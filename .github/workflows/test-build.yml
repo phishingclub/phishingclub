@@ -45,10 +45,10 @@ jobs:
           -v "$(pwd)":/app \
           -w /app/backend \
           -e CGO_ENABLED=1 \
-          golang:alpine \
-          sh -c "apk add --no-cache gcc musl-dev && go build -trimpath \
+          golang:1.24 \
+          go build -trimpath \
           -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }}' \
-          -tags production -o ../build/phishingclub main.go"
+          -tags production -o ../build/phishingclub main.go
 
       - name: Fix build directory permissions
         run: |
