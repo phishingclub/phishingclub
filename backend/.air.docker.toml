@@ -5,7 +5,7 @@ tmp_dir = ".dev"
 [build]
 args_bin = ["-files ./.dev", "-config ./config.docker.json"]
 bin = "/app/.dev-air/platform"
-cmd = "CGO_ENABLED=1 go build dev -o ./.dev-air/platform main.go" # community
+cmd = "CGO_ENABLED=1 go build -tags dev -o ./.dev-air/platform main.go" # community
 delay = 1000
 exclude_dir = [
     "out",
