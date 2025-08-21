@@ -13,33 +13,31 @@ The self-hosted phishing framework for security awareness training and penetrati
 
 Phishing Club is a phishing simulation framework designed for security professionals, red teams, and organizations looking to test and improve their security awareness. This platform provides tools for creating, deploying, and managing phishing campaigns in a controlled environment.
 
-## License
-
-Phishing Club is available under a dual licensing model:
-
-### Open Source License (AGPL-3.0)
-This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). This means:
-- ✅ You can use, modify, and distribute the software freely
-- ✅ Perfect for educational, research, and non-commercial use
-- ✅ You can run your own instance for internal security testing
-- ⚠️ **Important**: If you provide the software as a network service (SaaS), you must make your source code available under AGPL-3.0
-
-### Commercial License
-For organizations that want to:
-- Use Phishing Club in commercial products without AGPL restrictions
-- Offer Phishing Club as a service without source code disclosure
-- Integrate with proprietary software
-- Get dedicated support and maintenance
-
-**Contact us for commercial licensing**: [license@phishing.club](mailto:license@phishing.club)
-
 See the [LICENSE](LICENSE) file for the full AGPL-3.0 terms.
+
+### Features
+
+- Setup reusable phishing templates with emails, multiple phishing page flow, custom identifiers and more
+- Advanced scheduling with time-boxed sending and daily schedules (like monday, wednesday between 08:00 and 16:00)
+- API Sending, don't be limited by SMTP, deliver directly via an API
+- Handle multiple domains with automatic TLS (https)
+- Campaign overview and stats with graphs, per-recipient events and more
+- Dashboard with company statistics, trendlines, calendar and overview
+- Recipients and groups with stats such as repeat offender tracking
+- Custom websites and 404 pages
+- Asset management (upload js, css, images or whatever you want)
+- Security features like MFA, audit logging, session management, IP locked sessions and more
+- Webhooks for integrating with 3rd parties
+- MSSP Ready with individual dashboard and etc. for each client.
+- In-app updates
+
+And lots lots more!
 
 ## Getting Started
 
-### Production Installation
+### Install
 
-For production use, download the latest release and follow our installation guide:
+Download the latest release and follow our installation guide:
 
 1. **Download the latest version** from [GitHub Releases](https://github.com/phishingclub/phishingclub/releases)
 2. **Follow the installation guide** at [https://phishing.club/guide/management/#install](https://phishing.club/guide/management/#install)
@@ -171,6 +169,27 @@ Key configuration options:
 
 The development environment uses Pebble ACME server for automatic SSL certificate generation. In production, configure your preferred ACME provider or upload custom certificates.
 
+
+## License
+
+Phishing Club is available under a dual licensing model:
+
+### Open Source License (AGPL-3.0)
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). This means:
+- ✅ You can use, modify, and distribute the software freely
+- ✅ Perfect for educational, research, and non-commercial use
+- ✅ You can run your own instance for internal security testing
+- ⚠️ **Important**: If you provide the software as a network service (SaaS), you must make your source code available under AGPL-3.0
+
+### Commercial License
+For organizations that want to:
+- Use Phishing Club in commercial products without AGPL restrictions
+- Offer Phishing Club as a service without source code disclosure
+- Integrate with proprietary software
+- Get dedicated support and maintenance
+
+**Contact us for commercial licensing**: [license@phishing.club](mailto:license@phishing.club)
+
 ## Contributing
 
 We welcome contributions from the community! Please follow our contribution guidelines:
@@ -225,7 +244,7 @@ By contributing to Phishing Club, you agree that your contributions will be lice
 - Your contributions are your original work or properly attributed
 - You grant Phishing Club the right to license your contributions under both AGPL-3.0 and commercial licenses
 
-**Required**: 
+**Required**:
 - All commits must be signed off using the `-s` flag: `git commit -s -m "Your commit message"`
 - Before submitting a pull request, rebase your branch to a single commit
 - Use descriptive commit messages that explain what and why
