@@ -1,0 +1,5 @@
+email,phone,extraIdentifier,name,position,department,city,country,misc
+a@import-test.test,1234567890,extraIdentifier1,NewName,Position1,Department1,City1,Country1,Misc1
+b@import-test.test,1234567891,extraIdentifier2,NewName2,PositionNew2,DepartmentNew2,CityNew2,Country2,Misc2
+n@import-test.test,1234567892,extraIdentifierX3,NameX3,PositionX1,DepartmentX3,CityX3,CountryX3,MiscX3
+o@import-test.test,1234567893,extraIdentifierX4,NameX4,PositionX4,DepartmentX4,CityX4,CountryX4,MiscX4

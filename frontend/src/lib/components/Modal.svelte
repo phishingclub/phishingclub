@@ -1,0 +1,281 @@
+<script>
+	import { onMount, tick } from 'svelte';
+	import { beforeNavigate } from '$app/navigation';
+	import { scrollBarClassesVertical } from '$lib/utils/scrollbar';
+
+	export let headerText = '';
+	export let description = '';
+	export let visible = false;
+	export let isSubmitting = false;
+	export let onClose = () => {};
+	export let bindTo = null;
+	export let resetTabFocus = () => {};
+
+	let modalElement;
+	let previousActiveElement;
+	let focusableElements = [];
+	let firstFocusableElement;
+	let lastFocusableElement;
+
+	let modalInitialized = false;
+
+	$: {
+		if (visible && !modalInitialized) {
+			window.addEventListener('keydown', keyHandler);
+			// Prevent body scrolling when modal is open
+			document.body.style.overflow = 'hidden';
+			handleModalOpen();
+			modalInitialized = true;
+		} else if (!visible && modalInitialized) {
+			window.removeEventListener('keydown', keyHandler);
+			// Restore body scrolling when modal is closed
+			document.body.style.overflow = 'auto';
+			handleModalClose();
+			modalInitialized = false;
+		}
+	}
+
+	const keyHandler = (e) => {
+		if (e.key === 'Escape') {
+			close();
+		} else if (e.key === 'Tab') {
+			// Check if the focused element is a dropdown option button
+			const focusedElement = document.activeElement;
+			const isDropdownOption =
+				focusedElement?.closest('[role="listbox"]') && focusedElement?.role === 'option';
+
+			if (isDropdownOption) {
+				// Don't intercept tab from dropdown options - let them handle it first
+				return;
+			}
+
+			handleTabKey(e);
+		}
+	};
+
+	const handleTabKey = (e) => {
+		// Store the current focused element before updating the list
+		const currentlyFocused = document.activeElement;
+
+		// Update focusable elements before handling tab to account for dynamic changes
+		updateFocusableElements();
+
+		if (focusableElements.length === 0) return;
+
+		// Always prevent default tab behavior to keep focus within modal
+		e.preventDefault();
+
+		let currentIndex = focusableElements.indexOf(currentlyFocused);
+
+		// If current element is not found (-1), try to find a related element
+		if (currentIndex === -1) {
+			// Check if the current element is inside a TextFieldSelect or similar component
+			const parentComponent = currentlyFocused?.closest('.relative');
+			if (parentComponent) {
+				// Look for the input element within the same component
+				const inputInComponent = parentComponent.querySelector('input');
+				if (inputInComponent) {
+					const inputIndex = focusableElements.indexOf(inputInComponent);
+					if (inputIndex !== -1) {
+						// Use the input's position for navigation
+						currentIndex = inputIndex;
+					}
+				}
+			}
+		}
+
+		// If we still can't find the element, handle it gracefully
+		if (currentIndex === -1) {
+			// If we can't find the element or related element, try to be smarter
+			// Check if we should go forward or backward based on the shift key
+			if (e.shiftKey) {
+				// Shift+Tab: go to last element
+				lastFocusableElement?.focus();
+			} else {
+				// Tab: try to find the first input in the form, or fallback to first element
+				const firstInput = focusableElements.find((el) => el.tagName === 'INPUT');
+				if (firstInput) {
+					firstInput.focus();
+				} else {
+					firstFocusableElement?.focus();
+				}
+			}
+			return;
+		}
+
+		// Now handle normal tab navigation
+		if (e.shiftKey) {
+			// Shift + Tab - go to previous element
+			if (currentIndex <= 0) {
+				// If at first element, go to last
+				lastFocusableElement?.focus();
+			} else {
+				// Go to previous element
+				focusableElements[currentIndex - 1]?.focus();
+			}
+		} else {
+			// Tab - go to next element
+			if (currentIndex >= focusableElements.length - 1) {
+				// If at last element, go to first
+				firstFocusableElement?.focus();
+			} else {
+				// Go to next element
+				focusableElements[currentIndex + 1]?.focus();
+			}
+		}
+	};
+
+	const getFocusableElements = () => {
+		if (!modalElement) return [];
+
+		const focusableSelectors = [
+			'button:not([disabled])',
+			'[href]',
+			'input:not([disabled])',
+			'select:not([disabled])',
+			'textarea:not([disabled])',
+			'[tabindex]:not([tabindex="-1"]):not([disabled])',
+			'details',
+			'summary'
+		];
+
+		const elements = modalElement.querySelectorAll(focusableSelectors.join(', '));
+		return Array.from(elements).filter((el) => {
+			// Exclude dropdown option buttons from TextFieldSelect components
+			if (el.role === 'option' && el.closest('[role="listbox"]')) {
+				return false;
+			}
+			return el.offsetWidth > 0 && el.offsetHeight > 0 && !el.hasAttribute('hidden');
+		});
+	};
+
+	const updateFocusableElements = () => {
+		focusableElements = getFocusableElements();
+
+		// Exclude the close button from being the first focusable element
+		const closeButton = modalElement?.querySelector('[data-close-button]');
+		if (closeButton && focusableElements.length > 1) {
+			focusableElements = focusableElements.filter((el) => el !== closeButton);
+			focusableElements.push(closeButton); // Add close button to the end
+		}
+		firstFocusableElement = focusableElements[0] || null;
+		lastFocusableElement = focusableElements[focusableElements.length - 1] || null;
+	};
+
+	const handleModalOpen = async () => {
+		// Store the currently focused element
+		previousActiveElement = document.activeElement;
+
+		// Wait for the DOM to update
+		await tick();
+
+		updateFocusableElements();
+
+		// Focus the first focusable element (excluding close button)
+		if (firstFocusableElement) {
+			firstFocusableElement.focus();
+		}
+	};
+
+	const handleModalClose = () => {
+		// Restore focus to the previously focused element
+		if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
+			previousActiveElement.focus();
+		}
+	};
+
+	// Exposed function to reset tab focus when modal content changes
+	const handleResetTabFocus = async () => {
+		// Only reset focus if no element is currently focused or if focus is outside modal
+		const currentFocused = document.activeElement;
+		const isInModal = modalElement?.contains(currentFocused);
+
+		// Check if a TextFieldSelect is currently selecting an option
+		const isTextFieldSelectActive = modalElement?.querySelector('[data-selecting="true"]');
+
+		await tick();
+		updateFocusableElements();
+
+		// Only focus first element if focus is not properly within the modal and no selection is happening
+		if (!isInModal && !isTextFieldSelectActive && firstFocusableElement) {
+			firstFocusableElement.focus();
+		}
+	};
+
+	// Call resetTabFocus when it changes
+	$: if (resetTabFocus) {
+		resetTabFocus = handleResetTabFocus;
+	}
+
+	onMount(() => {
+		return () => {
+			window.removeEventListener('keydown', keyHandler);
+			// Ensure body scrolling is restored when component is destroyed
+			document.body.style.overflow = 'auto';
+			// Restore focus if modal was open when component was destroyed
+			if (visible && previousActiveElement && typeof previousActiveElement.focus === 'function') {
+				previousActiveElement.focus();
+			}
+		};
+	});
+
+	beforeNavigate((opts) => {
+		if (!opts.from || !opts.to || !visible) {
+			return;
+		}
+		const navigationIsNotOnSamePage = opts.from.url.pathname === opts.to.url.pathname;
+		if (opts.type === 'popstate' && !navigationIsNotOnSamePage) {
+			close();
+		}
+	});
+
+	const close = () => {
+		visible = false;
+		window.removeEventListener('keydown', keyHandler);
+		// Restore body scrolling when modal is closed
+		document.body.style.overflow = 'auto';
+		onClose();
+	};
+</script>
+
+{#if visible}
+	<div bind:this={bindTo}>
+		<div class="fixed top-0 left-0 w-full h-full bg-cta-blue opacity-20 blur-xl" />
+		<div
+			class="fixed top-0 left-0 w-full h-full flex justify-center items-center backdrop-blur-sm z-20"
+			role="dialog"
+			aria-modal="true"
+			aria-labelledby="modal-title"
+			aria-describedby={description ? 'modal-description' : undefined}
+		>
+			<section
+				bind:this={modalElement}
+				class="shadow-xl w-auto ml-20 mr-8 max-h-[90vh] bg-white opacity-100 rounded-md flex flex-col"
+			>
+				<div
+					class:opacity-20={isSubmitting}
+					class="bg-cta-blue text-white rounded-t-md py-4 px-8 flex justify-between flex-shrink-0"
+				>
+					<div class="flex-1">
+						<h1 id="modal-title" class="uppercase mr-8 font-semibold text-2xl">{headerText}</h1>
+						{#if description}
+							<p id="modal-description" class="mt-2 text-sm opacity-90">{description}</p>
+						{/if}
+					</div>
+					<button
+						class="w-4 hover:scale-110 flex-shrink-0"
+						on:click={close}
+						disabled={isSubmitting}
+						data-close-button
+						aria-label="Close modal"
+					>
+						<img class="w-full" src="/close-white.svg" alt="" />
+					</button>
+				</div>
+				<div class="px-8 overflow-y-auto {scrollBarClassesVertical}">
+					<slot />
+				</div>
+			</section>
+		</div>
+	</div>
+{/if}

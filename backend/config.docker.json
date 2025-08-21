@@ -1,0 +1,21 @@
+{
+  "acme": {
+    "email": ""
+  },
+  "administration": {
+    "tls_host": "phish.test",
+    "tls_auto": false,
+    "tls_cert_path": ".dev/certs/self-signed/admin-public.pem",
+    "tls_key_path": ".dev/certs/self-signed/admin-private.pem",
+    "address": "0.0.0.0:8002"
+  },
+  "phishing": {
+    "http": "0.0.0.0:8000",
+    "https": "0.0.0.0:8001"
+  },
+  "database": {
+    "engine": "sqlite3",
+    "dsn": "file:/app/.dev/db.sqlite3"
+  },
+  "ip_allow_list": []
+}

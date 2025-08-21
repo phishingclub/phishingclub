@@ -1,0 +1,2 @@
+Contact: security@phishing.club
+Policy: Beg bounty and reports with no real impact are ignored 

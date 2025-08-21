@@ -1,0 +1,125 @@
+name: Test Build
+
+on:
+  #pull_request:
+  #  branches: [ main, develop ]
+  push:
+    branches: [test-build]
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract version info
+        id: get_version
+        run: |
+          echo "VERSION=test-$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+          echo "HASH=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build frontend files
+        working-directory: frontend
+        run: |
+          sudo docker run --rm \
+          -v "$(pwd)":/app \
+          -w /app \
+          node:alpine \
+          sh -c "npm ci && npm run build-production"
+
+      - name: Move frontend build to backend
+        run: |
+          rm -rf backend/frontend/build
+          mkdir -p backend/frontend/build
+          cp -r frontend/build/* backend/frontend/build/
+
+      - name: Build single binary with all features
+        run: |
+          sudo docker run --rm \
+          -v "$(pwd)":/app \
+          -w /app/backend \
+          golang:alpine \
+          go build -trimpath \
+          -ldflags="-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }}" \
+          -tags production -o ../build/phishingclub main.go
+
+      - name: Fix build directory permissions
+        run: |
+          sudo chown -R $USER:$USER build/
+          chmod 755 build/
+          ls -la build/
+
+      - name: Test binary signing (if keys available)
+        run: |
+          if [ -n "${{ secrets.SIGNKEY_1 }}" ]; then
+            echo "Testing binary signing..."
+
+            # Create directory for keys
+            mkdir -p /tmp/keys
+            chmod 700 /tmp/keys
+
+            # Save private key from GitHub secrets
+            echo "${{ secrets.SIGNKEY_1 }}" > /tmp/keys/private1.pem
+            chmod 600 /tmp/keys/private1.pem
+
+            # Sign binary with primary key
+            openssl pkeyutl -sign -inkey /tmp/keys/private1.pem \
+                -rawin -in build/phishingclub \
+                -out build/phishingclub.sig
+
+            # Clean up keys
+            rm -rf /tmp/keys
+
+            echo "✅ Binary signing test successful"
+          else
+            echo "⚠️  SIGNKEY_1 not available - skipping signing test"
+          fi
+
+      - name: Test package creation
+        run: |
+          mkdir -p packages
+
+          # Test packaging
+          if [ -f build/phishingclub.sig ]; then
+            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
+                -C build \
+                phishingclub \
+                phishingclub.sig
+            echo "✅ Package created with signature"
+          else
+            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
+                -C build \
+                phishingclub
+            echo "✅ Package created without signature"
+          fi
+
+      - name: Verify build artifacts
+        run: |
+          echo "=== Build Summary ==="
+          echo "Binary size: $(du -h build/phishingclub | cut -f1)"
+          echo "Binary info:"
+          file build/phishingclub
+
+          if [ -f build/phishingclub.sig ]; then
+            echo "Signature size: $(du -h build/phishingclub.sig | cut -f1)"
+          fi
+
+          echo "Package size: $(du -h packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz | cut -f1)"
+          echo "Package contents:"
+          tar -tzf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz
+
+      - name: Upload build artifacts (for review)
+        uses: actions/upload-artifact@v4
+        with:
+          name: phishingclub-test-build-${{ steps.get_version.outputs.HASH }}
+          path: |
+            build/phishingclub
+            build/phishingclub.sig
+            packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz
+          retention-days: 2

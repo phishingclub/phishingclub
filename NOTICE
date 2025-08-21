@@ -1,0 +1,67 @@
+Phishing Club
+Copyright (C) 2025-present Phishing Club
+
+This product includes software developed by the Phishing Club project.
+
+================================================================================
+
+DUAL LICENSE NOTICE
+================================================================================
+
+This software is available under a dual licensing model:
+
+1. GNU Affero General Public License v3.0 (AGPL-3.0)
+   - For open source use, educational purposes, and non-commercial applications
+   - Full license text available in the LICENSE file
+   - Source code must be made available when distributed or used as a network service
+
+2. Commercial License
+   - For commercial use without AGPL restrictions
+   - For proprietary integrations and SaaS offerings
+   - Contact license@phishing.club for commercial licensing terms
+
+================================================================================
+
+THIRD PARTY COMPONENTS
+================================================================================
+
+This software may include third-party components with their own licensing terms.
+Please refer to the respective component documentation and license files for
+complete licensing information.
+
+================================================================================
+
+CONTRIBUTOR LICENSE AGREEMENT
+================================================================================
+
+By contributing to this project, contributors agree that their contributions
+will be licensed under the same dual license terms (AGPL-3.0 and commercial).
+Contributors confirm they have the right to contribute the code and grant
+the project maintainers the right to license contributions under both licenses.
+
+================================================================================
+
+CONTACT INFORMATION
+================================================================================
+
+For licensing inquiries: license@phishing.club
+For security issues: security@phishing.club
+Project website: https://phishing.club
+Community Discord: https://discord.gg/Zssps7U8gX
+
+================================================================================
+
+ETHICAL USE DISCLAIMER
+================================================================================
+
+This software is designed for authorized security testing, penetration testing,
+and security awareness training purposes only. Users are responsible for:
+
+- Obtaining proper authorization before conducting any phishing simulations
+- Complying with all applicable laws and regulations
+- Using the software ethically and responsibly
+- Protecting any data collected during authorized testing
+
+Misuse of this software may violate applicable laws. Users are solely
+responsible for ensuring their use complies with all applicable laws
+and regulations.

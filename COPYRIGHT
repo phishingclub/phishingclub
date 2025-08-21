@@ -1,0 +1,55 @@
+Copyright (C) 2025-present Phishing Club
+
+This file is part of Phishing Club.
+
+Phishing Club is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+Phishing Club is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with Phishing Club. If not, see <https://www.gnu.org/licenses/>.
+
+Additional permissions under GNU AGPL version 3 section 7:
+
+If you modify this Program, or any covered work, by linking or combining
+it with other code, such other code is not for that reason alone subject
+to any of the requirements of the GNU AGPL version 3.
+
+For commercial licensing that allows you to distribute Phishing Club
+or derivative works without the restrictions of the AGPL, please contact
+license@phishing.club.
+
+================================================================================
+
+DUAL LICENSING
+
+Phishing Club is available under a dual licensing model:
+
+1. Open Source License (AGPL-3.0)
+   - Free for open source projects
+   - Free for educational and research use
+   - Free for internal security testing
+   - Requires source code disclosure for network services
+
+2. Commercial License
+   - Removes AGPL restrictions
+   - Allows proprietary use and distribution
+   - Enables SaaS offerings without source disclosure
+   - Includes commercial support options
+
+For commercial licensing inquiries, contact: license@phishing.club
+
+================================================================================
+
+CONTACT
+
+Website: https://phishing.club
+Email: license@phishing.club
+Security: security@phishing.club
+Discord: https://discord.gg/Zssps7U8gX

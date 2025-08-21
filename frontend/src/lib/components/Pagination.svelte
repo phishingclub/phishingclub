@@ -1,0 +1,54 @@
+<script>
+	import { onMount } from 'svelte';
+
+	export let paginator;
+
+	let currentPage = paginator.currentPage;
+	let urlWithoutParams = window.location.href.split('?')[0];
+
+	const nextPage = async () => {
+		currentPage = paginator.next();
+	};
+
+	const previousPage = async () => {
+		currentPage = paginator.previous();
+	};
+
+	const popStateHandler = () => {
+		// only handle popstate if the url matches the current page
+		// this is to avoid handling popstate events from other pages
+		// upon a browser back/forward navigation as popstate event happens
+		// before the component is unmounted
+		if (window.location.href.split('?')[0] !== urlWithoutParams) {
+			return;
+		}
+		currentPage = paginator.currentPage;
+	};
+
+	onMount(() => {
+		// listen for browser back/forward navigation
+		window.addEventListener('popstate', popStateHandler);
+		// cleanup on component unmount
+		paginator.onChange((key, value) => {
+			if (key === 'page') {
+				currentPage = value;
+			}
+		});
+
+		return () => {
+			window.removeEventListener('popstate', popStateHandler);
+		};
+	});
+</script>
+
+<div class="flex items-center mb-8 mt-4">
+	<button
+		class="bg-highlight-blue w-8 text-white hover:bg-active-blue m-1 rounded-md py-1 px-1"
+		on:click|preventDefault={previousPage}>&lt;&lt;</button
+	>
+	<div class="w-8 text-center bg-grayblue-light rounded-md py-1 px-1">{currentPage}</div>
+	<button
+		class="bg-highlight-blue w-8 text-white hover:bg-active-blue m-1 rounded-md py-1 px-1"
+		on:click|preventDefault={nextPage}>&gt;&gt;</button
+	>
+</div>

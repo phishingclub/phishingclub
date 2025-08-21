@@ -1,0 +1,527 @@
+package service
+
+import (
+	"bytes"
+	"fmt"
+	"html"
+	"html/template"
+	"io"
+	"math/rand"
+	"strings"
+
+	"github.com/go-errors/errors"
+	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
+	"github.com/phishingclub/phishingclub/database"
+	"github.com/phishingclub/phishingclub/errs"
+	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/utils"
+	"github.com/yeqown/go-qrcode/v2"
+)
+
+const trackingPixelTemplate = "{{.Tracker}}"
+
+// TemplateService is for handling things related to
+// templates such as websites, emails, etc.
+type Template struct {
+	Common
+}
+
+// CreateMailTemplate creates a new mail template
+func (t *Template) CreateMail(
+	domainName string,
+	idKey string,
+	urlPath string,
+	campaignRecipient *model.CampaignRecipient,
+	email *model.Email,
+	apiSender *model.APISender,
+) *map[string]any {
+	baseURL := "https://" + domainName
+	url := fmt.Sprintf(
+		"%s%s?%s=%s",
+		baseURL,
+		urlPath,
+		idKey,
+		campaignRecipient.ID.MustGet().String(),
+	)
+	// set body
+	trackingPixelPath := fmt.Sprintf(
+		"%s/wf/open?upn=%s",
+		baseURL,
+		campaignRecipient.ID.MustGet().String(),
+	)
+	trackingPixel := fmt.Sprintf(
+		"<img src=\"%s/wf/open?upn=%s\" alt=\"\" width=\"1\" height=\"1\" border=\"0\" style=\"height:1px !important;width:1px\" />",
+		baseURL,
+		campaignRecipient.ID.MustGet().String(),
+	)
+	// #nosec
+	trackingPixelMarkup := template.HTML(trackingPixel)
+	return t.newTemplateDataMap(
+		idKey,
+		baseURL,
+		url,
+		campaignRecipient.Recipient,
+		trackingPixelPath,
+		trackingPixelMarkup,
+		email,
+		apiSender,
+	)
+}
+
+// ApplyPageMock
+func (t *Template) ApplyPageMock(content string) (*bytes.Buffer, error) {
+	// build response
+	domain := &database.Domain{
+		Name: "example.test",
+	}
+	email := model.NewEmailExample()
+	campaignRecipientID := uuid.New()
+	recipient := model.NewRecipientExample()
+	urlIdentifier := &model.Identifier{
+		Name: nullable.NewNullableWithValue(
+			"id",
+		),
+	}
+	stateIdentifier := &model.Identifier{
+		Name: nullable.NewNullableWithValue(
+			"state",
+		),
+	}
+	campaignTemplate := &model.CampaignTemplate{
+		URLIdentifier:   urlIdentifier,
+		StateIdentifier: stateIdentifier,
+	}
+	return t.CreatePhishingPage(
+		domain,
+		email,
+		&campaignRecipientID,
+		recipient,
+		content,
+		campaignTemplate,
+		"stateParam",
+		"urlPath",
+	)
+}
+
+// CreateMailBody returns a rendered mail body to string
+func (t *Template) CreateMailBody(
+	urlIdentifier string,
+	urlPath string,
+	domain *model.Domain,
+	campaignRecipient *model.CampaignRecipient,
+	email *model.Email,
+	apiSender *model.APISender, // can be nil
+) (string, error) {
+	mailData := t.CreateMail(
+		domain.Name.MustGet().String(),
+		urlIdentifier,
+		urlPath,
+		campaignRecipient,
+		email,
+		apiSender,
+	)
+	// parse and execute the mail content
+	mailContentTemplate := template.New("mailContent")
+	mailContentTemplate = mailContentTemplate.Funcs(TemplateFuncs())
+	content, err := email.Content.Get()
+	if err != nil {
+		t.Logger.Errorw("failed to get email content", "error", err)
+		return "", errs.Wrap(err)
+	}
+	mailTemplate, err := mailContentTemplate.Parse(content.String())
+	if err != nil {
+		t.Logger.Errorw("failed to parse body", "error", err)
+		return "", errs.Wrap(err)
+	}
+	var mailContent bytes.Buffer
+	if err := mailTemplate.Execute(&mailContent, mailData); err != nil {
+		t.Logger.Errorw("failed to execute mail template", "error", err)
+		return "", errs.Wrap(err)
+	}
+	(*mailData)["Content"] = mailContent.String()
+	var body bytes.Buffer
+	if err := mailContentTemplate.Execute(&body, mailData); err != nil {
+		t.Logger.Errorw("failed to execute body template", "error", err)
+		return "", errs.Wrap(err)
+	}
+	return body.String(), nil
+}
+
+// CreatePhishingPage creates a new phishing page
+func (t *Template) CreatePhishingPage(
+	domain *database.Domain,
+	email *model.Email,
+	campaignRecipientID *uuid.UUID,
+	recipient *model.Recipient,
+	contentToRender string,
+	campaignTemplate *model.CampaignTemplate,
+	stateParam string,
+	urlPath string,
+) (*bytes.Buffer, error) {
+	w := bytes.NewBuffer([]byte{})
+	id := campaignRecipientID.String()
+	baseURL := "https://" + domain.Name
+	if len(domain.Name) == 0 {
+		baseURL = ""
+	}
+	urlIdentifier := campaignTemplate.URLIdentifier.Name.MustGet()
+	stateIdentifier := campaignTemplate.StateIdentifier.Name.MustGet()
+	url := fmt.Sprintf("%s?%s=%s&%s=%s", baseURL, urlIdentifier, id, stateIdentifier, stateParam)
+	tmpl, err := template.New("page").
+		Funcs(TemplateFuncs()).
+		Parse(contentToRender)
+
+	if err != nil {
+		return w, fmt.Errorf("failed to parse page template: %s", err)
+	}
+	data := t.newTemplateDataMap(
+		id,
+		baseURL,
+		url,
+		recipient,
+		"", // trackingPixelPath
+		"", // trackingPixelMarkup
+		email,
+		nil, // apiSender
+	)
+	err = tmpl.Execute(w, data)
+	if err != nil {
+		return w, fmt.Errorf("failed to execute page template: %s", err)
+	}
+	return w, nil
+}
+
+// newTemplateDataMap creates a new data map for the templates
+func (t *Template) newTemplateDataMap(
+	id string,
+	baseURL string,
+	url string,
+	recipient *model.Recipient,
+	trackingPixelPath string,
+	trackingPixelMarkup template.HTML,
+	email *model.Email,
+	apiSender *model.APISender,
+) *map[string]any {
+	recipientFirstName := ""
+	if v, err := recipient.FirstName.Get(); err == nil {
+		recipientFirstName = v.String()
+	}
+	recipientLastName := ""
+	if v, err := recipient.LastName.Get(); err == nil {
+		recipientLastName = v.String()
+	}
+	recipientEmail := ""
+	if v, err := recipient.Email.Get(); err == nil {
+		recipientEmail = v.String()
+	}
+	recipientPhone := ""
+	if v, err := recipient.Phone.Get(); err == nil {
+		recipientPhone = v.String()
+	}
+	recipientExtraIdentifier := ""
+	if v, err := recipient.ExtraIdentifier.Get(); err == nil {
+		recipientExtraIdentifier = v.String()
+	}
+	recipientPosition := ""
+	if v, err := recipient.Position.Get(); err == nil {
+		recipientPosition = v.String()
+	}
+	recipientDepartment := ""
+	if v, err := recipient.Department.Get(); err == nil {
+		recipientDepartment = v.String()
+	}
+	recipientCity := ""
+	if v, err := recipient.City.Get(); err == nil {
+		recipientCity = v.String()
+	}
+	recipientCountry := ""
+	if v, err := recipient.Country.Get(); err == nil {
+		recipientCountry = v.String()
+	}
+	recipientMisc := ""
+	if v, err := recipient.Misc.Get(); err == nil {
+		recipientMisc = v.String()
+	}
+	mailHeaderFrom := ""
+	if v, err := email.MailHeaderFrom.Get(); err == nil {
+		mailHeaderFrom = v.String()
+	}
+	m := map[string]any{
+		"rID":             id,
+		"FirstName":       recipientFirstName,
+		"LastName":        recipientLastName,
+		"Email":           recipientEmail,
+		"To":              recipientEmail, // alias of Email
+		"Phone":           recipientPhone,
+		"ExtraIdentifier": recipientExtraIdentifier,
+		"Position":        recipientPosition,
+		"Department":      recipientDepartment,
+		"City":            recipientCity,
+		"Country":         recipientCountry,
+		"Misc":            recipientMisc,
+		"Tracker":         trackingPixelMarkup,
+		"TrackingURL":     trackingPixelPath,
+		// sender fields
+		"From": mailHeaderFrom,
+		// general fields
+		"BaseURL":      baseURL,
+		"URL":          url,
+		"APIKey":       "",
+		"CustomField1": "",
+		"CustomField2": "",
+		"CustomField3": "",
+		"CustomField4": "",
+	}
+	if apiSender != nil {
+		m["APIKey"] = utils.NullableToString(apiSender.APIKey)
+		m["CustomField1"] = utils.NullableToString(apiSender.CustomField1)
+		m["CustomField2"] = utils.NullableToString(apiSender.CustomField2)
+		m["CustomField3"] = utils.NullableToString(apiSender.CustomField3)
+		m["CustomField4"] = utils.NullableToString(apiSender.CustomField4)
+	}
+
+	return &m
+}
+
+func (t *Template) AddTrackingPixel(content string) string {
+	if strings.Contains(content, trackingPixelTemplate) {
+		return content
+	}
+
+	// handle empty or whitespace-only content
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return content
+	}
+
+	// If just plain text without any HTML, append
+	if !strings.Contains(content, "<") {
+		return content + trackingPixelTemplate
+	}
+
+	// find the first main container tag (like div), case insensitive
+	startDiv := -1
+	lowerContent := strings.ToLower(content)
+	if idx := strings.Index(lowerContent, "<div"); idx != -1 {
+		startDiv = idx
+	}
+	if startDiv == -1 {
+		return content + trackingPixelTemplate
+	}
+
+	// Find its matching closing tag
+	tagLevel := 0
+	inScript := false
+	inStyle := false
+	inComment := false
+	inQuote := false
+	quoteChar := byte(0)
+	pos := startDiv
+
+	for pos < len(content) {
+		// handle quotes in attributes
+		if !inComment && !inScript && !inStyle && (content[pos] == '"' || content[pos] == '\'') {
+			if !inQuote {
+				inQuote = true
+				quoteChar = content[pos]
+			} else if quoteChar == content[pos] {
+				if pos > 0 && content[pos-1] != '\\' {
+					inQuote = false
+					quoteChar = 0
+				}
+			}
+			pos++
+			continue
+		}
+
+		// skip everything if we're in a quote
+		if inQuote {
+			pos++
+			continue
+		}
+
+		if pos+4 <= len(content) && content[pos:pos+4] == "<!--" {
+			inComment = true
+			pos += 4
+			continue
+		}
+		if pos+3 <= len(content) && content[pos:pos+3] == "-->" {
+			inComment = false
+			pos += 3
+			continue
+		}
+		if inComment {
+			pos++
+			continue
+		}
+
+		// case insensitive check for script and style
+		if pos+7 <= len(content) && strings.ToLower(content[pos:pos+7]) == "<script" {
+			inScript = true
+		}
+		if pos+9 <= len(content) && strings.ToLower(content[pos:pos+9]) == "</script>" {
+			inScript = false
+		}
+		if pos+6 <= len(content) && strings.ToLower(content[pos:pos+6]) == "<style" {
+			inStyle = true
+		}
+		if pos+8 <= len(content) && strings.ToLower(content[pos:pos+8]) == "</style>" {
+			inStyle = false
+		}
+
+		if inScript || inStyle {
+			pos++
+			continue
+		}
+
+		// case insensitive check for div tags
+		if pos+4 <= len(content) && strings.ToLower(content[pos:pos+4]) == "<div" {
+			// Verify it's a complete tag
+			for i := pos + 4; i < len(content); i++ {
+				if content[i] == '>' {
+					tagLevel++
+					break
+				}
+			}
+		}
+		if pos+6 <= len(content) && strings.ToLower(content[pos:pos+6]) == "</div>" {
+			tagLevel--
+			if tagLevel == 0 {
+				// Found the matching closing tag
+				return content[:pos] + trackingPixelTemplate + content[pos:]
+			}
+		}
+		pos++
+	}
+
+	// couldn't find a proper place, append
+	return content + trackingPixelTemplate
+}
+
+func (t *Template) RemoveTrackingPixelFromContent(content string) string {
+	return strings.ReplaceAll(content, trackingPixelTemplate, "")
+}
+
+func TemplateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"urlEscape": func(s string) string {
+			return template.URLQueryEscaper(s)
+		},
+		"htmlEscape": func(s string) string {
+			return html.EscapeString(s)
+		},
+		"randInt": func(n1, n2 int) (int, error) {
+			if n1 > n2 {
+				return 0, fmt.Errorf("first number must be less than or equal to second number")
+			}
+			// #nosec
+			return rand.Intn(n2-n1+1) + n1, nil
+		},
+		"randAlpha": RandAlpha,
+		"qr":        GenerateQRCode,
+	}
+}
+
+func GenerateQRCode(args ...any) (template.HTML, error) {
+	if len(args) == 0 {
+		return "", errors.New("URL is required")
+	}
+
+	url, ok := args[0].(string)
+	if !ok {
+		return "", errors.New("first argument must be a URL string")
+	}
+
+	dotSize := 5
+	if len(args) > 1 {
+		if size, ok := args[1].(int); ok && size > 0 {
+			dotSize = size
+		}
+	}
+
+	var buf bytes.Buffer
+	qr, err := qrcode.New(url)
+	if err != nil {
+		return "", err
+	}
+
+	writer := NewQRHTMLWriter(&buf, dotSize)
+	if err := qr.Save(writer); err != nil {
+		return "", err
+	}
+	// #nosec
+	return template.HTML(buf.String()), nil
+}
+
+const alphaChar = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+// RandAlpha returns a random string of the given length
+func RandAlpha(length int) (string, error) {
+	if length > 32 {
+		return "", fmt.Errorf("length must be less than 32")
+	}
+	b := make([]byte, length)
+	for i := range b {
+		// #nosec
+		b[i] = alphaChar[rand.Intn(len(alphaChar))]
+	}
+	return string(b), nil
+}
+
+type QRHTMLWriter struct {
+	w       io.Writer
+	dotSize int
+}
+
+func NewQRHTMLWriter(w io.Writer, dotSize int) *QRHTMLWriter {
+	if dotSize <= 0 {
+		dotSize = 10
+	}
+	return &QRHTMLWriter{
+		w:       w,
+		dotSize: dotSize,
+	}
+}
+
+func (q *QRHTMLWriter) Write(mat qrcode.Matrix) error {
+	if q.w == nil {
+		return errors.New("QR writer: writer not initialized")
+	}
+
+	if _, err := fmt.Fprint(q.w, `<table cellpadding="0" cellspacing="0" border="0" style="border-collapse: collapse;">`); err != nil {
+		return fmt.Errorf("failed to write table opening: %w", err)
+	}
+
+	maxW := mat.Width() - 1
+	mat.Iterate(qrcode.IterDirection_ROW, func(x, y int, v qrcode.QRValue) {
+		if x == 0 {
+			fmt.Fprint(q.w, "<tr>")
+		}
+
+		color := "#FFFFFF"
+		if v.IsSet() {
+			color = "#000000"
+		}
+
+		fmt.Fprintf(q.w, `<td width="%d" height="%d" bgcolor="%s" style="padding:0; margin:0; font-size:0; line-height:0; width:%dpx; height:%dpx; min-width:%dpx; min-height:%dpx; "></td>`,
+			q.dotSize, q.dotSize, color, q.dotSize, q.dotSize, q.dotSize, q.dotSize)
+
+		if x == maxW {
+			fmt.Fprint(q.w, "</tr>")
+		}
+	})
+
+	if _, err := fmt.Fprint(q.w, "</table>"); err != nil {
+		return fmt.Errorf("QR writer: failed to write table closing: %w", err)
+	}
+
+	return nil
+}
+
+func (q *QRHTMLWriter) Close() error {
+	if closer, ok := q.w.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}

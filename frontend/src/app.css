@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* @import url('https://fonts.googleapis.com/css2?family=Phudu:wght@700;900&family=Titillium+Web:wght@400;600&display=swap'); */
+
+@font-face {
+	font-family: 'Titillium Web';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/TitilliumWeb-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Titillium Web';
+	font-style: normal;
+	font-weight: 600;
+	font-display: swap;
+	src: url('/TitilliumWeb-SemiBold.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Titillium Web';
+	font-style: normal;
+	font-weight: 700;
+	font-display: swap;
+	src: url('/TitilliumWeb-Bold.ttf') format('truetype');
+}
+
+/* For Phudu */
+@font-face {
+	font-family: 'Phudu';
+	font-style: normal;
+	font-weight: 700;
+	font-display: swap;
+	src: url('/Phudu-Bold.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Phudu';
+	font-style: normal;
+	font-weight: 900;
+	font-display: swap;
+	src: url('/Phudu-Black.ttf') format('truetype');
+}
+
+body {
+	@apply [&::-webkit-scrollbar]:w-2
+    [&::-webkit-scrollbar-track]:bg-gray-100
+    [&::-webkit-scrollbar-thumb]:rounded-md
+    [&::-webkit-scrollbar-thumb]:bg-pc-dusty-light-blue;
+}

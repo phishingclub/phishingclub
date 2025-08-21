@@ -1,0 +1,16 @@
+{
+    "ignore": [
+        ".svelte-kit/",
+        "build/",
+        "node_modules/"
+    ],
+    "watch": [
+        "src/",
+        "static/"
+    ],
+    "exec": "npm run build-dev",
+    "events": {
+        "restart": "rm ./vite.dev.config.js.timestamp* -f"
+    },
+    "ext": "js,ts,svelte,html,css,svg,png,jpg,jpeg,webp,json"
+}

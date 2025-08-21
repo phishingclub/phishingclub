@@ -1,0 +1,163 @@
+# Phishing Club Development Environment
+# Standalone docker-compose for the public phishingclub repository
+
+services:
+  # Backend API
+  # Backend Phishing Server
+  # NOTICE - the backend is accessed on dev via. 8003 via. vite magic proxy
+  backend:
+    user: "1000:1000"
+    tty: true
+    build:
+      context: ./backend
+      dockerfile: ./Dockerfile
+    # the acme certs are deleted because the acme server does not store the account
+    # and mouting them again would cause it to error because the account is not found
+    command: /bin/bash -c 'rm -rf /app/.dev/certs/acme/* && air -c /app/.air.docker.toml'
+    volumes:
+      - ./backend:/app
+    environment:
+      - air_wd=/app
+      - air_conf=/app/.air.docker.toml
+      - TERM=xterm-256color
+    ports:
+      - 2345:2345 # debugger
+      - 80:8000 # HTTP phishing server
+      - 443:8001 # HTTPS phishing server
+      # HTTPS administration server - used for proxying requests to /api endpoints
+      - 8002:8002
+    # restart on-failure is so when the containers are started and the backend has not yet build
+    # the files, the backend will not fail compiling due to missing files to embed.
+    # this might be fixable by using a go build flag, as files for the frontend are fetched on
+    # at run time when in development mode.
+    restart: on-failure
+    networks:
+      - default
+
+  # Frontend Server
+  # NOTICE - the frontend proxys the backend ports via 8003
+  frontend:
+    ports:
+      - 8003:8003 # dev magic proxy vite thing
+    tty: true
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    volumes:
+      - ./frontend:/app
+    networks:
+      - default
+
+  # Database Administration
+  dbgate:
+    image: dbgate/dbgate:5.2.5
+    environment:
+      CONNECTIONS: con1
+      LABEL_con1: SQLite
+      FILE_con1: /app/sqlite/db.sqlite3
+      ENGINE_con1: sqlite@dbgate-plugin-sqlite
+    restart: always
+    ports:
+      - 8101:3000
+    volumes:
+      - ./backend/.dev/:/app/sqlite/
+    networks:
+      - default
+    depends_on:
+      - backend
+
+  # Mailer - SMTP server for testing
+  # Mailpit for email testing and inspection
+  mailer:
+    image: axllent/mailpit
+    container_name: mailpit
+    restart: unless-stopped
+    ports:
+      - 8102:8025
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    networks:
+      - default
+
+  # Pebble - ACME server for testing
+  # Used to test TLS certificate requesting via ACME
+  pebble:
+    image: letsencrypt/pebble
+    command: pebble -config /test/my-pebble-config.json -dnsserver 172.20.0.137:5353
+    ports:
+      - 8201:14000 # ACME port
+      - 8202:15000 # Management port
+      - 8203:8055 # pebble-challtestsr
+    environment:
+      - PEBBLE_VA_NOSLEEP=1
+    volumes:
+      - ./backend/acme/pebble-config.json:/test/my-pebble-config.json
+      - ./backend/acme/pebble.minica.pem:/test/certs/pebble.minica.pem
+    networks:
+      - default
+
+  # API Test Server - for testing API sender functionality
+  api-test-server:
+    build:
+      context: ./api-test-server/
+      dockerfile: ./Dockerfile
+    volumes:
+      - ./api-test-server:/app
+    networks:
+      - default
+
+  # Utils container with debugging tools
+  test:
+    image: arunvelsriram/utils
+    command: ["tail", "-f", "/dev/null"]
+    networks:
+      - default
+
+  # Dozzle - container log viewer in the browser
+  dozzle:
+    image: amir20/dozzle:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - 8103:8080
+    environment:
+      - DOZZLE_NO_ANALYTICS=true
+    networks:
+      - default
+
+  # Container Statistics
+  stats:
+    image: virtualzone/docker-container-stats
+    ports:
+      - "8104:8080"
+    environment:
+      STATS_UPDATE_INTERVAL: 10
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - default
+
+  # DNS Server for .test domain resolution
+  dns:
+    restart: always
+    image: strm/dnsmasq
+    volumes:
+      - ./docker/dnsmasq/startup.sh:/root/startup.sh
+    cap_add:
+      - NET_ADMIN
+    entrypoint: ["/bin/sh", "-c"]
+    depends_on:
+      - backend
+    command: ["chmod +x /root/startup.sh; /root/startup.sh"]
+    networks:
+      default:
+        ipv4_address: 172.20.0.137
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
