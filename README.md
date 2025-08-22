@@ -40,6 +40,21 @@ Download the latest release and follow our installation guide:
 
 For detailed setup instructions, troubleshooting, and best practices, visit the [Phishing Club Guide](https://phishing.club/guide/introduction/).
 
+Need help? Join the discord
+
+### Students & Learning
+
+For cybersecurity students who want hands-on phishing simulation experience. The development setup includes a local mail server (Mailpit) so you can see emails in real-time without needing external SMTP. Spin up campaigns, test templates, and learn how phishing attacks work in a safe, contained environment.
+
+
+### Resources & Learning
+- [**HTML QR Codes in Phishing Emails**](https://www.linkedin.com/feed/update/urn:li:activity:7327787503921336320/) - Example of using a QR code in a phishing email. The QR code is made from HTML with inline styling.
+- [**Setting up a domain with a website including a 404 page**](https://www.linkedin.com/feed/update/urn:li:activity:7328132395189067777) - Setup a domain with auto TLS with website content and 404 page.
+- [**Custom delivery with rich pasting into 3. party**](https://www.linkedin.com/feed/update/urn:li:activity:7329121654842830849) - Custom lure delivery via. rich pasting into 3. party providers like gmail.
+- [**Using multi-page phishing flow**](https://www.linkedin.com/feed/update/urn:li:activity:7329454798959808512) - Setting up a mutli page phishing flow. Great for both red team operations and simulations with training.
+- [**Delivery using external API instead of SMTP**](https://www.linkedin.com/feed/update/urn:li:activity:7329565689025900544) - Example of how to use the API delivery. Makes it possible to deliver anywhere.
+
+
 ## Development Setup
 
 This repository contains the core Phishing Club platform.
