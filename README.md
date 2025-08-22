@@ -192,91 +192,41 @@ For organizations that want to:
 
 ## Contributing
 
-We welcome contributions from the community! Please follow our contribution guidelines:
+We welcome contributions from the community! Please read our [Contributing Guidelines](CONTRIBUTING.md) for detailed information on:
 
-### Before Contributing
+- Development setup and workflow
+- Code standards and conventions
+- Submission requirements
+- License agreements
 
-1. **Check existing issues** - Search for existing feature requests or bug reports
-2. **Create a feature request** - If your idea doesn't exist, create a detailed feature request issue, we have criteria for which features we want to add and do not waste anyones time with feature requests we never wanted.
-3. **Wait for approval** - Allow us to review and approve your proposal
-4. **Discuss implementation** - We may suggest changes or alternative approaches
+**Quick Start for Contributors:**
+1. Check existing issues and create a feature request if needed
+2. Wait for approval before starting work
+3. Fork the repository and create a feature branch
+4. Follow our development workflow and coding standards
+5. Submit a pull request with signed commits
 
-### Development Workflow
-
-1. **Fork the repository** and clone your fork
-2. **Create a feature branch** from `main`:
-   ```bash
-   git checkout -b feat/your-feature-name
-   ```
-3. **Follow naming conventions**:
-   - Features: `feat/feature-name`
-   - Bug fixes: `fix/bug-description`
-   - Documentation: `docs/update-description`
-   - Refactoring: `refactor/component-name`
-
-4. **Follow conventions**:
-   - Follow existing code style and patterns
-   - Update documentation as needed
-
-5. **Prepare for submission**:
-   - **Rebase your commits** to a single, clean commit before creating the pull request
-   - **Sign your commit** using the `-s` flag: `git commit -s -m "Your commit message"`
-   - Ensure your commit message is clear and descriptive
-
-6. **Submit a pull request**:
-   - Reference the related issue number
-   - Provide a clear description of changes
-   - Include screenshots/videos for UI changes
-
-### Code Standards
-
-- **Formatting**: Use project configurations
-- **Documentation**: Update relevant docs with your changes
-- **Security**: Follow secure coding practices
-
-### License Agreement
-
-**Important**: All contributors must agree to our Contributor License Agreement (CLA).
-
-By contributing to Phishing Club, you agree that your contributions will be licensed under the same dual license terms (AGPL-3.0 and commercial). You confirm that:
-
-- You have the right to contribute the code
-- Your contributions are your original work or properly attributed
-- You grant Phishing Club the right to license your contributions under both AGPL-3.0 and commercial licenses
-
-**Required**:
-- All commits must be signed off using the `-s` flag: `git commit -s -m "Your commit message"`
-- Before submitting a pull request, rebase your branch to a single commit
-- Use descriptive commit messages that explain what and why
-
-```bash
-# Example workflow:
-git rebase -i main    # Interactive rebase against main branch to squash commits
-git commit --amend -s # Add sign-off to the final commit if needed
-```
-
-This adds a "Signed-off-by" line indicating you agree to our [CLA](CLA.md) and the [Developer Certificate of Origin](https://developercertificate.org/).
-
-For detailed terms, see:
-- [Contributor License Agreement (CLA.md)](CLA.md)
-- [Contributors Guide (CONTRIBUTORS.md)](CONTRIBUTORS.md)
+For complete details, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 
-## Support and Security
+## Support
 
-Need help, join the [Phishing Club Discord](https://discord.gg/Zssps7U8gX)
+Need help? Join the [Phishing Club Discord](https://discord.gg/Zssps7U8gX)
 
-- **Security Issues**: Report privately via [security@phishing.club](mailto:security@phishing.club)
-- **Commercial Licensing**: Contact [license@phishing.club](mailto:license@phishing.club)
 - **General Support**: Join our Discord community or open a GitHub issue
+- **Commercial Licensing**: Contact [license@phishing.club](mailto:license@phishing.club)
+- **Security Issues**: See our [Security Policy](SECURITY.md)
 
-## Only for ethical use
+## Security and Ethical Use
 
-This platform is designed for authorized security testing only. Users are responsible for:
+This platform is designed for **authorized security testing only**. 
 
-- Obtaining proper authorization before conducting phishing simulations
-- Complying with all applicable laws and regulations
-- Using the platform ethically and responsibly
-- Protecting any data collected during testing
+For important information about:
+- Reporting security vulnerabilities
+- Ethical use requirements
+- Legal responsibilities
+- Security best practices
 
-This tool is for authorized security testing only. Misuse of this software may violate applicable laws. Users are solely responsible for ensuring their use complies with all applicable laws and regulations.
+Please read our [Security Policy](SECURITY.md).
+
+**Important**: Users are solely responsible for ensuring their use complies with all applicable laws and regulations.
