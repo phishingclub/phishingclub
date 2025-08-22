@@ -11,27 +11,22 @@ The self-hosted phishing framework for security awareness training and penetrati
 
 ## Overview
 
-Phishing Club is a phishing simulation framework designed for security professionals, red teams, and organizations looking to test and improve their security awareness. This platform provides tools for creating, deploying, and managing phishing campaigns in a controlled environment.
+Phishing Club is a self-hosted phishing simulation platform for security testing and awareness training. If you've used tools like GoPhish, you'll feel right at home—then quickly notice all the stuff you don't have to hack together yourself.
 
 See the [LICENSE](LICENSE) file for the full AGPL-3.0 terms.
 
-### Features
+## Features
 
-- Setup reusable phishing templates with emails, multiple phishing page flow, custom identifiers and more
-- Advanced scheduling with time-boxed sending and daily schedules (like monday, wednesday between 08:00 and 16:00)
-- API Sending, don't be limited by SMTP, deliver directly via an API
-- Handle multiple domains with automatic TLS (https)
-- Campaign overview and stats with graphs, per-recipient events and more
-- Dashboard with company statistics, trendlines, calendar and overview
-- Recipients and groups with stats such as repeat offender tracking
-- Custom websites and 404 pages
-- Asset management (upload js, css, images or whatever you want)
-- Security features like MFA, audit logging, session management, IP locked sessions and more
-- Webhooks for integrating with 3rd parties
-- MSSP Ready with individual dashboard and etc. for each client.
-- In-app updates
-
-And lots lots more!
+- **Multi-stage phishing flows** - Pre/main/post landing pages with session tracking
+- **Flexible scheduling** - Time windows, business hours, or manual control
+- **Multiple domains** - Auto TLS, custom sites, asset management
+- **Advanced delivery** - SMTP configs or custom API endpoints
+- **Recipient tracking** - Groups, CSV import, repeat offender metrics
+- **Real-time analytics** - Timelines, dashboards, per-user event history
+- **Automation** - HMAC-signed webhooks, REST API, import/export
+- **Multi-tenancy** - Isolated environments for service providers
+- **Security features** - MFA, SSO, session management, IP filtering
+- **Operational tools** - In-app updates, CLI installer, config management
 
 ## Getting Started
 
@@ -219,7 +214,7 @@ Need help? Join the [Phishing Club Discord](https://discord.gg/Zssps7U8gX)
 
 ## Security and Ethical Use
 
-This platform is designed for **authorized security testing only**. 
+This platform is designed for **authorized security testing only**.
 
 For important information about:
 - Reporting security vulnerabilities
