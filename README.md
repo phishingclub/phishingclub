@@ -116,6 +116,8 @@ Visit the [Phishing Club Guide](https://phishing.club/guide/introduction/) for m
 
 ## Development Commands
 
+The `makefile` has a lot of convenience commands for development.
+
 ```bash
 # Start all services
 make up
@@ -143,7 +145,7 @@ make backend-password
 
 ## Development Domains
 
-All domains ending with `.test` are automatically handled by the development setup. To use custom domains during development:
+For development we use `.test` for all domains. But this must also be handled on the host level. You must either modify the hosts file and add the domains you use or run a local DNS server and ensure all *.test domains resolves to 127.0.0.1.
 
 ### Option 1: DNSMasq (Recommended)
 ```bash
@@ -156,29 +158,19 @@ Add to `/etc/hosts`:
 ```
 127.0.0.1 microsoft.test
 127.0.0.1 google.test
-127.0.0.1 vikings.test
-127.0.0.1 dark-water.test
+... add your development domains here
 ```
 
-## Configuration
-
-### Environment Variables
-
-Copy the example environment file and customize:
-```bash
-cp backend/.env.example backend/.env.development
-```
-
-Key configuration options:
-- Database settings
-- SMTP configuration
-- Domain settings
-- Security keys
-
-### SSL Certificates
+## Development SSL Certificates
 
 The development environment uses Pebble ACME server for automatic SSL certificate generation. In production, configure your preferred ACME provider or upload custom certificates.
 
+If you experience any issues with certificate generation, bring the backend down,
+clear the local certs and start the backend again:
+
+ - `make backend-down`
+ - `make backend-clear-certs`
+ - `make backend-up`
 
 ## License
 
