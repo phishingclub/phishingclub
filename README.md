@@ -1,11 +1,8 @@
 # Phishing Club
 
 [![Latest Release](https://img.shields.io/github/v/release/phishingclub/phishingclub)](https://github.com/phishingclub/phishingclub/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/phishingclub/phishingclub/total)](https://github.com/phishingclub/phishingclub/releases)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?style=flat&logo=discord&logoColor=white)](https://discord.gg/Zssps7U8gX)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-
-</div>
 
 The self-hosted phishing framework for security awareness training and penetration testing.
 
