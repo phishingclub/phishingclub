@@ -24,7 +24,7 @@ See the [LICENSE](LICENSE) file for the full AGPL-3.0 terms.
 - **Recipient tracking** - Groups, CSV import, repeat offender metrics
 - **Real-time analytics** - Timelines, dashboards, per-user event history
 - **Automation** - HMAC-signed webhooks, REST API, import/export
-- **Multi-tenancy** - Isolated environments for service providers
+- **Multi-tenancy** - Segregated client handling and statistics for service providers
 - **Security features** - MFA, SSO, session management, IP filtering
 - **Operational tools** - In-app updates, CLI installer, config management
 
