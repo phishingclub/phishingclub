@@ -508,6 +508,10 @@ func (u *Update) verifySignature(binaryPath, sigPath string) error {
 }
 
 func (u *Update) CheckUpdateVersion(currentVersion, latestVersion string) (bool, error) {
+	if !build.Flags.Production {
+		// ignroe version in development
+		return false, nil
+	}
 	// The semver package expects versions to be prefixed with 'v'
 	current := ensureVPrefix(currentVersion)
 	latest := ensureVPrefix(latestVersion)
