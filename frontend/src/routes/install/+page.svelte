@@ -231,9 +231,6 @@
 								<div class="text-center py-8" id="step-{currentStep}">
 									<h3 class="text-lg font-medium text-gray-900 mb-4">Welcome to Phishing Club</h3>
 									<div class="space-y-4 text-sm text-gray-600">
-										<p class="text-blue-600 font-medium">
-											🎉 Open source with commercial licensing available
-										</p>
 										<p>
 											Get started by reading our
 											<a
