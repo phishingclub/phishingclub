@@ -37,7 +37,7 @@ func (o *Option) updateByKey(
 	d *gorm.DB,
 	option *model.Option,
 ) error {
-	result := o.DB.
+	result := d.
 		Model(&database.Option{}).
 		Where("key = ?", option.Key.String()).
 		Update("value", option.Value.String())

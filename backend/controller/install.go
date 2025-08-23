@@ -143,16 +143,19 @@ type Install struct {
 // Install completes the installation by setting the initial administrators and options
 func (in *Install) Install(g *gin.Context) {
 	tx := in.DB.Begin()
+	var committed bool
 	defer func() {
 		if r := recover(); r != nil {
-			tx.Rollback()
+			if !committed {
+				tx.Rollback()
+			}
 		}
 	}()
 	ok := in.install(g, tx)
 	if !ok {
-		if tx.Rollback().Error != nil {
+		if err := tx.Rollback().Error; err != nil {
 			in.Logger.Errorw("failed to install - could not rollback transaction",
-				"error", tx.Rollback().Error,
+				"error", err,
 			)
 		}
 		return
@@ -165,6 +168,7 @@ func (in *Install) Install(g *gin.Context) {
 		in.Response.ServerError(g)
 		return
 	}
+	committed = true
 	// the admin user changed username and password
 	// however as the install process is a special case, we wont
 	// require re-authentication
