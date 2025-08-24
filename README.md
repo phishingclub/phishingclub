@@ -44,6 +44,21 @@ Need help? Join the discord
 For cybersecurity students who want hands-on phishing simulation experience. The development setup includes a local mail server (Mailpit) so you can see emails in real-time without needing external SMTP. Spin up campaigns, test templates, and learn how phishing attacks work in a safe, contained environment.
 
 
+## Template Development
+
+### Phishing Template Workbench
+
+Speed up your template development with our template workbench tool:
+
+**[Phishing Template Workbench](https://github.com/phishingclub/templates)** - A developer-focused environment for creating and testing phishing simulation templates.
+
+- **Preview** - Preview templates
+- **Variable support** - See `{{.FirstName}}`, `{{.Email}}` substitution with realistic sample data
+- **Naive Responsive Testing** - Preview templates across mobile, tablet, and desktop
+- **Export Ready** - Compatible with Phishing Club formats
+- **Included Templates** - Comes with example templates covering common phishing scenarios that you can import and customize
+
+
 ### Resources & Learning
 - [**HTML QR Codes in Phishing Emails**](https://www.linkedin.com/feed/update/urn:li:activity:7327787503921336320/) - Example of using a QR code in a phishing email. The QR code is made from HTML with inline styling.
 - [**Setting up a domain with a website including a 404 page**](https://www.linkedin.com/feed/update/urn:li:activity:7328132395189067777) - Setup a domain with auto TLS with website content and 404 page.
