@@ -191,9 +191,9 @@ Phishing Club is available under a dual licensing model:
 ### Open Source License (AGPL-3.0)
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). This means:
 - ✅ You can use, modify, and distribute the software freely
-- ✅ Perfect for educational, research, and non-commercial use
-- ✅ You can run your own instance for internal security testing
-- ⚠️ **Important**: If you provide the software as a network service (SaaS), you must make your source code available under AGPL-3.0
+- ✅ Perfect for educational, research, and commercial use
+- ✅ You can run your own instance for security testing
+- ⚠️ **Important**: If you provide the software modified as a network service (SaaS), you must make your source code available under AGPL-3.0
 
 ### Commercial License
 For organizations that want to:
