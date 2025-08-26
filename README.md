@@ -4,13 +4,21 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?style=flat&logo=discord&logoColor=white)](https://discord.gg/Zssps7U8gX)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-The self-hosted phishing framework for security awareness training and penetration testing.
+The self-hosted phishing framework for penetration testing and security awareness training.
 
-## Overview
+## Quick start
 
-Phishing Club is a self-hosted phishing simulation platform for security testing and awareness training. If you've used tools like GoPhish, you'll feel right at home—then quickly notice all the stuff you don't have to hack together yourself.
+⚡ For systemd-enabled distributions, installation is quick and easy
 
-See the [LICENSE](LICENSE) file for the full AGPL-3.0 terms.
+Run the following on the server
+```
+curl -fsSL https://raw.githubusercontent.com/phishingclub/phishingclub/main/install.sh | bash
+```
+
+Remember to copy the admin URL and password
+
+For a manual step by step guide or more in depth installation information - [click here](https://phishing.club/guide/management/#install)
+
 
 ## Features
 
@@ -25,19 +33,12 @@ See the [LICENSE](LICENSE) file for the full AGPL-3.0 terms.
 - **Security features** - MFA, SSO, session management, IP filtering
 - **Operational tools** - In-app updates, CLI installer, config management
 
-## Getting Started
-
-### Install
-
-Download the latest release and follow our installation guide:
-
-1. **Download the latest version** from [GitHub Releases](https://github.com/phishingclub/phishingclub/releases)
-2. **Follow the installation guide** at [https://phishing.club/guide/management/#install](https://phishing.club/guide/management/#install)
-3. **Complete the setup** by following the step-by-step instructions in our documentation
-
-For detailed setup instructions, troubleshooting, and best practices, visit the [Phishing Club Guide](https://phishing.club/guide/introduction/).
-
-Need help? Join the discord
+### Resources & Learning
+- [**HTML QR Codes in Phishing Emails**](https://www.linkedin.com/feed/update/urn:li:activity:7327787503921336320/) - Example of using a QR code in a phishing email. The QR code is made from HTML with inline styling.
+- [**Setting up a domain with a website including a 404 page**](https://www.linkedin.com/feed/update/urn:li:activity:7328132395189067777) - Setup a domain with auto TLS with website content and 404 page.
+- [**Custom delivery with rich pasting into 3. party**](https://www.linkedin.com/feed/update/urn:li:activity:7329121654842830849) - Custom lure delivery via. rich pasting into 3. party providers like gmail.
+- [**Using multi-page phishing flow**](https://www.linkedin.com/feed/update/urn:li:activity:7329454798959808512) - Setting up a mutli page phishing flow. Great for both red team operations and simulations with training.
+- [**Delivery using external API instead of SMTP**](https://www.linkedin.com/feed/update/urn:li:activity:7329565689025900544) - Example of how to use the API delivery. Makes it possible to deliver anywhere.
 
 ### Students & Learning
 
@@ -59,12 +60,6 @@ Speed up your template development with our template workbench tool:
 - **Included Templates** - Comes with example templates covering common phishing scenarios that you can import and customize
 
 
-### Resources & Learning
-- [**HTML QR Codes in Phishing Emails**](https://www.linkedin.com/feed/update/urn:li:activity:7327787503921336320/) - Example of using a QR code in a phishing email. The QR code is made from HTML with inline styling.
-- [**Setting up a domain with a website including a 404 page**](https://www.linkedin.com/feed/update/urn:li:activity:7328132395189067777) - Setup a domain with auto TLS with website content and 404 page.
-- [**Custom delivery with rich pasting into 3. party**](https://www.linkedin.com/feed/update/urn:li:activity:7329121654842830849) - Custom lure delivery via. rich pasting into 3. party providers like gmail.
-- [**Using multi-page phishing flow**](https://www.linkedin.com/feed/update/urn:li:activity:7329454798959808512) - Setting up a mutli page phishing flow. Great for both red team operations and simulations with training.
-- [**Delivery using external API instead of SMTP**](https://www.linkedin.com/feed/update/urn:li:activity:7329565689025900544) - Example of how to use the API delivery. Makes it possible to deliver anywhere.
 
 
 ## Development Setup
