@@ -21,8 +21,8 @@ RestrictSUIDSGID=true
 MemoryDenyWriteExecute=true
 Restart=always
 RestartSec=5s
-StartLimitBurst=3          # Allow max 3 restart attempts
-StartLimitInterval=60s     # Within 60 seconds
+StartLimitBurst=3
+StartLimitInterval=60s
 
 [Install]
 WantedBy=multi-user.target
