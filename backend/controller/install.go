@@ -265,7 +265,7 @@ func (in *Install) install(g *gin.Context, tx *gorm.DB) bool {
 		in.Logger.Infow("failed to install - invalid password",
 			"error", err,
 		)
-		in.Response.BadRequestMessage(g, "invalid password")
+		in.Response.ValidationFailed(g, "Password", err)
 		return false
 	}
 	hash, err := in.PasswordHasher.Hash(newPassword.String())
