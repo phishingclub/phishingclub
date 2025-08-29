@@ -114,7 +114,7 @@ func ErrorIfStringNotbetweenOrEqualTo(s string, min int, max int) error {
 func ErrorIfIntEqual(a int, b int) error {
 	if a == b {
 		return errs.NewValidationError(
-			fmt.Errorf("must be equal to %d", b),
+			fmt.Errorf("must not be equal to %d", b),
 		)
 	}
 	return nil
@@ -124,7 +124,7 @@ func ErrorIfIntEqual(a int, b int) error {
 func ErrorIfLessThan(a int, b int) error {
 	if a < b {
 		return errs.NewValidationError(
-			fmt.Errorf("must be less than %d", b),
+			fmt.Errorf("must be greater than or equal to %d", b),
 		)
 	}
 	return nil
@@ -134,7 +134,7 @@ func ErrorIfLessThan(a int, b int) error {
 func ErrorIfIntLargerThan(a int, b int) error {
 	if a > b {
 		return errs.NewValidationError(
-			fmt.Errorf("must be or equal to %d", b),
+			fmt.Errorf("must be less than or equal to %d", b),
 		)
 	}
 	return nil
@@ -144,7 +144,7 @@ func ErrorIfIntLargerThan(a int, b int) error {
 func ErrorIfIntEqualOrLargerThan(a int, b int) error {
 	if a >= b {
 		return errs.NewValidationError(
-			fmt.Errorf("must be equal or larger than %d", b),
+			fmt.Errorf("must be less than %d", b),
 		)
 	}
 	return nil
@@ -154,7 +154,7 @@ func ErrorIfIntEqualOrLargerThan(a int, b int) error {
 func ErrorIfIntEqualOrLessThan(a int, b int) error {
 	if a <= b {
 		return errs.NewValidationError(
-			fmt.Errorf("must be equal or less than %d but is %d", b, a),
+			fmt.Errorf("must be greater than %d but is %d", b, a),
 		)
 	}
 	return nil
@@ -168,7 +168,7 @@ func ErrorIfNotbetweenOrEqualTo(s, min, max int) error {
 	}
 	return errs.NewValidationError(
 		fmt.Errorf(
-			"must be between %d and %d characters",
+			"must be between %d and %d",
 			min,
 			max,
 		),
