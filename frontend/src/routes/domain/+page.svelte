@@ -48,7 +48,7 @@
 		id: null,
 		name: null,
 		managedTLS: true, // managed TLS
-		ownManagedTLS: false, // own managed TLS
+		ownManagedTLS: false, // custom certificates
 		ownManagedTLSKey: null,
 		ownManagedTLSPem: null,
 		hostWebsite: true,
@@ -179,9 +179,9 @@
 			ownManagedTLSInputElement?.setCustomValidity('');
 			ownManagedTLSKeyElement?.setCustomValidity('');
 			ownManagedPemKeyElement?.setCustomValidity('');
-			// validate custom
+			// validate custom - allow both to be disabled for external TLS termination
 			if (formValues.ownManagedTLS && formValues.managedTLS) {
-				modalError = 'Managed and Self-managed TLS can not both be enabled';
+				modalError = 'Managed TLS and Custom Certificates can not both be enabled';
 				return;
 			}
 			if (formValues.ownManagedTLS) {
@@ -416,7 +416,7 @@
 			id: null,
 			name: null,
 			managedTLS: true, // managed TLS
-			ownManagedTLS: false, // own managed TLS
+			ownManagedTLS: false, // custom certificates
 			ownManagedTLSKey: null,
 			ownManagedTLSPem: null,
 			hostWebsite: true,
@@ -492,7 +492,7 @@
 			{ column: 'Hosting website', size: 'small', alignText: 'center' },
 			{ column: 'Redirects', size: 'small', alignText: 'center' },
 			{ column: 'Managed TLS', size: 'small', alignText: 'center' },
-			{ column: 'Own managed TLS', size: 'small', alignText: 'center' }
+			{ column: 'Custom Certificates', size: 'small', alignText: 'center' }
 		]}
 		sortable={['Name', 'Hosting website', 'Redirects']}
 		hasData={!!domains.length}
@@ -635,28 +635,16 @@
 								]}
 								bind:value={formValues.managedTLS}
 								toolTipText="Managed TLS via. public certificate authority"
-								onChange={(v) => {
-									if (v === false && formValues.ownManagedTLS === false) {
-										// Prevent both being disabled
-										formValues.ownManagedTLS = true;
-									}
-								}}
 							/>
 
 							<SelectSquare
-								label="Self-managed TLS"
+								label="Custom Certificates"
 								options={[
 									{ value: true, label: 'Enable' },
 									{ value: false, label: 'Disable' }
 								]}
 								bind:value={formValues.ownManagedTLS}
 								toolTipText="Upload own certificates for TLS"
-								onChange={(v) => {
-									if (v === false && formValues.managedTLS === false) {
-										// Prevent both being disabled
-										formValues.managedTLS = true;
-									}
-								}}
 							/>
 
 							{#if formValues.ownManagedTLS}
