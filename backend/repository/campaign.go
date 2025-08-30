@@ -435,6 +435,9 @@ func (r *Campaign) GetAllActive(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
+	// Filter out test campaigns
+	db = db.Where("is_test = false")
+
 	var dbCampaigns []database.Campaign
 	res := db.
 		Where(
@@ -483,6 +486,9 @@ func (r *Campaign) GetAllUpcoming(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
+	// Filter out test campaigns
+	db = db.Where("is_test = false")
+
 	var dbCampaigns []database.Campaign
 	res := db.
 		Where("((send_start_at > ?) AND closed_at IS NULL)", utils.NowRFC3339UTC()).
@@ -531,6 +537,9 @@ func (r *Campaign) GetAllFinished(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
+	// Filter out test campaigns
+	db = db.Where("is_test = false")
+
 	var dbCampaigns []database.Campaign
 	res := db.
 		Where("closed_at IS NOT NULL").
@@ -851,12 +860,15 @@ func (r *Campaign) GetAllCampaignWithinDates(
 
 	var dbCampaigns []database.Campaign
 
+	// Filter out test campaigns
+	db = db.Where("is_test = false")
+
 	// Query campaigns that:
 	// 1. Are self-managed (no send_start_at)
 	// 2. Start within the date range
 	res := db.Where(
 		"(send_start_at IS NULL) OR "+ // self managed
-			"(send_start_at BETWEEN ? AND ?)  ", // is within time
+			"(send_start_at BETWEEN ? AND ?)", // is within time
 		utils.RFC3339UTC(startDate),
 		utils.RFC3339UTC(endDate),
 	).Find(&dbCampaigns)

@@ -463,6 +463,10 @@
 			{#each scheduledCampaigns as campaign}
 				<TableRow>
 					<TableCell>
+						{#if campaign.isTest}
+							<TestLabel />
+						{/if}
+
 						<a href={`/campaign/${campaign.id}`}>
 							{campaign.name}
 						</a>
@@ -497,6 +501,10 @@
 			{#each completedCampaigns as campaign}
 				<TableRow>
 					<TableCell>
+						{#if campaign.isTest}
+							<TestLabel />
+						{/if}
+
 						<a href={`/campaign/${campaign.id}`}>
 							{campaign.name}
 						</a>
