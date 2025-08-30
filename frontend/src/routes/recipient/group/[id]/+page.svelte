@@ -369,14 +369,16 @@
 			{ column: 'Department', size: 'small' },
 			{ column: 'City', size: 'small' },
 			{ column: 'Country', size: 'small' },
-			{ column: 'Misc', size: 'small' }
+			{ column: 'Misc', size: 'small' },
+			{ column: '', size: 'small' },
+			{ column: 'Actions', size: 'small' }
 		]}
 		sortable={[
+			'email',
 			'first name',
 			'last name',
-			'extra identifier',
-			'email',
 			'phone',
+			'extra identifier',
 			'position',
 			'department',
 			'city',
@@ -390,17 +392,17 @@
 	>
 		{#each recipients as recipient}
 			<TableRow>
+				<TableCell value={recipient.email} />
 				<TableCell>
 					<a href="/recipient/{recipient.id}">{recipient.firstName}</a>
 				</TableCell>
 				<TableCell>
 					<a href="/recipient/{recipient.id}">{recipient.lastName}</a>
 				</TableCell>
+				<TableCell value={recipient.phone} />
 				<TableCell>
 					<a href="/recipient/{recipient.id}">{recipient.extraIdentifier}</a>
 				</TableCell>
-				<TableCell value={recipient.email} />
-				<TableCell value={recipient.phone} />
 				<TableCell value={recipient.position} />
 				<TableCell value={recipient.department} />
 				<TableCell value={recipient.city} />
@@ -439,7 +441,7 @@
 				</FormColumn>
 				<FormColumn>
 					<Table
-						columns={['Email', 'First name', 'Last name', 'Department']}
+						columns={['Email', 'First name', 'Last name', 'Department', '', 'Actions']}
 						sortable={['Email', 'First name', 'Last name', 'Department']}
 						hasData={!!selectedAddRecipients.length}
 						plural="recipients"
@@ -506,14 +508,16 @@
 							{ column: 'Department', size: 'small' },
 							{ column: 'City', size: 'small' },
 							{ column: 'Country', size: 'small' },
-							{ column: 'Misc', size: 'small' }
+							{ column: 'Misc', size: 'small' },
+							{ column: '', size: 'small' },
+							{ column: 'Actions', size: 'small' }
 						]}
 						sortable={[
+							'email',
 							'first name',
 							'last name',
-							'extra identifier',
-							'email',
 							'phone',
+							'extra identifier',
 							'position',
 							'department',
 							'city',
@@ -527,10 +531,10 @@
 						{#each selectedRecipientsImportPaginatedChunk as recipient}
 							<TableRow>
 								<TableCell value={recipient.email} />
-								<TableCell value={recipient.phone} />
-								<TableCell value={recipient.extraIdentifier} />
 								<TableCell value={recipient.firstName} />
 								<TableCell value={recipient.lastName} />
+								<TableCell value={recipient.phone} />
+								<TableCell value={recipient.extraIdentifier} />
 								<TableCell value={recipient.position} />
 								<TableCell value={recipient.department} />
 								<TableCell value={recipient.city} />
