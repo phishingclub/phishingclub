@@ -8,6 +8,7 @@
 	export let toolTipText = '';
 	export let optional = false;
 	export let id = null;
+	export let inline = false;
 
 	let parentForm = null;
 	let parentFormResetListener = null;
@@ -38,7 +39,12 @@
 	});
 </script>
 
-<label class="flex flex-col py-2 w-60">
+<label
+	class="flex py-2 w-60"
+	class:flex-col={!inline}
+	class:flex-row={inline}
+	class:items-center={inline}
+>
 	<div class="flex items-center">
 		<p class="font-semibold text-slate-600 py-2">
 			<slot />
@@ -54,7 +60,7 @@
 			</div>
 		{/if}
 	</div>
-	<div class="mt-1">
+	<div class="mt-1" class:mt-0={inline} class:ml-3={inline}>
 		<label class="relative flex items-center cursor-pointer">
 			<input
 				{id}
