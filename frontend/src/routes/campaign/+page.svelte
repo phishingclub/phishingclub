@@ -1210,7 +1210,6 @@
 
 								<TextFieldSelect
 									id="sortField"
-									optional
 									bind:value={formValues.sortField}
 									required
 									toolTipText="Choose which recipient field determines the delivery order"
@@ -1219,7 +1218,6 @@
 
 								<TextFieldSelect
 									id="sortOrder"
-									optional
 									bind:value={formValues.sortOrder}
 									toolTipText="Choose how recipients will be ordered for delivery"
 									required
@@ -1256,7 +1254,6 @@
 
 								<TextFieldSelect
 									id="sortField"
-									optional
 									bind:value={formValues.sortField}
 									required
 									toolTipText="Choose which recipient field determines the delivery order"
@@ -1265,7 +1262,6 @@
 
 								<TextFieldSelect
 									id="sortOrder"
-									optional
 									bind:value={formValues.sortOrder}
 									toolTipText="Choose how recipients will be ordered for delivery"
 									required
