@@ -593,7 +593,7 @@
 
 			const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
 			text.setAttribute('x', (legendX + 24).toString());
-			text.setAttribute('y', (y + 4).toString());
+			text.setAttribute('y', y.toString());
 			text.setAttribute('font-size', '11');
 			text.setAttribute('font-weight', '500');
 			text.setAttribute('fill', item.color);
