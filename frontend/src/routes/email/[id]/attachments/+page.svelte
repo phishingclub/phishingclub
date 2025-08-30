@@ -24,7 +24,6 @@
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import { newTableParams } from '$lib/service/tableParams';
 	import { getPaginatedChunkWithParams } from '$lib/service/paginationChunk';
-	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form';
