@@ -736,6 +736,7 @@ func (c *Campaign) GetStats(
 	ctx context.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
+	includeTestCampaigns bool,
 ) (*model.CampaignsStatView, error) {
 	ae := NewAuditEvent("Campaign.GetStats", session)
 	if companyID != nil {
@@ -752,15 +753,15 @@ func (c *Campaign) GetStats(
 		return nil, errs.ErrAuthorizationFailed
 	}
 	// get stats
-	active, err := c.CampaignRepository.GetActiveCount(ctx, companyID)
+	active, err := c.CampaignRepository.GetActiveCount(ctx, companyID, includeTestCampaigns)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	upcoming, err := c.CampaignRepository.GetUpcomingCount(ctx, companyID)
+	upcoming, err := c.CampaignRepository.GetUpcomingCount(ctx, companyID, includeTestCampaigns)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	finished, err := c.CampaignRepository.GetFinishedCount(ctx, companyID)
+	finished, err := c.CampaignRepository.GetFinishedCount(ctx, companyID, includeTestCampaigns)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}

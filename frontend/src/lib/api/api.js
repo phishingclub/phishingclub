@@ -74,6 +74,15 @@ const appendQuery = (query) => {
 	if (query.search) {
 		urlQuery += `&search=${query.search}`;
 	}
+
+	// Handle additional parameters
+	const knownParams = ['currentPage', 'perPage', 'page', 'sortBy', 'sortOrder', 'search'];
+	for (const [key, value] of Object.entries(query)) {
+		if (!knownParams.includes(key) && value !== undefined && value !== null) {
+			urlQuery += `&${key}=${encodeURIComponent(value)}`;
+		}
+	}
+
 	return urlQuery;
 };
 /**
@@ -648,8 +657,12 @@ export class API {
 		 * Get campaigns stats
 		 * if no company ID is provided it retrieves the global stats including all companies
 		 */
-		getStats: async (companyID = null) => {
-			return await getJSON(this.getPath(`/campaign/statistics?${this.companyQuery(companyID)}`));
+		getStats: async (companyID = null, options = {}) => {
+			return await getJSON(
+				this.getPath(
+					`/campaign/statistics?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`
+				)
+			);
 		},
 
 		/**

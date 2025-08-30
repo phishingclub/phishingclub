@@ -250,11 +250,13 @@ func (c *Campaign) GetStats(g *gin.Context) {
 	}
 	// parse request
 	companyID := companyIDFromRequestQuery(g)
+	includeTestCampaigns := g.Query("includeTest") == "true"
 	// get
 	stats, err := c.CampaignService.GetStats(
 		g.Request.Context(),
 		session,
 		companyID,
+		includeTestCampaigns,
 	)
 	// handle responses
 	if ok := c.handleErrors(g, err); !ok {
@@ -303,6 +305,7 @@ func (c *Campaign) GetAllWithinDates(g *gin.Context) {
 	}
 	// parse request
 	companyID := companyIDFromRequestQuery(g)
+	includeTestCampaigns := g.Query("includeTest") == "true"
 	queryArgs, ok := c.handleQueryArgs(g)
 	if !ok {
 		return
@@ -330,6 +333,7 @@ func (c *Campaign) GetAllWithinDates(g *gin.Context) {
 		&repository.CampaignOption{
 			QueryArgs:            queryArgs,
 			WithCampaignTemplate: true,
+			IncludeTestCampaigns: includeTestCampaigns,
 		},
 	)
 	// handle responses
@@ -349,6 +353,7 @@ func (c *Campaign) GetAllActive(g *gin.Context) {
 	}
 	// parse request
 	companyID := companyIDFromRequestQuery(g)
+	includeTestCampaigns := g.Query("includeTest") == "true"
 	queryArgs, ok := c.handleQueryArgs(g)
 	if !ok {
 		return
@@ -367,6 +372,7 @@ func (c *Campaign) GetAllActive(g *gin.Context) {
 			QueryArgs:            queryArgs,
 			WithCompany:          true,
 			WithCampaignTemplate: true,
+			IncludeTestCampaigns: includeTestCampaigns,
 		},
 	)
 	// handle responses
@@ -385,6 +391,7 @@ func (c *Campaign) GetAllUpcoming(g *gin.Context) {
 	}
 	// parse request
 	companyID := companyIDFromRequestQuery(g)
+	includeTestCampaigns := g.Query("includeTest") == "true"
 	queryArgs, ok := c.handleQueryArgs(g)
 	if !ok {
 		return
@@ -403,6 +410,7 @@ func (c *Campaign) GetAllUpcoming(g *gin.Context) {
 			QueryArgs:            queryArgs,
 			WithCompany:          true,
 			WithCampaignTemplate: true,
+			IncludeTestCampaigns: includeTestCampaigns,
 		},
 	)
 	// handle responses
@@ -421,6 +429,7 @@ func (c *Campaign) GetAllFinished(g *gin.Context) {
 	}
 	// parse request
 	companyID := companyIDFromRequestQuery(g)
+	includeTestCampaigns := g.Query("includeTest") == "true"
 	queryArgs, ok := c.handleQueryArgs(g)
 	if !ok {
 		return
@@ -439,6 +448,7 @@ func (c *Campaign) GetAllFinished(g *gin.Context) {
 			QueryArgs:            queryArgs,
 			WithCompany:          true,
 			WithCampaignTemplate: true,
+			IncludeTestCampaigns: includeTestCampaigns,
 		},
 	)
 	// handle responses

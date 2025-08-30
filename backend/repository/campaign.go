@@ -59,6 +59,7 @@ type CampaignOption struct {
 	WithRecipientGroupCount bool
 	WithAllowDeny           bool
 	WithDenyPage            bool
+	IncludeTestCampaigns    bool
 }
 
 // CampaignEventOption is options for preloading
@@ -72,6 +73,14 @@ type CampaignEventOption struct {
 // Campaign is a Campaign repository
 type Campaign struct {
 	DB *gorm.DB
+}
+
+// applyTestCampaignFilter conditionally applies the is_test filter based on options
+func (r *Campaign) applyTestCampaignFilter(db *gorm.DB, options *CampaignOption) *gorm.DB {
+	if !options.IncludeTestCampaigns {
+		db = db.Where("is_test = false")
+	}
+	return db
 }
 
 // load preloads the campaign repository
@@ -435,8 +444,8 @@ func (r *Campaign) GetAllActive(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	// Filter out test campaigns
-	db = db.Where("is_test = false")
+	// Apply test campaign filter based on options
+	db = r.applyTestCampaignFilter(db, options)
 
 	var dbCampaigns []database.Campaign
 	res := db.
@@ -486,8 +495,8 @@ func (r *Campaign) GetAllUpcoming(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	// Filter out test campaigns
-	db = db.Where("is_test = false")
+	// Apply test campaign filter based on options
+	db = r.applyTestCampaignFilter(db, options)
 
 	var dbCampaigns []database.Campaign
 	res := db.
@@ -537,8 +546,8 @@ func (r *Campaign) GetAllFinished(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	// Filter out test campaigns
-	db = db.Where("is_test = false")
+	// Apply test campaign filter based on options
+	db = r.applyTestCampaignFilter(db, options)
 
 	var dbCampaigns []database.Campaign
 	res := db.
@@ -860,8 +869,8 @@ func (r *Campaign) GetAllCampaignWithinDates(
 
 	var dbCampaigns []database.Campaign
 
-	// Filter out test campaigns
-	db = db.Where("is_test = false")
+	// Apply test campaign filter based on options
+	db = r.applyTestCampaignFilter(db, options)
 
 	// Query campaigns that:
 	// 1. Are self-managed (no send_start_at)
@@ -1304,18 +1313,21 @@ func (r *Campaign) AnonymizeCampaignEventsByRecipientID(
 
 // GetActiveCount get the number running campaigns
 // if no company ID is selected it gets the global count including all companies
-func (r *Campaign) GetActiveCount(ctx context.Context, companyID *uuid.UUID) (int64, error) {
+func (r *Campaign) GetActiveCount(ctx context.Context, companyID *uuid.UUID, includeTestCampaigns bool) (int64, error) {
 	var c int64
 	db := r.DB
 	if companyID != nil {
 		db = whereCompany(db, database.CAMPAIGN_TABLE, companyID)
 	}
+
+	whereClause := "((send_start_at <= ? OR send_start_at IS NULL) AND closed_at IS NULL)"
+	if !includeTestCampaigns {
+		whereClause += " AND is_test = false"
+	}
+
 	res := db.
 		Model(&database.Campaign{}).
-		Where(
-			"((send_start_at <= ? OR send_start_at IS NULL) AND closed_at IS NULL AND is_test IS false)",
-			utils.NowRFC3339UTC(),
-		).
+		Where(whereClause, utils.NowRFC3339UTC()).
 		Count(&c)
 
 	return c, res.Error
@@ -1323,17 +1335,21 @@ func (r *Campaign) GetActiveCount(ctx context.Context, companyID *uuid.UUID) (in
 
 // GetUpcomingCount get the upcoming campaign count
 // if no company ID is selected it gets the global count including all companies
-func (r *Campaign) GetUpcomingCount(ctx context.Context, companyID *uuid.UUID) (int64, error) {
+func (r *Campaign) GetUpcomingCount(ctx context.Context, companyID *uuid.UUID, includeTestCampaigns bool) (int64, error) {
 	var c int64
 	db := r.DB
 	if companyID != nil {
 		db = whereCompany(db, database.CAMPAIGN_TABLE, companyID)
 	}
+
+	whereClause := "((send_start_at > ?) AND closed_at IS NULL)"
+	if !includeTestCampaigns {
+		whereClause += " AND is_test = false"
+	}
+
 	res := db.
 		Model(&database.Campaign{}).
-		Where(
-			"((send_start_at > ?) AND closed_at IS NULL AND is_test IS false)", utils.NowRFC3339UTC(),
-		).
+		Where(whereClause, utils.NowRFC3339UTC()).
 		Count(&c)
 
 	return c, res.Error
@@ -1341,15 +1357,21 @@ func (r *Campaign) GetUpcomingCount(ctx context.Context, companyID *uuid.UUID) (
 
 // GetFinishedCount get the finished campaign count
 // if no company ID is selected it gets the global count including all companies
-func (r *Campaign) GetFinishedCount(ctx context.Context, companyID *uuid.UUID) (int64, error) {
+func (r *Campaign) GetFinishedCount(ctx context.Context, companyID *uuid.UUID, includeTestCampaigns bool) (int64, error) {
 	var c int64
 	db := r.DB
 	if companyID != nil {
 		db = whereCompany(db, database.CAMPAIGN_TABLE, companyID)
 	}
+
+	whereClause := "closed_at IS NOT NULL"
+	if !includeTestCampaigns {
+		whereClause += " AND is_test = false"
+	}
+
 	res := db.
 		Model(&database.Campaign{}).
-		Where("closed_at IS NOT NULL AND is_test IS false").
+		Where(whereClause).
 		Count(&c)
 
 	return c, res.Error
