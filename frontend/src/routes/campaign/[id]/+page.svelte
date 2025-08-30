@@ -194,6 +194,7 @@
 			campaign.sendStartAt = t.sendStartAt;
 			campaign.sendEndAt = t.sendEndAt;
 			campaign.anonymizedAt = t.anonymizedAt;
+			campaign.anonymizeAt = t.anonymizeAt;
 			campaign.closeAt = t.closeAt;
 			campaign.closedAt = t.closedAt;
 			campaign.isTest = t.isTest;
@@ -980,11 +981,17 @@
 
 						<span class="text-grayblue-dark font-medium">Data Saving:</span>
 						<span class="text-pc-darkblue">
-							{campaign.dataSaving ? 'Enabled' : 'Disabled'}
+							{campaign.saveSubmittedData ? 'Enabled' : 'Disabled'}
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Anonymization:</span>
-						<span class="text-pc-darkblue">{campaign.isAnonymous ? 'Enabled' : 'Disabled'}</span>
+						<span class="text-pc-darkblue">
+							{#if campaign.anonymizeAt}
+								<Datetime value={campaign.anonymizeAt} />
+							{:else}
+								Not scheduled
+							{/if}
+						</span>
 
 						<span class="text-grayblue-dark font-medium">Test:</span>
 						<span class="text-pc-darkblue">{campaign.isTest ? 'Yes' : 'No'}</span>
