@@ -36,6 +36,8 @@
 	import EventTimeline from '$lib/components/EventTimeline.svelte';
 	import CellCopy from '$lib/components/table/CopyCell.svelte';
 	import EventName from '$lib/components/table/EventName.svelte';
+	import { goto } from '$app/navigation';
+	import { globalButtonDisabledAttributes } from '$lib/utils/form';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -651,6 +653,37 @@
 			console.error('failed to load events', e);
 		}
 	};
+
+	const campaignUpdateDisabledAndTitle = (campaign) => {
+		const c = globalButtonDisabledAttributes(campaign, contextCompanyID);
+		if (c?.disabled) {
+			return c;
+		}
+
+		const now = new Date();
+		const fiveMinutesFromNow = new Date(now.getTime() + 5 * 60 * 1000);
+
+		// Check if campaign is closed
+		const isClosed = campaign.closedAt != null;
+
+		// Check if less than 5 minutes to start
+		const isNearStart =
+			campaign.sendStartAt != null && new Date(campaign.sendStartAt) <= fiveMinutesFromNow;
+
+		if (isClosed) {
+			return { disabled: true, title: 'Campaign is closed' };
+		}
+
+		if (isNearStart) {
+			return { disabled: true, title: 'Campaign starts in less than 5 minutes' };
+		}
+
+		return { disabled: false, title: '' };
+	};
+
+	const onClickUpdateCampaign = () => {
+		goto(`/campaign?update=${$page.params.id}`);
+	};
 </script>
 
 <HeadTitle title="Campaign {campaign.name ? ` - ${campaign.name}` : ''}" />
@@ -1066,25 +1099,33 @@
 				<div class="bg-white p-6 rounded-lg">
 					<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">Actions</h3>
 					<div class="flex flex-wrap gap-4">
+						{#if !campaignUpdateDisabledAndTitle(campaign).disabled}
+							<button
+								on:click={onClickUpdateCampaign}
+								class="px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:opacity-80 text-white rounded-md transition-colors"
+							>
+								Update
+							</button>
+						{/if}
 						<button
 							on:click={showCloseCampaignModal}
 							disabled={!!campaign.closedAt}
 							class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
 						>
-							Close campaign
+							Close
 						</button>
 						<button
 							on:click={showAnonymizeModal}
 							disabled={!!campaign.anonymizedAt}
-							class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
+							class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
 						>
-							Anonymize campaign
+							Anonymize
 						</button>
 						<button
 							on:click={onClickExportEvents}
 							class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
 						>
-							Export campaign events
+							Export events
 						</button>
 						<button
 							on:click={onClickExportSubmissions}

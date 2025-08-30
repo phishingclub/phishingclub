@@ -2,6 +2,7 @@
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
@@ -262,6 +263,23 @@
 			try {
 				await refreshCampaigns();
 				tableURLParams.onChange(refreshCampaigns);
+
+				// Check if we should auto-open the update modal
+				const updateId = $page.url.searchParams.get('update');
+				if (updateId) {
+					// Clear the URL parameter
+					const url = new URL($page.url);
+					url.searchParams.delete('update');
+					goto(url.pathname + url.search, { replaceState: true });
+
+					// Open the update modal
+					try {
+						await openUpdateModal(updateId);
+					} catch (e) {
+						addToast('Failed to open campaign for editing', 'Error');
+						console.error('Failed to open update modal:', e);
+					}
+				}
 			} catch (e) {
 				addToast('Failed to load data', 'Error');
 				console.error('failed to load data', e);
