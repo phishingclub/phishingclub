@@ -984,15 +984,6 @@
 							{campaign.saveSubmittedData ? 'Enabled' : 'Disabled'}
 						</span>
 
-						<span class="text-grayblue-dark font-medium">Anonymization:</span>
-						<span class="text-pc-darkblue">
-							{#if campaign.anonymizeAt}
-								<Datetime value={campaign.anonymizeAt} />
-							{:else}
-								Not scheduled
-							{/if}
-						</span>
-
 						<span class="text-grayblue-dark font-medium">Test:</span>
 						<span class="text-pc-darkblue">{campaign.isTest ? 'Yes' : 'No'}</span>
 					</div>

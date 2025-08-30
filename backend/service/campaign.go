@@ -1277,6 +1277,12 @@ func (c *Campaign) UpdateByID(
 	if v, err := incoming.ConstraintEndTime.Get(); err == nil {
 		current.ConstraintEndTime.Set(v)
 	}
+	if v, err := incoming.CloseAt.Get(); err == nil {
+		current.CloseAt.Set(v.Truncate(time.Minute))
+	}
+	if v, err := incoming.AnonymizeAt.Get(); err == nil {
+		current.AnonymizeAt.Set(v.Truncate(time.Minute))
+	}
 	if v, err := incoming.ClosedAt.Get(); err == nil {
 		current.ClosedAt.Set(v.Truncate(time.Minute))
 	}

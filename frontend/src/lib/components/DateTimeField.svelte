@@ -61,7 +61,7 @@
 			const minutes = min.getMinutes().toString().padStart(2, '0');
 			minTime = `${hours}:${minutes}`;
 			// if there selected value is a different date then remove the min time
-			if (dateValue && new Date(dateValue).getDate() !== min.getDate()) {
+			if (dateValue && new Date(dateValue).toDateString() !== min.toDateString()) {
 				minTime = '';
 			}
 		}
