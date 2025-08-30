@@ -369,9 +369,7 @@
 			{ column: 'Department', size: 'small' },
 			{ column: 'City', size: 'small' },
 			{ column: 'Country', size: 'small' },
-			{ column: 'Misc', size: 'small' },
-			{ column: '', size: 'small' },
-			{ column: 'Actions', size: 'small' }
+			{ column: 'Misc', size: 'small' }
 		]}
 		sortable={[
 			'email',
@@ -441,7 +439,7 @@
 				</FormColumn>
 				<FormColumn>
 					<Table
-						columns={['Email', 'First name', 'Last name', 'Department', '', 'Actions']}
+						columns={['Email', 'First name', 'Last name', 'Department']}
 						sortable={['Email', 'First name', 'Last name', 'Department']}
 						hasData={!!selectedAddRecipients.length}
 						plural="recipients"
@@ -508,9 +506,7 @@
 							{ column: 'Department', size: 'small' },
 							{ column: 'City', size: 'small' },
 							{ column: 'Country', size: 'small' },
-							{ column: 'Misc', size: 'small' },
-							{ column: '', size: 'small' },
-							{ column: 'Actions', size: 'small' }
+							{ column: 'Misc', size: 'small' }
 						]}
 						sortable={[
 							'email',
