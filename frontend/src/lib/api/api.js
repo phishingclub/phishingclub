@@ -701,6 +701,7 @@ export class API {
 		 * @param {string} [campaign.name]
 		 * @param {boolean} [campaign.saveSubmittedData]
 		 * @param {boolean} [campaign.isAnonymous]
+		 * @param {boolean} [campaign.isTest]
 		 * @param {string} [campaign.sortField]
 		 * @param {string} [campaign.sortOrder]
 		 * @param {string} [campaign.sendStartAt]
@@ -723,6 +724,7 @@ export class API {
 			name,
 			saveSubmittedData,
 			isAnonymous,
+			isTest,
 			sortField,
 			sortOrder,
 			sendStartAt,
@@ -742,6 +744,7 @@ export class API {
 				templateID,
 				name,
 				isAnonymous,
+				isTest,
 				saveSubmittedData,
 				sortField,
 				sortOrder,

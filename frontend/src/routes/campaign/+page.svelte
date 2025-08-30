@@ -558,6 +558,7 @@
 				sendStartAt: sendStartAtUTC,
 				saveSubmittedData: formValues.saveSubmittedData,
 				isAnonymous: formValues.isAnonymous,
+				isTest: formValues.isTest,
 				constraintWeekDays: weekDaysAvailableToBinary(formValues.constraintWeekDays),
 				constraintStartTime: contraintStartTimeUTC,
 				constraintEndTime: contraintEndTimeUTC,
@@ -640,7 +641,10 @@
 			const res = await api.campaign.getByName(name, contextCompanyID);
 			/** @type {HTMLInputElement} */
 			const ele = document.querySelector('#campaignName');
-			if (res.data) {
+			if (
+				res.data &&
+				(modalMode === 'create' || modalMode === 'copy' || res.data.id !== formValues.id)
+			) {
 				ele.setCustomValidity('Name is used by another campaign');
 				ele.reportValidity();
 			} else {
@@ -780,6 +784,7 @@
 			anonymizeAt: campaign.anonymizeAt,
 			saveSubmittedData: campaign.saveSubmittedData,
 			isAnonymous: campaign.isAnonymous,
+			isTest: campaign.isTest,
 			template: templateMap.byKey(campaign.templateID),
 			webhookValue: webhookMap.byKey(campaign.webhookID)
 		};
