@@ -62,10 +62,15 @@
 			menuX = pageX - 192;
 
 			if (shouldShowAbove) {
-				// for above positioning, use button position to avoid large gaps
-				const buttonRect = buttonRef.getBoundingClientRect();
-				const buttonPageY = buttonRect.top + window.scrollY;
-				menuY = buttonPageY - optimalHeight - gap;
+				// calculate actual menu height by temporarily showing it
+				menuRef.style.visibility = 'hidden';
+				menuRef.style.display = 'block';
+				const actualMenuHeight = menuRef.scrollHeight;
+				menuRef.style.display = '';
+				menuRef.style.visibility = '';
+
+				// position above by moving up by the actual menu height
+				menuY = pageY - actualMenuHeight - gap;
 			} else {
 				// for below positioning, use original click/button position
 				menuY = pageY + gap;
