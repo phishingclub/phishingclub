@@ -1867,11 +1867,25 @@ export class API {
 		 * @returns
 		 */
 		invalidateSessions: async (userID = '') => {
-			let data = null;
 			if (userID) {
-				data = { userID };
+				return await postJSON(this.getPath(`/user/sessions/invalidate`), { userID });
 			}
-			return await postJSON(this.getPath(`/user/sessions/invalidate`), data);
+			const res = await fetch(this.getPath(`/user/sessions/invalidate`), {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				}
+			});
+			let body = {};
+			try {
+				body = await res.json();
+			} catch (e) {
+				body = {
+					success: false,
+					error: 'invalid JSON in response'
+				};
+			}
+			return newResponse(body.success, res.status, body.error, body.data);
 		}
 	};
 
