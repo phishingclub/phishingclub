@@ -9,7 +9,7 @@
 	let menuRef = null;
 	let buttonRef = null;
 
-	// generate unique ID for this dropdown instance
+	// generate unique id for this dropdown instance
 	const dropdownId = Symbol();
 
 	// subscribe to active dropdown store
@@ -26,35 +26,52 @@
 			activeFormElement.set(dropdownId); // set this as active, closing others
 
 			const viewportHeight = window.innerHeight;
-			const menuHeight = 128; // max-h-32 in pixels
 			const buffer = 20; // extra space to ensure some padding from viewport edges
+			const minHeight = 64; // minimum dropdown height
+			const maxHeight = 400; // maximum dropdown height
 
 			let clickViewportY, pageX, pageY;
 
-			// Handle both mouse and keyboard events
+			// handle both mouse and keyboard events
 			if (e.clientY !== undefined && e.pageX !== undefined) {
-				// Mouse event
+				// mouse event
 				clickViewportY = e.clientY;
 				pageX = e.pageX;
 				pageY = e.pageY;
 			} else {
-				// Keyboard event - use button position
+				// keyboard event - use button position
 				const buttonRect = buttonRef.getBoundingClientRect();
 				clickViewportY = buttonRect.top;
 				pageX = buttonRect.left + window.scrollX;
 				pageY = buttonRect.top + window.scrollY;
 			}
 
-			// is the room enough to show the box
-			const shouldShowAbove = viewportHeight - clickViewportY < menuHeight + buffer;
+			// calculate available space above and below
+			const spaceAbove = clickViewportY - buffer;
+			const spaceBelow = viewportHeight - clickViewportY - buffer;
+
+			// choose position based on available space, with preference for below
+			const shouldShowAbove = spaceBelow < minHeight && spaceAbove > spaceBelow;
+			const availableSpace = shouldShowAbove ? spaceAbove : spaceBelow;
+
+			// calculate optimal height within bounds
+			const optimalHeight = Math.min(Math.max(availableSpace, minHeight), maxHeight);
 
 			// find position
+			const gap = 8; // small gap between menu and cursor/button
 			menuX = pageX - 192;
-			menuY = shouldShowAbove
-				? pageY - menuHeight // Position above click
-				: pageY; // Position below click
 
-			menuRef.style = `left: ${menuX}px; top: ${menuY}px`;
+			if (shouldShowAbove) {
+				// for above positioning, use button position to avoid large gaps
+				const buttonRect = buttonRef.getBoundingClientRect();
+				const buttonPageY = buttonRect.top + window.scrollY;
+				menuY = buttonPageY - optimalHeight - gap;
+			} else {
+				// for below positioning, use original click/button position
+				menuY = pageY + gap;
+			}
+
+			menuRef.style = `left: ${menuX}px; top: ${menuY}px; max-height: ${optimalHeight}px`;
 		}
 	};
 
@@ -90,7 +107,7 @@
 		document.removeEventListener('click', handleClickWhenVisible);
 		document.removeEventListener('keydown', handleGlobalKeydown);
 		unsubscribe();
-		// Clear active dropdown if this one was active
+		// clear active dropdown if this one was active
 		activeFormElement.update((current) => (current === dropdownId ? null : current));
 	};
 
@@ -123,7 +140,7 @@
 
 	<div
 		bind:this={menuRef}
-		class="absolute bg-white drop-shadow-md z-20 max-h-32 w-48 rounded-md overflow-y-scroll {scrollBarClassesVertical}"
+		class="absolute bg-white drop-shadow-md z-20 w-48 rounded-md overflow-y-scroll {scrollBarClassesVertical}"
 		class:hidden={!isMenuVisible}
 	>
 		<ul class="flex flex-col text-left">
