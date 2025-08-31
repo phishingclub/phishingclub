@@ -121,6 +121,12 @@
 					{context.companyName}
 				</p>
 			{/if}
+			<button
+				class="rounded-md h-3/4 px-8 text-white bg-indigo-500 hover:bg-cta-blue uppercase font-semibold mr-4"
+				on:click={toggleChangeCompanyModal}
+			>
+				Change company
+			</button>
 
 			{#if isUpdateAvailable}
 				<a
@@ -164,12 +170,17 @@
 			</div>
 		</div>
 
-		<button
-			class="flex w-14 mr-4 lg:hidden"
-			on:click={() => (isMobileMenuVisible = !isMobileMenuVisible)}
-		>
-			<img class="" src="/mob-menu-button.svg" alt="toggle mobile menu" />
-		</button>
+		<div class="flex lg:hidden items-center mr-4">
+			<button
+				class="rounded-md px-3 py-1 text-white bg-indigo-500 hover:bg-cta-blue uppercase font-semibold text-xs mr-3"
+				on:click={toggleChangeCompanyModal}
+			>
+				Change company
+			</button>
+			<button class="flex w-14" on:click={() => (isMobileMenuVisible = !isMobileMenuVisible)}>
+				<img class="" src="/mob-menu-button.svg" alt="toggle mobile menu" />
+			</button>
+		</div>
 	{/if}
 </div>
 

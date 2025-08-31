@@ -115,14 +115,25 @@
 	<main class="flex flex-col h-full">
 		<!-- Company Selection Section -->
 		<div class="flex-grow p-6">
-			<!--
-			<h2 class="text-lg mb-4 text-pc-darkblue">
-				Viewing as: {context?.companyName ?? 'Shared'}
-			</h2>
-			-->
 			{#if isLoadingCompanies}
 				<div class="flex items-center justify-center py-8">
 					<div class="text-gray-500">Loading companies...</div>
+				</div>
+			{:else if companies.length === 0}
+				<div class="flex flex-col items-center justify-center py-8 text-center">
+					<div class="text-gray-500 mb-4">No companies found.</div>
+					<div class="text-sm text-gray-400 mb-4">
+						You need to create a company first before you can switch to it.
+					</div>
+					<a
+						href="/company/"
+						class="bg-cta-blue hover:bg-blue-700 text-sm uppercase font-bold px-4 py-2 text-white rounded-md"
+						on:click={() => {
+							visible = false;
+						}}
+					>
+						Create Company
+					</a>
 				</div>
 			{:else}
 				<TextFieldSelect id={'context'} bind:value={selectedCompany} options={companyNameList}>
