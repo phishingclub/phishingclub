@@ -47,9 +47,6 @@
 				<h2 class="text-lg font-bold m-4">Links</h2>
 				<ul class="m-4">
 					<li>
-						<a href="https://localhost:8009" target="_blank">CRM / Update server</a>
-					</li>
-					<li>
 						<a href="http://localhost:8101" target="_blank">Database</a>
 					</li>
 					<li>
