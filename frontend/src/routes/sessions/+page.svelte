@@ -15,7 +15,6 @@
 	import { newTableURLParams } from '$lib/service/tableURLParams';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
-	import Button from '$lib/components/Button.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 
 	// services
@@ -37,7 +36,14 @@
 	const refreshSessions = async () => {
 		try {
 			isTableLoading = true;
-			const res = await api.user.getAllSessions(tableURLParams);
+			const params = {
+				currentPage: tableURLParams.currentPage,
+				perPage: tableURLParams.perPage,
+				sortBy: tableURLParams.sortBy,
+				sortOrder: tableURLParams.sortOrder,
+				search: tableURLParams.search
+			};
+			const res = await api.user.getAllSessions(params);
 			if (res.success) {
 				sessions = res.data.sessions;
 				return;
@@ -150,14 +156,12 @@
 		{/each}
 	</Table>
 	<DeleteAlert
-		type="session"
 		list={[]}
 		name={deleteValues.ip}
 		onClick={() => revokeSession(deleteValues.id, deleteValues.current)}
 		bind:isVisible={isDeleteAlertVisible}
 	></DeleteAlert>
 	<DeleteAlert
-		type="session"
 		list={[]}
 		name={'all sessions'}
 		onClick={() => revokeAllSession()}
