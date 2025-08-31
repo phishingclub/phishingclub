@@ -513,34 +513,10 @@
 						{domain.name}
 					</button>
 				</TableCell>
-				<TableCellCheck>
-					{#if domain.hostWebsite}
-						<img class="w-6" src="/icon-true.svg" alt="true" />
-					{:else}
-						<img class="w-6" src="/icon-false.svg" alt="false" />
-					{/if}
-				</TableCellCheck>
-				<TableCellCheck>
-					{#if domain.redirectURL}
-						<img class="w-6" src="/icon-true.svg" alt="true" />
-					{:else}
-						<img class="w-6" src="/icon-false.svg" alt="false" />
-					{/if}
-				</TableCellCheck>
-				<TableCellCheck>
-					{#if domain.managedTLS}
-						<img class="w-6" src="/icon-true.svg" alt="true" />
-					{:else}
-						<img class="w-6" src="/icon-false.svg" alt="false" />
-					{/if}
-				</TableCellCheck>
-				<TableCellCheck>
-					{#if domain.ownManagedTLS}
-						<img class="w-6" src="/icon-true.svg" alt="true" />
-					{:else}
-						<img class="w-6" src="/icon-false.svg" alt="false" />
-					{/if}
-				</TableCellCheck>
+				<TableCellCheck value={domain.hostWebsite} />
+				<TableCellCheck value={!!domain.redirectURL} />
+				<TableCellCheck value={domain.managedTLS} />
+				<TableCellCheck value={domain.ownManagedTLS} />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

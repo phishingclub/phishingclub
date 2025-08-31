@@ -139,13 +139,7 @@
 		{#each sessions as session}
 			<TableRow>
 				<TableCell value={session.ip} />
-				<TableCellCheck>
-					{#if session.current}
-						<img class="w-6" src="/icon-true.svg" alt="true" />
-					{:else}
-						<img class="w-6" src="/icon-false.svg" alt="false" />
-					{/if}
-				</TableCellCheck>
+				<TableCellCheck value={session.current} />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

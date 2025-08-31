@@ -533,13 +533,7 @@
 						</a>
 					{/if}
 				</TableCell>
-				<TableCellCheck>
-					{#if template.isUsable}
-						<img class="w-6" src="/icon-true.svg" alt="true" />
-					{:else}
-						<img class="w-6" src="/icon-false.svg" alt="false" />
-					{/if}
-				</TableCellCheck>
+				<TableCellCheck value={template.isUsable} />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

@@ -438,13 +438,7 @@
 				<TableCell value={recipient.phone} />
 				<TableCell value={recipient.extraIdentifier} />
 				<TableCell value={recipient.position} />
-				<TableCellCheck>
-					{#if recipient.isRepeatOffender}
-						<span class="text-red-600 font-bold text-center">Yes</span>
-					{:else}
-						<span class="text-green-600">No</span>
-					{/if}
-				</TableCellCheck>
+				<TableCellCheck value={recipient.isRepeatOffender} />
 				<TableCell value={recipient.department} />
 				<TableCell value={recipient.city} />
 				<TableCell value={recipient.country} />

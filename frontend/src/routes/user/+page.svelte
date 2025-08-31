@@ -269,13 +269,7 @@
 				>
 				<TableCell value={user.email} />
 				<TableCell value={user.name} />
-				<TableCellCheck>
-					{#if user.ssoID}
-						<img class="w-6" src="/icon-true.svg" alt="true" />
-					{:else}
-						<img class="w-6" src="/icon-false.svg" alt="false" />
-					{/if}
-				</TableCellCheck>
+				<TableCellCheck value={!!user.ssoID} />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

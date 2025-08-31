@@ -345,13 +345,7 @@
 						{entry.name}
 					</button>
 				</TableCell>
-				<TableCellCheck>
-					{#if entry.allowed}
-						<img class="w-6" src="/icon-true.svg" alt="true" />
-					{:else}
-						<img class="w-6" src="/icon-false.svg" alt="false" />
-					{/if}
-				</TableCellCheck>
+				<TableCellCheck value={entry.allowed} />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

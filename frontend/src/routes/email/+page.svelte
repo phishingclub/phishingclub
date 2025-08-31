@@ -400,13 +400,7 @@
 				</TableCell>
 				<TableCell value={email.mailHeaderFrom} />
 				<TableCell value={email.mailHeaderSubject} />
-				<TableCellCheck>
-					{#if email.addTrackingPixel}
-						<img class="w-6" src="/icon-true.svg" alt="true" />
-					{:else}
-						<img class="w-6" src="/icon-false.svg" alt="false" />
-					{/if}
-				</TableCellCheck>
+				<TableCellCheck value={email.addTrackingPixel} />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
