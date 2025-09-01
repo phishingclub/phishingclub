@@ -22,12 +22,12 @@ For a manual step by step guide or more in depth installation information - [cli
 
 ## Features
 
-- **Multi-stage phishing flows** - Pre/main/post landing pages with session tracking
-- **Flexible scheduling** - Time windows, business hours, or manual control
+- **Multi-stage phishing flows** - Put together multiple phishing pages
+- **Flexible scheduling** - Time windows, business hours, or manual delivery
 - **Multiple domains** - Auto TLS, custom sites, asset management
 - **Advanced delivery** - SMTP configs or custom API endpoints
 - **Recipient tracking** - Groups, CSV import, repeat offender metrics
-- **Real-time analytics** - Timelines, dashboards, per-user event history
+- **Analytics** - Timelines, dashboards, per-user event history
 - **Automation** - HMAC-signed webhooks, REST API, import/export
 - **Multi-tenancy** - Segregated client handling and statistics for service providers
 - **Security features** - MFA, SSO, session management, IP filtering
@@ -43,7 +43,6 @@ For a manual step by step guide or more in depth installation information - [cli
 ### Students & Learning
 
 For cybersecurity students who want hands-on phishing simulation experience. The development setup includes a local mail server (Mailpit) so you can see emails in real-time without needing external SMTP. Spin up campaigns, test templates, and learn how phishing attacks work in a safe, contained environment.
-
 
 ## Template Development
 
@@ -187,8 +186,8 @@ Phishing Club is available under a dual licensing model:
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). This means:
 - ✅ You can use, modify, and distribute the software freely
 - ✅ Perfect for educational, research, and commercial use
-- ✅ You can run your own instance for security testing
-- ⚠️ **Important**: If you provide the software modified as a network service (SaaS), you must make your source code available under AGPL-3.0
+- ✅ You can run your own instance for security testing or professional services
+- ⚠️ **Important**: If you provide the software modified as a network service, you must make your source code available under AGPL-3.0
 
 ### Commercial License
 For organizations that want to:
