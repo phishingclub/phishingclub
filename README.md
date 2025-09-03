@@ -193,10 +193,16 @@ This project is licensed under the GNU Affero General Public License v3.0 (AGPL-
 For organizations that want to:
 - Use Phishing Club in commercial products without AGPL restrictions
 - Offer Phishing Club as a service without source code disclosure
-- Integrate with proprietary software
-- Get dedicated support and maintenance
+- Modify or modify the codebase without source code disclosure
+- Get prioritized support
 
 **Contact us for commercial licensing**: [license@phishing.club](mailto:license@phishing.club)
+
+## Roadmap
+
+There is no offical roadmap at this moment.
+
+But you can vote with emojis on the `[feature]` requests [on Github](https://github.com/phishingclub/phishingclub) or even add you own feature request.
 
 ## Contributing
 
