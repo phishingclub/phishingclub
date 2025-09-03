@@ -63,6 +63,7 @@
 	let importFile = null;
 	let importResult = null;
 	let isImportResultModalVisible = false;
+	let importModalContent = null;
 
 	// Company context for import
 	const appState = AppStateService.instance;
@@ -190,8 +191,6 @@
 		}
 	}
 
-	// License functionality removed
-
 	async function refreshSSO() {
 		try {
 			const res = await api.option.get('sso_login');
@@ -243,8 +242,6 @@
 		}
 	};
 
-	// License functionality removed
-
 	const onSubmitSSO = async () => {
 		updateSSOError = '';
 		isSubmitting = true;
@@ -264,28 +261,8 @@
 		}
 	};
 
-	// License modal functions removed
-
 	const openSSOModal = async (e) => {
 		e.preventDefault();
-		/*
-		updateSSOError = '';
-		showIsLoading();
-		try {
-			const res = await api.option.get('sso_login');
-			if (!res.success) {
-				updateSSOError = res.error;
-				return;
-			}
-			const sso = JSON.parse(res.data.value);
-			ssoSettingsFormValues = sso;
-		} catch (e) {
-			addToast('Failed to get SSO options', 'Error');
-			console.error('failed to get SSO options', e);
-		} finally {
-			hideIsLoading();
-		}
-		*/
 		isSSOModalVisible = true;
 	};
 
@@ -323,11 +300,6 @@
 	/**
 	 * @param {*} event
 	 */
-	// License file handling removed
-
-	/**
-	 * @param {*} event
-	 */
 	const onSetImportFile = (event) => {
 		importFile = event.target.files[0];
 	};
@@ -360,6 +332,12 @@
 				importFile = null;
 				importResult = response.data;
 				isImportResultModalVisible = true;
+				// reset scroll position to top when modal becomes visible
+				setTimeout(() => {
+					if (importModalContent) {
+						importModalContent.scrollTop = 0;
+					}
+				}, 0);
 				// Reset file input
 				const fileInput = document.querySelector('input[type="file"][name="importFile"]');
 				if (fileInput) /** @type {HTMLInputElement} */ (fileInput).value = '';
@@ -367,6 +345,12 @@
 				importError = response.error || 'Import failed';
 				importResult = response.data || null;
 				isImportResultModalVisible = !!importResult;
+				// reset scroll position to top when modal becomes visible
+				setTimeout(() => {
+					if (importModalContent) {
+						importModalContent.scrollTop = 0;
+					}
+				}, 0);
 			}
 		} catch (error) {
 			console.error('Import error:', error);
@@ -527,7 +511,11 @@
 
 		{#if isImportResultModalVisible && importResult}
 			<Modal headerText="Import Summary" bind:visible={isImportResultModalVisible}>
-				<div class="p-6 max-h-[80vh] overflow-y-auto">
+				<div
+					class="p-6 max-h-[80vh] overflow-y-auto"
+					on:scroll={() => {}}
+					bind:this={importModalContent}
+				>
 					<div class="space-y-6">
 						<!-- Statistics Section -->
 						<div class="grid grid-cols-3 gap-6">
@@ -754,8 +742,6 @@
 			</div>
 		</div>
 	{/if}
-
-	<!-- License modal removed -->
 
 	{#if isSSOModalVisible}
 		<Modal bind:visible={isSSOModalVisible} headerText="SSO configuration" onClose={closeSSOModal}>
