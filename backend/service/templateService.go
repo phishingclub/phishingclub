@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
@@ -265,8 +266,9 @@ func (t *Template) newTemplateDataMap(
 		// sender fields
 		"From": mailHeaderFrom,
 		// general fields
-		"BaseURL":      baseURL,
-		"URL":          url,
+		"BaseURL": baseURL,
+		"URL":     url,
+
 		"APIKey":       "",
 		"CustomField1": "",
 		"CustomField2": "",
@@ -420,6 +422,15 @@ func TemplateFuncs() template.FuncMap {
 		},
 		"randAlpha": RandAlpha,
 		"qr":        GenerateQRCode,
+		"date": func(format string, offsetSeconds ...int) string {
+			offset := 0
+			if len(offsetSeconds) > 0 {
+				offset = offsetSeconds[0]
+			}
+			targetTime := time.Now().Add(time.Duration(offset) * time.Second)
+			goFormat := convertDateFormat(format)
+			return targetTime.Format(goFormat)
+		},
 	}
 }
 
@@ -524,4 +535,39 @@ func (q *QRHTMLWriter) Close() error {
 		return closer.Close()
 	}
 	return nil
+}
+
+// convertDateFormat converts readable date format (YmdHis) to Go's reference format
+func convertDateFormat(dateFormat string) string {
+	goFormat := dateFormat
+
+	// year formats
+	goFormat = strings.ReplaceAll(goFormat, "Y", "2006") // 4-digit year
+	goFormat = strings.ReplaceAll(goFormat, "y", "06")   // 2-digit year
+
+	// month formats
+	goFormat = strings.ReplaceAll(goFormat, "m", "01")      // 2-digit month
+	goFormat = strings.ReplaceAll(goFormat, "n", "1")       // month without leading zero
+	goFormat = strings.ReplaceAll(goFormat, "M", "Jan")     // short month name
+	goFormat = strings.ReplaceAll(goFormat, "F", "January") // full month name
+
+	// day formats
+	goFormat = strings.ReplaceAll(goFormat, "d", "02") // 2-digit day
+	goFormat = strings.ReplaceAll(goFormat, "j", "2")  // day without leading zero
+
+	// hour formats
+	goFormat = strings.ReplaceAll(goFormat, "H", "15") // 24-hour format
+	goFormat = strings.ReplaceAll(goFormat, "h", "03") // 12-hour format
+	goFormat = strings.ReplaceAll(goFormat, "G", "15") // 24-hour without leading zero (Go doesn't support this exactly)
+	goFormat = strings.ReplaceAll(goFormat, "g", "3")  // 12-hour without leading zero
+
+	// minute and second formats
+	goFormat = strings.ReplaceAll(goFormat, "i", "04") // minutes
+	goFormat = strings.ReplaceAll(goFormat, "s", "05") // seconds
+
+	// am/pm formats
+	goFormat = strings.ReplaceAll(goFormat, "A", "PM") // uppercase AM/PM
+	goFormat = strings.ReplaceAll(goFormat, "a", "pm") // lowercase am/pm
+
+	return goFormat
 }

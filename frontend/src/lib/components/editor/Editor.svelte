@@ -59,7 +59,8 @@
 			{ label: 'URL as QR HTML', text: '{{qr .URL 4}}' },
 			{ label: 'URL escape', text: '{{urlEscape "content" }}' },
 			{ label: 'Random alphanumeric', text: '{{randAlpha 8}}' },
-			{ label: 'Random number', text: '{{randInt 1 4}}' }
+			{ label: 'Random number', text: '{{randInt 1 4}}' },
+			{ label: 'Date', text: '{{date "Y-m-d H:i:s" 0}}' }
 		]
 	};
 
@@ -226,6 +227,19 @@
 				return result;
 			});
 		}
+
+		// handle date function with format and optional offset
+		if (text.includes('{{date')) {
+			const r = /{{date\s+"([^"]+)"\s*(-?\d+)?}}/g;
+			text = text.replace(r, (match, format, offset) => {
+				const currentTime = new Date();
+				const offsetSeconds = offset ? parseInt(offset, 10) : 0;
+				const targetTime = new Date(currentTime.getTime() + offsetSeconds * 1000);
+
+				return formatDate(targetTime, format);
+			});
+		}
+
 		switch (contentType) {
 			case 'domain':
 				return text.replaceAll('{{.BaseURL}}', _baseURL);
@@ -318,6 +332,34 @@
 		if (fileInputRef) {
 			fileInputRef.click();
 		}
+	};
+
+	// formatDate converts readable date format (YmdHis) to formatted date string
+	const formatDate = (date, format) => {
+		const pad = (num, size = 2) => num.toString().padStart(size, '0');
+
+		const replacements = {
+			Y: date.getFullYear(), // 4-digit year
+			y: date.getFullYear().toString().slice(-2), // 2-digit year
+			m: pad(date.getMonth() + 1), // 2-digit month
+			n: date.getMonth() + 1, // month without leading zero
+			d: pad(date.getDate()), // 2-digit day
+			j: date.getDate(), // day without leading zero
+			H: pad(date.getHours()), // 24-hour format
+			G: date.getHours(), // 24-hour without leading zero
+			h: pad(date.getHours() % 12 || 12), // 12-hour format
+			g: date.getHours() % 12 || 12, // 12-hour without leading zero
+			i: pad(date.getMinutes()), // minutes
+			s: pad(date.getSeconds()), // seconds
+			A: date.getHours() >= 12 ? 'PM' : 'AM', // uppercase AM/PM
+			a: date.getHours() >= 12 ? 'pm' : 'am' // lowercase am/pm
+		};
+
+		let result = format;
+		for (const [key, value] of Object.entries(replacements)) {
+			result = result.replaceAll(key, value.toString());
+		}
+		return result;
 	};
 
 	let isDetailsVisible = $$slots.default;
