@@ -249,6 +249,27 @@
 		modalText = getModalText('campaign', modalMode);
 	}
 
+	const getTemplateDetails = async (templateName) => {
+		if (!templateName) return null;
+
+		try {
+			const templateID = templateMap.byValue(templateName);
+			if (!templateID) return null;
+
+			// fetch template with full details including email and api sender
+			const templateRes = await api.campaignTemplate.getByID(templateID, true);
+			if (!templateRes.success) {
+				console.error('Failed to fetch template details:', templateRes.error);
+				return null;
+			}
+
+			return templateRes.data;
+		} catch (error) {
+			console.error('Error fetching template details:', error);
+			return null;
+		}
+	};
+
 	const tableURLParams = newTableURLParams();
 
 	onMount(() => {
@@ -1487,8 +1508,62 @@
 								</div>
 							</div>
 
-							<!-- Second Row: Schedule and Security -->
+							<!-- Second Row: Email and Schedule -->
 							<div class="grid grid-cols-2 gap-6">
+								<!-- Email/API Sender Information -->
+								<div class="bg-white p-6 rounded-lg shadow-sm">
+									<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">
+										Delivery Details
+									</h3>
+									{#await getTemplateDetails(formValues.template)}
+										<div class="text-gray-500">Loading delivery details...</div>
+									{:then template}
+										{#if template?.apiSender}
+											<div class="grid grid-cols-[120px_1fr] gap-y-3">
+												<span class="text-grayblue-dark font-medium">Type:</span>
+												<span class="text-pc-darkblue font-semibold">API Sender</span>
+
+												<span class="text-grayblue-dark font-medium">Name:</span>
+												<span class="text-pc-darkblue">{template.apiSender.name || 'Not set'}</span>
+
+												{#if template?.email}
+													<span class="text-grayblue-dark font-medium">Email:</span>
+													<span class="text-pc-darkblue">{template.email.name || 'Not set'}</span>
+												{/if}
+											</div>
+										{:else if template?.email}
+											<div class="grid grid-cols-[120px_1fr] gap-y-3">
+												<span class="text-grayblue-dark font-medium">Type:</span>
+												<span class="text-pc-darkblue font-semibold">SMTP</span>
+
+												<span class="text-grayblue-dark font-medium">Name:</span>
+												<span class="text-pc-darkblue">{template.email.name || 'Not set'}</span>
+
+												<span class="text-grayblue-dark font-medium">From:</span>
+												<span class="text-pc-darkblue"
+													>{template.email.mailHeaderFrom || 'Not set'}</span
+												>
+
+												<span class="text-grayblue-dark font-medium">Mail from:</span>
+												<span class="text-pc-darkblue"
+													>{template.email.mailEnvelopeFrom || 'Not set'}</span
+												>
+
+												<span class="text-grayblue-dark font-medium">Subject:</span>
+												<span class="text-pc-darkblue"
+													>{template.email.mailHeaderSubject || 'Not set'}</span
+												>
+											</div>
+										{:else}
+											<div class="text-gray-500">
+												No email or API sender configured for this template
+											</div>
+										{/if}
+									{:catch error}
+										<div class="text-red-500">Failed to load delivery details</div>
+									{/await}
+								</div>
+
 								<!-- Schedule -->
 								<div class="bg-white p-6 rounded-lg shadow-sm">
 									<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">
@@ -1496,7 +1571,7 @@
 									</h3>
 									<div class="grid grid-cols-[120px_1fr] gap-y-3">
 										<span class="text-grayblue-dark font-medium">Type:</span>
-										<span class="text-pc-darkblue">{scheduleType}</span>
+										<span class="text-pc-darkblue capitalize">{scheduleType}</span>
 
 										{#if scheduleType === 'basic'}
 											<span class="text-grayblue-dark font-medium">Start:</span>
@@ -1539,18 +1614,12 @@
 												<RelativeTime value={formValues.closeAt} />
 											</span>
 										{/if}
-
-										{#if formValues.anonymizeAt}
-											<span class="text-grayblue-dark font-medium">Anonymize at:</span>
-											<span class="text-pc-darkblue">
-												<Datetime value={formValues.anonymizeAt} />
-												<RelativeTime value={formValues.anonymizeAt} />
-											</span>
-										{/if}
 									</div>
 								</div>
+							</div>
 
-								<!-- Misc -->
+							<!-- Third Row: Security & Privacy -->
+							<div class="grid grid-cols-1 gap-6">
 								<div class="bg-white p-6 rounded-lg shadow-sm">
 									<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">
 										Security & Privacy
@@ -1588,6 +1657,14 @@
 										{#if formValues.denyPageValue}
 											<span class="text-grayblue-dark font-medium">Deny Page:</span>
 											<span class="text-pc-darkblue">{formValues.denyPageValue}</span>
+										{/if}
+
+										{#if formValues.anonymizeAt}
+											<span class="text-grayblue-dark font-medium">Anonymize at:</span>
+											<span class="text-pc-darkblue">
+												<Datetime value={formValues.anonymizeAt} />
+												<RelativeTime value={formValues.anonymizeAt} />
+											</span>
 										{/if}
 									</div>
 								</div>
