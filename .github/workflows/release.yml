@@ -88,6 +88,38 @@ jobs:
               phishingclub \
               phishingclub.sig
 
+      - name: Extract release notes from RELEASE.md
+        id: get_release_notes
+        run: |
+          # extract the section for the current version from RELEASE.md
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+
+          # find the line containing the current version
+          START_LINE=$(grep -n "## \[$VERSION\]" RELEASE.md | cut -d: -f1)
+
+          if [ -z "$START_LINE" ]; then
+            echo "Could not find version $VERSION in RELEASE.md"
+            echo "NOTES=PhishingClub release ${{ steps.get_version.outputs.TAG }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # find the next version section (next line starting with ##)
+          NEXT_LINE=$(tail -n +$((START_LINE + 1)) RELEASE.md | grep -n "^## " | head -1 | cut -d: -f1)
+
+          if [ -z "$NEXT_LINE" ]; then
+            # no next section, take from start line to end of file
+            RELEASE_NOTES=$(tail -n +$START_LINE RELEASE.md)
+          else
+            # calculate end line
+            END_LINE=$((START_LINE + NEXT_LINE - 1))
+            RELEASE_NOTES=$(sed -n "${START_LINE},${END_LINE}p" RELEASE.md)
+          fi
+
+          # save to github output (escape newlines)
+          echo "NOTES<<EOF" >> $GITHUB_OUTPUT
+          echo "$RELEASE_NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -95,7 +127,7 @@ jobs:
           gh release create ${{ steps.get_version.outputs.TAG }} \
             ./packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
             --title "PhishingClub ${{ steps.get_version.outputs.TAG }}" \
-            --notes "PhishingClub release ${{ steps.get_version.outputs.TAG }}"
+            --notes "${{ steps.get_release_notes.outputs.NOTES }}"
 
       - name: Notify about release
         run: |
