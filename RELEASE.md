@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.0] - 2025-09-04
+- Added support for YmdHis Date and Base64 template functions
+- Improved campaign review details
+- Fix import modal not scrolling to bottom after import
+
 ## [1.1.13] - 2025-08-30
 - Fix too many get all sessions params sent
 - Fix invalidate all sessions
