@@ -60,7 +60,8 @@
 			{ label: 'URL escape', text: '{{urlEscape "content" }}' },
 			{ label: 'Random alphanumeric', text: '{{randAlpha 8}}' },
 			{ label: 'Random number', text: '{{randInt 1 4}}' },
-			{ label: 'Date', text: '{{date "Y-m-d H:i:s" 0}}' }
+			{ label: 'Date', text: '{{date "Y-m-d H:i:s" 0}}' },
+			{ label: 'Base64', text: '{{base64 "text"}}' }
 		]
 	};
 
@@ -225,6 +226,14 @@
 					result += alphaChars.charAt(Math.floor(Math.random() * alphaChars.length));
 				}
 				return result;
+			});
+		}
+
+		// handle base64 function
+		if (text.includes('{{base64')) {
+			const r = /{{base64\s+"([^"]+)"}}/g;
+			text = text.replace(r, (match, input) => {
+				return btoa(input);
 			});
 		}
 

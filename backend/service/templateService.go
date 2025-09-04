@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"html/template"
@@ -430,6 +431,9 @@ func TemplateFuncs() template.FuncMap {
 			targetTime := time.Now().Add(time.Duration(offset) * time.Second)
 			goFormat := convertDateFormat(format)
 			return targetTime.Format(goFormat)
+		},
+		"base64": func(s string) string {
+			return base64.StdEncoding.EncodeToString([]byte(s))
 		},
 	}
 }
