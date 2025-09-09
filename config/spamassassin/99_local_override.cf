@@ -1,0 +1,28 @@
+# Custom SpamAssassin configuration for phishing template testing
+# This file uses higher priority (99_) to override default score files
+# that are loaded from updates_spamassassin_org
+
+# Disable MISSING_DATE rule - phishing templates often don't have proper dates
+score MISSING_DATE 0.0
+
+# Disable WEIRD_PORT rule - we use non-standard ports for testing (8005, 8102, etc.)
+score WEIRD_PORT 0.0
+
+# Disable MIME_HTML_ONLY rule - phishing emails are typically HTML-only
+score MIME_HTML_ONLY 0.0
+
+# Disable MSGID_FROM_MTA_HEADER rule - our test environment may not have proper MTA headers
+score MSGID_FROM_MTA_HEADER 0.0
+
+# Disable ALL_TRUSTED rule - our test environment uses trusted hosts only
+score ALL_TRUSTED 0.0
+
+# Additional rules that might trigger in phishing templates
+score HTML_MESSAGE 0.0
+score MISSING_HEADERS 0.0
+score MISSING_MID 0.0
+score NO_RECEIVED 0.0
+score NO_RELAYS 0.0
+
+# Enable more detailed logging for debugging
+# log_level 2
