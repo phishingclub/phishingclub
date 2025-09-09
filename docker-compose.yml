@@ -86,7 +86,6 @@ services:
   # SpamAssassin - Spam detection and scoring
   spamassassin:
     image: axllent/spamassassin
-    container_name: spamassassin
     restart: unless-stopped
     volumes:
       - ./config/spamassassin/99_local_override.cf:/etc/mail/spamassassin/99_local_override.cf:ro
