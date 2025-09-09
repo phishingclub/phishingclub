@@ -114,7 +114,7 @@ Visit the [Phishing Club Guide](https://phishing.club/guide/introduction/) for m
 | 8002 | Backend API | Backend API server |
 | 8003 | Frontend | Development frontend with Vite |
 | 8101 | Database Viewer | DBGate database administration |
-| 8102 | Mail Server | Mailpit SMTP server for testing |
+| 8102 | Mail Server | Mailpit SMTP server with SpamAssassin integration |
 | 8103 | Container Logs | Dozzle log viewer |
 | 8104 | Container Stats | Docker container statistics |
 | 8201 | ACME Server | Pebble ACME server for certificates |

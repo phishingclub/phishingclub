@@ -77,8 +77,20 @@ services:
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
+      MP_ENABLE_SPAMASSASSIN: spamassassin:783
+    depends_on:
+      - spamassassin
     networks:
       - default
+
+  # SpamAssassin - Spam detection and scoring
+  spamassassin:
+    image: axllent/spamassassin
+    container_name: spamassassin
+    restart: unless-stopped
+    networks:
+      - default
+  #
 
   # Pebble - ACME server for testing
   # Used to test TLS certificate requesting via ACME
