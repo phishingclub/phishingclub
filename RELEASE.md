@@ -1,7 +1,10 @@
 # Changelog
 
-## [1.2.1] - 2025-xx-xx
+## [1.2.1] - 2025-09-15
 - Add debug logging to SMTP.
+- Fix excessive table URL params
+- Bump backend dependencies
+- Add debug log for SMTP
 
 ## [1.2.0] - 2025-09-04
 - Added support for YmdHis Date and Base64 template functions
