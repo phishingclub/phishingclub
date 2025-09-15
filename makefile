@@ -66,7 +66,7 @@ frontend:
 	sudo docker compose logs -f --tail 1000 frontend;
 frontend-build:
 	-sudo docker compose stop frontend; \
-	sudo docker compose rm -force -v frontend; \
+	sudo docker compose rm --force -v frontend; \
 	sudo docker compose up -d frontend;
 frontend-restart:
 	sudo docker compose restart frontend
