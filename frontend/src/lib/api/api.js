@@ -52,35 +52,28 @@ const appendQuery = (query) => {
 	if (!query) {
 		return '_'; // append after this method hack
 	}
-	if (!query.currentPage) {
-		query.currentPage = 1;
-	}
-	if (!query.perPage) {
-		query.perPage = 10;
-	}
-	const offset = getOffset(query.currentPage, query.perPage);
 
-	let urlQuery = `offset=${offset}&limit=${query.perPage}`;
-	if (query.sortBy) {
+	const currentPage = query.currentPage || 1;
+	const perPage = query.perPage || 10;
+	const sortBy = query.sortBy;
+	const sortOrder = query.sortOrder;
+	const search = query.search;
+
+	const offset = getOffset(currentPage, perPage);
+
+	let urlQuery = `offset=${offset}&limit=${perPage}`;
+	if (sortBy) {
 		//  normalize the sortby field by lowercasing and replacing spacing with underscores
-		const sortBy = query.sortBy.toLowerCase().replace(/\s+/g, '_');
-		urlQuery += `&sortBy=${sortBy}`;
+		const normalizedSortBy = sortBy.toLowerCase().replace(/\s+/g, '_');
+		urlQuery += `&sortBy=${normalizedSortBy}`;
 	}
-	if (query.sortOrder) {
-		urlQuery += `&sortOrder=${query.sortOrder}`;
+	if (sortOrder) {
+		urlQuery += `&sortOrder=${sortOrder}`;
 	} else {
 		urlQuery += `&sortOrder=asc`;
 	}
-	if (query.search) {
-		urlQuery += `&search=${query.search}`;
-	}
-
-	// Handle additional parameters
-	const knownParams = ['currentPage', 'perPage', 'page', 'sortBy', 'sortOrder', 'search'];
-	for (const [key, value] of Object.entries(query)) {
-		if (!knownParams.includes(key) && value !== undefined && value !== null) {
-			urlQuery += `&${key}=${encodeURIComponent(value)}`;
-		}
+	if (search) {
+		urlQuery += `&search=${search}`;
 	}
 
 	return urlQuery;
