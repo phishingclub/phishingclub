@@ -24,6 +24,7 @@ import (
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
+	"github.com/phishingclub/phishingclub/log"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/validate"
@@ -2020,6 +2021,8 @@ func (c *Campaign) sendCampaignMessages(
 		// Try CRAM-MD5 first when credentials are provided
 		emailOptionsCRAM5 := append(emailOptions, mail.WithSMTPAuth(mail.SMTPAuthCramMD5))
 		mc, _ = mail.NewClient(smtpHost.String(), emailOptionsCRAM5...)
+		mc.SetLogger(log.NewGoMailLoggerAdapter(c.Logger))
+		mc.SetDebugLog(true)
 		if build.Flags.Production {
 			mc.SetTLSPolicy(mail.TLSMandatory)
 		} else {
@@ -2033,12 +2036,12 @@ func (c *Campaign) sendCampaignMessages(
 			strings.Contains(err.Error(), "538 ") ||
 			strings.Contains(err.Error(), "CRAM-MD5") ||
 			strings.Contains(err.Error(), "authentication failed")) {
-			c.Logger.Warnw("CRAM-MD5 authentication failed, trying PLAIN auth", "error", err)
+			c.Logger.Debugf("CRAM-MD5 authentication failed, trying PLAIN auth", "error", err)
 			emailOptionsBasic := emailOptions
-			if build.Flags.Production {
-				emailOptionsBasic = append(emailOptions, mail.WithSMTPAuth(mail.SMTPAuthPlain))
-			}
+			emailOptionsBasic = append(emailOptions, mail.WithSMTPAuth(mail.SMTPAuthPlain))
 			mc, _ = mail.NewClient(smtpHost.String(), emailOptionsBasic...)
+			mc.SetLogger(log.NewGoMailLoggerAdapter(c.Logger))
+			mc.SetDebugLog(true)
 			if build.Flags.Production {
 				mc.SetTLSPolicy(mail.TLSMandatory)
 			} else {
@@ -2049,6 +2052,8 @@ func (c *Campaign) sendCampaignMessages(
 	} else {
 		// No credentials provided, try without authentication (e.g., local postfix)
 		mc, _ = mail.NewClient(smtpHost.String(), emailOptions...)
+		mc.SetLogger(log.NewGoMailLoggerAdapter(c.Logger))
+		mc.SetDebugLog(true)
 		if build.Flags.Production {
 			mc.SetTLSPolicy(mail.TLSMandatory)
 		} else {

@@ -12,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/build"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
+	"github.com/phishingclub/phishingclub/log"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/validate"
@@ -277,13 +278,14 @@ func (s *SMTPConfiguration) SendTestEmail(
 	}
 	// send mail
 	var mc *mail.Client
-
 	// Try different authentication methods based on configuration
 	// If username is provided, use authentication; otherwise try without auth first
 	if un := username.String(); len(un) > 0 {
 		// Try CRAM-MD5 first when credentials are provided
 		emailOptionsCRAM5 := append(emailOptions, mail.WithSMTPAuth(mail.SMTPAuthCramMD5))
 		mc, _ = mail.NewClient(smtpHost.String(), emailOptionsCRAM5...)
+		mc.SetLogger(log.NewGoMailLoggerAdapter(s.Logger))
+		mc.SetDebugLog(true)
 		if build.Flags.Production {
 			mc.SetTLSPolicy(mail.TLSMandatory)
 		} else {
@@ -297,12 +299,12 @@ func (s *SMTPConfiguration) SendTestEmail(
 			strings.Contains(err.Error(), "538 ") ||
 			strings.Contains(err.Error(), "CRAM-MD5") ||
 			strings.Contains(err.Error(), "authentication failed")) {
-			s.Logger.Warnw("CRAM-MD5 authentication failed, trying PLAIN auth", "error", err)
+			s.Logger.Debugf("CRAM-MD5 authentication failed, trying PLAIN auth", "error", err)
 			emailOptionsBasic := emailOptions
-			if build.Flags.Production {
-				emailOptionsBasic = append(emailOptions, mail.WithSMTPAuth(mail.SMTPAuthPlain))
-			}
+			emailOptionsBasic = append(emailOptions, mail.WithSMTPAuth(mail.SMTPAuthPlain))
 			mc, _ = mail.NewClient(smtpHost.String(), emailOptionsBasic...)
+			mc.SetLogger(log.NewGoMailLoggerAdapter(s.Logger))
+			mc.SetDebugLog(true)
 			if build.Flags.Production {
 				mc.SetTLSPolicy(mail.TLSMandatory)
 			} else {
@@ -313,6 +315,8 @@ func (s *SMTPConfiguration) SendTestEmail(
 	} else {
 		// No credentials provided, try without authentication (e.g., local postfix)
 		mc, _ = mail.NewClient(smtpHost.String(), emailOptions...)
+		mc.SetLogger(log.NewGoMailLoggerAdapter(s.Logger))
+		mc.SetDebugLog(true)
 		if build.Flags.Production {
 			mc.SetTLSPolicy(mail.TLSMandatory)
 		} else {

@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.2.1] - 2025-xx-xx
+- Add debug logging to SMTP.
+
 ## [1.2.0] - 2025-09-04
 - Added support for YmdHis Date and Base64 template functions
 - Improved campaign review details
