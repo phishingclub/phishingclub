@@ -53,11 +53,13 @@ const appendQuery = (query) => {
 		return '_'; // append after this method hack
 	}
 
-	const currentPage = query.currentPage || 1;
+	// extract only the state properties we need, avoiding methods and internal properties
+	// handle both tableURLParams objects and plain objects safely
+	const currentPage = query.currentPage || query.page || 1;
 	const perPage = query.perPage || 10;
-	const sortBy = query.sortBy;
-	const sortOrder = query.sortOrder;
-	const search = query.search;
+	const sortBy = query.sortBy || '';
+	const sortOrder = query.sortOrder || '';
+	const search = query.search || '';
 
 	const offset = getOffset(currentPage, perPage);
 
