@@ -321,7 +321,7 @@ func ToEmail(row *database.Email) *model.Email {
 	subject := nullable.NewNullableWithValue(*vo.NewOptionalString255Must(row.Subject))
 	envelopeFrom := nullable.NewNullableWithValue(*vo.NewMailEnvelopeFromMust(row.MailFrom))
 	from := nullable.NewNullableWithValue(*vo.NewEmailMust(row.From))
-	content := nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(row.Content))
+	content := nullable.NewNullableWithValue(*vo.NewOptionalString10MBMust(row.Content))
 	addTrackingPixel := nullable.NewNullableWithValue(row.AddTrackingPixel)
 
 	attachments := []*model.Attachment{}

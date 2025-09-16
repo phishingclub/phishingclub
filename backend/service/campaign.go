@@ -1988,7 +1988,7 @@ func (c *Campaign) sendCampaignMessages(
 				}
 				// really hacky / unsafe
 				attachmentAsEmail.Content = nullable.NewNullableWithValue(
-					*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
+					*vo.NewUnsafeOptionalString10MB(string(attachmentContent)),
 				)
 				attachmentStr, err := c.TemplateService.CreateMailBody(
 					urlIdentifier.Name.MustGet(),

@@ -424,7 +424,7 @@ func (a *APISender) SendTest(
 			*vo.NewOptionalString255Must("Test Email Subject"),
 		),
 		Content: nullable.NewNullableWithValue(
-			*vo.NewOptionalString1MBMust("Hi {{.FirstName}},\n\nThis is a test email.\n\nBest,\nBob"),
+			*vo.NewOptionalString10MBMust("Hi {{.FirstName}},\n\nThis is a test email.\n\nBest,\nBob"),
 		),
 		AddTrackingPixel: nullable.NewNullableWithValue(false),
 	}

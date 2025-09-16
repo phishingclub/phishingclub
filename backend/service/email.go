@@ -238,7 +238,7 @@ func (m *Email) toggleTrackingPixel(
 	} else {
 		tmp = m.TemplateService.AddTrackingPixel(c.String())
 	}
-	b, err := vo.NewOptionalString1MB(tmp)
+	b, err := vo.NewOptionalString10MB(tmp)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
@@ -633,7 +633,7 @@ func (m *Email) SendTestEmail(
 			}
 			// really hacky / unsafe
 			attachmentAsEmail.Content = nullable.NewNullableWithValue(
-				*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
+				*vo.NewUnsafeOptionalString10MB(string(attachmentContent)),
 			)
 			attachmentStr, err := m.TemplateService.CreateMailBody(
 				"id",

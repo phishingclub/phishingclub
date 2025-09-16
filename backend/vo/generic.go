@@ -565,7 +565,7 @@ func NewOptionalString1MB(s string) (*OptionalString1MB, error) {
 	}, nil
 }
 
-// NewUnsafeString1MB creates a new long string but does validate the size
+// NewUnsafeString1MB creates a new long string but does not validate the size
 // this is a special unsafe method that should only be used for special occasions
 func NewUnsafeOptionalString1MB(s string) *OptionalString1MB {
 	return &OptionalString1MB{
@@ -610,6 +610,121 @@ func (s *OptionalString1MB) UnmarshalJSON(data []byte) error {
 
 // String returns the string representation of the long string
 func (s OptionalString1MB) String() string {
+	return s.inner
+}
+
+// String10MB is a trimmed string with a min of 1 and a max of 10000000
+type String10MB struct {
+	inner string
+}
+
+// NewString10MB creates a new long string
+func NewString10MB(s string) (*String10MB, error) {
+	s = strings.TrimSpace(s)
+	err := validate.ErrorIfStringNotbetweenOrEqualTo(s, 1, 10000000)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	return &String10MB{
+		inner: s,
+	}, nil
+}
+
+// NewString10MBMust creates a new long string and panics if it fails
+func NewString10MBMust(s string) *String10MB {
+	a, err := NewString10MB(s)
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+// MarshalJSON implements the json.Marshaler interface
+func (s String10MB) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.inner)
+}
+
+// UnmarshalJSON unmarshals the json into a string
+func (s *String10MB) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	ss, err := NewString10MB(str)
+	if err != nil {
+		return errors.Unwrap(err)
+	}
+	s.inner = ss.inner
+	return nil
+}
+
+// String returns the string representation of the long string
+func (s String10MB) String() string {
+	return s.inner
+}
+
+// OptionalString10MB is a trimmed string with a min of 0 and a max of 10000000
+type OptionalString10MB struct {
+	inner string
+}
+
+// NewOptionalString10MB creates a new long string
+func NewOptionalString10MB(s string) (*OptionalString10MB, error) {
+	s = strings.TrimSpace(s)
+	err := validate.ErrorIfStringNotbetweenOrEqualTo(s, 0, 10000000)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	return &OptionalString10MB{
+		inner: s,
+	}, nil
+}
+
+// NewUnsafeOptionalString10MB creates a new long string but does validate the size
+// this is a special unsafe method that should only be used for special occasions
+func NewUnsafeOptionalString10MB(s string) *OptionalString10MB {
+	return &OptionalString10MB{
+		inner: s,
+	}
+}
+
+// NewOptionalString10MBMust creates a new long string and panics if it fails
+func NewOptionalString10MBMust(s string) *OptionalString10MB {
+	a, err := NewOptionalString10MB(s)
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+// NewEmptyOptionalString10MB creates a new empty long string
+func NewEmptyOptionalString10MB() *OptionalString10MB {
+	return &OptionalString10MB{
+		inner: "",
+	}
+}
+
+// MarshalJSON implements the json.Marshaler interface
+func (s OptionalString10MB) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.inner)
+}
+
+// UnmarshalJSON unmarshals the json into a string
+func (s *OptionalString10MB) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	ss, err := NewOptionalString10MB(str)
+	if err != nil {
+		return errors.Unwrap(err)
+	}
+	s.inner = ss.inner
+	return nil
+}
+
+// String returns the string representation of the long string
+func (s OptionalString10MB) String() string {
 	return s.inner
 }
 

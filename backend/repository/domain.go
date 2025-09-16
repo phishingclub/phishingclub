@@ -266,8 +266,8 @@ func ToDomain(row *database.Domain) *model.Domain {
 	managedTLS := nullable.NewNullableWithValue(row.ManagedTLSCerts)
 	ownManagedTLS := nullable.NewNullableWithValue(row.OwnManagedTLS)
 	hostWebsite := nullable.NewNullableWithValue(row.HostWebsite)
-	staticPage := nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(row.PageContent))
-	staticNotFound := nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(row.PageNotFoundContent))
+	staticPage := nullable.NewNullableWithValue(*vo.NewOptionalString10MBMust(row.PageContent))
+	staticNotFound := nullable.NewNullableWithValue(*vo.NewOptionalString10MBMust(row.PageNotFoundContent))
 	redirectURL := nullable.NewNullableWithValue(*vo.NewOptionalString1024Must(row.RedirectURL))
 
 	return &model.Domain{

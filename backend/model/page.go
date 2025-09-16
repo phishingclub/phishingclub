@@ -11,12 +11,12 @@ import (
 
 // Page is a Page
 type Page struct {
-	ID        nullable.Nullable[uuid.UUID]            `json:"id"`
-	CreatedAt *time.Time                              `json:"createdAt"`
-	UpdatedAt *time.Time                              `json:"updatedAt"`
-	CompanyID nullable.Nullable[uuid.UUID]            `json:"companyID"`
-	Name      nullable.Nullable[vo.String64]          `json:"name"`
-	Content   nullable.Nullable[vo.OptionalString1MB] `json:"content"`
+	ID        nullable.Nullable[uuid.UUID]             `json:"id"`
+	CreatedAt *time.Time                               `json:"createdAt"`
+	UpdatedAt *time.Time                               `json:"updatedAt"`
+	CompanyID nullable.Nullable[uuid.UUID]             `json:"companyID"`
+	Name      nullable.Nullable[vo.String64]           `json:"name"`
+	Content   nullable.Nullable[vo.OptionalString10MB] `json:"content"`
 
 	Company *Company `json:"-"`
 }

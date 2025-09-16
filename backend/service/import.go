@@ -468,7 +468,7 @@ func (im *Import) Import(
 				continue
 			}
 			newPage.Name = nullable.NewNullableWithValue(*name)
-			if pageContent, err := vo.NewOptionalString1MB(string(content)); err == nil {
+			if pageContent, err := vo.NewOptionalString10MB(string(content)); err == nil {
 				newPage.Content = nullable.NewNullableWithValue(*pageContent)
 			}
 			if forCompany && companyID != nil {
@@ -596,7 +596,7 @@ func (im *Import) Import(
 			if companyID != nil {
 				newEmail.CompanyID = nullable.NewNullableWithValue(*companyID)
 			}
-			if emailContent, err := vo.NewOptionalString1MB(string(content)); err == nil {
+			if emailContent, err := vo.NewOptionalString10MB(string(content)); err == nil {
 				newEmail.Content = nullable.NewNullableWithValue(*emailContent)
 			}
 			name, err := vo.NewString64(email.Name)

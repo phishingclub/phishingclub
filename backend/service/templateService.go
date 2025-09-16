@@ -118,7 +118,7 @@ func (t *Template) ValidateEmailTemplate(content string) error {
 	}
 	email := model.NewEmailExample()
 	email.Content = nullable.NewNullableWithValue(
-		*vo.NewUnsafeOptionalString1MB(content),
+		*vo.NewUnsafeOptionalString10MB(content),
 	)
 	apiSender := model.NewAPISenderExample()
 

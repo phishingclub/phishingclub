@@ -11,16 +11,16 @@ import (
 
 // Email is a e-mail
 type Email struct {
-	ID                nullable.Nullable[uuid.UUID]            `json:"id"`
-	CreatedAt         *time.Time                              `json:"createdAt"`
-	UpdatedAt         *time.Time                              `json:"updatedAt"`
-	Name              nullable.Nullable[vo.String64]          `json:"name"`
-	MailEnvelopeFrom  nullable.Nullable[vo.MailEnvelopeFrom]  `json:"mailEnvelopeFrom"` // Bounce / Return-Path
-	MailHeaderFrom    nullable.Nullable[vo.Email]             `json:"mailHeaderFrom"`
-	MailHeaderSubject nullable.Nullable[vo.OptionalString255] `json:"mailHeaderSubject"`
-	Content           nullable.Nullable[vo.OptionalString1MB] `json:"content"`
-	AddTrackingPixel  nullable.Nullable[bool]                 `json:"addTrackingPixel"`
-	CompanyID         nullable.Nullable[uuid.UUID]            `json:"companyID"`
+	ID                nullable.Nullable[uuid.UUID]             `json:"id"`
+	CreatedAt         *time.Time                               `json:"createdAt"`
+	UpdatedAt         *time.Time                               `json:"updatedAt"`
+	Name              nullable.Nullable[vo.String64]           `json:"name"`
+	MailEnvelopeFrom  nullable.Nullable[vo.MailEnvelopeFrom]   `json:"mailEnvelopeFrom"` // Bounce / Return-Path
+	MailHeaderFrom    nullable.Nullable[vo.Email]              `json:"mailHeaderFrom"`
+	MailHeaderSubject nullable.Nullable[vo.OptionalString255]  `json:"mailHeaderSubject"`
+	Content           nullable.Nullable[vo.OptionalString10MB] `json:"content"`
+	AddTrackingPixel  nullable.Nullable[bool]                  `json:"addTrackingPixel"`
+	CompanyID         nullable.Nullable[uuid.UUID]             `json:"companyID"`
 
 	Attachments []*Attachment `json:"attachments"`
 	Company     *Company      `json:"company"`
@@ -112,7 +112,7 @@ func NewEmailExample() *Email {
 			*vo.NewOptionalString255Must("SubjectLine"),
 		),
 		Content: nullable.NewNullableWithValue(
-			*vo.NewOptionalString1MBMust("Content"),
+			*vo.NewOptionalString10MBMust("Content"),
 		),
 		AddTrackingPixel: nullable.NewNullableWithValue(true),
 	}

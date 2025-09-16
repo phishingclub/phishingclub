@@ -248,7 +248,7 @@ func ToPage(row *database.Page) (*model.Page, error) {
 		companyID.Set(*row.CompanyID)
 	}
 	name := nullable.NewNullableWithValue(*vo.NewString64Must(row.Name))
-	c, err := vo.NewOptionalString1MB(row.Content)
+	c, err := vo.NewOptionalString10MB(row.Content)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}

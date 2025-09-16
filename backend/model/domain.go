@@ -24,8 +24,8 @@ type Domain struct {
 	OwnManagedTLSKey nullable.Nullable[string] `json:"ownManagedTLSKey"`
 	// cert
 	OwnManagedTLSPem    nullable.Nullable[string]                `json:"ownManagedTLSPem"`
-	PageContent         nullable.Nullable[vo.OptionalString1MB]  `json:"pageContent"`
-	PageNotFoundContent nullable.Nullable[vo.OptionalString1MB]  `json:"pageNotFoundContent"`
+	PageContent         nullable.Nullable[vo.OptionalString10MB] `json:"pageContent"`
+	PageNotFoundContent nullable.Nullable[vo.OptionalString10MB] `json:"pageNotFoundContent"`
 	RedirectURL         nullable.Nullable[vo.OptionalString1024] `json:"redirectURL"`
 	CompanyID           nullable.Nullable[uuid.UUID]             `json:"companyID"`
 	Company             *Company                                 `json:"company"`

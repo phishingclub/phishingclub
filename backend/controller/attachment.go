@@ -111,7 +111,7 @@ func (a *Attachment) GetContentByID(g *gin.Context) {
 		email := model.NewEmailExample()
 		// hacky
 		email.Content = nullable.NewNullableWithValue(
-			*vo.NewUnsafeOptionalString1MB(string(content)),
+			*vo.NewUnsafeOptionalString10MB(string(content)),
 		)
 		apiSender := model.NewAPISenderExample()
 		b, err := a.TemplateService.CreateMailBody(
