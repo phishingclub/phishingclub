@@ -138,6 +138,7 @@ func NewServices(
 		CampaignRepository:      repositories.Campaign,
 		PageRepository:          repositories.Page,
 		CampaignTemplateService: campaignTemplate,
+		TemplateService:         templateService,
 	}
 	domain := &service.Domain{
 		Common:                    common,
@@ -149,6 +150,7 @@ func NewServices(
 		CampaignTemplateService:   campaignTemplate,
 		AssetService:              asset,
 		FileService:               file,
+		TemplateService:           templateService,
 	}
 	email := &service.Email{
 		Common:            common,

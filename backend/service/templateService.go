@@ -18,6 +18,7 @@ import (
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/utils"
+	"github.com/phishingclub/phishingclub/vo"
 	"github.com/yeqown/go-qrcode/v2"
 )
 
@@ -69,6 +70,104 @@ func (t *Template) CreateMail(
 		email,
 		apiSender,
 	)
+}
+
+// ValidatePageTemplate validates that a page template can be parsed and executed without errors
+func (t *Template) ValidatePageTemplate(content string) error {
+	// use the same parsing approach as CreatePhishingPage but without executing
+	_, err := template.New("validation").
+		Funcs(TemplateFuncs()).
+		Parse(content)
+
+	if err != nil {
+		return fmt.Errorf("failed to parse page template: %s", err)
+	}
+
+	// also try to execute with mock data to catch runtime errors
+	_, err = t.ApplyPageMock(content)
+	if err != nil {
+		return fmt.Errorf("failed to execute page template: %s", err)
+	}
+
+	return nil
+}
+
+// ValidateEmailTemplate validates that an email template can be parsed and executed without errors
+func (t *Template) ValidateEmailTemplate(content string) error {
+	// use the same parsing approach as email creation but without executing
+	_, err := template.New("validation").
+		Funcs(TemplateFuncs()).
+		Parse(content)
+
+	if err != nil {
+		return fmt.Errorf("failed to parse email template: %s", err)
+	}
+
+	// also try to execute with mock data to catch runtime errors
+	domain := &model.Domain{
+		Name: nullable.NewNullableWithValue(
+			*vo.NewString255Must("example.test"),
+		),
+	}
+	recipient := model.NewRecipientExample()
+	campaignRecipient := model.CampaignRecipient{
+		ID: nullable.NewNullableWithValue(
+			uuid.New(),
+		),
+		Recipient: recipient,
+	}
+	email := model.NewEmailExample()
+	email.Content = nullable.NewNullableWithValue(
+		*vo.NewUnsafeOptionalString1MB(content),
+	)
+	apiSender := model.NewAPISenderExample()
+
+	_, err = t.CreateMailBody(
+		"id",
+		"/test",
+		domain,
+		&campaignRecipient,
+		email,
+		apiSender,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to execute email template: %s", err)
+	}
+
+	return nil
+}
+
+// ValidateDomainTemplate validates that a domain template can be parsed and executed without errors
+func (t *Template) ValidateDomainTemplate(content string) error {
+	// use the same parsing approach as domain content but without executing
+	_, err := template.New("validation").
+		Funcs(TemplateFuncs()).
+		Parse(content)
+
+	if err != nil {
+		return fmt.Errorf("failed to parse domain template: %s", err)
+	}
+
+	// also try to execute with mock data to catch runtime errors
+	// domains only have access to BaseURL variable
+	data := map[string]any{
+		"BaseURL": "https://example.test",
+	}
+
+	tmpl, err := template.New("domain").
+		Funcs(TemplateFuncs()).
+		Parse(content)
+	if err != nil {
+		return fmt.Errorf("failed to parse domain template: %s", err)
+	}
+
+	var buf bytes.Buffer
+	err = tmpl.Execute(&buf, data)
+	if err != nil {
+		return fmt.Errorf("failed to execute domain template: %s", err)
+	}
+
+	return nil
 }
 
 // ApplyPageMock

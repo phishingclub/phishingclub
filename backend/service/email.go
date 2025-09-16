@@ -171,6 +171,13 @@ func (m *Email) Create(
 	if err := email.Validate(); err != nil {
 		return nil, errs.Wrap(err)
 	}
+	// validate template content if present
+	if content, err := email.Content.Get(); err == nil {
+		if err := m.TemplateService.ValidateEmailTemplate(content.String()); err != nil {
+			m.Logger.Errorw("failed to validate email template", "error", err)
+			return nil, validate.WrapErrorWithField(errors.New("invalid template: "+err.Error()), "content")
+		}
+	}
 	// check uniqueness
 	var companyID *uuid.UUID
 	if cid, err := email.CompanyID.Get(); err == nil {
@@ -780,6 +787,11 @@ func (m *Email) UpdateByID(
 		current.MailHeaderSubject.Set(v)
 	}
 	if v, err := email.Content.Get(); err == nil {
+		// validate template content before updating
+		if err := m.TemplateService.ValidateEmailTemplate(v.String()); err != nil {
+			m.Logger.Errorw("failed to validate email template", "error", err)
+			return validate.WrapErrorWithField(errors.New("invalid template: "+err.Error()), "content")
+		}
 		if _, err := email.AddTrackingPixel.Get(); err == nil {
 			// handle tracking pixel
 			email, err = m.toggleTrackingPixel(email)
