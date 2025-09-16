@@ -166,7 +166,35 @@
 
 	const onSubmitPageUpdate = async () => {
 		try {
-			await onClickUpdate();
+			isSubmitting = true;
+			updateContentError = '';
+			// clear site contents if not hosting a website
+			if (!formValues.hostWebsite) {
+				formValues.pageContent = '';
+				formValues.pageNotFoundContent = '';
+			}
+			const res = await api.domain.update({
+				id: formValues.id,
+				managedTLS: formValues.managedTLS,
+				ownManagedTLS: formValues.ownManagedTLS,
+				ownManagedTLSKey: formValues.ownManagedTLSKey,
+				ownManagedTLSPem: formValues.ownManagedTLSPem,
+				hostWebsite: formValues.hostWebsite,
+				pageContent: formValues.pageContent,
+				pageNotFoundContent: formValues.pageNotFoundContent,
+				redirectURL: formValues.redirectURL,
+				companyID: contextCompanyID
+			});
+			if (!res.success) {
+				updateContentError = res.error;
+				return;
+			}
+			addToast('Domain updated', 'Success');
+			closeAllModals();
+			refreshDomains();
+		} catch (e) {
+			addToast('Failed to update domain', 'Error');
+			console.error('failed to update domain', e);
 		} finally {
 			isSubmitting = false;
 		}
@@ -401,6 +429,7 @@
 
 	const closeAllModals = () => {
 		modalError = '';
+		updateContentError = '';
 		formValues.id = null;
 		if (form) {
 			form.reset();
@@ -678,7 +707,7 @@
 		<FormGrid on:submit={onSubmitPageUpdate} bind:bindTo={contentNotFoundForm} {isSubmitting}>
 			<Editor
 				contentType="domain"
-				baseURL={formValues.pageNotFoundContent}
+				baseURL={formValues.name}
 				bind:value={formValues.pageNotFoundContent}
 			/>
 			<FormError message={updateContentError} />
