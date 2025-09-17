@@ -30,16 +30,17 @@ export default {
 				'pc-lightblue': '#ddddff',
 				'pc-green': '#5dd8c4ff',
 				'pc-dusty-light-blue': '#819efb',
-				'scheduled': '#e756f6',
+				scheduled: '#e756f6',
 				'recipient-scheduled': '#4e68d8',
 				'failed-sending': '#f2bb58',
-				'cancelled': '#161692',
+				cancelled: '#161692',
 				'message-sent': '#94cae6',
 				'message-read': '#4cb5b5',
 				'before-page-visited': '#eea5fa',
 				'page-visited': '#f96dcf',
 				'after-page-visited': '#f6287b',
 				'submitted-data': '#f42e41',
+				reported: '#2c3e50',
 				'completed-campaign': '#48bb78',
 				'repeat-offenders': '#ff6768',
 				'emails-read': '#e8e810',
@@ -47,15 +48,13 @@ export default {
 				'repeat-link-clicks': '#c78bfd',
 				'data-submitted': '#f42e41',
 				'repeart-submissions': '#ff6a91',
-				'recipients': '#6cd4cc',
-				'closed': '#9f9f9f',
+				recipients: '#6cd4cc',
+				closed: '#9f9f9f',
 				'campaign-active': '#5557f6',
-				'campaign-scheduled':'#62aded',
-				'campaign-completed':'#69e1ab',
-				
-
+				'campaign-scheduled': '#62aded',
+				'campaign-completed': '#69e1ab'
 			},
-			/* 
+			/*
 			'scheduled':'#e756f6',
 				'recipient-scheduled':'#4e68d8',
 				'failed-sending':'#4cb5b5',
@@ -87,7 +86,7 @@ export default {
 				'67vh': '67vh',
 				'70vh': '70vh',
 				'75vh': '75vh',
-				'80vh': '80vh',
+				'80vh': '80vh'
 			},
 			width: {
 				'1/10': '10%',
@@ -96,8 +95,7 @@ export default {
 				'70vw': '70vw',
 				'80vw': '80vw',
 				'90vw': '90vw'
-			},
-
+			}
 		}
 	}
 };

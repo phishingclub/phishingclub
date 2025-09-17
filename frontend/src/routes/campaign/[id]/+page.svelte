@@ -692,6 +692,13 @@
 		const file = event.target.files?.[0];
 		if (!file) return;
 
+		// validate file type
+		if (!file.name.toLowerCase().endsWith('.csv')) {
+			addToast('Please select a CSV file', 'Error');
+			event.target.value = '';
+			return;
+		}
+
 		const formData = new FormData();
 		formData.append('file', file);
 
@@ -703,25 +710,23 @@
 				credentials: 'include'
 			});
 
-			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}`);
-			}
-
 			const result = await response.json();
 
-			if (result.success) {
+			if (response.ok && result.success) {
 				addToast(
-					`Processed ${result.data.processed} reported entries, skipped ${result.data.skipped}`,
+					`Successfully processed ${result.data.processed} reported entries${result.data.skipped > 0 ? `, skipped ${result.data.skipped} invalid entries` : ''}`,
 					'Success'
 				);
 				// refresh the stats
 				await setResults();
 			} else {
-				addToast('Failed to upload reported CSV', 'Error');
+				// handle validation errors
+				const errorMessage = result.error || `HTTP ${response.status}`;
+				addToast(`Upload failed: ${errorMessage}`, 'Error');
 			}
 		} catch (error) {
 			console.error('Upload error:', error);
-			addToast('Failed to upload reported CSV', 'Error');
+			addToast('Network error: Failed to upload CSV', 'Error');
 		} finally {
 			hideIsLoading();
 			// clear the file input
@@ -767,7 +772,9 @@
 			/>
 		</div>
 
-		<div class="grid grid-row-1 grid-cols-1 md:grid-cols-2 gap-6 mb-8 mt-4 lg:grid-cols-5">
+		<div
+			class="grid grid-row-1 grid-cols-1 md:grid-cols-2 gap-6 mb-8 mt-4 lg:grid-cols-3 2xl:grid-cols-6"
+		>
 			<StatsCard
 				title="Recipients"
 				value={result.recipients}
@@ -949,8 +956,8 @@
 			<StatsCard
 				title="Reported"
 				value={result.reported}
-				borderColor="border-red-500"
-				iconColor="text-red-500"
+				borderColor="border-reported"
+				iconColor="text-reported"
 				percentages={[
 					{
 						value: Math.round((result.reported / result.recipients) * 100),
@@ -1180,59 +1187,73 @@
 				</div>
 			</div>
 			<!-- Second Row: Schedule Constraints and Actions -->
-			<div class="grid grid-cols-1 lg:grid-cols-2">
+			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 				<div></div>
 				<div class="bg-white p-6 rounded-lg">
 					<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">Actions</h3>
-					<div class="flex flex-wrap gap-4">
-						{#if !campaignUpdateDisabledAndTitle(campaign).disabled}
+					<div class="space-y-4">
+						<!-- Action Buttons -->
+						<div class="flex flex-wrap gap-3">
+							{#if !campaignUpdateDisabledAndTitle(campaign).disabled}
+								<button
+									on:click={onClickUpdateCampaign}
+									class="px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:opacity-80 text-white rounded-md transition-colors"
+								>
+									Update
+								</button>
+							{/if}
 							<button
-								on:click={onClickUpdateCampaign}
-								class="px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:opacity-80 text-white rounded-md transition-colors"
+								on:click={showCloseCampaignModal}
+								disabled={!!campaign.closedAt}
+								class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
 							>
-								Update
+								Close
 							</button>
-						{/if}
-						<button
-							on:click={showCloseCampaignModal}
-							disabled={!!campaign.closedAt}
-							class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
-						>
-							Close
-						</button>
-						<button
-							on:click={showAnonymizeModal}
-							disabled={!!campaign.anonymizedAt}
-							class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
-						>
-							Anonymize
-						</button>
-						<button
-							on:click={onClickExportEvents}
-							class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
-						>
-							Export events
-						</button>
-						<button
-							on:click={onClickExportSubmissions}
-							class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
-						>
-							Export submitters
-						</button>
-						<div class="w-full">
-							<label for="reported-csv-upload" class="block text-sm font-medium text-gray-700 mb-2">
-								Upload Reported CSV
+							<button
+								on:click={showAnonymizeModal}
+								disabled={!!campaign.anonymizedAt}
+								class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
+							>
+								Anonymize
+							</button>
+						</div>
+
+						<!-- Export Buttons -->
+						<div class="flex flex-wrap gap-3">
+							<button
+								on:click={onClickExportEvents}
+								class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
+							>
+								Export events
+							</button>
+							<button
+								on:click={onClickExportSubmissions}
+								class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
+							>
+								Export submitters
+							</button>
+						</div>
+
+						<!-- Upload Section -->
+						<div class="border-t pt-4">
+							<div>
+								<label
+									for="reported-csv-upload"
+									class="block text-sm font-medium text-gray-700 mb-2"
+								>
+									Upload Reported CSV
+								</label>
+								<input
+									type="file"
+									id="reported-csv-upload"
+									accept=".csv"
+									on:change={onUploadReportedCSV}
+									class="block w-full text-sm text-gray-900 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-reported file:text-white hover:file:opacity-80"
+								/>
 								<p class="mt-1 text-xs text-gray-500">
-									CSV should have columns: "reported by" (email) and "date reporter (utc+02:00)"
+									CSV format: "Reported by" (email), "Date reported(UTC+02:00)"
 								</p>
-							</label>
-							<input
-								type="file"
-								id="reported-csv-upload"
-								accept=".csv"
-								on:change={onUploadReportedCSV}
-								class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-							/>
+							</div>
 						</div>
 					</div>
 				</div>

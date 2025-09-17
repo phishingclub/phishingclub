@@ -3051,11 +3051,13 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 	openRate := float64(0)
 	clickRate := float64(0)
 	submissionRate := float64(0)
+	reportRate := float64(0)
 
 	if resultStats.Recipients > 0 {
 		openRate = (float64(resultStats.TrackingPixelLoaded) / float64(resultStats.Recipients)) * 100
 		clickRate = (float64(resultStats.WebsiteLoaded) / float64(resultStats.Recipients)) * 100
 		submissionRate = (float64(resultStats.SubmittedData) / float64(resultStats.Recipients)) * 100
+		reportRate = (float64(resultStats.Reported) / float64(resultStats.Recipients)) * 100
 	}
 
 	// Determine campaign type
@@ -3116,9 +3118,11 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 		TrackingPixelLoaded: int(resultStats.TrackingPixelLoaded),
 		WebsiteVisits:       int(resultStats.WebsiteLoaded),
 		DataSubmissions:     int(resultStats.SubmittedData),
+		Reported:            int(resultStats.Reported),
 		OpenRate:            openRate,
 		ClickRate:           clickRate,
 		SubmissionRate:      submissionRate,
+		ReportRate:          reportRate,
 
 		TemplateName: templateName,
 		CampaignType: campaignType,
