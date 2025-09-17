@@ -3381,7 +3381,7 @@ func (c *Campaign) ProcessReportedCSV(
 				CampaignID:  campaignID,
 				RecipientID: nil,
 				IP:          vo.NewEmptyOptionalString64(),
-				UserAgent:   vo.NewOptionalString255Must("CSV Upload"),
+				UserAgent:   vo.NewEmptyOptionalString255(),
 				EventID:     reportedEventID,
 				Data:        vo.NewEmptyOptionalString1MB(),
 			}
@@ -3391,7 +3391,7 @@ func (c *Campaign) ProcessReportedCSV(
 				CampaignID:  campaignID,
 				RecipientID: &recipientID,
 				IP:          vo.NewEmptyOptionalString64(),
-				UserAgent:   vo.NewOptionalString255Must("CSV Upload"),
+				UserAgent:   vo.NewEmptyOptionalString255(),
 				EventID:     reportedEventID,
 				Data:        vo.NewEmptyOptionalString1MB(),
 			}
