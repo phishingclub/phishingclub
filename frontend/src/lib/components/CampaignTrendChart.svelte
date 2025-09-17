@@ -58,6 +58,7 @@
 	}
 
 	let chartContainer;
+	let sizingContainer;
 	let width = 300;
 	let height = 200; // Balanced height to prevent overflow
 	let containerReady = false;
@@ -777,9 +778,9 @@
 	}
 
 	onMount(async () => {
-		if (chartContainer) {
-			await tick(); // Wait for DOM/layout
-			const containerWidth = chartContainer.clientWidth || 0;
+		await tick(); // Wait for DOM/layout
+		if (sizingContainer) {
+			const containerWidth = sizingContainer.parentElement?.clientWidth || 0;
 			width = Math.min(Math.max(containerWidth, 300), containerWidth); // Minimum 300px but never exceed container
 			if (width > 0) containerReady = true;
 			resizeObserver = new ResizeObserver((entries) => {
@@ -791,13 +792,13 @@
 					}
 				}
 			});
-			resizeObserver.observe(chartContainer);
+			resizeObserver.observe(sizingContainer.parentElement || sizingContainer);
 		}
 	});
 
 	onDestroy(() => {
-		if (resizeObserver && chartContainer) {
-			resizeObserver.unobserve(chartContainer);
+		if (resizeObserver && sizingContainer) {
+			resizeObserver.unobserve(sizingContainer.parentElement || sizingContainer);
 		}
 		if (loadingTimeout) {
 			clearTimeout(loadingTimeout);
@@ -814,9 +815,9 @@
 </script>
 
 <div class="w-full box-border" style="contain: layout style;">
-	<!-- Always render a hidden chartContainer for ResizeObserver -->
+	<!-- Hidden sizing element for ResizeObserver -->
 	<div
-		bind:this={chartContainer}
+		bind:this={sizingContainer}
 		class="chart-container w-full overflow-x-auto"
 		style="height:0;overflow:hidden;visibility:hidden;position:absolute;"
 	></div>

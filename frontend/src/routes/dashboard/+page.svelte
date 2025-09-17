@@ -88,9 +88,9 @@
 			contextCompanyName = context.companyName;
 		}
 		refresh();
-		activeTableURLParams.onChange(refreshActiveCampaigns);
-		scheduledTableURLParams.onChange(refreshScheduledCampaigns);
-		completedTableURLParams.onChange(refreshFinishedCampaigns);
+		activeTableURLParams.onChange(() => refreshActiveCampaigns(true));
+		scheduledTableURLParams.onChange(() => refreshScheduledCampaigns(true));
+		completedTableURLParams.onChange(() => refreshFinishedCampaigns(true));
 
 		return () => {
 			activeTableURLParams.unsubscribe();
@@ -305,7 +305,87 @@
 			<AutoRefresh
 				isLoading={false}
 				onRefresh={async () => {
-					await refresh(false);
+					// refresh all data
+					let res = await api.campaign.getStats(contextCompanyID, {
+						includeTest: includeTestCampaigns
+					});
+					if (!res.success) {
+						throw res.error;
+					}
+					await refreshRepeatOffenders();
+
+					active = res.data.active;
+					scheduled = res.data.upcoming;
+					finished = res.data.finished;
+
+					// refresh table data directly like campaign page does
+					const activeOptions = {
+						page: activeTableURLParams.currentPage,
+						perPage: activeTableURLParams.perPage,
+						sortBy: activeTableURLParams.sortBy,
+						sortOrder: activeTableURLParams.sortOrder,
+						search: activeTableURLParams.search,
+						includeTest: includeTestCampaigns
+					};
+					const activeRes = await api.campaign.getAllActive(activeOptions, contextCompanyID);
+					if (activeRes.success) {
+						activeCampaigns = [];
+						await tick();
+						activeCampaigns = activeRes.data.rows;
+					}
+
+					const scheduledOptions = {
+						page: scheduledTableURLParams.currentPage,
+						perPage: scheduledTableURLParams.perPage,
+						sortBy: scheduledTableURLParams.sortBy,
+						sortOrder: scheduledTableURLParams.sortOrder,
+						search: scheduledTableURLParams.search,
+						includeTest: includeTestCampaigns
+					};
+					const scheduledRes = await api.campaign.getAllUpcoming(
+						scheduledOptions,
+						contextCompanyID
+					);
+					if (scheduledRes.success) {
+						scheduledCampaigns = [];
+						await tick();
+						scheduledCampaigns = scheduledRes.data.rows;
+					}
+
+					const completedOptions = {
+						page: completedTableURLParams.currentPage,
+						perPage: completedTableURLParams.perPage,
+						sortBy: completedTableURLParams.sortBy,
+						sortOrder: completedTableURLParams.sortOrder,
+						search: completedTableURLParams.search,
+						includeTest: includeTestCampaigns
+					};
+					const completedRes = await api.campaign.getAllFinished(
+						completedOptions,
+						contextCompanyID
+					);
+					if (completedRes.success) {
+						completedCampaigns = [];
+						await tick();
+						completedCampaigns = completedRes.data.rows;
+					}
+
+					const statsOptions = {
+						page: 1,
+						perPage: 10,
+						sortBy: 'campaign_closed_at',
+						sortOrder: 'desc',
+						search: '',
+						includeTest: includeTestCampaigns
+					};
+					const statsRes = await api.campaign.getAllCampaignStats(statsOptions, contextCompanyID);
+					if (statsRes.success) {
+						campaignStats = [];
+						await tick();
+						campaignStats = statsRes.data.rows || [];
+					}
+
+					await refreshCalendarCampaings();
 				}}
 			/>
 		</div>
