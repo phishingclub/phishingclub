@@ -854,6 +854,27 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
+// SendEmailByCampaignRecipientID sends an email to a specific campaign recipient
+func (c *Campaign) SendEmailByCampaignRecipientID(g *gin.Context) {
+	// handle session
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	// send email
+	err := c.CampaignService.SendEmailByCampaignRecipientID(g.Request.Context(), session, id)
+	// handle responses
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 // DeleteByID deletes a campaign by its id
 func (c *Campaign) DeleteByID(g *gin.Context) {
 	// handle session

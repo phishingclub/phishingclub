@@ -121,6 +121,8 @@
 	let isRecipientTableLoading = false;
 	let isCloseModalVisible = false;
 	let isAnonymizeModalVisible = false;
+	let isSendEmailModalVisible = false;
+	let sendEmailRecipient = null;
 	let lastPoll3399Nano = '';
 
 	// hooks
@@ -488,6 +490,50 @@
 			hideIsLoading();
 		}
 	};
+
+	/** @param {string} campaignRecipientID @param {Object} recipient */
+	const showSendEmailModal = (campaignRecipientID, recipient) => {
+		sendEmailRecipient = {
+			id: campaignRecipientID,
+			name: `${recipient.firstName || ''} ${recipient.lastName || ''}`.trim(),
+			email: recipient.email
+		};
+		isSendEmailModalVisible = true;
+	};
+
+	const closeSendEmailModal = () => {
+		isSendEmailModalVisible = false;
+		sendEmailRecipient = null;
+	};
+
+	const onConfirmSendEmail = async () => {
+		try {
+			showIsLoading();
+			// Check if this is a resend before sending
+			const isResend = campaignRecipients.find((r) => r.id === sendEmailRecipient.id)?.sentAt;
+			const res = await api.campaign.sendEmail(sendEmailRecipient.id);
+			if (!res.success) {
+				throw res.error;
+			}
+			const campaignType = isSelfManaged ? 'self-managed' : 'scheduled';
+			const message = isResend ? `Email sent again successfully` : `Email sent successfully`;
+			addToast(message, 'Success');
+			await setCampaign();
+			await getEvents();
+			await refreshCampaignRecipients();
+			closeSendEmailModal();
+		} catch (e) {
+			addToast('Failed to send email', 'Error');
+			console.error('failed to send email', e);
+		} finally {
+			hideIsLoading();
+		}
+	};
+
+	// reactive statement to clean up send email modal state when it closes
+	$: if (!isSendEmailModalVisible && sendEmailRecipient) {
+		sendEmailRecipient = null;
+	}
 
 	const showCloseCampaignModal = () => {
 		isCloseModalVisible = true;
@@ -1412,6 +1458,16 @@
 									disabled={!recp.recipient}
 									on:click={() => openEventsModal(recp.recipientID)}
 								/>
+								<TableDropDownButton
+									name={recp.sentAt ? 'Send email again' : 'Send email'}
+									title={recp.closedAt
+										? 'Campaign is closed'
+										: recp.cancelledAt
+											? 'Recipient cancelled'
+											: 'Send email'}
+									on:click={() => showSendEmailModal(recp.id, recp.recipient)}
+									disabled={!!campaign.closedAt || recp.cancelledAt}
+								/>
 								{#if !campaign.sendStartAt}
 									<!-- self managed campaign -->
 									<TableDropDownButton
@@ -1696,6 +1752,40 @@
 				<li class="list-tem">Anonymization is permanent and not reversable</li>
 				<li class="list-tem">Campaign will be set as completed</li>
 			</ul>
+		</div>
+	</Alert>
+
+	<Alert
+		headline="Send Email"
+		bind:visible={isSendEmailModalVisible}
+		onConfirm={onConfirmSendEmail}
+	>
+		<div>
+			{#if sendEmailRecipient}
+				{@const recipient = campaignRecipients.find((r) => r.id === sendEmailRecipient.id)}
+				{#if recipient}
+					<p class="mb-4">
+						{recipient.sentAt
+							? 'Are you sure you want to send the campaign email again to:'
+							: 'Are you sure you want to send the campaign email to:'}
+					</p>
+					<div class="bg-gray-50 p-3 rounded mb-4">
+						<p class="font-medium">{sendEmailRecipient.name}</p>
+						<p class="text-gray-600">{sendEmailRecipient.email}</p>
+						<p class="text-xs text-blue-600 mt-1">
+							Campaign type: {isSelfManaged ? 'Self-managed' : 'Scheduled'}
+						</p>
+						{#if recipient.sentAt}
+							<p class="text-sm text-amber-600 mt-1">
+								⚠️ Previously sent on {new Date(recipient.sentAt).toLocaleString()}
+							</p>
+						{/if}
+					</div>
+					<p class="text-sm text-gray-500">
+						This action will immediately send the email and cannot be undone.
+					</p>
+				{/if}
+			{/if}
 		</div>
 	</Alert>
 </main>

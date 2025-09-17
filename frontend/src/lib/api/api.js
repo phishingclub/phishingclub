@@ -690,6 +690,16 @@ export class API {
 		},
 
 		/**
+		 * Send email to campaign recipient
+		 *
+		 * @param {string} campaignRecipientID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		sendEmail: async (campaignRecipientID) => {
+			return await postJSON(this.getPath(`/campaign/recipient/${campaignRecipientID}/send`));
+		},
+
+		/**
 		 * Get campaign recipient landingpage URL.
 		 *
 		 * @param {string} campaignRecipientID
