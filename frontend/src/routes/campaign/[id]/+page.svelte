@@ -717,8 +717,10 @@
 					`Successfully processed ${result.data.processed} reported entries${result.data.skipped > 0 ? `, skipped ${result.data.skipped} invalid entries` : ''}`,
 					'Success'
 				);
-				// refresh the stats
+				// refresh the stats, events, and recipients table
 				await setResults();
+				await refreshCampaignRecipients();
+				await getEvents();
 			} else {
 				// handle validation errors
 				const errorMessage = result.error || `HTTP ${response.status}`;

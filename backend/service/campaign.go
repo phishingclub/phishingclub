@@ -3383,6 +3383,7 @@ func (c *Campaign) ProcessReportedCSV(
 				IP:          vo.NewEmptyOptionalString64(),
 				UserAgent:   vo.NewOptionalString255Must("CSV Upload"),
 				EventID:     reportedEventID,
+				Data:        vo.NewEmptyOptionalString1MB(),
 			}
 		} else {
 			campaignEvent = &model.CampaignEvent{
@@ -3392,6 +3393,7 @@ func (c *Campaign) ProcessReportedCSV(
 				IP:          vo.NewEmptyOptionalString64(),
 				UserAgent:   vo.NewOptionalString255Must("CSV Upload"),
 				EventID:     reportedEventID,
+				Data:        vo.NewEmptyOptionalString1MB(),
 			}
 		}
 
