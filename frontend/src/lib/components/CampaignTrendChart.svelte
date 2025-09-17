@@ -85,8 +85,10 @@
 		openRate: true,
 		clickRate: true,
 		submissionRate: true,
+		reportRate: true,
 		'mavg-clickRate': true,
-		'mavg-submissionRate': true
+		'mavg-submissionRate': true,
+		'mavg-reportRate': true
 	};
 
 	// Responsive margins based on container width
@@ -138,7 +140,8 @@
 	const metrics = [
 		{ key: 'openRate', label: 'Read Rate', color: '#4cb5b5', suffix: '%' },
 		{ key: 'clickRate', label: 'Click Rate', color: '#f96dcf', suffix: '%' },
-		{ key: 'submissionRate', label: 'Submission Rate', color: '#f42e41', suffix: '%' }
+		{ key: 'submissionRate', label: 'Submission Rate', color: '#f42e41', suffix: '%' },
+		{ key: 'reportRate', label: 'Report Rate', color: '#1e40af', suffix: '%' }
 	];
 
 	// Toggle metric visibility
@@ -159,7 +162,8 @@
 			n,
 			openRate: avg(slice, 'openRate'),
 			clickRate: avg(slice, 'clickRate'),
-			submissionRate: avg(slice, 'submissionRate')
+			submissionRate: avg(slice, 'submissionRate'),
+			reportRate: avg(slice, 'reportRate')
 		};
 	})();
 
@@ -205,6 +209,7 @@
 			clickRate: Math.round((stat.clickRate || 0) * (stat.clickRate > 1 ? 1 : 100) * 10) / 10,
 			submissionRate:
 				Math.round((stat.submissionRate || 0) * (stat.submissionRate > 1 ? 1 : 100) * 10) / 10,
+			reportRate: Math.round((stat.reportRate || 0) * (stat.reportRate > 1 ? 1 : 100) * 10) / 10,
 			totalRecipients: stat.totalRecipients
 		}));
 	}
@@ -247,8 +252,8 @@
 				createLine(svg, metric);
 			}
 		});
-		// Only draw moving average for clickRate and submissionRate, using user-selected N
-		['clickRate', 'submissionRate'].forEach((metricKey) => {
+		// Only draw moving average for clickRate, submissionRate, and reportRate, using user-selected N
+		['clickRate', 'submissionRate', 'reportRate'].forEach((metricKey) => {
 			const metric = metrics.find((m) => m.key === metricKey);
 			if (metric && visibleMetrics[`mavg-${metricKey}`]) {
 				createMovingAverageLine(svg, metric, movingAvgN);
@@ -309,6 +314,8 @@
 				avgColor = '#93c5fd'; // light blue
 			} else if (metric.key === 'submissionRate') {
 				avgColor = '#ff6a91'; // lighter red, closer to #f42e41
+			} else if (metric.key === 'reportRate') {
+				avgColor = '#60a5fa'; // lighter blue for report rate
 			}
 			path.setAttribute('stroke', avgColor);
 			path.setAttribute('stroke-width', '1.2');
@@ -545,18 +552,28 @@
 				strokeDasharray: null,
 				opacity: 1
 			});
-			if (metric.key === 'clickRate' || metric.key === 'submissionRate') {
+			if (
+				metric.key === 'clickRate' ||
+				metric.key === 'submissionRate' ||
+				metric.key === 'reportRate'
+			) {
 				// Use a lighter version of the main color for moving averages
 				let avgColor = metric.color;
+				let avgLabel = '';
 				if (metric.key === 'clickRate') {
 					avgColor = '#eea5fa'; // before-page-visited, lighter pink
+					avgLabel = 'Click MA';
 				} else if (metric.key === 'submissionRate') {
 					avgColor = '#ff6a91'; // lighter red, closer to #f42e41
+					avgLabel = 'Submit MA';
+				} else if (metric.key === 'reportRate') {
+					avgColor = '#60a5fa'; // lighter blue for report rate
+					avgLabel = 'Report MA';
 				}
 				legendItems.push({
 					type: 'mavg',
 					key: metric.key,
-					label: metric.key === 'clickRate' ? 'Click MA' : 'Submit MA',
+					label: avgLabel,
 					color: avgColor,
 					class: `legend-line legend-mavg legend-mavg-${metric.key}`,
 					labelClass: `legend-label legend-mavg legend-mavg-${metric.key}`,
@@ -863,7 +880,7 @@
 							</p>
 						</div>
 					</div>
-					<div class="mt-4 grid grid-cols-3 gap-4">
+					<div class="grid grid-cols-4 gap-4">
 						<div class="text-center">
 							<div class="text-2xl font-bold text-blue-600">{chartData[0].openRate}%</div>
 							<div class="text-sm text-gray-600">Open Rate</div>
@@ -875,6 +892,10 @@
 						<div class="text-center">
 							<div class="text-2xl font-bold text-yellow-600">{chartData[0].submissionRate}%</div>
 							<div class="text-sm text-gray-600">Submission Rate</div>
+						</div>
+						<div class="text-center">
+							<div class="text-2xl font-bold text-indigo-600">{chartData[0].reportRate}%</div>
+							<div class="text-sm text-gray-600">Report Rate</div>
 						</div>
 					</div>
 				</div>
@@ -926,7 +947,7 @@
 					</div>
 					<div style="height: 1.25rem;"></div>
 					{#if chartData.length > 0}
-						<div class="grid grid-cols-3 gap-2 sm:gap-4">
+						<div class="grid grid-cols-4 gap-2 sm:gap-4">
 							{#each metrics as metric}
 								<div class="text-center">
 									<div class="flex items-center justify-center">

@@ -766,7 +766,6 @@ func (c *Campaign) GetStats(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	// no audit on read
 	return &model.CampaignsStatView{
 		Active:   active,
 		Upcoming: upcoming,

@@ -442,6 +442,7 @@
 				{ column: 'Open Rate', size: 'small' },
 				{ column: 'Click Rate', size: 'small' },
 				{ column: 'Submission Rate', size: 'small' },
+				{ column: 'Report Rate', size: 'small' },
 				{ column: 'Closed', size: 'small' }
 			]}
 			hasData={!!campaignStats.length}
@@ -460,6 +461,7 @@
 					<TableCell value="{Math.round(stat.openRate)}%" />
 					<TableCell value="{Math.round(stat.clickRate)}%" />
 					<TableCell value="{Math.round(stat.submissionRate)}%" />
+					<TableCell value="{Math.round(stat.reportRate)}%" />
 					<TableCell value={stat.campaignClosedAt} isDate isRelative />
 				</TableRow>
 			{/each}
