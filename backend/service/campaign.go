@@ -766,7 +766,6 @@ func (c *Campaign) GetStats(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	// no audit on read
 	return &model.CampaignsStatView{
 		Active:   active,
 		Upcoming: upcoming,
@@ -3051,11 +3050,13 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 	openRate := float64(0)
 	clickRate := float64(0)
 	submissionRate := float64(0)
+	reportRate := float64(0)
 
 	if resultStats.Recipients > 0 {
 		openRate = (float64(resultStats.TrackingPixelLoaded) / float64(resultStats.Recipients)) * 100
 		clickRate = (float64(resultStats.WebsiteLoaded) / float64(resultStats.Recipients)) * 100
 		submissionRate = (float64(resultStats.SubmittedData) / float64(resultStats.Recipients)) * 100
+		reportRate = (float64(resultStats.Reported) / float64(resultStats.Recipients)) * 100
 	}
 
 	// Determine campaign type
@@ -3116,9 +3117,11 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 		TrackingPixelLoaded: int(resultStats.TrackingPixelLoaded),
 		WebsiteVisits:       int(resultStats.WebsiteLoaded),
 		DataSubmissions:     int(resultStats.SubmittedData),
+		Reported:            int(resultStats.Reported),
 		OpenRate:            openRate,
 		ClickRate:           clickRate,
 		SubmissionRate:      submissionRate,
+		ReportRate:          reportRate,
 
 		TemplateName: templateName,
 		CampaignType: campaignType,
@@ -3183,4 +3186,266 @@ func (c *Campaign) GetAllCampaignStats(ctx context.Context, session *model.Sessi
 	result.HasNextPage = false // Simple implementation without pagination for now
 
 	return result, nil
+}
+
+// ProcessReportedCSV processes a CSV file with reported recipients
+func (c *Campaign) ProcessReportedCSV(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+	records [][]string,
+) (int, int, error) {
+	ae := NewAuditEvent("Campaign.ProcessReportedCSV", session)
+	ae.Details["campaignID"] = campaignID.String()
+
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return 0, 0, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return 0, 0, errs.ErrAuthorizationFailed
+	}
+
+	// get campaign to check it exists and get details
+	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{})
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return 0, 0, errs.Wrap(err)
+	}
+
+	// validate CSV headers
+	headers := records[0]
+	reportedByIndex := -1
+	dateReportedIndex := -1
+
+	c.Logger.Debugw("processing CSV headers", "headers", headers)
+
+	for i, header := range headers {
+		switch strings.ToLower(strings.TrimSpace(header)) {
+		case "reported by":
+			reportedByIndex = i
+			c.Logger.Debugw("found reported by column", "index", i)
+		case "date reporter (utc+02:00)", "date reported(utc+02:00)", "date reported", "date reporter":
+			dateReportedIndex = i
+			c.Logger.Debugw("found date column", "index", i, "header", header)
+		}
+	}
+
+	if reportedByIndex == -1 {
+		c.Logger.Errorw("CSV missing required column", "expected", "reported by", "headers", headers)
+		return 0, 0, errs.NewValidationError(errors.New("CSV must have 'reported by' column"))
+	}
+	if dateReportedIndex == -1 {
+		c.Logger.Errorw("CSV missing required date column", "expected", "date reported(utc+02:00)", "headers", headers)
+		return 0, 0, errs.NewValidationError(errors.New("CSV must have 'date reporter (utc+02:00)' or similar date column"))
+	}
+
+	processed := 0
+	skipped := 0
+	reportedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
+
+	// process each row
+	for i, record := range records[1:] { // skip header
+		if len(record) <= reportedByIndex || len(record) <= dateReportedIndex {
+			skipped++
+			c.Logger.Debugw("skipping row with insufficient columns", "row", i+2)
+			continue
+		}
+
+		reportedByEmail := strings.TrimSpace(record[reportedByIndex])
+		dateReported := strings.TrimSpace(record[dateReportedIndex])
+
+		if reportedByEmail == "" {
+			skipped++
+			c.Logger.Debugw("skipping row with empty email", "row", i+2)
+			continue
+		}
+		// parse date - try multiple formats and handle timezone
+		var parsedDate time.Time
+		dateFormats := []string{
+			"2006-01-02T15:04:05",
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05Z",
+			"2006-01-02T15:04:05-07:00",
+			"2006-01-02T15:04:05+02:00",
+			"2006-01-02",
+			"01/02/2006 15:04:05",
+			"01/02/2006",
+			"02-01-2006 15:04:05",
+			"02-01-2006",
+		}
+
+		dateParseError := true
+		for _, format := range dateFormats {
+			if pd, err := time.Parse(format, dateReported); err == nil {
+				// if the parsed date has no timezone info and the header mentions UTC+02:00,
+				// assume the time is in UTC+02:00 and convert to UTC
+				if pd.Location() == time.UTC && strings.Contains(strings.ToLower(headers[dateReportedIndex]), "utc+02:00") {
+					// treat as UTC+02:00 and convert to UTC
+					loc, _ := time.LoadLocation("Europe/Berlin") // UTC+2 (or use FixedZone)
+					if loc != nil {
+						pd = time.Date(pd.Year(), pd.Month(), pd.Day(), pd.Hour(), pd.Minute(), pd.Second(), pd.Nanosecond(), loc).UTC()
+					}
+				}
+				parsedDate = pd
+				dateParseError = false
+				break
+			}
+		}
+
+		if dateParseError {
+			skipped++
+			c.Logger.Debugw("skipping row with invalid date format", "row", i+2, "date", dateReported, "tried_formats", dateFormats)
+			continue
+		}
+
+		c.Logger.Debugw("processing row", "row", i+2, "email", reportedByEmail, "date", parsedDate)
+
+		// find recipient by email in this campaign
+		emailVO, err := vo.NewEmail(reportedByEmail)
+		if err != nil {
+			skipped++
+			c.Logger.Debugw("invalid email format", "email", reportedByEmail, "row", i+2)
+			continue
+		}
+
+		// Get campaign to check company context
+		companyID, _ := campaign.CompanyID.Get()
+		var companyPtr *uuid.UUID
+		if companyID != uuid.Nil {
+			companyPtr = &companyID
+		}
+
+		recipient, err := c.RecipientService.GetByEmail(ctx, session, emailVO, companyPtr)
+		if err != nil {
+			skipped++
+			c.Logger.Debugw("recipient not found for email", "email", reportedByEmail, "row", i+2)
+			continue
+		}
+
+		recipientID := recipient.ID.MustGet()
+
+		// check if recipient is part of this campaign
+		campaignRecipient, err := c.CampaignRecipientRepository.GetByCampaignAndRecipientID(
+			ctx,
+			campaignID,
+			&recipientID,
+			&repository.CampaignRecipientOption{},
+		)
+		if err != nil {
+			skipped++
+			c.Logger.Debugw("recipient not part of campaign", "email", reportedByEmail, "campaignID", campaignID.String(), "row", i+2)
+			continue
+		}
+
+		// check if already reported (to avoid duplicates)
+		existingEvent, err := c.CampaignRepository.GetEventsByCampaignID(
+			ctx,
+			campaignID,
+			&repository.CampaignEventOption{
+				QueryArgs: &vo.QueryArgs{
+					Limit: 1,
+				},
+				EventTypeIDs: []string{reportedEventID.String()},
+			},
+			nil,
+		)
+
+		alreadyReported := false
+		if err == nil && existingEvent != nil {
+			for _, event := range existingEvent.Rows {
+				if event.RecipientID != nil && *event.RecipientID == recipientID {
+					alreadyReported = true
+					break
+				}
+			}
+		}
+
+		if alreadyReported {
+			skipped++
+			c.Logger.Debugw("recipient already reported", "email", reportedByEmail, "campaignID", campaignID.String())
+			continue
+		}
+
+		// create campaign event for reported
+		eventID := uuid.New()
+
+		var campaignEvent *model.CampaignEvent
+		if campaign.IsAnonymous.MustGet() {
+			campaignEvent = &model.CampaignEvent{
+				ID:          &eventID,
+				CampaignID:  campaignID,
+				RecipientID: nil,
+				IP:          vo.NewEmptyOptionalString64(),
+				UserAgent:   vo.NewEmptyOptionalString255(),
+				EventID:     reportedEventID,
+				Data:        vo.NewEmptyOptionalString1MB(),
+			}
+		} else {
+			campaignEvent = &model.CampaignEvent{
+				ID:          &eventID,
+				CampaignID:  campaignID,
+				RecipientID: &recipientID,
+				IP:          vo.NewEmptyOptionalString64(),
+				UserAgent:   vo.NewEmptyOptionalString255(),
+				EventID:     reportedEventID,
+				Data:        vo.NewEmptyOptionalString1MB(),
+			}
+		}
+
+		// save the event with custom timestamp
+		err = c.saveReportedEvent(campaignEvent, parsedDate)
+		if err != nil {
+			c.Logger.Errorw("failed to save reported event", "error", err, "email", reportedByEmail)
+			skipped++
+			continue
+		}
+
+		// update most notable event for campaign recipient
+		err = c.SetNotableCampaignRecipientEvent(
+			ctx,
+			campaignRecipient,
+			data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
+		)
+		if err != nil {
+			c.Logger.Errorw("failed to update notable event", "error", err)
+		}
+
+		processed++
+	}
+
+	ae.Details["processed"] = processed
+	ae.Details["skipped"] = skipped
+	c.AuditLogAuthorized(ae)
+
+	return processed, skipped, nil
+}
+
+// saveReportedEvent saves a reported event with custom timestamp
+func (c *Campaign) saveReportedEvent(
+	campaignEvent *model.CampaignEvent,
+	customTime time.Time,
+) error {
+	row := map[string]any{
+		"id":          campaignEvent.ID.String(),
+		"event_id":    campaignEvent.EventID.String(),
+		"campaign_id": campaignEvent.CampaignID.String(),
+		"ip_address":  campaignEvent.IP.String(),
+		"user_agent":  campaignEvent.UserAgent.String(),
+		"data":        campaignEvent.Data.String(),
+		"created_at":  customTime,
+		"updated_at":  time.Now(),
+	}
+	if campaignEvent.RecipientID != nil {
+		row["recipient_id"] = campaignEvent.RecipientID.String()
+	}
+
+	res := c.CampaignRepository.DB.Model(&database.CampaignEvent{}).Create(row)
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
 }

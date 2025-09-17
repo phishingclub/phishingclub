@@ -35,11 +35,13 @@ type CampaignStats struct {
 	TrackingPixelLoaded int `gorm:"not null;default:0" json:"trackingPixelLoaded"` // Email opens
 	WebsiteVisits       int `gorm:"not null;default:0" json:"websiteVisits"`       // Link clicks
 	DataSubmissions     int `gorm:"not null;default:0" json:"dataSubmissions"`     // Form submissions
+	Reported            int `gorm:"not null;default:0" json:"reported"`            // Reported phishing
 
 	// Success rates (as percentages for quick display)
 	OpenRate       float64 `gorm:"not null;default:0" json:"openRate"`
 	ClickRate      float64 `gorm:"not null;default:0" json:"clickRate"`
 	SubmissionRate float64 `gorm:"not null;default:0" json:"submissionRate"`
+	ReportRate     float64 `gorm:"not null;default:0" json:"reportRate"`
 
 	// Campaign metadata
 	TemplateName string `gorm:"" json:"templateName"`

@@ -37,6 +37,7 @@ func IsUpdateAvailable() bool {
 // readonly
 var CampaignEventPriority = map[string]int{
 	// campaign recipient events
+	data.EVENT_CAMPAIGN_RECIPIENT_REPORTED:            90,
 	data.EVENT_CAMPAIGN_RECIPIENT_CANCELLED:           80,
 	data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA:      70,
 	data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED:  60,

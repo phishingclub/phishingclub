@@ -83,7 +83,8 @@
 		emailsSent: 0,
 		trackingPixelLoaded: 0,
 		websiteLoaded: 0,
-		submittedData: 0
+		submittedData: 0,
+		reported: 0
 	};
 	// @ts-ignore
 	const recipientTableUrlParams = newTableURLParams({
@@ -340,6 +341,7 @@
 			result.trackingPixelLoaded = res.data.trackingPixelLoaded;
 			result.websiteLoaded = res.data.clickedLink;
 			result.submittedData = res.data.submittedData;
+			result.reported = res.data.reported;
 		} catch (e) {
 			addToast('Failed to load campaign result stats', 'Error');
 			console.error('failed to load campaign result stats', e);
@@ -685,6 +687,54 @@
 	const onClickUpdateCampaign = () => {
 		goto(`/campaign?update=${$page.params.id}`);
 	};
+
+	const onUploadReportedCSV = async (event) => {
+		const file = event.target.files?.[0];
+		if (!file) return;
+
+		// validate file type
+		if (!file.name.toLowerCase().endsWith('.csv')) {
+			addToast('Please select a CSV file', 'Error');
+			event.target.value = '';
+			return;
+		}
+
+		const formData = new FormData();
+		formData.append('file', file);
+
+		try {
+			showIsLoading();
+			const response = await fetch(`/api/v1/campaign/${$page.params.id}/upload/reported`, {
+				method: 'POST',
+				body: formData,
+				credentials: 'include'
+			});
+
+			const result = await response.json();
+
+			if (response.ok && result.success) {
+				addToast(
+					`Successfully processed ${result.data.processed} reported entries${result.data.skipped > 0 ? `, skipped ${result.data.skipped} invalid entries` : ''}`,
+					'Success'
+				);
+				// refresh the stats, events, and recipients table
+				await setResults();
+				await refreshCampaignRecipients();
+				await getEvents();
+			} else {
+				// handle validation errors
+				const errorMessage = result.error || `HTTP ${response.status}`;
+				addToast(`Upload failed: ${errorMessage}`, 'Error');
+			}
+		} catch (error) {
+			console.error('Upload error:', error);
+			addToast('Network error: Failed to upload CSV', 'Error');
+		} finally {
+			hideIsLoading();
+			// clear the file input
+			event.target.value = '';
+		}
+	};
 </script>
 
 <HeadTitle title="Campaign {campaign.name ? ` - ${campaign.name}` : ''}" />
@@ -724,7 +774,9 @@
 			/>
 		</div>
 
-		<div class="grid grid-row-1 grid-cols-1 md:grid-cols-2 gap-6 mb-8 mt-4 lg:grid-cols-5">
+		<div
+			class="grid grid-row-1 grid-cols-1 md:grid-cols-2 gap-6 mb-8 mt-4 lg:grid-cols-3 2xl:grid-cols-6"
+		>
 			<StatsCard
 				title="Recipients"
 				value={result.recipients}
@@ -899,6 +951,51 @@
 						stroke-linejoin="round"
 						stroke-width="2"
 						d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+					/>
+				</svg>
+			</StatsCard>
+
+			<StatsCard
+				title="Reported"
+				value={result.reported}
+				borderColor="border-reported"
+				iconColor="text-reported"
+				percentages={[
+					{
+						value: Math.round((result.reported / result.recipients) * 100),
+						relativeTo: 'of recipients',
+						baseValue: result.recipients
+					},
+					{
+						value: Math.round((result.reported / result.emailsSent) * 100),
+						relativeTo: 'of sent',
+						baseValue: result.emailsSent
+					},
+					{
+						value: Math.round((result.reported / result.trackingPixelLoaded) * 100),
+						relativeTo: 'of reads',
+						baseValue: result.trackingPixelLoaded
+					},
+					{
+						value: Math.round((result.reported / result.websiteLoaded) * 100),
+						relativeTo: 'of visits',
+						baseValue: result.websiteLoaded
+					}
+				]}
+			>
+				<svg
+					slot="icon"
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-5 w-5 ml-2"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"
 					/>
 				</svg>
 			</StatsCard>
@@ -1092,45 +1189,74 @@
 				</div>
 			</div>
 			<!-- Second Row: Schedule Constraints and Actions -->
-			<div class="grid grid-cols-1 lg:grid-cols-2">
+			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 				<div></div>
 				<div class="bg-white p-6 rounded-lg">
 					<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">Actions</h3>
-					<div class="flex flex-wrap gap-4">
-						{#if !campaignUpdateDisabledAndTitle(campaign).disabled}
+					<div class="space-y-4">
+						<!-- Action Buttons -->
+						<div class="flex flex-wrap gap-3">
+							{#if !campaignUpdateDisabledAndTitle(campaign).disabled}
+								<button
+									on:click={onClickUpdateCampaign}
+									class="px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:opacity-80 text-white rounded-md transition-colors"
+								>
+									Update
+								</button>
+							{/if}
 							<button
-								on:click={onClickUpdateCampaign}
-								class="px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:opacity-80 text-white rounded-md transition-colors"
+								on:click={showCloseCampaignModal}
+								disabled={!!campaign.closedAt}
+								class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
 							>
-								Update
+								Close
 							</button>
-						{/if}
-						<button
-							on:click={showCloseCampaignModal}
-							disabled={!!campaign.closedAt}
-							class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
-						>
-							Close
-						</button>
-						<button
-							on:click={showAnonymizeModal}
-							disabled={!!campaign.anonymizedAt}
-							class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
-						>
-							Anonymize
-						</button>
-						<button
-							on:click={onClickExportEvents}
-							class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
-						>
-							Export events
-						</button>
-						<button
-							on:click={onClickExportSubmissions}
-							class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
-						>
-							Export submitters
-						</button>
+							<button
+								on:click={showAnonymizeModal}
+								disabled={!!campaign.anonymizedAt}
+								class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
+							>
+								Anonymize
+							</button>
+						</div>
+
+						<!-- Export Buttons -->
+						<div class="flex flex-wrap gap-3">
+							<button
+								on:click={onClickExportEvents}
+								class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
+							>
+								Export events
+							</button>
+							<button
+								on:click={onClickExportSubmissions}
+								class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
+							>
+								Export submitters
+							</button>
+						</div>
+
+						<!-- Upload Section -->
+						<div class="border-t pt-4">
+							<div>
+								<label
+									for="reported-csv-upload"
+									class="block text-sm font-medium text-gray-700 mb-2"
+								>
+									Upload Reported CSV
+								</label>
+								<input
+									type="file"
+									id="reported-csv-upload"
+									accept=".csv"
+									on:change={onUploadReportedCSV}
+									class="block w-full text-sm text-gray-900 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-reported file:text-white hover:file:opacity-80"
+								/>
+								<p class="mt-1 text-xs text-gray-500">
+									CSV format: "Reported by" (email), "Date reported(UTC+02:00)"
+								</p>
+							</div>
+						</div>
 					</div>
 				</div>
 			</div>
