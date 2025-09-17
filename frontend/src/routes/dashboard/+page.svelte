@@ -431,42 +431,6 @@
 		/>
 	</div>
 
-	<SubHeadline>Recent Campaigns</SubHeadline>
-	<div class="min-h-[300px] mb-8">
-		<Table
-			isGhost={isCampaignStatsLoading}
-			columns={[
-				{ column: 'Campaign', size: 'large' },
-				{ column: 'Template', size: 'medium' },
-				{ column: 'Recipients', size: 'small' },
-				{ column: 'Open Rate', size: 'small' },
-				{ column: 'Click Rate', size: 'small' },
-				{ column: 'Submission Rate', size: 'small' },
-				{ column: 'Report Rate', size: 'small' },
-				{ column: 'Closed', size: 'small' }
-			]}
-			hasData={!!campaignStats.length}
-			plural="campaign statistics"
-			hasActions={false}
-		>
-			{#each campaignStats as stat}
-				<TableRow>
-					<TableCell>
-						<a href={`/campaign/${stat.campaignId}`}>
-							{stat.campaignName}
-						</a>
-					</TableCell>
-					<TableCell value={stat.templateName} />
-					<TableCell value={stat.totalRecipients} />
-					<TableCell value="{Math.round(stat.openRate)}%" />
-					<TableCell value="{Math.round(stat.clickRate)}%" />
-					<TableCell value="{Math.round(stat.submissionRate)}%" />
-					<TableCell value="{Math.round(stat.reportRate)}%" />
-					<TableCell value={stat.campaignClosedAt} isDate isRelative />
-				</TableRow>
-			{/each}
-		</Table>
-	</div>
 	<SubHeadline>Active campaigns</SubHeadline>
 	<div class="min-h-[300px] mb-8">
 		<Table
@@ -578,6 +542,43 @@
 							<TableViewButton on:click={() => onClickViewCampaign(campaign.id)} />
 						</TableDropDownEllipsis>
 					</TableCellAction>
+				</TableRow>
+			{/each}
+		</Table>
+	</div>
+
+	<SubHeadline>Recent Campaigns</SubHeadline>
+	<div class="min-h-[300px] mb-8">
+		<Table
+			isGhost={isCampaignStatsLoading}
+			columns={[
+				{ column: 'Campaign', size: 'large' },
+				{ column: 'Template', size: 'medium' },
+				{ column: 'Recipients', size: 'small' },
+				{ column: 'Open Rate', size: 'small' },
+				{ column: 'Click Rate', size: 'small' },
+				{ column: 'Submission Rate', size: 'small' },
+				{ column: 'Report Rate', size: 'small' },
+				{ column: 'Closed', size: 'small' }
+			]}
+			hasData={!!campaignStats.length}
+			plural="campaign statistics"
+			hasActions={false}
+		>
+			{#each campaignStats as stat}
+				<TableRow>
+					<TableCell>
+						<a href={`/campaign/${stat.campaignId}`}>
+							{stat.campaignName}
+						</a>
+					</TableCell>
+					<TableCell value={stat.templateName} />
+					<TableCell value={stat.totalRecipients} />
+					<TableCell value="{Math.round(stat.openRate)}%" />
+					<TableCell value="{Math.round(stat.clickRate)}%" />
+					<TableCell value="{Math.round(stat.submissionRate)}%" />
+					<TableCell value="{Math.round(stat.reportRate)}%" />
+					<TableCell value={stat.campaignClosedAt} isDate isRelative />
 				</TableRow>
 			{/each}
 		</Table>
