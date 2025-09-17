@@ -83,7 +83,8 @@
 		emailsSent: 0,
 		trackingPixelLoaded: 0,
 		websiteLoaded: 0,
-		submittedData: 0
+		submittedData: 0,
+		reported: 0
 	};
 	// @ts-ignore
 	const recipientTableUrlParams = newTableURLParams({
@@ -340,6 +341,7 @@
 			result.trackingPixelLoaded = res.data.trackingPixelLoaded;
 			result.websiteLoaded = res.data.clickedLink;
 			result.submittedData = res.data.submittedData;
+			result.reported = res.data.reported;
 		} catch (e) {
 			addToast('Failed to load campaign result stats', 'Error');
 			console.error('failed to load campaign result stats', e);
@@ -685,6 +687,47 @@
 	const onClickUpdateCampaign = () => {
 		goto(`/campaign?update=${$page.params.id}`);
 	};
+
+	const onUploadReportedCSV = async (event) => {
+		const file = event.target.files?.[0];
+		if (!file) return;
+
+		const formData = new FormData();
+		formData.append('file', file);
+
+		try {
+			showIsLoading();
+			const response = await fetch(`/api/v1/campaign/${$page.params.id}/upload/reported`, {
+				method: 'POST',
+				body: formData,
+				credentials: 'include'
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status}`);
+			}
+
+			const result = await response.json();
+
+			if (result.success) {
+				addToast(
+					`Processed ${result.data.processed} reported entries, skipped ${result.data.skipped}`,
+					'Success'
+				);
+				// refresh the stats
+				await setResults();
+			} else {
+				addToast('Failed to upload reported CSV', 'Error');
+			}
+		} catch (error) {
+			console.error('Upload error:', error);
+			addToast('Failed to upload reported CSV', 'Error');
+		} finally {
+			hideIsLoading();
+			// clear the file input
+			event.target.value = '';
+		}
+	};
 </script>
 
 <HeadTitle title="Campaign {campaign.name ? ` - ${campaign.name}` : ''}" />
@@ -899,6 +942,51 @@
 						stroke-linejoin="round"
 						stroke-width="2"
 						d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+					/>
+				</svg>
+			</StatsCard>
+
+			<StatsCard
+				title="Reported"
+				value={result.reported}
+				borderColor="border-red-500"
+				iconColor="text-red-500"
+				percentages={[
+					{
+						value: Math.round((result.reported / result.recipients) * 100),
+						relativeTo: 'of recipients',
+						baseValue: result.recipients
+					},
+					{
+						value: Math.round((result.reported / result.emailsSent) * 100),
+						relativeTo: 'of sent',
+						baseValue: result.emailsSent
+					},
+					{
+						value: Math.round((result.reported / result.trackingPixelLoaded) * 100),
+						relativeTo: 'of reads',
+						baseValue: result.trackingPixelLoaded
+					},
+					{
+						value: Math.round((result.reported / result.websiteLoaded) * 100),
+						relativeTo: 'of visits',
+						baseValue: result.websiteLoaded
+					}
+				]}
+			>
+				<svg
+					slot="icon"
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-5 w-5 ml-2"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"
 					/>
 				</svg>
 			</StatsCard>
@@ -1131,6 +1219,21 @@
 						>
 							Export submitters
 						</button>
+						<div class="w-full">
+							<label for="reported-csv-upload" class="block text-sm font-medium text-gray-700 mb-2">
+								Upload Reported CSV
+								<p class="mt-1 text-xs text-gray-500">
+									CSV should have columns: "reported by" (email) and "date reporter (utc+02:00)"
+								</p>
+							</label>
+							<input
+								type="file"
+								id="reported-csv-upload"
+								accept=".csv"
+								on:change={onUploadReportedCSV}
+								class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+							/>
+						</div>
 					</div>
 				</div>
 			</div>

@@ -794,6 +794,32 @@ func (r *Campaign) GetResultStats(
 		return nil, res.Error
 	}
 
+	// Get unique reported
+	res = r.DB.Raw(`
+    SELECT COUNT(*) FROM (
+        SELECT DISTINCT recipient_id
+        FROM campaign_events
+        WHERE campaign_id = ?
+        AND event_id = ?
+        AND recipient_id IS NOT NULL
+        UNION
+        SELECT DISTINCT anonymized_id
+        FROM campaign_events
+        WHERE campaign_id = ?
+        AND event_id = ?
+        AND anonymized_id IS NOT NULL
+    ) as unique_ids
+`,
+		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED],
+		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED],
+	).Scan(&stats.Reported)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+
 	return stats, nil
 }
 

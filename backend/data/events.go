@@ -14,6 +14,7 @@ const (
 	EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED        = "campaign_recipient_page_visited"
 	EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED  = "campaign_recipient_after_page_visited"
 	EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA      = "campaign_recipient_submitted_data"
+	EVENT_CAMPAIGN_RECIPIENT_REPORTED            = "campaign_recipient_reported"
 	EVENT_CAMPAIGN_RECIPIENT_CANCELLED           = "campaign_recipient_cancelled"
 )
 
@@ -32,5 +33,6 @@ var Events = []string{
 	EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED,
 	EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED,
 	EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
+	EVENT_CAMPAIGN_RECIPIENT_REPORTED,
 	EVENT_CAMPAIGN_RECIPIENT_CANCELLED,
 }
