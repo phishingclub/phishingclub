@@ -433,9 +433,9 @@
 	};
 </script>
 
-<HeadTitle title="Profile" />
+<HeadTitle title="Settings" />
 <main class="pb-8">
-	<Headline>Profile</Headline>
+	<Headline>Settings</Headline>
 	{#if isInitiallyLoaded}
 		<div class="max-w-7xl pt-4 space-y-8">
 			<!-- Settings Grid -->
