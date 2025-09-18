@@ -78,13 +78,10 @@
 	<div class="bg-white dark:bg-half-devil-gray p-6 rounded-lg shadow-sm">
 		<div class="grid grid-cols-1 gap-6">
 			<div class="border-t pt-6 border-grayblue-light dark:border-devil-gray">
-				{#if isUpdateAvailable}
+				{#if isUpdateAvailable || true}
 					<div class="bg-pleasant-gray dark:bg-devil-gray p-4 rounded-md mb-4">
 						<div class="flex items-center justify-between mb-4">
 							<div>
-								<h3 class="text-lg font-semibold text-active-blue dark:text-cta-light-blue">
-									Update Available!
-								</h3>
 								<p class="text-grayblue-dark">Version {newVersion} is now available</p>
 								<p class="mt-2">
 									<a
@@ -101,6 +98,9 @@
 										updated manually.
 									</p>
 								{/if}
+								<p class="mt-4 text-sm text-gray-600">
+									Consider creating a backup before updating to ensure you can restore if needed.
+								</p>
 							</div>
 						</div>
 

@@ -225,6 +225,7 @@ func main() {
 		certMagicConfig,
 		certMagicCache,
 		licenseServer,
+		*flagFilePath,
 	)
 	// get entra-id options and setup msal client
 	ssoOpt, err := services.SSO.GetSSOOptionWithoutAuth(context.Background())

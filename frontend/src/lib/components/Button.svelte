@@ -1,10 +1,11 @@
 <script>
 	export let backgroundColor = 'bg-cta-blue';
-	/* 
+	/*
 	linear-gradient(#64a6e6, #9198e5);
 	*/
 	export let css = '';
 	export let size = 'medium';
+	export let disabled = false;
 </script>
 
 <button
@@ -12,6 +13,7 @@
 	class:w-32={size === 'small'}
 	class:w-36={size === 'medium'}
 	class:w-60={size === 'large'}
+	{disabled}
 	on:click
 >
 	<slot />

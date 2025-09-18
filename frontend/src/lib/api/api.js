@@ -234,6 +234,43 @@ export class API {
 		 */
 		runUpdate: async () => {
 			return await postJSON(this.getPath(`/update`));
+		},
+
+		/**
+		 * Create a backup
+		 * @returns {Promise<ApiResponse>}
+		 */
+		createBackup: async () => {
+			return await postJSON(this.getPath(`/backup/create`));
+		},
+
+		/**
+		 * List available backups
+		 * @returns {Promise<ApiResponse>}
+		 */
+		listBackups: async () => {
+			return await getJSON(this.getPath(`/backup/list`));
+		},
+
+		/**
+		 * Download a backup file
+		 * @param {string} filename - name of the backup file
+		 * @returns {Promise<Blob>}
+		 */
+		downloadBackup: async (filename) => {
+			const response = await fetch(
+				this.getPath(`/backup/download/${encodeURIComponent(filename)}`),
+				{
+					method: 'GET',
+					credentials: 'same-origin'
+				}
+			);
+
+			if (!response.ok) {
+				throw new Error(`Failed to download backup: ${response.statusText}`);
+			}
+
+			return await response.blob();
 		}
 	};
 

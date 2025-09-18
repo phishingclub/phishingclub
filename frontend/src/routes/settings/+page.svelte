@@ -45,6 +45,12 @@
 	let updateAvailable = false;
 	let isCheckingUpdate = false;
 
+	// Backup functionality
+	let isBackupModalVisible = false;
+	let isCreatingBackup = false;
+	let availableBackups = [];
+	let isLoadingBackups = false;
+
 	let ssoForm = null;
 	let isSSOModalVisible = false;
 	let updateSSOError = '';
@@ -91,6 +97,7 @@
 			await refreshSSO();
 			await refreshVersion();
 			await refreshUpdateCached();
+			await refreshBackupList();
 			if (!ssoSettingsFormValues.redirectURL) {
 				ssoSettingsFormValues.redirectURL = `${location.origin}/api/v1/sso/entra-id/auth`;
 			}
@@ -203,6 +210,69 @@
 			isSSOEnabled = sso.enabled;
 		} catch (e) {
 			console.error('failed to get SSO configuration', e);
+		}
+	}
+
+	async function refreshBackupList() {
+		isLoadingBackups = true;
+		try {
+			const res = await api.application.listBackups();
+			if (res.success) {
+				availableBackups = res.data || [];
+			}
+		} catch (e) {
+			console.error('failed to refresh backup list', e);
+			availableBackups = [];
+		} finally {
+			isLoadingBackups = false;
+		}
+	}
+
+	async function downloadBackup(filename) {
+		try {
+			const blob = await api.application.downloadBackup(filename);
+
+			// Create download link
+			const url = window.URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = filename;
+			document.body.appendChild(a);
+			a.click();
+			window.URL.revokeObjectURL(url);
+			document.body.removeChild(a);
+
+			addToast('Backup downloaded successfully', 'Success');
+		} catch (e) {
+			console.error('failed to download backup', e);
+			addToast('Failed to download backup', 'Error');
+		}
+	}
+
+	function openBackupModal() {
+		isBackupModalVisible = true;
+	}
+
+	function closeBackupModal() {
+		isBackupModalVisible = false;
+	}
+
+	async function createBackup() {
+		isCreatingBackup = true;
+		try {
+			const res = await api.application.createBackup();
+			if (res.success) {
+				addToast('Backup created successfully', 'Success');
+				closeBackupModal();
+				await refreshBackupList(); // Refresh backup list
+			} else {
+				addToast('Failed to create backup', 'Error');
+			}
+		} catch (e) {
+			console.error('failed to create backup', e);
+			addToast('Failed to create backup', 'Error');
+		} finally {
+			isCreatingBackup = false;
 		}
 	}
 
@@ -503,6 +573,55 @@
 									Import File
 								{/if}
 							</FormButton>
+						</div>
+					</div>
+				</div>
+
+				<!-- Backup Section -->
+				<div
+					class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 min-h-[300px] flex flex-col"
+				>
+					<h2 class="text-xl font-semibold text-gray-700 mb-6">Backup</h2>
+					<div class="flex flex-col h-full">
+						<div class="space-y-4">
+							<p class="text-gray-600 text-sm">
+								Create a backup of database, assets, attachments and certificates.
+							</p>
+
+							{#if availableBackups.length > 0}
+								<div class="bg-gray-50 p-3 rounded-md">
+									<h4 class="font-medium text-gray-900 mb-2">Available:</h4>
+									<div class="space-y-3">
+										{#each availableBackups as backup}
+											<div class="flex items-start justify-between gap-4 text-sm">
+												<div class="flex flex-col min-w-0 flex-1">
+													<span class="text-gray-700 text-xs font-medium">
+														{new Date(backup.createdAt).toLocaleString()}
+													</span>
+													<span class="text-gray-400 text-xs">
+														{(backup.size / 1024 / 1024).toFixed(1)} MB
+													</span>
+												</div>
+												<button
+													class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors flex-shrink-0"
+													on:click={() => downloadBackup(backup.name)}
+												>
+													Download
+												</button>
+											</div>
+										{/each}
+									</div>
+								</div>
+							{:else if !isLoadingBackups}
+								<div class="bg-gray-50 p-3 rounded-md text-sm text-gray-600">
+									No backups available yet.
+								</div>
+							{/if}
+						</div>
+						<div class="mt-auto pt-4">
+							<Button size={'large'} on:click={openBackupModal} disabled={isCreatingBackup}>
+								Create Backup
+							</Button>
 						</div>
 					</div>
 				</div>
@@ -829,5 +948,55 @@
 			onClick={() => onClickDisableSSO()}
 			bind:isVisible={isSSODeleteAlertVisible}
 		/>
+	{/if}
+
+	{#if isBackupModalVisible}
+		<Modal
+			headerText="Create Backup"
+			bind:visible={isBackupModalVisible}
+			onClose={closeBackupModal}
+			isSubmitting={isCreatingBackup}
+		>
+			<FormGrid on:submit={createBackup} isSubmitting={isCreatingBackup}>
+				<FormColumns>
+					<FormColumn>
+						<div class="space-y-4">
+							<p>This will create a backup file that can be downloaded from the settings page.</p>
+							<p>
+								<strong>Note:</strong> This is not a substitute for having proper automated and tested
+								backup and recovery plans at the operating system level.
+							</p>
+							<div class="bg-blue-50 p-4 rounded-md">
+								<h3 class="font-semibold text-blue-800 mb-2">What will be backed up:</h3>
+								<ul class="text-sm text-blue-700 space-y-1">
+									<li>• SQLite database (including WAL files)</li>
+									<li>• Asset files</li>
+									<li>• Attachment files</li>
+									<li>• Certificate files</li>
+								</ul>
+							</div>
+
+							<div class="bg-yellow-50 p-4 rounded-md">
+								<h3 class="font-semibold text-yellow-800 mb-2">Important:</h3>
+								<ul class="text-sm text-yellow-700 space-y-1">
+									<li>• Large databases may take significant time to backup</li>
+									<li>• Operations may be affected during the backup process</li>
+									<li>• Ensure you have sufficient disk space</li>
+									<li>
+										• Only the 3 most recent backups are kept (older ones are automatically deleted)
+									</li>
+									<li>• The backup does not include config.json or the application binary</li>
+								</ul>
+							</div>
+						</div>
+					</FormColumn>
+				</FormColumns>
+				<FormFooter
+					closeModal={closeBackupModal}
+					isSubmitting={isCreatingBackup}
+					okText={isCreatingBackup ? 'Creating Backup...' : 'Create Backup'}
+				/>
+			</FormGrid>
+		</Modal>
 	{/if}
 </main>

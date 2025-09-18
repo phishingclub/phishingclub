@@ -36,6 +36,10 @@ const (
 	ROUTE_V1_UPDATE_AVAILABLE        = "/api/v1/update/available"
 	ROUTE_V1_UPDATE_AVAILABLE_CACHED = "/api/v1/update/available/cached"
 	ROUTE_V1_UPDATE                  = "/api/v1/update"
+	// backup
+	ROUTE_V1_BACKUP_CREATE   = "/api/v1/backup/create"
+	ROUTE_V1_BACKUP_LIST     = "/api/v1/backup/list"
+	ROUTE_V1_BACKUP_DOWNLOAD = "/api/v1/backup/download/:filename"
 	// user
 	ROUTE_V1_USER        = "/api/v1/user"
 	ROUTE_V1_USER_ID     = "/api/v1/user/:id"
@@ -419,6 +423,10 @@ func setupRoutes(
 		// update
 		GET(ROUTE_V1_UPDATE, middleware.SessionHandler, controllers.Update.GetUpdateDetails).
 		POST(ROUTE_V1_UPDATE, middleware.SessionHandler, controllers.Update.RunUpdate).
+		// backup
+		POST(ROUTE_V1_BACKUP_CREATE, middleware.SessionHandler, controllers.Backup.CreateBackup).
+		GET(ROUTE_V1_BACKUP_LIST, middleware.SessionHandler, controllers.Backup.ListBackups).
+		GET(ROUTE_V1_BACKUP_DOWNLOAD, middleware.SessionHandler, controllers.Backup.DownloadBackup).
 		// import
 		POST(ROUTE_V1_IMPORT, middleware.SessionHandler, controllers.Import.Import)
 
