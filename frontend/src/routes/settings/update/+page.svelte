@@ -78,7 +78,7 @@
 	<div class="bg-white dark:bg-half-devil-gray p-6 rounded-lg shadow-sm">
 		<div class="grid grid-cols-1 gap-6">
 			<div class="border-t pt-6 border-grayblue-light dark:border-devil-gray">
-				{#if isUpdateAvailable || true}
+				{#if isUpdateAvailable}
 					<div class="bg-pleasant-gray dark:bg-devil-gray p-4 rounded-md mb-4">
 						<div class="flex items-center justify-between mb-4">
 							<div>
