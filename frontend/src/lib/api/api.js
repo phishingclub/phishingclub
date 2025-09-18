@@ -727,7 +727,17 @@ export class API {
 		},
 
 		/**
-		 * Send email to campaign recipient
+		 * Send message to campaign recipient (works for both email and API senders)
+		 *
+		 * @param {string} campaignRecipientID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		sendMessage: async (campaignRecipientID) => {
+			return await postJSON(this.getPath(`/campaign/recipient/${campaignRecipientID}/send`));
+		},
+
+		/**
+		 * Send email to campaign recipient (alias for sendMessage for backward compatibility)
 		 *
 		 * @param {string} campaignRecipientID
 		 * @returns {Promise<ApiResponse>}

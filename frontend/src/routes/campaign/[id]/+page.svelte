@@ -121,8 +121,8 @@
 	let isRecipientTableLoading = false;
 	let isCloseModalVisible = false;
 	let isAnonymizeModalVisible = false;
-	let isSendEmailModalVisible = false;
-	let sendEmailRecipient = null;
+	let isSendMessageModalVisible = false;
+	let sendMessageRecipient = null;
 	let lastPoll3399Nano = '';
 
 	// hooks
@@ -492,47 +492,54 @@
 	};
 
 	/** @param {string} campaignRecipientID @param {Object} recipient */
-	const showSendEmailModal = (campaignRecipientID, recipient) => {
-		sendEmailRecipient = {
+	const showSendMessageModal = (campaignRecipientID, recipient) => {
+		sendMessageRecipient = {
 			id: campaignRecipientID,
 			name: `${recipient.firstName || ''} ${recipient.lastName || ''}`.trim(),
 			email: recipient.email
 		};
-		isSendEmailModalVisible = true;
+		isSendMessageModalVisible = true;
 	};
 
-	const closeSendEmailModal = () => {
-		isSendEmailModalVisible = false;
-		sendEmailRecipient = null;
+	const closeSendMessageModal = () => {
+		isSendMessageModalVisible = false;
+		sendMessageRecipient = null;
 	};
 
-	const onConfirmSendEmail = async () => {
+	// helper function to get appropriate messaging based on sender type
+	const getMessageType = () => {
+		return campaign.template?.email ? 'email' : 'message';
+	};
+
+	const onConfirmSendMessage = async () => {
 		try {
 			showIsLoading();
 			// Check if this is a resend before sending
-			const isResend = campaignRecipients.find((r) => r.id === sendEmailRecipient.id)?.sentAt;
-			const res = await api.campaign.sendEmail(sendEmailRecipient.id);
+			const isResend = campaignRecipients.find((r) => r.id === sendMessageRecipient.id)?.sentAt;
+			const res = await api.campaign.sendMessage(sendMessageRecipient.id);
 			if (!res.success) {
 				throw res.error;
 			}
-			const campaignType = isSelfManaged ? 'self-managed' : 'scheduled';
-			const message = isResend ? `Email sent again successfully` : `Email sent successfully`;
+			const messageType = getMessageType();
+			const message = isResend
+				? `${messageType.charAt(0).toUpperCase() + messageType.slice(1)} sent again successfully`
+				: `${messageType.charAt(0).toUpperCase() + messageType.slice(1)} sent successfully`;
 			addToast(message, 'Success');
 			await setCampaign();
 			await getEvents();
 			await refreshCampaignRecipients();
-			closeSendEmailModal();
+			closeSendMessageModal();
 		} catch (e) {
-			addToast('Failed to send email', 'Error');
-			console.error('failed to send email', e);
+			addToast(`Failed to send ${getMessageType()}`, 'Error');
+			console.error(`failed to send ${getMessageType()}`, e);
 		} finally {
 			hideIsLoading();
 		}
 	};
 
-	// reactive statement to clean up send email modal state when it closes
-	$: if (!isSendEmailModalVisible && sendEmailRecipient) {
-		sendEmailRecipient = null;
+	// reactive statement to clean up send message modal state when it closes
+	$: if (!isSendMessageModalVisible && sendMessageRecipient) {
+		sendMessageRecipient = null;
 	}
 
 	const showCloseCampaignModal = () => {
@@ -1459,13 +1466,15 @@
 									on:click={() => openEventsModal(recp.recipientID)}
 								/>
 								<TableDropDownButton
-									name={recp.sentAt ? 'Send email again' : 'Send email'}
+									name={recp.sentAt ? `Send ${getMessageType()} again` : `Send ${getMessageType()}`}
 									title={recp.closedAt
 										? 'Campaign is closed'
 										: recp.cancelledAt
 											? 'Recipient cancelled'
-											: 'Send email'}
-									on:click={() => showSendEmailModal(recp.id, recp.recipient)}
+											: recp.sentAt
+												? `Send ${getMessageType()} again (last sent: ${new Date(recp.sentAt).toLocaleDateString()})`
+												: `Send ${getMessageType()} to recipient`}
+									on:click={() => showSendMessageModal(recp.id, recp.recipient)}
 									disabled={!!campaign.closedAt || recp.cancelledAt}
 								/>
 								{#if !campaign.sendStartAt}
@@ -1756,24 +1765,24 @@
 	</Alert>
 
 	<Alert
-		headline="Send Email"
-		bind:visible={isSendEmailModalVisible}
-		onConfirm={onConfirmSendEmail}
+		headline={`Send ${getMessageType().charAt(0).toUpperCase() + getMessageType().slice(1)}`}
+		bind:visible={isSendMessageModalVisible}
+		onConfirm={onConfirmSendMessage}
 	>
 		<div>
-			{#if sendEmailRecipient}
-				{@const recipient = campaignRecipients.find((r) => r.id === sendEmailRecipient.id)}
+			{#if sendMessageRecipient}
+				{@const recipient = campaignRecipients.find((r) => r.id === sendMessageRecipient.id)}
 				{#if recipient}
 					<p class="mb-4">
 						{recipient.sentAt
-							? 'Are you sure you want to send the campaign email again to:'
-							: 'Are you sure you want to send the campaign email to:'}
+							? `Are you sure you want to send the campaign ${getMessageType()} again to:`
+							: `Are you sure you want to send the campaign ${getMessageType()} to:`}
 					</p>
 					<div class="bg-gray-50 p-3 rounded mb-4">
-						<p class="font-medium">{sendEmailRecipient.name}</p>
-						<p class="text-gray-600">{sendEmailRecipient.email}</p>
+						<p class="font-medium">{sendMessageRecipient.name}</p>
+						<p class="text-gray-600">{sendMessageRecipient.email}</p>
 						<p class="text-xs text-blue-600 mt-1">
-							Campaign type: {isSelfManaged ? 'Self-managed' : 'Scheduled'}
+							Sender type: {campaign.template?.email ? 'Email (SMTP)' : 'API Sender'}
 						</p>
 						{#if recipient.sentAt}
 							<p class="text-sm text-amber-600 mt-1">
@@ -1781,9 +1790,7 @@
 							</p>
 						{/if}
 					</div>
-					<p class="text-sm text-gray-500">
-						This action will immediately send the email and cannot be undone.
-					</p>
+					<p class="text-sm text-gray-500">This action will immediately send the message.</p>
 				{/if}
 			{/if}
 		</div>

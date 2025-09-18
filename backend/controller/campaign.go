@@ -866,7 +866,7 @@ func (c *Campaign) SendEmailByCampaignRecipientID(g *gin.Context) {
 	if !ok {
 		return
 	}
-	// send email
+	// send message (email or API depending on campaign template configuration)
 	err := c.CampaignService.SendEmailByCampaignRecipientID(g.Request.Context(), session, id)
 	// handle responses
 	if ok := c.handleErrors(g, err); !ok {
