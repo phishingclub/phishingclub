@@ -5,10 +5,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"html"
-	"html/template"
 	"io"
 	"math/rand"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -58,15 +58,13 @@ func (t *Template) CreateMail(
 		baseURL,
 		campaignRecipient.ID.MustGet().String(),
 	)
-	// #nosec
-	trackingPixelMarkup := template.HTML(trackingPixel)
 	return t.newTemplateDataMap(
 		idKey,
 		baseURL,
 		url,
 		campaignRecipient.Recipient,
 		trackingPixelPath,
-		trackingPixelMarkup,
+		trackingPixel,
 		email,
 		apiSender,
 	)
@@ -74,7 +72,6 @@ func (t *Template) CreateMail(
 
 // ValidatePageTemplate validates that a page template can be parsed and executed without errors
 func (t *Template) ValidatePageTemplate(content string) error {
-	// use the same parsing approach as CreatePhishingPage but without executing
 	_, err := template.New("validation").
 		Funcs(TemplateFuncs()).
 		Parse(content)
@@ -94,7 +91,6 @@ func (t *Template) ValidatePageTemplate(content string) error {
 
 // ValidateEmailTemplate validates that an email template can be parsed and executed without errors
 func (t *Template) ValidateEmailTemplate(content string) error {
-	// use the same parsing approach as email creation but without executing
 	_, err := template.New("validation").
 		Funcs(TemplateFuncs()).
 		Parse(content)
@@ -139,7 +135,6 @@ func (t *Template) ValidateEmailTemplate(content string) error {
 
 // ValidateDomainTemplate validates that a domain template can be parsed and executed without errors
 func (t *Template) ValidateDomainTemplate(content string) error {
-	// use the same parsing approach as domain content but without executing
 	_, err := template.New("validation").
 		Funcs(TemplateFuncs()).
 		Parse(content)
@@ -222,7 +217,6 @@ func (t *Template) CreateMailBody(
 		email,
 		apiSender,
 	)
-	// parse and execute the mail content
 	mailContentTemplate := template.New("mailContent")
 	mailContentTemplate = mailContentTemplate.Funcs(TemplateFuncs())
 	content, err := email.Content.Get()
@@ -293,14 +287,14 @@ func (t *Template) CreatePhishingPage(
 	return w, nil
 }
 
-// newTemplateDataMap creates a new data map for the templates
+// newTemplateDataMap creates a new data map for templates
 func (t *Template) newTemplateDataMap(
 	id string,
 	baseURL string,
 	url string,
 	recipient *model.Recipient,
 	trackingPixelPath string,
-	trackingPixelMarkup template.HTML,
+	trackingPixelMarkup string,
 	email *model.Email,
 	apiSender *model.APISender,
 ) *map[string]any {
@@ -384,6 +378,38 @@ func (t *Template) newTemplateDataMap(
 	}
 
 	return &m
+}
+
+// TemplateFuncs returns template functions for templates
+func TemplateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"urlEscape": func(s string) string {
+			return template.URLQueryEscaper(s)
+		},
+		"htmlEscape": func(s string) string {
+			return html.EscapeString(s)
+		},
+		"randInt": func(n1, n2 int) (int, error) {
+			if n1 > n2 {
+				return 0, fmt.Errorf("first number must be less than or equal to second number")
+			}
+			return rand.Intn(n2-n1+1) + n1, nil
+		},
+		"randAlpha": RandAlpha,
+		"qr":        GenerateQRCode,
+		"date": func(format string, offsetSeconds ...int) string {
+			offset := 0
+			if len(offsetSeconds) > 0 {
+				offset = offsetSeconds[0]
+			}
+			targetTime := time.Now().Add(time.Duration(offset) * time.Second)
+			goFormat := convertDateFormat(format)
+			return targetTime.Format(goFormat)
+		},
+		"base64": func(s string) string {
+			return base64.StdEncoding.EncodeToString([]byte(s))
+		},
+	}
 }
 
 func (t *Template) AddTrackingPixel(content string) string {
@@ -505,39 +531,7 @@ func (t *Template) RemoveTrackingPixelFromContent(content string) string {
 	return strings.ReplaceAll(content, trackingPixelTemplate, "")
 }
 
-func TemplateFuncs() template.FuncMap {
-	return template.FuncMap{
-		"urlEscape": func(s string) string {
-			return template.URLQueryEscaper(s)
-		},
-		"htmlEscape": func(s string) string {
-			return html.EscapeString(s)
-		},
-		"randInt": func(n1, n2 int) (int, error) {
-			if n1 > n2 {
-				return 0, fmt.Errorf("first number must be less than or equal to second number")
-			}
-			// #nosec
-			return rand.Intn(n2-n1+1) + n1, nil
-		},
-		"randAlpha": RandAlpha,
-		"qr":        GenerateQRCode,
-		"date": func(format string, offsetSeconds ...int) string {
-			offset := 0
-			if len(offsetSeconds) > 0 {
-				offset = offsetSeconds[0]
-			}
-			targetTime := time.Now().Add(time.Duration(offset) * time.Second)
-			goFormat := convertDateFormat(format)
-			return targetTime.Format(goFormat)
-		},
-		"base64": func(s string) string {
-			return base64.StdEncoding.EncodeToString([]byte(s))
-		},
-	}
-}
-
-func GenerateQRCode(args ...any) (template.HTML, error) {
+func GenerateQRCode(args ...any) (string, error) {
 	if len(args) == 0 {
 		return "", errors.New("URL is required")
 	}
@@ -564,8 +558,7 @@ func GenerateQRCode(args ...any) (template.HTML, error) {
 	if err := qr.Save(writer); err != nil {
 		return "", err
 	}
-	// #nosec
-	return template.HTML(buf.String()), nil
+	return buf.String(), nil
 }
 
 const alphaChar = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"

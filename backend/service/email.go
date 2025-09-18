@@ -1,13 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
-	"html/template"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
 
 	"github.com/go-errors/errors"
 
@@ -597,11 +598,13 @@ func (m *Email) SendTestEmail(
 		email,
 		nil,
 	)
-	err = msg.SetBodyHTMLTemplate(mailTmpl, t)
+	var bodyBuffer bytes.Buffer
+	err = mailTmpl.Execute(&bodyBuffer, t)
 	if err != nil {
-		m.Logger.Errorw("failed to set body html template", "error", err)
-		return errs.Wrap(err)
+		m.Logger.Errorw("failed to execute mail template", "error", err)
+		return err
 	}
+	msg.SetBodyString("text/html", bodyBuffer.String())
 	// attachments
 	attachments := email.Attachments
 	for _, attachment := range attachments {

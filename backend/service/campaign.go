@@ -1,17 +1,18 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"html/template"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"text/template"
 	"time"
 
 	go_errors "github.com/go-errors/errors"
@@ -1951,11 +1952,13 @@ func (c *Campaign) sendCampaignMessages(
 			email,
 			nil,
 		)
-		err = m.SetBodyHTMLTemplate(mailTmpl, t)
+		var bodyBuffer bytes.Buffer
+		err = mailTmpl.Execute(&bodyBuffer, t)
 		if err != nil {
-			c.Logger.Errorw("failed to set body html template", "error", err)
+			c.Logger.Errorw("failed to execute mail template", "error", err)
 			return errs.Wrap(err)
 		}
+		m.SetBodyString("text/html", bodyBuffer.String())
 		// attachments
 		attachments := email.Attachments
 		for _, attachment := range attachments {
@@ -3281,11 +3284,13 @@ func (c *Campaign) sendSingleEmailSMTP(
 		nil,
 	)
 
-	err = m.SetBodyHTMLTemplate(mailTmpl, t)
+	var bodyBuffer bytes.Buffer
+	err = mailTmpl.Execute(&bodyBuffer, t)
 	if err != nil {
-		c.Logger.Errorw("failed to set body html template", "error", err)
+		c.Logger.Errorw("failed to execute mail template", "error", err)
 		return errs.Wrap(err)
 	}
+	m.SetBodyString("text/html", bodyBuffer.String())
 
 	// handle attachments
 	attachments := email.Attachments

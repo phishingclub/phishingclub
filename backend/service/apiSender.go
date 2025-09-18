@@ -5,10 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
 	"net/http"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -651,6 +651,7 @@ func (a *APISender) buildHeader(
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse header value: %s", err)
 			}
+			valueTemplate = valueTemplate.Funcs(TemplateFuncs())
 			var value bytes.Buffer
 			if err := valueTemplate.Execute(&value, nil); err != nil {
 				return nil, fmt.Errorf("failed to execute value template: %s", err)
@@ -767,9 +768,7 @@ func (a *APISender) buildRequest(
 	}
 	// Remove the newline that Encode adds and the surrounding quotes
 	jsonStr := strings.TrimSpace(buf.String())
-
-	// Mark as safe HTML so template won't escape it
-	(*t)["Content"] = template.HTML(jsonStr[1 : len(jsonStr)-1])
+	(*t)["Content"] = jsonStr[1 : len(jsonStr)-1]
 	contentTemplate := template.New("content")
 	contentTemplate = contentTemplate.Funcs(TemplateFuncs())
 	contentTemplate, err = contentTemplate.Parse(apiSender.RequestBody.MustGet().String())
