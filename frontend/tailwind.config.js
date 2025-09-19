@@ -95,6 +95,10 @@ export default {
 				'70vw': '70vw',
 				'80vw': '80vw',
 				'90vw': '90vw'
+			},
+			minWidth: {
+				app: '768px',
+				desktop: '1024px'
 			}
 		}
 	}

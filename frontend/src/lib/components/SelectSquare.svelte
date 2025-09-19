@@ -15,15 +15,19 @@
 <div class="flex flex-col gap-2 py-2">
 	{#if label}
 		<div class="flex flex-row">
-			<div class="font-semibold text-slate-600">{label}</div>
+			<div class="font-semibold text-slate-600 dark:text-gray-300 transition-colors duration-200">
+				{label}
+			</div>
 			{#if toolTipText.length > 0}
 				<ToolTip>
 					{toolTipText}
 				</ToolTip>
 			{/if}
 			{#if optional}
-				<div class="bg-gray-100 ml-2 px-2 rounded-md">
-					<p class="text-slate-600 text-xs">optional</p>
+				<div
+					class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200"
+				>
+					<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
 				</div>
 			{/if}
 		</div>
@@ -42,11 +46,11 @@
           p-3 rounded-lg border-2 transition-all duration-200
           flex flex-col items-center justify-center text-center
           w-40
-          hover:border-blue-300 hover:bg-blue-50
+          hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30
           ${
 						value === option.value
-							? 'border-green-500 bg-green-50 text-green-700 '
-							: 'border-gray-200 bg-white text-gray-700 '
+							? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+							: 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200'
 					}
         `}
 				on:click={() => {
@@ -59,7 +63,9 @@
 				{/if}
 				<span class="font-medium text-sm">{option.label}</span>
 				{#if option.description}
-					<span class="text-xs text-gray-500 mt-1">{option.description}</span>
+					<span class="text-xs text-gray-500 dark:text-gray-400 mt-1 transition-colors duration-200"
+						>{option.description}</span
+					>
 				{/if}
 			</button>
 		{/each}

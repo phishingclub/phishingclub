@@ -59,7 +59,9 @@
 		class:w-60={labelWidth === 'large'}
 	>
 		<div class="flex items-center">
-			<p class="font-semibold text-slate-600 py-2">
+			<p
+				class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200"
+			>
 				<slot />
 			</p>
 			{#if toolTipText.length > 0}
@@ -68,8 +70,12 @@
 				</ToolTip>
 			{/if}
 			{#if optional === true}
-				<div class="bg-gray-100 ml-2 px-2 rounded-md">
-					<p class="text-slate-600 text-xs">optional</p>
+				<div
+					class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200"
+				>
+					<p class="text-slate-600 dark:text-gray-300 text-xs transition-colors duration-200">
+						optional
+					</p>
 				</div>
 			{/if}
 		</div>
@@ -86,7 +92,7 @@
 		{required}
 		{disabled}
 		autocomplete="off"
-		class="rounded-md text-center py-2 pl-2 text-gray-600 border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 focus:bg-gray-100 bg-grayblue-light font-normal"
+		class="rounded-md text-center py-2 pl-2 text-gray-600 dark:text-gray-200 border border-transparent dark:border-gray-600 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-blue-500 focus:bg-gray-100 dark:focus:bg-gray-600 bg-grayblue-light dark:bg-gray-700 font-normal transition-colors duration-200"
 		class:text-left={textAlign == 'left'}
 		class:text-center={textAlign == 'center'}
 		class:text-right={textAlign == 'right'}

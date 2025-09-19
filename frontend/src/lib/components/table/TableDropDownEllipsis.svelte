@@ -128,16 +128,31 @@
 <div class="">
 	<button
 		bind:this={buttonRef}
-		class="py-2 px-2"
+		class="w-full h-full py-3 flex items-center justify-center"
 		on:click|stopPropagation|preventDefault={toggle}
 		on:keydown={handleKeydown}
 	>
 		<svg width="3.335557" height="16.465519" viewBox="0 0 0.88253281 4.3565019">
 			<g transform="translate(-892.25669,88.863024)">
 				<g transform="matrix(0,1.0139418,-1.0139418,0,802.48114,-807.2715)">
-					<circle class="fill-cta-blue" cx="708.99603" cy="-88.976357" r="0.40846577" />
-					<circle class="fill-cta-blue" cx="710.67859" cy="-88.976357" r="0.40846577" />
-					<circle class="fill-cta-blue" cx="712.36115" cy="-88.976357" r="0.40846577" />
+					<circle
+						class="fill-cta-blue dark:fill-blue-500 transition-colors duration-200"
+						cx="708.99603"
+						cy="-88.976357"
+						r="0.40846577"
+					/>
+					<circle
+						class="fill-cta-blue dark:fill-blue-500 transition-colors duration-200"
+						cx="710.67859"
+						cy="-88.976357"
+						r="0.40846577"
+					/>
+					<circle
+						class="fill-cta-blue dark:fill-blue-500 transition-colors duration-200"
+						cx="712.36115"
+						cy="-88.976357"
+						r="0.40846577"
+					/>
 				</g>
 			</g>
 		</svg>
@@ -145,7 +160,7 @@
 
 	<div
 		bind:this={menuRef}
-		class="absolute bg-white drop-shadow-md z-20 w-48 rounded-md overflow-y-scroll {scrollBarClassesVertical}"
+		class="absolute bg-white dark:bg-gray-800 drop-shadow-md dark:shadow-gray-900/50 border dark:border-gray-600 z-20 w-48 rounded-md overflow-y-scroll transition-colors duration-200 {scrollBarClassesVertical}"
 		class:hidden={!isMenuVisible}
 	>
 		<ul class="flex flex-col text-left">

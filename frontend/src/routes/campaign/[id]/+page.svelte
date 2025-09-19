@@ -38,6 +38,7 @@
 	import EventName from '$lib/components/table/EventName.svelte';
 	import { goto } from '$app/navigation';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form';
+	import FileField from '$lib/components/FileField.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -1062,18 +1063,20 @@
 			<!-- First Row: Details and Timeline -->
 			<div class="grid grid-cols-1 lg:grid-cols-2">
 				<!-- Primary Campaign Info -->
-				<div class="bg-white py-6 rounded-lg">
-					<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">Details</h3>
+				<div class="py-6 rounded-lg">
+					<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+						Details
+					</h3>
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
 						<span class="text-grayblue-dark font-medium">Status:</span>
-						<span class="text-pc-darkblue font-semibold">
+						<span class="text-pc-darkblue dark:text-white font-semibold">
 							{toEvent(campaign.notableEventName).name}
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Template:</span>
-						<span class="text-pc-darkblue">
+						<span class="text-pc-darkblue dark:text-white">
 							<button
-								class="cursor-pointer text-cta-blue underline hover:opacity-75"
+								class="cursor-pointer text-cta-blue dark:text-white underline hover:opacity-75"
 								on:click={() => {
 									openTemplateModal(templateMap.byValue(campaign.template));
 								}}
@@ -1083,10 +1086,10 @@
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Groups:</span>
-						<span class="text-pc-darkblue">
+						<span class="text-pc-darkblue dark:text-white">
 							{#each campaign.recipientGroups as group, i}
 								<a
-									class="hover:underline text-cta-blue hover:opacity-75 underline"
+									class="hover:underline text-cta-blue dark:text-white hover:opacity-75 underline"
 									href="/recipient/group/{recipientGroupMap.byValue(group)}"
 									target="_blank">{group}</a
 								>{#if i !== (campaign.recipientGroups?.length ?? 0) - 1}
@@ -1096,18 +1099,20 @@
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Type:</span>
-						<span class="text-pc-darkblue">{isSelfManaged ? 'Self Managed' : 'Scheduled'}</span>
+						<span class="text-pc-darkblue dark:text-white"
+							>{isSelfManaged ? 'Self Managed' : 'Scheduled'}</span
+						>
 
 						<span class="text-grayblue-dark font-medium">
 							{campaign?.allowDeny ? (campaign.allowDeny.allowed ? 'Allow' : 'Deny') : ''}
 							IP Filters:
 						</span>
-						<span class="text-pc-darkblue">
+						<span class="text-pc-darkblue dark:text-white">
 							{#if campaign.allowDeny?.length}
 								{#each campaign.allowDeny as allowDeny, i}
 									<a
 										href="/ip-filter/?edit={allowDeny.id}"
-										class="text-pc-blue hover:underline"
+										class="text-cta-blue dark:text-white hover:underline"
 										target="_blank"
 									>
 										{allowDeny.name}
@@ -1121,7 +1126,7 @@
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Webhook:</span>
-						<span class="text-pc-darkblue">
+						<span class="text-pc-darkblue dark:text-white">
 							{#if campaign.webhookID}
 								Yes
 							{:else}
@@ -1130,44 +1135,60 @@
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Data Saving:</span>
-						<span class="text-pc-darkblue">
+						<span class="text-pc-darkblue dark:text-white">
 							{campaign.saveSubmittedData ? 'Enabled' : 'Disabled'}
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Test:</span>
-						<span class="text-pc-darkblue">{campaign.isTest ? 'Yes' : 'No'}</span>
+						<span class="text-pc-darkblue dark:text-white">{campaign.isTest ? 'Yes' : 'No'}</span>
 					</div>
 				</div>
 
-				<div class="bg-white p-6 rounded-lg">
-					<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">Timeline</h3>
+				<div class="p-6 rounded-lg">
+					<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+						Timeline
+					</h3>
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
 						<span class="text-grayblue-dark font-medium">Created:</span>
-						<span class="text-pc-darkblue"><Datetime value={campaign.createdAt} /></span>
+						<span class="text-pc-darkblue dark:text-white"
+							><Datetime value={campaign.createdAt} /></span
+						>
 
 						{#if !isSelfManaged}
 							<span class="text-grayblue-dark font-medium">Delivery start:</span>
-							<span class="text-pc-darkblue"><Datetime value={campaign.sendStartAt} /></span>
+							<span class="text-pc-darkblue dark:text-white"
+								><Datetime value={campaign.sendStartAt} /></span
+							>
 
 							<span class="text-grayblue-dark font-medium">Delivery finish:</span>
-							<span class="text-pc-darkblue"><Datetime value={campaign.sendEndAt} /></span>
+							<span class="text-pc-darkblue dark:text-white"
+								><Datetime value={campaign.sendEndAt} /></span
+							>
 						{/if}
 
 						<span class="text-grayblue-dark font-medium">Close At:</span>
-						<span class="text-pc-darkblue"><Datetime value={campaign.closeAt} /></span>
+						<span class="text-pc-darkblue dark:text-white"
+							><Datetime value={campaign.closeAt} /></span
+						>
 
 						<span class="text-grayblue-dark font-medium">Closed:</span>
-						<span class="text-pc-darkblue"><Datetime value={campaign.closedAt} /></span>
+						<span class="text-pc-darkblue dark:text-white"
+							><Datetime value={campaign.closedAt} /></span
+						>
 
 						<span class="text-grayblue-dark font-medium">Anonymize At:</span>
-						<span class="text-pc-darkblue"><Datetime value={campaign.anonymizeAt} /></span>
+						<span class="text-pc-darkblue dark:text-white"
+							><Datetime value={campaign.anonymizeAt} /></span
+						>
 
 						<span class="text-grayblue-dark font-medium">Anonymized:</span>
-						<span class="text-pc-darkblue"><Datetime value={campaign.anonymizedAt} /></span>
+						<span class="text-pc-darkblue dark:text-white"
+							><Datetime value={campaign.anonymizedAt} /></span
+						>
 					</div>
 
 					{#if campaign.constraintWeekDays}
-						<div class="bg-white py-6 rounded-lg">
+						<div class="py-6 rounded-lg">
 							<div class="flex gap-8">
 								<!-- Days Schedule -->
 								<div class="flex-1">
@@ -1244,8 +1265,10 @@
 			<!-- Second Row: Schedule Constraints and Actions -->
 			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 				<div></div>
-				<div class="bg-white p-6 rounded-lg">
-					<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">Actions</h3>
+				<div class="p-6 rounded-lg">
+					<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+						Actions
+					</h3>
 					<div class="space-y-4">
 						<!-- Action Buttons -->
 						<div class="flex flex-wrap gap-3">
@@ -1292,20 +1315,10 @@
 						<!-- Upload Section -->
 						<div class="border-t pt-4">
 							<div>
-								<label
-									for="reported-csv-upload"
-									class="block text-sm font-medium text-gray-700 mb-2"
-								>
+								<FileField accept=".csv" on:change={onUploadReportedCSV}>
 									Upload Reported CSV
-								</label>
-								<input
-									type="file"
-									id="reported-csv-upload"
-									accept=".csv"
-									on:change={onUploadReportedCSV}
-									class="block w-full text-sm text-gray-900 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-reported file:text-white hover:file:opacity-80"
-								/>
-								<p class="mt-1 text-xs text-gray-500">
+								</FileField>
+								<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
 									CSV format: "Reported by" (email), "Date reported(UTC+02:00)"
 								</p>
 							</div>
@@ -1551,15 +1564,17 @@
 	>
 		<div class="space-y-6">
 			<!-- Full-width Landing Page Flow -->
-			<div class="bg-white p-6 rounded-lg">
-				<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">Phishing Flow</h3>
+			<div class="p-6 rounded-lg">
+				<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+					Phishing Flow
+				</h3>
 
 				<!-- Enhanced Flow Visualization -->
 				<div class="flex items-center justify-center mb-6 text-sm">
 					<div class="flex items-center flex-wrap justify-center gap-2">
 						<!-- First block is always the delivery method -->
-						<div class="text-center px-3 py-2 bg-pc-lightblue rounded">
-							<div class="font-medium">
+						<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
+							<div class="font-medium text-gray-800 dark:text-white">
 								{#if template.email}
 									Email
 								{:else}
@@ -1575,8 +1590,8 @@
 
 						<!-- Before Landing -->
 						{#if template.beforeLandingPage}
-							<div class="text-center px-3 py-2 bg-pc-lightblue rounded">
-								<div class="font-medium">Before Landing</div>
+							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
+								<div class="font-medium text-gray-800 dark:text-white">Before Landing</div>
 							</div>
 							<!-- Only show arrow if there's a next step -->
 							{#if template.landingPage}
@@ -1586,8 +1601,8 @@
 
 						<!-- Main Landing -->
 						{#if template.landingPage}
-							<div class="text-center px-3 py-2 bg-pc-lightblue rounded">
-								<div class="font-medium">Main Landing</div>
+							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
+								<div class="font-medium text-gray-800 dark:text-white">Main Landing</div>
 							</div>
 							<!-- Only show arrow if there's a next step -->
 							{#if template.afterLandingPage || template.afterLandingPageRedirectURL}
@@ -1597,14 +1612,14 @@
 
 						<!-- After Landing or Redirect -->
 						{#if template.afterLandingPage}
-							<div class="text-center px-3 py-2 bg-pc-lightblue rounded">
-								<div class="font-medium">After Landing</div>
+							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
+								<div class="font-medium text-gray-800 dark:text-white">After Landing</div>
 							</div>
 						{/if}
 						{#if template.afterLandingPageRedirectURL}
 							<div class="mx-2">→</div>
-							<div class="text-center px-3 py-2 bg-pc-lightorange rounded">
-								<div class="font-medium">Redirect</div>
+							<div class="text-center px-3 py-2 bg-pc-lightorange dark:bg-orange-600 rounded">
+								<div class="font-medium text-gray-800 dark:text-white">Redirect</div>
 							</div>
 						{/if}
 					</div>
@@ -1614,22 +1629,26 @@
 			<!-- Basic Info and Email Config -->
 			<div class="grid grid-cols-2 gap-6">
 				<!-- Basic Info Section -->
-				<div class="bg-white p-6 rounded-lg">
-					<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">
+				<div class="p-6 rounded-lg">
+					<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
 						Basic Information
 					</h3>
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
 						<span class="text-grayblue-dark font-medium">Name:</span>
-						<span class="text-pc-darkblue">{template.name ?? ''}</span>
+						<span class="text-pc-darkblue dark:text-white">{template.name ?? ''}</span>
 
 						<span class="text-grayblue-dark font-medium">Query Key:</span>
-						<span class="text-pc-darkblue">{template.urlIdentifier?.name ?? ''}</span>
+						<span class="text-pc-darkblue dark:text-white"
+							>{template.urlIdentifier?.name ?? ''}</span
+						>
 
 						<span class="text-grayblue-dark font-medium">State Key:</span>
-						<span class="text-pc-darkblue">{template.stateIdentifier?.name ?? ''}</span>
+						<span class="text-pc-darkblue dark:text-white"
+							>{template.stateIdentifier?.name ?? ''}</span
+						>
 
 						<span class="text-grayblue-dark font-medium">Delivery :</span>
-						<span class="text-pc-darkblue">
+						<span class="text-pc-darkblue dark:text-white">
 							{#if template.email}
 								Email ({template.email.name ?? ''})
 							{:else}
@@ -1638,38 +1657,49 @@
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Before Page:</span>
-						<span class="text-pc-darkblue">{template.beforeLandingPage?.name ?? ''}</span>
+						<span class="text-pc-darkblue dark:text-white"
+							>{template.beforeLandingPage?.name ?? ''}</span
+						>
 
 						<span class="text-grayblue-dark font-medium">Main Page:</span>
-						<span class="text-pc-darkblue">{template.landingPage?.name ?? ''}</span>
+						<span class="text-pc-darkblue dark:text-white">{template.landingPage?.name ?? ''}</span>
 
 						<span class="text-grayblue-dark font-medium">After Page:</span>
-						<span class="text-pc-darkblue">{template.afterLandingPage?.name ?? ''}</span>
+						<span class="text-pc-darkblue dark:text-white"
+							>{template.afterLandingPage?.name ?? ''}</span
+						>
 
 						<span class="text-grayblue-dark font-medium">Redirect URL:</span>
-						<span class="text-pc-darkblue">{template.afterLandingPageRedirectURL ?? ''}</span>
+						<span class="text-pc-darkblue dark:text-white"
+							>{template.afterLandingPageRedirectURL ?? ''}</span
+						>
 					</div>
 				</div>
 
 				<!-- Email Configuration -->
 				{#if template.email}
-					<div class="bg-white p-6 rounded-lg">
-						<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">Email</h3>
+					<div class="p-6 rounded-lg">
+						<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+							Email
+						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
 							<span class="text-grayblue-dark font-medium">Name:</span>
-							<span class="text-pc-darkblue">{template.email.name}</span>
+							<span class="text-pc-darkblue dark:text-white">{template.email.name}</span>
 
 							<span class="text-grayblue-dark font-medium">Envelope:</span>
-							<span class="text-pc-darkblue">{template.email.mailEnvelopeFrom}</span>
+							<span class="text-pc-darkblue dark:text-white">{template.email.mailEnvelopeFrom}</span
+							>
 
 							<span class="text-grayblue-dark font-medium">From:</span>
-							<span class="text-pc-darkblue">{template.email.mailHeaderFrom}</span>
+							<span class="text-pc-darkblue dark:text-white">{template.email.mailHeaderFrom}</span>
 
 							<span class="text-grayblue-dark font-medium">Subject:</span>
-							<span class="text-pc-darkblue">{template.email.mailHeaderSubject}</span>
+							<span class="text-pc-darkblue dark:text-white"
+								>{template.email.mailHeaderSubject}</span
+							>
 
 							<span class="text-grayblue-dark font-medium">Tracking:</span>
-							<span class="text-pc-darkblue"
+							<span class="text-pc-darkblue dark:text-white"
 								>{template.email.addTrackingPixel ? 'Enabled' : 'Disabled'}</span
 							>
 						</div>
@@ -1680,28 +1710,32 @@
 			<!-- Domain and SMTP Config -->
 			<div class="grid grid-cols-2 gap-6">
 				<!-- Domain Configuration -->
-				<div class="bg-white p-6 rounded-lg">
-					<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">Domain</h3>
+				<div class="p-6 rounded-lg">
+					<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+						Domain
+					</h3>
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
 						<span class="text-grayblue-dark font-medium">Host Site:</span>
-						<span class="text-pc-darkblue">{template.domain.hostWebsite ? 'Yes' : 'No'}</span>
+						<span class="text-pc-darkblue dark:text-white"
+							>{template.domain.hostWebsite ? 'Yes' : 'No'}</span
+						>
 
 						<span class="text-grayblue-dark font-medium">Domain:</span>
-						<span class="text-pc-darkblue">
+						<span class="text-pc-darkblue dark:text-white">
 							<a
 								href="https://{template.domain?.name}"
 								target="_blank"
-								class="text-pc-blue hover:underline"
+								class="text-cta-blue dark:text-white hover:underline"
 							>
 								{template.domain?.name}
 							</a>
 						</span>
 
 						<span class="text-grayblue-dark font-medium">URL Path:</span>
-						<span class="text-pc-darkblue">{template.urlPath}</span>
+						<span class="text-pc-darkblue dark:text-white">{template.urlPath}</span>
 
 						<span class="text-grayblue-dark font-medium">TLS:</span>
-						<span class="text-pc-darkblue">
+						<span class="text-pc-darkblue dark:text-white">
 							{template.domain.managedTLS ? 'Managed' : template.domain.ownManagedTLS ? 'Own' : ''}
 						</span>
 					</div>
@@ -1709,33 +1743,39 @@
 
 				<!-- SMTP/API Configuration -->
 				{#if template.smtpConfiguration || template.apiSender}
-					<div class="bg-white p-6 rounded-lg">
-						<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">
+					<div class="p-6 rounded-lg">
+						<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
 							{template.smtpConfiguration ? 'Email SMTP' : 'API Sender'}
 						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
 							{#if template.smtpConfiguration}
 								<span class="text-grayblue-dark font-medium">Name:</span>
-								<span class="text-pc-darkblue">{template.smtpConfiguration.name}</span>
+								<span class="text-pc-darkblue dark:text-white"
+									>{template.smtpConfiguration.name}</span
+								>
 
 								<span class="text-grayblue-dark font-medium">Host:</span>
-								<span class="text-pc-darkblue">{template.smtpConfiguration.host}</span>
+								<span class="text-pc-darkblue dark:text-white"
+									>{template.smtpConfiguration.host}</span
+								>
 
 								<span class="text-grayblue-dark font-medium">Port:</span>
-								<span class="text-pc-darkblue">{template.smtpConfiguration.port}</span>
+								<span class="text-pc-darkblue dark:text-white"
+									>{template.smtpConfiguration.port}</span
+								>
 
 								<span class="text-grayblue-dark font-medium">Username:</span>
-								<span class="text-pc-darkblue">
+								<span class="text-pc-darkblue dark:text-white">
 									{template.smtpConfiguration.username || 'Not configured'}
 								</span>
 
 								<span class="text-grayblue-dark font-medium">Allow insecure: </span>
-								<span class="text-pc-darkblue">
+								<span class="text-pc-darkblue dark:text-white">
 									{!template.smtpConfiguration.ignoreCertErrors ? 'Disabled' : 'Enabled'}
 								</span>
 							{:else}
 								<span class="text-grayblue-dark font-medium">API Sender:</span>
-								<span class="text-pc-darkblue">{template.apiSender?.name}</span>
+								<span class="text-pc-darkblue dark:text-white">{template.apiSender?.name}</span>
 							{/if}
 						</div>
 					</div>
@@ -1778,7 +1818,7 @@
 							? `Are you sure you want to send the campaign ${getMessageType()} again to:`
 							: `Are you sure you want to send the campaign ${getMessageType()} to:`}
 					</p>
-					<div class="bg-gray-50 p-3 rounded mb-4">
+					<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded mb-4">
 						<p class="font-medium">{sendMessageRecipient.name}</p>
 						<p class="text-gray-600">{sendMessageRecipient.email}</p>
 						<p class="text-xs text-blue-600 mt-1">

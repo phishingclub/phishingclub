@@ -374,8 +374,10 @@
 	let isDetailsVisible = $$slots.default;
 </script>
 
-<div class="w-80vw z-[9000] col-start-1 col-end-4 flex flex-col">
-	<div class="">
+<div
+	class="w-80vw z-[9000] col-start-1 col-end-4 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+>
+	<div class="bg-white dark:bg-gray-800 transition-colors duration-200">
 		<div class="mt-4 flex items-center flex-wrap">
 			<!-- mode tabs -->
 			<div class="flex">
@@ -385,9 +387,10 @@
 							isDetailsVisible = true;
 						}}
 						type="button"
-						class="h-8 border-2 rounded-md w-36 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 mb-2"
+						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md w-36 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 mb-2 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 transition-colors duration-200"
 						class:font-bold={isDetailsVisible}
 						class:bg-cta-blue={isDetailsVisible}
+						class:dark:bg-indigo-600={isDetailsVisible}
 						class:text-white={isDetailsVisible}
 					>
 						<svg
@@ -410,9 +413,10 @@
 							isDetailsVisible = false;
 						}}
 						type="button"
-						class="h-8 border-2 rounded-md w-36 text-center cursor-pointer hover:opacity-80 ml-1 flex items-center justify-center gap-2"
+						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md w-36 text-center cursor-pointer hover:opacity-80 ml-1 flex items-center justify-center gap-2 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 transition-colors duration-200"
 						class:font-bold={!isDetailsVisible}
 						class:bg-cta-blue={!isDetailsVisible}
+						class:dark:bg-indigo-600={!isDetailsVisible}
 						class:text-white={!isDetailsVisible}
 					>
 						<svg
@@ -443,7 +447,7 @@
 					<button
 						type="button"
 						on:click={triggerFileInput}
-						class="h-8 border-2 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2"
+						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -476,9 +480,10 @@
 								updatePreview();
 							}
 						}}
-						class="h-8 border-2 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2"
+						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 						class:font-bold={isPreviewVisible}
 						class:bg-cta-blue={isPreviewVisible}
+						class:dark:bg-indigo-600={isPreviewVisible}
 						class:text-white={isPreviewVisible}
 					>
 						<svg
@@ -499,7 +504,7 @@
 
 					<!-- template selector -->
 					<select
-						class="h-8 border-2 rounded-md px-3 bg-white text-black cursor-pointer"
+						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200"
 						on:change={(e) => {
 							const t = /** @type {HTMLSelectElement} */ (e.target);
 							if (t.value) {
@@ -524,7 +529,7 @@
 							id="domain-select"
 							bind:value={selectedDomain}
 							on:change={selectPreviewDomain}
-							class="h-8 border-2 rounded-md px-3 bg-white text-black cursor-pointer"
+							class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200"
 						>
 							<option value="">Select preview domain...</option>
 							{#each domainMap.values() as domain}
@@ -537,7 +542,7 @@
 					<button
 						type="button"
 						on:click={openFullPagePreview}
-						class="h-8 border-2 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2"
+						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -563,8 +568,7 @@
 		<!-- details -->
 		{#if $$slots.default}
 			<div
-				class="flex flex-col lg:flex-row lg:items-center h-auto w-full justify-between mb-4"
-				class:lg:h-28={isDetailsVisible}
+				class="flex flex-col lg:flex-row lg:items-center h-auto w-full justify-between mb-4 bg-white dark:bg-gray-800 transition-colors duration-200"
 			>
 				{#if isDetailsVisible}
 					<slot />
@@ -575,21 +579,30 @@
 
 	<div class="flex h-full">
 		<div
-			class="flex flex-col border-2 border-black {!isPreviewVisible ? 'w-80vw' : 'w-1/2'}"
+			class="flex flex-col border-2 border-black dark:border-gray-600 bg-white dark:bg-gray-900 {!isPreviewVisible
+				? 'w-80vw'
+				: 'w-1/2'} transition-colors duration-200"
 			class:h-55vh={isDetailsVisible}
 			class:h-67vh={!isDetailsVisible}
 		>
 			<div id="monaco-editor" class="h-full" />
 		</div>
-		<div class="bg-cta-blue cursor-move w-1" class:hidden={!isPreviewVisible}>&nbsp;</div>
+		<div
+			class="bg-cta-blue dark:bg-indigo-600 cursor-move w-1 transition-colors duration-200"
+			class:hidden={!isPreviewVisible}
+		>
+			&nbsp;
+		</div>
 		{#if isPreviewVisible}
-			<div class="w-1/2 border-2 border-black">
+			<div
+				class="w-1/2 border-2 border-black dark:border-gray-600 bg-white transition-colors duration-200"
+			>
 				<iframe
 					bind:this={previewFrame}
 					sandbox="allow-forms allow-modals allow-popups allow-scripts allow-pointer-lock"
 					title="preview"
 					class="h-full w-full"
-					style="color-scheme: normal"
+					style="color-scheme: light;"
 				/>
 			</div>
 		{/if}

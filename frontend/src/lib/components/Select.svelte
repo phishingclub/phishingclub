@@ -21,10 +21,12 @@
 	});
 </script>
 
-<div >
-	<label for="pet-select">Show:</label>
+<div>
+	<label for="pet-select" class="text-gray-600 dark:text-gray-300 transition-colors duration-200"
+		>Show:</label
+	>
 	<select
-		class="bg-grayblue-light px-2 py-1 rounded-md text-gray-600 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 focus:bg-gray-100"
+		class="bg-grayblue-light dark:bg-gray-700 px-2 py-1 rounded-md text-gray-600 dark:text-gray-200 border border-transparent dark:border-gray-600 focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-blue-500 focus:bg-gray-100 dark:focus:bg-gray-600 transition-colors duration-200"
 		name="entries"
 		id="entries"
 		bind:value

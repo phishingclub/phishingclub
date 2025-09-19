@@ -72,6 +72,8 @@
 	// Toggle for including test campaigns
 	let includeTestCampaigns = false;
 
+	// Use consistent colors with campaign detail page - these are already well-suited for both light and dark modes
+
 	// Handler for when toggle changes
 	const handleToggleChange = async () => {
 		// Wait for binding to update
@@ -292,7 +294,7 @@
 <main>
 	<div class="flex justify-between">
 		<Headline>Dashboard</Headline>
-		<div class="flex gap-4 items-baseline">
+		<div class="flex gap-4 items-center">
 			<CheckboxField
 				bind:value={includeTestCampaigns}
 				on:change={handleToggleChange}
@@ -449,13 +451,13 @@
 			<StatsCard
 				title="Completed Campaigns"
 				value={finished}
-				borderColor="border-campaign-completed"
-				iconColor="text-campaign-completed"
+				borderColor="border-message-read"
+				iconColor="text-message-read"
 			>
 				<svg
 					slot="icon"
 					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2 text-campaign-completed"
+					class="h-5 w-5 ml-2 text-message-read"
 					fill="none"
 					viewBox="0 0 24 24"
 					stroke="currentColor"
@@ -474,13 +476,13 @@
 			<StatsCard
 				title="Repeat Offenders"
 				value={repeatOffenders}
-				borderColor="border-repeart-submissions"
-				iconColor="text-repeart-submissions"
+				borderColor="border-submitted-data"
+				iconColor="text-submitted-data"
 			>
 				<svg
 					slot="icon"
 					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2 text-repeart-submissions"
+					class="h-5 w-5 ml-2 text-submitted-data"
 					fill="none"
 					viewBox="0 0 24 24"
 					stroke="currentColor"

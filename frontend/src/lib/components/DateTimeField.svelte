@@ -112,7 +112,7 @@
 	class:w-60={labelWidth === 'large'}
 >
 	<div class="flex items-center">
-		<p class="font-semibold text-slate-600 py-2">
+		<p class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200">
 			<slot />
 		</p>
 		{#if toolTipText.length > 0}
@@ -121,8 +121,8 @@
 			</ToolTip>
 		{/if}
 		{#if optional === true}
-			<div class="bg-gray-100 ml-2 px-2 rounded-md">
-				<p class="text-slate-600 text-xs">optional</p>
+			<div class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200">
+				<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
 			</div>
 		{/if}
 	</div>
@@ -139,7 +139,7 @@
 		{readonly}
 		{required}
 		autocomplete="off"
-		class="w-44 rounded-md py-2 pl-2 text-gray-600 border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 focus:bg-gray-100 bg-grayblue-light font-normal"
+		class="w-44 rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-gray-500 focus:bg-gray-100 dark:focus:bg-gray-600 bg-grayblue-light dark:bg-gray-700 font-normal transition-colors duration-200"
 		class:opacity-90={readonly}
 	/>
 	<input
@@ -153,7 +153,8 @@
 		{readonly}
 		{required}
 		autocomplete="off"
-		class="ml-2 rounded-md py-2 pl-2 text-gray-600 text-center border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 focus:bg-gray-100 bg-grayblue-light font-normal"
+		class="ml-2 rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 text-center border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-gray-500 focus:bg-gray-100 dark:focus:bg-gray-600 bg-grayblue-light dark:bg-gray-700 font-normal transition-colors duration-200"
 		class:bg-yellow-200={readonly}
+		class:dark:bg-yellow-700={readonly}
 	/>
 </div>

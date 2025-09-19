@@ -139,16 +139,22 @@
 
 <HeadTitle title="Setup" />
 
-<div class="inset-0 z-50 min-h-screen">
+<div
+	class="inset-0 z-50 min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+>
 	<div class="flex flex-col justify-center py-12 sm:px-6 lg:px-8">
 		<div class="flex justify-center">
 			<img src="/logo-blue.svg" class="w-48" alt="Phishing Club" />
 		</div>
-		<p class="mt-2 text-center text-sm text-gray-600">
+		<p
+			class="mt-2 text-center text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200"
+		>
 			Complete the setup to get started with Phishing Club
 		</p>
 
-		<div class="sm:mx-auto sm:max-w-2xl mt-8">
+		<div
+			class="sm:mx-auto sm:max-w-2xl mt-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg dark:shadow-gray-900/50 transition-colors duration-200"
+		>
 			<div class="flex justify-between items-center mb-8 w-full px-4">
 				{#each steps as step, index}
 					<div class="flex flex-col items-center w-32">
@@ -263,7 +269,7 @@
 								{#if currentStep > 1}
 									<button
 										type="button"
-										class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+										class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
 										on:click={previousStep}
 									>
 										<svg

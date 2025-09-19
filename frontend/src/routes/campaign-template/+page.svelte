@@ -661,7 +661,9 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 			<div class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-8">
 				<!-- Basic Information Section -->
 				<div class="w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Basic Information</h3>
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+						Basic Information
+					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 						<div>
 							<TextField
@@ -689,7 +691,9 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 
 				<!-- Delivery Configuration Section -->
 				<div class="w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Delivery Configuration</h3>
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+						Delivery Configuration
+					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 						<div>
 							{#if formValues.templateType === 'Email' || !formValues.templateType}
@@ -721,7 +725,9 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 
 				<!-- Domain & URL Configuration Section -->
 				<div class="w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Domain & URL Configuration</h3>
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+						Domain & URL Configuration
+					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
 						<div>
 							<TextFieldSelect
@@ -764,7 +770,7 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 
 				<!-- Page Flow Section -->
 				<div class="w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Page Flow</h3>
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Page Flow</h3>
 					<div class="grid grid-cols-1 md:grid-cols-5 gap-6">
 						<div class="md:col-span-2 flex flex-col space-y-4">
 							<div>

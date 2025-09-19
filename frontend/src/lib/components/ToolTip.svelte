@@ -10,7 +10,7 @@
 </script>
 
 <div
-	class="rounded-full bg-gray-600 text-white w-4 h-4 z-30 text-center ml-2 relative cursor-pointer hover:bg-gray-500"
+	class="rounded-full bg-gray-600 dark:bg-gray-500 text-white w-4 h-4 z-30 text-center ml-2 relative cursor-pointer hover:bg-gray-500 dark:hover:bg-gray-400 transition-colors duration-200"
 	role="tooltip"
 	aria-describedby={tooltipId}
 	on:mouseenter={(e) => {
@@ -27,7 +27,7 @@
 {#if showToolTip}
 	<div
 		id={tooltipId}
-		class="bg-gray-600 text-white w-max mt-2 px-2 py-2 rounded-md shadow-xl z-40"
+		class="bg-gray-600 dark:bg-gray-700 text-white w-max mt-2 px-2 py-2 rounded-md shadow-xl dark:shadow-gray-900/70 z-40 transition-colors duration-200"
 		style={tooltipStyle}
 	>
 		<p><slot /></p>

@@ -1,104 +1,108 @@
 import { writable } from 'svelte/store';
+import { browser } from '$app/environment';
 
-// modeLight is the state for light mode
+// mode constants
 export const modeLight = 'light';
-// modeDark is the state for dark mode
 export const modeDark = 'dark';
-// modeNotSet is the state for when the mode is not set
 const modeNotSet = 'not-set';
-// modeKey is the key used to store the mode in localstorage
 const modeKey = 'theme-mode';
 
 /**
- * theme is either 'light' or 'dark' -
+ * theme store - either 'light' or 'dark'
  * use it to know which theme is current and subscribe to know when it changes
  */
-export const theme = writable('dark');
+export const theme = writable(modeLight);
 
 /**
- * toggleMode is used to toggle the theme mode from light to dark or vice versa
- * it is used by the toggle button in the header
- * @returns {void} - the new mode, either light or dark
+ * toggle the theme mode from light to dark or vice versa
+ * @returns {void}
  */
 export const toggleMode = () => {
 	theme.update((current) => {
-		let mode = current;
-		switch (mode) {
-			case modeLight:
-				mode = modeDark;
-				break;
-			case modeDark:
-				mode = modeLight;
-				break;
-			default:
-				throw new Error(`Unknown mode passed to changeMode: ${mode} - must be 'light' or 'dark'`);
-		}
-		setModeToLocalStorage(mode);
-		return mode;
+		const newMode = current === modeLight ? modeDark : modeLight;
+		setModeToLocalStorage(newMode);
+		applyThemeToHTML(newMode);
+		return newMode;
 	});
 };
 
 /**
- * setupTheme is used to set the theme mode
- * it must be called once it the bootstrapping of the application
- * it checks if a prefered mode is set in localstorage, if not
- * it checks the OS preferred mode and if that is not set it defaults to light
- * the default mode is saved to localstorage
- *
- * @returns {string} - the mode that was set, either light or dark
+ * setup the theme mode - must be called once during app bootstrapping
+ * checks localStorage, then OS preference, defaults to light
+ * @returns {string} the mode that was set
  */
 export function setupTheme() {
+	if (!browser) return modeLight;
+
 	let mode = getModeFromLocalStorage();
 	if (mode === modeNotSet) {
 		mode = getOSPreferredMode();
 		setModeToLocalStorage(mode);
 	}
-	changeMode(mode);
+
+	applyThemeToHTML(mode);
+	theme.set(mode);
 	return mode;
 }
 
 /**
- * getOSPreferredMode is used to get the OS preferred light or dark mode
- * @returns {string} - the mode that was set, either light or dark
+ * get the OS preferred light or dark mode
+ * @returns {string} either 'light' or 'dark'
  */
 export const getOSPreferredMode = () => {
+	if (!browser) return modeLight;
+
 	const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-	if (darkMediaQuery.matches) {
-		return modeDark;
-	}
-	return modeLight;
+	return darkMediaQuery.matches ? modeDark : modeLight;
 };
 
-/*
- * This function is used to set the theme mode in the local storage
- * @param {string} mode - light or dark
- * @returns {string}
+/**
+ * get the theme mode from localStorage
+ * @returns {string} the stored mode or 'not-set'
  */
 export const getModeFromLocalStorage = () => {
+	if (!browser) return modeNotSet;
 	return localStorage.getItem(modeKey) ?? modeNotSet;
 };
 
 /**
- * setModeToLocalStorage is used to set the theme mode in the local storage
- * @param {string} mode  - light or dark
+ * set the theme mode in localStorage
+ * @param {string} mode - either 'light' or 'dark'
  */
 export const setModeToLocalStorage = (mode) => {
+	if (!browser) return;
 	localStorage.setItem(modeKey, mode);
 };
 
 /**
- * changeMode is used to change the theme mode from light to dark or vice versa
- * @param {string} mode - light or dark
+ * apply the theme to the HTML element by adding/removing the 'dark' class
+ * @param {string} mode - either 'light' or 'dark'
  */
-const changeMode = (mode) => {
-	switch (mode) {
-		case modeLight:
-			theme.set(modeLight);
-			break;
-		case modeDark:
-			theme.set(modeDark);
-			break;
-		default:
-			throw new Error(`Unknown mode passed to changeMode: ${mode} - must be 'light' or 'dark'`);
+const applyThemeToHTML = (mode) => {
+	if (!browser) return;
+
+	const html = document.documentElement;
+	if (mode === modeDark) {
+		html.classList.add('dark');
+	} else {
+		html.classList.remove('dark');
 	}
+};
+
+/**
+ * set up theme change listener for OS preference changes
+ */
+export const setupOSThemeListener = () => {
+	if (!browser) return;
+
+	const darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+	darkMediaQuery.addEventListener('change', (e) => {
+		// only update if user hasn't manually set a preference
+		const storedMode = getModeFromLocalStorage();
+		if (storedMode === modeNotSet) {
+			const newMode = e.matches ? modeDark : modeLight;
+			applyThemeToHTML(newMode);
+			theme.set(newMode);
+		}
+	});
 };

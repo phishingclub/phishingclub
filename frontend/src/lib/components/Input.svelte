@@ -10,7 +10,9 @@
 </script>
 
 <div class="flex flex-col w-full p-4 h-24">
-	<label for={fieldName} class="text-md font-semibold font-titilium text-pc-darkblue"
+	<label
+		for={fieldName}
+		class="text-md font-semibold font-titilium text-pc-darkblue dark:text-gray-200"
 		>{fieldName}</label
 	>
 	<input
@@ -32,6 +34,6 @@
 		{type}
 		id={fieldName}
 		name={fieldName}
-		class="w-full p-2 rounded bg-pc-lightblue focus:outline-none focus:ring-0 focus:border-cta-blue focus:border-2"
+		class="w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-blue-500 focus:border-2 transition-colors duration-200"
 	/>
 </div>

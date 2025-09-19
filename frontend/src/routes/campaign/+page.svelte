@@ -1042,7 +1042,9 @@
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
 		<div class="relative flex justify-between items-center mb-8 w-full px-4">
 			<!-- Connector Line -->
-			<div class="absolute h-[2px] bg-gray-200 top-1/2 left-0 right-0 -translate-y-1/2 -z-10" />
+			<div
+				class="absolute h-[2px] bg-gray-200 dark:bg-gray-600 top-1/2 left-0 right-0 -translate-y-1/2 -z-10 transition-colors duration-200"
+			/>
 
 			{#each campaignSteps as step, index}
 				<div class="flex flex-col items-center w-20 sm:w-32">
@@ -1053,10 +1055,10 @@
           transition-colors duration-200
           ${
 						currentStep > index + 1
-							? 'bg-blue-300 text-white'
+							? 'bg-blue-300 dark:bg-indigo-700 text-white'
 							: currentStep === index + 1
-								? 'bg-blue-600 text-white'
-								: 'bg-white text-gray-500 border-2 border-gray-300'
+								? 'bg-blue-600 dark:bg-indigo-600 text-white'
+								: 'bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-300 border-2 border-gray-300 dark:border-gray-600'
 					}
         `}
 					>
@@ -1083,7 +1085,9 @@
 						class={`
           mt-2 text-xs sm:text-sm font-medium text-center
           ${
-						currentStep > index + 1 || currentStep === index + 1 ? 'text-blue-600' : 'text-gray-500'
+						currentStep > index + 1 || currentStep === index + 1
+							? 'text-blue-600 dark:text-blue-400'
+							: 'text-gray-500 dark:text-gray-400'
 					}
         `}
 					>
@@ -1167,7 +1171,7 @@
 										Delivery start
 									</DateTimeField>
 									<button
-										class="text-cta-blue hover:text-blue-700 text-sm"
+										class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200"
 										on:click|preventDefault={() =>
 											(formValues.sendStartAt = new Date().toISOString())}
 									>
@@ -1178,7 +1182,9 @@
 								{#if formValues.sendStartAt}
 									<div class="pl-36 pt-4 pb-6">
 										<div class="flex flex-col gap-2">
-											<p class="text-sm font-semibold text-slate-600">
+											<p
+												class="text-sm font-semibold text-slate-600 dark:text-gray-300 transition-colors duration-200"
+											>
 												Distribution Speed
 
 												<span class="italic font-normal">
@@ -1237,7 +1243,7 @@
 									</DateTimeField>
 									{#if spreadOption === SPREAD_MANUAL}
 										<button
-											class="text-cta-blue hover:text-blue-700 text-sm"
+											class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200"
 											on:click|preventDefault={() => {
 												formValues.sendEndAt = new Date().toISOString();
 											}}
@@ -1472,38 +1478,56 @@
 							<!-- First Row: Basic Info and Recipients -->
 							<div class="grid grid-cols-2 gap-6">
 								<!-- Basic Information -->
-								<div class="bg-white p-6 rounded-lg shadow-sm">
-									<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">
+								<div
+									class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm transition-colors duration-200"
+								>
+									<h3
+										class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b dark:border-gray-600 pb-2 transition-colors duration-200"
+									>
 										Basic Information
 									</h3>
 									<div class="grid grid-cols-[120px_1fr] gap-y-3">
 										<span class="text-grayblue-dark font-medium">Name:</span>
-										<span class="text-pc-darkblue">{formValues.name || 'Not set'}</span>
+										<span class="text-pc-darkblue dark:text-white"
+											>{formValues.name || 'Not set'}</span
+										>
 
 										<span class="text-grayblue-dark font-medium">Template:</span>
-										<span class="text-pc-darkblue">{formValues.template || 'Not set'}</span>
+										<span class="text-pc-darkblue dark:text-white"
+											>{formValues.template || 'Not set'}</span
+										>
 
 										<span class="text-grayblue-dark font-medium">Type:</span>
-										<span class="text-pc-darkblue">{formValues.isTest ? 'Test' : 'Production'}</span
+										<span class="text-pc-darkblue dark:text-white"
+											>{formValues.isTest ? 'Test' : 'Production'}</span
+										>
 										>
 									</div>
 								</div>
 
 								<!-- Recipients -->
-								<div class="bg-white p-6 rounded-lg shadow-sm">
-									<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">
+								<div
+									class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm transition-colors duration-200"
+								>
+									<h3
+										class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b dark:border-gray-600 pb-2 transition-colors duration-200"
+									>
 										Recipients
 									</h3>
 									<div class="grid grid-cols-[120px_1fr] gap-y-3">
 										<span class="text-grayblue-dark font-medium">Groups:</span>
-										<span class="text-pc-darkblue">
+										<span
+											class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+										>
 											{formValues.recipientGroups.length
 												? formValues.recipientGroups.join(', ')
 												: 'None selected'}
 										</span>
 
 										<span class="text-grayblue-dark font-medium">Total:</span>
-										<span class="text-pc-darkblue">{formValues.selectedCount} recipients</span>
+										<span class="text-pc-darkblue dark:text-white"
+											>{formValues.selectedCount} recipients</span
+										>
 									</div>
 								</div>
 							</div>
@@ -1511,8 +1535,12 @@
 							<!-- Second Row: Email and Schedule -->
 							<div class="grid grid-cols-2 gap-6">
 								<!-- Email/API Sender Information -->
-								<div class="bg-white p-6 rounded-lg shadow-sm">
-									<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">
+								<div
+									class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm transition-colors duration-200"
+								>
+									<h3
+										class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b dark:border-gray-600 pb-2 transition-colors duration-200"
+									>
 										Delivery Details
 									</h3>
 									{#await getTemplateDetails(formValues.template)}
@@ -1521,36 +1549,44 @@
 										{#if template?.apiSender}
 											<div class="grid grid-cols-[120px_1fr] gap-y-3">
 												<span class="text-grayblue-dark font-medium">Type:</span>
-												<span class="text-pc-darkblue font-semibold">API Sender</span>
+												<span class="text-pc-darkblue dark:text-white font-semibold"
+													>API Sender</span
+												>
 
 												<span class="text-grayblue-dark font-medium">Name:</span>
-												<span class="text-pc-darkblue">{template.apiSender.name || 'Not set'}</span>
+												<span class="text-pc-darkblue dark:text-white"
+													>{template.apiSender.name || 'Not set'}</span
+												>
 
 												{#if template?.email}
 													<span class="text-grayblue-dark font-medium">Email:</span>
-													<span class="text-pc-darkblue">{template.email.name || 'Not set'}</span>
+													<span class="text-pc-darkblue dark:text-white"
+														>{template.email.name || 'Not set'}</span
+													>
 												{/if}
 											</div>
 										{:else if template?.email}
 											<div class="grid grid-cols-[120px_1fr] gap-y-3">
 												<span class="text-grayblue-dark font-medium">Type:</span>
-												<span class="text-pc-darkblue font-semibold">SMTP</span>
+												<span class="text-pc-darkblue dark:text-white font-semibold">SMTP</span>
 
 												<span class="text-grayblue-dark font-medium">Name:</span>
-												<span class="text-pc-darkblue">{template.email.name || 'Not set'}</span>
+												<span class="text-pc-darkblue dark:text-white"
+													>{template.email.name || 'Not set'}</span
+												>
 
 												<span class="text-grayblue-dark font-medium">From:</span>
-												<span class="text-pc-darkblue"
+												<span class="text-pc-darkblue dark:text-white"
 													>{template.email.mailHeaderFrom || 'Not set'}</span
 												>
 
 												<span class="text-grayblue-dark font-medium">Mail from:</span>
-												<span class="text-pc-darkblue"
+												<span class="text-pc-darkblue dark:text-white"
 													>{template.email.mailEnvelopeFrom || 'Not set'}</span
 												>
 
 												<span class="text-grayblue-dark font-medium">Subject:</span>
-												<span class="text-pc-darkblue"
+												<span class="text-pc-darkblue dark:text-white"
 													>{template.email.mailHeaderSubject || 'Not set'}</span
 												>
 											</div>
@@ -1565,43 +1601,58 @@
 								</div>
 
 								<!-- Schedule -->
-								<div class="bg-white p-6 rounded-lg shadow-sm">
-									<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">
+								<div
+									class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm transition-colors duration-200"
+								>
+									<h3
+										class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b dark:border-gray-600 pb-2 transition-colors duration-200"
+									>
 										Schedule
 									</h3>
 									<div class="grid grid-cols-[120px_1fr] gap-y-3">
 										<span class="text-grayblue-dark font-medium">Type:</span>
-										<span class="text-pc-darkblue capitalize">{scheduleType}</span>
+										<span class="text-pc-darkblue dark:text-white capitalize">{scheduleType}</span>
 
 										{#if scheduleType === 'basic'}
 											<span class="text-grayblue-dark font-medium">Start:</span>
-											<span class="text-pc-darkblue">
+											<span
+												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+											>
 												<Datetime value={formValues.sendStartAt} />
 												<RelativeTime value={formValues.sendStartAt} />
 											</span>
 
-											<span class="text-grayblue-dark font-medium">End:</span>
-											<span class="text-pc-darkblue">
+											<span
+												class="text-grayblue-dark dark:text-gray-300 font-medium transition-colors duration-200"
+												>End:</span
+											>
+											<span
+												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+											>
 												<Datetime value={formValues.sendEndAt} />
 												<RelativeTime value={formValues.sendEndAt} />
 											</span>
 
 											{#if spreadOption && spreadOption !== SPREAD_MANUAL}
 												<span class="text-grayblue-dark font-medium">Spread:</span>
-												<span class="text-pc-darkblue">
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
 													{spreadOptionMap.byValue(spreadOption)}
 												</span>
 											{/if}
 										{:else if scheduleType === 'schedule'}
 											<span class="text-grayblue-dark font-medium">Active days:</span>
-											<span class="text-pc-darkblue">
+											<span
+												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+											>
 												{formValues.constraintWeekDays.map((d) => dayMap[d]).join(', ') ||
 													'None selected'}
 											</span>
 
 											{#if formValues.contraintStartTime && formValues.contraintEndTime}
 												<span class="text-grayblue-dark font-medium">Hours:</span>
-												<span class="text-pc-darkblue">
+												<span class="text-pc-darkblue dark:text-white">
 													{formValues.contraintStartTime} - {formValues.contraintEndTime}
 												</span>
 											{/if}
@@ -1609,7 +1660,7 @@
 
 										{#if formValues.closeAt}
 											<span class="text-grayblue-dark font-medium">Close at:</span>
-											<span class="text-pc-darkblue">
+											<span class="text-pc-darkblue dark:text-white">
 												<Datetime value={formValues.closeAt} />
 												<RelativeTime value={formValues.closeAt} />
 											</span>
@@ -1620,13 +1671,17 @@
 
 							<!-- Third Row: Security & Privacy -->
 							<div class="grid grid-cols-1 gap-6">
-								<div class="bg-white p-6 rounded-lg shadow-sm">
-									<h3 class="text-xl font-semibold text-pc-darkblue mb-4 border-b pb-2">
+								<div
+									class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm transition-colors duration-200"
+								>
+									<h3
+										class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b dark:border-gray-600 pb-2 transition-colors duration-200"
+									>
 										Security & Privacy
 									</h3>
 									<div class="grid grid-cols-[120px_1fr] gap-y-3">
 										<span class="text-grayblue-dark font-medium">IP Filtering:</span>
-										<span class="text-pc-darkblue">
+										<span class="text-pc-darkblue dark:text-white">
 											{#if allowDenyType === 'none'}
 												None
 											{:else}
@@ -1638,7 +1693,7 @@
 										</span>
 
 										<span class="text-grayblue-dark font-medium">Save data:</span>
-										<span class="text-pc-darkblue"
+										<span class="text-pc-darkblue dark:text-white"
 											>{formValues.saveSubmittedData ? 'Enabled' : 'Disabled'}</span
 										>
 
@@ -1651,17 +1706,20 @@
 
 										{#if formValues.webhookValue}
 											<span class="text-grayblue-dark font-medium">Webhook:</span>
-											<span class="text-pc-darkblue">{formValues.webhookValue}</span>
+											<span class="text-pc-darkblue dark:text-white">{formValues.webhookValue}</span
+											>
 										{/if}
 
 										{#if formValues.denyPageValue}
 											<span class="text-grayblue-dark font-medium">Deny Page:</span>
-											<span class="text-pc-darkblue">{formValues.denyPageValue}</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.denyPageValue}</span
+											>
 										{/if}
 
 										{#if formValues.anonymizeAt}
 											<span class="text-grayblue-dark font-medium">Anonymize at:</span>
-											<span class="text-pc-darkblue">
+											<span class="text-pc-darkblue dark:text-white">
 												<Datetime value={formValues.anonymizeAt} />
 												<RelativeTime value={formValues.anonymizeAt} />
 											</span>
@@ -1674,11 +1732,13 @@
 				</FormColumns>
 			{/if}
 			<FormError message={modalError} />
-			<div class="col-span-3 flex justify-between items-center w-full mt-2 border-t py-6">
+			<div
+				class="col-span-3 flex justify-between items-center w-full mt-2 border-t dark:border-gray-600 py-6 transition-colors duration-200"
+			>
 				{#if currentStep > 1}
 					<button
 						type="button"
-						class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+						class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
 						on:click={previousStep}
 					>
 						<svg

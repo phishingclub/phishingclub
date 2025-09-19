@@ -34,7 +34,7 @@
 </script>
 
 <th
-	class="pl-4 bg-grayblue-light py-4 border-hidden first:rounded-tl-lg first:rounded-bl-lg last:rounded-tr-lg last:border-4 min-w-48"
+	class="pl-4 bg-grayblue-light dark:bg-gray-700 py-4 border-hidden first:rounded-tl-lg first:rounded-bl-lg last:rounded-tr-lg last:border-4 min-w-48 transition-colors duration-200"
 	class:rounded-br-lg={last}
 	class:rounded-tr-lg={last}
 	class:w-48={size === 'small'}
@@ -49,7 +49,9 @@
 		on:click|preventDefault={setSortAndSortBy}
 	>
 		<div class="w-full">
-			<p class="font-bold text-slate-600 text-{alignText} flex">
+			<p
+				class="font-bold text-slate-600 dark:text-gray-200 text-{alignText} flex transition-colors duration-200"
+			>
 				{#if !isGhost}
 					{title.length ? title : column}
 				{:else}
@@ -58,7 +60,7 @@
 				{#if sortable && column.toLowerCase() === sortBy.toLowerCase() && !isGhost}
 					<div
 						class:bg-transparent={sortOrder === ''}
-						class="flex justify-center items-center w-6 h-6 ml-2 rounded-md bg-cta-blue"
+						class="flex justify-center items-center w-6 h-6 ml-2 rounded-md bg-cta-blue dark:bg-blue-600 transition-colors duration-200"
 					>
 						{#if sortOrder === 'asc'}
 							<div>

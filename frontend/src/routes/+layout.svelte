@@ -17,6 +17,7 @@
 	import DesktopMenu from '$lib/components/header/DesktopMenu.svelte';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import Header from '$lib/components/header/Header.svelte';
+	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
 	// Removed feature flags import - no longer needed
 
 	// services
@@ -50,6 +51,10 @@
 	});
 
 	onMount(() => {
+		// initialize theme system
+		setupTheme();
+		setupOSThemeListener();
+
 		(async () => {
 			// handle session
 			// if the user already has a active session, then the session will be
@@ -197,7 +202,7 @@
 	};
 </script>
 
-<div class="flex flex-col">
+<div class="flex flex-col min-w-[768px]">
 	<!-- global components -->
 	<DeveloperPanel />
 	<Loader />
@@ -235,6 +240,8 @@
 
 		/* font-family: "Phudu"; */
 		font-family: 'Titillium Web';
+		min-width: 768px;
+		overflow-x: auto;
 	}
 	:global(table) {
 		user-select: text;

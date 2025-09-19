@@ -354,8 +354,10 @@
 			<FormColumns>
 				<FormColumn>
 					<!-- Basic Information Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue mb-3">Basic Information</h3>
+					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							Basic Information
+						</h3>
 						<TextField
 							required
 							minLength={1}
@@ -366,8 +368,10 @@
 					</div>
 
 					<!-- API Configuration Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue mb-3">API Configuration</h3>
+					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							API Configuration
+						</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 							<div class="md:col-span-2">
 								<TextField
@@ -404,7 +408,9 @@
 
 					<!-- Headers and Body Section -->
 					<div class="mb-6 pt-4 pb-2 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue mb-3">Request Details</h3>
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							Request Details
+						</h3>
 						<div class="space-y-5">
 							<TextareaField
 								optional={true}
@@ -420,9 +426,9 @@ X-Custom-Header: Hello Friend"
 							>
 							<div class="flex flex-col py-2 w-full">
 								<div class="flex items-center">
-									<p class="font-bold text-slate-600 py-2">Request Body</p>
-									<div class="bg-gray-100 ml-2 px-2 rounded-md">
-										<p class="text-slate-600 text-xs">optional</p>
+									<p class="font-bold text-slate-600 dark:text-gray-300 py-2">Request Body</p>
+									<div class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md">
+										<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
 									</div>
 								</div>
 								<SimpleCodeEditor
@@ -441,8 +447,10 @@ X-Custom-Header: Hello Friend"
 					</div>
 
 					<!-- Response Validation Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue mb-3">Response Validation</h3>
+					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							Response Validation
+						</h3>
 						<div class="space-y-5">
 							<div>
 								<TextField
@@ -481,7 +489,9 @@ X-Custom-Header: Hello Friend"
 
 					<!-- Custom Fields Section -->
 					<div class="pt-4 pb-2 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue mb-3">Custom Fields</h3>
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							Custom Fields
+						</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 							<div>
 								<TextField
@@ -536,9 +546,13 @@ X-Custom-Header: Hello Friend"
 		<div class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-6 select-text">
 			{#if !testResponse.error}
 				<!-- Successful Test -->
-				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Request Details</h3>
-					<div class="p-3 bg-gray-50 rounded-md border border-gray-200">
+				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+						Request Details
+					</h3>
+					<div
+						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+					>
 						<div class="font-medium">
 							{testResponse.apiSender?.requestMethod}
 							{testResponse?.request?.url}
@@ -546,9 +560,13 @@ X-Custom-Header: Hello Friend"
 					</div>
 				</div>
 
-				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Request Headers</h3>
-					<div class="p-3 bg-gray-50 rounded-md border border-gray-200">
+				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+						Request Headers
+					</h3>
+					<div
+						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+					>
 						<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-60">{headersToString(
 								testResponse.request?.headers
 							) || 'No headers'}</pre>
@@ -556,17 +574,23 @@ X-Custom-Header: Hello Friend"
 				</div>
 
 				<div class="pt-4 pb-2 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Request Body</h3>
-					<div class="p-3 bg-gray-50 rounded-md border border-gray-200">
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Request Body</h3>
+					<div
+						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+					>
 						<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-80">{testResponse.request
 								?.body || 'Empty body'}</pre>
 					</div>
 				</div>
 				<!-- response -->
-				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Response Status</h3>
+				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+						Response Status
+					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-						<div class="p-3 bg-gray-50 rounded-md border border-gray-200">
+						<div
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+						>
 							<div class="text-sm font-medium mb-1">Received:</div>
 							<div
 								class={testResponse.response?.code ==
@@ -577,23 +601,31 @@ X-Custom-Header: Hello Friend"
 								{testResponse.response?.code}
 							</div>
 						</div>
-						<div class="p-3 bg-gray-50 rounded-md border border-gray-200">
+						<div
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+						>
 							<div class="text-sm font-medium mb-1">Expected:</div>
 							<div>{testResponse.apiSender?.expectedResponseStatusCode}</div>
 						</div>
 					</div>
 				</div>
 
-				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Response Headers</h3>
+				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+						Response Headers
+					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-						<div class="p-3 bg-gray-50 rounded-md border border-gray-200">
+						<div
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+						>
 							<div class="text-sm font-medium mb-1">Received:</div>
 							<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-60">{headersToString(
 									testResponse.response?.headers
 								) || 'No headers'}</pre>
 						</div>
-						<div class="p-3 bg-gray-50 rounded-md border border-gray-200">
+						<div
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+						>
 							<div class="text-sm font-medium mb-1">Expected to contain:</div>
 							<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-60">{testResponse
 									.apiSender?.expectedResponseHeaders || 'No validation specified'}</pre>
@@ -602,14 +634,18 @@ X-Custom-Header: Hello Friend"
 				</div>
 
 				<div class="pt-4 pb-2 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Response Body</h3>
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Response Body</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-						<div class="p-3 bg-gray-50 rounded-md border border-gray-200">
+						<div
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+						>
 							<div class="text-sm font-medium mb-1">Received:</div>
 							<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-80">{testResponse
 									.response?.body || 'Empty response'}</pre>
 						</div>
-						<div class="p-3 bg-gray-50 rounded-md border border-gray-200">
+						<div
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+						>
 							<div class="text-sm font-medium mb-1">Expected to contain:</div>
 							<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-80">{testResponse
 									.apiSender?.expectedResponseBody || 'No validation specified'}</pre>
@@ -618,9 +654,13 @@ X-Custom-Header: Hello Friend"
 				</div>
 			{:else}
 				<!-- Error Case -->
-				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue mb-3">Request Details</h3>
-					<div class="p-3 bg-gray-50 rounded-md border border-gray-200">
+				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+						Request Details
+					</h3>
+					<div
+						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+					>
 						<div class="font-medium">
 							{testResponse.apiSender?.requestMethod}
 							{testResponse.apiSender?.requestURL}
@@ -636,11 +676,11 @@ X-Custom-Header: Hello Friend"
 			{/if}
 
 			<!-- Footer with Close Button -->
-			<div class="pt-4 border-t border-gray-200">
+			<div class="pt-4 border-t border-gray-200 dark:border-gray-600">
 				<div class="flex justify-end">
 					<button
 						type="button"
-						class="px-4 py-2 bg-white border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+						class="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
 						on:click={closeTestModal}
 					>
 						Close
