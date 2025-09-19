@@ -82,16 +82,25 @@
 					<div class="bg-pleasant-gray dark:bg-devil-gray p-4 rounded-md mb-4">
 						<div class="flex items-center justify-between mb-4">
 							<div>
-								<h3 class="text-lg font-semibold text-active-blue dark:text-cta-light-blue">
-									Update Available!
-								</h3>
 								<p class="text-grayblue-dark">Version {newVersion} is now available</p>
+								<p class="mt-2">
+									<a
+										href="https://github.com/phishingclub/phishingclub/releases"
+										target="_blank"
+										class="text-cta-blue hover:text-active-blue underline"
+									>
+										View release notes →
+									</a>
+								</p>
 								{#if !isUpdateLocal}
 									<p class="mt-4">
 										This instance is was not setup using the <code>systemd install</code> and must be
 										updated manually.
 									</p>
 								{/if}
+								<p class="mt-4 text-sm text-gray-600">
+									Consider creating a backup before updating to ensure you can restore if needed.
+								</p>
 							</div>
 						</div>
 
@@ -128,6 +137,15 @@
 						<h3 class="mt-2 text-lg font-medium">System up to date!</h3>
 						<p class="mt-1 text-grayblue-dark">
 							An update notification is visible when a update is ready.
+						</p>
+						<p class="mt-3">
+							<a
+								href="https://github.com/phishingclub/phishingclub/releases"
+								target="_blank"
+								class="text-xs hover:text-gray-700"
+							>
+								View previous release information
+							</a>
 						</p>
 					</div>
 				{/if}

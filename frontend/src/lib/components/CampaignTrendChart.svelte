@@ -58,8 +58,9 @@
 	}
 
 	let chartContainer;
+	let sizingContainer;
 	let width = 300;
-	let height = 200; // Balanced height to prevent overflow
+	let height = 240; // Increased height for better label spacing
 	let containerReady = false;
 
 	// User controls for N
@@ -85,15 +86,17 @@
 		openRate: true,
 		clickRate: true,
 		submissionRate: true,
+		reportRate: true,
 		'mavg-clickRate': true,
-		'mavg-submissionRate': true
+		'mavg-submissionRate': true,
+		'mavg-reportRate': true
 	};
 
 	// Responsive margins based on container width
 	$: margin = {
 		top: 15,
 		right: Math.min(180, Math.max(160, width * 0.28)), // 28% of width, min 160px, max 180px
-		bottom: 30,
+		bottom: 50, // Increased bottom margin for better label spacing
 		left: 50
 	};
 
@@ -138,7 +141,8 @@
 	const metrics = [
 		{ key: 'openRate', label: 'Read Rate', color: '#4cb5b5', suffix: '%' },
 		{ key: 'clickRate', label: 'Click Rate', color: '#f96dcf', suffix: '%' },
-		{ key: 'submissionRate', label: 'Submission Rate', color: '#f42e41', suffix: '%' }
+		{ key: 'submissionRate', label: 'Submission Rate', color: '#f42e41', suffix: '%' },
+		{ key: 'reportRate', label: 'Report Rate', color: '#1e40af', suffix: '%' }
 	];
 
 	// Toggle metric visibility
@@ -159,7 +163,8 @@
 			n,
 			openRate: avg(slice, 'openRate'),
 			clickRate: avg(slice, 'clickRate'),
-			submissionRate: avg(slice, 'submissionRate')
+			submissionRate: avg(slice, 'submissionRate'),
+			reportRate: avg(slice, 'reportRate')
 		};
 	})();
 
@@ -205,6 +210,7 @@
 			clickRate: Math.round((stat.clickRate || 0) * (stat.clickRate > 1 ? 1 : 100) * 10) / 10,
 			submissionRate:
 				Math.round((stat.submissionRate || 0) * (stat.submissionRate > 1 ? 1 : 100) * 10) / 10,
+			reportRate: Math.round((stat.reportRate || 0) * (stat.reportRate > 1 ? 1 : 100) * 10) / 10,
 			totalRecipients: stat.totalRecipients
 		}));
 	}
@@ -247,8 +253,8 @@
 				createLine(svg, metric);
 			}
 		});
-		// Only draw moving average for clickRate and submissionRate, using user-selected N
-		['clickRate', 'submissionRate'].forEach((metricKey) => {
+		// Only draw moving average for clickRate, submissionRate, and reportRate, using user-selected N
+		['clickRate', 'submissionRate', 'reportRate'].forEach((metricKey) => {
 			const metric = metrics.find((m) => m.key === metricKey);
 			if (metric && visibleMetrics[`mavg-${metricKey}`]) {
 				createMovingAverageLine(svg, metric, movingAvgN);
@@ -309,6 +315,8 @@
 				avgColor = '#93c5fd'; // light blue
 			} else if (metric.key === 'submissionRate') {
 				avgColor = '#ff6a91'; // lighter red, closer to #f42e41
+			} else if (metric.key === 'reportRate') {
+				avgColor = '#60a5fa'; // lighter blue for report rate
 			}
 			path.setAttribute('stroke', avgColor);
 			path.setAttribute('stroke-width', '1.2');
@@ -336,17 +344,26 @@
 
 		const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
 		stop1.setAttribute('offset', '0%');
-		stop1.setAttribute('stop-color', '#f8f9fa');
+		stop1.setAttribute(
+			'stop-color',
+			document.documentElement.classList.contains('dark') ? '#374151' : '#f8f9fa'
+		);
 		stop1.setAttribute('stop-opacity', '0.3');
 
 		const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
 		stop2.setAttribute('offset', '50%');
-		stop2.setAttribute('stop-color', '#e9ecef');
+		stop2.setAttribute(
+			'stop-color',
+			document.documentElement.classList.contains('dark') ? '#4b5563' : '#e9ecef'
+		);
 		stop2.setAttribute('stop-opacity', '0.5');
 
 		const stop3 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
 		stop3.setAttribute('offset', '100%');
-		stop3.setAttribute('stop-color', '#f8f9fa');
+		stop3.setAttribute(
+			'stop-color',
+			document.documentElement.classList.contains('dark') ? '#374151' : '#f8f9fa'
+		);
 		stop3.setAttribute('stop-opacity', '0.3');
 
 		gradient.appendChild(stop1);
@@ -364,7 +381,10 @@
 			line.setAttribute('x2', (width - margin.right).toString());
 			line.setAttribute('y1', y.toString());
 			line.setAttribute('y2', y.toString());
-			line.setAttribute('stroke', '#E5E7EB');
+			line.setAttribute(
+				'stroke',
+				document.documentElement.classList.contains('dark') ? '#4b5563' : '#E5E7EB'
+			);
 			line.setAttribute('stroke-width', '1');
 			line.setAttribute('opacity', '0.4');
 			svg.appendChild(line);
@@ -378,7 +398,10 @@
 			vLine.setAttribute('x2', x.toString());
 			vLine.setAttribute('y1', margin.top.toString());
 			vLine.setAttribute('y2', (height - margin.bottom).toString());
-			vLine.setAttribute('stroke', '#e5e7eb');
+			vLine.setAttribute(
+				'stroke',
+				document.documentElement.classList.contains('dark') ? '#4b5563' : '#e5e7eb'
+			);
 			vLine.setAttribute('stroke-width', '0.5');
 			vLine.setAttribute('opacity', '0.3');
 			svg.appendChild(vLine);
@@ -391,7 +414,10 @@
 		yAxis.setAttribute('x2', margin.left.toString());
 		yAxis.setAttribute('y1', margin.top.toString());
 		yAxis.setAttribute('y2', (height - margin.bottom).toString());
-		yAxis.setAttribute('stroke', '#6B7280');
+		yAxis.setAttribute(
+			'stroke',
+			document.documentElement.classList.contains('dark') ? '#9ca3af' : '#6B7280'
+		);
 		yAxis.setAttribute('stroke-width', '2');
 		svg.appendChild(yAxis);
 
@@ -400,7 +426,10 @@
 		xAxis.setAttribute('x2', (width - margin.right).toString());
 		xAxis.setAttribute('y1', (height - margin.bottom).toString());
 		xAxis.setAttribute('y2', (height - margin.bottom).toString());
-		xAxis.setAttribute('stroke', '#6B7280');
+		xAxis.setAttribute(
+			'stroke',
+			document.documentElement.classList.contains('dark') ? '#9ca3af' : '#6B7280'
+		);
 		xAxis.setAttribute('stroke-width', '2');
 		svg.appendChild(xAxis);
 
@@ -412,7 +441,10 @@
 			text.setAttribute('y', (y - 2).toString());
 			text.setAttribute('text-anchor', 'end');
 			text.setAttribute('font-size', '11');
-			text.setAttribute('fill', '#6B7280');
+			text.setAttribute(
+				'fill',
+				document.documentElement.classList.contains('dark') ? '#d1d5db' : '#6B7280'
+			);
 			text.setAttribute('font-weight', '500');
 			text.setAttribute('alignment-baseline', 'middle');
 			text.textContent = `${value}%`;
@@ -424,10 +456,13 @@
 				const x = xScale(i);
 				const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
 				text.setAttribute('x', x.toString());
-				text.setAttribute('y', (height - margin.bottom + 18).toString());
+				text.setAttribute('y', (height - margin.bottom + 25).toString());
 				text.setAttribute('text-anchor', 'middle');
 				text.setAttribute('font-size', '11');
-				text.setAttribute('fill', '#000');
+				text.setAttribute(
+					'fill',
+					document.documentElement.classList.contains('dark') ? '#f9fafb' : '#000'
+				);
 				text.setAttribute('alignment-baseline', 'middle');
 				// Show date (YYYY/MM) and campaign name on the same line
 				const labelSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
@@ -526,9 +561,9 @@
 	}
 
 	function createLegend(svg, svgRoot) {
-		const legendY = margin.top - 5; // Move legend higher
+		const legendY = margin.top + 5; // Align with chart top area
 		const legendX = width - margin.right + 10;
-		const legendSpacing = 12; // Reduce spacing between legend items
+		const legendSpacing = 18; // More spacing between legend items
 
 		// Build a flat list of legend items (main and moving averages)
 		const legendItems = [];
@@ -545,18 +580,28 @@
 				strokeDasharray: null,
 				opacity: 1
 			});
-			if (metric.key === 'clickRate' || metric.key === 'submissionRate') {
+			if (
+				metric.key === 'clickRate' ||
+				metric.key === 'submissionRate' ||
+				metric.key === 'reportRate'
+			) {
 				// Use a lighter version of the main color for moving averages
 				let avgColor = metric.color;
+				let avgLabel = '';
 				if (metric.key === 'clickRate') {
 					avgColor = '#eea5fa'; // before-page-visited, lighter pink
+					avgLabel = 'Click MA';
 				} else if (metric.key === 'submissionRate') {
 					avgColor = '#ff6a91'; // lighter red, closer to #f42e41
+					avgLabel = 'Submit MA';
+				} else if (metric.key === 'reportRate') {
+					avgColor = '#60a5fa'; // lighter blue for report rate
+					avgLabel = 'Report MA';
 				}
 				legendItems.push({
 					type: 'mavg',
 					key: metric.key,
-					label: metric.key === 'clickRate' ? 'Click MA' : 'Submit MA',
+					label: avgLabel,
 					color: avgColor,
 					class: `legend-line legend-mavg legend-mavg-${metric.key}`,
 					labelClass: `legend-label legend-mavg legend-mavg-${metric.key}`,
@@ -666,8 +711,14 @@
 
 		const tooltipRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
 		tooltipRect.setAttribute('rx', '4');
-		tooltipRect.setAttribute('fill', '#1F2937');
-		tooltipRect.setAttribute('stroke', '#374151');
+		tooltipRect.setAttribute(
+			'fill',
+			document.documentElement.classList.contains('dark') ? '#111827' : '#1F2937'
+		);
+		tooltipRect.setAttribute(
+			'stroke',
+			document.documentElement.classList.contains('dark') ? '#374151' : '#4b5563'
+		);
 		tooltipRect.setAttribute('opacity', '0.95');
 
 		const tooltipText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -760,9 +811,9 @@
 	}
 
 	onMount(async () => {
-		if (chartContainer) {
-			await tick(); // Wait for DOM/layout
-			const containerWidth = chartContainer.clientWidth || 0;
+		await tick(); // Wait for DOM/layout
+		if (sizingContainer) {
+			const containerWidth = sizingContainer.parentElement?.clientWidth || 0;
 			width = Math.min(Math.max(containerWidth, 300), containerWidth); // Minimum 300px but never exceed container
 			if (width > 0) containerReady = true;
 			resizeObserver = new ResizeObserver((entries) => {
@@ -774,13 +825,13 @@
 					}
 				}
 			});
-			resizeObserver.observe(chartContainer);
+			resizeObserver.observe(sizingContainer.parentElement || sizingContainer);
 		}
 	});
 
 	onDestroy(() => {
-		if (resizeObserver && chartContainer) {
-			resizeObserver.unobserve(chartContainer);
+		if (resizeObserver && sizingContainer) {
+			resizeObserver.unobserve(sizingContainer.parentElement || sizingContainer);
 		}
 		if (loadingTimeout) {
 			clearTimeout(loadingTimeout);
@@ -797,9 +848,9 @@
 </script>
 
 <div class="w-full box-border" style="contain: layout style;">
-	<!-- Always render a hidden chartContainer for ResizeObserver -->
+	<!-- Hidden sizing element for ResizeObserver -->
 	<div
-		bind:this={chartContainer}
+		bind:this={sizingContainer}
 		class="chart-container w-full overflow-x-auto"
 		style="height:0;overflow:hidden;visibility:hidden;position:absolute;"
 	></div>
@@ -811,18 +862,26 @@
 		<div>
 			{#if debouncedIsLoading}
 				<div class="flex items-center justify-center h-64">
-					<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-					<span class="ml-2 text-gray-600">Loading trend data...</span>
+					<div
+						class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 dark:border-blue-400"
+					></div>
+					<span class="ml-2 text-gray-600 dark:text-gray-300 transition-colors duration-200"
+						>Loading trend data...</span
+					>
 				</div>
 			{:else if !hasAttemptedLoad && debouncedShowPending}
 				<div class="flex items-center justify-center h-64">
-					<span class="text-gray-400 text-sm">Preparing trend data...</span>
+					<span class="text-gray-400 dark:text-gray-500 text-sm transition-colors duration-200"
+						>Preparing trend data...</span
+					>
 				</div>
 			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && chartData.length === 0}
-				<div class="flex items-center justify-center h-64 bg-gray-50 rounded-lg">
+				<div
+					class="flex items-center justify-center h-64 bg-gray-50 dark:bg-gray-800 rounded-lg transition-colors duration-200"
+				>
 					<div class="text-center">
 						<svg
-							class="mx-auto h-12 w-12 text-gray-400"
+							class="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500 transition-colors duration-200"
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
@@ -834,17 +893,23 @@
 								d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
 							/>
 						</svg>
-						<h3 class="mt-2 text-sm font-medium text-gray-900">No campaign data</h3>
-						<p class="mt-1 text-sm text-gray-500">
+						<h3
+							class="mt-2 text-sm font-medium text-gray-900 dark:text-gray-200 transition-colors duration-200"
+						>
+							No campaign data
+						</h3>
+						<p class="mt-1 text-sm text-gray-500 dark:text-gray-400 transition-colors duration-200">
 							Campaign statistics will appear here once campaigns are completed.
 						</p>
 					</div>
 				</div>
 			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && chartData.length === 1}
-				<div class="bg-blue-50 border border-blue-200 rounded-lg p-6">
+				<div
+					class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-6 transition-colors duration-200"
+				>
 					<div class="flex items-center">
 						<svg
-							class="h-6 w-6 text-blue-600 mr-2"
+							class="h-6 w-6 text-blue-600 dark:text-blue-400 mr-2 transition-colors duration-200"
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
@@ -857,40 +922,78 @@
 							/>
 						</svg>
 						<div>
-							<h4 class="text-sm font-medium text-blue-900">Single Campaign Data</h4>
-							<p class="text-sm text-blue-700">
+							<h4
+								class="text-sm font-medium text-blue-900 dark:text-blue-200 transition-colors duration-200"
+							>
+								Single Campaign Data
+							</h4>
+							<p class="text-sm text-blue-700 dark:text-blue-300 transition-colors duration-200">
 								Trends will appear when you have 2 or more completed campaigns.
 							</p>
 						</div>
 					</div>
-					<div class="mt-4 grid grid-cols-3 gap-4">
+					<div class="grid grid-cols-4 gap-4">
 						<div class="text-center">
-							<div class="text-2xl font-bold text-blue-600">{chartData[0].openRate}%</div>
-							<div class="text-sm text-gray-600">Open Rate</div>
+							<div
+								class="text-2xl font-bold text-blue-600 dark:text-blue-400 transition-colors duration-200"
+							>
+								{chartData[0].openRate}%
+							</div>
+							<div class="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200">
+								Open Rate
+							</div>
 						</div>
 						<div class="text-center">
-							<div class="text-2xl font-bold text-green-600">{chartData[0].clickRate}%</div>
-							<div class="text-sm text-gray-600">Click Rate</div>
+							<div
+								class="text-2xl font-bold text-green-600 dark:text-green-400 transition-colors duration-200"
+							>
+								{chartData[0].clickRate}%
+							</div>
+							<div class="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200">
+								Click Rate
+							</div>
 						</div>
 						<div class="text-center">
-							<div class="text-2xl font-bold text-yellow-600">{chartData[0].submissionRate}%</div>
-							<div class="text-sm text-gray-600">Submission Rate</div>
+							<div
+								class="text-2xl font-bold text-yellow-600 dark:text-yellow-400 transition-colors duration-200"
+							>
+								{chartData[0].submissionRate}%
+							</div>
+							<div class="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200">
+								Submission Rate
+							</div>
+						</div>
+						<div class="text-center">
+							<div
+								class="text-2xl font-bold text-indigo-600 dark:text-indigo-400 transition-colors duration-200"
+							>
+								{chartData[0].reportRate}%
+							</div>
+							<div class="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200">
+								Report Rate
+							</div>
 						</div>
 					</div>
 				</div>
 			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && chartData.length >= 2}
-				<div class="bg-white rounded-lg border border-gray-200 p-6">
+				<div
+					class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 p-6 transition-colors duration-200"
+				>
 					<!-- Trendline stats and controls above chart -->
 					<div class="flex flex-row items-center justify-between mb-2 pb-0 flex-wrap gap-2">
-						<h4 class="text-sm font-medium text-gray-600 m-0">
+						<h4
+							class="text-sm font-medium text-gray-600 dark:text-gray-300 m-0 transition-colors duration-200"
+						>
 							Trendline: Last {trendStats ? trendStats.n : chartData.length} Campaigns (average)
 						</h4>
 						<div class="flex flex-wrap items-center gap-2 mb-0">
-							<label class="flex items-center gap-1 text-xs text-gray-700">
+							<label
+								class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
+							>
 								Time range:
 								<select
 									bind:value={selectedTimeRange}
-									class="border rounded px-1 py-0 text-xs"
+									class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 text-xs bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 									style="height: 1.5rem;"
 								>
 									{#each timeRanges as range}
@@ -899,26 +1002,30 @@
 								</select>
 							</label>
 							{#if chartData.length > 1}
-								<label class="flex items-center gap-1 text-xs text-gray-700">
+								<label
+									class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
+								>
 									Trendline N:
 									<input
 										type="number"
 										min="1"
 										max={chartData.length}
 										bind:value={trendN}
-										class="border rounded px-1 py-0 w-10 text-xs"
+										class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 										style="height: 1.5rem;"
 									/>
 								</label>
 							{/if}
-							<label class="flex items-center gap-1 text-xs text-gray-700">
+							<label
+								class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
+							>
 								Moving Avg N:
 								<input
 									type="number"
 									min="2"
 									max={chartData.length}
 									bind:value={movingAvgN}
-									class="border rounded px-1 py-0 w-10 text-xs"
+									class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 									style="height: 1.5rem;"
 								/>
 							</label>
@@ -926,7 +1033,7 @@
 					</div>
 					<div style="height: 1.25rem;"></div>
 					{#if chartData.length > 0}
-						<div class="grid grid-cols-3 gap-2 sm:gap-4">
+						<div class="grid grid-cols-4 gap-2 sm:gap-4">
 							{#each metrics as metric}
 								<div class="text-center">
 									<div class="flex items-center justify-center">
@@ -934,7 +1041,10 @@
 											class="w-3 h-3 rounded-full mr-2"
 											style="background-color: {metric.color}"
 										></div>
-										<span class="text-sm font-medium text-gray-700">{metric.label}</span>
+										<span
+											class="text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors duration-200"
+											>{metric.label}</span
+										>
 									</div>
 									<div class="mt-1">
 										<span class="text-2xl font-bold" style="color: {metric.color}">
@@ -949,7 +1059,9 @@
 							{/each}
 						</div>
 					{:else}
-						<div class="text-center text-gray-400 text-sm py-4">
+						<div
+							class="text-center text-gray-400 dark:text-gray-500 text-sm py-4 transition-colors duration-200"
+						>
 							No trendline stats to display (trendStats is null or not enough data).
 						</div>
 					{/if}
@@ -957,7 +1069,7 @@
 						{#if containerReady}
 							<div
 								bind:this={chartContainer}
-								class="min-h-[180px] max-h-[220px] w-full box-border relative rounded-md bg-white m-1"
+								class="min-h-[220px] max-h-[280px] w-full box-border relative rounded-md bg-white dark:bg-gray-800 m-1 transition-colors duration-200"
 								style="contain: layout style;"
 							></div>
 						{/if}
@@ -1016,6 +1128,10 @@
 		background: white;
 		border-radius: 8px;
 		padding: 8px;
+		transition: background-color 0.2s ease;
+	}
+	:global(.dark .campaign-trend-chart) {
+		background: #1f2937 !important;
 	}
 	:global(.line-enhanced) {
 		stroke-width: 5 !important;

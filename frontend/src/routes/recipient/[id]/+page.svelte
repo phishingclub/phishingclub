@@ -37,7 +37,8 @@
 		campaignsParticiated: 0,
 		campaignsTrackingPixelLoaded: 0,
 		campaignsPhishingPageLoaded: 0,
-		campaignsDataSubmitted: 0
+		campaignsDataSubmitted: 0,
+		campaignsReported: 0
 	};
 	let isGroupsLoading = false;
 	let isEventsLoading = false;
@@ -155,7 +156,7 @@
 	{/if}
 	<BigButton on:click={onClickExport}>Export events</BigButton>
 	<div>
-		<div class="grid mr-1/12 md:grid-cols-2 lg:grid-cols-6 gap-6 mb-8 mt-4">
+		<div class="grid mr-1/12 md:grid-cols-2 lg:grid-cols-7 gap-6 mb-8 mt-4">
 			<!-- Campaigns card -->
 			<StatsCard
 				title="Campaigns"
@@ -254,6 +255,30 @@
 						stroke-linejoin="round"
 						stroke-width="2"
 						d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+					/>
+				</svg>
+			</StatsCard>
+
+			<!-- Reported card -->
+			<StatsCard
+				title="Reported"
+				value={stats.campaignsReported}
+				borderColor="border-reported"
+				iconColor="text-reported"
+			>
+				<svg
+					slot="icon"
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-5 w-5 ml-2 text-reported"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"
 					/>
 				</svg>
 			</StatsCard>

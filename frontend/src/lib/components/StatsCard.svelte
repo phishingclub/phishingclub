@@ -43,12 +43,20 @@
 </script>
 
 <div
-	class="bg-white p-6 rounded-lg shadow-md border-l-[12px] {borderColor} hover:shadow-lg transition-shadow"
+	class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md dark:shadow-gray-900/50 border-l-[12px] {borderColor} hover:shadow-lg dark:hover:shadow-gray-900/70 transition-all duration-200"
 >
-	<div class="text-grayblue-dark text-sm font-semibold">{title}</div>
+	<div
+		class="text-grayblue-dark dark:text-gray-400 text-sm font-semibold transition-colors duration-200"
+	>
+		{title}
+	</div>
 	<div class="flex items-center justify-between">
 		<div class="flex items-center">
-			<span class="text-3xl font-bold text-pc-darkblue {flash ? 'flash' : ''}">
+			<span
+				class="text-3xl font-bold text-pc-darkblue dark:text-gray-100 transition-colors duration-200 {flash
+					? 'flash'
+					: ''}"
+			>
 				{Math.floor($displayValue)}
 			</span>
 			<div class="ml-2">
@@ -74,12 +82,14 @@
 
 	{#if validPercentages.length > 0}
 		<button
-			class="mt-2 text-sm text-gray-600 flex items-center"
+			class="mt-2 text-sm text-gray-600 dark:text-gray-400 flex items-center transition-colors duration-200"
 			on:click={cyclePercentage}
 			class:cursor-pointer={validPercentages.length > 1}
 		>
 			<div class="flex items-center">
-				<span class="text-pc-darkblue font-semibold">
+				<span
+					class="text-pc-darkblue dark:text-gray-200 font-semibold transition-colors duration-200"
+				>
 					{validPercentages[currentPercentageIndex].value}%
 				</span>
 				<span class="ml-1">
@@ -89,7 +99,7 @@
 			{#if validPercentages.length > 1}
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
-					class="h-4 w-4 ml-1 text-gray-400"
+					class="h-4 w-4 ml-1 text-gray-400 dark:text-gray-500 transition-colors duration-200"
 					fill="none"
 					viewBox="0 0 24 24"
 					stroke="currentColor"

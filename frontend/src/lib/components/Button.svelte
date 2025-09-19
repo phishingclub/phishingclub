@@ -1,17 +1,21 @@
 <script>
 	export let backgroundColor = 'bg-cta-blue';
-	/* 
+	/*
 	linear-gradient(#64a6e6, #9198e5);
 	*/
 	export let css = '';
 	export let size = 'medium';
+	export let disabled = false;
 </script>
 
 <button
-	class="{backgroundColor} px-6 py-2 text-white rounded-md uppercase font-semibold hover:opacity-80 text-sm {css}"
+	class="{backgroundColor} px-6 py-2 text-white rounded-md uppercase font-semibold hover:opacity-80 text-sm transition-all duration-200 dark:hover:opacity-90 {css}"
 	class:w-32={size === 'small'}
 	class:w-36={size === 'medium'}
 	class:w-60={size === 'large'}
+	class:disabled:opacity-50={disabled}
+	class:dark:disabled:opacity-60={disabled}
+	{disabled}
 	on:click
 >
 	<slot />

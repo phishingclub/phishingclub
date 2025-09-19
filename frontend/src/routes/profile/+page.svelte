@@ -361,9 +361,13 @@
 			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
 				<!-- Profile Settings -->
 				<div
-					class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 min-h-[300px] flex flex-col"
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
 				>
-					<h2 class="text-xl font-semibold text-gray-700 mb-6">Account Details</h2>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Account Details
+					</h2>
 					<Form
 						fullHeight
 						on:submit={async () => {
@@ -402,9 +406,13 @@
 
 				<!-- Password Settings -->
 				<div
-					class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 min-h-[300px] flex flex-col"
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
 				>
-					<h2 class="text-xl font-semibold text-gray-700 mb-6">Password Settings</h2>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Password Settings
+					</h2>
 					{#if !isSSOUser}
 						<Form on:submit={onClickChangePassword}>
 							<div class="flex flex-col h-full">
@@ -437,16 +445,22 @@
 							</div>
 						</Form>
 					{:else}
-						<div class="bg-gray-50 p-4 rounded-md text-gray-600">
+						<div
+							class="bg-gray-50 dark:bg-gray-800 p-4 rounded-md text-gray-600 dark:text-gray-300"
+						>
 							Password changes are disabled for SSO users.
 						</div>
 					{/if}
 				</div>
 				<!-- MFA Section -->
 				<div
-					class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 min-h-[300px] flex flex-col"
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
 				>
-					<h2 class="text-xl font-semibold text-gray-700 mb-6">Multi-Factor Authentication</h2>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Multi-Factor Authentication
+					</h2>
 					{#if !isSSOUser}
 						{#if isMFAEnabled}
 							<div class="flex flex-col h-full pt-5 w-60">
@@ -484,7 +498,9 @@
 							</Form>
 						{/if}
 					{:else}
-						<div class="bg-gray-50 p-4 rounded-md text-gray-600">
+						<div
+							class="bg-gray-50 dark:bg-gray-800 p-4 rounded-md text-gray-600 dark:text-gray-300"
+						>
 							MFA is managed through your SSO provider.
 						</div>
 					{/if}
@@ -492,9 +508,13 @@
 
 				<!-- API Key Section -->
 				<div
-					class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 min-h-[300px] flex flex-col"
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
 				>
-					<h2 class="text-xl font-semibold text-gray-700 mb-6">API Access</h2>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						API Access
+					</h2>
 					<Form fullHeight on:submit={onClickCreateAPIKey}>
 						<div class="flex flex-col h-full">
 							{#if !!apiKey.length}
@@ -508,7 +528,9 @@
 									<Button size={'large'} on:click={openShowRemoveAPIKeyModal}>Delete Key</Button>
 								</div>
 							{:else}
-								<div class="bg-gray-50 p-4 rounded-md text-gray-600 mb-4">
+								<div
+									class="bg-gray-50 dark:bg-gray-800 p-4 rounded-md text-gray-600 dark:text-gray-300 mb-4"
+								>
 									No API key currently exists.
 								</div>
 								<div class="mt-auto pt-4">
@@ -578,9 +600,11 @@
 								</div>
 
 								<!-- Alternative Method -->
-								<div class="border-gray-200 pt-4">
-									<h3 class="text-lg font-medium text-gray-700 mb-2">Can't scan the QR code?</h3>
-									<p class="text-gray-600 mb-2">
+								<div class="border-gray-200 dark:border-gray-600 pt-4">
+									<h3 class="text-lg font-medium text-gray-700 dark:text-gray-200 mb-2">
+										Can't scan the QR code?
+									</h3>
+									<p class="text-gray-600 dark:text-gray-300 mb-2">
 										Enter this code manually in your authenticator app:
 									</p>
 									<button
@@ -594,9 +618,11 @@
 								</div>
 
 								<!-- Step 2 -->
-								<div class="border-t border-gray-200 pt-4">
-									<h3 class="text-xl font-semibold text-gray-700 mb-2">2. Verify Setup</h3>
-									<p class="text-gray-600 mb-4">
+								<div class="border-t border-gray-200 dark:border-gray-600 pt-4">
+									<h3 class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-2">
+										2. Verify Setup
+									</h3>
+									<p class="text-gray-600 dark:text-gray-300 mb-4">
 										Enter the 6-digit code from your authenticator app:
 									</p>
 									<TextField

@@ -160,7 +160,9 @@
 </script>
 
 {#if visible}
-	<div class="fixed top-0 left-0 w-full h-full bg-cta-blue opacity-20 blur-xl" />
+	<div
+		class="fixed top-0 left-0 w-full h-full bg-cta-blue dark:bg-gray-900 opacity-20 blur-xl transition-colors duration-200"
+	/>
 	<div
 		class="fixed top-0 left-0 w-full h-full flex justify-center items-center backdrop-blur-sm z-20"
 		role="dialog"
@@ -170,23 +172,34 @@
 	>
 		<section
 			bind:this={confirmElement}
-			class="flex flex-col items-center w-1/3 bg-slate-100 shadow-xl rounded-md"
+			class="flex flex-col items-center w-1/3 bg-slate-100 dark:bg-gray-800 shadow-xl dark:shadow-gray-900/70 rounded-md transition-colors duration-200"
 		>
-			<div class="bg-cta-orange2 text-white rounded-tl-md rounded-tr-md w-full">
+			<div
+				class="bg-cta-orange2 dark:bg-orange-600 text-white rounded-tl-md rounded-tr-md w-full transition-colors duration-200"
+			>
 				<p id="confirm-title" class="uppercase font-bold text-center py">Confirm action</p>
 			</div>
-			<h1 class="uppercase font-bold text-center text-gray-500 text-4xl pt-10">Are you sure?</h1>
-			<p id="confirm-description" class="text-center">{confirm_text}</p>
+			<h1
+				class="uppercase font-bold text-center text-gray-500 dark:text-gray-300 text-4xl pt-10 transition-colors duration-200"
+			>
+				Are you sure?
+			</h1>
+			<p
+				id="confirm-description"
+				class="text-center text-gray-700 dark:text-gray-200 transition-colors duration-200"
+			>
+				{confirm_text}
+			</p>
 			<div class="flex pt-4 pb-8">
 				<button
-					class="mt-6 bg-grayblue-dark w-40 py-2 mr-2 hover:bg-slate-300 text-white font-bold uppercase rounded-md"
+					class="mt-6 bg-grayblue-dark dark:bg-gray-600 w-40 py-2 mr-2 hover:bg-slate-300 dark:hover:bg-gray-500 text-white font-bold uppercase rounded-md transition-colors duration-200"
 					on:click={close}
 					aria-label="Cancel action"
 				>
 					no
 				</button>
 				<button
-					class="mt-6 bg-cta-blue w-56 py-2 hover:bg-blue-500 text-white font-bold uppercase rounded-md"
+					class="mt-6 bg-cta-blue dark:bg-blue-600 w-56 py-2 hover:bg-blue-500 dark:hover:bg-blue-700 text-white font-bold uppercase rounded-md transition-colors duration-200"
 					on:click={confirm}
 					aria-label="Confirm action"
 				>

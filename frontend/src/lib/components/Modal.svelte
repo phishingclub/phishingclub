@@ -240,7 +240,9 @@
 
 {#if visible}
 	<div bind:this={bindTo}>
-		<div class="fixed top-0 left-0 w-full h-full bg-cta-blue opacity-20 blur-xl" />
+		<div
+			class="fixed top-0 left-0 w-full h-full bg-cta-blue dark:bg-gray-900 opacity-20 blur-xl transition-colors duration-200"
+		/>
 		<div
 			class="fixed top-0 left-0 w-full h-full flex justify-center items-center backdrop-blur-sm z-20"
 			role="dialog"
@@ -250,11 +252,11 @@
 		>
 			<section
 				bind:this={modalElement}
-				class="shadow-xl w-auto ml-20 mr-8 max-h-[90vh] bg-white opacity-100 rounded-md flex flex-col"
+				class="shadow-xl dark:shadow-gray-900/70 w-auto ml-20 mr-8 max-h-[90vh] bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-colors duration-200"
 			>
 				<div
 					class:opacity-20={isSubmitting}
-					class="bg-cta-blue text-white rounded-t-md py-4 px-8 flex justify-between flex-shrink-0"
+					class="bg-cta-blue dark:bg-blue-700 text-white rounded-t-md py-4 px-8 flex justify-between flex-shrink-0 transition-colors duration-200"
 				>
 					<div class="flex-1">
 						<h1 id="modal-title" class="uppercase mr-8 font-semibold text-2xl">{headerText}</h1>

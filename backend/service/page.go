@@ -20,6 +20,7 @@ type Page struct {
 	PageRepository          *repository.Page
 	CampaignRepository      *repository.Campaign
 	CampaignTemplateService *CampaignTemplate
+	TemplateService         *Template
 }
 
 // Create creates a new page
@@ -48,6 +49,13 @@ func (p *Page) Create(
 	if err := page.Validate(); err != nil {
 		p.Logger.Errorw("failed to validate page", "error", err)
 		return nil, errs.Wrap(err)
+	}
+	// validate template content if present
+	if content, err := page.Content.Get(); err == nil {
+		if err := p.TemplateService.ValidatePageTemplate(content.String()); err != nil {
+			p.Logger.Errorw("failed to validate page template", "error", err)
+			return nil, validate.WrapErrorWithField(errors.New("invalid template: "+err.Error()), "content")
+		}
 	}
 	// check uniqueness
 	name := page.Name.MustGet()
@@ -253,6 +261,11 @@ func (p *Page) UpdateByID(
 		current.Name.Set(v)
 	}
 	if v, err := page.Content.Get(); err == nil {
+		// validate template content before updating
+		if err := p.TemplateService.ValidatePageTemplate(v.String()); err != nil {
+			p.Logger.Errorw("failed to validate page template", "error", err)
+			return validate.WrapErrorWithField(errors.New("invalid template: "+err.Error()), "content")
+		}
 		current.Content.Set(v)
 	}
 	// update page

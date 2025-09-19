@@ -5,11 +5,11 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
-	"html/template"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"text/template"
 	"time"
 )
 

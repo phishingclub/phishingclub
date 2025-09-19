@@ -45,6 +45,12 @@
 	let updateAvailable = false;
 	let isCheckingUpdate = false;
 
+	// Backup functionality
+	let isBackupModalVisible = false;
+	let isCreatingBackup = false;
+	let availableBackups = [];
+	let isLoadingBackups = false;
+
 	let ssoForm = null;
 	let isSSOModalVisible = false;
 	let updateSSOError = '';
@@ -91,6 +97,7 @@
 			await refreshSSO();
 			await refreshVersion();
 			await refreshUpdateCached();
+			await refreshBackupList();
 			if (!ssoSettingsFormValues.redirectURL) {
 				ssoSettingsFormValues.redirectURL = `${location.origin}/api/v1/sso/entra-id/auth`;
 			}
@@ -203,6 +210,69 @@
 			isSSOEnabled = sso.enabled;
 		} catch (e) {
 			console.error('failed to get SSO configuration', e);
+		}
+	}
+
+	async function refreshBackupList() {
+		isLoadingBackups = true;
+		try {
+			const res = await api.application.listBackups();
+			if (res.success) {
+				availableBackups = res.data || [];
+			}
+		} catch (e) {
+			console.error('failed to refresh backup list', e);
+			availableBackups = [];
+		} finally {
+			isLoadingBackups = false;
+		}
+	}
+
+	async function downloadBackup(filename) {
+		try {
+			const blob = await api.application.downloadBackup(filename);
+
+			// Create download link
+			const url = window.URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = filename;
+			document.body.appendChild(a);
+			a.click();
+			window.URL.revokeObjectURL(url);
+			document.body.removeChild(a);
+
+			addToast('Backup downloaded successfully', 'Success');
+		} catch (e) {
+			console.error('failed to download backup', e);
+			addToast('Failed to download backup', 'Error');
+		}
+	}
+
+	function openBackupModal() {
+		isBackupModalVisible = true;
+	}
+
+	function closeBackupModal() {
+		isBackupModalVisible = false;
+	}
+
+	async function createBackup() {
+		isCreatingBackup = true;
+		try {
+			const res = await api.application.createBackup();
+			if (res.success) {
+				addToast('Backup created successfully', 'Success');
+				closeBackupModal();
+				await refreshBackupList(); // Refresh backup list
+			} else {
+				addToast('Failed to create backup', 'Error');
+			}
+		} catch (e) {
+			console.error('failed to create backup', e);
+			addToast('Failed to create backup', 'Error');
+		} finally {
+			isCreatingBackup = false;
 		}
 	}
 
@@ -363,18 +433,22 @@
 	};
 </script>
 
-<HeadTitle title="Profile" />
+<HeadTitle title="Settings" />
 <main class="pb-8">
-	<Headline>Profile</Headline>
+	<Headline>Settings</Headline>
 	{#if isInitiallyLoaded}
 		<div class="max-w-7xl pt-4 space-y-8">
 			<!-- Settings Grid -->
 			<div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-8">
 				<!-- SSO Card -->
 				<div
-					class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 min-h-[300px] flex flex-col"
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
 				>
-					<h2 class="text-xl font-semibold text-gray-700 mb-6">Single Sign-On</h2>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Single Sign-On
+					</h2>
 					<div class="flex flex-col h-full pt-4">
 						<div class="bg-gray-50 rounded-md p-3">
 							{#if isSSOEnabled}
@@ -406,9 +480,13 @@
 
 				<!-- General Settings Card -->
 				<div
-					class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 min-h-[300px] flex flex-col"
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
 				>
-					<h2 class="text-xl font-semibold text-gray-700 mb-6">General Settings</h2>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						General Settings
+					</h2>
 					<Form on:submit={onClickUpdateSettings} fullHeight>
 						<div class="flex flex-col h-full">
 							<div>
@@ -434,9 +512,13 @@
 
 				<!-- Logging Card -->
 				<div
-					class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 min-h-[300px] flex flex-col"
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
 				>
-					<h2 class="text-xl font-semibold text-gray-700 mb-6">Logging</h2>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Logging
+					</h2>
 					<Form fullHeight>
 						<div class="flex flex-col h-full">
 							<div>
@@ -462,9 +544,13 @@
 
 				<!-- Import Section -->
 				<div
-					class="bg-white p-6 rounded-lg shadow-sm border border-gray-100 min-h-[300px] flex flex-col"
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
 				>
-					<h2 class="text-xl font-semibold text-gray-700 mb-6">Import</h2>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Import
+					</h2>
 					<div class="flex flex-col h-full">
 						<div class="space-y-4">
 							<FileField name="importFile" accept=".zip" on:change={(e) => onSetImportFile(e)}>
@@ -479,12 +565,16 @@
 								Import pages and emails as company templates
 							</label>
 							{#if importForCompany}
-								<div class="bg-blue-50 p-3 rounded-md text-sm text-blue-700">
+								<div
+									class="bg-blue-50 dark:bg-blue-900/30 p-3 rounded-md text-sm text-blue-700 dark:text-blue-200 transition-colors duration-200"
+								>
 									<strong>Company Import:</strong><br /> Pages and emails will be imported for this company.
 									Assets will be imported as global/shared resources.
 								</div>
 							{:else}
-								<div class="bg-gray-50 p-3 rounded-md text-sm text-gray-600">
+								<div
+									class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200"
+								>
 									<strong>Global Import:</strong> All templates and assets will be imported as shared
 									resources.
 								</div>
@@ -506,13 +596,78 @@
 						</div>
 					</div>
 				</div>
+
+				<!-- Backup Section -->
+				<div
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
+				>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Backup
+					</h2>
+					<div class="flex flex-col h-full">
+						<div class="space-y-4">
+							<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+								Create a backup of database, assets, attachments and certificates.
+							</p>
+
+							{#if availableBackups.length > 0}
+								<div
+									class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md transition-colors duration-200"
+								>
+									<h4
+										class="font-medium text-gray-900 dark:text-gray-100 mb-2 transition-colors duration-200"
+									>
+										Available:
+									</h4>
+									<div class="space-y-3">
+										{#each availableBackups as backup}
+											<div class="flex items-start justify-between gap-4 text-sm">
+												<div class="flex flex-col min-w-0 flex-1">
+													<span
+														class="text-gray-700 dark:text-gray-200 text-xs font-medium transition-colors duration-200"
+													>
+														{new Date(backup.createdAt).toLocaleString()}
+													</span>
+													<span
+														class="text-gray-400 dark:text-gray-400 text-xs transition-colors duration-200"
+													>
+														{(backup.size / 1024 / 1024).toFixed(1)} MB
+													</span>
+												</div>
+												<button
+													class="px-3 py-1 bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-800 text-white text-xs rounded transition-colors flex-shrink-0"
+													on:click={() => downloadBackup(backup.name)}
+												>
+													Download
+												</button>
+											</div>
+										{/each}
+									</div>
+								</div>
+							{:else if !isLoadingBackups}
+								<div
+									class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200"
+								>
+									No backups available yet.
+								</div>
+							{/if}
+						</div>
+						<div class="mt-auto pt-4">
+							<Button size={'large'} on:click={openBackupModal} disabled={isCreatingBackup}>
+								Create Backup
+							</Button>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 
 		{#if isImportResultModalVisible && importResult}
 			<Modal headerText="Import Summary" bind:visible={isImportResultModalVisible}>
 				<div
-					class="p-6 max-h-[80vh] overflow-y-auto"
+					class="p-6 max-h-[80vh] overflow-y-auto bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 					on:scroll={() => {}}
 					bind:this={importModalContent}
 				>
@@ -521,20 +676,30 @@
 						<div class="grid grid-cols-3 gap-6">
 							<!-- Assets -->
 							<div>
-								<h3 class="font-semibold text-gray-900 mb-2">Assets (Global/Shared)</h3>
+								<h3
+									class="font-semibold text-gray-900 dark:text-gray-100 mb-2 transition-colors duration-200"
+								>
+									Assets (Global/Shared)
+								</h3>
 								<ul class="space-y-1">
 									<li>Created: {importResult.assets_created}</li>
 									<li>Skipped: {importResult.assets_skipped}</li>
 									<li>Errors: {importResult.assets_errors}</li>
 								</ul>
-								<p class="text-xs text-gray-500 mt-1">
+								<p
+									class="text-xs text-gray-500 dark:text-gray-400 mt-1 transition-colors duration-200"
+								>
 									Assets are always imported as global resources
 								</p>
 							</div>
 
 							<!-- Pages -->
 							<div>
-								<h3 class="font-semibold text-gray-900 mb-2">Pages</h3>
+								<h3
+									class="font-semibold text-gray-900 dark:text-gray-100 mb-2 transition-colors duration-200"
+								>
+									Pages
+								</h3>
 								<ul class="space-y-1">
 									<li>Created: {importResult.pages_created}</li>
 									<li>Updated: {importResult.pages_updated}</li>
@@ -545,7 +710,11 @@
 
 							<!-- Emails -->
 							<div>
-								<h3 class="font-semibold text-gray-900 mb-2">Emails</h3>
+								<h3
+									class="font-semibold text-gray-900 dark:text-gray-100 mb-2 transition-colors duration-200"
+								>
+									Emails
+								</h3>
 								<ul class="space-y-1">
 									<li>Created: {importResult.emails_created}</li>
 									<li>Updated: {importResult.emails_updated}</li>
@@ -710,26 +879,34 @@
 		{/if}
 
 		<!-- Version and Update Info -->
-		<div class="mt-8 text-sm text-gray-600 border-t border-gray-100 pt-4">
+		<div
+			class="mt-8 text-sm text-gray-600 dark:text-gray-300 border-t border-gray-100 dark:border-gray-700 pt-4 transition-colors duration-200"
+		>
 			<div class="flex items-center gap-4 flex-wrap">
 				<button
 					on:click|preventDefault={() => onClickCopy('.version-text')}
-					class="flex items-center hover:bg-gray-100 py-2 px-4 rounded-md text-gray-700 transition-colors"
+					class="flex items-center hover:bg-gray-100 dark:hover:bg-gray-700 py-2 px-4 rounded-md text-gray-700 dark:text-gray-300 transition-colors duration-200"
 				>
 					<span class="version-text font-mono">Version: {version}</span>
 					<img class="ml-2 w-4 h-4" src="/icon-copy.svg" alt="copy version" />
 				</button>
 				<span>|</span>
 				{#if updateAvailable}
-					<a href="/settings/update/" class="text-blue-600 hover:underline">Update Available</a>
+					<a
+						href="/settings/update/"
+						class="text-blue-600 dark:text-white hover:underline transition-colors duration-200"
+						>Update Available</a
+					>
 				{:else}
-					<span class="text-gray-500">Up to date</span>
+					<span class="text-gray-500 dark:text-gray-400 transition-colors duration-200"
+						>Up to date</span
+					>
 				{/if}
 				<span>|</span>
 				<button
 					on:click={checkForUpdate}
 					disabled={isCheckingUpdate}
-					class="text-blue-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+					class="text-blue-600 dark:text-white hover:underline disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 				>
 					{#if isCheckingUpdate}
 						Checking...
@@ -738,7 +915,11 @@
 					{/if}
 				</button>
 				<span>|</span>
-				<a href="/licenses.txt" class="text-blue-600 hover:underline">View Licenses</a>
+				<a
+					href="/licenses.txt"
+					class="text-blue-600 dark:text-white hover:underline transition-colors duration-200"
+					>View Licenses</a
+				>
 			</div>
 		</div>
 	{/if}
@@ -829,5 +1010,55 @@
 			onClick={() => onClickDisableSSO()}
 			bind:isVisible={isSSODeleteAlertVisible}
 		/>
+	{/if}
+
+	{#if isBackupModalVisible}
+		<Modal
+			headerText="Create Backup"
+			bind:visible={isBackupModalVisible}
+			onClose={closeBackupModal}
+			isSubmitting={isCreatingBackup}
+		>
+			<FormGrid on:submit={createBackup} isSubmitting={isCreatingBackup}>
+				<FormColumns>
+					<FormColumn>
+						<div class="space-y-4">
+							<p>This will create a backup file that can be downloaded from the settings page.</p>
+							<p>
+								<strong>Note:</strong> This is not a substitute for having proper automated and tested
+								backup and recovery plans at the operating system level.
+							</p>
+							<div class="bg-blue-50 p-4 rounded-md">
+								<h3 class="font-semibold text-blue-800 mb-2">What will be backed up:</h3>
+								<ul class="text-sm text-blue-700 space-y-1">
+									<li>• SQLite database (including WAL files)</li>
+									<li>• Asset files</li>
+									<li>• Attachment files</li>
+									<li>• Certificate files</li>
+								</ul>
+							</div>
+
+							<div class="bg-yellow-50 p-4 rounded-md">
+								<h3 class="font-semibold text-yellow-800 mb-2">Important:</h3>
+								<ul class="text-sm text-yellow-700 space-y-1">
+									<li>• Large databases may take significant time to backup</li>
+									<li>• Operations may be affected during the backup process</li>
+									<li>• Ensure you have sufficient disk space</li>
+									<li>
+										• Only the 3 most recent backups are kept (older ones are automatically deleted)
+									</li>
+									<li>• The backup does not include config.json or the application binary</li>
+								</ul>
+							</div>
+						</div>
+					</FormColumn>
+				</FormColumns>
+				<FormFooter
+					closeModal={closeBackupModal}
+					isSubmitting={isCreatingBackup}
+					okText={isCreatingBackup ? 'Creating Backup...' : 'Create Backup'}
+				/>
+			</FormGrid>
+		</Modal>
 	{/if}
 </main>

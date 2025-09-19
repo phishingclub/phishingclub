@@ -6,4 +6,5 @@ type CampaignResultView struct {
 	TrackingPixelLoaded int64 `json:"trackingPixelLoaded"`
 	WebsiteLoaded       int64 `json:"clickedLink"`
 	SubmittedData       int64 `json:"submittedData"`
+	Reported            int64 `json:"reported"`
 }

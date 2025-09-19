@@ -30,4 +30,6 @@
 	});
 </script>
 
-<div class="w-full h-full flex border-4 border-pc-darkblue animate-pulse"></div>
+<div
+	class="w-full h-full flex border-4 border-pc-darkblue dark:border-gray-600 animate-pulse transition-colors duration-200"
+></div>

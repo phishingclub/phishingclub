@@ -1,17 +1,18 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"html/template"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"text/template"
 	"time"
 
 	go_errors "github.com/go-errors/errors"
@@ -766,7 +767,6 @@ func (c *Campaign) GetStats(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	// no audit on read
 	return &model.CampaignsStatView{
 		Active:   active,
 		Upcoming: upcoming,
@@ -1952,11 +1952,13 @@ func (c *Campaign) sendCampaignMessages(
 			email,
 			nil,
 		)
-		err = m.SetBodyHTMLTemplate(mailTmpl, t)
+		var bodyBuffer bytes.Buffer
+		err = mailTmpl.Execute(&bodyBuffer, t)
 		if err != nil {
-			c.Logger.Errorw("failed to set body html template", "error", err)
+			c.Logger.Errorw("failed to execute mail template", "error", err)
 			return errs.Wrap(err)
 		}
+		m.SetBodyString("text/html", bodyBuffer.String())
 		// attachments
 		attachments := email.Attachments
 		for _, attachment := range attachments {
@@ -2962,6 +2964,449 @@ func (c *Campaign) AnonymizeByID(
 	return nil
 }
 
+// SendEmailByCampaignRecipientID sends an email to a specific campaign recipient
+// Multiple sends to the same recipient are allowed to support retry scenarios and follow-ups.
+func (c *Campaign) SendEmailByCampaignRecipientID(
+	ctx context.Context,
+	session *model.Session,
+	campaignRecipientID *uuid.UUID,
+) error {
+	ae := NewAuditEvent("Campaign.SendEmailByCampaignRecipientID", session)
+	ae.Details["campaignRecipientId"] = campaignRecipientID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+
+	// get campaign recipient
+	campaignRecipient, err := c.CampaignRecipientRepository.GetByID(
+		ctx,
+		campaignRecipientID,
+		&repository.CampaignRecipientOption{
+			WithRecipient: true,
+			WithCampaign:  true,
+		},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign recipient by id", "error", err)
+		return errs.Wrap(err)
+	}
+
+	campaign := campaignRecipient.Campaign
+	if campaign == nil {
+		return errors.New("campaign recipient has no campaign loaded")
+	}
+
+	// check if campaign is active
+	if !campaign.IsActive() {
+		return errors.New("campaign is not active")
+	}
+
+	// check if recipient exists (not anonymized)
+	if campaignRecipient.Recipient == nil {
+		return errors.New("recipient is anonymized or deleted")
+	}
+
+	// check if cancelled
+	if !campaignRecipient.CancelledAt.IsNull() {
+		return errors.New("recipient has been cancelled")
+	}
+
+	campaignID := campaign.ID.MustGet()
+
+	// add resend information to audit log
+	isResend := !campaignRecipient.SentAt.IsNull()
+	ae.Details["isResend"] = isResend
+	if isResend {
+		ae.Details["previouslySentAt"] = campaignRecipient.SentAt.MustGet().Format(time.RFC3339)
+	}
+
+	// send the email using existing logic from sendCampaignMessages
+	err = c.sendSingleCampaignMessage(ctx, session, &campaignID, campaignRecipient)
+	if err != nil {
+		c.Logger.Errorw("failed to send campaign message", "error", err)
+		return errs.Wrap(err)
+	}
+
+	c.AuditLogAuthorized(ae)
+	return nil
+}
+
+// sendSingleCampaignMessage sends an email to a single campaign recipient
+func (c *Campaign) sendSingleCampaignMessage(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+	campaignRecipient *model.CampaignRecipient,
+) error {
+	// get campaign template details - similar logic from sendCampaignMessages
+	campaign, err := c.CampaignRepository.GetByID(
+		ctx,
+		campaignID,
+		&repository.CampaignOption{},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return errs.Wrap(err)
+	}
+
+	templateID, err := campaign.TemplateID.Get()
+	if err != nil {
+		return errors.New("campaign has no template")
+	}
+
+	cTemplate, err := c.CampaignTemplateService.GetByID(
+		ctx,
+		session,
+		&templateID,
+		&repository.CampaignTemplateOption{
+			WithDomain:            true,
+			WithSMTPConfiguration: true,
+			WithIdentifier:        true,
+		},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign template by id", "error", err)
+		return errs.Wrap(err)
+	}
+
+	// check domain
+	domain := cTemplate.Domain
+	if domain == nil {
+		return errors.New("campaign template has no domain")
+	}
+
+	// get email details
+	emailID, err := cTemplate.EmailID.Get()
+	if err != nil {
+		return errors.New("campaign template has no email")
+	}
+
+	email, err := c.MailService.GetByID(ctx, session, &emailID)
+	if err != nil {
+		c.Logger.Errorw("failed to get email by id", "error", err)
+		return errs.Wrap(err)
+	}
+
+	// update last attempt timestamp
+	campaignRecipientID := campaignRecipient.ID.MustGet()
+	campaignRecipient.LastAttemptAt = nullable.NewNullableWithValue(time.Now())
+	err = c.CampaignRecipientRepository.UpdateByID(ctx, &campaignRecipientID, campaignRecipient)
+	if err != nil {
+		c.Logger.Errorw("failed to update last attempted at", "error", err)
+		return errs.Wrap(err)
+	}
+
+	// prepare template for rendering
+	content, err := email.Content.Get()
+	if err != nil {
+		return errors.New("failed to get email content")
+	}
+
+	t := template.New("email")
+	t = t.Funcs(TemplateFuncs())
+	mailTmpl, err := t.Parse(content.String())
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	// check sending method
+	isSmtpCampaign := cTemplate.SMTPConfigurationID.IsSpecified() && !cTemplate.SMTPConfigurationID.IsNull()
+	isAPISenderCampaign := cTemplate.APISenderID.IsSpecified() && !cTemplate.APISenderID.IsNull()
+
+	if !isSmtpCampaign && !isAPISenderCampaign {
+		return errors.New("campaign template has no SMTP configuration or API sender")
+	}
+
+	if isAPISenderCampaign {
+		// send via API
+		err = c.APISenderService.Send(
+			ctx,
+			session,
+			cTemplate,
+			campaignRecipient,
+			domain,
+			mailTmpl,
+			email,
+		)
+	} else {
+		// send via SMTP
+		err = c.sendSingleEmailSMTP(ctx, session, cTemplate, campaignRecipient, domain, mailTmpl, email)
+	}
+
+	// save sending result
+	saveErr := c.saveSendingResult(ctx, campaignRecipient, err)
+	if saveErr != nil {
+		c.Logger.Errorw("failed to save sending result", "error", saveErr)
+		return errs.Wrap(saveErr)
+	}
+
+	return err
+}
+
+// sendSingleEmailSMTP sends an email to a single recipient via SMTP
+func (c *Campaign) sendSingleEmailSMTP(
+	ctx context.Context,
+	session *model.Session,
+	cTemplate *model.CampaignTemplate,
+	campaignRecipient *model.CampaignRecipient,
+	domain *model.Domain,
+	mailTmpl *template.Template,
+	email *model.Email,
+) error {
+	// get SMTP configuration
+	smtpConfigID, err := cTemplate.SMTPConfigurationID.Get()
+	if err != nil {
+		return errors.New("failed to get SMTP configuration from template")
+	}
+
+	smtpConfig, err := c.SMTPConfigService.GetByID(
+		ctx,
+		session, // use the actual session passed to the method
+		&smtpConfigID,
+		&repository.SMTPConfigurationOption{
+			WithHeaders: true,
+		},
+	)
+	if err != nil {
+		c.Logger.Errorw("smtp configuration did not load", "error", err)
+		return errs.Wrap(err)
+	}
+
+	smtpPort, err := smtpConfig.Port.Get()
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	smtpHost, err := smtpConfig.Host.Get()
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	smtpIgnoreCertErrors, err := smtpConfig.IgnoreCertErrors.Get()
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	// setup SMTP client options
+	emailOptions := []mail.Option{
+		mail.WithPort(smtpPort.Int()),
+		mail.WithTLSConfig(
+			&tls.Config{
+				ServerName:         smtpHost.String(),
+				InsecureSkipVerify: smtpIgnoreCertErrors,
+			},
+		),
+	}
+
+	// setup authentication if provided
+	username, err := smtpConfig.Username.Get()
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	password, err := smtpConfig.Password.Get()
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	if un := username.String(); len(un) > 0 {
+		emailOptions = append(emailOptions, mail.WithUsername(un))
+		if pw := password.String(); len(pw) > 0 {
+			emailOptions = append(emailOptions, mail.WithPassword(pw))
+		}
+	}
+
+	// create message
+	messageOptions := []mail.MsgOption{
+		mail.WithNoDefaultUserAgent(),
+	}
+	m := mail.NewMsg(messageOptions...)
+
+	// set envelope from
+	err = m.EnvelopeFrom(email.MailEnvelopeFrom.MustGet().String())
+	if err != nil {
+		c.Logger.Errorw("failed to set envelope from", "error", err)
+		return errs.Wrap(err)
+	}
+
+	// set headers
+	err = m.From(email.MailHeaderFrom.MustGet().String())
+	if err != nil {
+		c.Logger.Errorw("failed to set mail header 'From'", "error", err)
+		return errs.Wrap(err)
+	}
+
+	recpEmail := campaignRecipient.Recipient.Email.MustGet().String()
+	err = m.To(recpEmail)
+	if err != nil {
+		c.Logger.Errorw("failed to set mail header 'To'", "error", err)
+		return errs.Wrap(err)
+	}
+
+	// custom headers
+	if headers := smtpConfig.Headers; headers != nil {
+		for _, header := range headers {
+			key := header.Key.MustGet()
+			value := header.Value.MustGet()
+			m.SetGenHeader(
+				mail.Header(key.String()),
+				value.String(),
+			)
+		}
+	}
+
+	m.Subject(email.MailHeaderSubject.MustGet().String())
+
+	// setup template variables
+	domainName, err := domain.Name.Get()
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	urlIdentifier := cTemplate.URLIdentifier
+	if urlIdentifier == nil {
+		return errors.New("url identifier must be loaded for the campaign template")
+	}
+
+	urlPath := cTemplate.URLPath.MustGet().String()
+	t := c.TemplateService.CreateMail(
+		domainName.String(),
+		urlIdentifier.Name.MustGet(),
+		urlPath,
+		campaignRecipient,
+		email,
+		nil,
+	)
+
+	var bodyBuffer bytes.Buffer
+	err = mailTmpl.Execute(&bodyBuffer, t)
+	if err != nil {
+		c.Logger.Errorw("failed to execute mail template", "error", err)
+		return errs.Wrap(err)
+	}
+	m.SetBodyString("text/html", bodyBuffer.String())
+
+	// handle attachments
+	attachments := email.Attachments
+	for _, attachment := range attachments {
+		p, err := c.MailService.AttachmentService.GetPath(attachment)
+		if err != nil {
+			return fmt.Errorf("failed to get attachment path: %s", err)
+		}
+		if !attachment.EmbeddedContent.MustGet() {
+			m.AttachFile(p.String())
+		} else {
+			attachmentContent, err := os.ReadFile(p.String())
+			if err != nil {
+				return errs.Wrap(err)
+			}
+			// setup attachment for executing as email template
+			attachmentAsEmail := model.Email{
+				ID:                email.ID,
+				CreatedAt:         email.CreatedAt,
+				UpdatedAt:         email.UpdatedAt,
+				Name:              email.Name,
+				MailEnvelopeFrom:  email.MailEnvelopeFrom,
+				MailHeaderFrom:    email.MailHeaderFrom,
+				MailHeaderSubject: email.MailHeaderSubject,
+				Content:           email.Content,
+				AddTrackingPixel:  email.AddTrackingPixel,
+				CompanyID:         email.CompanyID,
+				Attachments:       email.Attachments,
+				Company:           email.Company,
+			}
+			attachmentAsEmail.Content = nullable.NewNullableWithValue(
+				*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
+			)
+			attachmentStr, err := c.TemplateService.CreateMailBody(
+				urlIdentifier.Name.MustGet(),
+				urlPath,
+				domain,
+				campaignRecipient,
+				&attachmentAsEmail,
+				nil,
+			)
+			if err != nil {
+				return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
+			}
+			m.AttachReadSeeker(
+				filepath.Base(p.String()),
+				strings.NewReader(attachmentStr),
+			)
+		}
+	}
+
+	// send the email
+	var mc *mail.Client
+
+	// try different authentication methods
+	if un := username.String(); len(un) > 0 {
+		// try CRAM-MD5 first when credentials are provided
+		emailOptionsCRAM5 := append(emailOptions, mail.WithSMTPAuth(mail.SMTPAuthCramMD5))
+		mc, _ = mail.NewClient(smtpHost.String(), emailOptionsCRAM5...)
+		mc.SetLogger(log.NewGoMailLoggerAdapter(c.Logger))
+		mc.SetDebugLog(true)
+		if build.Flags.Production {
+			mc.SetTLSPolicy(mail.TLSMandatory)
+		} else {
+			mc.SetTLSPolicy(mail.TLSOpportunistic)
+		}
+		err = mc.DialAndSendWithContext(ctx, m)
+
+		// check if it's an authentication error and try PLAIN auth
+		if err != nil && (strings.Contains(err.Error(), "535 ") ||
+			strings.Contains(err.Error(), "534 ") ||
+			strings.Contains(err.Error(), "538 ") ||
+			strings.Contains(err.Error(), "CRAM-MD5") ||
+			strings.Contains(err.Error(), "authentication failed")) {
+			c.Logger.Debugf("CRAM-MD5 authentication failed, trying PLAIN auth", "error", err)
+			emailOptionsBasic := emailOptions
+			emailOptionsBasic = append(emailOptions, mail.WithSMTPAuth(mail.SMTPAuthPlain))
+			mc, _ = mail.NewClient(smtpHost.String(), emailOptionsBasic...)
+			mc.SetLogger(log.NewGoMailLoggerAdapter(c.Logger))
+			mc.SetDebugLog(true)
+			if build.Flags.Production {
+				mc.SetTLSPolicy(mail.TLSMandatory)
+			} else {
+				mc.SetTLSPolicy(mail.TLSOpportunistic)
+			}
+			err = mc.DialAndSendWithContext(ctx, m)
+		}
+	} else {
+		// no credentials provided, try without authentication
+		mc, _ = mail.NewClient(smtpHost.String(), emailOptions...)
+		mc.SetLogger(log.NewGoMailLoggerAdapter(c.Logger))
+		mc.SetDebugLog(true)
+		if build.Flags.Production {
+			mc.SetTLSPolicy(mail.TLSMandatory)
+		} else {
+			mc.SetTLSPolicy(mail.TLSOpportunistic)
+		}
+		err = mc.DialAndSendWithContext(ctx, m)
+
+		// if no-auth fails and we get an auth-related error, log it appropriately
+		if err != nil && (strings.Contains(err.Error(), "530 ") ||
+			strings.Contains(err.Error(), "535 ") ||
+			strings.Contains(err.Error(), "authentication required") ||
+			strings.Contains(err.Error(), "AUTH")) {
+			c.Logger.Warnw("Server requires authentication but no credentials provided", "error", err)
+		}
+	}
+
+	if err != nil {
+		c.Logger.Errorw("failed to send email", "error", err)
+		return errs.Wrap(err)
+	}
+
+	return nil
+}
+
 // SetNotableCampaignEvent checks and update if most notable event for a campaign
 func (c *Campaign) setMostNotableCampaignEvent(
 	ctx context.Context,
@@ -3051,11 +3496,13 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 	openRate := float64(0)
 	clickRate := float64(0)
 	submissionRate := float64(0)
+	reportRate := float64(0)
 
 	if resultStats.Recipients > 0 {
 		openRate = (float64(resultStats.TrackingPixelLoaded) / float64(resultStats.Recipients)) * 100
 		clickRate = (float64(resultStats.WebsiteLoaded) / float64(resultStats.Recipients)) * 100
 		submissionRate = (float64(resultStats.SubmittedData) / float64(resultStats.Recipients)) * 100
+		reportRate = (float64(resultStats.Reported) / float64(resultStats.Recipients)) * 100
 	}
 
 	// Determine campaign type
@@ -3116,9 +3563,11 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 		TrackingPixelLoaded: int(resultStats.TrackingPixelLoaded),
 		WebsiteVisits:       int(resultStats.WebsiteLoaded),
 		DataSubmissions:     int(resultStats.SubmittedData),
+		Reported:            int(resultStats.Reported),
 		OpenRate:            openRate,
 		ClickRate:           clickRate,
 		SubmissionRate:      submissionRate,
+		ReportRate:          reportRate,
 
 		TemplateName: templateName,
 		CampaignType: campaignType,
@@ -3183,4 +3632,266 @@ func (c *Campaign) GetAllCampaignStats(ctx context.Context, session *model.Sessi
 	result.HasNextPage = false // Simple implementation without pagination for now
 
 	return result, nil
+}
+
+// ProcessReportedCSV processes a CSV file with reported recipients
+func (c *Campaign) ProcessReportedCSV(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+	records [][]string,
+) (int, int, error) {
+	ae := NewAuditEvent("Campaign.ProcessReportedCSV", session)
+	ae.Details["campaignID"] = campaignID.String()
+
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return 0, 0, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return 0, 0, errs.ErrAuthorizationFailed
+	}
+
+	// get campaign to check it exists and get details
+	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{})
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return 0, 0, errs.Wrap(err)
+	}
+
+	// validate CSV headers
+	headers := records[0]
+	reportedByIndex := -1
+	dateReportedIndex := -1
+
+	c.Logger.Debugw("processing CSV headers", "headers", headers)
+
+	for i, header := range headers {
+		switch strings.ToLower(strings.TrimSpace(header)) {
+		case "reported by":
+			reportedByIndex = i
+			c.Logger.Debugw("found reported by column", "index", i)
+		case "date reporter (utc+02:00)", "date reported(utc+02:00)", "date reported", "date reporter":
+			dateReportedIndex = i
+			c.Logger.Debugw("found date column", "index", i, "header", header)
+		}
+	}
+
+	if reportedByIndex == -1 {
+		c.Logger.Errorw("CSV missing required column", "expected", "reported by", "headers", headers)
+		return 0, 0, errs.NewValidationError(errors.New("CSV must have 'reported by' column"))
+	}
+	if dateReportedIndex == -1 {
+		c.Logger.Errorw("CSV missing required date column", "expected", "date reported(utc+02:00)", "headers", headers)
+		return 0, 0, errs.NewValidationError(errors.New("CSV must have 'date reporter (utc+02:00)' or similar date column"))
+	}
+
+	processed := 0
+	skipped := 0
+	reportedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
+
+	// process each row
+	for i, record := range records[1:] { // skip header
+		if len(record) <= reportedByIndex || len(record) <= dateReportedIndex {
+			skipped++
+			c.Logger.Debugw("skipping row with insufficient columns", "row", i+2)
+			continue
+		}
+
+		reportedByEmail := strings.TrimSpace(record[reportedByIndex])
+		dateReported := strings.TrimSpace(record[dateReportedIndex])
+
+		if reportedByEmail == "" {
+			skipped++
+			c.Logger.Debugw("skipping row with empty email", "row", i+2)
+			continue
+		}
+		// parse date - try multiple formats and handle timezone
+		var parsedDate time.Time
+		dateFormats := []string{
+			"2006-01-02T15:04:05",
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05Z",
+			"2006-01-02T15:04:05-07:00",
+			"2006-01-02T15:04:05+02:00",
+			"2006-01-02",
+			"01/02/2006 15:04:05",
+			"01/02/2006",
+			"02-01-2006 15:04:05",
+			"02-01-2006",
+		}
+
+		dateParseError := true
+		for _, format := range dateFormats {
+			if pd, err := time.Parse(format, dateReported); err == nil {
+				// if the parsed date has no timezone info and the header mentions UTC+02:00,
+				// assume the time is in UTC+02:00 and convert to UTC
+				if pd.Location() == time.UTC && strings.Contains(strings.ToLower(headers[dateReportedIndex]), "utc+02:00") {
+					// treat as UTC+02:00 and convert to UTC
+					loc, _ := time.LoadLocation("Europe/Berlin") // UTC+2 (or use FixedZone)
+					if loc != nil {
+						pd = time.Date(pd.Year(), pd.Month(), pd.Day(), pd.Hour(), pd.Minute(), pd.Second(), pd.Nanosecond(), loc).UTC()
+					}
+				}
+				parsedDate = pd
+				dateParseError = false
+				break
+			}
+		}
+
+		if dateParseError {
+			skipped++
+			c.Logger.Debugw("skipping row with invalid date format", "row", i+2, "date", dateReported, "tried_formats", dateFormats)
+			continue
+		}
+
+		c.Logger.Debugw("processing row", "row", i+2, "email", reportedByEmail, "date", parsedDate)
+
+		// find recipient by email in this campaign
+		emailVO, err := vo.NewEmail(reportedByEmail)
+		if err != nil {
+			skipped++
+			c.Logger.Debugw("invalid email format", "email", reportedByEmail, "row", i+2)
+			continue
+		}
+
+		// Get campaign to check company context
+		companyID, _ := campaign.CompanyID.Get()
+		var companyPtr *uuid.UUID
+		if companyID != uuid.Nil {
+			companyPtr = &companyID
+		}
+
+		recipient, err := c.RecipientService.GetByEmail(ctx, session, emailVO, companyPtr)
+		if err != nil {
+			skipped++
+			c.Logger.Debugw("recipient not found for email", "email", reportedByEmail, "row", i+2)
+			continue
+		}
+
+		recipientID := recipient.ID.MustGet()
+
+		// check if recipient is part of this campaign
+		campaignRecipient, err := c.CampaignRecipientRepository.GetByCampaignAndRecipientID(
+			ctx,
+			campaignID,
+			&recipientID,
+			&repository.CampaignRecipientOption{},
+		)
+		if err != nil {
+			skipped++
+			c.Logger.Debugw("recipient not part of campaign", "email", reportedByEmail, "campaignID", campaignID.String(), "row", i+2)
+			continue
+		}
+
+		// check if already reported (to avoid duplicates)
+		existingEvent, err := c.CampaignRepository.GetEventsByCampaignID(
+			ctx,
+			campaignID,
+			&repository.CampaignEventOption{
+				QueryArgs: &vo.QueryArgs{
+					Limit: 1,
+				},
+				EventTypeIDs: []string{reportedEventID.String()},
+			},
+			nil,
+		)
+
+		alreadyReported := false
+		if err == nil && existingEvent != nil {
+			for _, event := range existingEvent.Rows {
+				if event.RecipientID != nil && *event.RecipientID == recipientID {
+					alreadyReported = true
+					break
+				}
+			}
+		}
+
+		if alreadyReported {
+			skipped++
+			c.Logger.Debugw("recipient already reported", "email", reportedByEmail, "campaignID", campaignID.String())
+			continue
+		}
+
+		// create campaign event for reported
+		eventID := uuid.New()
+
+		var campaignEvent *model.CampaignEvent
+		if campaign.IsAnonymous.MustGet() {
+			campaignEvent = &model.CampaignEvent{
+				ID:          &eventID,
+				CampaignID:  campaignID,
+				RecipientID: nil,
+				IP:          vo.NewEmptyOptionalString64(),
+				UserAgent:   vo.NewEmptyOptionalString255(),
+				EventID:     reportedEventID,
+				Data:        vo.NewEmptyOptionalString1MB(),
+			}
+		} else {
+			campaignEvent = &model.CampaignEvent{
+				ID:          &eventID,
+				CampaignID:  campaignID,
+				RecipientID: &recipientID,
+				IP:          vo.NewEmptyOptionalString64(),
+				UserAgent:   vo.NewEmptyOptionalString255(),
+				EventID:     reportedEventID,
+				Data:        vo.NewEmptyOptionalString1MB(),
+			}
+		}
+
+		// save the event with custom timestamp
+		err = c.saveReportedEvent(campaignEvent, parsedDate)
+		if err != nil {
+			c.Logger.Errorw("failed to save reported event", "error", err, "email", reportedByEmail)
+			skipped++
+			continue
+		}
+
+		// update most notable event for campaign recipient
+		err = c.SetNotableCampaignRecipientEvent(
+			ctx,
+			campaignRecipient,
+			data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
+		)
+		if err != nil {
+			c.Logger.Errorw("failed to update notable event", "error", err)
+		}
+
+		processed++
+	}
+
+	ae.Details["processed"] = processed
+	ae.Details["skipped"] = skipped
+	c.AuditLogAuthorized(ae)
+
+	return processed, skipped, nil
+}
+
+// saveReportedEvent saves a reported event with custom timestamp
+func (c *Campaign) saveReportedEvent(
+	campaignEvent *model.CampaignEvent,
+	customTime time.Time,
+) error {
+	row := map[string]any{
+		"id":          campaignEvent.ID.String(),
+		"event_id":    campaignEvent.EventID.String(),
+		"campaign_id": campaignEvent.CampaignID.String(),
+		"ip_address":  campaignEvent.IP.String(),
+		"user_agent":  campaignEvent.UserAgent.String(),
+		"data":        campaignEvent.Data.String(),
+		"created_at":  customTime,
+		"updated_at":  time.Now(),
+	}
+	if campaignEvent.RecipientID != nil {
+		row["recipient_id"] = campaignEvent.RecipientID.String()
+	}
+
+	res := c.CampaignRepository.DB.Model(&database.CampaignEvent{}).Create(row)
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
 }

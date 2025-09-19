@@ -208,7 +208,7 @@
 
 <HeadTitle title="Sign in" />
 <main
-	class="h-screen grid-cols-1 grid md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-2"
+	class="h-screen grid-cols-1 grid md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-2 bg-white dark:bg-gray-900 transition-colors duration-200"
 >
 	<div class="flex items-center justify-center h-full">
 		<img
@@ -221,7 +221,7 @@
 		>
 			<div class="flex flex-col items-center justify-center w-full p-4">
 				<h1
-					class="text-4xl md:text-5xl lg:text-5xl xl:text-5xl 2xl:text-5xl font-titilium font-bold uppercase text-pc-darkblue text-center"
+					class="text-4xl md:text-5xl lg:text-5xl xl:text-5xl 2xl:text-5xl font-titilium font-bold uppercase text-pc-darkblue dark:text-white text-center transition-colors duration-200"
 				>
 					Please sign in
 				</h1>
@@ -230,7 +230,7 @@
 			<div class="flex flex-col items-center justify-center w-full p-px md:p-px lg:p-4">
 				{#if loginError}
 					<div
-						class="flex justify-center w-9/10 bg-message-red border-pc-red border text-center py-4 font-titilium"
+						class="flex justify-center w-9/10 bg-message-red dark:bg-red-900 border-pc-red dark:border-red-700 border text-center py-4 font-titilium text-gray-900 dark:text-white transition-colors duration-200"
 					>
 						{loginError}
 					</div>
@@ -248,7 +248,9 @@
 						submitOnEnter
 					/>
 					<div class="flex flex-col w-full p-4 h-24">
-						<label for="Password" class="text-md font-semibold font-titilium text-pc-darkblue"
+						<label
+							for="Password"
+							class="text-md font-semibold font-titilium text-pc-darkblue dark:text-white transition-colors duration-200"
 							>Password</label
 						>
 						<div class="relative flex items-center justify-end">
@@ -259,9 +261,17 @@
 								on:click={handleClick}
 							>
 								{#if isPasswordVisible}
-									<img src="/view.svg" alt="view" />
+									<img
+										src="/view.svg"
+										alt="view"
+										class="dark:filter dark:brightness-0 dark:invert transition-all duration-200"
+									/>
 								{:else}
-									<img src="/toggle-view.svg" alt="toggle view" />
+									<img
+										src="/toggle-view.svg"
+										alt="toggle view"
+										class="dark:filter dark:brightness-0 dark:invert transition-all duration-200"
+									/>
 								{/if}
 							</button>
 							<input
@@ -281,14 +291,18 @@
 								type={inputType}
 								id="Password"
 								name="Password"
-								class="relative w-full p-2 rounded bg-pc-lightblue focus:outline-none focus:ring-0 focus:border-cta-blue focus:border-2"
+								class="relative w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-blue-400 focus:border-2 text-gray-900 dark:text-white transition-colors duration-200"
 							/>
 						</div>
 					</div>
 					<CTAbutton disabled={isSubmitting} />
 					{#if isSSOEnabled}
 						<div class="absolute bottom-12">
-							<div class="text-center font-bold">SSO</div>
+							<div
+								class="text-center font-bold text-gray-900 dark:text-white transition-colors duration-200"
+							>
+								SSO
+							</div>
 							<a href="/api/v1/sso/entra-id/login">
 								<img src="/ms-login-light.svg" alt="Login with Microsoft" />
 							</a>
@@ -303,15 +317,22 @@
 					>
 						<FormColumns>
 							<FormColumn>
-								<p class="text-center text-lg">Enter the MFA code from your authenticator app</p>
+								<p
+									class="text-center text-lg text-gray-900 dark:text-white transition-colors duration-200"
+								>
+									Enter the MFA code from your authenticator app
+								</p>
 								<Input fieldName={'MFA Code'} type="text" bind:value={formValues.mfaTOTP} />
 
 								<div class="flex flex-col">
-									<p class="text-sm">
+									<p
+										class="text-sm text-gray-700 dark:text-gray-300 transition-colors duration-200"
+									>
 										Forgot your MFA code? Recover your code <button
 											type="button"
 											on:click={showMFARecoveryModal}
-											class="text-cta-blue underline">here</button
+											class="text-cta-blue dark:text-blue-400 underline hover:text-blue-700 dark:hover:text-blue-300 transition-colors duration-200"
+											>here</button
 										>
 									</p>
 								</div>
@@ -319,7 +340,7 @@
 						</FormColumns>
 						<FormError message={mfaError} />
 						<div
-							class="row-start-7 py-4 row-span-2 col-start-1 col-span-3 border-t-2 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end"
+							class="row-start-7 py-4 row-span-2 col-start-1 col-span-3 border-t-2 dark:border-gray-600 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end transition-colors duration-200"
 						>
 							<FormButton>Verify</FormButton>
 						</div>
@@ -338,7 +359,11 @@
 						<FormColumns>
 							<FormColumn>
 								<div class="px-16 py-8">
-									<p class="text-center text-lg">Please enter the MFA recovery code</p>
+									<p
+										class="text-center text-lg text-gray-900 dark:text-white transition-colors duration-200"
+									>
+										Please enter the MFA recovery code
+									</p>
 									<Input
 										fieldName={'MFA Recovery Code'}
 										type="text"
@@ -350,7 +375,7 @@
 
 						<FormError message={mfaRecoveryLoginError} />
 						<div
-							class="row-start-7 py-4 row-span-2 col-start-1 col-span-3 border-t-2 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end"
+							class="row-start-7 py-4 row-span-2 col-start-1 col-span-3 border-t-2 dark:border-gray-600 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end transition-colors duration-200"
 						>
 							<FormButton>Verify</FormButton>
 						</div>

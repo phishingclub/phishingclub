@@ -70,7 +70,8 @@
 			.attr('y1', (height - margin.top - margin.bottom) / 2)
 			.attr('y2', (height - margin.top - margin.bottom) / 2)
 			.attr('stroke', '#E2E8F0')
-			.attr('stroke-width', 2);
+			.attr('stroke-width', 2)
+			.attr('class', 'timeline-line');
 
 		// X Axis
 		g.append('g')
@@ -340,7 +341,8 @@
 			.attr('y1', (height - margin.top - margin.bottom) / 2)
 			.attr('y2', (height - margin.top - margin.bottom) / 2)
 			.attr('stroke', '#E2E8F0')
-			.attr('stroke-width', 2);
+			.attr('stroke-width', 2)
+			.attr('class', 'timeline-line');
 
 		const ghostDots = 8;
 		const ghostDotsData = Array(ghostDots).fill(null);
@@ -355,6 +357,7 @@
 			.attr('r', 6)
 			.attr('fill', '#E2E8F0')
 			.attr('stroke', '#fff')
+			.attr('class', 'ghost-dot-fill')
 			.attr('stroke-width', 2);
 	}
 
@@ -378,10 +381,10 @@
 		try {
 			tooltip.innerHTML = `
 				<div class="p-2">
-					<div class="font-semibold text-lg text-gray-700 border-b-2">${toEvent(d.eventName).name}</div>
-					<div class="">${d.recipient?.email ?? ''}</div>
-					<div class="text-xs text-gray-600">${new Date(d.createdAt).toLocaleString()}</div>
-					${d.data ? `<div class="text-xs mt-1">${d.data}</div>` : ''}
+					<div class="font-semibold text-lg text-gray-700 dark:text-gray-200 border-b-2">${toEvent(d.eventName).name}</div>
+					<div class="text-gray-600 dark:text-gray-300">${d.recipient?.email ?? ''}</div>
+					<div class="text-xs text-gray-600 dark:text-gray-400">${new Date(d.createdAt).toLocaleString()}</div>
+					${d.data ? `<div class="text-xs mt-1 text-gray-500 dark:text-gray-400">${d.data}</div>` : ''}
 				</div>
 			`;
 		} catch (e) {
@@ -435,7 +438,10 @@
 	function getEventColor(eventName) {
 		if (!eventName) return '#6B7280'; // Default gray for undefined events
 
-		const colorMap = {
+		const isDark =
+			typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+
+		const lightModeColors = {
 			campaign_scheduled: '#4e68d8',
 			campaign_active: '#53afe3',
 			campaign_self_managed: '#303f9f',
@@ -443,7 +449,7 @@
 			campaign_recipient_scheduled: '#4e68d8',
 			campaign_recipient_message_sent: '#94cae6',
 			campaign_recipient_message_failed: '#f2bb58',
-			campaign_recipient_message_read: '#4cb5b5',
+			campaign_recipient_message_read: '#22c55e', // More muted green
 			campaign_recipient_before_page_visited: '#eea5fa',
 			campaign_recipient_page_visited: '#f96dcf',
 			campaign_recipient_after_page_visited: '#f6287b',
@@ -451,6 +457,25 @@
 			campaign_recipient_cancelled: '#161692',
 			default: '#6B7280'
 		};
+
+		const darkModeColors = {
+			campaign_scheduled: '#60a5fa',
+			campaign_active: '#38bdf8',
+			campaign_self_managed: '#6366f1',
+			campaign_closed: '#a1a1aa',
+			campaign_recipient_scheduled: '#60a5fa',
+			campaign_recipient_message_sent: '#7dd3fc',
+			campaign_recipient_message_failed: '#fbbf24',
+			campaign_recipient_message_read: '#4ade80', // Softer green for dark mode
+			campaign_recipient_before_page_visited: '#d8b4fe',
+			campaign_recipient_page_visited: '#f472b6',
+			campaign_recipient_after_page_visited: '#fb7185',
+			campaign_recipient_submitted_data: '#f87171',
+			campaign_recipient_cancelled: '#3730a3',
+			default: '#9ca3af'
+		};
+
+		const colorMap = isDark ? darkModeColors : lightModeColors;
 		return colorMap[eventName] || colorMap.default;
 	}
 
@@ -465,11 +490,11 @@
 			bind:this={svg}
 			width="100%"
 			height={height + 20}
-			class="bg-white rounded-lg shadow-sm p-2"
+			class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-2 transition-colors duration-200"
 		/>
 		<div
 			bind:this={tooltip}
-			class="absolute hidden bg-white shadow-lg rounded-lg border border-gray-200 z-10 pointer-events-none"
+			class="absolute hidden bg-white dark:bg-gray-800 shadow-lg rounded-lg border border-gray-200 dark:border-gray-600 z-10 pointer-events-none transition-colors duration-200"
 		/>
 		{#if !isGhost}
 			<div class="absolute top-2 right-2 flex gap-2">
@@ -478,23 +503,23 @@
 						use24Hour = !use24Hour;
 						updateTimeline();
 					}}
-					class="px-2 py-1 text-xs bg-white border border-slate-200 rounded shadow-sm hover:bg-slate-50 text-slate-600"
+					class="px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-slate-200 dark:border-gray-600 rounded shadow-sm hover:bg-slate-50 dark:hover:bg-gray-600 text-slate-600 dark:text-gray-300 transition-colors duration-200"
 				>
 					{use24Hour ? '12h' : '24h'}
 				</button>
 				<button
 					on:click={resetZoom}
-					class="px-2 py-1 text-xs bg-white border border-slate-200 rounded shadow-sm hover:bg-slate-50 text-slate-600"
+					class="px-2 py-1 text-xs bg-white dark:bg-gray-700 border border-slate-200 dark:border-gray-600 rounded shadow-sm hover:bg-slate-50 dark:hover:bg-gray-600 text-slate-600 dark:text-gray-300 transition-colors duration-200"
 				>
 					Reset View
 				</button>
 			</div>
 			<div
-				class="absolute top-0 left-1/2 transform -translate-x-1/2 bg-white px-3 py-1 rounded-b-lg shadow-sm border border-t-0 text-sm font-medium text-slate-700"
+				class="absolute top-0 left-1/2 transform -translate-x-1/2 bg-white dark:bg-gray-800 px-3 py-1 rounded-b-lg shadow-sm border border-t-0 border-gray-200 dark:border-gray-600 text-sm font-medium text-slate-700 dark:text-gray-200 transition-colors duration-200"
 			>
 				{currentCenterDate}
 			</div>
-			<div class="absolute bottom-0 right-0 p-2 text-xs text-slate-500">
+			<div class="absolute bottom-0 right-0 p-2 text-xs text-slate-500 dark:text-gray-400">
 				Drag to pan • Scroll to zoom
 			</div>
 		{/if}
@@ -507,12 +532,45 @@
 		font-weight: 500;
 		fill: #4a5568;
 	}
+
+	:global(.dark .x-axis text) {
+		fill: #d1d5db;
+	}
+
 	:global(.x-axis line) {
 		stroke: #e2e8f0;
 	}
+
+	:global(.dark .x-axis line) {
+		stroke: #4b5563;
+	}
+
 	:global(.x-axis path) {
 		stroke: #e2e8f0;
 	}
+
+	:global(.dark .x-axis path) {
+		stroke: #4b5563;
+	}
+
+	:global(.timeline-line) {
+		stroke: #e2e8f0;
+	}
+
+	:global(.dark .timeline-line) {
+		stroke: #4b5563;
+	}
+
+	:global(.ghost-dot-fill) {
+		fill: #e2e8f0;
+		stroke: #fff;
+	}
+
+	:global(.dark .ghost-dot-fill) {
+		fill: #4b5563;
+		stroke: #1f2937;
+	}
+
 	:global(.ghost-dot) {
 		animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 	}

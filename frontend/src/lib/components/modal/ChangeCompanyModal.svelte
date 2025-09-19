@@ -117,17 +117,21 @@
 		<div class="flex-grow p-6">
 			{#if isLoadingCompanies}
 				<div class="flex items-center justify-center py-8">
-					<div class="text-gray-500">Loading companies...</div>
+					<div class="text-gray-500 dark:text-gray-400 transition-colors duration-200">
+						Loading companies...
+					</div>
 				</div>
 			{:else if companies.length === 0}
 				<div class="flex flex-col items-center justify-center py-8 text-center">
-					<div class="text-gray-500 mb-4">No companies found.</div>
-					<div class="text-sm text-gray-400 mb-4">
+					<div class="text-gray-500 dark:text-gray-400 mb-4 transition-colors duration-200">
+						No companies found.
+					</div>
+					<div class="text-sm text-gray-400 dark:text-gray-500 mb-4 transition-colors duration-200">
 						You need to create a company first before you can switch to it.
 					</div>
 					<a
 						href="/company/"
-						class="bg-cta-blue hover:bg-blue-700 text-sm uppercase font-bold px-4 py-2 text-white rounded-md"
+						class="bg-cta-blue dark:bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-700 text-sm uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
 						on:click={() => {
 							visible = false;
 						}}
@@ -143,11 +147,13 @@
 		</div>
 
 		<!-- Button Section -->
-		<div class="border-t p-6 mt-36 flex flex-wrap gap-4 justify-end">
+		<div
+			class="border-t border-gray-200 dark:border-gray-600 p-6 mt-36 flex flex-wrap gap-4 justify-end transition-colors duration-200"
+		>
 			{#if inContext}
 				<button
 					type="button"
-					class="bg-slate-400 hover:bg-slate-300 text-sm mr-2 uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+					class="bg-slate-400 dark:bg-gray-600 hover:bg-slate-300 dark:hover:bg-gray-500 text-sm mr-2 uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 					disabled={isLoadingCompanies}
 					on:click={onClickSwitchToAdministratorContext}
 				>
@@ -157,7 +163,7 @@
 
 			<button
 				type="submit"
-				class="bg-cta-blue hover:bg-blue-700 text-sm uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+				class="bg-cta-blue dark:bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-700 text-sm uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 				disabled={isLoadingCompanies || !selectedCompany}
 				on:click={onClickSwitch}
 			>

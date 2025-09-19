@@ -419,6 +419,18 @@ func (r *Recipient) GetStatsByID(
 		Distinct("campaign_events.campaign_id").
 		Count(&stats.CampaignsDataSubmitted)
 
+	// get unique reported campaigns
+	r.DB.Model(&database.CampaignEvent{}).
+		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
+		Where(
+			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ?",
+			id,
+			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED],
+			false,
+		).
+		Distinct("campaign_events.campaign_id").
+		Count(&stats.CampaignsReported)
+
 	// Get repeat link clicks in last selected threshold months
 	var linkClickCount int64
 	r.DB.Model(&database.CampaignEvent{}).

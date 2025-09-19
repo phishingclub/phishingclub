@@ -12,7 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"text/template"
+	textTmpl "text/template"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -316,7 +316,7 @@ func (s *Server) Handler(c *gin.Context) {
 			return
 		}
 		// TODO extract this into another method, maybe file
-		t, err := template.
+		t, err := textTmpl.
 			New("staticContent").
 			Funcs(service.TemplateFuncs()).
 			Parse(string(domain.PageNotFoundContent))
@@ -363,7 +363,7 @@ func (s *Server) Handler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-	t, err := template.
+	t, err := textTmpl.
 		New("staticContent").
 		Funcs(service.TemplateFuncs()).
 		Parse(domain.PageContent)
@@ -421,7 +421,7 @@ func (s *Server) handlerNotFound(c *gin.Context) {
 		c.Status(http.StatusNotFound)
 		return
 	}
-	t := template.New("staticContent")
+	t := textTmpl.New("staticContent")
 	t = t.Funcs(service.TemplateFuncs())
 	tmpl, err := t.Parse(string(domain.PageNotFoundContent))
 	if err != nil {
@@ -919,7 +919,9 @@ func (s *Server) renderDenyPage(
 	if err != nil {
 		return fmt.Errorf("failed to get landing page: %s", err)
 	}
-	tmpl, err := template.New("page").Parse(page.Content.MustGet().String())
+	tmpl, err := textTmpl.New("page").
+		Funcs(service.TemplateFuncs()).
+		Parse(page.Content.MustGet().String())
 	if err != nil {
 		return fmt.Errorf("failed to parse page template: %s", err)
 	}

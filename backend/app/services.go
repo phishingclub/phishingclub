@@ -34,6 +34,7 @@ type Services struct {
 	SSO               *service.SSO
 	Update            *service.Update
 	Import            *service.Import
+	Backup            *service.Backup
 }
 
 // NewServices creates a collection of services
@@ -49,6 +50,7 @@ func NewServices(
 	certMagicConfig *certmagic.Config,
 	certMagicCache *certmagic.Cache,
 	licenseServerURL string,
+	filePath string,
 ) *Services {
 	common := service.Common{
 		Logger: logger,
@@ -138,6 +140,7 @@ func NewServices(
 		CampaignRepository:      repositories.Campaign,
 		PageRepository:          repositories.Page,
 		CampaignTemplateService: campaignTemplate,
+		TemplateService:         templateService,
 	}
 	domain := &service.Domain{
 		Common:                    common,
@@ -149,6 +152,7 @@ func NewServices(
 		CampaignTemplateService:   campaignTemplate,
 		AssetService:              asset,
 		FileService:               file,
+		TemplateService:           templateService,
 	}
 	email := &service.Email{
 		Common:            common,
@@ -210,6 +214,12 @@ func NewServices(
 		SessionService: sessionService,
 		// MSALClient:     msalClient, this dependency is set AFTER this function
 	}
+	backupService := &service.Backup{
+		Common:        common,
+		OptionService: optionService,
+		DB:            db,
+		FilePath:      filePath,
+	}
 	updateService := &service.Update{
 		Common:        common,
 		OptionService: optionService,
@@ -250,5 +260,6 @@ func NewServices(
 		SSO:               ssoService,
 		Update:            updateService,
 		Import:            importService,
+		Backup:            backupService,
 	}
 }

@@ -71,7 +71,9 @@
 <div class="flex flex-col justify-start">
 	<label class="flex flex-col py-2 relative">
 		<div class="flex items-center">
-			<p class="font-semibold text-slate-600 py-2">
+			<p
+				class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200"
+			>
 				<slot />
 			</p>
 			{#if toolTipText.length > 0}
@@ -97,7 +99,7 @@
 				on:keyup={_onKeyUp}
 				on:click|stopPropagation={() => {}}
 				autocomplete="off"
-				class="w-full relative rounded-md py-2 pl-4 focus:pl-10 text-gray-600 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 focus:bg-gray-100 bg-grayblue-light font-normal cursor-pointer focus:cursor-text"
+				class="w-full relative rounded-md py-2 pl-4 focus:pl-10 text-gray-600 dark:text-gray-100 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-gray-500 focus:bg-gray-100 dark:focus:bg-gray-700 bg-grayblue-light dark:bg-gray-600 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
 				{id}
 				{required}
 			/>
@@ -109,12 +111,12 @@
 		{#if options.length && showSelection}
 			<div class="w-96 absolute top-10 z-50">
 				<ul
-					class="bg-gray-100 list-none mt-4 rounded-md min-w-fit shadow-md border max-h-40 overflow-y-scroll"
+					class="bg-gray-100 dark:bg-gray-700 list-none mt-4 rounded-md min-w-fit shadow-md dark:shadow-gray-900/50 border border-gray-200 dark:border-gray-600 max-h-40 overflow-y-scroll transition-colors duration-200"
 				>
 					{#each options as option}
 						<li class="break-words">
 							<button
-								class="w-full text-left bg-slate-100 rounded-md text-gray-600 hover:bg-grayblue-dark hover:text-white py-2 px-2 cursor-pointer"
+								class="w-full text-left bg-slate-100 dark:bg-gray-700 rounded-md text-gray-600 dark:text-gray-200 hover:bg-grayblue-dark dark:hover:bg-gray-600 hover:text-white py-2 px-2 cursor-pointer transition-colors duration-200"
 								on:click|preventDefault={() => {
 									value = '';
 									showSelection = false;

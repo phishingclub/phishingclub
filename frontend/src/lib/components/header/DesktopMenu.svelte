@@ -92,19 +92,19 @@
 
 <div class="flex">
 	<nav
-		class="hidden lg:flex flex-col transition-all fixed top-16 z-10 bg-gradient-to-b from-pc-darkblue to-indigo-400 rounded-br-lg overflow-y-auto overflow-x-hidden min-h-0 max-h-[calc(100vh-4rem)] box-content border-r-[1px] border-pc-darkblue"
+		class="hidden lg:flex flex-col transition-all fixed top-16 z-10 bg-gradient-to-b from-pc-darkblue to-indigo-400 dark:from-gray-900 dark:to-gray-800 rounded-br-lg overflow-y-auto overflow-x-hidden min-h-0 max-h-[calc(100vh-4rem)] box-content border-r-[1px] border-pc-darkblue dark:border-gray-700"
 		class:w-40={isExpanded}
 		class:w-12={!isExpanded}
 	>
 		<div
-			class="sticky top-0 bg-highlight-blue/20 border-b w-full border-blue-700/30 transform-none"
+			class="sticky top-0 bg-highlight-blue/20 dark:bg-gray-800/70 border-b w-full border-blue-700/30 dark:border-gray-600 transform-none transition-colors duration-200"
 		>
 			<button
-				class="w-full flex items-center justify-center rounded-md hover:bg-blue-600/30 transition-colors group px-3 py-2"
+				class="w-full flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-gray-700/70 transition-colors group px-3 py-2"
 				on:click={() => (isExpanded = !isExpanded)}
 			>
 				<svg
-					class="text-blue-100 duration-200 w-6"
+					class="text-blue-100 dark:text-gray-100 duration-200 w-6 transition-colors"
 					class:rotate-180={!isExpanded}
 					xmlns="http://www.w3.org/2000/svg"
 					fill="none"
@@ -123,13 +123,15 @@
 
 		<!-- Navigation Items -->
 		<div
-			class="flex flex-col py-4 flex-1 overflow-y-auto {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue"
+			class="flex flex-col py-4 flex-1 overflow-y-auto {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue dark:[&::-webkit-scrollbar-track]:bg-gray-800"
 		>
 			{#each menu as link}
 				{#if link.type === 'submenu'}
 					<div class="py-1 mt-4 first:mt-0">
 						{#if isExpanded}
-							<div class="px-3 py-2 text-xs font-semibold text-blue-100 uppercase tracking-wider">
+							<div
+								class="px-3 py-2 text-xs font-semibold text-blue-100 dark:text-gray-200 uppercase tracking-wider transition-colors duration-200"
+							>
 								{link.label}
 							</div>
 						{/if}
@@ -139,8 +141,8 @@
 								<a
 									class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
                                         {$page.url.pathname === item.route
-										? 'text-white font-medium bg-active-blue shadow-md'
-										: 'text-blue-100 hover:shadow-md hover:bg-highlight-blue hover:text-white'}"
+										? 'text-white font-medium bg-active-blue dark:bg-indigo-600 shadow-md'
+										: 'text-blue-100 dark:text-gray-200 hover:shadow-md hover:bg-highlight-blue dark:hover:bg-gray-700 hover:text-white dark:hover:text-gray-100'}"
 									class:hidden={shouldHideMenuItem(item.route)}
 									draggable="false"
 									href={item.route}
@@ -164,7 +166,7 @@
 									{/if}
 
 									{#if $page.url.pathname === item.route}
-										<div class="absolute left-0 top-0 bottom-0 w-1 bg-white"></div>
+										<div class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-blue-400"></div>
 									{/if}
 								</a>
 							{/each}
@@ -174,8 +176,8 @@
 					<a
 						class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
                             {$page.url.pathname === link.route
-							? 'text-white font-medium bg-active-blue shadow-md'
-							: 'text-blue-100 hover:text-white'}"
+							? 'text-white font-medium bg-active-blue dark:bg-indigo-600 shadow-md'
+							: 'text-blue-100 dark:text-gray-200 hover:text-white dark:hover:text-gray-100 dark:hover:bg-gray-700'}"
 						draggable="false"
 						href={link.route}
 					>
@@ -188,16 +190,16 @@
 							<span class="ml-3 truncate">{link.label}</span>
 						{:else}
 							<div
-								class="absolute left-14 rounded bg-gray-900 text-white px-2 py-1 ml-6 text-sm
-                                invisible opacity-0 -translate-x-3 group-hover:visible group-hover:opacity-100 group-hover:translate-x-0
-                                transition-all duration-150 whitespace-nowrap z-50 shadow-lg"
+								class="absolute left-14 rounded bg-gray-900 dark:bg-gray-800 text-white dark:text-gray-100 px-2 py-1 ml-6 text-sm
+	                                invisible opacity-0 -translate-x-3 group-hover:visible group-hover:opacity-100 group-hover:translate-x-0
+	                                transition-all duration-150 whitespace-nowrap z-50 shadow-lg border dark:border-gray-600"
 							>
 								{link.label}
 							</div>
 						{/if}
 
 						{#if $page.url.pathname === link.route}
-							<div class="absolute left-0 top-0 bottom-0 w-1 bg-white"></div>
+							<div class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-blue-400"></div>
 						{/if}
 					</a>
 				{/if}

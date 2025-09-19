@@ -3,6 +3,7 @@
 	import { menu, mobileTopMenu } from '$lib/consts/navigation';
 	import MenuLink from './MenuLink.svelte';
 	import { shouldHideMenuItem } from '$lib/utils/common';
+	import ThemeToggle from '../ThemeToggle.svelte';
 
 	export let visible = false;
 	export let username = '';
@@ -10,48 +11,91 @@
 </script>
 
 {#if visible}
-	<div class="fixed top-0 left-0 w-full h-full bg-pc-darkblue z-40 overflow-y-auto pb-4">
-		<div class="flex justify-between h-16">
-			<img class="w-40 sm:w-40 md:w-42 lg:w-56 ml-4" src="/logo-white.svg" alt="logo" />
-			<button class="mr-4 w-14" on:click={() => (visible = !visible)}>
-				<img class="w-3/4" src="/mob-menu-close.svg" alt="close mobile menu" />
-			</button>
-		</div>
-		<div>
-			<div class="flex flex-col px-4 py-4 rounded-b-xl">
-				<div class="flex py-6 border-b-2 border-white mb-4">
-					<!-- <div class="bg-slate-50 w-16 h-16 rounded-full" /> -->
-					<div>
-						<h1 class="font-bold text-3xl ml-6 text-white">{username ?? ''}</h1>
-						<button
-							on:click={onClickLogout}
-							class="bg-cta-blue hover:bg-pc-lightblue uppercase font-bold ml-6 mt-2 py text-white rounded-md"
-						>
-							<p class="py px-8">Log Out</p>
-						</button>
-					</div>
+	<!-- Overlay -->
+	<button
+		class="fixed inset-0 bg-black bg-opacity-50 z-40 cursor-default"
+		on:click={() => (visible = false)}
+		aria-label="Close mobile menu"
+	></button>
+
+	<!-- Mobile Menu -->
+	<div
+		class="mobile-menu-content fixed top-0 left-0 w-full h-full bg-pc-darkblue dark:bg-gray-900 z-50 overflow-y-auto shadow-xl transition-colors duration-200"
+	>
+		<!-- Header -->
+		<div
+			class="mobile-menu-header flex justify-between h-20 items-center bg-pc-darkblue dark:bg-gray-800 px-6"
+		>
+			<img class="w-40 h-auto" src="/logo-white.svg" alt="logo" />
+			<div class="flex items-center gap-4">
+				<div
+					class="flex items-center justify-center w-12 h-12 rounded-lg hover:bg-white/10 dark:hover:bg-gray-600/30 transition-colors duration-200"
+				>
+					<ThemeToggle />
 				</div>
-				<div class="flex flex-col text-white">
-					{#each mobileTopMenu as link}
-						<a
-							class="pl-5 py-2 hover:bg-cta-blue hover:text-white rounded-md"
-							class:bg-gray-600={$page.url.pathname === link.route}
-							class:hidden={shouldHideMenuItem(link.route)}
-							on:click={() => (visible = !visible)}
-							target={link.external ? '_blank' : '_self'}
-							href={link.route}>{link.label}</a
-						>
-					{/each}
-				</div>
+				<button
+					class="flex items-center justify-center w-12 h-12 rounded-lg hover:bg-white/10 dark:hover:bg-gray-600/30 transition-colors duration-200"
+					on:click={() => (visible = false)}
+				>
+					<img class="w-6 h-6" src="/mob-menu-close.svg" alt="close mobile menu" />
+				</button>
 			</div>
 		</div>
-		<div>
-			<div class="flex flex-col bg-cta-blue px-4 pt-4">
+
+		<!-- User Section -->
+		<div class="p-6 border-b border-white dark:border-gray-700">
+			<h1 class="font-bold text-xl text-white dark:text-gray-100 mb-4">
+				{username ?? ''}
+			</h1>
+			<button
+				on:click={onClickLogout}
+				class="bg-cta-blue dark:bg-indigo-600 dark:hover:bg-indigo-700 uppercase font-bold py-3 px-6 rounded-md transition-colors duration-200 text-sm text-white"
+			>
+				Log Out
+			</button>
+		</div>
+
+		<!-- Top Menu -->
+		<div class="p-4">
+			<div
+				class="bg-gradient-to-b from-cta-blue to-indigo-500 dark:from-gray-800 dark:to-gray-700 rounded-md"
+			>
+				{#each mobileTopMenu as link}
+					<a
+						class="block text-center py-4 text-white text-lg font-medium first:rounded-t-md last:rounded-b-md transition-colors duration-200"
+						class:bg-active-blue={$page.url.pathname === link.route}
+						class:dark:bg-gray-700={$page.url.pathname === link.route}
+						class:shadow-md={$page.url.pathname === link.route}
+						class:hidden={shouldHideMenuItem(link.route)}
+						on:click={() => (visible = false)}
+						target={link.external ? '_blank' : '_self'}
+						href={link.route}
+					>
+						{link.label}
+					</a>
+				{/each}
+			</div>
+		</div>
+
+		<!-- Main Menu -->
+		<div class="p-4 pt-0">
+			<div
+				class="bg-gradient-to-b from-cta-blue to-indigo-500 dark:from-gray-800 dark:to-gray-700 rounded-md"
+			>
 				{#each menu as link}
 					{#if link.type === 'submenu'}
-						<div class="text-white font-semibold text-xl">{link.label}</div>
+						<div
+							class="text-center py-4 text-white font-semibold text-lg border-b border-white/20 dark:border-gray-600"
+						>
+							{link.label}
+						</div>
 						{#each link.items as item, i (i)}
-							<MenuLink href={item.route} on:click={() => (visible = !visible)}>
+							<a
+								class="block text-center py-3 text-white text-base transition-colors duration-200"
+								class:last:rounded-b-md={i === link.items.length - 1}
+								href={item.route}
+								on:click={() => (visible = false)}
+							>
 								{#if i === 0}
 									Overview
 								{:else if item.singleLabel}
@@ -59,13 +103,49 @@
 								{:else}
 									{item.label}
 								{/if}
-							</MenuLink>
+							</a>
 						{/each}
 					{:else}
-						<MenuLink href={link.route}>{link.label}</MenuLink>
+						<a
+							class="block text-center py-4 text-white text-lg font-medium transition-colors duration-200"
+							href={link.route}
+							on:click={() => (visible = false)}
+						>
+							{link.label}
+						</a>
 					{/if}
 				{/each}
 			</div>
 		</div>
 	</div>
 {/if}
+
+<style>
+	/* Prevent any hover effects on the mobile menu header */
+	:global(.mobile-menu-header) {
+		background-color: #0b2063 !important;
+	}
+	:global(.mobile-menu-header:hover) {
+		background-color: #0b2063 !important;
+	}
+	:global(.dark .mobile-menu-header) {
+		background-color: #1f2937 !important;
+	}
+	:global(.dark .mobile-menu-header:hover) {
+		background-color: #1f2937 !important;
+	}
+
+	/* Prevent any hover effects on the mobile menu content */
+	.mobile-menu-content {
+		background-color: #0b2063 !important;
+	}
+	.mobile-menu-content:hover {
+		background-color: #0b2063 !important;
+	}
+	:global(.dark) .mobile-menu-content {
+		background-color: #111827 !important;
+	}
+	:global(.dark) .mobile-menu-content:hover {
+		background-color: #111827 !important;
+	}
+</style>

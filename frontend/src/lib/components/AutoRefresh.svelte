@@ -66,15 +66,20 @@
 	});
 </script>
 
-<div class="relative h-2">
-	<TextFieldSelect
-		id="autoRefresh"
-		value={$autoRefreshStore.enabled
-			? options.byValue($autoRefreshStore.interval.toString())
-			: 'Disabled'}
-		onSelect={handleIntervalChange}
-		options={options.keys()}
-		inline={true}
-		size={'small'}>Auto-Refresh</TextFieldSelect
+<div class="flex items-center gap-2">
+	<span class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200"
+		>Auto-Refresh</span
 	>
+	<div class="relative">
+		<TextFieldSelect
+			id="autoRefresh"
+			value={$autoRefreshStore.enabled
+				? options.byValue($autoRefreshStore.interval.toString())
+				: 'Disabled'}
+			onSelect={handleIntervalChange}
+			options={options.keys()}
+			inline={true}
+			size={'small'}
+		></TextFieldSelect>
+	</div>
 </div>

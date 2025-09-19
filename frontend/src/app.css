@@ -45,9 +45,292 @@
 	src: url('/Phudu-Black.ttf') format('truetype');
 }
 
+/* custom properties for theming */
+:root {
+	/* light mode colors */
+	--color-bg-primary: #ffffff;
+	--color-bg-secondary: #f8f9fa;
+	--color-bg-tertiary: #f1f3f4;
+	--color-border: #e5e7eb;
+	--color-border-hover: #d1d5db;
+	--color-text-primary: #111827;
+	--color-text-secondary: #6b7280;
+	--color-text-tertiary: #9ca3af;
+	--color-shadow: rgba(0, 0, 0, 0.1);
+	--color-shadow-lg: rgba(0, 0, 0, 0.15);
+
+	/* form colors */
+	--color-input-bg: #ffffff;
+	--color-input-border: #d1d5db;
+	--color-input-border-focus: #2563eb;
+
+	/* scrollbar colors */
+	--color-scrollbar-track: #f1f1f1;
+	--color-scrollbar-thumb: #819efb;
+	--color-scrollbar-thumb-hover: #6b85d6;
+}
+
+.dark {
+	/* dark mode colors */
+	--color-bg-primary: #111827;
+	--color-bg-secondary: #1f2937;
+	--color-bg-tertiary: #374151;
+	--color-border: #374151;
+	--color-border-hover: #4b5563;
+	--color-text-primary: #f9fafb;
+	--color-text-secondary: #d1d5db;
+	--color-text-tertiary: #9ca3af;
+	--color-shadow: rgba(0, 0, 0, 0.3);
+	--color-shadow-lg: rgba(0, 0, 0, 0.4);
+
+	/* form colors */
+	--color-input-bg: #374151;
+	--color-input-border: #4b5563;
+	--color-input-border-focus: #3b82f6;
+
+	/* scrollbar colors */
+	--color-scrollbar-track: #374151;
+	--color-scrollbar-thumb: #6b7280;
+	--color-scrollbar-thumb-hover: #9ca3af;
+}
+
+/* global styles */
+body {
+	background-color: var(--color-bg-primary);
+	color: var(--color-text-primary);
+	transition:
+		background-color 0.2s ease,
+		color 0.2s ease;
+}
+
+/* scrollbar styles */
 body {
 	@apply [&::-webkit-scrollbar]:w-2
-    [&::-webkit-scrollbar-track]:bg-gray-100
+    [&::-webkit-scrollbar-track]:bg-[var(--color-scrollbar-track)]
     [&::-webkit-scrollbar-thumb]:rounded-md
-    [&::-webkit-scrollbar-thumb]:bg-pc-dusty-light-blue;
+    [&::-webkit-scrollbar-thumb]:bg-[var(--color-scrollbar-thumb)]
+    [&::-webkit-scrollbar-thumb:hover]:bg-[var(--color-scrollbar-thumb-hover)];
+}
+
+/* dark mode utility classes */
+@layer utilities {
+	.bg-theme-primary {
+		background-color: var(--color-bg-primary);
+	}
+
+	.bg-theme-secondary {
+		background-color: var(--color-bg-secondary);
+	}
+
+	.bg-theme-tertiary {
+		background-color: var(--color-bg-tertiary);
+	}
+
+	.text-theme-primary {
+		color: var(--color-text-primary);
+	}
+
+	.text-theme-secondary {
+		color: var(--color-text-secondary);
+	}
+
+	.text-theme-tertiary {
+		color: var(--color-text-tertiary);
+	}
+
+	.border-theme {
+		border-color: var(--color-border);
+	}
+
+	.border-theme-hover:hover {
+		border-color: var(--color-border-hover);
+	}
+
+	.shadow-theme {
+		box-shadow: 0 1px 3px 0 var(--color-shadow);
+	}
+
+	.shadow-theme-lg {
+		box-shadow: 0 10px 15px -3px var(--color-shadow-lg);
+	}
+
+	.input-theme {
+		background-color: var(--color-input-bg);
+		border-color: var(--color-input-border);
+		color: var(--color-text-primary);
+	}
+
+	.input-theme:focus {
+		border-color: var(--color-input-border-focus);
+	}
+}
+
+/* component-specific dark mode overrides */
+.dark .bg-gray-50 {
+	@apply bg-gray-800;
+}
+
+.dark .bg-gray-100 {
+	@apply bg-gray-700;
+}
+
+.dark .bg-gray-200 {
+	@apply bg-gray-600;
+}
+
+.dark .bg-white {
+	@apply bg-gray-800;
+}
+
+.dark .text-gray-900 {
+	@apply text-gray-100;
+}
+
+.dark .text-gray-800 {
+	@apply text-gray-200;
+}
+
+.dark .text-gray-700 {
+	@apply text-gray-300;
+}
+
+.dark .text-gray-600 {
+	@apply text-gray-400;
+}
+
+.dark .text-black {
+	@apply text-white;
+}
+
+.dark .border-gray-200 {
+	@apply border-gray-600;
+}
+
+.dark .border-gray-300 {
+	@apply border-gray-500;
+}
+
+/* table dark mode styles */
+.dark table {
+	@apply bg-gray-800;
+}
+
+.dark table td {
+	@apply bg-transparent text-gray-300 border-gray-600;
+}
+
+/* form elements dark mode */
+.dark input,
+.dark textarea,
+.dark select {
+	@apply bg-gray-700 border-gray-600 text-white placeholder-gray-400;
+}
+
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+	@apply border-blue-500 ring-blue-500;
+}
+
+/* modal and card dark mode */
+.dark .modal-content,
+.dark .card {
+	@apply bg-gray-800 border-gray-600;
+}
+
+/* button hover effects in dark mode */
+.dark .bg-cta-blue:hover {
+	@apply bg-blue-600;
+}
+
+.dark .bg-pc-darkblue:hover {
+	@apply bg-blue-900;
+}
+
+/* custom scrollbar for dark mode containers */
+.dark .overflow-auto,
+.dark .overflow-x-auto,
+.dark .overflow-y-auto {
+	scrollbar-width: thin;
+	scrollbar-color: #6b7280 #374151;
+}
+
+.dark .overflow-auto::-webkit-scrollbar,
+.dark .overflow-x-auto::-webkit-scrollbar,
+.dark .overflow-y-auto::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.dark .overflow-auto::-webkit-scrollbar-track,
+.dark .overflow-x-auto::-webkit-scrollbar-track,
+.dark .overflow-y-auto::-webkit-scrollbar-track {
+	background: #374151;
+}
+
+.dark .overflow-auto::-webkit-scrollbar-thumb,
+.dark .overflow-x-auto::-webkit-scrollbar-thumb,
+.dark .overflow-y-auto::-webkit-scrollbar-thumb {
+	background: #6b7280;
+	border-radius: 4px;
+}
+
+.dark .overflow-auto::-webkit-scrollbar-thumb:hover,
+.dark .overflow-x-auto::-webkit-scrollbar-thumb:hover,
+.dark .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+	background: #9ca3af;
+}
+
+/* native date picker dark mode styling */
+.dark input[type='date']::-webkit-calendar-picker-indicator,
+.dark input[type='time']::-webkit-calendar-picker-indicator,
+.dark input[type='datetime-local']::-webkit-calendar-picker-indicator {
+	filter: invert(1);
+}
+
+.dark input[type='date']::-webkit-datetime-edit,
+.dark input[type='time']::-webkit-datetime-edit,
+.dark input[type='datetime-local']::-webkit-datetime-edit {
+	color: rgb(209 213 219);
+}
+
+.dark input[type='date']::-webkit-datetime-edit-fields-wrapper,
+.dark input[type='time']::-webkit-datetime-edit-fields-wrapper,
+.dark input[type='datetime-local']::-webkit-datetime-edit-fields-wrapper {
+	background: rgb(55 65 81);
+}
+
+/* force date picker to use system dark theme */
+.dark input[type='date'],
+.dark input[type='time'],
+.dark input[type='datetime-local'] {
+	color-scheme: dark;
+}
+
+/* selected date background in dark mode */
+.dark input[type='date']::-webkit-datetime-edit-day-field:focus,
+.dark input[type='date']::-webkit-datetime-edit-month-field:focus,
+.dark input[type='date']::-webkit-datetime-edit-year-field:focus,
+.dark input[type='time']::-webkit-datetime-edit-hour-field:focus,
+.dark input[type='time']::-webkit-datetime-edit-minute-field:focus {
+	background-color: rgb(55 65 81);
+	color: rgb(209 213 219);
+}
+
+/* transitions for smooth theme switching */
+*,
+*::before,
+*::after {
+	transition:
+		background-color 0.2s ease,
+		border-color 0.2s ease,
+		color 0.2s ease;
+}
+
+/* override transitions for elements that shouldn't animate */
+.no-transition,
+.no-transition *,
+.no-transition *::before,
+.no-transition *::after {
+	transition: none !important;
 }

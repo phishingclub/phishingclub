@@ -481,8 +481,10 @@
 			<FormColumns>
 				<FormColumn>
 					<!-- Basic Configuration Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue mb-3">Basic Configuration</h3>
+					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							Basic Configuration
+						</h3>
 						<div class="space-y-6">
 							<TextField
 								required
@@ -510,8 +512,10 @@
 					</div>
 
 					<!-- Authentication Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue mb-3">Authentication</h3>
+					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							Authentication
+						</h3>
 						<div class="space-y-6">
 							<TextField
 								minLength={1}
@@ -531,7 +535,9 @@
 
 					<!-- Security Settings -->
 					<div class="pt-4 pb-2 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue mb-3">Security Settings</h3>
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							Security Settings
+						</h3>
 						<div>
 							<SelectSquare
 								label="TLS Certificate Validation"

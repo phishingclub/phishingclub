@@ -59,7 +59,7 @@
 
 <label class="flex flex-col py-2 w-60">
 	<div class="flex items-center">
-		<p class="font-semibold text-slate-600 py-2">
+		<p class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200">
 			<slot />
 		</p>
 		{#if toolTipText.length > 0}
@@ -68,8 +68,10 @@
 			</ToolTip>
 		{/if}
 		{#if optional === true}
-			<div class="bg-gray-100 ml-2 px-2 rounded-md">
-				<p class="text-slate-600 text-xs">optional</p>
+			<div class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200">
+				<p class="text-slate-600 dark:text-gray-300 text-xs transition-colors duration-200">
+					optional
+				</p>
 			</div>
 		{/if}
 	</div>
@@ -86,7 +88,7 @@
 				minlength={minLength}
 				maxlength={maxLength}
 				{required}
-				class="text-ellipsis w-60 rounded-md py-2 pl-4 text-gray-600 border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 focus:bg-gray-100 bg-grayblue-light font-normal"
+				class="text-ellipsis w-60 rounded-md py-2 pl-4 pr-12 text-gray-600 dark:text-gray-200 border border-transparent dark:border-gray-600 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-blue-500 focus:bg-gray-100 dark:focus:bg-gray-600 bg-grayblue-light dark:bg-gray-700 font-normal transition-colors duration-200"
 			/>
 		{:else}
 			<input
@@ -100,18 +102,26 @@
 				{placeholder}
 				autocomplete="off"
 				{required}
-				class="text-ellipsis w-60 rounded-md py-2 pl-4 text-gray-600 border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 focus:bg-gray-100 bg-grayblue-light font-normal"
+				class="text-ellipsis w-60 rounded-md py-2 pl-4 pr-12 text-gray-600 dark:text-gray-200 border border-transparent dark:border-gray-600 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-blue-500 focus:bg-gray-100 dark:focus:bg-gray-600 bg-grayblue-light dark:bg-gray-700 font-normal transition-colors duration-200"
 			/>
 		{/if}
 		<button
-			class="absolute w-8 mr-2 hover:opacity-70"
+			class="absolute w-8 mr-2 hover:opacity-70 transition-opacity duration-200"
 			on:click={handleClick}
 			on:keyup={handleClick}
 		>
 			{#if viewPassword}
-				<img src="/view.svg" alt="view" />
+				<img
+					src="/view.svg"
+					alt="view"
+					class="dark:filter dark:brightness-0 dark:invert transition-all duration-200"
+				/>
 			{:else}
-				<img src="/toggle-view.svg" alt="toggle view" />
+				<img
+					src="/toggle-view.svg"
+					alt="toggle view"
+					class="dark:filter dark:brightness-0 dark:invert transition-all duration-200"
+				/>
 			{/if}
 		</button>
 	</div>

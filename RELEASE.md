@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.0] - 2025-09-19
+- Added dark mode support and various UI improvements
+- Added manual backup functionality
+- Added reported functionality for phishing campaigns
+- Added recipient manual send action
+- Added validation on save
+- Added link to release information on update modal and page
+- Fixed copy campaign wrong text on create
+- Fixed HTML to text template handling
+- Fixed bad title on settings page
+- Fixed dashboard scroll to top issue
+- Improved send again texts
+- Improved modal error position
+- Moved recent campaigns to bottom of dashboard
+- Bumped Go version and dependencies
+
 ## [1.2.1] - 2025-09-15
 - Add debug logging to SMTP
 - Fix excessive table URL params

@@ -3,6 +3,8 @@ package controller
 import (
 	"bytes"
 	"encoding/csv"
+	"io"
+	"strings"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -852,6 +854,27 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
+// SendEmailByCampaignRecipientID sends an email to a specific campaign recipient
+func (c *Campaign) SendEmailByCampaignRecipientID(g *gin.Context) {
+	// handle session
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	// send message (email or API depending on campaign template configuration)
+	err := c.CampaignService.SendEmailByCampaignRecipientID(g.Request.Context(), session, id)
+	// handle responses
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 // DeleteByID deletes a campaign by its id
 func (c *Campaign) DeleteByID(g *gin.Context) {
 	// handle session
@@ -934,4 +957,71 @@ func (c *Campaign) GetAllCampaignStats(g *gin.Context) {
 		return
 	}
 	c.Response.OK(g, stats)
+}
+
+// UploadReportedCSV uploads a CSV file with reported recipients
+func (c *Campaign) UploadReportedCSV(g *gin.Context) {
+	// handle session
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse campaign id
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+
+	// get the uploaded file
+	file, header, err := g.Request.FormFile("file")
+	if err != nil {
+		c.Response.ValidationFailed(g, "file", err)
+		return
+	}
+	defer file.Close()
+
+	// validate file extension
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".csv") {
+		c.Response.ValidationFailed(g, "file", errors.New("file must be a CSV"))
+		return
+	}
+
+	// read file content
+	content, err := io.ReadAll(file)
+	if err != nil {
+		c.Response.ValidationFailed(g, "file", err)
+		return
+	}
+
+	// parse CSV
+	reader := csv.NewReader(strings.NewReader(string(content)))
+	records, err := reader.ReadAll()
+	if err != nil {
+		c.Logger.Errorw("failed to parse CSV file", "error", err)
+		c.Response.ValidationFailed(g, "file", errors.New("failed to parse CSV file: "+err.Error()))
+		return
+	}
+
+	if len(records) < 2 {
+		c.Logger.Debugw("CSV file has insufficient rows", "rows", len(records))
+		c.Response.ValidationFailed(g, "file", errors.New("CSV file must have header and at least one data row"))
+		return
+	}
+
+	c.Logger.Debugw("processing CSV", "rows", len(records), "headers", records[0])
+
+	// process CSV
+	processed, skipped, err := c.CampaignService.ProcessReportedCSV(g.Request.Context(), session, id, records)
+	if err != nil {
+		c.Logger.Errorw("failed to process reported CSV", "error", err)
+		if ok := c.handleErrors(g, err); !ok {
+			return
+		}
+	}
+
+	c.Response.OK(g, gin.H{
+		"processed": processed,
+		"skipped":   skipped,
+		"message":   "CSV processed successfully",
+	})
 }

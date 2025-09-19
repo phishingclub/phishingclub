@@ -36,6 +36,7 @@ type Domain struct {
 	CampaignTemplateService   *CampaignTemplate
 	AssetService              *Asset
 	FileService               *File
+	TemplateService           *Template
 }
 
 // Create creates a new domain
@@ -59,6 +60,19 @@ func (d *Domain) Create(
 	if err := domain.Validate(); err != nil {
 		// d.Logger.Debugf("failed to validate domain", "error", err)
 		return nil, errs.Wrap(err)
+	}
+	// validate template content if present
+	if pageContent, err := domain.PageContent.Get(); err == nil {
+		if err := d.TemplateService.ValidateDomainTemplate(pageContent.String()); err != nil {
+			d.Logger.Errorw("failed to validate domain page template", "error", err)
+			return nil, validate.WrapErrorWithField(errors.New("invalid page template: "+err.Error()), "pageContent")
+		}
+	}
+	if notFoundContent, err := domain.PageNotFoundContent.Get(); err == nil {
+		if err := d.TemplateService.ValidateDomainTemplate(notFoundContent.String()); err != nil {
+			d.Logger.Errorw("failed to validate domain not found template", "error", err)
+			return nil, validate.WrapErrorWithField(errors.New("invalid not found template: "+err.Error()), "pageNotFoundContent")
+		}
 	}
 	// check for uniqueness
 	name := domain.Name.MustGet() // safe as we have validated
@@ -403,9 +417,19 @@ func (d *Domain) UpdateByID(
 		current.HostWebsite.Set(v)
 	}
 	if v, err := incoming.PageContent.Get(); err == nil {
+		// validate template content before updating
+		if err := d.TemplateService.ValidateDomainTemplate(v.String()); err != nil {
+			d.Logger.Errorw("failed to validate domain page template", "error", err)
+			return validate.WrapErrorWithField(errors.New("invalid page template: "+err.Error()), "pageContent")
+		}
 		current.PageContent.Set(v)
 	}
 	if v, err := incoming.PageNotFoundContent.Get(); err == nil {
+		// validate template content before updating
+		if err := d.TemplateService.ValidateDomainTemplate(v.String()); err != nil {
+			d.Logger.Errorw("failed to validate domain not found template", "error", err)
+			return validate.WrapErrorWithField(errors.New("invalid not found template: "+err.Error()), "pageNotFoundContent")
+		}
 		current.PageNotFoundContent.Set(v)
 	}
 	if v, err := incoming.RedirectURL.Get(); err == nil {

@@ -5,10 +5,13 @@
 </script>
 
 <a
-	class="py-2 px-4 text-white hover:bg-active-blue hover:text-white hover:rounded-md"
-	class:bg-highlight-blue={$page.url.pathname === href}
-	class:font-semibold={$page.url.pathname === href}
-	class:rounded-md={$page.url.pathname === href}
+	class="pl-5 py-2 text-white last:rounded-md first:rounded-t-md transition-colors duration-200"
+	class:hover:shadow-md={$page.url.pathname !== href}
+	class:hover:bg-highlight-blue={$page.url.pathname !== href}
+	class:dark:hover:bg-gray-600={$page.url.pathname !== href}
+	class:bg-active-blue={$page.url.pathname === href}
+	class:dark:bg-gray-700={$page.url.pathname === href}
+	class:shadow-md={$page.url.pathname === href}
 	class:hidden
 	{href}
 	on:click

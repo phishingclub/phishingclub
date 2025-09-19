@@ -41,11 +41,12 @@
 
 	let isGeneratingCalendar = false;
 
+	// Use consistent colors that match the design system - these work well in both light and dark modes
 	const COLORS = {
-		SCHEDULED: '#62aded',
-		ACTIVE: '#5557f6',
-		COMPLETED: '#69e1ab',
-		SELF_MANAGED: '#9F7AEA'
+		SCHEDULED: '#62aded', // campaign-scheduled
+		ACTIVE: '#5557f6', // campaign-active
+		COMPLETED: '#4cb5b5', // message-read - much more muted than bright green
+		SELF_MANAGED: '#9F7AEA' // purple
 	};
 
 	function sortCampaignsByPriority(campaigns, day) {
@@ -306,18 +307,20 @@
 	}
 </script>
 
-<div class="w-full bg-white rounded-lg shadow-sm p-4 border border-gray-200">
+<div
+	class="w-full bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 border border-gray-200 dark:border-gray-700 transition-colors duration-200"
+>
 	<div class="space-y-4 max-w-5xl mx-auto min-h-[600px]">
 		<!-- Navigation Controls -->
 		<div class="flex justify-center items-center">
 			<button
-				class="p-2 rounded hover:bg-gray-100 mx-4"
+				class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 mx-4 transition-colors duration-200"
 				on:click={previousMonth}
 				disabled={isLoadingNewMonth}
 			>
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 text-gray-600"
+					class="h-5 w-5 text-gray-600 dark:text-gray-300"
 					fill="none"
 					viewBox="0 0 24 24"
 					stroke="currentColor"
@@ -331,18 +334,18 @@
 				</svg>
 			</button>
 
-			<h2 class="text-lg font-semibold">
+			<h2 class="text-lg font-semibold text-gray-900 dark:text-white">
 				{format(currentMonth, 'MMMM yyyy')}
 			</h2>
 
 			<button
-				class="p-2 rounded hover:bg-gray-100 mx-4"
+				class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 mx-4 transition-colors duration-200"
 				on:click={nextMonth}
 				disabled={isLoadingNewMonth}
 			>
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 text-gray-600"
+					class="h-5 w-5 text-gray-600 dark:text-gray-300"
 					fill="none"
 					viewBox="0 0 24 24"
 					stroke="currentColor"
@@ -356,7 +359,7 @@
 		<div class="flex justify-center flex-wrap gap-4 text-sm">
 			{#each [{ key: 'SCHEDULED', color: COLORS.SCHEDULED, label: 'Scheduled' }, { key: 'ACTIVE', color: COLORS.ACTIVE, label: 'Active' }, { key: 'COMPLETED', color: COLORS.COMPLETED, label: 'Completed' }, { key: 'SELF_MANAGED', color: COLORS.SELF_MANAGED, label: 'Self-managed' }] as item}
 				<button
-					class="flex items-center cursor-pointer select-none"
+					class="flex items-center cursor-pointer select-none hover:opacity-80 transition-opacity duration-200"
 					on:click={() => toggleFilter(item.key)}
 				>
 					<div
@@ -364,7 +367,7 @@
 						style="background-color: {item.color}; opacity: {activeFilters[item.key] ? '1' : '0.3'}"
 					></div>
 					<span
-						class="transition-opacity duration-200"
+						class="transition-opacity duration-200 text-gray-700 dark:text-gray-300"
 						style="opacity: {activeFilters[item.key] ? '1' : '0.5'}">{item.label}</span
 					>
 				</button>
@@ -376,7 +379,7 @@
 			<!-- Day headers -->
 			<div class="grid grid-cols-7 text-center mb-1">
 				{#each ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as day}
-					<div class="text-sm font-medium text-gray-600">{day}</div>
+					<div class="text-sm font-medium text-gray-600 dark:text-gray-300">{day}</div>
 				{/each}
 			</div>
 
@@ -384,8 +387,10 @@
 			{#if !isInitialized || isGeneratingCalendar || isLoadingNewMonth}
 				<div class="min-h-[450px] flex items-center justify-center">
 					<div class="flex items-center space-x-2">
-						<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-						<span class="text-gray-600">Loading calendar...</span>
+						<div
+							class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 dark:border-blue-400"
+						></div>
+						<span class="text-gray-600 dark:text-gray-300">Loading calendar...</span>
 					</div>
 				</div>
 			{:else}
@@ -395,17 +400,19 @@
 							{#each week as day}
 								<div
 									class="calendar-day relative border rounded-md overflow-hidden {scrollBarClassesHorizontal}  {day.isToday
-										? 'border-gray-700 bg-gray-50'
-										: 'border-gray-200'}
-	                                {day.isCurrentMonth ? 'bg-white' : 'bg-gray-50'}"
+										? 'border-gray-700 dark:border-gray-400 bg-gray-50 dark:bg-gray-700'
+										: 'border-gray-200 dark:border-gray-600'}
+	                                {day.isCurrentMonth
+										? 'bg-white dark:bg-gray-800'
+										: 'bg-gray-50 dark:bg-gray-700'} transition-colors duration-200"
 								>
 									<!-- Date number -->
 									<div
 										class="text-sm p-1 {day.isToday
-											? 'font-bold text-gray-800'
+											? 'font-bold text-gray-800 dark:text-white'
 											: day.isCurrentMonth
-												? 'text-gray-600'
-												: 'text-gray-400'}"
+												? 'text-gray-600 dark:text-gray-300'
+												: 'text-gray-400 dark:text-gray-500'}"
 									>
 										{day.date.getDate()}
 									</div>

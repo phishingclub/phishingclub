@@ -34,6 +34,7 @@ type Controllers struct {
 	SSO               *controller.SSO
 	Update            *controller.Update
 	Import            *controller.Import
+	Backup            *controller.Backup
 }
 
 // NewControllers creates a collection of controllers
@@ -168,6 +169,10 @@ func NewControllers(
 		Common:        common,
 		ImportService: services.Import,
 	}
+	backup := &controller.Backup{
+		Common:        common,
+		BackupService: services.Backup,
+	}
 
 	return &Controllers{
 		Asset:             asset,
@@ -196,5 +201,6 @@ func NewControllers(
 		SSO:               sso,
 		Update:            update,
 		Import:            importController,
+		Backup:            backup,
 	}
 }

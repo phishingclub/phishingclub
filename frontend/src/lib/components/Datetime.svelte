@@ -14,7 +14,7 @@
 	}
 </script>
 
-<div>
+<div class="text-gray-900 dark:text-gray-100 transition-colors duration-200">
 	{#if date}
 		{#if !hideHours}
 			{date.toLocaleString()}

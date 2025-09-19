@@ -36,6 +36,10 @@ const (
 	ROUTE_V1_UPDATE_AVAILABLE        = "/api/v1/update/available"
 	ROUTE_V1_UPDATE_AVAILABLE_CACHED = "/api/v1/update/available/cached"
 	ROUTE_V1_UPDATE                  = "/api/v1/update"
+	// backup
+	ROUTE_V1_BACKUP_CREATE   = "/api/v1/backup/create"
+	ROUTE_V1_BACKUP_LIST     = "/api/v1/backup/list"
+	ROUTE_V1_BACKUP_DOWNLOAD = "/api/v1/backup/download/:filename"
 	// user
 	ROUTE_V1_USER        = "/api/v1/user"
 	ROUTE_V1_USER_ID     = "/api/v1/user/:id"
@@ -132,10 +136,12 @@ const (
 	ROUTE_V1_CAMPAIGN_STATS              = "/api/v1/campaign/statistics"
 	ROUTE_V1_CAMPAIGN_STATS_ID           = "/api/v1/campaign/:id/stats"
 	ROUTE_V1_CAMPAIGN_STATS_ALL          = "/api/v1/campaign/stats/all"
+	ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED    = "/api/v1/campaign/:id/upload/reported"
 	// campaign-recipient
-	ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL    = "/api/v1/campaign/recipient/:id/email"
-	ROUTE_V1_CAMPAIGN_RECIPIENT_URL      = "/api/v1/campaign/recipient/:id/url"
-	ROUTE_V1_CAMPAIGN_RECIPIENT_SET_SENT = "/api/v1/campaign/recipient/:id/sent"
+	ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL      = "/api/v1/campaign/recipient/:id/email"
+	ROUTE_V1_CAMPAIGN_RECIPIENT_URL        = "/api/v1/campaign/recipient/:id/url"
+	ROUTE_V1_CAMPAIGN_RECIPIENT_SET_SENT   = "/api/v1/campaign/recipient/:id/sent"
+	ROUTE_V1_CAMPAIGN_RECIPIENT_SEND_EMAIL = "/api/v1/campaign/recipient/:id/send"
 	// asset
 	ROUTE_V1_ASSET                = "/api/v1/asset"
 	ROUTE_V1_ASSET_ID             = "/api/v1/asset/:id"
@@ -364,6 +370,7 @@ func setupRoutes(
 		POST(ROUTE_V1_CAMPAIGN_CLOSE, middleware.SessionHandler, controllers.Campaign.CloseCampaignByID).
 		GET(ROUTE_V1_CAMPAIGN_EXPORT_EVENTS, middleware.SessionHandler, controllers.Campaign.ExportEventsAsCSV).
 		GET(ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS, middleware.SessionHandler, controllers.Campaign.ExportSubmissionsAsCSV).
+		POST(ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED, middleware.SessionHandler, controllers.Campaign.UploadReportedCSV).
 		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE, middleware.SessionHandler, controllers.Campaign.AnonymizeByID).
 		DELETE(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.DeleteByID).
 		// campaign-recipient
@@ -371,6 +378,7 @@ func setupRoutes(
 		GET(ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL, middleware.SessionHandler, controllers.Campaign.GetCampaignEmail).
 		GET(ROUTE_V1_CAMPAIGN_RECIPIENT_URL, middleware.SessionHandler, controllers.Campaign.GetCampaignURL).
 		POST(ROUTE_V1_CAMPAIGN_RECIPIENT_SET_SENT, middleware.SessionHandler, controllers.Campaign.SetSentAtByCampaignRecipientID).
+		POST(ROUTE_V1_CAMPAIGN_RECIPIENT_SEND_EMAIL, middleware.SessionHandler, controllers.Campaign.SendEmailByCampaignRecipientID).
 		// asset
 		GET(ROUTE_V1_ASSET_DOMAIN_VIEW, middleware.SessionHandler, controllers.Asset.GetContentByID).
 		GET(ROUTE_V1_ASSET_ID, middleware.SessionHandler, controllers.Asset.GetByID).
@@ -415,6 +423,10 @@ func setupRoutes(
 		// update
 		GET(ROUTE_V1_UPDATE, middleware.SessionHandler, controllers.Update.GetUpdateDetails).
 		POST(ROUTE_V1_UPDATE, middleware.SessionHandler, controllers.Update.RunUpdate).
+		// backup
+		POST(ROUTE_V1_BACKUP_CREATE, middleware.SessionHandler, controllers.Backup.CreateBackup).
+		GET(ROUTE_V1_BACKUP_LIST, middleware.SessionHandler, controllers.Backup.ListBackups).
+		GET(ROUTE_V1_BACKUP_DOWNLOAD, middleware.SessionHandler, controllers.Backup.DownloadBackup).
 		// import
 		POST(ROUTE_V1_IMPORT, middleware.SessionHandler, controllers.Import.Import)
 

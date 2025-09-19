@@ -166,7 +166,35 @@
 
 	const onSubmitPageUpdate = async () => {
 		try {
-			await onClickUpdate();
+			isSubmitting = true;
+			updateContentError = '';
+			// clear site contents if not hosting a website
+			if (!formValues.hostWebsite) {
+				formValues.pageContent = '';
+				formValues.pageNotFoundContent = '';
+			}
+			const res = await api.domain.update({
+				id: formValues.id,
+				managedTLS: formValues.managedTLS,
+				ownManagedTLS: formValues.ownManagedTLS,
+				ownManagedTLSKey: formValues.ownManagedTLSKey,
+				ownManagedTLSPem: formValues.ownManagedTLSPem,
+				hostWebsite: formValues.hostWebsite,
+				pageContent: formValues.pageContent,
+				pageNotFoundContent: formValues.pageNotFoundContent,
+				redirectURL: formValues.redirectURL,
+				companyID: contextCompanyID
+			});
+			if (!res.success) {
+				updateContentError = res.error;
+				return;
+			}
+			addToast('Domain updated', 'Success');
+			closeAllModals();
+			refreshDomains();
+		} catch (e) {
+			addToast('Failed to update domain', 'Error');
+			console.error('failed to update domain', e);
 		} finally {
 			isSubmitting = false;
 		}
@@ -401,6 +429,7 @@
 
 	const closeAllModals = () => {
 		modalError = '';
+		updateContentError = '';
 		formValues.id = null;
 		if (form) {
 			form.reset();
@@ -563,8 +592,10 @@
 			<FormColumns>
 				<FormColumn>
 					<!-- Domain Information Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue mb-3">Domain Information</h3>
+					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							Domain Information
+						</h3>
 						<div class="space-y-6">
 							<TextField
 								minLength={3}
@@ -599,9 +630,11 @@
 						</div>
 					</div>
 
-					<!-- TLS Configuration Section -->
-					<div class="mb-6 pt-4 pb-2 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue mb-3">TLS Configuration</h3>
+					<!-- SSL Configuration Section -->
+					<div class="pt-4 pb-2 w-full">
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							SSL Configuration
+						</h3>
 						<div class="space-y-6">
 							<SelectSquare
 								label="Managed TLS"
@@ -678,7 +711,7 @@
 		<FormGrid on:submit={onSubmitPageUpdate} bind:bindTo={contentNotFoundForm} {isSubmitting}>
 			<Editor
 				contentType="domain"
-				baseURL={formValues.pageNotFoundContent}
+				baseURL={formValues.name}
 				bind:value={formValues.pageNotFoundContent}
 			/>
 			<FormError message={updateContentError} />
