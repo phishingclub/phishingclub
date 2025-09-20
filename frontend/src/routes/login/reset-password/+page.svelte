@@ -10,6 +10,8 @@
 	import FormError from '$lib/components/FormError.svelte';
 	import PasswordField from '$lib/components/PasswordField.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
+	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
 
 	// services
 	const api = API.instance;
@@ -29,6 +31,10 @@
 
 	// hooks
 	onMount(() => {
+		// initialize theme system
+		setupTheme();
+		setupOSThemeListener();
+
 		console.log('no implemented');
 		location.href = '/login';
 	});
@@ -62,7 +68,11 @@
 </script>
 
 <HeadTitle title="Change password" />
-<main>
+<main class="bg-white dark:bg-gray-900 transition-colors duration-200">
+	<!-- theme toggle -->
+	<div class="fixed top-3 right-6 z-50">
+		<ThemeToggle />
+	</div>
 	<Form on:submit={onSubmitChangePassword}>
 		<SubHeadline>Current password has expired. Set a new password</SubHeadline>
 		<PasswordField bind:value={changePasswordFormValues.currentPassword}

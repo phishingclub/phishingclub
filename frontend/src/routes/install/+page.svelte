@@ -1,4 +1,5 @@
 <script>
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { API } from '$lib/api/api';
 	import { AppStateService } from '$lib/service/appState';
@@ -10,6 +11,8 @@
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
+	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
 
 	// services
 	const api = API.instance;
@@ -32,6 +35,12 @@
 	};
 
 	// Removed edition detection - single unified installation
+
+	// initialize theme system
+	onMount(() => {
+		setupTheme();
+		setupOSThemeListener();
+	});
 
 	// if already installed or not a superadministrator redirect to the dashboard
 	const user = appStateService.getUser();
@@ -142,19 +151,16 @@
 <div
 	class="inset-0 z-50 min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 >
+	<!-- theme toggle -->
+	<div class="fixed top-3 right-6 z-50">
+		<ThemeToggle />
+	</div>
 	<div class="flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-		<div class="flex justify-center">
-			<img src="/logo-blue.svg" class="w-48" alt="Phishing Club" />
-		</div>
-		<p
-			class="mt-2 text-center text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200"
-		>
+		<p class="text-center text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200">
 			Complete the setup to get started with Phishing Club
 		</p>
 
-		<div
-			class="sm:mx-auto sm:max-w-2xl mt-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg dark:shadow-gray-900/50 transition-colors duration-200"
-		>
+		<div class="sm:mx-auto sm:max-w-2xl mt-8">
 			<div class="flex justify-between items-center mb-8 w-full px-4">
 				{#each steps as step, index}
 					<div class="flex flex-col items-center w-32">
