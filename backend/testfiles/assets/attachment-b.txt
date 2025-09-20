@@ -1,0 +1,1 @@
+Hi {{.FirstName}} Welcome to The Phishing Club! We are excited to have you here. Click <a href='{{.URL}}'>here</a> to get started.

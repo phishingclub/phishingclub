@@ -57,7 +57,7 @@ func (r *Asset) GetAllByDomainAndContext(
 		db = db.
 			Joins("left join domains on domains.id = assets.domain_id").
 			Select(r.joinSelectString()).
-			Where("(assets.company_id = ? OR assets.company_id IS NULL) AND (domain_id = ? OR domain_id IS NULL)", companyID, domainID)
+			Where("(assets.company_id = ? OR assets.company_id IS NULL) AND domain_id = ?", companyID, domainID)
 	} else {
 		db.Where("assets.company_id = ?", companyID)
 	}
@@ -103,7 +103,7 @@ func (r *Asset) GetAllByGlobalContext(
 	}
 	var dbModels []*database.Asset
 	dbRes := db.
-		Where("company_id IS NULL").
+		Where("company_id IS NULL AND domain_id IS NULL").
 		Find(&dbModels)
 
 	if dbRes.Error != nil {
