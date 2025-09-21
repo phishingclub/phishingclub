@@ -246,6 +246,7 @@
 						on:click={() => {
 							openUpdateModal(company.id);
 						}}
+						class="block w-full py-1 text-left"
 					>
 						{company.name}
 					</button>

@@ -16,6 +16,8 @@
 	import { api } from '$lib/api/apiProxy';
 	import { addToast } from '$lib/store/toast';
 	import { page } from '$app/stores';
+	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+	import { setupTheme, setupOSThemeListener, theme } from '$lib/theme.js';
 
 	// services
 	const appState = AppStateService.instance;
@@ -43,6 +45,10 @@
 
 	// hooks
 	onMount(() => {
+		// initialize theme system
+		setupTheme();
+		setupOSThemeListener();
+
 		// if the user is already logged in, we want to redirect to the dashboard
 		if (appState.isLoggedIn()) {
 			console.info('login: navigating to /dashboard');
@@ -210,10 +216,15 @@
 <main
 	class="h-screen grid-cols-1 grid md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-2 bg-white dark:bg-gray-900 transition-colors duration-200"
 >
+	<!-- theme toggle -->
+	<div class="fixed top-3 right-6 z-50">
+		<ThemeToggle />
+	</div>
+
 	<div class="flex items-center justify-center h-full">
 		<img
 			class="fixed center top-6 w-1/4 md:w-1/4 lg:w-1/6 xl:w-1/6 2xl:w-1/6 lg:top-6 lg:left-4 xl:top-6 xl:left-4 2xl:top-6 2xl:left-4"
-			src="/logo-blue.svg"
+			src={$theme === 'dark' ? '/logo-white.svg' : '/logo-blue.svg'}
 			alt="phishing club logo"
 		/>
 		<div

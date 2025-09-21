@@ -1,0 +1,5 @@
+/** global asset **/
+* {
+    background-color: yellow;
+    background: url(contoso-logo.png);
+}

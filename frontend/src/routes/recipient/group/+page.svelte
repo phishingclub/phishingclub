@@ -8,6 +8,7 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
+	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import { addToast } from '$lib/store/toast';
@@ -232,17 +233,13 @@
 	>
 		{#each groups as group}
 			<TableRow>
-				<TableCell>
-					<a href={`/recipient/group/${group.id}`}>
-						{group.name}
-					</a>
-				</TableCell>
+				<TableCellLink href={`/recipient/group/${group.id}`} title={group.name}>
+					{group.name}
+				</TableCellLink>
 
-				<TableCell>
-					<a href={`/recipient/group/${group.id}`}>
-						{group.recipientCount}
-					</a>
-				</TableCell>
+				<TableCellLink href={`/recipient/group/${group.id}`} title={group.recipientCount}>
+					{group.recipientCount}
+				</TableCellLink>
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

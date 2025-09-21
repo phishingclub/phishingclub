@@ -261,6 +261,7 @@
 							}}
 							{...globalButtonDisabledAttributes(attachment, contextCompanyID)}
 							title={attachment.name}
+							class="block w-full py-1 text-left"
 						>
 							{attachment.name}
 						</button>
@@ -274,6 +275,7 @@
 							}}
 							{...globalButtonDisabledAttributes(attachment, contextCompanyID)}
 							title={attachment.name}
+							class="block w-full py-1 text-left"
 						>
 							{attachment.description}
 						</button>
@@ -287,6 +289,7 @@
 							}}
 							{...globalButtonDisabledAttributes(attachment, contextCompanyID)}
 							title={attachment.name}
+							class="block w-full py-1 text-left"
 						>
 							{attachment.fileName}
 						</button>

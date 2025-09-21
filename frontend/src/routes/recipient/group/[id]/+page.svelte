@@ -9,6 +9,7 @@
 	import SubHeadline from '$lib/components/SubHeadline.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
+	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import { addToast } from '$lib/store/toast';
 	import FormError from '$lib/components/FormError.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
@@ -391,16 +392,16 @@
 		{#each recipients as recipient}
 			<TableRow>
 				<TableCell value={recipient.email} />
-				<TableCell>
-					<a href="/recipient/{recipient.id}">{recipient.firstName}</a>
-				</TableCell>
-				<TableCell>
-					<a href="/recipient/{recipient.id}">{recipient.lastName}</a>
-				</TableCell>
+				<TableCellLink href="/recipient/{recipient.id}" title={recipient.firstName}>
+					{recipient.firstName}
+				</TableCellLink>
+				<TableCellLink href="/recipient/{recipient.id}" title={recipient.lastName}>
+					{recipient.lastName}
+				</TableCellLink>
 				<TableCell value={recipient.phone} />
-				<TableCell>
-					<a href="/recipient/{recipient.id}">{recipient.extraIdentifier}</a>
-				</TableCell>
+				<TableCellLink href="/recipient/{recipient.id}" title={recipient.extraIdentifier}>
+					{recipient.extraIdentifier}
+				</TableCellLink>
 				<TableCell value={recipient.position} />
 				<TableCell value={recipient.department} />
 				<TableCell value={recipient.city} />

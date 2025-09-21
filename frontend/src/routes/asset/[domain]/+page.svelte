@@ -54,7 +54,8 @@
 	let isDeleteAlertVisible = false;
 	let deleteValues = {
 		id: null,
-		name: null
+		name: null,
+		path: null
 	};
 	let modalMode = null;
 	let modalText = '';
@@ -251,6 +252,7 @@
 		isDeleteAlertVisible = true;
 		deleteValues.id = asset.id;
 		deleteValues.name = asset.name;
+		deleteValues.path = asset.path;
 	};
 
 	const onClickPreview = async (path) => {
@@ -396,7 +398,7 @@
 				<TableCell>
 					{#if isImageFile(asset.path)}
 						{#await getImagePreviewUrl(asset.path)}
-							<div class="w-12 h-12 bg-gray-200 animate-pulse rounded"></div>
+							<div class="w-12 h-12 animate-pulse rounded"></div>
 						{:then imageUrl}
 							{#if imageUrl}
 								<button
@@ -415,22 +417,18 @@
 								</button>
 							{:else}
 								<div
-									class="w-12 h-12 bg-gray-300 rounded flex items-center justify-center text-xs text-gray-600"
+									class="w-12 h-12 rounded flex items-center justify-center text-xs text-gray-600"
 								>
 									No preview
 								</div>
 							{/if}
 						{:catch}
-							<div
-								class="w-12 h-12 bg-red-100 rounded flex items-center justify-center text-xs text-red-600"
-							>
+							<div class="w-12 h-12 rounded flex items-center justify-center text-xs text-red-600">
 								Error
 							</div>
 						{/await}
 					{:else}
-						<div
-							class="w-12 h-12 bg-gray-100 rounded flex items-center justify-center text-xs text-gray-500"
-						>
+						<div class="w-12 h-12 rounded flex items-center justify-center text-xs text-gray-500">
 							📄
 						</div>
 					{/if}
@@ -513,7 +511,7 @@
 		</FormGrid>
 	</Modal>
 	<DeleteAlert
-		name={deleteValues.name}
+		name={deleteValues.name || deleteValues.path || 'Unnamed asset'}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
 	></DeleteAlert>

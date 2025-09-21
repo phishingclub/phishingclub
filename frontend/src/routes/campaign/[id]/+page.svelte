@@ -10,6 +10,7 @@
 	import { AppStateService } from '$lib/service/appState';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
+	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import { formatWeekDays, formatTimeConstraint, timeFormat } from '$lib/utils/date.js';
 	import {
 		defaultPerPage,
@@ -1362,21 +1363,21 @@
 						<TableCell isDate value={event.createdAt} />
 						<TableCell>
 							{#if event.recipient?.firstName}
-								<a href={`/recipient/${event.recipient.id}`}>
+								<a href={`/recipient/${event.recipient.id}`} class="block w-full py-1">
 									{event.recipient.firstName}
 								</a>
 							{/if}
 						</TableCell>
 						<TableCell>
 							{#if event.recipient?.lastName}
-								<a href={`/recipient/${event.recipient.id}`}>
+								<a href={`/recipient/${event.recipient.id}`} class="block w-full py-1">
 									{event.recipient.lastName}
 								</a>
 							{/if}
 						</TableCell>
 						<TableCell>
 							{#if event.recipient?.email}
-								<a href={`/recipient/${event.recipient.id}`}>
+								<a href={`/recipient/${event.recipient.id}`} class="block w-full py-1">
 									{event.recipient.email}
 								</a>
 							{/if}
@@ -1430,18 +1431,27 @@
 						<TableCell value={'anonymized'} />
 					{:else}
 						<TableCell>
-							<button on:click={() => openEventsModal(recp.recipientID)}>
+							<button
+								on:click={() => openEventsModal(recp.recipientID)}
+								class="block w-full py-1 text-left"
+							>
 								{recp.recipient.firstName}
 							</button>
 						</TableCell>
 						<TableCell>
-							<button on:click={() => openEventsModal(recp.recipientID)}>
+							<button
+								on:click={() => openEventsModal(recp.recipientID)}
+								class="block w-full py-1 text-left"
+							>
 								{recp.recipient.lastName}
 							</button>
 						</TableCell>
 						<TableCell>
 							{#if recp?.recipient?.email}
-								<button on:click={() => openEventsModal(recp.recipientID)}>
+								<button
+									on:click={() => openEventsModal(recp.recipientID)}
+									class="block w-full py-1 text-left"
+								>
 									{recp.recipient.email}
 								</button>
 							{/if}

@@ -8,6 +8,7 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
+	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import { addToast } from '$lib/store/toast';
@@ -994,22 +995,21 @@
 	>
 		{#each campaigns as campaign}
 			<TableRow>
-				<TableCell>
+				<TableCellLink href={`/campaign/${campaign.id}`} title={campaign.name}>
 					{#if campaign.isTest}
 						<TestLabel />
 					{/if}
-					<a href={`/campaign/${campaign.id}`}>
-						{campaign.name}
-					</a>
-				</TableCell>
+					{campaign.name}
+				</TableCellLink>
 				<TableCell>
 					{toEvent(campaign.notableEventName).name}
 				</TableCell>
-				<TableCell>
-					<a href={`/campaign-template/?edit=${campaign.templateID}`}>
-						{templateMap.byKey(campaign.templateID)}
-					</a>
-				</TableCell>
+				<TableCellLink
+					href={`/campaign-template/?edit=${campaign.templateID}`}
+					title={templateMap.byKey(campaign.templateID)}
+				>
+					{templateMap.byKey(campaign.templateID)}
+				</TableCellLink>
 				<TableCell value={campaign.sendStartAt} isDate isRelative />
 				<TableCell value={campaign.sendEndAt} isDate isRelative />
 				<TableCell value={campaign.closeAt ?? ''} isDate isRelative />

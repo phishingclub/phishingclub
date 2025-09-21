@@ -322,6 +322,7 @@
 						}}
 						{...globalButtonDisabledAttributes(apiSender, contextCompanyID)}
 						title={apiSender.name}
+						class="block w-full py-1 text-left"
 					>
 						{apiSender.name}
 					</button>
