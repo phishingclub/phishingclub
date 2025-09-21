@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1] - 2025-09-21
+- Improved width of links in tables
+- Fixed asset page not showing domains
+- Fixed domain assets shown under global assets
+- Improve asset delete modal text
+- Removed asset preview icon background
+- Minor improvements to install / login UI.
+
 ## [1.3.0] - 2025-09-19
 - Added dark mode support and various UI improvements
 - Added manual backup functionality
