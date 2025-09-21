@@ -12,9 +12,9 @@ export const immediateResponseHandler = (apiResponse) => {
 		goto('/login');
 		window.location.reload();
 	}
-	// If the user must renew their password, move them to the renew password page
+	// If the user must renew their password, redirect to login
 	if (apiResponse.statusCode === 400 && apiResponse.error === 'New password required') {
-		goto('/login/reset-password');
+		goto('/login');
 		return;
 	}
 	return apiResponse;
