@@ -10,6 +10,7 @@
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
+	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import { addToast } from '$lib/store/toast';
@@ -538,6 +539,7 @@
 						}}
 						{...globalButtonDisabledAttributes(domain, contextCompanyID)}
 						title={domain.name}
+						class="block w-full py-1 text-left"
 					>
 						{domain.name}
 					</button>

@@ -263,6 +263,7 @@
 						on:click={() => {
 							showEditModal(user.id);
 						}}
+						class="block w-full py-1 text-left"
 					>
 						{user.username}
 					</button></TableCell

@@ -441,6 +441,7 @@
 						}}
 						{...globalButtonDisabledAttributes(conf, contextCompanyID)}
 						title={conf.name}
+						class="block w-full py-1 text-left"
 					>
 						{conf.name}
 					</button>

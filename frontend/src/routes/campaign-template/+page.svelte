@@ -7,6 +7,7 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
+	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
@@ -473,62 +474,70 @@
 						on:click={() => openUpdateModal(template.id)}
 						{...globalButtonDisabledAttributes(template, contextCompanyID)}
 						title={template.name}
+						class="block w-full py-1 text-left"
 					>
 						{template.name}
 					</button>
 				</TableCell>
 				<TableCell>
 					{#if template.domainID}
-						<a href={`/domain/?edit=${template.domainID}`}>
+						<a href={`/domain/?edit=${template.domainID}`} class="block w-full py-1">
 							{domainMap.byKey(template.domainID)}
 						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
 					{#if template.smtpConfigurationID}
-						<a href={`/smtp-configuration/?edit=${template.smtpConfigurationID}`}>
+						<a
+							href={`/smtp-configuration/?edit=${template.smtpConfigurationID}`}
+							class="block w-full py-1"
+						>
 							{smtpConfigurationMap.byKey(template.smtpConfigurationID)}
 						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
 					{#if template.apiSenderID}
-						<a href={`/api-sender/?edit=${template.apiSenderID}`}>
+						<a href={`/api-sender/?edit=${template.apiSenderID}`} class="block w-full py-1">
 							{apiSenderMap.byKey(template.apiSenderID)}
 						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
 					{#if template.emailID}
-						<a href={`/email/?edit=${template.emailID}`}>
+						<a href={`/email/?edit=${template.emailID}`} class="block w-full py-1">
 							{emailMap.byKey(template.emailID)}
 						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
 					{#if template.beforeLandingPageID}
-						<a href={`/page/?edit=${template.beforeLandingPageID}`}>
+						<a href={`/page/?edit=${template.beforeLandingPageID}`} class="block w-full py-1">
 							{beforeLandingPageMap.byKey(template.beforeLandingPageID)}
 						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
 					{#if template.landingPageID}
-						<a href={`/page/?edit=${template.landingPageID}`}>
+						<a href={`/page/?edit=${template.landingPageID}`} class="block w-full py-1">
 							{landingPageMap.byKey(template.landingPageID)}
 						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
 					{#if template.afterLandingPageID}
-						<a href={`/page/?edit=${template.afterLandingPageID}`}>
+						<a href={`/page/?edit=${template.afterLandingPageID}`} class="block w-full py-1">
 							{afterLandingPageMap.byKey(template.afterLandingPageID)}
 						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
 					{#if template.afterLandingPageRedirectURL}
-						<a href={`${template.afterLandingPageRedirectURL}`} target="_blank">
+						<a
+							href={`${template.afterLandingPageRedirectURL}`}
+							target="_blank"
+							class="block w-full py-1"
+						>
 							{template.afterLandingPageRedirectURL}
 						</a>
 					{/if}

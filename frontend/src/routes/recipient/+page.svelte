@@ -7,6 +7,7 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
+	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import { addToast } from '$lib/store/toast';
@@ -406,19 +407,18 @@
 	>
 		{#each recipients as recipient}
 			<TableRow>
-				<TableCell>
+				<TableCellLink href={`/recipient/${recipient.id}`} title={recipient.email}>
 					{#if recipient.email}
-						<a href={`/recipient/${recipient.id}`}>
-							{recipient.email}
-						</a>
+						{recipient.email}
 					{/if}
-				</TableCell>
+				</TableCellLink>
 				<TableCell>
 					{#if recipient.firstName}
 						<button
 							on:click={() => {
 								openUpdateModal(recipient.id);
 							}}
+							class="block w-full py-1 text-left"
 						>
 							{recipient.firstName}
 						</button>
@@ -430,6 +430,7 @@
 							on:click={() => {
 								openUpdateModal(recipient.id);
 							}}
+							class="block w-full py-1 text-left"
 						>
 							{recipient.lastName}
 						</button>
