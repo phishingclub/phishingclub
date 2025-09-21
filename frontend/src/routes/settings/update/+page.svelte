@@ -75,80 +75,92 @@
 <HeadTitle title="Update - Settings" />
 <main class="pb-8">
 	<Headline>Update</Headline>
-	<div class="bg-white dark:bg-half-devil-gray p-6 rounded-lg shadow-sm">
-		<div class="grid grid-cols-1 gap-6">
-			<div class="border-t pt-6 border-grayblue-light dark:border-devil-gray">
-				{#if isUpdateAvailable}
-					<div class="bg-pleasant-gray dark:bg-devil-gray p-4 rounded-md mb-4">
-						<div class="flex items-center justify-between mb-4">
-							<div>
-								<p class="text-grayblue-dark">Version {newVersion} is now available</p>
-								<p class="mt-2">
-									<a
-										href="https://github.com/phishingclub/phishingclub/releases"
-										target="_blank"
-										class="text-cta-blue hover:text-active-blue underline"
-									>
-										View release notes →
-									</a>
-								</p>
-								{#if !isUpdateLocal}
-									<p class="mt-4">
-										This instance is was not setup using the <code>systemd install</code> and must be
-										updated manually.
+	<div class="pt-4">
+		<div
+			class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 transition-colors duration-200"
+		>
+			<div class="grid grid-cols-1 gap-6">
+				<div>
+					{#if isUpdateAvailable}
+						<div class="mb-4">
+							<div class="flex items-center justify-between mb-4">
+								<div>
+									<p class="text-gray-700 dark:text-gray-200 transition-colors duration-200">
+										Version {newVersion} is now available
 									</p>
-								{/if}
-								<p class="mt-4 text-sm text-gray-600">
-									Consider creating a backup before updating to ensure you can restore if needed.
-								</p>
+									<p class="mt-2">
+										<a
+											href="https://github.com/phishingclub/phishingclub/releases"
+											target="_blank"
+											class="text-blue-600 dark:text-white hover:text-blue-700 dark:hover:text-gray-200 underline transition-colors duration-200"
+										>
+											View release notes
+										</a>
+									</p>
+									{#if !isUpdateLocal}
+										<p class="mt-4 text-gray-600 dark:text-gray-300 transition-colors duration-200">
+											This instance is was not setup using the <code>systemd install</code> and must
+											be updated manually.
+										</p>
+									{/if}
+									<p
+										class="mt-4 text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200"
+									>
+										Consider creating a backup before updating to ensure you can restore if needed.
+									</p>
+								</div>
+							</div>
+
+							<div class="mt-6 flex">
+								<button
+									on:click={installUpdate}
+									disabled={isUpdating}
+									class="px-4 py-2 bg-cta-blue hover:bg-active-blue text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+								>
+									{#if !isUpdateLocal}
+										Download
+									{:else}
+										Update
+									{/if}
+								</button>
 							</div>
 						</div>
-
-						<div class="mt-6 flex">
-							<button
-								on:click={installUpdate}
-								disabled={isUpdating}
-								class="px-4 py-2 bg-cta-blue hover:bg-active-blue text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+					{:else}
+						<div class="text-center">
+							<svg
+								class="mx-auto h-12 w-12 text-cta-green"
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
 							>
-								{#if !isUpdateLocal}
-									Get update
-								{:else}
-									Update
-								{/if}
-							</button>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M5 13l4 4L19 7"
+								/>
+							</svg>
+							<h3
+								class="mt-2 text-lg font-medium text-gray-900 dark:text-gray-100 transition-colors duration-200"
+							>
+								System up to date!
+							</h3>
+							<p class="mt-1 text-gray-600 dark:text-gray-300 transition-colors duration-200">
+								An update notification is visible when a update is ready.
+							</p>
+							<p class="mt-3">
+								<a
+									href="https://github.com/phishingclub/phishingclub/releases"
+									target="_blank"
+									class="text-sm text-blue-600 dark:text-white hover:text-blue-700 dark:hover:text-gray-200 transition-colors duration-200"
+								>
+									View previous release information
+								</a>
+							</p>
 						</div>
-					</div>
-				{:else}
-					<div class="bg-pleasant-gray dark:bg-devil-gray p-4 rounded-md text-center">
-						<svg
-							class="mx-auto h-12 w-12 text-cta-green"
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M5 13l4 4L19 7"
-							/>
-						</svg>
-						<h3 class="mt-2 text-lg font-medium">System up to date!</h3>
-						<p class="mt-1 text-grayblue-dark">
-							An update notification is visible when a update is ready.
-						</p>
-						<p class="mt-3">
-							<a
-								href="https://github.com/phishingclub/phishingclub/releases"
-								target="_blank"
-								class="text-xs hover:text-gray-700"
-							>
-								View previous release information
-							</a>
-						</p>
-					</div>
-				{/if}
+					{/if}
+				</div>
 			</div>
 		</div>
 	</div>
