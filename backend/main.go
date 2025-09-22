@@ -130,7 +130,7 @@ func main() {
 		*flagConfigPath,
 	)
 	if err != nil {
-		golog.Fatalf("failed to config: %s", err)
+		golog.Fatalf("failed to setup config: %s", err)
 	}
 	// setup database connection
 	db, err := app.SetupDatabase(conf)

@@ -18,6 +18,7 @@
 	import { AppStateService } from '$lib/service/appState';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
+	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
@@ -54,8 +55,9 @@
 		ownManagedTLSPem: null,
 		hostWebsite: true,
 		pageContent: '', // default value
-		pageNotFoundContent: '404 page not found', // default value
-		redirectURL: ''
+		pageNotFoundContent: '', // default value
+		redirectURL: '',
+		staticContent: ''
 	};
 
 	let isDeleteAlertVisible = false;
@@ -67,6 +69,10 @@
 	let defaultValues = {
 		...formValues
 	};
+
+	let currentDomain = null; // store current domain for proxy info
+	$: isProxyDomain = currentDomain?.type === 'proxy';
+	$: isRegularDomain = !isProxyDomain;
 	let contextCompanyID = null;
 	let domains = [];
 	let modalError = '';
@@ -78,6 +84,7 @@
 	let isUpdateNotFoundModalVisible = false;
 	let isCopyContentModalVisible = false;
 	let isDomainTableLoading = false;
+
 	// @type {null|'create'|'update'}
 	let modalMode = null;
 	let modalText = '';
@@ -169,23 +176,44 @@
 		try {
 			isSubmitting = true;
 			updateContentError = '';
-			// clear site contents if not hosting a website
-			if (!formValues.hostWebsite) {
+			// clear site contents if not hosting a website or if proxy domain
+			if (!formValues.hostWebsite || isProxyDomain) {
 				formValues.pageContent = '';
 				formValues.pageNotFoundContent = '';
 			}
-			const res = await api.domain.update({
-				id: formValues.id,
-				managedTLS: formValues.managedTLS,
-				ownManagedTLS: formValues.ownManagedTLS,
-				ownManagedTLSKey: formValues.ownManagedTLSKey,
-				ownManagedTLSPem: formValues.ownManagedTLSPem,
-				hostWebsite: formValues.hostWebsite,
-				pageContent: formValues.pageContent,
-				pageNotFoundContent: formValues.pageNotFoundContent,
-				redirectURL: formValues.redirectURL,
-				companyID: contextCompanyID
-			});
+			// prepare complete update data
+			let updateData;
+
+			if (isProxyDomain) {
+				// for proxy domains, only send TLS-related fields
+				updateData = {
+					id: formValues.id,
+					managedTLS: formValues.managedTLS,
+					ownManagedTLS: formValues.ownManagedTLS,
+					ownManagedTLSKey: formValues.ownManagedTLSKey,
+					ownManagedTLSPem: formValues.ownManagedTLSPem,
+					companyID: contextCompanyID
+				};
+			} else {
+				// for regular domains, send all fields
+				updateData = {
+					id: formValues.id,
+					type: 'regular',
+					proxyTargetDomain: '',
+					managedTLS: formValues.managedTLS,
+					ownManagedTLS: formValues.ownManagedTLS,
+					ownManagedTLSKey: formValues.ownManagedTLSKey,
+					ownManagedTLSPem: formValues.ownManagedTLSPem,
+					hostWebsite: formValues.hostWebsite,
+					pageContent: formValues.pageContent,
+					pageNotFoundContent: formValues.pageNotFoundContent,
+					redirectURL: formValues.redirectURL,
+					companyID: contextCompanyID
+				};
+			}
+
+			// @ts-ignore
+			const res = await api.domain.update(updateData);
 			if (!res.success) {
 				updateContentError = res.error;
 				return;
@@ -245,13 +273,15 @@
 	const onClickCreate = async () => {
 		modalError = '';
 		try {
-			// clear site contents if not hosting a website
-			if (!formValues.hostWebsite) {
+			// clear site contents if not hosting a website or if proxy domain
+			if (!formValues.hostWebsite || isProxyDomain) {
 				formValues.pageContent = '';
 				formValues.pageNotFoundContent = '';
 			}
 			const res = await api.domain.create({
 				name: formValues.name,
+				type: 'regular',
+				proxyTargetDomain: '',
 				managedTLS: formValues.managedTLS,
 				ownManagedTLS: formValues.ownManagedTLS,
 				ownManagedTLSKey: formValues.ownManagedTLSKey,
@@ -277,24 +307,45 @@
 
 	const onClickUpdate = async () => {
 		modalError = '';
-		// clear site contents if not hosting a website
-		if (!formValues.hostWebsite) {
+		// clear site contents if not hosting a website or if proxy domain
+		if (!formValues.hostWebsite || isProxyDomain) {
 			formValues.pageContent = '';
 			formValues.pageNotFoundContent = '';
 		}
 		try {
-			const res = await api.domain.update({
-				id: formValues.id,
-				managedTLS: formValues.managedTLS,
-				ownManagedTLS: formValues.ownManagedTLS,
-				ownManagedTLSKey: formValues.ownManagedTLSKey,
-				ownManagedTLSPem: formValues.ownManagedTLSPem,
-				hostWebsite: formValues.hostWebsite,
-				pageContent: formValues.pageContent,
-				pageNotFoundContent: formValues.pageNotFoundContent,
-				redirectURL: formValues.redirectURL,
-				companyID: contextCompanyID
-			});
+			// prepare complete update data
+			let updateData;
+
+			if (isProxyDomain) {
+				// for proxy domains, only send TLS-related fields
+				updateData = {
+					id: formValues.id,
+					managedTLS: formValues.managedTLS,
+					ownManagedTLS: formValues.ownManagedTLS,
+					ownManagedTLSKey: formValues.ownManagedTLSKey,
+					ownManagedTLSPem: formValues.ownManagedTLSPem,
+					companyID: contextCompanyID
+				};
+			} else {
+				// for regular domains, send all fields
+				updateData = {
+					id: formValues.id,
+					type: 'regular',
+					proxyTargetDomain: '',
+					managedTLS: formValues.managedTLS,
+					ownManagedTLS: formValues.ownManagedTLS,
+					ownManagedTLSKey: formValues.ownManagedTLSKey,
+					ownManagedTLSPem: formValues.ownManagedTLSPem,
+					hostWebsite: formValues.hostWebsite,
+					pageContent: formValues.pageContent,
+					pageNotFoundContent: formValues.pageNotFoundContent,
+					redirectURL: formValues.redirectURL,
+					companyID: contextCompanyID
+				};
+			}
+
+			// @ts-ignore
+			const res = await api.domain.update(updateData);
 			if (!res.success) {
 				modalError = res.error;
 				return;
@@ -349,6 +400,12 @@
 		showIsLoading();
 		try {
 			const domain = await getDomain(id);
+
+			// prevent opening modal for proxy domains (except for TLS settings)
+			if (domain.type === 'proxy') {
+				// Allow opening for TLS settings only
+			}
+
 			formValues = {
 				id: domain.id,
 				name: domain.name,
@@ -362,6 +419,10 @@
 				redirectURL: domain.redirectURL,
 				staticContent: domain.staticContent
 			};
+
+			// Store domain object for proxy info display
+			currentDomain = domain;
+
 			const r = globalButtonDisabledAttributes(domain, contextCompanyID);
 			if (r.disabled) {
 				hideIsLoading();
@@ -383,13 +444,22 @@
 	const openUpdateContentModal = async (id) => {
 		modalMode = 'update';
 		showIsLoading();
+
 		try {
 			const domain = await getDomain(id);
+
+			// prevent opening modal for proxy domains
+			if (domain.type === 'proxy') {
+				addToast('Proxy domains cannot be edited - managed through proxy configuration', 'Error');
+				hideIsLoading();
+				return;
+			}
+
 			assignDomainValues(domain);
 			isUpdateContentModalVisible = true;
 		} catch (e) {
 			addToast('Failed to load domain', 'Error');
-			console.error('failed to load domain', e);
+			console.error('failed to get domain', e);
 		} finally {
 			hideIsLoading();
 		}
@@ -426,6 +496,8 @@
 			redirectURL: domain.redirectURL,
 			staticContent: domain.staticContent
 		};
+		// Store domain object for proxy info display
+		currentDomain = domain;
 	};
 
 	const closeAllModals = () => {
@@ -441,7 +513,7 @@
 		if (contentNotFoundForm) {
 			contentNotFoundForm.reset();
 		}
-		isModalVisible = false;
+		// reset content
 		formValues = {
 			id: null,
 			name: null,
@@ -451,12 +523,15 @@
 			ownManagedTLSPem: null,
 			hostWebsite: true,
 			pageContent: '', // default value
-			pageNotFoundContent: '404 page not found', // default value
-			redirectURL: ''
+			pageNotFoundContent: '', // default value
+			redirectURL: '',
+			staticContent: ''
 		};
+		currentDomain = null;
+
 		isModalVisible = false;
-		isUpdateNotFoundModalVisible = false;
 		isUpdateContentModalVisible = false;
+		isUpdateNotFoundModalVisible = false;
 		isCopyContentModalVisible = false;
 	};
 
@@ -468,6 +543,14 @@
 		showIsLoading();
 		try {
 			const domain = await getDomain(id);
+
+			// prevent opening modal for proxy domains
+			if (domain.type === 'proxy') {
+				addToast('Proxy domains cannot be edited - managed through proxy configuration', 'Error');
+				hideIsLoading();
+				return;
+			}
+
 			formValues = {
 				id: domain.id,
 				name: domain.name,
@@ -478,18 +561,28 @@
 				hostWebsite: domain.hostWebsite,
 				pageContent: domain.pageContent,
 				pageNotFoundContent: domain.pageNotFoundContent,
-				redirectURL: domain.redirectURL
+				redirectURL: domain.redirectURL,
+				staticContent: domain.staticContent
 			};
 			isUpdateNotFoundModalVisible = true;
 		} catch (e) {
 			addToast('Failed to load domain', 'Error');
-			console.error('failed to load domain', e);
+			console.error('failed to get domain', e);
 		} finally {
 			hideIsLoading();
 		}
 	};
 
 	const openDeleteAlert = async (domain) => {
+		// prevent deletion of proxy domains
+		if (domain.type === 'proxy') {
+			addToast(
+				'Proxy domains can only be deleted by deleting the associated proxy configuration',
+				'Error'
+			);
+			return;
+		}
+
 		isDeleteAlertVisible = true;
 		deleteValues.id = domain.id;
 		deleteValues.name = domain.name;
@@ -522,9 +615,11 @@
 			{ column: 'Hosting website', size: 'small', alignText: 'center' },
 			{ column: 'Redirects', size: 'small', alignText: 'center' },
 			{ column: 'Managed TLS', size: 'small', alignText: 'center' },
-			{ column: 'Custom Certificates', size: 'small', alignText: 'center' }
+			{ column: 'Custom Certificates', size: 'small', alignText: 'center' },
+			{ column: 'Type', size: 'small', alignText: 'center' },
+			{ column: 'Target Domain', size: 'small' }
 		]}
-		sortable={['Name', 'Hosting website', 'Redirects']}
+		sortable={['Name', 'Hosting website', 'Redirects', 'Type']}
 		hasData={!!domains.length}
 		plural="domains"
 		pagination={tableURLParams}
@@ -541,13 +636,26 @@
 						title={domain.name}
 						class="block w-full py-1 text-left"
 					>
-						{domain.name}
+						{#if domain.type === 'proxy'}<ProxySvgIcon size="w-4 h-4" className="inline mr-1" />
+						{/if}{domain.name}
 					</button>
 				</TableCell>
 				<TableCellCheck value={domain.hostWebsite} />
 				<TableCellCheck value={!!domain.redirectURL} />
 				<TableCellCheck value={domain.managedTLS} />
 				<TableCellCheck value={domain.ownManagedTLS} />
+				<TableCell>
+					<div class="flex justify-center">
+						<span title={domain.type === 'proxy' ? 'Proxy Domain' : 'Regular Domain'}>
+							{#if domain.type === 'proxy'}
+								<ProxySvgIcon size="w-5 h-5" />
+							{:else}
+								📄
+							{/if}
+						</span>
+					</div>
+				</TableCell>
+				<TableCell>{domain.type === 'proxy' ? domain.proxyTargetDomain : ''}</TableCell>
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
@@ -562,21 +670,39 @@
 							on:click={() => openUpdateModal(domain.id)}
 							{...globalButtonDisabledAttributes(domain, contextCompanyID)}
 						/>
-						<TableUpdateButton
-							name={'Update page'}
-							on:click={() => openUpdateContentModal(domain.id)}
-							{...globalButtonDisabledAttributes(domain, contextCompanyID)}
-						/>
-						<TableUpdateButton
-							name={'Update 404 page'}
-							on:click={() => openUpdateNotFoundContentModal(domain.id)}
-							{...globalButtonDisabledAttributes(domain, contextCompanyID)}
-						/>
-						<TableCopyButton title={'Copy'} on:click={() => openCopyModal(domain.id)} />
-						<TableDeleteButton
-							on:click={() => openDeleteAlert(domain)}
-							{...globalButtonDisabledAttributes(domain, contextCompanyID)}
-						></TableDeleteButton>
+						{#if domain.type !== 'proxy'}
+							<TableUpdateButton
+								name={'Update page'}
+								on:click={() => openUpdateContentModal(domain.id)}
+								{...globalButtonDisabledAttributes(domain, contextCompanyID)}
+							/>
+							<TableUpdateButton
+								name={'Update 404 page'}
+								on:click={() => openUpdateNotFoundContentModal(domain.id)}
+								{...globalButtonDisabledAttributes(domain, contextCompanyID)}
+							/>
+							<TableCopyButton title={'Copy'} on:click={() => openCopyModal(domain.id)} />
+							<TableDeleteButton
+								on:click={() => openDeleteAlert(domain)}
+								{...globalButtonDisabledAttributes(domain, contextCompanyID)}
+							></TableDeleteButton>
+						{:else}
+							<TableUpdateButton
+								name={'Update page'}
+								disabled={true}
+								title="Proxy domains can only be edited through proxy configuration"
+							/>
+							<TableUpdateButton
+								name={'Update 404 page'}
+								disabled={true}
+								title="Proxy domains can only be edited through proxy configuration"
+							/>
+							<TableCopyButton disabled={true} title="Proxy domains cannot be copied" />
+							<TableDeleteButton
+								disabled={true}
+								title="Proxy domains can only be deleted by deleting the proxy"
+							></TableDeleteButton>
+						{/if}
 						<TableDropDownButton name={'Assets'} on:click={() => gotoDomainAssets(domain.name)} />
 					</TableDropDownEllipsis>
 				</TableCellAction>
@@ -608,34 +734,36 @@
 								placeholder="example.com">Domain</TextField
 							>
 
-							<SelectSquare
-								label="Website Hosting"
-								options={[
-									{ value: true, label: 'Host Website' },
-									{ value: false, label: 'Redirect Only' }
-								]}
-								bind:value={formValues.hostWebsite}
-							/>
+							{#if !isProxyDomain}
+								<SelectSquare
+									label="Website Hosting"
+									options={[
+										{ value: true, label: 'Host Website' },
+										{ value: false, label: 'Redirect Only' }
+									]}
+									bind:value={formValues.hostWebsite}
+								/>
 
-							{#if !formValues.hostWebsite}
-								<TextField
-									bind:value={formValues.redirectURL}
-									optional
-									type="url"
-									minLength={8}
-									maxLength={1024}
-									placeholder="https://example.com"
-									toolTipText="Redirect to another website when visiting domain &#13 (except for landing page or asset)"
-									>Redirect URL</TextField
-								>
+								{#if !formValues.hostWebsite}
+									<TextField
+										bind:value={formValues.redirectURL}
+										optional
+										type="url"
+										minLength={8}
+										maxLength={1024}
+										placeholder="https://example.com"
+										toolTipText="Redirect to another website when visiting domain &#13 (except for landing page or asset)"
+										>Redirect URL</TextField
+									>
+								{/if}
 							{/if}
 						</div>
 					</div>
 
-					<!-- SSL Configuration Section -->
+					<!-- TLS Configuration Section -->
 					<div class="pt-4 pb-2 w-full">
 						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							SSL Configuration
+							TLS Configuration
 						</h3>
 						<div class="space-y-6">
 							<SelectSquare
@@ -678,6 +806,7 @@
 							{/if}
 						</div>
 					</div>
+
 					<FormError message={modalError} />
 				</FormColumn>
 			</FormColumns>

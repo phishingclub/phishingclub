@@ -13,13 +13,15 @@ import (
 )
 
 type Domain struct {
-	ID            nullable.Nullable[uuid.UUID]    `json:"id"`
-	CreatedAt     *time.Time                      `json:"createdAt"`
-	UpdatedAt     *time.Time                      `json:"updatedAt"`
-	Name          nullable.Nullable[vo.String255] `json:"name"`
-	HostWebsite   nullable.Nullable[bool]         `json:"hostWebsite"`
-	ManagedTLS    nullable.Nullable[bool]         `json:"managedTLS"`
-	OwnManagedTLS nullable.Nullable[bool]         `json:"ownManagedTLS"`
+	ID                nullable.Nullable[uuid.UUID]            `json:"id"`
+	CreatedAt         *time.Time                              `json:"createdAt"`
+	UpdatedAt         *time.Time                              `json:"updatedAt"`
+	Name              nullable.Nullable[vo.String255]         `json:"name"`
+	Type              nullable.Nullable[vo.String32]          `json:"type"`              // "regular" or "proxy"
+	ProxyTargetDomain nullable.Nullable[vo.OptionalString255] `json:"proxyTargetDomain"` // target URL for proxy (can be full URL or domain)
+	HostWebsite       nullable.Nullable[bool]                 `json:"hostWebsite"`
+	ManagedTLS        nullable.Nullable[bool]                 `json:"managedTLS"`
+	OwnManagedTLS     nullable.Nullable[bool]                 `json:"ownManagedTLS"`
 	// private key
 	OwnManagedTLSKey nullable.Nullable[string] `json:"ownManagedTLSKey"`
 	// cert
@@ -28,6 +30,7 @@ type Domain struct {
 	PageNotFoundContent nullable.Nullable[vo.OptionalString1MB]  `json:"pageNotFoundContent"`
 	RedirectURL         nullable.Nullable[vo.OptionalString1024] `json:"redirectURL"`
 	CompanyID           nullable.Nullable[uuid.UUID]             `json:"companyID"`
+	ProxyID             nullable.Nullable[uuid.UUID]             `json:"proxyID"`
 	Company             *Company                                 `json:"company"`
 }
 
@@ -36,20 +39,45 @@ func (d *Domain) Validate() error {
 	if err := validate.NullableFieldRequired("name", d.Name); err != nil {
 		return err
 	}
-	if err := validate.NullableFieldRequired("hostWebsite", d.HostWebsite); err != nil {
-		return err
+
+	// set default type if not specified
+	if !d.Type.IsSpecified() {
+		d.Type.Set(*vo.NewString32Must("regular"))
 	}
-	if err := validate.NullableFieldRequired("managedTLS", d.ManagedTLS); err != nil {
-		return err
+
+	domainType, err := d.Type.Get()
+	if err != nil {
+		return validate.WrapErrorWithField(errors.New("type is required"), "type")
 	}
-	if err := validate.NullableFieldRequired("pageContent", d.PageContent); err != nil {
-		return err
+
+	// validate type is either "regular" or "proxy"
+	if domainType.String() != "regular" && domainType.String() != "proxy" {
+		return validate.WrapErrorWithField(errors.New("type must be 'regular' or 'proxy'"), "type")
 	}
-	if err := validate.NullableFieldRequired("pageNotFoundContent", d.PageNotFoundContent); err != nil {
-		return err
-	}
-	if err := validate.NullableFieldRequired("redirectURL", d.RedirectURL); err != nil {
-		return err
+
+	if domainType.String() == "proxy" {
+		// proxy domains require proxyTargetDomain
+		if err := validate.NullableFieldRequired("proxyTargetDomain", d.ProxyTargetDomain); err != nil {
+			return err
+		}
+		// proxy domains don't need page content validation
+	} else {
+		// regular domains need standard validation
+		if err := validate.NullableFieldRequired("hostWebsite", d.HostWebsite); err != nil {
+			return err
+		}
+		if err := validate.NullableFieldRequired("managedTLS", d.ManagedTLS); err != nil {
+			return err
+		}
+		if err := validate.NullableFieldRequired("pageContent", d.PageContent); err != nil {
+			return err
+		}
+		if err := validate.NullableFieldRequired("pageNotFoundContent", d.PageNotFoundContent); err != nil {
+			return err
+		}
+		if err := validate.NullableFieldRequired("redirectURL", d.RedirectURL); err != nil {
+			return err
+		}
 	}
 	//
 	//
@@ -101,6 +129,18 @@ func (d *Domain) ToDBMap() map[string]any {
 			m["name"] = name.String()
 		}
 	}
+	if d.Type.IsSpecified() {
+		m["type"] = "regular"
+		if domainType, err := d.Type.Get(); err == nil {
+			m["type"] = domainType.String()
+		}
+	}
+	if d.ProxyTargetDomain.IsSpecified() {
+		m["proxy_target_domain"] = nil
+		if proxyTargetDomain, err := d.ProxyTargetDomain.Get(); err == nil {
+			m["proxy_target_domain"] = proxyTargetDomain.String()
+		}
+	}
 	if d.HostWebsite.IsSpecified() {
 		m["host_website"] = nil
 		if hostWebsite, err := d.HostWebsite.Get(); err == nil {
@@ -149,18 +189,28 @@ func (d *Domain) ToDBMap() map[string]any {
 			m["own_managed_tls"] = d.OwnManagedTLS.MustGet()
 		}
 	}
+	if d.ProxyID.IsSpecified() {
+		if d.ProxyID.IsNull() {
+			m["proxy_id"] = nil
+		} else {
+			m["proxy_id"] = d.ProxyID.MustGet()
+		}
+	}
 	return m
 }
 
 // DomainOverview is a subset of the domain as used as read-only
 type DomainOverview struct {
-	ID            uuid.UUID  `json:"id,omitempty"`
-	CreatedAt     *time.Time `json:"createdAt"`
-	UpdatedAt     *time.Time `json:"updatedAt"`
-	Name          string     `json:"name"`
-	HostWebsite   bool       `json:"hostWebsite"`
-	ManagedTLS    bool       `json:"managedTLS"`
-	OwnManagedTLS bool       `json:"ownManagedTLS"`
-	RedirectURL   string     `json:"redirectURL"`
-	CompanyID     *uuid.UUID `json:"companyID"`
+	ID                uuid.UUID  `json:"id,omitempty"`
+	CreatedAt         *time.Time `json:"createdAt"`
+	UpdatedAt         *time.Time `json:"updatedAt"`
+	Name              string     `json:"name"`
+	Type              string     `json:"type"`
+	ProxyTargetDomain string     `json:"proxyTargetDomain"`
+	HostWebsite       bool       `json:"hostWebsite"`
+	ManagedTLS        bool       `json:"managedTLS"`
+	OwnManagedTLS     bool       `json:"ownManagedTLS"`
+	RedirectURL       string     `json:"redirectURL"`
+	CompanyID         *uuid.UUID `json:"companyID"`
+	ProxyID           *uuid.UUID `json:"proxyID"`
 }

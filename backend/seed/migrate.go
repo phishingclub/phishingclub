@@ -1,6 +1,8 @@
 package seed
 
 import (
+	"crypto/rand"
+
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/app"
@@ -34,6 +36,7 @@ func initialInstallAndSeed(
 		&database.RecipientGroupRecipient{},
 		&database.Domain{},
 		&database.Page{},
+		&database.Proxy{},
 		&database.SMTPHeader{},
 		&database.SMTPConfiguration{},
 		&database.Email{},
@@ -51,15 +54,32 @@ func initialInstallAndSeed(
 		&database.Identifier{},
 		&database.CampaignStats{},
 	}
+
+	// disable foreign key constraints temporarily for sqlite to allow table recreation
+	logger.Debug("disabling foreign key constraints for migration")
+	err := db.Exec("PRAGMA foreign_keys = OFF").Error
+	if err != nil {
+		return errs.Wrap(errors.Errorf("failed to disable foreign keys: %w", err))
+	}
+
 	// create tables
 	logger.Debug("migrating tables")
-	err := db.AutoMigrate(
+	err = db.AutoMigrate(
 		tables...,
 	)
 	if err != nil {
+		// re-enable foreign keys before returning error
+		db.Exec("PRAGMA foreign_keys = ON")
 		return errs.Wrap(
 			errors.Errorf("failed to migrate database: %w", err),
 		)
+	}
+
+	// re-enable foreign key constraints
+	logger.Debug("re-enabling foreign key constraints after migration")
+	err = db.Exec("PRAGMA foreign_keys = ON").Error
+	if err != nil {
+		return errs.Wrap(errors.Errorf("failed to re-enable foreign keys: %w", err))
 	}
 	for _, table := range tables {
 		t, ok := table.(database.Migrater)
@@ -238,6 +258,40 @@ func SeedSettings(
 				ID:    &id,
 				Key:   data.OptionKeyUsingSystemd,
 				Value: isUsingSystemdStr,
+			})
+			if res.Error != nil {
+				return errs.Wrap(res.Error)
+			}
+		}
+	}
+	{
+		// seed proxy cookie name
+		id := uuid.New()
+		var c int64
+		res := db.
+			Model(&database.Option{}).
+			Where("key = ?", data.OptionKeyProxyCookieName).
+			Count(&c)
+
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if c == 0 {
+			// generate random 8-character cookie name
+			b := make([]byte, 8)
+			_, err := rand.Read(b)
+			if err != nil {
+				return errs.Wrap(err)
+			}
+			charset := "abcdefghijklmnopqrstuvwxyz"
+			cookieName := ""
+			for i := range b {
+				cookieName += string(charset[int(b[i])%len(charset)])
+			}
+			res = db.Create(&database.Option{
+				ID:    &id,
+				Key:   data.OptionKeyProxyCookieName,
+				Value: cookieName,
 			})
 			if res.Error != nil {
 				return errs.Wrap(res.Error)

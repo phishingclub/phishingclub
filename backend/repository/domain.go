@@ -257,12 +257,27 @@ func ToDomain(row *database.Domain) *model.Domain {
 	if row.CompanyID != nil {
 		companyID.Set(*row.CompanyID)
 	}
+	proxyID := nullable.NewNullNullable[uuid.UUID]()
+	if row.ProxyID != nil {
+		proxyID.Set(*row.ProxyID)
+	}
 	var company *model.Company
 	if row.Company != nil {
 		company = ToCompany(row.Company)
 	}
 	id := nullable.NewNullableWithValue(row.ID)
 	name := nullable.NewNullableWithValue(*vo.NewString255Must(row.Name))
+
+	// Handle domain type
+	domainType := row.Type
+	if domainType == "" {
+		domainType = "regular"
+	}
+	domainTypeValue := nullable.NewNullableWithValue(*vo.NewString32Must(domainType))
+
+	// Handle proxy target domain
+	proxyTargetDomain := nullable.NewNullableWithValue(*vo.NewOptionalString255Must(row.ProxyTargetDomain))
+
 	managedTLS := nullable.NewNullableWithValue(row.ManagedTLSCerts)
 	ownManagedTLS := nullable.NewNullableWithValue(row.OwnManagedTLS)
 	hostWebsite := nullable.NewNullableWithValue(row.HostWebsite)
@@ -275,6 +290,8 @@ func ToDomain(row *database.Domain) *model.Domain {
 		CreatedAt:           row.CreatedAt,
 		UpdatedAt:           row.UpdatedAt,
 		Name:                name,
+		Type:                domainTypeValue,
+		ProxyTargetDomain:   proxyTargetDomain,
 		ManagedTLS:          managedTLS,
 		OwnManagedTLS:       ownManagedTLS,
 		HostWebsite:         hostWebsite,
@@ -282,21 +299,55 @@ func ToDomain(row *database.Domain) *model.Domain {
 		PageNotFoundContent: staticNotFound,
 		RedirectURL:         redirectURL,
 		CompanyID:           companyID,
+		ProxyID:             proxyID,
 		Company:             company,
 	}
 }
 
+// GetByProxyID gets domains by proxy ID
+func (r *Domain) GetByProxyID(
+	ctx context.Context,
+	proxyID *uuid.UUID,
+	options *DomainOption,
+) (*model.Result[model.Domain], error) {
+	result := model.NewEmptyResult[model.Domain]()
+	var dbDomains []database.Domain
+	db := r.DB
+	if options.WithCompany {
+		db = r.load(db)
+	}
+	db = db.Where("proxy_id = ?", proxyID)
+	dbRes := db.Find(&dbDomains)
+
+	if dbRes.Error != nil {
+		return result, dbRes.Error
+	}
+
+	for _, dbDomain := range dbDomains {
+		result.Rows = append(result.Rows, ToDomain(&dbDomain))
+	}
+	return result, nil
+}
+
 // ToDomainSubset converts a domain subset from db row to model
 func ToDomainSubset(dbDomain *database.Domain) *model.DomainOverview {
+	domainType := dbDomain.Type
+	if domainType == "" {
+		domainType = "regular"
+	}
+
 	return &model.DomainOverview{
-		ID:            dbDomain.ID,
-		CreatedAt:     dbDomain.CreatedAt,
-		UpdatedAt:     dbDomain.UpdatedAt,
-		Name:          dbDomain.Name,
-		HostWebsite:   dbDomain.HostWebsite,
-		ManagedTLS:    dbDomain.ManagedTLSCerts,
-		OwnManagedTLS: dbDomain.OwnManagedTLS,
-		RedirectURL:   dbDomain.RedirectURL,
-		CompanyID:     dbDomain.CompanyID,
+		ID:                dbDomain.ID,
+		CreatedAt:         dbDomain.CreatedAt,
+		UpdatedAt:         dbDomain.UpdatedAt,
+		Name:              dbDomain.Name,
+		Type:              domainType,
+		ProxyTargetDomain: dbDomain.ProxyTargetDomain,
+		HostWebsite:       dbDomain.HostWebsite,
+		ManagedTLS:        dbDomain.ManagedTLSCerts,
+		OwnManagedTLS:     dbDomain.OwnManagedTLS,
+		RedirectURL:       dbDomain.RedirectURL,
+		CompanyID:         dbDomain.CompanyID,
+		ProxyID:           dbDomain.ProxyID,
 	}
 }

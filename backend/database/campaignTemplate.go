@@ -29,6 +29,10 @@ type CampaignTemplate struct {
 	LandingPageID *uuid.UUID `gorm:"type:uuid;index;"`
 	LandingPage   *Page      `gorm:"references:LandingPage;foreignKey:LandingPageID;references:ID;"`
 
+	// landing page can also be a proxy
+	LandingProxyID *uuid.UUID `gorm:"type:uuid;index;"`
+	LandingProxy   *Proxy      `gorm:"foreignKey:LandingProxyID;references:ID;"`
+
 	DomainID *uuid.UUID `gorm:"type:uuid;index;"`
 	Domain   *Domain    `gorm:"foreignKey:DomainID"`
 
@@ -42,8 +46,16 @@ type CampaignTemplate struct {
 	BeforeLandingPageID *uuid.UUID `gorm:"type:uuid;index"`
 	BeforeLandingPage   *Page      `gorm:"foreignkey:BeforeLandingPageID;references:ID"`
 
+	// before landing page can also be a proxy
+	BeforeLandingProxyID *uuid.UUID `gorm:"type:uuid;index"`
+	BeforeLandingProxy   *Proxy      `gorm:"foreignKey:BeforeLandingProxyID;references:ID"`
+
 	AfterLandingPageID *uuid.UUID `gorm:"type:uuid;index"`
 	AfterLandingPage   *Page      `gorm:"foreignKey:AfterLandingPageID;references:ID"`
+
+	// after landing page can also be a proxy
+	AfterLandingProxyID *uuid.UUID `gorm:"type:uuid;index"`
+	AfterLandingProxy   *Proxy      `gorm:"foreignKey:AfterLandingProxyID;references:ID"`
 
 	AfterLandingPageRedirectURL string `gorm:"not null;"`
 

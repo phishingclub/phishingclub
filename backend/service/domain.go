@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -39,11 +40,49 @@ type Domain struct {
 	TemplateService           *Template
 }
 
+// CreateProxyDomain creates a proxy domain bypassing direct creation restrictions
+func (d *Domain) CreateProxyDomain(
+	ctx context.Context,
+	session *model.Session,
+	domain *model.Domain,
+) (*uuid.UUID, error) {
+	return d.createDomain(ctx, session, domain, true)
+}
+
 // Create creates a new domain
 func (d *Domain) Create(
 	ctx context.Context,
 	session *model.Session,
 	domain *model.Domain,
+) (*uuid.UUID, error) {
+	return d.createDomain(ctx, session, domain, false)
+}
+
+// DeleteProxyDomain deletes a proxy domain bypassing direct deletion restrictions
+func (d *Domain) DeleteProxyDomain(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+) error {
+	return d.deleteDomain(ctx, session, id, true)
+}
+
+// UpdateProxyDomain updates a proxy domain bypassing direct update restrictions
+func (d *Domain) UpdateProxyDomain(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	incoming *model.Domain,
+) error {
+	return d.updateDomain(ctx, session, id, incoming, true)
+}
+
+// createDomain is the internal domain creation method
+func (d *Domain) createDomain(
+	ctx context.Context,
+	session *model.Session,
+	domain *model.Domain,
+	allowProxyCreation bool,
 ) (*uuid.UUID, error) {
 	ae := NewAuditEvent("Domain.Create", session)
 	// check permissions
@@ -56,22 +95,40 @@ func (d *Domain) Create(
 		d.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
-	// validate data
-	if err := domain.Validate(); err != nil {
-		// d.Logger.Debugf("failed to validate domain", "error", err)
-		return nil, errs.Wrap(err)
-	}
-	// validate template content if present
-	if pageContent, err := domain.PageContent.Get(); err == nil {
-		if err := d.TemplateService.ValidateDomainTemplate(pageContent.String()); err != nil {
-			d.Logger.Errorw("failed to validate domain page template", "error", err)
-			return nil, validate.WrapErrorWithField(errors.New("invalid page template: "+err.Error()), "pageContent")
+	// prevent direct creation of proxy domains unless explicitly allowed
+	if !allowProxyCreation {
+		if domainType, err := domain.Type.Get(); err == nil && domainType.String() == "proxy" {
+			return nil, validate.WrapErrorWithField(errors.New("proxy domains can only be created through proxy configuration, not directly"), "type")
 		}
 	}
-	if notFoundContent, err := domain.PageNotFoundContent.Get(); err == nil {
-		if err := d.TemplateService.ValidateDomainTemplate(notFoundContent.String()); err != nil {
-			d.Logger.Errorw("failed to validate domain not found template", "error", err)
-			return nil, validate.WrapErrorWithField(errors.New("invalid not found template: "+err.Error()), "pageNotFoundContent")
+
+	// validate data
+	if err := domain.Validate(); err != nil {
+		d.Logger.Errorw("failed to validate domain", "error", err)
+		return nil, errs.Wrap(err)
+	}
+
+	// get domain type for specific validation
+	domainType, _ := domain.Type.Get()
+
+	if domainType.String() == "proxy" {
+		// validate proxy target domain
+		if err := d.validateProxyDomain(ctx, domain); err != nil {
+			return nil, err
+		}
+	} else {
+		// validate template content for regular domains
+		if pageContent, err := domain.PageContent.Get(); err == nil {
+			if err := d.TemplateService.ValidateDomainTemplate(pageContent.String()); err != nil {
+				d.Logger.Errorw("failed to validate domain page template", "error", err)
+				return nil, validate.WrapErrorWithField(errors.New("invalid page template: "+err.Error()), "pageContent")
+			}
+		}
+		if notFoundContent, err := domain.PageNotFoundContent.Get(); err == nil {
+			if err := d.TemplateService.ValidateDomainTemplate(notFoundContent.String()); err != nil {
+				d.Logger.Errorw("failed to validate domain not found template", "error", err)
+				return nil, validate.WrapErrorWithField(errors.New("invalid not found template: "+err.Error()), "pageNotFoundContent")
+			}
 		}
 	}
 	// check for uniqueness
@@ -366,6 +423,17 @@ func (d *Domain) UpdateByID(
 	id *uuid.UUID,
 	incoming *model.Domain,
 ) error {
+	return d.updateDomain(ctx, session, id, incoming, false)
+}
+
+// updateDomain is the internal domain update method
+func (d *Domain) updateDomain(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	incoming *model.Domain,
+	allowProxyUpdate bool,
+) error {
 	ae := NewAuditEvent("Domain.UpdateByID", session)
 	ae.Details["id"] = id.String()
 	// check permissions
@@ -392,7 +460,78 @@ func (d *Domain) UpdateByID(
 		d.Logger.Errorw("failed to update domain", "error", err)
 		return err
 	}
+
+	// check if this is a proxy domain and restrict editable fields
+	isProxyDomain := false
+	if domainType, err := current.Type.Get(); err == nil && domainType.String() == "proxy" {
+		isProxyDomain = true
+		// for proxy domains, only allow updating ManagedTLS and custom certificate fields
+		if incoming.Type.IsSpecified() {
+			incomingType, _ := incoming.Type.Get()
+			if incomingType.String() != "proxy" {
+				return validate.WrapErrorWithField(errors.New("cannot change type of proxy domain"), "type")
+			}
+		}
+	} else {
+		// prevent changing regular domains to proxy type
+		if incoming.Type.IsSpecified() {
+			incomingType, _ := incoming.Type.Get()
+			if incomingType.String() == "proxy" {
+				return validate.WrapErrorWithField(errors.New("cannot change domain to proxy type - proxy domains can only be created through proxy configuration"), "type")
+			}
+		}
+	}
+
 	// set the supplied field on the existing domain
+	if isProxyDomain && !allowProxyUpdate {
+		// for proxy domains, prevent changing proxy-specific fields unless explicitly allowed
+		if incoming.ProxyTargetDomain.IsSpecified() {
+			return validate.WrapErrorWithField(errors.New("cannot change proxy target domain - edit the proxy configuration instead"), "proxyTargetDomain")
+		}
+		if incoming.HostWebsite.IsSpecified() {
+			return validate.WrapErrorWithField(errors.New("cannot change host website setting for proxy domain"), "hostWebsite")
+		}
+		if incoming.PageContent.IsSpecified() {
+			return validate.WrapErrorWithField(errors.New("cannot change page content for proxy domain"), "pageContent")
+		}
+		if incoming.PageNotFoundContent.IsSpecified() {
+			return validate.WrapErrorWithField(errors.New("cannot change page not found content for proxy domain"), "pageNotFoundContent")
+		}
+		if incoming.RedirectURL.IsSpecified() {
+			return validate.WrapErrorWithField(errors.New("cannot change redirect URL for proxy domain"), "redirectURL")
+		}
+	} else {
+		// for regular domains or proxy domains with allowed updates, allow updating all fields
+		if v, err := incoming.Type.Get(); err == nil {
+			current.Type.Set(v)
+		}
+		if v, err := incoming.ProxyTargetDomain.Get(); err == nil {
+			current.ProxyTargetDomain.Set(v)
+		}
+		if v, err := incoming.HostWebsite.Get(); err == nil {
+			current.HostWebsite.Set(v)
+		}
+		if v, err := incoming.PageContent.Get(); err == nil {
+			// validate template content before updating
+			if err := d.TemplateService.ValidateDomainTemplate(v.String()); err != nil {
+				d.Logger.Errorw("failed to validate domain page template", "error", err)
+				return validate.WrapErrorWithField(errors.New("invalid page template: "+err.Error()), "pageContent")
+			}
+			current.PageContent.Set(v)
+		}
+		if v, err := incoming.PageNotFoundContent.Get(); err == nil {
+			// validate template content before updating
+			if err := d.TemplateService.ValidateDomainTemplate(v.String()); err != nil {
+				d.Logger.Errorw("failed to validate domain not found template", "error", err)
+				return validate.WrapErrorWithField(errors.New("invalid not found template: "+err.Error()), "pageNotFoundContent")
+			}
+			current.PageNotFoundContent.Set(v)
+		}
+		if v, err := incoming.RedirectURL.Get(); err == nil {
+			current.RedirectURL.Set(v)
+		}
+	}
+
 	wasManagedTLS := current.ManagedTLS.MustGet()
 	if v, err := incoming.ManagedTLS.Get(); err == nil {
 		current.ManagedTLS.Set(v)
@@ -413,32 +552,32 @@ func (d *Domain) UpdateByID(
 		current.OwnManagedTLSPem.Set(v)
 		ownManagedTLSPemIsSet = len(v) > 0
 	}
-	if v, err := incoming.HostWebsite.Get(); err == nil {
-		current.HostWebsite.Set(v)
-	}
-	if v, err := incoming.PageContent.Get(); err == nil {
-		// validate template content before updating
-		if err := d.TemplateService.ValidateDomainTemplate(v.String()); err != nil {
-			d.Logger.Errorw("failed to validate domain page template", "error", err)
-			return validate.WrapErrorWithField(errors.New("invalid page template: "+err.Error()), "pageContent")
-		}
-		current.PageContent.Set(v)
-	}
-	if v, err := incoming.PageNotFoundContent.Get(); err == nil {
-		// validate template content before updating
-		if err := d.TemplateService.ValidateDomainTemplate(v.String()); err != nil {
-			d.Logger.Errorw("failed to validate domain not found template", "error", err)
-			return validate.WrapErrorWithField(errors.New("invalid not found template: "+err.Error()), "pageNotFoundContent")
-		}
-		current.PageNotFoundContent.Set(v)
-	}
-	if v, err := incoming.RedirectURL.Get(); err == nil {
-		current.RedirectURL.Set(v)
-	}
+
 	// validate
 	if err := current.Validate(); err != nil {
 		d.Logger.Errorw("failed to validate domain", "error", err)
 		return err
+	}
+
+	// validate proxy domain if type is proxy
+	if domainType, err := current.Type.Get(); err == nil && domainType.String() == "proxy" {
+		if err := d.validateProxyDomain(ctx, current); err != nil {
+			return err
+		}
+	} else {
+		// validate template content for regular domains only
+		if pageContent, err := current.PageContent.Get(); err == nil {
+			if err := d.TemplateService.ValidateDomainTemplate(pageContent.String()); err != nil {
+				d.Logger.Errorw("failed to validate domain page template", "error", err)
+				return validate.WrapErrorWithField(errors.New("invalid page template: "+err.Error()), "pageContent")
+			}
+		}
+		if notFoundContent, err := current.PageNotFoundContent.Get(); err == nil {
+			if err := d.TemplateService.ValidateDomainTemplate(notFoundContent.String()); err != nil {
+				d.Logger.Errorw("failed to validate domain not found template", "error", err)
+				return validate.WrapErrorWithField(errors.New("invalid not found template: "+err.Error()), "pageNotFoundContent")
+			}
+		}
 	}
 	// clean up if TLS was previous managed but no longer is
 	if managedTLS, err := incoming.ManagedTLS.Get(); err == nil && !managedTLS {
@@ -491,11 +630,21 @@ func (d *Domain) UpdateByID(
 	return nil
 }
 
-// DeleteByID
+// DeleteByID deletes a domain by ID
 func (d *Domain) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
+) error {
+	return d.deleteDomain(ctx, session, id, false)
+}
+
+// deleteDomain is the internal domain deletion method
+func (d *Domain) deleteDomain(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	allowProxyDeletion bool,
 ) error {
 	ae := NewAuditEvent("Domain.DeleteByID", session)
 	ae.Details["id"] = id.String()
@@ -508,6 +657,24 @@ func (d *Domain) DeleteByID(
 	if !isAuthorized {
 		d.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
+	}
+
+	// get the domain to check if it's a proxy domain
+	current, err := d.DomainRepository.GetByID(ctx, id, &repository.DomainOption{})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		d.Logger.Debugw("domain not found", "error", err)
+		return err
+	}
+	if err != nil {
+		d.Logger.Errorw("failed to get domain for deletion", "error", err)
+		return err
+	}
+
+	// prevent deletion of proxy domains unless explicitly allowed
+	if !allowProxyDeletion {
+		if domainType, err := current.Type.Get(); err == nil && domainType.String() == "proxy" {
+			return validate.WrapErrorWithField(errors.New("proxy domains can only be deleted by deleting the associated proxy configuration"), "domain")
+		}
 	}
 	// get the domain
 	domain, err := d.DomainRepository.GetByID(
@@ -695,4 +862,106 @@ func (d *Domain) removeOwnManagedTLS(
 		)
 	}
 	return nil
+}
+
+// validateProxyDomain validates proxy domain configuration
+func (d *Domain) validateProxyDomain(ctx context.Context, domain *model.Domain) error {
+	// validate proxy target domain format
+	proxyTargetDomain, err := domain.ProxyTargetDomain.Get()
+	if err != nil {
+		return validate.WrapErrorWithField(errors.New("proxy target domain is required for proxy domains"), "proxyTargetDomain")
+	}
+
+	targetDomainStr := proxyTargetDomain.String()
+	if targetDomainStr == "" {
+		return validate.WrapErrorWithField(errors.New("proxy target domain cannot be empty"), "proxyTargetDomain")
+	}
+
+	// validate proxy target format - can be full URL or domain
+	if strings.Contains(targetDomainStr, "://") {
+		// full URL format - basic validation
+		if !strings.HasPrefix(targetDomainStr, "http://") && !strings.HasPrefix(targetDomainStr, "https://") {
+			return validate.WrapErrorWithField(errors.New("proxy target domain URL must start with http:// or https://"), "proxyTargetDomain")
+		}
+	} else {
+		// domain-only format - validate as domain
+		if !isValidDomain(targetDomainStr) {
+			return validate.WrapErrorWithField(errors.New("invalid domain format for proxy target domain"), "proxyTargetDomain")
+		}
+	}
+
+	return nil
+}
+
+// isValidDomain performs basic domain name validation
+func isValidDomain(domain string) bool {
+	// basic checks - must have at least one dot and valid characters
+	if len(domain) == 0 || len(domain) > 253 {
+		return false
+	}
+
+	// must contain at least one dot
+	if !strings.Contains(domain, ".") {
+		return false
+	}
+
+	// cannot start or end with dash or dot
+	if strings.HasPrefix(domain, "-") || strings.HasSuffix(domain, "-") ||
+		strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
+		return false
+	}
+
+	// check each label
+	labels := strings.Split(domain, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+
+		// label cannot start or end with dash
+		if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+
+		// basic character check - alphanumeric and dash only
+		for _, char := range label {
+			if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+				(char >= '0' && char <= '9') || char == '-') {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// GetByProxyID gets domains by proxy ID
+func (d *Domain) GetByProxyID(
+	ctx context.Context,
+	session *model.Session,
+	proxyID *uuid.UUID,
+) (*model.Result[model.Domain], error) {
+	ae := NewAuditEvent("Domain.GetByProxyID", session)
+	ae.Details["proxyID"] = proxyID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		d.LogAuthError(err)
+		return nil, err
+	}
+	if !isAuthorized {
+		d.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+	result, err := d.DomainRepository.GetByProxyID(
+		ctx,
+		proxyID,
+		&repository.DomainOption{},
+	)
+	if err != nil {
+		d.Logger.Errorw("failed to get domains by proxy id", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	// no audit on read
+	return result, nil
 }

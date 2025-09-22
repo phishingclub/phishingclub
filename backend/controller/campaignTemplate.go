@@ -75,14 +75,17 @@ func (c *CampaignTemplate) GetByID(g *gin.Context) {
 	_, ok = g.GetQuery("full")
 	if ok {
 		options = &repository.CampaignTemplateOption{
-			WithDomain:            true,
-			WithSMTPConfiguration: true,
-			WithAPISender:         true,
-			WithEmail:             true,
-			WithLandingPage:       true,
-			WithBeforeLandingPage: true,
-			WithAfterLandingPage:  true,
-			WithIdentifier:        true,
+			WithDomain:             true,
+			WithSMTPConfiguration:  true,
+			WithAPISender:          true,
+			WithEmail:              true,
+			WithLandingPage:        true,
+			WithBeforeLandingPage:  true,
+			WithAfterLandingPage:   true,
+			WithLandingProxy:       true,
+			WithBeforeLandingProxy: true,
+			WithAfterLandingProxy:  true,
+			WithIdentifier:         true,
 		}
 	}
 	// get
@@ -130,16 +133,19 @@ func (c *CampaignTemplate) GetAll(g *gin.Context) {
 		companyID,
 		pagination,
 		&repository.CampaignTemplateOption{
-			QueryArgs:             queryArgs,
-			Columns:               columns,
-			WithDomain:            true,
-			WithSMTPConfiguration: true,
-			WithAPISender:         true,
-			WithEmail:             true,
-			WithLandingPage:       true,
-			WithBeforeLandingPage: true,
-			WithAfterLandingPage:  true,
-			UsableOnly:            usableOnly,
+			QueryArgs:              queryArgs,
+			Columns:                columns,
+			WithDomain:             true,
+			WithSMTPConfiguration:  true,
+			WithAPISender:          true,
+			WithEmail:              true,
+			WithLandingPage:        true,
+			WithBeforeLandingPage:  true,
+			WithAfterLandingPage:   true,
+			WithLandingProxy:       true,
+			WithBeforeLandingProxy: true,
+			WithAfterLandingProxy:  true,
+			UsableOnly:             usableOnly,
 		},
 	)
 	// handle response

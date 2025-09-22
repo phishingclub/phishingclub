@@ -907,8 +907,11 @@ export class API {
 		 * @param {string} template.companyID
 		 * @param {string} template.domainID
 		 * @param {string} template.beforeLandingPageID
+		 * @param {string} template.beforeLandingProxyID
 		 * @param {string} template.afterLandingPageID
+		 * @param {string} template.afterLandingProxyID
 		 * @param {string} template.landingPageID
+		 * @param {string} template.landingProxyID
 		 * @param {string} template.smtpConfigurationID
 		 * @param {string} template.apiSenderID
 		 * @param {string} template.afterLandingPageRedirectURL
@@ -923,8 +926,11 @@ export class API {
 			companyID,
 			domainID,
 			beforeLandingPageID,
+			beforeLandingProxyID,
 			afterLandingPageID,
+			afterLandingProxyID,
 			landingPageID,
+			landingProxyID,
 			smtpConfigurationID,
 			apiSenderID,
 			urlIdentifierID,
@@ -937,8 +943,11 @@ export class API {
 				companyID: companyID,
 				domainID: domainID,
 				beforeLandingPageID: beforeLandingPageID,
+				beforeLandingProxyID: beforeLandingProxyID,
 				afterLandingPageID: afterLandingPageID,
+				afterLandingProxyID: afterLandingProxyID,
 				landingPageID: landingPageID,
+				landingProxyID: landingProxyID,
 				smtpConfigurationID: smtpConfigurationID,
 				apiSenderID: apiSenderID,
 				afterLandingPageRedirectURL: afterLandingPageRedirectURL,
@@ -957,8 +966,11 @@ export class API {
 		 * @param {string} template.companyID
 		 * @param {string} template.domainID
 		 * @param {string} template.beforeLandingPageID
+		 * @param {string} template.beforeLandingProxyID
 		 * @param {string} template.afterLandingPageID
+		 * @param {string} template.afterLandingProxyID
 		 * @param {string} template.landingPageID
+		 * @param {string} template.landingProxyID
 		 * @param {string} template.smtpConfigurationID
 		 * @param {string} template.apiSenderID
 		 * @param {string} template.afterLandingPageRedirectURL
@@ -974,8 +986,11 @@ export class API {
 			companyID,
 			domainID,
 			beforeLandingPageID,
+			beforeLandingProxyID,
 			afterLandingPageID,
+			afterLandingProxyID,
 			landingPageID,
+			landingProxyID,
 			smtpConfigurationID,
 			apiSenderID,
 			afterLandingPageRedirectURL,
@@ -989,8 +1004,11 @@ export class API {
 				companyID: companyID,
 				domainID: domainID,
 				beforeLandingPageID: beforeLandingPageID,
+				beforeLandingProxyID: beforeLandingProxyID,
 				afterLandingPageID: afterLandingPageID,
+				afterLandingProxyID: afterLandingProxyID,
 				landingPageID: landingPageID,
+				landingProxyID: landingProxyID,
 				smtpConfigurationID: smtpConfigurationID,
 				apiSenderID: apiSenderID,
 				afterLandingPageRedirectURL: afterLandingPageRedirectURL,
@@ -1092,6 +1110,8 @@ export class API {
 		 *
 		 * @param {object} domain
 		 * @param {string} domain.name
+		 * @param {string} domain.type
+		 * @param {string} domain.proxyTargetDomain
 		 * @param {boolean} domain.managedTLS
 		 * @param {boolean} domain.ownManagedTLS
 		 * @param {string} domain.ownManagedTLSKey
@@ -1105,6 +1125,8 @@ export class API {
 		 */
 		create: async ({
 			name,
+			type,
+			proxyTargetDomain,
 			managedTLS,
 			ownManagedTLS,
 			ownManagedTLSKey,
@@ -1117,6 +1139,8 @@ export class API {
 		}) => {
 			return await postJSON(this.getPath('/domain/'), {
 				name: name,
+				type: type,
+				proxyTargetDomain: proxyTargetDomain,
 				managedTLS: managedTLS,
 				ownManagedTLS: ownManagedTLS,
 				ownManagedTLSKey: ownManagedTLSKey,
@@ -1134,19 +1158,23 @@ export class API {
 		 *
 		 * @param {object} domain
 		 * @param {string} domain.id
+		 * @param {string} [domain.type]
+		 * @param {string} [domain.proxyTargetDomain]
 		 * @param {boolean} domain.managedTLS
 		 * @param {boolean} domain.ownManagedTLS
 		 * @param {string} domain.ownManagedTLSKey
 		 * @param {string} domain.ownManagedTLSPem
-		 * @param {boolean} domain.hostWebsite
-		 * @param {string} domain.pageContent
-		 * @param {string} domain.pageNotFoundContent
-		 * @param {string} domain.redirectURL
+		 * @param {boolean} [domain.hostWebsite]
+		 * @param {string} [domain.pageContent]
+		 * @param {string} [domain.pageNotFoundContent]
+		 * @param {string} [domain.redirectURL]
 		 * @param {string} domain.companyID
 		 * @returns {Promise<ApiResponse>}
 		 */
 		update: async ({
 			id,
+			type,
+			proxyTargetDomain,
 			managedTLS,
 			ownManagedTLS,
 			ownManagedTLSKey,
@@ -1157,17 +1185,23 @@ export class API {
 			redirectURL,
 			companyID
 		}) => {
-			return await postJSON(this.getPath(`/domain/${id}`), {
-				hostWebsite: hostWebsite,
+			const payload = {
 				managedTLS: managedTLS,
 				ownManagedTLS: ownManagedTLS,
 				ownManagedTLSKey: ownManagedTLSKey,
 				ownManagedTLSPem: ownManagedTLSPem,
-				pageContent: pageContent,
-				pageNotFoundContent: pageNotFoundContent,
-				redirectURL: redirectURL,
 				companyID: companyID
-			});
+			};
+
+			// conditionally add fields if they are provided
+			if (type !== undefined) payload.type = type;
+			if (proxyTargetDomain !== undefined) payload.proxyTargetDomain = proxyTargetDomain;
+			if (hostWebsite !== undefined) payload.hostWebsite = hostWebsite;
+			if (pageContent !== undefined) payload.pageContent = pageContent;
+			if (pageNotFoundContent !== undefined) payload.pageNotFoundContent = pageNotFoundContent;
+			if (redirectURL !== undefined) payload.redirectURL = redirectURL;
+
+			return await postJSON(this.getPath(`/domain/${id}`), payload);
 		},
 
 		/**
@@ -1280,14 +1314,17 @@ export class API {
 		 * @param {string} name
 		 * @param {string} content
 		 * @param {string} companyID
+		 * @param {object} additionalFields - Optional additional fields for Proxy pages
 		 * @returns {Promise<ApiResponse>}
 		 */
-		create: async (name, content, companyID) => {
-			return await postJSON(this.getPath('/page'), {
+		create: async (name, content, companyID, additionalFields = {}) => {
+			const payload = {
 				name: name,
 				content: content,
-				companyID: companyID
-			});
+				companyID: companyID,
+				...additionalFields
+			};
+			return await postJSON(this.getPath('/page'), payload);
 		},
 
 		/**
@@ -2712,6 +2749,93 @@ export class API {
 		 */
 		get: async () => {
 			return await getJSON(this.getPath(`/version`));
+		}
+	};
+
+	/**
+	 * proxy is the API for Proxy related operations.
+	 */
+	proxy = {
+		/**
+		 * Get a Proxy by its ID.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getByID: async (id) => {
+			return await getJSON(this.getPath(`/proxy/${id}`));
+		},
+
+		/**
+		 * Get all Proxies using pagination.
+		 *
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAll: async (options, companyID = null) => {
+			return await getJSON(
+				this.getPath(`/proxy?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`)
+			);
+		},
+
+		/**
+		 * Get all Proxies overview using pagination.
+		 *
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAllSubset: async (options, companyID = null) => {
+			return await getJSON(
+				this.getPath(`/proxy/overview?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`)
+			);
+		},
+
+		/**
+		 * Create a new Proxy.
+		 *
+		 * @param {object} proxy
+		 * @param {string} proxy.name
+		 * @param {string} proxy.description
+		 * @param {string} proxy.startURL
+		 * @param {string} proxy.proxyConfig
+		 * @param {string} proxy.companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		create: async ({ name, description, startURL, proxyConfig, companyID }) => {
+			return await postJSON(this.getPath('/proxy'), {
+				name: name,
+				description: description,
+				startURL: startURL,
+				proxyConfig: proxyConfig,
+				companyID: companyID
+			});
+		},
+
+		/**
+		 * Update a Proxy.
+		 *
+		 * @param {string} id
+		 * @param {object} proxy
+		 * @param {string} proxy.name
+		 * @param {string} proxy.description
+		 * @param {string} proxy.startURL
+		 * @param {string} proxy.proxyConfig
+		 * @returns {Promise<ApiResponse>}
+		 */
+		update: async (id, proxy) => {
+			return await patchJSON(this.getPath(`/proxy/${id}`), proxy);
+		},
+
+		/**
+		 * Delete a Proxy.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		delete: async (id) => {
+			return await deleteJSON(this.getPath(`/proxy/${id}`));
 		}
 	};
 

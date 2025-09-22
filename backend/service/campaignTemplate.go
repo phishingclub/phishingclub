@@ -587,22 +587,49 @@ func (c *CampaignTemplate) UpdateByID(
 	if campaignTemplate.BeforeLandingPageID.IsSpecified() {
 		if v, err := campaignTemplate.BeforeLandingPageID.Get(); err == nil {
 			incoming.BeforeLandingPageID.Set(v)
+			incoming.BeforeLandingProxyID.SetNull() // clear proxy if page is set
 		} else {
 			incoming.BeforeLandingPageID.SetNull()
+		}
+	}
+	if campaignTemplate.BeforeLandingProxyID.IsSpecified() {
+		if v, err := campaignTemplate.BeforeLandingProxyID.Get(); err == nil {
+			incoming.BeforeLandingProxyID.Set(v)
+			incoming.BeforeLandingPageID.SetNull() // clear page if proxy is set
+		} else {
+			incoming.BeforeLandingProxyID.SetNull()
 		}
 	}
 	if campaignTemplate.LandingPageID.IsSpecified() {
 		if v, err := campaignTemplate.LandingPageID.Get(); err == nil {
 			incoming.LandingPageID.Set(v)
+			incoming.LandingProxyID.SetNull() // clear proxy if page is set
 		} else {
 			incoming.LandingPageID.SetNull()
+		}
+	}
+	if campaignTemplate.LandingProxyID.IsSpecified() {
+		if v, err := campaignTemplate.LandingProxyID.Get(); err == nil {
+			incoming.LandingProxyID.Set(v)
+			incoming.LandingPageID.SetNull() // clear page if proxy is set
+		} else {
+			incoming.LandingProxyID.SetNull()
 		}
 	}
 	if campaignTemplate.AfterLandingPageID.IsSpecified() {
 		if v, err := campaignTemplate.AfterLandingPageID.Get(); err == nil {
 			incoming.AfterLandingPageID.Set(v)
+			incoming.AfterLandingProxyID.SetNull() // clear proxy if page is set
 		} else {
 			incoming.AfterLandingPageID.SetNull()
+		}
+	}
+	if campaignTemplate.AfterLandingProxyID.IsSpecified() {
+		if v, err := campaignTemplate.AfterLandingProxyID.Get(); err == nil {
+			incoming.AfterLandingProxyID.Set(v)
+			incoming.AfterLandingPageID.SetNull() // clear page if proxy is set
+		} else {
+			incoming.AfterLandingProxyID.SetNull()
 		}
 	}
 	if campaignTemplate.AfterLandingPageRedirectURL.IsSpecified() {
@@ -702,5 +729,78 @@ func (c *CampaignTemplate) DeleteByID(
 		return err
 	}
 	c.AuditLogAuthorized(ae)
+	return nil
+}
+
+// RemoveProxiesByProxyID removes the Proxy ID from templates
+func (c *CampaignTemplate) RemoveProxiesByProxyID(
+	ctx context.Context,
+	session *model.Session,
+	proxyID *uuid.UUID,
+) error {
+	ae := NewAuditEvent("CampaignTemplate.RemoveProxiesByProxyID", session)
+	ae.Details["proxyId"] = proxyID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+
+	// get all templates that use this proxy
+	templatesAffected, err := c.CampaignTemplateRepository.GetByProxyID(
+		ctx,
+		proxyID,
+		&repository.CampaignTemplateOption{},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get affected campaign templates", "error", err)
+		return err
+	}
+
+	// get all campaigns using these templates and close active ones
+	templateIDs := []*uuid.UUID{}
+	for _, t := range templatesAffected {
+		id := t.ID.MustGet()
+		templateIDs = append(templateIDs, &id)
+	}
+
+	if len(templateIDs) > 0 {
+		campaignsAffected, err := c.CampaignRepository.GetByTemplateIDs(ctx, templateIDs)
+		if err != nil {
+			c.Logger.Errorw("failed to get affected campaigns by template IDs", "error", err)
+			return err
+		}
+
+		for _, campaign := range campaignsAffected {
+			if !campaign.IsActive() {
+				continue
+			}
+			err := campaign.Close()
+			if err != nil {
+				c.Logger.Errorw("failed to close campaign", "error", err)
+			}
+			campaignID := campaign.ID.MustGet()
+			err = c.CampaignRepository.UpdateByID(
+				ctx,
+				&campaignID,
+				campaign,
+			)
+			if err != nil {
+				c.Logger.Errorw("failed to update closed campaign", "error", err)
+			}
+		}
+	}
+
+	// remove the Proxy id from the templates
+	err = c.CampaignTemplateRepository.RemoveProxyIDFromAll(ctx, proxyID)
+	if err != nil {
+		c.Logger.Errorw("failed to remove Proxy ID from all campaign templates", "error", err)
+		return err
+	}
 	return nil
 }

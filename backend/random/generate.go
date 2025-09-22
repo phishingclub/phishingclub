@@ -38,3 +38,15 @@ func RandomIntN(n int) (int, error) {
 	}
 	return int(randNum.Int64()), nil
 }
+
+// GenerateRandomCookieName generates a random cookie name with length between 8-16 characters
+func GenerateRandomCookieName() (string, error) {
+	// generate random length between 8 and 16
+	length, err := RandomIntN(9) // 0-8, add 8 to get 8-16
+	if err != nil {
+		return "", fmt.Errorf("failed to generate random cookie name length: %w", err)
+	}
+	length += 8 // now 8-16
+
+	return GenerateRandomURLBase64Encoded(length)
+}

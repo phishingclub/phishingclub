@@ -150,6 +150,23 @@ services:
     networks:
       - default
 
+  # mitmproxy - HTTP/HTTPS proxy for security research and debugging
+  # Web interface: http://localhost:8105 (check logs for auto-generated token) - Proxy available at 172.20.0.138:8080
+  # Use this IP in your Proxy configs: proxy: '172.20.0.138:8080'
+  mitmproxy:
+    image: mitmproxy/mitmproxy:latest
+    command: mitmweb --web-host 0.0.0.0 --web-port 8080 --listen-port 8081 --no-web-open-browser
+    tty: true
+    ports:
+      - "8105:8080" # Web interface
+      - "8106:8081" # Proxy port (for external access)
+    volumes:
+      - mitmproxy_data:/home/mitmproxy/.mitmproxy
+    restart: unless-stopped
+    networks:
+      default:
+        ipv4_address: 172.20.0.138
+
   # DNS Server for .test domain resolution
   dns:
     restart: always
@@ -165,6 +182,9 @@ services:
     networks:
       default:
         ipv4_address: 172.20.0.137
+
+volumes:
+  mitmproxy_data:
 
 networks:
   default:

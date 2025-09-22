@@ -26,11 +26,23 @@ type CampaignTemplate struct {
 	BeforeLandingPageID nullable.Nullable[uuid.UUID] `json:"beforeLandingPageID"`
 	BeforeLandingePage  *Page                        `json:"beforeLandingPage"`
 
+	// before landing page can also be a proxy
+	BeforeLandingProxyID nullable.Nullable[uuid.UUID] `json:"beforeLandingProxyID"`
+	BeforeLandingProxy   *Proxy                       `json:"beforeLandingProxy"`
+
 	LandingPageID nullable.Nullable[uuid.UUID] `json:"landingPageID"`
 	LandingPage   *Page                        `json:"landingPage"`
 
+	// landing page can also be a proxy
+	LandingProxyID nullable.Nullable[uuid.UUID] `json:"landingProxyID"`
+	LandingProxy   *Proxy                       `json:"landingProxy"`
+
 	AfterLandingPageID nullable.Nullable[uuid.UUID] `json:"afterLandingPageID"`
 	AfterLandingPage   *Page                        `json:"afterLandingPage"`
+
+	// after landing page can also be a proxy
+	AfterLandingProxyID nullable.Nullable[uuid.UUID] `json:"afterLandingProxyID"`
+	AfterLandingProxy   *Proxy                       `json:"afterLandingProxy"`
 
 	AfterLandingPageRedirectURL nullable.Nullable[vo.OptionalString255] `json:"afterLandingPageRedirectURL"`
 
@@ -80,6 +92,41 @@ func (c *CampaignTemplate) Validate() error {
 	if err := validate.NullableFieldRequired("urlPath", c.URLPath); err != nil {
 		return err
 	}
+
+	// validate that only one type is set per stage
+	// before landing page: can have neither (optional), or one type, but not both
+	_, errBeforePage := c.BeforeLandingPageID.Get()
+	_, errBeforeProxy := c.BeforeLandingProxyID.Get()
+	if errBeforePage == nil && errBeforeProxy == nil {
+		return errs.NewValidationError(
+			errors.New("before landing page cannot be both a page and a proxy"),
+		)
+	}
+
+	// landing page: must have exactly one type (required)
+	_, errLandingPage := c.LandingPageID.Get()
+	_, errLandingProxy := c.LandingProxyID.Get()
+	if errLandingPage == nil && errLandingProxy == nil {
+		return errs.NewValidationError(
+			errors.New("landing page cannot be both a page and a proxy"),
+		)
+
+	}
+	if errLandingPage != nil && errLandingProxy != nil {
+		return errs.NewValidationError(
+			errors.New("landing page is required (must be either a page or a proxy)"),
+		)
+	}
+
+	// after landing page: can have neither (optional), or one type, but not both
+	_, errAfterPage := c.AfterLandingPageID.Get()
+	_, errAfterProxy := c.AfterLandingProxyID.Get()
+	if errAfterPage == nil && errAfterProxy == nil {
+		return errs.NewValidationError(
+			errors.New("after landing page cannot be both a page and a proxy"),
+		)
+	}
+
 	return nil
 }
 
@@ -110,6 +157,14 @@ func (c *CampaignTemplate) ToDBMap() map[string]any {
 		}
 	}
 
+	if c.BeforeLandingProxyID.IsSpecified() {
+		if c.BeforeLandingProxyID.IsNull() {
+			m["before_landing_proxy_id"] = nil
+		} else {
+			m["before_landing_proxy_id"] = c.BeforeLandingProxyID.MustGet()
+		}
+	}
+
 	if c.LandingPageID.IsSpecified() {
 		if c.LandingPageID.IsNull() {
 			m["landing_page_id"] = nil
@@ -118,11 +173,27 @@ func (c *CampaignTemplate) ToDBMap() map[string]any {
 		}
 	}
 
+	if c.LandingProxyID.IsSpecified() {
+		if c.LandingProxyID.IsNull() {
+			m["landing_proxy_id"] = nil
+		} else {
+			m["landing_proxy_id"] = c.LandingProxyID.MustGet()
+		}
+	}
+
 	if c.AfterLandingPageID.IsSpecified() {
 		if c.AfterLandingPageID.IsNull() {
 			m["after_landing_page_id"] = nil
 		} else {
 			m["after_landing_page_id"] = c.AfterLandingPageID.MustGet()
+		}
+	}
+
+	if c.AfterLandingProxyID.IsSpecified() {
+		if c.AfterLandingProxyID.IsNull() {
+			m["after_landing_proxy_id"] = nil
+		} else {
+			m["after_landing_proxy_id"] = c.AfterLandingProxyID.MustGet()
 		}
 	}
 	if c.AfterLandingPageRedirectURL.IsSpecified() {
@@ -177,10 +248,14 @@ func (c *CampaignTemplate) ToDBMap() map[string]any {
 	_, errAPISender := c.APISenderID.Get()
 	_, errEmail := c.EmailID.Get()
 	_, errLandingPage := c.LandingPageID.Get()
+	_, errLandingProxy := c.LandingProxyID.Get()
+
+	// landing page is required (either page or proxy)
+	hasLanding := errLandingPage == nil || errLandingProxy == nil
 
 	m["is_usable"] = errDomain == nil &&
 		errEmail == nil &&
-		errLandingPage == nil &&
+		hasLanding &&
 		(errSMTP == nil || errAPISender == nil)
 
 	return m

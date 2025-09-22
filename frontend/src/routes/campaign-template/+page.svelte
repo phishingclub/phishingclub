@@ -18,6 +18,7 @@
 	import { BiMap } from '$lib/utils/maps';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
@@ -30,10 +31,11 @@
 	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
-	import { page } from '$app/stores'; // Add this import at the top
+	import { page } from '$app/stores';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import CopyCell from '$lib/components/table/CopyCell.svelte';
+	import TextFieldSelectWithType from '$lib/components/form/TextFieldSelectWithType.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -46,8 +48,11 @@
 		name: null,
 		domain: null,
 		landingPage: null,
+		landingPageType: 'page', // 'page' or 'proxy'
 		beforeLandingPage: null,
+		beforeLandingPageType: 'page', // 'page' or 'proxy'
 		afterLandingPage: null,
+		afterLandingPageType: 'page', // 'page' or 'proxy'
 		afterLandingPageRedirectURL: null,
 		email: null,
 		smtpConfiguration: null,
@@ -59,9 +64,13 @@
 
 	let contextCompanyID = null;
 	let domainMap = new BiMap({});
+	let domainObjectMap = new Map(); // stores full domain objects
 	let beforeLandingPageMap = new BiMap({});
 	let landingPageMap = new BiMap({});
 	let afterLandingPageMap = new BiMap({});
+	let beforeLandingProxyMap = new BiMap({});
+	let landingProxyMap = new BiMap({});
+	let afterLandingProxyMap = new BiMap({});
 	let emailMap = new BiMap({});
 	let smtpConfigurationMap = new BiMap({});
 	let apiSenderMap = new BiMap({});
@@ -107,6 +116,7 @@
 				refreshSmtpConfigurations(),
 				refreshApiSenders(),
 				refreshPages(),
+				refreshProxies(),
 				getCampaignTemplates(),
 				refreshIdentifiers()
 			]);
@@ -123,10 +133,17 @@
 	});
 
 	const refreshDomains = async () => {
-		const domains = await fetchAllRows((options) => {
+		const allDomains = await fetchAllRows((options) => {
 			return api.domain.getAllSubset(options, contextCompanyID);
 		});
-		domainMap = BiMap.FromArrayOfObjects(domains);
+		// filter to only include regular domains (not proxy domains)
+		const regularDomains = allDomains.filter((domain) => domain.type !== 'proxy');
+		domainMap = BiMap.FromArrayOfObjects(regularDomains);
+		// store full domain objects for type access
+		domainObjectMap = new Map();
+		regularDomains.forEach((domain) => {
+			domainObjectMap.set(domain.id, domain);
+		});
 	};
 
 	const refreshEmails = async () => {
@@ -157,6 +174,15 @@
 		landingPageMap = BiMap.FromArrayOfObjects(pages);
 		beforeLandingPageMap = BiMap.FromArrayOfObjects(pages);
 		afterLandingPageMap = BiMap.FromArrayOfObjects(pages);
+	};
+
+	const refreshProxies = async () => {
+		const proxies = await fetchAllRows((options) => {
+			return api.proxy.getAllSubset(options, contextCompanyID);
+		});
+		landingProxyMap = BiMap.FromArrayOfObjects(proxies);
+		beforeLandingProxyMap = BiMap.FromArrayOfObjects(proxies);
+		afterLandingProxyMap = BiMap.FromArrayOfObjects(proxies);
 	};
 
 	const refreshIdentifiers = async () => {
@@ -271,9 +297,30 @@
 				emailID: emailMap.byValueOrNull(formValues.email),
 				smtpConfigurationID: smtpConfigurationMap.byValueOrNull(formValues.smtpConfiguration),
 				apiSenderID: apiSenderMap.byValueOrNull(formValues.apiSender),
-				landingPageID: landingPageMap.byValue(formValues.landingPage),
-				beforeLandingPageID: beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage),
-				afterLandingPageID: afterLandingPageMap.byValueOrNull(formValues.afterLandingPage),
+				landingPageID:
+					formValues.landingPageType === 'page'
+						? landingPageMap.byValueOrNull(formValues.landingPage)
+						: null,
+				landingProxyID:
+					formValues.landingPageType === 'proxy'
+						? landingProxyMap.byValueOrNull(formValues.landingPage)
+						: null,
+				beforeLandingPageID:
+					formValues.beforeLandingPageType === 'page'
+						? beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage)
+						: null,
+				beforeLandingProxyID:
+					formValues.beforeLandingPageType === 'proxy'
+						? beforeLandingProxyMap.byValueOrNull(formValues.beforeLandingPage)
+						: null,
+				afterLandingPageID:
+					formValues.afterLandingPageType === 'page'
+						? afterLandingPageMap.byValueOrNull(formValues.afterLandingPage)
+						: null,
+				afterLandingProxyID:
+					formValues.afterLandingPageType === 'proxy'
+						? afterLandingProxyMap.byValueOrNull(formValues.afterLandingPage)
+						: null,
 				afterLandingPageRedirectURL: formValues.afterLandingPageRedirectURL,
 				urlIdentifierID: identifierMap.byValueOrNull(formValues.urlIdentifier),
 				stateIdentifierID: identifierMap.byValueOrNull(formValues.stateIdentifier),
@@ -302,9 +349,30 @@
 				emailID: emailMap.byValueOrNull(formValues.email),
 				smtpConfigurationID: smtpConfigurationMap.byValueOrNull(formValues.smtpConfiguration),
 				apiSenderID: apiSenderMap.byValueOrNull(formValues.apiSender),
-				landingPageID: landingPageMap.byValueOrNull(formValues.landingPage),
-				beforeLandingPageID: beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage),
-				afterLandingPageID: afterLandingPageMap.byValueOrNull(formValues.afterLandingPage),
+				landingPageID:
+					formValues.landingPageType === 'page'
+						? landingPageMap.byValueOrNull(formValues.landingPage)
+						: null,
+				landingProxyID:
+					formValues.landingPageType === 'proxy'
+						? landingProxyMap.byValueOrNull(formValues.landingPage)
+						: null,
+				beforeLandingPageID:
+					formValues.beforeLandingPageType === 'page'
+						? beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage)
+						: null,
+				beforeLandingProxyID:
+					formValues.beforeLandingPageType === 'proxy'
+						? beforeLandingProxyMap.byValueOrNull(formValues.beforeLandingPage)
+						: null,
+				afterLandingPageID:
+					formValues.afterLandingPageType === 'page'
+						? afterLandingPageMap.byValueOrNull(formValues.afterLandingPage)
+						: null,
+				afterLandingProxyID:
+					formValues.afterLandingPageType === 'proxy'
+						? afterLandingProxyMap.byValueOrNull(formValues.afterLandingPage)
+						: null,
 				afterLandingPageRedirectURL: formValues.afterLandingPageRedirectURL,
 				urlIdentifierID: identifierMap.byValueOrNull(formValues.urlIdentifier),
 				stateIdentifierID: identifierMap.byValueOrNull(formValues.stateIdentifier),
@@ -359,8 +427,11 @@
 			name: null,
 			domain: null,
 			landingPage: null,
+			landingPageType: 'page',
 			beforeLandingPage: null,
+			beforeLandingPageType: 'page',
 			afterLandingPage: null,
+			afterLandingPageType: 'page',
 			afterLandingPageRedirectURL: null,
 			email: null,
 			smtpConfiguration: null,
@@ -422,9 +493,34 @@
 		}
 		formValues.domain = domainMap.byKey(template.domainID);
 		formValues.email = emailMap.byKey(template.emailID);
-		formValues.landingPage = landingPageMap.byKey(template.landingPageID);
-		formValues.beforeLandingPage = beforeLandingPageMap.byKey(template.beforeLandingPageID);
-		formValues.afterLandingPage = afterLandingPageMap.byKey(template.afterLandingPageID);
+
+		// handle landing page (page or proxy)
+		if (template.landingPageID) {
+			formValues.landingPage = landingPageMap.byKey(template.landingPageID);
+			formValues.landingPageType = 'page';
+		} else if (template.landingProxyID) {
+			formValues.landingPage = landingProxyMap.byKey(template.landingProxyID);
+			formValues.landingPageType = 'proxy';
+		}
+
+		// handle before landing page (page or proxy)
+		if (template.beforeLandingPageID) {
+			formValues.beforeLandingPage = beforeLandingPageMap.byKey(template.beforeLandingPageID);
+			formValues.beforeLandingPageType = 'page';
+		} else if (template.beforeLandingProxyID) {
+			formValues.beforeLandingPage = beforeLandingProxyMap.byKey(template.beforeLandingProxyID);
+			formValues.beforeLandingPageType = 'proxy';
+		}
+
+		// handle after landing page (page or proxy)
+		if (template.afterLandingPageID) {
+			formValues.afterLandingPage = afterLandingPageMap.byKey(template.afterLandingPageID);
+			formValues.afterLandingPageType = 'page';
+		} else if (template.afterLandingProxyID) {
+			formValues.afterLandingPage = afterLandingProxyMap.byKey(template.afterLandingProxyID);
+			formValues.afterLandingPageType = 'proxy';
+		}
+
 		formValues.afterLandingPageRedirectURL = template.afterLandingPageRedirectURL;
 		formValues.urlIdentifier = identifierMap.byKey(template.urlIdentifierID);
 		formValues.stateIdentifier = identifierMap.byKey(template.stateIdentifierID);
@@ -515,6 +611,13 @@
 						<a href={`/page/?edit=${template.beforeLandingPageID}`} class="block w-full py-1">
 							{beforeLandingPageMap.byKey(template.beforeLandingPageID)}
 						</a>
+					{:else if template.beforeLandingProxyID}
+						<a href={`/proxy/?edit=${template.beforeLandingProxyID}`} class="block w-full py-1">
+							<span class="flex items-center gap-1">
+								<ProxySvgIcon size="w-4 h-4" />
+								{beforeLandingProxyMap.byKey(template.beforeLandingProxyID)}
+							</span>
+						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
@@ -522,12 +625,26 @@
 						<a href={`/page/?edit=${template.landingPageID}`} class="block w-full py-1">
 							{landingPageMap.byKey(template.landingPageID)}
 						</a>
+					{:else if template.landingProxyID}
+						<a href={`/proxy/?edit=${template.landingProxyID}`} class="block w-full py-1">
+							<span class="flex items-center gap-1">
+								<ProxySvgIcon size="w-4 h-4" />
+								{landingProxyMap.byKey(template.landingProxyID)}
+							</span>
+						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
 					{#if template.afterLandingPageID}
 						<a href={`/page/?edit=${template.afterLandingPageID}`} class="block w-full py-1">
 							{afterLandingPageMap.byKey(template.afterLandingPageID)}
+						</a>
+					{:else if template.afterLandingProxyID}
+						<a href={`/proxy/?edit=${template.afterLandingProxyID}`} class="block w-full py-1">
+							<span class="flex items-center gap-1">
+								<ProxySvgIcon size="w-4 h-4" />
+								{afterLandingProxyMap.byKey(template.afterLandingProxyID)}
+							</span>
 						</a>
 					{/if}
 				</TableCell>
@@ -781,31 +898,37 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 				<div class="w-full">
 					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Page Flow</h3>
 					<div class="grid grid-cols-1 md:grid-cols-5 gap-6">
-						<div class="md:col-span-2 flex flex-col space-y-4">
-							<div>
-								<TextFieldSelect
-									id="beforeLandingPage"
-									bind:value={formValues.beforeLandingPage}
-									options={beforeLandingPageMap.values()}
-									optional>Before Landing Page</TextFieldSelect
-								>
-							</div>
-							<div>
-								<TextFieldSelect
-									id="landingPage"
-									required
-									bind:value={formValues.landingPage}
-									options={landingPageMap.values()}>Landing Page</TextFieldSelect
-								>
-							</div>
-							<div>
-								<TextFieldSelect
-									id="afterLandingPage"
-									bind:value={formValues.afterLandingPage}
-									options={afterLandingPageMap.values()}
-									optional>After Landing Page</TextFieldSelect
-								>
-							</div>
+						<div class="md:col-span-2 flex flex-col space-y-6">
+							<!-- Before Landing Page -->
+							<TextFieldSelectWithType
+								id="beforeLandingPage"
+								bind:value={formValues.beforeLandingPage}
+								bind:type={formValues.beforeLandingPageType}
+								pageOptions={beforeLandingPageMap.values()}
+								proxyOptions={beforeLandingProxyMap.values()}
+								optional>Before Landing</TextFieldSelectWithType
+							>
+
+							<!-- Landing Page -->
+							<TextFieldSelectWithType
+								id="landingPage"
+								bind:value={formValues.landingPage}
+								bind:type={formValues.landingPageType}
+								pageOptions={landingPageMap.values()}
+								proxyOptions={landingProxyMap.values()}
+								required>Landing</TextFieldSelectWithType
+							>
+
+							<!-- After Landing Page -->
+							<TextFieldSelectWithType
+								id="afterLandingPage"
+								bind:value={formValues.afterLandingPage}
+								bind:type={formValues.afterLandingPageType}
+								pageOptions={afterLandingPageMap.values()}
+								proxyOptions={afterLandingProxyMap.values()}
+								optional>After Landing</TextFieldSelectWithType
+							>
+
 							<div>
 								<TextField
 									bind:value={formValues.afterLandingPageRedirectURL}
@@ -833,7 +956,11 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 										>
 									</div>
 									<div class="flex-1">
-										<p class="text-xs font-medium">Before Landing Page</p>
+										<p class="text-xs font-medium">
+											Before Landing {formValues.beforeLandingPageType === 'proxy'
+												? 'Proxy'
+												: 'Page'}
+										</p>
 										<p class="text-xs text-gray-500 truncate max-w-[180px]">
 											{formValues.beforeLandingPage || 'Not selected'}
 										</p>
@@ -853,7 +980,9 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 										<span class="text-xl text-blue-600">2</span>
 									</div>
 									<div class="flex-1">
-										<p class="text-xs font-medium">Landing Page</p>
+										<p class="text-xs font-medium">
+											Landing {formValues.landingPageType === 'proxy' ? 'Proxy' : 'Page'}
+										</p>
 										<p class="text-xs text-gray-500 truncate max-w-[180px]">
 											{formValues.landingPage || 'Required'}
 										</p>
@@ -877,7 +1006,9 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 										>
 									</div>
 									<div class="flex-1">
-										<p class="text-xs font-medium">After Landing Page</p>
+										<p class="text-xs font-medium">
+											After Landing {formValues.afterLandingPageType === 'proxy' ? 'Proxy' : 'Page'}
+										</p>
 										<p class="text-xs text-gray-500 truncate max-w-[180px]">
 											{formValues.afterLandingPage || 'Not selected'}
 										</p>

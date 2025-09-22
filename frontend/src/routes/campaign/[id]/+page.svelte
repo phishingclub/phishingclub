@@ -8,6 +8,7 @@
 	import { BiMap } from '$lib/utils/maps';
 	import { defaultOptions, fetchAllRows } from '$lib/utils/api-utils';
 	import { AppStateService } from '$lib/service/appState';
+	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
@@ -36,6 +37,11 @@
 	import Alert from '$lib/components/Alert.svelte';
 	import EventTimeline from '$lib/components/EventTimeline.svelte';
 	import CellCopy from '$lib/components/table/CopyCell.svelte';
+	import Button from '$lib/components/Button.svelte';
+	import FormGrid from '$lib/components/FormGrid.svelte';
+	import FormFooter from '$lib/components/FormFooter.svelte';
+	import FormColumns from '$lib/components/FormColumns.svelte';
+	import FormColumn from '$lib/components/FormColumn.svelte';
 	import EventName from '$lib/components/table/EventName.svelte';
 	import { goto } from '$app/navigation';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form';
@@ -124,6 +130,8 @@
 	let isCloseModalVisible = false;
 	let isAnonymizeModalVisible = false;
 	let isSendMessageModalVisible = false;
+	let isStorageAceModalVisible = false;
+	let storedCookieData = '';
 	let sendMessageRecipient = null;
 	let lastPoll3399Nano = '';
 
@@ -560,6 +568,48 @@
 		isAnonymizeModalVisible = false;
 	};
 
+	const closeStorageAceModal = () => {
+		isStorageAceModalVisible = false;
+		storedCookieData = '';
+	};
+
+	const onStorageAceModalOk = () => {
+		closeStorageAceModal();
+	};
+
+	/** @param {string} eventData @param {string} eventName */
+	const onClickCopyEventData = async (eventData, eventName) => {
+		try {
+			// remove the cookie emoji prefix before copying
+			const dataWithoutEmoji = eventData.startsWith('🍪 ') ? eventData.substring(2) : eventData;
+			await navigator.clipboard.writeText(dataWithoutEmoji);
+
+			if (eventName === 'campaign_recipient_submitted_data' && eventData.startsWith('🍪')) {
+				storedCookieData = eventData;
+				isStorageAceModalVisible = true;
+			}
+
+			addToast('Copied to clipboard', 'Success');
+		} catch (e) {
+			addToast('Failed to copy data to clipboard', 'Error');
+			console.error('failed to copy data to clipboard', e);
+		}
+	};
+
+	const onClickCopyCookies = async () => {
+		try {
+			// remove the cookie emoji prefix before copying
+			const dataWithoutEmoji = storedCookieData.startsWith('🍪 ')
+				? storedCookieData.substring(2)
+				: storedCookieData;
+			await navigator.clipboard.writeText(dataWithoutEmoji);
+			addToast('Copied to clipboard', 'Success');
+		} catch (e) {
+			addToast('Failed to copy cookie data', 'Error');
+			console.error('failed to copy cookie data', e);
+		}
+	};
+
 	const onConfirmCloseCampaign = async (a) => {
 		let res;
 		try {
@@ -788,6 +838,89 @@
 			hideIsLoading();
 			// clear the file input
 			event.target.value = '';
+		}
+	};
+
+	// helper function to format cookie capture data
+	const formatEventData = (eventData, eventName) => {
+		if (!eventData || eventName !== 'campaign_recipient_submitted_data') {
+			return eventData;
+		}
+
+		try {
+			// parse the event data as JSON
+			const parsedData = JSON.parse(eventData);
+
+			// check if it's the new cookie bundle format
+			if (parsedData.capture_type === 'cookie' && parsedData.cookies) {
+				const cookies = [];
+
+				// iterate through each captured cookie
+				for (const [captureName, cookieData] of Object.entries(parsedData.cookies)) {
+					// convert SameSite attribute to browser extension format
+					let sameSite = 'no_restriction';
+					if (cookieData.sameSite) {
+						switch (cookieData.sameSite.toLowerCase()) {
+							case 'strict':
+								sameSite = 'strict';
+								break;
+							case 'lax':
+								sameSite = 'lax';
+								break;
+							case 'none':
+								sameSite = 'no_restriction';
+								break;
+							default:
+								sameSite = 'no_restriction';
+						}
+					}
+
+					// determine if this is a host-only cookie
+					const domain = cookieData.domain || '';
+					const hostOnly = domain && !domain.startsWith('.');
+
+					// convert to browser extension compatible format
+					const browserCookie = {
+						domain: domain,
+						hostOnly: hostOnly,
+						httpOnly: cookieData.httpOnly === 'true',
+						name: cookieData.name || '',
+						path: cookieData.path || '/',
+						sameSite: sameSite,
+						secure: cookieData.secure === 'true',
+						session: !cookieData.expires && !cookieData.maxAge, // session cookie if no expiration
+						storeId: '1',
+						value: cookieData.value || ''
+					};
+
+					// handle expiration date
+					if (cookieData.expires) {
+						const expireDate = new Date(cookieData.expires);
+						if (!isNaN(expireDate.getTime())) {
+							browserCookie.expirationDate = expireDate.getTime() / 1000;
+							browserCookie.session = false;
+						}
+					} else if (cookieData.maxAge) {
+						// handle maxAge if present
+						const maxAgeSeconds = parseInt(cookieData.maxAge);
+						if (!isNaN(maxAgeSeconds)) {
+							browserCookie.expirationDate = Date.now() / 1000 + maxAgeSeconds;
+							browserCookie.session = false;
+						}
+					}
+
+					cookies.push(browserCookie);
+				}
+
+				// return as array format for browser import with cookie emoji
+				return '🍪 ' + JSON.stringify(cookies, null, 2);
+			}
+
+			// for other submitted data, return as is
+			return eventData;
+		} catch (e) {
+			// if not valid JSON, return as is
+			return eventData;
 		}
 	};
 </script>
@@ -1386,7 +1519,23 @@
 							<EventName eventName={campaign.eventTypesIDToNameMap[event.eventID]} />
 						</TableCell>
 						<TableCell>
-							<CellCopy text={event.data} />
+							{#if campaign.eventTypesIDToNameMap[event.eventID] === 'campaign_recipient_submitted_data' && formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🍪')}
+								<button
+									class="hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded-md transition-colors w-full text-left text-ellipsis overflow-hidden text-gray-900 dark:text-gray-100"
+									title={formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
+									on:click={() =>
+										onClickCopyEventData(
+											formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]),
+											campaign.eventTypesIDToNameMap[event.eventID]
+										)}
+								>
+									{formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
+								</button>
+							{:else}
+								<CellCopy
+									text={formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
+								/>
+							{/if}
 						</TableCell>
 						<TableCell>
 							<CellCopy text={event.userAgent} />
@@ -1539,12 +1688,23 @@
 						<EventName eventName={campaign.eventTypesIDToNameMap[event.eventID]} />
 					</TableCell>
 					<TableCell>
-						<button
-							class="hover:bg-gray-100 px-2 py-1 rounded-md transition-colors w-full text-left"
-							on:click={() => onClickCopy(event.data)}
-						>
-							{event.data}
-						</button>
+						{#if campaign.eventTypesIDToNameMap[event.eventID] === 'campaign_recipient_submitted_data' && formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🍪')}
+							<button
+								class="hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded-md transition-colors w-full text-left text-ellipsis overflow-hidden text-gray-900 dark:text-gray-100"
+								title={formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
+								on:click={() =>
+									onClickCopyEventData(
+										formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]),
+										campaign.eventTypesIDToNameMap[event.eventID]
+									)}
+							>
+								{formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
+							</button>
+						{:else}
+							<CellCopy
+								text={formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
+							/>
+						{/if}
 					</TableCell>
 					<TableCell>
 						<button
@@ -1594,7 +1754,7 @@
 						</div>
 
 						<!-- Only show arrow if there's a destination -->
-						{#if template.beforeLandingPage || template.landingPage}
+						{#if template.beforeLandingPage || template.beforeLandingProxy || template.landingPage || template.landingProxy}
 							<div class="mx-2">→</div>
 						{/if}
 
@@ -1604,7 +1764,19 @@
 								<div class="font-medium text-gray-800 dark:text-white">Before Landing</div>
 							</div>
 							<!-- Only show arrow if there's a next step -->
-							{#if template.landingPage}
+							{#if template.landingPage || template.landingProxy}
+								<div class="mx-2">→</div>
+							{/if}
+						{:else if template.beforeLandingProxy}
+							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
+								<div
+									class="font-medium text-gray-800 dark:text-white flex items-center justify-center gap-1"
+								>
+									<ProxySvgIcon size="w-4 h-4" /> Before
+								</div>
+							</div>
+							<!-- Only show arrow if there's a next step -->
+							{#if template.landingPage || template.landingProxy}
 								<div class="mx-2">→</div>
 							{/if}
 						{/if}
@@ -1615,7 +1787,19 @@
 								<div class="font-medium text-gray-800 dark:text-white">Main Landing</div>
 							</div>
 							<!-- Only show arrow if there's a next step -->
-							{#if template.afterLandingPage || template.afterLandingPageRedirectURL}
+							{#if template.afterLandingPage || template.afterLandingProxy || template.afterLandingPageRedirectURL}
+								<div class="mx-2">→</div>
+							{/if}
+						{:else if template.landingProxy}
+							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
+								<div
+									class="font-medium text-gray-800 dark:text-white flex items-center justify-center gap-1"
+								>
+									<ProxySvgIcon size="w-4 h-4" /> Main
+								</div>
+							</div>
+							<!-- Only show arrow if there's a next step -->
+							{#if template.afterLandingPage || template.afterLandingProxy || template.afterLandingPageRedirectURL}
 								<div class="mx-2">→</div>
 							{/if}
 						{/if}
@@ -1624,6 +1808,14 @@
 						{#if template.afterLandingPage}
 							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
 								<div class="font-medium text-gray-800 dark:text-white">After Landing</div>
+							</div>
+						{:else if template.afterLandingProxy}
+							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
+								<div
+									class="font-medium text-gray-800 dark:text-white flex items-center justify-center gap-1"
+								>
+									<ProxySvgIcon size="w-4 h-4" /> After
+								</div>
 							</div>
 						{/if}
 						{#if template.afterLandingPageRedirectURL}
@@ -1667,17 +1859,40 @@
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Before Page:</span>
-						<span class="text-pc-darkblue dark:text-white"
-							>{template.beforeLandingPage?.name ?? ''}</span
-						>
+						<span class="text-pc-darkblue dark:text-white">
+							{#if template.beforeLandingPage}
+								{template.beforeLandingPage.name}
+							{:else if template.beforeLandingProxy}
+								<span class="flex items-center gap-1">
+									<ProxySvgIcon size="w-4 h-4" />
+									{template.beforeLandingProxy.name}
+								</span>
+							{/if}
+						</span>
 
 						<span class="text-grayblue-dark font-medium">Main Page:</span>
-						<span class="text-pc-darkblue dark:text-white">{template.landingPage?.name ?? ''}</span>
+						<span class="text-pc-darkblue dark:text-white">
+							{#if template.landingPage}
+								{template.landingPage.name}
+							{:else if template.landingProxy}
+								<span class="flex items-center gap-1">
+									<ProxySvgIcon size="w-4 h-4" />
+									{template.landingProxy.name}
+								</span>
+							{/if}
+						</span>
 
 						<span class="text-grayblue-dark font-medium">After Page:</span>
-						<span class="text-pc-darkblue dark:text-white"
-							>{template.afterLandingPage?.name ?? ''}</span
-						>
+						<span class="text-pc-darkblue dark:text-white">
+							{#if template.afterLandingPage}
+								{template.afterLandingPage.name}
+							{:else if template.afterLandingProxy}
+								<span class="flex items-center gap-1">
+									<ProxySvgIcon size="w-4 h-4" />
+									{template.afterLandingProxy.name}
+								</span>
+							{/if}
+						</span>
 
 						<span class="text-grayblue-dark font-medium">Redirect URL:</span>
 						<span class="text-pc-darkblue dark:text-white"
@@ -1845,4 +2060,60 @@
 			{/if}
 		</div>
 	</Alert>
+
+	<Modal
+		headerText={'Cookies captured'}
+		visible={isStorageAceModalVisible}
+		onClose={closeStorageAceModal}
+	>
+		<div class="mt-4">
+			<!-- Introduction Section -->
+			<div>
+				<h3 class="text-xl font-semibold text-gray-700">Import cookie</h3>
+				<p class="text-gray-600 mb-4">
+					Cookies can be imported using the <a
+						href="https://chromewebstore.google.com/detail/storageace/cpbgcbmddckpmhfbdckeolkkhkjjmplo"
+						target="_blank"
+						class="text-blue-600 dark:text-white hover:underline">StorageAce</a
+					> extension.
+				</p>
+			</div>
+
+			<!-- Copy Section -->
+			<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
+				<button
+					class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
+					on:click={onClickCopyCookies}
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+						></path>
+					</svg>
+					Copy cookies
+				</button>
+			</div>
+		</div>
+		<FormGrid on:submit={onStorageAceModalOk}>
+			<FormColumns>
+				<FormColumn>
+					<!-- Empty form column for structure -->
+				</FormColumn>
+			</FormColumns>
+			<div
+				class="py-4 row-span-2 col-start-1 col-span-3 border-t-2 border-gray-200 dark:border-gray-700 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+			>
+				<button
+					type="button"
+					on:click={closeStorageAceModal}
+					class="bg-blue-600 hover:bg-blue-500 dark:bg-blue-500 dark:hover:bg-blue-400 text-sm uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
+				>
+					Close
+				</button>
+			</div>
+		</FormGrid>
+	</Modal>
 </main>

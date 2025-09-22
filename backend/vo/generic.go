@@ -12,6 +12,60 @@ import (
 	"github.com/phishingclub/phishingclub/validate"
 )
 
+// String32 is a trimmed string with a min of 1 and a max of 32
+type String32 struct {
+	inner string
+}
+
+// NewString32 creates a new short string
+func NewString32(s string) (*String32, error) {
+	s = strings.TrimSpace(s)
+	err := validate.ErrorIfStringNotbetweenOrEqualTo(s, 1, 32)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	return &String32{
+		inner: s,
+	}, nil
+}
+
+// NewString32Must creates a new short string and panics if it fails
+func NewString32Must(s string) *String32 {
+	a, err := NewString32(s)
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+// MarshalJSON implements the json.Marshaler interface
+func (s String32) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.inner)
+}
+
+// UnmarshalJSON unmarshals the json into a string
+func (s *String32) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	ss, err := NewString32(str)
+	if err != nil {
+		unwrapped := errors.Unwrap(err)
+		if unwrapped == nil {
+			return err
+		}
+		return unwrapped
+	}
+	s.inner = ss.inner
+	return nil
+}
+
+// String returns the string representation of the short string
+func (s String32) String() string {
+	return s.inner
+}
+
 // String64 is a trimmed string with a min of 1 and a max of 64
 type String64 struct {
 	inner string

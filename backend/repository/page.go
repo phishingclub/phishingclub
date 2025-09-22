@@ -254,12 +254,34 @@ func ToPage(row *database.Page) (*model.Page, error) {
 	}
 	content := nullable.NewNullableWithValue(*c)
 
+	// Handle proxy fields
+	typeValue := row.Type
+	if typeValue == "" {
+		typeValue = "regular"
+	}
+	pageType := nullable.NewNullableWithValue(*vo.NewString32Must(typeValue))
+
+	targetURL, err := vo.NewOptionalString1024(row.TargetURL)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	targetURLNullable := nullable.NewNullableWithValue(*targetURL)
+
+	proxyConfig, err := vo.NewOptionalString1MB(row.ProxyConfig)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	proxyConfigNullable := nullable.NewNullableWithValue(*proxyConfig)
+
 	return &model.Page{
-		ID:        id,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		CompanyID: companyID,
-		Name:      name,
-		Content:   content,
+		ID:          id,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+		CompanyID:   companyID,
+		Name:        name,
+		Content:     content,
+		Type:        pageType,
+		TargetURL:   targetURLNullable,
+		ProxyConfig: proxyConfigNullable,
 	}, nil
 }

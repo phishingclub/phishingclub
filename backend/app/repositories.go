@@ -12,6 +12,7 @@ type Repositories struct {
 	Company           *repository.Company
 	Option            *repository.Option
 	Page              *repository.Page
+	Proxy             *repository.Proxy
 	Role              *repository.Role
 	Session           *repository.Session
 	User              *repository.User
@@ -40,6 +41,7 @@ func NewRepositories(
 		Company:           &repository.Company{DB: db},
 		Option:            option,
 		Page:              &repository.Page{DB: db},
+		Proxy:             &repository.Proxy{DB: db},
 		Role:              &repository.Role{DB: db},
 		Session:           &repository.Session{DB: db},
 		User:              &repository.User{DB: db},

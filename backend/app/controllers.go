@@ -15,6 +15,7 @@ type Controllers struct {
 	Installer         *controller.Install
 	InitialSetup      *controller.InitialSetup
 	Page              *controller.Page
+	Proxy             *controller.Proxy
 	Log               *controller.Log
 	Option            *controller.Option
 	User              *controller.User
@@ -101,6 +102,10 @@ func NewControllers(
 		PageService:     services.Page,
 		TemplateService: services.Template,
 	}
+	proxy := &controller.Proxy{
+		Common:       common,
+		ProxyService: services.Proxy,
+	}
 	option := &controller.Option{
 		Common:        common,
 		OptionService: services.Option,
@@ -182,6 +187,7 @@ func NewControllers(
 		InitialSetup:      initialSetup,
 		Health:            health,
 		Page:              page,
+		Proxy:             proxy,
 		Log:               log,
 		Option:            option,
 		User:              user,

@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-errors/errors"
+	"gopkg.in/yaml.v3"
 
 	"github.com/caddyserver/certmagic"
 	securejoin "github.com/cyphar/filepath-securejoin"
@@ -27,6 +29,7 @@ import (
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/proxy"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/server"
 	"github.com/phishingclub/phishingclub/service"
@@ -50,6 +53,7 @@ type Server struct {
 	controllers           *Controllers
 	services              *Services
 	repositories          *Repositories
+	proxyServer           *proxy.ProxyHandler
 }
 
 // NewServer returns a new server
@@ -63,6 +67,38 @@ func NewServer(
 	logger *zap.SugaredLogger,
 	certMagicConfig *certmagic.Config,
 ) *Server {
+	// setup proxy cookie tracking
+	cookieName := ""
+	if option, err := repositories.Option.GetByKey(context.Background(), data.OptionKeyProxyCookieName); err == nil && option != nil {
+		cookieName = option.Value.String()
+	}
+
+	// setup goproxy-based proxy server
+	proxyServer := proxy.NewProxyHandler(
+		logger,
+		repositories.Page,
+		repositories.CampaignRecipient,
+		repositories.Campaign,
+		repositories.CampaignTemplate,
+		repositories.Domain,
+		repositories.Proxy,
+		repositories.Identifier,
+		services.Campaign,
+		cookieName,
+	)
+
+	// setup proxy session cleanup routine
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				proxyServer.CleanupExpiredSessions()
+			}
+		}
+	}()
+
 	return &Server{
 		staticPath:            staticPath,
 		ownManagedTLSCertPath: ownManagedTLSCertPath,
@@ -72,6 +108,7 @@ func NewServer(
 		repositories:          repositories,
 		logger:                logger,
 		certMagicConfig:       certMagicConfig,
+		proxyServer:           proxyServer,
 	}
 }
 
@@ -233,21 +270,36 @@ func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
 // checks if the request should be redirected
 // checks if the request is for a static page or static not found page
 func (s *Server) Handler(c *gin.Context) {
+	// add error recovery for handler
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Errorw("panic in handler",
+				"panic", r,
+				"host", c.Request.Host,
+				"url", c.Request.URL.String(),
+			)
+			c.Status(http.StatusInternalServerError)
+			c.Abort()
+		}
+	}()
+
 	host, err := s.getHostOnly(c.Request.Host)
 	if err != nil {
 		s.logger.Debugw("failed to parse host",
+			"rawHost", c.Request.Host,
 			"error", err,
 		)
 		c.Status(http.StatusNotFound)
 		c.Abort()
 		return
 	}
+
 	// check if the domain is valid
 	// use DB directly here to avoid getting unnecessary data
 	// as a domain contains big blobs for static content
 	var domain *database.Domain
 	res := s.db.
-		Select("id, name, host_website, redirect_url").
+		Select("id, name, type, proxy_id, proxy_target_domain, host_website, redirect_url").
 		Where("name = ?", host).
 		First(&domain)
 
@@ -257,6 +309,26 @@ func (s *Server) Handler(c *gin.Context) {
 		c.Abort()
 		return
 	}
+
+	// check if this is a proxy domain - if so, handle it with proxy server
+	if domain.Type == "proxy" {
+		s.logger.Debugw("handling proxy domain request",
+			"host", host,
+			"targetDomain", domain.ProxyTargetDomain,
+			"path", c.Request.URL.Path,
+		)
+		err = s.proxyServer.HandleHTTPRequest(c.Writer, c.Request, domain)
+		if err != nil {
+			s.logger.Errorw("failed to handle proxy request",
+				"error", err,
+				"host", host,
+			)
+			c.Status(http.StatusInternalServerError)
+		}
+		c.Abort()
+		return
+	}
+
 	// check if the request is for a tacking pixel
 	if c.Request.URL.Path == "/wf/open" {
 		s.controllers.Campaign.TrackingPixel(c)
@@ -265,6 +337,8 @@ func (s *Server) Handler(c *gin.Context) {
 	}
 
 	// check if the request is for a phishing page or is denied by allow/deny list
+	// this must come BEFORE proxy cookie check to ensure initial requests with campaign recipient IDs
+	// are treated as initial requests even if they have existing proxy cookies
 	isRequestForPhishingPageOrDenied, err := s.checkAndServePhishingPage(c, domain)
 	if err != nil {
 		s.logger.Errorw("failed to serve phishing page",
@@ -276,6 +350,20 @@ func (s *Server) Handler(c *gin.Context) {
 	}
 	// if this was a request for the phishing page and there was no error
 	if isRequestForPhishingPageOrDenied {
+		return
+	}
+
+	// check for proxy cookie - only if this wasn't a phishing page request
+	// this ensures that requests with campaign recipient IDs are handled as initial requests
+	if s.proxyServer.IsValidProxyCookie(s.getProxyCookieValue(c)) {
+		err = s.proxyServer.HandleHTTPRequest(c.Writer, c.Request, domain)
+		if err != nil {
+			s.logger.Errorw("failed to handle proxy request",
+				"error", err,
+			)
+			c.Status(http.StatusInternalServerError)
+		}
+		c.Abort()
 		return
 	}
 	// check if the request is for assets
@@ -458,65 +546,26 @@ func (s *Server) checkAndServePhishingPage(
 	c *gin.Context,
 	domain *database.Domain,
 ) (bool, error) {
-	// get all identifiers and collect all that match query params
-	identifiers, err := s.repositories.Identifier.GetAll(c, &repository.IdentifierOption{})
+	// get campaign recipient from URL parameters
+	campaignRecipient, _, err := server.GetCampaignRecipientFromURLParams(
+		c,
+		c.Request,
+		s.repositories.Identifier,
+		s.repositories.CampaignRecipient,
+	)
 	if err != nil {
-		s.logger.Debugw("failed to get all identifiers",
+		s.logger.Debugw("failed to get campaign recipient from URL parameters",
 			"error", err,
 		)
 		return false, errs.Wrap(err)
 	}
-	query := c.Request.URL.Query()
-	matchingParams := []string{}
-	for _, identifier := range identifiers.Rows {
-		if name := identifier.Name.MustGet(); query.Has(name) {
-			matchingParams = append(matchingParams, name)
-		}
-	}
-	// check which match a UUIDv4 and check if any of those match a campaignrecipient id
-	matchingUUIDParams := []*uuid.UUID{}
-	for _, param := range matchingParams {
-		if id, err := uuid.Parse(query.Get(param)); err == nil {
-			matchingUUIDParams = append(matchingUUIDParams, &id)
-		}
-	}
-	if len(matchingUUIDParams) == 0 {
-		s.logger.Debugw("'campaignrecipient' not found",
-			"error", err,
-		)
-		return false, nil
-	}
-	var campaignRecipient *model.CampaignRecipient
-	var campaignRecipientID *uuid.UUID
-	// however limit it to 3 attempts to prevent a DoS attack
-	for i, v := range matchingUUIDParams {
-		if i > 2 {
-			s.logger.Warn("too many attempts to get campaign recipient by a UUID. Ensure that there are no more than max 3 UUID in the phishing URL!")
-			return false, nil
-		}
-		campaignRecipient, err = s.repositories.CampaignRecipient.GetByCampaignRecipientID(
-			c,
-			v,
-		)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			s.logger.Debugw("failed to get active campaign and campaign recipient by query param",
-				"error", err,
-			)
-			return false, fmt.Errorf("failed to get active campaign and campaign recipient by query param: %s", err)
-		}
-		if campaignRecipient != nil {
-			campaignRecipientID = v
-			break
-		}
-	}
-	// there was a campagin recipient id but it did not match a campaign
-	// this could be because there is an ID value but is not for us
 	if campaignRecipient == nil {
-		s.logger.Debugw("'campaignrecipient' not found",
-			"error", err,
-		)
+		s.logger.Debugw("'campaignrecipient' not found")
 		return false, nil
 	}
+
+	campaignRecipientID := campaignRecipient.ID.MustGet()
+	campaignRecipientIDPtr := &campaignRecipientID
 	// at this point we know which url param matched the campaignrecipientID, however
 	// it could have been any available identifier and not the one matching the campaign template
 	// it is possible now to check if it is correct, however it does not matter as the campaign
@@ -587,16 +636,29 @@ func (s *Server) checkAndServePhishingPage(
 	}
 	// figure out which page types this template has
 	var beforePageID *uuid.UUID
+	var beforeProxyID *uuid.UUID
 	if v, err := cTemplate.BeforeLandingPageID.Get(); err == nil {
 		beforePageID = &v
+	} else if v, err := cTemplate.BeforeLandingProxyID.Get(); err == nil {
+		beforeProxyID = &v
 	}
-	landingPageID, err := cTemplate.LandingPageID.Get()
-	if err != nil {
-		return false, fmt.Errorf("Template is incomplete, missing landing page ID: %s", err)
+
+	var landingPageID *uuid.UUID
+	var landingProxyID *uuid.UUID
+	if v, err := cTemplate.LandingPageID.Get(); err == nil {
+		landingPageID = &v
+	} else if v, err := cTemplate.LandingProxyID.Get(); err == nil {
+		landingProxyID = &v
+	} else {
+		return false, fmt.Errorf("Template is incomplete, missing landing page or Proxy ID")
 	}
+
 	var afterPageID *uuid.UUID
+	var afterProxyID *uuid.UUID
 	if v, err := cTemplate.AfterLandingPageID.Get(); err == nil {
 		afterPageID = &v
+	} else if v, err := cTemplate.AfterLandingProxyID.Get(); err == nil {
+		afterProxyID = &v
 	}
 
 	stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
@@ -608,17 +670,50 @@ func (s *Server) checkAndServePhishingPage(
 	}
 	// if there is no page type then this is the before landing page or the landing page
 	var pageID *uuid.UUID
+	var proxyID *uuid.UUID
 	nextPageType := ""
 	currentPageType := ""
+
+	s.logger.Debugw("determining page flow",
+		"pageTypeQuery", pageTypeQuery,
+		"hasBeforePage", beforePageID != nil,
+		"hasBeforeProxy", beforeProxyID != nil,
+		"hasLandingPage", landingPageID != nil,
+		"hasLandingProxy", landingProxyID != nil,
+		"hasAfterPage", afterPageID != nil,
+		"hasAfterProxy", afterProxyID != nil,
+		"campaignRecipientID", campaignRecipientID.String(),
+	)
+
 	if len(pageTypeQuery) == 0 {
-		if beforePageID != nil {
-			pageID = beforePageID
+		if beforePageID != nil || beforeProxyID != nil {
+			if beforePageID != nil {
+				pageID = beforePageID
+				s.logger.Debugw("initial request - serving before landing page",
+					"pageID", pageID.String(),
+				)
+			} else {
+				proxyID = beforeProxyID
+				s.logger.Debugw("initial request - serving before landing Proxy",
+					"proxyID", proxyID.String(),
+				)
+			}
 			currentPageType = data.PAGE_TYPE_BEFORE
 			nextPageType = data.PAGE_TYPE_LANDING
 		} else {
-			pageID = &landingPageID
+			if landingPageID != nil {
+				pageID = landingPageID
+				s.logger.Debugw("initial request - serving landing page",
+					"pageID", pageID.String(),
+				)
+			} else {
+				proxyID = landingProxyID
+				s.logger.Debugw("initial request - serving landing Proxy",
+					"proxyID", proxyID.String(),
+				)
+			}
 			currentPageType = data.PAGE_TYPE_LANDING
-			if afterPageID != nil {
+			if afterPageID != nil || afterProxyID != nil {
 				nextPageType = data.PAGE_TYPE_AFTER
 			} else {
 				nextPageType = data.PAGE_TYPE_DONE // landing page is final page
@@ -631,28 +726,70 @@ func (s *Server) checkAndServePhishingPage(
 		case data.PAGE_TYPE_BEFORE:
 		// this is set if the previous page was a before page
 		case data.PAGE_TYPE_LANDING:
-			pageID = &landingPageID
+			if landingPageID != nil {
+				pageID = landingPageID
+				s.logger.Debugw("serving landing page from state",
+					"pageID", pageID.String(),
+				)
+			} else {
+				proxyID = landingProxyID
+				s.logger.Debugw("serving landing Proxy from state",
+					"proxyID", proxyID.String(),
+				)
+			}
 			currentPageType = data.PAGE_TYPE_LANDING
-			if afterPageID != nil {
+			if afterPageID != nil || afterProxyID != nil {
 				nextPageType = data.PAGE_TYPE_AFTER
 			} else {
-				nextPageType = data.PAGE_TYPE_DONE // landiung page is final page
+				nextPageType = data.PAGE_TYPE_DONE // landing page is final page
 			}
 		// this is set if the previous page was a landing page
 		case data.PAGE_TYPE_AFTER:
 			if afterPageID != nil {
 				pageID = afterPageID
+				s.logger.Debugw("serving after landing page from state",
+					"pageID", pageID.String(),
+				)
+			} else if afterProxyID != nil {
+				proxyID = afterProxyID
+				s.logger.Debugw("serving after landing Proxy from state",
+					"proxyID", proxyID.String(),
+				)
+			} else if landingPageID != nil {
+				pageID = landingPageID
+				s.logger.Debugw("fallback to landing page for after state",
+					"pageID", pageID.String(),
+				)
 			} else {
-				pageID = &landingPageID
+				proxyID = landingProxyID
+				s.logger.Debugw("fallback to landing Proxy for after state",
+					"proxyID", proxyID.String(),
+				)
 			}
-			// next page after a after landinge page, is the same page
+			// next page after a after landing page, is the same page
 			currentPageType = data.PAGE_TYPE_AFTER
 			nextPageType = data.PAGE_TYPE_DONE
 		case data.PAGE_TYPE_DONE:
 			if afterPageID != nil {
 				pageID = afterPageID
+				s.logger.Debugw("serving after landing page for done state",
+					"pageID", pageID.String(),
+				)
+			} else if afterProxyID != nil {
+				proxyID = afterProxyID
+				s.logger.Debugw("serving after landing Proxy for done state",
+					"proxyID", proxyID.String(),
+				)
+			} else if landingPageID != nil {
+				pageID = landingPageID
+				s.logger.Debugw("fallback to landing page for done state",
+					"pageID", pageID.String(),
+				)
 			} else {
-				pageID = &landingPageID
+				proxyID = landingProxyID
+				s.logger.Debugw("fallback to landing Proxy for done state",
+					"proxyID", proxyID.String(),
+				)
 			}
 			currentPageType = data.PAGE_TYPE_DONE
 			nextPageType = data.PAGE_TYPE_DONE
@@ -715,7 +852,7 @@ func (s *Server) checkAndServePhishingPage(
 			campaignRecipient.NotableEventID.Set(*submitDataEventID)
 			err := s.repositories.CampaignRecipient.UpdateByID(
 				c,
-				campaignRecipientID,
+				campaignRecipientIDPtr,
 				campaignRecipient,
 			)
 			if err != nil {
@@ -766,7 +903,252 @@ func (s *Server) checkAndServePhishingPage(
 			}
 		}
 	}
-	// fetch the page
+
+	// handle Proxy pages
+	if proxyID != nil {
+		// this is a Proxy page - redirect to the phishing domain
+		proxy, err := s.repositories.Proxy.GetByID(
+			c,
+			proxyID,
+			&repository.ProxyOption{},
+		)
+		if err != nil {
+			return true, fmt.Errorf("failed to get Proxy page: %s", err)
+		}
+
+		startURL, err := proxy.StartURL.Get()
+		if err != nil {
+			return true, fmt.Errorf("Proxy page has no start URL: %s", err)
+		}
+
+		// parse proxy config to find the phishing domain
+		proxyConfig, err := proxy.ProxyConfig.Get()
+		if err != nil {
+			return true, fmt.Errorf("Proxy page has no configuration: %s", err)
+		}
+
+		// extract the phishing domain from Proxy configuration
+		var rawConfig map[string]interface{}
+		err = yaml.Unmarshal([]byte(proxyConfig.String()), &rawConfig)
+		if err != nil {
+			return true, fmt.Errorf("invalid Proxy configuration YAML: %s", err)
+		}
+
+		// parse the start URL to get the target domain
+		parsedStartURL, err := url.Parse(startURL.String())
+		if err != nil {
+			return true, fmt.Errorf("invalid proxy start URL: %s", err)
+		}
+		startDomain := parsedStartURL.Host
+
+		// find the phishing domain mapping for the start URL domain
+		phishingDomain := ""
+		for originalHost, domainData := range rawConfig {
+			if originalHost == "proxy" || originalHost == "global" {
+				continue
+			}
+			if originalHost == startDomain {
+				if domainMap, ok := domainData.(map[string]interface{}); ok {
+					if to, exists := domainMap["to"]; exists {
+						if toStr, ok := to.(string); ok {
+							phishingDomain = toStr
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if phishingDomain == "" {
+			return true, fmt.Errorf("no phishing domain mapping found for start URL domain: %s", startDomain)
+		}
+
+		// save the event of Proxy page being accessed
+		visitEventID := uuid.New()
+		eventName := ""
+		switch currentPageType {
+		case data.PAGE_TYPE_BEFORE:
+			eventName = data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED
+		case data.PAGE_TYPE_LANDING:
+			eventName = data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED
+		case data.PAGE_TYPE_AFTER:
+			eventName = data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED
+		default:
+			eventName = data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED
+		}
+		eventID := cache.EventIDByName[eventName]
+		clientIP := vo.NewOptionalString64Must(c.ClientIP())
+		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
+		var visitEvent *model.CampaignEvent
+		if !campaign.IsAnonymous.MustGet() {
+			visitEvent = &model.CampaignEvent{
+				ID:          &visitEventID,
+				CampaignID:  &campaignID,
+				RecipientID: &recipientID,
+				IP:          clientIP,
+				UserAgent:   userAgent,
+				EventID:     eventID,
+				Data:        vo.NewEmptyOptionalString1MB(),
+			}
+		} else {
+			ua := vo.NewEmptyOptionalString255()
+			visitEvent = &model.CampaignEvent{
+				ID:          &visitEventID,
+				CampaignID:  &campaignID,
+				RecipientID: nil,
+				IP:          vo.NewEmptyOptionalString64(),
+				UserAgent:   ua,
+				EventID:     eventID,
+				Data:        vo.NewEmptyOptionalString1MB(),
+			}
+		}
+
+		// save the visit event unless it's the final page repeat
+		if currentPageType != data.PAGE_TYPE_DONE {
+			err = s.repositories.Campaign.SaveEvent(
+				c,
+				visitEvent,
+			)
+			if err != nil {
+				s.logger.Errorw("failed to save proxy visit event",
+					"error", err,
+					"proxyID", proxyID.String(),
+				)
+			}
+
+			// check and update if most notable event for recipient
+			currentNotableEventID, _ := campaignRecipient.NotableEventID.Get()
+			if cache.IsMoreNotableCampaignRecipientEventID(
+				&currentNotableEventID,
+				eventID,
+			) {
+				campaignRecipient.NotableEventID.Set(*eventID)
+				err := s.repositories.CampaignRecipient.UpdateByID(
+					c,
+					campaignRecipientIDPtr,
+					campaignRecipient,
+				)
+				if err != nil {
+					s.logger.Errorw("failed to update notable event for proxy",
+						"campaignRecipientID", campaignRecipientID.String(),
+						"eventID", eventID.String(),
+						"error", err,
+					)
+				}
+			}
+		}
+
+		// handle webhook for Proxy page visit
+		webhookID, err := s.repositories.Campaign.GetWebhookIDByCampaignID(
+			c,
+			&campaignID,
+		)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			s.logger.Errorw("failed to get webhook id by campaign id for proxy",
+				"campaignID", campaignID.String(),
+				"error", err,
+			)
+		}
+		if webhookID != nil && currentPageType != data.PAGE_TYPE_DONE {
+			err = s.services.Campaign.HandleWebhook(
+				// TODO this should be tied to a application wide context not the request
+				context.TODO(),
+				webhookID,
+				&campaignID,
+				&recipientID,
+				eventName,
+			)
+			if err != nil {
+				s.logger.Errorw("failed to handle webhook for Proxy page",
+					"error", err,
+					"proxyID", proxyID.String(),
+				)
+			}
+		}
+
+		// validate phishing domain format
+		if strings.Contains(phishingDomain, "://") || strings.Contains(phishingDomain, "/") {
+			return true, fmt.Errorf("invalid phishing domain format: %s", phishingDomain)
+		}
+
+		// validate that the phishing domain is configured as a proxy domain
+		var phishingDomainRecord *database.Domain
+		res := s.db.
+			Select("id, name, type, proxy_id, proxy_target_domain").
+			Where("name = ?", phishingDomain).
+			First(&phishingDomainRecord)
+
+		if res.RowsAffected == 0 {
+			return true, fmt.Errorf("phishing domain '%s' is not configured in the system", phishingDomain)
+		}
+
+		if phishingDomainRecord.Type != "proxy" {
+			return true, fmt.Errorf("phishing domain '%s' is not configured as proxy type", phishingDomain)
+		}
+
+		s.logger.Debugw("redirecting to Proxy phishing domain",
+			"proxyID", proxyID.String(),
+			"startURL", startURL.String(),
+			"phishingDomain", phishingDomain,
+			"currentPageType", currentPageType,
+			"phishingDomainType", phishingDomainRecord.Type,
+		)
+
+		// build the redirect URL to the phishing domain with campaign recipient ID
+		urlParam := cTemplate.URLIdentifier.Name.MustGet()
+
+		// construct the redirect URL properly
+		u := &url.URL{
+			Scheme: "https",
+			Host:   phishingDomain,
+			Path:   parsedStartURL.Path,
+		}
+
+		q := u.Query()
+		q.Set(urlParam, campaignRecipientID.String())
+		if encryptedParam != "" {
+			q.Set(stateParamKey, encryptedParam)
+		}
+		// preserve any existing query params from start URL
+		if parsedStartURL.RawQuery != "" {
+			startQuery, _ := url.ParseQuery(parsedStartURL.RawQuery)
+			for key, values := range startQuery {
+				for _, value := range values {
+					q.Add(key, value)
+				}
+			}
+		}
+		u.RawQuery = q.Encode()
+
+		s.logger.Debugw("built proxy redirect URL",
+			"redirectURL", u.String(),
+			"phishingDomain", phishingDomain,
+			"originalPath", parsedStartURL.Path,
+		)
+
+		// validate the final URL
+		finalURL := u.String()
+		if !strings.HasPrefix(finalURL, "https://") {
+			return true, fmt.Errorf("invalid redirect URL scheme: %s", finalURL)
+		}
+
+		s.logger.Infow("redirecting to proxy domain",
+			"from", c.Request.Host+c.Request.URL.Path,
+			"to", finalURL,
+			"campaignRecipientID", campaignRecipientID.String(),
+		)
+
+		c.Redirect(http.StatusSeeOther, finalURL)
+		c.Abort()
+		return true, nil
+	}
+
+	// ensure we have a page ID if we're not handling a proxy
+	if pageID == nil {
+		return true, fmt.Errorf("no page or proxy configured for current step")
+	}
+
+	// fetch the regular page
 	page, err := s.repositories.Page.GetByID(
 		c,
 		pageID,
@@ -775,6 +1157,7 @@ func (s *Server) checkAndServePhishingPage(
 	if err != nil {
 		return true, fmt.Errorf("failed to get landing page: %s", err)
 	}
+
 	// fetch the sender email to use for the template
 	emailID := cTemplate.EmailID.MustGet()
 	email, err := s.repositories.Email.GetByID(
@@ -794,7 +1177,7 @@ func (s *Server) checkAndServePhishingPage(
 		c,
 		domain,
 		email,
-		campaignRecipientID,
+		campaignRecipientIDPtr,
 		recipient,
 		page,
 		cTemplate,
@@ -860,7 +1243,7 @@ func (s *Server) checkAndServePhishingPage(
 		campaignRecipient.NotableEventID.Set(*eventID)
 		err := s.repositories.CampaignRecipient.UpdateByID(
 			c,
-			campaignRecipientID,
+			campaignRecipientIDPtr,
 			campaignRecipient,
 		)
 		if err != nil {
@@ -948,6 +1331,15 @@ func (s *Server) renderDenyPage(
 func (s *Server) AssignRoutes(r *gin.Engine) {
 	r.Use(s.Handler)
 	r.NoRoute(s.handlerNotFound)
+}
+
+// getProxyCookieValue extracts proxy cookie value from gin context
+func (s *Server) getProxyCookieValue(c *gin.Context) string {
+	cookieName := s.proxyServer.GetCookieName()
+	if cookieValue, err := c.Cookie(cookieName); err == nil {
+		return cookieValue
+	}
+	return ""
 }
 
 func (s *Server) StartHTTP(

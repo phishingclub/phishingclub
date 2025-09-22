@@ -16,6 +16,7 @@ type Services struct {
 	InstallSetup      *service.InstallSetup
 	Option            *service.Option
 	Page              *service.Page
+	Proxy             *service.Proxy
 	Session           *service.Session
 	User              *service.User
 	Domain            *service.Domain
@@ -141,6 +142,7 @@ func NewServices(
 		PageRepository:          repositories.Page,
 		CampaignTemplateService: campaignTemplate,
 		TemplateService:         templateService,
+		DomainRepository:        repositories.Domain,
 	}
 	domain := &service.Domain{
 		Common:                    common,
@@ -153,6 +155,14 @@ func NewServices(
 		AssetService:              asset,
 		FileService:               file,
 		TemplateService:           templateService,
+	}
+	proxy := &service.Proxy{
+		Common:                  common,
+		ProxyRepository:         repositories.Proxy,
+		DomainRepository:        repositories.Domain,
+		CampaignRepository:      repositories.Campaign,
+		CampaignTemplateService: campaignTemplate,
+		DomainService:           domain,
 	}
 	email := &service.Email{
 		Common:            common,
@@ -242,6 +252,7 @@ func NewServices(
 		InstallSetup:      installSetup,
 		Option:            optionService,
 		Page:              page,
+		Proxy:             proxy,
 		Session:           sessionService,
 		User:              userService,
 		Domain:            domain,

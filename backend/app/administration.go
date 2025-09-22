@@ -88,6 +88,10 @@ const (
 	ROUTE_V1_PAGE_OVERVIEW   = "/api/v1/page/overview"
 	ROUTE_V1_PAGE_ID         = "/api/v1/page/:id"
 	ROUTE_V1_PAGE_CONTENT_ID = "/api/v1/page/:id/content"
+	// proxy
+	ROUTE_V1_PROXY          = "/api/v1/proxy"
+	ROUTE_V1_PROXY_OVERVIEW = "/api/v1/proxy/overview"
+	ROUTE_V1_PROXY_ID       = "/api/v1/proxy/:id"
 	// recipient and groups
 	ROUTE_V1_RECIPIENT                  = "/api/v1/recipient"
 	ROUTE_V1_RECIPIENT_IMPORT           = "/api/v1/recipient/import"
@@ -320,6 +324,13 @@ func setupRoutes(
 		POST(ROUTE_V1_PAGE, middleware.SessionHandler, controllers.Page.Create).
 		PATCH(ROUTE_V1_PAGE_ID, middleware.SessionHandler, controllers.Page.UpdateByID).
 		DELETE(ROUTE_V1_PAGE_ID, middleware.SessionHandler, controllers.Page.DeleteByID).
+		// proxy
+		GET(ROUTE_V1_PROXY, middleware.SessionHandler, controllers.Proxy.GetAll).
+		GET(ROUTE_V1_PROXY_OVERVIEW, middleware.SessionHandler, controllers.Proxy.GetOverview).
+		GET(ROUTE_V1_PROXY_ID, middleware.SessionHandler, controllers.Proxy.GetByID).
+		POST(ROUTE_V1_PROXY, middleware.SessionHandler, controllers.Proxy.Create).
+		PATCH(ROUTE_V1_PROXY_ID, middleware.SessionHandler, controllers.Proxy.UpdateByID).
+		DELETE(ROUTE_V1_PROXY_ID, middleware.SessionHandler, controllers.Proxy.DeleteByID).
 		// smtp configuration
 		GET(ROUTE_V1_SMTP_CONFIGURATION, middleware.SessionHandler, controllers.SMTPConfiguration.GetAll).
 		GET(ROUTE_V1_SMTP_CONFIGURATION_ID, middleware.SessionHandler, controllers.SMTPConfiguration.GetByID).

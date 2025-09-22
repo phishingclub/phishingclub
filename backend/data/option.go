@@ -23,4 +23,6 @@ const (
 	OptionKeyRepeatOffenderMonths = "repeat_offender_months"
 
 	OptionKeyAdminSSOLogin = "sso_login"
+
+	OptionKeyProxyCookieName = "proxy_cookie_name"
 )

@@ -6,6 +6,7 @@ package validate
 import (
 	"fmt"
 	"net/mail"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -411,4 +412,89 @@ func OneOfNullableFieldsRequired(fields map[string]any) error {
 	}
 	keys := utils.MapKeys(fields)
 	return fmt.Errorf("one of the fields (%s) must be supplied", strings.Join(keys, ", "))
+}
+
+// ErrorIfInvalidURL validates that a string is a valid URL with http/https scheme
+func ErrorIfInvalidURL(urlStr string) error {
+	if urlStr == "" {
+		return errs.NewValidationError(
+			errors.New("URL cannot be empty"),
+		)
+	}
+
+	// validate that URL is parseable
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return errs.NewValidationError(
+			errors.New("must be a valid URL"),
+		)
+	}
+
+	// ensure it has a valid scheme (http or https)
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return errs.NewValidationError(
+			errors.New("must use http or https protocol"),
+		)
+	}
+
+	// ensure it has a valid host
+	if parsedURL.Host == "" {
+		return errs.NewValidationError(
+			errors.New("must have a valid host"),
+		)
+	}
+
+	// extract hostname (removes port if present) for domain validation
+	hostname := parsedURL.Hostname()
+	if hostname == "" {
+		return errs.NewValidationError(
+			errors.New("must have a valid hostname"),
+		)
+	}
+
+	// basic domain validation
+	if !isValidDomain(hostname) {
+		return errs.NewValidationError(
+			errors.New("must have a valid domain"),
+		)
+	}
+
+	return nil
+}
+
+// isValidDomain performs basic domain name validation
+// supports international domain names (IDNs)
+func isValidDomain(domain string) bool {
+	// basic checks - length limits
+	if len(domain) == 0 || len(domain) > 253 {
+		return false
+	}
+
+	// must contain at least one dot
+	if !strings.Contains(domain, ".") {
+		return false
+	}
+
+	// cannot start or end with dash or dot
+	if strings.HasPrefix(domain, "-") || strings.HasSuffix(domain, "-") ||
+		strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
+		return false
+	}
+
+	// check each label
+	labels := strings.Split(domain, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+
+		// label cannot start or end with dash
+		if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return false
+		}
+
+		// removed restrictive ascii-only character check to support international domains
+	}
+
+	return true
 }

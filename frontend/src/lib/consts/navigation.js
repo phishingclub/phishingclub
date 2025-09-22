@@ -56,6 +56,10 @@ export const route = {
 		label: 'Pages',
 		route: '/page/'
 	},
+	proxy: {
+		label: 'Proxies',
+		route: '/proxy/'
+	},
 	campaignTemplates: {
 		label: 'Campaign Templates',
 		singleLabel: 'Templates',
@@ -109,7 +113,7 @@ export const menu = [
 	{
 		label: 'Domains',
 		type: 'submenu',
-		items: [route.domain, route.pages, route.assets]
+		items: [route.domain, route.pages, route.proxy, route.assets]
 	},
 	{
 		label: 'Emails',

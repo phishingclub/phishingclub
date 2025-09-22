@@ -23,6 +23,8 @@ For a manual step by step guide or more in depth installation information - [cli
 ## Features
 
 - **Multi-stage phishing flows** - Put together multiple phishing pages
+- **Reverse proxy phishing** - Capture sessions to bypass weak MFA
+- **Domain proxying** - Configure domains to proxy and mirror content from target sites
 - **Flexible scheduling** - Time windows, business hours, or manual delivery
 - **Multiple domains** - Auto TLS, custom sites, asset management
 - **Advanced delivery** - SMTP configs or custom API endpoints
@@ -117,8 +119,11 @@ Visit the [Phishing Club Guide](https://phishing.club/guide/introduction/) for m
 | 8102 | Mail Server | Mailpit SMTP server with SpamAssassin integration |
 | 8103 | Container Logs | Dozzle log viewer |
 | 8104 | Container Stats | Docker container statistics |
+| 8105 | MITMProxy| MITMProxy web interface |
+| 8106 | MITMProxy | MITMProxy external access |
 | 8201 | ACME Server | Pebble ACME server for certificates |
 | 8202 | ACME Management | Pebble management interface |
+
 
 ## Development Commands
 

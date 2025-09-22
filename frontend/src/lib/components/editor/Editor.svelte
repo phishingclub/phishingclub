@@ -103,6 +103,7 @@
 
 	onMount(() => {
 		document.body.classList.add('overflow-hidden');
+		/* ts-ignore */
 		self.MonacoEnvironment = {
 			getWorker: function (_, label) {
 				if (label === 'html') {

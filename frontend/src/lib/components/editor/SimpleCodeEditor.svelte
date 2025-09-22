@@ -51,6 +51,7 @@
 				editor.dispose();
 			}
 		};
+		/* @ts-ignore */
 		self.MonacoEnvironment = {
 			getWorker: function (_, label) {
 				if (label === 'json') {
@@ -145,7 +146,7 @@
 						</button>
 					</div>
 					<pre
-						class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap transition-colors duration-200">{placeholder}</pre>
+						class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap transition-colors duration-200 select-text cursor-text">{placeholder}</pre>
 				</div>
 			{/if}
 		</div>

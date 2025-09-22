@@ -35,14 +35,17 @@ type CampaignTemplateOption struct {
 
 	UsableOnly bool
 
-	WithCompany           bool
-	WithDomain            bool
-	WithLandingPage       bool
-	WithBeforeLandingPage bool
-	WithAfterLandingPage  bool
-	WithEmail             bool
-	WithSMTPConfiguration bool
-	WithAPISender         bool
+	WithCompany            bool
+	WithDomain             bool
+	WithLandingPage        bool
+	WithBeforeLandingPage  bool
+	WithAfterLandingPage   bool
+	WithLandingProxy       bool
+	WithBeforeLandingProxy bool
+	WithAfterLandingProxy  bool
+	WithEmail              bool
+	WithSMTPConfiguration  bool
+	WithAPISender          bool
 	// url and cookie keys
 	WithIdentifier bool
 }
@@ -105,6 +108,45 @@ func (r CampaignTemplate) load(o *CampaignTemplateOption, db *gorm.DB) *gorm.DB 
 			))
 		} else {
 			db = db.Preload("AfterLandingPage")
+		}
+	}
+	if o.WithLandingProxy {
+		if len(o.Columns) > 0 {
+			db = db.Joins(LeftJoinOnWithAlias(
+				database.CAMPAIGN_TEMPLATE_TABLE,
+				"landing_proxy_id",
+				database.PROXY_TABLE,
+				"id",
+				"landing_proxy",
+			))
+		} else {
+			db = db.Preload("LandingProxy")
+		}
+	}
+	if o.WithBeforeLandingProxy {
+		if len(o.Columns) > 0 {
+			db = db.Joins(LeftJoinOnWithAlias(
+				database.CAMPAIGN_TEMPLATE_TABLE,
+				"before_landing_proxy_id",
+				database.PROXY_TABLE,
+				"id",
+				"before_landing_proxy",
+			))
+		} else {
+			db = db.Preload("BeforeLandingProxy")
+		}
+	}
+	if o.WithAfterLandingProxy {
+		if len(o.Columns) > 0 {
+			db = db.Joins(LeftJoinOnWithAlias(
+				database.CAMPAIGN_TEMPLATE_TABLE,
+				"after_landing_proxy_id",
+				database.PROXY_TABLE,
+				"id",
+				"after_landing_proxy",
+			))
+		} else {
+			db = db.Preload("AfterLandingProxy")
 		}
 	}
 	if o.WithEmail {
@@ -711,6 +753,18 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 	if row.BeforeLandingPageID != nil {
 		beforeLandingPageID.Set(*row.BeforeLandingPageID)
 	}
+	var beforeLandingProxy *model.Proxy
+	if row.BeforeLandingProxy != nil {
+		m, err := ToProxy(row.BeforeLandingProxy)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		beforeLandingProxy = m
+	}
+	beforeLandingProxyID := nullable.NewNullNullable[uuid.UUID]()
+	if row.BeforeLandingProxyID != nil {
+		beforeLandingProxyID.Set(*row.BeforeLandingProxyID)
+	}
 	var landingPage *model.Page
 	if row.LandingPage != nil {
 		p, err := ToPage(row.LandingPage)
@@ -723,6 +777,18 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 	if row.LandingPageID != nil {
 		landingPageID.Set(*row.LandingPageID)
 	}
+	var landingProxy *model.Proxy
+	if row.LandingProxy != nil {
+		m, err := ToProxy(row.LandingProxy)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		landingProxy = m
+	}
+	landingProxyID := nullable.NewNullNullable[uuid.UUID]()
+	if row.LandingProxyID != nil {
+		landingProxyID.Set(*row.LandingProxyID)
+	}
 	var afterLandingPage *model.Page
 	if row.AfterLandingPage != nil {
 		p, err := ToPage(row.AfterLandingPage)
@@ -734,6 +800,18 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 	afterLandingPageID := nullable.NewNullNullable[uuid.UUID]()
 	if row.AfterLandingPageID != nil {
 		afterLandingPageID.Set(*row.AfterLandingPageID)
+	}
+	var afterLandingProxy *model.Proxy
+	if row.AfterLandingProxy != nil {
+		m, err := ToProxy(row.AfterLandingProxy)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		afterLandingProxy = m
+	}
+	afterLandingProxyID := nullable.NewNullNullable[uuid.UUID]()
+	if row.AfterLandingProxyID != nil {
+		afterLandingProxyID.Set(*row.AfterLandingProxyID)
 	}
 	redirectURL := nullable.NewNullableWithValue(*vo.NewOptionalString255Must(""))
 	if row.AfterLandingPageRedirectURL != "" {
@@ -789,10 +867,16 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 		Domain:                      domain,
 		BeforeLandingPageID:         beforeLandingPageID,
 		BeforeLandingePage:          beforeLandingPage,
+		BeforeLandingProxyID:        beforeLandingProxyID,
+		BeforeLandingProxy:          beforeLandingProxy,
 		LandingPageID:               landingPageID,
 		LandingPage:                 landingPage,
+		LandingProxyID:              landingProxyID,
+		LandingProxy:                landingProxy,
 		AfterLandingPageID:          afterLandingPageID,
 		AfterLandingPage:            afterLandingPage,
+		AfterLandingProxyID:         afterLandingProxyID,
+		AfterLandingProxy:           afterLandingProxy,
 		AfterLandingPageRedirectURL: redirectURL,
 		EmailID:                     emailID,
 		Email:                       email,
@@ -807,4 +891,85 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 		URLPath:                     urlPath,
 		IsUsable:                    isUsable,
 	}, nil
+}
+
+// RemoveProxyIDFromAll removes the proxy ID from any matching columns
+// landing_proxy_id, before_landing_proxy_id and after_landing_proxy_id
+// GetByProxyID gets campaign templates that use a specific proxy ID
+func (r *CampaignTemplate) GetByProxyID(
+	ctx context.Context,
+	proxyID *uuid.UUID,
+	options *CampaignTemplateOption,
+) ([]*model.CampaignTemplate, error) {
+	db := r.DB
+	if options.Columns != nil && len(options.Columns) > 0 {
+		db = db.Select(strings.Join(options.Columns, ","))
+	}
+	db = r.load(options, db)
+	db, err := useQuery(db, database.CAMPAIGN_TEMPLATE_TABLE, options.QueryArgs, allowdCampaignTemplatesColumns...)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	db = db.Where(
+		fmt.Sprintf(
+			"(%s = ? OR %s = ? OR %s = ?)",
+			TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "before_landing_proxy_id"),
+			TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "landing_proxy_id"),
+			TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "after_landing_proxy_id"),
+		),
+		proxyID.String(),
+		proxyID.String(),
+		proxyID.String(),
+	)
+	if options.UsableOnly {
+		db = db.Where(
+			fmt.Sprintf(
+				"%s = ?",
+				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "is_usable"),
+			),
+			true,
+		)
+	}
+	var rows []*database.CampaignTemplate
+	res := db.Find(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	templates := []*model.CampaignTemplate{}
+	for _, row := range rows {
+		tmpl, err := ToCampaignTemplate(row)
+		if err != nil {
+			return nil, err
+		}
+		templates = append(templates, tmpl)
+	}
+	return templates, nil
+}
+
+func (r *CampaignTemplate) RemoveProxyIDFromAll(
+	ctx context.Context,
+	proxyID *uuid.UUID,
+) error {
+	columns := []string{"before_landing_proxy_id", "after_landing_proxy_id", "landing_proxy_id"}
+	for _, column := range columns {
+		row := map[string]any{}
+		AddUpdatedAt(row)
+		row[column] = nil
+		row["is_usable"] = false
+		res := r.DB.
+			Model(&database.CampaignTemplate{}).
+			Where(
+				fmt.Sprintf(
+					"%s = ?",
+					TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, column),
+				),
+				proxyID.String(),
+			).
+			Updates(row)
+
+		if res.Error != nil {
+			return res.Error
+		}
+	}
+	return nil
 }
