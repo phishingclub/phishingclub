@@ -64,7 +64,7 @@
 		editor = monaco.editor.create(editorContainer, {
 			value: value || '',
 			language: language,
-			theme: isDark ? 'vs-dark' : 'vs-light',
+			theme: 'vs-dark',
 			automaticLayout: true,
 			minimap: {
 				enabled: false
@@ -113,12 +113,14 @@
 </script>
 
 <div class="w-full">
-	<div
-		bind:this={editorContainer}
-		class="border border-gray-300 dark:border-gray-600 rounded-md {heightClasses[
-			height
-		]} w-full transition-colors duration-200"
-	></div>
+	<div class="bg-white dark:bg-gray-800 transition-colors duration-200 rounded-md">
+		<div
+			bind:this={editorContainer}
+			class="border-2 border-black dark:border-gray-600 bg-white dark:bg-gray-900 rounded-md {heightClasses[
+				height
+			]} w-full transition-colors duration-200"
+		></div>
+	</div>
 	{#if placeholder}
 		<div class="mt-2">
 			<button

@@ -328,7 +328,7 @@
 									id="{listboxId}-option-{index}"
 									role="option"
 									aria-selected={value === option}
-									class="w-full text-left bg-slate-100 dark:bg-gray-600 rounded-md text-gray-600 dark:text-gray-200 hover:bg-grayblue-dark dark:hover:bg-gray-500 hover:text-white py-2 px-2 cursor-pointer focus:bg-grayblue-dark dark:focus:bg-gray-500 focus:text-white focus:outline-none transition-colors duration-200"
+									class="w-full text-left bg-slate-100 dark:bg-gray-700 rounded-md text-gray-600 dark:text-gray-200 hover:bg-grayblue-dark dark:hover:bg-gray-500 hover:text-white py-2 px-2 cursor-pointer focus:bg-grayblue-dark dark:focus:bg-gray-500 focus:text-white focus:outline-none transition-colors duration-200"
 									on:click={(e) => {
 										e.preventDefault();
 										e.stopPropagation();
@@ -344,7 +344,7 @@
 					{:else}
 						<li
 							role="none"
-							class="w-full bg-slate-100 dark:bg-gray-600 rounded-md text-gray-600 dark:text-gray-300 py-2 px-2 transition-colors duration-200"
+							class="w-full bg-slate-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 py-2 px-2 transition-colors duration-200"
 						>
 							No options available
 						</li>
