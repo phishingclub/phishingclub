@@ -1314,15 +1314,13 @@ export class API {
 		 * @param {string} name
 		 * @param {string} content
 		 * @param {string} companyID
-		 * @param {object} additionalFields - Optional additional fields for Proxy pages
 		 * @returns {Promise<ApiResponse>}
 		 */
-		create: async (name, content, companyID, additionalFields = {}) => {
+		create: async (name, content, companyID) => {
 			const payload = {
 				name: name,
 				content: content,
-				companyID: companyID,
-				...additionalFields
+				companyID: companyID
 			};
 			return await postJSON(this.getPath('/page'), payload);
 		},

@@ -2,12 +2,8 @@ package service
 
 import (
 	"context"
-	"net/url"
-	"regexp"
-	"strings"
 
 	"github.com/go-errors/errors"
-	"gopkg.in/yaml.v3"
 
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/data"
@@ -15,7 +11,6 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/validate"
-	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
 )
 
@@ -27,39 +22,6 @@ type Page struct {
 	CampaignTemplateService *CampaignTemplate
 	TemplateService         *Template
 	DomainRepository        *repository.Domain
-}
-
-// ProxyConfig represents the YAML configuration for proxy pages
-type ProxyConfig struct {
-	Default map[string]interface{}     `yaml:"default,omitempty"`
-	Hosts   map[string]ProxyHostConfig `yaml:",inline"`
-}
-
-// ProxyHostConfig represents configuration for a specific host
-type ProxyHostConfig struct {
-	Proxy   string             `yaml:"proxy,omitempty"`
-	Domain  string             `yaml:"domain,omitempty"`
-	Capture []ProxyCaptureRule `yaml:"capture,omitempty"`
-	Replace []ProxyReplaceRule `yaml:"replace,omitempty"`
-}
-
-// ProxyCaptureRule represents a capture rule
-type ProxyCaptureRule struct {
-	Name     string `yaml:"name"`
-	Method   string `yaml:"method,omitempty"`
-	Path     string `yaml:"path,omitempty"`
-	Pattern  string `yaml:"pattern,omitempty"`
-	Find     string `yaml:"find"`
-	From     string `yaml:"from,omitempty"`
-	Required *bool  `yaml:"required,omitempty"`
-}
-
-// ProxyReplaceRule represents a replace rule
-type ProxyReplaceRule struct {
-	Name    string `yaml:"name"`
-	Find    string `yaml:"find"`
-	Replace string `yaml:"replace"`
-	From    string `yaml:"from,omitempty"`
 }
 
 // Create creates a new page
@@ -89,20 +51,11 @@ func (p *Page) Create(
 		p.Logger.Errorw("failed to validate page", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	// validate based on page type
-	pageType, _ := page.Type.Get()
-	if pageType.String() == "proxy" {
-		// validate proxy configuration
-		if err := p.validateProxyPage(ctx, page); err != nil {
-			return nil, err
-		}
-	} else {
-		// validate template content for regular pages
-		if content, err := page.Content.Get(); err == nil {
-			if err := p.TemplateService.ValidatePageTemplate(content.String()); err != nil {
-				p.Logger.Errorw("failed to validate page template", "error", err)
-				return nil, validate.WrapErrorWithField(errors.New("invalid template: "+err.Error()), "content")
-			}
+	// validate template content
+	if content, err := page.Content.Get(); err == nil {
+		if err := p.TemplateService.ValidatePageTemplate(content.String()); err != nil {
+			p.Logger.Errorw("failed to validate page template", "error", err)
+			return nil, validate.WrapErrorWithField(errors.New("invalid template: "+err.Error()), "content")
 		}
 	}
 	// check uniqueness
@@ -308,33 +261,15 @@ func (p *Page) UpdateByID(
 		}
 		current.Name.Set(v)
 	}
-	if v, err := page.Type.Get(); err == nil {
-		current.Type.Set(v)
-	}
-	if v, err := page.TargetURL.Get(); err == nil {
-		current.TargetURL.Set(v)
-	}
-	if v, err := page.ProxyConfig.Get(); err == nil {
-		current.ProxyConfig.Set(v)
-	}
 	if v, err := page.Content.Get(); err == nil {
 		current.Content.Set(v)
 	}
 
-	// validate based on updated page type
-	updatedPageType, _ := current.Type.Get()
-	if updatedPageType.String() == "proxy" {
-		// validate proxy configuration
-		if err := p.validateProxyPage(ctx, current); err != nil {
-			return err
-		}
-	} else {
-		// validate template content for regular pages
-		if content, err := current.Content.Get(); err == nil {
-			if err := p.TemplateService.ValidatePageTemplate(content.String()); err != nil {
-				p.Logger.Errorw("failed to validate page template", "error", err)
-				return validate.WrapErrorWithField(errors.New("invalid template: "+err.Error()), "content")
-			}
+	// validate template content
+	if content, err := current.Content.Get(); err == nil {
+		if err := p.TemplateService.ValidatePageTemplate(content.String()); err != nil {
+			p.Logger.Errorw("failed to validate page template", "error", err)
+			return validate.WrapErrorWithField(errors.New("invalid template: "+err.Error()), "content")
 		}
 	}
 	// update page
@@ -349,121 +284,6 @@ func (p *Page) UpdateByID(
 	}
 	ae.Details["id"] = id.String()
 	p.AuditLogNotAuthorized(ae)
-
-	return nil
-}
-
-// validateProxyPage validates proxy page configuration
-func (p *Page) validateProxyPage(ctx context.Context, page *model.Page) error {
-	// validate target URL format
-	targetURL, err := page.TargetURL.Get()
-	if err != nil {
-		return validate.WrapErrorWithField(errors.New("target URL is required for proxy pages"), "targetURL")
-	}
-
-	parsedURL, err := url.Parse(targetURL.String())
-	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
-		return validate.WrapErrorWithField(errors.New("invalid target URL format - must be a valid HTTP or HTTPS URL"), "targetURL")
-	}
-
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return validate.WrapErrorWithField(errors.New("target URL must use HTTP or HTTPS protocol"), "targetURL")
-	}
-
-	// validate proxy configuration YAML
-	proxyConfig, err := page.ProxyConfig.Get()
-	if err != nil {
-		return validate.WrapErrorWithField(errors.New("proxy configuration is required for proxy pages"), "proxyConfig")
-	}
-
-	var config ProxyConfig
-	if err := yaml.Unmarshal([]byte(proxyConfig.String()), &config); err != nil {
-		return validate.WrapErrorWithField(errors.New("invalid YAML format: "+err.Error()), "proxyConfig")
-	}
-
-	// validate that all referenced domains in the config support proxy
-	for hostname, hostConfig := range config.Hosts {
-		if hostConfig.Domain != "" {
-			domainName, err := vo.NewString255(hostConfig.Domain)
-			if err != nil {
-				return validate.WrapErrorWithField(
-					errors.New("invalid domain name format"),
-					"proxyConfig",
-				)
-			}
-
-			_, err = p.DomainRepository.GetByName(ctx, domainName, &repository.DomainOption{})
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return validate.WrapErrorWithField(
-						errors.New("referenced domain '"+hostConfig.Domain+"' not found"),
-						"proxyConfig",
-					)
-				}
-				return err
-			}
-		}
-
-		// validate capture rules
-		for _, capture := range hostConfig.Capture {
-			if capture.Name == "" {
-				return validate.WrapErrorWithField(errors.New("capture rule name is required"), "proxyConfig")
-			}
-			if capture.Pattern == "" && capture.Path == "" {
-				return validate.WrapErrorWithField(
-					errors.New("capture rule must have either pattern or path"),
-					"proxyConfig",
-				)
-			}
-			if capture.Pattern != "" {
-				if _, err := regexp.Compile(capture.Pattern); err != nil {
-					return validate.WrapErrorWithField(
-						errors.New("invalid regex pattern in capture rule: "+err.Error()),
-						"proxyConfig",
-					)
-				}
-			}
-			if capture.Path != "" {
-				if _, err := regexp.Compile(capture.Path); err != nil {
-					return validate.WrapErrorWithField(
-						errors.New("invalid regex pattern for path in capture rule: "+err.Error()),
-						"proxyConfig",
-					)
-				}
-			}
-			if capture.From != "" {
-				validFromValues := []string{"request_body", "request_header", "response_body", "response_header", "any"}
-				valid := false
-				for _, validFrom := range validFromValues {
-					if capture.From == validFrom {
-						valid = true
-						break
-					}
-				}
-				if !valid {
-					return validate.WrapErrorWithField(
-						errors.New("invalid 'from' value in capture rule, must be one of: "+strings.Join(validFromValues, ", ")),
-						"proxyConfig",
-					)
-				}
-			}
-		}
-
-		// validate replace rules
-		for _, replace := range hostConfig.Replace {
-			if replace.Find == "" {
-				return validate.WrapErrorWithField(errors.New("replace rule 'find' is required"), "proxyConfig")
-			}
-			if _, err := regexp.Compile(replace.Find); err != nil {
-				return validate.WrapErrorWithField(
-					errors.New("invalid regex pattern in replace rule 'find': "+err.Error()),
-					"proxyConfig",
-				)
-			}
-		}
-
-		p.Logger.Debugw("validated proxy host config", "hostname", hostname)
-	}
 
 	return nil
 }

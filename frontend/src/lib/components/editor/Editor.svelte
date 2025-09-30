@@ -388,11 +388,19 @@
 							isDetailsVisible = true;
 						}}
 						type="button"
-						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md w-36 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 mb-2 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 transition-colors duration-200"
+						class="h-8 border-2 rounded-md w-36 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 mb-2 transition-colors duration-200"
 						class:font-bold={isDetailsVisible}
-						class:bg-cta-blue={isDetailsVisible}
-						class:dark:bg-indigo-600={isDetailsVisible}
+						class:bg-blue-600={isDetailsVisible}
+						class:dark:bg-blue-500={isDetailsVisible}
 						class:text-white={isDetailsVisible}
+						class:border-blue-600={isDetailsVisible}
+						class:dark:border-blue-500={isDetailsVisible}
+						class:text-gray-700={!isDetailsVisible}
+						class:dark:text-gray-200={!isDetailsVisible}
+						class:bg-white={!isDetailsVisible}
+						class:dark:bg-gray-700={!isDetailsVisible}
+						class:border-gray-300={!isDetailsVisible}
+						class:dark:border-gray-600={!isDetailsVisible}
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -414,11 +422,19 @@
 							isDetailsVisible = false;
 						}}
 						type="button"
-						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md w-36 text-center cursor-pointer hover:opacity-80 ml-1 flex items-center justify-center gap-2 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 transition-colors duration-200"
+						class="h-8 border-2 rounded-md w-36 text-center cursor-pointer hover:opacity-80 ml-1 flex items-center justify-center gap-2 transition-colors duration-200"
 						class:font-bold={!isDetailsVisible}
-						class:bg-cta-blue={!isDetailsVisible}
-						class:dark:bg-indigo-600={!isDetailsVisible}
+						class:bg-blue-600={!isDetailsVisible}
+						class:dark:bg-blue-500={!isDetailsVisible}
 						class:text-white={!isDetailsVisible}
+						class:border-blue-600={!isDetailsVisible}
+						class:dark:border-blue-500={!isDetailsVisible}
+						class:text-gray-700={isDetailsVisible}
+						class:dark:text-gray-200={isDetailsVisible}
+						class:bg-white={isDetailsVisible}
+						class:dark:bg-gray-700={isDetailsVisible}
+						class:border-gray-300={isDetailsVisible}
+						class:dark:border-gray-600={isDetailsVisible}
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
