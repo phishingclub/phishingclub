@@ -23,6 +23,7 @@
 	let isPreviewVisible = false;
 	let externalFrameRef = null;
 	let fileInputRef;
+	let shadowContainer = null;
 
 	const apiTemplates = [
 		{ label: 'Custom Field 1', text: '{{.CustomField1}}' },
@@ -147,6 +148,45 @@
 		updatePreview();
 	};
 
+	// create shadow dom for iframe isolation
+	const createShadowIframe = () => {
+		if (!shadowContainer) return;
+
+		// clear existing content
+		shadowContainer.innerHTML = '';
+
+		// create shadow root
+		const shadowRoot = shadowContainer.attachShadow({ mode: 'closed' });
+
+		// create iframe inside shadow dom
+		const iframe = document.createElement('iframe');
+		iframe.sandbox = 'allow-forms allow-modals allow-popups allow-scripts allow-pointer-lock';
+		iframe.title = 'preview';
+		iframe.style.cssText = 'height: 100%; width: 100%; border: none;';
+
+		// add styles to shadow root to isolate it
+		const style = document.createElement('style');
+		style.textContent = `
+			:host {
+				display: block;
+				height: 100%;
+				width: 100%;
+				background: white;
+			}
+			iframe {
+				height: 100%;
+				width: 100%;
+				border: none;
+			}
+		`;
+
+		shadowRoot.appendChild(style);
+		shadowRoot.appendChild(iframe);
+
+		// set as preview frame
+		previewFrame = iframe;
+	};
+
 	const updatePreview = async () => {
 		if (isRenderingPreview) {
 			return;
@@ -154,15 +194,20 @@
 		const v = editor.getValue() ?? value;
 		value = v;
 		const content = await replaceTemplateVariables(v);
+
+		// create shadow iframe if not exists
+		if (shadowContainer && !previewFrame) {
+			createShadowIframe();
+		}
+
 		if (previewFrame) {
-			const blob = new Blob([content], { type: 'text/html' });
-			URL.revokeObjectURL(previewFrame.src);
-			const url = URL.createObjectURL(blob);
-			previewFrame.src = url;
+			// use data url for null origin isolation
+			previewFrame.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(content);
 		}
 		if (externalFrameRef) {
-			const blob = new Blob([createEmbed(content)], { type: 'text/html' });
-			externalFrameRef.location.replace(URL.createObjectURL(blob));
+			const embedContent = createEmbed(content);
+			const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(embedContent);
+			externalFrameRef.location.replace(dataUrl);
 		}
 		isRenderingPreview = false;
 	};
@@ -322,7 +367,7 @@
         <body>
           <iframe
             sandbox="allow-forms allow-modals allow-popups allow-scripts allow-pointer-lock"
-            src="data:text/html;base64,${btoa(content)}"></iframe>
+            src="data:text/html;charset=utf-8,${encodeURIComponent(content)}"></iframe>
         </body>
       </html>
     `;
@@ -614,13 +659,7 @@
 			<div
 				class="w-1/2 border-2 border-black dark:border-gray-600 bg-white transition-colors duration-200"
 			>
-				<iframe
-					bind:this={previewFrame}
-					sandbox="allow-forms allow-modals allow-popups allow-scripts allow-pointer-lock"
-					title="preview"
-					class="h-full w-full"
-					style="color-scheme: light;"
-				/>
+				<div bind:this={shadowContainer} class="h-full w-full"></div>
 			</div>
 		{/if}
 	</div>
