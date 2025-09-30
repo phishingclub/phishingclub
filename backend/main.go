@@ -56,6 +56,7 @@ var (
 	flagFilePath                = flag.String("files", "./data", "Path to save application data")
 	env                         = flag.Bool("env", false, "Outputs the available environment variables")
 	flagRecovery                = flag.Bool("recover", false, "Used for interactive recovery of an account")
+	flagConfigOnly              = flag.Bool("config-only", false, "Run interactive installer and save config without installing")
 )
 
 func main() {
@@ -71,11 +72,17 @@ func main() {
 		return
 	}
 
+	if *flagConfigOnly {
+		if err := install.RunInteractiveConfigOnly(*flagConfigPath); err != nil {
+			golog.Fatalf("Config generation failed: %s", err)
+		}
+		return
+	}
+
 	if *flagInstall {
 		if err := install.Install(); err != nil {
 			golog.Fatalf("Installation failed: %s", err)
 		}
-
 		return
 	}
 

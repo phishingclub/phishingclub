@@ -15,10 +15,9 @@ import (
 )
 
 var (
-	// Attractive UI styles with a cohesive color scheme
 	titleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#0B3D91")). // NASA blue
+			Background(lipgloss.Color("#0B3D91")).
 			Bold(true).
 			Padding(2, 2)
 
@@ -27,51 +26,71 @@ var (
 
 	focusedStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#1E88E5")). // Material blue
+			Background(lipgloss.Color("#1E88E5")).
 			Bold(true)
 
 	blurredStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#0B3D91"))
 
 	cursorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF9E43")) // Amber accent
+			Foreground(lipgloss.Color("#FF9E43"))
 
 	helpStyle = lipgloss.NewStyle().
 			Italic(true).
-			Foreground(lipgloss.Color("#607D8B")) // Blue grey
+			Foreground(lipgloss.Color("#607D8B"))
 
 	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F44336")). // Red
+			Foreground(lipgloss.Color("#F44336")).
 			Bold(true)
 
 	buttonStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#43A047")). // Green
+			Background(lipgloss.Color("#43A047")).
 			Bold(true).
 			Padding(0, 3)
+
+	sectionStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#6A1B9A")).
+			Bold(true).
+			Padding(0, 1)
+
+	modeStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#FF5722")).
+			Bold(true).
+			Padding(0, 1)
 )
 
-// InputWithHelp extends textinput.Model to include a help text
+type InstallMode int
+
+const (
+	BasicMode InstallMode = iota
+	AdvancedMode
+)
+
+// inputWithHelp extends textinput.Model to include help text
 type InputWithHelp struct {
 	textinput.Model
 	HelpText string
 }
 
-// ConfigModel is the model for the tea app
+// configModel is the model for the tea app
 type ConfigModel struct {
 	inputs        []InputWithHelp
 	focusIndex    int
 	err           error
 	shouldInstall bool
 	config        *config.Config
+	currentMode   InstallMode
 }
 
-// Init initializes the model
+// init initializes the model
 func (m ConfigModel) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-// Update handles updates
+// update handles updates
 func (m ConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -79,17 +98,33 @@ func (m ConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			return m, tea.Quit
 
-		// Navigate between inputs with tab/shift+tab
+		// mode switching
+		case "f1":
+			if m.currentMode != BasicMode {
+				m.currentMode = BasicMode
+				m.focusIndex = 0
+				m.inputs = m.createBasicInputs()
+				return m, nil
+			}
+		case "f2":
+			if m.currentMode != AdvancedMode {
+				m.currentMode = AdvancedMode
+				m.focusIndex = 0
+				m.inputs = m.createAdvancedInputs()
+				return m, nil
+			}
+
+		// navigate between inputs with tab/shift+tab
 		case "tab", "shift+tab", "enter", "up", "down":
 			s := msg.String()
 
-			// Did the user press enter while the submit button was focused?
+			// check if user pressed enter while submit button was focused
 			if s == "enter" && m.focusIndex == len(m.inputs) {
-				// Validate config and set shouldInstall
+				// validate config and set shouldInstall
 				var err error
 				m.shouldInstall = true
 
-				// Apply the input values to configuration
+				// apply input values to configuration
 				err = m.applyConfig()
 				if err != nil {
 					m.err = err
@@ -100,7 +135,7 @@ func (m ConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 
-			// Cycle indexes
+			// cycle indexes
 			if s == "up" || s == "shift+tab" {
 				m.focusIndex--
 			} else {
@@ -116,12 +151,12 @@ func (m ConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds := make([]tea.Cmd, len(m.inputs))
 			for i := 0; i < len(m.inputs); i++ {
 				if i == m.focusIndex {
-					// Set focused state
+					// set focused state
 					cmds[i] = m.inputs[i].Focus()
 					m.inputs[i].PromptStyle = focusedStyle
 					m.inputs[i].TextStyle = focusedStyle
 				} else {
-					// Remove focused state
+					// remove focused state
 					m.inputs[i].Blur()
 					m.inputs[i].PromptStyle = blurredStyle
 					m.inputs[i].TextStyle = blurredStyle
@@ -132,16 +167,15 @@ func (m ConfigModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Handle character input
+	// handle character input
 	cmd := m.updateInputs(msg)
-
 	return m, cmd
 }
 
 func (m *ConfigModel) updateInputs(msg tea.Msg) tea.Cmd {
 	var cmds = make([]tea.Cmd, len(m.inputs))
 
-	// Only text inputs with Focus() set will respond
+	// only text inputs with Focus() set will respond
 	for i := range m.inputs {
 		m.inputs[i].Model, cmds[i] = m.inputs[i].Model.Update(msg)
 	}
@@ -160,13 +194,20 @@ func (m ConfigModel) View() string {
 		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %s\n\n", m.err.Error())))
 	}
 
-	for i, input := range m.inputs {
-		b.WriteString(input.View())
-		// Display help text for the focused input
-		if i == m.focusIndex {
-			b.WriteString("\n  " + helpStyle.Render(input.HelpText))
-		}
-		b.WriteString("\n")
+	// show current mode and switching instructions
+	modeText := "Basic Mode"
+	if m.currentMode == AdvancedMode {
+		modeText = "Advanced Mode"
+	}
+	b.WriteString(fmt.Sprintf("Mode: %s  ", modeStyle.Render(modeText)))
+	b.WriteString(helpStyle.Render("(F1: Basic | F2: Advanced)"))
+	b.WriteString("\n\n")
+
+	// group inputs by section for advanced mode
+	if m.currentMode == AdvancedMode {
+		m.renderAdvancedSections(&b)
+	} else {
+		m.renderBasicInputs(&b)
 	}
 
 	button := blurredStyle.Copy()
@@ -178,9 +219,56 @@ func (m ConfigModel) View() string {
 	return b.String()
 }
 
-// InitialModel creates the initial model for the tea app
-func InitialModel(currentConfig *config.Config) ConfigModel {
-	// Setup text inputs
+func (m ConfigModel) renderBasicInputs(b *strings.Builder) {
+	for i, input := range m.inputs {
+		b.WriteString(input.View())
+		// display help text for the focused input
+		if i == m.focusIndex {
+			b.WriteString("\n  " + helpStyle.Render(input.HelpText))
+		}
+		b.WriteString("\n")
+	}
+}
+
+func (m ConfigModel) renderAdvancedSections(b *strings.Builder) {
+	sections := []struct {
+		title string
+		start int
+		end   int
+	}{
+		{"Server Configuration", 0, 6},
+		{"Database Configuration", 6, 8},
+		{"TLS Configuration", 8, 10},
+		{"Logging Configuration", 10, 12},
+		{"Security Configuration", 12, len(m.inputs)},
+	}
+
+	currentSection := -1
+	for i, input := range m.inputs {
+		// check if we're starting a new section
+		for j, section := range sections {
+			if i == section.start {
+				if currentSection >= 0 {
+					b.WriteString("\n")
+				}
+				b.WriteString(sectionStyle.Render(fmt.Sprintf(" %s ", section.title)))
+				b.WriteString("\n")
+				currentSection = j
+				break
+			}
+		}
+
+		b.WriteString(input.View())
+		// display help text for the focused input
+		if i == m.focusIndex {
+			b.WriteString("\n  " + helpStyle.Render(input.HelpText))
+		}
+		b.WriteString("\n")
+	}
+}
+
+// createBasicInputs creates inputs for basic mode
+func (m *ConfigModel) createBasicInputs() []InputWithHelp {
 	var inputs []InputWithHelp
 	var prompts = []struct {
 		prompt       string
@@ -188,52 +276,113 @@ func InitialModel(currentConfig *config.Config) ConfigModel {
 		placeholder  string
 		description  string
 	}{
-		{"HTTP port", strconv.Itoa(config.DefaultProductionHTTPPhishingPort), "80", "Port for HTTP phishing server"},
-		{"HTTPS port", strconv.Itoa(config.DefaultProductionHTTPSPhishingPort), "443", "Port for HTTPS phishing server"},
-		{"Admin port", strconv.Itoa(config.DefaultProductionAdministrationPort), "0 (random port)", "Admin server port - can not be the same as the ports used by the phishing server"},
-		{"Admin host", config.DefaultAdminHost, "localhost", "Admin server hostname - used for TLS certificate"},
-		{"Use Auto TLS", config.DefaultAdminAutoTLSString, "true/false", "Use automated TLS for the admin service"},
-		{"ACME email", config.DefaultACMEEmail, config.DefaultACMEEmail, "Email for Let's Encrypt notifications"},
+		{"HTTP port", strconv.Itoa(config.DefaultProductionHTTPPhishingPort), "80", "port for HTTP phishing server"},
+		{"HTTPS port", strconv.Itoa(config.DefaultProductionHTTPSPhishingPort), "443", "port for HTTPS phishing server"},
+		{"Admin port", strconv.Itoa(config.DefaultProductionAdministrationPort), "0 (random port)", "admin server port - can not be the same as the ports used by the phishing server"},
+		{"Admin host", config.DefaultAdminHost, "localhost", "admin server hostname - used for TLS certificate"},
+		{"Use Auto TLS", config.DefaultAdminAutoTLSString, "true/false", "use automated TLS for the admin service"},
+		{"ACME email", config.DefaultACMEEmail, config.DefaultACMEEmail, "email for Let's Encrypt notifications"},
 	}
 
 	for i, p := range prompts {
-		t := textinput.New()
-		t.Cursor.Style = cursorStyle
-		t.CharLimit = 64
-
-		// Configure each input
-		t.Placeholder = p.placeholder
-		t.PromptStyle = blurredStyle
-		t.TextStyle = blurredStyle
-
-		// The first input is focused
-		if i == 0 {
-			t.PromptStyle = focusedStyle
-			t.TextStyle = focusedStyle
-			t.Focus()
-		}
-
-		// Set the prompt with the default value displayed
-		t.Prompt = fmt.Sprintf("%s [%s]: ", p.prompt, p.defaultValue)
-
-		// Create our custom input with help text
-		input := InputWithHelp{
-			Model:    t,
-			HelpText: p.description,
-		}
-
-		inputs = append(inputs, input)
+		inputs = append(inputs, m.createInput(i, p.prompt, p.defaultValue, p.placeholder, p.description))
 	}
 
-	return ConfigModel{
-		inputs: inputs,
-		config: currentConfig,
+	return inputs
+}
+
+// createAdvancedInputs creates inputs for advanced mode
+func (m *ConfigModel) createAdvancedInputs() []InputWithHelp {
+	var inputs []InputWithHelp
+	var prompts = []struct {
+		prompt       string
+		defaultValue string
+		placeholder  string
+		description  string
+	}{
+		// server configuration
+		{"HTTP port", strconv.Itoa(config.DefaultProductionHTTPPhishingPort), "80", "port for HTTP phishing server"},
+		{"HTTPS port", strconv.Itoa(config.DefaultProductionHTTPSPhishingPort), "443", "port for HTTPS phishing server"},
+		{"Admin port", strconv.Itoa(config.DefaultProductionAdministrationPort), "0 (random port)", "admin server port - can not be the same as the ports used by the phishing server"},
+		{"Admin host", config.DefaultAdminHost, "localhost", "admin server hostname - used for TLS certificate"},
+		{"Use Auto TLS", config.DefaultAdminAutoTLSString, "true/false", "use automated TLS for the admin service"},
+		{"ACME email", config.DefaultACMEEmail, config.DefaultACMEEmail, "email for Let's Encrypt notifications"},
+
+		// database configuration
+		{"Database engine", config.DefaultDatabase, "sqlite3/postgres", "database engine to use (sqlite3 or postgres)"},
+		{"Database DSN", config.DefaultAdministrationDSN, "file:./db.sqlite3", "database connection string"},
+
+		// tls configuration
+		{"TLS cert path", "", "/path/to/cert.pem", "path to TLS certificate file (leave empty for auto TLS)"},
+		{"TLS key path", "", "/path/to/key.pem", "path to TLS private key file (leave empty for auto TLS)"},
+
+		// logging configuration
+		{"Log file path", config.DefaultLogFilePath, "/var/log/phishingclub.log", "path to log file (empty for stdout)"},
+		{"Error log path", config.DefaultErrLogFilePath, "/var/log/phishingclub-error.log", "path to error log file (empty for stderr)"},
+
+		// security configuration
+		{"Admin allowed IPs", "", "192.168.1.0/24,10.0.0.1", "comma-separated list of IP/CIDR ranges allowed to access admin (empty for all)"},
+		{"Trusted proxies", "", "192.168.1.1,10.0.0.1", "comma-separated list of trusted proxy IPs/CIDR ranges"},
+		{"Trusted IP header", config.DefaultTrustedIPHeader, "X-Real-IP", "header name to check for real client IP from trusted proxies"},
 	}
+
+	for i, p := range prompts {
+		inputs = append(inputs, m.createInput(i, p.prompt, p.defaultValue, p.placeholder, p.description))
+	}
+
+	return inputs
+}
+
+// createInput creates a single input field
+func (m *ConfigModel) createInput(index int, prompt, defaultValue, placeholder, description string) InputWithHelp {
+	t := textinput.New()
+	t.Cursor.Style = cursorStyle
+	t.CharLimit = 256
+
+	// configure each input
+	t.Placeholder = placeholder
+	t.PromptStyle = blurredStyle
+	t.TextStyle = blurredStyle
+
+	// the first input is focused
+	if index == 0 {
+		t.PromptStyle = focusedStyle
+		t.TextStyle = focusedStyle
+		t.Focus()
+	}
+
+	// set the prompt with the default value displayed
+	t.Prompt = fmt.Sprintf("%s [%s]: ", prompt, defaultValue)
+
+	// create custom input with help text
+	return InputWithHelp{
+		Model:    t,
+		HelpText: description,
+	}
+}
+
+// initialModel creates the initial model for the tea app
+func InitialModel(currentConfig *config.Config) ConfigModel {
+	model := ConfigModel{
+		config:      currentConfig,
+		currentMode: BasicMode,
+		focusIndex:  0,
+	}
+	model.inputs = model.createBasicInputs()
+	return model
 }
 
 // applyConfig takes the input values and applies them to the config
 func (m *ConfigModel) applyConfig() error {
-	// Get the input values or use defaults if empty
+	if m.currentMode == BasicMode {
+		return m.applyBasicConfig()
+	}
+	return m.applyAdvancedConfig()
+}
+
+// applyBasicConfig applies basic configuration
+func (m *ConfigModel) applyBasicConfig() error {
+	// get the input values or use defaults if empty
 	httpPort := getValueOrDefault(m.inputs[0].Value(), strconv.Itoa(config.DefaultProductionHTTPPhishingPort))
 	httpsPort := getValueOrDefault(m.inputs[1].Value(), strconv.Itoa(config.DefaultProductionHTTPSPhishingPort))
 	adminPort := getValueOrDefault(m.inputs[2].Value(), strconv.Itoa(config.DefaultProductionAdministrationPort))
@@ -241,7 +390,80 @@ func (m *ConfigModel) applyConfig() error {
 	autoTLS := getValueOrDefault(m.inputs[4].Value(), config.DefaultAdminAutoTLSString)
 	acmeEmail := getValueOrDefault(m.inputs[5].Value(), config.DefaultACMEEmail)
 
-	// Convert ports to integers
+	return m.applyServerConfig(httpPort, httpsPort, adminPort, adminHost, autoTLS, acmeEmail)
+}
+
+// applyAdvancedConfig applies advanced configuration
+func (m *ConfigModel) applyAdvancedConfig() error {
+	// server configuration
+	httpPort := getValueOrDefault(m.inputs[0].Value(), strconv.Itoa(config.DefaultProductionHTTPPhishingPort))
+	httpsPort := getValueOrDefault(m.inputs[1].Value(), strconv.Itoa(config.DefaultProductionHTTPSPhishingPort))
+	adminPort := getValueOrDefault(m.inputs[2].Value(), strconv.Itoa(config.DefaultProductionAdministrationPort))
+	adminHost := getValueOrDefault(m.inputs[3].Value(), config.DefaultAdminHost)
+	autoTLS := getValueOrDefault(m.inputs[4].Value(), config.DefaultAdminAutoTLSString)
+	acmeEmail := getValueOrDefault(m.inputs[5].Value(), config.DefaultACMEEmail)
+
+	// apply server config first
+	if err := m.applyServerConfig(httpPort, httpsPort, adminPort, adminHost, autoTLS, acmeEmail); err != nil {
+		return err
+	}
+
+	// database configuration
+	dbEngine := getValueOrDefault(m.inputs[6].Value(), config.DefaultDatabase)
+	dbDSN := getValueOrDefault(m.inputs[7].Value(), config.DefaultAdministrationDSN)
+
+	// validate database engine
+	if dbEngine != config.DatabaseUsePostgres && dbEngine != config.DefaultAdministrationUseSqlite {
+		return fmt.Errorf("invalid database engine: %s (must be 'postgres' or 'sqlite3')", dbEngine)
+	}
+
+	// set database config
+	m.config.SetDatabaseEngine(dbEngine)
+	m.config.SetDatabaseDSN(dbDSN)
+
+	// tls configuration (if not using auto TLS)
+	tlsCertPath := m.inputs[8].Value()
+	tlsKeyPath := m.inputs[9].Value()
+	if tlsCertPath != "" {
+		m.config.SetTLSCertPath(tlsCertPath)
+	}
+	if tlsKeyPath != "" {
+		m.config.SetTLSKeyPath(tlsKeyPath)
+	}
+
+	// logging configuration
+	logPath := m.inputs[10].Value()
+	errLogPath := m.inputs[11].Value()
+	m.config.SetLogPath(logPath)
+	m.config.SetErrLogPath(errLogPath)
+
+	// security configuration
+	adminAllowed := m.inputs[12].Value()
+	trustedProxies := m.inputs[13].Value()
+	trustedIPHeader := m.inputs[14].Value()
+
+	// parse comma-separated IP lists
+	adminAllowedList := []string{}
+	trustedProxiesList := []string{}
+
+	if adminAllowed != "" {
+		adminAllowedList = strings.Split(strings.ReplaceAll(adminAllowed, " ", ""), ",")
+	}
+	if trustedProxies != "" {
+		trustedProxiesList = strings.Split(strings.ReplaceAll(trustedProxies, " ", ""), ",")
+	}
+
+	// set security config
+	m.config.IPSecurity.AdminAllowed = adminAllowedList
+	m.config.IPSecurity.TrustedProxies = trustedProxiesList
+	m.config.IPSecurity.TrustedIPHeader = trustedIPHeader
+
+	return nil
+}
+
+// applyServerConfig applies server configuration (common to both modes)
+func (m *ConfigModel) applyServerConfig(httpPort, httpsPort, adminPort, adminHost, autoTLS, acmeEmail string) error {
+	// convert ports to integers
 	httpPortInt, err := strconv.Atoi(httpPort)
 	if err != nil {
 		return fmt.Errorf("invalid HTTP port: %w", err)
@@ -257,7 +479,7 @@ func (m *ConfigModel) applyConfig() error {
 		return fmt.Errorf("invalid admin port: %w", err)
 	}
 
-	// Validate port values
+	// validate port values
 	if httpPortInt <= 0 || httpPortInt > 65535 {
 		return fmt.Errorf("HTTP port must be between 1 and 65535")
 	}
@@ -268,7 +490,7 @@ func (m *ConfigModel) applyConfig() error {
 		return fmt.Errorf("admin port must be between 0 and 65535")
 	}
 
-	// Check for port conflicts
+	// check for port conflicts
 	if httpPortInt == httpsPortInt {
 		return fmt.Errorf("HTTP and HTTPS ports cannot be the same")
 	}
@@ -276,13 +498,13 @@ func (m *ConfigModel) applyConfig() error {
 		return fmt.Errorf("admin port cannot be the same as HTTP or HTTPS ports")
 	}
 
-	// Convert autoTLS to boolean
+	// convert autoTLS to boolean
 	autoTLSBool := false
 	if strings.ToLower(autoTLS) == config.DefaultAdminAutoTLSString {
 		autoTLSBool = true
 	}
 
-	// Set values in config
+	// set values in config
 	err = m.config.SetPhishingHTTPNetAddress(fmt.Sprintf("0.0.0.0:%d", httpPortInt))
 	if err != nil {
 		return fmt.Errorf("failed to set HTTP address: %w", err)
@@ -314,33 +536,33 @@ func getValueOrDefault(value, defaultValue string) string {
 }
 
 func RunInteractiveInstall() error {
-	// First check if we're running as root
+	// first check if we're running as root
 	if os.Geteuid() != 0 {
 		return fmt.Errorf("installation must be run as root")
 	}
 
-	// Create installation directories first
+	// create installation directories first
 	if err := createDirectories(); err != nil {
 		return fmt.Errorf("failed to create install directories: %w", err)
 	}
 
-	// Get default configuration
+	// get default configuration
 	conf := config.NewProductionDefaultConfig()
 
-	// Run the tea program
+	// run the tea program
 	p := tea.NewProgram(InitialModel(conf))
 	model, err := p.Run()
 	if err != nil {
 		return fmt.Errorf("error running interactive installer: %w", err)
 	}
 
-	// Get the final model
+	// get the final model
 	finalModel := model.(ConfigModel)
 	if !finalModel.shouldInstall {
 		return fmt.Errorf("installation cancelled")
 	}
 
-	// Save the config to the installation directory
+	// save the config to the installation directory
 	configPath := filepath.Join(installDir, "config.json")
 	err = finalModel.config.WriteToFile(configPath)
 	if err != nil {
@@ -352,7 +574,7 @@ func RunInteractiveInstall() error {
 
 	fmt.Printf("Configuration saved to %s\n", configPath)
 
-	// Now run the actual installation
+	// now run the actual installation
 	err = InstallWithConfig(finalModel.config)
 	if err != nil {
 		return err
@@ -360,7 +582,41 @@ func RunInteractiveInstall() error {
 	return nil
 }
 
-// InstallWithConfig handles the installation using the provided configuration
+// runInteractiveConfigOnly runs the interactive installer and saves config without installing
+func RunInteractiveConfigOnly(configPath string) error {
+	fmt.Println("📝 Running in CONFIG-ONLY mode - no actual installation will be performed")
+	fmt.Println()
+
+	// get default configuration (no root check needed for config-only mode)
+	conf := config.NewProductionDefaultConfig()
+
+	// run the tea program
+	p := tea.NewProgram(InitialModel(conf))
+	model, err := p.Run()
+	if err != nil {
+		return fmt.Errorf("error running interactive installer: %w", err)
+	}
+
+	// get the final model
+	finalModel := model.(ConfigModel)
+	if !finalModel.shouldInstall {
+		fmt.Println("Installation cancelled by user")
+		return nil
+	}
+
+	// save the config to the specified path
+	err = finalModel.config.WriteToFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to save configuration to %s: %w", configPath, err)
+	}
+
+	fmt.Printf("✅ Configuration saved to %s\n", configPath)
+	fmt.Println("💡 Review the config file and run without --config-only flag as root to install")
+
+	return nil
+}
+
+// installWithConfig handles the installation using the provided configuration
 func InstallWithConfig(conf *config.Config) error {
 	steps := []struct {
 		name string

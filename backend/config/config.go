@@ -331,9 +331,19 @@ func (c *Config) TLSKeyPath() string {
 	return c.tlsKeyPath
 }
 
-// SetTLSCertPath returns the admin host
+// SetTLSHost sets the admin host
 func (c *Config) SetTLSHost(host string) {
 	c.tlsHost = host
+}
+
+// SetTLSCertPath sets the TLS certificate path
+func (c *Config) SetTLSCertPath(certPath string) {
+	c.tlsCertPath = certPath
+}
+
+// SetTLSKeyPath sets the TLS private key path
+func (c *Config) SetTLSKeyPath(keyPath string) {
+	c.tlsKeyPath = keyPath
 }
 
 // SetTLSAuto sets if a ACME service should handle TLS for the admin server
@@ -369,6 +379,26 @@ func (c *Config) SetPhishingHTTPSNetAddress(addr string) error {
 	}
 	c.phishingHTTPSNetAddress = *newAddr
 	return nil
+}
+
+// SetDatabaseEngine sets the database engine
+func (c *Config) SetDatabaseEngine(engine string) {
+	c.database.Engine = engine
+}
+
+// SetDatabaseDSN sets the database DSN
+func (c *Config) SetDatabaseDSN(dsn string) {
+	c.database.DSN = dsn
+}
+
+// SetLogPath sets the log file path
+func (c *Config) SetLogPath(path string) {
+	c.LogPath = path
+}
+
+// SetErrLogPath sets the error log file path
+func (c *Config) SetErrLogPath(path string) {
+	c.ErrLogPath = path
 }
 
 // SetFileWriter sets the file writer
