@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: Copyright 2010 The Go Authors. All rights reserved.
-// SPDX-FileCopyrightText: Copyright (c) 2022-2023 The go-mail Authors
+// SPDX-FileCopyrightText: Copyright (c) The go-mail Authors
 //
 // Original net/smtp code from the Go stdlib by the Go Authors.
 // Use of this source code is governed by a BSD-style
@@ -10,9 +10,6 @@
 // See [PROJECT ROOT]/LICENSES directory for more information.
 //
 // SPDX-License-Identifier: BSD-3-Clause AND MIT
-
-//go:build go1.19
-// +build go1.19
 
 package smtp
 

@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: Copyright 2010 The Go Authors. All rights reserved.
-// SPDX-FileCopyrightText: Copyright (c) 2022-2023 The go-mail Authors
+// SPDX-FileCopyrightText: Copyright (c) The go-mail Authors
 //
 // Original net/smtp code from the Go stdlib by the Go Authors.
 // Use of this source code is governed by a BSD-style
@@ -12,6 +12,19 @@
 // SPDX-License-Identifier: BSD-3-Clause AND MIT
 
 package smtp
+
+import "errors"
+
+var (
+	// ErrUnencrypted is an error indicating that the connection is not encrypted.
+	ErrUnencrypted = errors.New("unencrypted connection")
+	// ErrUnexpectedServerChallange is an error indicating that the server issued an unexpected challenge.
+	ErrUnexpectedServerChallange = errors.New("unexpected server challenge")
+	// ErrUnexpectedServerResponse is an error indicating that the server issued an unexpected response.
+	ErrUnexpectedServerResponse = errors.New("unexpected server response")
+	// ErrWrongHostname is an error indicating that the provided hostname does not match the expected value.
+	ErrWrongHostname = errors.New("wrong host name")
+)
 
 // Auth is implemented by an SMTP authentication mechanism.
 type Auth interface {

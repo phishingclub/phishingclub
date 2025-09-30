@@ -1,33 +1,48 @@
-// SPDX-FileCopyrightText: 2022-2023 The go-mail Authors
+// SPDX-FileCopyrightText: The go-mail Authors
 //
 // SPDX-License-Identifier: MIT
 
 package mail
 
 import (
-	"fmt"
+	"errors"
 	"io"
 )
 
-// ErrNoOutWriter is an error message that should be used if a Base64LineBreaker has no out io.Writer set
-const ErrNoOutWriter = "no io.Writer set for Base64LineBreaker"
+// newlineBytes is a byte slice representation of the SingleNewLine constant used for line breaking
+// in encoding processes.
+var newlineBytes = []byte(SingleNewLine)
 
-// Base64LineBreaker is a io.WriteCloser that writes Base64 encoded data streams
-// with line breaks at a given line length
-type Base64LineBreaker struct {
+// base64LineBreaker handles base64 encoding with the insertion of new lines after a certain number
+// of characters.
+//
+// This struct is used to manage base64 encoding while ensuring that new lines are inserted after
+// reaching a specific line length. It satisfies the io.WriteCloser interface.
+//
+// References:
+//   - https://datatracker.ietf.org/doc/html/rfc2045 (Base64 and line length limitations)
+type base64LineBreaker struct {
 	line [MaxBodyLength]byte
 	used int
 	out  io.Writer
 }
 
-var newlineBytes = []byte(SingleNewLine)
-
-// Write writes the data stream and inserts a SingleNewLine when the maximum
-// line length is reached
-func (l *Base64LineBreaker) Write(data []byte) (numBytes int, err error) {
+// Write writes data to the base64LineBreaker, ensuring lines do not exceed MaxBodyLength.
+//
+// This method writes the provided data to the base64LineBreaker. It ensures that the written
+// lines do not exceed the MaxBodyLength. If the data exceeds the limit, it handles the
+// continuation by splitting the data and writing new lines as necessary.
+//
+// Parameters:
+//   - data: A byte slice containing the data to be written.
+//
+// Returns:
+//   - numBytes: The number of bytes written.
+//   - err: An error if one occurred during the write operation.
+func (l *base64LineBreaker) Write(data []byte) (numBytes int, err error) {
 	if l.out == nil {
-		err = fmt.Errorf(ErrNoOutWriter)
-		return
+		err = errors.New("no io.Writer set for base64LineBreaker")
+		return numBytes, err
 	}
 	if l.used+len(data) < MaxBodyLength {
 		copy(l.line[l.used:], data)
@@ -35,36 +50,45 @@ func (l *Base64LineBreaker) Write(data []byte) (numBytes int, err error) {
 		return len(data), nil
 	}
 
-	numBytes, err = l.out.Write(l.line[0:l.used])
+	_, err = l.out.Write(l.line[0:l.used])
 	if err != nil {
-		return
+		return numBytes, err
 	}
 	excess := MaxBodyLength - l.used
 	l.used = 0
 
 	numBytes, err = l.out.Write(data[0:excess])
 	if err != nil {
-		return
+		return numBytes, err
 	}
 
-	numBytes, err = l.out.Write(newlineBytes)
+	_, err = l.out.Write(newlineBytes)
 	if err != nil {
-		return
+		return numBytes, err
 	}
 
-	return l.Write(data[excess:])
+	var n int
+	n, err = l.Write(data[excess:]) // recurse
+	numBytes += n
+	return numBytes, err
 }
 
-// Close closes the Base64LineBreaker and writes any access data that is still
-// unwritten in memory
-func (l *Base64LineBreaker) Close() (err error) {
+// Close finalizes the base64LineBreaker, writing any remaining buffered data and appending a newline.
+//
+// This method ensures that any remaining data in the buffer is written to the output and appends
+// a newline. It is used to finalize the base64LineBreaker and should be called when no more data
+// is expected to be written.
+//
+// Returns:
+//   - err: An error if one occurred during the final write operation.
+func (l *base64LineBreaker) Close() (err error) {
 	if l.used > 0 {
 		_, err = l.out.Write(l.line[0:l.used])
 		if err != nil {
-			return
+			return err
 		}
 		_, err = l.out.Write(newlineBytes)
 	}
 
-	return
+	return err
 }

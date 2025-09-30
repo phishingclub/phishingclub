@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: Copyright 2010 The Go Authors. All rights reserved.
-// SPDX-FileCopyrightText: Copyright (c) 2022-2023 The go-mail Authors
+// SPDX-FileCopyrightText: Copyright (c) The go-mail Authors
 //
 // Original net/smtp code from the Go stdlib by the Go Authors.
 // Use of this source code is governed by a BSD-style
@@ -13,14 +13,11 @@
 
 package smtp
 
-import (
-	"errors"
-)
-
 // plainAuth is the type that satisfies the Auth interface for the "SMTP PLAIN" auth
 type plainAuth struct {
 	identity, username, password string
 	host                         string
+	allowUnencryptedAuth         bool
 }
 
 // PlainAuth returns an [Auth] that implements the PLAIN authentication
@@ -31,8 +28,8 @@ type plainAuth struct {
 // PlainAuth will only send the credentials if the connection is using TLS
 // or is connected to localhost. Otherwise authentication will fail with an
 // error, without sending the credentials.
-func PlainAuth(identity, username, password, host string) Auth {
-	return &plainAuth{identity, username, password, host}
+func PlainAuth(identity, username, password, host string, allowUnenc bool) Auth {
+	return &plainAuth{identity, username, password, host, allowUnenc}
 }
 
 func (a *plainAuth) Start(server *ServerInfo) (string, []byte, error) {
@@ -41,11 +38,11 @@ func (a *plainAuth) Start(server *ServerInfo) (string, []byte, error) {
 	// In particular, it doesn't matter if the server advertises PLAIN auth.
 	// That might just be the attacker saying
 	// "it's ok, you can trust me with your password."
-	if !server.TLS && !isLocalhost(server.Name) {
-		return "", nil, errors.New("unencrypted connection")
+	if !a.allowUnencryptedAuth && !server.TLS && !isLocalhost(server.Name) {
+		return "", nil, ErrUnencrypted
 	}
 	if server.Name != a.host {
-		return "", nil, errors.New("wrong host name")
+		return "", nil, ErrWrongHostname
 	}
 	resp := []byte(a.identity + "\x00" + a.username + "\x00" + a.password)
 	return "PLAIN", resp, nil
@@ -54,7 +51,7 @@ func (a *plainAuth) Start(server *ServerInfo) (string, []byte, error) {
 func (a *plainAuth) Next(_ []byte, more bool) ([]byte, error) {
 	if more {
 		// We've already sent everything.
-		return nil, errors.New("unexpected server challenge")
+		return nil, ErrUnexpectedServerChallange
 	}
 	return nil, nil
 }
