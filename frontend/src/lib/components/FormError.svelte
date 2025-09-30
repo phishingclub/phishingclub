@@ -4,7 +4,7 @@
 </script>
 
 {#if message}
-	<div class="flex col-span-12 justify-center p-4">
+	<div class="flex col-span-12 justify-center p-4 select-text">
 		<div class="w-80 flex col-span-12 justify-center">
 			<div
 				class="flex items-center w-full bg-pleasant-gray dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600 text-center p-2 font-titilium transition-colors duration-200"
