@@ -4,6 +4,23 @@
 		<meta charset="utf-8" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.png" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<script>
+			// prevent white flash in dark mode
+			(function () {
+				try {
+					const storedTheme = localStorage.getItem('theme-mode');
+					const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+					const isDark = storedTheme === 'dark' || (!storedTheme && prefersDark);
+
+					if (isDark) {
+						document.documentElement.classList.add('dark');
+						document.documentElement.style.backgroundColor = '#111827';
+					}
+				} catch (e) {
+					// ignore errors
+				}
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
 
