@@ -6,6 +6,9 @@
 
 The self-hosted phishing framework for penetration testing and security awareness training.
 
+![Phishing Club Dashboard](https://phishing.club/img/dashboard.png)
+
+
 ## Quick start
 
 ⚡ For systemd-enabled distributions, installation is quick and easy
@@ -44,7 +47,11 @@ For a manual step by step guide or more in depth installation information - [cli
 
 ### Students & Learning
 
-For cybersecurity students who want hands-on phishing simulation experience. The development setup includes a local mail server (Mailpit) so you can see emails in real-time without needing external SMTP. Spin up campaigns, test templates, and learn how phishing attacks work in a safe, contained environment.
+Phishing Club can be used by cybersecurity students or others who want try hands-on phishing. The development setup includes a local mail server (Mailpit) so you can see emails in without needing external SMTP. Spin up campaigns, test templates, and learn how phishing attacks work in a safe, contained environment.
+
+To aid with the development of MITM proxys configurations there is also a `MITMProxy` container where you can view the traffic that flows towards the proxied site.
+
+To get started, clone the repo, ensure you have make and docker installed and run `make up`
 
 ## Template Development
 
@@ -59,9 +66,6 @@ Speed up your template development with our template workbench tool:
 - **Naive Responsive Testing** - Preview templates across mobile, tablet, and desktop
 - **Export Ready** - Compatible with Phishing Club formats
 - **Included Templates** - Comes with example templates covering common phishing scenarios that you can import and customize
-
-
-
 
 ## Development Setup
 
