@@ -706,10 +706,8 @@
 			{:else}
 				<h1>Microsoft Allow listing</h1>
 				<p>
-					To ensure your campaign simulation emails are delivered and not blocked by Microsoft
-					Defender for Office 365, add the following information to the <b
-						>Advanced Delivery Policy</b
-					>
+					To ensure your emails are delivered and not blocked by Microsoft Defender for Office 365,
+					add the following information to the <b>Advanced Delivery Policy</b>
 					as a third-party phishing simulation.
 				</p>
 				<div>
