@@ -14,7 +14,7 @@
 
 <div class="flex flex-col gap-2 py-2">
 	{#if label}
-		<div class="flex flex-row">
+		<div class="flex flex-row items-center">
 			<div class="font-semibold text-slate-600 dark:text-gray-300 transition-colors duration-200">
 				{label}
 			</div>
@@ -25,7 +25,7 @@
 			{/if}
 			{#if optional}
 				<div
-					class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200"
+					class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
 				>
 					<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
 				</div>

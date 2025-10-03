@@ -121,7 +121,9 @@
 			</ToolTip>
 		{/if}
 		{#if optional === true}
-			<div class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200">
+			<div
+				class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+			>
 				<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
 			</div>
 		{/if}
