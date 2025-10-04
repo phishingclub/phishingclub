@@ -8,7 +8,8 @@ import (
 
 	"github.com/go-errors/errors"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
+	"os"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
@@ -62,7 +63,7 @@ func (a *Asset) Create(
 		contextFolder,
 	)
 
-	files := []*FileUpload{}
+	files := []*RootFileUpload{}
 	for _, asset := range assets {
 		domainNameProvided := asset.DomainName.IsSpecified() && !asset.DomainName.IsNull()
 		// ensure context is the same across all files
@@ -105,16 +106,10 @@ func (a *Asset) Create(
 			}
 			path = p
 		}
-		path, err = securejoin.SecureJoin(path, asset.File.Filename)
-		if err != nil {
-			a.Logger.Warnw("insecure path", "error", err)
-			return ids, validate.WrapErrorWithField(
-				errs.NewValidationError(err),
-				"Path",
-			)
-		}
+		// build full relative path including filename for DB storage
+		fullRelativePath := filepath.Join(path, asset.File.Filename)
 		// relative path is used in the DB
-		relativePath, err := vo.NewRelativeFilePath(path)
+		relativePath, err := vo.NewRelativeFilePath(fullRelativePath)
 		if err != nil {
 			a.Logger.Debugw("failed to make file path", "error", err)
 			return ids, validate.WrapErrorWithField(
@@ -155,29 +150,78 @@ func (a *Asset) Create(
 		// this is a bit dirty, but I will do it anyway
 		// overwriting the path the client assigned with the context relative path including the file name
 		asset.Path = nullable.NewNullableWithValue(*relativePath)
-		// full path is used in the file system
-		pathWithRootAndDomainContext, err := securejoin.SecureJoin(a.RootFolder, contextFolder)
-		if err != nil {
-			a.Logger.Debugw("insecure path", "path", err)
-			return ids, fmt.Errorf("insecure path: %s", err)
+		// ensure base asset directory exists
+		if err := os.MkdirAll(a.RootFolder, 0755); err != nil {
+			a.Logger.Debugw("failed to create asset root directory", "error", err)
+			return ids, fmt.Errorf("failed to create asset root directory: %s", err)
 		}
-		pathWithRootAndDomainContext, err = securejoin.SecureJoin(
-			pathWithRootAndDomainContext,
-			path,
-		)
-		if err != nil {
-			a.Logger.Debugw("insecure path", "error", err)
-			return ids, fmt.Errorf("insecure path: %s", err)
-		}
-		a.Logger.Debugw("file path",
-			"relative", relativePath.String(),
-			"relativeWithRootPath", pathWithRootAndDomainContext,
-		)
-		asset.Path = nullable.NewNullableWithValue(*relativePath) // path to file from within the context
 
-		files = append(files, NewFileUpload(pathWithRootAndDomainContext, &asset.File))
+		// create root filesystem for the full context path (controlled paths only)
+		fullContextPath := filepath.Join(a.RootFolder, contextFolder)
+		contextRoot, err := os.OpenRoot(fullContextPath)
+		var isUsingParentRoot bool
+		if err != nil {
+			// context path doesn't exist - this is OK for uploads, directories will be created
+			a.Logger.Debugw("context path doesn't exist yet", "path", fullContextPath, "error", err)
+			// for validation purposes, we'll use the parent root and validate the context is safe
+			parentRoot, parentErr := os.OpenRoot(a.RootFolder)
+			if parentErr != nil {
+				a.Logger.Debugw("failed to open root folder", "error", parentErr)
+				return ids, fmt.Errorf("failed to open root folder: %s", parentErr)
+			}
+			defer parentRoot.Close()
+
+			// validate context folder is safe (doesn't need to exist)
+			_, statErr := parentRoot.Stat(contextFolder)
+			if statErr != nil && !os.IsNotExist(statErr) {
+				a.Logger.Debugw("invalid context folder", "error", statErr)
+				return ids, fmt.Errorf("invalid context folder: %s", statErr)
+			}
+			contextRoot = parentRoot
+			isUsingParentRoot = true
+		} else {
+			defer contextRoot.Close()
+		}
+
+		// build and validate full user path through OpenRoot
+		var fullUserPath string
+		if path != "" {
+			fullUserPath = filepath.Join(strings.Trim(path, "/"), asset.File.Filename)
+		} else {
+			fullUserPath = asset.File.Filename
+		}
+
+		// validate full path is safe (doesn't need to exist)
+		_, err = contextRoot.Stat(fullUserPath)
+		if err != nil && !os.IsNotExist(err) {
+			a.Logger.Debugw("invalid file path", "path", fullUserPath, "error", err)
+			return ids, fmt.Errorf("invalid file path: %s", err)
+		}
+
+		// build relative path for secure upload
+		var uploadRelativePath string
+		if path != "" {
+			uploadRelativePath = filepath.Join(strings.Trim(path, "/"), asset.File.Filename)
+		} else {
+			uploadRelativePath = asset.File.Filename
+		}
+
+		// if using parent root, we need to include context folder in path
+		var pathToValidate string
+		if isUsingParentRoot {
+			pathToValidate = filepath.Join(contextFolder, uploadRelativePath)
+		} else {
+			pathToValidate = uploadRelativePath
+		}
+
+		a.Logger.Debugw("secure file path",
+			"contextPath", fullContextPath,
+			"relativePath", pathToValidate,
+		)
+
+		files = append(files, NewRootFileUpload(contextRoot, pathToValidate, &asset.File))
 	}
-	// upload files to the file system
+	// upload files to the file system using secure method
 	_, err = a.FileService.Upload(
 		g,
 		files,
@@ -423,16 +467,31 @@ func (a *Asset) DeleteByID(
 		return err
 	}
 
-	domainRoot, err := securejoin.SecureJoin(a.RootFolder, domainContext)
+	// create root filesystem for secure deletion
+	root, err := os.OpenRoot(a.RootFolder)
 	if err != nil {
-		a.Logger.Debugw("insecure path", "error", err)
+		a.Logger.Debugw("failed to open root folder", "error", err)
 		return err
 	}
-	filePath, err := securejoin.SecureJoin(domainRoot, p.String())
+	defer root.Close()
+
+	// validate domain context access
+	domainRoot, err := root.OpenRoot(domainContext)
 	if err != nil {
-		a.Logger.Debugw("insecure path", "error", err)
+		a.Logger.Debugw("failed to open domain context", "error", err)
 		return err
 	}
+	defer domainRoot.Close()
+
+	// validate file exists within domain context
+	_, err = domainRoot.Stat(p.String())
+	if err != nil {
+		a.Logger.Debugw("file not found in domain context", "error", err)
+		return err
+	}
+
+	// build safe file path (validated by OpenRoot)
+	filePath := filepath.Join(a.RootFolder, domainContext, p.String())
 
 	err = a.FileService.Delete(
 		filePath,
@@ -445,7 +504,7 @@ func (a *Asset) DeleteByID(
 		return err
 	}
 	err = a.FileService.RemoveEmptyFolderRecursively(
-		domainRoot,
+		filepath.Join(a.RootFolder, domainContext),
 		filepath.Dir(filePath),
 	)
 	if err != nil {
@@ -512,16 +571,31 @@ func (a *Asset) DeleteAllByCompanyID(
 			a.Logger.Debugw("failed to get path", "error", err)
 			return err
 		}
-		domainRoot, err := securejoin.SecureJoin(a.RootFolder, domainContext)
+		// create root filesystem for secure deletion
+		root, err := os.OpenRoot(a.RootFolder)
 		if err != nil {
-			a.Logger.Debugw("insecure path", "error", err)
+			a.Logger.Debugw("failed to open root folder", "error", err)
 			return err
 		}
-		filePath, err := securejoin.SecureJoin(domainRoot, p.String())
+		defer root.Close()
+
+		// validate domain context access
+		domainContextRoot, err := root.OpenRoot(domainContext)
 		if err != nil {
-			a.Logger.Debugw("insecure path", "error", err)
+			a.Logger.Debugw("failed to open domain context", "error", err)
 			return err
 		}
+		defer domainContextRoot.Close()
+
+		// validate file exists within domain context
+		_, err = domainContextRoot.Stat(p.String())
+		if err != nil {
+			a.Logger.Debugw("file not found in domain context", "error", err)
+			return err
+		}
+
+		// build safe file path (validated by OpenRoot)
+		filePath := filepath.Join(a.RootFolder, domainContext, p.String())
 		err = a.FileService.Delete(
 			filePath,
 		)
@@ -533,7 +607,7 @@ func (a *Asset) DeleteAllByCompanyID(
 			return err
 		}
 		err = a.FileService.RemoveEmptyFolderRecursively(
-			domainRoot,
+			filepath.Join(a.RootFolder, domainContext),
 			filepath.Dir(filePath),
 		)
 		if err != nil {
@@ -608,16 +682,31 @@ func (a *Asset) DeleteAllByDomainID(
 			return err
 		}
 
-		domainRoot, err := securejoin.SecureJoin(a.RootFolder, domainContext)
+		// create root filesystem for secure deletion
+		root, err := os.OpenRoot(a.RootFolder)
 		if err != nil {
-			a.Logger.Debugw("insecure path", "error", err)
+			a.Logger.Debugw("failed to open root folder", "error", err)
 			return err
 		}
-		filePath, err := securejoin.SecureJoin(domainRoot, p.String())
+		defer root.Close()
+
+		// validate domain context access
+		domainContextRoot, err := root.OpenRoot(domainContext)
 		if err != nil {
-			a.Logger.Debugw("insecure path", "error", err)
+			a.Logger.Debugw("failed to open domain context", "error", err)
 			return err
 		}
+		defer domainContextRoot.Close()
+
+		// validate file exists within domain context
+		_, err = domainContextRoot.Stat(p.String())
+		if err != nil {
+			a.Logger.Debugw("file not found in domain context", "error", err)
+			return err
+		}
+
+		// build safe file path (validated by OpenRoot)
+		filePath := filepath.Join(a.RootFolder, domainContext, p.String())
 		err = a.FileService.Delete(
 			filePath,
 		)
@@ -629,7 +718,7 @@ func (a *Asset) DeleteAllByDomainID(
 			return err
 		}
 		err = a.FileService.RemoveEmptyFolderRecursively(
-			domainRoot,
+			filepath.Join(a.RootFolder, domainContext),
 			filepath.Dir(filePath),
 		)
 		if err != nil {

@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-errors/errors"
 
 	"github.com/caddyserver/certmagic"
-	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/build"
@@ -783,13 +784,26 @@ func (d *Domain) handleOwnManagedTLS(
 	if len(key) > 0 && len(pem) > 0 {
 		keyBuffer := bytes.NewBufferString(key)
 		pemBuffer := bytes.NewBufferString(pem)
-		path, err := securejoin.SecureJoin(d.OwnManagedCertificatePath, name)
+
+		// create root filesystem for secure certificate operations
+		root, err := os.OpenRoot(d.OwnManagedCertificatePath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to join cert path and domain name: %s", err)
+			return nil, fmt.Errorf("failed to open certificate path: %s", err)
 		}
+		defer root.Close()
+
+		// validate domain name directory access
+		_, err = root.Stat(name)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("invalid domain name for certificate path: %s", err)
+		}
+
+		// build path for certificate operations
+		// build safe path for certificate operations (validated by OpenRoot)
+		// use secure file upload for certificate operations
 		err = d.FileService.UploadFile(
-			ctx,
-			path+"/cert.key",
+			root,
+			name+"/cert.key",
 			keyBuffer,
 			true,
 		)
@@ -801,8 +815,8 @@ func (d *Domain) handleOwnManagedTLS(
 			return nil, errs.Wrap(err)
 		}
 		err = d.FileService.UploadFile(
-			ctx,
-			path+"/cert.pem",
+			root,
+			name+"/cert.pem",
 			pemBuffer,
 			true,
 		)
@@ -813,13 +827,14 @@ func (d *Domain) handleOwnManagedTLS(
 			)
 			return nil, errs.Wrap(err)
 		}
-		keyBuffer = bytes.NewBufferString(key)
-		pemBuffer = bytes.NewBufferString(pem)
+		// Create fresh buffers for caching since upload consumed the original buffers
+		keyBufferForCache := bytes.NewBufferString(key)
+		pemBufferForCache := bytes.NewBufferString(pem)
 		hash, err := d.CertMagicConfig.CacheUnmanagedCertificatePEMBytes(
 			ctx,
-			pemBuffer.Bytes(),
-			keyBuffer.Bytes(),
-			[]string{},
+			pemBufferForCache.Bytes(),
+			keyBufferForCache.Bytes(),
+			[]string{name},
 		)
 		if err != nil {
 			d.Logger.Errorw(
@@ -844,10 +859,26 @@ func (d *Domain) removeOwnManagedTLS(
 	domain *model.Domain,
 ) error {
 	name := domain.Name.MustGet().String()
-	path, err := securejoin.SecureJoin(d.OwnManagedCertificatePath, name)
+
+	// create root filesystem for secure certificate operations
+	root, err := os.OpenRoot(d.OwnManagedCertificatePath)
 	if err != nil {
-		return fmt.Errorf("failed to delete own managed TLS for '%s' as: %s", name, err)
+		return fmt.Errorf("failed to open certificate path for '%s': %s", name, err)
 	}
+	defer root.Close()
+
+	// validate domain name directory exists
+	_, err = root.Stat(name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// directory doesn't exist, nothing to delete
+			return nil
+		}
+		return fmt.Errorf("failed to access certificate directory for '%s': %s", name, err)
+	}
+
+	// build safe path for deletion (validated by OpenRoot)
+	path := filepath.Join(d.OwnManagedCertificatePath, name)
 	err = d.FileService.DeleteAll(path)
 	if err != nil {
 		return fmt.Errorf("failed to delete own managed TLS for '%s' as: %s", name, err)

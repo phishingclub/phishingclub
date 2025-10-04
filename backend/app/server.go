@@ -20,7 +20,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/caddyserver/certmagic"
-	securejoin "github.com/cyphar/filepath-securejoin"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/cache"
@@ -202,26 +202,46 @@ func (s *Server) testTCPConnection(identifier string, addr string) chan server.S
 // and serves it if it is
 // return true if the request was for static content
 func (s *Server) checkAndServeAssets(c *gin.Context, host string) bool {
-	// check if the path is a file
-	staticPath, err := securejoin.SecureJoin(s.staticPath, host)
+	// create root filesystem for asset validation
+	root, err := os.OpenRoot(s.staticPath)
 	if err != nil {
-		s.logger.Infow("insecure path attempted on asset",
+		s.logger.Infow("failed to open static path root",
 			"error", err,
 		)
 		return false
 	}
-	staticPath, err = securejoin.SecureJoin(staticPath, c.Request.URL.Path)
-	if err != nil {
-		s.logger.Infow("insecure path attempted on asset",
+	defer root.Close()
+
+	// validate host folder path is safe
+	_, err = root.Stat(host)
+	if err != nil && !os.IsNotExist(err) {
+		s.logger.Infow("insecure host path attempted",
+			"host", host,
 			"error", err,
 		)
 		return false
 	}
-	// check if path exists on the specific domain
-	info, err := os.Stat(staticPath)
+
+	// clean path and remove leading slash
+	cleanPath := strings.TrimPrefix(filepath.Clean(c.Request.URL.Path), "/")
+
+	// validate full path is safe by checking it against root
+	fullRelativePath := filepath.Join(host, cleanPath)
+	_, err = root.Stat(fullRelativePath)
+	if err != nil && !os.IsNotExist(err) {
+		s.logger.Infow("insecure path attempted on asset",
+			"path", fullRelativePath,
+			"error", err,
+		)
+		return false
+	}
+
+	// check if file exists and get info through root
+	fullRelativePathForFile := filepath.Join(host, cleanPath)
+	info, err := root.Stat(fullRelativePathForFile)
 	if err != nil {
 		s.logger.Debugw("not found on domain: %s",
-			"path", staticPath,
+			"path", fullRelativePathForFile,
 		)
 		// check if this is a global asset
 		return s.checkAndServeSharedAsset(c)
@@ -229,37 +249,80 @@ func (s *Server) checkAndServeAssets(c *gin.Context, host string) bool {
 	if info.IsDir() {
 		return false
 	}
-	// checks if the path is a directory
-	c.Header("Content-Type", mime.TypeByExtension(filepath.Ext(staticPath)))
-	c.File(staticPath)
-	return true
-}
 
-func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
-	// check if the path is a file
-	// TODO I need to somehow make this safe from directory traversal
-	staticPath, err := securejoin.SecureJoin(
-		s.staticPath+"/shared",
-		c.Request.URL.Path,
-	)
+	// open and serve file through root to maintain security boundaries
+	file, err := root.Open(fullRelativePathForFile)
 	if err != nil {
-		s.logger.Infow("insecure path attempted on asset",
+		s.logger.Infow("failed to open file through root",
+			"path", fullRelativePathForFile,
 			"error", err,
 		)
 		return false
 	}
-	// check if path exists
-	info, err := os.Stat(staticPath)
+	defer file.Close()
+
+	c.Header("Content-Type", mime.TypeByExtension(filepath.Ext(cleanPath)))
+	c.DataFromReader(http.StatusOK, info.Size(), mime.TypeByExtension(filepath.Ext(cleanPath)), file, nil)
+	return true
+}
+
+func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
+	// create root filesystem for secure shared asset validation
+	root, err := os.OpenRoot(s.staticPath)
 	if err != nil {
-		_ = err
+		s.logger.Infow("failed to open static path root",
+			"error", err,
+		)
+		return false
+	}
+	defer root.Close()
+
+	// validate shared folder path is safe
+	_, err = root.Stat("shared")
+	if err != nil && !os.IsNotExist(err) {
+		s.logger.Infow("insecure shared path",
+			"error", err,
+		)
+		return false
+	}
+
+	// clean path and remove leading slash
+	cleanPath := strings.TrimPrefix(filepath.Clean(c.Request.URL.Path), "/")
+
+	// validate full path is safe by checking it against root
+	fullRelativePath := filepath.Join("shared", cleanPath)
+	_, err = root.Stat(fullRelativePath)
+	if err != nil && !os.IsNotExist(err) {
+		s.logger.Infow("insecure shared asset path",
+			"path", fullRelativePath,
+			"error", err,
+		)
+		return false
+	}
+
+	// check if file exists and get info through root
+	sharedRelativePath := filepath.Join("shared", cleanPath)
+	info, err := root.Stat(sharedRelativePath)
+	if err != nil {
 		return false
 	}
 	if info.IsDir() {
 		return false
 	}
-	// checks if the path is a directory
-	c.Header("Content-Type", mime.TypeByExtension(filepath.Ext(staticPath)))
-	c.File(staticPath)
+
+	// open and serve file through root to maintain security boundaries
+	file, err := root.Open(sharedRelativePath)
+	if err != nil {
+		s.logger.Infow("failed to open shared file through root",
+			"path", sharedRelativePath,
+			"error", err,
+		)
+		return false
+	}
+	defer file.Close()
+
+	c.Header("Content-Type", mime.TypeByExtension(filepath.Ext(cleanPath)))
+	c.DataFromReader(http.StatusOK, info.Size(), mime.TypeByExtension(filepath.Ext(cleanPath)), file, nil)
 	return true
 }
 

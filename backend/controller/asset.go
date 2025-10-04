@@ -8,10 +8,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-errors/errors"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
@@ -78,15 +78,30 @@ func (a *Asset) GetContentByID(g *gin.Context) {
 		// such as the company name or something that is prefixed
 		_ = data.ASSET_GLOBAL_FOLDER
 	}
-	staticPath, err := securejoin.SecureJoin(a.StaticAssetPath, domain.String())
+	// create root filesystem for secure asset access
+	root, err := os.OpenRoot(a.StaticAssetPath)
 	if err != nil {
-		a.Logger.Debugw("insecure path",
+		a.Logger.Debugw("failed to open static asset path root",
 			"path", a.StaticAssetPath,
+			"error", err,
+		)
+		a.Response.ServerError(g)
+		return
+	}
+	defer root.Close()
+
+	// validate domain directory access
+	domainRoot, err := root.OpenRoot(domain.String())
+	if err != nil {
+		a.Logger.Debugw("insecure domain path",
 			"domain", domain.String(),
 			"error", err,
 		)
+		a.Response.BadRequest(g)
 		return
 	}
+	defer domainRoot.Close()
+
 	// get the file path
 	pathDecoded, err := url.QueryUnescape(g.Param("path"))
 	if err != nil {
@@ -97,15 +112,22 @@ func (a *Asset) GetContentByID(g *gin.Context) {
 		return
 	}
 
-	filePath, err := securejoin.SecureJoin(staticPath, pathDecoded)
+	// clean path and remove leading slash for os.OpenRoot compatibility
+	cleanPath := strings.TrimPrefix(filepath.Clean(pathDecoded), "/")
+
+	// validate file path within domain directory
+	_, err = domainRoot.Stat(cleanPath)
 	if err != nil {
-		a.Logger.Debugw("insecure path",
-			"path", pathDecoded,
+		a.Logger.Debugw("insecure file path",
+			"path", cleanPath,
 			"error", err,
 		)
 		a.Response.BadRequest(g)
 		return
 	}
+
+	// build safe file path (validated by OpenRoot)
+	filePath := filepath.Join(a.StaticAssetPath, domain.String(), cleanPath)
 	// check if the file exists
 	a.Logger.Debugw("checking if asset exists",
 		"path", filePath,

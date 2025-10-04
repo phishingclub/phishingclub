@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"os"
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
-	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/gin-gonic/gin"
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
@@ -21,6 +19,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/vo"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
 
@@ -751,19 +750,28 @@ func (im *Import) createAssetFromZipFile(
 	// Build the file system path - assets are always stored in shared folder
 	contextFolder := "shared"
 
-	// Build full file path
-	pathWithRootAndDomainContext, err := securejoin.SecureJoin(im.Asset.RootFolder, contextFolder)
-	if err != nil {
-		return false, err
-	}
-	pathWithRootAndDomainContext, err = securejoin.SecureJoin(pathWithRootAndDomainContext, fullRelativePath)
-	if err != nil {
+	// ensure base asset directory exists
+	if err := os.MkdirAll(im.Asset.RootFolder, 0755); err != nil {
 		return false, err
 	}
 
-	// Upload the file content directly
+	// create root filesystem for the full context path (controlled paths only)
+	fullContextPath := filepath.Join(im.Asset.RootFolder, contextFolder)
+	contextRoot, err := os.OpenRoot(fullContextPath)
+	if err != nil {
+		return false, err
+	}
+	defer contextRoot.Close()
+
+	// validate file path within context
+	_, err = contextRoot.Stat(fullRelativePath)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+
+	// Upload the file content directly using secure method
 	contentBuffer := bytes.NewBuffer(content)
-	err = im.File.UploadFile(g, pathWithRootAndDomainContext, contentBuffer, true)
+	err = im.File.UploadFile(contextRoot, strings.Trim(fullRelativePath, "/"), contentBuffer, true)
 	if err != nil {
 		// Clean up the database entry if file upload fails
 		im.Asset.AssetRepository.DeleteByID(g, id)

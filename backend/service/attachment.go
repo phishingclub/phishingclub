@@ -3,11 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/go-errors/errors"
 
-	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
@@ -59,7 +59,7 @@ func (a *Attachment) Create(
 		"all attachments must have the same context '%s'",
 		contextFolder,
 	)
-	files := []*FileUpload{}
+	files := []*RootFileUpload{}
 	filePaths := []string{}
 	for _, attachment := range attachments {
 		// ensure context is the same across all files
@@ -94,31 +94,40 @@ func (a *Attachment) Create(
 			)
 			return createdIDs, errs.Wrap(err)
 		}
-		// full path is used in the file system
-		pathWithRootAndDomainContext, err := securejoin.SecureJoin(
-			a.RootFolder,
-			contextFolder,
-		)
-		if err != nil {
-			a.Logger.Infow("insecure path", "error", err)
+		// ensure base attachment directory exists
+		if err := os.MkdirAll(a.RootFolder, 0755); err != nil {
+			a.Logger.Debugw("failed to create attachment root directory", "error", err)
 			return createdIDs, errs.Wrap(err)
 		}
-		pathWithRootAndDomainContext, err = securejoin.SecureJoin(
-			pathWithRootAndDomainContext,
-			attachmentFilename,
-		)
+
+		// create root filesystem for the full context path (controlled paths only)
+		fullContextPath := filepath.Join(a.RootFolder, contextFolder)
+		contextRoot, err := os.OpenRoot(fullContextPath)
 		if err != nil {
-			a.Logger.Infow("insecure path", "error", err)
+			a.Logger.Infow("failed to open context folder", "error", err)
 			return createdIDs, errs.Wrap(err)
 		}
-		a.Logger.Debugw("file path: %s",
+		defer contextRoot.Close()
+
+		// validate that the filename is accessible within the context
+		// this prevents directory traversal in the filename itself
+		_, err = contextRoot.Stat(attachmentFilename)
+		if err != nil && !os.IsNotExist(err) {
+			a.Logger.Infow("invalid filename", "filename", attachmentFilename, "error", err)
+			return createdIDs, errs.Wrap(err)
+		}
+
+		// build final path for logging
+		pathWithRootAndDomainContext := filepath.Join(fullContextPath, attachmentFilename)
+		a.Logger.Debugw("secure file path",
 			"relative", relativePath.String(),
-			"relativeWithRootFilePath", pathWithRootAndDomainContext,
+			"contextPath", fullContextPath,
+			"filename", attachmentFilename,
 		)
 		filePaths = append(filePaths, pathWithRootAndDomainContext)
-		files = append(files, NewFileUpload(pathWithRootAndDomainContext, attachment.File))
+		files = append(files, NewRootFileUpload(contextRoot, attachmentFilename, attachment.File))
 	}
-	// upload files to the file system
+	// upload files to the file system using secure method
 	_, err = a.FileService.Upload(
 		g,
 		files,
@@ -342,18 +351,33 @@ func (a *Attachment) DeleteByID(
 	if attachment.CompanyID.IsSpecified() && !attachment.CompanyID.IsNull() {
 		companyContext = attachment.CompanyID.MustGet().String()
 	}
-	domainRoot, err := securejoin.SecureJoin(a.RootFolder, companyContext)
+	// create root filesystem for secure file operations
+	root, err := os.OpenRoot(a.RootFolder)
 	if err != nil {
-		a.Logger.Debugw("insecure path", "error", err)
+		a.Logger.Debugw("failed to open root folder", "error", err)
 		return err
 	}
-	attachmentFileName := attachment.FileName.MustGet()
-	filename, err := securejoin.SecureJoin(domainRoot, attachmentFileName.String())
-	if err != nil {
+	defer root.Close()
 
-		a.Logger.Debugw("insecure path", "error", err)
+	// validate that company context exists and is accessible
+	companyRoot, err := root.OpenRoot(companyContext)
+	if err != nil {
+		a.Logger.Debugw("failed to open company context", "error", err)
 		return err
 	}
+	defer companyRoot.Close()
+
+	attachmentFileName := attachment.FileName.MustGet()
+
+	// validate that the file exists and is accessible within the company context
+	_, err = companyRoot.Stat(attachmentFileName.String())
+	if err != nil {
+		a.Logger.Debugw("attachment file not found in context", "error", err)
+		return err
+	}
+
+	// build full path for file service (validated as safe by OpenRoot)
+	filename := filepath.Join(a.RootFolder, companyContext, attachmentFileName.String())
 	err = a.FileService.Delete(
 		filename,
 	)
@@ -387,28 +411,31 @@ func (a *Attachment) GetPath(attachment *model.Attachment) (*vo.RelativeFilePath
 	}
 	// map attachments to files
 	attachmentFilename := filepath.Clean(attachment.FileName.MustGet().String())
-	// relative path is used in the DB
-	/*
-		relativePath, err := vo.NewRelativeFilePath(attachmentFilename)
-		if err != nil {
-			a.Logger.Debugw("failed to make file path", err)
-			return nil,errs.Wrap(err)
-		}
-	*/
-	// full path is used in the file system
-	pathWithRootAndDomainContext, err := securejoin.SecureJoin(a.RootFolder, contextFolder)
+	// create root filesystem for secure path operations
+	root, err := os.OpenRoot(a.RootFolder)
 	if err != nil {
-		a.Logger.Infow("insecure path", "error", err)
+		a.Logger.Infow("failed to open root folder", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	pathWithRootAndDomainContext, err = securejoin.SecureJoin(
-		pathWithRootAndDomainContext,
-		attachmentFilename,
-	)
+	defer root.Close()
+
+	// validate that the context folder and filename are accessible within root
+	contextRoot, err := root.OpenRoot(contextFolder)
 	if err != nil {
-		a.Logger.Infow("insecure path", "error", err)
+		a.Logger.Infow("failed to open context folder", "error", err)
 		return nil, errs.Wrap(err)
 	}
+	defer contextRoot.Close()
+
+	// verify the file exists and is accessible
+	_, err = contextRoot.Stat(attachmentFilename)
+	if err != nil {
+		a.Logger.Debugw("file not accessible", "error", err)
+		return nil, errs.Wrap(err)
+	}
+
+	// build full path for return value
+	pathWithRootAndDomainContext := filepath.Join(a.RootFolder, contextFolder, attachmentFilename)
 	path, err := vo.NewRelativeFilePath(pathWithRootAndDomainContext)
 	if err != nil {
 		a.Logger.Debugw("failed to make file path", "error", err)
