@@ -1071,6 +1071,10 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 		campaignRecipientID,
 	)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.Logger.Debugw("campaign recipient not found for tracking pixel", "campaign_recipient_id", campaignRecipientID.String())
+			return err
+		}
 		c.Logger.Errorw("failed to get campaign recipient by id", "error", err)
 		return errs.Wrap(err)
 	}
