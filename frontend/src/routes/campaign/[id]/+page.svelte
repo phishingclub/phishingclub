@@ -2046,7 +2046,7 @@
 					<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded mb-4">
 						<p class="font-medium">{sendMessageRecipient.name}</p>
 						<p class="text-gray-600">{sendMessageRecipient.email}</p>
-						<p class="text-xs text-blue-600 mt-1">
+						<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
 							Sender type: {campaign.template?.email ? 'Email (SMTP)' : 'API Sender'}
 						</p>
 						{#if recipient.sentAt}
