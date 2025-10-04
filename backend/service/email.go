@@ -325,6 +325,7 @@ func (m *Email) GetByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
+	companyID *uuid.UUID,
 ) (*model.Email, error) {
 	ae := NewAuditEvent("Email.GetByID", session)
 	ae.Details["id"] = id.String()
@@ -343,7 +344,7 @@ func (m *Email) GetByID(
 		ctx,
 		id,
 		&repository.EmailOption{
-			WithAttachments: true,
+			WithAttachments: false, // we'll load attachments manually with context filtering
 		},
 	)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -354,6 +355,14 @@ func (m *Email) GetByID(
 		m.Logger.Errorw("failed to get email by id", "error", err)
 		return nil, errs.Wrap(err)
 	}
+
+	// load attachments with proper context filtering
+	err = m.loadEmailAttachmentsWithContext(ctx, email, companyID)
+	if err != nil {
+		m.Logger.Errorw("failed to load email attachments with context", "error", err)
+		return nil, errs.Wrap(err)
+	}
+
 	// no audit on read
 	return email, nil
 }
@@ -405,6 +414,7 @@ func (m *Email) SendTestEmail(
 	smtpID *uuid.UUID,
 	domainID *uuid.UUID,
 	recpID *uuid.UUID,
+	companyID *uuid.UUID,
 ) error {
 	ae := NewAuditEvent("Email.SendTestEmail", session)
 	ae.Details["emailId"] = emailID.String()
@@ -463,7 +473,7 @@ func (m *Email) SendTestEmail(
 		ctx,
 		emailID,
 		&repository.EmailOption{
-			WithAttachments: true,
+			WithAttachments: false, // we'll load attachments manually with context filtering
 		},
 	)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -474,6 +484,13 @@ func (m *Email) SendTestEmail(
 	}
 	if err != nil {
 		m.Logger.Errorw("failed to send test email - email not found", "error", err)
+		return errs.Wrap(err)
+	}
+
+	// load attachments with proper context filtering
+	err = m.loadEmailAttachmentsWithContext(ctx, email, companyID)
+	if err != nil {
+		m.Logger.Errorw("failed to load email attachments with context for test email", "error", err)
 		return errs.Wrap(err)
 	}
 	campaignRecipient := &model.CampaignRecipient{
@@ -861,5 +878,61 @@ func (m *Email) DeleteByID(
 	}
 	m.AuditLogAuthorized(ae)
 
+	return nil
+}
+
+// loadEmailAttachmentsWithContext loads attachments for an email with proper context filtering
+// this ensures that in global context, only global attachments are loaded
+// and in company context, both global and company-specific attachments are loaded
+func (m *Email) loadEmailAttachmentsWithContext(
+	ctx context.Context,
+	email *model.Email,
+	companyID *uuid.UUID,
+) error {
+	// get all attachment IDs associated with this email
+	attachmentIDs, err := m.EmailRepository.GetAttachmentIDsByEmailID(ctx, email.ID.MustGet())
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	// if no attachments, nothing to do
+	if len(attachmentIDs) == 0 {
+		email.Attachments = []*model.Attachment{}
+		return nil
+	}
+
+	// get attachments with proper context filtering
+	contextFilteredAttachments := []*model.Attachment{}
+	for _, attachmentID := range attachmentIDs {
+		attachment, err := m.AttachmentService.AttachmentRepository.GetByID(ctx, attachmentID)
+		if err != nil {
+			// if attachment doesn't exist, log and continue
+			m.Logger.Debugw("attachment not found", "attachmentID", attachmentID, "error", err)
+			continue
+		}
+
+		// apply context filtering logic
+		isAttachmentAccessible := false
+		if companyID == nil {
+			// global context - only allow global attachments (company_id IS NULL)
+			isAttachmentAccessible = !attachment.CompanyID.IsSpecified() || attachment.CompanyID.IsNull()
+		} else {
+			// company context - allow both global and company-specific attachments
+			if !attachment.CompanyID.IsSpecified() || attachment.CompanyID.IsNull() {
+				// global attachment
+				isAttachmentAccessible = true
+			} else {
+				// company-specific attachment - check if it matches the context
+				attachmentCompanyID := attachment.CompanyID.MustGet()
+				isAttachmentAccessible = attachmentCompanyID == *companyID
+			}
+		}
+
+		if isAttachmentAccessible {
+			contextFilteredAttachments = append(contextFilteredAttachments, attachment)
+		}
+	}
+
+	email.Attachments = contextFilteredAttachments
 	return nil
 }

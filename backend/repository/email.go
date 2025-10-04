@@ -85,6 +85,24 @@ func (m *Email) RemoveAttachment(
 	return nil
 }
 
+// GetAttachmentIDsByEmailID gets all attachment IDs associated with an email
+func (m *Email) GetAttachmentIDsByEmailID(
+	ctx context.Context,
+	emailID uuid.UUID,
+) ([]*uuid.UUID, error) {
+	var emailAttachments []database.EmailAttachment
+	result := m.DB.Where("email_id = ?", emailID).Find(&emailAttachments)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	attachmentIDs := make([]*uuid.UUID, len(emailAttachments))
+	for i, ea := range emailAttachments {
+		attachmentIDs[i] = ea.AttachmentID
+	}
+	return attachmentIDs, nil
+}
+
 // RemoveAttachment removes an attachments from a email by attachment ID
 func (m *Email) RemoveAttachmentsByAttachmentID(
 	ctx context.Context,

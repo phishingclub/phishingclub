@@ -177,6 +177,7 @@ func (m *Email) SendTestEmail(g *gin.Context) {
 	if ok := m.handleParseRequest(g, &req); !ok {
 		return
 	}
+	companyID := companyIDFromRequestQuery(g)
 	// send test email
 	err := m.EmailService.SendTestEmail(
 		g,
@@ -185,6 +186,7 @@ func (m *Email) SendTestEmail(g *gin.Context) {
 		req.SMTPID,
 		req.DomainID,
 		req.RecipientID,
+		companyID,
 	)
 	// handle responses
 	if ok := m.handleErrors(g, err); !ok {
@@ -204,11 +206,13 @@ func (m *Email) GetByID(g *gin.Context) {
 	if !ok {
 		return
 	}
+	companyID := companyIDFromRequestQuery(g)
 	// get email
 	email, err := m.EmailService.GetByID(
 		g.Request.Context(),
 		session,
 		id,
+		companyID,
 	)
 	// handle responses
 	if ok := m.handleErrors(g, err); !ok {
@@ -228,11 +232,13 @@ func (m *Email) GetContentByID(g *gin.Context) {
 	if !ok {
 		return
 	}
+	companyID := companyIDFromRequestQuery(g)
 	// get
 	email, err := m.EmailService.GetByID(
 		g.Request.Context(),
 		session,
 		id,
+		companyID,
 	)
 	if ok := m.handleErrors(g, err); !ok {
 		return

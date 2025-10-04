@@ -1651,10 +1651,18 @@ func (c *Campaign) sendCampaignMessages(
 		}
 		return nil
 	}
+	// get campaign's company context for attachment filtering
+	var campaignCompanyID *uuid.UUID
+	if campaign.CompanyID.IsSpecified() && !campaign.CompanyID.IsNull() {
+		companyID := campaign.CompanyID.MustGet()
+		campaignCompanyID = &companyID
+	}
+
 	email, err := c.MailService.GetByID(
 		ctx,
 		session,
 		&emailID,
+		campaignCompanyID,
 	)
 	if err != nil {
 		closeErr := c.closeCampaign(
@@ -2588,10 +2596,18 @@ func (c *Campaign) GetCampaignEmailBody(
 		)
 	}
 	// get the email
+	// get campaign's company context for attachment filtering
+	var campaignCompanyID *uuid.UUID
+	if campaign.CompanyID.IsSpecified() && !campaign.CompanyID.IsNull() {
+		companyID := campaign.CompanyID.MustGet()
+		campaignCompanyID = &companyID
+	}
+
 	email, err := c.MailService.GetByID(
 		ctx,
 		session,
 		&emailID,
+		campaignCompanyID,
 	)
 	if err != nil {
 		c.Logger.Errorw("failed to get message by id", "error", err)
@@ -3088,7 +3104,14 @@ func (c *Campaign) sendSingleCampaignMessage(
 		return errors.New("campaign template has no email")
 	}
 
-	email, err := c.MailService.GetByID(ctx, session, &emailID)
+	// get campaign's company context for attachment filtering
+	var campaignCompanyID *uuid.UUID
+	if campaign.CompanyID.IsSpecified() && !campaign.CompanyID.IsNull() {
+		companyID := campaign.CompanyID.MustGet()
+		campaignCompanyID = &companyID
+	}
+
+	email, err := c.MailService.GetByID(ctx, session, &emailID, campaignCompanyID)
 	if err != nil {
 		c.Logger.Errorw("failed to get email by id", "error", err)
 		return errs.Wrap(err)
