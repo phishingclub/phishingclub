@@ -127,10 +127,7 @@
 			}
 		});
 
-		// enable vim mode if preference is enabled
-		if (localVimMode) {
-			initializeVimMode();
-		}
+		// vim mode will be initialized by reactive statement if needed
 
 		editor.getModel().onDidChangeContent((e) => {
 			if (previewRenderDelayID) {
@@ -145,10 +142,8 @@
 
 		return () => {
 			document.body.classList.remove('overflow-hidden');
-			if (vimModeInstance && vimModeInstance.dispose) {
-				vimModeInstance.dispose();
-				vimModeInstance = null;
-			}
+			// properly cleanup vim mode first
+			destroyVimMode();
 			if (editor) {
 				editor.dispose();
 				monaco.editor.getModels().forEach((model) => model.dispose());
@@ -174,8 +169,12 @@
 
 	const destroyVimMode = () => {
 		if (vimModeInstance) {
-			// use official monaco-vim dispose method
-			vimModeInstance.dispose();
+			try {
+				// use official monaco-vim dispose method
+				vimModeInstance.dispose();
+			} catch (e) {
+				console.warn('Error disposing vim mode:', e);
+			}
 
 			// clear vim status bar
 			if (vimStatusBar) {
@@ -193,13 +192,22 @@
 		localVimMode = $vimModeEnabled;
 	}
 
-	// Watch for vim mode changes after initial load
+	// debounce vim mode changes to prevent race conditions
+	let vimModeTimeout = null;
+
+	// Watch for vim mode changes and editor initialization
 	$: if (editor && typeof localVimMode === 'boolean') {
-		if (localVimMode && !vimModeInstance) {
-			initializeVimMode();
-		} else if (!localVimMode && vimModeInstance) {
-			destroyVimMode();
+		if (vimModeTimeout) {
+			clearTimeout(vimModeTimeout);
 		}
+		vimModeTimeout = setTimeout(() => {
+			if (localVimMode && !vimModeInstance) {
+				initializeVimMode();
+			} else if (!localVimMode && vimModeInstance) {
+				destroyVimMode();
+			}
+			vimModeTimeout = null;
+		}, 100);
 	}
 
 	const selectPreviewDomain = () => {
