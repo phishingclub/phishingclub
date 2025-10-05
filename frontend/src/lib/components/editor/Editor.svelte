@@ -6,6 +6,10 @@
 	import { BiMap } from '$lib/utils/maps';
 	import { previewQR as generateQR } from '$lib/utils/qrPreview';
 	import { vimModeEnabled } from '$lib/store/vimMode.js';
+	import {
+		setupVimClipboardIntegration,
+		destroyVimClipboardIntegration
+	} from '$lib/utils/vimClipboard.js';
 	/** @type {'domain'|'page'|'email'} */
 
 	export let contentType;
@@ -160,6 +164,9 @@
 				.then((vimModule) => {
 					const statusNode = vimStatusBar;
 					vimModeInstance = vimModule.initVimMode(editor, statusNode);
+
+					// integrate system clipboard with vim registers
+					setupVimClipboardIntegration(editor, vimModeInstance, localVimMode, monaco);
 				})
 				.catch((e) => {
 					console.error('vim mode not available', e);
@@ -170,6 +177,9 @@
 	const destroyVimMode = () => {
 		if (vimModeInstance) {
 			try {
+				// cleanup clipboard integration first
+				destroyVimClipboardIntegration(vimModeInstance);
+
 				// use official monaco-vim dispose method
 				vimModeInstance.dispose();
 			} catch (e) {

@@ -4,6 +4,10 @@
 	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 	import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 	import { vimModeEnabled } from '$lib/store/vimMode.js';
+	import {
+		setupVimClipboardIntegration,
+		destroyVimClipboardIntegration
+	} from '$lib/utils/vimClipboard.js';
 
 	export let value = '';
 	export let height = 'medium';
@@ -119,6 +123,9 @@
 				.then((vimModule) => {
 					const statusNode = vimStatusBar;
 					vimModeInstance = vimModule.initVimMode(editor, statusNode);
+
+					// integrate system clipboard with vim registers
+					setupVimClipboardIntegration(editor, vimModeInstance, localVimMode, monaco);
 				})
 				.catch(() => {
 					console.warn('vim mode not available - monaco-vim package not installed');
@@ -129,6 +136,9 @@
 	const destroyVimMode = () => {
 		if (vimModeInstance) {
 			try {
+				// cleanup clipboard integration first
+				destroyVimClipboardIntegration(vimModeInstance);
+
 				// use official monaco-vim dispose method
 				vimModeInstance.dispose();
 			} catch (e) {
