@@ -187,6 +187,24 @@ clear the local certs and start the backend again:
  - `make backend-clear-certs`
  - `make backend-up`
 
+## Certificate warning
+When developing it can be nice to ignore certificate warnings, especially when handling complex proxy setups. Use a
+dedicated browser and skip certificate warning.
+
+On Ubuntu you can add custom shortcut for chromium without cert warnings.
+
+`~/.local/share/applications/chromium-dev.desktop`
+```
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Chromium Phishing Dev
+Comment=Chromium for development with SSL certificate errors ignored
+Exec=chromium-browser --ignore-certificate-errors
+Icon=chromium-browser
+Terminal=false
+```
+
 ## License
 
 Phishing Club is available under a dual licensing model:
