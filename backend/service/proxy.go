@@ -1458,6 +1458,9 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 		return fmt.Errorf("failed to get current proxy domains: %w", err)
 	}
 
+	// collect specific errors for better reporting
+	var syncErrors []string
+
 	currentDomains := make(map[string]*model.Domain)
 	for _, domain := range currentDomainsResult.Rows {
 		currentDomains[domain.Name.MustGet().String()] = domain
@@ -1652,11 +1655,13 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 
 			redirectURL, err := vo.NewOptionalString1024("")
 			if err != nil {
+				errMsg := fmt.Sprintf("failed to create redirect URL for domain '%s': %v", phishingDomain, err)
 				m.Logger.Warnw("failed to create redirect URL for proxy domain",
 					"proxyID", proxyID.String(),
 					"domain", phishingDomain,
 					"error", err,
 				)
+				syncErrors = append(syncErrors, errMsg)
 				errorCount++
 				continue
 			}
@@ -1670,11 +1675,13 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 
 			_, err = m.DomainService.CreateProxyDomain(ctx, session, domain)
 			if err != nil {
+				errMsg := fmt.Sprintf("failed to create domain '%s': %v", phishingDomain, err)
 				m.Logger.Warnw("failed to create new proxy domain",
 					"proxyID", proxyID.String(),
 					"domain", phishingDomain,
 					"error", err,
 				)
+				syncErrors = append(syncErrors, errMsg)
 				errorCount++
 			} else {
 				m.Logger.Debugw("created new proxy domain",
@@ -1695,7 +1702,8 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 	)
 
 	if errorCount > 0 {
-		return fmt.Errorf("proxy domain sync completed with %d errors", errorCount)
+		errorDetails := strings.Join(syncErrors, "; ")
+		return fmt.Errorf("proxy domain sync failed with %d errors: %s", errorCount, errorDetails)
 	}
 
 	return nil
