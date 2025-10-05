@@ -546,6 +546,48 @@ func (m *ProxyHandler) rewriteResponseHeadersWithContext(resp *http.Response, re
 			}
 		}
 	}
+
+	// apply custom replacement rules for response headers (after all hardcoded changes)
+	if reqCtx.Session != nil {
+		m.applyCustomResponseHeaderReplacements(resp, reqCtx.Session)
+	}
+}
+
+func (m *ProxyHandler) applyCustomResponseHeaderReplacements(resp *http.Response, session *ProxySession) {
+	// get all headers as a string
+	var buf bytes.Buffer
+	resp.Header.Write(&buf)
+	headers := buf.Bytes()
+
+	session.Config.Range(func(key, value interface{}) bool {
+		hostConfig := value.(service.ProxyServiceDomainConfig)
+		for _, replacement := range hostConfig.Rewrite {
+			if replacement.From == "response_header" || replacement.From == "any" {
+				headers = m.applyReplacement(headers, replacement, session.ID)
+			}
+		}
+		return true
+	})
+
+	// parse the modified headers back
+	if string(headers) != buf.String() {
+		// clear existing headers and parse the new ones
+		resp.Header = make(http.Header)
+		lines := strings.Split(string(headers), "\r\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if parts := strings.SplitN(line, ":", 2); len(parts) == 2 {
+				headerName := strings.TrimSpace(parts[0])
+				headerValue := strings.TrimSpace(parts[1])
+				if headerName != "" {
+					resp.Header.Add(headerName, headerValue)
+				}
+			}
+		}
+	}
 }
 
 func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCtx *RequestContext) {
@@ -1359,7 +1401,7 @@ func (m *ProxyHandler) applyRequestBodyReplacements(req *http.Request, session *
 	session.Config.Range(func(key, value interface{}) bool {
 		hostConfig := value.(service.ProxyServiceDomainConfig)
 		for _, replacement := range hostConfig.Rewrite {
-			if replacement.From == "" || replacement.From == "request_body" {
+			if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
 				body = m.applyReplacement(body, replacement, session.ID)
 			}
 		}
@@ -1373,7 +1415,7 @@ func (m *ProxyHandler) applyCustomReplacements(body []byte, session *ProxySessio
 	session.Config.Range(func(key, value interface{}) bool {
 		hostConfig := value.(service.ProxyServiceDomainConfig)
 		for _, replacement := range hostConfig.Rewrite {
-			if replacement.From == "" || replacement.From == "response_body" {
+			if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
 				body = m.applyReplacement(body, replacement, session.ID)
 			}
 		}
@@ -1387,7 +1429,7 @@ func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config
 	// apply rewrite rules from all host configurations (matches session behavior)
 	for _, hostConfig := range config {
 		for _, replacement := range hostConfig.Rewrite {
-			if replacement.From == "" || replacement.From == "response_body" {
+			if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
 				body = m.applyReplacement(body, replacement, "no-session")
 			}
 		}
