@@ -3,15 +3,21 @@
 	import * as monaco from 'monaco-editor';
 	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 	import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
+	import { vimModeEnabled } from '$lib/store/vimMode.js';
 
 	export let value = '';
 	export let height = 'medium';
 	export let language = 'json';
 	export let placeholder = '';
+	export let showVimToggle = true;
+	export let externalVimMode = null; // allow external control of vim mode
+	let localVimMode = externalVimMode !== null ? externalVimMode : $vimModeEnabled;
 
 	let editor = null;
 	let editorContainer = null;
 	let isDark = false;
+	let vimStatusBar = null;
+	let vimModeInstance = null;
 
 	const heightClasses = {
 		small: 'h-64',
@@ -88,17 +94,71 @@
 			wordBasedSuggestions: 'off'
 		});
 
+		// enable vim mode if preference is enabled
+		if (localVimMode) {
+			initializeVimMode();
+		}
+
 		// Update value when editor content changes
 		editor.getModel().onDidChangeContent(() => {
 			value = editor.getValue();
 		});
 
-		return cleanup;
+		return () => {
+			cleanup();
+			if (vimModeInstance && vimModeInstance.dispose) {
+				vimModeInstance.dispose();
+				vimModeInstance = null;
+			}
+		};
 	});
 
 	// Watch for external value changes
 	$: if (editor && value !== undefined && editor.getValue() !== value) {
 		editor.setValue(value || '');
+	}
+
+	const initializeVimMode = () => {
+		if (localVimMode && editor && !vimModeInstance) {
+			import('monaco-vim')
+				.then((vimModule) => {
+					const statusNode = vimStatusBar;
+					vimModeInstance = vimModule.initVimMode(editor, statusNode);
+				})
+				.catch(() => {
+					console.warn('vim mode not available - monaco-vim package not installed');
+				});
+		}
+	};
+
+	const destroyVimMode = () => {
+		if (vimModeInstance) {
+			// use official monaco-vim dispose method
+			vimModeInstance.dispose();
+
+			// clear vim status bar
+			if (vimStatusBar) {
+				vimStatusBar.textContent = '';
+			}
+
+			vimModeInstance = null;
+		}
+	};
+
+	// sync with external vim mode control
+	$: if (externalVimMode !== null) {
+		localVimMode = externalVimMode;
+	} else {
+		localVimMode = $vimModeEnabled;
+	}
+
+	// Watch for vim mode changes
+	$: if (editor && typeof localVimMode === 'boolean') {
+		if (localVimMode && !vimModeInstance) {
+			initializeVimMode();
+		} else if (!localVimMode && vimModeInstance) {
+			destroyVimMode();
+		}
 	}
 
 	let showExample = false;
@@ -114,12 +174,46 @@
 
 <div class="w-full">
 	<div class="bg-white dark:bg-gray-800 transition-colors duration-200 rounded-md">
+		{#if showVimToggle}
+			<div
+				class="flex justify-between items-center p-2 border-b border-gray-200 dark:border-gray-600"
+			>
+				<div class="flex items-center space-x-2">
+					<button
+						type="button"
+						on:click={() => {
+							vimModeEnabled.update((v) => !v);
+						}}
+						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+						class:font-bold={localVimMode}
+						class:bg-cta-blue={localVimMode}
+						class:dark:bg-indigo-600={localVimMode}
+						class:text-white={localVimMode}
+					>
+						<span>Vim</span>
+					</button>
+				</div>
+			</div>
+		{/if}
 		<div
 			bind:this={editorContainer}
-			class="border-2 border-black dark:border-gray-600 bg-white dark:bg-gray-900 rounded-md {heightClasses[
-				height
-			]} w-full transition-colors duration-200"
+			class="border-2 border-black dark:border-gray-600 bg-white dark:bg-gray-900 w-full transition-colors duration-200"
+			class:rounded-b-md={showVimToggle}
+			class:rounded-md={!showVimToggle}
+			class:h-64={height === 'small' && !localVimMode}
+			class:h-80={height === 'medium' && !localVimMode}
+			class:h-96={height === 'large' && !localVimMode}
+			style={localVimMode
+				? `height: ${height === 'small' ? '224px' : height === 'medium' ? '294px' : '359px'}`
+				: ''}
 		></div>
+		{#if localVimMode}
+			<div
+				bind:this={vimStatusBar}
+				class="px-2 py-1 bg-gray-100 dark:bg-gray-700 border-t border-gray-200 dark:border-gray-600 text-xs font-mono text-gray-700 dark:text-gray-300 rounded-b-md"
+				style="height: 25px;"
+			></div>
+		{/if}
 	</div>
 	{#if placeholder}
 		<div class="mt-2">

@@ -5,6 +5,7 @@
 	import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
 	import { BiMap } from '$lib/utils/maps';
 	import { previewQR as generateQR } from '$lib/utils/qrPreview';
+	import { vimModeEnabled } from '$lib/store/vimMode.js';
 	/** @type {'domain'|'page'|'email'} */
 
 	export let contentType;
@@ -12,6 +13,8 @@
 	export let baseURL = 'example.test';
 	export let domainMap = new BiMap({});
 	export let selectedDomain = '';
+	export let externalVimMode = null; // allow external control of vim mode
+	let localVimMode = externalVimMode !== null ? externalVimMode : $vimModeEnabled;
 	let editor = null;
 	let previewFrame = null;
 	let previewRenderDelayID = null;
@@ -24,6 +27,7 @@
 	let externalFrameRef = null;
 	let fileInputRef;
 	let shadowContainer = null;
+	let vimStatusBar = null;
 
 	const apiTemplates = [
 		{ label: 'Custom Field 1', text: '{{.CustomField1}}' },
@@ -123,6 +127,11 @@
 			}
 		});
 
+		// enable vim mode if preference is enabled
+		if (localVimMode) {
+			initializeVimMode();
+		}
+
 		editor.getModel().onDidChangeContent((e) => {
 			if (previewRenderDelayID) {
 				clearTimeout(previewRenderDelayID);
@@ -136,12 +145,62 @@
 
 		return () => {
 			document.body.classList.remove('overflow-hidden');
+			if (vimModeInstance && vimModeInstance.dispose) {
+				vimModeInstance.dispose();
+				vimModeInstance = null;
+			}
 			if (editor) {
 				editor.dispose();
 				monaco.editor.getModels().forEach((model) => model.dispose());
 			}
 		};
 	});
+
+	// track vim mode state to prevent duplicate initialization
+	let vimModeInstance = null;
+
+	const initializeVimMode = () => {
+		if (localVimMode && editor && !vimModeInstance) {
+			import('monaco-vim')
+				.then((vimModule) => {
+					const statusNode = vimStatusBar;
+					vimModeInstance = vimModule.initVimMode(editor, statusNode);
+				})
+				.catch((e) => {
+					console.error('vim mode not available', e);
+				});
+		}
+	};
+
+	const destroyVimMode = () => {
+		if (vimModeInstance) {
+			// use official monaco-vim dispose method
+			vimModeInstance.dispose();
+
+			// clear vim status bar
+			if (vimStatusBar) {
+				vimStatusBar.textContent = '';
+			}
+
+			vimModeInstance = null;
+		}
+	};
+
+	// sync with external vim mode control
+	$: if (externalVimMode !== null) {
+		localVimMode = externalVimMode;
+	} else {
+		localVimMode = $vimModeEnabled;
+	}
+
+	// Watch for vim mode changes after initial load
+	$: if (editor && typeof localVimMode === 'boolean') {
+		if (localVimMode && !vimModeInstance) {
+			initializeVimMode();
+		} else if (!localVimMode && vimModeInstance) {
+			destroyVimMode();
+		}
+	}
 
 	const selectPreviewDomain = () => {
 		baseURL = selectedDomain ? selectedDomain : baseURL;
@@ -564,6 +623,30 @@
 						<span>Preview</span>
 					</button>
 
+					<!-- vim mode toggle button -->
+					<button
+						type="button"
+						on:click={() => {
+							vimModeEnabled.update((v) => !v);
+						}}
+						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+						class:font-bold={localVimMode}
+						class:bg-cta-blue={localVimMode}
+						class:dark:bg-indigo-600={localVimMode}
+						class:text-white={localVimMode}
+					>
+						<svg
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+							class="transition-colors duration-200"
+						>
+							<path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h6v2H7v-2z" />
+						</svg>
+						<span>Vim</span>
+					</button>
+
 					<!-- template selector -->
 					<select
 						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200"
@@ -647,7 +730,18 @@
 			class:h-55vh={isDetailsVisible}
 			class:h-67vh={!isDetailsVisible}
 		>
-			<div id="monaco-editor" class="h-full" />
+			<div
+				id="monaco-editor"
+				class="h-full"
+				style={localVimMode ? 'height: calc(100% - 25px)' : ''}
+			/>
+			{#if localVimMode}
+				<div
+					bind:this={vimStatusBar}
+					class="px-2 py-1 bg-gray-100 dark:bg-gray-700 border-t border-gray-200 dark:border-gray-600 text-xs font-mono text-gray-700 dark:text-gray-300"
+					style="height: 25px;"
+				></div>
+			{/if}
 		</div>
 		<div
 			class="bg-cta-blue dark:bg-indigo-600 cursor-move w-1 transition-colors duration-200"

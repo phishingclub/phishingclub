@@ -31,6 +31,7 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
+	import VimToggle from '$lib/components/editor/VimToggle.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -426,16 +427,20 @@ X-Custom-Header: Hello Friend"
 								>Request Headers</TextareaField
 							>
 							<div class="flex flex-col py-2 w-full">
-								<div class="flex items-center">
-									<p class="font-bold text-slate-600 dark:text-gray-300 py-2">Request Body</p>
-									<div class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md">
-										<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
+								<div class="flex items-center justify-between">
+									<div class="flex items-center">
+										<p class="font-bold text-slate-600 dark:text-gray-300 py-2">Request Body</p>
+										<div class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md">
+											<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
+										</div>
 									</div>
+									<VimToggle />
 								</div>
 								<SimpleCodeEditor
 									bind:value={formValues.requestBody}
 									height="medium"
 									language="json"
+									showVimToggle={false}
 									placeholder={`{
   "to": "{{.Name}}",
   "from": "{{.From}}",
