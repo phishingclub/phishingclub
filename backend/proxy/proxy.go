@@ -860,7 +860,8 @@ func (m *ProxyHandler) createNewSession(
 		Campaign:            campaign,
 		Domain:              domain,
 		TargetDomain:        targetDomain,
-		CreatedAt:           time.Now(),
+
+		CreatedAt: time.Now(),
 	}
 
 	// initialize session data
@@ -913,16 +914,14 @@ func (m *ProxyHandler) buildSessionConfig(targetDomain, phishDomain string, prox
 		}
 	}
 
-	// add global rules to all host configurations
-	if proxyConfig.Global != nil {
-		for originalHost := range sessionConfig {
-			hostConfig := sessionConfig[originalHost]
-			// append global capture rules
-			hostConfig.Capture = append(hostConfig.Capture, proxyConfig.Global.Capture...)
-			// append global rewrite rules
-			hostConfig.Rewrite = append(hostConfig.Rewrite, proxyConfig.Global.Rewrite...)
-			sessionConfig[originalHost] = hostConfig
-		}
+	// add global rules only to the target domain configuration
+	if proxyConfig.Global != nil && sessionConfig[targetDomain].To != "" {
+		hostConfig := sessionConfig[targetDomain]
+		// append global capture rules
+		hostConfig.Capture = append(hostConfig.Capture, proxyConfig.Global.Capture...)
+		// append global rewrite rules
+		hostConfig.Rewrite = append(hostConfig.Rewrite, proxyConfig.Global.Rewrite...)
+		sessionConfig[targetDomain] = hostConfig
 	}
 
 	return sessionConfig
