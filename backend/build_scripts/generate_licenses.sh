@@ -21,11 +21,15 @@ sudo docker compose cp frontend:/tmp/frontend-licenses.json /tmp/licenses/
 
 # Combine licenses
 echo "Combining licenses..."
-cat /tmp/licenses/backend-licenses.md > phishingclub/frontend/static/licenses.txt
-echo -e "\n\n" >> phishingclub/frontend/static/licenses.txt
-cat /tmp/licenses/frontend-licenses.json >> phishingclub/frontend/static/licenses.txt
+# Ensure the static directory exists
+mkdir -p frontend/static/
+cat /tmp/licenses/backend-licenses.md > frontend/static/licenses.txt
+echo -e "\n\n" >> frontend/static/licenses.txt
+cat /tmp/licenses/frontend-licenses.json >> frontend/static/licenses.txt
+echo -e "\n\n" >> frontend/static/licenses.txt
+cat THIRD_PARTY_LICENSES.md >> frontend/static/licenses.txt
 
 # Cleanup
 rm -rf /tmp/licenses
 
-echo "License file generated at phishingclub/frontend/static/licenses.txt"
+echo "License file generated at frontend/static/licenses.txt"
