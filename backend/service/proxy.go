@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/go-errors/errors"
@@ -39,16 +40,31 @@ type ProxyServiceConfig struct {
 
 // ProxyServiceDomainConfig represents configuration for a specific domain mapping
 type ProxyServiceDomainConfig struct {
-	To      string                    `yaml:"to"`
-	Capture []ProxyServiceCaptureRule `yaml:"capture,omitempty"`
-	Rewrite []ProxyServiceReplaceRule `yaml:"rewrite,omitempty"`
+	To      string                     `yaml:"to"`
+	Access  *ProxyServiceAccessControl `yaml:"access,omitempty"`
+	Capture []ProxyServiceCaptureRule  `yaml:"capture,omitempty"`
+	Rewrite []ProxyServiceReplaceRule  `yaml:"rewrite,omitempty"`
 }
 
 // ProxyServiceRules represents capture and replace rules
 // ProxyServiceRules represents global rules that apply to all hosts
 type ProxyServiceRules struct {
-	Capture []ProxyServiceCaptureRule `yaml:"capture,omitempty"`
-	Rewrite []ProxyServiceReplaceRule `yaml:"rewrite,omitempty"`
+	Access  *ProxyServiceAccessControl `yaml:"access,omitempty"`
+	Capture []ProxyServiceCaptureRule  `yaml:"capture,omitempty"`
+	Rewrite []ProxyServiceReplaceRule  `yaml:"rewrite,omitempty"`
+}
+
+// ProxyServiceAccessControl represents access control configuration
+type ProxyServiceAccessControl struct {
+	Mode   string                   `yaml:"mode"` // "allow" | "deny"
+	Paths  []string                 `yaml:"paths"`
+	OnDeny ProxyServiceDenyResponse `yaml:"on_deny"`
+}
+
+// ProxyServiceDenyResponse represents response configuration when access is denied
+type ProxyServiceDenyResponse struct {
+	WithSession    string `yaml:"with_session"`    // "allow" | "redirect:URL" | status code
+	WithoutSession string `yaml:"without_session"` // "allow" | "redirect:URL" | status code
 }
 
 // CompilePathPatterns compiles regex patterns for all capture rules
@@ -107,6 +123,43 @@ type ProxyServiceReplaceRule struct {
 }
 
 // ProxyServiceConfigYAML represents the complete YAML configuration structure that matches the actual YAML format
+//
+// Example YAML configuration with access control:
+//
+// version: "0.0"
+// global:
+//
+//	access:
+//	  mode: "deny"
+//	  paths:
+//	    - "^/admin/"
+//	    - "^/wp-admin/"
+//	    - "^/\\.git/"
+//	  on_deny:
+//	    with_session: 403
+//	    without_session: 404
+//	capture:
+//	  - name: "global_navigation"
+//	    path: "/important"
+//
+// example.com:
+//
+//	to: "phishing-example.com"
+//	access:
+//	  mode: "allow"
+//	  paths:
+//	    - "^/login"
+//	    - "^/api/public/"
+//	    - "^/assets/"
+//	  on_deny:
+//	    with_session: "redirect:https://phishing-example.com/"
+//	    without_session: 503
+//	capture:
+//	  - name: "login_capture"
+//	    method: "POST"
+//	    path: "/login"
+//	    find: "password=(.*?)&"
+//	    from: "request_body"
 type ProxyServiceConfigYAML struct {
 	Version string                               `yaml:"version,omitempty"`
 	Proxy   string                               `yaml:"proxy,omitempty"`
@@ -498,6 +551,11 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 			)
 		}
 
+		// validate domain-specific access control
+		if err := m.validateAccessControl(domainConfig.Access); err != nil {
+			return err
+		}
+
 		// validate domain-specific capture rules
 		if err := m.validateCaptureRules(domainConfig.Capture); err != nil {
 			return err
@@ -512,8 +570,11 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 		// the syncProxyDomains method will handle domain management properly
 	}
 
-	// validate global capture and rewrite rules
+	// validate global rules
 	if config.Global != nil {
+		if err := m.validateAccessControl(config.Global.Access); err != nil {
+			return err
+		}
 		if err := m.validateCaptureRules(config.Global.Capture); err != nil {
 			return err
 		}
@@ -701,6 +762,94 @@ func (m *Proxy) validateReplaceRules(replaceRules []ProxyServiceReplaceRule) err
 	return nil
 }
 
+// validateAccessControl validates access control configuration
+func (m *Proxy) validateAccessControl(accessControl *ProxyServiceAccessControl) error {
+	if accessControl == nil {
+		return nil // access control is optional
+	}
+
+	// validate mode
+	if accessControl.Mode != "allow" && accessControl.Mode != "deny" {
+		return validate.WrapErrorWithField(
+			errors.New("access control mode must be either 'allow' or 'deny'"),
+			"proxyConfig",
+		)
+	}
+
+	// validate paths are valid regex patterns
+	for i, path := range accessControl.Paths {
+		if path == "" {
+			return validate.WrapErrorWithField(
+				errors.New(fmt.Sprintf("access control path %d cannot be empty", i)),
+				"proxyConfig",
+			)
+		}
+		if _, err := regexp.Compile(path); err != nil {
+			return validate.WrapErrorWithField(
+				errors.New(fmt.Sprintf("invalid regex pattern in access control path '%s': %s", path, err.Error())),
+				"proxyConfig",
+			)
+		}
+	}
+
+	// validate deny response actions
+	if err := m.validateDenyAction(accessControl.OnDeny.WithSession, true); err != nil {
+		return err
+	}
+	if err := m.validateDenyAction(accessControl.OnDeny.WithoutSession, false); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateDenyAction validates a deny action string
+func (m *Proxy) validateDenyAction(action string, withSession bool) error {
+	if action == "" {
+		return nil // action is optional, will use default
+	}
+
+	// check for allow action
+	if action == "allow" {
+		return nil
+	}
+
+	// check for redirect action
+	if strings.HasPrefix(action, "redirect:") {
+		url := strings.TrimPrefix(action, "redirect:")
+		if url == "" {
+			return validate.WrapErrorWithField(
+				errors.New("redirect action must include URL: 'redirect:https://example.com'"),
+				"proxyConfig",
+			)
+		}
+		// basic URL validation
+		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+			return validate.WrapErrorWithField(
+				errors.New("redirect URL must start with http:// or https://"),
+				"proxyConfig",
+			)
+		}
+		return nil
+	}
+
+	// check for status code
+	if statusCode, err := strconv.Atoi(action); err == nil {
+		if statusCode < 100 || statusCode > 599 {
+			return validate.WrapErrorWithField(
+				errors.New("status code must be between 100 and 599"),
+				"proxyConfig",
+			)
+		}
+		return nil
+	}
+
+	return validate.WrapErrorWithField(
+		errors.New("invalid deny action: must be 'allow', 'redirect:URL', or a status code"),
+		"proxyConfig",
+	)
+}
+
 // validateProxyConfig validates Proxy configuration
 func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) error {
 	// validate Proxy configuration YAML
@@ -830,6 +979,11 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 			}
 		}
 
+		// validate domain-specific access control
+		if err := m.validateAccessControl(domainConfig.Access); err != nil {
+			return err
+		}
+
 		// validate domain-specific capture rules
 		if err := m.validateCaptureRules(domainConfig.Capture); err != nil {
 			return err
@@ -846,8 +1000,11 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 		}
 	}
 
-	// validate global capture and rewrite rules
+	// validate global rules
 	if config.Global != nil {
+		if err := m.validateAccessControl(config.Global.Access); err != nil {
+			return err
+		}
 		if err := m.validateCaptureRules(config.Global.Capture); err != nil {
 			return err
 		}

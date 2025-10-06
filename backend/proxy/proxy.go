@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -264,6 +265,13 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 		if err == nil && m.isValidSessionCookie(sessionCookie.Value) {
 			reqCtx.SessionID = sessionCookie.Value
 		}
+	}
+
+	// check access control before proceeding
+	hasSession := reqCtx.SessionID != ""
+
+	if allowed, denyAction := m.evaluatePathAccess(req.URL.Path, reqCtx, hasSession); !allowed {
+		return req, m.createDenyResponse(req, reqCtx, denyAction, hasSession)
 	}
 
 	// handle requests without session
@@ -1785,11 +1793,7 @@ func (m *ProxyHandler) createCampaignFlowRedirect(session *ProxySession, resp *h
 	}
 
 	redirectResp := &http.Response{
-		Status:     "302 Found",
 		StatusCode: 302,
-		Proto:      resp.Proto,
-		ProtoMajor: resp.ProtoMajor,
-		ProtoMinor: resp.ProtoMinor,
 		Header:     make(http.Header),
 		Body:       io.NopCloser(bytes.NewReader([]byte{})),
 		Request:    resp.Request,
@@ -1975,49 +1979,6 @@ func (m *ProxyHandler) setProxyConfigDefaults(config *service.ProxyServiceConfig
 	}
 }
 
-func (m *ProxyHandler) ValidateProxyConfig(configStr string) (*service.ProxyServiceConfigYAML, error) {
-	config, err := m.parseProxyConfig(configStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse proxy config: %w", err)
-	}
-
-	if err := service.ValidateVersion(config); err != nil {
-		return nil, fmt.Errorf("version validation failed: %w", err)
-	}
-
-	for originalHost, hostConfig := range config.Hosts {
-		if hostConfig == nil || hostConfig.To == "" {
-			return nil, fmt.Errorf("domain mapping for '%s' is empty", originalHost)
-		}
-
-		for i, capture := range hostConfig.Capture {
-			if capture.Name == "" {
-				return nil, fmt.Errorf("capture rule %d for '%s' has no name", i, originalHost)
-			}
-			if capture.Find == "" {
-				return nil, fmt.Errorf("capture rule '%s' for '%s' has no pattern", capture.Name, originalHost)
-			}
-			if _, err := regexp.Compile(capture.Find); err != nil {
-				return nil, fmt.Errorf("capture rule '%s' for '%s' has invalid regex: %w", capture.Name, originalHost, err)
-			}
-		}
-
-		for i, replace := range hostConfig.Rewrite {
-			if replace.Name == "" {
-				return nil, fmt.Errorf("replace rule %d for '%s' has no name", i, originalHost)
-			}
-			if replace.Find == "" {
-				return nil, fmt.Errorf("replace rule '%s' for '%s' has no find pattern", replace.Name, originalHost)
-			}
-			if _, err := regexp.Compile(replace.Find); err != nil {
-				return nil, fmt.Errorf("replace rule '%s' for '%s' has invalid regex: %w", replace.Name, originalHost, err)
-			}
-		}
-	}
-
-	return config, nil
-}
-
 func (m *ProxyHandler) GetCookieName() string {
 	return m.cookieName
 }
@@ -2104,10 +2065,6 @@ func (m *ProxyHandler) configToMap(configMap *sync.Map) map[string]service.Proxy
 func (m *ProxyHandler) createServiceUnavailableResponse(message string) *http.Response {
 	resp := &http.Response{
 		StatusCode: http.StatusServiceUnavailable,
-		Status:     "503 Service Unavailable",
-		Proto:      "HTTP/1.1",
-		ProtoMajor: 1,
-		ProtoMinor: 1,
 		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader(message)),
 	}
@@ -2116,10 +2073,19 @@ func (m *ProxyHandler) createServiceUnavailableResponse(message string) *http.Re
 }
 
 func (m *ProxyHandler) writeResponse(w http.ResponseWriter, resp *http.Response) error {
+	// check for nil response
+	if resp == nil {
+		m.logger.Errorw("response is nil in writeResponse")
+		w.WriteHeader(500)
+		return errors.New("response is nil")
+	}
+
 	// copy headers
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
+	if resp.Header != nil {
+		for k, v := range resp.Header {
+			for _, val := range v {
+				w.Header().Add(k, val)
+			}
 		}
 	}
 
@@ -2127,6 +2093,146 @@ func (m *ProxyHandler) writeResponse(w http.ResponseWriter, resp *http.Response)
 	w.WriteHeader(resp.StatusCode)
 
 	// copy body
-	_, err := io.Copy(w, resp.Body)
-	return err
+	if resp.Body != nil {
+		_, err := io.Copy(w, resp.Body)
+		return err
+	}
+	return nil
+}
+
+// evaluatePathAccess checks if a path is allowed based on access control rules
+func (m *ProxyHandler) evaluatePathAccess(path string, reqCtx *RequestContext, hasSession bool) (bool, string) {
+	// check for nil request context
+	if reqCtx == nil {
+		m.logger.Errorw("request context is nil in evaluatePathAccess")
+		return true, "" // default allow to prevent panic
+	}
+
+	// check domain-specific rules first
+	if reqCtx.Domain != nil && reqCtx.ProxyConfig != nil && reqCtx.ProxyConfig.Hosts != nil {
+
+		// find the domain config where the "to" field matches our phishing domain
+		for _, domainConfig := range reqCtx.ProxyConfig.Hosts {
+			if domainConfig != nil && domainConfig.To == reqCtx.PhishDomain && domainConfig.Access != nil {
+				allowed, action := m.checkAccessRules(path, domainConfig.Access, hasSession)
+				// domain rule found - return its decision (allow or deny)
+				return allowed, action
+			}
+		}
+
+	}
+
+	// no domain rule found - check global rules
+	if reqCtx.ProxyConfig != nil && reqCtx.ProxyConfig.Global != nil && reqCtx.ProxyConfig.Global.Access != nil {
+
+		if allowed, action := m.checkAccessRules(path, reqCtx.ProxyConfig.Global.Access, hasSession); !allowed {
+
+			return false, action
+		}
+	}
+
+	// default allow if no rules match
+	return true, ""
+}
+
+// checkAccessRules evaluates access control rules for a given path
+func (m *ProxyHandler) checkAccessRules(path string, accessControl *service.ProxyServiceAccessControl, hasSession bool) (bool, string) {
+	if accessControl == nil {
+		return true, "" // no access control = allow everything
+	}
+
+	matches := m.matchesAnyAccessPath(path, accessControl.Paths)
+
+	var action string
+	if hasSession {
+		action = accessControl.OnDeny.WithSession
+	} else {
+		action = accessControl.OnDeny.WithoutSession
+	}
+
+	// default actions if not specified
+	if action == "" {
+		action = "404"
+	}
+
+	switch accessControl.Mode {
+	case "allow":
+		if matches {
+			return true, "" // path matches allow list
+		}
+		// path doesn't match allow list - check if we should allow anyway
+		if action == "allow" {
+			return true, "" // override deny with allow
+		}
+		return false, action // deny with specified action
+	case "deny":
+		if !matches {
+			return true, "" // path doesn't match deny list
+		}
+		// path matches deny list - check if we should allow anyway
+		if action == "allow" {
+			return true, "" // override deny with allow
+		}
+		return false, action // deny with specified action
+	default:
+		return true, "" // safe default
+	}
+}
+
+// matchesAnyAccessPath checks if a path matches any of the provided regex patterns
+func (m *ProxyHandler) matchesAnyAccessPath(path string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if matched, err := regexp.MatchString(pattern, path); err == nil && matched {
+			return true
+		}
+	}
+	return false
+}
+
+// createDenyResponse creates an appropriate response for denied access
+func (m *ProxyHandler) createDenyResponse(req *http.Request, reqCtx *RequestContext, denyAction string, hasSession bool) *http.Response {
+	// construct proper full URL for logging
+	fullURL := fmt.Sprintf("%s://%s%s", req.URL.Scheme, req.Host, req.URL.RequestURI())
+
+	// log the denial for debugging
+	m.logger.Debugw("access denied for path",
+		"path", req.URL.Path,
+		"full_url", fullURL,
+		"phish_domain", reqCtx.PhishDomain,
+		"target_domain", reqCtx.TargetDomain,
+		"has_session", hasSession,
+		"deny_action", denyAction,
+		"user_agent", req.Header.Get("User-Agent"),
+	)
+
+	if strings.HasPrefix(denyAction, "redirect:") {
+		url := strings.TrimPrefix(denyAction, "redirect:")
+		return m.createRedirectResponse(url)
+	}
+
+	// parse as status code
+	if statusCode, err := strconv.Atoi(denyAction); err == nil {
+		return m.createStatusResponse(statusCode)
+	}
+
+	return m.createStatusResponse(404) // fallback
+}
+
+// createRedirectResponse creates a redirect response
+func (m *ProxyHandler) createRedirectResponse(url string) *http.Response {
+	return &http.Response{
+		StatusCode: 302,
+		Header: map[string][]string{
+			"Location": {url},
+		},
+	}
+}
+
+// createStatusResponse creates a response with the specified status code
+func (m *ProxyHandler) createStatusResponse(statusCode int) *http.Response {
+	return &http.Response{
+		StatusCode: statusCode,
+		Header:     make(map[string][]string),
+		Body:       io.NopCloser(strings.NewReader("")),
+	}
 }

@@ -1,8 +1,9 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import * as monaco from 'monaco-editor';
 	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 	import htmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
+	import * as vimModule from 'monaco-vim';
 	import { BiMap } from '$lib/utils/maps';
 	import { previewQR as generateQR } from '$lib/utils/qrPreview';
 	import { vimModeEnabled } from '$lib/store/vimMode.js';
@@ -32,6 +33,8 @@
 	let fileInputRef;
 	let shadowContainer = null;
 	let vimStatusBar = null;
+	let isDestroyed = false;
+	let editorContainer = null;
 
 	const apiTemplates = [
 		{ label: 'Custom Field 1', text: '{{.CustomField1}}' },
@@ -101,15 +104,6 @@
 		}
 	};
 
-	/*
-	$: {
-
-		if (previewFrame && isPreviewVisible && !isRenderingPreview) {
-			updatePreview();
-		}
-	}
-	*/
-
 	onMount(() => {
 		document.body.classList.add('overflow-hidden');
 		/* @ts-ignore */
@@ -121,15 +115,26 @@
 				return new editorWorker();
 			}
 		};
-		editor = monaco.editor.create(document.getElementById('monaco-editor'), {
+		const editorOptions = {
 			value: value,
 			language: 'html',
 			theme: 'vs-dark',
 			automaticLayout: true,
 			minimap: {
 				enabled: false
+			},
+			fontSize: 13,
+			lineNumbers: 'on',
+			folding: true,
+			wordWrap: 'on',
+			contextmenu: true,
+			scrollbar: {
+				horizontal: 'hidden'
 			}
-		});
+		};
+
+		/* @ts-ignore - editorOptions is not complete */
+		editor = monaco.editor.create(editorContainer, editorOptions);
 
 		// vim mode will be initialized by reactive statement if needed
 
@@ -145,12 +150,14 @@
 		updatePreview();
 
 		return () => {
+			isDestroyed = true;
 			document.body.classList.remove('overflow-hidden');
 			// properly cleanup vim mode first
 			destroyVimMode();
 			if (editor) {
 				editor.dispose();
 				monaco.editor.getModels().forEach((model) => model.dispose());
+				editor = null;
 			}
 		};
 	});
@@ -159,18 +166,16 @@
 	let vimModeInstance = null;
 
 	const initializeVimMode = () => {
-		if (localVimMode && editor && !vimModeInstance) {
-			import('monaco-vim')
-				.then((vimModule) => {
-					const statusNode = vimStatusBar;
-					vimModeInstance = vimModule.initVimMode(editor, statusNode);
+		if (localVimMode && editor && !vimModeInstance && !isDestroyed) {
+			try {
+				const statusNode = vimStatusBar;
+				vimModeInstance = vimModule.initVimMode(editor, statusNode);
 
-					// integrate system clipboard with vim registers
-					setupVimClipboardIntegration(editor, vimModeInstance, localVimMode, monaco);
-				})
-				.catch((e) => {
-					console.error('vim mode not available', e);
-				});
+				// integrate system clipboard with vim registers
+				setupVimClipboardIntegration(editor, vimModeInstance, localVimMode, monaco);
+			} catch (e) {
+				console.error('vim mode not available', e);
+			}
 		}
 	};
 
@@ -186,11 +191,6 @@
 				console.warn('Error disposing vim mode:', e);
 			}
 
-			// clear vim status bar
-			if (vimStatusBar) {
-				vimStatusBar.textContent = '';
-			}
-
 			vimModeInstance = null;
 		}
 	};
@@ -202,22 +202,18 @@
 		localVimMode = $vimModeEnabled;
 	}
 
-	// debounce vim mode changes to prevent race conditions
-	let vimModeTimeout = null;
-
-	// Watch for vim mode changes and editor initialization
-	$: if (editor && typeof localVimMode === 'boolean') {
-		if (vimModeTimeout) {
-			clearTimeout(vimModeTimeout);
+	// Watch for vim mode changes
+	$: if (editor && !isDestroyed && typeof localVimMode === 'boolean') {
+		if (localVimMode && !vimModeInstance) {
+			// Wait for DOM updates to complete
+			tick().then(() => {
+				if (localVimMode && !vimModeInstance && !isDestroyed) {
+					initializeVimMode();
+				}
+			});
+		} else if (!localVimMode && vimModeInstance) {
+			destroyVimMode();
 		}
-		vimModeTimeout = setTimeout(() => {
-			if (localVimMode && !vimModeInstance) {
-				initializeVimMode();
-			} else if (!localVimMode && vimModeInstance) {
-				destroyVimMode();
-			}
-			vimModeTimeout = null;
-		}, 100);
 	}
 
 	const selectPreviewDomain = () => {
@@ -619,11 +615,19 @@
 								updatePreview();
 							}
 						}}
-						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+						class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
 						class:font-bold={isPreviewVisible}
-						class:bg-cta-blue={isPreviewVisible}
-						class:dark:bg-indigo-600={isPreviewVisible}
+						class:bg-blue-600={isPreviewVisible}
+						class:dark:bg-blue-500={isPreviewVisible}
 						class:text-white={isPreviewVisible}
+						class:border-blue-600={isPreviewVisible}
+						class:dark:border-blue-500={isPreviewVisible}
+						class:text-gray-700={!isPreviewVisible}
+						class:dark:text-gray-200={!isPreviewVisible}
+						class:bg-white={!isPreviewVisible}
+						class:dark:bg-gray-700={!isPreviewVisible}
+						class:border-gray-300={!isPreviewVisible}
+						class:dark:border-gray-600={!isPreviewVisible}
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -647,18 +651,25 @@
 						on:click={() => {
 							vimModeEnabled.update((v) => !v);
 						}}
-						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+						class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
 						class:font-bold={localVimMode}
-						class:bg-cta-blue={localVimMode}
-						class:dark:bg-indigo-600={localVimMode}
+						class:bg-blue-600={localVimMode}
+						class:dark:bg-blue-500={localVimMode}
 						class:text-white={localVimMode}
+						class:border-blue-600={localVimMode}
+						class:dark:border-blue-500={localVimMode}
+						class:text-gray-700={!localVimMode}
+						class:dark:text-gray-200={!localVimMode}
+						class:bg-white={!localVimMode}
+						class:dark:bg-gray-700={!localVimMode}
+						class:border-gray-300={!localVimMode}
+						class:dark:border-gray-600={!localVimMode}
 					>
 						<svg
-							width="16"
-							height="16"
-							viewBox="0 0 24 24"
+							xmlns="http://www.w3.org/2000/svg"
+							class="h-4 w-4"
+							viewBox="0 0 20 20"
 							fill="currentColor"
-							class="transition-colors duration-200"
 						>
 							<path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h6v2H7v-2z" />
 						</svg>
@@ -740,23 +751,19 @@
 		{/if}
 	</div>
 
-	<div class="flex h-full">
+	<div class="flex h-full rounded-lg overflow-hidden">
 		<div
-			class="flex flex-col border-2 border-black dark:border-gray-600 bg-white dark:bg-gray-900 {!isPreviewVisible
+			class="flex flex-col relative {!isPreviewVisible
 				? 'w-80vw'
 				: 'w-1/2'} transition-colors duration-200"
 			class:h-55vh={isDetailsVisible}
 			class:h-67vh={!isDetailsVisible}
 		>
-			<div
-				id="monaco-editor"
-				class="h-full"
-				style={localVimMode ? 'height: calc(100% - 25px)' : ''}
-			/>
+			<div bind:this={editorContainer} class="h-full"></div>
 			{#if localVimMode}
 				<div
 					bind:this={vimStatusBar}
-					class="px-2 py-1 bg-gray-100 dark:bg-gray-700 border-t border-gray-200 dark:border-gray-600 text-xs font-mono text-gray-700 dark:text-gray-300"
+					class="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gray-700 text-xs font-mono text-gray-300"
 					style="height: 25px;"
 				></div>
 			{/if}
@@ -776,3 +783,9 @@
 		{/if}
 	</div>
 </div>
+
+<style>
+	:global(.monaco-editor .current-line) {
+		background-color: rgba(255, 255, 255, 0.05) !important;
+	}
+</style>

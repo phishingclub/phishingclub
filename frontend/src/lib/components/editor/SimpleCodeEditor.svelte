@@ -1,19 +1,23 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import * as monaco from 'monaco-editor';
 	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 	import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
+	import * as vimModule from 'monaco-vim';
+
 	import { vimModeEnabled } from '$lib/store/vimMode.js';
 	import {
 		setupVimClipboardIntegration,
 		destroyVimClipboardIntegration
 	} from '$lib/utils/vimClipboard.js';
+	import { setupProxyYamlCompletion } from '$lib/utils/proxyYamlCompletion.js';
 
 	export let value = '';
 	export let height = 'medium';
 	export let language = 'json';
 	export let placeholder = '';
 	export let showVimToggle = true;
+	export let enableProxyCompletion = false; // enable proxy YAML completion
 	export let externalVimMode = null; // allow external control of vim mode
 	let localVimMode = externalVimMode !== null ? externalVimMode : $vimModeEnabled;
 
@@ -22,6 +26,8 @@
 	let isDark = false;
 	let vimStatusBar = null;
 	let vimModeInstance = null;
+	let proxyCompletionProvider = null;
+	let isDestroyed = false;
 
 	const heightClasses = {
 		small: 'h-64',
@@ -56,9 +62,13 @@
 		});
 
 		const cleanup = () => {
+			isDestroyed = true;
 			observer.disconnect();
+			// properly cleanup vim mode first
+			destroyVimMode();
 			if (editor) {
 				editor.dispose();
+				editor = null;
 			}
 		};
 		/* @ts-ignore */
@@ -71,7 +81,7 @@
 			}
 		};
 
-		editor = monaco.editor.create(editorContainer, {
+		const editorOptions = {
 			value: value || '',
 			language: language,
 			theme: 'vs-dark',
@@ -88,15 +98,35 @@
 			scrollbar: {
 				horizontal: 'hidden'
 			},
-			quickSuggestions: false,
+			// Enable suggestions for YAML with proxy completion
+			quickSuggestions: enableProxyCompletion && language === 'yaml' ? true : false,
 			parameterHints: {
-				enabled: false
+				enabled: enableProxyCompletion && language === 'yaml'
 			},
-			suggestOnTriggerCharacters: false,
-			acceptSuggestionOnEnter: 'off',
-			tabCompletion: 'off',
-			wordBasedSuggestions: 'off'
-		});
+			suggestOnTriggerCharacters: enableProxyCompletion && language === 'yaml',
+			acceptSuggestionOnEnter: enableProxyCompletion && language === 'yaml' ? 'on' : 'off',
+			tabCompletion: enableProxyCompletion && language === 'yaml' ? 'on' : 'off',
+			wordBasedSuggestions:
+				enableProxyCompletion && language === 'yaml' ? 'currentDocument' : 'off',
+			// Better YAML editing
+			insertSpaces: true,
+			tabSize: 2,
+			detectIndentation: false,
+			trimAutoWhitespace: true,
+			// Bracket matching
+			matchBrackets: 'always',
+			// Selection
+			selectOnLineNumbers: true,
+			// Find
+			find: {
+				addExtraSpaceOnTop: false,
+				autoFindInSelection: 'never',
+				seedSearchStringFromSelection: 'selection'
+			}
+		};
+
+		/* @ts-ignore - editorOptions is not complete */
+		editor = monaco.editor.create(editorContainer, editorOptions);
 
 		// vim mode will be initialized by reactive statement if needed
 
@@ -105,10 +135,22 @@
 			value = editor.getValue();
 		});
 
+		// Setup proxy YAML completion if enabled
+		if (enableProxyCompletion && language === 'yaml') {
+			try {
+				proxyCompletionProvider = setupProxyYamlCompletion(monaco);
+			} catch (error) {
+				console.warn('Failed to setup proxy YAML completion:', error);
+			}
+		}
+
 		return () => {
 			cleanup();
-			// properly cleanup vim mode first
-			destroyVimMode();
+			// cleanup completion provider
+			if (proxyCompletionProvider) {
+				proxyCompletionProvider.dispose();
+				proxyCompletionProvider = null;
+			}
 		};
 	});
 
@@ -118,36 +160,26 @@
 	}
 
 	const initializeVimMode = () => {
-		if (localVimMode && editor && !vimModeInstance) {
-			import('monaco-vim')
-				.then((vimModule) => {
-					const statusNode = vimStatusBar;
-					vimModeInstance = vimModule.initVimMode(editor, statusNode);
+		if (localVimMode && editor && !vimModeInstance && !isDestroyed) {
+			try {
+				const statusNode = vimStatusBar;
+				vimModeInstance = vimModule.initVimMode(editor, statusNode);
 
-					// integrate system clipboard with vim registers
-					setupVimClipboardIntegration(editor, vimModeInstance, localVimMode, monaco);
-				})
-				.catch(() => {
-					console.warn('vim mode not available - monaco-vim package not installed');
-				});
+				// integrate system clipboard with vim registers
+				setupVimClipboardIntegration(editor, vimModeInstance, localVimMode, monaco);
+			} catch (e) {
+				console.error('failed to start vim mode', e);
+			}
 		}
 	};
 
 	const destroyVimMode = () => {
 		if (vimModeInstance) {
 			try {
-				// cleanup clipboard integration first
 				destroyVimClipboardIntegration(vimModeInstance);
-
-				// use official monaco-vim dispose method
 				vimModeInstance.dispose();
 			} catch (e) {
 				console.warn('Error disposing vim mode:', e);
-			}
-
-			// clear vim status bar
-			if (vimStatusBar) {
-				vimStatusBar.textContent = '';
 			}
 
 			vimModeInstance = null;
@@ -161,22 +193,18 @@
 		localVimMode = $vimModeEnabled;
 	}
 
-	// debounce vim mode changes to prevent race conditions
-	let vimModeTimeout = null;
-
 	// Watch for vim mode changes
-	$: if (editor && typeof localVimMode === 'boolean') {
-		if (vimModeTimeout) {
-			clearTimeout(vimModeTimeout);
+	$: if (editor && !isDestroyed && typeof localVimMode === 'boolean') {
+		if (localVimMode && !vimModeInstance) {
+			// Wait for DOM updates to complete
+			tick().then(() => {
+				if (localVimMode && !vimModeInstance && !isDestroyed) {
+					initializeVimMode();
+				}
+			});
+		} else if (!localVimMode && vimModeInstance) {
+			destroyVimMode();
 		}
-		vimModeTimeout = setTimeout(() => {
-			if (localVimMode && !vimModeInstance) {
-				initializeVimMode();
-			} else if (!localVimMode && vimModeInstance) {
-				destroyVimMode();
-			}
-			vimModeTimeout = null;
-		}, 100);
 	}
 
 	let showExample = false;
@@ -192,46 +220,61 @@
 
 <div class="w-full">
 	<div class="bg-white dark:bg-gray-800 transition-colors duration-200 rounded-md">
-		{#if showVimToggle}
+		{#if showVimToggle || enableProxyCompletion}
 			<div
 				class="flex justify-between items-center p-2 border-b border-gray-200 dark:border-gray-600"
 			>
 				<div class="flex items-center space-x-2">
-					<button
-						type="button"
-						on:click={() => {
-							vimModeEnabled.update((v) => !v);
-						}}
-						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
-						class:font-bold={localVimMode}
-						class:bg-cta-blue={localVimMode}
-						class:dark:bg-indigo-600={localVimMode}
-						class:text-white={localVimMode}
-					>
-						<span>Vim</span>
-					</button>
+					{#if showVimToggle}
+						<button
+							type="button"
+							on:click={() => {
+								vimModeEnabled.update((v) => !v);
+							}}
+							class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
+							class:font-bold={localVimMode}
+							class:bg-blue-600={localVimMode}
+							class:dark:bg-blue-500={localVimMode}
+							class:text-white={localVimMode}
+							class:border-blue-600={localVimMode}
+							class:dark:border-blue-500={localVimMode}
+							class:text-gray-700={!localVimMode}
+							class:dark:text-gray-200={!localVimMode}
+							class:bg-white={!localVimMode}
+							class:dark:bg-gray-700={!localVimMode}
+							class:border-gray-300={!localVimMode}
+							class:dark:border-gray-600={!localVimMode}
+						>
+							<span>Vim</span>
+						</button>
+					{/if}
+					{#if enableProxyCompletion}
+						<div class="flex items-center text-xs text-gray-500 dark:text-gray-400">
+							<span>Ctrl+Space for suggestions • Tab to accept</span>
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}
-		<div
-			bind:this={editorContainer}
-			class="border-2 border-black dark:border-gray-600 bg-white dark:bg-gray-900 w-full transition-colors duration-200"
-			class:rounded-b-md={showVimToggle}
-			class:rounded-md={!showVimToggle}
-			class:h-64={height === 'small' && !localVimMode}
-			class:h-80={height === 'medium' && !localVimMode}
-			class:h-96={height === 'large' && !localVimMode}
-			style={localVimMode
-				? `height: ${height === 'small' ? '224px' : height === 'medium' ? '294px' : '359px'}`
-				: ''}
-		></div>
-		{#if localVimMode}
+		<div class="border-2 border-gray-800 w-full rounded-lg overflow-hidden">
 			<div
-				bind:this={vimStatusBar}
-				class="px-2 py-1 bg-gray-100 dark:bg-gray-700 border-t border-gray-200 dark:border-gray-600 text-xs font-mono text-gray-700 dark:text-gray-300 rounded-b-md"
-				style="height: 25px;"
+				bind:this={editorContainer}
+				class="w-full"
+				class:h-64={height === 'small' && !localVimMode}
+				class:h-80={height === 'medium' && !localVimMode}
+				class:h-96={height === 'large' && !localVimMode}
+				style={localVimMode
+					? `height: ${height === 'small' ? '224px' : height === 'medium' ? '294px' : '359px'}`
+					: ''}
 			></div>
-		{/if}
+			{#if localVimMode}
+				<div
+					bind:this={vimStatusBar}
+					class="px-2 py-1 bg-gray-700 text-xs font-mono text-gray-300"
+					style="height: 25px;"
+				></div>
+			{/if}
+		</div>
 	</div>
 	{#if placeholder}
 		<div class="mt-2">
@@ -244,25 +287,31 @@
 			</button>
 			{#if showExample}
 				<div
-					class="mt-2 p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md transition-colors duration-200"
+					class="mt-2 p-3 bg-gray-900 dark:bg-black border border-gray-600 dark:border-gray-700 rounded-md transition-colors duration-200"
 				>
 					<div class="flex justify-between items-start mb-2">
 						<span
-							class="text-xs font-medium text-gray-700 dark:text-gray-300 transition-colors duration-200"
+							class="text-xs font-medium text-gray-300 dark:text-gray-200 transition-colors duration-200"
 							>Example:</span
 						>
 						<button
 							type="button"
 							on:click={loadExample}
-							class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline transition-colors duration-200"
+							class="text-xs text-blue-400 dark:text-blue-300 hover:text-blue-300 dark:hover:text-blue-200 underline transition-colors duration-200"
 						>
 							Load example
 						</button>
 					</div>
 					<pre
-						class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-wrap transition-colors duration-200 select-text cursor-text">{placeholder}</pre>
+						class="text-xs text-gray-300 dark:text-gray-200 whitespace-pre-wrap transition-colors duration-200 select-text cursor-text">{placeholder}</pre>
 				</div>
 			{/if}
 		</div>
 	{/if}
 </div>
+
+<style>
+	:global(.monaco-editor .current-line) {
+		background-color: rgba(255, 255, 255, 0.05) !important;
+	}
+</style>

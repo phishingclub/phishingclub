@@ -1,5 +1,6 @@
 /**
  * hacky vim copy to clipboard on visual mode d or y key down
+ * supports yy and dd and thats it.
  */
 
 /**

