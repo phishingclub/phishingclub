@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0] - 2025-10-08
+- Added access control rules for proxys
+- Completion help for proxys in editor
+- Vim mode for editors
+- Fix proxy header rewrite not being done
+- Fix company attachments in shared context
+- Fix panic on loading tracking pixel for deleted campaign
+- Various UI fixes
+- Campaigns now default to saving submitted data
+- Updated embedded licenses
+- Removed securejoin dependency in favor of os.OpenRoot (native)
+
 ## [1.4.0] - 2025-09-30
 - Added proxy (MITM) functionality
 - Added 'Advanced mode' to interactive installer
