@@ -84,8 +84,10 @@ const applyThemeToHTML = (mode) => {
 	const html = document.documentElement;
 	if (mode === modeDark) {
 		html.classList.add('dark');
+		html.style.backgroundColor = '#111827';
 	} else {
 		html.classList.remove('dark');
+		html.style.removeProperty('background-color');
 	}
 };
 
