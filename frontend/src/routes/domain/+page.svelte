@@ -172,7 +172,8 @@
 		return null;
 	};
 
-	const onSubmitPageUpdate = async () => {
+	const onSubmitPageUpdate = async (event) => {
+		const saveOnly = event?.detail?.saveOnly || false;
 		try {
 			isSubmitting = true;
 			updateContentError = '';
@@ -218,20 +219,23 @@
 				updateContentError = res.error;
 				return;
 			}
-			addToast('Domain updated', 'Success');
-			closeAllModals();
+			addToast(saveOnly ? 'Domain content saved' : 'Domain updated', 'Success');
+			if (!saveOnly) {
+				closeAllModals();
+			}
 			refreshDomains();
 		} catch (e) {
-			addToast('Failed to update domain', 'Error');
+			addToast(saveOnly ? 'Failed to save domain content' : 'Failed to update domain', 'Error');
 			console.error('failed to update domain', e);
 		} finally {
 			isSubmitting = false;
 		}
 	};
 
-	const onSubmit = async () => {
+	const onSubmit = async (event) => {
 		try {
 			// reset validate
+			const saveOnly = event?.detail?.saveOnly || false;
 			managedTLSInputElement?.setCustomValidity('');
 			ownManagedTLSInputElement?.setCustomValidity('');
 			ownManagedTLSKeyElement?.setCustomValidity('');
@@ -262,7 +266,7 @@
 				await onClickCreate();
 				return;
 			} else {
-				await onClickUpdate();
+				await onClickUpdate(saveOnly);
 				return;
 			}
 		} finally {
@@ -305,7 +309,7 @@
 		}
 	};
 
-	const onClickUpdate = async () => {
+	const onClickUpdate = async (saveOnly = false) => {
 		modalError = '';
 		// clear site contents if not hosting a website or if proxy domain
 		if (!formValues.hostWebsite || isProxyDomain) {
@@ -350,11 +354,13 @@
 				modalError = res.error;
 				return;
 			}
-			addToast('Domain updated', 'Success');
-			closeAllModals();
+			addToast(saveOnly ? 'Domain saved' : 'Domain updated', 'Success');
+			if (!saveOnly) {
+				closeAllModals();
+			}
 			refreshDomains();
 		} catch (e) {
-			addToast('Failed to update domain', 'Error');
+			addToast(saveOnly ? 'Failed to save domain' : 'Failed to update domain', 'Error');
 			console.error('failed to update domain', e);
 		}
 	};
@@ -716,7 +722,7 @@
 		onClose={closeAllModals}
 		{isSubmitting}
 	>
-		<FormGrid novalidate on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
+		<FormGrid novalidate on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<FormColumns>
 				<FormColumn>
 					<!-- Domain Information Section -->
@@ -821,7 +827,12 @@
 			onClose={closeAllModals}
 			{isSubmitting}
 		>
-			<FormGrid on:submit={onSubmitPageUpdate} bind:bindTo={contentForm} {isSubmitting}>
+			<FormGrid
+				on:submit={onSubmitPageUpdate}
+				bind:bindTo={contentForm}
+				{isSubmitting}
+				modalMode="update"
+			>
 				<Editor
 					contentType="domain"
 					baseURL={formValues.name}
@@ -839,7 +850,12 @@
 		onClose={closeAllModals}
 		{isSubmitting}
 	>
-		<FormGrid on:submit={onSubmitPageUpdate} bind:bindTo={contentNotFoundForm} {isSubmitting}>
+		<FormGrid
+			on:submit={onSubmitPageUpdate}
+			bind:bindTo={contentNotFoundForm}
+			{isSubmitting}
+			modalMode="update"
+		>
 			<Editor
 				contentType="domain"
 				baseURL={formValues.name}

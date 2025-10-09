@@ -137,14 +137,15 @@
 		}
 	};
 
-	const onSubmit = async () => {
+	const onSubmit = async (event) => {
 		try {
 			isSubmitting = true;
+			const saveOnly = event?.detail?.saveOnly || false;
 			if (modalMode === 'create' || modalMode === 'copy') {
 				await onClickCreate();
 				return;
 			} else {
-				await onClickUpdate();
+				await onClickUpdate(saveOnly);
 				return;
 			}
 		} finally {
@@ -176,7 +177,7 @@
 		}
 	};
 
-	const onClickUpdate = async () => {
+	const onClickUpdate = async (saveOnly = false) => {
 		try {
 			const res = await api.email.update({
 				id: formValues.id,
@@ -192,11 +193,13 @@
 				return;
 			}
 			modalError = '';
-			closeModal();
-			addToast('Email updated', 'Success');
+			addToast(saveOnly ? 'Email saved' : 'Email updated', 'Success');
+			if (!saveOnly) {
+				closeModal();
+			}
 			refreshEmails();
 		} catch (e) {
-			addToast('Failed to update email', 'Error');
+			addToast(saveOnly ? 'Failed to save email' : 'Failed to update email', 'Error');
 			console.error('failed to update email', e);
 		}
 	};
@@ -423,7 +426,7 @@
 		{/each}
 	</Table>
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
-		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
+		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<Editor contentType="email" {domainMap} bind:value={formValues.content}>
 				<div class="flex flex-col lg:flex-row w-full pl-4">
 					<div class="flex flex-col lg:flex-row justify-between w-1/3">

@@ -140,14 +140,15 @@
 		}
 	};
 
-	const onSubmit = async () => {
+	const onSubmit = async (event) => {
 		try {
 			isSubmitting = true;
+			const saveOnly = event?.detail?.saveOnly || false;
 			if (modalMode === 'create' || modalMode === 'copy') {
 				await create();
 				return;
 			} else {
-				await update();
+				await update(saveOnly);
 				return;
 			}
 		} finally {
@@ -171,7 +172,7 @@
 		}
 	};
 
-	const update = async () => {
+	const update = async (saveOnly = false) => {
 		try {
 			const updateData = {
 				name: formValues.name,
@@ -183,11 +184,13 @@
 				formError = res.error;
 				return;
 			}
-			addToast('Page updated', 'Success');
-			closeModal();
+			addToast(saveOnly ? 'Page saved' : 'Page updated', 'Success');
+			if (!saveOnly) {
+				closeModal();
+			}
 			refreshPages();
 		} catch (e) {
-			addToast('Failed to update page', 'Error');
+			addToast(saveOnly ? 'Failed to save page' : 'Failed to update page', 'Error');
 			console.error('failed to update page', e);
 		}
 	};
@@ -359,7 +362,7 @@
 		{/each}
 	</Table>
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
-		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
+		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<Editor contentType="page" {domainMap} bind:value={formValues.content}>
 				<div class="pl-4">
 					<TextField

@@ -144,14 +144,15 @@ portal.example.com:
 		}
 	};
 
-	const onSubmit = async () => {
+	const onSubmit = async (event) => {
 		try {
 			isSubmitting = true;
+			const saveOnly = event?.detail?.saveOnly || false;
 			if (modalMode === 'create' || modalMode === 'copy') {
 				await create();
 				return;
 			} else {
-				await update();
+				await update(saveOnly);
 				return;
 			}
 		} finally {
@@ -185,7 +186,7 @@ portal.example.com:
 		}
 	};
 
-	const update = async () => {
+	const update = async (saveOnly = false) => {
 		try {
 			const updateData = {
 				name: formValues.name,
@@ -199,11 +200,13 @@ portal.example.com:
 				formError = res.error;
 				return;
 			}
-			addToast('Proxy updated', 'Success');
-			closeModal();
+			addToast(saveOnly ? 'Proxy saved' : 'Proxy updated', 'Success');
+			if (!saveOnly) {
+				closeModal();
+			}
 			refreshProxies();
 		} catch (e) {
-			addToast('Failed to update Proxy', 'Error');
+			addToast(saveOnly ? 'Failed to save Proxy' : 'Failed to update Proxy', 'Error');
 			console.error('failed to update Proxy', e);
 		}
 	};
@@ -372,7 +375,7 @@ portal.example.com:
 		{/each}
 	</Table>
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
-		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
+		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<div class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-8">
 				<!-- Basic Information Section -->
 				<div class="w-full">

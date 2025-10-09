@@ -1,7 +1,35 @@
 <script>
+	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
+
 	export let bindTo = null;
+
+	$: if (formElement) {
+		bindTo = formElement;
+	}
 	export let isSubmitting = false;
 	export let novalidate = false;
+	export let modalMode = null; // 'create', 'update', 'copy'
+
+	const dispatch = createEventDispatcher();
+	let formElement = null;
+
+	function handleKeydown(event) {
+		if (event.ctrlKey && event.key === 's') {
+			// Only trigger if the form or its descendants have focus and we're in update mode
+			if (modalMode === 'update' && formElement && formElement.contains(document.activeElement)) {
+				event.preventDefault();
+				dispatch('submit', { ...event, saveOnly: true });
+			}
+		}
+	}
+
+	onMount(() => {
+		window.addEventListener('keydown', handleKeydown);
+	});
+
+	onDestroy(() => {
+		window.removeEventListener('keydown', handleKeydown);
+	});
 </script>
 
 <form
@@ -9,7 +37,7 @@
 	inert={isSubmitting}
 	class="grid grid-cols-3 grid-rows-1 w-full h-full flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 	class:opacity-70={isSubmitting}
-	bind:this={bindTo}
+	bind:this={formElement}
 	{novalidate}
 >
 	<slot />

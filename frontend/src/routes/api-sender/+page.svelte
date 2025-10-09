@@ -126,14 +126,15 @@
 		return [];
 	};
 
-	const onSubmit = async () => {
+	const onSubmit = async (event) => {
 		try {
 			isSubmitting = true;
+			const saveOnly = event?.detail?.saveOnly || false;
 			if (modalMode === 'create' || modalMode === 'copy') {
 				await onClickCreate();
 				return;
 			} else {
-				await onClickUpdate();
+				await onClickUpdate(saveOnly);
 				return;
 			}
 		} finally {
@@ -157,15 +158,17 @@
 		}
 	};
 
-	const onClickUpdate = async () => {
+	const onClickUpdate = async (saveOnly = false) => {
 		try {
 			const res = await api.apiSender.update(formValues);
 			if (!res.success) {
 				modalError = res.error;
 				throw res.error;
 			}
-			addToast('Updated API sender', 'Success');
-			closeEditModal();
+			addToast(saveOnly ? 'API sender saved' : 'Updated API sender', 'Success');
+			if (!saveOnly) {
+				closeEditModal();
+			}
 			refreshConfigurations();
 		} catch (err) {
 			console.error('failed to update API sender:', err);
@@ -352,7 +355,7 @@
 		{/each}
 	</Table>
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeCreateModal} {isSubmitting}>
-		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
+		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<FormColumns>
 				<FormColumn>
 					<!-- Basic Information Section -->
