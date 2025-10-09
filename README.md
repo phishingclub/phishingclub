@@ -200,7 +200,7 @@ Version=1.0
 Type=Application
 Name=Chromium Phishing Dev
 Comment=Chromium for development with SSL certificate errors ignored
-Exec=chromium-browser --ignore-certificate-errors
+Exec=chromium-browser --ignore-certificate-errors --incognito
 Icon=chromium-browser
 Terminal=false
 ```
