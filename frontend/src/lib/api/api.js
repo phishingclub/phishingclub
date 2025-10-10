@@ -271,6 +271,14 @@ export class API {
 			}
 
 			return await response.blob();
+		},
+
+		/**
+		 * Install example templates from GitHub during setup
+		 * @returns {Promise<ApiResponse>}
+		 */
+		installTemplates: async () => {
+			return await postJSON(this.getPath(`/install/templates`));
 		}
 	};
 

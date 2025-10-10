@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	MaxIndividualFileSize = 10 * 1024 * 1024  // 10MB per file
-	MaxTotalExtractedSize = 200 * 1024 * 1024 // 200MB total extracted
+	MaxIndividualFileSize = 100 * 1024 * 1024 // 100MB per file
+	MaxTotalExtractedSize = 500 * 1024 * 1024 // 500MB total extracted
 	MaxFileCount          = 20000             // Maximum files in zip
 	MaxCompressionRatio   = 100               // Maximum compression ratio (100:1)
 )
@@ -98,7 +98,6 @@ type ImportSummary struct {
 	EmailsErrors      int           `json:"emails_errors"`
 	EmailsErrorsList  []ImportError `json:"emails_errors_list"`
 
-	// unspecificed errors
 	Errors []ImportError `json:"errors"`
 }
 
@@ -146,6 +145,12 @@ func (im *Import) Import(
 		im.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
+
+	// check size limits
+	if fileHeader.Size > MaxIndividualFileSize {
+		return nil, fmt.Errorf("file too large: %d bytes (max: %d)", fileHeader.Size, MaxIndividualFileSize)
+	}
+
 	// handle file
 	zipFile, err := fileHeader.Open()
 	if err != nil {
@@ -158,13 +163,30 @@ func (im *Import) Import(
 	if err != nil {
 		return nil, err
 	}
+
+	return im.ImportFromBytes(g, session, zipBytes, forCompany, companyID)
+}
+
+// ImportFromBytes imports templates from raw zip bytes
+func (im *Import) ImportFromBytes(
+	g *gin.Context,
+	session *model.Session,
+	zipBytes []byte,
+	forCompany bool,
+	companyID *uuid.UUID,
+) (*ImportSummary, error) {
+	// check size limits
+	if int64(len(zipBytes)) > MaxIndividualFileSize {
+		return nil, fmt.Errorf("file too large: %d bytes (max: %d)", len(zipBytes), MaxIndividualFileSize)
+	}
+
 	readerAt := bytes.NewReader(zipBytes)
 	r, err := zip.NewReader(readerAt, int64(len(zipBytes)))
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
 
-	// Validate zip file structure and prevent zip bombs
+	// validate zip file structure and prevent zip bombs
 	var totalUncompressedSize int64
 	fileCount := 0
 	for _, f := range r.File {
@@ -200,9 +222,9 @@ func (im *Import) Import(
 		}
 	}
 	for _, assetFile := range assetFiles {
-		// Compute relative path inside assets/
+		// relative path inside assets/
 		relPath := strings.TrimPrefix(assetFile.Name, "assets/")
-		// Check DB for asset existence
+		// check if exists
 		createdNew, err := im.createAssetFromZipFile(g, session, assetFile, relPath)
 		if err != nil {
 			summary.AssetsErrors++
@@ -221,7 +243,7 @@ func (im *Import) Import(
 	}
 
 	// 2. Find all folders containing a data.yaml and process them as template folders
-	// Map: folder path -> *zip.File for data.yaml
+	// map: folder path -> *zip.File for data.yaml
 	templateFolders := make(map[string]*zip.File)
 	for _, f := range r.File {
 		if !f.FileInfo().IsDir() && strings.HasSuffix(f.Name, "data.yaml") {
@@ -230,18 +252,17 @@ func (im *Import) Import(
 			im.Logger.Debugw("Found template folder", "folder", dir, "dataYamlPath", f.Name)
 		}
 	}
-	im.Logger.Infow("Template folder discovery complete", "templateFolderCount", len(templateFolders))
 
 	// 3. Find all standalone template files without data.yaml
 	standaloneTemplates := make(map[string][]*zip.File) // folder -> list of HTML files
 	processedFolders := make(map[string]bool)
 
-	// Mark folders with data.yaml as processed
+	// mark folders with data.yaml as processed
 	for folder := range templateFolders {
 		processedFolders[folder] = true
 	}
 
-	// Find standalone HTML files in folders without data.yaml
+	// find standalone HTML files in folders without data.yaml
 	for _, f := range r.File {
 		if f.FileInfo().IsDir() {
 			continue
@@ -250,12 +271,12 @@ func (im *Import) Import(
 		fileName := filepath.Base(f.Name)
 		folder := filepath.Dir(f.Name)
 
-		// Skip if this folder already has data.yaml or is assets folder
+		// skip if this folder already has data.yaml or is assets folder
 		if processedFolders[folder] || strings.HasPrefix(f.Name, "assets/") {
 			continue
 		}
 
-		// Look for common template file patterns
+		// look for common template file patterns
 		if strings.HasSuffix(fileName, ".html") &&
 			(fileName == "landing.html" || fileName == "index.html" ||
 				fileName == "email.html" || fileName == "landingpage.html") {
@@ -264,10 +285,9 @@ func (im *Import) Import(
 		}
 	}
 
-	im.Logger.Infow("Template discovery complete", "foldersWithDataYaml", len(templateFolders), "standaloneTemplateFolders", len(standaloneTemplates))
+	im.Logger.Debugw("Template discovery complete", "foldersWithDataYaml", len(templateFolders), "standaloneTemplateFolders", len(standaloneTemplates))
 
 	// 4. For each template folder, parse data.yaml and process pages/emails
-	// Helper for robust zip relative path calculation
 	zipRelPath := func(folder, name string) string {
 		cleanName := filepath.Clean(filepath.ToSlash(name))
 		cleanFolder := filepath.Clean(filepath.ToSlash(folder))
@@ -280,7 +300,7 @@ func (im *Import) Import(
 		return strings.TrimPrefix(cleanName, cleanFolder+"/")
 	}
 
-	im.Logger.Infow("Starting template folder processing", "totalTemplateFolders", len(templateFolders), "totalZipFiles", len(r.File))
+	im.Logger.Debugw("Starting template folder processing", "totalTemplateFolders", len(templateFolders), "totalZipFiles", len(r.File))
 
 	// Pre-build file indices for efficient lookup
 	buildFileIndex := func(folder string) map[string]*zip.File {
@@ -310,9 +330,9 @@ func (im *Import) Import(
 	}
 
 	for folder, dataYamlFile := range templateFolders {
-		im.Logger.Infow("Processing template folder", "folder", folder, "dataYamlFile", dataYamlFile.Name)
+		im.Logger.Debugw("Processing template folder", "folder", folder, "dataYamlFile", dataYamlFile.Name)
 
-		// Read data.yaml content
+		// read data.yaml
 		rc, err := dataYamlFile.Open()
 		if err != nil {
 			summary.Errors = append(summary.Errors, ImportError{
@@ -342,13 +362,13 @@ func (im *Import) Import(
 			continue
 		}
 
-		im.Logger.Infow("Parsed data.yaml", "folder", folder, "name", dataYaml.Name, "pageCount", len(dataYaml.Pages), "emailCount", len(dataYaml.Emails))
+		im.Logger.Debugw("Parsed data.yaml", "folder", folder, "name", dataYaml.Name, "pageCount", len(dataYaml.Pages), "emailCount", len(dataYaml.Emails))
 
-		// Build file index for this template folder
+		// build file index for this template folder
 		fileIndex := buildFileIndex(folder)
 		im.Logger.Debugw("Built file index for folder", "folder", folder, "fileCount", len(fileIndex))
 
-		// Build sets of page and email file relative paths (relative to the template folder)
+		// build sets of page and email file relative paths (relative to the template folder)
 		pageFiles := make(map[string]struct{})
 		for _, page := range dataYaml.Pages {
 			cleanPageFile := filepath.Clean(filepath.ToSlash(page.File))
@@ -362,7 +382,7 @@ func (im *Import) Import(
 			emailFiles[cleanEmailFile] = struct{}{}
 		}
 
-		// For each file in the zip, check if it's under this template folder (including subfolders)
+		// for each file in the zip, check if it's under this template folder (including subfolders)
 		for _, f := range r.File {
 			if f.FileInfo().IsDir() {
 				continue
@@ -374,7 +394,7 @@ func (im *Import) Import(
 			}
 			relPath := zipRelPath(folder, f.Name)
 			im.Logger.Debugw("Found file in template folder", "name", f.Name, "relPath", relPath)
-			// Skip data.yaml, page files, and email files by relative path
+			// skip data.yaml, page files, and email files by relative path
 			if relPath == "data.yaml" {
 				im.Logger.Debugw("Skipping data.yaml")
 				continue
@@ -388,7 +408,7 @@ func (im *Import) Import(
 				continue
 			}
 			im.Logger.Debugw("Processing as asset", "relPath", relPath)
-			// Upload as asset, using relPath as the asset path
+			// upload as asset, using relPath as the asset path
 			created, err := im.createAssetFromZipFile(g, session, f, relPath)
 			if err != nil {
 				summary.AssetsErrors++
@@ -406,12 +426,12 @@ func (im *Import) Import(
 			}
 		}
 
-		// PAGE IMPORT ---
+		// PAGE IMPORT
 		for _, page := range dataYaml.Pages {
 			cleanPageFile := filepath.Clean(filepath.ToSlash(page.File))
 			im.Logger.Debugw("Looking for page file", "pageName", page.Name, "pageFile", page.File, "cleanedFile", cleanPageFile, "folder", folder)
 
-			// Use file index for efficient lookup
+			// use file index for efficient lookup
 			pageFile, pageFileFound := fileIndex[cleanPageFile]
 			if !pageFileFound {
 				pageFile, pageFileFound = fileIndex[strings.ToLower(cleanPageFile)]
@@ -431,7 +451,7 @@ func (im *Import) Import(
 				continue
 			}
 
-			// Read HTML content
+			// read HTML content
 			rc, err := pageFile.Open()
 			if err != nil {
 				summary.PagesErrors++
@@ -454,7 +474,7 @@ func (im *Import) Import(
 				continue
 			}
 
-			// Create new page
+			// create new page
 			newPage := &model.Page{}
 			name, err := vo.NewString64(page.Name)
 			if err != nil {
@@ -694,60 +714,60 @@ func (im *Import) createAssetFromZipFile(
 	f *zip.File,
 	relativePath string,
 ) (bool, error) {
-	// Check if asset already exists by path
+	// check if asset already exists by path
 	existing, err := im.Asset.GetByPath(g.Request.Context(), session, relativePath)
 
 	if err == nil && existing != nil {
-		// Asset already exists - check if it has a company ID (if so, skip it)
+		// asset already exists - check if it has a company ID (if so, skip it)
 		if existing.CompanyID.IsSpecified() && !existing.CompanyID.IsNull() {
-			// Asset belongs to a company - skip it to maintain global-only policy
+			// asset belongs to a company - skip it to maintain global-only policy
 			return false, nil
 		}
-		// Asset already exists and is global
+		// asset already exists and is global
 		return false, nil
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, err
 	}
 
-	// Open the file from zip
+	// open the file from zip
 	rc, err := f.Open()
 	if err != nil {
 		return false, err
 	}
 	defer rc.Close()
 
-	// Read file content
+	// read file content
 	content, err := io.ReadAll(rc)
 	if err != nil {
 		return false, err
 	}
 
-	// Use the provided relativePath for the asset path
+	// use the provided relativePath for the asset path
 	fullRelativePath := relativePath
 
-	// Create asset model
+	// create asset model
 	asset := &model.Asset{}
 
-	// Set the name from filename
+	// set the name from filename
 	filename := filepath.Base(f.Name)
 	if name, err := vo.NewOptionalString127(filename); err == nil {
 		asset.Name = nullable.NewNullableWithValue(*name)
 	}
 
-	// Set the relative path
+	// set the relative path
 	if path, err := vo.NewRelativeFilePath(fullRelativePath); err == nil {
 		asset.Path = nullable.NewNullableWithValue(*path)
 	}
 
 	// Assets are always global/shared - never set company ID
 
-	// Save asset to database first
+	// save asset to database first
 	id, err := im.Asset.AssetRepository.Insert(g, asset)
 	if err != nil {
 		return false, err
 	}
 
-	// Build the file system path - assets are always stored in shared folder
+	// build the file system path - assets are always stored in shared folder
 	contextFolder := "shared"
 
 	// ensure base asset directory exists

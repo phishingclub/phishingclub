@@ -1,7 +1,11 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"time"
 
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
@@ -138,6 +142,7 @@ type Install struct {
 	OptionRepository  *repository.Option
 	DB                *gorm.DB
 	PasswordHasher    password.Argon2Hasher
+	ImportService     *service.Import
 }
 
 // Install completes the installation by setting the initial administrators and options
@@ -330,4 +335,156 @@ func (in *Install) install(g *gin.Context, tx *gorm.DB) bool {
 
 	}
 	return true
+}
+
+// InstallTemplates downloads and imports example templates from GitHub
+func (in *Install) InstallTemplates(g *gin.Context) {
+	// handle session
+	session, user, ok := in.handleSession(g)
+	if !ok {
+		return
+	}
+	role := user.Role
+	if role == nil {
+		in.Logger.Error("failed to install templates - session contain no role")
+		in.Response.ServerError(g)
+		return
+	}
+	if !role.IsSuperAdministrator() {
+		in.Logger.Info("failed to install templates - not super admin")
+		in.Response.Forbidden(g)
+		return
+	}
+
+	ctx := g.Request.Context()
+
+	// check if already installed
+	isInstalled, err := in.OptionRepository.GetByKey(ctx, data.OptionKeyIsInstalled)
+	if err != nil {
+		in.Logger.Errorw("failed to install templates - could not get option",
+			"optionKey", data.OptionKeyIsInstalled,
+			"error", err,
+		)
+		in.Response.ServerError(g)
+		return
+	}
+	if isInstalled.Value.String() != data.OptionValueIsInstalled {
+		in.Logger.Info("failed to install templates - installation not complete")
+		in.Response.BadRequestMessage(g, "Installation must be completed first")
+		return
+	}
+
+	// create http client with timeout
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	// get latest release info from GitHub API
+	releaseURL := "https://api.github.com/repos/phishingclub/templates/releases/latest"
+	resp, err := client.Get(releaseURL)
+	if err != nil {
+		in.Logger.Errorw("failed to get latest release info",
+			"url", releaseURL,
+			"error", err,
+		)
+		in.Response.ServerErrorMessage(g, "Failed to get latest templates release info")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		in.Logger.Errorw("failed to get release info - bad status",
+			"url", releaseURL,
+			"status", resp.StatusCode,
+		)
+		in.Response.ServerErrorMessage(g, fmt.Sprintf("Failed to get release info: HTTP %d", resp.StatusCode))
+		return
+	}
+
+	// parse release response
+	var release struct {
+		Assets []struct {
+			BrowserDownloadURL string `json:"browser_download_url"`
+			Name               string `json:"name"`
+		} `json:"assets"`
+	}
+
+	releaseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		in.Logger.Errorw("failed to read release response",
+			"error", err,
+		)
+		in.Response.ServerErrorMessage(g, "Failed to read release info")
+		return
+	}
+
+	if err := json.Unmarshal(releaseBody, &release); err != nil {
+		in.Logger.Errorw("failed to parse release response",
+			"error", err,
+		)
+		in.Response.ServerErrorMessage(g, "Failed to parse release info")
+		return
+	}
+
+	if len(release.Assets) == 0 {
+		in.Logger.Error("no assets found in latest release")
+		in.Response.ServerErrorMessage(g, "No template assets found in latest release")
+		return
+	}
+
+	// use the first asset (should be the templates zip)
+	templatesURL := release.Assets[0].BrowserDownloadURL
+	in.Logger.Infow("downloading templates from latest release",
+		"url", templatesURL,
+		"asset", release.Assets[0].Name,
+	)
+
+	// download the templates
+	resp2, err := client.Get(templatesURL)
+	if err != nil {
+		in.Logger.Errorw("failed to download templates",
+			"url", templatesURL,
+			"error", err,
+		)
+		in.Response.ServerErrorMessage(g, "Failed to download templates from GitHub")
+		return
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		in.Logger.Errorw("failed to download templates - bad status",
+			"url", templatesURL,
+			"status", resp2.StatusCode,
+		)
+		in.Response.ServerErrorMessage(g, fmt.Sprintf("Failed to download templates: HTTP %d", resp2.StatusCode))
+		return
+	}
+
+	// read the response body
+	body, err := io.ReadAll(resp2.Body)
+	if err != nil {
+		in.Logger.Errorw("failed to read templates response",
+			"error", err,
+		)
+		in.Response.ServerErrorMessage(g, "Failed to read templates download")
+		return
+	}
+
+	// import the templates from raw bytes (for global use, not company-specific)
+	summary, err := in.ImportService.ImportFromBytes(g, session, body, false, nil)
+	if err != nil {
+		in.Logger.Errorw("failed to import templates",
+			"error", err,
+		)
+		in.Response.ServerErrorMessage(g, "Failed to import templates")
+		return
+	}
+
+	in.Logger.Infow("successfully installed templates",
+		"assetsCreated", summary.AssetsCreated,
+		"pagesCreated", summary.PagesCreated,
+		"emailsCreated", summary.EmailsCreated,
+	)
+
+	in.Response.OK(g, summary)
 }

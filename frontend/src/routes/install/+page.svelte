@@ -19,7 +19,7 @@
 	const appStateService = AppStateService.instance;
 
 	// installation steps - will be updated based on edition
-	let steps = [{ name: 'Profile' }, { name: 'Complete' }];
+	let steps = [{ name: 'Profile' }, { name: 'Templates' }, { name: 'Complete' }];
 
 	let currentStep = 1;
 	let formError = '';
@@ -33,6 +33,10 @@
 		password: '',
 		repeatPassword: ''
 	};
+
+	// templates step
+	let installTemplates = false;
+	let templatesError = '';
 
 	// Removed edition detection - single unified installation
 
@@ -86,7 +90,10 @@
 			case 1:
 				return validateProfile();
 			case 2:
-				// Step 2 is always Complete now - no validation needed
+				// Step 2 is templates - no validation needed
+				return true;
+			case 3:
+				// Step 3 is always Complete now - no validation needed
 				return true;
 			default:
 				return true;
@@ -132,6 +139,18 @@
 				return;
 			}
 
+			// Install templates if requested
+			if (installTemplates) {
+				const templatesRes = await api.application.installTemplates();
+				if (!templatesRes.success) {
+					templatesError = templatesRes.error || 'Failed to install templates';
+					console.warn('failed to install templates', templatesRes.error);
+					// Continue with installation even if templates fail
+				} else {
+					console.info('templates installed successfully');
+				}
+			}
+
 			appStateService.setIsInstalled();
 			// License configuration available in settings after installation
 			console.info('install: setup completed - refreshing');
@@ -173,7 +192,7 @@
 										? 'bg-blue-300 text-white'
 										: currentStep === index + 1
 											? 'bg-blue-600 text-white'
-											: 'bg-white text-gray-500 border-2 border-gray-300'
+											: 'bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-300 border-2 border-gray-300 dark:border-gray-600'
 								}
 							`}
 						>
@@ -197,7 +216,7 @@
 						<span
 							class={`
 								mt-2 text-sm font-medium text-center
-								${currentStep > index + 1 || currentStep === index + 1 ? 'text-blue-600' : 'text-gray-500'}
+								${currentStep > index + 1 || currentStep === index + 1 ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}
 							`}
 						>
 							{step.name}
@@ -208,7 +227,9 @@
 		</div>
 
 		<div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-			<div class="bg-white px-4 shadow sm:rounded-lg sm:px-10">
+			<div
+				class="bg-white dark:bg-gray-800 px-4 shadow sm:rounded-lg sm:px-10 transition-colors duration-200"
+			>
 				<FormGrid bind:bindTo={form}>
 					<FormColumns>
 						<FormColumn>
@@ -239,17 +260,64 @@
 										Confirm Password
 									</PasswordField>
 								</div>
+							{:else if currentStep === 2}
+								<div class="text-center py-8" id="step-2">
+									<h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
+										Example Templates
+									</h3>
+									<div class="space-y-4 text-sm text-gray-600 dark:text-gray-300">
+										<p>Install example templates?</p>
+										<p class="text-xs text-gray-500 dark:text-gray-400">
+											Includes phishing pages and emails from
+											<a
+												href="https://github.com/phishingclub/templates"
+												target="_blank"
+												rel="noopener noreferrer"
+												class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+											>
+												template builder
+											</a>
+										</p>
+									</div>
+									<div class="mt-6">
+										<label class="flex items-center justify-center gap-3">
+											<input
+												type="checkbox"
+												bind:checked={installTemplates}
+												class="w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
+											/>
+											<span class="text-sm font-medium text-gray-900 dark:text-gray-100">
+												Yes, install example templates
+											</span>
+										</label>
+									</div>
+									{#if templatesError}
+										<div
+											class="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md"
+										>
+											<p class="text-sm text-yellow-800 dark:text-yellow-200">
+												<strong>Note:</strong>
+												{templatesError}
+											</p>
+											<p class="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
+												You can manually import templates later from Settings.
+											</p>
+										</div>
+									{/if}
+								</div>
 							{:else}
 								<div class="text-center py-8" id="step-{currentStep}">
-									<h3 class="text-lg font-medium text-gray-900 mb-4">Welcome to Phishing Club</h3>
-									<div class="space-y-4 text-sm text-gray-600">
+									<h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
+										Welcome to Phishing Club
+									</h3>
+									<div class="space-y-4 text-sm text-gray-600 dark:text-gray-300">
 										<p>
 											Get started by reading our
 											<a
 												href="https://phishing.club/guide/introduction/"
 												target="_blank"
 												rel="noopener noreferrer"
-												class="text-blue-600 hover:text-blue-800 font-medium"
+												class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
 											>
 												user guide
 											</a>
@@ -258,7 +326,7 @@
 											Have questions, bugs or suggestions? <br /> Contact us at
 											<a
 												href="mailto:support@phishing.club"
-												class="text-blue-600 hover:text-blue-800 font-medium"
+												class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
 											>
 												support@phishing.club
 											</a>

@@ -77,7 +77,8 @@ const (
 	ROUTE_V1_OPTION     = "/api/v1/option"
 	ROUTE_V1_OPTION_GET = "/api/v1/option/:key"
 	// installation
-	ROUTE_V1_INSTALL = "/api/v1/install"
+	ROUTE_V1_INSTALL           = "/api/v1/install"
+	ROUTE_V1_INSTALL_TEMPLATES = "/api/v1/install/templates"
 	// domain
 	ROUTE_V1_DOMAIN        = "/api/v1/domain"
 	ROUTE_V1_DOMAIN_SUBSET = "/api/v1/domain/subset"
@@ -246,6 +247,7 @@ func setupRoutes(
 		POST(ROUTE_V1_USER_LOGOUT, controllers.User.Logout).
 		// install
 		POST(ROUTE_V1_INSTALL, middleware.SessionHandler, controllers.Installer.Install).
+		POST(ROUTE_V1_INSTALL_TEMPLATES, middleware.SessionHandler, controllers.Installer.InstallTemplates).
 		// user
 		GET(ROUTE_V1_USER, middleware.SessionHandler, controllers.User.GetAll).
 		GET(ROUTE_V1_USER_ID, middleware.SessionHandler, controllers.User.GetByID).

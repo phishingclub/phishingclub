@@ -89,6 +89,7 @@ func NewControllers(
 		OptionRepository:  repositories.Option,
 		PasswordHasher:    *utillities.PasswordHasher,
 		DB:                db,
+		ImportService:     services.Import,
 	}
 	health := &controller.Health{}
 	log := &controller.Log{

@@ -72,6 +72,7 @@ func InstallNonInteractive() error {
 	fmt.Println("'journalctl -u phishingclub.service -f' to see logs")
 	fmt.Println("'systemctl status phishingclub' to check status of the service")
 	fmt.Println("")
+
 	fmt.Println()
 
 	return nil
@@ -387,6 +388,12 @@ func createDirectories() error {
 	dirs := []string{
 		installDir,
 		filepath.Join(installDir, dataDir),
+		filepath.Join(installDir, dataDir, "assets"),
+		filepath.Join(installDir, dataDir, "assets", "shared"),
+		filepath.Join(installDir, dataDir, "attachments"),
+		filepath.Join(installDir, dataDir, "attachments", "shared"),
+		filepath.Join(installDir, dataDir, "certs"),
+		filepath.Join(installDir, dataDir, "certs", "own-managed"),
 	}
 
 	for _, dir := range dirs {
