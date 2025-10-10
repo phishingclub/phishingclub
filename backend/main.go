@@ -57,6 +57,7 @@ var (
 	env                         = flag.Bool("env", false, "Outputs the available environment variables")
 	flagRecovery                = flag.Bool("recover", false, "Used for interactive recovery of an account")
 	flagConfigOnly              = flag.Bool("config-only", false, "Run interactive installer and save config without installing")
+	flagDebug                   = flag.Bool("debug", false, "Force debug logging on db and app logger, ignores db settings on startup")
 )
 
 func main() {
@@ -152,7 +153,7 @@ func main() {
 		_ = logger.Sync()
 	}()
 	// set log levels
-	err = setLogLevels(db, atomicLogger)
+	err = setLogLevels(db, atomicLogger, *flagDebug)
 	if err != nil {
 		// this could fail due to db not being seeded
 		db.Logger = db.Logger.LogMode(gormLogger.Silent)
@@ -202,7 +203,7 @@ func main() {
 		logger.Fatalw("Failed to run migrations and seeding", "error", err)
 	}
 	// setup logging again so it is according to the database
-	err = setLogLevels(db, atomicLogger)
+	err = setLogLevels(db, atomicLogger, *flagDebug)
 	if err != nil {
 		// this could fail due to db not being seeded
 		db.Logger = db.Logger.LogMode(gormLogger.Silent)
@@ -591,7 +592,14 @@ func interactiveAccountRecovery(repositories *app.Repositories, utils *app.Utili
 	}
 }
 
-func setLogLevels(db *gorm.DB, atomicLogger *zap.AtomicLevel) error {
+func setLogLevels(db *gorm.DB, atomicLogger *zap.AtomicLevel, forceDebug bool) error {
+	// if debug flag is set, force debug logging and ignore db settings
+	if forceDebug {
+		db.Logger = db.Logger.LogMode(gormLogger.Info)
+		atomicLogger.SetLevel(zap.DebugLevel)
+		return nil
+	}
+
 	// set log levels from DB for logger and db logger
 	var dbLogLevel database.Option
 	res := db.
