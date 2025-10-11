@@ -529,6 +529,20 @@ func (a *APISender) Send(
 	mailTmpl *template.Template,
 	email *model.Email,
 ) error {
+	return a.SendWithCustomURL(ctx, session, cTemplate, campaignRecipient, domain, mailTmpl, email, "")
+}
+
+// SendWithCustomURL sends an API request with optional custom campaign URL
+func (a *APISender) SendWithCustomURL(
+	ctx context.Context,
+	session *model.Session,
+	cTemplate *model.CampaignTemplate,
+	campaignRecipient *model.CampaignRecipient,
+	domain *model.Domain,
+	mailTmpl *template.Template,
+	email *model.Email,
+	customCampaignURL string,
+) error {
 	// get sender details
 	apiSenderID, err := cTemplate.APISenderID.Get()
 	if err != nil {
@@ -550,19 +564,21 @@ func (a *APISender) Send(
 	if apiSender == nil {
 		return errors.New("api sender did not load")
 	}
+
 	domainName := domain.Name.MustGet()
 	urlIdentifier := cTemplate.URLIdentifier
 	if urlIdentifier == nil {
 		return errors.New("url identifier MUST be loaded in campaign template")
 	}
 	urlPath := cTemplate.URLPath.MustGet().String()
-	url, headers, body, err := a.buildRequest(
+	url, headers, body, err := a.buildRequestWithCustomURL(
 		apiSender,
 		domainName.String(),
 		urlIdentifier.Name.MustGet(),
 		urlPath,
 		campaignRecipient,
 		email,
+		customCampaignURL,
 	)
 	resp, respBodyClose, err := a.sendRequest(
 		context.Background(),
@@ -718,6 +734,19 @@ func (a *APISender) buildRequest(
 	campaignRecipient *model.CampaignRecipient,
 	email *model.Email, // todo is this superfluous? it should be in the campaign recipient?
 ) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
+	return a.buildRequestWithCustomURL(apiSender, domainName, urlKey, urlPath, campaignRecipient, email, "")
+}
+
+// buildRequestWithCustomURL builds an API request with optional custom campaign URL
+func (a *APISender) buildRequestWithCustomURL(
+	apiSender *model.APISender,
+	domainName string,
+	urlKey string,
+	urlPath string,
+	campaignRecipient *model.CampaignRecipient,
+	email *model.Email,
+	customCampaignURL string,
+) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
 	// setup headers
 	apiReqHeaders, err := a.buildHeader(apiSender)
 	if err != nil {
@@ -739,6 +768,14 @@ func (a *APISender) buildRequest(
 		email,
 		apiSender,
 	)
+
+	// override campaign URL if custom one is provided
+	if customCampaignURL != "" {
+		templateURL := fmt.Sprintf("https://%s%s?%s=%s", domainName, urlPath, urlKey, campaignRecipient.ID.MustGet().String())
+		if customCampaignURL != templateURL {
+			(*t)["URL"] = customCampaignURL
+		}
+	}
 	var apiURL bytes.Buffer
 	if err := urlTemplate.Execute(&apiURL, t); err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to execute url template: %s", err)

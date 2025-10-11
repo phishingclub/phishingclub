@@ -675,7 +675,7 @@ func (s *Server) checkAndServePhishingPage(
 		return false, fmt.Errorf("failed to get campaign template: %s", err)
 	}
 	// check that the requesters IP is allow listed
-	ip := c.ClientIP()
+	ip := utils.ExtractClientIP(c.Request)
 	servedByIPFilter, err := s.checkIPFilter(c, ip, campaign, domain, &campaignID)
 	if err != nil {
 		return false, err
@@ -868,7 +868,7 @@ func (s *Server) checkAndServePhishingPage(
 		}
 		newEventID := uuid.New()
 		campaignID := campaign.ID.MustGet()
-		clientIP := vo.NewOptionalString64Must(c.ClientIP())
+		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 		submittedData := vo.NewEmptyOptionalString1MB()
 		if campaign.SaveSubmittedData.MustGet() {
@@ -1040,7 +1040,7 @@ func (s *Server) checkAndServePhishingPage(
 			eventName = data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED
 		}
 		eventID := cache.EventIDByName[eventName]
-		clientIP := vo.NewOptionalString64Must(c.ClientIP())
+		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 		var visitEvent *model.CampaignEvent
 		if !campaign.IsAnonymous.MustGet() {
@@ -1262,7 +1262,7 @@ func (s *Server) checkAndServePhishingPage(
 		eventName = data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED
 	}
 	eventID := cache.EventIDByName[eventName]
-	clientIP := vo.NewOptionalString64Must(c.ClientIP())
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 	var visitEvent *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {

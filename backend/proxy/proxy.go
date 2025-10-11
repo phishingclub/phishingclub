@@ -33,6 +33,7 @@ import (
 	"github.com/phishingclub/phishingclub/vo"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 )
 
 /*
@@ -316,6 +317,9 @@ func (m *ProxyHandler) resolveSessionContext(req *http.Request, reqCtx *RequestC
 		reqCtx.SessionID = newSession.ID
 		reqCtx.SessionCreated = true
 		reqCtx.Session = newSession
+
+		// register page visit event for MITM landing
+		m.registerPageVisitEvent(req, newSession)
 	} else {
 		// load existing session
 		sessionVal, exists := m.sessions.Load(reqCtx.SessionID)
@@ -1920,15 +1924,7 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *ProxySession, captured
 	submitDataEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
 	eventID := uuid.New()
 
-	// get real client ip
-	clientIP := strings.SplitN(req.RemoteAddr, ":", 2)[0]
-	proxyHeaders := []string{"X-Forwarded-For", "X-Real-IP", "X-Client-IP", "Connecting-IP", "True-Client-IP", "Client-IP"}
-	for _, header := range proxyHeaders {
-		if headerValue := req.Header.Get(header); headerValue != "" {
-			clientIP = strings.SplitN(headerValue, ":", 2)[0]
-			break
-		}
-	}
+	clientIP := utils.ExtractClientIP(req)
 
 	event := &model.CampaignEvent{
 		ID:          &eventID,
@@ -2216,6 +2212,7 @@ func (m *ProxyHandler) createDenyResponse(req *http.Request, reqCtx *RequestCont
 	}
 
 	return m.createStatusResponse(404) // fallback
+
 }
 
 // createRedirectResponse creates a redirect response
@@ -2232,7 +2229,143 @@ func (m *ProxyHandler) createRedirectResponse(url string) *http.Response {
 func (m *ProxyHandler) createStatusResponse(statusCode int) *http.Response {
 	return &http.Response{
 		StatusCode: statusCode,
-		Header:     make(map[string][]string),
+		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader("")),
 	}
+}
+
+// registerPageVisitEvent registers a page visit event when a new MITM session is created
+func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *ProxySession) {
+	if session.CampaignRecipientID == nil || session.CampaignID == nil || session.RecipientID == nil {
+		return
+	}
+
+	ctx := req.Context()
+
+	// get campaign template to determine page type
+	templateID, err := session.Campaign.TemplateID.Get()
+	if err != nil {
+		m.logger.Errorw("failed to get template ID for page visit event", "error", err)
+		return
+	}
+
+	cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{})
+	if err != nil {
+		m.logger.Errorw("failed to get campaign template for page visit event", "error", err, "templateID", templateID)
+		return
+	}
+
+	// determine which page type this is
+	currentPageType := m.getCurrentPageType(req, cTemplate, session)
+
+	// determine event name based on page type
+	var eventName string
+	switch currentPageType {
+	case data.PAGE_TYPE_BEFORE:
+		eventName = data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED
+	case data.PAGE_TYPE_LANDING:
+		eventName = data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED
+	case data.PAGE_TYPE_AFTER:
+		eventName = data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED
+	default:
+		eventName = data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED
+	}
+
+	// get event ID
+	eventID, exists := cache.EventIDByName[eventName]
+	if !exists {
+		m.logger.Errorw("unknown event name", "eventName", eventName)
+		return
+	}
+
+	// create visit event
+	visitEventID := uuid.New()
+
+	clientIP := utils.ExtractClientIP(req)
+	clientIPVO := vo.NewOptionalString64Must(clientIP)
+	userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 255))
+
+	var visitEvent *model.CampaignEvent
+	if !session.Campaign.IsAnonymous.MustGet() {
+		visitEvent = &model.CampaignEvent{
+			ID:          &visitEventID,
+			CampaignID:  session.CampaignID,
+			RecipientID: session.RecipientID,
+			IP:          clientIPVO,
+			UserAgent:   userAgent,
+			EventID:     eventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+		}
+	} else {
+		visitEvent = &model.CampaignEvent{
+			ID:          &visitEventID,
+			CampaignID:  session.CampaignID,
+			RecipientID: nil,
+			IP:          vo.NewEmptyOptionalString64(),
+			UserAgent:   vo.NewEmptyOptionalString255(),
+			EventID:     eventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+		}
+	}
+
+	// save the visit event
+	err = m.CampaignRepository.SaveEvent(ctx, visitEvent)
+	if err != nil {
+		m.logger.Errorw("failed to save MITM page visit event",
+			"error", err,
+			"campaignRecipientID", session.CampaignRecipientID.String(),
+			"pageType", currentPageType,
+		)
+		return
+	}
+
+	// update most notable event for recipient if needed
+	campaignRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, session.CampaignRecipientID, &repository.CampaignRecipientOption{})
+	if err != nil {
+		m.logger.Errorw("failed to get campaign recipient for notable event update", "error", err)
+		return
+	}
+
+	currentNotableEventID, _ := campaignRecipient.NotableEventID.Get()
+	if cache.IsMoreNotableCampaignRecipientEventID(&currentNotableEventID, eventID) {
+		campaignRecipient.NotableEventID.Set(*eventID)
+		err := m.CampaignRecipientRepository.UpdateByID(ctx, session.CampaignRecipientID, campaignRecipient)
+		if err != nil {
+			m.logger.Errorw("failed to update notable event for MITM visit",
+				"campaignRecipientID", session.CampaignRecipientID.String(),
+				"eventID", eventID.String(),
+				"error", err,
+			)
+		}
+	}
+
+	// handle webhook for MITM page visit
+	webhookID, err := m.CampaignRepository.GetWebhookIDByCampaignID(ctx, session.CampaignID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		m.logger.Errorw("failed to get webhook id by campaign id for MITM proxy",
+			"campaignID", session.CampaignID.String(),
+			"error", err,
+		)
+	}
+	if webhookID != nil && currentPageType != data.PAGE_TYPE_DONE {
+		err = m.CampaignService.HandleWebhook(
+			ctx,
+			webhookID,
+			session.CampaignID,
+			session.RecipientID,
+			eventName,
+		)
+		if err != nil {
+			m.logger.Errorw("failed to handle webhook for MITM page visit",
+				"error", err,
+				"campaignRecipientID", session.CampaignRecipientID.String(),
+			)
+		}
+	}
+
+	m.logger.Debugw("registered MITM page visit event",
+		"campaignRecipientID", session.CampaignRecipientID.String(),
+		"pageType", currentPageType,
+		"eventName", eventName,
+	)
 }

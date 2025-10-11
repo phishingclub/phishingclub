@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	go_errors "github.com/go-errors/errors"
+	"gopkg.in/yaml.v3"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -28,6 +30,7 @@ import (
 	"github.com/phishingclub/phishingclub/log"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
+	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/validate"
 	"github.com/phishingclub/phishingclub/vo"
 	"github.com/wneessen/go-mail"
@@ -1105,7 +1108,7 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 			Data:        vo.NewOptionalString1MBMust(""),
 		}
 	} else {
-		ip := vo.NewOptionalString64Must(ctx.ClientIP())
+		ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request))
 		ua := ctx.Request.UserAgent()
 		if len(ua) > 255 {
 			ua = strings.TrimSpace(ua[:255])
@@ -1601,9 +1604,11 @@ func (c *Campaign) sendCampaignMessages(
 		session,
 		&templateID,
 		&repository.CampaignTemplateOption{
-			WithDomain:            true,
-			WithSMTPConfiguration: true,
-			WithIdentifier:        true,
+			WithDomain:             true,
+			WithSMTPConfiguration:  true,
+			WithIdentifier:         true,
+			WithBeforeLandingProxy: true,
+			WithLandingProxy:       true,
 		},
 	)
 	if err != nil {
@@ -1741,7 +1746,16 @@ func (c *Campaign) sendCampaignMessages(
 					fmt.Errorf("failed to update last attempted at: %s \nThis is critical for sending, aborting...", err),
 				)
 			}
-			err = c.APISenderService.Send(
+			// generate custom campaign URL if first page is MITM
+			recipientID := campaignRecipient.ID.MustGet()
+			customCampaignURL, urlErr := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+			if urlErr != nil {
+				c.Logger.Errorw("failed to get campaign url for API sender", "error", urlErr)
+				customCampaignURL = ""
+			}
+
+			// send via API with custom URL (domain and template stay the same for assets)
+			err = c.APISenderService.SendWithCustomURL(
 				ctx,
 				session,
 				cTemplate,
@@ -1749,6 +1763,7 @@ func (c *Campaign) sendCampaignMessages(
 				domain,
 				mailTmpl,
 				email,
+				customCampaignURL,
 			)
 			if err != nil {
 				c.Logger.Errorw("failed to send message via. API", "error", err)
@@ -1945,17 +1960,28 @@ func (c *Campaign) sendCampaignMessages(
 			}
 		}
 		m.Subject(email.MailHeaderSubject.MustGet().String())
-		domainName, err := domain.Name.Get()
-		if err != nil {
-			c.Logger.Errorw("failed to get domain name", "error", err)
-			return errs.Wrap(err)
-		}
 		urlIdentifier := cTemplate.URLIdentifier
 		if urlIdentifier == nil {
 			c.Logger.Error("url identifier is MUST be loaded for the campaign template")
 			return fmt.Errorf("url identifier is MUST be loaded for the campaign template")
 		}
+
+		// get template domain for assets and tracking pixel
+		domainName, err := domain.Name.Get()
+		if err != nil {
+			c.Logger.Errorw("failed to get domain name", "error", err)
+			return errs.Wrap(err)
+		}
 		urlPath := cTemplate.URLPath.MustGet().String()
+
+		// generate custom campaign URL if first page is MITM
+		recipientID := campaignRecipient.ID.MustGet()
+		customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+		if err != nil {
+			c.Logger.Errorw("failed to get campaign url", "error", err)
+			return errs.Wrap(err)
+		}
+
 		t := c.TemplateService.CreateMail(
 			domainName.String(),
 			urlIdentifier.Name.MustGet(),
@@ -1964,6 +1990,12 @@ func (c *Campaign) sendCampaignMessages(
 			email,
 			nil,
 		)
+
+		// override campaign URL if it's different from template domain URL
+		templateURL := fmt.Sprintf("https://%s%s?%s=%s", domainName.String(), urlPath, urlIdentifier.Name.MustGet(), recipientID.String())
+		if customCampaignURL != templateURL {
+			(*t)["URL"] = customCampaignURL
+		}
 		var bodyBuffer bytes.Buffer
 		err = mailTmpl.Execute(&bodyBuffer, t)
 		if err != nil {
@@ -2004,13 +2036,22 @@ func (c *Campaign) sendCampaignMessages(
 				attachmentAsEmail.Content = nullable.NewNullableWithValue(
 					*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 				)
-				attachmentStr, err := c.TemplateService.CreateMailBody(
+				// generate custom campaign URL for attachment
+				recipientID := campaignRecipient.ID.MustGet()
+				customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+				if err != nil {
+					c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
+					return errs.Wrap(err)
+				}
+
+				attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURL(
 					urlIdentifier.Name.MustGet(),
 					urlPath,
 					domain,
 					campaignRecipient,
 					&attachmentAsEmail,
 					nil,
+					customCampaignURL,
 				)
 				if err != nil {
 					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
@@ -2589,7 +2630,9 @@ func (c *Campaign) GetCampaignEmailBody(
 		session,
 		&templateID,
 		&repository.CampaignTemplateOption{
-			WithIdentifier: true,
+			WithIdentifier:         true,
+			WithBeforeLandingProxy: true,
+			WithLandingProxy:       true,
 		},
 	)
 	emailID, err := cTemplate.EmailID.Get()
@@ -2617,9 +2660,15 @@ func (c *Campaign) GetCampaignEmailBody(
 		c.Logger.Errorw("failed to get message by id", "error", err)
 		return "", errs.Wrap(err)
 	}
+	urlIdentifier := cTemplate.URLIdentifier
+	if urlIdentifier == nil {
+		return "", errors.New("url identifier is nil")
+	}
+
+	// get template domain for assets and tracking pixel
 	domainID, err := cTemplate.DomainID.Get()
 	if err != nil {
-		c.Logger.Infow("failed domain from template - template ID: %s", templateID)
+		c.Logger.Infow("failed domain from template - template ID", "templateID", templateID)
 		return "", errs.NewValidationError(
 			errors.New("Campaign template has no domain"),
 		)
@@ -2634,24 +2683,30 @@ func (c *Campaign) GetCampaignEmailBody(
 		c.Logger.Errorw("failed to get domain by id", "error", err)
 		return "", errs.Wrap(err)
 	}
-	urlIdentifier := cTemplate.URLIdentifier
-	if urlIdentifier == nil {
-		return "", errors.New("url identifier is nil")
-	}
 	urlPath := cTemplate.URLPath.MustGet().String()
 
+	// generate custom campaign URL if first page is MITM
+	customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, campaignRecipientID)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign url", "error", err)
+		return "", errs.Wrap(err)
+	}
+
 	// no audit on read
-	return c.TemplateService.CreateMailBody(
+	return c.TemplateService.CreateMailBodyWithCustomURL(
 		urlIdentifier.Name.MustGet(),
 		urlPath,
 		domain,
 		campaignRecipient,
 		email,
 		nil,
+		customCampaignURL,
 	)
 }
 
-// GetLandingPageURLByCampaignRecipientID returns the URL for a campaign recipient
+// GetLandingPageURLByCampaignRecipientID generates the lure URL for a campaign recipient.
+// if the first page in the campaign flow is a mitm proxy, the url goes directly to the
+// mitm domain instead of redirecting through the template domain.
 func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 	ctx context.Context,
 	session *model.Session,
@@ -2701,29 +2756,137 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 			WithIdentifier: true,
 		},
 	)
-	domainID, err := cTemplate.DomainID.Get()
-	if err != nil {
-		c.Logger.Infow("failed email from template - template ID", "templateID", templateID)
-		return "", errs.NewValidationError(
-			errors.New("Campaign template has no email"),
-		)
-	}
-	domain, err := c.DomainService.GetByID(
-		ctx,
-		session,
-		&domainID,
-		&repository.DomainOption{},
-	)
-	if err != nil {
-		c.Logger.Errorw("failed to get domain by id", err)
-		return "", errs.Wrap(err)
-	}
-	urlPath := cTemplate.URLPath.MustGet().String()
-	baseURL := "https://" + domain.Name.MustGet().String()
+	// determine if we should use mitm domain for first page
+	var baseURL string
+	var urlPath string
 	idIdentifier := cTemplate.URLIdentifier.Name.MustGet()
-	url := fmt.Sprintf("%s%s?%s=%s", baseURL, urlPath, idIdentifier, campaignRecipientID.String())
+
+	// check if first page is a mitm proxy
+	firstPageProxy := c.getFirstPageProxy(cTemplate)
+	if firstPageProxy != nil {
+		// get the phishing domain for this proxy
+		phishingDomain, err := c.getPhishingDomainForProxy(ctx, firstPageProxy)
+		if err != nil {
+			c.Logger.Errorw("failed to get phishing domain for first page proxy", "error", err)
+			// fallback to template domain
+			firstPageProxy = nil
+		} else {
+			// use phishing domain directly
+			startURL, err := firstPageProxy.StartURL.Get()
+			if err != nil {
+				c.Logger.Errorw("failed to get start url from first page proxy", "error", err)
+				return "", errs.Wrap(err)
+			}
+			parsedStartURL, err := url.Parse(startURL.String())
+			if err != nil {
+				c.Logger.Errorw("failed to parse start url from first page proxy", "error", err)
+				return "", errs.Wrap(err)
+			}
+			baseURL = "https://" + phishingDomain
+			urlPath = parsedStartURL.Path
+		}
+	}
+
+	if firstPageProxy == nil {
+		// use template domain (current behavior)
+		domainID, err := cTemplate.DomainID.Get()
+		if err != nil {
+			c.Logger.Infow("failed email from template - template ID", "templateID", templateID)
+			return "", errs.NewValidationError(
+				errors.New("Campaign template has no email"),
+			)
+		}
+		domain, err := c.DomainService.GetByID(
+			ctx,
+			session,
+			&domainID,
+			&repository.DomainOption{},
+		)
+		if err != nil {
+			c.Logger.Errorw("failed to get domain by id", err)
+			return "", errs.Wrap(err)
+		}
+		urlPath = cTemplate.URLPath.MustGet().String()
+		baseURL = "https://" + domain.Name.MustGet().String()
+	}
+
+	// build final url
+	separator := "?"
+	if strings.Contains(baseURL, "?") {
+		separator = "&"
+	}
+	url := fmt.Sprintf("%s%s%s%s=%s", baseURL, urlPath, separator, idIdentifier, campaignRecipientID.String())
 	// no audit on read
 	return url, nil
+}
+
+// getFirstPageProxy returns the proxy for the first page in the campaign flow
+// returns nil if the first page is not a proxy
+func (c *Campaign) getFirstPageProxy(template *model.CampaignTemplate) *model.Proxy {
+	if template.BeforeLandingPageID != nil {
+		return nil
+	}
+	if template.BeforeLandingProxyID != nil {
+		return template.BeforeLandingProxy
+	}
+	if template.LandingPageID != nil {
+		return nil
+	}
+	if template.LandingProxyID != nil {
+		return template.LandingProxy
+	}
+	if template.AfterLandingPageID != nil {
+		return nil
+	}
+	if template.AfterLandingProxyID != nil {
+		return template.AfterLandingProxy
+	}
+	return nil
+}
+
+// getPhishingDomainForProxy finds the phishing domain that maps to the proxy's start url
+func (c *Campaign) getPhishingDomainForProxy(ctx context.Context, proxy *model.Proxy) (string, error) {
+	startURL, err := proxy.StartURL.Get()
+	if err != nil {
+		return "", fmt.Errorf("failed to get start url from proxy: %w", err)
+	}
+
+	proxyConfig, err := proxy.ProxyConfig.Get()
+	if err != nil {
+		return "", fmt.Errorf("failed to get proxy config: %w", err)
+	}
+
+	// parse the proxy configuration to find domain mappings
+	var rawConfig map[string]interface{}
+	err = yaml.Unmarshal([]byte(proxyConfig.String()), &rawConfig)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse proxy config yaml: %w", err)
+	}
+
+	// parse the start URL to get the target domain
+	parsedStartURL, err := url.Parse(startURL.String())
+	if err != nil {
+		return "", fmt.Errorf("failed to parse start url: %w", err)
+	}
+	startDomain := parsedStartURL.Host
+
+	// find the phishing domain mapping for the start URL domain
+	for originalHost, domainData := range rawConfig {
+		if originalHost == "proxy" || originalHost == "global" {
+			continue
+		}
+		if originalHost == startDomain {
+			if domainMap, ok := domainData.(map[string]interface{}); ok {
+				if to, exists := domainMap["to"]; exists {
+					if toStr, ok := to.(string); ok {
+						return toStr, nil
+					}
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no phishing domain mapping found for start url domain: %s", startDomain)
 }
 
 // SetSentAtByCampaignRecipientID sets the sent at time for a recipient
@@ -3086,9 +3249,11 @@ func (c *Campaign) sendSingleCampaignMessage(
 		session,
 		&templateID,
 		&repository.CampaignTemplateOption{
-			WithDomain:            true,
-			WithSMTPConfiguration: true,
-			WithIdentifier:        true,
+			WithDomain:             true,
+			WithSMTPConfiguration:  true,
+			WithIdentifier:         true,
+			WithBeforeLandingProxy: true,
+			WithLandingProxy:       true,
 		},
 	)
 	if err != nil {
@@ -3152,8 +3317,16 @@ func (c *Campaign) sendSingleCampaignMessage(
 	}
 
 	if isAPISenderCampaign {
-		// send via API
-		err = c.APISenderService.Send(
+		// generate custom campaign URL if first page is MITM
+		recipientID := campaignRecipient.ID.MustGet()
+		customCampaignURL, urlErr := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+		if urlErr != nil {
+			c.Logger.Errorw("failed to get campaign url for API sender", "error", urlErr)
+			customCampaignURL = ""
+		}
+
+		// send via API with custom URL (domain and template stay the same for assets)
+		err = c.APISenderService.SendWithCustomURL(
 			ctx,
 			session,
 			cTemplate,
@@ -3161,6 +3334,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 			domain,
 			mailTmpl,
 			email,
+			customCampaignURL,
 		)
 	} else {
 		// send via SMTP
@@ -3291,17 +3465,26 @@ func (c *Campaign) sendSingleEmailSMTP(
 	m.Subject(email.MailHeaderSubject.MustGet().String())
 
 	// setup template variables
-	domainName, err := domain.Name.Get()
-	if err != nil {
-		return errs.Wrap(err)
-	}
-
 	urlIdentifier := cTemplate.URLIdentifier
 	if urlIdentifier == nil {
 		return errors.New("url identifier must be loaded for the campaign template")
 	}
 
+	// get template domain for assets and tracking pixel
+	domainName, err := domain.Name.Get()
+	if err != nil {
+		return errs.Wrap(err)
+	}
 	urlPath := cTemplate.URLPath.MustGet().String()
+
+	// generate custom campaign URL if first page is MITM
+	recipientID := campaignRecipient.ID.MustGet()
+	customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign url", "error", err)
+		return errs.Wrap(err)
+	}
+
 	t := c.TemplateService.CreateMail(
 		domainName.String(),
 		urlIdentifier.Name.MustGet(),
@@ -3310,6 +3493,12 @@ func (c *Campaign) sendSingleEmailSMTP(
 		email,
 		nil,
 	)
+
+	// override campaign URL if it's different from template domain URL
+	templateURL := fmt.Sprintf("https://%s%s?%s=%s", domainName.String(), urlPath, urlIdentifier.Name.MustGet(), recipientID.String())
+	if customCampaignURL != templateURL {
+		(*t)["URL"] = customCampaignURL
+	}
 
 	var bodyBuffer bytes.Buffer
 	err = mailTmpl.Execute(&bodyBuffer, t)
@@ -3351,13 +3540,22 @@ func (c *Campaign) sendSingleEmailSMTP(
 			attachmentAsEmail.Content = nullable.NewNullableWithValue(
 				*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 			)
-			attachmentStr, err := c.TemplateService.CreateMailBody(
+			// generate custom campaign URL for attachment
+			recipientID := campaignRecipient.ID.MustGet()
+			customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+			if err != nil {
+				c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
+				return errs.Wrap(err)
+			}
+
+			attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURL(
 				urlIdentifier.Name.MustGet(),
 				urlPath,
 				domain,
 				campaignRecipient,
 				&attachmentAsEmail,
 				nil,
+				customCampaignURL,
 			)
 			if err != nil {
 				return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))

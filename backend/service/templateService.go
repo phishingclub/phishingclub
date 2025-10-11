@@ -209,6 +209,27 @@ func (t *Template) CreateMailBody(
 	email *model.Email,
 	apiSender *model.APISender, // can be nil
 ) (string, error) {
+	return t.CreateMailBodyWithCustomURL(
+		urlIdentifier,
+		urlPath,
+		domain,
+		campaignRecipient,
+		email,
+		apiSender,
+		"", // empty customURL means use template domain
+	)
+}
+
+// CreateMailBodyWithCustomURL returns a rendered mail body to string with optional custom campaign URL
+func (t *Template) CreateMailBodyWithCustomURL(
+	urlIdentifier string,
+	urlPath string,
+	domain *model.Domain,
+	campaignRecipient *model.CampaignRecipient,
+	email *model.Email,
+	apiSender *model.APISender, // can be nil
+	customCampaignURL string, // if provided, overrides the default campaign URL
+) (string, error) {
 	mailData := t.CreateMail(
 		domain.Name.MustGet().String(),
 		urlIdentifier,
@@ -217,6 +238,11 @@ func (t *Template) CreateMailBody(
 		email,
 		apiSender,
 	)
+
+	// override campaign URL if custom one is provided
+	if customCampaignURL != "" {
+		(*mailData)["URL"] = customCampaignURL
+	}
 	mailContentTemplate := template.New("mailContent")
 	mailContentTemplate = mailContentTemplate.Funcs(TemplateFuncs())
 	content, err := email.Content.Get()
