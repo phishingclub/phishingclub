@@ -8,7 +8,6 @@ The self-hosted phishing framework for penetration testing and security awarenes
 
 ![Phishing Club Dashboard](https://phishing.club/img/dashboard.png)
 
-
 ## Quick start
 
 ⚡ For systemd-enabled distributions, installation is quick and easy
@@ -38,12 +37,6 @@ For a manual step by step guide or more in depth installation information - [cli
 - **Security features** - MFA, SSO, session management, IP filtering
 - **Operational tools** - In-app updates, CLI installer, config management
 
-### Resources & Learning
-- [**HTML QR Codes in Phishing Emails**](https://www.linkedin.com/feed/update/urn:li:activity:7327787503921336320/) - Example of using a QR code in a phishing email. The QR code is made from HTML with inline styling.
-- [**Setting up a domain with a website including a 404 page**](https://www.linkedin.com/feed/update/urn:li:activity:7328132395189067777) - Setup a domain with auto TLS with website content and 404 page.
-- [**Custom delivery with rich pasting into 3. party**](https://www.linkedin.com/feed/update/urn:li:activity:7329121654842830849) - Custom lure delivery via. rich pasting into 3. party providers like gmail.
-- [**Using multi-page phishing flow**](https://www.linkedin.com/feed/update/urn:li:activity:7329454798959808512) - Setting up a mutli page phishing flow. Great for both red team operations and simulations with training.
-- [**Delivery using external API instead of SMTP**](https://www.linkedin.com/feed/update/urn:li:activity:7329565689025900544) - Example of how to use the API delivery. Makes it possible to deliver anywhere.
 
 ### Students & Learning
 
@@ -221,7 +214,6 @@ For organizations that want to:
 - Use Phishing Club in commercial products without AGPL restrictions
 - Offer Phishing Club as a service without source code disclosure
 - Modify or modify the codebase without source code disclosure
-- Get prioritized support
 
 **Contact us for commercial licensing**: [license@phishing.club](mailto:license@phishing.club)
 
