@@ -1,6 +1,6 @@
 <script>
 	import { api } from '$lib/api/apiProxy.js';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
@@ -315,15 +315,43 @@
 		};
 	});
 
-	const nextStep = () => {
+	const nextStep = async () => {
 		if (validateCurrentStep()) {
 			currentStep = Math.min(currentStep + 1, campaignSteps.length);
 			modalError = '';
+			// reset tab focus after dom update - only for explicit step navigation
+			await tick();
+			// focus first element in current step
+			setTimeout(() => {
+				const currentStepContainer = document.querySelector(`#step-${currentStep}`);
+				if (currentStepContainer) {
+					const firstFocusable = currentStepContainer.querySelector(
+						'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+					);
+					if (firstFocusable && firstFocusable instanceof HTMLElement) {
+						firstFocusable.focus();
+					}
+				}
+			}, 0);
 		}
 	};
 
-	const previousStep = () => {
+	const previousStep = async () => {
 		currentStep = Math.max(currentStep - 1, 1);
+		// reset tab focus after dom update - only for explicit step navigation
+		await tick();
+		// focus first element in current step
+		setTimeout(() => {
+			const currentStepContainer = document.querySelector(`#step-${currentStep}`);
+			if (currentStepContainer) {
+				const firstFocusable = currentStepContainer.querySelector(
+					'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+				);
+				if (firstFocusable && firstFocusable instanceof HTMLElement) {
+					firstFocusable.focus();
+				}
+			}
+		}, 0);
 	};
 
 	const validateCurrentStep = () => {
@@ -1061,6 +1089,9 @@
 								: 'bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-300 border-2 border-gray-300 dark:border-gray-600'
 					}
         `}
+						role="tab"
+						aria-selected={currentStep === index + 1}
+						aria-label={`Step ${index + 1}: ${step.name}`}
 					>
 						{#if currentStep > index + 1}
 							<svg

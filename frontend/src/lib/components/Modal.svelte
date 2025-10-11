@@ -70,7 +70,24 @@
 		// If current element is not found (-1), try to find a related element
 		if (currentIndex === -1) {
 			// Check if the current element is inside a TextFieldSelect or similar component
-			const parentComponent = currentlyFocused?.closest('.relative');
+			const parentComponent = currentlyFocused?.closest('.textfield-select-container');
+			if (parentComponent) {
+				// Look for the input element within the same component
+				const inputInComponent = parentComponent.querySelector('input');
+				if (inputInComponent) {
+					const inputIndex = focusableElements.indexOf(inputInComponent);
+					if (inputIndex !== -1) {
+						// Use the input's position for navigation and continue tab flow
+						currentIndex = inputIndex;
+					}
+				}
+			}
+		}
+
+		// If we still can't find the element, handle it gracefully
+		if (currentIndex === -1) {
+			// Check if the current element is inside a TextFieldSelect or similar component
+			const parentComponent = currentlyFocused?.closest('.textfield-select-container');
 			if (parentComponent) {
 				// Look for the input element within the same component
 				const inputInComponent = parentComponent.querySelector('input');
@@ -141,23 +158,70 @@
 
 		const elements = modalElement.querySelectorAll(focusableSelectors.join(', '));
 		return Array.from(elements).filter((el) => {
-			// Exclude dropdown option buttons from TextFieldSelect components
+			// exclude dropdown option buttons from TextFieldSelect components
 			if (el.role === 'option' && el.closest('[role="listbox"]')) {
 				return false;
 			}
-			return el.offsetWidth > 0 && el.offsetHeight > 0 && !el.hasAttribute('hidden');
+
+			// check if element is truly visible (has dimensions and not hidden)
+			if (el.offsetWidth === 0 && el.offsetHeight === 0) {
+				return false;
+			}
+
+			// check for hidden attribute
+			if (el.hasAttribute('hidden')) {
+				return false;
+			}
+
+			// check computed styles for visibility
+			const style = window.getComputedStyle(el);
+			if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+				return false;
+			}
+
+			// check if any parent container is hidden (for multi-step forms)
+			let parent = el.parentElement;
+			while (parent && parent !== modalElement) {
+				const parentStyle = window.getComputedStyle(parent);
+				if (parentStyle.display === 'none' || parentStyle.visibility === 'hidden') {
+					return false;
+				}
+				parent = parent.parentElement;
+			}
+
+			return true;
 		});
 	};
 
 	const updateFocusableElements = () => {
 		focusableElements = getFocusableElements();
 
-		// Exclude the close button from being the first focusable element
+		// Reorder elements: form controls first, then navigation buttons, then close button
+		const formElements = [];
+		const navigationButtons = [];
 		const closeButton = modalElement?.querySelector('[data-close-button]');
-		if (closeButton && focusableElements.length > 1) {
-			focusableElements = focusableElements.filter((el) => el !== closeButton);
-			focusableElements.push(closeButton); // Add close button to the end
+
+		focusableElements.forEach((el) => {
+			if (el === closeButton) {
+				// close button goes last
+				return;
+			} else if (
+				el instanceof HTMLButtonElement &&
+				(el.textContent?.trim() === 'Next' || el.textContent?.trim() === 'Previous')
+			) {
+				navigationButtons.push(el);
+			} else {
+				// all other elements (form fields, form control buttons, etc.) go first
+				formElements.push(el);
+			}
+		});
+
+		// Rebuild focusable elements in desired order: form controls, then navigation, then close
+		focusableElements = [...formElements, ...navigationButtons];
+		if (closeButton) {
+			focusableElements.push(closeButton);
 		}
+
 		firstFocusableElement = focusableElements[0] || null;
 		lastFocusableElement = focusableElements[focusableElements.length - 1] || null;
 	};
@@ -186,20 +250,11 @@
 
 	// Exposed function to reset tab focus when modal content changes
 	const handleResetTabFocus = async () => {
-		// Only reset focus if no element is currently focused or if focus is outside modal
-		const currentFocused = document.activeElement;
-		const isInModal = modalElement?.contains(currentFocused);
-
 		// Check if a TextFieldSelect is currently selecting an option
 		const isTextFieldSelectActive = modalElement?.querySelector('[data-selecting="true"]');
 
 		await tick();
 		updateFocusableElements();
-
-		// Only focus first element if focus is not properly within the modal and no selection is happening
-		if (!isInModal && !isTextFieldSelectActive && firstFocusableElement) {
-			firstFocusableElement.focus();
-		}
 	};
 
 	// Call resetTabFocus when it changes

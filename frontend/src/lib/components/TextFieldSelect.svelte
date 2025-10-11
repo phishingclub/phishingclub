@@ -25,6 +25,7 @@
 	let showDropdown = false;
 	let inputElement;
 	let dropdownElement;
+	let justSelected = false;
 
 	// Simple function to filter options based on input
 	const filterOptions = (searchValue) => {
@@ -45,9 +46,13 @@
 	// Show dropdown when focused and there are options
 	const handleFocus = () => {
 		activeFormElement.set(id);
-		showDropdown = true;
-		hasTyped = false; // Reset typing flag to show all options
-		allOptions = [...optionsArray]; // Show all options on focus
+		// Don't open dropdown if we just selected something
+		if (!justSelected) {
+			showDropdown = true;
+			hasTyped = false; // Reset typing flag to show all options
+			allOptions = [...optionsArray]; // Show all options on focus
+		}
+		justSelected = false; // Reset the flag
 	};
 
 	// Handle input changes for filtering
@@ -63,7 +68,14 @@
 		value = option;
 		showDropdown = false;
 		hasTyped = false; // Reset typing flag after selection
+		justSelected = true; // Set flag to prevent dropdown reopening
 		onSelect(option);
+		// Focus the input field after selection without reopening dropdown
+		setTimeout(() => {
+			if (inputElement) {
+				inputElement.focus();
+			}
+		}, 0);
 	};
 
 	// Close dropdown

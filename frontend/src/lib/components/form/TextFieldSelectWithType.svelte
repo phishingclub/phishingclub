@@ -259,6 +259,33 @@
 		</div>
 	</label>
 	<div class="relative">
+		{#if !isFocused}
+			<div class="absolute left-1 top-1/2 transform -translate-y-1/2 flex bg-transparent z-10">
+				<button
+					type="button"
+					class="w-8 h-8 text-base transition-all duration-200 rounded-lg border flex items-center justify-center {type ===
+					'page'
+						? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+						: 'border-gray-200 dark:border-gray-600 bg-grayblue-light dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30'}"
+					on:click={() => handleTypeChange('page')}
+					title="Page"
+				>
+					📄
+				</button>
+				<button
+					type="button"
+					class="w-8 h-8 text-base transition-all duration-200 rounded-lg border flex items-center justify-center ml-0.5 {type ===
+					'proxy'
+						? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+						: 'border-gray-200 dark:border-gray-600 bg-grayblue-light dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30'}"
+					on:click={() => handleTypeChange('proxy')}
+					title="Proxy"
+				>
+					<ProxySvgIcon size="w-5 h-5" />
+				</button>
+			</div>
+		{/if}
+
 		<div
 			class="flex items-center relative"
 			class:w-28={size == 'small'}
@@ -289,34 +316,6 @@
 				placeholder={!hasValue && !showDropdown ? placeholder : ''}
 				{required}
 			/>
-
-			<!-- Type selector buttons inside the input on the left - hidden when focused -->
-			{#if !isFocused}
-				<div class="absolute left-1 top-1/2 transform -translate-y-1/2 flex bg-transparent">
-					<button
-						type="button"
-						class="w-8 h-8 text-base transition-all duration-200 rounded-lg border flex items-center justify-center {type ===
-						'page'
-							? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-							: 'border-gray-200 dark:border-gray-600 bg-grayblue-light dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30'}"
-						on:click={() => handleTypeChange('page')}
-						title="Page"
-					>
-						📄
-					</button>
-					<button
-						type="button"
-						class="w-8 h-8 text-base transition-all duration-200 rounded-lg border flex items-center justify-center ml-0.5 {type ===
-						'proxy'
-							? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-							: 'border-gray-200 dark:border-gray-600 bg-grayblue-light dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30'}"
-						on:click={() => handleTypeChange('proxy')}
-						title="Proxy"
-					>
-						<ProxySvgIcon size="w-5 h-5" />
-					</button>
-				</div>
-			{/if}
 
 			<!-- Search icon - visible when dropdown is open -->
 			{#if showDropdown}
