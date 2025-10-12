@@ -251,7 +251,7 @@
 							<span class="ml-3 truncate">{link.label}</span>
 						{:else}
 							<div
-								class="absolute left-14 rounded bg-gray-900 dark:bg-gray-800 dark:border-highlight-blue/40 text-white dark:text-highlight-blue px-2 py-1 ml-6 text-sm
+								class="absolute left-14 rounded bg-gray-900 dark:bg-gray-800 text-white dark:text-highlight-blue px-2 py-1 ml-6 text-sm
 	                                invisible opacity-0 -translate-x-3 group-hover:visible group-hover:opacity-100 group-hover:translate-x-0
 	                                transition-all duration-150 whitespace-nowrap z-50 shadow-lg border dark:border-highlight-blue/40"
 							>
