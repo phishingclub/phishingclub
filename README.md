@@ -6,7 +6,7 @@
 
 The self-hosted phishing framework for penetration testing and security awareness training.
 
-![Phishing Club Dashboard](https://phishing.club/img/dashboard.png)
+![Phishing Club Dashboard](https://phishing.club/img/dashboard-dark.png)
 
 ## Quick start
 
