@@ -130,9 +130,11 @@
 	let isCloseModalVisible = false;
 	let isAnonymizeModalVisible = false;
 	let isSendMessageModalVisible = false;
+	let isSetAsSentModalVisible = false;
 	let isStorageAceModalVisible = false;
 	let storedCookieData = '';
 	let sendMessageRecipient = null;
+	let setAsSentRecipient = null;
 	let lastPoll3399Nano = '';
 
 	// hooks
@@ -481,11 +483,15 @@
 		}
 	};
 
-	/** @param {string} campaignRecipientID */
-	const onClickSetEmailSent = async (campaignRecipientID) => {
+	/** @param {string} campaignRecipientID @param {Object} recipient */
+	const onClickSetEmailSent = (campaignRecipientID, recipient) => {
+		showSetAsSentModal(campaignRecipientID, recipient);
+	};
+
+	const onConfirmSetAsSent = async () => {
 		try {
 			showIsLoading();
-			const res = await api.campaign.setEmailSent(campaignRecipientID);
+			const res = await api.campaign.setEmailSent(setAsSentRecipient.id);
 			if (!res.success) {
 				throw res.error;
 			}
@@ -493,9 +499,12 @@
 			await setCampaign();
 			await getEvents();
 			await refreshCampaignRecipients();
+			closeSetAsSentModal();
+			return { success: true };
 		} catch (e) {
 			addToast('Failed to set email sent', 'Error');
 			console.error('failed to set email sent', e);
+			throw e;
 		} finally {
 			hideIsLoading();
 		}
@@ -514,6 +523,21 @@
 	const closeSendMessageModal = () => {
 		isSendMessageModalVisible = false;
 		sendMessageRecipient = null;
+	};
+
+	/** @param {string} campaignRecipientID @param {Object} recipient */
+	const showSetAsSentModal = (campaignRecipientID, recipient) => {
+		setAsSentRecipient = {
+			id: campaignRecipientID,
+			name: `${recipient.firstName || ''} ${recipient.lastName || ''}`.trim(),
+			email: recipient.email
+		};
+		isSetAsSentModalVisible = true;
+	};
+
+	const closeSetAsSentModal = () => {
+		isSetAsSentModalVisible = false;
+		setAsSentRecipient = null;
 	};
 
 	// helper function to get appropriate messaging based on sender type
@@ -539,9 +563,11 @@
 			await getEvents();
 			await refreshCampaignRecipients();
 			closeSendMessageModal();
+			return { success: true };
 		} catch (e) {
 			addToast(`Failed to send ${getMessageType()}`, 'Error');
 			console.error(`failed to send ${getMessageType()}`, e);
+			throw e;
 		} finally {
 			hideIsLoading();
 		}
@@ -550,6 +576,11 @@
 	// reactive statement to clean up send message modal state when it closes
 	$: if (!isSendMessageModalVisible && sendMessageRecipient) {
 		sendMessageRecipient = null;
+	}
+
+	// reactive statement to clean up set as sent modal state when it closes
+	$: if (!isSetAsSentModalVisible && setAsSentRecipient) {
+		setAsSentRecipient = null;
 	}
 
 	const showCloseCampaignModal = () => {
@@ -1654,7 +1685,7 @@
 									<TableDropDownButton
 										name="Set as sent"
 										title={recp.closedAt ? 'Campaign is closed' : ''}
-										on:click={() => onClickSetEmailSent(recp.id)}
+										on:click={() => onClickSetEmailSent(recp.id, recp.recipient)}
 										disabled={!!campaign.closedAt || recp.cancelledAt}
 									/>
 								{/if}
@@ -2056,6 +2087,33 @@
 						{/if}
 					</div>
 					<p class="text-sm text-gray-500">This action will immediately send the message.</p>
+				{/if}
+			{/if}
+		</div>
+	</Alert>
+
+	<Alert
+		headline="Set as Sent"
+		bind:visible={isSetAsSentModalVisible}
+		onConfirm={onConfirmSetAsSent}
+	>
+		<div>
+			{#if setAsSentRecipient}
+				{@const recipient = campaignRecipients.find((r) => r.id === setAsSentRecipient.id)}
+				{#if recipient}
+					<p class="mb-4">Are you sure you want to mark the campaign as sent for:</p>
+					<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded mb-4">
+						<p class="font-medium">{setAsSentRecipient.name}</p>
+						<p class="text-gray-600">{setAsSentRecipient.email}</p>
+						{#if recipient.sentAt}
+							<p class="text-sm text-amber-600 mt-1">
+								⚠️ Already marked as sent on {new Date(recipient.sentAt).toLocaleString()}
+							</p>
+						{/if}
+					</div>
+					<p class="text-sm text-gray-500">
+						This action will mark the message as sent without actually sending it.
+					</p>
 				{/if}
 			{/if}
 		</div>
