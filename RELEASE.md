@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.6.0] - 2025-10-12
+- Added debug flag
+- Option to install example templates on setup
+- Support for CTRL+s to save when updating email, page or domain without closing editing modal
+- Many UI updates
+- Set as sent now has a confirm modal
+- Improve tabbing in form modals
+- Fix if first page is a proxy, skip the campaign template domain
+
 ## [1.5.0] - 2025-10-08
 - Added access control rules for proxys
 - Completion help for proxys in editor
