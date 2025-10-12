@@ -2753,7 +2753,9 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 		session,
 		&templateID,
 		&repository.CampaignTemplateOption{
-			WithIdentifier: true,
+			WithIdentifier:         true,
+			WithBeforeLandingProxy: true,
+			WithLandingProxy:       true,
 		},
 	)
 	// determine if we should use mitm domain for first page
@@ -2823,22 +2825,22 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 // getFirstPageProxy returns the proxy for the first page in the campaign flow
 // returns nil if the first page is not a proxy
 func (c *Campaign) getFirstPageProxy(template *model.CampaignTemplate) *model.Proxy {
-	if template.BeforeLandingPageID != nil {
+	if template.BeforeLandingPageID.IsNull() != true {
 		return nil
 	}
-	if template.BeforeLandingProxyID != nil {
+	if template.BeforeLandingProxyID.IsNull() != true {
 		return template.BeforeLandingProxy
 	}
-	if template.LandingPageID != nil {
+	if template.LandingPageID.IsNull() != true {
 		return nil
 	}
-	if template.LandingProxyID != nil {
+	if template.LandingProxyID.IsNull() != true {
 		return template.LandingProxy
 	}
-	if template.AfterLandingPageID != nil {
+	if template.AfterLandingPageID.IsNull() != true {
 		return nil
 	}
-	if template.AfterLandingProxyID != nil {
+	if template.AfterLandingProxyID.IsNull() != true {
 		return template.AfterLandingProxy
 	}
 	return nil
