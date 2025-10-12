@@ -56,11 +56,11 @@
 		<div
 			bind:this={tableWrapper}
 			class="
-			border-2 border-gray-200 dark:border-gray-600 rounded-md px-4 py-4 overflow-x-auto bg-white dark:bg-gray-800 transition-colors duration-200
+			border-2 border-gray-200 dark:border-gray-700/60 rounded-md px-4 py-4 overflow-x-auto bg-white dark:bg-gray-900/80 transition-colors duration-200
 			{scrollBarClassesHorizontal}"
 		>
 			<table
-				class="w-full table-fixed bg-white dark:bg-gray-800 transition-colors duration-200"
+				class="w-full table-fixed bg-white dark:bg-gray-900/80 transition-colors duration-200"
 				class:animate-pulse={isGhost}
 			>
 				<TableHeader {isGhost} {columns} {sortable} {hasActions} {pagination} />

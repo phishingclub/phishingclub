@@ -39,7 +39,7 @@
 				setSearch();
 			}
 		}}
-		class="bg-grayblue-light dark:bg-gray-700 w-56 border text-gray-600 dark:text-gray-200 border-gray-300 dark:border-gray-600 pl-8 py-2 relative rounded-lg focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-blue-500 focus:border transition-colors duration-200 dark:placeholder-gray-400"
+		class="bg-grayblue-light dark:bg-gray-900/60 w-56 border text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-700/60 pl-8 py-2 relative rounded-lg focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border transition-colors duration-200 dark:placeholder-gray-500"
 		placeholder="Search"
 	/>
 </div>

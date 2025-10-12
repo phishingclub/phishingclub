@@ -160,7 +160,7 @@
 
 	<div
 		bind:this={menuRef}
-		class="absolute bg-white dark:bg-gray-800 drop-shadow-md dark:shadow-gray-900/50 border dark:border-gray-600 z-20 w-48 rounded-md overflow-y-scroll transition-colors duration-200 {scrollBarClassesVertical}"
+		class="absolute bg-white dark:bg-gray-900/90 drop-shadow-md dark:shadow-gray-900/50 border dark:border-gray-700/60 z-20 w-48 rounded-md overflow-y-scroll transition-colors duration-200 {scrollBarClassesVertical}"
 		class:hidden={!isMenuVisible}
 	>
 		<ul class="flex flex-col text-left">

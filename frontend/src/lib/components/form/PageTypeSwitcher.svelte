@@ -16,14 +16,14 @@
 	}
 </script>
 
-<div class="inline-flex bg-gray-100 dark:bg-gray-700 rounded p-0.5">
+<div class="inline-flex bg-gray-100 dark:bg-gray-800/60 rounded p-0.5">
 	{#each options as option}
 		<button
 			type="button"
 			class="w-6 h-6 text-xs rounded transition-colors duration-150 flex items-center justify-center {value ===
 			option.value
-				? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-				: 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'} {disabled
+				? 'bg-white dark:bg-gray-700/80 text-gray-900 dark:text-white shadow-sm'
+				: 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'} {disabled
 				? 'opacity-50 cursor-not-allowed'
 				: 'cursor-pointer'}"
 			on:click={() => handleChange(option.value)}

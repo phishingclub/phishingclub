@@ -17,7 +17,7 @@
 
 {#if disabled}
 	<button
-		class="w-full px py-1 text-slate-300 dark:text-gray-500 cursor-not-allowed text-left transition-colors duration-200"
+		class="w-full px py-1 text-slate-300 dark:text-gray-600 cursor-not-allowed text-left transition-colors duration-200"
 		{disabled}
 		{title}
 	>
@@ -25,7 +25,7 @@
 	</button>
 {:else}
 	<button
-		class="w-full px py-1 text-slate-600 dark:text-gray-300 hover:bg-highlight-blue dark:hover:bg-blue-600 hover:text-white cursor-pointer text-left transition-colors duration-200"
+		class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
 		on:click
 		on:keydown={handleKeydown}
 		{title}

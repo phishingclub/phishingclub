@@ -30,7 +30,7 @@
 							}
 						}}
 						transition:slide|global
-						class="flex items-center bg-pleasant-gray dark:bg-gray-700 text-gray-500 dark:text-gray-200 shadow-lg dark:shadow-gray-900/50 capitalize text-xl p-4 first:mt-0 mt-4 min-w-max rounded-md justify-self-center w-full transition-colors duration-200"
+						class="flex items-center bg-pleasant-gray dark:bg-gray-800/80 text-gray-500 dark:text-gray-300 shadow-lg dark:shadow-gray-900/50 capitalize text-xl p-4 first:mt-0 mt-4 min-w-max rounded-md justify-self-center w-full transition-colors duration-200"
 					>
 						<!-- <img class="w-9 mr-6" draggable="false" src={src1} alt="checkmark success" /> -->
 						<svg class="w-11 mr-6" viewBox="0 0 32.25 32.4">
@@ -60,7 +60,7 @@
 						}
 					}}
 					transition:slide|global
-					class="flex items-center bg-pleasant-gray dark:bg-gray-700 text-gray-500 dark:text-gray-200 shadow-lg dark:shadow-gray-900/50 capitalize text-xl p-4 first:mt-0 mt-4 min-w-max rounded-md justify-self-center w-full transition-colors duration-200"
+					class="flex items-center bg-pleasant-gray dark:bg-gray-800/80 text-gray-500 dark:text-gray-300 shadow-lg dark:shadow-gray-900/50 capitalize text-xl p-4 first:mt-0 mt-4 min-w-max rounded-md justify-self-center w-full transition-colors duration-200"
 				>
 					<!-- <img class="w-9 mr-6" draggable="false" src="/t-warning.svg" alt="checkmark warning" /> -->
 					<svg class="w-11 mr-6" viewBox="0 0 36.26 32.41">
@@ -101,7 +101,7 @@
 						}
 					}}
 					transition:slide|global
-					class="flex items-center bg-pleasant-gray dark:bg-gray-700 text-gray-500 dark:text-gray-200 shadow-lg dark:shadow-gray-900/50 capitalize text-xl p-4 first:mt-0 mt-4 min-w-max rounded-md justify-self-center w-full transition-colors duration-200"
+					class="flex items-center bg-pleasant-gray dark:bg-gray-800/80 text-gray-500 dark:text-gray-300 shadow-lg dark:shadow-gray-900/50 capitalize text-xl p-4 first:mt-0 mt-4 min-w-max rounded-md justify-self-center w-full transition-colors duration-200"
 				>
 					<!-- <img class="w-9 mr-6" draggable="false" src="/t-error.svg" alt="checkmark error" /> -->
 					<svg class="w-11 mr-6" viewBox="0 0 32.98 32.98">
@@ -143,7 +143,7 @@
 							removeToast(toast.id);
 						}
 					}}
-					class="flex items-center bg-pleasant-gray dark:bg-gray-700 text-gray-500 dark:text-gray-200 shadow-lg dark:shadow-gray-900/50 capitalize text-xl p-4 first:mt-0 mt-4 min-w-max rounded-md justify-self-center w-full transition-colors duration-200"
+					class="flex items-center bg-pleasant-gray dark:bg-gray-800/80 text-gray-500 dark:text-gray-300 shadow-lg dark:shadow-gray-900/50 capitalize text-xl p-4 first:mt-0 mt-4 min-w-max rounded-md justify-self-center w-full transition-colors duration-200"
 				>
 					<!-- <img class="w-9 mr-6" draggable="false" src="/t-info.svg" alt="checkmark info" /> -->
 					<svg class="w-11 mr-6" viewBox="0 0 32.79 32.79">

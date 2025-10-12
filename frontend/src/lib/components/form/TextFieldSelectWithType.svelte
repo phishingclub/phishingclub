@@ -240,7 +240,7 @@
 		<div class="flex items-center">
 			<p
 				id={labelId}
-				class="font-semibold text-slate-600 dark:text-gray-300 py-1 transition-colors duration-200"
+				class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
 			>
 				<slot />
 			</p>
@@ -251,9 +251,9 @@
 			{/if}
 			{#if optional === true}
 				<div
-					class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200"
+					class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200"
 				>
-					<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
+					<p class="text-slate-600 dark:text-gray-400 text-xs">optional</p>
 				</div>
 			{/if}
 		</div>
@@ -265,8 +265,8 @@
 					type="button"
 					class="w-8 h-8 text-base transition-all duration-200 rounded-lg border flex items-center justify-center {type ===
 					'page'
-						? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-						: 'border-gray-200 dark:border-gray-600 bg-grayblue-light dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30'}"
+						? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-800/40 text-green-700 dark:text-green-300'
+						: 'border-gray-200 dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-800/60 text-gray-700 dark:text-gray-300 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
 					on:click={() => handleTypeChange('page')}
 					title="Page"
 				>
@@ -276,8 +276,8 @@
 					type="button"
 					class="w-8 h-8 text-base transition-all duration-200 rounded-lg border flex items-center justify-center ml-0.5 {type ===
 					'proxy'
-						? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-						: 'border-gray-200 dark:border-gray-600 bg-grayblue-light dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:border-blue-300 dark:hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30'}"
+						? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-800/40 text-green-700 dark:text-green-300'
+						: 'border-gray-200 dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-800/60 text-gray-700 dark:text-gray-300 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
 					on:click={() => handleTypeChange('proxy')}
 					title="Proxy"
 				>
@@ -308,7 +308,7 @@
 				on:keydown={handleKeyDown}
 				on:click={handleFocus}
 				autocomplete="off"
-				class="w-full relative rounded-md py-2 pr-10 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-gray-500 focus:bg-gray-100 dark:focus:bg-gray-600 bg-grayblue-light dark:bg-gray-700 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
+				class="w-full relative rounded-md py-2 pr-10 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
 				class:pl-10={isFocused && showDropdown}
 				class:pl-20={!isFocused}
 				class:pl-4={isFocused && !showDropdown}
@@ -363,7 +363,7 @@
 					id={listboxId}
 					role="listbox"
 					aria-labelledby={labelId}
-					class="bg-gray-100 dark:bg-gray-700 list-none mt-4 z-[999] rounded-md min-w-fit shadow-md border border-gray-200 dark:border-gray-600 max-h-40 overflow-y-scroll transition-colors duration-200"
+					class="bg-gray-100 dark:bg-gray-900 list-none mt-4 z-[999] rounded-md min-w-fit shadow-md border border-gray-200 dark:border-gray-700/60 max-h-40 overflow-y-scroll transition-colors duration-200"
 				>
 					{#if allOptions.length}
 						{#each allOptions as option, index}
@@ -372,7 +372,7 @@
 									id="{listboxId}-option-{index}"
 									role="option"
 									aria-selected={value === option}
-									class="w-full text-left bg-slate-100 dark:bg-gray-700 rounded-md text-gray-600 dark:text-gray-200 hover:bg-grayblue-dark dark:hover:bg-gray-500 hover:text-white py-2 px-2 cursor-pointer focus:bg-grayblue-dark dark:focus:bg-gray-500 focus:text-white focus:outline-none transition-colors duration-200"
+									class="w-full text-left bg-slate-100 dark:bg-gray-900 rounded-md text-gray-600 dark:text-gray-300 hover:bg-grayblue-dark dark:hover:bg-highlight-blue/40 hover:text-white py-2 px-2 cursor-pointer focus:bg-grayblue-dark dark:focus:bg-highlight-blue/40 focus:text-white focus:outline-none transition-colors duration-200"
 									on:click={(e) => {
 										e.preventDefault();
 										e.stopPropagation();
@@ -388,7 +388,7 @@
 					{:else}
 						<li
 							role="none"
-							class="w-full bg-slate-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 py-2 px-2 transition-colors duration-200"
+							class="w-full bg-slate-100 dark:bg-gray-900 text-gray-600 dark:text-gray-400 py-2 px-2 transition-colors duration-200"
 						>
 							No {type === 'proxy' ? 'Proxies' : 'pages'} available
 						</li>

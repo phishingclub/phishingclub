@@ -17,6 +17,7 @@
 	import DesktopMenu from '$lib/components/header/DesktopMenu.svelte';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import Header from '$lib/components/header/Header.svelte';
+	import CompanyBanner from '$lib/components/header/CompanyBanner.svelte';
 	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
 	// Removed feature flags import - no longer needed
 
@@ -222,10 +223,10 @@
 			{#if installState === AppStateService.INSTALL.INSTALLED}
 				<MobileMenu
 					bind:visible={isMobileMenuVisible}
-					username={user?.name}
 					onClickLogout={logout}
+					{toggleChangeCompanyModal}
 				/>
-				<ProfileMenu {logout} bind:visible={isProfileMenuVisible} />
+				<ProfileMenu {logout} bind:visible={isProfileMenuVisible} {toggleChangeCompanyModal} />
 			{/if}
 			<div class="col-start-1 col-end-13 row-start-1">
 				<slot />

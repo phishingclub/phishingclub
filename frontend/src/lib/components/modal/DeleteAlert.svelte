@@ -46,20 +46,20 @@
 				<!--
 				<h3 class="text-lg font-medium text-gray-900">Delete {type}</h3>
 				-->
-				<p class="mt-2 text-gray-600 dark:text-gray-300">
+				<p class="mt-2 text-gray-600 dark:text-gray-400">
 					Are you sure you want to delete
 					{#if name?.length > 30}
 						<br />
 					{/if}
-					<span class="font-medium text-gray-900 dark:text-gray-100">"{name}"</span>?
+					<span class="font-medium text-gray-900 dark:text-gray-300">"{name}"</span>?
 				</p>
 			</div>
 
 			<!-- Impact Section -->
 			{#if list.length}
-				<div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 transition-colors duration-200">
-					<p class="font-medium text-gray-900 dark:text-gray-100 mb-3">Side effects:</p>
-					<ul class="space-y-2 ml-4 list-disc text-gray-600 dark:text-gray-300">
+				<div class="bg-gray-50 dark:bg-gray-800/40 rounded-lg p-4 transition-colors duration-200">
+					<p class="font-medium text-gray-900 dark:text-gray-300 mb-3">Side effects:</p>
+					<ul class="space-y-2 ml-4 list-disc text-gray-600 dark:text-gray-400">
 						{#each list as line}
 							<li>{line}</li>
 						{/each}
@@ -85,7 +85,7 @@
 			{/if}
 
 			{#if permanent}
-				<p class="text-red-700 dark:text-red-400 font-medium">This action cannot be undone.</p>
+				<p class="text-red-700 dark:text-red-300 font-medium">This action cannot be undone.</p>
 			{/if}
 		</div>
 	</Alert>

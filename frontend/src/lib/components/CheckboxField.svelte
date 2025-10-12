@@ -46,7 +46,7 @@
 	class:items-center={inline}
 >
 	<div class="flex items-center">
-		<p class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200">
+		<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
 			<slot />
 		</p>
 		{#if toolTipText.length > 0}
@@ -56,9 +56,9 @@
 		{/if}
 		{#if optional === true}
 			<div
-				class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+				class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
 			>
-				<p class="text-slate-600 dark:text-gray-300 text-xs transition-colors duration-200">
+				<p class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200">
 					optional
 				</p>
 			</div>
@@ -75,12 +75,12 @@
 				on:change
 			/>
 			<div
-				class="w-5 h-5 border-2 border-slate-300 dark:border-gray-600 rounded
-                        peer-checked:border-cta-blue dark:peer-checked:border-blue-500 peer-checked:bg-cta-blue dark:peer-checked:bg-blue-500
+				class="w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
+                        peer-checked:border-cta-blue dark:peer-checked:border-highlight-blue/80 peer-checked:bg-cta-blue dark:peer-checked:bg-highlight-blue/80
                         transition-all duration-200 ease-in-out
                         flex items-center justify-center
-						bg-slate-50 dark:bg-gray-700
-                        focus-within:ring-2 focus-within:ring-cta-blue dark:focus-within:ring-blue-500 focus-within:ring-offset-2 dark:focus-within:ring-offset-gray-800"
+						bg-slate-50 dark:bg-gray-900/60
+                        focus-within:ring-2 focus-within:ring-cta-blue dark:focus-within:ring-highlight-blue/80 focus-within:ring-offset-2 dark:focus-within:ring-offset-gray-900"
 			>
 				{#if value}
 					<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

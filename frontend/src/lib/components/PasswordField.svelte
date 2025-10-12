@@ -59,7 +59,7 @@
 
 <label class="flex flex-col py-2 w-60">
 	<div class="flex items-center">
-		<p class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200">
+		<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
 			<slot />
 		</p>
 		{#if toolTipText.length > 0}
@@ -69,9 +69,9 @@
 		{/if}
 		{#if optional === true}
 			<div
-				class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+				class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
 			>
-				<p class="text-slate-600 dark:text-gray-300 text-xs transition-colors duration-200">
+				<p class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200">
 					optional
 				</p>
 			</div>
@@ -90,7 +90,7 @@
 				minlength={minLength}
 				maxlength={maxLength}
 				{required}
-				class="text-ellipsis w-60 rounded-md py-2 pl-4 pr-12 text-gray-600 dark:text-gray-200 border border-transparent dark:border-gray-600 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-blue-500 focus:bg-gray-100 dark:focus:bg-gray-600 bg-grayblue-light dark:bg-gray-700 font-normal transition-colors duration-200"
+				class="text-ellipsis w-60 rounded-md py-2 pl-4 pr-12 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
 			/>
 		{:else}
 			<input
@@ -104,7 +104,7 @@
 				{placeholder}
 				autocomplete="off"
 				{required}
-				class="text-ellipsis w-60 rounded-md py-2 pl-4 pr-12 text-gray-600 dark:text-gray-200 border border-transparent dark:border-gray-600 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-blue-500 focus:bg-gray-100 dark:focus:bg-gray-600 bg-grayblue-light dark:bg-gray-700 font-normal transition-colors duration-200"
+				class="text-ellipsis w-60 rounded-md py-2 pl-4 pr-12 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
 			/>
 		{/if}
 		<button

@@ -945,21 +945,25 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 								<!-- Before Landing Page -->
 								<div class="flex items-center">
 									<div
-										class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3
-                                    ${formValues.beforeLandingPage ? 'bg-blue-50 border-blue-300' : 'bg-gray-100 border-gray-300'}`}
+										class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3 transition-colors duration-200
+                                    ${formValues.beforeLandingPage ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-300 dark:border-blue-500' : 'bg-gray-100 dark:bg-gray-800/60 border-gray-300 dark:border-gray-600'}`}
 									>
 										<span
-											class={`text-xl ${formValues.beforeLandingPage ? 'text-blue-500' : 'text-gray-400'}`}
+											class={`text-xl transition-colors duration-200 ${formValues.beforeLandingPage ? 'text-blue-500 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500'}`}
 											>1</span
 										>
 									</div>
 									<div class="flex-1">
-										<p class="text-xs font-medium">
+										<p
+											class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
+										>
 											Before Landing {formValues.beforeLandingPageType === 'proxy'
 												? 'Proxy'
 												: 'Page'}
 										</p>
-										<p class="text-xs text-gray-500 truncate max-w-[180px]">
+										<p
+											class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
+										>
 											{formValues.beforeLandingPage || 'Not selected'}
 										</p>
 									</div>
@@ -967,21 +971,30 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 
 								<!-- Down Arrow -->
 								<div class="flex">
-									<div class="ml-5 w-0.5 h-4 bg-gray-300"></div>
+									<div
+										class="ml-5 w-0.5 h-4 bg-gray-300 dark:bg-gray-600 transition-colors duration-200"
+									></div>
 								</div>
 
 								<!-- Main Landing Page -->
 								<div class="flex items-center">
 									<div
-										class="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center border border-blue-400 mr-3"
+										class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center border border-blue-400 dark:border-blue-500 mr-3 transition-colors duration-200"
 									>
-										<span class="text-xl text-blue-600">2</span>
+										<span
+											class="text-xl text-blue-600 dark:text-blue-300 transition-colors duration-200"
+											>2</span
+										>
 									</div>
 									<div class="flex-1">
-										<p class="text-xs font-medium">
+										<p
+											class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
+										>
 											Landing {formValues.landingPageType === 'proxy' ? 'Proxy' : 'Page'}
 										</p>
-										<p class="text-xs text-gray-500 truncate max-w-[180px]">
+										<p
+											class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
+										>
 											{formValues.landingPage || 'Required'}
 										</p>
 									</div>
@@ -989,25 +1002,31 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 
 								<!-- Down Arrow -->
 								<div class="flex">
-									<div class="ml-5 w-0.5 h-4 bg-gray-300"></div>
+									<div
+										class="ml-5 w-0.5 h-4 bg-gray-300 dark:bg-gray-600 transition-colors duration-200"
+									></div>
 								</div>
 
 								<!-- After Landing Page -->
 								<div class="flex items-center">
 									<div
-										class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3
-                                    ${formValues.afterLandingPage ? 'bg-blue-50 border-blue-300' : 'bg-gray-100 border-gray-300'}`}
+										class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3 transition-colors duration-200
+                                    ${formValues.afterLandingPage ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-300 dark:border-blue-500' : 'bg-gray-100 dark:bg-gray-800/60 border-gray-300 dark:border-gray-600'}`}
 									>
 										<span
-											class={`text-xl ${formValues.afterLandingPage ? 'text-blue-500' : 'text-gray-400'}`}
+											class={`text-xl transition-colors duration-200 ${formValues.afterLandingPage ? 'text-blue-500 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500'}`}
 											>3</span
 										>
 									</div>
 									<div class="flex-1">
-										<p class="text-xs font-medium">
+										<p
+											class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
+										>
 											After Landing {formValues.afterLandingPageType === 'proxy' ? 'Proxy' : 'Page'}
 										</p>
-										<p class="text-xs text-gray-500 truncate max-w-[180px]">
+										<p
+											class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
+										>
 											{formValues.afterLandingPage || 'Not selected'}
 										</p>
 									</div>
@@ -1015,23 +1034,31 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 
 								<!-- Down Arrow -->
 								<div class="flex">
-									<div class="ml-5 w-0.5 h-4 bg-gray-300"></div>
+									<div
+										class="ml-5 w-0.5 h-4 bg-gray-300 dark:bg-gray-600 transition-colors duration-200"
+									></div>
 								</div>
 
 								<!-- Final Redirect -->
 								<div class="flex items-center">
 									<div
-										class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3
-                                    ${formValues.afterLandingPageRedirectURL ? 'bg-blue-50 border-blue-300' : 'bg-gray-100 border-gray-300'}`}
+										class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3 transition-colors duration-200
+                                    ${formValues.afterLandingPageRedirectURL ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-300 dark:border-blue-500' : 'bg-gray-100 dark:bg-gray-800/60 border-gray-300 dark:border-gray-600'}`}
 									>
 										<span
-											class={`text-xl ${formValues.afterLandingPageRedirectURL ? 'text-blue-500' : 'text-gray-400'}`}
+											class={`text-xl transition-colors duration-200 ${formValues.afterLandingPageRedirectURL ? 'text-blue-500 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500'}`}
 											>4</span
 										>
 									</div>
 									<div class="flex-1">
-										<p class="text-xs font-medium">POST Redirect URL</p>
-										<p class="text-xs text-gray-500 truncate max-w-[180px]">
+										<p
+											class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
+										>
+											POST Redirect URL
+										</p>
+										<p
+											class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
+										>
 											{formValues.afterLandingPageRedirectURL || 'Not set'}
 										</p>
 									</div>

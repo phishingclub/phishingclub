@@ -43,16 +43,16 @@
 
 <div class="flex items-center mb-8 mt-4">
 	<button
-		class="bg-highlight-blue dark:bg-blue-600 w-8 text-white hover:bg-active-blue dark:hover:bg-blue-700 m-1 rounded-md py-1 px-1 transition-colors duration-200"
+		class="bg-highlight-blue dark:bg-highlight-blue/80 w-8 text-white hover:bg-active-blue dark:hover:bg-highlight-blue m-1 rounded-md py-1 px-1 transition-colors duration-200"
 		on:click|preventDefault={previousPage}>&lt;&lt;</button
 	>
 	<div
-		class="w-8 text-center bg-grayblue-light dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md py-1 px-1 transition-colors duration-200"
+		class="w-8 text-center bg-grayblue-light dark:bg-gray-800/60 text-gray-700 dark:text-gray-300 rounded-md py-1 px-1 transition-colors duration-200"
 	>
 		{currentPage}
 	</div>
 	<button
-		class="bg-highlight-blue dark:bg-blue-600 w-8 text-white hover:bg-active-blue dark:hover:bg-blue-700 m-1 rounded-md py-1 px-1 transition-colors duration-200"
+		class="bg-highlight-blue dark:bg-highlight-blue/80 w-8 text-white hover:bg-active-blue dark:hover:bg-highlight-blue m-1 rounded-md py-1 px-1 transition-colors duration-200"
 		on:click|preventDefault={nextPage}>&gt;&gt;</button
 	>
 </div>

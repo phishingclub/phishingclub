@@ -2,6 +2,21 @@
 	import { onMount, onDestroy, tick } from 'svelte';
 	let resizeObserver;
 
+	// Theme detection for chart reactivity
+	let isDarkMode = false;
+
+	// Check theme on mount and when it changes
+	const checkTheme = () => {
+		const newIsDarkMode = document.documentElement.classList.contains('dark');
+		if (newIsDarkMode !== isDarkMode) {
+			isDarkMode = newIsDarkMode;
+			// Recreate chart when theme changes
+			if (containerReady && chartData.length >= 2) {
+				tick().then(() => createChart());
+			}
+		}
+	};
+
 	export let campaignStats = [];
 	export let isLoading = false;
 
@@ -238,6 +253,16 @@
 		svg.setAttribute('class', 'campaign-trend-chart');
 		chartContainer.appendChild(svg);
 
+		// Add dark background rectangle
+		const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+		bgRect.setAttribute('width', '100%');
+		bgRect.setAttribute('height', '100%');
+		bgRect.setAttribute(
+			'fill',
+			document.documentElement.classList.contains('dark') ? '#111827' : '#ffffff'
+		);
+		svg.appendChild(bgRect);
+
 		const xExtent = [0, chartData.length - 1];
 		// Map 0-100% directly to chart boundaries so 0% aligns with X-axis
 		const yExtent = [0, 100];
@@ -346,7 +371,7 @@
 		stop1.setAttribute('offset', '0%');
 		stop1.setAttribute(
 			'stop-color',
-			document.documentElement.classList.contains('dark') ? '#374151' : '#f8f9fa'
+			document.documentElement.classList.contains('dark') ? '#1f2937' : '#f8f9fa'
 		);
 		stop1.setAttribute('stop-opacity', '0.3');
 
@@ -354,15 +379,15 @@
 		stop2.setAttribute('offset', '50%');
 		stop2.setAttribute(
 			'stop-color',
-			document.documentElement.classList.contains('dark') ? '#4b5563' : '#e9ecef'
+			document.documentElement.classList.contains('dark') ? '#374151' : '#e9ecef'
 		);
-		stop2.setAttribute('stop-opacity', '0.5');
+		stop2.setAttribute('stop-opacity', '0.4');
 
 		const stop3 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
 		stop3.setAttribute('offset', '100%');
 		stop3.setAttribute(
 			'stop-color',
-			document.documentElement.classList.contains('dark') ? '#374151' : '#f8f9fa'
+			document.documentElement.classList.contains('dark') ? '#1f2937' : '#f8f9fa'
 		);
 		stop3.setAttribute('stop-opacity', '0.3');
 
@@ -400,7 +425,7 @@
 			vLine.setAttribute('y2', (height - margin.bottom).toString());
 			vLine.setAttribute(
 				'stroke',
-				document.documentElement.classList.contains('dark') ? '#4b5563' : '#e5e7eb'
+				document.documentElement.classList.contains('dark') ? '#374151' : '#e5e7eb'
 			);
 			vLine.setAttribute('stroke-width', '0.5');
 			vLine.setAttribute('opacity', '0.3');
@@ -416,7 +441,7 @@
 		yAxis.setAttribute('y2', (height - margin.bottom).toString());
 		yAxis.setAttribute(
 			'stroke',
-			document.documentElement.classList.contains('dark') ? '#9ca3af' : '#6B7280'
+			document.documentElement.classList.contains('dark') ? '#6887ea' : '#6B7280'
 		);
 		yAxis.setAttribute('stroke-width', '2');
 		svg.appendChild(yAxis);
@@ -428,7 +453,7 @@
 		xAxis.setAttribute('y2', (height - margin.bottom).toString());
 		xAxis.setAttribute(
 			'stroke',
-			document.documentElement.classList.contains('dark') ? '#9ca3af' : '#6B7280'
+			document.documentElement.classList.contains('dark') ? '#6887ea' : '#6B7280'
 		);
 		xAxis.setAttribute('stroke-width', '2');
 		svg.appendChild(xAxis);
@@ -443,7 +468,7 @@
 			text.setAttribute('font-size', '11');
 			text.setAttribute(
 				'fill',
-				document.documentElement.classList.contains('dark') ? '#d1d5db' : '#6B7280'
+				document.documentElement.classList.contains('dark') ? '#e5e7eb' : '#6B7280'
 			);
 			text.setAttribute('font-weight', '500');
 			text.setAttribute('alignment-baseline', 'middle');
@@ -461,7 +486,7 @@
 				text.setAttribute('font-size', '11');
 				text.setAttribute(
 					'fill',
-					document.documentElement.classList.contains('dark') ? '#f9fafb' : '#000'
+					document.documentElement.classList.contains('dark') ? '#f3f4f6' : '#000'
 				);
 				text.setAttribute('alignment-baseline', 'middle');
 				// Show date (YYYY/MM) and campaign name on the same line
@@ -810,8 +835,21 @@
 		});
 	}
 
+	let themeObserver;
+
 	onMount(async () => {
 		await tick(); // Wait for DOM/layout
+
+		// Initialize theme detection
+		checkTheme();
+
+		// Watch for theme changes
+		themeObserver = new MutationObserver(checkTheme);
+		themeObserver.observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: ['class']
+		});
+
 		if (sizingContainer) {
 			const containerWidth = sizingContainer.parentElement?.clientWidth || 0;
 			width = Math.min(Math.max(containerWidth, 300), containerWidth); // Minimum 300px but never exceed container
@@ -832,6 +870,10 @@
 	onDestroy(() => {
 		if (resizeObserver && sizingContainer) {
 			resizeObserver.unobserve(sizingContainer.parentElement || sizingContainer);
+		}
+		// Clean up theme observer
+		if (themeObserver) {
+			themeObserver.disconnect();
 		}
 		if (loadingTimeout) {
 			clearTimeout(loadingTimeout);
@@ -856,14 +898,16 @@
 	></div>
 	{#if !containerReady}
 		<div class="flex items-center justify-center min-h-[100px]">
-			<span class="text-gray-400 text-sm">Preparing chart…</span>
+			<span class="text-gray-400 dark:text-gray-500 text-sm transition-colors duration-200"
+				>Preparing chart…</span
+			>
 		</div>
 	{:else}
 		<div>
 			{#if debouncedIsLoading}
 				<div class="flex items-center justify-center h-64">
 					<div
-						class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 dark:border-blue-400"
+						class="animate-spin rounded-full h-8 w-8 border-b-2 border-cta-blue dark:border-highlight-blue transition-colors duration-200"
 					></div>
 					<span class="ml-2 text-gray-600 dark:text-gray-300 transition-colors duration-200"
 						>Loading trend data...</span
@@ -875,109 +919,53 @@
 						>Preparing trend data...</span
 					>
 				</div>
-			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && chartData.length === 0}
+			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && chartData.length < 2}
 				<div
-					class="flex items-center justify-center h-64 bg-gray-50 dark:bg-gray-800 rounded-lg transition-colors duration-200"
+					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200"
 				>
-					<div class="text-center">
-						<svg
-							class="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500 transition-colors duration-200"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
+					<!-- Match the height structure of the data container -->
+					<div class="flex flex-row items-center justify-between mb-2 pb-0 flex-wrap gap-2">
+						<h4
+							class="text-sm font-medium text-gray-600 dark:text-gray-300 m-0 transition-colors duration-200"
 						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="1.5"
-								d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-							/>
-						</svg>
-						<h3
-							class="mt-2 text-sm font-medium text-gray-900 dark:text-gray-200 transition-colors duration-200"
-						>
-							No campaign data
-						</h3>
-						<p class="mt-1 text-sm text-gray-500 dark:text-gray-400 transition-colors duration-200">
-							Campaign statistics will appear here once campaigns are completed.
-						</p>
+							Trend Analytics
+						</h4>
 					</div>
-				</div>
-			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && chartData.length === 1}
-				<div
-					class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-6 transition-colors duration-200"
-				>
-					<div class="flex items-center">
-						<svg
-							class="h-6 w-6 text-blue-600 dark:text-blue-400 mr-2 transition-colors duration-200"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-							/>
-						</svg>
-						<div>
-							<h4
-								class="text-sm font-medium text-blue-900 dark:text-blue-200 transition-colors duration-200"
+					<div class="mb-8"></div>
+
+					<!-- Centered content matching stats grid height -->
+					<div class="flex items-center justify-center min-h-[350px] py-16">
+						<div class="text-center">
+							<svg
+								class="mx-auto h-12 w-12 text-cta-blue dark:text-highlight-blue transition-colors duration-200"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+								aria-hidden="true"
 							>
-								Single Campaign Data
-							</h4>
-							<p class="text-sm text-blue-700 dark:text-blue-300 transition-colors duration-200">
-								Trends will appear when you have 2 or more completed campaigns.
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+								/>
+							</svg>
+							<h3
+								class="mt-3 text-lg font-medium text-gray-900 dark:text-gray-100 transition-colors duration-200"
+							>
+								Insufficient data for trend analysis
+							</h3>
+							<p
+								class="mt-2 text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200"
+							>
+								Trend analysis requires at least 2 completed campaigns to show meaningful patterns.
 							</p>
-						</div>
-					</div>
-					<div class="grid grid-cols-4 gap-4">
-						<div class="text-center">
-							<div
-								class="text-2xl font-bold text-blue-600 dark:text-blue-400 transition-colors duration-200"
-							>
-								{chartData[0].openRate}%
-							</div>
-							<div class="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200">
-								Open Rate
-							</div>
-						</div>
-						<div class="text-center">
-							<div
-								class="text-2xl font-bold text-green-600 dark:text-green-400 transition-colors duration-200"
-							>
-								{chartData[0].clickRate}%
-							</div>
-							<div class="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200">
-								Click Rate
-							</div>
-						</div>
-						<div class="text-center">
-							<div
-								class="text-2xl font-bold text-yellow-600 dark:text-yellow-400 transition-colors duration-200"
-							>
-								{chartData[0].submissionRate}%
-							</div>
-							<div class="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200">
-								Submission Rate
-							</div>
-						</div>
-						<div class="text-center">
-							<div
-								class="text-2xl font-bold text-indigo-600 dark:text-indigo-400 transition-colors duration-200"
-							>
-								{chartData[0].reportRate}%
-							</div>
-							<div class="text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200">
-								Report Rate
-							</div>
 						</div>
 					</div>
 				</div>
 			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && chartData.length >= 2}
 				<div
-					class="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 p-6 transition-colors duration-200"
+					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200"
 				>
 					<!-- Trendline stats and controls above chart -->
 					<div class="flex flex-row items-center justify-between mb-2 pb-0 flex-wrap gap-2">
@@ -993,7 +981,7 @@
 								Time range:
 								<select
 									bind:value={selectedTimeRange}
-									class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 text-xs bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+									class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 									style="height: 1.5rem;"
 								>
 									{#each timeRanges as range}
@@ -1011,7 +999,7 @@
 										min="1"
 										max={chartData.length}
 										bind:value={trendN}
-										class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+										class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 										style="height: 1.5rem;"
 									/>
 								</label>
@@ -1025,13 +1013,13 @@
 									min="2"
 									max={chartData.length}
 									bind:value={movingAvgN}
-									class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+									class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 									style="height: 1.5rem;"
 								/>
 							</label>
 						</div>
 					</div>
-					<div style="height: 1.25rem;"></div>
+					<div class="mb-8"></div>
 					{#if chartData.length > 0}
 						<div class="grid grid-cols-4 gap-2 sm:gap-4">
 							{#each metrics as metric}
@@ -1065,11 +1053,12 @@
 							No trendline stats to display (trendStats is null or not enough data).
 						</div>
 					{/if}
+					<div class="mt-8 mb-6"></div>
 					{#key chartKey}
 						{#if containerReady}
 							<div
 								bind:this={chartContainer}
-								class="min-h-[220px] max-h-[280px] w-full box-border relative rounded-md bg-white dark:bg-gray-800 m-1 transition-colors duration-200"
+								class="min-h-[220px] max-h-[280px] w-full box-border relative rounded-md bg-white dark:bg-gray-900 m-1 transition-colors duration-200"
 								style="contain: layout style;"
 							></div>
 						{/if}
@@ -1126,8 +1115,6 @@
 		display: block !important;
 		contain: layout style !important;
 		background: white;
-		border-radius: 8px;
-		padding: 8px;
 		transition: background-color 0.2s ease;
 	}
 	:global(.dark .campaign-trend-chart) {

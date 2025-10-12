@@ -34,7 +34,7 @@
 </script>
 
 <th
-	class="pl-4 bg-grayblue-light dark:bg-gray-700 py-4 border-hidden first:rounded-tl-lg first:rounded-bl-lg last:rounded-tr-lg last:border-4 min-w-48 transition-colors duration-200"
+	class="pl-4 bg-grayblue-light dark:bg-gray-800/60 py-4 border-hidden first:rounded-tl-lg first:rounded-bl-lg last:rounded-tr-lg last:border-4 min-w-48 transition-colors duration-200"
 	class:rounded-br-lg={last}
 	class:rounded-tr-lg={last}
 	class:w-48={size === 'small'}
@@ -43,9 +43,11 @@
 	class:w-full={fillRest}
 >
 	<button
-		class="flex group cursor-pointer"
+		class="flex group cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 rounded-md p-1 transition-colors duration-200"
 		class:pointer-events-none={!sortable}
 		class:table-cell={alignText === 'center'}
+		class:hover:bg-transparent={!sortable}
+		class:dark:hover:bg-transparent={!sortable}
 		on:click|preventDefault={setSortAndSortBy}
 	>
 		<div class="w-full">
@@ -60,7 +62,7 @@
 				{#if sortable && column.toLowerCase() === sortBy.toLowerCase() && !isGhost}
 					<div
 						class:bg-transparent={sortOrder === ''}
-						class="flex justify-center items-center w-6 h-6 ml-2 rounded-md bg-cta-blue dark:bg-blue-600 transition-colors duration-200"
+						class="flex justify-center items-center w-6 h-6 ml-2 rounded-md bg-cta-blue dark:bg-highlight-blue/80 transition-colors duration-200"
 					>
 						{#if sortOrder === 'asc'}
 							<div>

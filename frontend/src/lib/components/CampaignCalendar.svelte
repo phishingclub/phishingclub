@@ -46,7 +46,7 @@
 		SCHEDULED: '#62aded', // campaign-scheduled
 		ACTIVE: '#5557f6', // campaign-active
 		COMPLETED: '#4cb5b5', // message-read - much more muted than bright green
-		SELF_MANAGED: '#9F7AEA' // purple
+		SELF_MANAGED: '#7C3AED' // darker purple
 	};
 
 	function sortCampaignsByPriority(campaigns, day) {
@@ -308,19 +308,19 @@
 </script>
 
 <div
-	class="w-full bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 border border-gray-200 dark:border-gray-700 transition-colors duration-200"
+	class="w-full bg-white dark:bg-gray-900/80 rounded-lg shadow-sm p-4 border border-gray-200 dark:border-gray-700/60 transition-colors duration-200"
 >
 	<div class="space-y-4 max-w-5xl mx-auto min-h-[600px]">
 		<!-- Navigation Controls -->
 		<div class="flex justify-center items-center">
 			<button
-				class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 mx-4 transition-colors duration-200"
+				class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800/60 mx-4 transition-colors duration-200"
 				on:click={previousMonth}
 				disabled={isLoadingNewMonth}
 			>
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 text-gray-600 dark:text-gray-300"
+					class="h-5 w-5 text-gray-600 dark:text-gray-400"
 					fill="none"
 					viewBox="0 0 24 24"
 					stroke="currentColor"
@@ -334,18 +334,18 @@
 				</svg>
 			</button>
 
-			<h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+			<h2 class="text-lg font-semibold text-gray-900 dark:text-gray-300">
 				{format(currentMonth, 'MMMM yyyy')}
 			</h2>
 
 			<button
-				class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 mx-4 transition-colors duration-200"
+				class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800/60 mx-4 transition-colors duration-200"
 				on:click={nextMonth}
 				disabled={isLoadingNewMonth}
 			>
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 text-gray-600 dark:text-gray-300"
+					class="h-5 w-5 text-gray-600 dark:text-gray-400"
 					fill="none"
 					viewBox="0 0 24 24"
 					stroke="currentColor"
@@ -367,7 +367,7 @@
 						style="background-color: {item.color}; opacity: {activeFilters[item.key] ? '1' : '0.3'}"
 					></div>
 					<span
-						class="transition-opacity duration-200 text-gray-700 dark:text-gray-300"
+						class="transition-opacity duration-200 text-gray-700 dark:text-gray-400"
 						style="opacity: {activeFilters[item.key] ? '1' : '0.5'}">{item.label}</span
 					>
 				</button>
@@ -379,7 +379,7 @@
 			<!-- Day headers -->
 			<div class="grid grid-cols-7 text-center mb-1">
 				{#each ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as day}
-					<div class="text-sm font-medium text-gray-600 dark:text-gray-300">{day}</div>
+					<div class="text-sm font-medium text-gray-600 dark:text-gray-400">{day}</div>
 				{/each}
 			</div>
 
@@ -388,9 +388,9 @@
 				<div class="min-h-[450px] flex items-center justify-center">
 					<div class="flex items-center space-x-2">
 						<div
-							class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 dark:border-blue-400"
+							class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 dark:border-highlight-blue/80"
 						></div>
-						<span class="text-gray-600 dark:text-gray-300">Loading calendar...</span>
+						<span class="text-gray-600 dark:text-gray-400">Loading calendar...</span>
 					</div>
 				</div>
 			{:else}
@@ -400,19 +400,19 @@
 							{#each week as day}
 								<div
 									class="calendar-day relative border rounded-md overflow-hidden {scrollBarClassesHorizontal}  {day.isToday
-										? 'border-gray-700 dark:border-gray-400 bg-gray-50 dark:bg-gray-700'
-										: 'border-gray-200 dark:border-gray-600'}
+										? 'border-gray-700 dark:border-gray-500 bg-gray-50 dark:bg-gray-800/60'
+										: 'border-gray-200 dark:border-gray-700/60'}
 	                                {day.isCurrentMonth
-										? 'bg-white dark:bg-gray-800'
-										: 'bg-gray-50 dark:bg-gray-700'} transition-colors duration-200"
+										? 'bg-white dark:bg-gray-900/60'
+										: 'bg-gray-50 dark:bg-gray-800/40'} transition-colors duration-200"
 								>
 									<!-- Date number -->
 									<div
 										class="text-sm p-1 {day.isToday
-											? 'font-bold text-gray-800 dark:text-white'
+											? 'font-bold text-gray-800 dark:text-gray-300'
 											: day.isCurrentMonth
-												? 'text-gray-600 dark:text-gray-300'
-												: 'text-gray-400 dark:text-gray-500'}"
+												? 'text-gray-600 dark:text-gray-400'
+												: 'text-gray-400 dark:text-gray-600'}"
 									>
 										{day.date.getDate()}
 									</div>
@@ -423,8 +423,8 @@
 										{#each day.campaigns as campaign}
 											<a
 												href={`/campaign/${campaign.id}`}
-												class="block mb-1 rounded-sm text-white text-xs p-1 overflow-hidden hover:opacity-90 transition-opacity"
-												style="background-color: {campaign.color};"
+												class="block mb-1 rounded-sm text-xs p-1 pl-2 overflow-hidden hover:bg-gray-200 dark:hover:bg-gray-700/40 transition-all duration-200 bg-gray-100 dark:bg-gray-800/30"
+												style="border-left: 3px solid {campaign.color};"
 												title="{campaign.name} - {campaign.isSelfManaged
 													? 'Self-managed'
 													: campaign.end < new Date()
@@ -435,7 +435,7 @@
 													? `${formatDateString(new Date(campaign.createdAt))} - ?`
 													: `${formatDateString(campaign.start)} - ${formatDateString(campaign.end)}`}"
 											>
-												<div class="campaign-name truncate text-white">
+												<div class="campaign-name truncate text-gray-700 dark:text-gray-300">
 													{truncateText(campaign.name, 18)}
 												</div>
 											</a>

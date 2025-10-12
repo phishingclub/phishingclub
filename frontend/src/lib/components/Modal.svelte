@@ -295,9 +295,7 @@
 
 {#if visible}
 	<div bind:this={bindTo}>
-		<div
-			class="fixed top-0 left-0 w-full h-full bg-cta-blue dark:bg-gray-900 opacity-20 blur-xl transition-colors duration-200"
-		/>
+		<div class="fixed top-0 left-0 w-full h-full opacity-[0.5]" />
 		<div
 			class="fixed top-0 left-0 w-full h-full flex justify-center items-center backdrop-blur-sm z-20"
 			role="dialog"
@@ -311,7 +309,7 @@
 			>
 				<div
 					class:opacity-20={isSubmitting}
-					class="bg-cta-blue dark:bg-blue-700 text-white rounded-t-md py-4 px-8 flex justify-between flex-shrink-0 transition-colors duration-200"
+					class="bg-cta-blue dark:bg-blue-800 text-white rounded-t-md py-4 px-8 flex justify-between flex-shrink-0 transition-colors duration-200"
 				>
 					<div class="flex-1">
 						<h1 id="modal-title" class="uppercase mr-8 font-semibold text-2xl">{headerText}</h1>

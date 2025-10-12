@@ -118,7 +118,7 @@
 	<label class="flex flex-col py-2 relative">
 		<div class="flex items-center">
 			<p
-				class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200"
+				class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
 			>
 				<slot />
 			</p>
@@ -129,9 +129,9 @@
 			{/if}
 			{#if optional === true}
 				<div
-					class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+					class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
 				>
-					<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
+					<p class="text-slate-600 dark:text-gray-400 text-xs">optional</p>
 				</div>
 			{/if}
 		</div>
@@ -155,7 +155,7 @@
 				{id}
 				required={required && !value.length}
 				autocomplete="off"
-				class="w-full relative rounded-md py-2 pl-4 focus:pl-10 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-gray-500 focus:bg-gray-100 dark:focus:bg-gray-600 bg-grayblue-light dark:bg-gray-700 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
+				class="w-full relative rounded-md py-2 pl-4 focus:pl-10 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
 			/>
 			{#if showSelection}
 				<img
@@ -169,13 +169,13 @@
 		{#if showSelection}
 			<div class="w-60 absolute top-10 z-50">
 				<ul
-					class="bg-gray-100 dark:bg-gray-700 list-none mt-4 rounded-md min-w-fit shadow-md border border-gray-200 dark:border-gray-600 max-h-40 overflow-y-scroll transition-colors duration-200"
+					class="bg-gray-100 dark:bg-gray-900 list-none mt-4 rounded-md min-w-fit shadow-md border border-gray-200 dark:border-gray-700/60 max-h-40 overflow-y-scroll transition-colors duration-200"
 				>
 					{#if options.length}
 						{#each filteredOptions as option}
 							<li>
 								<button
-									class="w-full text-left bg-slate-100 dark:bg-gray-700 rounded-md text-gray-600 dark:text-gray-200 hover:bg-grayblue-dark dark:hover:bg-gray-500 hover:text-white py-2 px-2 cursor-pointer transition-colors duration-200"
+									class="w-full text-left bg-slate-100 dark:bg-gray-900 rounded-md text-gray-600 dark:text-gray-300 hover:bg-grayblue-dark dark:hover:bg-highlight-blue/40 hover:text-white py-2 px-2 cursor-pointer transition-colors duration-200"
 									on:click={() => {
 										onClickSelectedOption(option);
 									}}
@@ -186,7 +186,7 @@
 						{/each}
 					{:else}
 						<li
-							class="w-full bg-slate-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 py-2 px-2 transition-colors duration-200"
+							class="w-full bg-slate-100 dark:bg-gray-900 text-gray-600 dark:text-gray-400 py-2 px-2 transition-colors duration-200"
 						>
 							List is empty
 						</li>
@@ -200,7 +200,7 @@
 					on:click|preventDefault={removeSelection}
 					on:keypress|preventDefault={removeSelection}
 					data-value={option}
-					class="flex flex-row items-center bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 px-2 py-2 mt-2 mr-2 rounded-md text-gray-900 dark:text-gray-100 transition-colors duration-200"
+					class="flex flex-row items-center bg-gray-100 dark:bg-gray-800/60 hover:bg-gray-200 dark:hover:bg-gray-700/80 px-2 py-2 mt-2 mr-2 rounded-md text-gray-900 dark:text-gray-300 transition-colors duration-200"
 				>
 					{option}
 					<img class="w-4 ml-2 pointer-events-none" src="/delete2.svg" alt="delete" />

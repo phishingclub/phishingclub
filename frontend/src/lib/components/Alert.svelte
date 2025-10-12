@@ -243,9 +243,7 @@
 </script>
 
 {#if visible}
-	<div
-		class="fixed top-0 left-0 w-full h-full bg-cta-blue dark:bg-gray-900 opacity-20 blur-xl transition-colors duration-200"
-	/>
+	<div class="fixed top-0 left-0 w-full h-full opacity-[0.5]" />
 	<div
 		class="fixed top-0 left-0 w-full h-full flex justify-center items-center backdrop-blur-sm z-20"
 		role="dialog"
@@ -259,7 +257,7 @@
 		>
 			<!-- Header -->
 			<div
-				class="bg-red-700 dark:bg-red-800 text-white rounded-t-md py-4 px-8 flex items-center justify-between flex-shrink-0 transition-colors duration-200"
+				class="bg-red-700 dark:bg-red-700/90 text-white rounded-t-md py-4 px-8 flex items-center justify-between flex-shrink-0 transition-colors duration-200"
 			>
 				<div class="flex items-center">
 					<svg
@@ -293,7 +291,7 @@
 			<div class="px-8 py-6">
 				<div
 					id="alert-description"
-					class="text-gray-600 dark:text-gray-300 transition-colors duration-200"
+					class="text-gray-600 dark:text-gray-400 transition-colors duration-200"
 				>
 					{#if $$slots.default}
 						<slot />
@@ -317,13 +315,13 @@
 
 			<!-- Footer -->
 			<div
-				class="py-4 row-span-2 col-start-1 col-span-3 border-t-2 border-gray-200 dark:border-gray-600 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end px-8 bg-gray-50 dark:bg-gray-700 rounded-b-md transition-colors duration-200"
+				class="py-4 row-span-2 col-start-1 col-span-3 border-t-2 border-gray-200 dark:border-gray-700/60 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end px-8 bg-gray-50 dark:bg-gray-800/40 rounded-b-md transition-colors duration-200"
 			>
 				{#if !noCancel}
 					<button
 						type="reset"
 						on:click={close}
-						class="bg-slate-400 hover:bg-slate-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-sm mr-2 uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
+						class="bg-slate-400 hover:bg-slate-300 dark:bg-gray-700/80 dark:hover:bg-gray-600/80 text-sm mr-2 uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
 					>
 						{cancel}
 					</button>

@@ -7,7 +7,7 @@
 	<div class="flex col-span-12 justify-center p-4 select-text">
 		<div class="w-80 flex col-span-12 justify-center">
 			<div
-				class="flex items-center w-full bg-pleasant-gray dark:bg-gray-700 rounded-md border border-gray-200 dark:border-gray-600 text-center p-2 font-titilium transition-colors duration-200"
+				class="flex items-center w-full bg-pleasant-gray dark:bg-gray-800/40 rounded-md border border-gray-200 dark:border-gray-700/60 text-center p-2 font-titilium transition-colors duration-200"
 			>
 				<svg class="w-12 ml-4" transition:slide viewBox="0 0 32.94 32.94">
 					<circle
@@ -33,7 +33,7 @@
 						/>
 					</g>
 				</svg>
-				<p class="pl-4 text-gray-700 dark:text-gray-200 transition-colors duration-200">
+				<p class="pl-4 text-gray-700 dark:text-gray-400 transition-colors duration-200">
 					{message}
 				</p>
 			</div>

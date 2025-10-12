@@ -52,7 +52,7 @@
 
 <label class="flex flex-col py-2 w-60" class:w-full={fullWidth}>
 	<div class="flex items-center">
-		<p class="font-bold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200">
+		<p class="font-bold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
 			<slot />
 		</p>
 		{#if toolTipText.length > 0}
@@ -62,9 +62,9 @@
 		{/if}
 		{#if optional === true}
 			<div
-				class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+				class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
 			>
-				<p class="text-slate-600 dark:text-gray-300 text-xs transition-colors duration-200">
+				<p class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200">
 					optional
 				</p>
 			</div>
@@ -80,7 +80,7 @@
 		maxlength={maxLength}
 		{readonly}
 		{placeholder}
-		class=" focus:outline-none pl-2 border border-transparent dark:border-gray-600 rounded-md focus:border-solid text-gray-600 dark:text-gray-200 focus:bg-gray-100 dark:focus:bg-gray-600 font-light focus:border-slate-400 dark:focus:border-blue-500 bg-grayblue-light dark:bg-gray-700 transition-colors duration-200"
+		class=" focus:outline-none pl-2 border border-transparent dark:border-gray-700/60 rounded-md focus:border-solid text-gray-600 dark:text-gray-300 focus:bg-gray-100 dark:focus:bg-gray-700/60 font-light focus:border-slate-400 dark:focus:border-highlight-blue/80 bg-grayblue-light dark:bg-gray-900/60 transition-colors duration-200"
 		class:h-16={height === 'small'}
 		class:h-28={height === 'medium'}
 		class:h-48={height === 'large'}

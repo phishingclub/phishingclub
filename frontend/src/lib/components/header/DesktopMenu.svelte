@@ -3,8 +3,57 @@
 	import { page } from '$app/stores';
 	import { scrollBarClassesVertical } from '$lib/utils/scrollbar';
 	import { shouldHideMenuItem } from '$lib/utils/common';
+	import { AppStateService } from '$lib/service/appState';
+	import { onMount } from 'svelte';
+	import { beforeNavigate } from '$app/navigation';
 
 	let isExpanded = false;
+	let menuElement;
+	let instantCollapse = false;
+	let context = {
+		current: '',
+		companyName: ''
+	};
+
+	const appState = AppStateService.instance;
+
+	onMount(() => {
+		const unsub = appState.subscribe((s) => {
+			context = {
+				current: s.context.current,
+				companyName: s.context.companyName
+			};
+		});
+
+		// handle click outside to collapse menu
+		const handleClickOutside = (event) => {
+			if (isExpanded && menuElement && !menuElement.contains(event.target)) {
+				isExpanded = false;
+			}
+		};
+
+		document.addEventListener('click', handleClickOutside);
+
+		return () => {
+			unsub();
+			document.removeEventListener('click', handleClickOutside);
+		};
+	});
+
+	// handle navigation to collapse menu
+	beforeNavigate(() => {
+		if (isExpanded) {
+			instantCollapse = true;
+			isExpanded = false;
+			// reset after a brief moment
+			setTimeout(() => {
+				instantCollapse = false;
+			}, 50);
+		}
+	});
+
+	$: hasCompanySelected =
+		context.current === AppStateService.CONTEXT.COMPANY && context.companyName;
 
 	const icons = {
 		dashboard: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
@@ -98,19 +147,23 @@
 
 <div class="flex">
 	<nav
-		class="hidden lg:flex flex-col transition-all fixed top-16 z-10 bg-gradient-to-b from-pc-darkblue to-indigo-400 dark:from-gray-900 dark:to-gray-800 rounded-br-lg overflow-y-auto overflow-x-hidden min-h-0 max-h-[calc(100vh-4rem)] box-content border-r-[1px] border-pc-darkblue dark:border-gray-700"
+		bind:this={menuElement}
+		class="hidden lg:flex flex-col fixed top-16 z-10 bg-gradient-to-b from-pc-darkblue to-indigo-400 dark:from-gray-900 dark:to-gray-800 rounded-br-lg overflow-y-auto overflow-x-hidden min-h-0 max-h-[calc(100vh-4rem)] box-content border-r-[1px] border-pc-darkblue dark:border-highlight-blue/40"
+		class:transition-all={!instantCollapse}
 		class:w-40={isExpanded}
 		class:w-12={!isExpanded}
+		class:!top-[89px]={hasCompanySelected}
+		class:!max-h-[calc(100vh-6rem)]={hasCompanySelected}
 	>
 		<div
-			class="sticky top-0 bg-highlight-blue/20 dark:bg-gray-800/70 border-b w-full border-blue-700/30 dark:border-gray-600 transform-none transition-colors duration-200"
+			class="sticky top-0 bg-highlight-blue/20 dark:bg-gray-800/70 border-b w-full border-blue-700/30 dark:border-highlight-blue/40 transform-none transition-colors duration-200"
 		>
 			<button
-				class="w-full flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-gray-700/70 transition-colors group px-3 py-2"
+				class="w-full flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-highlight-blue/20 transition-colors group px-3 py-2"
 				on:click={() => (isExpanded = !isExpanded)}
 			>
 				<svg
-					class="text-blue-100 dark:text-gray-100 duration-200 w-6 transition-colors"
+					class="text-blue-100 dark:text-highlight-blue duration-200 w-6 transition-colors"
 					class:rotate-180={!isExpanded}
 					xmlns="http://www.w3.org/2000/svg"
 					fill="none"
@@ -136,7 +189,7 @@
 					<div class="py-1 mt-4 first:mt-0">
 						{#if isExpanded}
 							<div
-								class="px-3 py-2 text-xs font-semibold text-blue-100 dark:text-gray-200 uppercase tracking-wider transition-colors duration-200"
+								class="px-3 py-2 text-xs font-semibold text-blue-100 dark:text-highlight-blue uppercase tracking-wider transition-colors duration-200"
 							>
 								{link.label}
 							</div>
@@ -147,15 +200,15 @@
 								<a
 									class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
                                         {$page.url.pathname === item.route
-										? 'text-white font-medium bg-active-blue dark:bg-indigo-600 shadow-md'
-										: 'text-blue-100 dark:text-gray-200 hover:shadow-md hover:bg-highlight-blue dark:hover:bg-gray-700 hover:text-white dark:hover:text-gray-100'}"
+										? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
+										: 'text-blue-100 dark:text-gray-200 hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-gray-100'}"
 									class:hidden={shouldHideMenuItem(item.route)}
 									draggable="false"
 									href={item.route}
 									title={item.label}
 								>
 									<!-- Icon -->
-									<div class="flex-shrink-0">
+									<div class="flex-shrink-0 text-blue-100 dark:text-highlight-blue">
 										{@html getIconForRoute(item.route)}
 									</div>
 
@@ -172,7 +225,9 @@
 									{/if}
 
 									{#if $page.url.pathname === item.route}
-										<div class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-blue-400"></div>
+										<div
+											class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-highlight-blue"
+										></div>
 									{/if}
 								</a>
 							{/each}
@@ -182,13 +237,13 @@
 					<a
 						class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
                             {$page.url.pathname === link.route
-							? 'text-white font-medium bg-active-blue dark:bg-indigo-600 shadow-md'
-							: 'text-blue-100 dark:text-gray-200 hover:text-white dark:hover:text-gray-100 dark:hover:bg-gray-700'}"
+							? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
+							: 'text-blue-100 dark:text-gray-200 hover:text-white dark:hover:text-gray-100 hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20'}"
 						draggable="false"
 						href={link.route}
 					>
 						<!-- Icon -->
-						<div class="flex-shrink-0">
+						<div class="flex-shrink-0 text-blue-100 dark:text-highlight-blue">
 							{@html icons[link.label]}
 						</div>
 
@@ -196,16 +251,16 @@
 							<span class="ml-3 truncate">{link.label}</span>
 						{:else}
 							<div
-								class="absolute left-14 rounded bg-gray-900 dark:bg-gray-800 text-white dark:text-gray-100 px-2 py-1 ml-6 text-sm
+								class="absolute left-14 rounded bg-gray-900 dark:bg-gray-800 dark:border-highlight-blue/40 text-white dark:text-highlight-blue px-2 py-1 ml-6 text-sm
 	                                invisible opacity-0 -translate-x-3 group-hover:visible group-hover:opacity-100 group-hover:translate-x-0
-	                                transition-all duration-150 whitespace-nowrap z-50 shadow-lg border dark:border-gray-600"
+	                                transition-all duration-150 whitespace-nowrap z-50 shadow-lg border dark:border-highlight-blue/40"
 							>
 								{link.label}
 							</div>
 						{/if}
 
 						{#if $page.url.pathname === link.route}
-							<div class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-blue-400"></div>
+							<div class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-highlight-blue"></div>
 						{/if}
 					</a>
 				{/if}
