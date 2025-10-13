@@ -214,7 +214,7 @@
 
 <HeadTitle title="Sign in" />
 <main
-	class="h-screen grid-cols-1 grid md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-2 bg-white dark:bg-gray-900 transition-colors duration-200"
+	class="h-screen grid-cols-1 grid md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-2 bg-white dark:bg-gray-800 transition-colors duration-200"
 >
 	<!-- theme toggle -->
 	<div class="fixed top-3 right-6 z-50">
@@ -261,7 +261,7 @@
 					<div class="flex flex-col w-full p-4 h-24">
 						<label
 							for="Password"
-							class="text-md font-semibold font-titilium text-pc-darkblue dark:text-white transition-colors duration-200"
+							class="text-md font-semibold font-titilium text-pc-darkblue dark:text-gray-300 transition-colors duration-200"
 							>Password</label
 						>
 						<div class="relative flex items-center justify-end">
@@ -302,7 +302,7 @@
 								type={inputType}
 								id="Password"
 								name="Password"
-								class="relative w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-blue-400 focus:border-2 text-gray-900 dark:text-white transition-colors duration-200"
+								class="relative w-full p-2 rounded bg-pc-lightblue dark:bg-gray-900/60 dark:border-gray-700/60 dark:text-gray-300 dark:placeholder-gray-500 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
 							/>
 						</div>
 					</div>
