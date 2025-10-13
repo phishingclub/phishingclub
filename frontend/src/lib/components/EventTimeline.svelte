@@ -554,103 +554,153 @@
 				second: '2-digit'
 			});
 
-			// use template literals for better performance
-			const content = `
-				<div class="overflow-hidden">
-					<div class="border-t-4" style="border-top-color: ${eventColor};">
-						<div class="px-4 py-3 text-gray-800 dark:text-gray-200">
-							<div class="flex items-center space-x-2">
-								<div class="flex-shrink-0 w-5 h-5" style="color: ${eventColor};">
-									${eventIcon}
-								</div>
-								<div class="flex-1 min-w-0">
-									<h3 class="text-sm font-bold truncate">${eventInfo.name}</h3>
-								</div>
-							</div>
-						</div>
-					</div>
-					<div class="px-4 py-3 space-y-3">
-						${
-							d.recipient?.email
-								? `
-							<div class="flex items-center space-x-2">
-								<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400">
-									<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"/>
-									</svg>
-								</div>
-								<span class="text-sm text-gray-700 dark:text-gray-300 truncate">${d.recipient.email}</span>
-							</div>
-						`
-								: ''
-						}
-						<div class="flex items-center space-x-2">
-							<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400">
-								<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-								</svg>
-							</div>
-							<div class="text-sm text-gray-700 dark:text-gray-300">
-								${formattedDate.split(',')[0]} ${formattedTime}
-							</div>
-						</div>
-						${
-							d.ip || d.userAgent
-								? `
-							<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 space-y-2">
-								${
-									d.ip
-										? `
-									<div class="flex items-center space-x-2">
-										<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400">
-											<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
-											</svg>
-										</div>
-										<span class="text-xs text-gray-600 dark:text-gray-400 truncate">${d.ip}</span>
-									</div>
-								`
-										: ''
-								}
-								${
-									d.userAgent
-										? `
-									<div class="flex items-start space-x-2">
-										<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5">
-											<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-											</svg>
-										</div>
-										<span class="text-xs text-gray-600 dark:text-gray-400 break-words">${d.userAgent.length > 80 ? d.userAgent.substring(0, 80) + '...' : d.userAgent}</span>
-									</div>
-								`
-										: ''
-								}
-							</div>
-						`
-								: ''
-						}
-						${
-							d.data
-								? `
-							<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
-								<div class="flex items-start space-x-2">
-									<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5">
-										<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-										</svg>
-									</div>
-									<div class="text-xs text-gray-600 dark:text-gray-400 break-words">${d.data.length > 100 ? d.data.substring(0, 100) + '...' : d.data}</div>
-								</div>
-							</div>
-						`
-								: ''
-						}
-					</div>
-				</div>
-			`;
+			tooltip.innerHTML = '';
 
-			tooltip.innerHTML = content;
+			// create main container
+			const container = document.createElement('div');
+			container.className = 'overflow-hidden';
+
+			// create header with colored border
+			const header = document.createElement('div');
+			header.className = 'border-t-4';
+			header.style.borderTopColor = eventColor;
+
+			const headerContent = document.createElement('div');
+			headerContent.className = 'px-4 py-3 text-gray-800 dark:text-gray-200';
+
+			const headerFlex = document.createElement('div');
+			headerFlex.className = 'flex items-center space-x-2';
+
+			// create icon container
+			const iconContainer = document.createElement('div');
+			iconContainer.className = 'flex-shrink-0 w-5 h-5';
+			iconContainer.style.color = eventColor;
+			iconContainer.innerHTML = eventIcon; // eventIcon is safe SVG from getEventIcon function
+
+			const textContainer = document.createElement('div');
+			textContainer.className = 'flex-1 min-w-0';
+
+			const title = document.createElement('h3');
+			title.className = 'text-sm font-bold truncate';
+			title.textContent = eventInfo.name;
+
+			textContainer.appendChild(title);
+			headerFlex.appendChild(iconContainer);
+			headerFlex.appendChild(textContainer);
+			headerContent.appendChild(headerFlex);
+			header.appendChild(headerContent);
+			container.appendChild(header);
+
+			// create body content
+			const body = document.createElement('div');
+			body.className = 'px-4 py-3 space-y-3';
+
+			// email section
+			if (d.recipient?.email) {
+				const emailSection = document.createElement('div');
+				emailSection.className = 'flex items-center space-x-2';
+
+				const emailIcon = document.createElement('div');
+				emailIcon.className = 'flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400';
+				emailIcon.innerHTML =
+					'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"/></svg>';
+
+				const emailText = document.createElement('span');
+				emailText.className = 'text-sm text-gray-700 dark:text-gray-300 truncate';
+				emailText.textContent = d.recipient.email;
+
+				emailSection.appendChild(emailIcon);
+				emailSection.appendChild(emailText);
+				body.appendChild(emailSection);
+			}
+
+			// time section
+			const timeSection = document.createElement('div');
+			timeSection.className = 'flex items-center space-x-2';
+
+			const timeIcon = document.createElement('div');
+			timeIcon.className = 'flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400';
+			timeIcon.innerHTML =
+				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+
+			const timeText = document.createElement('div');
+			timeText.className = 'text-sm text-gray-700 dark:text-gray-300';
+			timeText.textContent = `${formattedDate.split(',')[0]} ${formattedTime}`;
+
+			timeSection.appendChild(timeIcon);
+			timeSection.appendChild(timeText);
+			body.appendChild(timeSection);
+
+			// ip/useragent section
+			if (d.ip || d.userAgent) {
+				const techSection = document.createElement('div');
+				techSection.className = 'mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 space-y-2';
+
+				if (d.ip) {
+					const ipSection = document.createElement('div');
+					ipSection.className = 'flex items-center space-x-2';
+
+					const ipIcon = document.createElement('div');
+					ipIcon.className = 'flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400';
+					ipIcon.innerHTML =
+						'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>';
+
+					const ipText = document.createElement('span');
+					ipText.className = 'text-xs text-gray-600 dark:text-gray-400 truncate';
+					ipText.textContent = d.ip;
+
+					ipSection.appendChild(ipIcon);
+					ipSection.appendChild(ipText);
+					techSection.appendChild(ipSection);
+				}
+
+				if (d.userAgent) {
+					const uaSection = document.createElement('div');
+					uaSection.className = 'flex items-start space-x-2';
+
+					const uaIcon = document.createElement('div');
+					uaIcon.className = 'flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5';
+					uaIcon.innerHTML =
+						'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>';
+
+					const uaText = document.createElement('span');
+					uaText.className = 'text-xs text-gray-600 dark:text-gray-400 break-words';
+					uaText.textContent =
+						d.userAgent.length > 80 ? d.userAgent.substring(0, 80) + '...' : d.userAgent;
+
+					uaSection.appendChild(uaIcon);
+					uaSection.appendChild(uaText);
+					techSection.appendChild(uaSection);
+				}
+
+				body.appendChild(techSection);
+			}
+
+			// data section
+			if (d.data) {
+				const dataSection = document.createElement('div');
+				dataSection.className = 'mt-3 pt-3 border-t border-gray-200 dark:border-gray-600';
+
+				const dataFlex = document.createElement('div');
+				dataFlex.className = 'flex items-start space-x-2';
+
+				const dataIcon = document.createElement('div');
+				dataIcon.className = 'flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5';
+				dataIcon.innerHTML =
+					'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+
+				const dataText = document.createElement('div');
+				dataText.className = 'text-xs text-gray-600 dark:text-gray-400 break-words';
+				dataText.textContent = d.data.length > 100 ? d.data.substring(0, 100) + '...' : d.data;
+
+				dataFlex.appendChild(dataIcon);
+				dataFlex.appendChild(dataText);
+				dataSection.appendChild(dataFlex);
+				body.appendChild(dataSection);
+			}
+
+			container.appendChild(body);
+			tooltip.appendChild(container);
 		} catch (e) {
 			console.error('Error updating tooltip content:', e);
 			hideTooltipOptimized();

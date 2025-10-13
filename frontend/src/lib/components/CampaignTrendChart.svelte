@@ -77,6 +77,8 @@
 	let width = 300;
 	let height = 240; // Increased height for better label spacing
 	let containerReady = false;
+	let tooltip;
+	let tooltipTimeout;
 
 	// User controls for N
 	let trendN = 4;
@@ -729,108 +731,191 @@
 		});
 	}
 
+	function showTooltip(event, data, index, metricKey) {
+		if (!tooltip || !data) return;
+
+		// clear any pending hide
+		if (tooltipTimeout) clearTimeout(tooltipTimeout);
+
+		// show tooltip
+		tooltip.style.display = 'block';
+
+		// use requestAnimationFrame for positioning similar to EventTimeline
+		requestAnimationFrame(() => {
+			// get cursor position relative to the chart container
+			const containerRect = chartContainer.getBoundingClientRect();
+			const x = event.clientX - containerRect.left;
+			const y = event.clientY - containerRect.top;
+
+			const tooltipWidth = 250;
+			const containerWidth = chartContainer.offsetWidth;
+			const leftPosition = x + 10;
+			const rightEdge = leftPosition + tooltipWidth;
+
+			// better positioning logic - more balanced positioning
+			let adjustedLeft;
+			if (rightEdge > containerWidth - 20) {
+				// position to the left with some offset, not too far
+				adjustedLeft = x - tooltipWidth + 40;
+			} else {
+				adjustedLeft = leftPosition;
+			}
+
+			tooltip.style.left = `${Math.max(10, adjustedLeft)}px`;
+			tooltip.style.top = `${Math.max(10, y - 10)}px`;
+
+			// update tooltip content
+			updateTooltipContent(data, metricKey);
+		});
+
+		// show value label for hovered metric
+		const svg = chartContainer.querySelector('svg');
+		const valueLabel = svg?.querySelector(`.value-label-${metricKey}-${index}`);
+		if (valueLabel) {
+			valueLabel.setAttribute('opacity', '1');
+		}
+	}
+
+	function hideTooltip(index, metricKey) {
+		if (tooltipTimeout) clearTimeout(tooltipTimeout);
+		tooltipTimeout = setTimeout(() => {
+			if (tooltip) {
+				tooltip.style.display = 'none';
+			}
+		}, 150);
+
+		// hide value label
+		const svg = chartContainer.querySelector('svg');
+		const valueLabel = svg?.querySelector(`.value-label-${metricKey}-${index}`);
+		if (valueLabel) {
+			valueLabel.setAttribute('opacity', '0');
+		}
+	}
+
+	function updateTooltipContent(data, hoveredMetric) {
+		if (!tooltip) return;
+
+		try {
+			const formattedDate =
+				data.date instanceof Date
+					? `${data.date.getFullYear()}/${String(data.date.getMonth() + 1).padStart(2, '0')}`
+					: 'Unknown Date';
+
+			const visibleMetricsList = metrics.filter((metric) => visibleMetrics[metric.key]);
+			const hoveredMetricInfo = metrics.find((metric) => metric.key === hoveredMetric);
+
+			// clear tooltip and build content safely using DOM methods
+			tooltip.innerHTML = '';
+
+			// create main container
+			const container = document.createElement('div');
+			container.className = 'overflow-hidden';
+
+			// create header with colored border
+			const header = document.createElement('div');
+			header.className = 'border-t-4';
+			header.style.borderTopColor = hoveredMetricInfo?.color || '#3b82f6';
+
+			const headerContent = document.createElement('div');
+			headerContent.className = 'px-4 py-3 text-gray-800 dark:text-gray-200';
+
+			const headerFlex = document.createElement('div');
+			headerFlex.className = 'flex items-center space-x-2';
+
+			// no indicator dot needed for cleaner look
+
+			const textContainer = document.createElement('div');
+			textContainer.className = 'flex-1 min-w-0';
+
+			const title = document.createElement('h3');
+			title.className = 'text-sm font-bold truncate';
+			title.textContent = data.name;
+
+			const date = document.createElement('p');
+			date.className = 'text-xs text-gray-600 dark:text-gray-400';
+			date.textContent = formattedDate;
+
+			textContainer.appendChild(title);
+			textContainer.appendChild(date);
+			headerFlex.appendChild(textContainer);
+			headerContent.appendChild(headerFlex);
+			header.appendChild(headerContent);
+			container.appendChild(header);
+
+			// create body content
+			const body = document.createElement('div');
+			body.className = 'px-4 py-3 space-y-3';
+
+			// recipients section
+			const recipientsSection = document.createElement('div');
+			recipientsSection.className = 'flex items-center space-x-2';
+
+			// no icon needed for cleaner look
+
+			const recipientsText = document.createElement('span');
+			recipientsText.className = 'text-sm text-gray-700 dark:text-gray-300';
+			recipientsText.textContent = `Total Recipients: ${data.totalRecipients || 0}`;
+
+			recipientsSection.appendChild(recipientsText);
+			body.appendChild(recipientsSection);
+
+			// metrics section
+			if (visibleMetricsList.length > 0) {
+				const metricsSection = document.createElement('div');
+				metricsSection.className =
+					'mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 space-y-2';
+
+				visibleMetricsList.forEach((metric) => {
+					const metricRow = document.createElement('div');
+					metricRow.className = 'flex items-center justify-between';
+
+					const metricLeft = document.createElement('div');
+					metricLeft.className = 'flex items-center space-x-2';
+
+					const metricDot = document.createElement('div');
+					metricDot.className = 'w-3 h-3 rounded-full';
+					metricDot.style.backgroundColor = metric.color;
+
+					const metricLabel = document.createElement('span');
+					metricLabel.className = 'text-sm text-gray-700 dark:text-gray-300';
+					metricLabel.textContent = metric.label;
+
+					const metricValue = document.createElement('span');
+					metricValue.className = 'text-sm font-semibold';
+					metricValue.style.color = metric.color;
+					metricValue.textContent = Math.round(data[metric.key] || 0).toString();
+
+					metricLeft.appendChild(metricDot);
+					metricLeft.appendChild(metricLabel);
+					metricRow.appendChild(metricLeft);
+					metricRow.appendChild(metricValue);
+					metricsSection.appendChild(metricRow);
+				});
+
+				body.appendChild(metricsSection);
+			}
+
+			container.appendChild(body);
+			tooltip.appendChild(container);
+		} catch (e) {
+			console.error('Error updating tooltip content:', e);
+			hideTooltip();
+		}
+	}
+
 	function createTooltip(svg, points) {
-		const tooltipGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-		tooltipGroup.setAttribute('class', 'tooltip-group');
-		tooltipGroup.setAttribute('display', 'none');
-
-		const tooltipRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-		tooltipRect.setAttribute('rx', '4');
-		tooltipRect.setAttribute(
-			'fill',
-			document.documentElement.classList.contains('dark') ? '#111827' : '#1F2937'
-		);
-		tooltipRect.setAttribute(
-			'stroke',
-			document.documentElement.classList.contains('dark') ? '#374151' : '#4b5563'
-		);
-		tooltipRect.setAttribute('opacity', '0.95');
-
-		const tooltipText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-		tooltipText.setAttribute('fill', 'white');
-		tooltipText.setAttribute('font-size', '12');
-		tooltipText.setAttribute('font-weight', '500');
-
-		tooltipGroup.appendChild(tooltipRect);
-		tooltipGroup.appendChild(tooltipText);
-		svg.appendChild(tooltipGroup);
-
 		points.forEach((point) => {
 			point.addEventListener('mouseenter', (e) => {
 				const index = parseInt(e.target.getAttribute('data-index'));
 				const metricKey = e.target.getAttribute('data-metric');
 				const data = chartData[index];
-
-				// Show only the value label for the hovered metric
-				const valueLabel = svg.querySelector(`.value-label-${metricKey}-${index}`);
-				if (valueLabel) {
-					valueLabel.setAttribute('opacity', '1');
-				}
-
-				while (tooltipText.firstChild) tooltipText.removeChild(tooltipText.firstChild);
-
-				const labelSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-				labelSpan.setAttribute('x', '10');
-				labelSpan.setAttribute('dy', '15');
-				if (data.date instanceof Date) {
-					labelSpan.textContent = `${data.date.getFullYear()}/${String(data.date.getMonth() + 1).padStart(2, '0')} ${data.name}`;
-				} else {
-					labelSpan.textContent = data.name;
-				}
-				tooltipText.appendChild(labelSpan);
-
-				metrics.forEach((metric, i) => {
-					if (visibleMetrics[metric.key]) {
-						const metricSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-						metricSpan.setAttribute('x', '10');
-						metricSpan.setAttribute('dy', '15');
-						metricSpan.setAttribute('fill', metric.color);
-						metricSpan.textContent = `${metric.label}: ${Math.round(data[metric.key] || 0)}`;
-						tooltipText.appendChild(metricSpan);
-					}
-				});
-
-				const recipientsSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
-				recipientsSpan.setAttribute('x', '10');
-				recipientsSpan.setAttribute('dy', '15');
-				recipientsSpan.textContent = `Recipients: ${data.totalRecipients}`;
-				tooltipText.appendChild(recipientsSpan);
-
-				const bbox = tooltipText.getBBox();
-				tooltipRect.setAttribute('x', (bbox.x - 5).toString());
-				tooltipRect.setAttribute('y', (bbox.y - 5).toString());
-				tooltipRect.setAttribute('width', (bbox.width + 10).toString());
-				tooltipRect.setAttribute('height', (bbox.height + 10).toString());
-
-				const svgRect = svg.getBoundingClientRect();
-				const x = parseFloat(e.target.getAttribute('cx'));
-				const y = parseFloat(e.target.getAttribute('cy'));
-				const tooltipWidth = bbox.width + 10;
-				let tooltipX = x + 10;
-				// If tooltip would overflow right edge, show to the left
-				if (tooltipX + tooltipWidth > width - 10) {
-					tooltipX = x - tooltipWidth - 10;
-				}
-				// Prevent tooltip from being cut off at the top
-				let tooltipY = y - 60;
-				if (tooltipY < 0) {
-					tooltipY = y + 10;
-				}
-				tooltipGroup.setAttribute('transform', `translate(${tooltipX}, ${tooltipY})`);
-				tooltipGroup.setAttribute('display', 'block');
+				showTooltip(e, data, index, metricKey);
 			});
 
 			point.addEventListener('mouseleave', (e) => {
 				const index = parseInt(e.target.getAttribute('data-index'));
 				const metricKey = e.target.getAttribute('data-metric');
-
-				// Hide the value label for this metric
-				const valueLabel = svg.querySelector(`.value-label-${metricKey}-${index}`);
-				if (valueLabel) {
-					valueLabel.setAttribute('opacity', '0');
-				}
-
-				tooltipGroup.setAttribute('display', 'none');
+				hideTooltip(index, metricKey);
 			});
 		});
 	}
@@ -880,6 +965,9 @@
 		}
 		if (pendingTimeout) {
 			clearTimeout(pendingTimeout);
+		}
+		if (tooltipTimeout) {
+			clearTimeout(tooltipTimeout);
 		}
 	});
 
@@ -1056,11 +1144,17 @@
 					<div class="mt-8 mb-6"></div>
 					{#key chartKey}
 						{#if containerReady}
-							<div
-								bind:this={chartContainer}
-								class="min-h-[220px] max-h-[280px] w-full box-border relative rounded-md bg-white dark:bg-gray-900 m-1 transition-colors duration-200"
-								style="contain: layout style;"
-							></div>
+							<div class="relative">
+								<div
+									bind:this={chartContainer}
+									class="min-h-[220px] max-h-[280px] w-full box-border relative rounded-md bg-white dark:bg-gray-900 m-1 transition-colors duration-200"
+									style="contain: layout style;"
+								></div>
+								<div
+									bind:this={tooltip}
+									class="absolute z-50 hidden bg-white dark:bg-gray-900 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700/60 max-w-xs transition-colors duration-200"
+								></div>
+							</div>
 						{/if}
 					{/key}
 					<!-- DEBUG: Show moving average arrays for openRate and submissionRate

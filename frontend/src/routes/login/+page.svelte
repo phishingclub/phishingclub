@@ -214,7 +214,7 @@
 
 <HeadTitle title="Sign in" />
 <main
-	class="h-screen grid-cols-1 grid md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-2 bg-white dark:bg-gray-800 transition-colors duration-200"
+	class="h-screen grid-cols-1 grid md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-2 bg-white dark:bg-gray-900 transition-colors duration-200"
 >
 	<!-- theme toggle -->
 	<div class="fixed top-3 right-6 z-50">
@@ -252,12 +252,32 @@
 					on:submit={(e) => onSubmitLogin('password', e)}
 					class="flex flex-col items-center justify-center w-full md:p-px lg:p-4"
 				>
-					<Input
-						fieldName={'Username'}
-						type="text"
-						bind:value={formValues.username}
-						submitOnEnter
-					/>
+					<div class="flex flex-col w-full p-4 h-24">
+						<label
+							for="Username"
+							class="text-md font-semibold font-titilium text-pc-darkblue dark:text-gray-300 transition-colors duration-200"
+							>Username</label
+						>
+						<input
+							required
+							on:keyup={(event) => {
+								const t = /** @type {HTMLInputElement} */ (event.target);
+								formValues.username = t.value;
+							}}
+							on:keydown={(event) => {
+								if (event.key === 'Enter') {
+									onSubmitLogin('password', null);
+								}
+							}}
+							value={formValues.username}
+							autocomplete="off"
+							tabindex="0"
+							type="text"
+							id="Username"
+							name="Username"
+							class="w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
+						/>
+					</div>
 					<div class="flex flex-col w-full p-4 h-24">
 						<label
 							for="Password"
@@ -302,7 +322,7 @@
 								type={inputType}
 								id="Password"
 								name="Password"
-								class="relative w-full p-2 rounded bg-pc-lightblue dark:bg-gray-900/60 dark:border-gray-700/60 dark:text-gray-300 dark:placeholder-gray-500 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
+								class="relative w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
 							/>
 						</div>
 					</div>
