@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.6.1] - 2025-10-13
+- Fix proxy domain comparison
+- Improve campaign trendline campaign box
+- Escape context in analytics graphs
+- Fix login page on dark mode
+
 ## [1.6.0] - 2025-10-12
 - Added debug flag
 - Option to install example templates on setup
