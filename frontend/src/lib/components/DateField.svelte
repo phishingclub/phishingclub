@@ -101,38 +101,3 @@
 		class:w-60={inputWidth === 'large'}
 	/>
 </div>
-
-<style>
-	/* Override browser default styling for date inputs */
-	:global(.date-field-input::-webkit-calendar-picker-indicator) {
-		background: transparent;
-		color: inherit;
-	}
-
-	:global(.date-field-input::-webkit-datetime-edit) {
-		background: transparent !important;
-		color: inherit;
-	}
-
-	:global(.date-field-input::-webkit-datetime-edit-fields-wrapper) {
-		background: transparent !important;
-	}
-
-	:global(.date-field-input::-webkit-datetime-edit-text) {
-		color: inherit;
-		background: transparent !important;
-	}
-
-	:global(.date-field-input::-webkit-datetime-edit-month-field),
-	:global(.date-field-input::-webkit-datetime-edit-day-field),
-	:global(.date-field-input::-webkit-datetime-edit-year-field) {
-		background: transparent !important;
-		color: inherit;
-	}
-
-	/* Dark mode specific overrides */
-	:global(.dark .date-field-input::-webkit-calendar-picker-indicator) {
-		filter: invert(1);
-		opacity: 0.7;
-	}
-</style>
