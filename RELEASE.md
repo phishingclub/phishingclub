@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.6.2] - 2025-10-13
+- Remove dark mode browser specific styling for date components
+
 ## [1.6.1] - 2025-10-13
 - Fix proxy domain comparison
 - Improve campaign trendline campaign box
