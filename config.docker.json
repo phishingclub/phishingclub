@@ -1,0 +1,30 @@
+{
+  "acme": {
+    "email": ""
+  },
+  "administration": {
+    "tls_host": "localhost",
+    "tls_auto": false,
+    "tls_cert_path": "/app/data/certs/admin/public.pem",
+    "tls_key_path": "/app/data/certs/admin/private.pem",
+    "address": "0.0.0.0:8000",
+    "ip_allow_list": []
+  },
+  "phishing": {
+    "http": "0.0.0.0:8080",
+    "https": "0.0.0.0:8443"
+  },
+  "database": {
+    "engine": "sqlite3",
+    "dsn": "file:/app/data/db.sqlite3"
+  },
+  "log": {
+    "path": "",
+    "errorPath": ""
+  },
+  "ip_security": {
+    "admin_allowed": [],
+    "trusted_proxies": [],
+    "trusted_ip_header": ""
+  }
+}
