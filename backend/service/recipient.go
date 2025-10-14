@@ -227,7 +227,9 @@ func (r *Recipient) GetByCompanyID(
 ) (*model.Result[model.Recipient], error) {
 	result := model.NewEmptyResult[model.Recipient]()
 	ae := NewAuditEvent("Recipient.GetByCompanyID", session)
-	ae.Details["id"] = id.String()
+	if id != nil {
+		ae.Details["id"] = id.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
