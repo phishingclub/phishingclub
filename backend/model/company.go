@@ -11,10 +11,11 @@ import (
 
 // Company is a company
 type Company struct {
-	ID        nullable.Nullable[uuid.UUID]   `json:"id"`
-	CreatedAt *time.Time                     `json:"createdAt"`
-	UpdatedAt *time.Time                     `json:"updatedAt"`
-	Name      nullable.Nullable[vo.String64] `json:"name"`
+	ID        nullable.Nullable[uuid.UUID]            `json:"id"`
+	CreatedAt *time.Time                              `json:"createdAt"`
+	UpdatedAt *time.Time                              `json:"updatedAt"`
+	Name      nullable.Nullable[vo.String64]          `json:"name"`
+	Comment   nullable.Nullable[vo.OptionalString1MB] `json:"comment"`
 }
 
 // Validate checks if the Company configuration with a valid state
@@ -34,6 +35,12 @@ func (c *Company) ToDBMap() map[string]any {
 		m["name"] = nil
 		if name, err := c.Name.Get(); err == nil {
 			m["name"] = name.String()
+		}
+	}
+	if c.Comment.IsSpecified() {
+		m["comment"] = nil
+		if comment, err := c.Comment.Get(); err == nil {
+			m["comment"] = comment.String()
 		}
 	}
 	return m

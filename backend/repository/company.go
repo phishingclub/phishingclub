@@ -17,6 +17,7 @@ var companyAllowedColumns = assignTableToColumns(database.COMPANY_TABLE, []strin
 	"created_at",
 	"updated_at",
 	"name",
+	"comment",
 })
 
 // Company is a Company repository
@@ -147,10 +148,15 @@ func (r *Company) DeleteByID(
 func ToCompany(row *database.Company) *model.Company {
 	id := nullable.NewNullableWithValue(row.ID)
 	name := nullable.NewNullableWithValue(*vo.NewString64Must(row.Name))
+	var comment nullable.Nullable[vo.OptionalString1MB]
+	if row.Comment != nil {
+		comment = nullable.NewNullableWithValue(*vo.NewUnsafeOptionalString1MB(*row.Comment))
+	}
 	return &model.Company{
 		ID:        id,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
 		Name:      name,
+		Comment:   comment,
 	}
 }

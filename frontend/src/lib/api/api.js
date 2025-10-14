@@ -1078,11 +1078,13 @@ export class API {
 		 * Create a new company.
 		 *
 		 * @param {string} name
+		 * @param {string} comment
 		 * @returns {Promise<ApiResponse>}
 		 */
-		create: async (name) => {
+		create: async (name, comment) => {
 			return await postJSON(this.getPath(`/company`), {
-				name: name
+				name: name,
+				comment: comment
 			});
 		},
 
@@ -1091,11 +1093,13 @@ export class API {
 		 *
 		 * @param {string} id
 		 * @param {string} name
+		 * @param {string} comment
 		 * @returns {Promise<ApiResponse>}
 		 */
-		update: async (id, name) => {
+		update: async (id, name, comment) => {
 			return await postJSON(this.getPath(`/company/${id}`), {
-				name: name
+				name: name,
+				comment: comment
 			});
 		},
 

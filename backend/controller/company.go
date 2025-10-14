@@ -26,6 +26,7 @@ var CompanyColumnsMap = map[string]string{
 	"created_at": repository.TableColumn(database.COMPANY_TABLE, "created_at"),
 	"updated_at": repository.TableColumn(database.COMPANY_TABLE, "updated_at"),
 	"name":       repository.TableColumn(database.COMPANY_TABLE, "name"),
+	"comment":    repository.TableColumn(database.COMPANY_TABLE, "comment"),
 }
 
 // Company is a Company controller
@@ -93,6 +94,7 @@ func (c *Company) ExportByCompanyID(g *gin.Context) {
 			"Created at",
 			"Updated at",
 			"Name",
+			"Comment",
 		}
 		err = writer.Write(headers)
 		if ok := c.handleErrors(g, err); !ok {
@@ -102,6 +104,7 @@ func (c *Company) ExportByCompanyID(g *gin.Context) {
 			utils.CSVFromDate(company.CreatedAt),
 			utils.CSVFromDate(company.UpdatedAt),
 			utils.CSVRemoveFormulaStart(utils.NullableToString(company.Name)),
+			utils.CSVRemoveFormulaStart(utils.NullableToString(company.Comment)),
 		}
 		err = writer.Write(row)
 		if ok := c.handleErrors(g, err); !ok {

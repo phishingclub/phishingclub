@@ -2,7 +2,6 @@
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
 	import Headline from '$lib/components/Headline.svelte';
-	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
@@ -13,10 +12,7 @@
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import Modal from '$lib/components/Modal.svelte';
-	import FormGrid from '$lib/components/FormGrid.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
-	import FormColumns from '$lib/components/FormColumns.svelte';
-	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
@@ -28,7 +24,8 @@
 	// bindings
 	let form = null;
 	const formValues = {
-		name: null
+		name: null,
+		comment: null
 	};
 	// data
 	let modalError = '';
@@ -45,6 +42,9 @@
 		id: null,
 		name: null
 	};
+
+	let isViewCommentModalVisible = false;
+	let viewCommentCompany = null;
 
 	$: {
 		modalText = modalMode === 'create' ? 'New company' : 'Update company';
@@ -120,7 +120,7 @@
 	const create = async () => {
 		modalError = '';
 		try {
-			const res = await api.company.create(formValues.name);
+			const res = await api.company.create(formValues.name, formValues.comment);
 			if (!res.success) {
 				modalError = res.error;
 				return;
@@ -137,7 +137,7 @@
 	const update = async () => {
 		modalError = '';
 		try {
-			const res = await api.company.update(formValues.id, formValues.name);
+			const res = await api.company.update(formValues.id, formValues.name, formValues.comment);
 			if (!res.success) {
 				modalError = res.error;
 				return;
@@ -179,12 +179,20 @@
 	const openCreateModal = () => {
 		modalMode = 'create';
 		modalError = '';
+		// reset form values for create mode
+		formValues.id = null;
+		formValues.name = null;
+		formValues.comment = null;
 		isModalVisible = true;
 	};
 
 	const closeModal = () => {
 		modalError = '';
 		isModalVisible = false;
+		// reset form values
+		formValues.id = null;
+		formValues.name = null;
+		formValues.comment = null;
 		form.reset();
 	};
 
@@ -198,6 +206,7 @@
 			const company = await getCompany(id);
 			formValues.id = company.id;
 			formValues.name = company.name;
+			formValues.comment = company.comment || null;
 			isModalVisible = true;
 		} catch (e) {
 			addToast('Failed to get company', 'Error');
@@ -210,7 +219,21 @@
 	const closeUpdateModal = () => {
 		isModalVisible = false;
 		modalError = '';
+		// reset form values
+		formValues.id = null;
+		formValues.name = null;
+		formValues.comment = null;
 		form.reset();
+	};
+
+	const openViewCommentModal = (company) => {
+		viewCommentCompany = company;
+		isViewCommentModalVisible = true;
+	};
+
+	const closeViewCommentModal = () => {
+		isViewCommentModalVisible = false;
+		viewCommentCompany = null;
 	};
 
 	const onClickExport = async (id) => {
@@ -255,6 +278,10 @@
 				<TableCellAction>
 					<TableDropDownEllipsis>
 						<TableUpdateButton on:click={() => openUpdateModal(company.id)} />
+						<TableDropDownButton
+							name="View Comment"
+							on:click={() => openViewCommentModal(company)}
+						/>
 						<TableDropDownButton name="Export" on:click={() => onClickExport(company.id)} />
 						<TableDeleteButton on:click={() => openDeleteAlert(company)} />
 					</TableDropDownEllipsis>
@@ -264,21 +291,94 @@
 	</Table>
 
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
-		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
-			<FormColumns>
-				<FormColumn>
-					<TextField
-						required
-						minLength={1}
-						maxLength={64}
-						placeholder="Alices Enterprise Solutions"
-						bind:value={formValues.name}>Name</TextField
-					>
-				</FormColumn>
-			</FormColumns>
-			<FormError message={modalError} />
-			<FormFooter {closeModal} {isSubmitting} />
-		</FormGrid>
+		<div class="w-[1000px] p-6">
+			<form on:submit|preventDefault={onSubmit} bind:this={form}>
+				<div class="space-y-6">
+					<div>
+						<label
+							for="company-name"
+							class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+						>
+							Company Name
+						</label>
+						<input
+							id="company-name"
+							type="text"
+							required
+							minlength="1"
+							maxlength="64"
+							placeholder="Alices Enterprise Solutions"
+							bind:value={formValues.name}
+							class="w-96 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+						/>
+					</div>
+
+					<div>
+						<div class="flex items-center mb-2">
+							<label
+								for="company-comment"
+								class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+							>
+								Comment
+							</label>
+							<div
+								class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+							>
+								<p class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200">
+									optional
+								</p>
+							</div>
+						</div>
+						<textarea
+							id="company-comment"
+							bind:value={formValues.comment}
+							maxlength={1000000}
+							rows="20"
+							placeholder="Add notes about this company..."
+							class="w-full p-4 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+						/>
+					</div>
+				</div>
+
+				<FormError message={modalError} />
+				<FormFooter {closeModal} {isSubmitting} />
+			</form>
+		</div>
+	</Modal>
+
+	<Modal
+		headerText="Company Comment"
+		visible={isViewCommentModalVisible}
+		onClose={closeViewCommentModal}
+	>
+		<div class="p-8 w-full min-w-[800px] max-w-6xl">
+			<div class="mb-4">
+				<h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">
+					{viewCommentCompany?.name || 'Company'}
+				</h3>
+			</div>
+			{#if viewCommentCompany?.comment && viewCommentCompany.comment.trim()}
+				<div
+					class="bg-gray-50 dark:bg-gray-800 p-8 rounded-lg border min-h-[400px] max-h-[600px] overflow-y-auto"
+				>
+					<pre
+						class="whitespace-pre-wrap text-base text-gray-700 dark:text-gray-300 font-normal leading-relaxed">{viewCommentCompany.comment}</pre>
+				</div>
+			{:else}
+				<div class="bg-gray-50 dark:bg-gray-800 p-8 rounded-lg border text-center">
+					<p class="text-sm text-gray-500 dark:text-gray-400 italic">No comment available.</p>
+				</div>
+			{/if}
+			<div class="mt-6 flex justify-end">
+				<button
+					type="button"
+					on:click={closeViewCommentModal}
+					class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md transition-colors duration-200"
+				>
+					Close
+				</button>
+			</div>
+		</div>
 	</Modal>
 
 	<DeleteAlert

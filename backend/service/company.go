@@ -197,30 +197,38 @@ func (s *Company) UpdateByID(
 		s.Logger.Debugw("failed to get company name", "error", err)
 		return err
 	}
-	// check if company name is unique, let a TOCTOU error
-	// happen as a generic error, this is easier than checking
-	// all database types specific unique contraint errors
-	_, err = s.CompanyRepository.GetByName(
-		ctx,
-		name.String(),
-	)
-	// we expect not to find a company with this name
-	// so any error is an actual error
-	if err != nil {
-		// something went wrong
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			s.Logger.Debugw("failed to get existing company name", "error", current.Name)
-			return err
+	// check if company name is unique, excluding the current company
+	// only check if the name has actually changed
+	currentName := current.Name.MustGet().String()
+	if name.String() != currentName {
+		// check if company name is unique, let a TOCTOU error
+		// happen as a generic error, this is easier than checking
+		// all database types specific unique contraint errors
+		existingCompany, err := s.CompanyRepository.GetByName(
+			ctx,
+			name.String(),
+		)
+		// we expect not to find a company with this name
+		if err != nil {
+			// something went wrong
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				s.Logger.Debugw("failed to get existing company name", "error", err)
+				return err
+			}
 		}
-	}
-	// if there is no error, then the company name is already taken
-	if err == nil {
-		s.Logger.Debugw("company name is already taken", "error", name.String())
-		return validate.WrapErrorWithField(errors.New("not unique"), "name")
+		// if there is no error, then the company name is already taken
+		// but we need to make sure it's not the same company we're updating
+		if err == nil && existingCompany.ID.MustGet() != *id {
+			s.Logger.Debugw("company name is already taken", "error", name.String())
+			return validate.WrapErrorWithField(errors.New("not unique"), "name")
+		}
 	}
 	// update changed fields
 	if v, err := company.Name.Get(); err == nil {
 		current.Name.Set(v)
+	}
+	if v, err := company.Comment.Get(); err == nil {
+		current.Comment.Set(v)
 	}
 	// validate
 	if err := company.Validate(); err != nil {

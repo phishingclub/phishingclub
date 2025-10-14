@@ -15,6 +15,7 @@ type Company struct {
 	CreatedAt *time.Time `gorm:"not null;index;"`
 	UpdatedAt *time.Time `gorm:"not null;index"`
 	Name      string     `gorm:"not null;unique;index"`
+	Comment   *string    `gorm:"type:text"`
 
 	// backref: many-to-one
 	Users           []*User           //`gorm:"foreignKey:CompanyID;"`
