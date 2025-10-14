@@ -20,6 +20,7 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
+	import Alert from '$lib/components/Alert.svelte';
 
 	// bindings
 	let form = null;
@@ -45,6 +46,10 @@
 
 	let isViewCommentModalVisible = false;
 	let viewCommentCompany = null;
+
+	let isExportCompanyModalVisible = false;
+	let isExportSharedModalVisible = false;
+	let exportCompany = null;
 
 	$: {
 		modalText = modalMode === 'create' ? 'New company' : 'Update company';
@@ -236,13 +241,49 @@
 		viewCommentCompany = null;
 	};
 
-	const onClickExport = async (id) => {
+	const openExportCompanyModal = (company) => {
+		exportCompany = company;
+		isExportCompanyModalVisible = true;
+	};
+
+	const closeExportCompanyModal = () => {
+		isExportCompanyModalVisible = false;
+		exportCompany = null;
+	};
+
+	const openExportSharedModal = () => {
+		isExportSharedModalVisible = true;
+	};
+
+	const closeExportSharedModal = () => {
+		isExportSharedModalVisible = false;
+	};
+
+	const onConfirmExportCompany = async () => {
 		try {
 			showIsLoading();
-			api.company.export(id);
+			api.company.export(exportCompany.id);
+			closeExportCompanyModal();
+			return { success: true };
 		} catch (e) {
 			addToast('Failed to export company events', 'Error');
 			console.error('failed to export company events', e);
+			return { success: false, error: e };
+		} finally {
+			hideIsLoading();
+		}
+	};
+
+	const onConfirmExportShared = async () => {
+		try {
+			showIsLoading();
+			api.company.export();
+			closeExportSharedModal();
+			return { success: true };
+		} catch (e) {
+			addToast('Failed to export shared events', 'Error');
+			console.error('failed to export shared events', e);
+			return { success: false, error: e };
 		} finally {
 			hideIsLoading();
 		}
@@ -253,7 +294,7 @@
 <main>
 	<Headline>Companies</Headline>
 	<BigButton on:click={openCreateModal}>New company</BigButton>
-	<BigButton on:click={() => onClickExport()}>Export shared</BigButton>
+	<BigButton on:click={openExportSharedModal}>Export shared</BigButton>
 	<Table
 		columns={[{ column: 'Name', size: 'large' }]}
 		sortable={['name']}
@@ -282,7 +323,7 @@
 							name="View Comment"
 							on:click={() => openViewCommentModal(company)}
 						/>
-						<TableDropDownButton name="Export" on:click={() => onClickExport(company.id)} />
+						<TableDropDownButton name="Export" on:click={() => openExportCompanyModal(company)} />
 						<TableDeleteButton on:click={() => openDeleteAlert(company)} />
 					</TableDropDownEllipsis>
 				</TableCellAction>
@@ -387,4 +428,37 @@
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
 	></DeleteAlert>
+
+	<Alert
+		headline="Export Company Data"
+		bind:visible={isExportCompanyModalVisible}
+		onConfirm={onConfirmExportCompany}
+	>
+		<div>
+			{#if exportCompany}
+				<p class="mb-4">Are you sure you want to export all data for:</p>
+				<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded mb-4">
+					<p class="font-medium">{exportCompany.name}</p>
+				</div>
+				<p class="text-sm text-gray-500">
+					This will download a ZIP file containing all company data, recipients, and campaign
+					events.
+				</p>
+			{/if}
+		</div>
+	</Alert>
+
+	<Alert
+		headline="Export Shared Data"
+		bind:visible={isExportSharedModalVisible}
+		onConfirm={onConfirmExportShared}
+	>
+		<div>
+			<p class="mb-4">Are you sure you want to export all shared data?</p>
+			<p class="text-sm text-gray-500">
+				This will download a ZIP file containing all recipients and campaign events that are not
+				assigned to any specific company.
+			</p>
+		</div>
+	</Alert>
 </main>
