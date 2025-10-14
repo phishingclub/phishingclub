@@ -306,6 +306,60 @@ func (r *Recipient) GetRepeatOffenderCount(g *gin.Context) {
 	r.Response.OK(g, count)
 }
 
+// GetOrphaned gets all recipients that are not in any group
+func (r *Recipient) GetOrphaned(g *gin.Context) {
+	session, _, ok := r.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	companyID := companyIDFromRequestQuery(g)
+	queryArgs, ok := r.handleQueryArgs(g)
+	if !ok {
+		return
+	}
+	queryArgs.DefaultSortBy("first_name")
+	// remap query args
+	queryArgs.RemapOrderBy(recipientColumnByMap)
+	// get orphaned recipients
+	recipients, err := r.RecipientService.GetOrphaned(
+		g.Request.Context(),
+		companyID,
+		session,
+		&repository.RecipientOption{
+			QueryArgs: queryArgs,
+		},
+	)
+	// handle response
+	if ok := r.handleErrors(g, err); !ok {
+		return
+	}
+	r.Response.OK(g, recipients)
+}
+
+// DeleteAllOrphaned deletes all recipients that are not in any group
+func (r *Recipient) DeleteAllOrphaned(g *gin.Context) {
+	session, _, ok := r.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	companyID := companyIDFromRequestQuery(g)
+	// delete orphaned recipients
+	count, err := r.RecipientService.DeleteAllOrphaned(
+		g.Request.Context(),
+		companyID,
+		session,
+	)
+	// handle response
+	if ok := r.handleErrors(g, err); !ok {
+		return
+	}
+	r.Response.OK(g, gin.H{
+		"count": count,
+	})
+}
+
 // GetAll gets all recipients
 func (r *Recipient) GetAll(g *gin.Context) {
 	session, _, ok := r.handleSession(g)

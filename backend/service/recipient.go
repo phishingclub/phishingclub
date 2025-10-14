@@ -386,6 +386,70 @@ func (r *Recipient) GetRepeatOffenderCount(
 	return count, nil
 }
 
+// GetOrphaned gets all recipients that are not in any group
+func (r *Recipient) GetOrphaned(
+	ctx context.Context,
+	companyID *uuid.UUID, // can be null
+	session *model.Session,
+	options *repository.RecipientOption,
+) (*model.Result[model.Recipient], error) {
+	result := model.NewEmptyResult[model.Recipient]()
+	ae := NewAuditEvent("Recipient.GetOrphaned", session)
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		r.LogAuthError(err)
+		return result, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		r.AuditLogNotAuthorized(ae)
+		return result, errs.ErrAuthorizationFailed
+	}
+	// get orphaned recipients
+	result, err = r.RecipientRepository.GetOrphaned(
+		ctx,
+		companyID,
+		options,
+	)
+	if err != nil {
+		r.Logger.Errorw("failed to get orphaned recipients - failed to get orphaned recipients", "error", err)
+		return result, errs.Wrap(err)
+	}
+	// no audit on read
+	return result, nil
+}
+
+// DeleteAllOrphaned deletes all recipients that are not in any group
+func (r *Recipient) DeleteAllOrphaned(
+	ctx context.Context,
+	companyID *uuid.UUID, // can be null
+	session *model.Session,
+) (int64, error) {
+	ae := NewAuditEvent("Recipient.DeleteAllOrphaned", session)
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		r.LogAuthError(err)
+		return 0, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		r.AuditLogNotAuthorized(ae)
+		return 0, errs.ErrAuthorizationFailed
+	}
+	// delete orphaned recipients
+	count, err := r.RecipientRepository.DeleteAllOrphaned(
+		ctx,
+		companyID,
+	)
+	if err != nil {
+		r.Logger.Errorw("failed to delete orphaned recipients - failed to delete orphaned recipients", "error", err)
+		return 0, errs.Wrap(err)
+	}
+	ae.Details["count"] = count
+	r.AuditLogAuthorized(ae)
+	return count, nil
+}
+
 // GetByEmail gets a recipient by email
 func (r *Recipient) GetByEmail(
 	ctx context.Context,

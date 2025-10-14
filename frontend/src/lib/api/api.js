@@ -2049,6 +2049,33 @@ export class API {
 		},
 
 		/**
+		 * Get all orphaned recipients (recipients not in any group) using pagination.
+		 *
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getOrphaned: async (options, companyID = null) => {
+			return await getJSON(
+				this.getPath(
+					`/recipient/orphaned?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`
+				)
+			);
+		},
+
+		/**
+		 * Delete all orphaned recipients (recipients not in any group).
+		 *
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		deleteAllOrphaned: async (companyID = null) => {
+			return await deleteReq(
+				this.getPath(`/recipient/orphaned/delete?${this.appendCompanyQuery(companyID)}`)
+			);
+		},
+
+		/**
 		 * Get campaign events related by recipient id and optional campaign id
 		 *
 		 * @param {string} recipientID

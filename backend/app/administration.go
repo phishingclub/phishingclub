@@ -101,6 +101,8 @@ const (
 	ROUTE_V1_RECIPIENT_ID_EVENTS        = "/api/v1/recipient/:id/events"
 	ROUTE_V1_RECIPIENT_ID_STATS         = "/api/v1/recipient/:id/stats"
 	ROUTE_V1_RECIPIENT_REPEAT_OFFENDERS = "/api/v1/recipient/repeat-offenders"
+	ROUTE_V1_RECIPIENT_ORPHANED         = "/api/v1/recipient/orphaned"
+	ROUTE_V1_RECIPIENT_ORPHANED_DELETE  = "/api/v1/recipient/orphaned/delete"
 	ROUTE_V1_RECIPIENT_GROUP            = "/api/v1/recipient/group"
 	ROUTE_V1_RECIPIENT_GROUP_ID         = "/api/v1/recipient/group/:id"
 	ROUTE_V1_RECIPIENT_GROUP_ID_IMPORT  = "/api/v1/recipient/group/:id/import"
@@ -308,6 +310,8 @@ func setupRoutes(
 		PATCH(ROUTE_V1_RECIPIENT_ID, middleware.SessionHandler, controllers.Recipient.UpdateByID).
 		DELETE(ROUTE_V1_RECIPIENT_ID, middleware.SessionHandler, controllers.Recipient.DeleteByID).
 		GET(ROUTE_V1_RECIPIENT_REPEAT_OFFENDERS, middleware.SessionHandler, controllers.Recipient.GetRepeatOffenderCount).
+		GET(ROUTE_V1_RECIPIENT_ORPHANED, middleware.SessionHandler, controllers.Recipient.GetOrphaned).
+		DELETE(ROUTE_V1_RECIPIENT_ORPHANED_DELETE, middleware.SessionHandler, controllers.Recipient.DeleteAllOrphaned).
 		// recipient group
 		GET(ROUTE_V1_RECIPIENT_GROUP, middleware.SessionHandler, controllers.RecipientGroup.GetAll).
 		GET(ROUTE_V1_RECIPIENT_GROUP_ID, middleware.SessionHandler, controllers.RecipientGroup.GetByID).

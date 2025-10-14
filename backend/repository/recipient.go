@@ -336,6 +336,129 @@ func (r *Recipient) GetAllCampaignEvents(
 	return result, nil
 }
 
+// GetOrphaned gets all recipients that are not in any group
+func (r *Recipient) GetOrphaned(
+	ctx context.Context,
+	companyID *uuid.UUID,
+	options *RecipientOption,
+) (*model.Result[model.Recipient], error) {
+	result := model.NewEmptyResult[model.Recipient]()
+
+	// build optimized LEFT JOIN query for orphaned recipients
+	var companyFilter string
+	var args []interface{}
+
+	if companyID != nil {
+		companyFilter = fmt.Sprintf("AND %s.company_id = ?", database.RECIPIENT_TABLE)
+		args = append(args, companyID)
+	} else {
+		companyFilter = fmt.Sprintf("AND %s.company_id IS NULL", database.RECIPIENT_TABLE)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT %s.* FROM %s
+		LEFT JOIN %s rgr ON %s.id = rgr.recipient_id
+		WHERE rgr.recipient_id IS NULL %s`,
+		database.RECIPIENT_TABLE,
+		database.RECIPIENT_TABLE,
+		database.RECIPIENT_GROUP_RECIPIENT_TABLE,
+		database.RECIPIENT_TABLE,
+		companyFilter,
+	)
+
+	// apply query args for sorting/pagination if provided
+	if options.QueryArgs != nil {
+		if options.QueryArgs.OrderBy != "" {
+			direction := "ASC"
+			if options.QueryArgs.Desc {
+				direction = "DESC"
+			}
+			query += fmt.Sprintf(" ORDER BY %s %s", options.QueryArgs.OrderBy, direction)
+		}
+		if options.QueryArgs.Limit > 0 {
+			query += fmt.Sprintf(" LIMIT %d OFFSET %d", options.QueryArgs.Limit, options.QueryArgs.Offset)
+		}
+	}
+
+	var rows []database.Recipient
+	dbRes := r.DB.Raw(query, args...).Find(&rows)
+
+	if dbRes.Error != nil {
+		return result, dbRes.Error
+	}
+
+	// check for next page using raw query
+	if options.QueryArgs != nil && options.QueryArgs.Limit > 0 {
+		countQuery := fmt.Sprintf(`
+			SELECT COUNT(*) FROM %s
+			LEFT JOIN %s rgr ON %s.id = rgr.recipient_id
+			WHERE rgr.recipient_id IS NULL %s`,
+			database.RECIPIENT_TABLE,
+			database.RECIPIENT_GROUP_RECIPIENT_TABLE,
+			database.RECIPIENT_TABLE,
+			companyFilter,
+		)
+
+		var totalCount int64
+		if err := r.DB.Raw(countQuery, args...).Count(&totalCount).Error; err != nil {
+			return result, errs.Wrap(err)
+		}
+
+		offset64 := int64(options.QueryArgs.Offset)
+		limit64 := int64(options.QueryArgs.Limit)
+		result.HasNextPage = totalCount > (offset64 + limit64)
+	}
+
+	for _, recipient := range rows {
+		r, err := ToRecipient(&recipient)
+		if err != nil {
+			return result, errs.Wrap(err)
+		}
+		result.Rows = append(result.Rows, r)
+	}
+
+	return result, nil
+}
+
+// DeleteAllOrphaned deletes all recipients that are not in any group
+func (r *Recipient) DeleteAllOrphaned(
+	ctx context.Context,
+	companyID *uuid.UUID,
+) (int64, error) {
+	// build optimized LEFT JOIN delete query for orphaned recipients
+	var companyFilter string
+	var args []interface{}
+
+	if companyID != nil {
+		companyFilter = fmt.Sprintf("AND r.company_id = ?")
+		args = append(args, companyID)
+	} else {
+		companyFilter = fmt.Sprintf("AND r.company_id IS NULL")
+	}
+
+	// use raw SQL for optimized LEFT JOIN delete
+	query := fmt.Sprintf(`
+		DELETE FROM %s
+		WHERE id IN (
+			SELECT r.id FROM %s r
+			LEFT JOIN %s rgr ON r.id = rgr.recipient_id
+			WHERE rgr.recipient_id IS NULL %s
+		)`,
+		database.RECIPIENT_TABLE,
+		database.RECIPIENT_TABLE,
+		database.RECIPIENT_GROUP_RECIPIENT_TABLE,
+		companyFilter,
+	)
+
+	result := r.DB.Exec(query, args...)
+
+	if result.Error != nil {
+		return 0, result.Error
+	}
+
+	return result.RowsAffected, nil
+}
+
 // GetByID gets a recipient by id
 func (r *Recipient) GetByID(
 	ctx context.Context,

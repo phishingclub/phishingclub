@@ -219,7 +219,10 @@
 <HeadTitle title="Groups" />
 <main>
 	<Headline>Groups</Headline>
-	<BigButton on:click={openCreateModal}>New group</BigButton>
+	<div class="flex gap-4 mb-4">
+		<BigButton on:click={openCreateModal}>New group</BigButton>
+		<BigButton on:click={() => goto('/recipient/orphaned/')}>View Orphaned</BigButton>
+	</div>
 	<Table
 		columns={[
 			{ column: 'Name', size: 'large' },
