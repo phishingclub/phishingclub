@@ -17,6 +17,7 @@
 	import { AppStateService } from '$lib/service/appState';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
@@ -381,9 +382,10 @@
 			{ column: 'Name', size: 'large' },
 			{ column: 'From', size: 'medium' },
 			{ column: 'Subject', size: 'medium' },
-			{ column: 'Tracking Pixel', size: 'small', alignText: 'center' }
+			{ column: 'Tracking Pixel', size: 'small', alignText: 'center' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
-		sortable={['Name', 'From', 'Subject', 'Tracking Pixel']}
+		sortable={['Name', 'From', 'Subject', 'Tracking Pixel', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!emails.length}
 		plural="emails"
 		pagination={tableURLParams}
@@ -406,6 +408,9 @@
 				<TableCell value={email.mailHeaderFrom} />
 				<TableCell value={email.mailHeaderSubject} />
 				<TableCellCheck value={email.addTrackingPixel} />
+				{#if contextCompanyID}
+					<TableCellScope companyID={email.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

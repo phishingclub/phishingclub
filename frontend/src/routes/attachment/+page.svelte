@@ -18,6 +18,7 @@
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Table from '$lib/components/table/Table.svelte';
@@ -244,9 +245,16 @@
 			'Name',
 			'Description',
 			'Filename',
-			{ column: 'Embedded Content', alignText: 'center' }
+			{ column: 'Embedded Content', alignText: 'center' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
-		sortable={['Name', 'Description', 'Filename', 'Embedded Content']}
+		sortable={[
+			'Name',
+			'Description',
+			'Filename',
+			'Embedded Content',
+			...(contextCompanyID ? ['scope'] : [])
+		]}
 		hasData={!!attachments.length}
 		plural="attachments"
 		pagination={tableURLParams}
@@ -296,6 +304,9 @@
 					{/if}
 				</TableCell>
 				<TableCellCheck value={attachment.embeddedContent} />
+				{#if contextCompanyID}
+					<TableCellScope companyID={attachment.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

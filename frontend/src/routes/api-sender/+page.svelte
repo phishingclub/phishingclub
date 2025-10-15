@@ -18,6 +18,7 @@
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import TextareaField from '$lib/components/TextareaField.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
@@ -310,10 +311,13 @@
 	<Headline>API Senders</Headline>
 	<BigButton on:click={openCreateModal}>New API sender</BigButton>
 	<Table
-		columns={[{ column: 'Name', size: 'large' }]}
-		sortable={['name']}
+		columns={[
+			{ column: 'Name', size: 'large' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
+		]}
+		sortable={['Name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!apiSenders.length}
-		plural="API senders"
+		plural="api senders"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}
 	>
@@ -331,7 +335,9 @@
 						{apiSender.name}
 					</button>
 				</TableCell>
-
+				{#if contextCompanyID}
+					<TableCellScope companyID={apiSender.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

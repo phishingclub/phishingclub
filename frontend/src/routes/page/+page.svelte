@@ -29,6 +29,7 @@
 	import TableCopyButton from '$lib/components/table/TableCopyButton.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import { fetchAllRows } from '$lib/utils/api-utils';
@@ -322,8 +323,11 @@
 	</div>
 	<BigButton on:click={openCreateModal}>New Page</BigButton>
 	<Table
-		columns={[{ column: 'Name', size: 'large' }]}
-		sortable={['Name']}
+		columns={[
+			{ column: 'Name', size: 'large' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
+		]}
+		sortable={['Name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!pages.length}
 		plural="pages"
 		pagination={tableURLParams}
@@ -343,7 +347,9 @@
 						{page.name}
 					</button>
 				</TableCell>
-
+				{#if contextCompanyID}
+					<TableCellScope companyID={page.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

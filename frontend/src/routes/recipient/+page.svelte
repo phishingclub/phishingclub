@@ -28,6 +28,7 @@
 	import Table from '$lib/components/table/Table.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import FileField from '$lib/components/FileField.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import { getModalText } from '$lib/utils/common';
 	import TableCopyButton from '$lib/components/table/TableCopyButton.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
@@ -386,7 +387,8 @@
 			{ column: 'Department', size: 'small' },
 			{ column: 'City', size: 'small' },
 			{ column: 'Country', size: 'small' },
-			{ column: 'Misc', size: 'small' }
+			{ column: 'Misc', size: 'small' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={[
 			'first name',
@@ -399,7 +401,8 @@
 			'department',
 			'city',
 			'country',
-			'misc'
+			'misc',
+			...(contextCompanyID ? ['scope'] : [])
 		]}
 		hasData={!!recipients.length}
 		plural="recipients"
@@ -444,6 +447,9 @@
 				<TableCell value={recipient.city} />
 				<TableCell value={recipient.country} />
 				<TableCell value={recipient.misc} />
+				{#if contextCompanyID}
+					<TableCellScope companyID={recipient.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

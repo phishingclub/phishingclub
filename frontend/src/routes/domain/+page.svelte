@@ -22,6 +22,7 @@
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
@@ -623,9 +624,16 @@
 			{ column: 'Managed TLS', size: 'small', alignText: 'center' },
 			{ column: 'Custom Certificates', size: 'small', alignText: 'center' },
 			{ column: 'Type', size: 'small', alignText: 'center' },
-			{ column: 'Target Domain', size: 'small' }
+			{ column: 'Target Domain', size: 'small' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
-		sortable={['Name', 'Hosting website', 'Redirects', 'Type']}
+		sortable={[
+			'Name',
+			'Hosting website',
+			'Redirects',
+			'Type',
+			...(contextCompanyID ? ['scope'] : [])
+		]}
 		hasData={!!domains.length}
 		plural="domains"
 		pagination={tableURLParams}
@@ -662,6 +670,9 @@
 					</div>
 				</TableCell>
 				<TableCell>{domain.type === 'proxy' ? domain.proxyTargetDomain : ''}</TableCell>
+				{#if contextCompanyID}
+					<TableCellScope companyID={domain.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
