@@ -33,6 +33,9 @@ func (r *AllowDeny) Validate() error {
 	if err := validate.NullableFieldRequired("cidrs", r.Cidrs); err != nil {
 		return err
 	}
+	if err := validate.NullableFieldRequired("filter type", r.Allowed); err != nil {
+		return err
+	}
 	if v := r.Cidrs.MustGet(); len(v) == 0 {
 		return errs.NewValidationError(
 			errors.New("cidrs must include atleast one CIDR"),
