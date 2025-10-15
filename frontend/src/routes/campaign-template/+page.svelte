@@ -23,6 +23,7 @@
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import { getModalText } from '$lib/utils/common';
@@ -544,7 +545,8 @@
 			{ column: 'Landing Page', size: 'small' },
 			{ column: 'After Landing Page', size: 'small' },
 			{ column: 'After landing page redirect URL', size: 'small' },
-			{ column: 'Is complete', size: 'small', alignText: 'center' }
+			{ column: 'Is complete', size: 'small', alignText: 'center' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={[
 			'Name',
@@ -556,7 +558,8 @@
 			'Landing Page',
 			'After Landing Page',
 			'After landing page redirect URL',
-			'Is complete'
+			'Is complete',
+			...(contextCompanyID ? ['scope'] : [])
 		]}
 		hasData={!!templates.length}
 		plural="templates"
@@ -659,7 +662,10 @@
 						</a>
 					{/if}
 				</TableCell>
-				<TableCellCheck value={template.isUsable} />
+				<TableCellCheck value={template.isComplete} />
+				{#if contextCompanyID}
+					<TableCellScope companyID={template.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
