@@ -97,6 +97,7 @@ type RequestContext struct {
 	ConfigMap           map[string]service.ProxyServiceDomainConfig
 	CampaignRecipientID *uuid.UUID
 	ParamName           string
+	PendingResponse     *http.Response
 }
 
 type ProxyHandler struct {
@@ -266,6 +267,16 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 		if err == nil && m.isValidSessionCookie(sessionCookie.Value) {
 			reqCtx.SessionID = sessionCookie.Value
 		}
+	}
+
+	// check for response rules first (before access control)
+	if resp := m.checkResponseRules(req, reqCtx); resp != nil {
+		// if response rule doesn't forward, return response immediately
+		if !m.shouldForwardRequest(req, reqCtx) {
+			return req, resp
+		}
+		// if response rule forwards, we'll send the response after proxying
+		reqCtx.PendingResponse = resp
 	}
 
 	// check access control before proceeding
@@ -443,6 +454,12 @@ func (m *ProxyHandler) removeProxyCookie(req *http.Request) {
 func (m *ProxyHandler) processResponseWithContext(resp *http.Response, reqCtx *RequestContext) *http.Response {
 	if resp == nil {
 		return nil
+	}
+
+	// check for pending response from response rules with forward: true
+	if reqCtx.PendingResponse != nil {
+		// if we have a pending response, return it instead of the proxied response
+		return reqCtx.PendingResponse
 	}
 
 	// handle responses with or without session
@@ -2002,7 +2019,25 @@ func (m *ProxyHandler) setProxyConfigDefaults(config *service.ProxyServiceConfig
 				}
 			}
 		}
+		if domainConfig != nil && domainConfig.Response != nil {
+			for i := range domainConfig.Response {
+				// set default status to 200 if not specified
+				if domainConfig.Response[i].Status == 0 {
+					domainConfig.Response[i].Status = 200
+				}
+			}
+		}
 		config.Hosts[domain] = domainConfig
+	}
+
+	// set defaults for global response rules
+	if config.Global != nil && config.Global.Response != nil {
+		for i := range config.Global.Response {
+			// set default status to 200 if not specified
+			if config.Global.Response[i].Status == 0 {
+				config.Global.Response[i].Status = 200
+			}
+		}
 	}
 }
 
@@ -2012,6 +2047,141 @@ func (m *ProxyHandler) GetCookieName() string {
 
 func (m *ProxyHandler) IsValidProxyCookie(cookie string) bool {
 	return m.isValidSessionCookie(cookie)
+}
+
+// checkResponseRules checks if any response rules match the current request
+func (m *ProxyHandler) checkResponseRules(req *http.Request, reqCtx *RequestContext) *http.Response {
+	// check global response rules first
+	if reqCtx.ProxyConfig.Global != nil {
+		if resp := m.matchGlobalResponseRules(reqCtx.ProxyConfig.Global, req, reqCtx); resp != nil {
+			return resp
+		}
+	}
+
+	// check domain-specific response rules
+	for _, hostConfig := range reqCtx.ProxyConfig.Hosts {
+		if hostConfig != nil {
+			if resp := m.matchDomainResponseRules(hostConfig, req, reqCtx); resp != nil {
+				return resp
+			}
+		}
+	}
+
+	return nil
+}
+
+// shouldForwardRequest checks if any matching response rule has forward: true
+func (m *ProxyHandler) shouldForwardRequest(req *http.Request, reqCtx *RequestContext) bool {
+	// check global response rules first
+	if reqCtx.ProxyConfig.Global != nil {
+		if shouldForward := m.checkForwardInGlobalRules(reqCtx.ProxyConfig.Global, req); shouldForward {
+			return true
+		}
+	}
+
+	// check domain-specific response rules
+	for _, hostConfig := range reqCtx.ProxyConfig.Hosts {
+		if hostConfig != nil {
+			if shouldForward := m.checkForwardInDomainRules(hostConfig, req); shouldForward {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// checkForwardInGlobalRules checks if any matching global response rule has forward: true
+func (m *ProxyHandler) checkForwardInGlobalRules(rules *service.ProxyServiceRules, req *http.Request) bool {
+	if rules == nil || rules.Response == nil {
+		return false
+	}
+
+	for _, rule := range rules.Response {
+		if rule.PathRe != nil && rule.PathRe.MatchString(req.URL.Path) {
+			return rule.Forward
+		}
+	}
+
+	return false
+}
+
+// checkForwardInDomainRules checks if any matching domain response rule has forward: true
+func (m *ProxyHandler) checkForwardInDomainRules(rules *service.ProxyServiceDomainConfig, req *http.Request) bool {
+	if rules == nil || rules.Response == nil {
+		return false
+	}
+
+	for _, rule := range rules.Response {
+		if rule.PathRe != nil && rule.PathRe.MatchString(req.URL.Path) {
+			return rule.Forward
+		}
+	}
+
+	return false
+}
+
+// matchGlobalResponseRules checks global response rules
+func (m *ProxyHandler) matchGlobalResponseRules(rules *service.ProxyServiceRules, req *http.Request, reqCtx *RequestContext) *http.Response {
+	if rules == nil || rules.Response == nil {
+		return nil
+	}
+
+	for _, rule := range rules.Response {
+		if rule.PathRe != nil && rule.PathRe.MatchString(req.URL.Path) {
+			return m.createResponseFromRule(rule, req, reqCtx)
+		}
+	}
+
+	return nil
+}
+
+// matchDomainResponseRules checks domain-specific response rules
+func (m *ProxyHandler) matchDomainResponseRules(rules *service.ProxyServiceDomainConfig, req *http.Request, reqCtx *RequestContext) *http.Response {
+	if rules == nil || rules.Response == nil {
+		return nil
+	}
+
+	for _, rule := range rules.Response {
+		if rule.PathRe != nil && rule.PathRe.MatchString(req.URL.Path) {
+			return m.createResponseFromRule(rule, req, reqCtx)
+		}
+	}
+
+	return nil
+}
+
+// createResponseFromRule creates an HTTP response based on a response rule
+func (m *ProxyHandler) createResponseFromRule(rule service.ProxyServiceResponseRule, req *http.Request, reqCtx *RequestContext) *http.Response {
+	// ensure status code defaults to 200 if not set
+	status := rule.Status
+	if status == 0 {
+		status = 200
+	}
+
+	resp := &http.Response{
+		StatusCode: status,
+		Header:     make(http.Header),
+		Request:    req,
+	}
+
+	// set headers
+	for name, value := range rule.Headers {
+		resp.Header.Set(name, value)
+	}
+
+	// process body
+	body := rule.Body
+
+	resp.Body = io.NopCloser(strings.NewReader(body))
+	resp.ContentLength = int64(len(body))
+
+	// set content-length header if not already set
+	if resp.Header.Get("Content-Length") == "" {
+		resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	}
+
+	return resp
 }
 
 func (m *ProxyHandler) CleanupExpiredSessions() {

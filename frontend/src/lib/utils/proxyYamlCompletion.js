@@ -102,6 +102,9 @@ export class ProxyYamlCompletionProvider {
 			if (context === 'rewrite') {
 				return this.getNewRewriteSuggestions(range);
 			}
+			if (context === 'response') {
+				return this.getNewResponseSuggestions(range);
+			}
 		}
 
 		// Handle field completions based on context
@@ -124,6 +127,8 @@ export class ProxyYamlCompletionProvider {
 				return this.getCaptureSuggestions(range);
 			case 'rewrite':
 				return this.getRewriteSuggestions(range);
+			case 'response':
+				return this.getResponseSuggestions(range);
 			default:
 				return [];
 		}
@@ -157,6 +162,7 @@ export class ProxyYamlCompletionProvider {
 				if (key === 'access') return 'access';
 				if (key === 'capture') return 'capture';
 				if (key === 'rewrite') return 'rewrite';
+				if (key === 'response') return 'response';
 				if (key === 'on_deny') return 'on_deny';
 				if (key === 'paths') return 'paths';
 			}
@@ -213,6 +219,13 @@ export class ProxyYamlCompletionProvider {
 				insertText: 'rewrite:',
 				documentation: 'Global rewrite rules',
 				range
+			},
+			{
+				label: 'response',
+				kind: this.monaco.languages.CompletionItemKind.Module,
+				insertText: 'response:',
+				documentation: 'Global response rules',
+				range
 			}
 		];
 	}
@@ -245,6 +258,13 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'rewrite:',
 				documentation: 'Domain rewrite rules',
+				range
+			},
+			{
+				label: 'response',
+				kind: this.monaco.languages.CompletionItemKind.Module,
+				insertText: 'response:',
+				documentation: 'Domain response rules',
 				range
 			}
 		];
@@ -290,6 +310,60 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'without_session: 404',
 				documentation: 'Response for users without sessions',
+				range
+			}
+		];
+	}
+
+	getResponseSuggestions(range) {
+		return [
+			{
+				label: '- Response Rule',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText: [
+					'- path: "^/path/pattern$"',
+					'  status: 200',
+					'  headers:',
+					'    Content-Type: "application/json"',
+					'  body: \'{"message": "Hello"}\'',
+					'  forward: false'
+				].join('\n  '),
+				documentation: 'Complete response rule template',
+				range
+			},
+			{
+				label: 'path',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'path: "^/api/health$"',
+				documentation: 'Regex pattern for request path',
+				range
+			},
+			{
+				label: 'status',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'status: 200',
+				documentation: 'HTTP status code (default: 200)',
+				range
+			},
+			{
+				label: 'headers',
+				kind: this.monaco.languages.CompletionItemKind.Module,
+				insertText: 'headers:',
+				documentation: 'Response headers',
+				range
+			},
+			{
+				label: 'body',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'body: "Response content"',
+				documentation: 'Response body content (plain text/HTML/JSON/etc.)',
+				range
+			},
+			{
+				label: 'forward',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'forward: false',
+				documentation: 'Whether to also forward request to target (default: false)',
 				range
 			}
 		];
@@ -396,6 +470,19 @@ export class ProxyYamlCompletionProvider {
 				insertText:
 					'name: "rewrite_name"\n  find: "pattern"\n  replace: "replacement"\n  from: "response_body"',
 				documentation: 'New rewrite rule template',
+				range
+			}
+		];
+	}
+
+	getNewResponseSuggestions(range) {
+		return [
+			{
+				label: 'response rule',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'path: "^/api/health$"\n  status: 200\n  headers:\n    Content-Type: "application/json"\n  body: \'{"status": "ok"}\'\n  forward: false',
+				documentation: 'New response rule template',
 				range
 			}
 		];
@@ -617,7 +704,12 @@ export class ProxyYamlCompletionProvider {
 			required: 'Whether this capture is required for page and capture completion',
 			rewrite: 'Rules for modifying request/response content',
 			replace: 'Replacement text for the find pattern',
-			to: 'Target phishing domain for this original domain'
+			to: 'Target phishing domain for this original domain',
+			response: 'Rules for custom responses to specific paths',
+			status: 'HTTP status code for response (default: 200)',
+			headers: 'HTTP headers to include in response',
+			body: 'Response body content (plain text/HTML/JSON/etc.)',
+			forward: 'Whether to also forward request to target server (default: false)'
 		};
 
 		return hoverData[word] || null;

