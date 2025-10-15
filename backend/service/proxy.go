@@ -70,7 +70,7 @@ type ProxyServiceDenyResponse struct {
 // CompilePathPatterns compiles regex patterns for all capture rules
 func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
 	// Compile global capture rule patterns
-	if config.Global != nil {
+	if config.Global != nil && config.Global.Capture != nil {
 		for i := range config.Global.Capture {
 			if err := compileCapturePath(&config.Global.Capture[i]); err != nil {
 				return err
@@ -80,7 +80,7 @@ func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
 
 	// Compile host-specific capture rule patterns
 	for _, hostConfig := range config.Hosts {
-		if hostConfig != nil {
+		if hostConfig != nil && hostConfig.Capture != nil {
 			for i := range hostConfig.Capture {
 				if err := compileCapturePath(&hostConfig.Capture[i]); err != nil {
 					return err
@@ -700,22 +700,24 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 	}
 
 	for domain, domainConfig := range config.Hosts {
-		for i := range domainConfig.Capture {
-			// set default required to true if not specified
-			if domainConfig.Capture[i].Required == nil {
-				trueValue := true
-				domainConfig.Capture[i].Required = &trueValue
-			}
-			// set default 'from' to 'any' if not specified
-			if domainConfig.Capture[i].From == "" {
-				domainConfig.Capture[i].From = "any"
+		if domainConfig != nil && domainConfig.Capture != nil {
+			for i := range domainConfig.Capture {
+				// set default required to true if not specified
+				if domainConfig.Capture[i].Required == nil {
+					trueValue := true
+					domainConfig.Capture[i].Required = &trueValue
+				}
+				// set default 'from' to 'any' if not specified
+				if domainConfig.Capture[i].From == "" {
+					domainConfig.Capture[i].From = "any"
+				}
 			}
 		}
 		config.Hosts[domain] = domainConfig
 	}
 
 	// set defaults for global capture rules
-	if config.Global != nil {
+	if config.Global != nil && config.Global.Capture != nil {
 		for i := range config.Global.Capture {
 			// set default required to true if not specified
 			if config.Global.Capture[i].Required == nil {
@@ -1022,23 +1024,25 @@ func (m *Proxy) validateGlobalCaptureNameUniqueness(config *ProxyServiceConfigYA
 
 	// collect all capture names from domain-specific rules
 	for domain, domainConfig := range config.Hosts {
-		for _, capture := range domainConfig.Capture {
-			if capture.Name == "" {
-				continue // this will be caught by other validation
-			}
+		if domainConfig != nil && domainConfig.Capture != nil {
+			for _, capture := range domainConfig.Capture {
+				if capture.Name == "" {
+					continue // this will be caught by other validation
+				}
 
-			if existingLocation, exists := allCaptureNames[capture.Name]; exists {
-				return validate.WrapErrorWithField(
-					errors.New(fmt.Sprintf("duplicate capture rule name '%s' found in domain '%s' - already used in %s", capture.Name, domain, existingLocation)),
-					"proxyConfig",
-				)
+				if existingLocation, exists := allCaptureNames[capture.Name]; exists {
+					return validate.WrapErrorWithField(
+						errors.New(fmt.Sprintf("duplicate capture rule name '%s' found in domain '%s' - already used in %s", capture.Name, domain, existingLocation)),
+						"proxyConfig",
+					)
+				}
+				allCaptureNames[capture.Name] = fmt.Sprintf("domain '%s'", domain)
 			}
-			allCaptureNames[capture.Name] = fmt.Sprintf("domain '%s'", domain)
 		}
 	}
 
 	// collect all capture names from global rules
-	if config.Global != nil {
+	if config.Global != nil && config.Global.Capture != nil {
 		for _, capture := range config.Global.Capture {
 			if capture.Name == "" {
 				continue // this will be caught by other validation
