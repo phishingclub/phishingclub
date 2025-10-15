@@ -32,6 +32,7 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -424,9 +425,10 @@
 			{ column: 'Name', size: 'large' },
 			{ column: 'Host', size: 'small' },
 			{ column: 'Port', size: 'small' },
-			{ column: 'Username', size: 'small' }
+			{ column: 'Username', size: 'small' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
-		sortable={['Name', 'Host', 'Port', 'Username']}
+		sortable={['Name', 'Host', 'Port', 'Username', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!configurations.length}
 		plural="SMTP configurations"
 		pagination={tableURLParams}
@@ -449,6 +451,9 @@
 				<TableCell value={conf.host} />
 				<TableCell value={conf.port} />
 				<TableCell value={conf.username} />
+				{#if contextCompanyID}
+					<TableCellScope companyID={conf.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

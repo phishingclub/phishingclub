@@ -28,6 +28,7 @@
 	import TableCopyButton from '$lib/components/table/TableCopyButton.svelte';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -275,8 +276,11 @@
 	<Headline>Webhooks</Headline>
 	<BigButton on:click={openCreateModal}>New webhook</BigButton>
 	<Table
-		columns={[{ column: 'Name', size: 'large' }]}
-		sortable={['name']}
+		columns={[
+			{ column: 'Name', size: 'large' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
+		]}
+		sortable={['name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!webhooks.length}
 		plural="Webhooks"
 		pagination={tableURLParams}
@@ -295,7 +299,9 @@
 						{webhook.name}
 					</button>
 				</TableCell>
-
+				{#if contextCompanyID}
+					<TableCellScope companyID={webhook.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

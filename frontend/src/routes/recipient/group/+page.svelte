@@ -28,6 +28,7 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -226,9 +227,10 @@
 	<Table
 		columns={[
 			{ column: 'Name', size: 'large' },
-			{ column: 'Count', size: 'small' }
+			{ column: 'Count', size: 'small' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
-		sortable={['Name']}
+		sortable={['Name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!groups.length}
 		plural="groups"
 		pagination={tableURLParams}
@@ -243,6 +245,9 @@
 				<TableCellLink href={`/recipient/group/${group.id}`} title={group.recipientCount}>
 					{group.recipientCount}
 				</TableCellLink>
+				{#if contextCompanyID}
+					<TableCellScope companyID={group.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

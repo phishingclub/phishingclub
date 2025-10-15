@@ -33,6 +33,7 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -324,9 +325,10 @@
 	<Table
 		columns={[
 			{ column: 'Name', size: 'large' },
-			{ column: 'Allowed', size: 'small', alignText: 'center' }
+			{ column: 'Allowed', size: 'small', alignText: 'center' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
-		sortable={['Name', 'Allowed']}
+		sortable={['Name', 'Allowed', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!allowDenyList.length}
 		plural="Allow deny entries"
 		pagination={tableURLParams}
@@ -346,6 +348,9 @@
 					</button>
 				</TableCell>
 				<TableCellCheck value={entry.allowed} />
+				{#if contextCompanyID}
+					<TableCellScope companyID={entry.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

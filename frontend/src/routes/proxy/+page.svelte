@@ -31,6 +31,7 @@
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -332,9 +333,10 @@ portal.example.com:
 	<Table
 		columns={[
 			{ column: 'Name', size: 'large' },
-			{ column: 'Start URL', size: 'medium' }
+			{ column: 'Start URL', size: 'medium' },
+			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
-		sortable={['Name', 'Start URL']}
+		sortable={['Name', 'Start URL', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!proxies.length}
 		plural="Proxies"
 		pagination={tableURLParams}
@@ -356,7 +358,9 @@ portal.example.com:
 				</TableCell>
 
 				<TableCell>{proxy.startURL}</TableCell>
-
+				{#if contextCompanyID}
+					<TableCellScope companyID={proxy.companyID} />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
