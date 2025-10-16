@@ -69,19 +69,6 @@ proxy: "My Proxy Campaign"
 portal.example.com:
   to: "evil.example.com"
   response:
-    - path: "^/favicon\\.ico$"
-      headers:
-        Content-Type: "image/x-icon"
-        Cache-Control: "public, max-age=3600"
-      body: ""
-      forward: false
-    - path: "^/robots\\.txt$"
-      headers:
-        Content-Type: "text/plain"
-      body: |
-        User-agent: *
-        Disallow: /
-      forward: false
     - path: "^/api/health$"
       headers:
         Content-Type: "application/json"
