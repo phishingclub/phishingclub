@@ -567,23 +567,6 @@
 			circle.setAttribute('data-metric', metric.key);
 			circle.style.filter = 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))';
 			svg.appendChild(circle);
-
-			// Add value label above each point
-			const value = point[metric.key] || 0;
-			if (value > 0) {
-				const valueLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-				valueLabel.setAttribute('x', x.toString());
-				valueLabel.setAttribute('y', (y - 12).toString());
-				valueLabel.setAttribute('text-anchor', 'middle');
-				valueLabel.setAttribute('font-size', '9');
-				valueLabel.setAttribute('font-weight', '600');
-				valueLabel.setAttribute('fill', metric.color);
-				valueLabel.setAttribute('opacity', '0');
-				valueLabel.setAttribute('class', `value-label value-label-${metric.key}-${i}`);
-				valueLabel.textContent = `${Math.round(value)}`;
-				valueLabel.style.transition = 'opacity 0.3s ease';
-				svg.appendChild(valueLabel);
-			}
 		});
 	}
 
@@ -739,6 +722,7 @@
 
 		// show tooltip
 		tooltip.style.display = 'block';
+		tooltip.style.width = '320px';
 
 		// use requestAnimationFrame for positioning similar to EventTimeline
 		requestAnimationFrame(() => {
@@ -747,33 +731,26 @@
 			const x = event.clientX - containerRect.left;
 			const y = event.clientY - containerRect.top;
 
-			const tooltipWidth = 250;
+			const tooltipWidth = 320;
 			const containerWidth = chartContainer.offsetWidth;
-			const leftPosition = x + 10;
+			const leftPosition = x + 25; // increased offset to avoid cursor
 			const rightEdge = leftPosition + tooltipWidth;
 
 			// better positioning logic - more balanced positioning
 			let adjustedLeft;
 			if (rightEdge > containerWidth - 20) {
 				// position to the left with some offset, not too far
-				adjustedLeft = x - tooltipWidth + 40;
+				adjustedLeft = x - tooltipWidth - 15; // position to left of cursor
 			} else {
 				adjustedLeft = leftPosition;
 			}
 
 			tooltip.style.left = `${Math.max(10, adjustedLeft)}px`;
-			tooltip.style.top = `${Math.max(10, y - 10)}px`;
+			tooltip.style.top = `${Math.max(10, y - 40)}px`; // position above cursor
 
 			// update tooltip content
 			updateTooltipContent(data, metricKey);
 		});
-
-		// show value label for hovered metric
-		const svg = chartContainer.querySelector('svg');
-		const valueLabel = svg?.querySelector(`.value-label-${metricKey}-${index}`);
-		if (valueLabel) {
-			valueLabel.setAttribute('opacity', '1');
-		}
 	}
 
 	function hideTooltip(index, metricKey) {
@@ -783,13 +760,6 @@
 				tooltip.style.display = 'none';
 			}
 		}, 150);
-
-		// hide value label
-		const svg = chartContainer.querySelector('svg');
-		const valueLabel = svg?.querySelector(`.value-label-${metricKey}-${index}`);
-		if (valueLabel) {
-			valueLabel.setAttribute('opacity', '0');
-		}
 	}
 
 	function updateTooltipContent(data, hoveredMetric) {
@@ -877,11 +847,11 @@
 					metricDot.style.backgroundColor = metric.color;
 
 					const metricLabel = document.createElement('span');
-					metricLabel.className = 'text-sm text-gray-700 dark:text-gray-300';
+					metricLabel.className = 'text-sm text-gray-700 dark:text-gray-300 flex-1 pr-4';
 					metricLabel.textContent = metric.label;
 
 					const metricValue = document.createElement('span');
-					metricValue.className = 'text-sm font-semibold';
+					metricValue.className = 'text-sm font-semibold ml-auto';
 					metricValue.style.color = metric.color;
 					metricValue.textContent = Math.round(data[metric.key] || 0).toString();
 
