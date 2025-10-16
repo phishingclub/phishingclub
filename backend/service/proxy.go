@@ -151,8 +151,11 @@ type ProxyServiceCaptureRule struct {
 // ProxyServiceReplaceRule represents a replacement rule
 type ProxyServiceReplaceRule struct {
 	Name    string `yaml:"name,omitempty"`
-	Find    string `yaml:"find"`
-	Replace string `yaml:"replace"`
+	Engine  string `yaml:"engine,omitempty"`  // "regex" (default) or "dom"
+	Find    string `yaml:"find,omitempty"`    // regex pattern (regex engine) or css selector (dom engine)
+	Replace string `yaml:"replace,omitempty"` // replacement value for both engines
+	Action  string `yaml:"action,omitempty"`  // dom action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove
+	Target  string `yaml:"target,omitempty"`  // target matching: "first", "last", "all" (default), "1,3,5", "2-4"
 	From    string `yaml:"from,omitempty"`
 }
 
@@ -923,7 +926,13 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 				if domainConfig.Response[i].Status == 0 {
 					domainConfig.Response[i].Status = 200
 				}
-				// set default forward to false if not specified (forward is already false by default for bool)
+			}
+		}
+
+		// clean up rewrite rules based on engine type
+		if domainConfig.Rewrite != nil {
+			for i := range domainConfig.Rewrite {
+				m.cleanupRewriteRule(&domainConfig.Rewrite[i])
 			}
 		}
 		config.Hosts[domain] = domainConfig
@@ -951,23 +960,135 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 			if config.Global.Response[i].Status == 0 {
 				config.Global.Response[i].Status = 200
 			}
-			// set default forward to false if not specified (forward is already false by default for bool)
 		}
+	}
+	// clean up global rewrite rules based on engine type
+	if config.Global != nil && config.Global.Rewrite != nil {
+		for i := range config.Global.Rewrite {
+			m.cleanupRewriteRule(&config.Global.Rewrite[i])
+		}
+	}
+}
+
+// cleanupRewriteRule ensures only relevant fields are set based on engine type
+func (m *Proxy) cleanupRewriteRule(rule *ProxyServiceReplaceRule) {
+	// set default engine to regex if not specified
+	if rule.Engine == "" {
+		rule.Engine = "regex"
+	}
+
+	// clean up fields based on engine type
+	if rule.Engine == "regex" {
+		// for regex engine, completely remove dom-specific fields
+		rule.Action = ""
+		rule.Target = ""
+		// set default 'from' to 'response_body' for regex if not specified
+		if rule.From == "" {
+			rule.From = "response_body"
+		}
+	} else if rule.Engine == "dom" {
+		// for dom engine, set default target if not specified
+		if rule.Target == "" {
+			rule.Target = "all"
+		}
+		// dom engine always uses response_body, force it
+		rule.From = "response_body"
 	}
 }
 
 // validateReplaceRules validates a slice of replace rules
 func (m *Proxy) validateReplaceRules(replaceRules []ProxyServiceReplaceRule) error {
 	for _, replace := range replaceRules {
-		if replace.Find == "" {
-			return validate.WrapErrorWithField(errors.New("replace rule 'find' is required"), "proxyConfig")
+		// set default engine to regex if not specified
+		engine := replace.Engine
+		if engine == "" {
+			engine = "regex"
 		}
-		if _, err := regexp.Compile(replace.Find); err != nil {
+
+		// validate engine type
+		if engine != "regex" && engine != "dom" {
 			return validate.WrapErrorWithField(
-				errors.New("invalid regex pattern in replace rule 'find': "+err.Error()),
+				errors.New("invalid 'engine' value in replace rule, must be 'regex' or 'dom'"),
 				"proxyConfig",
 			)
 		}
+
+		// validate based on engine type
+		if engine == "regex" {
+			if replace.Find == "" {
+				return validate.WrapErrorWithField(errors.New("replace rule 'find' is required for regex engine"), "proxyConfig")
+			}
+			if _, err := regexp.Compile(replace.Find); err != nil {
+				return validate.WrapErrorWithField(
+					errors.New("invalid regex pattern in replace rule 'find': "+err.Error()),
+					"proxyConfig",
+				)
+			}
+			if replace.Replace == "" {
+				return validate.WrapErrorWithField(errors.New("replace rule 'replace' is required for regex engine"), "proxyConfig")
+			}
+		} else if engine == "dom" {
+			if replace.Find == "" {
+				return validate.WrapErrorWithField(errors.New("replace rule 'find' is required for dom engine"), "proxyConfig")
+			}
+			if replace.Action == "" {
+				return validate.WrapErrorWithField(errors.New("replace rule 'action' is required for dom engine"), "proxyConfig")
+			}
+
+			// validate dom actions
+			validActions := []string{"setText", "setHtml", "setAttr", "removeAttr", "addClass", "removeClass", "remove"}
+			validAction := false
+			for _, action := range validActions {
+				if replace.Action == action {
+					validAction = true
+					break
+				}
+			}
+			if !validAction {
+				return validate.WrapErrorWithField(
+					errors.New("invalid 'action' value in replace rule, must be one of: "+strings.Join(validActions, ", ")),
+					"proxyConfig",
+				)
+			}
+
+			// validate that actions requiring a replace value have one
+			if (replace.Action == "setText" || replace.Action == "setHtml" || replace.Action == "setAttr" || replace.Action == "addClass" || replace.Action == "removeClass") && replace.Replace == "" {
+				return validate.WrapErrorWithField(
+					errors.New("replace rule 'replace' is required for action '"+replace.Action+"'"),
+					"proxyConfig",
+				)
+			}
+
+			// validate target field if specified
+			if replace.Target != "" {
+				validTargets := []string{"first", "last", "all"}
+				isValidTarget := false
+				for _, target := range validTargets {
+					if replace.Target == target {
+						isValidTarget = true
+						break
+					}
+				}
+				// also check for numeric patterns like "1,3,5" or "2-4"
+				if !isValidTarget {
+					if matched, _ := regexp.MatchString(`^(\d+,)*\d+$`, replace.Target); matched {
+						isValidTarget = true
+					} else if matched, _ := regexp.MatchString(`^\d+-\d+$`, replace.Target); matched {
+						isValidTarget = true
+					}
+				}
+				if !isValidTarget {
+					return validate.WrapErrorWithField(
+						errors.New("invalid 'target' value in replace rule, must be 'first', 'last', 'all', numeric list (1,3,5), or range (2-4)"),
+						"proxyConfig",
+					)
+				}
+			}
+
+			// dom engine doesn't use 'from' field - it always works on response_body
+			// if 'from' is specified for dom engine, it's ignored (will be forced to response_body)
+		}
+
 		if replace.From != "" {
 			validFromValues := []string{"request_body", "request_header", "response_body", "response_header", "any"}
 			valid := false

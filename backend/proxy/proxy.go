@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/cache"
@@ -1496,9 +1497,28 @@ func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config
 }
 
 func (m *ProxyHandler) applyReplacement(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string) []byte {
+	// default to regex engine if not specified
+	engine := replacement.Engine
+	if engine == "" {
+		engine = "regex"
+	}
+
+	switch engine {
+	case "regex":
+		return m.applyRegexReplacement(body, replacement, sessionID)
+	case "dom":
+		return m.applyDomReplacement(body, replacement, sessionID)
+	default:
+		m.logger.Errorw("unsupported replacement engine", "engine", engine, "sessionID", sessionID)
+		return body
+	}
+}
+
+// applyRegexReplacement applies regex-based replacement
+func (m *ProxyHandler) applyRegexReplacement(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string) []byte {
 	re, err := regexp.Compile(replacement.Find)
 	if err != nil {
-		m.logger.Errorw("invalid replacement regex", "error", err)
+		m.logger.Errorw("invalid replacement regex", "error", err, "sessionID", sessionID)
 		return body
 	}
 
@@ -1508,6 +1528,130 @@ func (m *ProxyHandler) applyReplacement(body []byte, replacement service.ProxySe
 		return []byte(content)
 	}
 	return body
+}
+
+// applyDomReplacement applies DOM-based replacement
+func (m *ProxyHandler) applyDomReplacement(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string) []byte {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		m.logger.Errorw("failed to parse html for dom manipulation", "error", err, "sessionID", sessionID)
+		return body
+	}
+
+	// find elements using the selector
+	selection := doc.Find(replacement.Find)
+	if selection.Length() == 0 {
+		// no elements found, return original body
+		return body
+	}
+
+	// apply target filtering
+	selection = m.applyTargetFilter(selection, replacement.Target)
+	if selection.Length() == 0 {
+		return body
+	}
+
+	switch replacement.Action {
+	case "setText":
+		selection.SetText(replacement.Replace)
+	case "setHtml":
+		selection.SetHtml(replacement.Replace)
+	case "setAttr":
+		// for setAttr, replace should be in format "attribute:value"
+		parts := strings.SplitN(replacement.Replace, ":", 2)
+		if len(parts) == 2 {
+			selection.SetAttr(parts[0], parts[1])
+		} else {
+			m.logger.Errorw("invalid setAttr replace format, expected 'attribute:value'", "replace", replacement.Replace, "sessionID", sessionID)
+			return body
+		}
+	case "removeAttr":
+		selection.RemoveAttr(replacement.Replace)
+	case "addClass":
+		selection.AddClass(replacement.Replace)
+	case "removeClass":
+		selection.RemoveClass(replacement.Replace)
+	case "remove":
+		selection.Remove()
+	default:
+		m.logger.Errorw("unsupported dom action", "action", replacement.Action, "sessionID", sessionID)
+		return body
+	}
+
+	// get the modified html
+	html, err := doc.Html()
+	if err != nil {
+		m.logger.Errorw("failed to generate html from dom document", "error", err, "sessionID", sessionID)
+		return body
+	}
+
+	return []byte(html)
+}
+
+// applyTargetFilter filters the selection based on target specification
+func (m *ProxyHandler) applyTargetFilter(selection *goquery.Selection, target string) *goquery.Selection {
+	if target == "" || target == "all" {
+		return selection
+	}
+
+	length := selection.Length()
+	if length == 0 {
+		return selection
+	}
+
+	switch target {
+	case "first":
+		return selection.First()
+	case "last":
+		return selection.Last()
+	default:
+		// handle numeric patterns like "1,3,5" or "2-4"
+		if matched, _ := regexp.MatchString(`^(\d+,)*\d+$`, target); matched {
+			// comma-separated list like "1,3,5"
+			indices := strings.Split(target, ",")
+			var filteredSelection *goquery.Selection
+			for _, indexStr := range indices {
+				if index, err := strconv.Atoi(strings.TrimSpace(indexStr)); err == nil {
+					// convert to 0-based index
+					if index > 0 && index <= length {
+						element := selection.Eq(index - 1)
+						if filteredSelection == nil {
+							filteredSelection = element
+						} else {
+							filteredSelection = filteredSelection.AddSelection(element)
+						}
+					}
+				}
+			}
+			if filteredSelection != nil {
+				return filteredSelection
+			}
+		} else if matched, _ := regexp.MatchString(`^\d+-\d+$`, target); matched {
+			// range like "2-4"
+			parts := strings.Split(target, "-")
+			if len(parts) == 2 {
+				start, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+				end, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+				if err1 == nil && err2 == nil && start > 0 && end >= start {
+					var filteredSelection *goquery.Selection
+					for i := start; i <= end && i <= length; i++ {
+						element := selection.Eq(i - 1)
+						if filteredSelection == nil {
+							filteredSelection = element
+						} else {
+							filteredSelection = filteredSelection.AddSelection(element)
+						}
+					}
+					if filteredSelection != nil {
+						return filteredSelection
+					}
+				}
+			}
+		}
+	}
+
+	// fallback to all if target is invalid
+	return selection
 }
 
 func (m *ProxyHandler) processCookiesForPhishingDomain(resp *http.Response, ps *ProxySession) {
