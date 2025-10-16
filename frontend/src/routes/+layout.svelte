@@ -14,6 +14,7 @@
 	import MobileMenu from '$lib/components/header/MobileMenu.svelte';
 	import RootLoader from '$lib/components/RootLoader.svelte';
 	import ChangeCompanyModal from '$lib/components/modal/ChangeCompanyModal.svelte';
+	import CommandPalette from '$lib/components/modal/CommandPalette.svelte';
 	import DesktopMenu from '$lib/components/header/DesktopMenu.svelte';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import Header from '$lib/components/header/Header.svelte';
@@ -38,6 +39,7 @@
 	let isProfileMenuVisible = false;
 	let isMobileMenuVisible = false;
 	let isChangeCompanyModalVisible = false;
+	let isCommandPaletteVisible = false;
 	let isReady = false;
 
 	beforeNavigate((beforeNavigate) => {
@@ -209,6 +211,7 @@
 	<Loader />
 	<Toast />
 	<ChangeCompanyModal bind:visible={isChangeCompanyModalVisible} />
+	<CommandPalette bind:visible={isCommandPaletteVisible} {toggleChangeCompanyModal} />
 	<!-- VIEW -->
 	{#if !isReady}
 		<RootLoader />
