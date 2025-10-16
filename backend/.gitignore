@@ -4,7 +4,7 @@ db.sqlite3
 *.sqlite3
 # air
 air
-#vendor
+vendor
 frontend/build/*
 go.work
 go.work.sum
