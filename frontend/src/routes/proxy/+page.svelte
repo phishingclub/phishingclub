@@ -226,6 +226,7 @@ portal.example.com:
 				formError = res.error;
 				return;
 			}
+			formError = '';
 			addToast('Proxy created', 'Success');
 			closeModal();
 			refreshProxies();
@@ -249,6 +250,7 @@ portal.example.com:
 				formError = res.error;
 				return;
 			}
+			formError = '';
 			addToast(saveOnly ? 'Proxy saved' : 'Proxy updated', 'Success');
 			if (!saveOnly) {
 				closeModal();

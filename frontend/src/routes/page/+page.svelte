@@ -164,6 +164,7 @@
 				formError = res.error;
 				return;
 			}
+			formError = '';
 			addToast('Page created', 'Success');
 			closeModal();
 			refreshPages();
@@ -185,6 +186,7 @@
 				formError = res.error;
 				return;
 			}
+			formError = '';
 			addToast(saveOnly ? 'Page saved' : 'Page updated', 'Success');
 			if (!saveOnly) {
 				closeModal();

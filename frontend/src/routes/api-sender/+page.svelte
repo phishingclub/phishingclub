@@ -150,6 +150,7 @@
 				modalError = res.error;
 				return;
 			}
+			modalError = '';
 			addToast('Created API sender', 'Success');
 			closeCreateModal();
 			refreshConfigurations();
@@ -166,6 +167,7 @@
 				modalError = res.error;
 				throw res.error;
 			}
+			modalError = '';
 			addToast(saveOnly ? 'API sender saved' : 'Updated API sender', 'Success');
 			if (!saveOnly) {
 				closeEditModal();

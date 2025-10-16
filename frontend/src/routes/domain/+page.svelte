@@ -298,6 +298,7 @@
 				companyID: contextCompanyID
 			});
 			if (res.success) {
+				modalError = '';
 				addToast('Domain created', 'Success');
 				closeAllModals();
 				refreshDomains();
@@ -355,6 +356,7 @@
 				modalError = res.error;
 				return;
 			}
+			modalError = '';
 			addToast(saveOnly ? 'Domain saved' : 'Domain updated', 'Success');
 			if (!saveOnly) {
 				closeAllModals();
