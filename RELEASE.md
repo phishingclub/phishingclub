@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.0] - 2025-10-16
+- New DOM engine choice for proxy rewrite directive
+- New response proxy directive
+- New orhaned recipients page with delete all
+- Quick navigation with CTRL+p
+- A comment can now be added to a company
+- Added confirm alerts to company and shared data export
+- When in company context tables show which scope a row belongs to
+- Fix panic on missing nil checks of various proxy rules
+- Fix panic on export shared view data
+- Fix missing validation of type on allow/deny list
+- Fix error still shown when updating with shortcut
+- Fix campagin box position on trendline
+
 ## [1.6.2] - 2025-10-13
 - Remove dark mode browser specific styling for date components
 
