@@ -14,6 +14,7 @@ export class ProxyYamlCompletionProvider {
 		try {
 			if (!this.completionProvider) {
 				this.completionProvider = this.monaco.languages.registerCompletionItemProvider('yaml', {
+					triggerCharacters: [' ', ':', '-', '"', "'"],
 					provideCompletionItems: (model, position) => {
 						try {
 							return this.provideCompletionItems(model, position);
@@ -77,16 +78,25 @@ export class ProxyYamlCompletionProvider {
 		const currentIndent = this.getIndent(linePrefix);
 
 		// Handle specific field value completions
-		if (linePrefix.match(/mode:\s*$/)) {
+		if (linePrefix.match(/\s*engine:\s*$/)) {
+			return this.getEngineSuggestions(range);
+		}
+		if (linePrefix.match(/\s*action:\s*$/)) {
+			return this.getDomActionSuggestions(range);
+		}
+		if (linePrefix.match(/\s*target:\s*$/)) {
+			return this.getTargetSuggestions(range);
+		}
+		if (linePrefix.match(/\s*mode:\s*$/)) {
 			return this.getModeSuggestions(range);
 		}
-		if (linePrefix.match(/from:\s*$/)) {
+		if (linePrefix.match(/\bfrom:\s*["']?/)) {
 			return this.getFromSuggestions(range);
 		}
-		if (linePrefix.match(/method:\s*$/)) {
+		if (linePrefix.match(/\s*method:\s*$/)) {
 			return this.getMethodSuggestions(range);
 		}
-		if (linePrefix.match(/(with_session|without_session):\s*$/)) {
+		if (linePrefix.match(/\s*(with_session|without_session):\s*$/)) {
 			return this.getActionSuggestions(range);
 		}
 
@@ -342,7 +352,7 @@ export class ProxyYamlCompletionProvider {
 		];
 	}
 
-	getRewriteSuggestions(range) {
+	getRewriteSuggestions(range, linesAbove, current) {
 		return [
 			{
 				label: 'name',
@@ -352,24 +362,48 @@ export class ProxyYamlCompletionProvider {
 				range
 			},
 			{
+				label: 'engine',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'engine: "regex"',
+				documentation: 'Rewrite engine: "regex" (default) or "dom"',
+				range
+			},
+			{
 				label: 'find',
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'find: "pattern"',
-				documentation: 'Regex pattern to find (required)',
+				documentation:
+					'Pattern/selector to find (regex pattern for regex engine, CSS selector for dom engine)',
 				range
 			},
 			{
 				label: 'replace',
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'replace: "replacement"',
-				documentation: 'Replacement text (required)',
+				documentation: 'Replacement value (replacement text for regex, value for dom actions)',
+				range
+			},
+			{
+				label: 'action',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'action: "setText"',
+				documentation:
+					'DOM action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove',
+				range
+			},
+			{
+				label: 'target',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'target: "all"',
+				documentation: 'Target matching: "first", "last", "all" (default), "1,3,5", "2-4"',
 				range
 			},
 			{
 				label: 'from',
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'from: "response_body"',
-				documentation: 'Where to apply replacement',
+				documentation:
+					'Where to apply replacement (regex engine only - dom engine always uses response_body)',
 				range
 			}
 		];
@@ -391,11 +425,59 @@ export class ProxyYamlCompletionProvider {
 	getNewRewriteSuggestions(range) {
 		return [
 			{
-				label: 'rewrite rule',
+				label: 'regex rewrite rule',
 				kind: this.monaco.languages.CompletionItemKind.Snippet,
 				insertText:
-					'name: "rewrite_name"\n  find: "pattern"\n  replace: "replacement"\n  from: "response_body"',
-				documentation: 'New rewrite rule template',
+					'name: "regex_rule"\n  find: "pattern"\n  replace: "replacement"\n  from: "response_body"',
+				documentation: 'New regex-based rewrite rule template',
+				range
+			},
+			{
+				label: 'dom rewrite rule',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "dom_rule"\n  engine: "dom"\n  find: "css-selector"\n  action: "setText"\n  replace: "new-value"\n  target: "all"',
+				documentation: 'New DOM-based rewrite rule template',
+				range
+			},
+			{
+				label: 'dom change title',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "change_title"\n  engine: "dom"\n  find: "title"\n  action: "setText"\n  replace: "Secure Login Portal"\n  target: "first"',
+				documentation: 'Change page title using DOM',
+				range
+			},
+			{
+				label: 'dom modify form action',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "modify_form"\n  engine: "dom"\n  find: "form[action]"\n  action: "setAttr"\n  replace: "action:/evil/submit"\n  target: "all"',
+				documentation: 'Modify form action attribute using DOM',
+				range
+			},
+			{
+				label: 'dom add CSS class',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "add_class"\n  engine: "dom"\n  find: ".login-form"\n  action: "addClass"\n  replace: "enhanced-security"\n  target: "all"',
+				documentation: 'Add CSS class to elements using DOM',
+				range
+			},
+			{
+				label: 'dom remove elements',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "remove_warnings"\n  engine: "dom"\n  find: ".security-warning"\n  action: "remove"\n  target: "all"',
+				documentation: 'Remove security warnings using DOM',
+				range
+			},
+			{
+				label: 'dom remove attribute',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "remove_csrf"\n  engine: "dom"\n  find: "input[name=\'_token\']"\n  action: "removeAttr"\n  replace: "name"\n  target: "all"',
+				documentation: 'Remove attributes using DOM',
 				range
 			}
 		];
@@ -495,6 +577,119 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Value,
 				insertText: '"DELETE"',
 				documentation: 'HTTP DELETE method',
+				range
+			}
+		];
+	}
+
+	getEngineSuggestions(range) {
+		return [
+			{
+				label: '"regex"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"regex"',
+				documentation: 'Regex-based replacement engine (default)',
+				range
+			},
+			{
+				label: '"dom"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"dom"',
+				documentation: 'DOM manipulation engine for HTML elements',
+				range
+			}
+		];
+	}
+
+	getTargetSuggestions(range) {
+		return [
+			{
+				label: '"all"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"all"',
+				documentation: 'Target all matching elements (default)',
+				range
+			},
+			{
+				label: '"first"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"first"',
+				documentation: 'Target only the first matching element',
+				range
+			},
+			{
+				label: '"last"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"last"',
+				documentation: 'Target only the last matching element',
+				range
+			},
+			{
+				label: '"1,3,5"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"1,3,5"',
+				documentation: 'Target specific elements by index (comma-separated)',
+				range
+			},
+			{
+				label: '"2-4"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"2-4"',
+				documentation: 'Target a range of elements (start-end)',
+				range
+			}
+		];
+	}
+
+	getDomActionSuggestions(range) {
+		return [
+			{
+				label: '"setText"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"setText"',
+				documentation: 'Set the text content of selected elements (preserves HTML structure)',
+				range
+			},
+			{
+				label: '"setHtml"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"setHtml"',
+				documentation: 'Set the HTML content of selected elements (replaces inner HTML)',
+				range
+			},
+			{
+				label: '"setAttr"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"setAttr"',
+				documentation: 'Set attribute value (use value format: "attribute:value")',
+				range
+			},
+			{
+				label: '"removeAttr"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"removeAttr"',
+				documentation: 'Remove attribute from selected elements',
+				range
+			},
+			{
+				label: '"addClass"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"addClass"',
+				documentation: 'Add CSS class to selected elements',
+				range
+			},
+			{
+				label: '"removeClass"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"removeClass"',
+				documentation: 'Remove CSS class from selected elements',
+				range
+			},
+			{
+				label: '"remove"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"remove"',
+				documentation: 'Remove selected elements from DOM',
 				range
 			}
 		];
@@ -612,11 +807,16 @@ export class ProxyYamlCompletionProvider {
 			name: 'Unique identifier for the rule',
 			method: 'HTTP method to match (GET, POST, PUT, DELETE, etc.)',
 			path: 'URL path pattern to match (regex)',
-			find: 'Regex pattern to capture data, or cookie name if from=cookie',
-			from: 'Location to search: request_body, request_header, response_body, response_header, cookie, any',
+			find: 'Pattern to find: regex pattern (regex engine) or CSS selector (dom engine)',
+			from: 'Location to search (regex engine only): request_body, request_header, response_body, response_header, cookie, any',
 			required: 'Whether this capture is required for page and capture completion',
-			rewrite: 'Rules for modifying request/response content',
-			replace: 'Replacement text for the find pattern',
+			rewrite: 'Rules for modifying request/response content using regex or dom engines',
+			replace: 'Replacement value: replacement text (regex engine) or value for dom actions',
+			engine:
+				'Rewrite engine: "regex" (default) for pattern replacement or "dom" for HTML manipulation',
+			action: 'DOM action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove',
+			target:
+				'Target matching: "first", "last", "all" (default), "1,3,5" (specific), "2-4" (range)',
 			to: 'Target phishing domain for this original domain'
 		};
 

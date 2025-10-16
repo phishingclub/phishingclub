@@ -4,6 +4,7 @@ go 1.25.1
 
 require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.3.2
+	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/boombuler/barcode v1.0.1
 	github.com/brianvoe/gofakeit/v7 v7.0.4
 	github.com/caddyserver/certmagic v0.19.2
@@ -31,6 +32,7 @@ require (
 )
 
 require (
+	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/bytedance/sonic v1.12.1 // indirect

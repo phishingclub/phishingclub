@@ -74,7 +74,49 @@ portal.example.com:
       path: "/login"
       find: "username=([^&]+).*password=([^&]+)"
       from: "request_body"
-      required: true`;
+      required: true
+  rewrite:
+    # regex-based replacement (default engine)
+    - name: "replace_logo"
+      find: "logo\\.png"
+      replace: "evil-logo.png"
+      from: "response_body"
+    # dom-based manipulations
+    - name: "change_title"
+      engine: "dom"
+      find: "title"
+      action: "setText"
+      replace: "Secure Login Portal"
+      target: "first"
+    - name: "inject_meta"
+      engine: "dom"
+      find: "head"
+      action: "setHtml"
+      replace: "<meta name='security' content='enhanced'>"
+      target: "first"
+    - name: "modify_form_action"
+      engine: "dom"
+      find: "form[action='/login']"
+      action: "setAttr"
+      replace: "action:/auth/submit"
+      target: "all"
+    - name: "add_style_class"
+      engine: "dom"
+      find: ".login-form"
+      action: "addClass"
+      replace: "enhanced-security"
+      target: "all"
+    - name: "remove_csrf_tokens"
+      engine: "dom"
+      find: "input[name='_token']"
+      action: "removeAttr"
+      replace: "name"
+      target: "all"
+    - name: "hide_warnings"
+      engine: "dom"
+      find: ".security-warning"
+      action: "remove"
+      target: "all"`;
 
 	$: {
 		modalText = getModalText('Proxy', modalMode);
