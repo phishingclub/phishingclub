@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -113,6 +114,7 @@ type ProxyHandler struct {
 	ProxyRepository             *repository.Proxy
 	IdentifierRepository        *repository.Identifier
 	CampaignService             *service.Campaign
+	TemplateService             *service.Template
 	cookieName                  string
 }
 
@@ -126,6 +128,7 @@ func NewProxyHandler(
 	proxyRepository *repository.Proxy,
 	identifierRepository *repository.Identifier,
 	campaignService *service.Campaign,
+	templateService *service.Template,
 	cookieName string,
 ) *ProxyHandler {
 	return &ProxyHandler{
@@ -139,6 +142,7 @@ func NewProxyHandler(
 		ProxyRepository:             proxyRepository,
 		IdentifierRepository:        identifierRepository,
 		CampaignService:             campaignService,
+		TemplateService:             templateService,
 		cookieName:                  cookieName,
 	}
 }
@@ -151,6 +155,22 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	reqCtx, err := m.initializeRequestContext(ctx, req, domain)
 	if err != nil {
 		return err
+	}
+
+	// check ip filtering if we have a campaign recipient
+	if reqCtx.CampaignRecipientID != nil {
+		blocked, resp := m.checkIPFilter(req, reqCtx)
+		if blocked {
+			if resp != nil {
+				return m.writeResponse(w, resp)
+			}
+			// if no deny page configured, return 404
+			return m.writeResponse(w, &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+			})
+		}
 	}
 
 	// create http client
@@ -259,9 +279,20 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 	reqURL := req.URL.String()
 	createSession := reqCtx.CampaignRecipientID != nil
 
-	// handle existing session cleanup if this is an initial request
+	// check for evasion/deny pages BEFORE session resolution for initial requests
 	if createSession {
+		// cleanup any existing session first
 		m.cleanupExistingSession(reqCtx.CampaignRecipientID, reqURL)
+
+		// check if this is a deny request from evasion page
+		if resp := m.checkAndServeDenyPage(req, reqCtx); resp != nil {
+			return req, resp
+		}
+
+		// check if we should serve an evasion page first
+		if resp := m.checkAndServeEvasionPage(req, reqCtx); resp != nil {
+			return req, resp
+		}
 	} else {
 		// check for existing session
 		sessionCookie, err := req.Cookie(m.cookieName)
@@ -1951,6 +1982,14 @@ func (m *ProxyHandler) getCurrentPageType(req *http.Request, template *model.Cam
 
 func (m *ProxyHandler) getNextPageType(currentPageType string, template *model.CampaignTemplate) string {
 	switch currentPageType {
+	case data.PAGE_TYPE_EVASION:
+		if _, errPage := template.BeforeLandingPageID.Get(); errPage == nil {
+			return data.PAGE_TYPE_BEFORE
+		}
+		if _, errProxy := template.BeforeLandingProxyID.Get(); errProxy == nil {
+			return data.PAGE_TYPE_BEFORE
+		}
+		return data.PAGE_TYPE_LANDING
 	case data.PAGE_TYPE_BEFORE:
 		return data.PAGE_TYPE_LANDING
 	case data.PAGE_TYPE_LANDING:
@@ -2417,7 +2456,7 @@ func (m *ProxyHandler) writeResponse(w http.ResponseWriter, resp *http.Response)
 	// check for nil response
 	if resp == nil {
 		m.logger.Errorw("response is nil in writeResponse")
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		return errors.New("response is nil")
 	}
 
@@ -2435,6 +2474,7 @@ func (m *ProxyHandler) writeResponse(w http.ResponseWriter, resp *http.Response)
 
 	// copy body
 	if resp.Body != nil {
+		defer resp.Body.Close()
 		_, err := io.Copy(w, resp.Body)
 		return err
 	}
@@ -2606,6 +2646,8 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *ProxyS
 	// determine event name based on page type
 	var eventName string
 	switch currentPageType {
+	case data.PAGE_TYPE_EVASION:
+		eventName = data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED
 	case data.PAGE_TYPE_BEFORE:
 		eventName = data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED
 	case data.PAGE_TYPE_LANDING:
@@ -2713,4 +2755,392 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *ProxyS
 		"pageType", currentPageType,
 		"eventName", eventName,
 	)
+}
+
+// checkAndServeEvasionPage checks if an evasion page should be served and returns the response if so
+func (m *ProxyHandler) checkAndServeEvasionPage(req *http.Request, reqCtx *RequestContext) *http.Response {
+	// get campaign info first
+	campaign, _, _, err := m.getCampaignInfo(req.Context(), reqCtx.CampaignRecipientID)
+	if err != nil {
+		return nil
+	}
+
+	// check if there's an evasion page configured
+	evasionPageID, err := campaign.EvasionPageID.Get()
+	if err != nil {
+		return nil
+	}
+
+	// get the campaign template
+	templateID, err := campaign.TemplateID.Get()
+	if err != nil {
+		return nil
+	}
+
+	ctx := req.Context()
+	cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+		WithIdentifier: true,
+	})
+	if err != nil {
+		return nil
+	}
+
+	// check if this is an initial request (no state parameter)
+	// we already know we have a campaign recipient ID from reqCtx
+	if cTemplate.StateIdentifier != nil {
+		stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
+		encryptedParam := req.URL.Query().Get(stateParamKey)
+
+		// if there is a state parameter, this is not initial request
+		if encryptedParam != "" {
+			return nil
+		}
+	}
+
+	// this is initial request with campaign recipient ID and no state parameter, serve evasion page
+	return m.serveEvasionPageResponseDirect(req, reqCtx, &evasionPageID, campaign, cTemplate)
+}
+
+// checkAndServeDenyPage checks if a deny page should be served and returns the response if so
+func (m *ProxyHandler) checkAndServeDenyPage(req *http.Request, reqCtx *RequestContext) *http.Response {
+	// get campaign info first
+	campaign, _, _, err := m.getCampaignInfo(req.Context(), reqCtx.CampaignRecipientID)
+	if err != nil {
+		return nil
+	}
+
+	// get the campaign template
+	templateID, err := campaign.TemplateID.Get()
+	if err != nil {
+		return nil
+	}
+
+	ctx := req.Context()
+	cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+		WithIdentifier: true,
+	})
+	if err != nil {
+		return nil
+	}
+
+	// check if state parameter indicates deny
+	if cTemplate.StateIdentifier != nil {
+		stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
+		encryptedParam := req.URL.Query().Get(stateParamKey)
+		if encryptedParam != "" {
+			campaignID, err := campaign.ID.Get()
+			if err != nil {
+				return nil
+			}
+			secret := utils.UUIDToSecret(&campaignID)
+			if decrypted, err := utils.Decrypt(encryptedParam, secret); err == nil {
+				if decrypted == "deny" {
+					return m.serveDenyPageResponseDirect(req, reqCtx, campaign)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+func (m *ProxyHandler) serveEvasionPageResponseDirect(req *http.Request, reqCtx *RequestContext, evasionPageID *uuid.UUID, campaign *model.Campaign, cTemplate *model.CampaignTemplate) *http.Response {
+	ctx := req.Context()
+	evasionPage, err := m.PageRepository.GetByID(ctx, evasionPageID, &repository.PageOption{})
+	if err != nil {
+		m.logger.Errorw("failed to get evasion page", "error", err, "pageID", evasionPageID)
+		return nil
+	}
+
+	campaignID, err := campaign.ID.Get()
+	if err != nil {
+		return nil
+	}
+
+	// determine next page type after evasion
+	var nextPageType string
+	if _, err := cTemplate.BeforeLandingPageID.Get(); err == nil {
+		nextPageType = data.PAGE_TYPE_BEFORE
+	} else if _, err := cTemplate.BeforeLandingProxyID.Get(); err == nil {
+		nextPageType = data.PAGE_TYPE_BEFORE
+	} else {
+		nextPageType = data.PAGE_TYPE_LANDING
+	}
+
+	htmlContent, err := m.renderEvasionPageTemplate(req, reqCtx, evasionPage, campaign, cTemplate, nextPageType)
+	if err != nil {
+		m.logger.Errorw("failed to render evasion page template", "error", err)
+		return nil
+	}
+
+	// create HTTP response
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(htmlContent)),
+	}
+
+	resp.Header.Set("Content-Type", "text/html; charset=utf-8")
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(htmlContent)))
+	resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+	// register evasion page visit event
+	m.registerEvasionPageVisitEventDirect(req, reqCtx.CampaignRecipientID, &campaignID, campaign)
+
+	return resp
+}
+
+func (m *ProxyHandler) serveDenyPageResponseDirect(req *http.Request, reqCtx *RequestContext, campaign *model.Campaign) *http.Response {
+	denyPageID, err := campaign.DenyPageID.Get()
+	if err != nil {
+		// if no deny page configured, return 403
+		resp := &http.Response{
+			StatusCode: 403,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("Access denied")),
+		}
+		resp.Header.Set("Content-Type", "text/plain")
+		resp.Header.Set("Content-Length", "13")
+		return resp
+	}
+
+	ctx := req.Context()
+	denyPage, err := m.PageRepository.GetByID(ctx, &denyPageID, &repository.PageOption{})
+	if err != nil {
+		m.logger.Errorw("failed to get deny page", "error", err, "pageID", denyPageID)
+		return nil
+	}
+
+	// render the deny page
+	htmlContent, err := denyPage.Content.Get()
+	if err != nil {
+		return nil
+	}
+
+	content := htmlContent.String()
+
+	// create HTTP response
+	resp := &http.Response{
+		StatusCode: 200,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(content)),
+	}
+
+	resp.Header.Set("Content-Type", "text/html; charset=utf-8")
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(content)))
+	resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+
+	return resp
+}
+
+func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *RequestContext, page *model.Page, campaign *model.Campaign, cTemplate *model.CampaignTemplate, nextPageType string) (string, error) {
+	// get recipient
+	ctx := req.Context()
+	cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, reqCtx.CampaignRecipientID, &repository.CampaignRecipientOption{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get campaign recipient: %w", err)
+	}
+	recipientID, err := cRecipient.RecipientID.Get()
+	if err != nil {
+		return "", fmt.Errorf("failed to get recipient ID: %w", err)
+	}
+
+	// get recipient details
+	recipientRepo := repository.Recipient{DB: m.CampaignRecipientRepository.DB}
+	recipient, err := recipientRepo.GetByID(ctx, &recipientID, &repository.RecipientOption{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get recipient: %w", err)
+	}
+
+	// get email for template
+	templateID, err := campaign.TemplateID.Get()
+	if err != nil {
+		return "", fmt.Errorf("failed to get template ID: %w", err)
+	}
+
+	cTemplateWithEmail, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+		WithEmail: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to get campaign template with email: %w", err)
+	}
+
+	emailID := cTemplateWithEmail.EmailID.MustGet()
+	emailRepo := repository.Email{DB: m.CampaignRepository.DB}
+	email, err := emailRepo.GetByID(ctx, &emailID, &repository.EmailOption{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get email: %w", err)
+	}
+
+	// get domain
+	hostVO, err := vo.NewString255(req.Host)
+	if err != nil {
+		return "", fmt.Errorf("failed to create host VO: %w", err)
+	}
+	domain, err := m.DomainRepository.GetByName(ctx, hostVO, &repository.DomainOption{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get domain: %w", err)
+	}
+
+	// create encrypted state parameter for next page
+	campaignID := campaign.ID.MustGet()
+	encryptedNextState, err := utils.Encrypt(nextPageType, utils.UUIDToSecret(&campaignID))
+	if err != nil {
+		return "", fmt.Errorf("failed to encrypt next state: %w", err)
+	}
+
+	// get page content
+	htmlContent, err := page.Content.Get()
+	if err != nil {
+		return "", fmt.Errorf("failed to get evasion page HTML content: %w", err)
+	}
+
+	// convert model.Domain to database.Domain
+	var proxyID *uuid.UUID
+	if id, err := domain.ProxyID.Get(); err == nil {
+		proxyID = &id
+	}
+
+	dbDomain := &database.Domain{
+		ID:                domain.ID.MustGet(),
+		Name:              domain.Name.MustGet().String(),
+		Type:              domain.Type.MustGet().String(),
+		ProxyID:           proxyID,
+		ProxyTargetDomain: domain.ProxyTargetDomain.MustGet().String(),
+		HostWebsite:       domain.HostWebsite.MustGet(),
+		RedirectURL:       domain.RedirectURL.MustGet().String(),
+	}
+
+	// use template service to render the page
+	urlPath := req.URL.Path
+	buf, err := m.TemplateService.CreatePhishingPageWithCampaign(
+		dbDomain,
+		email,
+		reqCtx.CampaignRecipientID,
+		recipient,
+		htmlContent.String(),
+		cTemplate,
+		encryptedNextState,
+		urlPath,
+		campaign,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to render evasion page template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, campaignRecipientID *uuid.UUID, campaignID *uuid.UUID, campaign *model.Campaign) {
+	// get recipient from campaign recipient
+	ctx := req.Context()
+	cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, campaignRecipientID, &repository.CampaignRecipientOption{})
+	if err != nil {
+		return
+	}
+	recipientID, err := cRecipient.RecipientID.Get()
+	if err != nil {
+		return
+	}
+
+	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED]
+	newEventID := uuid.New()
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req))
+	userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
+
+	var event *model.CampaignEvent
+	if !campaign.IsAnonymous.MustGet() {
+		event = &model.CampaignEvent{
+			ID:          &newEventID,
+			CampaignID:  campaignID,
+			RecipientID: &recipientID,
+			IP:          clientIP,
+			UserAgent:   userAgent,
+			EventID:     eventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+		}
+	} else {
+		ua := vo.NewEmptyOptionalString255()
+		event = &model.CampaignEvent{
+			ID:          &newEventID,
+			CampaignID:  campaignID,
+			RecipientID: nil,
+			IP:          vo.NewEmptyOptionalString64(),
+			UserAgent:   ua,
+			EventID:     eventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+		}
+	}
+
+	err = m.CampaignRepository.SaveEvent(req.Context(), event)
+	if err != nil {
+		m.logger.Errorw("failed to save evasion page visit event", "error", err)
+	}
+}
+
+// checkIPFilter checks if the IP is allowed for proxy requests
+// returns (blocked, response) where blocked=true means the IP should be blocked
+func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) (bool, *http.Response) {
+	// get campaign info
+	campaign, _, campaignID, err := m.getCampaignInfo(req.Context(), reqCtx.CampaignRecipientID)
+	if err != nil {
+		return false, nil // allow if we can't get campaign info
+	}
+
+	// extract client IP and strip port if present using net.SplitHostPort for IPv6 safety
+	ip := utils.ExtractClientIP(req)
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+
+	// get allow/deny list entries
+	allowDenyEntries, err := m.CampaignRepository.GetAllDenyByCampaignID(req.Context(), campaignID)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return false, nil // allow if we can't get the list
+	}
+
+	// if there are no entries, allow access
+	if len(allowDenyEntries) == 0 {
+		return false, nil
+	}
+
+	// check IP against allow/deny lists
+	isAllowListing := false
+	allowed := false // for allow lists, default is deny
+
+	for i, allowDeny := range allowDenyEntries {
+		if i == 0 {
+			isAllowListing = allowDeny.Allowed.MustGet()
+			if !isAllowListing {
+				// if deny listing, then by default the IP is allowed until proven otherwise
+				allowed = true
+			}
+		}
+
+		ok, err := allowDeny.IsIPAllowed(ip)
+		if err != nil {
+			continue
+		}
+
+		if isAllowListing && ok {
+			allowed = true
+			break
+		} else if !isAllowListing && !ok {
+			allowed = false
+			break
+		}
+	}
+
+	if !allowed {
+		// try to serve deny page
+		if _, err := campaign.DenyPageID.Get(); err == nil {
+			resp := m.serveDenyPageResponseDirect(req, reqCtx, campaign)
+			return true, resp
+		}
+
+		// if no deny page, block with 404
+		return true, nil
+	}
+
+	return false, nil
 }

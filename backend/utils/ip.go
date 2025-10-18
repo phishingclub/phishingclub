@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"net"
 	"net/http"
 	"strings"
 )
@@ -35,6 +36,10 @@ func ExtractClientIP(req *http.Request) string {
 				break
 			}
 		}
+	}
+	// strip port
+	if host, _, err := net.SplitHostPort(clientIP); err == nil {
+		clientIP = host
 	}
 
 	return clientIP

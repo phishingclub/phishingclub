@@ -84,6 +84,7 @@ func NewServer(
 		repositories.Proxy,
 		repositories.Identifier,
 		services.Campaign,
+		services.Template,
 		cookieName,
 	)
 
@@ -697,6 +698,12 @@ func (s *Server) checkAndServePhishingPage(
 	if err != nil {
 		return false, fmt.Errorf("failed to get recipient: %s", err)
 	}
+	// check for evasion page first
+	var evasionPageID *uuid.UUID
+	if v, err := campaign.EvasionPageID.Get(); err == nil {
+		evasionPageID = &v
+	}
+
 	// figure out which page types this template has
 	var beforePageID *uuid.UUID
 	var beforeProxyID *uuid.UUID
@@ -737,19 +744,34 @@ func (s *Server) checkAndServePhishingPage(
 	nextPageType := ""
 	currentPageType := ""
 
-	s.logger.Debugw("determining page flow",
-		"pageTypeQuery", pageTypeQuery,
-		"hasBeforePage", beforePageID != nil,
-		"hasBeforeProxy", beforeProxyID != nil,
-		"hasLandingPage", landingPageID != nil,
-		"hasLandingProxy", landingProxyID != nil,
-		"hasAfterPage", afterPageID != nil,
-		"hasAfterProxy", afterProxyID != nil,
-		"campaignRecipientID", campaignRecipientID.String(),
-	)
+	/*
+		s.logger.Debugw("determining page flow",
+			"pageTypeQuery", pageTypeQuery,
+			"hasBeforePage", beforePageID != nil,
+			"hasBeforeProxy", beforeProxyID != nil,
+			"hasLandingPage", landingPageID != nil,
+			"hasLandingProxy", landingProxyID != nil,
+			"hasAfterPage", afterPageID != nil,
+			"hasAfterProxy", afterProxyID != nil,
+			"campaignRecipientID", campaignRecipientID.String(),
+		)
+	*/
 
 	if len(pageTypeQuery) == 0 {
-		if beforePageID != nil || beforeProxyID != nil {
+		// check if there's an evasion page to serve first
+		if evasionPageID != nil {
+			pageID = evasionPageID
+			s.logger.Debugw("initial request - serving evasion page",
+				"pageID", pageID.String(),
+			)
+			currentPageType = data.PAGE_TYPE_EVASION
+			// determine next page type based on template structure
+			if beforePageID != nil || beforeProxyID != nil {
+				nextPageType = data.PAGE_TYPE_BEFORE
+			} else {
+				nextPageType = data.PAGE_TYPE_LANDING
+			}
+		} else if beforePageID != nil || beforeProxyID != nil {
 			if beforePageID != nil {
 				pageID = beforePageID
 				s.logger.Debugw("initial request - serving before landing page",
@@ -785,8 +807,72 @@ func (s *Server) checkAndServePhishingPage(
 		// if there is a page type, then we use that
 	} else {
 		switch pageTypeQuery {
-		// this is not relevant - already taken care of, ignore it
+		// this is set if the previous page was an evasion page
+		case data.PAGE_TYPE_EVASION:
+			// after evasion page, go to before page or landing page
+			if beforePageID != nil || beforeProxyID != nil {
+				if beforePageID != nil {
+					pageID = beforePageID
+					s.logger.Debugw("serving before landing page from evasion state",
+						"pageID", pageID.String(),
+					)
+				} else {
+					proxyID = beforeProxyID
+					s.logger.Debugw("serving before landing Proxy from evasion state",
+						"proxyID", proxyID.String(),
+					)
+				}
+				currentPageType = data.PAGE_TYPE_BEFORE
+				nextPageType = data.PAGE_TYPE_LANDING
+			} else {
+				if landingPageID != nil {
+					pageID = landingPageID
+					s.logger.Debugw("serving landing page from evasion state",
+						"pageID", pageID.String(),
+					)
+				} else {
+					proxyID = landingProxyID
+					s.logger.Debugw("serving landing Proxy from evasion state",
+						"proxyID", proxyID.String(),
+					)
+				}
+				currentPageType = data.PAGE_TYPE_LANDING
+				if afterPageID != nil || afterProxyID != nil {
+					nextPageType = data.PAGE_TYPE_AFTER
+				} else {
+					nextPageType = data.PAGE_TYPE_DONE
+				}
+			}
+		// special case for deny page access from evasion page
+		case "deny":
+			// serve the deny page if one is configured
+			if denyPageID, err := campaign.DenyPageID.Get(); err == nil {
+				err = s.renderDenyPage(c, domain, &denyPageID)
+				if err != nil {
+					return true, fmt.Errorf("failed to render deny page from evasion: %s", err)
+				}
+				return true, nil
+			} else {
+				// if no deny page configured, return 403
+				c.String(http.StatusForbidden, "Access denied")
+				c.Abort()
+				return true, nil
+			}
+		// this is set when transitioning to the before page
 		case data.PAGE_TYPE_BEFORE:
+			if beforePageID != nil {
+				pageID = beforePageID
+				s.logger.Debugw("serving before landing page from state",
+					"pageID", pageID.String(),
+				)
+			} else {
+				proxyID = beforeProxyID
+				s.logger.Debugw("serving before landing Proxy from state",
+					"proxyID", proxyID.String(),
+				)
+			}
+			currentPageType = data.PAGE_TYPE_BEFORE
+			nextPageType = data.PAGE_TYPE_LANDING
 		// this is set if the previous page was a before page
 		case data.PAGE_TYPE_LANDING:
 			if landingPageID != nil {
@@ -1030,6 +1116,8 @@ func (s *Server) checkAndServePhishingPage(
 		visitEventID := uuid.New()
 		eventName := ""
 		switch currentPageType {
+		case data.PAGE_TYPE_EVASION:
+			eventName = data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED
 		case data.PAGE_TYPE_BEFORE:
 			eventName = data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED
 		case data.PAGE_TYPE_LANDING:
@@ -1236,6 +1324,7 @@ func (s *Server) checkAndServePhishingPage(
 		return true, fmt.Errorf("failed to encrypt next page type: %s", err)
 	}
 	urlPath := cTemplate.URLPath.MustGet().String()
+
 	err = s.renderPageTemplate(
 		c,
 		domain,
@@ -1246,6 +1335,7 @@ func (s *Server) checkAndServePhishingPage(
 		cTemplate,
 		encryptedParam,
 		urlPath,
+		campaign,
 	)
 	if err != nil {
 		return true, fmt.Errorf("failed to render phishing page: %s", err)
@@ -1254,6 +1344,8 @@ func (s *Server) checkAndServePhishingPage(
 	visitEventID := uuid.New()
 	eventName := ""
 	switch currentPageType {
+	case data.PAGE_TYPE_EVASION:
+		eventName = data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED
 	case data.PAGE_TYPE_BEFORE:
 		eventName = data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED
 	case data.PAGE_TYPE_LANDING:
@@ -1543,12 +1635,13 @@ func (s *Server) renderPageTemplate(
 	campaignTemplate *model.CampaignTemplate,
 	stateParam string,
 	urlPath string,
+	campaign *model.Campaign,
 ) error {
 	content, err := page.Content.Get()
 	if err != nil {
 		return fmt.Errorf("no page content set to render: %s", err)
 	}
-	phishingPage, err := s.services.Template.CreatePhishingPage(
+	phishingPage, err := s.services.Template.CreatePhishingPageWithCampaign(
 		domain,
 		email,
 		campaignRecipientID,
@@ -1557,6 +1650,7 @@ func (s *Server) renderPageTemplate(
 		campaignTemplate,
 		stateParam,
 		urlPath,
+		campaign,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create phishing page: %s", err)

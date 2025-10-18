@@ -178,6 +178,7 @@ func (c *Campaign) GetByID(g *gin.Context) {
 			WithRecipientGroups: true,
 			WithAllowDeny:       true,
 			WithDenyPage:        true,
+			WithEvasionPage:     true,
 		},
 	)
 	// handle responses
@@ -210,6 +211,7 @@ func (c *Campaign) GetByName(g *gin.Context) {
 			WithRecipientGroups: true,
 			WithAllowDeny:       true,
 			WithDenyPage:        true,
+			WithEvasionPage:     true,
 		},
 	)
 	// handle responses

@@ -216,6 +216,8 @@
 			campaign.saveSubmittedData = t.saveSubmittedData;
 			campaign.isAnonymous = t.isAnonymous;
 			campaign.allowDeny = t.allowDeny;
+			campaign.denyPage = t.denyPage;
+			campaign.evasionPage = t.evasionPage;
 			campaign.webhookID = t.webhookID;
 			campaign.template = templateMap.byKey(t.templateID);
 			campaign.recipientGroups = t.recipientGroupIDs.map((id) => recipientGroupMap.byKey(id));
@@ -1281,6 +1283,24 @@
 									{#if i < campaign.allowDeny.length - 1},
 									{/if}
 								{/each}
+							{:else}
+								None
+							{/if}
+						</span>
+
+						<span class="text-grayblue-dark font-medium">Deny Page:</span>
+						<span class="text-pc-darkblue dark:text-white">
+							{#if campaign.denyPage}
+								{campaign.denyPage.name}
+							{:else}
+								None
+							{/if}
+						</span>
+
+						<span class="text-grayblue-dark font-medium">Evasion Page:</span>
+						<span class="text-pc-darkblue dark:text-white">
+							{#if campaign.evasionPage}
+								{campaign.evasionPage.name}
 							{:else}
 								None
 							{/if}

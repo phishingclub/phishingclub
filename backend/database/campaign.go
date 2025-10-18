@@ -48,10 +48,12 @@ type Campaign struct {
 	CampaignTemplate   *CampaignTemplate
 
 	// can has one
-	CompanyID  *uuid.UUID `gorm:"index;type:uuid;index;uniqueIndex:idx_campaigns_unique_name_and_company_id;"`
-	Company    *Company
-	DenyPageID *uuid.UUID `gorm:"type:uuid;index;"`
-	DenyPage   *Page      `gorm:"foreignKey:DenyPageID;references:ID"`
+	CompanyID     *uuid.UUID `gorm:"index;type:uuid;index;uniqueIndex:idx_campaigns_unique_name_and_company_id;"`
+	Company       *Company
+	DenyPageID    *uuid.UUID `gorm:"type:uuid;index;"`
+	DenyPage      *Page      `gorm:"foreignKey:DenyPageID;references:ID"`
+	EvasionPageID *uuid.UUID `gorm:"type:uuid;index;"`
+	EvasionPage   *Page      `gorm:"foreignKey:EvasionPageID;references:ID"`
 	// NotableEventID notable event for this campaign
 	NotableEvent   *Event     `gorm:"foreignKey:NotableEventID;references:ID"`
 	NotableEventID *uuid.UUID `gorm:"type:uuid;index"`

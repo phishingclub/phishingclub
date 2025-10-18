@@ -46,6 +46,8 @@ type Campaign struct {
 	AllowDenyIDs      nullable.Nullable[[]*uuid.UUID] `json:"allowDenyIDs,omitempty"`
 	DenyPageID        nullable.Nullable[uuid.UUID]    `json:"denyPageID,omitempty"`
 	DenyPage          *Page                           `json:"denyPage"`
+	EvasionPageID     nullable.Nullable[uuid.UUID]    `json:"evasionPageID,omitempty"`
+	EvasionPage       *Page                           `json:"evasionPage"`
 	WebhookID         nullable.Nullable[uuid.UUID]    `json:"webhookID"`
 
 	// must not be set by a user
@@ -85,7 +87,7 @@ func (c *Campaign) Validate() error {
 	if len(c.RecipientGroupIDs.MustGet()) == 0 {
 		return validate.WrapErrorWithField(errors.New("must have at least one recipient group"), "RecipientGroupIDs")
 	}
-	if err := c.ValidateDenyPage(); err != nil {
+	if err := c.ValidateEvasionAndDenyPages(); err != nil {
 		return err
 	}
 
@@ -208,13 +210,22 @@ func (c *Campaign) ValidateNoSendTimesSet() error {
 	return nil
 }
 
-// ValidateDenyPage checks that a deny page is set
-func (c *Campaign) ValidateDenyPage() error {
-	if c.DenyPageID.IsSpecified() && !c.DenyPageID.IsNull() {
-		if c.AllowDenyIDs.IsSpecified() && (c.AllowDenyIDs.IsNull() || len(c.AllowDenyIDs.MustGet()) == 0) {
-			return validate.WrapErrorWithField(errors.New("requires a allow deny IDs to be set"), "denyPage")
+// ValidateEvasionAndDenyPages checks evasion page and deny page requirements
+func (c *Campaign) ValidateEvasionAndDenyPages() error {
+	// if evasion page is set, deny page must also be set
+	if c.EvasionPageID.IsSpecified() && !c.EvasionPageID.IsNull() {
+		if !c.DenyPageID.IsSpecified() || c.DenyPageID.IsNull() {
+			return validate.WrapErrorWithField(errors.New("evasion page requires a deny page to be set"), "evasionPage")
 		}
 	}
+
+	// if allow/deny IDs are set (IP filtering), deny page must be set
+	if c.AllowDenyIDs.IsSpecified() && !c.AllowDenyIDs.IsNull() && len(c.AllowDenyIDs.MustGet()) > 0 {
+		if !c.DenyPageID.IsSpecified() || c.DenyPageID.IsNull() {
+			return validate.WrapErrorWithField(errors.New("IP filtering requires a deny page to be set"), "denyPage")
+		}
+	}
+
 	return nil
 }
 
@@ -320,15 +331,17 @@ func (c *Campaign) ToDBMap() map[string]any {
 			m["company_id"] = c.CompanyID.MustGet()
 		}
 	}
-	allowDenyIsSet := c.AllowDenyIDs.IsSpecified() && !c.AllowDenyIDs.IsNull() && len(c.AllowDenyIDs.MustGet()) > 0
-	if allowDenyIsSet {
+	if c.DenyPageID.IsSpecified() {
+		m["deny_page_id"] = nil
 		if v, err := c.DenyPageID.Get(); err == nil {
 			m["deny_page_id"] = v.String()
-		} else {
-			m["deny_page_id"] = nil
 		}
-	} else {
-		m["deny_page_id"] = nil
+	}
+	if c.EvasionPageID.IsSpecified() {
+		m["evasion_page_id"] = nil
+		if v, err := c.EvasionPageID.Get(); err == nil {
+			m["evasion_page_id"] = v.String()
+		}
 	}
 	if c.WebhookID.IsSpecified() {
 		m["webhook_id"] = nil

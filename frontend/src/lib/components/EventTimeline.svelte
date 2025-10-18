@@ -41,6 +41,7 @@
 		campaign_recipient_message_sent: true,
 		campaign_recipient_message_failed: true,
 		campaign_recipient_message_read: true,
+		campaign_recipient_evasion_page_visited: true,
 		campaign_recipient_before_page_visited: true,
 		campaign_recipient_page_visited: true,
 		campaign_recipient_after_page_visited: true,

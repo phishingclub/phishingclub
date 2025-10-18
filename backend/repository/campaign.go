@@ -59,6 +59,7 @@ type CampaignOption struct {
 	WithRecipientGroupCount bool
 	WithAllowDeny           bool
 	WithDenyPage            bool
+	WithEvasionPage         bool
 	IncludeTestCampaigns    bool
 }
 
@@ -104,6 +105,9 @@ func (r *Campaign) load(db *gorm.DB, options *CampaignOption) *gorm.DB {
 	}
 	if options.WithDenyPage {
 		db = db.Preload("DenyPage")
+	}
+	if options.WithEvasionPage {
+		db = db.Preload("EvasionPage")
 	}
 	return db
 }
@@ -1500,6 +1504,21 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		denyPageID.SetNull()
 	}
 
+	var evasionPage *model.Page
+	if row.EvasionPage != nil {
+		ep, err := ToPage(row.EvasionPage)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		evasionPage = ep
+	}
+	evasionPageID := nullable.NewNullNullable[uuid.UUID]()
+	if row.EvasionPageID != nil {
+		evasionPageID.Set(*row.EvasionPageID)
+	} else {
+		evasionPageID.SetNull()
+	}
+
 	constraintWeekDays := nullable.NewNullNullable[vo.CampaignWeekDays]()
 	if row.ConstraintWeekDays != nil {
 		weekDays, err := vo.NewCampaignWeekDays(*row.ConstraintWeekDays)
@@ -1573,6 +1592,8 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		AllowDeny:           allowDeny,
 		DenyPage:            denyPage,
 		DenyPageID:          denyPageID,
+		EvasionPage:         evasionPage,
+		EvasionPageID:       evasionPageID,
 		WebhookID:           webhookID,
 		NotableEventID:      notableEventID,
 		NotableEventName:    notableEventName,

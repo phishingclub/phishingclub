@@ -10,6 +10,11 @@ const eventNameMap = {
 		color: 'bg-failed-sending'
 	},
 	campaign_recipient_message_read: { name: 'Message Read', priority: 40, color: 'bg-message-read' },
+	campaign_recipient_evasion_page_visited: {
+		name: 'Evasion Page Visited',
+		priority: 45,
+		color: 'bg-evasion-page-visited'
+	},
 	campaign_recipient_before_page_visited: {
 		name: 'Before Page Visited',
 		priority: 50,

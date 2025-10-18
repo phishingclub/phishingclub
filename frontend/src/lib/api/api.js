@@ -508,6 +508,7 @@ export class API {
 		 * @param {string[]} campaign.recipientGroupIDs []uuid
 		 * @param {string[]} campaign.allowDenyIDs []uuid
 		 * @param {string} campaign.denyPageID uuid
+		 * @param {string} campaign.evasionPageID uuid
 		 * @param {string} campaign.webhookID uuid
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
@@ -530,6 +531,7 @@ export class API {
 			recipientGroupIDs,
 			allowDenyIDs,
 			denyPageID,
+			evasionPageID,
 			webhookID,
 			constraintWeekDays,
 			constraintStartTime,
@@ -551,6 +553,7 @@ export class API {
 				recipientGroupIDs,
 				allowDenyIDs,
 				denyPageID,
+				evasionPageID,
 				webhookID,
 				constraintWeekDays,
 				constraintStartTime,
@@ -787,6 +790,7 @@ export class API {
 		 * @param {string[]} [campaign.recipientGroupIDs] []uuid
 		 * @param {string[]} campaign.allowDenyIDs []uuid
 		 * @param {string} campaign.denyPageID uuid
+		 * @param {string} campaign.evasionPageID uuid
 		 * @param {string} campaign.webhookID uuid
 		 * @returns {Promise<ApiResponse>}
 		 */
@@ -810,6 +814,7 @@ export class API {
 			recipientGroupIDs,
 			allowDenyIDs,
 			denyPageID,
+			evasionPageID,
 			webhookID
 		}) => {
 			return await postJSON(this.getPath(`/campaign/${id}`), {
@@ -831,6 +836,7 @@ export class API {
 				recipientGroupIDs,
 				allowDenyIDs,
 				denyPageID,
+				evasionPageID,
 				webhookID
 			});
 		},

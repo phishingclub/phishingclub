@@ -1336,6 +1336,15 @@ func (c *Campaign) UpdateByID(
 		}
 
 	}
+
+	// handle evasion page ID
+	if incoming.EvasionPageID.IsSpecified() {
+		if incoming.EvasionPageID.IsNull() {
+			current.EvasionPageID.SetNull()
+		} else {
+			current.EvasionPageID.Set(incoming.EvasionPageID.MustGet())
+		}
+	}
 	// validate and update
 	if err := current.Validate(); err != nil {
 		return errs.Wrap(err)

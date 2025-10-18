@@ -188,7 +188,7 @@ func (t *Template) ApplyPageMock(content string) (*bytes.Buffer, error) {
 		URLIdentifier:   urlIdentifier,
 		StateIdentifier: stateIdentifier,
 	}
-	return t.CreatePhishingPage(
+	return t.CreatePhishingPageWithCampaign(
 		domain,
 		email,
 		&campaignRecipientID,
@@ -197,6 +197,7 @@ func (t *Template) ApplyPageMock(content string) (*bytes.Buffer, error) {
 		campaignTemplate,
 		"stateParam",
 		"urlPath",
+		nil, // no campaign for mock, so DenyURL will be empty string
 	)
 }
 
@@ -280,6 +281,21 @@ func (t *Template) CreatePhishingPage(
 	stateParam string,
 	urlPath string,
 ) (*bytes.Buffer, error) {
+	return t.CreatePhishingPageWithCampaign(domain, email, campaignRecipientID, recipient, contentToRender, campaignTemplate, stateParam, urlPath, nil)
+}
+
+// CreatePhishingPageWithCampaign creates a new phishing page with optional campaign for deny URL support
+func (t *Template) CreatePhishingPageWithCampaign(
+	domain *database.Domain,
+	email *model.Email,
+	campaignRecipientID *uuid.UUID,
+	recipient *model.Recipient,
+	contentToRender string,
+	campaignTemplate *model.CampaignTemplate,
+	stateParam string,
+	urlPath string,
+	campaign *model.Campaign,
+) (*bytes.Buffer, error) {
 	w := bytes.NewBuffer([]byte{})
 	id := campaignRecipientID.String()
 	baseURL := "https://" + domain.Name
@@ -289,6 +305,20 @@ func (t *Template) CreatePhishingPage(
 	urlIdentifier := campaignTemplate.URLIdentifier.Name.MustGet()
 	stateIdentifier := campaignTemplate.StateIdentifier.Name.MustGet()
 	url := fmt.Sprintf("%s?%s=%s&%s=%s", baseURL, urlIdentifier, id, stateIdentifier, stateParam)
+
+	// create deny URL if campaign and deny page exist
+	denyURL := ""
+	if campaign != nil {
+		if _, err := campaign.DenyPageID.Get(); err == nil {
+			// create a special state param that indicates deny page should be served
+			campaignID := campaign.ID.MustGet()
+			denyStateParam, encErr := utils.Encrypt("deny", utils.UUIDToSecret(&campaignID))
+			if encErr == nil {
+				denyURL = fmt.Sprintf("%s?%s=%s&%s=%s", baseURL, urlIdentifier, id, stateIdentifier, denyStateParam)
+			}
+		}
+	}
+
 	tmpl, err := template.New("page").
 		Funcs(TemplateFuncs()).
 		Parse(contentToRender)
@@ -296,10 +326,11 @@ func (t *Template) CreatePhishingPage(
 	if err != nil {
 		return w, fmt.Errorf("failed to parse page template: %s", err)
 	}
-	data := t.newTemplateDataMap(
+	data := t.newTemplateDataMapWithDenyURL(
 		id,
 		baseURL,
 		url,
+		denyURL,
 		recipient,
 		"", // trackingPixelPath
 		"", // trackingPixelMarkup
@@ -404,6 +435,27 @@ func (t *Template) newTemplateDataMap(
 	}
 
 	return &m
+}
+
+// newTemplateDataMapWithDenyURL creates a new data map for templates with deny URL for evasion pages
+func (t *Template) newTemplateDataMapWithDenyURL(
+	id string,
+	baseURL string,
+	url string,
+	denyURL string,
+	recipient *model.Recipient,
+	trackingPixelPath string,
+	trackingPixelMarkup string,
+	email *model.Email,
+	apiSender *model.APISender,
+) *map[string]any {
+	// get the standard template data
+	data := t.newTemplateDataMap(id, baseURL, url, recipient, trackingPixelPath, trackingPixelMarkup, email, apiSender)
+
+	// add the deny URL for evasion pages
+	(*data)["DenyURL"] = denyURL
+
+	return data
 }
 
 // TemplateFuncs returns template functions for templates

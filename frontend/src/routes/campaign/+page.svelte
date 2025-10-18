@@ -94,13 +94,13 @@
 			icon: ''
 		},
 		{
-			label: 'Add allow-list',
+			label: 'Allow',
 			value: 'allow',
 			icon: ''
 		},
 
 		{
-			label: 'Add deny-list',
+			label: 'Deny',
 			value: 'deny',
 			icon: ''
 		}
@@ -148,6 +148,23 @@
 	let scheduleType = 'basic';
 	let allowDenyType = 'none';
 	let allAllowDeny = [];
+	let showSecurityOptions = false;
+
+	// reactive statement to enable security options when deny page is set
+	$: if (formValues.denyPageValue && formValues.denyPageValue.trim() !== '') {
+		showSecurityOptions = true;
+	}
+
+	// reactive statement to clear evasion page and IP filtering when deny page is cleared
+	$: if (!formValues.denyPageValue) {
+		if (formValues.evasionPageValue) {
+			formValues.evasionPageValue = null;
+		}
+		if (allowDenyType !== 'none') {
+			allowDenyType = 'none';
+			formValues.allowDeny = [];
+		}
+	}
 
 	const defaultSendField = 'Email';
 	const defaultSendOrder = 'Random';
@@ -228,6 +245,7 @@
 		recipientGroups: [],
 		allowDeny: [],
 		denyPageValue: null,
+		evasionPageValue: null,
 		constraintWeekDays: [],
 		contraintStartTime: null,
 		contraintEndTime: null,
@@ -406,6 +424,15 @@
 	};
 
 	const validateMisc = () => {
+		// validate that deny page is selected if evasion page or IP filtering is used
+		if (formValues.evasionPageValue && !formValues.denyPageValue) {
+			modalError = 'Deny page is required when using an evasion page';
+			return false;
+		}
+		if (allowDenyType !== 'none' && !formValues.denyPageValue) {
+			modalError = 'Deny page is required when using IP filtering';
+			return false;
+		}
 		return checkCurrentStepValidity();
 	};
 
@@ -573,6 +600,7 @@
 				recipientGroupIDs: recipientGroupIDs,
 				allowDenyIDs: allowDenyIDs,
 				denyPageID: denyPageMap.byValueOrNull(formValues.denyPageValue),
+				evasionPageID: denyPageMap.byValueOrNull(formValues.evasionPageValue),
 				constraintWeekDays: weekDaysAvailableToBinary(formValues.constraintWeekDays),
 				constraintStartTime: contraintStartTimeUTC,
 				constraintEndTime: contraintEndTimeUTC,
@@ -636,6 +664,7 @@
 				recipientGroupIDs: recipientGroupIDs,
 				allowDenyIDs: allowDenyIDs,
 				denyPageID: denyPageMap.byValueOrNull(formValues.denyPageValue),
+				evasionPageID: denyPageMap.byValueOrNull(formValues.evasionPageValue),
 				webhookID: webhookMap.byValueOrNull(formValues.webhookValue)
 			});
 
@@ -752,6 +781,7 @@
 			recipientGroups: [],
 			allowDeny: [],
 			denyPageValue: null,
+			evasionPageValue: null,
 			constraintWeekDays: [],
 			contraintStartTime: null,
 			contraintEndTime: null,
@@ -779,7 +809,6 @@
 
 	const onChangeAllowDenyType = () => {
 		formValues.allowDeny = [];
-		formValues.denyPageValue = null;
 		setAllowDenyType(allAllowDeny);
 	};
 
@@ -880,6 +909,10 @@
 
 		if (campaign.denyPage) {
 			formValues.denyPageValue = campaign.denyPage.name;
+		}
+
+		if (campaign.evasionPage) {
+			formValues.evasionPageValue = campaign.evasionPage.name;
 		}
 	};
 
@@ -1462,36 +1495,6 @@
 						</div>
 
 						<div class="mb-6">
-							<SelectSquare
-								label="IP filtering"
-								options={ipFilterOptions}
-								bind:value={allowDenyType}
-								onChange={() => {
-									onChangeAllowDenyType();
-								}}
-							/>
-
-							{#if allowDenyType !== 'none'}
-								<TextFieldMultiSelect
-									id="allowDenyIDs"
-									toolTipText="Select the IP groups to allow or block"
-									bind:value={formValues.allowDeny}
-									options={Array.from(allowDenyMap.values())}>Lists</TextFieldMultiSelect
-								>
-
-								<TextFieldSelect
-									id="deny-page"
-									bind:value={formValues.denyPageValue}
-									optional
-									onSelect={(page) => {
-										formValues.denyPageValue = page;
-									}}
-									options={Array.from(denyPageMap.values())}>Blocked Access Page</TextFieldSelect
-								>
-							{/if}
-						</div>
-
-						<div>
 							<TextFieldSelect
 								id="webhook"
 								bind:value={formValues.webhookValue}
@@ -1499,6 +1502,101 @@
 								options={Array.from(webhookMap.values())}>Webhook</TextFieldSelect
 							>
 						</div>
+
+						<div class="mb-6">
+							<SelectSquare
+								optional
+								label="Security Configuration"
+								options={[
+									{ value: false, label: 'Disabled' },
+									{ value: true, label: 'Enabled' }
+								]}
+								bind:value={showSecurityOptions}
+								onChange={() => {
+									if (!showSecurityOptions) {
+										formValues.denyPageValue = '';
+										formValues.evasionPageValue = '';
+										allowDenyType = 'none';
+										formValues.allowDeny = [];
+									}
+								}}
+							/>
+						</div>
+
+						{#if showSecurityOptions}
+							<div class="mb-6">
+								<TextFieldSelect
+									id="deny-page"
+									bind:value={formValues.denyPageValue}
+									optional
+									toolTipText="Page to show when access is denied. Required for evasion pages and IP filtering."
+									onSelect={(page) => {
+										formValues.denyPageValue = page;
+									}}
+									options={Array.from(denyPageMap.values())}>Deny Page</TextFieldSelect
+								>
+							</div>
+
+							<div class="mb-6">
+								{#if formValues.denyPageValue}
+									<TextFieldSelect
+										id="evasion-page"
+										bind:value={formValues.evasionPageValue}
+										optional
+										toolTipText="Select an anti-bot/evasion page to be served before the first real page. If evasion fails, the deny page will be shown instead."
+										onSelect={(page) => {
+											formValues.evasionPageValue = page;
+										}}
+										options={Array.from(denyPageMap.values())}
+										>Anti-bot / Evasion Page</TextFieldSelect
+									>
+								{:else}
+									<div
+										class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600"
+									>
+										<p class="text-gray-600 dark:text-gray-400 text-sm">
+											<strong>Anti-bot / Evasion Page</strong><br />
+											You must select a deny page first to use evasion pages.
+										</p>
+									</div>
+								{/if}
+							</div>
+
+							<div class="mb-6">
+								{#if formValues.denyPageValue}
+									<SelectSquare
+										label="IP filtering"
+										toolTipText="Filter access based on IP address lists"
+										options={ipFilterOptions}
+										width="small"
+										bind:value={allowDenyType}
+										onChange={() => {
+											onChangeAllowDenyType();
+										}}
+									/>
+
+									{#if allowDenyType !== 'none'}
+										<div class="mt-4">
+											<TextFieldMultiSelect
+												id="allowDenyIDs"
+												toolTipText="Select the IP groups to allow or block"
+												bind:value={formValues.allowDeny}
+												options={Array.from(allowDenyMap.values())}>Lists</TextFieldMultiSelect
+											>
+										</div>
+									{/if}
+								{:else}
+									<div
+										class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600"
+									>
+										<p class="text-gray-600 dark:text-gray-400 text-sm">
+											<strong>IP filtering mode</strong><br />
+											You must select a deny page first to use IP filtering.
+										</p>
+									</div>
+								{/if}
+							</div>
+						{/if}
 					</FormColumn>
 				</FormColumns>
 			{:else if currentStep === 5}
@@ -1745,6 +1843,13 @@
 											<span class="text-grayblue-dark font-medium">Deny Page:</span>
 											<span class="text-pc-darkblue dark:text-white"
 												>{formValues.denyPageValue}</span
+											>
+										{/if}
+
+										{#if formValues.evasionPageValue}
+											<span class="text-grayblue-dark font-medium">Evasion Page:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.evasionPageValue}</span
 											>
 										{/if}
 
