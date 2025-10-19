@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.8.0] - 2025-10-19
+- Campaigns now support Anti-Bot / Evasion page
+- Proxy campaign pages now support IP filtering
+- Minor UI update / fixes
+
 ## [1.7.0] - 2025-10-16
 - New DOM engine choice for proxy rewrite directive
 - New response proxy directive
