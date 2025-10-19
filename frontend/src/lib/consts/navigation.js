@@ -61,7 +61,7 @@ export const route = {
 		route: '/proxy/'
 	},
 	campaignTemplates: {
-		label: 'Campaign Templates',
+		label: 'Templates',
 		singleLabel: 'Templates',
 		route: '/campaign-template/'
 	},
