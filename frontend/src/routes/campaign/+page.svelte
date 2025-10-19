@@ -1201,7 +1201,7 @@
 				<!-- Recipients Step -->
 				<FormColumns id={'step-2'}>
 					<FormColumn>
-						<div class="pb-32">
+						<div class="mb-32">
 							<TextFieldMultiSelect
 								id="recipientGroupIDs"
 								bind:value={formValues.recipientGroups}

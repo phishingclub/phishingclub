@@ -261,7 +261,7 @@
 		<div class="flex items-center">
 			<p
 				id={labelId}
-				class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
+				class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
 			>
 				<slot />
 			</p>
@@ -279,7 +279,7 @@
 			{/if}
 		</div>
 	</label>
-	<div class="relative mb-6">
+	<div class="relative">
 		<div
 			class="flex items-center relative"
 			class:w-28={size == 'small'}
@@ -369,8 +369,6 @@
 									role="option"
 									aria-selected={value.includes(option)}
 									class="w-full text-left bg-slate-100 dark:bg-gray-900 rounded-md text-gray-600 dark:text-gray-300 hover:bg-grayblue-dark dark:hover:bg-highlight-blue/40 hover:text-white py-2 px-2 cursor-pointer focus:bg-grayblue-dark dark:focus:bg-highlight-blue/40 focus:text-white focus:outline-none transition-colors duration-200"
-									class:bg-blue-600={value.includes(option)}
-									class:text-white={value.includes(option)}
 									on:click={(e) => {
 										e.preventDefault();
 										e.stopPropagation();
@@ -380,9 +378,6 @@
 									on:blur={handleBlur}
 								>
 									{option}
-									{#if value.includes(option)}
-										<span class="float-right">✓</span>
-									{/if}
 								</button>
 							</li>
 						{/each}
