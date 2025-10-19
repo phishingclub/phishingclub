@@ -1201,14 +1201,16 @@
 				<!-- Recipients Step -->
 				<FormColumns id={'step-2'}>
 					<FormColumn>
-						<TextFieldMultiSelect
-							id="recipientGroupIDs"
-							bind:value={formValues.recipientGroups}
-							required
-							onSelect={onAddReceipientGroup}
-							onRemove={onRemoveReceipientGroup}
-							options={recipientGroupMap.values()}>Recipient Groups</TextFieldMultiSelect
-						>
+						<div class="pb-32">
+							<TextFieldMultiSelect
+								id="recipientGroupIDs"
+								bind:value={formValues.recipientGroups}
+								required
+								onSelect={onAddReceipientGroup}
+								onRemove={onRemoveReceipientGroup}
+								options={recipientGroupMap.values()}>Recipient Groups</TextFieldMultiSelect
+							>
+						</div>
 					</FormColumn>
 				</FormColumns>
 			{:else if currentStep === 3}
