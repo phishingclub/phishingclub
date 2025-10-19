@@ -1632,7 +1632,6 @@
 										<span class="text-pc-darkblue dark:text-white"
 											>{formValues.isTest ? 'Test' : 'Production'}</span
 										>
-										>
 									</div>
 								</div>
 
