@@ -371,7 +371,15 @@ portal.example.com:
 <HeadTitle title="Proxies" />
 <main>
 	<div class="flex justify-between">
-		<Headline>Proxies</Headline>
+		<div class="flex items-center gap-2">
+			<Headline>Proxies</Headline>
+			<span
+				class="bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-0.5 rounded dark:bg-orange-900 dark:text-orange-300"
+				title="This is a beta feature. Use with caution and expect changes"
+			>
+				BETA
+			</span>
+		</div>
 		<AutoRefresh
 			isLoading={false}
 			onRefresh={() => {
