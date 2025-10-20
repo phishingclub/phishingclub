@@ -1276,6 +1276,21 @@ export class API {
 			return await getJSON(
 				this.getPath(`/domain/subset?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`)
 			);
+		},
+
+		/**
+		 * get domains subsets excluding proxy domains
+		 *
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns  {Promise<ApiResponse>}
+		 */
+		getAllSubsetWithoutProxies: async (options, companyID = null) => {
+			return await getJSON(
+				this.getPath(
+					`/domain/subset/noproxies?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`
+				)
+			);
 		}
 	};
 

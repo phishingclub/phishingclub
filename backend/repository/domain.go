@@ -23,7 +23,8 @@ var domainAllowedColumns = assignTableToColumns(database.DOMAIN_TABLE, []string{
 // DomainOption is for deciding if we should load full domain entities
 type DomainOption struct {
 	*vo.QueryArgs
-	WithCompany bool
+	WithCompany         bool
+	ExcludeProxyDomains bool
 }
 
 // Domain is a Domain repository
@@ -143,6 +144,10 @@ func (r *Domain) GetAllSubset(
 ) (*model.Result[model.DomainOverview], error) {
 	result := model.NewEmptyResult[model.DomainOverview]()
 	db := withCompanyIncludingNullContext(r.DB, companyID, database.DOMAIN_TABLE)
+	// exclude proxy domains (MITM domains) if requested
+	if options.ExcludeProxyDomains {
+		db = db.Where("proxy_id IS NULL")
+	}
 	db, err := useQuery(db, database.DOMAIN_TABLE, options.QueryArgs, domainAllowedColumns...)
 	if err != nil {
 		return result, errs.Wrap(err)

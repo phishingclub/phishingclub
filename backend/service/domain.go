@@ -343,6 +343,42 @@ func (d *Domain) GetAllOverview(
 	return result, nil
 }
 
+// GetAllOverviewWithoutProxies gets domains with limited data, excluding proxy domains for asset management
+func (d *Domain) GetAllOverviewWithoutProxies(
+	companyID *uuid.UUID, // can be null
+	ctx context.Context,
+	session *model.Session,
+	queryArgs *vo.QueryArgs,
+) (*model.Result[model.DomainOverview], error) {
+	result := model.NewEmptyResult[model.DomainOverview]()
+	ae := NewAuditEvent("Domain.GetAllOverviewWithoutProxies", session)
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		d.LogAuthError(err)
+		return result, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		d.AuditLogNotAuthorized(ae)
+		return result, errs.ErrAuthorizationFailed
+	}
+	// get domains excluding proxy domains for asset management
+	result, err = d.DomainRepository.GetAllSubset(
+		ctx,
+		companyID,
+		&repository.DomainOption{
+			QueryArgs:           queryArgs,
+			ExcludeProxyDomains: true,
+		},
+	)
+	if err != nil {
+		d.Logger.Errorw("failed to get domains subset for assets", "error", err)
+		return result, errs.Wrap(err)
+	}
+	// no audit on read
+	return result, nil
+}
+
 // GetByID is a function to get domain by id
 func (d *Domain) GetByID(
 	ctx context.Context,

@@ -120,7 +120,7 @@
 
 	const refreshDomains = async () => {
 		const domains = await fetchAllRows((options) => {
-			return api.domain.getAllSubset(options, contextCompanyID);
+			return api.domain.getAllSubsetWithoutProxies(options, contextCompanyID);
 		});
 		domainMap = BiMap.FromArrayOfObjects(domains);
 	};

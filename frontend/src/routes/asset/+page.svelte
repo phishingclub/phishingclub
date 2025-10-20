@@ -36,7 +36,7 @@
 	const refresh = async () => {
 		try {
 			isTableLoading = true;
-			const res = await api.domain.getAllSubset(tableURLParams, contextCompanyID);
+			const res = await api.domain.getAllSubsetWithoutProxies(tableURLParams, contextCompanyID);
 			if (!res.success) {
 				throw res.error;
 			}

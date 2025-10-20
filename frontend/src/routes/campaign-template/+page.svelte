@@ -135,14 +135,12 @@
 
 	const refreshDomains = async () => {
 		const allDomains = await fetchAllRows((options) => {
-			return api.domain.getAllSubset(options, contextCompanyID);
+			return api.domain.getAllSubsetWithoutProxies(options, contextCompanyID);
 		});
-		// filter to only include regular domains (not proxy domains)
-		const regularDomains = allDomains.filter((domain) => domain.type !== 'proxy');
-		domainMap = BiMap.FromArrayOfObjects(regularDomains);
+		domainMap = BiMap.FromArrayOfObjects(allDomains);
 		// store full domain objects for type access
 		domainObjectMap = new Map();
-		regularDomains.forEach((domain) => {
+		allDomains.forEach((domain) => {
 			domainObjectMap.set(domain.id, domain);
 		});
 	};

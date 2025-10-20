@@ -109,6 +109,34 @@ func (d *Domain) GetAllOverview(g *gin.Context) {
 	d.Response.OK(g, domains)
 }
 
+// GetAllOverviewWithoutProxies gets domains with limited data, excluding proxy domains for asset management
+func (d *Domain) GetAllOverviewWithoutProxies(g *gin.Context) {
+	// handle session
+	session, _, ok := d.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	companyID := companyIDFromRequestQuery(g)
+	queryArgs, ok := d.handleQueryArgs(g)
+	if !ok {
+		return
+	}
+	queryArgs.DefaultSortByUpdatedAt()
+	queryArgs.RemapOrderBy(DomainColumnsMap)
+	// get domains excluding proxy domains for asset management
+	domains, err := d.DomainService.GetAllOverviewWithoutProxies(
+		companyID,
+		g.Request.Context(),
+		session,
+		queryArgs,
+	)
+	if ok := d.handleErrors(g, err); !ok {
+		return
+	}
+	d.Response.OK(g, domains)
+}
+
 // GetByID gets a domain by id
 func (d *Domain) GetByID(g *gin.Context) {
 	// handle session
