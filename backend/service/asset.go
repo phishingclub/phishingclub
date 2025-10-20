@@ -655,7 +655,7 @@ func (a *Asset) DeleteAllByDomainID(
 		return errs.ErrAuthorizationFailed
 	}
 	// get assets
-	assets, err := a.AssetRepository.GetAllByCompanyID(
+	assets, err := a.AssetRepository.GetAllByDomainID(
 		ctx,
 		domainID,
 	)
