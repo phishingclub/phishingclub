@@ -261,6 +261,7 @@
 	let isSubmitting = false;
 	let isTableLoading = false;
 	let modalText = '';
+	let isValidatingName = false;
 	let weekDaysAvailable = [];
 	let isDeleteAlertVisible = false;
 
@@ -334,7 +335,7 @@
 	});
 
 	const nextStep = async () => {
-		if (validateCurrentStep()) {
+		if (await validateCurrentStep()) {
 			currentStep = Math.min(currentStep + 1, campaignSteps.length);
 			modalError = '';
 			// reset tab focus after dom update - only for explicit step navigation
@@ -372,10 +373,10 @@
 		}, 0);
 	};
 
-	const validateCurrentStep = () => {
+	const validateCurrentStep = async () => {
 		switch (currentStep) {
 			case 1:
-				return validateBasicInfo();
+				return await validateBasicInfo();
 			case 2:
 				return validateRecipients();
 			case 3:
@@ -402,8 +403,31 @@
 		return true;
 	};
 
-	const validateBasicInfo = () => {
-		return checkCurrentStepValidity();
+	const validateBasicInfo = async () => {
+		if (!checkCurrentStepValidity()) {
+			return false;
+		}
+
+		// check if campaign name exists
+		if (formValues.name?.length) {
+			isValidatingName = true;
+			try {
+				const nameExists = await campaignNameExists(formValues.name);
+				if (nameExists) {
+					/** @type {HTMLInputElement} */
+					const ele = document.querySelector('#campaignName');
+					if (ele) {
+						ele.setCustomValidity('Name is used by another campaign');
+						ele.reportValidity();
+					}
+					return false;
+				}
+			} finally {
+				isValidatingName = false;
+			}
+		}
+
+		return true;
 	};
 
 	const validateRecipients = () => {
@@ -733,23 +757,22 @@
 	};
 
 	/** @param {string} name */
-	const campaignNameExits = async (name) => {
+	const campaignNameExists = async (name) => {
+		if (!name?.length) return false;
+
 		try {
 			const res = await api.campaign.getByName(name, contextCompanyID);
-			/** @type {HTMLInputElement} */
-			const ele = document.querySelector('#campaignName');
 			if (
 				res.data &&
 				(modalMode === 'create' || modalMode === 'copy' || res.data.id !== formValues.id)
 			) {
-				ele.setCustomValidity('Name is used by another campaign');
-				ele.reportValidity();
-			} else {
-				ele.setCustomValidity('');
+				return true;
 			}
+			return false;
 		} catch (e) {
 			addToast('Failed to check if campaign name is used', 'Error');
 			console.error('Failed to check if campaign name is used', e);
+			return false;
 		}
 	};
 
@@ -816,6 +839,7 @@
 		modalMode = null;
 		isModalVisible = false;
 		currentStep = 1;
+		isValidatingName = false;
 		if (form) form.reset();
 		resetFormValues();
 	};
@@ -1193,10 +1217,9 @@
 								const ele = document.querySelector('#campaignName');
 								ele.setCustomValidity('');
 							}}
-							onBlur={() => {
-								formValues.name.length && campaignNameExits(formValues.name);
-							}}>Name</TextField
 						>
+							Name
+						</TextField>
 						<TextFieldSelect
 							required
 							id="template"
@@ -1918,10 +1941,15 @@
 				{#if currentStep < 5}
 					<button
 						type="button"
-						class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+						class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+						disabled={isValidatingName}
 						on:click={nextStep}
 					>
-						Next
+						{#if isValidatingName}
+							Checking...
+						{:else}
+							Next
+						{/if}
 						<svg
 							class="ml-2 h-4 w-4"
 							xmlns="http://www.w3.org/2000/svg"
