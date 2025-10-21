@@ -868,17 +868,23 @@
 			name: copyMode ? `${campaign.name} (Copy)` : campaign.name,
 			sortField: sortField.byValue(campaign.sortField),
 			sortOrder: sortOrder.byValue(campaign.sortOrder),
-			sendStartAt: campaign.sendStartAt,
-			sendEndAt: campaign.sendEndAt,
-			scheduledStartAt: campaign.sendStartAt
-				? local_yyyy_mm_dd(new Date(campaign.sendStartAt))
-				: null,
-			scheduledEndAt: campaign.sendEndAt ? local_yyyy_mm_dd(new Date(campaign.sendEndAt)) : null,
-			constraintWeekDays: weekDayBinaryToAvailable(campaign.constraintWeekDays),
-			contraintStartTime: utcTimeToLocal(campaign.constraintStartTime),
-			contraintEndTime: utcTimeToLocal(campaign.constraintEndTime),
-			closeAt: campaign.closeAt,
-			anonymizeAt: campaign.anonymizeAt,
+			sendStartAt: copyMode ? null : campaign.sendStartAt,
+			sendEndAt: copyMode ? null : campaign.sendEndAt,
+			scheduledStartAt: copyMode
+				? null
+				: campaign.sendStartAt
+					? local_yyyy_mm_dd(new Date(campaign.sendStartAt))
+					: null,
+			scheduledEndAt: copyMode
+				? null
+				: campaign.sendEndAt
+					? local_yyyy_mm_dd(new Date(campaign.sendEndAt))
+					: null,
+			constraintWeekDays: copyMode ? [] : weekDayBinaryToAvailable(campaign.constraintWeekDays),
+			contraintStartTime: copyMode ? null : utcTimeToLocal(campaign.constraintStartTime),
+			contraintEndTime: copyMode ? null : utcTimeToLocal(campaign.constraintEndTime),
+			closeAt: copyMode ? null : campaign.closeAt,
+			anonymizeAt: copyMode ? null : campaign.anonymizeAt,
 			saveSubmittedData: campaign.saveSubmittedData,
 			isAnonymous: campaign.isAnonymous,
 			isTest: campaign.isTest,
@@ -886,17 +892,28 @@
 			webhookValue: webhookMap.byKey(campaign.webhookID)
 		};
 
-		formValues.recipientGroups = campaign.recipientGroupIDs.map((id) =>
-			recipientGroupMap.byKey(id)
-		);
-		formValues.selectedCount = formValues.recipientGroups.reduce((acc, label) => {
-			const id = recipientGroupMap.byValue(label);
-			const group = recipientGroupsByID[id];
-			return acc + group.recipientCount;
-		}, 0);
+		if (copyMode) {
+			// reset recipient groups when copying
+			formValues.recipientGroups = [];
+			formValues.selectedCount = 0;
+		} else {
+			formValues.recipientGroups = campaign.recipientGroupIDs.map((id) =>
+				recipientGroupMap.byKey(id)
+			);
+			formValues.selectedCount = formValues.recipientGroups.reduce((acc, label) => {
+				const id = recipientGroupMap.byValue(label);
+				const group = recipientGroupsByID[id];
+				return acc + group.recipientCount;
+			}, 0);
+		}
 
 		if (!formValues.sendStartAt && !formValues.sendEndAt) {
 			scheduleType = 'self-managed';
+		}
+
+		// reset schedule type to basic when copying since delivery times are cleared
+		if (copyMode) {
+			scheduleType = 'basic';
 		}
 
 		if (campaign.allowDeny.length > 0) {
