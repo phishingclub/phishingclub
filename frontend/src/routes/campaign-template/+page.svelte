@@ -660,7 +660,7 @@
 						</a>
 					{/if}
 				</TableCell>
-				<TableCellCheck value={template.isComplete} />
+				<TableCellCheck value={template.isUsable} />
 				{#if contextCompanyID}
 					<TableCellScope companyID={template.companyID} />
 				{/if}
