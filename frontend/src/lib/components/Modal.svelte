@@ -327,7 +327,7 @@
 						<img class="w-full" src="/close-white.svg" alt="" />
 					</button>
 				</div>
-				<div class="px-8 overflow-y-auto {scrollBarClassesVertical}">
+				<div class="px-8 overflow-y-auto overflow-x-visible {scrollBarClassesVertical}">
 					<slot />
 				</div>
 			</section>
