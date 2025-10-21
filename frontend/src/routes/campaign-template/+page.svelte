@@ -809,7 +809,7 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 									required
 									id="apiSender"
 									bind:value={formValues.apiSender}
-									options={apiSenderMap.values()}>External API Sender</TextFieldSelect
+									options={apiSenderMap.values()}>API Sender</TextFieldSelect
 								>
 							</div>
 						{/if}
