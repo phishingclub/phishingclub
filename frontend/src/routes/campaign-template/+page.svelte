@@ -45,22 +45,20 @@
 	let form = null;
 	let formValues = {
 		id: null,
-		templateType: null,
+		templateType: 'Email',
 		name: null,
 		domain: null,
 		landingPage: null,
 		landingPageType: 'page', // 'page' or 'proxy'
 		beforeLandingPage: null,
-		beforeLandingPageType: 'page', // 'page' or 'proxy'
 		afterLandingPage: null,
-		afterLandingPageType: 'page', // 'page' or 'proxy'
-		afterLandingPageRedirectURL: null,
+		afterLandingPageRedirectURL: '',
 		email: null,
 		smtpConfiguration: null,
 		apiSender: null,
 		urlIdentifier: 'id',
 		stateIdentifier: 'session',
-		urlPath: null
+		urlPath: ''
 	};
 
 	let contextCompanyID = null;
@@ -97,6 +95,7 @@
 		id: null,
 		name: null
 	};
+	let showAdvancedOptions = false;
 
 	$: {
 		modalText = getModalText('template', modalMode);
@@ -304,26 +303,14 @@
 					formValues.landingPageType === 'proxy'
 						? landingProxyMap.byValueOrNull(formValues.landingPage)
 						: null,
-				beforeLandingPageID:
-					formValues.beforeLandingPageType === 'page'
-						? beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage)
-						: null,
-				beforeLandingProxyID:
-					formValues.beforeLandingPageType === 'proxy'
-						? beforeLandingProxyMap.byValueOrNull(formValues.beforeLandingPage)
-						: null,
-				afterLandingPageID:
-					formValues.afterLandingPageType === 'page'
-						? afterLandingPageMap.byValueOrNull(formValues.afterLandingPage)
-						: null,
-				afterLandingProxyID:
-					formValues.afterLandingPageType === 'proxy'
-						? afterLandingProxyMap.byValueOrNull(formValues.afterLandingPage)
-						: null,
-				afterLandingPageRedirectURL: formValues.afterLandingPageRedirectURL,
+				beforeLandingPageID: beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage),
+				beforeLandingProxyID: null,
+				afterLandingPageID: afterLandingPageMap.byValueOrNull(formValues.afterLandingPage),
+				afterLandingProxyID: null,
+				afterLandingPageRedirectURL: formValues.afterLandingPageRedirectURL || '',
 				urlIdentifierID: identifierMap.byValueOrNull(formValues.urlIdentifier),
 				stateIdentifierID: identifierMap.byValueOrNull(formValues.stateIdentifier),
-				urlPath: formValues.urlPath,
+				urlPath: formValues.urlPath || '',
 				companyID: contextCompanyID
 			});
 			if (!res.success) {
@@ -356,26 +343,14 @@
 					formValues.landingPageType === 'proxy'
 						? landingProxyMap.byValueOrNull(formValues.landingPage)
 						: null,
-				beforeLandingPageID:
-					formValues.beforeLandingPageType === 'page'
-						? beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage)
-						: null,
-				beforeLandingProxyID:
-					formValues.beforeLandingPageType === 'proxy'
-						? beforeLandingProxyMap.byValueOrNull(formValues.beforeLandingPage)
-						: null,
-				afterLandingPageID:
-					formValues.afterLandingPageType === 'page'
-						? afterLandingPageMap.byValueOrNull(formValues.afterLandingPage)
-						: null,
-				afterLandingProxyID:
-					formValues.afterLandingPageType === 'proxy'
-						? afterLandingProxyMap.byValueOrNull(formValues.afterLandingPage)
-						: null,
-				afterLandingPageRedirectURL: formValues.afterLandingPageRedirectURL,
+				beforeLandingPageID: beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage),
+				beforeLandingProxyID: null,
+				afterLandingPageID: afterLandingPageMap.byValueOrNull(formValues.afterLandingPage),
+				afterLandingProxyID: null,
+				afterLandingPageRedirectURL: formValues.afterLandingPageRedirectURL || '',
 				urlIdentifierID: identifierMap.byValueOrNull(formValues.urlIdentifier),
 				stateIdentifierID: identifierMap.byValueOrNull(formValues.stateIdentifier),
-				urlPath: formValues.urlPath
+				urlPath: formValues.urlPath || ''
 			});
 			if (!res.success) {
 				modalError = res.error;
@@ -422,24 +397,23 @@
 		form.reset();
 		formValues = {
 			id: null,
-			templateType: null,
+			templateType: 'Email',
 			name: null,
 			domain: null,
 			landingPage: null,
 			landingPageType: 'page',
 			beforeLandingPage: null,
-			beforeLandingPageType: 'page',
 			afterLandingPage: null,
-			afterLandingPageType: 'page',
-			afterLandingPageRedirectURL: null,
+			afterLandingPageRedirectURL: '',
 			email: null,
 			smtpConfiguration: null,
 			apiSender: null,
 			urlIdentifier: 'id',
 			stateIdentifier: 'session',
-			urlPath: null
+			urlPath: ''
 		};
 		modalError = '';
+		showAdvancedOptions = false;
 	};
 
 	/** @param {string} id */
@@ -488,7 +462,7 @@
 		if (template.smtpConfigurationID) {
 			formValues.templateType = 'Email';
 		} else {
-			formValues.templateType = 'External API';
+			formValues.templateType = 'API Sender';
 		}
 		formValues.domain = domainMap.byKey(template.domainID);
 		formValues.email = emailMap.byKey(template.emailID);
@@ -502,28 +476,32 @@
 			formValues.landingPageType = 'proxy';
 		}
 
-		// handle before landing page (page or proxy)
+		// handle before landing page (only pages, no proxy)
 		if (template.beforeLandingPageID) {
 			formValues.beforeLandingPage = beforeLandingPageMap.byKey(template.beforeLandingPageID);
-			formValues.beforeLandingPageType = 'page';
-		} else if (template.beforeLandingProxyID) {
-			formValues.beforeLandingPage = beforeLandingProxyMap.byKey(template.beforeLandingProxyID);
-			formValues.beforeLandingPageType = 'proxy';
 		}
 
-		// handle after landing page (page or proxy)
+		// handle after landing page (only pages, no proxy)
 		if (template.afterLandingPageID) {
 			formValues.afterLandingPage = afterLandingPageMap.byKey(template.afterLandingPageID);
-			formValues.afterLandingPageType = 'page';
-		} else if (template.afterLandingProxyID) {
-			formValues.afterLandingPage = afterLandingProxyMap.byKey(template.afterLandingProxyID);
-			formValues.afterLandingPageType = 'proxy';
 		}
 
-		formValues.afterLandingPageRedirectURL = template.afterLandingPageRedirectURL;
+		formValues.afterLandingPageRedirectURL = template.afterLandingPageRedirectURL || '';
 		formValues.urlIdentifier = identifierMap.byKey(template.urlIdentifierID);
 		formValues.stateIdentifier = identifierMap.byKey(template.stateIdentifierID);
-		formValues.urlPath = template.urlPath;
+		formValues.urlPath = template.urlPath || '';
+
+		// set advanced options visibility based on template configuration
+		showAdvancedOptions = !!(
+			(
+				(template.urlPath && template.urlPath !== '') ||
+				(template.afterLandingPageRedirectURL && template.afterLandingPageRedirectURL !== '') ||
+				(template.urlIdentifierID && identifierMap.byKey(template.urlIdentifierID) !== 'id') ||
+				(template.stateIdentifierID &&
+					identifierMap.byKey(template.stateIdentifierID) !== 'session') ||
+				template.apiSenderID
+			) // Show advanced if using External API
+		);
 	};
 </script>
 
@@ -794,69 +772,10 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 						<div>
-							<TextField
-								required
-								minLength={1}
-								maxLength={64}
-								bind:value={formValues.name}
-								placeholder="Intranet login">Name</TextField
+							<TextField required minLength={1} maxLength={64} bind:value={formValues.name}
+								>Name</TextField
 							>
 						</div>
-						<div>
-							<div class="w-full">
-								<SelectSquare
-									label="Delivery Type"
-									options={[
-										{ icon: '✉️', value: 'Email', label: 'Email' },
-										{ icon: '🔌', value: 'External API', label: 'API' }
-									]}
-									bind:value={formValues.templateType}
-								/>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Delivery Configuration Section -->
-				<div class="w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-						Delivery Configuration
-					</h3>
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-						<div>
-							{#if formValues.templateType === 'Email' || !formValues.templateType}
-								<TextFieldSelect
-									id="smtpConfig"
-									required
-									bind:value={formValues.smtpConfiguration}
-									options={smtpConfigurationMap.values()}>SMTP Configuration</TextFieldSelect
-								>
-							{:else if formValues.templateType === 'External API'}
-								<TextFieldSelect
-									required
-									id="apiSender"
-									bind:value={formValues.apiSender}
-									options={apiSenderMap.values()}>API Sender</TextFieldSelect
-								>
-							{/if}
-						</div>
-						<div>
-							<TextFieldSelect
-								required
-								id="email"
-								bind:value={formValues.email}
-								options={emailMap.values()}>Email</TextFieldSelect
-							>
-						</div>
-					</div>
-				</div>
-
-				<!-- Domain & URL Configuration Section -->
-				<div class="w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-						Domain & URL Configuration
-					</h3>
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
 						<div>
 							<TextFieldSelect
 								required
@@ -865,32 +784,41 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 								options={domainMap.values()}>Domain</TextFieldSelect
 							>
 						</div>
+					</div>
+				</div>
+
+				<!-- Delivery Configuration Section -->
+				<!-- Email/API Configuration -->
+				<div class="w-full">
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+						Email Configuration
+					</h3>
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+						{#if formValues.templateType === 'Email' || !formValues.templateType}
+							<div>
+								<TextFieldSelect
+									required
+									id="smtpConfiguration"
+									bind:value={formValues.smtpConfiguration}
+									options={smtpConfigurationMap.values()}>SMTP Configuration</TextFieldSelect
+								>
+							</div>
+						{:else if formValues.templateType === 'External API'}
+							<div>
+								<TextFieldSelect
+									required
+									id="apiSender"
+									bind:value={formValues.apiSender}
+									options={apiSenderMap.values()}>External API Sender</TextFieldSelect
+								>
+							</div>
+						{/if}
 						<div>
-							<TextField
-								toolTipText="Path after the domain name."
+							<TextFieldSelect
+								id="email"
+								bind:value={formValues.email}
 								optional
-								minLength={1}
-								maxLength={1024}
-								bind:value={formValues.urlPath}
-								placeholder="/employee/login">URL Path</TextField
-							>
-						</div>
-						<div>
-							<TextFieldSelect
-								id="urlIdentifier"
-								toolTipText="This is the query param key used in the phishing URL."
-								required
-								bind:value={formValues.urlIdentifier}
-								options={identifierMap.values()}>Query param key</TextFieldSelect
-							>
-						</div>
-						<div>
-							<TextFieldSelect
-								id="stateIdentifier"
-								toolTipText="This is the query param key used for state."
-								required
-								bind:value={formValues.stateIdentifier}
-								options={identifierMap.values()}>State param key</TextFieldSelect
+								options={emailMap.values()}>Email</TextFieldSelect
 							>
 						</div>
 					</div>
@@ -902,13 +830,11 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 					<div class="grid grid-cols-1 md:grid-cols-5 gap-6">
 						<div class="md:col-span-2 flex flex-col space-y-6">
 							<!-- Before Landing Page -->
-							<TextFieldSelectWithType
+							<TextFieldSelect
 								id="beforeLandingPage"
 								bind:value={formValues.beforeLandingPage}
-								bind:type={formValues.beforeLandingPageType}
-								pageOptions={beforeLandingPageMap.values()}
-								proxyOptions={beforeLandingProxyMap.values()}
-								optional>Before Landing</TextFieldSelectWithType
+								options={beforeLandingPageMap.values()}
+								optional>Before Landing</TextFieldSelect
 							>
 
 							<!-- Landing Page -->
@@ -922,24 +848,12 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 							>
 
 							<!-- After Landing Page -->
-							<TextFieldSelectWithType
+							<TextFieldSelect
 								id="afterLandingPage"
 								bind:value={formValues.afterLandingPage}
-								bind:type={formValues.afterLandingPageType}
-								pageOptions={afterLandingPageMap.values()}
-								proxyOptions={afterLandingProxyMap.values()}
-								optional>After Landing</TextFieldSelectWithType
+								options={afterLandingPageMap.values()}
+								optional>After Landing</TextFieldSelect
 							>
-
-							<div>
-								<TextField
-									bind:value={formValues.afterLandingPageRedirectURL}
-									type="url"
-									minLength={1}
-									maxLength={255}
-									placeholder="https://example.com/u-been-phished">POST redirect URL</TextField
-								>
-							</div>
 						</div>
 
 						<!-- Visualization - Takes 2 columns on larger screens -->
@@ -961,9 +875,7 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 										<p
 											class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
 										>
-											Before Landing {formValues.beforeLandingPageType === 'proxy'
-												? 'Proxy'
-												: 'Page'}
+											Before Landing Page
 										</p>
 										<p
 											class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
@@ -1026,7 +938,7 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 										<p
 											class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
 										>
-											After Landing {formValues.afterLandingPageType === 'proxy' ? 'Proxy' : 'Page'}
+											After Landing Page
 										</p>
 										<p
 											class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
@@ -1036,45 +948,118 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 									</div>
 								</div>
 
-								<!-- Down Arrow -->
-								<div class="flex">
-									<div
-										class="ml-5 w-0.5 h-4 bg-gray-300 dark:bg-gray-600 transition-colors duration-200"
-									></div>
-								</div>
+								{#if showAdvancedOptions}
+									<!-- Down Arrow -->
+									<div class="flex">
+										<div
+											class="ml-5 w-0.5 h-4 bg-gray-300 dark:bg-gray-600 transition-colors duration-200"
+										></div>
+									</div>
 
-								<!-- Final Redirect -->
-								<div class="flex items-center">
-									<div
-										class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3 transition-colors duration-200
-                                    ${formValues.afterLandingPageRedirectURL ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-300 dark:border-blue-500' : 'bg-gray-100 dark:bg-gray-800/60 border-gray-300 dark:border-gray-600'}`}
-									>
-										<span
-											class={`text-xl transition-colors duration-200 ${formValues.afterLandingPageRedirectURL ? 'text-blue-500 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500'}`}
-											>4</span
+									<!-- Final Redirect -->
+									<div class="flex items-center">
+										<div
+											class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3 transition-colors duration-200
+			                                    ${formValues.afterLandingPageRedirectURL ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-300 dark:border-blue-500' : 'bg-gray-100 dark:bg-gray-800/60 border-gray-300 dark:border-gray-600'}`}
 										>
+											<span
+												class={`text-xl transition-colors duration-200 ${formValues.afterLandingPageRedirectURL ? 'text-blue-500 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500'}`}
+												>4</span
+											>
+										</div>
+										<div class="flex-1">
+											<p
+												class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
+											>
+												POST Redirect URL
+											</p>
+											<p
+												class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
+											>
+												{formValues.afterLandingPageRedirectURL || 'Not set'}
+											</p>
+										</div>
 									</div>
-									<div class="flex-1">
-										<p
-											class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
-										>
-											POST Redirect URL
-										</p>
-										<p
-											class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
-										>
-											{formValues.afterLandingPageRedirectURL || 'Not set'}
-										</p>
-									</div>
-								</div>
+								{/if}
 							</div>
 						</div>
 					</div>
 				</div>
 
 				<FormError message={modalError} />
-			</div>
 
+				<!-- Advanced Options Section -->
+				{#if !showAdvancedOptions}
+					<div class="mt-6 text-center">
+						<button
+							type="button"
+							class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200 underline"
+							on:click={() => (showAdvancedOptions = true)}
+						>
+							Show advanced options
+						</button>
+					</div>
+				{/if}
+
+				{#if showAdvancedOptions}
+					<div class="w-full border-t pt-6 mt-6">
+						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+							Advanced Options
+						</h3>
+						<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+							<div>
+								<SelectSquare
+									label="Delivery Type"
+									width="small"
+									center={false}
+									options={[
+										{ value: 'Email', label: 'Email' },
+										{ value: 'External API', label: 'External API' }
+									]}
+									bind:value={formValues.templateType}
+								/>
+							</div>
+							<div>
+								<TextField
+									toolTipText="Path after the domain name."
+									optional
+									minLength={1}
+									maxLength={1024}
+									bind:value={formValues.urlPath}
+									placeholder="/employee/login">URL Path</TextField
+								>
+							</div>
+							<div>
+								<TextFieldSelect
+									id="urlIdentifier"
+									toolTipText="This is the query param key used in the phishing URL."
+									required
+									bind:value={formValues.urlIdentifier}
+									options={identifierMap.values()}>Query param key</TextFieldSelect
+								>
+							</div>
+							<div>
+								<TextFieldSelect
+									id="stateIdentifier"
+									toolTipText="This is the query param key used for state."
+									required
+									bind:value={formValues.stateIdentifier}
+									options={identifierMap.values()}>State param key</TextFieldSelect
+								>
+							</div>
+							<div>
+								<TextField
+									bind:value={formValues.afterLandingPageRedirectURL}
+									type="url"
+									minLength={1}
+									maxLength={255}
+									placeholder="https://example.com/u-been-phished">POST redirect URL</TextField
+								>
+							</div>
+						</div>
+					</div>
+				{/if}
+			</div>
 			<FormFooter {closeModal} {isSubmitting} />
 		</FormGrid>
 	</Modal>
