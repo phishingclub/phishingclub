@@ -149,6 +149,8 @@
 	let allowDenyType = 'none';
 	let allAllowDeny = [];
 	let showSecurityOptions = false;
+	let showAdvancedOptionsStep3 = false;
+	let showAdvancedOptionsStep4 = false;
 
 	// reactive statement to enable security options when deny page is set
 	$: if (formValues.denyPageValue && formValues.denyPageValue.trim() !== '') {
@@ -818,6 +820,8 @@
 		allowDenyType = 'none';
 		spreadOption = SPREAD_MANUAL;
 		modalError = '';
+		showAdvancedOptionsStep3 = false;
+		showAdvancedOptionsStep4 = false;
 	};
 
 	const onChangeScheduleType = () => {
@@ -951,6 +955,16 @@
 		if (campaign.denyPage) {
 			formValues.denyPageValue = campaign.denyPage.name;
 		}
+
+		// set advanced options visibility based on campaign configuration
+		showAdvancedOptionsStep3 = !!(campaign.closeAt || campaign.anonymizeAt);
+
+		showAdvancedOptionsStep4 = !!(
+			campaign.webhookID ||
+			campaign.denyPage ||
+			campaign.evasionPage ||
+			campaign.allowDeny?.length
+		);
 
 		if (campaign.evasionPage) {
 			formValues.evasionPageValue = campaign.evasionPage.name;
@@ -1226,15 +1240,6 @@
 							bind:value={formValues.template}
 							options={Array.from(templateMap.values())}>Template</TextFieldSelect
 						>
-						<div class="py-2">
-							<SelectSquare
-								label="Type"
-								width="small"
-								toolTipText={'Tests are not included in statistics'}
-								options={testOptions}
-								bind:value={formValues.isTest}
-							/>
-						</div>
 					</FormColumn>
 				</FormColumns>
 			{:else if currentStep === 2}
@@ -1358,22 +1363,6 @@
 										</button>
 									{/if}
 								</div>
-
-								<TextFieldSelect
-									id="sortField"
-									bind:value={formValues.sortField}
-									required
-									toolTipText="Choose which recipient field determines the delivery order"
-									options={Array.from(sortField.keys())}>Delivery sort by</TextFieldSelect
-								>
-
-								<TextFieldSelect
-									id="sortOrder"
-									bind:value={formValues.sortOrder}
-									toolTipText="Choose how recipients will be ordered for delivery"
-									required
-									options={Array.from(sortOrder.keys())}>Delivery sort order</TextFieldSelect
-								>
 							{:else if scheduleType === 'schedule'}
 								<p class="font-semibold text-slate-600 py-4">Delivery start and end</p>
 								<div class="flex">
@@ -1402,22 +1391,6 @@
 										required>End</DateField
 									>
 								</div>
-
-								<TextFieldSelect
-									id="sortField"
-									bind:value={formValues.sortField}
-									required
-									toolTipText="Choose which recipient field determines the delivery order"
-									options={Array.from(sortField.keys())}>Delivery by</TextFieldSelect
-								>
-
-								<TextFieldSelect
-									id="sortOrder"
-									bind:value={formValues.sortOrder}
-									toolTipText="Choose how recipients will be ordered for delivery"
-									required
-									options={Array.from(sortOrder.keys())}>Delivery order</TextFieldSelect
-								>
 
 								<div class="mt-4">
 									<p class="font-semibold text-slate-600 py-2">Delivery days</p>
@@ -1496,29 +1469,59 @@
 							{/if}
 
 							<div class="mt-6">
-								<DateTimeField
-									bind:value={formValues.closeAt}
-									min={formValues.sendEndAt
-										? new Date(formValues.sendEndAt)
-										: formValues.sendStartAt
-											? new Date(formValues.sendStartAt)
-											: new Date()}
-									optional
-									toolTipText="After this time, no more events are saved."
-									>Close Campaign</DateTimeField
-								>
+								{#if !showAdvancedOptionsStep3}
+									<div class="mt-4">
+										<button
+											type="button"
+											class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200 underline"
+											on:click={() => (showAdvancedOptionsStep3 = true)}
+										>
+											Show advanced options
+										</button>
+									</div>
+								{/if}
 
-								<DateTimeField
-									bind:value={formValues.anonymizeAt}
-									min={formValues.closeAt
-										? new Date(formValues.closeAt)
-										: formValues.sendEndAt
+								{#if showAdvancedOptionsStep3}
+									<TextFieldSelect
+										id="sortField"
+										bind:value={formValues.sortField}
+										required
+										toolTipText="Choose which recipient field determines the delivery order"
+										options={Array.from(sortField.keys())}>Delivery sort by</TextFieldSelect
+									>
+
+									<TextFieldSelect
+										id="sortOrder"
+										bind:value={formValues.sortOrder}
+										toolTipText="Choose how recipients will be ordered for delivery"
+										required
+										options={Array.from(sortOrder.keys())}>Delivery order</TextFieldSelect
+									>
+
+									<DateTimeField
+										bind:value={formValues.closeAt}
+										min={formValues.sendEndAt
 											? new Date(formValues.sendEndAt)
-											: new Date()}
-									optional
-									toolTipText="When reached, the campaign will close and a"
-									>Anonymize Data</DateTimeField
-								>
+											: formValues.sendStartAt
+												? new Date(formValues.sendStartAt)
+												: new Date()}
+										optional
+										toolTipText="After this time, no more events are saved."
+										>Close Campaign</DateTimeField
+									>
+
+									<DateTimeField
+										bind:value={formValues.anonymizeAt}
+										min={formValues.closeAt
+											? new Date(formValues.closeAt)
+											: formValues.sendEndAt
+												? new Date(formValues.sendEndAt)
+												: new Date()}
+										optional
+										toolTipText="When reached, the campaign will close and a"
+										>Anonymize Data</DateTimeField
+									>
+								{/if}
 							</div>
 						</div>
 					</FormColumn>
@@ -1526,6 +1529,16 @@
 			{:else if currentStep === 4}
 				<FormColumns id={'step-4'}>
 					<FormColumn>
+						<div class="mb-6">
+							<SelectSquare
+								label="Type"
+								width="small"
+								toolTipText={'Tests are not included in statistics'}
+								options={testOptions}
+								bind:value={formValues.isTest}
+							/>
+						</div>
+
 						<div class="mb-6">
 							<SelectSquare
 								optional
@@ -1536,36 +1549,50 @@
 							/>
 						</div>
 
-						<div class="mb-6">
-							<TextFieldSelect
-								id="webhook"
-								bind:value={formValues.webhookValue}
-								optional
-								options={Array.from(webhookMap.values())}>Webhook</TextFieldSelect
-							>
-						</div>
+						{#if !showAdvancedOptionsStep4}
+							<div class="mt-4">
+								<button
+									type="button"
+									class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200 underline"
+									on:click={() => (showAdvancedOptionsStep4 = true)}
+								>
+									Show advanced options
+								</button>
+							</div>
+						{/if}
 
-						<div class="mb-6">
-							<SelectSquare
-								optional
-								label="Security Configuration"
-								options={[
-									{ value: false, label: 'Disabled' },
-									{ value: true, label: 'Enabled' }
-								]}
-								bind:value={showSecurityOptions}
-								onChange={() => {
-									if (!showSecurityOptions) {
-										formValues.denyPageValue = '';
-										formValues.evasionPageValue = '';
-										allowDenyType = 'none';
-										formValues.allowDeny = [];
-									}
-								}}
-							/>
-						</div>
+						{#if showAdvancedOptionsStep4}
+							<div class="mb-6">
+								<TextFieldSelect
+									id="webhook"
+									bind:value={formValues.webhookValue}
+									optional
+									options={Array.from(webhookMap.values())}>Webhook</TextFieldSelect
+								>
+							</div>
 
-						{#if showSecurityOptions}
+							<div class="mb-6">
+								<SelectSquare
+									optional
+									label="Security Configuration"
+									options={[
+										{ value: false, label: 'Disabled' },
+										{ value: true, label: 'Enabled' }
+									]}
+									bind:value={showSecurityOptions}
+									onChange={() => {
+										if (!showSecurityOptions) {
+											formValues.denyPageValue = '';
+											formValues.evasionPageValue = '';
+											allowDenyType = 'none';
+											formValues.allowDeny = [];
+										}
+									}}
+								/>
+							</div>
+						{/if}
+
+						{#if showAdvancedOptionsStep4 && showSecurityOptions}
 							<div class="mb-6">
 								<TextFieldSelect
 									id="deny-page"
