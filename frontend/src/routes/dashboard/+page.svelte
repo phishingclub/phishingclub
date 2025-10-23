@@ -259,7 +259,7 @@
 			const statsParams = newTableURLParams({
 				sortBy: 'campaign_closed_at',
 				sortOrder: 'desc',
-				perPage: 10
+				perPage: 50
 			});
 			const res = await api.campaign.getAllCampaignStats(contextCompanyID);
 			if (!res.success) {
