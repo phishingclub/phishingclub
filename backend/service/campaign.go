@@ -2794,7 +2794,12 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 				return "", errs.Wrap(err)
 			}
 			baseURL = "https://" + phishingDomain
-			urlPath = parsedStartURL.Path
+			// use campaign template URLPath if available, otherwise fall back to proxy StartURL path
+			if templateURLPath, err := cTemplate.URLPath.Get(); err == nil && templateURLPath.String() != "" {
+				urlPath = templateURLPath.String()
+			} else {
+				urlPath = parsedStartURL.Path
+			}
 		}
 	}
 

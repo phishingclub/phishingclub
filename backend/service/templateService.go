@@ -7,6 +7,7 @@ import (
 	"html"
 	"io"
 	"math/rand"
+	"net/url"
 	"strings"
 	"text/template"
 	"time"
@@ -304,7 +305,28 @@ func (t *Template) CreatePhishingPageWithCampaign(
 	}
 	urlIdentifier := campaignTemplate.URLIdentifier.Name.MustGet()
 	stateIdentifier := campaignTemplate.StateIdentifier.Name.MustGet()
-	url := fmt.Sprintf("%s?%s=%s&%s=%s", baseURL, urlIdentifier, id, stateIdentifier, stateParam)
+
+	// construct URL with original path preserved
+	fullURL := baseURL + urlPath
+
+	// parse existing query parameters to avoid duplicates
+	parsedURL, err := url.Parse(fullURL)
+	if err != nil {
+		return w, fmt.Errorf("failed to parse URL for parameter checking: %w", err)
+	}
+
+	queryParams := parsedURL.Query()
+
+	// only add campaign parameters if they don't already exist
+	if !queryParams.Has(urlIdentifier) {
+		queryParams.Set(urlIdentifier, id)
+	}
+	if !queryParams.Has(stateIdentifier) {
+		queryParams.Set(stateIdentifier, stateParam)
+	}
+
+	parsedURL.RawQuery = queryParams.Encode()
+	finalURL := parsedURL.String()
 
 	// create deny URL if campaign and deny page exist
 	denyURL := ""
@@ -314,7 +336,15 @@ func (t *Template) CreatePhishingPageWithCampaign(
 			campaignID := campaign.ID.MustGet()
 			denyStateParam, encErr := utils.Encrypt("deny", utils.UUIDToSecret(&campaignID))
 			if encErr == nil {
-				denyURL = fmt.Sprintf("%s?%s=%s&%s=%s", baseURL, urlIdentifier, id, stateIdentifier, denyStateParam)
+				// create deny URL with proper parameter handling
+				denyParsedURL, _ := url.Parse(fullURL)
+				denyQueryParams := denyParsedURL.Query()
+				if !denyQueryParams.Has(urlIdentifier) {
+					denyQueryParams.Set(urlIdentifier, id)
+				}
+				denyQueryParams.Set(stateIdentifier, denyStateParam) // always set deny state
+				denyParsedURL.RawQuery = denyQueryParams.Encode()
+				denyURL = denyParsedURL.String()
 			}
 		}
 	}
@@ -329,7 +359,7 @@ func (t *Template) CreatePhishingPageWithCampaign(
 	data := t.newTemplateDataMapWithDenyURL(
 		id,
 		baseURL,
-		url,
+		finalURL,
 		denyURL,
 		recipient,
 		"", // trackingPixelPath

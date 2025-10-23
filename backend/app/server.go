@@ -80,6 +80,7 @@ func NewServer(
 		services.Campaign,
 		services.Template,
 		services.IPAllowList,
+		repositories.Option,
 	)
 
 	// setup proxy session cleanup routine

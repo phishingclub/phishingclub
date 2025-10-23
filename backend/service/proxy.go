@@ -40,20 +40,22 @@ type ProxyServiceConfig struct {
 
 // ProxyServiceDomainConfig represents configuration for a specific domain mapping
 type ProxyServiceDomainConfig struct {
-	To       string                     `yaml:"to"`
-	Access   *ProxyServiceAccessControl `yaml:"access,omitempty"`
-	Capture  []ProxyServiceCaptureRule  `yaml:"capture,omitempty"`
-	Rewrite  []ProxyServiceReplaceRule  `yaml:"rewrite,omitempty"`
-	Response []ProxyServiceResponseRule `yaml:"response,omitempty"`
+	To          string                       `yaml:"to"`
+	Access      *ProxyServiceAccessControl   `yaml:"access,omitempty"`
+	Capture     []ProxyServiceCaptureRule    `yaml:"capture,omitempty"`
+	Rewrite     []ProxyServiceReplaceRule    `yaml:"rewrite,omitempty"`
+	Response    []ProxyServiceResponseRule   `yaml:"response,omitempty"`
+	RewriteURLs []ProxyServiceURLRewriteRule `yaml:"rewrite_urls,omitempty"`
 }
 
 // ProxyServiceRules represents capture and replace rules
 // ProxyServiceRules represents global rules that apply to all hosts
 type ProxyServiceRules struct {
-	Access   *ProxyServiceAccessControl `yaml:"access,omitempty"`
-	Capture  []ProxyServiceCaptureRule  `yaml:"capture,omitempty"`
-	Rewrite  []ProxyServiceReplaceRule  `yaml:"rewrite,omitempty"`
-	Response []ProxyServiceResponseRule `yaml:"response,omitempty"`
+	Access      *ProxyServiceAccessControl   `yaml:"access,omitempty"`
+	Capture     []ProxyServiceCaptureRule    `yaml:"capture,omitempty"`
+	Rewrite     []ProxyServiceReplaceRule    `yaml:"rewrite,omitempty"`
+	Response    []ProxyServiceResponseRule   `yaml:"response,omitempty"`
+	RewriteURLs []ProxyServiceURLRewriteRule `yaml:"rewrite_urls,omitempty"`
 }
 
 // ProxyServiceAccessControl represents access control configuration
@@ -154,6 +156,20 @@ type ProxyServiceReplaceRule struct {
 	Action  string `yaml:"action,omitempty"`  // dom action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove
 	Target  string `yaml:"target,omitempty"`  // target matching: "first", "last", "all" (default), "1,3,5", "2-4"
 	From    string `yaml:"from,omitempty"`
+}
+
+// ProxyServiceURLRewriteRule represents a URL rewrite rule for anti-detection
+type ProxyServiceURLRewriteRule struct {
+	Find    string                             `yaml:"find"`    // regex pattern to match path
+	Replace string                             `yaml:"replace"` // replacement path
+	Query   []ProxyServiceURLRewriteQueryParam `yaml:"query,omitempty"`
+	Filter  []string                           `yaml:"filter,omitempty"` // query parameters to keep (if empty, keep all)
+}
+
+// ProxyServiceURLRewriteQueryParam represents query parameter mapping
+type ProxyServiceURLRewriteQueryParam struct {
+	Find    string `yaml:"find"`    // original parameter name
+	Replace string `yaml:"replace"` // new parameter name
 }
 
 // ProxyServiceResponseRule represents a response rule that allows custom responses for specific paths
@@ -718,6 +734,10 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 		if err := m.validateReplaceRules(config.Global.Rewrite); err != nil {
 			return err
 		}
+		// validate global URL rewrite rules
+		if err := m.validateURLRewriteRules(config.Global.RewriteURLs); err != nil {
+			return err
+		}
 		// validate global response rules
 		if err := m.validateResponseRules(config.Global.Response); err != nil {
 			return err
@@ -833,6 +853,66 @@ func (m *Proxy) validateCaptureRules(captureRules []ProxyServiceCaptureRule) err
 	return nil
 }
 
+// validateURLRewriteRules validates URL rewrite rules configuration
+func (m *Proxy) validateURLRewriteRules(urlRewriteRules []ProxyServiceURLRewriteRule) error {
+	for i, rule := range urlRewriteRules {
+		// validate find pattern is not empty
+		if rule.Find == "" {
+			return validate.WrapErrorWithField(
+				errors.New(fmt.Sprintf("URL rewrite rule at index %d must have a find pattern", i)),
+				"proxyConfig",
+			)
+		}
+
+		// validate regex pattern
+		if _, err := regexp.Compile(rule.Find); err != nil {
+			return validate.WrapErrorWithField(
+				errors.New(fmt.Sprintf("URL rewrite rule at index %d has invalid regex pattern: %s", i, err.Error())),
+				"proxyConfig",
+			)
+		}
+
+		// validate replace path is not empty
+		if rule.Replace == "" {
+			return validate.WrapErrorWithField(
+				errors.New(fmt.Sprintf("URL rewrite rule at index %d must have a replace path", i)),
+				"proxyConfig",
+			)
+		}
+
+		// validate query parameter mappings
+		queryParamNames := make(map[string]bool)
+		for j, queryParam := range rule.Query {
+			if queryParam.Find == "" {
+				return validate.WrapErrorWithField(
+					errors.New(fmt.Sprintf("URL rewrite rule at index %d, query param at index %d must have a find parameter name", i, j)),
+					"proxyConfig",
+				)
+			}
+			if queryParam.Replace == "" {
+				return validate.WrapErrorWithField(
+					errors.New(fmt.Sprintf("URL rewrite rule at index %d, query param at index %d must have a replace parameter name", i, j)),
+					"proxyConfig",
+				)
+			}
+
+			// check for duplicate query parameter mappings
+			if queryParamNames[queryParam.Find] {
+				return validate.WrapErrorWithField(
+					errors.New(fmt.Sprintf("URL rewrite rule at index %d has duplicate query parameter mapping for '%s'", i, queryParam.Find)),
+					"proxyConfig",
+				)
+			}
+			queryParamNames[queryParam.Find] = true
+		}
+
+		// note: it's valid to both filter and map the same parameter
+		// the filter determines which parameters are allowed through,
+		// and mappings rename them during the process
+	}
+	return nil
+}
+
 // validateResponseRules validates response rules configuration
 func (m *Proxy) validateResponseRules(responseRules []ProxyServiceResponseRule) error {
 	for i, rule := range responseRules {
@@ -917,6 +997,18 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 			}
 		}
 
+		// set defaults for domain access control
+		if domainConfig != nil && domainConfig.Access != nil {
+			// set default mode to private if not specified
+			if domainConfig.Access.Mode == "" {
+				domainConfig.Access.Mode = "private"
+			}
+			// set default deny action for private mode if not specified
+			if domainConfig.Access.Mode == "private" && domainConfig.Access.OnDeny == "" {
+				domainConfig.Access.OnDeny = "404"
+			}
+		}
+
 		// clean up rewrite rules based on engine type
 		if domainConfig.Rewrite != nil {
 			for i := range domainConfig.Rewrite {
@@ -950,6 +1042,18 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 			}
 		}
 	}
+	// set defaults for global access control
+	if config.Global != nil && config.Global.Access != nil {
+		// set default mode to private if not specified
+		if config.Global.Access.Mode == "" {
+			config.Global.Access.Mode = "private"
+		}
+		// set default deny action for private mode if not specified
+		if config.Global.Access.Mode == "private" && config.Global.Access.OnDeny == "" {
+			config.Global.Access.OnDeny = "404"
+		}
+	}
+
 	// clean up global rewrite rules based on engine type
 	if config.Global != nil && config.Global.Rewrite != nil {
 		for i := range config.Global.Rewrite {
@@ -1332,8 +1436,18 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 			return err
 		}
 
-		// validate domain-specific rewrite rules
+		// validate domain-specific capture rules
+		if err := m.validateCaptureRules(domainConfig.Capture); err != nil {
+			return err
+		}
+
+		// validate rewrite rules
 		if err := m.validateReplaceRules(domainConfig.Rewrite); err != nil {
+			return err
+		}
+
+		// validate URL rewrite rules
+		if err := m.validateURLRewriteRules(domainConfig.RewriteURLs); err != nil {
 			return err
 		}
 
@@ -1357,6 +1471,10 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 			return err
 		}
 		if err := m.validateReplaceRules(config.Global.Rewrite); err != nil {
+			return err
+		}
+		// validate global URL rewrite rules
+		if err := m.validateURLRewriteRules(config.Global.RewriteURLs); err != nil {
 			return err
 		}
 		// validate global response rules

