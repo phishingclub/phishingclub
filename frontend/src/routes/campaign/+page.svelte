@@ -149,6 +149,8 @@
 	let allowDenyType = 'none';
 	let allAllowDeny = [];
 	let showSecurityOptions = false;
+	let showAdvancedOptionsStep3 = false;
+	let showAdvancedOptionsStep4 = false;
 
 	// reactive statement to enable security options when deny page is set
 	$: if (formValues.denyPageValue && formValues.denyPageValue.trim() !== '') {
@@ -261,6 +263,7 @@
 	let isSubmitting = false;
 	let isTableLoading = false;
 	let modalText = '';
+	let isValidatingName = false;
 	let weekDaysAvailable = [];
 	let isDeleteAlertVisible = false;
 
@@ -334,7 +337,7 @@
 	});
 
 	const nextStep = async () => {
-		if (validateCurrentStep()) {
+		if (await validateCurrentStep()) {
 			currentStep = Math.min(currentStep + 1, campaignSteps.length);
 			modalError = '';
 			// reset tab focus after dom update - only for explicit step navigation
@@ -372,10 +375,10 @@
 		}, 0);
 	};
 
-	const validateCurrentStep = () => {
+	const validateCurrentStep = async () => {
 		switch (currentStep) {
 			case 1:
-				return validateBasicInfo();
+				return await validateBasicInfo();
 			case 2:
 				return validateRecipients();
 			case 3:
@@ -402,8 +405,31 @@
 		return true;
 	};
 
-	const validateBasicInfo = () => {
-		return checkCurrentStepValidity();
+	const validateBasicInfo = async () => {
+		if (!checkCurrentStepValidity()) {
+			return false;
+		}
+
+		// check if campaign name exists
+		if (formValues.name?.length) {
+			isValidatingName = true;
+			try {
+				const nameExists = await campaignNameExists(formValues.name);
+				if (nameExists) {
+					/** @type {HTMLInputElement} */
+					const ele = document.querySelector('#campaignName');
+					if (ele) {
+						ele.setCustomValidity('Name is used by another campaign');
+						ele.reportValidity();
+					}
+					return false;
+				}
+			} finally {
+				isValidatingName = false;
+			}
+		}
+
+		return true;
 	};
 
 	const validateRecipients = () => {
@@ -733,23 +759,22 @@
 	};
 
 	/** @param {string} name */
-	const campaignNameExits = async (name) => {
+	const campaignNameExists = async (name) => {
+		if (!name?.length) return false;
+
 		try {
 			const res = await api.campaign.getByName(name, contextCompanyID);
-			/** @type {HTMLInputElement} */
-			const ele = document.querySelector('#campaignName');
 			if (
 				res.data &&
 				(modalMode === 'create' || modalMode === 'copy' || res.data.id !== formValues.id)
 			) {
-				ele.setCustomValidity('Name is used by another campaign');
-				ele.reportValidity();
-			} else {
-				ele.setCustomValidity('');
+				return true;
 			}
+			return false;
 		} catch (e) {
 			addToast('Failed to check if campaign name is used', 'Error');
 			console.error('Failed to check if campaign name is used', e);
+			return false;
 		}
 	};
 
@@ -795,6 +820,8 @@
 		allowDenyType = 'none';
 		spreadOption = SPREAD_MANUAL;
 		modalError = '';
+		showAdvancedOptionsStep3 = false;
+		showAdvancedOptionsStep4 = false;
 	};
 
 	const onChangeScheduleType = () => {
@@ -816,6 +843,7 @@
 		modalMode = null;
 		isModalVisible = false;
 		currentStep = 1;
+		isValidatingName = false;
 		if (form) form.reset();
 		resetFormValues();
 	};
@@ -868,17 +896,23 @@
 			name: copyMode ? `${campaign.name} (Copy)` : campaign.name,
 			sortField: sortField.byValue(campaign.sortField),
 			sortOrder: sortOrder.byValue(campaign.sortOrder),
-			sendStartAt: campaign.sendStartAt,
-			sendEndAt: campaign.sendEndAt,
-			scheduledStartAt: campaign.sendStartAt
-				? local_yyyy_mm_dd(new Date(campaign.sendStartAt))
-				: null,
-			scheduledEndAt: campaign.sendEndAt ? local_yyyy_mm_dd(new Date(campaign.sendEndAt)) : null,
-			constraintWeekDays: weekDayBinaryToAvailable(campaign.constraintWeekDays),
-			contraintStartTime: utcTimeToLocal(campaign.constraintStartTime),
-			contraintEndTime: utcTimeToLocal(campaign.constraintEndTime),
-			closeAt: campaign.closeAt,
-			anonymizeAt: campaign.anonymizeAt,
+			sendStartAt: copyMode ? null : campaign.sendStartAt,
+			sendEndAt: copyMode ? null : campaign.sendEndAt,
+			scheduledStartAt: copyMode
+				? null
+				: campaign.sendStartAt
+					? local_yyyy_mm_dd(new Date(campaign.sendStartAt))
+					: null,
+			scheduledEndAt: copyMode
+				? null
+				: campaign.sendEndAt
+					? local_yyyy_mm_dd(new Date(campaign.sendEndAt))
+					: null,
+			constraintWeekDays: copyMode ? [] : weekDayBinaryToAvailable(campaign.constraintWeekDays),
+			contraintStartTime: copyMode ? null : utcTimeToLocal(campaign.constraintStartTime),
+			contraintEndTime: copyMode ? null : utcTimeToLocal(campaign.constraintEndTime),
+			closeAt: copyMode ? null : campaign.closeAt,
+			anonymizeAt: copyMode ? null : campaign.anonymizeAt,
 			saveSubmittedData: campaign.saveSubmittedData,
 			isAnonymous: campaign.isAnonymous,
 			isTest: campaign.isTest,
@@ -886,17 +920,28 @@
 			webhookValue: webhookMap.byKey(campaign.webhookID)
 		};
 
-		formValues.recipientGroups = campaign.recipientGroupIDs.map((id) =>
-			recipientGroupMap.byKey(id)
-		);
-		formValues.selectedCount = formValues.recipientGroups.reduce((acc, label) => {
-			const id = recipientGroupMap.byValue(label);
-			const group = recipientGroupsByID[id];
-			return acc + group.recipientCount;
-		}, 0);
+		if (copyMode) {
+			// reset recipient groups when copying
+			formValues.recipientGroups = [];
+			formValues.selectedCount = 0;
+		} else {
+			formValues.recipientGroups = campaign.recipientGroupIDs.map((id) =>
+				recipientGroupMap.byKey(id)
+			);
+			formValues.selectedCount = formValues.recipientGroups.reduce((acc, label) => {
+				const id = recipientGroupMap.byValue(label);
+				const group = recipientGroupsByID[id];
+				return acc + group.recipientCount;
+			}, 0);
+		}
 
 		if (!formValues.sendStartAt && !formValues.sendEndAt) {
 			scheduleType = 'self-managed';
+		}
+
+		// reset schedule type to basic when copying since delivery times are cleared
+		if (copyMode) {
+			scheduleType = 'basic';
 		}
 
 		if (campaign.allowDeny.length > 0) {
@@ -910,6 +955,16 @@
 		if (campaign.denyPage) {
 			formValues.denyPageValue = campaign.denyPage.name;
 		}
+
+		// set advanced options visibility based on campaign configuration
+		showAdvancedOptionsStep3 = !!(campaign.closeAt || campaign.anonymizeAt);
+
+		showAdvancedOptionsStep4 = !!(
+			campaign.webhookID ||
+			campaign.denyPage ||
+			campaign.evasionPage ||
+			campaign.allowDeny?.length
+		);
 
 		if (campaign.evasionPage) {
 			formValues.evasionPageValue = campaign.evasionPage.name;
@@ -1176,25 +1231,15 @@
 								const ele = document.querySelector('#campaignName');
 								ele.setCustomValidity('');
 							}}
-							onBlur={() => {
-								formValues.name.length && campaignNameExits(formValues.name);
-							}}>Name</TextField
 						>
+							Name
+						</TextField>
 						<TextFieldSelect
 							required
 							id="template"
 							bind:value={formValues.template}
 							options={Array.from(templateMap.values())}>Template</TextFieldSelect
 						>
-						<div class="py-2">
-							<SelectSquare
-								label="Type"
-								width="small"
-								toolTipText={'Tests are not included in statistics'}
-								options={testOptions}
-								bind:value={formValues.isTest}
-							/>
-						</div>
 					</FormColumn>
 				</FormColumns>
 			{:else if currentStep === 2}
@@ -1318,22 +1363,6 @@
 										</button>
 									{/if}
 								</div>
-
-								<TextFieldSelect
-									id="sortField"
-									bind:value={formValues.sortField}
-									required
-									toolTipText="Choose which recipient field determines the delivery order"
-									options={Array.from(sortField.keys())}>Delivery sort by</TextFieldSelect
-								>
-
-								<TextFieldSelect
-									id="sortOrder"
-									bind:value={formValues.sortOrder}
-									toolTipText="Choose how recipients will be ordered for delivery"
-									required
-									options={Array.from(sortOrder.keys())}>Delivery sort order</TextFieldSelect
-								>
 							{:else if scheduleType === 'schedule'}
 								<p class="font-semibold text-slate-600 py-4">Delivery start and end</p>
 								<div class="flex">
@@ -1362,22 +1391,6 @@
 										required>End</DateField
 									>
 								</div>
-
-								<TextFieldSelect
-									id="sortField"
-									bind:value={formValues.sortField}
-									required
-									toolTipText="Choose which recipient field determines the delivery order"
-									options={Array.from(sortField.keys())}>Delivery by</TextFieldSelect
-								>
-
-								<TextFieldSelect
-									id="sortOrder"
-									bind:value={formValues.sortOrder}
-									toolTipText="Choose how recipients will be ordered for delivery"
-									required
-									options={Array.from(sortOrder.keys())}>Delivery order</TextFieldSelect
-								>
 
 								<div class="mt-4">
 									<p class="font-semibold text-slate-600 py-2">Delivery days</p>
@@ -1456,29 +1469,59 @@
 							{/if}
 
 							<div class="mt-6">
-								<DateTimeField
-									bind:value={formValues.closeAt}
-									min={formValues.sendEndAt
-										? new Date(formValues.sendEndAt)
-										: formValues.sendStartAt
-											? new Date(formValues.sendStartAt)
-											: new Date()}
-									optional
-									toolTipText="After this time, no more events are saved."
-									>Close Campaign</DateTimeField
-								>
+								{#if !showAdvancedOptionsStep3}
+									<div class="mt-4">
+										<button
+											type="button"
+											class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200 underline"
+											on:click={() => (showAdvancedOptionsStep3 = true)}
+										>
+											Show advanced options
+										</button>
+									</div>
+								{/if}
 
-								<DateTimeField
-									bind:value={formValues.anonymizeAt}
-									min={formValues.closeAt
-										? new Date(formValues.closeAt)
-										: formValues.sendEndAt
+								{#if showAdvancedOptionsStep3}
+									<TextFieldSelect
+										id="sortField"
+										bind:value={formValues.sortField}
+										required
+										toolTipText="Choose which recipient field determines the delivery order"
+										options={Array.from(sortField.keys())}>Delivery sort by</TextFieldSelect
+									>
+
+									<TextFieldSelect
+										id="sortOrder"
+										bind:value={formValues.sortOrder}
+										toolTipText="Choose how recipients will be ordered for delivery"
+										required
+										options={Array.from(sortOrder.keys())}>Delivery order</TextFieldSelect
+									>
+
+									<DateTimeField
+										bind:value={formValues.closeAt}
+										min={formValues.sendEndAt
 											? new Date(formValues.sendEndAt)
-											: new Date()}
-									optional
-									toolTipText="When reached, the campaign will close and a"
-									>Anonymize Data</DateTimeField
-								>
+											: formValues.sendStartAt
+												? new Date(formValues.sendStartAt)
+												: new Date()}
+										optional
+										toolTipText="After this time, no more events are saved."
+										>Close Campaign</DateTimeField
+									>
+
+									<DateTimeField
+										bind:value={formValues.anonymizeAt}
+										min={formValues.closeAt
+											? new Date(formValues.closeAt)
+											: formValues.sendEndAt
+												? new Date(formValues.sendEndAt)
+												: new Date()}
+										optional
+										toolTipText="When reached, the campaign will close and a"
+										>Anonymize Data</DateTimeField
+									>
+								{/if}
 							</div>
 						</div>
 					</FormColumn>
@@ -1486,6 +1529,16 @@
 			{:else if currentStep === 4}
 				<FormColumns id={'step-4'}>
 					<FormColumn>
+						<div class="mb-6">
+							<SelectSquare
+								label="Type"
+								width="small"
+								toolTipText={'Tests are not included in statistics'}
+								options={testOptions}
+								bind:value={formValues.isTest}
+							/>
+						</div>
+
 						<div class="mb-6">
 							<SelectSquare
 								optional
@@ -1496,36 +1549,50 @@
 							/>
 						</div>
 
-						<div class="mb-6">
-							<TextFieldSelect
-								id="webhook"
-								bind:value={formValues.webhookValue}
-								optional
-								options={Array.from(webhookMap.values())}>Webhook</TextFieldSelect
-							>
-						</div>
+						{#if !showAdvancedOptionsStep4}
+							<div class="mt-4">
+								<button
+									type="button"
+									class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200 underline"
+									on:click={() => (showAdvancedOptionsStep4 = true)}
+								>
+									Show advanced options
+								</button>
+							</div>
+						{/if}
 
-						<div class="mb-6">
-							<SelectSquare
-								optional
-								label="Security Configuration"
-								options={[
-									{ value: false, label: 'Disabled' },
-									{ value: true, label: 'Enabled' }
-								]}
-								bind:value={showSecurityOptions}
-								onChange={() => {
-									if (!showSecurityOptions) {
-										formValues.denyPageValue = '';
-										formValues.evasionPageValue = '';
-										allowDenyType = 'none';
-										formValues.allowDeny = [];
-									}
-								}}
-							/>
-						</div>
+						{#if showAdvancedOptionsStep4}
+							<div class="mb-6">
+								<TextFieldSelect
+									id="webhook"
+									bind:value={formValues.webhookValue}
+									optional
+									options={Array.from(webhookMap.values())}>Webhook</TextFieldSelect
+								>
+							</div>
 
-						{#if showSecurityOptions}
+							<div class="mb-6">
+								<SelectSquare
+									optional
+									label="Security Configuration"
+									options={[
+										{ value: false, label: 'Disabled' },
+										{ value: true, label: 'Enabled' }
+									]}
+									bind:value={showSecurityOptions}
+									onChange={() => {
+										if (!showSecurityOptions) {
+											formValues.denyPageValue = '';
+											formValues.evasionPageValue = '';
+											allowDenyType = 'none';
+											formValues.allowDeny = [];
+										}
+									}}
+								/>
+							</div>
+						{/if}
+
+						{#if showAdvancedOptionsStep4 && showSecurityOptions}
 							<div class="mb-6">
 								<TextFieldSelect
 									id="deny-page"
@@ -1901,10 +1968,15 @@
 				{#if currentStep < 5}
 					<button
 						type="button"
-						class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+						class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+						disabled={isValidatingName}
 						on:click={nextStep}
 					>
-						Next
+						{#if isValidatingName}
+							Checking...
+						{:else}
+							Next
+						{/if}
 						<svg
 							class="ml-2 h-4 w-4"
 							xmlns="http://www.w3.org/2000/svg"

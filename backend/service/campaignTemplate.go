@@ -85,6 +85,10 @@ func (c *CampaignTemplate) Create(
 	if !campaignTemplate.URLPath.IsSpecified() || campaignTemplate.URLPath.IsNull() {
 		campaignTemplate.URLPath = nullable.NewNullableWithValue(*vo.NewURLPathMust(""))
 	}
+	// if no afterLandingPageRedirectURL set to ''
+	if !campaignTemplate.AfterLandingPageRedirectURL.IsSpecified() || campaignTemplate.AfterLandingPageRedirectURL.IsNull() {
+		campaignTemplate.AfterLandingPageRedirectURL = nullable.NewNullableWithValue(*vo.NewOptionalString255Must(""))
+	}
 	// validate
 	if err := campaignTemplate.Validate(); err != nil {
 		c.Logger.Errorw("failed to validate campaign template", "error", err)
@@ -636,7 +640,8 @@ func (c *CampaignTemplate) UpdateByID(
 		if v, err := campaignTemplate.AfterLandingPageRedirectURL.Get(); err == nil {
 			incoming.AfterLandingPageRedirectURL.Set(v)
 		} else {
-			incoming.AfterLandingPageRedirectURL.SetNull()
+			// if AfterLandingPageRedirectURL is null, set to empty string
+			incoming.AfterLandingPageRedirectURL.Set(*vo.NewOptionalString255Must(""))
 		}
 	}
 	if v, err := campaignTemplate.URLIdentifierID.Get(); err == nil {
@@ -645,8 +650,13 @@ func (c *CampaignTemplate) UpdateByID(
 	if v, err := campaignTemplate.StateIdentifierID.Get(); err == nil {
 		incoming.StateIdentifierID.Set(v)
 	}
-	if v, err := campaignTemplate.URLPath.Get(); err == nil {
-		incoming.URLPath.Set(v)
+	if campaignTemplate.URLPath.IsSpecified() {
+		if v, err := campaignTemplate.URLPath.Get(); err == nil {
+			incoming.URLPath.Set(v)
+		} else {
+			// if URLPath is null, set to empty string
+			incoming.URLPath.Set(*vo.NewURLPathMust(""))
+		}
 	}
 	// validate
 	if err := incoming.Validate(); err != nil {

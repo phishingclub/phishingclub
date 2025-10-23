@@ -2898,6 +2898,31 @@ export class API {
 	};
 
 	/**
+	 * ipAllowList is the API for IP Allow List related operations.
+	 */
+	ipAllowList = {
+		/**
+		 * Get IP allow list entries for a specific proxy configuration.
+		 *
+		 * @param {string} proxyConfigID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getForProxyConfig: async (proxyConfigID) => {
+			return await getJSON(this.getPath(`/ip-allow-list/proxy-config/${proxyConfigID}`));
+		},
+
+		/**
+		 * Clear all entries for a specific proxy configuration.
+		 *
+		 * @param {string} proxyConfigID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		clearForProxyConfig: async (proxyConfigID) => {
+			return await deleteJSON(this.getPath(`/ip-allow-list/clear-proxy-config/${proxyConfigID}`));
+		}
+	};
+
+	/**
 	 * import is for importing assets, landing pages and etc
 	 */
 	import = {

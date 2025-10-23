@@ -89,9 +89,7 @@ func (c *CampaignTemplate) Validate() error {
 			}
 		}
 	}
-	if err := validate.NullableFieldRequired("urlPath", c.URLPath); err != nil {
-		return err
-	}
+	// URLPath is optional, no validation needed
 
 	// validate that only one type is set per stage
 	// before landing page: can have neither (optional), or one type, but not both
@@ -198,9 +196,13 @@ func (c *CampaignTemplate) ToDBMap() map[string]any {
 	}
 	if c.AfterLandingPageRedirectURL.IsSpecified() {
 		if c.AfterLandingPageRedirectURL.IsNull() {
-			m["after_landing_page_redirect_url"] = nil
+			m["after_landing_page_redirect_url"] = ""
 		} else {
-			m["after_landing_page_redirect_url"] = c.AfterLandingPageRedirectURL.MustGet().String()
+			if v, err := c.AfterLandingPageRedirectURL.Get(); err == nil {
+				m["after_landing_page_redirect_url"] = v.String()
+			} else {
+				m["after_landing_page_redirect_url"] = ""
+			}
 		}
 	}
 
@@ -239,8 +241,16 @@ func (c *CampaignTemplate) ToDBMap() map[string]any {
 	if v, err := c.StateIdentifierID.Get(); err == nil {
 		m["state_identifier_id"] = v
 	}
-	if v, err := c.URLPath.Get(); err == nil {
-		m["url_path"] = v.String()
+	if c.URLPath.IsSpecified() {
+		if c.URLPath.IsNull() {
+			m["url_path"] = ""
+		} else {
+			if v, err := c.URLPath.Get(); err == nil {
+				m["url_path"] = v.String()
+			} else {
+				m["url_path"] = ""
+			}
+		}
 	}
 
 	_, errDomain := c.DomainID.Get()

@@ -36,6 +36,7 @@ type Controllers struct {
 	Update            *controller.Update
 	Import            *controller.Import
 	Backup            *controller.Backup
+	IPAllowList       *controller.IPAllowList
 }
 
 // NewControllers creates a collection of controllers
@@ -179,6 +180,10 @@ func NewControllers(
 		Common:        common,
 		BackupService: services.Backup,
 	}
+	ipAllowList := &controller.IPAllowList{
+		Common:             common,
+		IPAllowListService: services.IPAllowList,
+	}
 
 	return &Controllers{
 		Asset:             asset,
@@ -209,5 +214,6 @@ func NewControllers(
 		Update:            update,
 		Import:            importController,
 		Backup:            backup,
+		IPAllowList:       ipAllowList,
 	}
 }

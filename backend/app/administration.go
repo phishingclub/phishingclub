@@ -94,6 +94,9 @@ const (
 	ROUTE_V1_PROXY          = "/api/v1/proxy"
 	ROUTE_V1_PROXY_OVERVIEW = "/api/v1/proxy/overview"
 	ROUTE_V1_PROXY_ID       = "/api/v1/proxy/:id"
+	// ip allow list
+	ROUTE_V1_IP_ALLOW_LIST_PROXY_CONFIG       = "/api/v1/ip-allow-list/proxy-config/:id"
+	ROUTE_V1_IP_ALLOW_LIST_CLEAR_PROXY_CONFIG = "/api/v1/ip-allow-list/clear-proxy-config/:id"
 	// recipient and groups
 	ROUTE_V1_RECIPIENT                  = "/api/v1/recipient"
 	ROUTE_V1_RECIPIENT_IMPORT           = "/api/v1/recipient/import"
@@ -339,6 +342,9 @@ func setupRoutes(
 		POST(ROUTE_V1_PROXY, middleware.SessionHandler, controllers.Proxy.Create).
 		PATCH(ROUTE_V1_PROXY_ID, middleware.SessionHandler, controllers.Proxy.UpdateByID).
 		DELETE(ROUTE_V1_PROXY_ID, middleware.SessionHandler, controllers.Proxy.DeleteByID).
+		// ip allow list
+		GET(ROUTE_V1_IP_ALLOW_LIST_PROXY_CONFIG, middleware.SessionHandler, controllers.IPAllowList.GetEntriesForProxyConfig).
+		DELETE(ROUTE_V1_IP_ALLOW_LIST_CLEAR_PROXY_CONFIG, middleware.SessionHandler, controllers.IPAllowList.ClearForProxyConfig).
 		// smtp configuration
 		GET(ROUTE_V1_SMTP_CONFIGURATION, middleware.SessionHandler, controllers.SMTPConfiguration.GetAll).
 		GET(ROUTE_V1_SMTP_CONFIGURATION_ID, middleware.SessionHandler, controllers.SMTPConfiguration.GetByID).

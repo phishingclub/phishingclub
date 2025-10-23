@@ -115,36 +115,36 @@ type ProxyHandler struct {
 	IdentifierRepository        *repository.Identifier
 	CampaignService             *service.Campaign
 	TemplateService             *service.Template
+	IPAllowListService          *service.IPAllowListService
 	cookieName                  string
-	ipAllowList                 sync.Map // map[string]int64 (ip+domain -> expiry timestamp)
 }
 
 func NewProxyHandler(
 	logger *zap.SugaredLogger,
-	pageRepository *repository.Page,
-	campaignRecipientRepository *repository.CampaignRecipient,
-	campaignRepository *repository.Campaign,
-	campaignTemplateRepository *repository.CampaignTemplate,
-	domainRepository *repository.Domain,
-	proxyRepository *repository.Proxy,
-	identifierRepository *repository.Identifier,
+	pageRepo *repository.Page,
+	campaignRecipientRepo *repository.CampaignRecipient,
+	campaignRepo *repository.Campaign,
+	campaignTemplateRepo *repository.CampaignTemplate,
+	domainRepo *repository.Domain,
+	proxyRepo *repository.Proxy,
+	identifierRepo *repository.Identifier,
 	campaignService *service.Campaign,
 	templateService *service.Template,
-	cookieName string,
+	ipAllowListService *service.IPAllowListService,
 ) *ProxyHandler {
 	return &ProxyHandler{
 		logger:                      logger,
-		sessions:                    sync.Map{},
-		PageRepository:              pageRepository,
-		CampaignRecipientRepository: campaignRecipientRepository,
-		CampaignRepository:          campaignRepository,
-		CampaignTemplateRepository:  campaignTemplateRepository,
-		DomainRepository:            domainRepository,
-		ProxyRepository:             proxyRepository,
-		IdentifierRepository:        identifierRepository,
+		PageRepository:              pageRepo,
+		CampaignRecipientRepository: campaignRecipientRepo,
+		CampaignRepository:          campaignRepo,
+		CampaignTemplateRepository:  campaignTemplateRepo,
+		DomainRepository:            domainRepo,
+		ProxyRepository:             proxyRepo,
+		IdentifierRepository:        identifierRepo,
 		CampaignService:             campaignService,
 		TemplateService:             templateService,
-		cookieName:                  cookieName,
+		IPAllowListService:          ipAllowListService,
+		cookieName:                  "ps",
 	}
 }
 
@@ -364,7 +364,10 @@ func (m *ProxyHandler) resolveSessionContext(req *http.Request, reqCtx *RequestC
 		m.registerPageVisitEvent(req, newSession)
 
 		// allow list IP for tunnel mode access
-		m.allowListIP(req, reqCtx.Domain.Name)
+		clientIP := m.getClientIP(req)
+		if clientIP != "" {
+			m.IPAllowListService.AddIP(clientIP, reqCtx.Domain.ProxyID.String(), 10*time.Minute)
+		}
 	} else {
 		// load existing session
 		sessionVal, exists := m.sessions.Load(reqCtx.SessionID)
@@ -2401,24 +2404,7 @@ func (m *ProxyHandler) CleanupExpiredSessions() {
 	}
 
 	// cleanup expired IP allow listed entries
-	ipCleanedCount := 0
-	currentTime := now.Unix()
-
-	m.ipAllowList.Range(func(key, value interface{}) bool {
-		expiry, ok := value.(int64)
-		if !ok {
-			m.ipAllowList.Delete(key)
-			ipCleanedCount++
-			return true
-		}
-
-		if currentTime >= expiry {
-			m.ipAllowList.Delete(key)
-			ipCleanedCount++
-		}
-		return true
-	})
-
+	ipCleanedCount := m.IPAllowListService.ClearExpired()
 	if ipCleanedCount > 0 {
 		m.logger.Debugw("cleaned up expired IP allow listed entries", "count", ipCleanedCount)
 	}
@@ -2561,9 +2547,12 @@ func (m *ProxyHandler) checkAccessRules(path string, accessControl *service.Prox
 			return true, ""
 		}
 
-		// check if IP is allowlisted for this domain (from previous lure access)
-		if reqCtx != nil && reqCtx.Domain != nil && req != nil && m.isIPAllowlistedForRequest(req, reqCtx.Domain.Name) {
-			return true, ""
+		// check if IP is allowlisted for this proxy config (from previous lure access)
+		if reqCtx != nil && reqCtx.Domain != nil && req != nil {
+			clientIP := m.getClientIP(req)
+			if clientIP != "" && m.IPAllowListService.IsIPAllowed(clientIP, reqCtx.Domain.ProxyID.String()) {
+				return true, ""
+			}
 		}
 
 		// no lure request and IP not allow listed - deny access
@@ -2580,63 +2569,16 @@ func (m *ProxyHandler) applyDefaultPrivateMode(reqCtx *RequestContext, req *http
 		return true, ""
 	}
 
-	// check if IP is allow listed for this domain (from previous lure access)
-	if reqCtx != nil && reqCtx.Domain != nil && req != nil && m.isIPAllowlistedForRequest(req, reqCtx.Domain.Name) {
-		return true, ""
+	// check if IP is allowlisted for this proxy config (from previous lure access)
+	if reqCtx != nil && reqCtx.Domain != nil && req != nil {
+		clientIP := m.getClientIP(req)
+		if clientIP != "" && m.IPAllowListService.IsIPAllowed(clientIP, reqCtx.Domain.ProxyID.String()) {
+			return true, ""
+		}
 	}
 
 	// no lure request and IP not allow listed - deny with default action
 	return false, "404"
-}
-
-// allowListIP adds an IP address to the allow list for private mode access
-func (m *ProxyHandler) allowListIP(req *http.Request, domain string) {
-	clientIP := m.getClientIP(req)
-	if clientIP == "" {
-		return
-	}
-
-	key := clientIP + "-" + domain
-	// allowlisted for 10 minutes
-	expiry := time.Now().Add(10 * time.Minute).Unix()
-
-	m.ipAllowList.Store(key, expiry)
-
-	m.logger.Debugw("IP allow listed for private mode",
-		"ip", clientIP,
-		"domain", domain,
-		"expires_at", time.Unix(expiry, 0).Format(time.RFC3339),
-	)
-}
-
-// isIPAllowlistedForRequest checks if an IP is allowlisted for a specific domain
-func (m *ProxyHandler) isIPAllowlistedForRequest(req *http.Request, domain string) bool {
-	clientIP := m.getClientIP(req)
-	if clientIP == "" {
-		return false
-	}
-
-	key := clientIP + "-" + domain
-
-	if expiryVal, exists := m.ipAllowList.Load(key); exists {
-		expiry := expiryVal.(int64)
-		if time.Now().Unix() < expiry {
-			m.logger.Debugw("IP found in allow list for private mode",
-				"ip", clientIP,
-				"domain", domain,
-				"expires_at", time.Unix(expiry, 0).Format(time.RFC3339),
-			)
-			return true
-		}
-		// expired, remove it
-		m.ipAllowList.Delete(key)
-		m.logger.Debugw("IP allow listed entry expired and removed",
-			"ip", clientIP,
-			"domain", domain,
-		)
-	}
-
-	return false
 }
 
 // getClientIP extracts the real client IP from request headers
