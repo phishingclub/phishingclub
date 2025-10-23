@@ -482,12 +482,12 @@
 		</a>
 	</div>
 
-	<SubHeadline>Campaign Trends</SubHeadline>
+	<SubHeadline>{contextCompanyName ? 'Campaign Trends' : 'Shared Campaign Trends'}</SubHeadline>
 	<div class="mb-8 w-full min-h-[300px]">
 		<CampaignTrendChart {campaignStats} isLoading={isCampaignStatsLoading} />
 	</div>
 
-	<SubHeadline>Calendar</SubHeadline>
+	<SubHeadline>{contextCompanyName ? 'Calendar' : 'Shared Calendar'}</SubHeadline>
 	<div class="mb-8 min-h-[600px]">
 		<CampaignCalender
 			campaigns={calendarCampaigns}
@@ -612,6 +612,7 @@
 			{/each}
 		</Table>
 	</div>
+<<<<<<< HEAD
 
 	<SubHeadline>Recent Campaigns</SubHeadline>
 	<div class="min-h-[300px] mb-8">
@@ -655,4 +656,6 @@
 			{/each}
 		</Table>
 	</div>
+=======
+>>>>>>> fix-dashboards-setup
 </main>
