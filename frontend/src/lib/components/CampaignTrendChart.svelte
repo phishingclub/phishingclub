@@ -83,17 +83,23 @@
 	// User controls for N
 	let trendN = 4;
 	let movingAvgN = 4;
+	let userHasSetTrendN = false; // Track if user has manually changed trendN
 
-	// Auto-adjust trendN based on available data
+	// Auto-adjust trendN and movingAvgN based on available data
 	$: {
 		if (chartData.length > 0) {
-			// If current trendN is larger than available data, adjust it
-			if (trendN > chartData.length) {
+			// Set trendN to default to the number of campaigns for overall average only if user hasn't set it
+			if (!userHasSetTrendN) {
 				trendN = chartData.length;
 			}
-			// If trendN is less than 1, set it to 1 (minimum)
-			if (trendN < 1) {
-				trendN = 1;
+
+			// If current movingAvgN is larger than available data, adjust it
+			if (movingAvgN > chartData.length) {
+				movingAvgN = chartData.length;
+			}
+			// If movingAvgN is less than 1, set it to 1 (minimum)
+			if (movingAvgN < 1) {
+				movingAvgN = 1;
 			}
 		}
 	}
@@ -103,10 +109,10 @@
 		openRate: true,
 		clickRate: true,
 		submissionRate: true,
-		reportRate: true,
-		'mavg-clickRate': true,
+		reportRate: false,
+		'mavg-clickRate': false,
 		'mavg-submissionRate': true,
-		'mavg-reportRate': true
+		'mavg-reportRate': false
 	};
 
 	// Responsive margins based on container width
@@ -132,14 +138,13 @@
 		{ label: 'Last 6 months', value: '6' },
 		{ label: 'Last 12 months', value: '12' },
 		{ label: 'Last 24 months', value: '24' },
-		{ label: 'All time', value: 'all' }
+		{ label: 'Last 36 months', value: '36' }
 	];
 	let selectedTimeRange = '12'; // default to last 12 months
 
 	// Filtered campaigns based on selected time range (using sendStartAt or createdAt)
 	$: filteredCampaignStats = (() => {
 		if (!campaignStats || campaignStats.length === 0) return [];
-		if (selectedTimeRange === 'all') return campaignStats;
 		const range = Number(selectedTimeRange);
 		const now = new Date();
 		const cutoff = new Date(now.getFullYear(), now.getMonth() - range + 1, 1);
@@ -207,22 +212,19 @@
 		.join('-');
 
 	// --- Data processing ---
-	$: chartData = processData(campaignStats);
-
 	function processData(stats) {
 		const sortedStats = [...(stats || [])]
 			.filter((stat) => stat.campaignClosedAt)
 			.sort(
 				(a, b) => new Date(a.campaignClosedAt).getTime() - new Date(b.campaignClosedAt).getTime()
-			)
-			.slice(-12);
+			);
 
 		return sortedStats.map((stat, index) => ({
 			index: index + 1,
-			date: new Date(stat.campaignClosedAt),
-			name: stat.campaignName,
+			date: stat.campaignClosedAt ? new Date(stat.campaignClosedAt) : null,
+			name: stat.campaignName || `Campaign ${index + 1}`,
 			// If your backend provides fractions (e.g., 0.425 for 42.5%), multiply by 100 below.
-			// If it provides percentages (e.g., 42.5 for 42.5%), leave as is.
+			// If it produces percentages (e.g., 42.5 for 42.5%), leave as is.
 			openRate: Math.round((stat.openRate || 0) * (stat.openRate > 1 ? 1 : 100) * 10) / 10,
 			clickRate: Math.round((stat.clickRate || 0) * (stat.clickRate > 1 ? 1 : 100) * 10) / 10,
 			submissionRate:
@@ -231,6 +233,9 @@
 			totalRecipients: stat.totalRecipients
 		}));
 	}
+
+	// Use filtered campaign stats based on selected time range
+	$: chartData = processData(filteredCampaignStats);
 
 	function createChart() {
 		if (!chartContainer || chartData.length < 2) return;
@@ -276,11 +281,16 @@
 		createAxes(svg);
 
 		metrics.forEach((metric) => {
-			if (visibleMetrics[metric.key]) {
-				createLine(svg, metric);
+			createLine(svg, metric);
+			// Hide line if not visible
+			if (!visibleMetrics[metric.key]) {
+				const lines = svg.querySelectorAll(`.main-line-${metric.key}`);
+				lines.forEach((line) => {
+					if (line instanceof HTMLElement) line.style.display = 'none';
+				});
 			}
 		});
-		// Only draw moving average for clickRate, submissionRate, and reportRate, using user-selected N
+		// Only draw moving average for clickRate, submissionRate, and reportRate that are visible
 		['clickRate', 'submissionRate', 'reportRate'].forEach((metricKey) => {
 			const metric = metrics.find((m) => m.key === metricKey);
 			if (metric && visibleMetrics[`mavg-${metricKey}`]) {
@@ -288,8 +298,17 @@
 			}
 		});
 		metrics.forEach((metric) => {
-			if (visibleMetrics[metric.key]) {
-				createDataPoints(svg, metric);
+			createDataPoints(svg, metric);
+			// Hide data points if not visible
+			if (!visibleMetrics[metric.key]) {
+				const points = svg.querySelectorAll(`[data-metric="${metric.key}"]`);
+				const glows = svg.querySelectorAll(`.chart-point-glow-${metric.key}`);
+				points.forEach((point) => {
+					if (point instanceof HTMLElement) point.style.display = 'none';
+				});
+				glows.forEach((glow) => {
+					if (glow instanceof HTMLElement) glow.style.display = 'none';
+				});
 			}
 		});
 		createLegend(svg, svg);
@@ -478,8 +497,10 @@
 			svg.appendChild(text);
 		}
 
+		// Show labels for EVERY campaign with valid dates
 		chartData.forEach((d, i) => {
-			if (i % Math.max(1, Math.floor(chartData.length / 6)) === 0) {
+			// Show label for every campaign that has a valid date
+			if (d.date instanceof Date && !isNaN(d.date.getTime())) {
 				const x = xScale(i);
 				const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
 				text.setAttribute('x', x.toString());
@@ -491,20 +512,13 @@
 					document.documentElement.classList.contains('dark') ? '#f3f4f6' : '#000'
 				);
 				text.setAttribute('alignment-baseline', 'middle');
-				// Show date (YYYY/MM) and campaign name on the same line
+				// Show mm-yy format
 				const labelSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
 				labelSpan.setAttribute('x', x.toString());
 				labelSpan.setAttribute('dy', '0');
-				if (d.date instanceof Date) {
-					if (chartData.length > 5 || width < 1000) {
-						// Only show month (MM) if there are more than 5 campaigns or chart is narrow
-						labelSpan.textContent = `${String(d.date.getMonth() + 1).padStart(2, '0')}`;
-					} else {
-						labelSpan.textContent = `${d.date.getFullYear()}/${String(d.date.getMonth() + 1).padStart(2, '0')} ${d.name}`;
-					}
-				} else {
-					labelSpan.textContent = d.name;
-				}
+				const month = String(d.date.getMonth() + 1).padStart(2, '0');
+				const year = String(d.date.getFullYear()).slice(-2);
+				labelSpan.textContent = `${month}-${year}`;
 				text.appendChild(labelSpan);
 
 				svg.appendChild(text);
@@ -671,44 +685,111 @@
 
 	// Enhance line on legend hover
 	function setupLegendHover(svg) {
-		const legendItems = svg.querySelectorAll('.legend-line, .legend-label');
+		const legendItems = svg.querySelectorAll('.legend-item');
 		const allMainLines = svg.querySelectorAll('.main-line');
 		const allMovingAvgLines = svg.querySelectorAll('.moving-average-line');
+		const allDataPoints = svg.querySelectorAll('.chart-point');
+		const allGlowPoints = svg.querySelectorAll('.chart-point-glow');
+
 		legendItems.forEach((item) => {
 			item.addEventListener('mouseenter', (e) => {
-				let metric = e.target.getAttribute('data-metric');
-				let isMavg = false;
-				if (metric && metric.startsWith('mavg-')) {
-					isMavg = true;
-					metric = metric.replace('mavg-', '');
+				const hoveredMetric = e.currentTarget.getAttribute('data-metric');
+
+				// Show all lines with faded opacity first
+				allMainLines.forEach((line) => {
+					const metricKey = line.classList.toString().match(/main-line-(\w+)/)?.[1];
+					if (metricKey && visibleMetrics[metricKey]) {
+						line.style.display = 'block';
+					}
+					line.classList.add('line-faded');
+					line.classList.remove('line-enhanced');
+				});
+				allMovingAvgLines.forEach((line) => {
+					line.classList.add('line-faded');
+					line.classList.remove('line-enhanced');
+				});
+				allDataPoints.forEach((point) => {
+					const metricKey = point.getAttribute('data-metric');
+					if (metricKey && visibleMetrics[metricKey]) {
+						point.style.display = 'block';
+						point.style.opacity = '0.2';
+					}
+				});
+				allGlowPoints.forEach((glow) => {
+					const metricKey = glow.classList.toString().match(/chart-point-glow-(\w+)/)?.[1];
+					if (metricKey && visibleMetrics[metricKey]) {
+						glow.style.display = 'block';
+						glow.style.opacity = '0.04';
+					}
+				});
+
+				// Enhance only the hovered metric
+				if (hoveredMetric.startsWith('mavg-')) {
+					const baseMetric = hoveredMetric.replace('mavg-', '');
+					allMovingAvgLines.forEach((line) => {
+						if (line.classList.contains(`moving-average-${baseMetric}`)) {
+							line.style.display = 'block';
+							line.classList.add('line-enhanced');
+							line.classList.remove('line-faded');
+						}
+					});
+				} else {
+					allMainLines.forEach((line) => {
+						if (line.classList.contains(`main-line-${hoveredMetric}`)) {
+							line.style.display = 'block';
+							line.classList.add('line-enhanced');
+							line.classList.remove('line-faded');
+						}
+					});
+					// Show and enhance data points for the hovered metric
+					allDataPoints.forEach((point) => {
+						if (point.getAttribute('data-metric') === hoveredMetric) {
+							point.style.display = 'block';
+							point.style.opacity = '1';
+						}
+					});
+					allGlowPoints.forEach((glow) => {
+						if (glow.classList.contains(`chart-point-glow-${hoveredMetric}`)) {
+							glow.style.display = 'block';
+							glow.style.opacity = '0.2';
+						}
+					});
 				}
-				// Main lines
-				allMainLines.forEach((line) => {
-					if (!isMavg && line.classList.contains(`main-line-${metric}`)) {
-						line.classList.add('line-enhanced');
-						line.classList.remove('line-faded');
-					} else {
-						line.classList.add('line-faded');
-						line.classList.remove('line-enhanced');
-					}
-				});
-				// Moving average lines
-				allMovingAvgLines.forEach((line) => {
-					if (isMavg && line.classList.contains(`moving-average-${metric}`)) {
-						line.classList.add('line-enhanced');
-						line.classList.remove('line-faded');
-					} else {
-						line.classList.add('line-faded');
-						line.classList.remove('line-enhanced');
-					}
-				});
 			});
+
 			item.addEventListener('mouseleave', () => {
+				// Reset all lines and points to their original visibility state
 				allMainLines.forEach((line) => {
 					line.classList.remove('line-enhanced', 'line-faded');
+					const metricKey = line.classList.toString().match(/main-line-(\w+)/)?.[1];
+					if (metricKey && visibleMetrics[metricKey]) {
+						line.style.display = 'block';
+					} else {
+						line.style.display = 'none';
+					}
 				});
 				allMovingAvgLines.forEach((line) => {
 					line.classList.remove('line-enhanced', 'line-faded');
+					// Since we only create visible moving average lines, they should all stay visible
+					line.style.display = 'block';
+				});
+				allDataPoints.forEach((point) => {
+					const metricKey = point.getAttribute('data-metric');
+					if (metricKey && visibleMetrics[metricKey]) {
+						point.style.display = 'block';
+						point.style.opacity = '';
+					} else {
+						point.style.display = 'none';
+					}
+				});
+				allGlowPoints.forEach((glow) => {
+					const metricKey = glow.classList.toString().match(/chart-point-glow-(\w+)/)?.[1];
+					if (metricKey && visibleMetrics[metricKey]) {
+						glow.style.display = 'block';
+						glow.style.opacity = '';
+					} else {
+						glow.style.display = 'none';
+					}
 				});
 			});
 		});
@@ -1057,6 +1138,7 @@
 										min="1"
 										max={chartData.length}
 										bind:value={trendN}
+										on:input={() => (userHasSetTrendN = true)}
 										class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 										style="height: 1.5rem;"
 									/>
@@ -1188,7 +1270,6 @@
 		stroke-width: 5 !important;
 		opacity: 1 !important;
 		filter: drop-shadow(0 0 4px #0006);
-		mix-blend-mode: multiply;
 	}
 	:global(.line-faded) {
 		opacity: 0.2 !important;

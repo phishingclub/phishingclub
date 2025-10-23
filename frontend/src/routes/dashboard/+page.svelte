@@ -259,7 +259,7 @@
 			const statsParams = newTableURLParams({
 				sortBy: 'campaign_closed_at',
 				sortOrder: 'desc',
-				perPage: 10
+				perPage: 50
 			});
 			const options = {
 				page: statsParams.currentPage,
