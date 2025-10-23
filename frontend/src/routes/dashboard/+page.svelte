@@ -261,15 +261,7 @@
 				sortOrder: 'desc',
 				perPage: 10
 			});
-			const options = {
-				page: statsParams.currentPage,
-				perPage: statsParams.perPage,
-				sortBy: statsParams.sortBy,
-				sortOrder: statsParams.sortOrder,
-				search: statsParams.search,
-				includeTest: includeTestCampaigns
-			};
-			const res = await api.campaign.getAllCampaignStats(options, contextCompanyID);
+			const res = await api.campaign.getAllCampaignStats(contextCompanyID);
 			if (!res.success) {
 				throw res.error;
 			}
@@ -372,15 +364,7 @@
 						completedCampaigns = completedRes.data.rows;
 					}
 
-					const statsOptions = {
-						page: 1,
-						perPage: 10,
-						sortBy: 'campaign_closed_at',
-						sortOrder: 'desc',
-						search: '',
-						includeTest: includeTestCampaigns
-					};
-					const statsRes = await api.campaign.getAllCampaignStats(statsOptions, contextCompanyID);
+					const statsRes = await api.campaign.getAllCampaignStats(contextCompanyID);
 					if (statsRes.success) {
 						campaignStats = [];
 						await tick();
@@ -650,9 +634,15 @@
 			{#each campaignStats as stat}
 				<TableRow>
 					<TableCell>
-						<a href={`/campaign/${stat.campaignId}`}>
-							{stat.campaignName}
-						</a>
+						{#if stat.campaignId}
+							<a href={`/campaign/${stat.campaignId}`}>
+								{stat.campaignName}
+							</a>
+						{:else}
+							<span class="text-gray-600 dark:text-gray-400">
+								{stat.campaignName}
+							</span>
+						{/if}
 					</TableCell>
 					<TableCell value={stat.templateName} />
 					<TableCell value={stat.totalRecipients} />

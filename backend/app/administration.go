@@ -144,6 +144,10 @@ const (
 	ROUTE_V1_CAMPAIGN_STATS              = "/api/v1/campaign/statistics"
 	ROUTE_V1_CAMPAIGN_STATS_ID           = "/api/v1/campaign/:id/stats"
 	ROUTE_V1_CAMPAIGN_STATS_ALL          = "/api/v1/campaign/stats/all"
+	ROUTE_V1_CAMPAIGN_STATS_CREATE       = "/api/v1/campaign/stats"
+	ROUTE_V1_CAMPAIGN_STATS_MANUAL       = "/api/v1/campaign/stats/manual"
+	ROUTE_V1_CAMPAIGN_STATS_UPDATE       = "/api/v1/campaign/stats/:id"
+	ROUTE_V1_CAMPAIGN_STATS_DELETE       = "/api/v1/campaign/stats/:id"
 	ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED    = "/api/v1/campaign/:id/upload/reported"
 	// campaign-recipient
 	ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL      = "/api/v1/campaign/recipient/:id/email"
@@ -381,6 +385,10 @@ func setupRoutes(
 		GET(ROUTE_V1_CAMPAIGN_RESULT_STATS, middleware.SessionHandler, controllers.Campaign.GetResultStats).
 		GET(ROUTE_V1_CAMPAIGN_STATS_ID, middleware.SessionHandler, controllers.Campaign.GetCampaignStats).
 		GET(ROUTE_V1_CAMPAIGN_STATS_ALL, middleware.SessionHandler, controllers.Campaign.GetAllCampaignStats).
+		POST(ROUTE_V1_CAMPAIGN_STATS_CREATE, middleware.SessionHandler, controllers.Campaign.CreateCampaignStats).
+		GET(ROUTE_V1_CAMPAIGN_STATS_MANUAL, middleware.SessionHandler, controllers.Campaign.GetManualCampaignStats).
+		PUT(ROUTE_V1_CAMPAIGN_STATS_UPDATE, middleware.SessionHandler, controllers.Campaign.UpdateCampaignStats).
+		DELETE(ROUTE_V1_CAMPAIGN_STATS_DELETE, middleware.SessionHandler, controllers.Campaign.DeleteCampaignStatsManual).
 		GET(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.GetByID).
 		GET(ROUTE_V1_CAMPAIGN_NAME, middleware.SessionHandler, controllers.Campaign.GetByName).
 		POST(ROUTE_V1_CAMPAIGN, middleware.SessionHandler, controllers.Campaign.Create).

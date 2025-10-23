@@ -17,7 +17,7 @@ type CampaignStats struct {
 	UpdatedAt *time.Time `gorm:"not null;" json:"updatedAt"`
 
 	// Campaign reference
-	CampaignID   *uuid.UUID `gorm:"not null;unique;index;type:uuid;" json:"campaignId"`
+	CampaignID   *uuid.UUID `gorm:"index;type:uuid;" json:"campaignId"`
 	CampaignName string     `gorm:"not null;" json:"campaignName"`
 	CompanyID    *uuid.UUID `gorm:"index;type:uuid;" json:"companyId"` // nullable for global campaigns
 

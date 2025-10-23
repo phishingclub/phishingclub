@@ -1666,34 +1666,14 @@ func (r *Campaign) GetCampaignStats(ctx context.Context, campaignID *uuid.UUID) 
 	return &stats, nil
 }
 
-// GetAllCampaignStats retrieves campaign statistics with pagination and filtering
-func (r *Campaign) GetAllCampaignStats(ctx context.Context, companyID *uuid.UUID, options *vo.QueryArgs) ([]database.CampaignStats, error) {
+// GetAllCampaignStats retrieves all campaign statistics
+func (r *Campaign) GetAllCampaignStats(ctx context.Context, companyID *uuid.UUID) ([]database.CampaignStats, error) {
 	var stats []database.CampaignStats
 
-	db := r.DB.WithContext(ctx)
+	db := r.DB.WithContext(ctx).Order("created_at DESC")
 
 	if companyID != nil {
 		db = db.Where("company_id = ?", companyID)
-	}
-
-	if options != nil {
-		if options.Search != "" {
-			db = db.Where("campaign_name ILIKE ?", "%"+options.Search+"%")
-		}
-
-		if options.OrderBy != "" {
-			sortColumn := options.OrderBy
-			if options.Desc {
-				sortColumn += " DESC"
-			}
-			db = db.Order(sortColumn)
-		} else {
-			db = db.Order("campaign_closed_at DESC")
-		}
-
-		if options.Limit > 0 {
-			db = db.Offset(options.Offset).Limit(options.Limit)
-		}
 	}
 
 	res := db.Find(&stats)
@@ -1701,17 +1681,13 @@ func (r *Campaign) GetAllCampaignStats(ctx context.Context, companyID *uuid.UUID
 }
 
 // GetCampaignStatsCount returns the total count of campaign statistics
-func (r *Campaign) GetCampaignStatsCount(ctx context.Context, companyID *uuid.UUID, search string) (int64, error) {
+func (r *Campaign) GetCampaignStatsCount(ctx context.Context, companyID *uuid.UUID) (int64, error) {
 	var count int64
 
 	db := r.DB.WithContext(ctx).Model(&database.CampaignStats{})
 
 	if companyID != nil {
 		db = db.Where("company_id = ?", companyID)
-	}
-
-	if search != "" {
-		db = db.Where("campaign_name ILIKE ?", "%"+search+"%")
 	}
 
 	res := db.Count(&count)
@@ -1721,5 +1697,55 @@ func (r *Campaign) GetCampaignStatsCount(ctx context.Context, companyID *uuid.UU
 // DeleteCampaignStats deletes campaign statistics by campaign ID
 func (r *Campaign) DeleteCampaignStats(ctx context.Context, campaignID *uuid.UUID) error {
 	res := r.DB.WithContext(ctx).Where("campaign_id = ?", campaignID).Delete(&database.CampaignStats{})
+	return res.Error
+}
+
+// GetManualCampaignStats retrieves manual campaign statistics (those with null campaignID)
+func (r *Campaign) GetManualCampaignStats(ctx context.Context, companyID *uuid.UUID) ([]database.CampaignStats, error) {
+	var stats []database.CampaignStats
+
+	db := r.DB.WithContext(ctx).Where("campaign_id IS NULL").Order("created_at DESC")
+
+	if companyID != nil {
+		db = db.Where("company_id = ?", companyID)
+	}
+
+	res := db.Find(&stats)
+	return stats, res.Error
+}
+
+// GetManualCampaignStatsCount returns the total count of manual campaign statistics
+func (r *Campaign) GetManualCampaignStatsCount(ctx context.Context, companyID *uuid.UUID) (int64, error) {
+	var count int64
+
+	db := r.DB.WithContext(ctx).Model(&database.CampaignStats{}).Where("campaign_id IS NULL")
+
+	if companyID != nil {
+		db = db.Where("company_id = ?", companyID)
+	}
+
+	res := db.Count(&count)
+	return count, res.Error
+}
+
+// GetCampaignStatsByID retrieves campaign statistics by stats ID
+func (r *Campaign) GetCampaignStatsByID(ctx context.Context, statsID *uuid.UUID) (*database.CampaignStats, error) {
+	var stats database.CampaignStats
+	res := r.DB.WithContext(ctx).Where("id = ?", statsID).First(&stats)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return &stats, nil
+}
+
+// UpdateCampaignStats updates campaign statistics by ID
+func (r *Campaign) UpdateCampaignStats(ctx context.Context, statsID *uuid.UUID, updateData map[string]interface{}) error {
+	res := r.DB.WithContext(ctx).Model(&database.CampaignStats{}).Where("id = ?", statsID).Updates(updateData)
+	return res.Error
+}
+
+// DeleteCampaignStatsByID deletes campaign statistics by stats ID
+func (r *Campaign) DeleteCampaignStatsByID(ctx context.Context, statsID *uuid.UUID) error {
+	res := r.DB.WithContext(ctx).Where("id = ?", statsID).Delete(&database.CampaignStats{})
 	return res.Error
 }

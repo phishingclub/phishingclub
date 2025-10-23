@@ -3838,8 +3838,8 @@ func (c *Campaign) GetCampaignStats(ctx context.Context, session *model.Session,
 	return c.CampaignRepository.GetCampaignStats(ctx, campaignID)
 }
 
-// GetAllCampaignStats retrieves all campaign statistics with pagination
-func (c *Campaign) GetAllCampaignStats(ctx context.Context, session *model.Session, options *vo.QueryArgs, companyID *uuid.UUID) (*model.Result[database.CampaignStats], error) {
+// GetAllCampaignStats retrieves all campaign statistics
+func (c *Campaign) GetAllCampaignStats(ctx context.Context, session *model.Session, companyID *uuid.UUID) (*model.Result[database.CampaignStats], error) {
 	result := model.NewEmptyResult[database.CampaignStats]()
 
 	// Check permissions
@@ -3853,7 +3853,7 @@ func (c *Campaign) GetAllCampaignStats(ctx context.Context, session *model.Sessi
 	}
 
 	// Get the data
-	stats, err := c.CampaignRepository.GetAllCampaignStats(ctx, companyID, options)
+	stats, err := c.CampaignRepository.GetAllCampaignStats(ctx, companyID)
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
@@ -3865,9 +3865,201 @@ func (c *Campaign) GetAllCampaignStats(ctx context.Context, session *model.Sessi
 	}
 
 	result.Rows = rows
-	result.HasNextPage = false // Simple implementation without pagination for now
+	result.HasNextPage = false
 
 	return result, nil
+}
+
+// CreateManualCampaignStats creates campaign statistics manually without requiring a campaign
+func (c *Campaign) CreateManualCampaignStats(ctx context.Context, session *model.Session, req *database.CampaignStats) (*database.CampaignStats, error) {
+	// Check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		return nil, errs.ErrAuthorizationFailed
+	}
+
+	// Set up the stats record
+	id := uuid.New()
+	now := time.Now()
+
+	// Use provided date for created_at and updated_at, or current time if not provided
+	var statsDate time.Time
+	if req.CampaignStartDate != nil {
+		statsDate = *req.CampaignStartDate
+	} else {
+		statsDate = now
+	}
+
+	// Set required fields
+	req.ID = &id
+	req.CreatedAt = &statsDate
+	req.UpdatedAt = &statsDate
+	req.CampaignID = nil // No campaign reference for manual stats
+
+	// Calculate rates
+	if req.TotalRecipients > 0 {
+		req.OpenRate = float64(req.TrackingPixelLoaded) / float64(req.TotalRecipients) * 100
+		req.ClickRate = float64(req.WebsiteVisits) / float64(req.TotalRecipients) * 100
+		req.SubmissionRate = float64(req.DataSubmissions) / float64(req.TotalRecipients) * 100
+		req.ReportRate = float64(req.Reported) / float64(req.TotalRecipients) * 100
+	}
+
+	// Calculate total events
+	req.TotalEvents = req.EmailsSent + req.TrackingPixelLoaded + req.WebsiteVisits + req.DataSubmissions + req.Reported
+
+	// Insert the stats
+	c.Logger.Debugf("inserting manual campaign stats", "statsID", req.ID.String())
+	err = c.CampaignRepository.InsertCampaignStats(ctx, req)
+	if err != nil {
+		c.Logger.Errorw("failed to insert manual campaign stats", "error", err, "statsID", req.ID.String())
+		return nil, errs.Wrap(err)
+	}
+
+	c.Logger.Debugf("successfully inserted manual campaign stats", "statsID", req.ID.String())
+	return req, nil
+}
+
+// GetManualCampaignStats retrieves manual campaign statistics (those without campaignID)
+func (c *Campaign) GetManualCampaignStats(ctx context.Context, session *model.Session, companyID *uuid.UUID) (*model.Result[database.CampaignStats], error) {
+	result := model.NewEmptyResult[database.CampaignStats]()
+
+	// Check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return result, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		return result, errs.ErrAuthorizationFailed
+	}
+
+	// Get manual stats (those with null campaignID)
+	stats, err := c.CampaignRepository.GetManualCampaignStats(ctx, companyID)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+
+	// Convert to result format with pointers
+	rows := make([]*database.CampaignStats, len(stats))
+	for i := range stats {
+		rows[i] = &stats[i]
+	}
+
+	result.Rows = rows
+	result.HasNextPage = false
+
+	return result, nil
+}
+
+// UpdateManualCampaignStats updates manual campaign statistics
+func (c *Campaign) UpdateManualCampaignStats(ctx context.Context, session *model.Session, req *database.CampaignStats) (*database.CampaignStats, error) {
+	// Check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		return nil, errs.ErrAuthorizationFailed
+	}
+
+	// Get existing stats to ensure it's manual (no campaignID)
+	existingStats, err := c.CampaignRepository.GetCampaignStatsByID(ctx, req.ID)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+
+	// Ensure this is a manual stat (no campaignID)
+	if existingStats.CampaignID != nil {
+		return nil, errs.Wrap(errors.New("cannot update system-generated campaign stats"))
+	}
+
+	// Set updated timestamp
+	now := time.Now()
+	req.UpdatedAt = &now
+	req.CampaignID = nil // Ensure it remains manual
+
+	// Calculate rates
+	if req.TotalRecipients > 0 {
+		req.OpenRate = float64(req.TrackingPixelLoaded) / float64(req.TotalRecipients) * 100
+		req.ClickRate = float64(req.WebsiteVisits) / float64(req.TotalRecipients) * 100
+		req.SubmissionRate = float64(req.DataSubmissions) / float64(req.TotalRecipients) * 100
+		req.ReportRate = float64(req.Reported) / float64(req.TotalRecipients) * 100
+	}
+
+	// Calculate total events
+	req.TotalEvents = req.EmailsSent + req.TrackingPixelLoaded + req.WebsiteVisits + req.DataSubmissions + req.Reported
+
+	// Prepare update data
+	updateData := map[string]interface{}{
+		"updated_at":            req.UpdatedAt,
+		"campaign_name":         req.CampaignName,
+		"company_id":            req.CompanyID,
+		"campaign_start_date":   req.CampaignStartDate,
+		"campaign_end_date":     req.CampaignEndDate,
+		"campaign_closed_at":    req.CampaignClosedAt,
+		"total_recipients":      req.TotalRecipients,
+		"total_events":          req.TotalEvents,
+		"emails_sent":           req.EmailsSent,
+		"tracking_pixel_loaded": req.TrackingPixelLoaded,
+		"website_visits":        req.WebsiteVisits,
+		"data_submissions":      req.DataSubmissions,
+		"reported":              req.Reported,
+		"open_rate":             req.OpenRate,
+		"click_rate":            req.ClickRate,
+		"submission_rate":       req.SubmissionRate,
+		"report_rate":           req.ReportRate,
+		"template_name":         req.TemplateName,
+		"campaign_type":         req.CampaignType,
+	}
+
+	// Update the stats
+	err = c.CampaignRepository.UpdateCampaignStats(ctx, req.ID, updateData)
+	if err != nil {
+		c.Logger.Errorw("failed to update manual campaign stats", "error", err, "statsID", req.ID.String())
+		return nil, errs.Wrap(err)
+	}
+
+	c.Logger.Debugf("successfully updated manual campaign stats", "statsID", req.ID.String())
+	return req, nil
+}
+
+// DeleteManualCampaignStats deletes manual campaign statistics by ID
+func (c *Campaign) DeleteManualCampaignStats(ctx context.Context, session *model.Session, statsID *uuid.UUID) error {
+	// Check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		return errs.ErrAuthorizationFailed
+	}
+
+	// Get existing stats to ensure it's manual (no campaignID)
+	existingStats, err := c.CampaignRepository.GetCampaignStatsByID(ctx, statsID)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	// Ensure this is a manual stat (no campaignID)
+	if existingStats.CampaignID != nil {
+		return errs.Wrap(errors.New("cannot delete system-generated campaign stats"))
+	}
+
+	// Delete the stats
+	err = c.CampaignRepository.DeleteCampaignStatsByID(ctx, statsID)
+	if err != nil {
+		c.Logger.Errorw("failed to delete manual campaign stats", "error", err, "statsID", statsID.String())
+		return errs.Wrap(err)
+	}
+
+	c.Logger.Debugf("successfully deleted manual campaign stats", "statsID", statsID.String())
+	return nil
 }
 
 // ProcessReportedCSV processes a CSV file with reported recipients

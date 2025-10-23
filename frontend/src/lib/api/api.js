@@ -862,18 +862,82 @@ export class API {
 		},
 
 		/**
-		 * Get all campaign statistics with pagination.
+		 * Get all campaign statistics.
 		 *
-		 * @param {TableURLParams} options
 		 * @param {string|null} companyID
 		 * @returns {Promise<ApiResponse>}
 		 */
-		getAllCampaignStats: async (options, companyID = null) => {
-			return await getJSON(
-				this.getPath(
-					`/campaign/stats/all?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`
-				)
-			);
+		getAllCampaignStats: async (companyID = null) => {
+			const companyQuery = companyID ? `?${this.companyQuery(companyID)}` : '';
+			return await getJSON(this.getPath(`/campaign/stats/all${companyQuery}`));
+		},
+
+		/**
+		 * Get all manual campaign statistics (those without campaignID).
+		 *
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getManualCampaignStats: async (companyID = null) => {
+			const companyQuery = companyID ? `?${this.companyQuery(companyID)}` : '';
+			return await getJSON(this.getPath(`/campaign/stats/manual${companyQuery}`));
+		},
+
+		/**
+		 * Create manual campaign statistics.
+		 *
+		 * @param {object} stats
+		 * @param {string} stats.campaignName
+		 * @param {string} [stats.companyId]
+		 * @param {number} stats.totalRecipients
+		 * @param {number} stats.emailsSent
+		 * @param {number} stats.trackingPixelLoaded
+		 * @param {number} stats.websiteVisits
+		 * @param {number} stats.dataSubmissions
+		 * @param {number} stats.reported
+		 * @param {string} [stats.templateName]
+		 * @param {string} [stats.campaignType]
+		 * @param {string} [stats.campaignStartDate] - ISO date string
+		 * @param {string} [stats.campaignEndDate] - ISO date string
+		 * @param {string} [stats.campaignClosedAt] - ISO date string
+		 * @returns {Promise<ApiResponse>}
+		 */
+		createStats: async (stats) => {
+			return await postJSON(this.getPath('/campaign/stats'), stats);
+		},
+
+		/**
+		 * Update manual campaign statistics by ID.
+		 *
+		 * @param {string} statsID
+		 * @param {object} stats
+		 * @param {string} stats.campaignName
+		 * @param {string} [stats.companyId]
+		 * @param {number} stats.totalRecipients
+		 * @param {number} stats.emailsSent
+		 * @param {number} stats.trackingPixelLoaded
+		 * @param {number} stats.websiteVisits
+		 * @param {number} stats.dataSubmissions
+		 * @param {number} stats.reported
+		 * @param {string} [stats.templateName]
+		 * @param {string} [stats.campaignType]
+		 * @param {string} [stats.campaignStartDate] - ISO date string
+		 * @param {string} [stats.campaignEndDate] - ISO date string
+		 * @param {string} [stats.campaignClosedAt] - ISO date string
+		 * @returns {Promise<ApiResponse>}
+		 */
+		updateStats: async (statsID, stats) => {
+			return await putJSON(this.getPath(`/campaign/stats/${statsID}`), stats);
+		},
+
+		/**
+		 * Delete manual campaign statistics by ID.
+		 *
+		 * @param {string} statsID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		deleteStats: async (statsID) => {
+			return await deleteJSON(this.getPath(`/campaign/stats/${statsID}`));
 		}
 	};
 

@@ -1,6 +1,7 @@
 <script>
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import Headline from '$lib/components/Headline.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
@@ -324,6 +325,10 @@
 							on:click={() => openViewCommentModal(company)}
 						/>
 						<TableDropDownButton name="Export" on:click={() => openExportCompanyModal(company)} />
+						<TableDropDownButton
+							name="Custom Stats"
+							on:click={() => goto(`/company/${company.id}/stats`)}
+						/>
 						<TableDeleteButton on:click={() => openDeleteAlert(company)} />
 					</TableDropDownEllipsis>
 				</TableCellAction>

@@ -946,19 +946,110 @@ func (c *Campaign) GetAllCampaignStats(g *gin.Context) {
 		return
 	}
 	// parse request
-	queryArgs, ok := c.handleQueryArgs(g)
-	if !ok {
-		return
-	}
-	queryArgs.RemapOrderBy(allowedCampaignColumns)
 	companyID := companyIDFromRequestQuery(g)
 
 	// get stats
-	stats, err := c.CampaignService.GetAllCampaignStats(g.Request.Context(), session, queryArgs, companyID)
+	stats, err := c.CampaignService.GetAllCampaignStats(g.Request.Context(), session, companyID)
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
 	c.Response.OK(g, stats)
+}
+
+// CreateCampaignStats creates manual campaign statistics
+func (c *Campaign) CreateCampaignStats(g *gin.Context) {
+	// handle session
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+
+	// parse request body
+	var req database.CampaignStats
+
+	if err := g.ShouldBindJSON(&req); err != nil {
+		c.Response.BadRequest(g)
+		return
+	}
+
+	// create stats
+	stats, err := c.CampaignService.CreateManualCampaignStats(g.Request.Context(), session, &req)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+
+	c.Response.OK(g, stats)
+}
+
+// GetManualCampaignStats gets all manual campaign statistics (those without campaignID)
+func (c *Campaign) GetManualCampaignStats(g *gin.Context) {
+	// handle session
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	companyID := companyIDFromRequestQuery(g)
+
+	// get manual stats (those with null campaignID)
+	stats, err := c.CampaignService.GetManualCampaignStats(g.Request.Context(), session, companyID)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, stats)
+}
+
+// UpdateCampaignStats updates manual campaign statistics by ID
+func (c *Campaign) UpdateCampaignStats(g *gin.Context) {
+	// handle session
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+
+	// parse request body
+	var req database.CampaignStats
+
+	if err := g.ShouldBindJSON(&req); err != nil {
+		c.Response.BadRequest(g)
+		return
+	}
+
+	// update stats
+	req.ID = id
+	stats, err := c.CampaignService.UpdateManualCampaignStats(g.Request.Context(), session, &req)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+
+	c.Response.OK(g, stats)
+}
+
+// DeleteCampaignStatsManual deletes manual campaign statistics by ID
+func (c *Campaign) DeleteCampaignStatsManual(g *gin.Context) {
+	// handle session
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+
+	// delete manual stats
+	err := c.CampaignService.DeleteManualCampaignStats(g.Request.Context(), session, id)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+
+	c.Response.OK(g, gin.H{"message": "Campaign stats deleted successfully"})
 }
 
 // UploadReportedCSV uploads a CSV file with reported recipients
