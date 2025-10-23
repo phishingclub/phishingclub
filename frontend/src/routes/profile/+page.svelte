@@ -609,7 +609,7 @@
 									</p>
 									<button
 										type="button"
-										on:click|preventDefault={() => onClickCopy('.totp-code')}
+										on:click|preventDefault={() => onClickCopy(mfaValues.totpCode)}
 										class="flex items-center bg-gray-100 hover:bg-gray-200 py-2 px-4 rounded-md text-gray-700 transition-colors"
 									>
 										<span class="totp-code font-mono">{mfaValues.totpCode}</span>
@@ -656,7 +656,7 @@
 										your authenticator app:
 									</p>
 									<button
-										on:click|preventDefault={() => onClickCopy('.totp-recoveryCode')}
+										on:click|preventDefault={() => onClickCopy(mfaValues.totpRecoveryCode)}
 										class="flex items-center bg-gray-100 hover:bg-gray-200 py-3 px-4 rounded-md text-gray-700 w-full mb-4 transition-colors"
 									>
 										<span class="totp-recoveryCode font-mono">{mfaValues.totpRecoveryCode}</span>

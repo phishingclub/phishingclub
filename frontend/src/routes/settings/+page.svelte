@@ -22,10 +22,6 @@
 	import { addToast } from '$lib/store/toast';
 	import { onMount } from 'svelte';
 	import { onClickCopy } from '$lib/utils/common';
-	import SelectSquare from '$lib/components/SelectSquare.svelte';
-
-	// services
-	const appStateService = AppStateService.instance;
 
 	const logLevels = ['debug', 'info', 'warn', 'error'];
 	const dbLogLevels = ['silent', 'info', 'warn', 'error'];
@@ -884,7 +880,7 @@
 		>
 			<div class="flex items-center gap-4 flex-wrap">
 				<button
-					on:click|preventDefault={() => onClickCopy('.version-text')}
+					on:click|preventDefault={() => onClickCopy(version)}
 					class="flex items-center hover:bg-gray-100 dark:hover:bg-gray-700 py-2 px-4 rounded-md text-gray-700 dark:text-gray-300 transition-colors duration-200"
 				>
 					<span class="version-text font-mono">Version: {version}</span>
