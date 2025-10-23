@@ -58,16 +58,13 @@ type ProxyServiceRules struct {
 
 // ProxyServiceAccessControl represents access control configuration
 type ProxyServiceAccessControl struct {
-	Mode   string                   `yaml:"mode"` // "allow" | "deny"
-	Paths  []string                 `yaml:"paths"`
-	OnDeny ProxyServiceDenyResponse `yaml:"on_deny"`
+	Mode   string `yaml:"mode"`              // "public" | "private"
+	OnDeny string `yaml:"on_deny,omitempty"` // "404" | "redirect:URL" | status code (only used for private mode)
 }
 
-// ProxyServiceDenyResponse represents response configuration when access is denied
-type ProxyServiceDenyResponse struct {
-	WithSession    string `yaml:"with_session"`    // "allow" | "redirect:URL" | status code
-	WithoutSession string `yaml:"without_session"` // "allow" | "redirect:URL" | status code
-}
+// Access control modes:
+// - "public": Allow all traffic (traditional proxy mode) - on_deny is ignored
+// - "private": Strict IP-based mode like evilginx2 - whitelist IP after lure access, deny all others (DEFAULT)
 
 // CompilePathPatterns compiles regex patterns for all capture and response rules
 func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
@@ -254,15 +251,7 @@ type ProxyServiceResponseRule struct {
 // version: "0.0"
 // global:
 //
-//	access:
-//	  mode: "deny"
-//	  paths:
-//	    - "^/admin/"
-//	    - "^/wp-admin/"
-//	    - "^/\\.git/"
-//	  on_deny:
-//	    with_session: 403
-//	    without_session: 404
+//	# No access section = private mode by default (secure by default)
 //	capture:
 //	  - name: "global_navigation"
 //	    path: "/important"
@@ -276,15 +265,14 @@ type ProxyServiceResponseRule struct {
 // example.com:
 //
 //	to: "phishing-example.com"
-//	access:
-//	  mode: "allow"
-//	  paths:
-//	    - "^/login"
-//	    - "^/api/public/"
-//	    - "^/assets/"
-//	  on_deny:
-//	    with_session: "redirect:https://phishing-example.com/"
-//	    without_session: 503
+//	# No access section = private mode by default (secure by default)
+//	# To override with public mode or custom deny action:
+//	# access:
+//	#   mode: "public"                   # Traditional proxy mode
+//	# Or:
+//	# access:
+//	#   mode: "private"
+//	#   on_deny: "https://example.com"   # Clean redirect syntax
 //	response:
 //	  - path: "^/robots\\.txt$"
 //	    headers:
@@ -1112,46 +1100,38 @@ func (m *Proxy) validateReplaceRules(replaceRules []ProxyServiceReplaceRule) err
 // validateAccessControl validates access control configuration
 func (m *Proxy) validateAccessControl(accessControl *ProxyServiceAccessControl) error {
 	if accessControl == nil {
-		return nil // access control is optional
+		return nil // access control will be set to defaults
+	}
+
+	// set default mode if empty
+	if accessControl.Mode == "" {
+		accessControl.Mode = "private"
 	}
 
 	// validate mode
-	if accessControl.Mode != "allow" && accessControl.Mode != "deny" {
+	if accessControl.Mode != "public" && accessControl.Mode != "private" {
 		return validate.WrapErrorWithField(
-			errors.New("access control mode must be either 'allow' or 'deny'"),
+			errors.New("access control mode must be either 'public' or 'private' - private mode uses IP whitelisting like evilginx2"),
 			"proxyConfig",
 		)
 	}
 
-	// validate paths are valid regex patterns
-	for i, path := range accessControl.Paths {
-		if path == "" {
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("access control path %d cannot be empty", i)),
-				"proxyConfig",
-			)
+	// validate deny action (only required for private mode)
+	if accessControl.Mode == "private" {
+		// set default deny action if empty
+		if accessControl.OnDeny == "" {
+			accessControl.OnDeny = "404"
 		}
-		if _, err := regexp.Compile(path); err != nil {
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("invalid regex pattern in access control path '%s': %s", path, err.Error())),
-				"proxyConfig",
-			)
+		if err := m.validateDenyAction(accessControl.OnDeny); err != nil {
+			return err
 		}
-	}
-
-	// validate deny response actions
-	if err := m.validateDenyAction(accessControl.OnDeny.WithSession, true); err != nil {
-		return err
-	}
-	if err := m.validateDenyAction(accessControl.OnDeny.WithoutSession, false); err != nil {
-		return err
 	}
 
 	return nil
 }
 
 // validateDenyAction validates a deny action string
-func (m *Proxy) validateDenyAction(action string, withSession bool) error {
+func (m *Proxy) validateDenyAction(action string) error {
 	if action == "" {
 		return nil // action is optional, will use default
 	}
@@ -1161,16 +1141,27 @@ func (m *Proxy) validateDenyAction(action string, withSession bool) error {
 		return nil
 	}
 
-	// check for redirect action
+	// check for redirect action (auto-detect URLs or old redirect: syntax)
+	if strings.HasPrefix(action, "http://") || strings.HasPrefix(action, "https://") {
+		if len(action) < 10 { // minimum valid URL length
+			return validate.WrapErrorWithField(
+				errors.New("redirect URL is too short, must be a valid URL like 'https://example.com'"),
+				"proxyConfig",
+			)
+		}
+		return nil
+	}
+
+	// check for old redirect: syntax (backwards compatibility)
 	if strings.HasPrefix(action, "redirect:") {
 		url := strings.TrimPrefix(action, "redirect:")
 		if url == "" {
 			return validate.WrapErrorWithField(
-				errors.New("redirect action must include URL: 'redirect:https://example.com'"),
+				errors.New("redirect action must include URL: 'redirect:https://example.com' or just 'https://example.com'"),
 				"proxyConfig",
 			)
 		}
-		// basic URL validation
+		// basic URL validation for old syntax
 		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 			return validate.WrapErrorWithField(
 				errors.New("redirect URL must start with http:// or https://"),
@@ -1192,7 +1183,7 @@ func (m *Proxy) validateDenyAction(action string, withSession bool) error {
 	}
 
 	return validate.WrapErrorWithField(
-		errors.New("invalid deny action: must be 'allow', 'redirect:URL', or a status code"),
+		errors.New("deny action must be a valid HTTP status code (e.g., '404') or redirect URL (e.g., 'https://example.com')"),
 		"proxyConfig",
 	)
 }

@@ -36,6 +36,7 @@ type Services struct {
 	Update            *service.Update
 	Import            *service.Import
 	Backup            *service.Backup
+	IPAllowList       *service.IPAllowListService
 }
 
 // NewServices creates a collection of services
@@ -164,6 +165,7 @@ func NewServices(
 		CampaignTemplateService: campaignTemplate,
 		DomainService:           domain,
 	}
+	ipAllowListService := service.NewIPAllowListService(logger, repositories.Proxy)
 	email := &service.Email{
 		Common:            common,
 		AttachmentPath:    attachmentPath,
@@ -272,5 +274,6 @@ func NewServices(
 		Update:            updateService,
 		Import:            importService,
 		Backup:            backupService,
+		IPAllowList:       ipAllowListService,
 	}
 }

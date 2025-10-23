@@ -67,12 +67,6 @@ func NewServer(
 	logger *zap.SugaredLogger,
 	certMagicConfig *certmagic.Config,
 ) *Server {
-	// setup proxy cookie tracking
-	cookieName := ""
-	if option, err := repositories.Option.GetByKey(context.Background(), data.OptionKeyProxyCookieName); err == nil && option != nil {
-		cookieName = option.Value.String()
-	}
-
 	// setup goproxy-based proxy server
 	proxyServer := proxy.NewProxyHandler(
 		logger,
@@ -85,7 +79,7 @@ func NewServer(
 		repositories.Identifier,
 		services.Campaign,
 		services.Template,
-		cookieName,
+		services.IPAllowList,
 	)
 
 	// setup proxy session cleanup routine

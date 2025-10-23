@@ -96,16 +96,13 @@ export class ProxyYamlCompletionProvider {
 		if (linePrefix.match(/\s*method:\s*$/)) {
 			return this.getMethodSuggestions(range);
 		}
-		if (linePrefix.match(/\s*(with_session|without_session):\s*$/)) {
-			return this.getActionSuggestions(range);
+		if (linePrefix.match(/\s*on_deny:\s*$/)) {
+			return this.getOnDenySuggestions(range);
 		}
 
 		// Handle array items
 		if (linePrefix.match(/^\s*-\s*$/)) {
 			const context = this.findParentSection(linesAbove, currentIndent);
-			if (context === 'paths') {
-				return this.getPathPatternSuggestions(range);
-			}
 			if (context === 'capture') {
 				return this.getNewCaptureSuggestions(range);
 			}
@@ -131,8 +128,6 @@ export class ProxyYamlCompletionProvider {
 				return this.getDomainSuggestions(range);
 			case 'access':
 				return this.getAccessSuggestions(range);
-			case 'on_deny':
-				return this.getOnDenySuggestions(range);
 			case 'capture':
 				return this.getCaptureSuggestions(range);
 			case 'rewrite':
@@ -253,7 +248,7 @@ export class ProxyYamlCompletionProvider {
 				label: 'access',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'access:',
-				documentation: 'Domain access control',
+				documentation: 'Domain access control (optional - defaults to secure private mode)',
 				range
 			},
 			{
@@ -285,22 +280,17 @@ export class ProxyYamlCompletionProvider {
 			{
 				label: 'mode',
 				kind: this.monaco.languages.CompletionItemKind.Property,
-				insertText: 'mode: "allow"',
-				documentation: 'Access control mode: allow or deny',
-				range
-			},
-			{
-				label: 'paths',
-				kind: this.monaco.languages.CompletionItemKind.Property,
-				insertText: 'paths:',
-				documentation: 'Array of path patterns',
+				insertText: 'mode: "private"',
+				documentation:
+					'Access control mode: public (allow all) or private (IP whitelist after lure). Default: private',
 				range
 			},
 			{
 				label: 'on_deny',
-				kind: this.monaco.languages.CompletionItemKind.Module,
-				insertText: 'on_deny:',
-				documentation: 'Response when access denied',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'on_deny: "404"',
+				documentation:
+					'Response for blocked requests in private mode (e.g., "404", "https://example.com")',
 				range
 			}
 		];
@@ -309,17 +299,24 @@ export class ProxyYamlCompletionProvider {
 	getOnDenySuggestions(range) {
 		return [
 			{
-				label: 'with_session',
-				kind: this.monaco.languages.CompletionItemKind.Property,
-				insertText: 'with_session: 403',
-				documentation: 'Response for users with sessions',
+				label: '"404"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"404"',
+				documentation: 'Return 404 Not Found status',
 				range
 			},
 			{
-				label: 'without_session',
-				kind: this.monaco.languages.CompletionItemKind.Property,
-				insertText: 'without_session: 404',
-				documentation: 'Response for users without sessions',
+				label: '"403"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"403"',
+				documentation: 'Return 403 Forbidden status',
+				range
+			},
+			{
+				label: '"https://example.com"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"https://example.com"',
+				documentation: 'Redirect to specified URL (auto-detected)',
 				range
 			}
 		];
@@ -573,17 +570,17 @@ export class ProxyYamlCompletionProvider {
 	getModeSuggestions(range) {
 		return [
 			{
-				label: '"allow"',
+				label: '"private"',
 				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"allow"',
-				documentation: 'Allowlist mode - only specified paths allowed',
+				insertText: '"private"',
+				documentation: 'Private mode - IP-based whitelist after lure access (DEFAULT, secure)',
 				range
 			},
 			{
-				label: '"deny"',
+				label: '"public"',
 				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"deny"',
-				documentation: 'Denylist mode - specified paths blocked',
+				insertText: '"public"',
+				documentation: 'Public mode - allow all traffic (traditional proxy behavior)',
 				range
 			}
 		];
@@ -782,86 +779,6 @@ export class ProxyYamlCompletionProvider {
 		];
 	}
 
-	getActionSuggestions(range) {
-		return [
-			{
-				label: '"allow"',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"allow"',
-				documentation: 'Allow access (override deny)',
-				range
-			},
-			{
-				label: '"redirect:https://example.com"',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"redirect:https://example.com"',
-				documentation: 'Redirect to URL',
-				range
-			},
-			{
-				label: '404',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '404',
-				documentation: 'Return 404 Not Found',
-				range
-			},
-			{
-				label: '403',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '403',
-				documentation: 'Return 403 Forbidden',
-				range
-			},
-			{
-				label: '503',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '503',
-				documentation: 'Return 503 Service Unavailable',
-				range
-			}
-		];
-	}
-
-	getPathPatternSuggestions(range) {
-		return [
-			{
-				label: '"^/admin/"',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"^/admin/"',
-				documentation: 'Admin panel paths',
-				range
-			},
-			{
-				label: '"^/login"',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"^/login"',
-				documentation: 'Login page',
-				range
-			},
-			{
-				label: '"^/api/"',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"^/api/"',
-				documentation: 'API endpoints',
-				range
-			},
-			{
-				label: '"^/assets/"',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"^/assets/"',
-				documentation: 'Static assets',
-				range
-			},
-			{
-				label: '"^/\\.git/"',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"^/\\.git/"',
-				documentation: 'Git repository',
-				range
-			}
-		];
-	}
-
 	provideHover(model, position) {
 		const word = model.getWordAtPosition(position);
 		if (!word) return null;
@@ -884,12 +801,10 @@ export class ProxyYamlCompletionProvider {
 		const hoverData = {
 			version: 'Configuration version. Currently supports "0.0"',
 			global: 'Rules that apply to all domain mappings',
-			access: 'Access control configuration - restricts which paths are accessible',
-			mode: 'Access control mode: "allow" (allowlist) or "deny" (denylist)',
-			paths: 'Array of regex patterns for path matching',
-			on_deny: 'Response configuration when access is denied',
-			with_session: 'Response for users with active proxy sessions (request with mitm cookie)',
-			without_session: 'Response for requests without sessions',
+			access: 'Access control configuration (optional - defaults to private mode for security)',
+			mode: 'Access control mode: "public" (allow all traffic) or "private" (IP whitelist after lure access, DEFAULT)',
+			on_deny:
+				'Response when access is denied in private mode (e.g., "404", "https://example.com")',
 			capture: 'Rules for capturing data from requests/responses',
 			name: 'Unique identifier for the rule',
 			method: 'HTTP method to match (GET, POST, PUT, DELETE, etc.)',

@@ -60,6 +60,11 @@
 		name: null
 	};
 
+	let isIPAllowListModalVisible = false;
+	let ipAllowListEntries = [];
+	let selectedProxyForIPList = null;
+	let isLoadingIPAllowList = false;
+
 	const currentExample = `version: "0.0"
 proxy: "My Proxy Campaign"
 
@@ -363,6 +368,55 @@ portal.example.com:
 		formValues.startURL = proxyItem.startURL;
 		formValues.proxyConfig = proxyItem.proxyConfig;
 	};
+
+	const openIPAllowListModal = async (proxy) => {
+		selectedProxyForIPList = proxy;
+		isLoadingIPAllowList = true;
+		isIPAllowListModalVisible = true;
+
+		console.log('Opening IP allow list for proxy:', proxy.id);
+
+		try {
+			const res = await api.ipAllowList.getForProxyConfig(proxy.id);
+			console.log('API response:', res);
+			if (res.success) {
+				ipAllowListEntries = res.data || [];
+			} else {
+				console.error('API error:', res.error);
+				addToast(`Failed to load IP allow list: ${res.error}`, 'Error');
+				ipAllowListEntries = [];
+			}
+		} catch (e) {
+			console.error('Network error:', e);
+			addToast('Failed to load IP allow list', 'Error');
+			ipAllowListEntries = [];
+		} finally {
+			isLoadingIPAllowList = false;
+		}
+	};
+
+	const closeIPAllowListModal = () => {
+		isIPAllowListModalVisible = false;
+		selectedProxyForIPList = null;
+		ipAllowListEntries = [];
+	};
+
+	const clearIPAllowList = async () => {
+		if (!selectedProxyForIPList) return;
+
+		try {
+			const res = await api.ipAllowList.clearForProxyConfig(selectedProxyForIPList.id);
+			if (res.success) {
+				addToast('IP allow list cleared', 'Success');
+				ipAllowListEntries = [];
+			} else {
+				addToast('Failed to clear IP allow list', 'Error');
+			}
+		} catch (e) {
+			addToast('Failed to clear IP allow list', 'Error');
+			console.error('failed to clear IP allow list', e);
+		}
+	};
 </script>
 
 <HeadTitle title="Proxies" />
@@ -424,6 +478,13 @@ portal.example.com:
 							{...globalButtonDisabledAttributes(proxy, contextCompanyID)}
 						/>
 						<TableCopyButton title={'Copy'} on:click={() => openCopyModal(proxy.id)} />
+						<button
+							class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
+							on:click={() => openIPAllowListModal(proxy)}
+							title="View IP Allow List"
+						>
+							<p class="ml-2 text-left">View IP Allow List</p>
+						</button>
 						<TableDeleteButton
 							on:click={() => openDeleteAlert(proxy)}
 							{...globalButtonDisabledAttributes(proxy, contextCompanyID)}
@@ -506,4 +567,53 @@ portal.example.com:
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
 	></DeleteAlert>
+
+	<!-- IP Allow List Modal -->
+	<Modal
+		headerText={`IP Allow List - ${selectedProxyForIPList?.name || ''}`}
+		visible={isIPAllowListModalVisible}
+		onClose={closeIPAllowListModal}
+		isSubmitting={false}
+	>
+		<FormGrid>
+			<div class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-6">
+				<div class="flex justify-between items-center">
+					{#if !isLoadingIPAllowList && ipAllowListEntries && ipAllowListEntries.length > 0}
+						<BigButton on:click={clearIPAllowList}>Clear All</BigButton>
+					{/if}
+				</div>
+
+				{#if isLoadingIPAllowList}
+					<div class="flex items-center justify-center py-8">
+						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+						<span class="ml-2 text-gray-600 dark:text-gray-400">Loading...</span>
+					</div>
+				{:else if !ipAllowListEntries || ipAllowListEntries.length === 0}
+					<div class="text-center py-8 text-gray-500 dark:text-gray-400">
+						No IP addresses are allow listed
+					</div>
+				{:else}
+					<Table
+						columns={[
+							{ column: 'IP Address', size: 'medium' },
+							{ column: 'Added At', size: 'medium' },
+							{ column: 'Expires At', size: 'medium' }
+						]}
+						hasData={ipAllowListEntries.length > 0}
+						plural="entries"
+					>
+						{#each ipAllowListEntries as entry}
+							<TableRow>
+								<TableCell>{entry.ip}</TableCell>
+								<TableCell>{new Date(entry.createdAt).toLocaleString()}</TableCell>
+								<TableCell>{new Date(entry.expiresAt).toLocaleString()}</TableCell>
+								<TableCellEmpty />
+								<TableCellEmpty />
+							</TableRow>
+						{/each}
+					</Table>
+				{/if}
+			</div>
+		</FormGrid>
+	</Modal>
 </main>
