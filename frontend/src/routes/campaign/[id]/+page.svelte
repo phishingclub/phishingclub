@@ -69,7 +69,6 @@
 		// groups by name, must be mapped to IDs before sending to the server
 		recipientGroups: [],
 		events: [],
-		// TODO move this out of campaign to a separate variable
 		eventTypesIDToNameMap: {},
 		notableEventName: ''
 	};
@@ -2065,7 +2064,12 @@
 		</div>
 	</Alert>
 
-	<Alert headline="anonymize" bind:visible={isAnonymizeModalVisible} onConfirm={onConfirmAnonymize}>
+	<Alert
+		headline="anonymize"
+		bind:visible={isAnonymizeModalVisible}
+		onConfirm={onConfirmAnonymize}
+		verification="confirm"
+	>
 		<div>
 			<ul class="list-disc ml-8 mt-4 mb-4">
 				<li class="list-tem">Stop any pending delivery</li>
