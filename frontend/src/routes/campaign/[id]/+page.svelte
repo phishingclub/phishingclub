@@ -220,7 +220,7 @@
 			campaign.webhookID = t.webhookID;
 			campaign.template = templateMap.byKey(t.templateID);
 			campaign.recipientGroups = t.recipientGroupIDs.map((id) => recipientGroupMap.byKey(id));
-			campaign.notableEventName = t.notableEventName; // t.recipientGroupIDs.map((id) => recipientGroupMap.byKey(id));
+			campaign.notableEventName = t.notableEventName;
 			if (t.sendStartAt === null && t.sendEndAt === null) {
 				isSelfManaged = true;
 			}
@@ -1753,20 +1753,10 @@
 						{/if}
 					</TableCell>
 					<TableCell>
-						<button
-							class="hover:bg-gray-100 px-2 py-1 rounded-md transition-colors w-full text-left"
-							on:click={() => onClickCopy(event.userAgent)}
-						>
-							{event.userAgent}
-						</button>
+						<CellCopy text={event.userAgent} />
 					</TableCell>
 					<TableCell>
-						<button
-							class="hover:bg-gray-100 px-2 py-1 rounded-md transition-colors w-full text-left"
-							on:click={() => onClickCopy(event.ip)}
-						>
-							{event.ip}
-						</button>
+						<CellCopy text={event.ip} />
 					</TableCell>
 				</TableRow>
 			{/each}
