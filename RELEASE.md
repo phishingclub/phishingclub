@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.9.0] - 2025-10-24
+- Revamped proxy access directive
+- Added proxy rewrite URL directive
+- Added custom stats for company
+- Various changes to the proxing logic
+- Simplified create campaign modal
+- Simplefied create template modal
+- Campaign anonymization now requires confirmation
+- Improved dashboard campaign trendline
+- Fixed response for host specific path matched any host
+- Fixed copy button copied wrong text
+- Fixed bad dark mode color on copy campaign recipient event
+- Fixed check campaign name before step 2 on copy campaign
+- Fixed copy campaign transfering values that should be reset
+- Fixed bad mapping on campaign templates 'is complete'
+- Fixed proxy should not be available in all contexts
+- Fixed bug when deleting all assets of a domain
+- Added beta tag for Proxy functionality
+
 ## [1.8.0] - 2025-10-19
 - Campaigns now support Anti-Bot / Evasion page
 - Proxy campaign pages now support IP filtering
