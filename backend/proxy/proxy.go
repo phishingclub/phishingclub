@@ -424,11 +424,6 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 		return req, m.createDenyResponse(req, reqCtx, denyAction, hasSession)
 	}
 
-	// handle requests without session
-	if reqCtx.SessionID == "" && !createSession && reqCtx.CampaignRecipientID == nil {
-		return m.prepareRequestWithoutSession(req, reqCtx.TargetDomain), nil
-	}
-
 	// get or create session and populate context if we have campaign recipient ID or valid session
 	if reqCtx.CampaignRecipientID != nil || reqCtx.SessionID != "" {
 		err = m.resolveSessionContext(req, reqCtx, createSession)
@@ -441,8 +436,7 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 		return m.applySessionToRequestWithContext(req, reqCtx), nil
 	}
 
-	// handle requests without campaign recipient ID or session
-	return m.prepareRequestWithoutSession(req, reqCtx.TargetDomain), nil
+	return m.prepareRequestWithoutSession(req, reqCtx), nil
 }
 
 func (m *ProxyHandler) cleanupExistingSession(campaignRecipientID *uuid.UUID, reqURL string) {
@@ -453,10 +447,120 @@ func (m *ProxyHandler) cleanupExistingSession(campaignRecipientID *uuid.UUID, re
 	}
 }
 
-func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, targetDomain string) *http.Request {
-	req.Host = targetDomain
-	req.URL.Host = targetDomain
+func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, reqCtx *RequestContext) *http.Request {
+	// set host and scheme
+	req.Host = reqCtx.TargetDomain
+	req.URL.Host = reqCtx.TargetDomain
 	req.URL.Scheme = "https"
+
+	// create a dummy session for header normalization (no campaign/session data)
+	dummySession := &ProxySession{
+		Config: sync.Map{},
+	}
+	// populate dummy config for normalization
+	dummySession.Config.Store(reqCtx.TargetDomain, service.ProxyServiceDomainConfig{
+		To: reqCtx.TargetDomain,
+	})
+
+	// normalize headers
+	m.normalizeRequestHeaders(req, dummySession)
+
+	// patch query parameters
+	m.patchQueryParametersWithContext(req, reqCtx)
+
+	// get host config from ProxyConfig.Hosts using TargetDomain
+	var hostConfig service.ProxyServiceDomainConfig
+	if reqCtx.ProxyConfig != nil && reqCtx.ProxyConfig.Hosts != nil {
+		if cfg, ok := reqCtx.ProxyConfig.Hosts[reqCtx.TargetDomain]; ok {
+			hostConfig = *cfg
+		}
+	}
+
+	// apply header rewrite rules (no capture)
+	if hostConfig.Rewrite != nil {
+		for _, replacement := range hostConfig.Rewrite {
+			if replacement.From == "" || replacement.From == "request_header" || replacement.From == "any" {
+				engine := replacement.Engine
+				if engine == "" {
+					engine = "regex"
+				}
+				if engine == "regex" {
+					re, err := regexp.Compile(replacement.Find)
+					if err != nil {
+						continue
+					}
+					for headerName, values := range req.Header {
+						newValues := make([]string, 0, len(values))
+						for _, val := range values {
+							fullHeader := headerName + ": " + val
+							replaced := re.ReplaceAllString(fullHeader, replacement.Replace)
+							if strings.HasPrefix(replaced, headerName+": ") {
+								newVal := replaced[len(headerName)+2:]
+								newValues = append(newValues, newVal)
+							} else if replaced != fullHeader {
+								newValues = append(newValues, val)
+							} else {
+								newValues = append(newValues, val)
+							}
+						}
+						req.Header[headerName] = newValues
+					}
+				}
+			}
+		}
+	}
+
+	// apply body rewrite rules (no capture)
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err == nil {
+			if hostConfig.Rewrite != nil {
+				for _, replacement := range hostConfig.Rewrite {
+					if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
+						engine := replacement.Engine
+						if engine == "" {
+							engine = "regex"
+						}
+						if engine == "regex" {
+							re, err := regexp.Compile(replacement.Find)
+							if err == nil {
+								oldContent := string(body)
+								content := re.ReplaceAllString(oldContent, replacement.Replace)
+								body = []byte(content)
+							}
+						}
+					}
+				}
+			}
+			req.Body = io.NopCloser(bytes.NewBuffer(body))
+			req.ContentLength = int64(len(body))
+		}
+	}
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err == nil {
+			if hostConfig.Rewrite != nil {
+				for _, replacement := range hostConfig.Rewrite {
+					if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
+						engine := replacement.Engine
+						if engine == "" {
+							engine = "regex"
+						}
+						if engine == "regex" {
+							re, err := regexp.Compile(replacement.Find)
+							if err == nil {
+								oldContent := string(body)
+								content := re.ReplaceAllString(oldContent, replacement.Replace)
+								body = []byte(content)
+							}
+						}
+					}
+				}
+			}
+			req.Body = io.NopCloser(bytes.NewBuffer(body))
+			req.ContentLength = int64(len(body))
+		}
+	}
 
 	return req
 }
@@ -548,7 +652,7 @@ func (m *ProxyHandler) processRequestWithSessionContext(req *http.Request, reqCt
 	// normalize headers
 	m.normalizeRequestHeaders(req, reqCtx.Session)
 
-	// apply capture rules
+	// apply replace and capture rules
 	m.onRequestBody(req, reqCtx.Session)
 	m.onRequestHeader(req, reqCtx.Session)
 
@@ -1228,6 +1332,42 @@ func (m *ProxyHandler) onRequestHeader(req *http.Request, session *ProxySession)
 		for _, capture := range hostConfig.Capture {
 			if m.shouldApplyCaptureRule(capture, "request_header", req) {
 				m.captureFromText(buf.String(), capture, session, req, "request_header")
+			}
+		}
+	}
+
+	// request header rewrite logic (mirrors applyRequestHeaderReplacements)
+	if hostConfig.Rewrite != nil {
+		for _, replacement := range hostConfig.Rewrite {
+			if replacement.From == "" || replacement.From == "request_header" || replacement.From == "any" {
+				engine := replacement.Engine
+				if engine == "" {
+					engine = "regex"
+				}
+				if engine == "regex" {
+					re, err := regexp.Compile(replacement.Find)
+					if err != nil {
+						m.logger.Errorw("invalid request_header replacement regex", "error", err, "sessionID", session.ID)
+						continue
+					}
+					for headerName, values := range req.Header {
+						newValues := make([]string, 0, len(values))
+						for _, val := range values {
+							fullHeader := headerName + ": " + val
+							replaced := re.ReplaceAllString(fullHeader, replacement.Replace)
+							if strings.HasPrefix(replaced, headerName+": ") {
+								newVal := replaced[len(headerName)+2:]
+								newValues = append(newValues, newVal)
+							} else if replaced != fullHeader {
+								m.logger.Warnw("header name changed by replacement, skipping", "original", headerName, "sessionID", session.ID)
+								newValues = append(newValues, val)
+							} else {
+								newValues = append(newValues, val)
+							}
+						}
+						req.Header[headerName] = newValues
+					}
+				}
 			}
 		}
 	}
