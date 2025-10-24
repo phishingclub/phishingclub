@@ -117,7 +117,6 @@ jobs:
           file: ./Dockerfile.release
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:test-${{ steps.get_version.outputs.HASH }}
             ghcr.io/${{ github.repository }}:test-latest
           labels: |
             org.opencontainers.image.title=PhishingClub-Test
