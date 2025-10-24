@@ -101,6 +101,13 @@ type RequestContext struct {
 	CampaignRecipientID *uuid.UUID
 	ParamName           string
 	PendingResponse     *http.Response
+	// cached campaign data to avoid repeated queries
+	Campaign          *model.Campaign
+	CampaignTemplate  *model.CampaignTemplate
+	CampaignRecipient *model.CampaignRecipient
+	RecipientID       *uuid.UUID
+	CampaignID        *uuid.UUID
+	ProxyEntry        *model.Proxy
 }
 
 type ProxyHandler struct {
@@ -292,14 +299,60 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 	// check for campaign recipient id
 	campaignRecipientID, paramName := m.getCampaignRecipientIDFromURLParams(req)
 
-	return &RequestContext{
+	reqCtx := &RequestContext{
 		PhishDomain:         req.Host,
 		TargetDomain:        targetDomain,
 		Domain:              domain,
 		ProxyConfig:         proxyConfig,
 		CampaignRecipientID: campaignRecipientID,
 		ParamName:           paramName,
-	}, nil
+		ProxyEntry:          proxyEntry,
+	}
+
+	// preload campaign data if we have a campaign recipient ID
+	if campaignRecipientID != nil {
+		// get campaign recipient
+		cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, campaignRecipientID, &repository.CampaignRecipientOption{})
+		if err != nil {
+			return nil, errors.Errorf("failed to get campaign recipient: %w", err)
+		}
+		reqCtx.CampaignRecipient = cRecipient
+
+		// get recipient and campaign IDs
+		recipientID, err := cRecipient.RecipientID.Get()
+		if err != nil {
+			return nil, errors.Errorf("failed to get recipient ID: %w", err)
+		}
+		campaignID, err := cRecipient.CampaignID.Get()
+		if err != nil {
+			return nil, errors.Errorf("failed to get campaign ID: %w", err)
+		}
+		reqCtx.RecipientID = &recipientID
+		reqCtx.CampaignID = &campaignID
+
+		// get campaign
+		campaign, err := m.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{
+			WithCampaignTemplate: true,
+		})
+		if err != nil {
+			return nil, errors.Errorf("failed to get campaign: %w", err)
+		}
+		reqCtx.Campaign = campaign
+
+		// preload campaign template if available
+		if templateID, err := campaign.TemplateID.Get(); err == nil {
+			cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+				WithDomain:     true,
+				WithIdentifier: true,
+				WithEmail:      true,
+			})
+			if err == nil {
+				reqCtx.CampaignTemplate = cTemplate
+			}
+		}
+	}
+
+	return reqCtx, nil
 }
 
 func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *RequestContext) (*http.Request, *http.Response) {
@@ -321,24 +374,14 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 
 	// check if this has a valid state parameter (post-evasion request)
 	hasValidStateParameter := false
-	if createSession {
-		campaign, _, _, err := m.getCampaignInfo(req.Context(), reqCtx.CampaignRecipientID)
-		if err == nil {
-			templateID, err := campaign.TemplateID.Get()
-			if err == nil {
-				cTemplate, err := m.CampaignTemplateRepository.GetByID(req.Context(), &templateID, &repository.CampaignTemplateOption{
-					WithIdentifier: true,
-				})
-				if err == nil && cTemplate.StateIdentifier != nil {
-					stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
-					encryptedParam := req.URL.Query().Get(stateParamKey)
-					if encryptedParam != "" {
-						campaignID, _ := campaign.ID.Get()
-						secret := utils.UUIDToSecret(&campaignID)
-						if decrypted, err := utils.Decrypt(encryptedParam, secret); err == nil {
-							hasValidStateParameter = decrypted != "deny"
-						}
-					}
+	if createSession && reqCtx.Campaign != nil && reqCtx.CampaignTemplate != nil {
+		if reqCtx.CampaignTemplate.StateIdentifier != nil {
+			stateParamKey := reqCtx.CampaignTemplate.StateIdentifier.Name.MustGet()
+			encryptedParam := req.URL.Query().Get(stateParamKey)
+			if encryptedParam != "" && reqCtx.CampaignID != nil {
+				secret := utils.UUIDToSecret(reqCtx.CampaignID)
+				if decrypted, err := utils.Decrypt(encryptedParam, secret); err == nil {
+					hasValidStateParameter = decrypted != "deny"
 				}
 			}
 		}
@@ -421,7 +464,7 @@ func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, targetDom
 // resolveSessionContext gets or creates a session and populates the request context
 func (m *ProxyHandler) resolveSessionContext(req *http.Request, reqCtx *RequestContext, createSession bool) error {
 	if createSession {
-		newSession, err := m.createNewSession(req, reqCtx.CampaignRecipientID, reqCtx.ProxyConfig, reqCtx.Domain, reqCtx.TargetDomain)
+		newSession, err := m.createNewSession(req, reqCtx)
 		if err != nil {
 			return err
 		}
@@ -460,11 +503,9 @@ func (m *ProxyHandler) applySessionToRequestWithContext(req *http.Request, reqCt
 	if reqCtx.CampaignRecipientID != nil && reqCtx.SessionCreated {
 
 		// always redirect to StartURL for new sessions (both initial and post-evasion)
-		// get proxy configuration to extract start url
-		ctx := req.Context()
-		proxyEntry, err := m.ProxyRepository.GetByID(ctx, reqCtx.Domain.ProxyID, &repository.ProxyOption{})
-		if err == nil {
-			startURL, err := proxyEntry.StartURL.Get()
+		// use cached proxy configuration to extract start url
+		if reqCtx.ProxyEntry != nil {
+			startURL, err := reqCtx.ProxyEntry.StartURL.Get()
 			if err == nil {
 				// parse start url to get the target path and query
 				if parsedStartURL, err := url.Parse(startURL.String()); err == nil {
@@ -485,19 +526,10 @@ func (m *ProxyHandler) applySessionToRequestWithContext(req *http.Request, reqCt
 		q := req.URL.Query()
 		q.Del(reqCtx.ParamName)
 
-		// also remove state parameter if it exists
-		if reqCtx.Session.Campaign != nil {
-			templateID, err := reqCtx.Session.Campaign.TemplateID.Get()
-			if err == nil {
-				ctx := req.Context()
-				cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
-					WithIdentifier: true,
-				})
-				if err == nil && cTemplate.StateIdentifier != nil {
-					stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
-					q.Del(stateParamKey)
-				}
-			}
+		// also remove state parameter if exists using cached template data
+		if reqCtx.Session.Campaign != nil && reqCtx.CampaignTemplate != nil && reqCtx.CampaignTemplate.StateIdentifier != nil {
+			stateParamKey := reqCtx.CampaignTemplate.StateIdentifier.Name.MustGet()
+			q.Del(stateParamKey)
 		}
 		req.URL.RawQuery = q.Encode()
 	} else {
@@ -1020,21 +1052,20 @@ func (m *ProxyHandler) replaceHostWithPhished(hostname string, config map[string
 
 func (m *ProxyHandler) createNewSession(
 	req *http.Request,
-	campaignRecipientID *uuid.UUID,
-	proxyConfig *service.ProxyServiceConfigYAML,
-	domain *database.Domain,
-	targetDomain string,
+	reqCtx *RequestContext,
 ) (*ProxySession, error) {
-	ctx := req.Context()
+	// use cached campaign data from request context
+	campaign := reqCtx.Campaign
+	recipientID := reqCtx.RecipientID
+	campaignID := reqCtx.CampaignID
+	campaignRecipientID := reqCtx.CampaignRecipientID
 
-	// get campaign information
-	campaign, recipientID, campaignID, err := m.getCampaignInfo(ctx, campaignRecipientID)
-	if err != nil {
-		return nil, err
+	if campaign == nil || recipientID == nil || campaignID == nil || campaignRecipientID == nil {
+		return nil, fmt.Errorf("missing required campaign data in request context")
 	}
 
 	// create session configuration
-	sessionConfig := m.buildSessionConfig(targetDomain, domain.Name, proxyConfig)
+	sessionConfig := m.buildSessionConfig(reqCtx.TargetDomain, reqCtx.Domain.Name, reqCtx.ProxyConfig)
 
 	// create session
 	session := &ProxySession{
@@ -1043,8 +1074,8 @@ func (m *ProxyHandler) createNewSession(
 		CampaignID:          campaignID,
 		RecipientID:         recipientID,
 		Campaign:            campaign,
-		Domain:              domain,
-		TargetDomain:        targetDomain,
+		Domain:              reqCtx.Domain,
+		TargetDomain:        reqCtx.TargetDomain,
 
 		CreatedAt: time.Now(),
 	}
@@ -1164,12 +1195,14 @@ func (m *ProxyHandler) initializeRequiredCaptures(session *ProxySession) {
 }
 
 func (m *ProxyHandler) onRequestBody(req *http.Request, session *ProxySession) {
-	hostConfigInterface, exists := session.Config.Load(req.Host)
-	if !exists || req.Body == nil {
+	if req.Body == nil {
 		return
 	}
 
-	hostConfig := hostConfigInterface.(service.ProxyServiceDomainConfig)
+	hostConfig, exists := m.getHostConfig(session, req.Host)
+	if !exists {
+		return
+	}
 	body := m.readRequestBody(req)
 
 	if hostConfig.Capture != nil {
@@ -1184,12 +1217,10 @@ func (m *ProxyHandler) onRequestBody(req *http.Request, session *ProxySession) {
 }
 
 func (m *ProxyHandler) onRequestHeader(req *http.Request, session *ProxySession) {
-	hostConfigInterface, exists := session.Config.Load(req.Host)
+	hostConfig, exists := m.getHostConfig(session, req.Host)
 	if !exists {
 		return
 	}
-
-	hostConfig := hostConfigInterface.(service.ProxyServiceDomainConfig)
 	var buf bytes.Buffer
 	req.Header.Write(&buf)
 
@@ -1208,12 +1239,10 @@ func (m *ProxyHandler) onResponseBody(resp *http.Response, body []byte, session 
 		originalHost = session.TargetDomain
 	}
 
-	hostConfigInterface, exists := session.Config.Load(originalHost)
+	hostConfig, exists := m.getHostConfig(session, originalHost)
 	if !exists {
 		return
 	}
-
-	hostConfig := hostConfigInterface.(service.ProxyServiceDomainConfig)
 
 	if hostConfig.Capture != nil {
 		for _, capture := range hostConfig.Capture {
@@ -1229,12 +1258,10 @@ func (m *ProxyHandler) onResponseBody(resp *http.Response, body []byte, session 
 }
 
 func (m *ProxyHandler) onResponseCookies(resp *http.Response, session *ProxySession) {
-	hostConfigInterface, exists := session.Config.Load(resp.Request.Host)
+	hostConfig, exists := m.getHostConfig(session, resp.Request.Host)
 	if !exists {
 		return
 	}
-
-	hostConfig := hostConfigInterface.(service.ProxyServiceDomainConfig)
 	cookies := resp.Cookies()
 	if len(cookies) == 0 {
 		return
@@ -1267,12 +1294,10 @@ func (m *ProxyHandler) onResponseCookies(resp *http.Response, session *ProxySess
 }
 
 func (m *ProxyHandler) onResponseHeader(resp *http.Response, session *ProxySession) {
-	hostConfigInterface, exists := session.Config.Load(resp.Request.Host)
+	hostConfig, exists := m.getHostConfig(session, resp.Request.Host)
 	if !exists {
 		return
 	}
-
-	hostConfig := hostConfigInterface.(service.ProxyServiceDomainConfig)
 	var buf bytes.Buffer
 	resp.Header.Write(&buf)
 
@@ -2248,15 +2273,20 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *ProxySession, captured
 
 	ctx := context.Background()
 
-	// get campaign to check SaveSubmittedData setting
-	campaign, err := m.CampaignRepository.GetByID(ctx, session.CampaignID, &repository.CampaignOption{})
-	if err != nil {
-		m.logger.Errorw("failed to get campaign for proxy capture event", "error", err)
-		return
+	// use campaign from session if available, otherwise fetch
+	campaign := session.Campaign
+	if campaign == nil {
+		var err error
+		campaign, err = m.CampaignRepository.GetByID(ctx, session.CampaignID, &repository.CampaignOption{})
+		if err != nil {
+			m.logger.Errorw("failed to get campaign for proxy capture event", "error", err)
+			return
+		}
 	}
 
 	// save captured data only if SaveSubmittedData is enabled
 	var submittedDataJSON []byte
+	var err error
 	if campaign.SaveSubmittedData.MustGet() {
 		submittedDataJSON, err = json.Marshal(capturedData)
 		if err != nil {
@@ -2270,9 +2300,12 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *ProxySession, captured
 
 	submitDataEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
 	eventID := uuid.New()
+	// use the event creation below instead of service call
+
+	// mark session as complete
+	session.IsComplete.Store(true)
 
 	clientIP := utils.ExtractClientIP(req)
-
 	event := &model.CampaignEvent{
 		ID:          &eventID,
 		CampaignID:  session.CampaignID,
@@ -2968,11 +3001,11 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *ProxyS
 
 // checkAndServeEvasionPage checks if an evasion page should be served and returns the response if so
 func (m *ProxyHandler) checkAndServeEvasionPage(req *http.Request, reqCtx *RequestContext) *http.Response {
-	// get campaign info first
-	campaign, _, _, err := m.getCampaignInfo(req.Context(), reqCtx.CampaignRecipientID)
-	if err != nil {
+	// use cached campaign info
+	if reqCtx.Campaign == nil {
 		return nil
 	}
+	campaign := reqCtx.Campaign
 
 	// check if there's an evasion page configured
 	evasionPageID, err := campaign.EvasionPageID.Get()
@@ -2980,19 +3013,17 @@ func (m *ProxyHandler) checkAndServeEvasionPage(req *http.Request, reqCtx *Reque
 		return nil
 	}
 
-	// get the campaign template
-	templateID, err := campaign.TemplateID.Get()
+	// check if evasion page is configured for this template
+	_, err = campaign.TemplateID.Get()
 	if err != nil {
 		return nil
 	}
 
-	ctx := req.Context()
-	cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
-		WithIdentifier: true,
-	})
-	if err != nil {
+	// use cached campaign template
+	if reqCtx.CampaignTemplate == nil {
 		return nil
 	}
+	cTemplate := reqCtx.CampaignTemplate
 
 	// check if this is an initial request (no state parameter)
 	// we already know we have a campaign recipient ID from reqCtx
@@ -3025,26 +3056,22 @@ func (m *ProxyHandler) checkAndServeEvasionPage(req *http.Request, reqCtx *Reque
 
 // checkAndServeDenyPage checks if a deny page should be served and returns the response if so
 func (m *ProxyHandler) checkAndServeDenyPage(req *http.Request, reqCtx *RequestContext) *http.Response {
-	// get campaign info first
-	campaign, _, _, err := m.getCampaignInfo(req.Context(), reqCtx.CampaignRecipientID)
-	if err != nil {
+	// use cached campaign info
+	if reqCtx.Campaign == nil {
+		return nil
+	}
+	campaign := reqCtx.Campaign
+
+	// check if campaign has a template
+	if _, err := campaign.TemplateID.Get(); err != nil {
 		return nil
 	}
 
-	// get the campaign template
-	templateID, err := campaign.TemplateID.Get()
-	if err != nil {
+	// use cached campaign template
+	if reqCtx.CampaignTemplate == nil {
 		return nil
 	}
-
-	ctx := req.Context()
-	cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
-		WithDomain:     true,
-		WithIdentifier: true,
-	})
-	if err != nil {
-		return nil
-	}
+	cTemplate := reqCtx.CampaignTemplate
 
 	// check if state parameter indicates deny
 	stateParamKey := cTemplate.StateIdentifier.Name.MustGet()
@@ -3073,7 +3100,7 @@ func (m *ProxyHandler) serveEvasionPageResponseDirect(req *http.Request, reqCtx 
 		return nil
 	}
 
-	campaignID, err := campaign.ID.Get()
+	_, err = campaign.ID.Get()
 	if err != nil {
 		return nil
 	}
@@ -3106,7 +3133,7 @@ func (m *ProxyHandler) serveEvasionPageResponseDirect(req *http.Request, reqCtx 
 	resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 
 	// register evasion page visit event
-	m.registerEvasionPageVisitEventDirect(req, reqCtx.CampaignRecipientID, &campaignID, campaign)
+	m.registerEvasionPageVisitEventDirect(req, reqCtx)
 
 	return resp
 }
@@ -3181,20 +3208,27 @@ func (m *ProxyHandler) serveDenyPageResponseDirect(req *http.Request, reqCtx *Re
 
 // renderDenyPageTemplate renders the deny page with full template processing like evasion pages
 func (m *ProxyHandler) renderDenyPageTemplate(req *http.Request, reqCtx *RequestContext, page *model.Page, campaign *model.Campaign, cTemplate *model.CampaignTemplate) (string, error) {
-	// get recipient
-	ctx := req.Context()
-	cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, reqCtx.CampaignRecipientID, &repository.CampaignRecipientOption{})
-	if err != nil {
-		return "", fmt.Errorf("failed to get campaign recipient: %w", err)
-	}
-	recipientID, err := cRecipient.RecipientID.Get()
-	if err != nil {
-		return "", fmt.Errorf("failed to get recipient ID: %w", err)
+	// use cached recipient data
+	cRecipient := reqCtx.CampaignRecipient
+	recipientID := reqCtx.RecipientID
+	if cRecipient == nil || recipientID == nil {
+		ctx := req.Context()
+		var err error
+		cRecipient, err = m.CampaignRecipientRepository.GetByID(ctx, reqCtx.CampaignRecipientID, &repository.CampaignRecipientOption{})
+		if err != nil {
+			return "", fmt.Errorf("failed to get campaign recipient: %w", err)
+		}
+		rid, err := cRecipient.RecipientID.Get()
+		if err != nil {
+			return "", fmt.Errorf("failed to get recipient ID: %w", err)
+		}
+		recipientID = &rid
 	}
 
 	// get recipient details
+	ctx := req.Context()
 	recipientRepo := repository.Recipient{DB: m.CampaignRecipientRepository.DB}
-	recipient, err := recipientRepo.GetByID(ctx, &recipientID, &repository.RecipientOption{})
+	recipient, err := recipientRepo.GetByID(ctx, recipientID, &repository.RecipientOption{})
 	if err != nil {
 		return "", fmt.Errorf("failed to get recipient: %w", err)
 	}
@@ -3205,11 +3239,15 @@ func (m *ProxyHandler) renderDenyPageTemplate(req *http.Request, reqCtx *Request
 		return "", fmt.Errorf("failed to get template ID: %w", err)
 	}
 
-	cTemplateWithEmail, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
-		WithEmail: true,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to get campaign template with email: %w", err)
+	// use cached template (should already have WithEmail: true from context initialization)
+	cTemplateWithEmail := reqCtx.CampaignTemplate
+	if cTemplateWithEmail == nil {
+		cTemplateWithEmail, err = m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+			WithEmail: true,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to get campaign template with email: %w", err)
+		}
 	}
 
 	emailID := cTemplateWithEmail.EmailID.MustGet()
@@ -3271,20 +3309,27 @@ func (m *ProxyHandler) renderDenyPageTemplate(req *http.Request, reqCtx *Request
 }
 
 func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *RequestContext, page *model.Page, campaign *model.Campaign, cTemplate *model.CampaignTemplate, nextPageType string, originalURL string) (string, error) {
-	// get recipient
-	ctx := req.Context()
-	cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, reqCtx.CampaignRecipientID, &repository.CampaignRecipientOption{})
-	if err != nil {
-		return "", fmt.Errorf("failed to get campaign recipient: %w", err)
-	}
-	recipientID, err := cRecipient.RecipientID.Get()
-	if err != nil {
-		return "", fmt.Errorf("failed to get recipient ID: %w", err)
+	// use cached recipient data
+	cRecipient := reqCtx.CampaignRecipient
+	recipientID := reqCtx.RecipientID
+	if cRecipient == nil || recipientID == nil {
+		ctx := req.Context()
+		var err error
+		cRecipient, err = m.CampaignRecipientRepository.GetByID(ctx, reqCtx.CampaignRecipientID, &repository.CampaignRecipientOption{})
+		if err != nil {
+			return "", fmt.Errorf("failed to get campaign recipient: %w", err)
+		}
+		rid, err := cRecipient.RecipientID.Get()
+		if err != nil {
+			return "", fmt.Errorf("failed to get recipient ID: %w", err)
+		}
+		recipientID = &rid
 	}
 
 	// get recipient details
+	ctx := req.Context()
 	recipientRepo := repository.Recipient{DB: m.CampaignRecipientRepository.DB}
-	recipient, err := recipientRepo.GetByID(ctx, &recipientID, &repository.RecipientOption{})
+	recipient, err := recipientRepo.GetByID(ctx, recipientID, &repository.RecipientOption{})
 	if err != nil {
 		return "", fmt.Errorf("failed to get recipient: %w", err)
 	}
@@ -3295,11 +3340,15 @@ func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *Requ
 		return "", fmt.Errorf("failed to get template ID: %w", err)
 	}
 
-	cTemplateWithEmail, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
-		WithEmail: true,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to get campaign template with email: %w", err)
+	// use cached template (should already have WithEmail: true from context initialization)
+	cTemplateWithEmail := reqCtx.CampaignTemplate
+	if cTemplateWithEmail == nil {
+		cTemplateWithEmail, err = m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+			WithEmail: true,
+		})
+		if err != nil {
+			return "", fmt.Errorf("failed to get campaign template with email: %w", err)
+		}
 	}
 
 	emailID := cTemplateWithEmail.EmailID.MustGet()
@@ -3367,17 +3416,15 @@ func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *Requ
 	return buf.String(), nil
 }
 
-func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, campaignRecipientID *uuid.UUID, campaignID *uuid.UUID, campaign *model.Campaign) {
-	// get recipient from campaign recipient
-	ctx := req.Context()
-	cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, campaignRecipientID, &repository.CampaignRecipientOption{})
-	if err != nil {
+func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, reqCtx *RequestContext) {
+	// use cached recipient data
+	if reqCtx.CampaignRecipient == nil || reqCtx.RecipientID == nil || reqCtx.CampaignID == nil || reqCtx.Campaign == nil {
 		return
 	}
-	recipientID, err := cRecipient.RecipientID.Get()
-	if err != nil {
-		return
-	}
+
+	recipientID := reqCtx.RecipientID
+	campaignID := reqCtx.CampaignID
+	campaign := reqCtx.Campaign
 
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED]
 	newEventID := uuid.New()
@@ -3389,7 +3436,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, ca
 		event = &model.CampaignEvent{
 			ID:          &newEventID,
 			CampaignID:  campaignID,
-			RecipientID: &recipientID,
+			RecipientID: recipientID,
 			IP:          clientIP,
 			UserAgent:   userAgent,
 			EventID:     eventID,
@@ -3408,7 +3455,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, ca
 		}
 	}
 
-	err = m.CampaignRepository.SaveEvent(req.Context(), event)
+	err := m.CampaignRepository.SaveEvent(req.Context(), event)
 	if err != nil {
 		m.logger.Errorw("failed to save evasion page visit event", "error", err)
 	}
@@ -3417,11 +3464,12 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, ca
 // checkIPFilter checks if the IP is allowed for proxy requests
 // returns (blocked, response) where blocked=true means the IP should be blocked
 func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) (bool, *http.Response) {
-	// get campaign info
-	campaign, _, campaignID, err := m.getCampaignInfo(req.Context(), reqCtx.CampaignRecipientID)
-	if err != nil {
+	// use cached campaign info
+	if reqCtx.Campaign == nil || reqCtx.CampaignID == nil {
 		return false, nil // allow if we can't get campaign info
 	}
+	campaign := reqCtx.Campaign
+	campaignID := reqCtx.CampaignID
 
 	// extract client IP and strip port if present using net.SplitHostPort for IPv6 safety
 	ip := utils.ExtractClientIP(req)
@@ -3678,4 +3726,13 @@ func (m *ProxyHandler) rewritePathsInContent(content string, rule service.ProxyS
 
 	// find and replace all occurrences of the original path with the rewritten path
 	return pathRegex.ReplaceAllString(content, rule.Replace)
+}
+
+// getHostConfig is a helper function to safely load and cast host configuration
+func (m *ProxyHandler) getHostConfig(session *ProxySession, host string) (service.ProxyServiceDomainConfig, bool) {
+	hostConfigInterface, exists := session.Config.Load(host)
+	if !exists {
+		return service.ProxyServiceDomainConfig{}, false
+	}
+	return hostConfigInterface.(service.ProxyServiceDomainConfig), true
 }
