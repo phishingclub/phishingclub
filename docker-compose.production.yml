@@ -1,0 +1,26 @@
+# PhishingClub Production Docker Compose
+version: "3.8"
+
+services:
+  phishingclub:
+    image: ghcr.io/phishingclub/phishingclub:latest
+
+    container_name: phishingclub
+    restart: unless-stopped
+
+    # Mount config and data directories
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+
+    ports:
+      - "80:8080" # HTTP phishing server
+      - "443:8443" # HTTPS phishing server
+      - "8000:8000" # Admin interface
+
+    networks:
+      - phishingclub
+
+networks:
+  phishingclub:
+    driver: bridge
