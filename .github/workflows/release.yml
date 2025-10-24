@@ -137,24 +137,6 @@ jobs:
             --title "PhishingClub ${{ steps.get_version.outputs.TAG }}" \
             --notes "${{ steps.get_release_notes.outputs.NOTES }}"
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.release
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.VERSION }}
-            ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.TAG }}
-          labels: |
-            org.opencontainers.image.title=PhishingClub
-            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.version=${{ steps.get_version.outputs.VERSION }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
-            org.opencontainers.image.revision=${{ github.sha }}
-
       - name: Notify about release
         run: |
           curl -d "phishingclub version ${{ steps.get_version.outputs.VERSION }} has been released on GitHub" https://ntfy.sh/phishing_club_released
