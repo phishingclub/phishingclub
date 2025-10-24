@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.9.1] - 2025-10-25
+- Fixed missing proxy logic for modifying sessionless request and headers
+- Fixed actions width to align with header width
+
 ## [1.9.0] - 2025-10-24
 - Revamped proxy access directive
 - Added proxy rewrite URL directive
