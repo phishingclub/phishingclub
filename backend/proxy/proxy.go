@@ -14,6 +14,7 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -159,7 +160,24 @@ func NewProxyHandler(
 }
 
 // HandleHTTPRequest processes incoming http requests through the proxy
-func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Request, domain *database.Domain) error {
+func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Request, domain *database.Domain) (err error) {
+	// add panic recovery with debug trace
+	defer func() {
+		if r := recover(); r != nil {
+			m.logger.Errorw("proxy handler panic recovered",
+				"panic", r,
+				"host", req.Host,
+				"path", req.URL.Path,
+				"query", req.URL.RawQuery,
+				"method", req.Method,
+				"userAgent", req.UserAgent(),
+				"remoteAddr", req.RemoteAddr,
+				"stack", string(debug.Stack()),
+			)
+			err = fmt.Errorf("proxy handler panic: %v", r)
+		}
+	}()
+
 	ctx := req.Context()
 
 	// initialize request context
@@ -3140,26 +3158,116 @@ func (m *ProxyHandler) serveDenyPageResponseDirect(req *http.Request, reqCtx *Re
 		return nil
 	}
 
-	// render the deny page
-	htmlContent, err := denyPage.Content.Get()
+	// render deny page with full template processing
+	htmlContent, err := m.renderDenyPageTemplate(req, reqCtx, denyPage, campaign, cTemplate)
 	if err != nil {
+		m.logger.Errorw("failed to render deny page template", "error", err)
 		return nil
 	}
-
-	content := htmlContent.String()
 
 	// create HTTP response
 	resp := &http.Response{
 		StatusCode: 200,
 		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader(content)),
+		Body:       io.NopCloser(strings.NewReader(htmlContent)),
 	}
 
 	resp.Header.Set("Content-Type", "text/html; charset=utf-8")
-	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(content)))
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(htmlContent)))
 	resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 
 	return resp
+}
+
+// renderDenyPageTemplate renders the deny page with full template processing like evasion pages
+func (m *ProxyHandler) renderDenyPageTemplate(req *http.Request, reqCtx *RequestContext, page *model.Page, campaign *model.Campaign, cTemplate *model.CampaignTemplate) (string, error) {
+	// get recipient
+	ctx := req.Context()
+	cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, reqCtx.CampaignRecipientID, &repository.CampaignRecipientOption{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get campaign recipient: %w", err)
+	}
+	recipientID, err := cRecipient.RecipientID.Get()
+	if err != nil {
+		return "", fmt.Errorf("failed to get recipient ID: %w", err)
+	}
+
+	// get recipient details
+	recipientRepo := repository.Recipient{DB: m.CampaignRecipientRepository.DB}
+	recipient, err := recipientRepo.GetByID(ctx, &recipientID, &repository.RecipientOption{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get recipient: %w", err)
+	}
+
+	// get email for template
+	templateID, err := campaign.TemplateID.Get()
+	if err != nil {
+		return "", fmt.Errorf("failed to get template ID: %w", err)
+	}
+
+	cTemplateWithEmail, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+		WithEmail: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to get campaign template with email: %w", err)
+	}
+
+	emailID := cTemplateWithEmail.EmailID.MustGet()
+	emailRepo := repository.Email{DB: m.CampaignRepository.DB}
+	email, err := emailRepo.GetByID(ctx, &emailID, &repository.EmailOption{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get email: %w", err)
+	}
+
+	// get domain
+	hostVO, err := vo.NewString255(req.Host)
+	if err != nil {
+		return "", fmt.Errorf("failed to create host VO: %w", err)
+	}
+	domain, err := m.DomainRepository.GetByName(ctx, hostVO, &repository.DomainOption{})
+	if err != nil {
+		return "", fmt.Errorf("failed to get domain: %w", err)
+	}
+
+	// get page content
+	htmlContent, err := page.Content.Get()
+	if err != nil {
+		return "", fmt.Errorf("failed to get deny page HTML content: %w", err)
+	}
+
+	// convert model.Domain to database.Domain
+	var proxyID *uuid.UUID
+	if id, err := domain.ProxyID.Get(); err == nil {
+		proxyID = &id
+	}
+
+	dbDomain := &database.Domain{
+		ID:                domain.ID.MustGet(),
+		Name:              domain.Name.MustGet().String(),
+		Type:              domain.Type.MustGet().String(),
+		ProxyID:           proxyID,
+		ProxyTargetDomain: domain.ProxyTargetDomain.MustGet().String(),
+		HostWebsite:       domain.HostWebsite.MustGet(),
+		RedirectURL:       domain.RedirectURL.MustGet().String(),
+	}
+
+	// use template service to render the deny page with full template processing
+	buf, err := m.TemplateService.CreatePhishingPageWithCampaign(
+		dbDomain,
+		email,
+		reqCtx.CampaignRecipientID,
+		recipient,
+		htmlContent.String(),
+		cTemplate,
+		"", // no state parameter for deny pages
+		req.URL.Path,
+		campaign,
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to render deny page template: %w", err)
+	}
+
+	return buf.String(), nil
 }
 
 func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *RequestContext, page *model.Page, campaign *model.Campaign, cTemplate *model.CampaignTemplate, nextPageType string, originalURL string) (string, error) {

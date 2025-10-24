@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	textTmpl "text/template"
 	"time"
@@ -336,6 +337,10 @@ func (s *Server) Handler(c *gin.Context) {
 				"panic", r,
 				"host", c.Request.Host,
 				"url", c.Request.URL.String(),
+				"method", c.Request.Method,
+				"userAgent", c.Request.UserAgent(),
+				"remoteAddr", c.Request.RemoteAddr,
+				"stack", string(debug.Stack()),
 			)
 			c.Status(http.StatusInternalServerError)
 			c.Abort()
@@ -1450,31 +1455,126 @@ func (s *Server) renderDenyPage(
 		&repository.PageOption{},
 	)
 	if err != nil {
-		return fmt.Errorf("failed to get landing page: %s", err)
+		return fmt.Errorf("failed to get deny page: %s", err)
 	}
-	tmpl, err := textTmpl.New("page").
-		Funcs(service.TemplateFuncs()).
-		Parse(page.Content.MustGet().String())
+
+	// get campaign recipient - there MUST be one if we're rendering a deny page
+	campaignRecipient, _, err := server.GetCampaignRecipientFromURLParams(
+		ctx,
+		c.Request,
+		s.repositories.Identifier,
+		s.repositories.CampaignRecipient,
+	)
 	if err != nil {
-		return fmt.Errorf("failed to parse page template: %s", err)
+		return fmt.Errorf("failed to get campaign recipient for deny page: %s", err)
 	}
-	baseURL := "https://" + domain.Name
-	w := bytes.NewBuffer([]byte{})
-	err = tmpl.Execute(w,
-		map[string]string{
-			"BaseURL": baseURL,
-		})
+	if campaignRecipient == nil {
+		return fmt.Errorf("campaign recipient is nil")
+	}
+
+	// get recipient ID from campaign recipient with nil check
+	recipientID, err := campaignRecipient.RecipientID.Get()
 	if err != nil {
-		return fmt.Errorf("failed to execute page template: %s", err)
+		return fmt.Errorf("campaign recipient has no recipient ID: %s", err)
 	}
-	c.Data(http.StatusOK, "text/html; charset=utf-8", w.Bytes())
+	recipient, err := s.repositories.Recipient.GetByID(ctx, &recipientID, &repository.RecipientOption{})
+	if err != nil {
+		return fmt.Errorf("failed to get recipient: %s", err)
+	}
+	if recipient == nil {
+		return fmt.Errorf("recipient is nil")
+	}
+
+	// get campaign with nil check
+	campaignID, err := campaignRecipient.CampaignID.Get()
+	if err != nil {
+		return fmt.Errorf("campaign recipient has no campaign ID: %s", err)
+	}
+	campaign, err := s.repositories.Campaign.GetByID(ctx, &campaignID, &repository.CampaignOption{})
+	if err != nil {
+		return fmt.Errorf("failed to get campaign: %s", err)
+	}
+	if campaign == nil {
+		return fmt.Errorf("campaign is nil")
+	}
+
+	// get campaign template with email and nil check
+	templateID, err := campaign.TemplateID.Get()
+	if err != nil {
+		return fmt.Errorf("campaign has no template ID: %s", err)
+	}
+	cTemplate, err := s.repositories.CampaignTemplate.GetByID(
+		ctx,
+		&templateID,
+		&repository.CampaignTemplateOption{
+			WithEmail:      true,
+			WithIdentifier: true,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("failed to get campaign template: %s", err)
+	}
+	if cTemplate == nil {
+		return fmt.Errorf("campaign template is nil")
+	}
+
+	// get email with nil check
+	emailID, err := cTemplate.EmailID.Get()
+	if err != nil {
+		return fmt.Errorf("campaign template has no email ID: %s", err)
+	}
+	email, err := s.repositories.Email.GetByID(ctx, &emailID, &repository.EmailOption{})
+	if err != nil {
+		return fmt.Errorf("failed to get email: %s", err)
+	}
+	if email == nil {
+		return fmt.Errorf("email is nil")
+	}
+
+	// get campaign recipient ID with nil check
+	campaignRecipientID, err := campaignRecipient.ID.Get()
+	if err != nil {
+		return fmt.Errorf("campaign recipient has no ID: %s", err)
+	}
+
+	// render with full template context
+	buf, err := s.services.Template.CreatePhishingPageWithCampaign(
+		domain,
+		email,
+		&campaignRecipientID,
+		recipient,
+		page.Content.MustGet().String(),
+		cTemplate,
+		"", // no state parameter for deny pages
+		c.Request.URL.Path,
+		campaign,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to render deny page template: %s", err)
+	}
+
+	c.Data(http.StatusOK, "text/html; charset=utf-8", buf.Bytes())
 	c.Abort()
-	s.logger.Debugw("rendered deny page: %s",
-		"pageName", page.Name.MustGet().String(),
-		"pageID", page.ID.MustGet().String(),
+	// safely log with nil checks
+	pageName := "unknown"
+	if pageNameVal, err := page.Name.Get(); err == nil {
+		pageName = pageNameVal.String()
+	}
+	pageIDStr := "unknown"
+	if pageIDVal, err := page.ID.Get(); err == nil {
+		pageIDStr = pageIDVal.String()
+	}
+	recipientEmailStr := "unknown"
+	if recipientEmailVal, err := recipient.Email.Get(); err == nil {
+		recipientEmailStr = recipientEmailVal.String()
+	}
+
+	s.logger.Debugw("rendered deny page",
+		"pageName", pageName,
+		"pageID", pageIDStr,
+		"recipientEmail", recipientEmailStr,
 	)
 	return nil
-
 }
 
 // AssignRoutes assigns the routes to the server
