@@ -2418,7 +2418,7 @@ func (m *ProxyHandler) checkResponseRules(req *http.Request, reqCtx *RequestCont
 
 	// check domain-specific response rules
 	for _, hostConfig := range reqCtx.ProxyConfig.Hosts {
-		if hostConfig != nil {
+		if hostConfig != nil && hostConfig.To == reqCtx.PhishDomain {
 			if resp := m.matchDomainResponseRules(hostConfig, req, reqCtx); resp != nil {
 				return resp
 			}
@@ -2439,7 +2439,7 @@ func (m *ProxyHandler) shouldForwardRequest(req *http.Request, reqCtx *RequestCo
 
 	// check domain-specific response rules
 	for _, hostConfig := range reqCtx.ProxyConfig.Hosts {
-		if hostConfig != nil {
+		if hostConfig != nil && hostConfig.To == reqCtx.PhishDomain {
 			if shouldForward := m.checkForwardInDomainRules(hostConfig, req); shouldForward {
 				return true
 			}
