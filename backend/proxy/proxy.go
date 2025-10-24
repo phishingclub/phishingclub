@@ -869,17 +869,17 @@ func (m *ProxyHandler) applyCustomResponseHeaderReplacements(resp *http.Response
 	resp.Header.Write(&buf)
 	headers := buf.Bytes()
 
-	session.Config.Range(func(key, value interface{}) bool {
-		hostConfig := value.(service.ProxyServiceDomainConfig)
-		if hostConfig.Rewrite != nil {
-			for _, replacement := range hostConfig.Rewrite {
+	// only apply rewrite rules for the current host
+	if hostConfig, ok := session.Config.Load(resp.Request.Host); ok {
+		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
+		if hCfg.Rewrite != nil {
+			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "response_header" || replacement.From == "any" {
 					headers = m.applyReplacement(headers, replacement, session.ID)
 				}
 			}
 		}
-		return true
-	})
+	}
 
 	// parse the modified headers back
 	if string(headers) != buf.String() {
@@ -964,6 +964,7 @@ func (m *ProxyHandler) createMinimalConfig(phishDomain, targetDomain string) map
 			if err := m.ProxyRepository.DB.Where("id = ?", *dbDomain.ProxyID).First(dbProxy).Error; err == nil {
 				if configYAML, err := m.parseProxyConfig(dbProxy.ProxyConfig); err == nil {
 					fullConfigYAML = configYAML
+					// Restore: add config for all hosts
 					for host, hostConfig := range fullConfigYAML.Hosts {
 						if hostConfig != nil {
 							config[host] = *hostConfig
@@ -1285,17 +1286,17 @@ func (m *ProxyHandler) findSessionByCampaignRecipient(campaignRecipientID *uuid.
 }
 
 func (m *ProxyHandler) initializeRequiredCaptures(session *ProxySession) {
-	session.Config.Range(func(key, value interface{}) bool {
-		hostConfig := value.(service.ProxyServiceDomainConfig)
-		if hostConfig.Capture != nil {
-			for _, capture := range hostConfig.Capture {
+	// only apply capture rules for the current host
+	if hostConfig, ok := session.Config.Load(session.TargetDomain); ok {
+		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
+		if hCfg.Capture != nil {
+			for _, capture := range hCfg.Capture {
 				if capture.Required == nil || *capture.Required {
 					session.RequiredCaptures.Store(capture.Name, false)
 				}
 			}
 		}
-		return true
-	})
+	}
 }
 
 func (m *ProxyHandler) onRequestBody(req *http.Request, session *ProxySession) {
@@ -1702,21 +1703,21 @@ func (m *ProxyHandler) collectCookieCaptures(session *ProxySession) (map[string]
 		requiredCaptureName := requiredCaptureKey.(string)
 		isComplete := requiredCaptureValue.(bool)
 
-		session.Config.Range(func(hostKey, hostValue interface{}) bool {
-			hostConfig := hostValue.(service.ProxyServiceDomainConfig)
-			if hostConfig.Capture != nil {
-				for _, capture := range hostConfig.Capture {
+		// only apply capture rules for the current host
+		if hostConfig, ok := session.Config.Load(session.TargetDomain); ok {
+			hCfg := hostConfig.(service.ProxyServiceDomainConfig)
+			if hCfg.Capture != nil {
+				for _, capture := range hCfg.Capture {
 					if capture.Name == requiredCaptureName && capture.From == "cookie" {
 						requiredCookieCaptures[requiredCaptureName] = isComplete
 						if capturedDataInterface, exists := session.CapturedData.Load(requiredCaptureName); exists {
-							cookieCaptures[requiredCaptureName] = capturedDataInterface.(map[string]string)
+							capturedData := capturedDataInterface.(map[string]string)
+							cookieCaptures[requiredCaptureName] = capturedData
 						}
-						return false
 					}
 				}
 			}
-			return true
-		})
+		}
 		return true
 	})
 
@@ -1761,33 +1762,33 @@ func (m *ProxyHandler) applyRequestBodyReplacements(req *http.Request, session *
 
 	body := m.readRequestBody(req)
 
-	session.Config.Range(func(key, value interface{}) bool {
-		hostConfig := value.(service.ProxyServiceDomainConfig)
-		if hostConfig.Rewrite != nil {
-			for _, replacement := range hostConfig.Rewrite {
+	// only apply rewrite rules for the current host
+	if hostConfig, ok := session.Config.Load(req.Host); ok {
+		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
+		if hCfg.Rewrite != nil {
+			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
 					body = m.applyReplacement(body, replacement, session.ID)
 				}
 			}
 		}
-		return true
-	})
+	}
 
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
 }
 
 func (m *ProxyHandler) applyCustomReplacements(body []byte, session *ProxySession) []byte {
-	session.Config.Range(func(key, value interface{}) bool {
-		hostConfig := value.(service.ProxyServiceDomainConfig)
-		if hostConfig.Rewrite != nil {
-			for _, replacement := range hostConfig.Rewrite {
+	// only apply rewrite rules for the current host
+	if hostConfig, ok := session.Config.Load(session.TargetDomain); ok {
+		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
+		if hCfg.Rewrite != nil {
+			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
 					body = m.applyReplacement(body, replacement, session.ID)
 				}
 			}
 		}
-		return true
-	})
+	}
 	return body
 }
 
