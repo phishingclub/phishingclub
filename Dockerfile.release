@@ -25,5 +25,5 @@ USER appuser
 # expose ports (using non-privileged ports by default)
 EXPOSE 8080 8443 8000
 
-# run the binary with default flags
-CMD ["/app/phishingclub"]
+# run the binary with config path
+CMD ["/app/phishingclub", "--config", "/app/config/config.json"]
