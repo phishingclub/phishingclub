@@ -1,4 +1,3 @@
-# production dockerfile for release builds
 FROM debian:12-slim
 
 # install ca-certificates for https requests
@@ -10,48 +9,21 @@ RUN apt-get update && \
 RUN groupadd -g 1000 appuser && \
     useradd -r -u 1000 -g appuser appuser
 
-# create app and data directories
+# set working directory
 WORKDIR /app
-RUN mkdir -p /app/data && \
-    mkdir -p /app/config
 
 # copy the binary from build context
 COPY build/phishingclub /app/phishingclub
 
-# copy docker-friendly config
-COPY config.docker.json /app/config.docker.json
-
-# create entrypoint script
-RUN cat > /app/entrypoint.sh << 'EOF'
-#!/bin/sh
-
-# check if config exists, if not use docker-friendly default
-if [ ! -f /app/config/config.json ]; then
-    echo "🔧 No config found, using Docker-friendly default (non-privileged ports)..."
-    cp /app/config.docker.json /app/config/config.json
-    echo "✅ Docker config copied to /app/config/config.json"
-    echo "💡 You can mount your own config at /app/config/config.json to override"
-fi
-
-# start the application
-exec /app/phishingclub --config /app/config/config.json --files /app/data "$@"
-EOF
-
-# make scripts executable
+# make binary executable and set ownership
 RUN chmod +x /app/phishingclub && \
-    chmod +x /app/entrypoint.sh
+    chown appuser:appuser /app/phishingclub
 
-# change ownership to appuser
-RUN chown -R appuser:appuser /app
-
-# switch to non-root user
-USER appuser
+# copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # expose ports (using non-privileged ports by default)
 EXPOSE 8080 8443 8000
 
-# create volumes for config and data
-VOLUME ["/app/config", "/app/data"]
-
-# use entrypoint script
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
