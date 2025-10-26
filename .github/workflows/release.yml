@@ -96,6 +96,25 @@ jobs:
               phishingclub \
               phishingclub.sig
 
+      - name: Build and push release Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.release
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.VERSION }}
+          labels: |
+            org.opencontainers.image.title=PhishingClub ${{ steps.get_version.outputs.VERSION }}
+            org.opencontainers.image.description=PhishingClub production release image (linux/amd64). Built from tag ${{ steps.get_version.outputs.TAG }}.
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.get_version.outputs.VERSION }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
       - name: Extract release notes from RELEASE.md
         id: get_release_notes
         run: |
