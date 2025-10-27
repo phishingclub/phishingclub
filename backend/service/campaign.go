@@ -3733,19 +3733,6 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 	}
 	c.Logger.Debugf("retrieved result stats", "campaignID", campaignID.String(), "recipients", resultStats.Recipients)
 
-	// Calculate rates
-	openRate := float64(0)
-	clickRate := float64(0)
-	submissionRate := float64(0)
-	reportRate := float64(0)
-
-	if resultStats.Recipients > 0 {
-		openRate = (float64(resultStats.TrackingPixelLoaded) / float64(resultStats.Recipients)) * 100
-		clickRate = (float64(resultStats.WebsiteLoaded) / float64(resultStats.Recipients)) * 100
-		submissionRate = (float64(resultStats.SubmittedData) / float64(resultStats.Recipients)) * 100
-		reportRate = (float64(resultStats.Reported) / float64(resultStats.Recipients)) * 100
-	}
-
 	// Determine campaign type
 	campaignType := "scheduled"
 	if campaign.SendStartAt == nil && campaign.SendEndAt == nil {
@@ -3805,10 +3792,6 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 		WebsiteVisits:       int(resultStats.WebsiteLoaded),
 		DataSubmissions:     int(resultStats.SubmittedData),
 		Reported:            int(resultStats.Reported),
-		OpenRate:            openRate,
-		ClickRate:           clickRate,
-		SubmissionRate:      submissionRate,
-		ReportRate:          reportRate,
 
 		TemplateName: templateName,
 		CampaignType: campaignType,
@@ -3905,14 +3888,6 @@ func (c *Campaign) CreateManualCampaignStats(ctx context.Context, session *model
 	req.UpdatedAt = &statsDate
 	req.CampaignID = nil // No campaign reference for manual stats
 
-	// Calculate rates
-	if req.TotalRecipients > 0 {
-		req.OpenRate = float64(req.TrackingPixelLoaded) / float64(req.TotalRecipients) * 100
-		req.ClickRate = float64(req.WebsiteVisits) / float64(req.TotalRecipients) * 100
-		req.SubmissionRate = float64(req.DataSubmissions) / float64(req.TotalRecipients) * 100
-		req.ReportRate = float64(req.Reported) / float64(req.TotalRecipients) * 100
-	}
-
 	// Calculate total events
 	req.TotalEvents = req.EmailsSent + req.TrackingPixelLoaded + req.WebsiteVisits + req.DataSubmissions + req.Reported
 
@@ -3988,14 +3963,6 @@ func (c *Campaign) UpdateManualCampaignStats(ctx context.Context, session *model
 	req.UpdatedAt = &now
 	req.CampaignID = nil // Ensure it remains manual
 
-	// Calculate rates
-	if req.TotalRecipients > 0 {
-		req.OpenRate = float64(req.TrackingPixelLoaded) / float64(req.TotalRecipients) * 100
-		req.ClickRate = float64(req.WebsiteVisits) / float64(req.TotalRecipients) * 100
-		req.SubmissionRate = float64(req.DataSubmissions) / float64(req.TotalRecipients) * 100
-		req.ReportRate = float64(req.Reported) / float64(req.TotalRecipients) * 100
-	}
-
 	// Calculate total events
 	req.TotalEvents = req.EmailsSent + req.TrackingPixelLoaded + req.WebsiteVisits + req.DataSubmissions + req.Reported
 
@@ -4014,10 +3981,6 @@ func (c *Campaign) UpdateManualCampaignStats(ctx context.Context, session *model
 		"website_visits":        req.WebsiteVisits,
 		"data_submissions":      req.DataSubmissions,
 		"reported":              req.Reported,
-		"open_rate":             req.OpenRate,
-		"click_rate":            req.ClickRate,
-		"submission_rate":       req.SubmissionRate,
-		"report_rate":           req.ReportRate,
 		"template_name":         req.TemplateName,
 		"campaign_type":         req.CampaignType,
 	}

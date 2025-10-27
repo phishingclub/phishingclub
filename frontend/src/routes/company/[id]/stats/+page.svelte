@@ -25,6 +25,41 @@
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
 
+	function getStatPercentages(stats) {
+		const totalRecipients = stats.totalRecipients || 0;
+		const emailsSent = stats.emailsSent || 0;
+		const read = stats.trackingPixelLoaded || 0;
+		const clicked = stats.websiteVisits || 0;
+		const reported = stats.reported || 0;
+
+		function pct(n, d) {
+			return d > 0 ? Math.round((n / d) * 100) : 0;
+		}
+
+		return {
+			sent: {
+				count: emailsSent,
+				absolute: pct(emailsSent, totalRecipients),
+				relative: pct(emailsSent, totalRecipients)
+			},
+			read: {
+				count: read,
+				absolute: pct(read, totalRecipients),
+				relative: pct(read, emailsSent)
+			},
+			clicked: {
+				count: clicked,
+				absolute: pct(clicked, totalRecipients),
+				relative: pct(clicked, read)
+			},
+			reported: {
+				count: reported,
+				absolute: pct(reported, totalRecipients),
+				relative: pct(reported, emailsSent)
+			}
+		};
+	}
+
 	// Get company ID from URL params
 	$: companyId = $page.params.id;
 
@@ -299,15 +334,52 @@
 
 	<BigButton on:click={openCreateModal}>Add</BigButton>
 
+	<script>
+		function getStatPercentages(stats) {
+			const totalRecipients = stats.totalRecipients || 0;
+			const emailsSent = stats.emailsSent || 0;
+			const read = stats.trackingPixelLoaded || 0;
+			const clicked = stats.websiteVisits || 0;
+			const reported = stats.reported || 0;
+
+			function pct(n, d) {
+				return d > 0 ? Math.round((n / d) * 100) : 0;
+			}
+
+			return {
+				sent: {
+					count: emailsSent,
+					absolute: pct(emailsSent, totalRecipients),
+					relative: pct(emailsSent, totalRecipients)
+				},
+				read: {
+					count: read,
+					absolute: pct(read, totalRecipients),
+					relative: pct(read, emailsSent)
+				},
+				clicked: {
+					count: clicked,
+					absolute: pct(clicked, totalRecipients),
+					relative: pct(clicked, read)
+				},
+				reported: {
+					count: reported,
+					absolute: pct(reported, totalRecipients),
+					relative: pct(reported, emailsSent)
+				}
+			};
+		}
+	</script>
+
 	<Table
 		columns={[
 			{ column: 'Campaign Name', size: 'large' },
-			{ column: 'Recipients', size: 'small' },
-			{ column: 'Open Rate', size: 'small' },
-			{ column: 'Click Rate', size: 'small' },
-			{ column: 'Submission Rate', size: 'small' },
-			{ column: 'Report Rate', size: 'small' },
-			{ column: 'Date', size: 'small' }
+			{ column: 'Recipients', size: 'small', alignText: 'center' },
+			{ column: 'Sent', size: 'small', alignText: 'center' },
+			{ column: 'Read', size: 'small', alignText: 'center' },
+			{ column: 'Clicked', size: 'small', alignText: 'center' },
+			{ column: 'Reported', size: 'small', alignText: 'center' },
+			{ column: 'Time ago', size: 'small', alignText: 'center' }
 		]}
 		sortable={[]}
 		hasData={!!customStats.length}
@@ -315,6 +387,7 @@
 		isGhost={isTableLoading}
 	>
 		{#each customStats as stats}
+			{@const pct = getStatPercentages(stats)}
 			<TableRow>
 				<TableCell>
 					<button
@@ -324,12 +397,18 @@
 						{stats.campaignName}
 					</button>
 				</TableCell>
-				<TableCell value={stats.totalRecipients} />
-				<TableCell value="{Math.round(stats.openRate)}%" />
-				<TableCell value="{Math.round(stats.clickRate)}%" />
-				<TableCell value="{Math.round(stats.submissionRate)}%" />
-				<TableCell value="{Math.round(stats.reportRate)}%" />
-				<TableCell value={stats.createdAt} isDate isRelative />
+				<TableCell alignText="center" value={stats.totalRecipients} />
+				<TableCell alignText="center" value={pct.sent.count} />
+				<TableCell alignText="center" value={`${pct.read.count} (${pct.read.absolute}%)`} />
+				<TableCell
+					alignText="center"
+					value={`${pct.clicked.count} (${pct.clicked.absolute}%, rel: ${pct.clicked.relative}%)`}
+				/>
+				<TableCell
+					alignText="center"
+					value={`${pct.reported.count} (${pct.reported.absolute}%, rel: ${pct.reported.relative}%)`}
+				/>
+				<TableCell alignText="center" value={stats.createdAt} isDate isRelative />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

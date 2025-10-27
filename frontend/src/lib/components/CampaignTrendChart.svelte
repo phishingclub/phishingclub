@@ -219,17 +219,19 @@
 				(a, b) => new Date(a.campaignClosedAt).getTime() - new Date(b.campaignClosedAt).getTime()
 			);
 
+		// calculate percentage with one decimal place
+		function pct(n, d) {
+			return d > 0 ? Math.round((n / d) * 1000) / 10 : 0;
+		}
+
 		return sortedStats.map((stat, index) => ({
 			index: index + 1,
 			date: stat.campaignClosedAt ? new Date(stat.campaignClosedAt) : null,
 			name: stat.campaignName || `Campaign ${index + 1}`,
-			// If your backend provides fractions (e.g., 0.425 for 42.5%), multiply by 100 below.
-			// If it produces percentages (e.g., 42.5 for 42.5%), leave as is.
-			openRate: Math.round((stat.openRate || 0) * (stat.openRate > 1 ? 1 : 100) * 10) / 10,
-			clickRate: Math.round((stat.clickRate || 0) * (stat.clickRate > 1 ? 1 : 100) * 10) / 10,
-			submissionRate:
-				Math.round((stat.submissionRate || 0) * (stat.submissionRate > 1 ? 1 : 100) * 10) / 10,
-			reportRate: Math.round((stat.reportRate || 0) * (stat.reportRate > 1 ? 1 : 100) * 10) / 10,
+			openRate: pct(stat.trackingPixelLoaded, stat.totalRecipients),
+			clickRate: pct(stat.websiteVisits, stat.totalRecipients),
+			submissionRate: pct(stat.dataSubmissions, stat.totalRecipients),
+			reportRate: pct(stat.reported, stat.totalRecipients),
 			totalRecipients: stat.totalRecipients
 		}));
 	}

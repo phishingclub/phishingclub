@@ -37,12 +37,6 @@ type CampaignStats struct {
 	DataSubmissions     int `gorm:"not null;default:0" json:"dataSubmissions"`     // Form submissions
 	Reported            int `gorm:"not null;default:0" json:"reported"`            // Reported phishing
 
-	// Success rates (as percentages for quick display)
-	OpenRate       float64 `gorm:"not null;default:0" json:"openRate"`
-	ClickRate      float64 `gorm:"not null;default:0" json:"clickRate"`
-	SubmissionRate float64 `gorm:"not null;default:0" json:"submissionRate"`
-	ReportRate     float64 `gorm:"not null;default:0" json:"reportRate"`
-
 	// Campaign metadata
 	TemplateName string `gorm:"" json:"templateName"`
 	CampaignType string `gorm:"" json:"campaignType"` // 'scheduled', 'self-managed'
