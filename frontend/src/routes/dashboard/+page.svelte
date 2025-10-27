@@ -58,6 +58,7 @@
 	let scheduled = 0;
 	let finished = 0;
 	let repeatOffenders = 0;
+	let finishedCustomStats = 0;
 
 	let calendarCampaigns = [];
 	let activeCampaigns = [];
@@ -256,16 +257,13 @@
 			isCampaignStatsLoading = true;
 		}
 		try {
-			const statsParams = newTableURLParams({
-				sortBy: 'campaign_closed_at',
-				sortOrder: 'desc',
-				perPage: 50
-			});
 			const res = await api.campaign.getAllCampaignStats(contextCompanyID);
 			if (!res.success) {
 				throw res.error;
 			}
 			campaignStats = res.data.rows || [];
+			// stats without a campaign ID is custom stats
+			finishedCustomStats = res.data.rows.filter((c) => !c.campaignId).length;
 		} catch (e) {
 			addToast('Failed to load campaign statistics', 'Error');
 			console.error('Failed to load campaign statistics', e);
@@ -434,7 +432,7 @@
 		<a href="/campaign">
 			<StatsCard
 				title="Completed Campaigns"
-				value={finished}
+				value={finished > 0 ? finished : finishedCustomStats}
 				borderColor="border-message-read"
 				iconColor="text-message-read"
 			>
