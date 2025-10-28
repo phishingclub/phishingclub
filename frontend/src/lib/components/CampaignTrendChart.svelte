@@ -104,8 +104,9 @@
 		}
 	}
 
-	// Legend visibility state
-	let visibleMetrics = {
+	// legend visibility state - persisted in localstorage when possible
+	const VISIBLE_METRICS_KEY = 'campaignTrend.visibleMetrics';
+	const defaultVisibleMetrics = {
 		openRate: true,
 		clickRate: true,
 		submissionRate: true,
@@ -114,6 +115,51 @@
 		'mavg-submissionRate': false,
 		'mavg-reportRate': false
 	};
+	let visibleMetrics;
+	try {
+		const stored = localStorage.getItem(VISIBLE_METRICS_KEY);
+		visibleMetrics = stored ? JSON.parse(stored) : { ...defaultVisibleMetrics };
+	} catch (e) {
+		visibleMetrics = { ...defaultVisibleMetrics };
+	}
+
+	// whenever metrics change, merge into visibleMetrics but preserve user choices.
+	// reassign the object to ensure svelte reactivity fires.
+	$: if (metrics && Array.isArray(metrics)) {
+		const merged = { ...visibleMetrics };
+		// add any newly introduced metrics (default visible)
+		for (const metric of metrics) {
+			if (!(metric.key in merged)) {
+				merged[metric.key] = true;
+			}
+			// ensure moving-average keys exist for relevant metrics (keep existing default)
+			const mavgKey = `mavg-${metric.key}`;
+			if (!(mavgKey in merged)) {
+				merged[mavgKey] = merged[mavgKey] ?? false;
+			}
+		}
+		// remove keys that no longer correspond to current metrics
+		for (const key of Object.keys(merged)) {
+			if (key.startsWith('mavg-')) {
+				const base = key.slice(5);
+				if (!metrics.find((m) => m.key === base)) {
+					delete merged[key];
+				}
+			} else {
+				if (!metrics.find((m) => m.key === key)) {
+					delete merged[key];
+				}
+			}
+		}
+		visibleMetrics = merged;
+	}
+
+	// persist visibleMetrics whenever it changes
+	$: try {
+		localStorage.setItem(VISIBLE_METRICS_KEY, JSON.stringify(visibleMetrics));
+	} catch (e) {
+		// ignore localstorage failures (e.g., private mode)
+	}
 
 	// Responsive margins based on container width
 	$: margin = {
@@ -169,9 +215,9 @@
 		{ key: 'reportRate', label: 'Report Rate', color: '#1e40af', suffix: '%' }
 	];
 
-	// Toggle metric visibility
+	// toggle metric visibility (reassign to trigger svelte reactivity and persist)
 	function toggleMetric(metricKey) {
-		visibleMetrics[metricKey] = !visibleMetrics[metricKey];
+		visibleMetrics = { ...visibleMetrics, [metricKey]: !visibleMetrics[metricKey] };
 		if (containerReady) {
 			createChart();
 		}
@@ -326,6 +372,12 @@
 
 		// Add hover listeners for legend enhancement
 		setupLegendHover(svg);
+
+		// apply stored visibility to DOM elements after chart rebuilt
+		// ensures user toggles remain applied even after hover interactions and data refreshes
+		if (typeof applyVisibility === 'function') {
+			applyVisibility(svg);
+		}
 	}
 
 	// Calculate moving average for a metric, window N (default 4, min 3)
@@ -608,6 +660,57 @@
 		});
 	}
 
+	function applyVisibility(svg) {
+		// enforce visibility state for all chart elements based on visibleMetrics
+		const allMainLines = svg.querySelectorAll('.main-line');
+		const allMovingAvgLines = svg.querySelectorAll('.moving-average-line');
+		const allDataPoints = svg.querySelectorAll('.chart-point');
+		const allGlowPoints = svg.querySelectorAll('.chart-point-glow');
+
+		allMainLines.forEach((line) => {
+			const metricKey = line.classList.toString().match(/main-line-(\w+)/)?.[1];
+			if (metricKey && visibleMetrics[metricKey]) {
+				line.style.display = 'block';
+			} else {
+				line.style.display = 'none';
+			}
+			line.classList.remove('line-enhanced', 'line-faded');
+		});
+
+		// handle moving average lines by metric keys to avoid matching the 'moving-average-line' token
+		metrics.forEach((metric) => {
+			const lines = svg.querySelectorAll(`.moving-average-${metric.key}`);
+			lines.forEach((line) => {
+				if (visibleMetrics[`mavg-${metric.key}`]) {
+					line.style.display = 'block';
+				} else {
+					line.style.display = 'none';
+				}
+				line.classList.remove('line-enhanced', 'line-faded');
+			});
+		});
+
+		allDataPoints.forEach((point) => {
+			const metricKey = point.getAttribute('data-metric');
+			if (metricKey && visibleMetrics[metricKey]) {
+				point.style.display = 'block';
+				point.style.opacity = '';
+			} else {
+				point.style.display = 'none';
+			}
+		});
+
+		allGlowPoints.forEach((glow) => {
+			const metricKey = glow.classList.toString().match(/chart-point-glow-(\w+)/)?.[1];
+			if (metricKey && visibleMetrics[metricKey]) {
+				glow.style.display = 'block';
+				glow.style.opacity = '';
+			} else {
+				glow.style.display = 'none';
+			}
+		});
+	}
+
 	function createLegend(svg, svgRoot) {
 		const legendY = margin.top + 5; // Align with chart top area
 		const legendX = width - margin.right + 10;
@@ -782,39 +885,10 @@
 			});
 
 			item.addEventListener('mouseleave', () => {
-				// Reset all lines and points to their original visibility state
-				allMainLines.forEach((line) => {
-					line.classList.remove('line-enhanced', 'line-faded');
-					const metricKey = line.classList.toString().match(/main-line-(\w+)/)?.[1];
-					if (metricKey && visibleMetrics[metricKey]) {
-						line.style.display = 'block';
-					} else {
-						line.style.display = 'none';
-					}
-				});
-				allMovingAvgLines.forEach((line) => {
-					line.classList.remove('line-enhanced', 'line-faded');
-					// Since we only create visible moving average lines, they should all stay visible
-					line.style.display = 'block';
-				});
-				allDataPoints.forEach((point) => {
-					const metricKey = point.getAttribute('data-metric');
-					if (metricKey && visibleMetrics[metricKey]) {
-						point.style.display = 'block';
-						point.style.opacity = '';
-					} else {
-						point.style.display = 'none';
-					}
-				});
-				allGlowPoints.forEach((glow) => {
-					const metricKey = glow.classList.toString().match(/chart-point-glow-(\w+)/)?.[1];
-					if (metricKey && visibleMetrics[metricKey]) {
-						glow.style.display = 'block';
-						glow.style.opacity = '';
-					} else {
-						glow.style.display = 'none';
-					}
-				});
+				// restore visibility based on persisted visibleMetrics
+				if (typeof applyVisibility === 'function') {
+					applyVisibility(svg);
+				}
 			});
 		});
 	}
