@@ -131,6 +131,7 @@
 
 	let chartData = [];
 	let xScale, yScale;
+	let useLogScale = false;
 
 	// Time range filter for campaigns
 	const timeRanges = [
@@ -277,7 +278,9 @@
 		const yExtent = [0, 100];
 
 		xScale = createLinearScale(xExtent, [margin.left, width - margin.right]);
-		yScale = createLinearScale(yExtent, [height - margin.bottom, margin.top]);
+		yScale = useLogScale
+			? createLogScale(yExtent, [height - margin.bottom, margin.top])
+			: createLinearScale(yExtent, [height - margin.bottom, margin.top]);
 
 		createGridLines(svg);
 		createAxes(svg);
@@ -380,6 +383,20 @@
 		const [r0, r1] = range;
 		const k = (r1 - r0) / (d1 - d0 || 1);
 		return (value) => r0 + k * (value - d0);
+	}
+
+	// log scale for y axis (clamps to min > 0)
+	function createLogScale(domain, range) {
+		const [d0, d1] = domain;
+		const [r0, r1] = range;
+		const min = Math.max(d0, 0.1);
+		const logd0 = Math.log10(min);
+		const logd1 = Math.log10(d1);
+		const k = (r1 - r0) / (logd1 - logd0 || 1);
+		return (value) => {
+			const v = Math.max(value, 0.1);
+			return r0 + k * (Math.log10(v) - logd0);
+		};
 	}
 
 	function createGridLines(svg) {
@@ -488,7 +505,7 @@
 			text.setAttribute('x', (margin.left - 10).toString());
 			text.setAttribute('y', (y - 2).toString());
 			text.setAttribute('text-anchor', 'end');
-			text.setAttribute('font-size', '11');
+			text.setAttribute('font-size', useLogScale ? '8' : '11');
 			text.setAttribute(
 				'fill',
 				document.documentElement.classList.contains('dark') ? '#e5e7eb' : '#6B7280'
@@ -1025,7 +1042,10 @@
 	});
 
 	// Only create chart when width is set and chartData is ready
-	$: if (containerReady && chartContainer && width > 0 && chartData.length > 1 && movingAvgN) {
+	$: if (
+		(containerReady && chartContainer && width > 0 && chartData.length > 1 && movingAvgN) ||
+		useLogScale
+	) {
 		createChart();
 	}
 </script>
@@ -1158,6 +1178,12 @@
 									class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 									style="height: 1.5rem;"
 								/>
+							</label>
+							<label
+								class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
+							>
+								Log scale:
+								<input type="checkbox" bind:checked={useLogScale} class="accent-blue-600" />
 							</label>
 						</div>
 					</div>
