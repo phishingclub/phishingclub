@@ -1060,7 +1060,7 @@
 						>Preparing trend data...</span
 					>
 				</div>
-			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && chartData.length < 2}
+			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && campaignStats.length < 2}
 				<div
 					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200"
 				>
@@ -1104,7 +1104,7 @@
 						</div>
 					</div>
 				</div>
-			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && chartData.length >= 2}
+			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && campaignStats.length >= 2}
 				<div
 					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200"
 				>
@@ -1113,7 +1113,7 @@
 						<h4
 							class="text-sm font-medium text-gray-600 dark:text-gray-300 m-0 transition-colors duration-200"
 						>
-							Trendline: Last {trendStats ? trendStats.n : chartData.length} Campaigns (average)
+							Trendline: Last {trendStats ? trendStats.n : campaignStats.length} Campaigns (average)
 						</h4>
 						<div class="flex flex-wrap items-center gap-2 mb-0">
 							<label
@@ -1130,7 +1130,7 @@
 									{/each}
 								</select>
 							</label>
-							{#if chartData.length > 1}
+							{#if campaignStats.length > 1}
 								<label
 									class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
 								>
@@ -1138,7 +1138,7 @@
 									<input
 										type="number"
 										min="1"
-										max={chartData.length}
+										max={campaignStats.length}
 										bind:value={trendN}
 										on:input={() => (userHasSetTrendN = true)}
 										class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
@@ -1153,7 +1153,7 @@
 								<input
 									type="number"
 									min="2"
-									max={chartData.length}
+									max={campaignStats.length}
 									bind:value={movingAvgN}
 									class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 									style="height: 1.5rem;"
@@ -1162,7 +1162,7 @@
 						</div>
 					</div>
 					<div class="mb-8"></div>
-					{#if chartData.length > 0}
+					{#if campaignStats.length > 0}
 						<div class="grid grid-cols-4 gap-2 sm:gap-4">
 							{#each metrics as metric}
 								<div class="text-center">
