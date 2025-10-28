@@ -634,17 +634,7 @@
 			const clampedValue = Math.max(0, Math.min(100, point[metric.key] || 0));
 			const y = yScale(clampedValue);
 
-			// Create glow effect
-			const glowCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-			glowCircle.setAttribute('cx', x.toString());
-			glowCircle.setAttribute('cy', y.toString());
-			glowCircle.setAttribute('r', '8');
-			glowCircle.setAttribute('fill', metric.color);
-			glowCircle.setAttribute('opacity', '0.2');
-			glowCircle.setAttribute('class', `chart-point-glow chart-point-glow-${metric.key}`);
-			svg.appendChild(glowCircle);
-
-			// Main circle with enhanced styling
+			// Main circle
 			const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
 			circle.setAttribute('cx', x.toString());
 			circle.setAttribute('cy', y.toString());
@@ -657,6 +647,31 @@
 			circle.setAttribute('data-metric', metric.key);
 			circle.style.filter = 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))';
 			svg.appendChild(circle);
+
+			// per-point hover listeners to control only the matching glow element.
+			// this avoids affecting adjacent points while keeping the original hover UX.
+			circle.addEventListener('mouseenter', () => {
+				try {
+					const glow = svg.querySelector(`.chart-point-glow-${metric.key}[data-index="${i}"]`);
+					if (glow) {
+						glow.setAttribute('r', '12');
+						glow.style.opacity = '0.4';
+					}
+				} catch (e) {
+					// ignore
+				}
+			});
+			circle.addEventListener('mouseleave', () => {
+				try {
+					const glow = svg.querySelector(`.chart-point-glow-${metric.key}[data-index="${i}"]`);
+					if (glow) {
+						glow.setAttribute('r', '8');
+						glow.style.opacity = '0.2';
+					}
+				} catch (e) {
+					// ignore
+				}
+			});
 		});
 	}
 
@@ -902,6 +917,8 @@
 		// show tooltip
 		tooltip.style.display = 'block';
 		tooltip.style.width = '320px';
+
+		// glow handled by per-point listeners; no programmatic highlight here
 
 		// use requestAnimationFrame for positioning similar to EventTimeline
 		requestAnimationFrame(() => {
