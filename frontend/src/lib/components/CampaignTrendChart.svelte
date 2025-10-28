@@ -132,6 +132,7 @@
 	let chartData = [];
 	let xScale, yScale;
 	let useLogScale = false;
+	let useRelativeMetrics = false;
 
 	// Time range filter for campaigns
 	const timeRanges = [
@@ -213,7 +214,7 @@
 		.join('-');
 
 	// --- Data processing ---
-	function processData(stats) {
+	function processData(stats, useRelativeMetrics) {
 		const sortedStats = [...(stats || [])]
 			.filter((stat) => stat.campaignClosedAt)
 			.sort(
@@ -230,15 +231,19 @@
 			date: stat.campaignClosedAt ? new Date(stat.campaignClosedAt) : null,
 			name: stat.campaignName || `Campaign ${index + 1}`,
 			openRate: pct(stat.trackingPixelLoaded, stat.totalRecipients),
-			clickRate: pct(stat.websiteVisits, stat.totalRecipients),
-			submissionRate: pct(stat.dataSubmissions, stat.totalRecipients),
+			clickRate: useRelativeMetrics
+				? pct(stat.websiteVisits, stat.trackingPixelLoaded)
+				: pct(stat.websiteVisits, stat.totalRecipients),
+			submissionRate: useRelativeMetrics
+				? pct(stat.dataSubmissions, stat.websiteVisits)
+				: pct(stat.dataSubmissions, stat.totalRecipients),
 			reportRate: pct(stat.reported, stat.totalRecipients),
 			totalRecipients: stat.totalRecipients
 		}));
 	}
 
-	// Use filtered campaign stats based on selected time range
-	$: chartData = processData(filteredCampaignStats);
+	// Use filtered campaign stats based on selected time range and relative metrics toggle
+	$: chartData = processData(filteredCampaignStats, useRelativeMetrics);
 
 	function createChart() {
 		if (!chartContainer || chartData.length < 2) return;
@@ -1042,11 +1047,13 @@
 	});
 
 	// Only create chart when width is set and chartData is ready
-	$: if (
-		(containerReady && chartContainer && width > 0 && chartData.length > 1 && movingAvgN) ||
-		useLogScale
-	) {
-		createChart();
+	$: {
+		if (containerReady && chartContainer && width > 0 && chartData.length > 1 && movingAvgN) {
+			// reference toggles so Svelte tracks them for reactivity
+			useLogScale;
+			useRelativeMetrics;
+			createChart();
+		}
 	}
 </script>
 
@@ -1185,6 +1192,18 @@
 								Log scale:
 								<input type="checkbox" bind:checked={useLogScale} class="accent-blue-600" />
 							</label>
+							<div class="ml-auto flex items-center">
+								<label
+									class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
+								>
+									Relative metrics:
+									<input
+										type="checkbox"
+										bind:checked={useRelativeMetrics}
+										class="accent-blue-600"
+									/>
+								</label>
+							</div>
 						</div>
 					</div>
 					<div class="mb-8"></div>
