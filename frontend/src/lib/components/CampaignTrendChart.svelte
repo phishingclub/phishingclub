@@ -109,9 +109,9 @@
 		openRate: true,
 		clickRate: true,
 		submissionRate: true,
-		reportRate: false,
+		reportRate: true,
 		'mavg-clickRate': false,
-		'mavg-submissionRate': true,
+		'mavg-submissionRate': false,
 		'mavg-reportRate': false
 	};
 
