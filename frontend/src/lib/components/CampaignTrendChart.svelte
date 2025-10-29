@@ -1254,13 +1254,12 @@
 								>
 									Trendline N:
 									<input
-										type="number"
+										type="text"
 										min="1"
 										max={campaignStats.length}
 										bind:value={trendN}
 										on:input={() => (userHasSetTrendN = true)}
-										class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
-										style="height: 1.5rem;"
+										class="h-6 w-8 px-2 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 									/>
 								</label>
 							{/if}
@@ -1269,12 +1268,11 @@
 							>
 								Moving Avg N:
 								<input
-									type="number"
+									type="text"
 									min="2"
 									max={campaignStats.length}
 									bind:value={movingAvgN}
-									class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 w-10 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
-									style="height: 1.5rem;"
+									class="h-6 w-8 px-2 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 								/>
 							</label>
 							<label
@@ -1328,7 +1326,7 @@
 						<div
 							class="text-center text-gray-400 dark:text-gray-500 text-sm py-4 transition-colors duration-200"
 						>
-							No trendline stats to display (trendStats is null or not enough data).
+							No trendline stats to dsplay (trendStats is null or not enough data).
 						</div>
 					{/if}
 					<div class="mt-8 mb-6"></div>
