@@ -416,8 +416,9 @@
 		</div>
 	</div>
 	<div class="flex">
-		<div class="overflow-hidden hidden sm:hidden md:hidden lg:flex xl:flex 2xl:flex">
-			<img class="h-full max-w-fit" src="/login-graphics.svg" alt="lady beign phished" />
-		</div>
+		<div
+			class="overflow-hidden hidden sm:hidden md:hidden lg:flex xl:flex 2xl:flex min-w-0 w-full h-full bg-right bg-cover"
+			style="background-image: url('/login-graphics.svg'); background-repeat: no-repeat; background-position: right center; background-size: cover;"
+		></div>
 	</div>
 </main>
