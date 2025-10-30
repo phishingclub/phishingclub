@@ -410,6 +410,7 @@
 			...(contextCompanyID ? ['scope'] : [])
 		]}
 		hasData={!!recipients.length}
+		hasNextPage={recipientsHasNextPage}
 		plural="recipients"
 		pagination={tableURLParams}
 	>
