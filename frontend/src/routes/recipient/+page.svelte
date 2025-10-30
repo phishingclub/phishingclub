@@ -372,8 +372,11 @@
 <HeadTitle title="Recipients" />
 <section>
 	<Headline>Recipients</Headline>
-	<BigButton on:click={openCreateModal}>New recipient</BigButton>
-	<BigButton on:click={openImportModal}>Import from CSV</BigButton>
+
+	<div class="flex gap-3">
+		<BigButton on:click={openCreateModal}>New recipient</BigButton>
+		<BigButton on:click={openImportModal}>Import from CSV</BigButton>
+	</div>
 	<Table
 		isGhost={isRecipientsTableLoading}
 		columns={[

@@ -220,7 +220,7 @@
 <HeadTitle title="Groups" />
 <main>
 	<Headline>Groups</Headline>
-	<div class="flex gap-4 mb-4">
+	<div class="flex gap-3">
 		<BigButton on:click={openCreateModal}>New group</BigButton>
 		<BigButton on:click={() => goto('/recipient/orphaned/')}>View Orphaned</BigButton>
 	</div>
