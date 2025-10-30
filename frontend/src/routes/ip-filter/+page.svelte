@@ -6,7 +6,6 @@
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
-	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
@@ -25,7 +24,7 @@
 	import Table from '$lib/components/table/Table.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
-	import { debounceTyping, getModalText } from '$lib/utils/common';
+	import { getModalText } from '$lib/utils/common';
 	import TableCopyButton from '$lib/components/table/TableCopyButton.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import TextareaField from '$lib/components/TextareaField.svelte';
@@ -321,7 +320,7 @@
 <HeadTitle title="IP filter" />
 <main>
 	<Headline>IP filters</Headline>
-	<BigButton on:click={openCreateModal}>New</BigButton>
+	<BigButton on:click={openCreateModal}>New filter</BigButton>
 	<Table
 		columns={[
 			{ column: 'Name', size: 'large' },
