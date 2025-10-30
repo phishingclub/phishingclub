@@ -109,6 +109,12 @@ func (r *Asset) GetAllByGlobalContext(
 	if dbRes.Error != nil {
 		return nil, dbRes.Error
 	}
+
+	hasNextPage, err := useHasNextPage(db, database.ASSET_TABLE, queryArgs, assetAllowedColumns...)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	result.HasNextPage = hasNextPage
 	for _, dbModel := range dbModels {
 		result.Rows = append(result.Rows, ToAsset(dbModel))
 	}
