@@ -240,8 +240,9 @@
 		return action;
 	};
 
-	const openCreateModal = () => {
+	const openCreateModal = async () => {
 		modalMode = 'create';
+		await refreshDomains();
 		isModalVisible = true;
 	};
 
@@ -375,7 +376,7 @@
 <HeadTitle title="Emails" />
 <main>
 	<Headline>Emails</Headline>
-	<BigButton on:click={openCreateModal}>New Email</BigButton>
+	<BigButton on:click={async () => await openCreateModal()}>New Email</BigButton>
 	<Table
 		columns={[
 			{ column: 'Name', size: 'large' },
