@@ -16,6 +16,7 @@
 
 	// data
 	let domains = [];
+	let domainsHasNextPage = true;
 	let contextCompanyID = '';
 	let isTableLoading = false;
 	const tableURLParams = newTableURLParams();
@@ -41,6 +42,7 @@
 				throw res.error;
 			}
 			domains = res.data?.rows ?? [];
+			domainsHasNextPage = res.data?.hasNextPage;
 		} catch (e) {
 			console.error('failed to get asset domains', e);
 		} finally {
@@ -63,6 +65,7 @@
 		columns={[{ column: 'Name', size: 'large' }]}
 		sortable={['Name']}
 		hasData={domains.length > 0}
+		hasNextPage={domainsHasNextPage}
 		plural="domains"
 		pagination={tableURLParams}
 		hasActions={false}

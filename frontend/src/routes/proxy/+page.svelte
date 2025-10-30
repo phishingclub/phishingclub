@@ -48,6 +48,7 @@
 	const tableURLParams = newTableURLParams();
 	let contextCompanyID = null;
 	let proxies = [];
+	let proxiesHasNextPage = true;
 	let formError = '';
 	let isModalVisible = false;
 	let isProxyTableLoading = false;
@@ -157,6 +158,7 @@ portal.example.com:
 			}
 			const res = await getProxies();
 			proxies = res.rows;
+			proxiesHasNextPage = res.hasNextPage;
 		} catch (e) {
 			addToast('Failed to load Proxies', 'Error');
 			console.error('Failed to load Proxies', e);
@@ -447,6 +449,7 @@ portal.example.com:
 		]}
 		sortable={['Name', 'Start URL', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!proxies.length}
+		hasNextPage={proxiesHasNextPage}
 		plural="Proxies"
 		pagination={tableURLParams}
 		isGhost={isProxyTableLoading}

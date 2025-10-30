@@ -62,8 +62,11 @@
 
 	let calendarCampaigns = [];
 	let activeCampaigns = [];
+	let activeCampaignsHasNextPage = true;
 	let scheduledCampaigns = [];
+	let scheduledCampaignsHasNextPage = true;
 	let completedCampaigns = [];
+	let completedCampaignsHasNextPage = true;
 	let campaignStats = [];
 	let isCampaignStatsLoading = false;
 
@@ -173,6 +176,7 @@
 				throw res.error;
 			}
 			activeCampaigns = res.data.rows;
+			activeCampaignsHasNextPage = res.data.hasNextPage;
 		} catch (e) {
 			addToast('Failed to load active campaigns', 'Error');
 			console.error('Failed to load active campaigns', e);
@@ -201,6 +205,7 @@
 				throw res.error;
 			}
 			scheduledCampaigns = res.data.rows;
+			scheduledCampaignsHasNextPage = res.data.hasNextPage;
 		} catch (e) {
 			addToast('Failed to load scheduled campaigns', 'Error');
 			console.error('Failed to load scheduled campaigns', e);
@@ -229,6 +234,7 @@
 				throw res.error;
 			}
 			completedCampaigns = res.data.rows;
+			completedCampaignsHasNextPage = res.data.hasNextPage;
 		} catch (e) {
 			addToast('Failed to load finshed campaigns', 'Error');
 			console.error('Failed to load finshed campaigns', e);
@@ -506,6 +512,7 @@
 				{ title: 'Delivery finished', column: 'Send end at', size: 'small' }
 			]}
 			hasData={!!activeCampaigns.length}
+			hasNextPage={activeCampaignsHasNextPage}
 			plural="active campaigns"
 			pagination={activeTableURLParams}
 		>
@@ -545,6 +552,7 @@
 				{ title: 'Delivery finished', column: 'Send end at', size: 'small' }
 			]}
 			hasData={!!scheduledCampaigns.length}
+			hasNextPage={scheduledCampaignsHasNextPage}
 			plural="scheduled campaigns"
 			pagination={scheduledTableURLParams}
 		>
@@ -583,6 +591,7 @@
 				{ title: 'Delivery finished', column: 'Send end at', size: 'small' }
 			]}
 			hasData={!!completedCampaigns.length}
+			hasNextPage={completedCampaignsHasNextPage}
 			plural="completed campaigns"
 			pagination={completedTableURLParams}
 		>

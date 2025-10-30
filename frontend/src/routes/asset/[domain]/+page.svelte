@@ -40,6 +40,8 @@
 	}
 	let contextCompanyID = '';
 	let assets = [];
+	let assetsHasNextPage = true;
+
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
 	let modalError = '';
@@ -116,6 +118,7 @@
 				throw res.error;
 			}
 			assets = res.data.rows ?? [];
+			assetsHasNextPage = res.data.hasNextPage;
 			// if global context but domain has a company relation, then we should redirect
 		} catch (e) {
 			addToast('Failed to get assets', 'Error');
@@ -389,6 +392,7 @@
 		]}
 		sortable={['Name', 'Description', 'Path']}
 		hasData={!!assets.length}
+		hasNextPage={assetsHasNextPage}
 		plural="assets"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}

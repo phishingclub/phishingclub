@@ -7,10 +7,8 @@
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
-	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
-	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import { addToast } from '$lib/store/toast';
@@ -76,6 +74,7 @@
 	$: isRegularDomain = !isProxyDomain;
 	let contextCompanyID = null;
 	let domains = [];
+	let domainsHasNextPage = true;
 	let modalError = '';
 	let isSubmitting = false;
 	let updateContentError = '';
@@ -131,6 +130,7 @@
 			}
 			const result = await getDomains();
 			domains = result.rows;
+			domainsHasNextPage = result.hasNextPage;
 		} catch (e) {
 			addToast('failed to load domains', 'Error');
 			console.error('failed to load domains', e);
@@ -637,6 +637,7 @@
 			...(contextCompanyID ? ['scope'] : [])
 		]}
 		hasData={!!domains.length}
+		hasNextPage={domainsHasNextPage}
 		plural="domains"
 		pagination={tableURLParams}
 		isGhost={isDomainTableLoading}

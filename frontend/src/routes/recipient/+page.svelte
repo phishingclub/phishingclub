@@ -71,6 +71,7 @@
 	});
 	let contextCompanyID = null;
 	let recipients = [];
+	let recipientsHasNextPage = true;
 	let isModalVisible = false;
 	let isSubmitting = false;
 	let modalMode = null;
@@ -110,6 +111,7 @@
 			const res = await api.recipient.getAll(tableURLParams, contextCompanyID);
 			if (res.success) {
 				recipients = res.data.rows;
+				recipientsHasNextPage = res.data.hasNextPage;
 				return;
 			}
 			throw res.error;

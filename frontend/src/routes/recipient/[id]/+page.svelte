@@ -33,6 +33,7 @@
 		groups: []
 	};
 	let events = [];
+	let eventsHasNextPage = true;
 	let stats = {
 		campaignsParticiated: 0,
 		campaignsTrackingPixelLoaded: 0,
@@ -80,6 +81,7 @@
 			const res = await api.recipient.getEvents($page.params.id, tableURLParams);
 			if (res.success) {
 				events = res.data.rows;
+				eventsHasNextPage = res.data.hasNextPage;
 				return;
 			}
 			throw res.error;
@@ -361,6 +363,7 @@
 			columns={['Event', 'Created', 'Campaign', 'Details', 'User-Agent', 'IP']}
 			sortable={['Event', 'Created', 'Campaign', 'Details', 'User-Agent', 'IP']}
 			hasData={!!events?.length}
+			hasNextPage={eventsHasNextPage}
 			plural="events"
 			pagination={tableURLParams}
 			isGhost={isEventsLoading}

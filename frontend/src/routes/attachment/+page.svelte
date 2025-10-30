@@ -42,6 +42,7 @@
 	};
 
 	let attachments = [];
+	let attachmentsHasNextPage = false;
 	let isModalVisible = false;
 	let isSubmitting = false;
 	const tableURLParams = newTableURLParams();
@@ -80,6 +81,7 @@
 			showIsLoading();
 			const res = await api.attachment.getByContext(contextCompanyID, tableURLParams);
 			attachments = res.data.rows ?? [];
+			attachmentsHasNextPage = res.data.hasNextPage;
 		} catch (e) {
 			addToast('Failed to get attachments', 'Error');
 			console.error('failed to get attachments', e);
@@ -256,6 +258,7 @@
 			...(contextCompanyID ? ['scope'] : [])
 		]}
 		hasData={!!attachments.length}
+		hasNextPage={attachmentsHasNextPage}
 		plural="attachments"
 		pagination={tableURLParams}
 	>

@@ -70,6 +70,7 @@
 	let modalError = '';
 	let sendTestModalError = '';
 	let emails = [];
+	let emailsHasNextPage = true;
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
 	let isSendTestModalVisible = false;
@@ -109,6 +110,7 @@
 			isTableLoading = true;
 			const res = await getEmails();
 			emails = res.rows;
+			emailsHasNextPage = res.hasNextPage;
 		} catch (e) {
 			addToast('Failed to load emails', 'Error');
 			console.error('Failed to load emails', e);
@@ -387,6 +389,7 @@
 		]}
 		sortable={['Name', 'From', 'Subject', 'Tracking Pixel', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!emails.length}
+		hasNextPage={emailsHasNextPage}
 		plural="emails"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}

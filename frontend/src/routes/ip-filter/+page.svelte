@@ -46,6 +46,7 @@
 		allowed: null
 	};
 	let allowDenyList = [];
+	let allowDenyListHasNextPage = true;
 	let formError = '';
 	let contextCompanyID = null;
 	const tableURLParams = newTableURLParams();
@@ -89,7 +90,9 @@
 	const refreshAllowDenies = async () => {
 		try {
 			isTableLoading = true;
-			allowDenyList = await getAllAllowDenyEntries();
+			const data = await getAllAllowDenyEntries();
+			allowDenyList = data.rows;
+			allowDenyListHasNextPage = data.hasNextPage;
 		} catch (e) {
 			addToast('Failed to get IP filters', 'Error');
 			console.error(e);
@@ -121,7 +124,7 @@
 			if (!res.success) {
 				throw res.error;
 			}
-			return res.data.rows;
+			return res.data;
 		} catch (e) {
 			addToast('Failed to get IP filters', 'Error');
 			console.error('failed to get IP filters', e);
@@ -329,6 +332,7 @@
 		]}
 		sortable={['Name', 'Allowed', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!allowDenyList.length}
+		hasNextPage={allowDenyListHasNextPage}
 		plural="Allow deny entries"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}

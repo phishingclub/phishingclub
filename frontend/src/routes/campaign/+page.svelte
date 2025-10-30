@@ -137,6 +137,7 @@
 	const appStateService = AppStateService.instance;
 	let contextCompanyID = null;
 	let campaigns = [];
+	let campaignsHasNextPage = false;
 	let templateMap = new BiMap({});
 	let recipientGroupsByID = {};
 	let recipientGroupMap = new BiMap({});
@@ -578,6 +579,7 @@
 			if (!res.success) {
 				throw res.error;
 			}
+			campaignsHasNextPage = res.data.hasNextPage;
 			return res.data.rows;
 		} catch (e) {
 			addToast('Failed to load campaigns', 'Error');
@@ -1107,6 +1109,7 @@
 		sortable={['Name', 'Template', 'Send start at', 'Send end at', 'Close at']}
 		hasData={!!campaigns?.length}
 		plural="campaigns"
+		hasNextPage={campaignsHasNextPage}
 		pagination={tableURLParams}
 		isGhost={isTableLoading}
 	>

@@ -58,6 +58,7 @@
 		expectedResponseBody: null
 	};
 	let apiSenders = [];
+	let apiSendersHasNextPage = true;
 	let modalError = '';
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
@@ -104,7 +105,9 @@
 	const refreshConfigurations = async () => {
 		try {
 			isTableLoading = true;
-			apiSenders = await getAPISenders();
+			const data = await getAPISenders();
+			apiSenders = data.rows;
+			apiSendersHasNextPage = data.hasNextPage;
 		} catch (e) {
 			addToast('Failed to get API senders', 'Error');
 			console.error(e);
@@ -119,7 +122,7 @@
 			if (!res.success) {
 				throw res.error;
 			}
-			return res.data.rows;
+			return res.data;
 		} catch (e) {
 			addToast('Failed to get API senders', 'Error');
 			console.error('failed to get API senders', e);
@@ -319,6 +322,7 @@
 		]}
 		sortable={['Name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!apiSenders.length}
+		hasNextPage={apiSendersHasNextPage}
 		plural="api senders"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}

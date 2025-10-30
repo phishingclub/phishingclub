@@ -24,6 +24,8 @@
 	// key value map that should be switched on when selecting a sort by
 	export let hasActions = true;
 	export let isGhost = false;
+	// if there is more data to paginate
+	export let hasNextPage = true;
 
 	let tableWrapper = null;
 	let columnsLength = columns.length;
@@ -87,7 +89,7 @@
 			</table>
 		</div>
 		{#if pagination}
-			<Pagination paginator={pagination} />
+			<Pagination paginator={pagination} {hasNextPage} />
 		{:else}
 			<div class="flex items-center mb-8 mt-4" />
 		{/if}

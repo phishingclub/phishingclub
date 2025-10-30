@@ -8,7 +8,6 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
-	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import FormError from '$lib/components/FormError.svelte';
@@ -20,8 +19,6 @@
 	import FormGrid from '$lib/components/FormGrid.svelte';
 
 	import BigButton from '$lib/components/BigButton.svelte';
-	import FormColumns from '$lib/components/FormColumns.svelte';
-	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
@@ -52,6 +49,7 @@
 	const tableURLParams = newTableURLParams();
 	let contextCompanyID = null;
 	let pages = [];
+	let pagesHasNextPage = true;
 	let domainMap = new BiMap({});
 	let formError = '';
 	let isModalVisible = false;
@@ -96,6 +94,7 @@
 			}
 			const res = await getPages();
 			pages = res.rows;
+			pagesHasNextPage = res.hasNextPage;
 		} catch (e) {
 			addToast('Failed to load pages', 'Error');
 			console.error('Failed to load pages', e);
@@ -331,6 +330,7 @@
 		]}
 		sortable={['Name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!pages.length}
+		hasNextPage={pagesHasNextPage}
 		plural="pages"
 		pagination={tableURLParams}
 		isGhost={isPageTableLoading}

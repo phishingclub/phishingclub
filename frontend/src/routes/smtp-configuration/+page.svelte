@@ -6,7 +6,6 @@
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
-	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
@@ -60,6 +59,7 @@
 		email: null
 	};
 	let configurations = [];
+	let configurationsHasNextPage = false;
 	let headers = [];
 	let formError = '';
 	let headerError = '';
@@ -107,7 +107,9 @@
 	const refreshConfigurations = async () => {
 		try {
 			isConfigTableLoading = true;
-			configurations = await getConfigurations();
+			const data = await getConfigurations();
+			configurations = data.rows;
+			configurationsHasNextPage = data.hasNextPage;
 		} catch (e) {
 			addToast('Failed to get SMTP configurations', 'Error');
 			console.error(e);
@@ -143,7 +145,7 @@
 			if (!res.success) {
 				throw res.error;
 			}
-			return res.data.rows;
+			return res.data;
 		} catch (e) {
 			addToast('Failed to get SMTP configurations', 'Error');
 			console.error('failed to get SMTP configurations', e);
@@ -430,6 +432,7 @@
 		]}
 		sortable={['Name', 'Host', 'Port', 'Username', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!configurations.length}
+		hasNextPage={configurationsHasNextPage}
 		plural="SMTP configurations"
 		pagination={tableURLParams}
 		isGhost={isConfigTableLoading}

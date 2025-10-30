@@ -74,6 +74,7 @@
 	let apiSenderMap = new BiMap({});
 	let identifierMap = new BiMap({});
 	let templates = [];
+	let templatesHasNextPage = true;
 	let modalError = '';
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
@@ -237,6 +238,7 @@
 		try {
 			const result = await getTemplates();
 			templates = result.rows;
+			templatesHasNextPage = result.hasNextPage;
 		} catch (e) {
 			addToast('Failed to load campaign templates', 'Error');
 			console.error('Failed to load campaign templates', e);
@@ -537,6 +539,7 @@
 			...(contextCompanyID ? ['scope'] : [])
 		]}
 		hasData={!!templates.length}
+		hasNextPage={templatesHasNextPage}
 		plural="templates"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}

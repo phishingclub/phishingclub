@@ -22,6 +22,7 @@
 
 	// local state
 	let sessions = [];
+	let sessionsHasNextPage = true;
 	const tableURLParams = newTableURLParams();
 	let isTableLoading = false;
 
@@ -46,6 +47,7 @@
 			const res = await api.user.getAllSessions(params);
 			if (res.success) {
 				sessions = res.data.sessions;
+				sessionsHasNextPage = res.data.hasNextPage;
 				return;
 			}
 			throw res.error;
@@ -132,6 +134,7 @@
 		]}
 		sortable={['IP address']}
 		hasData={!!sessions.length}
+		hasNextPage={sessionsHasNextPage}
 		plural="Sessions"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}

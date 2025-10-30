@@ -47,6 +47,7 @@
 	const tableURLParams = newTableURLParams();
 	let contextCompanyID = '';
 	let groups = [];
+	let groupsHasNextPage = true;
 	let modalMode = null;
 	let modalText = '';
 
@@ -97,6 +98,7 @@
 				throw res.error;
 			}
 			groups = res.data.rows;
+			groupsHasNextPage = res.data.hasNextPage;
 		} catch (e) {
 			addToast('Failed to load groups', 'Error');
 			console.error('failed to load groups', e);
@@ -232,6 +234,7 @@
 		]}
 		sortable={['Name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!groups.length}
+		hasNextPage={groupsHasNextPage}
 		plural="groups"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}

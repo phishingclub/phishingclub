@@ -44,6 +44,7 @@
 	let addError = '';
 	let allSelectedAttachments = [];
 	let allSelectedAttachmentsChunk = [];
+	let hasNextPage = true;
 	let emailName = '';
 	let isSubmitting = false;
 	let isTableLoading = false;
@@ -63,7 +64,10 @@
 			sortBy: tableParams.sortBy,
 			sortOrder: tableParams.sortOrder
 		});
+		const offset = (tableParams.currentPage - 1) * tableParams.perPage;
+		hasNextPage = allSelectedAttachments.length > offset + tableParams.perPage;
 	};
+
 	//hooks
 	onMount(async () => {
 		const context = appStateService.getContext();
@@ -201,6 +205,7 @@
 		sortable={['Name', 'Description', 'Filename']}
 		pagination={tableParams}
 		hasData={!!allSelectedAttachmentsChunk}
+		{hasNextPage}
 		plural="attachments"
 		isGhost={isTableLoading}
 	>

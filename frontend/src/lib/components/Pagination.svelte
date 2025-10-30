@@ -6,6 +6,8 @@
 	let currentPage = paginator.currentPage;
 	let urlWithoutParams = window.location.href.split('?')[0];
 
+	export let hasNextPage = true;
+
 	const nextPage = async () => {
 		currentPage = paginator.next();
 	};
@@ -44,6 +46,8 @@
 <div class="flex items-center mb-8 mt-4">
 	<button
 		class="bg-highlight-blue dark:bg-highlight-blue/80 w-8 text-white hover:bg-active-blue dark:hover:bg-highlight-blue m-1 rounded-md py-1 px-1 transition-colors duration-200"
+		disabled={currentPage === 1}
+		class:opacity-50={currentPage === 1}
 		on:click|preventDefault={previousPage}>&lt;&lt;</button
 	>
 	<div
@@ -52,7 +56,9 @@
 		{currentPage}
 	</div>
 	<button
-		class="bg-highlight-blue dark:bg-highlight-blue/80 w-8 text-white hover:bg-active-blue dark:hover:bg-highlight-blue m-1 rounded-md py-1 px-1 transition-colors duration-200"
+		disabled={!hasNextPage}
+		class:opacity-50={!hasNextPage}
+		class=" bg-highlight-blue dark:bg-highlight-blue/80 w-8 text-white hover:bg-active-blue dark:hover:bg-highlight-blue m-1 rounded-md py-1 px-1 transition-colors duration-200"
 		on:click|preventDefault={nextPage}>&gt;&gt;</button
 	>
 </div>

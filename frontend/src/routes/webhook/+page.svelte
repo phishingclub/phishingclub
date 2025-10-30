@@ -44,6 +44,7 @@
 		secret: ''
 	};
 	let webhooks = [];
+	let webhooksHasNextPage = true;
 	let modalError = '';
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
@@ -89,6 +90,7 @@
 			isTableLoading = true;
 			const result = await getWebhooks();
 			webhooks = result.rows;
+			webhooksHasNextPage = result.hasNextPage;
 		} catch (e) {
 			addToast('Failed to get webhooks', 'Error');
 			console.error(e);
@@ -282,6 +284,7 @@
 		]}
 		sortable={['name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!webhooks.length}
+		hasNextPage={webhooksHasNextPage}
 		plural="Webhooks"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}

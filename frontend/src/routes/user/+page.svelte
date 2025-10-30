@@ -38,6 +38,7 @@
 		password: null
 	};
 	let users = [];
+	let usersHasNextPage = true;
 	let modalError = '';
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
@@ -77,6 +78,7 @@
 			isTableLoading = true;
 			const result = await getUsers();
 			users = result.rows;
+			usersHasNextPage = result.hasNextPage;
 		} catch (e) {
 			addToast('Failed to load users', 'Error');
 			console.error('Failed to load users', e);
@@ -252,6 +254,7 @@
 		]}
 		sortable={['Username', 'Email', 'Name']}
 		hasData={!!users.length}
+		hasNextPage={usersHasNextPage}
 		plural="users"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}

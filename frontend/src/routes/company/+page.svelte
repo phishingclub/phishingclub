@@ -32,6 +32,7 @@
 	// data
 	let modalError = '';
 	let companies = [];
+	let companiesHasNextPage = true;
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
 	let isSubmitting = false;
@@ -69,7 +70,9 @@
 	const refreshCompanies = async () => {
 		try {
 			isTableLoading = true;
-			companies = await getCompanies();
+			const data = await getCompanies();
+			companies = data.rows;
+			companiesHasNextPage = data.hasNextPage;
 		} catch (e) {
 			addToast('Failed to get companies', 'Error');
 			console.error('failed to get companies', e);
@@ -100,7 +103,7 @@
 		try {
 			const res = await api.company.getAll(tableURLParams);
 			if (res.success) {
-				return res.data.rows;
+				return res.data;
 			}
 			throw new res.error();
 		} catch (e) {
@@ -300,6 +303,7 @@
 		columns={[{ column: 'Name', size: 'large' }]}
 		sortable={['name']}
 		hasData={!!companies.length}
+		hasNextPage={companiesHasNextPage}
 		plural="companies"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}
