@@ -116,11 +116,12 @@ jobs:
           context: .
           file: ./Dockerfile.release
           push: true
+          platforms: linux/amd64
           tags: |
-            ghcr.io/${{ github.repository }}:test-${{ steps.get_version.outputs.HASH }}
             ghcr.io/${{ github.repository }}:test-latest
           labels: |
-            org.opencontainers.image.title=PhishingClub-Test
+            org.opencontainers.image.title=PhishingClub-Test ${{ steps.get_version.outputs.VERSION }}
+            org.opencontainers.image.description=PhishingClub test build image (linux/amd64). Not for production deployment.
             org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.get_version.outputs.VERSION }}
