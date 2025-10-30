@@ -775,8 +775,13 @@ func (im *Import) createAssetFromZipFile(
 		return false, err
 	}
 
-	// create root filesystem for the full context path (controlled paths only)
+	// ensure shared directory exists
 	fullContextPath := filepath.Join(im.Asset.RootFolder, contextFolder)
+	if err := os.MkdirAll(fullContextPath, 0755); err != nil {
+		return false, err
+	}
+
+	// create root filesystem for the full context path (controlled paths only)
 	contextRoot, err := os.OpenRoot(fullContextPath)
 	if err != nil {
 		return false, err
