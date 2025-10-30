@@ -232,10 +232,24 @@ func (r *Recipient) GetAll(
 		return result, errs.Wrap(err)
 	}
 
-	// Check for next page
+	// check for next page using a fresh count query with only filters, no limit/offset
 	if options.QueryArgs != nil && options.QueryArgs.Limit > 0 {
+		countDb := r.DB.Table(database.RECIPIENT_TABLE)
+		countDb = r.load(countDb, options)
+		countDb = withCompanyIncludingNullContext(countDb, companyID, database.RECIPIENT_TABLE)
+		if options.QueryArgs != nil {
+			// create a copy of QueryArgs with Limit/Offset set to zero
+			queryArgsNoPagination := *options.QueryArgs
+			queryArgsNoPagination.Limit = 0
+			queryArgsNoPagination.Offset = 0
+			var err error
+			countDb, err = useQuery(countDb, database.RECIPIENT_TABLE, &queryArgsNoPagination, allowdRecipientColumns...)
+			if err != nil {
+				return result, errs.Wrap(err)
+			}
+		}
 		var total int64
-		if err := baseDb.Count(&total).Error; err != nil {
+		if err := countDb.Count(&total).Error; err != nil {
 			return result, errs.Wrap(err)
 		}
 		offset64 := int64(options.QueryArgs.Offset)
