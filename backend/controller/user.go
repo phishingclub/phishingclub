@@ -460,7 +460,10 @@ func (c *User) GetSessionsOnLoggedInUser(g *gin.Context) {
 	}
 	c.Response.OK(
 		g,
-		gin.H{"sessions": data},
+		gin.H{
+			"sessions":    data,
+			"hasNextPage": sessions.HasNextPage,
+		},
 	)
 }
 
