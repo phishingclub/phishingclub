@@ -317,8 +317,8 @@ func (m *ConfigModel) createAdvancedInputs() []InputWithHelp {
 		{"TLS key path", "", "/path/to/key.pem", "path to TLS private key file (leave empty for auto TLS)"},
 
 		// logging configuration
-		{"Log file path", config.DefaultLogFilePath, "/var/log/phishingclub.log", "path to log file (empty for stdout)"},
-		{"Error log path", config.DefaultErrLogFilePath, "/var/log/phishingclub-error.log", "path to error log file (empty for stderr)"},
+		{"Log file path", config.DefaultLogFilePath, "", "path to log file (empty for stdout)"},
+		{"Error log path", config.DefaultErrLogFilePath, "", "path to error log file (empty for stderr)"},
 
 		// security configuration
 		{"Admin allowed IPs", "", "192.168.1.0/24,10.0.0.1", "comma-separated list of IP/CIDR ranges allowed to access admin (empty for all)"},
