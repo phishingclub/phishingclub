@@ -152,6 +152,16 @@ func (a *APISender) GetAllOverview(
 	if res.Error != nil {
 		return result, res.Error
 	}
+	hasNextPage, err := useHasNextPage(
+		db,
+		database.API_SENDER_TABLE,
+		option.QueryArgs,
+		apiSenderAllowedColumns...,
+	)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	result.HasNextPage = hasNextPage
 	for _, dbAPISender := range dbAPISenders {
 		apiSender, err := ToAPISenderOverview(dbAPISender)
 		if err != nil {
