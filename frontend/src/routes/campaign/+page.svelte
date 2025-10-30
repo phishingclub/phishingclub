@@ -1082,17 +1082,18 @@
 
 <HeadTitle title="Campaigns" />
 
-<main class="">
-	<div class="flex justify-between">
+<main>
+	<div class="relative">
 		<Headline>Campaigns</Headline>
-		<AutoRefresh
-			isLoading={false}
-			onRefresh={() => {
-				refreshCampaigns(false);
-			}}
-		/>
+		<div class="absolute top-0 right-0">
+			<AutoRefresh
+				isLoading={false}
+				onRefresh={() => {
+					refreshCampaigns(false);
+				}}
+			/>
+		</div>
 	</div>
-
 	<BigButton on:click={openCreateModal}>New Campaign</BigButton>
 	<Table
 		columns={[

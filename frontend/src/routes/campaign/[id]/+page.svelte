@@ -958,14 +958,15 @@
 
 <main>
 	{#if initialPageLoadComplete}
-		<div class="flex justify-between">
-			<Headline
-				>Campaign: {campaign.name ?? ''}
-				{#if campaign.isTest}
-					<TestLabel />
-				{/if}
-			</Headline>
-
+		<div class="relative">
+			<div class="flex justify-between">
+				<Headline
+					>Campaign: {campaign.name ?? ''}
+					{#if campaign.isTest}
+						<TestLabel />
+					{/if}
+				</Headline>
+			</div>
 			<AutoRefresh
 				isLoading={false}
 				onRefresh={async () => {
