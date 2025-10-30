@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.10.0] - 2025-10-31
+- Added release image on ghcr
+- Added option to pin menu
+- Pagination now disables previous and/or next button in appropriate cases
+- Added log scale and relative metrics to Campaign Trendline
+- Trendline settings are now saved
+- Updated custom company stats table to more than just percentages
+- Various UI style fixing mostly related to firefox and tables
+- Various fixes to Campaign Trendline
+- Fix proxy host rules reacting to other hosts rules
+- Fix custom stats not added to completed campaigns on dashboard
+- Fix bug with importing data in nested folders
+- Fix preview domain always visible in editor
+- Fix bug where domains might be shown in editor
+
+
 ## [1.9.1] - 2025-10-25
 - Fixed missing proxy logic for modifying sessionless request and headers
 - Fixed actions width to align with header width
