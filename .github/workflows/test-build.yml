@@ -49,7 +49,7 @@ jobs:
           mkdir -p backend/frontend/build
           cp -r frontend/build/* backend/frontend/build/
 
-      - name: Build single binary with all features
+      - name: Build binary
         run: |
           sudo docker run --rm \
           -v "$(pwd)":/app \
