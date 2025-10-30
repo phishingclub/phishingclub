@@ -698,19 +698,21 @@
 					</select>
 
 					<!-- domain selector if available -->
-					{#if domainMap.values().length}
-						<select
-							id="domain-select"
-							bind:value={selectedDomain}
-							on:change={selectPreviewDomain}
-							class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200"
-						>
-							<option value="">Select preview domain...</option>
+					<select
+						id="domain-select"
+						bind:value={selectedDomain}
+						on:change={selectPreviewDomain}
+						class="h-8 w-64 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200 text-ellipsis"
+					>
+						{#if domainMap.values().length}
+							<option value="" class="italic">Select preview domain...</option>
 							{#each domainMap.values() as domain}
 								<option value={domain}>{domain}</option>
 							{/each}
-						</select>
-					{/if}
+						{:else}
+							<option value="" class="italic">No domains - Assets will not load</option>
+						{/if}
+					</select>
 
 					<!-- open in new window button -->
 					<button

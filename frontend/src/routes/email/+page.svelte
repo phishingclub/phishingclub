@@ -8,7 +8,6 @@
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
-	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
