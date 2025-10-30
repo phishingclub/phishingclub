@@ -18,7 +18,6 @@
 	import DesktopMenu from '$lib/components/header/DesktopMenu.svelte';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import Header from '$lib/components/header/Header.svelte';
-	import CompanyBanner from '$lib/components/header/CompanyBanner.svelte';
 	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
 	// Removed feature flags import - no longer needed
 
@@ -42,6 +41,20 @@
 	let isCommandPaletteVisible = false;
 	let isReady = false;
 
+	// pin state for menu
+	let isMenuPinned = false;
+
+	// cookie helpers
+	function getCookie(name) {
+		const value = `; ${document.cookie}`;
+		const parts = value.split(`; ${name}=`);
+		if (parts.length === 2) return parts.pop().split(';').shift();
+	}
+	function setCookie(name, value, days = 365) {
+		const expires = new Date(Date.now() + days * 864e5).toUTCString();
+		document.cookie = `${name}=${value}; expires=${expires}; path=/`;
+	}
+
 	beforeNavigate((beforeNavigate) => {
 		if (!beforeNavigate.to) {
 			return;
@@ -57,6 +70,9 @@
 		// initialize theme system
 		setupTheme();
 		setupOSThemeListener();
+
+		const pinned = getCookie('menuPinned');
+		isMenuPinned = pinned === 'true';
 
 		(async () => {
 			// handle session
@@ -203,6 +219,19 @@
 	const toggleChangeCompanyModal = async () => {
 		isChangeCompanyModalVisible = !isChangeCompanyModalVisible;
 	};
+
+	// pin toggle handler
+	let desktopMenuRef;
+	function handlePinToggle() {
+		if (isMenuPinned) {
+			isMenuPinned = false;
+			setCookie('menuPinned', 'false');
+			desktopMenuRef?.collapseMenu();
+		} else {
+			isMenuPinned = true;
+			setCookie('menuPinned', 'true');
+		}
+	}
 </script>
 
 <div class="flex flex-col min-w-[768px]">
@@ -220,9 +249,13 @@
 	{:else if loginStatus === AppStateService.LOGIN.LOGGED_IN && $page.route.id !== '/login'}
 		<Header bind:isProfileMenuVisible bind:isMobileMenuVisible {toggleChangeCompanyModal} />
 		{#if installState === AppStateService.INSTALL.INSTALLED}
-			<DesktopMenu />
+			<DesktopMenu
+				bind:this={desktopMenuRef}
+				isPinned={isMenuPinned}
+				on:pinToggle={handlePinToggle}
+			/>
 		{/if}
-		<div class="grid grid-cols-12 lg:ml-24 ml-8 mr-10 mt-4">
+		<div class={`grid grid-cols-12 mr-10 mt-4 ${isMenuPinned ? 'menu-pinned ml-52' : 'ml-24'}`}>
 			{#if installState === AppStateService.INSTALL.INSTALLED}
 				<MobileMenu
 					bind:visible={isMobileMenuVisible}
@@ -249,5 +282,8 @@
 	}
 	:global(table) {
 		user-select: text;
+	}
+	.menu-pinned {
+		grid-template-columns: 10rem 1fr !important;
 	}
 </style>

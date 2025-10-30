@@ -7,7 +7,16 @@
 	import { onMount } from 'svelte';
 	import { beforeNavigate } from '$app/navigation';
 
+	export let isPinned = false;
+
 	let isExpanded = false;
+
+	// expose collapseMenu for parent to collapse menu on unpin
+	export function collapseMenu() {
+		isExpanded = false;
+	}
+
+	$: isExpanded = isPinned ? true : isExpanded;
 	let menuElement;
 	let instantCollapse = false;
 	let context = {
@@ -16,6 +25,8 @@
 	};
 
 	const appState = AppStateService.instance;
+	import { createEventDispatcher } from 'svelte';
+	const dispatch = createEventDispatcher();
 
 	onMount(() => {
 		const unsub = appState.subscribe((s) => {
@@ -27,7 +38,7 @@
 
 		// handle click outside to collapse menu
 		const handleClickOutside = (event) => {
-			if (isExpanded && menuElement && !menuElement.contains(event.target)) {
+			if (!isPinned && isExpanded && menuElement && !menuElement.contains(event.target)) {
 				isExpanded = false;
 			}
 		};
@@ -42,7 +53,7 @@
 
 	// handle navigation to collapse menu
 	beforeNavigate(() => {
-		if (isExpanded) {
+		if (!isPinned && isExpanded) {
 			instantCollapse = true;
 			isExpanded = false;
 			// reset after a brief moment
@@ -156,33 +167,103 @@
 		class:!max-h-[calc(100vh-6rem)]={hasCompanySelected}
 	>
 		<div
-			class="sticky top-0 bg-highlight-blue/20 dark:bg-gray-800/70 border-b w-full border-blue-700/30 dark:border-highlight-blue/40 transform-none transition-colors duration-200"
+			class={isPinned
+				? 'absolute right-2 top-2 flex items-center justify-between px-0'
+				: 'sticky top-0 bg-highlight-blue/20 dark:bg-gray-800/70 border-b w-full border-blue-700/30 dark:border-highlight-blue/40 transform-none transition-colors duration-200 flex items-center justify-between px-1'}
 		>
-			<button
-				class="w-full flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-highlight-blue/20 transition-colors group px-3 py-2"
-				on:click={() => (isExpanded = !isExpanded)}
-			>
-				<svg
-					class="text-blue-100 dark:text-highlight-blue duration-200 w-6 transition-colors"
-					class:rotate-180={!isExpanded}
-					xmlns="http://www.w3.org/2000/svg"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke-width="1.5"
-					stroke="currentColor"
+			{#if !isPinned}
+				<div class="flex items-center w-full">
+					<button
+						class="flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-highlight-blue/20 transition-colors group px-3 py-2"
+						on:click={() => (isExpanded = !isExpanded)}
+						type="button"
+					>
+						<svg
+							class="text-blue-100 dark:text-highlight-blue duration-200 w-4 h-4 transition-colors"
+							class:rotate-180={!isExpanded}
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="1.5"
+							stroke="currentColor"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="m18.75 4.5-7.5 7.5 7.5 7.5m-6-15L5.25 12l7.5 7.5"
+							/>
+						</svg>
+					</button>
+					{#if isExpanded}
+						<button
+							class="flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-highlight-blue/20 transition-colors group px-3 py-2"
+							title={isPinned ? 'Unpin menu' : 'Pin menu'}
+							on:click={() => dispatch('pinToggle')}
+							type="button"
+						>
+							{#if isPinned}
+								<svg
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="currentColor"
+									xmlns="http://www.w3.org/2000/svg"
+									class="w-4 h-4 text-blue-100 dark:text-highlight-blue"
+								>
+									<path
+										d="M16 9V5a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v4l-4 4v2h6v5a1 1 0 0 0 2 0v-5h6v-2l-4-4z"
+									/>
+								</svg>
+							{:else}
+								<svg
+									width="16"
+									height="16"
+									viewBox="0 0 24 24"
+									fill="none"
+									xmlns="http://www.w3.org/2000/svg"
+									class="w-4 h-4 text-blue-100 dark:text-highlight-blue"
+								>
+									<path
+										d="M16 9V5a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v4l-4 4v2h6v5a1 1 0 0 0 2 0v-5h6v-2l-4-4z"
+										stroke="currentColor"
+										stroke-width="2"
+									/>
+								</svg>
+							{/if}
+						</button>
+					{/if}
+				</div>
+			{:else}
+				<button
+					class="flex items-center justify-center w-4 h-4 text-blue-100 dark:text-highlight-blue"
+					title="Unpin menu"
+					on:click={() => dispatch('pinToggle')}
+					type="button"
 				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						d="m18.75 4.5-7.5 7.5 7.5 7.5m-6-15L5.25 12l7.5 7.5"
-					/>
-				</svg>
-			</button>
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						xmlns="http://www.w3.org/2000/svg"
+						class="w-4 h-4 text-blue-100 dark:text-highlight-blue"
+					>
+						<path
+							d="M16 9V5a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v4l-4 4v2h6v5a1 1 0 0 0 2 0v-5h6v-2l-4-4z"
+							stroke="currentColor"
+							stroke-width="1.2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						/>
+					</svg>
+				</button>
+			{/if}
 		</div>
 
 		<!-- Navigation Items -->
 		<div
-			class="flex flex-col py-4 flex-1 overflow-y-auto {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue dark:[&::-webkit-scrollbar-track]:bg-gray-800"
+			class="flex flex-col flex-1 overflow-y-auto {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue dark:[&::-webkit-scrollbar-track]:bg-gray-800"
+			class:py-4={!isPinned}
 		>
 			{#each menu as link}
 				{#if link.type === 'submenu'}
