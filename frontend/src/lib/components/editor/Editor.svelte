@@ -35,6 +35,7 @@
 	let vimStatusBar = null;
 	let isDestroyed = false;
 	let editorContainer = null;
+	let isExpanded = false;
 
 	const apiTemplates = [
 		{ label: 'Custom Field 1', text: '{{.CustomField1}}' },
@@ -489,303 +490,272 @@
 		}
 		return result;
 	};
-
-	let isDetailsVisible = $$slots.default;
 </script>
 
 <div
 	class="w-80vw z-[9000] col-start-1 col-end-4 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 >
-	<div class="bg-white dark:bg-gray-800 transition-colors duration-200">
-		<div class="mt-4 flex items-center flex-wrap">
-			<!-- mode tabs -->
-			<div class="flex">
-				{#if $$slots.default}
-					<button
-						on:click={() => {
-							isDetailsVisible = true;
-						}}
-						type="button"
-						class="h-8 border-2 rounded-md w-36 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 mb-2 transition-colors duration-200"
-						class:font-bold={isDetailsVisible}
-						class:bg-blue-600={isDetailsVisible}
-						class:dark:bg-blue-500={isDetailsVisible}
-						class:text-white={isDetailsVisible}
-						class:border-blue-600={isDetailsVisible}
-						class:dark:border-blue-500={isDetailsVisible}
-						class:text-gray-700={!isDetailsVisible}
-						class:dark:text-gray-200={!isDetailsVisible}
-						class:bg-white={!isDetailsVisible}
-						class:dark:bg-gray-700={!isDetailsVisible}
-						class:border-gray-300={!isDetailsVisible}
-						class:dark:border-gray-600={!isDetailsVisible}
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-4 w-4"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0v12h8V4H6z"
-								clip-rule="evenodd"
-							/>
-							<path fill-rule="evenodd" d="M7 7h6v2H7V7zm0 4h6v2H7v-2z" clip-rule="evenodd" />
-						</svg>
-						<span>Details</span>
-					</button>
-					<button
-						on:click={() => {
-							isDetailsVisible = false;
-						}}
-						type="button"
-						class="h-8 border-2 rounded-md w-36 text-center cursor-pointer hover:opacity-80 ml-1 flex items-center justify-center gap-2 transition-colors duration-200"
-						class:font-bold={!isDetailsVisible}
-						class:bg-blue-600={!isDetailsVisible}
-						class:dark:bg-blue-500={!isDetailsVisible}
-						class:text-white={!isDetailsVisible}
-						class:border-blue-600={!isDetailsVisible}
-						class:dark:border-blue-500={!isDetailsVisible}
-						class:text-gray-700={isDetailsVisible}
-						class:dark:text-gray-200={isDetailsVisible}
-						class:bg-white={isDetailsVisible}
-						class:dark:bg-gray-700={isDetailsVisible}
-						class:border-gray-300={isDetailsVisible}
-						class:dark:border-gray-600={isDetailsVisible}
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-4 w-4"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-						<span>Editor</span>
-					</button>
-				{/if}
-			</div>
-
-			<!-- editor controls - custom markup that matches the design -->
-			{#if !isDetailsVisible}
-				<div
-					class="flex items-center ml-0 xl:ml-4 flex-wrap gap-2 mb-2"
-					class:ml-4={$$slots.default}
-					class:mb-4={!$$slots.default}
-				>
-					<!-- custom file upload button -->
-					<button
-						type="button"
-						on:click={triggerFileInput}
-						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-4 w-4"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-						<span>Load File</span>
-					</button>
-					<input
-						bind:this={fileInputRef}
-						type="file"
-						on:change={onSetFile}
-						accept=".html,.htm,.txt"
-						class="hidden"
-					/>
-
-					<!-- custom preview toggle button -->
-					<button
-						type="button"
-						on:click={() => {
-							isPreviewVisible = !isPreviewVisible;
-							if (isPreviewVisible) {
-								updatePreview();
-							} else {
-								previewFrame = null;
-								if (shadowContainer) shadowContainer.innerHTML = '';
-							}
-						}}
-						class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
-						class:font-bold={isPreviewVisible}
-						class:bg-blue-600={isPreviewVisible}
-						class:dark:bg-blue-500={isPreviewVisible}
-						class:text-white={isPreviewVisible}
-						class:border-blue-600={isPreviewVisible}
-						class:dark:border-blue-500={isPreviewVisible}
-						class:text-gray-700={!isPreviewVisible}
-						class:dark:text-gray-200={!isPreviewVisible}
-						class:bg-white={!isPreviewVisible}
-						class:dark:bg-gray-700={!isPreviewVisible}
-						class:border-gray-300={!isPreviewVisible}
-						class:dark:border-gray-600={!isPreviewVisible}
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-4 w-4"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-						>
-							<path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
-							<path
-								fill-rule="evenodd"
-								d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-						<span>Preview</span>
-					</button>
-
-					<!-- vim mode toggle button -->
-					<button
-						type="button"
-						on:click={() => {
-							vimModeEnabled.update((v) => !v);
-						}}
-						class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
-						class:font-bold={localVimMode}
-						class:bg-blue-600={localVimMode}
-						class:dark:bg-blue-500={localVimMode}
-						class:text-white={localVimMode}
-						class:border-blue-600={localVimMode}
-						class:dark:border-blue-500={localVimMode}
-						class:text-gray-700={!localVimMode}
-						class:dark:text-gray-200={!localVimMode}
-						class:bg-white={!localVimMode}
-						class:dark:bg-gray-700={!localVimMode}
-						class:border-gray-300={!localVimMode}
-						class:dark:border-gray-600={!localVimMode}
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-4 w-4"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-						>
-							<path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h6v2H7v-2z" />
-						</svg>
-						<span>Vim</span>
-					</button>
-
-					<!-- template selector -->
-					<select
-						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200"
-						on:change={(e) => {
-							const t = /** @type {HTMLSelectElement} */ (e.target);
-							if (t.value) {
-								insertTemplate(t.value);
-								t.value = ''; // reset selection
-							}
-						}}
-					>
-						<option class="" value="">Templates...</option>
-						{#each Object.entries(templates) as [group, items]}
-							<optgroup label={group}>
-								{#each items as item}
-									<option value={item.text}>{item.label}</option>
-								{/each}
-							</optgroup>
-						{/each}
-					</select>
-
-					<!-- domain selector if available -->
-					<select
-						id="domain-select"
-						bind:value={selectedDomain}
-						on:change={selectPreviewDomain}
-						class="h-8 w-64 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200 text-ellipsis"
-					>
-						{#if domainMap.values().length}
-							<option value="" class="italic">Select preview domain...</option>
-							{#each domainMap.values() as domain}
-								<option value={domain}>{domain}</option>
-							{/each}
-						{:else}
-							<option value="" class="italic">No domains - Assets will not load</option>
-						{/if}
-					</select>
-
-					<!-- open in new window button -->
-					<button
-						type="button"
-						on:click={openFullPagePreview}
-						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
-					>
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							class="h-4 w-4"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V8.414l-4-4H4zm.5 2a.5.5 0 00-.5.5v7a.5.5 0 00.5.5h11a.5.5 0 00.5-.5v-7a.5.5 0 00-.5-.5h-11z"
-								clip-rule="evenodd"
-							/>
-							<path
-								d="M8 6h2v2H8V6zM6 8h2v2H6V8zM8 10h2v2H8v-2zM6 12h2v2H6v-2zM10 8h2v2h-2V8zM12 6h2v2h-2V6zM10 12h2v2h-2v-2zM12 10h2v2h-2v-2z"
-							/>
-						</svg>
-						<span>New Window</span>
-					</button>
-				</div>
-			{/if}
-		</div>
-
+	<div
+		class="bg-white dark:bg-gray-800 transition-colors duration-200"
+		class:fixed={isExpanded}
+		class:inset-0={isExpanded}
+		class:z-50={isExpanded}
+		style={isExpanded ? 'width: 100vw; height: 100vh;' : ''}
+		role={isExpanded ? 'dialog' : undefined}
+		on:keydown={(e) => {
+			if (isExpanded && e.key === 'Escape') {
+				e.stopPropagation();
+				isExpanded = false;
+			}
+		}}
+	>
 		<!-- details -->
-		{#if $$slots.default}
+		{#if !isExpanded}
 			<div
 				class="flex flex-col lg:flex-row lg:items-center h-auto w-full justify-between mb-4 bg-white dark:bg-gray-800 transition-colors duration-200"
 			>
-				{#if isDetailsVisible}
-					<slot />
+				<slot />
+			</div>
+		{/if}
+		<!-- editor controls -->
+		<div
+			class="flex items-center flex-wrap gap-2 bg-slate-900 w-full justify-start p-4 rounded-t-md"
+		>
+			<!-- custom file upload button -->
+			<button
+				type="button"
+				on:click={triggerFileInput}
+				class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-4 w-4"
+					viewBox="0 0 20 20"
+					fill="currentColor"
+				>
+					<path
+						fill-rule="evenodd"
+						d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z"
+						clip-rule="evenodd"
+					/>
+				</svg>
+				<span>Load File</span>
+			</button>
+			<input
+				bind:this={fileInputRef}
+				type="file"
+				on:change={onSetFile}
+				accept=".html,.htm,.txt"
+				class="hidden"
+			/>
+
+			<!-- vim mode toggle button -->
+			<button
+				type="button"
+				on:click={() => {
+					vimModeEnabled.update((v) => !v);
+				}}
+				class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
+				class:font-bold={localVimMode}
+				class:bg-blue-600={localVimMode}
+				class:dark:bg-blue-500={localVimMode}
+				class:text-white={localVimMode}
+				class:border-blue-600={localVimMode}
+				class:dark:border-blue-500={localVimMode}
+				class:text-gray-700={!localVimMode}
+				class:dark:text-gray-200={!localVimMode}
+				class:bg-white={!localVimMode}
+				class:dark:bg-gray-700={!localVimMode}
+				class:border-gray-300={!localVimMode}
+				class:dark:border-gray-600={!localVimMode}
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-4 w-4"
+					viewBox="0 0 20 20"
+					fill="currentColor"
+				>
+					<path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h6v2H7v-2z" />
+				</svg>
+				<span>Vim</span>
+			</button>
+
+			<!-- template selector -->
+			<select
+				class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200"
+				on:change={(e) => {
+					const t = /** @type {HTMLSelectElement} */ (e.target);
+					if (t.value) {
+						insertTemplate(t.value);
+						t.value = ''; // reset selection
+					}
+				}}
+			>
+				<option class="" value="">Templates...</option>
+				{#each Object.entries(templates) as [group, items]}
+					<optgroup label={group}>
+						{#each items as item}
+							<option value={item.text}>{item.label}</option>
+						{/each}
+					</optgroup>
+				{/each}
+			</select>
+
+			<!-- domain selector if available -->
+			<select
+				id="domain-select"
+				bind:value={selectedDomain}
+				on:change={selectPreviewDomain}
+				class="h-8 w-64 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200 text-ellipsis"
+			>
+				{#if domainMap.values().length}
+					<option value="" class="italic">Select preview domain...</option>
+					{#each domainMap.values() as domain}
+						<option value={domain}>{domain}</option>
+					{/each}
+				{:else}
+					<option value="" class="italic">No domains - Assets will not load</option>
+				{/if}
+			</select>
+
+			<!-- custom preview toggle button -->
+			<button
+				type="button"
+				on:click={async () => {
+					isPreviewVisible = !isPreviewVisible;
+					if (isPreviewVisible) {
+						previewFrame = null;
+						await tick();
+						updatePreview();
+					} else {
+						previewFrame = null;
+						if (shadowContainer) shadowContainer.innerHTML = '';
+					}
+				}}
+				class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
+				class:font-bold={isPreviewVisible}
+				class:bg-blue-600={isPreviewVisible}
+				class:dark:bg-blue-500={isPreviewVisible}
+				class:text-white={isPreviewVisible}
+				class:border-blue-600={isPreviewVisible}
+				class:dark:border-blue-500={isPreviewVisible}
+				class:text-gray-700={!isPreviewVisible}
+				class:dark:text-gray-200={!isPreviewVisible}
+				class:bg-white={!isPreviewVisible}
+				class:dark:bg-gray-700={!isPreviewVisible}
+				class:border-gray-300={!isPreviewVisible}
+				class:dark:border-gray-600={!isPreviewVisible}
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-4 w-4"
+					viewBox="0 0 20 20"
+					fill="currentColor"
+				>
+					<path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+					<path
+						fill-rule="evenodd"
+						d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+						clip-rule="evenodd"
+					/>
+				</svg>
+				<span>Preview</span>
+			</button>
+
+			<!-- open in new window button -->
+			<button
+				type="button"
+				on:click={openFullPagePreview}
+				class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-4 w-4"
+					viewBox="0 0 20 20"
+					fill="currentColor"
+				>
+					<path
+						fill-rule="evenodd"
+						d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V8.414l-4-4H4zm.5 2a.5.5 0 00-.5.5v7a.5.5 0 00.5.5h11a.5.5 0 00.5-.5v-7a.5.5 0 00-.5-.5h-11z"
+						clip-rule="evenodd"
+					/>
+					<path
+						d="M8 6h2v2H8V6zM6 8h2v2H6V8zM8 10h2v2H8v-2zM6 12h2v2H6v-2zM10 8h2v2h-2V8zM12 6h2v2h-2V6zM10 12h2v2h-2v-2zM12 10h2v2h-2v-2z"
+					/>
+				</svg>
+				<span>New Window</span>
+			</button>
+			<button
+				type="button"
+				on:click={() => (isExpanded = !isExpanded)}
+				class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+			>
+				{#if !isExpanded}
+					<!-- Expand icon -->
+					<svg class="h-4 w-4" viewBox="0 0 20 20" fill="none">
+						<path
+							d="M4 8V4h4M16 8V4h-4M4 12v4h4M16 12v4h-4"
+							stroke="currentColor"
+							stroke-width="1.5"
+							stroke-linecap="round"
+						/>
+						<path
+							d="M4 4l5 5M16 4l-5 5M4 16l5-5M16 16l-5-5"
+							stroke="currentColor"
+							stroke-width="1.5"
+							stroke-linecap="round"
+						/>
+					</svg>
+					<span>Expand</span>
+				{:else}
+					<!-- Collapse icon -->
+					<svg class="h-4 w-4" viewBox="0 0 20 20" fill="none">
+						<path
+							d="M9 4h-5v5M11 4h5v5M9 16h-5v-5M11 16h5v-5"
+							stroke="currentColor"
+							stroke-width="1.5"
+							stroke-linecap="round"
+						/>
+						<path
+							d="M9 9l-5-5M11 9l5-5M9 11l-5 5M11 11l5 5"
+							stroke="currentColor"
+							stroke-width="1.5"
+							stroke-linecap="round"
+						/>
+					</svg>
+					<span>Collapse</span>
+				{/if}
+			</button>
+		</div>
+		<!-- editor below controls -->
+		<!-- editor and preview side-by-side -->
+		<div
+			class={isExpanded
+				? 'flex flex-row w-full h-[calc(100vh-64px)] overflow-hidden'
+				: 'flex flex-row w-full h-[55vh] overflow-hidden'}
+		>
+			<div
+				class="flex flex-col relative h-full transition-colors duration-200 {isPreviewVisible
+					? 'w-1/2'
+					: 'w-full'}"
+			>
+				<div bind:this={editorContainer} class="h-full"></div>
+				{#if localVimMode}
+					<div
+						bind:this={vimStatusBar}
+						class="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gray-700 text-xs font-mono text-gray-300"
+						style="height: 25px;"
+					></div>
 				{/if}
 			</div>
-		{/if}
-	</div>
-
-	<div class="flex h-full rounded-lg overflow-hidden">
-		<div
-			class="flex flex-col relative {!isPreviewVisible
-				? 'w-80vw'
-				: 'w-1/2'} transition-colors duration-200"
-			class:h-55vh={isDetailsVisible}
-			class:h-67vh={!isDetailsVisible}
-		>
-			<div bind:this={editorContainer} class="h-full"></div>
-			{#if localVimMode}
+			{#if isPreviewVisible}
 				<div
-					bind:this={vimStatusBar}
-					class="absolute bottom-0 left-0 right-0 px-2 py-1 bg-gray-700 text-xs font-mono text-gray-300"
-					style="height: 25px;"
-				></div>
+					class="w-1/2 border-2 border-black dark:border-gray-600 bg-white transition-colors duration-200 h-full"
+				>
+					<div bind:this={shadowContainer} class="h-full w-full"></div>
+				</div>
 			{/if}
 		</div>
-		<div
-			class="bg-cta-blue dark:bg-indigo-600 cursor-move w-1 transition-colors duration-200"
-			class:hidden={!isPreviewVisible}
-		>
-			&nbsp;
-		</div>
-		{#if isPreviewVisible}
-			<div
-				class="w-1/2 border-2 border-black dark:border-gray-600 bg-white transition-colors duration-200"
-			>
-				<div bind:this={shadowContainer} class="h-full w-full"></div>
-			</div>
-		{/if}
 	</div>
 </div>
 
