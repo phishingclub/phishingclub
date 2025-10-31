@@ -613,6 +613,9 @@
 							isPreviewVisible = !isPreviewVisible;
 							if (isPreviewVisible) {
 								updatePreview();
+							} else {
+								previewFrame = null;
+								if (shadowContainer) shadowContainer.innerHTML = '';
 							}
 						}}
 						class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
