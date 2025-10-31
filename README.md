@@ -21,6 +21,9 @@ Remember to copy the admin URL and password
 
 For a manual step by step guide or more in depth installation information - [click here](https://phishing.club/guide/management/#install)
 
+Prebuild images of the latest version are also available.
+
+See [production docker comopse example](https://github.com/phishingclub/phishingclub/blob/develop/docker-compose.production.yml) and [the latest images](https://github.com/phishingclub/phishingclub/pkgs/container/phishingclub)
 
 ## Features
 
