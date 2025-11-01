@@ -1264,6 +1264,9 @@ func (c *Campaign) UpdateByID(
 	if v, err := incoming.IsTest.Get(); err == nil {
 		current.IsTest.Set(v)
 	}
+	if v, err := incoming.Obfuscate.Get(); err == nil {
+		current.Obfuscate.Set(v)
+	}
 	if v, err := incoming.SortField.Get(); err == nil {
 		current.SortField.Set(v)
 	}

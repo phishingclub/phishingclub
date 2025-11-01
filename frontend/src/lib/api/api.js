@@ -499,6 +499,7 @@ export class API {
 		 * @param {boolean} [campaign.saveSubmittedData]
 		 * @param {boolean} [campaign.isAnonymous]
 		 * @param {boolean} [campaign.isTest]
+		 * @param {boolean} [campaign.obfuscate]
 		 * @param {string} campaign.sortField
 		 * @param {string} campaign.sortOrder
 		 * @param {string} campaign.sendStartAt
@@ -522,6 +523,7 @@ export class API {
 			saveSubmittedData,
 			isAnonymous,
 			isTest,
+			obfuscate,
 			sortField,
 			sortOrder,
 			sendStartAt,
@@ -543,6 +545,7 @@ export class API {
 				name,
 				isAnonymous,
 				isTest,
+				obfuscate,
 				saveSubmittedData,
 				sortField,
 				sortOrder,
@@ -550,6 +553,79 @@ export class API {
 				sendEndAt,
 				closeAt,
 				anonymizeAt,
+				recipientGroupIDs,
+				allowDenyIDs,
+				denyPageID,
+				evasionPageID,
+				webhookID,
+				constraintWeekDays,
+				constraintStartTime,
+				constraintEndTime
+			});
+		},
+
+		/**
+		 *
+		 * @param {object} campaign
+		 * @param {string} campaign.id
+		 * @param {string} campaign.name
+		 * @param {boolean} [campaign.saveSubmittedData]
+		 * @param {boolean} [campaign.isAnonymous]
+		 * @param {boolean} [campaign.isTest]
+		 * @param {boolean} [campaign.obfuscate]
+		 * @param {string} campaign.sortField
+		 * @param {string} campaign.sortOrder
+		 * @param {string} campaign.sendStartAt
+		 * @param {string} campaign.sendEndAt
+		 * @param {string} [campaign.closeAt]
+		 * @param {string} [campaign.anonymizeAt]
+		 * @param {string} campaign.templateID  uuid
+		 * @param {string[]} campaign.recipientGroupIDs []uuid
+		 * @param {string[]} campaign.allowDenyIDs []uuid
+		 * @param {string} campaign.denyPageID uuid
+		 * @param {string} campaign.evasionPageID uuid
+		 * @param {string} campaign.webhookID uuid
+		 * @param {Array} [campaign.constraintWeekDays]
+		 * @param {string} [campaign.constraintStartTime]
+		 * @param {string} [campaign.constraintEndTime]
+		 * @returns {Promise<ApiResponse>}
+		 */
+		update: async ({
+			id,
+			name,
+			saveSubmittedData,
+			isAnonymous,
+			isTest,
+			obfuscate,
+			sortField,
+			sortOrder,
+			sendStartAt,
+			sendEndAt,
+			closeAt,
+			anonymizeAt,
+			templateID,
+			recipientGroupIDs,
+			allowDenyIDs,
+			denyPageID,
+			evasionPageID,
+			webhookID,
+			constraintWeekDays,
+			constraintStartTime,
+			constraintEndTime
+		}) => {
+			return await postJSON(this.getPath(`/campaign/${id}`), {
+				name,
+				isAnonymous,
+				isTest,
+				obfuscate,
+				saveSubmittedData,
+				sortField,
+				sortOrder,
+				sendStartAt,
+				sendEndAt,
+				closeAt,
+				anonymizeAt,
+				templateID,
 				recipientGroupIDs,
 				allowDenyIDs,
 				denyPageID,
@@ -765,80 +841,6 @@ export class API {
 		 */
 		getURL: async (campaignRecipientID) => {
 			return await getJSON(this.getPath(`/campaign/recipient/${campaignRecipientID}/url`));
-		},
-
-		/**
-		 * Update a campaign.
-		 *
-		 * @param {object} campaign
-		 * @param {string} campaign.id
-		 * @param {string} [campaign.companyID]   uuid
-		 * @param {string} [campaign.templateID]  uuid
-		 * @param {string} [campaign.name]
-		 * @param {boolean} [campaign.saveSubmittedData]
-		 * @param {boolean} [campaign.isAnonymous]
-		 * @param {boolean} [campaign.isTest]
-		 * @param {string} [campaign.sortField]
-		 * @param {string} [campaign.sortOrder]
-		 * @param {string} [campaign.sendStartAt]
-		 * @param {string} [campaign.sendEndAt]
-		 * @param {array} [campaign.constraintWeekDays]
-		 * @param {string} [campaign.constraintStartTime]
-		 * @param {string} [campaign.constraintEndTime]
-		 * @param {string} [campaign.closeAt]
-		 * @param {string} [campaign.anonymizeAt]
-		 * @param {string[]} [campaign.recipientGroupIDs] []uuid
-		 * @param {string[]} campaign.allowDenyIDs []uuid
-		 * @param {string} campaign.denyPageID uuid
-		 * @param {string} campaign.evasionPageID uuid
-		 * @param {string} campaign.webhookID uuid
-		 * @returns {Promise<ApiResponse>}
-		 */
-		update: async ({
-			id,
-			companyID,
-			templateID,
-			name,
-			saveSubmittedData,
-			isAnonymous,
-			isTest,
-			sortField,
-			sortOrder,
-			sendStartAt,
-			sendEndAt,
-			constraintWeekDays,
-			constraintStartTime,
-			constraintEndTime,
-			closeAt,
-			anonymizeAt,
-			recipientGroupIDs,
-			allowDenyIDs,
-			denyPageID,
-			evasionPageID,
-			webhookID
-		}) => {
-			return await postJSON(this.getPath(`/campaign/${id}`), {
-				companyID,
-				templateID,
-				name,
-				isAnonymous,
-				isTest,
-				saveSubmittedData,
-				sortField,
-				sortOrder,
-				sendStartAt,
-				sendEndAt,
-				constraintWeekDays,
-				constraintStartTime,
-				constraintEndTime,
-				closeAt,
-				anonymizeAt,
-				recipientGroupIDs,
-				allowDenyIDs,
-				denyPageID,
-				evasionPageID,
-				webhookID
-			});
 		},
 
 		/**

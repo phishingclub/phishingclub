@@ -1459,6 +1459,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	saveSubmittedData := nullable.NewNullableWithValue(row.SaveSubmittedData)
 	isAnonymous := nullable.NewNullableWithValue(row.IsAnonymous)
 	isTest := nullable.NewNullableWithValue(row.IsTest)
+	obfuscate := nullable.NewNullableWithValue(row.Obfuscate)
 	var templateID nullable.Nullable[uuid.UUID]
 	if row.CampaignTemplateID != nil {
 		templateID = nullable.NewNullableWithValue(*row.CampaignTemplateID)
@@ -1585,6 +1586,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		SaveSubmittedData:   saveSubmittedData,
 		IsAnonymous:         isAnonymous,
 		IsTest:              isTest,
+		Obfuscate:           obfuscate,
 		TemplateID:          templateID,
 		Template:            template,
 		RecipientGroups:     recipientGroups,

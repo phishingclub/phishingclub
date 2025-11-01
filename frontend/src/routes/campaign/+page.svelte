@@ -255,6 +255,7 @@
 		saveSubmittedData: true,
 		isAnonymous: null,
 		isTest: false,
+		obfuscate: false,
 		selectedCount: 0,
 		webhookValue: null
 	};
@@ -625,6 +626,7 @@
 				saveSubmittedData: formValues.saveSubmittedData,
 				isAnonymous: formValues.isAnonymous,
 				isTest: formValues.isTest,
+				obfuscate: formValues.obfuscate,
 				recipientGroupIDs: recipientGroupIDs,
 				allowDenyIDs: allowDenyIDs,
 				denyPageID: denyPageMap.byValueOrNull(formValues.denyPageValue),
@@ -683,6 +685,7 @@
 				saveSubmittedData: formValues.saveSubmittedData,
 				isAnonymous: formValues.isAnonymous,
 				isTest: formValues.isTest,
+				obfuscate: formValues.obfuscate,
 				constraintWeekDays: weekDaysAvailableToBinary(formValues.constraintWeekDays),
 				constraintStartTime: contraintStartTimeUTC,
 				constraintEndTime: contraintEndTimeUTC,
@@ -813,8 +816,9 @@
 			contraintStartTime: null,
 			contraintEndTime: null,
 			saveSubmittedData: true,
-			isAnonymous: false,
+			isAnonymous: null,
 			isTest: false,
+			obfuscate: false,
 			selectedCount: 0,
 			webhookValue: null
 		};
@@ -918,6 +922,7 @@
 			saveSubmittedData: campaign.saveSubmittedData,
 			isAnonymous: campaign.isAnonymous,
 			isTest: campaign.isTest,
+			obfuscate: campaign.obfuscate || false,
 			template: templateMap.byKey(campaign.templateID),
 			webhookValue: webhookMap.byKey(campaign.webhookID)
 		};
@@ -965,7 +970,8 @@
 			campaign.webhookID ||
 			campaign.denyPage ||
 			campaign.evasionPage ||
-			campaign.allowDeny?.length
+			campaign.allowDeny?.length ||
+			campaign.obfuscate
 		);
 
 		if (campaign.evasionPage) {
@@ -1597,6 +1603,19 @@
 						{/if}
 
 						{#if showAdvancedOptionsStep4 && showSecurityOptions}
+							<div class="mb-6">
+								<SelectSquare
+									optional
+									label="Obfuscation"
+									toolTipText="Obfuscate html pages to avoid fingerprinting of static content."
+									options={[
+										{ value: false, label: 'Disabled' },
+										{ value: true, label: 'Enabled' }
+									]}
+									bind:value={formValues.obfuscate}
+								/>
+							</div>
+
 							<div class="mb-6">
 								<TextFieldSelect
 									id="deny-page"

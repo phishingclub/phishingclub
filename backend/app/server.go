@@ -1750,7 +1750,25 @@ func (s *Server) renderPageTemplate(
 	if err != nil {
 		return fmt.Errorf("failed to create phishing page: %s", err)
 	}
-	c.Data(http.StatusOK, "text/html; charset=utf-8", phishingPage.Bytes())
+
+	// apply obfuscation if enabled
+	pageContent := phishingPage.Bytes()
+	if campaign != nil {
+		if obfuscate, err := campaign.Obfuscate.Get(); err == nil && obfuscate {
+			s.logger.Debugw("obfuscating page", "campaignID", campaign.ID.MustGet().String(), "pageID", page.ID.MustGet().String())
+			obfuscated, err := utils.ObfuscateHTML(string(pageContent), utils.DefaultObfuscationConfig())
+			if err != nil {
+				s.logger.Errorw("failed to obfuscate page", "error", err)
+			} else {
+				s.logger.Debugw("page obfuscated successfully", "originalSize", len(pageContent), "obfuscatedSize", len(obfuscated))
+				pageContent = []byte(obfuscated)
+			}
+		} else {
+			s.logger.Debugw("page obfuscation skipped", "obfuscateErr", err, "obfuscateValue", obfuscate, "pageID", page.ID.MustGet().String())
+		}
+	}
+
+	c.Data(http.StatusOK, "text/html; charset=utf-8", pageContent)
 	c.Abort()
 	s.logger.Debugw("served phishing page",
 		"pageID", page.ID.MustGet().String(),

@@ -36,6 +36,7 @@ type Campaign struct {
 	SaveSubmittedData nullable.Nullable[bool]         `json:"saveSubmittedData"`
 	IsAnonymous       nullable.Nullable[bool]         `json:"isAnonymous"`
 	IsTest            nullable.Nullable[bool]         `json:"isTest"`
+	Obfuscate         nullable.Nullable[bool]         `json:"obfuscate"`
 	TemplateID        nullable.Nullable[uuid.UUID]    `json:"templateID"`
 	Template          *CampaignTemplate               `json:"template"`
 	CompanyID         nullable.Nullable[uuid.UUID]    `json:"companyID"`
@@ -316,6 +317,12 @@ func (c *Campaign) ToDBMap() map[string]any {
 		m["is_anonymous"] = false
 		if v, err := c.IsAnonymous.Get(); err == nil {
 			m["is_anonymous"] = v
+		}
+	}
+	if c.Obfuscate.IsSpecified() {
+		m["obfuscate"] = false
+		if v, err := c.Obfuscate.Get(); err == nil {
+			m["obfuscate"] = v
 		}
 	}
 	if c.TemplateID.IsSpecified() {
