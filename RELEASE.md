@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.11.0] - 2025-01-01
+- Added option to use campaign obfuscation
+- Removed details/editor and added expand option to editor
+- Fix editor preview bug when toggled multiple times
+
 ## [1.10.0] - 2025-10-31
 - Added release image on ghcr
 - Added option to pin menu
