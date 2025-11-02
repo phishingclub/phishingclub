@@ -1,7 +1,6 @@
 <script>
 	import Headline from '$lib/components/Headline.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
-	import { AppStateService } from '$lib/service/appState';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api/apiProxy.js';

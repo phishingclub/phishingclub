@@ -505,7 +505,7 @@ portal.example.com:
 					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
 						Basic Information
 					</h3>
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+					<div class="grid grid-cols-1 md:grid-cols-[1fr_2fr_2fr] gap-4">
 						<div>
 							<TextField
 								required
@@ -516,21 +516,20 @@ portal.example.com:
 							>
 						</div>
 						<div>
+							<TextField optional maxLength={255} bind:value={formValues.description}
+								>Description</TextField
+							>
+						</div>
+						<div class="flex justify-end">
 							<TextField
 								required
 								minLength={3}
 								maxLength={255}
 								bind:value={formValues.startURL}
 								placeholder="https://login.example.com/auth"
-								toolTipText="The starting URL where the Proxy attack begins - domain must be in YAML mappings"
-								>Start URL</TextField
+								toolTipText="Domain must be in proxy configuration">Start URL</TextField
 							>
 						</div>
-					</div>
-					<div class="mt-6">
-						<TextField optional maxLength={255} bind:value={formValues.description}
-							>Description</TextField
-						>
 					</div>
 				</div>
 
