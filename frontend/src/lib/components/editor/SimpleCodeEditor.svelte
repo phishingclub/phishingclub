@@ -17,6 +17,7 @@
 	export let language = 'json';
 	export let placeholder = '';
 	export let showVimToggle = true;
+	export let showExpandButton = true; // control expand button visibility
 	export let enableProxyCompletion = false; // enable proxy YAML completion
 	export let externalVimMode = null; // allow external control of vim mode
 	let localVimMode = externalVimMode !== null ? externalVimMode : $vimModeEnabled;
@@ -28,6 +29,7 @@
 	let vimModeInstance = null;
 	let proxyCompletionProvider = null;
 	let isDestroyed = false;
+	let isExpanded = false;
 
 	const heightClasses = {
 		small: 'h-64',
@@ -218,54 +220,123 @@
 	};
 </script>
 
-<div class="w-full">
-	<div class="bg-white dark:bg-gray-800 transition-colors duration-200 rounded-md">
-		{#if showVimToggle || enableProxyCompletion}
+<div
+	class="w-full"
+	class:fixed={isExpanded}
+	class:inset-0={isExpanded}
+	class:z-50={isExpanded}
+	class:bg-white={isExpanded}
+	class:dark:bg-gray-900={isExpanded}
+>
+	<div
+		class="bg-white dark:bg-gray-800 transition-colors duration-200"
+		class:rounded-md={!isExpanded}
+		class:h-full={isExpanded}
+		class:flex={isExpanded}
+		class:flex-col={isExpanded}
+		role={isExpanded ? 'dialog' : undefined}
+		on:keydown={(e) => {
+			if (isExpanded && e.key === 'Escape') {
+				e.stopPropagation();
+				isExpanded = false;
+			}
+		}}
+	>
+		{#if showVimToggle || showExpandButton || enableProxyCompletion}
 			<div
-				class="flex justify-between items-center p-2 border-b border-gray-200 dark:border-gray-600"
+				class="flex items-center flex-wrap gap-2 bg-slate-900 w-full justify-start p-4 rounded-t-md"
 			>
-				<div class="flex items-center space-x-2">
-					{#if showVimToggle}
-						<button
-							type="button"
-							on:click={() => {
-								vimModeEnabled.update((v) => !v);
-							}}
-							class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
-							class:font-bold={localVimMode}
-							class:bg-blue-600={localVimMode}
-							class:dark:bg-blue-500={localVimMode}
-							class:text-white={localVimMode}
-							class:border-blue-600={localVimMode}
-							class:dark:border-blue-500={localVimMode}
-							class:text-gray-700={!localVimMode}
-							class:dark:text-gray-200={!localVimMode}
-							class:bg-white={!localVimMode}
-							class:dark:bg-gray-700={!localVimMode}
-							class:border-gray-300={!localVimMode}
-							class:dark:border-gray-600={!localVimMode}
-						>
-							<span>Vim</span>
-						</button>
-					{/if}
-					{#if enableProxyCompletion}
-						<div class="flex items-center text-xs text-gray-500 dark:text-gray-400">
-							<span>Ctrl+Space for suggestions • Tab to accept</span>
-						</div>
-					{/if}
-				</div>
+				{#if showVimToggle}
+					<button
+						type="button"
+						on:click={() => {
+							vimModeEnabled.update((v) => !v);
+						}}
+						class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
+						class:font-bold={localVimMode}
+						class:bg-blue-600={localVimMode}
+						class:dark:bg-blue-500={localVimMode}
+						class:text-white={localVimMode}
+						class:border-blue-600={localVimMode}
+						class:dark:border-blue-500={localVimMode}
+						class:text-gray-700={!localVimMode}
+						class:dark:text-gray-200={!localVimMode}
+						class:bg-white={!localVimMode}
+						class:dark:bg-gray-700={!localVimMode}
+						class:border-gray-300={!localVimMode}
+						class:dark:border-gray-600={!localVimMode}
+					>
+						<span>Vim</span>
+					</button>
+				{/if}
+				{#if showExpandButton}
+					<button
+						type="button"
+						on:click={() => (isExpanded = !isExpanded)}
+						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+					>
+						{#if !isExpanded}
+							<!-- Expand icon -->
+							<svg class="h-4 w-4" viewBox="0 0 20 20" fill="none">
+								<path
+									d="M4 8V4h4M16 8V4h-4M4 12v4h4M16 12v4h-4"
+									stroke="currentColor"
+									stroke-width="1.5"
+									stroke-linecap="round"
+								/>
+								<path
+									d="M4 4l5 5M16 4l-5 5M4 16l5-5M16 16l-5-5"
+									stroke="currentColor"
+									stroke-width="1.5"
+									stroke-linecap="round"
+								/>
+							</svg>
+							<span>Expand</span>
+						{:else}
+							<!-- Collapse icon -->
+							<svg class="h-4 w-4" viewBox="0 0 20 20" fill="none">
+								<path
+									d="M9 4h-5v5M11 4h5v5M9 16h-5v-5M11 16h5v-5"
+									stroke="currentColor"
+									stroke-width="1.5"
+									stroke-linecap="round"
+								/>
+								<path
+									d="M9 9l-5-5M11 9l5-5M9 11l-5 5M11 11l5 5"
+									stroke="currentColor"
+									stroke-width="1.5"
+									stroke-linecap="round"
+								/>
+							</svg>
+							<span>Collapse</span>
+						{/if}
+					</button>
+				{/if}
+				{#if enableProxyCompletion}
+					<div class="flex items-center text-xs text-gray-500 dark:text-gray-400">
+						<span>Ctrl+Space for suggestions • Tab to accept</span>
+					</div>
+				{/if}
 			</div>
 		{/if}
-		<div class="border-2 border-gray-800 w-full rounded-lg overflow-hidden">
+		<div
+			class="border-2 border-gray-800 w-full rounded-lg overflow-hidden"
+			class:flex-1={isExpanded}
+			class:flex={isExpanded}
+			class:flex-col={isExpanded}
+		>
 			<div
 				bind:this={editorContainer}
 				class="w-full"
-				class:h-64={height === 'small' && !localVimMode}
-				class:h-80={height === 'medium' && !localVimMode}
-				class:h-96={height === 'large' && !localVimMode}
-				style={localVimMode
-					? `height: ${height === 'small' ? '224px' : height === 'medium' ? '294px' : '359px'}`
-					: ''}
+				class:h-64={height === 'small' && !localVimMode && !isExpanded}
+				class:h-80={height === 'medium' && !localVimMode && !isExpanded}
+				class:h-96={height === 'large' && !localVimMode && !isExpanded}
+				class:flex-1={isExpanded}
+				style={isExpanded
+					? ''
+					: localVimMode
+						? `height: ${height === 'small' ? '224px' : height === 'medium' ? '294px' : '359px'}`
+						: ''}
 			></div>
 			{#if localVimMode}
 				<div
