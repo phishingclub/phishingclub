@@ -192,6 +192,14 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	if err != nil {
 		return err
 	}
+	// if context is nil, campaign is not active - return 404
+	if reqCtx == nil {
+		return m.writeResponse(w, &http.Response{
+			StatusCode: http.StatusNotFound,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("")),
+		})
+	}
 
 	// check for URL rewrite and redirect if needed
 	if rewriteResp := m.checkAndApplyURLRewrite(req, reqCtx); rewriteResp != nil {
@@ -337,6 +345,15 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 		if err != nil {
 			return nil, errors.Errorf("failed to get campaign: %w", err)
 		}
+
+		// check if campaign is active
+		if !campaign.IsActive() {
+			m.logger.Debugw("campaign is not active",
+				"campaignID", campaignID.String(),
+			)
+			return nil, nil
+		}
+
 		reqCtx.Campaign = campaign
 
 		// preload campaign template if available
@@ -602,6 +619,15 @@ func (m *ProxyHandler) resolveSessionContext(req *http.Request, reqCtx *RequestC
 			reqCtx.CampaignID = session.CampaignID
 			reqCtx.CampaignRecipientID = session.CampaignRecipientID
 			reqCtx.RecipientID = session.RecipientID
+
+			// check if campaign is still active
+			if !session.Campaign.IsActive() {
+				m.logger.Debugw("session campaign is no longer active",
+					"sessionID", reqCtx.SessionID,
+					"campaignID", session.CampaignID.String(),
+				)
+				return fmt.Errorf("campaign is no longer active")
+			}
 		}
 	}
 
