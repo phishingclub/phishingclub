@@ -69,8 +69,16 @@
 	const currentExample = `version: "0.0"
 proxy: "My Proxy Campaign"
 
+# global TLS configuration (applies to all hosts unless overridden)
+global:
+  tls:
+    mode: "managed"  # "managed" (Let's Encrypt) or "self-signed"
+
 portal.example.com:
   to: "evil.example.com"
+  # optional: override global TLS config for this specific host
+  # tls:
+  #   mode: "self-signed"
   response:
     - path: "^/api/health$"
       headers:

@@ -88,7 +88,12 @@ export class ProxyYamlCompletionProvider {
 			return this.getTargetSuggestions(range);
 		}
 		if (linePrefix.match(/\s*mode:\s*$/)) {
-			return this.getModeSuggestions(range);
+			// determine context for mode - could be access or tls
+			const context = this.findParentSection(linesAbove, currentIndent);
+			if (context === 'tls') {
+				return this.getTLSModeSuggestions(range);
+			}
+			return this.getAccessModeSuggestions(range);
 		}
 		if (linePrefix.match(/\bfrom:\s*["']?/)) {
 			return this.getFromSuggestions(range);
@@ -135,6 +140,8 @@ export class ProxyYamlCompletionProvider {
 				return this.getGlobalSuggestions(range);
 			case 'domain':
 				return this.getDomainSuggestions(range);
+			case 'tls':
+				return this.getTLSSuggestions(range);
 			case 'access':
 				return this.getAccessSuggestions(range);
 			case 'capture':
@@ -181,6 +188,7 @@ export class ProxyYamlCompletionProvider {
 				}
 
 				// Nested sections
+				if (key === 'tls') return 'tls';
 				if (key === 'access') return 'access';
 				if (key === 'capture') return 'capture';
 				if (key === 'rewrite') return 'rewrite';
@@ -224,6 +232,13 @@ export class ProxyYamlCompletionProvider {
 	getGlobalSuggestions(range) {
 		return [
 			{
+				label: 'tls',
+				kind: this.monaco.languages.CompletionItemKind.Module,
+				insertText: 'tls:',
+				documentation: 'Global TLS configuration (applies to all hosts unless overridden)',
+				range
+			},
+			{
 				label: 'access',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'access:',
@@ -265,44 +280,82 @@ export class ProxyYamlCompletionProvider {
 		return [
 			{
 				label: 'to',
-				kind: this.monaco.languages.CompletionItemKind.Property,
-				insertText: 'to: "phishing-domain.com"',
-				documentation: 'Target phishing domain (required)',
+				kind: this.monaco.languages.CompletionItemKind.Field,
+				insertText: 'to: ',
+				documentation: 'Phishing domain (where victims will visit)',
+				range
+			},
+			{
+				label: 'tls',
+				kind: this.monaco.languages.CompletionItemKind.Module,
+				insertText: 'tls:',
+				documentation: 'TLS configuration for this domain (overrides global setting)',
 				range
 			},
 			{
 				label: 'access',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'access:',
-				documentation: 'Domain access control (optional - defaults to secure private mode)',
+				documentation: 'Access control configuration',
 				range
 			},
 			{
 				label: 'capture',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'capture:',
-				documentation: 'Domain capture rules',
+				documentation: 'Capture rules for this domain',
 				range
 			},
 			{
 				label: 'rewrite',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'rewrite:',
-				documentation: 'Domain rewrite rules',
+				documentation: 'Rewrite rules for this domain',
 				range
 			},
 			{
 				label: 'response',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'response:',
-				documentation: 'Domain response rules',
+				documentation: 'Response rules for this domain',
 				range
 			},
 			{
 				label: 'rewrite_urls',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'rewrite_urls:',
-				documentation: 'Domain URL rewrite rules for anti-detection',
+				documentation: 'URL rewrite rules for anti-detection',
+				range
+			}
+		];
+	}
+
+	getTLSSuggestions(range) {
+		return [
+			{
+				label: 'mode',
+				kind: this.monaco.languages.CompletionItemKind.Field,
+				insertText: 'mode: ',
+				documentation: 'TLS mode: "managed" (Let\'s Encrypt) or "self-signed"',
+				range
+			}
+		];
+	}
+
+	getTLSModeSuggestions(range) {
+		return [
+			{
+				label: '"managed"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"managed"',
+				documentation: "Managed TLS via Let's Encrypt (DEFAULT)",
+				range
+			},
+			{
+				label: '"self-signed"',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"self-signed"',
+				documentation: 'Automatically generated self-signed certificates',
 				range
 			}
 		];
@@ -312,18 +365,18 @@ export class ProxyYamlCompletionProvider {
 		return [
 			{
 				label: 'mode',
-				kind: this.monaco.languages.CompletionItemKind.Property,
-				insertText: 'mode: "private"',
+				kind: this.monaco.languages.CompletionItemKind.Field,
+				insertText: 'mode: ',
 				documentation:
-					'Access control mode: public (allow all) or private (IP whitelist after lure). Default: private',
+					'Access mode: "public" (allow all) or "private" (IP whitelist after lure access)',
 				range
 			},
 			{
 				label: 'on_deny',
-				kind: this.monaco.languages.CompletionItemKind.Property,
-				insertText: 'on_deny: "404"',
+				kind: this.monaco.languages.CompletionItemKind.Field,
+				insertText: 'on_deny: ',
 				documentation:
-					'Response for blocked requests in private mode (e.g., "404", "https://example.com")',
+					'Action when access denied in private mode: "404", status code, or "redirect:URL"',
 				range
 			}
 		];
@@ -691,7 +744,7 @@ export class ProxyYamlCompletionProvider {
 		];
 	}
 
-	getModeSuggestions(range) {
+	getAccessModeSuggestions(range) {
 		return [
 			{
 				label: '"private"',
@@ -925,8 +978,9 @@ export class ProxyYamlCompletionProvider {
 		const hoverData = {
 			version: 'Configuration version. Currently supports "0.0"',
 			global: 'Rules that apply to all domain mappings',
+			tls: 'TLS certificate configuration for proxy domains',
 			access: 'Access control configuration (optional - defaults to private mode for security)',
-			mode: 'Access control mode: "public" (allow all traffic) or "private" (IP whitelist after lure access, DEFAULT)',
+			mode: 'Access control mode: "public" (allow all traffic) or "private" (IP whitelist after lure access, DEFAULT), OR TLS mode: "managed" (Let\'s Encrypt) or "self-signed"',
 			on_deny:
 				'Response when access is denied in private mode (e.g., "404", "https://example.com")',
 			capture: 'Rules for capturing data from requests/responses',

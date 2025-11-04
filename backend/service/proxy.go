@@ -41,6 +41,7 @@ type ProxyServiceConfig struct {
 // ProxyServiceDomainConfig represents configuration for a specific domain mapping
 type ProxyServiceDomainConfig struct {
 	To          string                       `yaml:"to"`
+	TLS         *ProxyServiceTLSConfig       `yaml:"tls,omitempty"`
 	Access      *ProxyServiceAccessControl   `yaml:"access,omitempty"`
 	Capture     []ProxyServiceCaptureRule    `yaml:"capture,omitempty"`
 	Rewrite     []ProxyServiceReplaceRule    `yaml:"rewrite,omitempty"`
@@ -51,11 +52,30 @@ type ProxyServiceDomainConfig struct {
 // ProxyServiceRules represents capture and replace rules
 // ProxyServiceRules represents global rules that apply to all hosts
 type ProxyServiceRules struct {
+	TLS         *ProxyServiceTLSConfig       `yaml:"tls,omitempty"`
 	Access      *ProxyServiceAccessControl   `yaml:"access,omitempty"`
 	Capture     []ProxyServiceCaptureRule    `yaml:"capture,omitempty"`
 	Rewrite     []ProxyServiceReplaceRule    `yaml:"rewrite,omitempty"`
 	Response    []ProxyServiceResponseRule   `yaml:"response,omitempty"`
 	RewriteURLs []ProxyServiceURLRewriteRule `yaml:"rewrite_urls,omitempty"`
+}
+
+// ProxyServiceTLSConfig represents TLS configuration for proxy domains
+// TLS modes:
+// - "managed": Use Let's Encrypt for automatic certificate management (DEFAULT)
+// - "self-signed": Use automatically generated self-signed certificates
+//
+// Configuration can be set globally and overridden per-host:
+//
+//	global:
+//	  tls:
+//	    mode: "managed"
+//	example.com:
+//	  to: "phishing.com"
+//	  tls:
+//	    mode: "self-signed"  # override global setting
+type ProxyServiceTLSConfig struct {
+	Mode string `yaml:"mode"` // "managed" | "self-signed"
 }
 
 // ProxyServiceAccessControl represents access control configuration
@@ -974,7 +994,23 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 		config.Version = "0.0"
 	}
 
+	// set defaults for global TLS config
+	if config.Global != nil && config.Global.TLS != nil {
+		// set default mode to managed if not specified
+		if config.Global.TLS.Mode == "" {
+			config.Global.TLS.Mode = "managed"
+		}
+	}
+
 	for domain, domainConfig := range config.Hosts {
+		// set defaults for domain TLS config
+		if domainConfig != nil && domainConfig.TLS != nil {
+			// set default mode to managed if not specified
+			if domainConfig.TLS.Mode == "" {
+				domainConfig.TLS.Mode = "managed"
+			}
+		}
+
 		if domainConfig != nil && domainConfig.Capture != nil {
 			for i := range domainConfig.Capture {
 				// set default required to true if not specified
@@ -1202,6 +1238,22 @@ func (m *Proxy) validateReplaceRules(replaceRules []ProxyServiceReplaceRule) err
 }
 
 // validateAccessControl validates access control configuration
+func (m *Proxy) validateTLSConfig(tlsConfig *ProxyServiceTLSConfig) error {
+	if tlsConfig == nil {
+		return nil
+	}
+
+	// validate TLS mode
+	if tlsConfig.Mode != "" && tlsConfig.Mode != "managed" && tlsConfig.Mode != "self-signed" {
+		return validate.WrapErrorWithField(
+			errors.New("tls.mode must be either 'managed' or 'self-signed'"),
+			"proxyConfig",
+		)
+	}
+
+	return nil
+}
+
 func (m *Proxy) validateAccessControl(accessControl *ProxyServiceAccessControl) error {
 	if accessControl == nil {
 		return nil // access control will be set to defaults
@@ -1426,6 +1478,11 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 			}
 		}
 
+		// validate domain-specific TLS config
+		if err := m.validateTLSConfig(domainConfig.TLS); err != nil {
+			return err
+		}
+
 		// validate domain-specific access control
 		if err := m.validateAccessControl(domainConfig.Access); err != nil {
 			return err
@@ -1464,6 +1521,9 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 
 	// validate global rules
 	if config.Global != nil {
+		if err := m.validateTLSConfig(config.Global.TLS); err != nil {
+			return err
+		}
 		if err := m.validateAccessControl(config.Global.Access); err != nil {
 			return err
 		}
@@ -1959,9 +2019,25 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 		}
 		domain.ProxyTargetDomain.Set(*proxyTargetDomain)
 
+		// determine TLS mode from config (check domain-specific first, then global, then default to managed)
+		tlsMode := "managed" // default
+		if domainConfig.TLS != nil && domainConfig.TLS.Mode != "" {
+			tlsMode = domainConfig.TLS.Mode
+		} else if config.Global != nil && config.Global.TLS != nil && config.Global.TLS.Mode != "" {
+			tlsMode = config.Global.TLS.Mode
+		}
+
 		domain.HostWebsite.Set(false)
-		domain.ManagedTLS.Set(true)
-		domain.OwnManagedTLS.Set(false)
+		if tlsMode == "self-signed" {
+			domain.ManagedTLS.Set(false)
+			domain.OwnManagedTLS.Set(false)
+			domain.SelfSignedTLS.Set(true)
+		} else {
+			// default to managed
+			domain.ManagedTLS.Set(true)
+			domain.OwnManagedTLS.Set(false)
+			domain.SelfSignedTLS.Set(false)
+		}
 
 		pageContent, err := vo.NewOptionalString1MB("")
 		if err != nil {
@@ -2207,6 +2283,31 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 				}
 			}
 
+			// check if TLS configuration needs updating
+			tlsMode := "managed" // default
+			if hostConfig, exists := config.Hosts[originalDomain]; exists && hostConfig != nil && hostConfig.TLS != nil && hostConfig.TLS.Mode != "" {
+				tlsMode = hostConfig.TLS.Mode
+			} else if config.Global != nil && config.Global.TLS != nil && config.Global.TLS.Mode != "" {
+				tlsMode = config.Global.TLS.Mode
+			}
+
+			// check current TLS settings
+			currentManagedTLS := existingDomain.ManagedTLS.MustGet()
+			currentSelfSignedTLS := existingDomain.SelfSignedTLS.MustGet()
+
+			// determine if TLS settings need updating
+			if tlsMode == "self-signed" && !currentSelfSignedTLS {
+				existingDomain.ManagedTLS.Set(false)
+				existingDomain.OwnManagedTLS.Set(false)
+				existingDomain.SelfSignedTLS.Set(true)
+				needsUpdate = true
+			} else if tlsMode == "managed" && !currentManagedTLS {
+				existingDomain.ManagedTLS.Set(true)
+				existingDomain.OwnManagedTLS.Set(false)
+				existingDomain.SelfSignedTLS.Set(false)
+				needsUpdate = true
+			}
+
 			if needsUpdate {
 				domainID, err := existingDomain.ID.Get()
 				if err == nil {
@@ -2254,9 +2355,25 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 			}
 			domain.ProxyTargetDomain.Set(*proxyTargetDomain)
 
+			// determine TLS mode from config (check domain-specific first, then global, then default to managed)
+			tlsMode := "managed" // default
+			if hostConfig, exists := config.Hosts[originalDomain]; exists && hostConfig != nil && hostConfig.TLS != nil && hostConfig.TLS.Mode != "" {
+				tlsMode = hostConfig.TLS.Mode
+			} else if config.Global != nil && config.Global.TLS != nil && config.Global.TLS.Mode != "" {
+				tlsMode = config.Global.TLS.Mode
+			}
+
 			domain.HostWebsite.Set(false)
-			domain.ManagedTLS.Set(true)
-			domain.OwnManagedTLS.Set(false)
+			if tlsMode == "self-signed" {
+				domain.ManagedTLS.Set(false)
+				domain.OwnManagedTLS.Set(false)
+				domain.SelfSignedTLS.Set(true)
+			} else {
+				// default to managed
+				domain.ManagedTLS.Set(true)
+				domain.OwnManagedTLS.Set(false)
+				domain.SelfSignedTLS.Set(false)
+			}
 
 			pageContent, err := vo.NewOptionalString1MB("")
 			if err != nil {
