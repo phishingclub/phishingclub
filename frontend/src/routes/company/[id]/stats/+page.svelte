@@ -30,6 +30,7 @@
 		const emailsSent = stats.emailsSent || 0;
 		const read = stats.trackingPixelLoaded || 0;
 		const clicked = stats.websiteVisits || 0;
+		const submitted = stats.dataSubmissions || 0;
 		const reported = stats.reported || 0;
 
 		function pct(n, d) {
@@ -51,6 +52,11 @@
 				count: clicked,
 				absolute: pct(clicked, totalRecipients),
 				relative: pct(clicked, read)
+			},
+			submitted: {
+				count: submitted,
+				absolute: pct(submitted, totalRecipients),
+				relative: pct(submitted, clicked)
 			},
 			reported: {
 				count: reported,
@@ -374,10 +380,10 @@
 	<Table
 		columns={[
 			{ column: 'Campaign Name', size: 'large' },
-			{ column: 'Recipients', size: 'small', alignText: 'center' },
 			{ column: 'Sent', size: 'small', alignText: 'center' },
 			{ column: 'Read', size: 'small', alignText: 'center' },
 			{ column: 'Clicked', size: 'small', alignText: 'center' },
+			{ column: 'Submitted', size: 'small', alignText: 'center' },
 			{ column: 'Reported', size: 'small', alignText: 'center' },
 			{ column: 'Time ago', size: 'small', alignText: 'center' }
 		]}
@@ -397,12 +403,15 @@
 						{stats.campaignName}
 					</button>
 				</TableCell>
-				<TableCell alignText="center" value={stats.totalRecipients} />
 				<TableCell alignText="center" value={pct.sent.count} />
 				<TableCell alignText="center" value={`${pct.read.count} (${pct.read.absolute}%)`} />
 				<TableCell
 					alignText="center"
 					value={`${pct.clicked.count} (${pct.clicked.absolute}%, rel: ${pct.clicked.relative}%)`}
+				/>
+				<TableCell
+					alignText="center"
+					value={`${pct.submitted.count} (${pct.submitted.absolute}%, rel: ${pct.submitted.relative}%)`}
 				/>
 				<TableCell
 					alignText="center"
