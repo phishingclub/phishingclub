@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.12.0] - 2025-01-04
+- Added tls directive for proxy domains
+- Added self signed certificates for domains
+- Added expand mode to SimpleCodeEditor
+- Align proxy editor UI with normal editor
+- All campaign trendline settings are saved
+- Clear proxy session when changing a proxy config
+- Fixed unused config field
+
 ## [1.11.0] - 2025-01-01
 - Added option to use campaign obfuscation
 - Removed details/editor and added expand option to editor
