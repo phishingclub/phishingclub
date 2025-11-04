@@ -72,6 +72,14 @@
 		}
 	}
 
+	// localStorage keys for persisting chart settings
+	const VISIBLE_METRICS_KEY = 'campaignTrend.visibleMetrics';
+	const TIME_RANGE_KEY = 'campaignTrend.selectedTimeRange';
+	const TREND_N_KEY = 'campaignTrend.trendN';
+	const MOVING_AVG_N_KEY = 'campaignTrend.movingAvgN';
+	const LOG_SCALE_KEY = 'campaignTrend.useLogScale';
+	const RELATIVE_METRICS_KEY = 'campaignTrend.useRelativeMetrics';
+
 	let chartContainer;
 	let sizingContainer;
 	let width = 300;
@@ -83,7 +91,33 @@
 	// User controls for N
 	let trendN = 4;
 	let movingAvgN = 4;
-	let userHasSetTrendN = false; // Track if user has manually changed trendN
+	let userHasSetTrendN = false; // track if user has manually changed trendN
+
+	// load saved trendN and movingAvgN from localStorage
+	try {
+		const storedTrendN = localStorage.getItem(TREND_N_KEY);
+		if (storedTrendN !== null) {
+			const parsed = Number(storedTrendN);
+			if (!isNaN(parsed) && parsed > 0) {
+				trendN = parsed;
+				userHasSetTrendN = true;
+			}
+		}
+	} catch (e) {
+		// ignore errors
+	}
+
+	try {
+		const storedMovingAvgN = localStorage.getItem(MOVING_AVG_N_KEY);
+		if (storedMovingAvgN !== null) {
+			const parsed = Number(storedMovingAvgN);
+			if (!isNaN(parsed) && parsed > 0) {
+				movingAvgN = parsed;
+			}
+		}
+	} catch (e) {
+		// ignore errors
+	}
 
 	// Auto-adjust trendN and movingAvgN based on available data
 	$: {
@@ -105,7 +139,6 @@
 	}
 
 	// legend visibility state - persisted in localstorage when possible
-	const VISIBLE_METRICS_KEY = 'campaignTrend.visibleMetrics';
 	const defaultVisibleMetrics = {
 		openRate: true,
 		clickRate: true,
@@ -158,7 +191,42 @@
 	$: try {
 		localStorage.setItem(VISIBLE_METRICS_KEY, JSON.stringify(visibleMetrics));
 	} catch (e) {
-		// ignore localstorage failures (e.g., private mode)
+		// ignore errors
+	}
+
+	// save selected time range
+	$: try {
+		localStorage.setItem(TIME_RANGE_KEY, selectedTimeRange);
+	} catch (e) {
+		// ignore errors
+	}
+
+	// save trend n
+	$: try {
+		localStorage.setItem(TREND_N_KEY, trendN.toString());
+	} catch (e) {
+		// ignore errors
+	}
+
+	// save moving avg n
+	$: try {
+		localStorage.setItem(MOVING_AVG_N_KEY, movingAvgN.toString());
+	} catch (e) {
+		// ignore errors
+	}
+
+	// save log scale
+	$: try {
+		localStorage.setItem(LOG_SCALE_KEY, useLogScale.toString());
+	} catch (e) {
+		// ignore errors
+	}
+
+	// save relative metrics
+	$: try {
+		localStorage.setItem(RELATIVE_METRICS_KEY, useRelativeMetrics.toString());
+	} catch (e) {
+		// ignore errors
 	}
 
 	// Responsive margins based on container width
@@ -180,6 +248,25 @@
 	let useLogScale = false;
 	let useRelativeMetrics = false;
 
+	// load saved settings from localStorage
+	try {
+		const storedLogScale = localStorage.getItem(LOG_SCALE_KEY);
+		if (storedLogScale !== null) {
+			useLogScale = storedLogScale === 'true';
+		}
+	} catch (e) {
+		// ignore errors
+	}
+
+	try {
+		const storedRelativeMetrics = localStorage.getItem(RELATIVE_METRICS_KEY);
+		if (storedRelativeMetrics !== null) {
+			useRelativeMetrics = storedRelativeMetrics === 'true';
+		}
+	} catch (e) {
+		// ignore errors
+	}
+
 	// Time range filter for campaigns
 	const timeRanges = [
 		{ label: 'Last 3 months', value: '3' },
@@ -189,6 +276,16 @@
 		{ label: 'Last 36 months', value: '36' }
 	];
 	let selectedTimeRange = '12'; // default to last 12 months
+
+	// load saved time range from localStorage
+	try {
+		const storedTimeRange = localStorage.getItem(TIME_RANGE_KEY);
+		if (storedTimeRange !== null && timeRanges.some((r) => r.value === storedTimeRange)) {
+			selectedTimeRange = storedTimeRange;
+		}
+	} catch (e) {
+		// ignore errors
+	}
 
 	// Filtered campaigns based on selected time range (using sendStartAt or createdAt)
 	$: filteredCampaignStats = (() => {
