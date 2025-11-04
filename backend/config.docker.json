@@ -16,6 +16,5 @@
   "database": {
     "engine": "sqlite3",
     "dsn": "file:/app/.dev/db.sqlite3"
-  },
-  "ip_allow_list": []
+  }
 }

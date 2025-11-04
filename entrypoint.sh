@@ -15,8 +15,7 @@ if [ ! -f /app/config/config.json ]; then
     "tls_auto": false,
     "tls_cert_path": "/app/config/certs/admin/public.pem",
     "tls_key_path": "/app/config/certs/admin/private.pem",
-    "address": "0.0.0.0:8000",
-    "ip_allow_list": []
+    "address": "0.0.0.0:8000"
   },
   "phishing": {
     "http": "0.0.0.0:8080",

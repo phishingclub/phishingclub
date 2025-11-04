@@ -98,12 +98,11 @@ type (
 
 	// AdministrationServer ConfigDTO administration
 	AdministrationServer struct {
-		TLSHost     string   `json:"tls_host"`
-		TLSAuto     bool     `json:"tls_auto"`
-		TLSCertPath string   `json:"tls_cert_path"`
-		TLSKeyPath  string   `json:"tls_key_path"`
-		Address     string   `json:"address"`
-		AllowList   []string `json:"ip_allow_list"`
+		TLSHost     string `json:"tls_host"`
+		TLSAuto     bool   `json:"tls_auto"`
+		TLSCertPath string `json:"tls_cert_path"`
+		TLSKeyPath  string `json:"tls_key_path"`
+		Address     string `json:"address"`
 	}
 
 	// PhishingServer ConfigDTO phishing
@@ -471,8 +470,6 @@ func FromDTO(dto *ConfigDTO) (*Config, error) {
 
 // ToDTO converts a *Config to a *ConfigDTO
 func (c *Config) ToDTO() *ConfigDTO {
-	allowList := make([]string, 0)
-
 	return &ConfigDTO{
 		ACME: ACME{
 			Email: c.acme.Email,
@@ -483,7 +480,6 @@ func (c *Config) ToDTO() *ConfigDTO {
 			TLSCertPath: c.TLSCertPath(),
 			TLSKeyPath:  c.TLSKeyPath(),
 			Address:     c.AdminNetAddress(),
-			AllowList:   allowList,
 		},
 		PhishingServer: PhishingServer{
 			Http:  c.phishingHTTPNetAddress.String(),

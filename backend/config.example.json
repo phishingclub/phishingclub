@@ -20,6 +20,5 @@
   "log": {
     "path": "",
     "errorPath": ""
-  },
-  "ip_allow_list": []
+  }
 }
