@@ -4,7 +4,7 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?style=flat&logo=discord&logoColor=white)](https://discord.gg/Zssps7U8gX)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-The self-hosted phishing framework for penetration testing and security awareness training.
+The self-hosted phishing framework for penetration testing or security awareness training.
 
 ![Phishing Club Dashboard](https://phishing.club/img/animated.gif)
 
@@ -23,7 +23,7 @@ For a manual step by step guide or more in depth installation information - [cli
 
 Prebuild images of the latest version are also available.
 
-See [production docker comopse example](https://github.com/phishingclub/phishingclub/blob/develop/docker-compose.production.yml) and [the latest images](https://github.com/phishingclub/phishingclub/pkgs/container/phishingclub)
+See [production docker compose example](https://github.com/phishingclub/phishingclub/blob/develop/docker-compose.production.yml) and [the latest images](https://github.com/phishingclub/phishingclub/pkgs/container/phishingclub)
 
 ## Features
 
