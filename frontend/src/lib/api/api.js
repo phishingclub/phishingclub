@@ -1198,6 +1198,7 @@ export class API {
 		 * @param {string} domain.proxyTargetDomain
 		 * @param {boolean} domain.managedTLS
 		 * @param {boolean} domain.ownManagedTLS
+		 * @param {boolean} domain.selfSignedTLS
 		 * @param {string} domain.ownManagedTLSKey
 		 * @param {string} domain.ownManagedTLSPem
 		 * @param {boolean} domain.hostWebsite
@@ -1213,6 +1214,7 @@ export class API {
 			proxyTargetDomain,
 			managedTLS,
 			ownManagedTLS,
+			selfSignedTLS,
 			ownManagedTLSKey,
 			ownManagedTLSPem,
 			hostWebsite,
@@ -1227,6 +1229,7 @@ export class API {
 				proxyTargetDomain: proxyTargetDomain,
 				managedTLS: managedTLS,
 				ownManagedTLS: ownManagedTLS,
+				selfSignedTLS: selfSignedTLS,
 				ownManagedTLSKey: ownManagedTLSKey,
 				ownManagedTLSPem: ownManagedTLSPem,
 				hostWebsite: hostWebsite,
@@ -1246,6 +1249,7 @@ export class API {
 		 * @param {string} [domain.proxyTargetDomain]
 		 * @param {boolean} domain.managedTLS
 		 * @param {boolean} domain.ownManagedTLS
+		 * @param {boolean} domain.selfSignedTLS
 		 * @param {string} domain.ownManagedTLSKey
 		 * @param {string} domain.ownManagedTLSPem
 		 * @param {boolean} [domain.hostWebsite]
@@ -1261,6 +1265,7 @@ export class API {
 			proxyTargetDomain,
 			managedTLS,
 			ownManagedTLS,
+			selfSignedTLS,
 			ownManagedTLSKey,
 			ownManagedTLSPem,
 			hostWebsite,
@@ -1272,6 +1277,7 @@ export class API {
 			const payload = {
 				managedTLS: managedTLS,
 				ownManagedTLS: ownManagedTLS,
+				selfSignedTLS: selfSignedTLS,
 				ownManagedTLSKey: ownManagedTLSKey,
 				ownManagedTLSPem: ownManagedTLSPem,
 				companyID: companyID

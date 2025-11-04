@@ -22,6 +22,7 @@ type Domain struct {
 	HostWebsite       nullable.Nullable[bool]                 `json:"hostWebsite"`
 	ManagedTLS        nullable.Nullable[bool]                 `json:"managedTLS"`
 	OwnManagedTLS     nullable.Nullable[bool]                 `json:"ownManagedTLS"`
+	SelfSignedTLS     nullable.Nullable[bool]                 `json:"selfSignedTLS"`
 	// private key
 	OwnManagedTLSKey nullable.Nullable[string] `json:"ownManagedTLSKey"`
 	// cert
@@ -84,10 +85,28 @@ func (d *Domain) Validate() error {
 	ownManagedTLS, err := d.OwnManagedTLS.Get()
 	ownManagedTLSSet := err == nil && ownManagedTLS
 
-	// cant both have managed and own managed tls
-	if managedTLS, err := d.ManagedTLS.Get(); err == nil && managedTLS && ownManagedTLSSet {
+	selfSignedTLS, err := d.SelfSignedTLS.Get()
+	selfSignedTLSSet := err == nil && selfSignedTLS
+
+	managedTLS, err := d.ManagedTLS.Get()
+	managedTLSSet := err == nil && managedTLS
+
+	// count how many TLS options are enabled
+	tlsCount := 0
+	if managedTLSSet {
+		tlsCount++
+	}
+	if ownManagedTLSSet {
+		tlsCount++
+	}
+	if selfSignedTLSSet {
+		tlsCount++
+	}
+
+	// only one TLS option can be enabled at a time
+	if tlsCount > 1 {
 		return errs.NewValidationError(errors.New(
-			"Domain TLS can not both be managed and own managed",
+			"Domain TLS can only have one option enabled: managed, own managed, or self-signed",
 		))
 	}
 	if ownManagedTLS {
@@ -189,6 +208,14 @@ func (d *Domain) ToDBMap() map[string]any {
 			m["own_managed_tls"] = d.OwnManagedTLS.MustGet()
 		}
 	}
+	if d.SelfSignedTLS.IsSpecified() {
+		m["self_signed_tls"] = false
+		if d.SelfSignedTLS.IsNull() {
+			m["self_signed_tls"] = nil
+		} else {
+			m["self_signed_tls"] = d.SelfSignedTLS.MustGet()
+		}
+	}
 	if d.ProxyID.IsSpecified() {
 		if d.ProxyID.IsNull() {
 			m["proxy_id"] = nil
@@ -210,6 +237,7 @@ type DomainOverview struct {
 	HostWebsite       bool       `json:"hostWebsite"`
 	ManagedTLS        bool       `json:"managedTLS"`
 	OwnManagedTLS     bool       `json:"ownManagedTLS"`
+	SelfSignedTLS     bool       `json:"selfSignedTLS"`
 	RedirectURL       string     `json:"redirectURL"`
 	CompanyID         *uuid.UUID `json:"companyID"`
 	ProxyID           *uuid.UUID `json:"proxyID"`

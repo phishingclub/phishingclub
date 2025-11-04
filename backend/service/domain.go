@@ -17,6 +17,7 @@ import (
 	"github.com/caddyserver/certmagic"
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
+	"github.com/phishingclub/phishingclub/acme"
 	"github.com/phishingclub/phishingclub/build"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
@@ -153,6 +154,10 @@ func (d *Domain) createDomain(
 		return nil, validate.WrapErrorWithField(errors.New("not unique"), "name")
 	}
 	domain, err = d.handleOwnManagedTLS(ctx, domain)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	domain, err = d.handleSelfSignedTLS(ctx, domain)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
@@ -579,6 +584,12 @@ func (d *Domain) updateDomain(
 		current.OwnManagedTLS.Set(v)
 		ownManagedTLSIsSet = v
 	}
+	wasSelfSignedTLS := current.SelfSignedTLS.MustGet()
+	selfSignedTLSIsSet := false
+	if v, err := incoming.SelfSignedTLS.Get(); err == nil {
+		current.SelfSignedTLS.Set(v)
+		selfSignedTLSIsSet = v
+	}
 	ownManagedTLSKeyIsSet := false
 	if v, err := incoming.OwnManagedTLSKey.Get(); err == nil {
 		current.OwnManagedTLSKey.Set(v)
@@ -629,6 +640,13 @@ func (d *Domain) updateDomain(
 			d.Logger.Warnf("failed to remove own managed TLS", "error", err)
 		}
 	}
+	// if previously was self-signed but not anymore, remove the certs and cache
+	if wasSelfSignedTLS && !selfSignedTLSIsSet {
+		err = d.removeSelfSignedTLS(current)
+		if err != nil {
+			d.Logger.Warnf("failed to remove self-signed TLS", "error", err)
+		}
+	}
 	// if previously own managed TLS and now is own managed
 	if !wasOwnManagedTLS && ownManagedTLSIsSet {
 		if ownManagedTLSKeyIsSet && ownManagedTLSPemIsSet {
@@ -650,6 +668,13 @@ func (d *Domain) updateDomain(
 			if err != nil {
 				return fmt.Errorf("faile to handle own managed TLS: %s", err)
 			}
+		}
+	}
+	// if previously not self-signed and now is self-signed
+	if !wasSelfSignedTLS && selfSignedTLSIsSet {
+		current, err = d.handleSelfSignedTLS(ctx, current)
+		if err != nil {
+			return fmt.Errorf("failed to handle self-signed TLS: %s", err)
 		}
 	}
 	// when updating, the own managed tls can previous be set with uploaded
@@ -753,6 +778,20 @@ func (d *Domain) deleteDomain(
 	// clean up if TLS was managed
 	if domain.ManagedTLS.MustGet() {
 		d.removeManagedDomainTLS(ctx, domain.Name.MustGet().String())
+	}
+	// clean up if TLS was own managed
+	if domain.OwnManagedTLS.MustGet() {
+		err = d.removeOwnManagedTLS(domain)
+		if err != nil {
+			d.Logger.Warnf("failed to remove own managed TLS during deletion", "error", err)
+		}
+	}
+	// clean up if TLS was self-signed
+	if domain.SelfSignedTLS.MustGet() {
+		err = d.removeSelfSignedTLS(domain)
+		if err != nil {
+			d.Logger.Warnf("failed to remove self-signed TLS during deletion", "error", err)
+		}
 	}
 	d.AuditLogAuthorized(ae)
 	return nil
@@ -920,6 +959,132 @@ func (d *Domain) removeOwnManagedTLS(
 		return fmt.Errorf("failed to delete own managed TLS for '%s' as: %s", name, err)
 	}
 	d.Logger.Debugw("removed storage for own managed TLS", "name", name)
+	certs := d.CertMagicCache.AllMatchingCertificates(name)
+	for _, cert := range certs {
+		d.CertMagicCache.Remove([]string{cert.Hash()})
+		d.Logger.Debugw("removed cached TLS",
+			"domain", name,
+			"hash", cert.Hash(),
+		)
+	}
+	return nil
+}
+
+func (d *Domain) handleSelfSignedTLS(
+	ctx context.Context,
+	domain *model.Domain) (*model.Domain, error) {
+	selfSignedTLS, err := domain.SelfSignedTLS.Get()
+	if err != nil || !selfSignedTLS {
+		return domain, nil
+	}
+
+	name := domain.Name.MustGet().String()
+
+	// create root filesystem for secure certificate operations
+	root, err := os.OpenRoot(d.OwnManagedCertificatePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open certificate path: %s", err)
+	}
+	defer root.Close()
+
+	// validate domain name directory access
+	_, err = root.Stat(name)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("invalid domain name for certificate path: %s", err)
+	}
+
+	// build path for certificate operations
+	certDir := filepath.Join(d.OwnManagedCertificatePath, name)
+	certKeyPath := filepath.Join(certDir, "cert.key")
+	certPemPath := filepath.Join(certDir, "cert.pem")
+
+	// generate self-signed certificate
+	info := acme.NewInformationWithDefault()
+	err = acme.CreateSelfSignedCert(
+		d.Logger,
+		info,
+		[]string{name},
+		certPemPath,
+		certKeyPath,
+	)
+	if err != nil {
+		d.Logger.Errorw(
+			"failed to generate self-signed certificate",
+			"domain", name,
+			"error", err,
+		)
+		return nil, errs.Wrap(err)
+	}
+
+	// read generated certificate files for caching
+	keyBytes, err := os.ReadFile(certKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read generated key file: %s", err)
+	}
+
+	pemBytes, err := os.ReadFile(certPemPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read generated cert file: %s", err)
+	}
+
+	// cache in certmagic
+	hash, err := d.CertMagicConfig.CacheUnmanagedCertificatePEMBytes(
+		ctx,
+		pemBytes,
+		keyBytes,
+		[]string{name},
+	)
+	if err != nil {
+		d.Logger.Errorw(
+			"failed to cache self-signed cert for", name,
+			"error", err,
+		)
+		return nil, errs.Wrap(err)
+	}
+
+	d.Logger.Debugw("cached self-signed TLS",
+		"domain", name,
+		"hash", hash,
+	)
+
+	domain.SelfSignedTLS = nullable.NewNullableWithValue(true)
+	domain.ManagedTLS = nullable.NewNullableWithValue(false)
+	domain.OwnManagedTLS = nullable.NewNullableWithValue(false)
+
+	return domain, nil
+}
+
+func (d *Domain) removeSelfSignedTLS(
+	domain *model.Domain,
+) error {
+	name := domain.Name.MustGet().String()
+
+	// create root filesystem for secure certificate operations
+	root, err := os.OpenRoot(d.OwnManagedCertificatePath)
+	if err != nil {
+		return fmt.Errorf("failed to open certificate path for '%s': %s", name, err)
+	}
+	defer root.Close()
+
+	// validate domain name directory exists
+	_, err = root.Stat(name)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// directory doesn't exist, nothing to delete
+			return nil
+		}
+		return fmt.Errorf("failed to access certificate directory for '%s': %s", name, err)
+	}
+
+	// build safe path for deletion (validated by OpenRoot)
+	path := filepath.Join(d.OwnManagedCertificatePath, name)
+	err = d.FileService.DeleteAll(path)
+	if err != nil {
+		return fmt.Errorf("failed to delete self-signed TLS for '%s' as: %s", name, err)
+	}
+	d.Logger.Debugw("removed storage for self-signed TLS", "name", name)
+
+	// remove from certmagic cache
 	certs := d.CertMagicCache.AllMatchingCertificates(name)
 	for _, cert := range certs {
 		d.CertMagicCache.Remove([]string{cert.Hash()})

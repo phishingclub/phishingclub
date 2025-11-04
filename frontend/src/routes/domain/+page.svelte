@@ -50,6 +50,7 @@
 		name: null,
 		managedTLS: true, // managed TLS
 		ownManagedTLS: false, // custom certificates
+		selfSignedTLS: false, // self-signed certificates
 		ownManagedTLSKey: null,
 		ownManagedTLSPem: null,
 		hostWebsite: true,
@@ -102,6 +103,23 @@
 		modalText = '';
 		modalText = getModalText('domain', modalMode);
 	}
+
+	// handle mutual exclusivity of TLS options
+	$: if (formValues.managedTLS) {
+		formValues.ownManagedTLS = false;
+		formValues.selfSignedTLS = false;
+	}
+
+	$: if (formValues.selfSignedTLS) {
+		formValues.managedTLS = false;
+		formValues.ownManagedTLS = false;
+	}
+
+	$: if (formValues.ownManagedTLS) {
+		formValues.managedTLS = false;
+		formValues.selfSignedTLS = false;
+	}
+
 	// hooks
 	onMount(() => {
 		const context = appStateService.getContext();
@@ -192,6 +210,7 @@
 					id: formValues.id,
 					managedTLS: formValues.managedTLS,
 					ownManagedTLS: formValues.ownManagedTLS,
+					selfSignedTLS: formValues.selfSignedTLS,
 					ownManagedTLSKey: formValues.ownManagedTLSKey,
 					ownManagedTLSPem: formValues.ownManagedTLSPem,
 					companyID: contextCompanyID
@@ -200,10 +219,11 @@
 				// for regular domains, send all fields
 				updateData = {
 					id: formValues.id,
-					type: 'regular',
-					proxyTargetDomain: '',
+					type: isProxyDomain ? 'proxy' : 'regular',
+					proxyTargetDomain: formValues.proxyTargetDomain || '',
 					managedTLS: formValues.managedTLS,
 					ownManagedTLS: formValues.ownManagedTLS,
+					selfSignedTLS: formValues.selfSignedTLS,
 					ownManagedTLSKey: formValues.ownManagedTLSKey,
 					ownManagedTLSPem: formValues.ownManagedTLSPem,
 					hostWebsite: formValues.hostWebsite,
@@ -289,6 +309,7 @@
 				proxyTargetDomain: '',
 				managedTLS: formValues.managedTLS,
 				ownManagedTLS: formValues.ownManagedTLS,
+				selfSignedTLS: formValues.selfSignedTLS,
 				ownManagedTLSKey: formValues.ownManagedTLSKey,
 				ownManagedTLSPem: formValues.ownManagedTLSPem,
 				hostWebsite: formValues.hostWebsite,
@@ -328,6 +349,7 @@
 					id: formValues.id,
 					managedTLS: formValues.managedTLS,
 					ownManagedTLS: formValues.ownManagedTLS,
+					selfSignedTLS: formValues.selfSignedTLS,
 					ownManagedTLSKey: formValues.ownManagedTLSKey,
 					ownManagedTLSPem: formValues.ownManagedTLSPem,
 					companyID: contextCompanyID
@@ -340,6 +362,7 @@
 					proxyTargetDomain: '',
 					managedTLS: formValues.managedTLS,
 					ownManagedTLS: formValues.ownManagedTLS,
+					selfSignedTLS: formValues.selfSignedTLS,
 					ownManagedTLSKey: formValues.ownManagedTLSKey,
 					ownManagedTLSPem: formValues.ownManagedTLSPem,
 					hostWebsite: formValues.hostWebsite,
@@ -420,13 +443,14 @@
 				name: domain.name,
 				managedTLS: domain.managedTLS,
 				ownManagedTLS: domain.ownManagedTLS,
-				ownManagedTLSKey: null,
-				ownManagedTLSPem: null,
+				selfSignedTLS: domain.selfSignedTLS,
+				ownManagedTLSKey: domain.ownManagedTLSKey,
+				ownManagedTLSPem: domain.ownManagedTLSPem,
 				hostWebsite: domain.hostWebsite,
 				pageContent: domain.pageContent,
 				pageNotFoundContent: domain.pageNotFoundContent,
 				redirectURL: domain.redirectURL,
-				staticContent: domain.staticContent
+				staticContent: domain.staticContent || ''
 			};
 
 			// Store domain object for proxy info display
@@ -497,6 +521,7 @@
 			name: domain.name,
 			managedTLS: domain.managedTLS,
 			ownManagedTLS: domain.ownManagedTLS,
+			selfSignedTLS: domain.selfSignedTLS,
 			ownManagedTLSKey: null,
 			ownManagedTLSPem: null,
 			hostWebsite: domain.hostWebsite,
@@ -528,6 +553,7 @@
 			name: null,
 			managedTLS: true, // managed TLS
 			ownManagedTLS: false, // custom certificates
+			selfSignedTLS: false, // self-signed certificates
 			ownManagedTLSKey: null,
 			ownManagedTLSPem: null,
 			hostWebsite: true,
@@ -565,6 +591,7 @@
 				name: domain.name,
 				managedTLS: domain.managedTLS,
 				ownManagedTLS: domain.ownManagedTLS,
+				selfSignedTLS: domain.selfSignedTLS,
 				ownManagedTLSKey: null,
 				ownManagedTLSPem: null,
 				hostWebsite: domain.hostWebsite,
@@ -660,7 +687,7 @@
 				<TableCellCheck value={domain.hostWebsite} />
 				<TableCellCheck value={!!domain.redirectURL} />
 				<TableCellCheck value={domain.managedTLS} />
-				<TableCellCheck value={domain.ownManagedTLS} />
+				<TableCellCheck value={domain.ownManagedTLS || domain.selfSignedTLS} />
 				<TableCell>
 					<div class="flex justify-center">
 						<span title={domain.type === 'proxy' ? 'Proxy Domain' : 'Regular Domain'}>
@@ -794,6 +821,16 @@
 								]}
 								bind:value={formValues.managedTLS}
 								toolTipText="Managed TLS via. public certificate authority"
+							/>
+
+							<SelectSquare
+								label="Self-Signed Certificates"
+								options={[
+									{ value: true, label: 'Enable' },
+									{ value: false, label: 'Disable' }
+								]}
+								bind:value={formValues.selfSignedTLS}
+								toolTipText="Automatically generate self-signed certificates for TLS"
 							/>
 
 							<SelectSquare

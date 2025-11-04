@@ -285,6 +285,7 @@ func ToDomain(row *database.Domain) *model.Domain {
 
 	managedTLS := nullable.NewNullableWithValue(row.ManagedTLSCerts)
 	ownManagedTLS := nullable.NewNullableWithValue(row.OwnManagedTLS)
+	selfSignedTLS := nullable.NewNullableWithValue(row.SelfSignedTLS)
 	hostWebsite := nullable.NewNullableWithValue(row.HostWebsite)
 	staticPage := nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(row.PageContent))
 	staticNotFound := nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(row.PageNotFoundContent))
@@ -299,6 +300,7 @@ func ToDomain(row *database.Domain) *model.Domain {
 		ProxyTargetDomain:   proxyTargetDomain,
 		ManagedTLS:          managedTLS,
 		OwnManagedTLS:       ownManagedTLS,
+		SelfSignedTLS:       selfSignedTLS,
 		HostWebsite:         hostWebsite,
 		PageContent:         staticPage,
 		PageNotFoundContent: staticNotFound,
@@ -351,6 +353,7 @@ func ToDomainSubset(dbDomain *database.Domain) *model.DomainOverview {
 		HostWebsite:       dbDomain.HostWebsite,
 		ManagedTLS:        dbDomain.ManagedTLSCerts,
 		OwnManagedTLS:     dbDomain.OwnManagedTLS,
+		SelfSignedTLS:     dbDomain.SelfSignedTLS,
 		RedirectURL:       dbDomain.RedirectURL,
 		CompanyID:         dbDomain.CompanyID,
 		ProxyID:           dbDomain.ProxyID,
