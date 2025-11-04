@@ -71,6 +71,7 @@ func NewServer(
 	// setup goproxy-based proxy server
 	proxyServer := proxy.NewProxyHandler(
 		logger,
+		services.ProxySessionManager,
 		repositories.Page,
 		repositories.CampaignRecipient,
 		repositories.Campaign,

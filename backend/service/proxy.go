@@ -30,6 +30,7 @@ type Proxy struct {
 	CampaignRepository      *repository.Campaign
 	CampaignTemplateService *CampaignTemplate
 	DomainService           *Domain
+	ProxySessionManager     *ProxySessionManager
 }
 
 // ProxyServiceConfig represents the YAML configuration for proxy
@@ -621,6 +622,15 @@ func (m *Proxy) UpdateByID(
 	if err != nil {
 		m.Logger.Errorw("failed to sync proxy domains", "error", err)
 		return err
+	}
+
+	// clear all sessions for this proxy since config has changed
+	// this ensures sessions get the new config (capture rules, rewrite rules, etc.)
+	if m.ProxySessionManager != nil {
+		m.Logger.Debugw("clearing all sessions for updated proxy",
+			"proxyID", id.String(),
+		)
+		m.ProxySessionManager.ClearSessionsForProxy(id.String())
 	}
 
 	ae.Details["id"] = id.String()

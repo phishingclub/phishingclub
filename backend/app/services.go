@@ -9,34 +9,35 @@ import (
 
 // Services is a collection of services
 type Services struct {
-	Asset             *service.Asset
-	Attachment        *service.Attachment
-	File              *service.File
-	Company           *service.Company
-	InstallSetup      *service.InstallSetup
-	Option            *service.Option
-	Page              *service.Page
-	Proxy             *service.Proxy
-	Session           *service.Session
-	User              *service.User
-	Domain            *service.Domain
-	Recipient         *service.Recipient
-	RecipientGroup    *service.RecipientGroup
-	SMTPConfiguration *service.SMTPConfiguration
-	Email             *service.Email
-	CampaignTemplate  *service.CampaignTemplate
-	Campaign          *service.Campaign
-	Template          *service.Template
-	APISender         *service.APISender
-	AllowDeny         *service.AllowDeny
-	Webhook           *service.Webhook
-	Identifier        *service.Identifier
-	Version           *service.Version
-	SSO               *service.SSO
-	Update            *service.Update
-	Import            *service.Import
-	Backup            *service.Backup
-	IPAllowList       *service.IPAllowListService
+	Asset               *service.Asset
+	Attachment          *service.Attachment
+	File                *service.File
+	Company             *service.Company
+	InstallSetup        *service.InstallSetup
+	Option              *service.Option
+	Page                *service.Page
+	Proxy               *service.Proxy
+	Session             *service.Session
+	User                *service.User
+	Domain              *service.Domain
+	Recipient           *service.Recipient
+	RecipientGroup      *service.RecipientGroup
+	SMTPConfiguration   *service.SMTPConfiguration
+	Email               *service.Email
+	CampaignTemplate    *service.CampaignTemplate
+	Campaign            *service.Campaign
+	Template            *service.Template
+	APISender           *service.APISender
+	AllowDeny           *service.AllowDeny
+	Webhook             *service.Webhook
+	Identifier          *service.Identifier
+	Version             *service.Version
+	SSO                 *service.SSO
+	Update              *service.Update
+	Import              *service.Import
+	Backup              *service.Backup
+	IPAllowList         *service.IPAllowListService
+	ProxySessionManager *service.ProxySessionManager
 }
 
 // NewServices creates a collection of services
@@ -157,6 +158,7 @@ func NewServices(
 		FileService:               file,
 		TemplateService:           templateService,
 	}
+	proxySessionManager := service.NewProxySessionManager(logger)
 	proxy := &service.Proxy{
 		Common:                  common,
 		ProxyRepository:         repositories.Proxy,
@@ -164,6 +166,7 @@ func NewServices(
 		CampaignRepository:      repositories.Campaign,
 		CampaignTemplateService: campaignTemplate,
 		DomainService:           domain,
+		ProxySessionManager:     proxySessionManager,
 	}
 	ipAllowListService := service.NewIPAllowListService(logger, repositories.Proxy)
 	email := &service.Email{
@@ -247,33 +250,34 @@ func NewServices(
 	}
 
 	return &Services{
-		Asset:             asset,
-		Attachment:        attachment,
-		Company:           companyService,
-		File:              file,
-		InstallSetup:      installSetup,
-		Option:            optionService,
-		Page:              page,
-		Proxy:             proxy,
-		Session:           sessionService,
-		User:              userService,
-		Domain:            domain,
-		Recipient:         recipient,
-		RecipientGroup:    recipientGroup,
-		SMTPConfiguration: smtpConfiguration,
-		Email:             email,
-		Template:          templateService,
-		CampaignTemplate:  campaignTemplate,
-		Campaign:          campaign,
-		APISender:         apiSender,
-		AllowDeny:         allowDeny,
-		Webhook:           webhook,
-		Identifier:        identifier,
-		Version:           versionService,
-		SSO:               ssoService,
-		Update:            updateService,
-		Import:            importService,
-		Backup:            backupService,
-		IPAllowList:       ipAllowListService,
+		Asset:               asset,
+		Attachment:          attachment,
+		Company:             companyService,
+		File:                file,
+		InstallSetup:        installSetup,
+		Option:              optionService,
+		Page:                page,
+		Proxy:               proxy,
+		Session:             sessionService,
+		User:                userService,
+		Domain:              domain,
+		Recipient:           recipient,
+		RecipientGroup:      recipientGroup,
+		SMTPConfiguration:   smtpConfiguration,
+		Email:               email,
+		Template:            templateService,
+		CampaignTemplate:    campaignTemplate,
+		Campaign:            campaign,
+		APISender:           apiSender,
+		AllowDeny:           allowDeny,
+		Webhook:             webhook,
+		Identifier:          identifier,
+		Version:             versionService,
+		SSO:                 ssoService,
+		Update:              updateService,
+		Import:              importService,
+		Backup:              backupService,
+		IPAllowList:         ipAllowListService,
+		ProxySessionManager: proxySessionManager,
 	}
 }
