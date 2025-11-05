@@ -104,6 +104,18 @@ export class ProxyYamlCompletionProvider {
 		if (linePrefix.match(/\s*on_deny:\s*$/)) {
 			return this.getOnDenySuggestions(range);
 		}
+		if (linePrefix.match(/\s*browser:\s*$/)) {
+			return this.getBrowserSuggestions(range);
+		}
+		if (linePrefix.match(/\s*os:\s*$/)) {
+			return this.getOSSuggestions(range);
+		}
+		if (linePrefix.match(/\s*http_version:\s*$/)) {
+			return this.getHTTPVersionSuggestions(range);
+		}
+		if (linePrefix.match(/\s*preserve_ua:\s*$/)) {
+			return this.getPreserveUASuggestions(range);
+		}
 
 		// Handle array items
 		if (linePrefix.match(/^\s*-\s*$/)) {
@@ -138,6 +150,8 @@ export class ProxyYamlCompletionProvider {
 		switch (context) {
 			case 'global':
 				return this.getGlobalSuggestions(range);
+			case 'impersonation':
+				return this.getImpersonationSuggestions(range);
 			case 'domain':
 				return this.getDomainSuggestions(range);
 			case 'tls':
@@ -184,6 +198,7 @@ export class ProxyYamlCompletionProvider {
 				// Top level sections
 				if (lineIndent === 0) {
 					if (key === 'global') return 'global';
+					if (key === 'impersonation') return 'impersonation';
 					if (key.match(/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)) return 'domain';
 				}
 
@@ -220,6 +235,13 @@ export class ProxyYamlCompletionProvider {
 				range
 			},
 			{
+				label: 'impersonation',
+				kind: this.monaco.languages.CompletionItemKind.Module,
+				insertText: 'impersonation:',
+				documentation: 'Browser and OS impersonation settings',
+				range
+			},
+			{
 				label: 'global',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'global:',
@@ -235,42 +257,194 @@ export class ProxyYamlCompletionProvider {
 				label: 'tls',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'tls:',
-				documentation: 'Global TLS configuration (applies to all hosts unless overridden)',
+				documentation: 'TLS configuration',
 				range
 			},
 			{
 				label: 'access',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'access:',
-				documentation: 'Global access control',
+				documentation: 'Access control configuration',
 				range
 			},
 			{
 				label: 'capture',
-				kind: this.monaco.languages.CompletionItemKind.Module,
+				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'capture:',
-				documentation: 'Global capture rules',
+				documentation: 'Capture rules',
 				range
 			},
 			{
 				label: 'rewrite',
-				kind: this.monaco.languages.CompletionItemKind.Module,
+				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'rewrite:',
-				documentation: 'Global rewrite rules',
+				documentation: 'Rewrite rules',
 				range
 			},
 			{
 				label: 'response',
-				kind: this.monaco.languages.CompletionItemKind.Module,
+				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'response:',
-				documentation: 'Global response rules',
+				documentation: 'Response rules',
 				range
 			},
 			{
 				label: 'rewrite_urls',
-				kind: this.monaco.languages.CompletionItemKind.Module,
+				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'rewrite_urls:',
-				documentation: 'Global URL rewrite rules for anti-detection',
+				documentation: 'URL rewriting rules',
+				range
+			}
+		];
+	}
+
+	getImpersonationSuggestions(range) {
+		return [
+			{
+				label: 'browser',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'browser: ',
+				documentation: 'Browser to impersonate (chrome, firefox)',
+				range
+			},
+			{
+				label: 'os',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'os: ',
+				documentation:
+					'Operating system to impersonate (windows, macos, linux, android, ios, random)',
+				range
+			},
+			{
+				label: 'http_version',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'http_version: ',
+				documentation: 'HTTP version to use (http1, http2, http3)',
+				range
+			},
+			{
+				label: 'preserve_ua',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'preserve_ua: ',
+				documentation: "Preserve victim's User-Agent (true/false, default: false)",
+				range
+			},
+			{
+				label: 'user_agent',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'user_agent: ""',
+				documentation: 'Custom User-Agent override',
+				range
+			}
+		];
+	}
+
+	getBrowserSuggestions(range) {
+		return [
+			{
+				label: 'chrome',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"chrome"',
+				documentation: 'Impersonate Chrome v142',
+				range
+			},
+			{
+				label: 'firefox',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"firefox"',
+				documentation: 'Impersonate Firefox v144',
+				range
+			}
+		];
+	}
+
+	getOSSuggestions(range) {
+		return [
+			{
+				label: 'windows',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"windows"',
+				documentation: 'Impersonate Windows operating system',
+				range
+			},
+			{
+				label: 'macos',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"macos"',
+				documentation: 'Impersonate macOS operating system',
+				range
+			},
+			{
+				label: 'linux',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"linux"',
+				documentation: 'Impersonate Linux operating system',
+				range
+			},
+			{
+				label: 'android',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"android"',
+				documentation: 'Impersonate Android operating system',
+				range
+			},
+			{
+				label: 'ios',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"ios"',
+				documentation: 'Impersonate iOS operating system',
+				range
+			},
+			{
+				label: 'random',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"random"',
+				documentation: 'Randomly select an operating system',
+				range
+			}
+		];
+	}
+
+	getHTTPVersionSuggestions(range) {
+		return [
+			{
+				label: 'http1',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"http1"',
+				documentation: 'Force HTTP/1.1',
+				range
+			},
+			{
+				label: 'http2',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"http2"',
+				documentation: 'Use HTTP/2 (default)',
+				range
+			},
+			{
+				label: 'http3',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: '"http3"',
+				documentation: 'Use HTTP/3 over QUIC',
+				range
+			}
+		];
+	}
+
+	getPreserveUASuggestions(range) {
+		return [
+			{
+				label: 'false',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'false',
+				documentation: "Use surf's impersonated User-Agent (default, best for anti-detection)",
+				range
+			},
+			{
+				label: 'true',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'true',
+				documentation: "Preserve victim's original User-Agent (transparent proxying)",
 				range
 			}
 		];
@@ -978,6 +1152,13 @@ export class ProxyYamlCompletionProvider {
 		const hoverData = {
 			version: 'Configuration version. Currently supports "0.0"',
 			global: 'Rules that apply to all domain mappings',
+			impersonation: 'Browser and OS impersonation settings for anti-detection',
+			browser: 'Browser to impersonate: "chrome" (Chrome v142) or "firefox" (Firefox v144)',
+			os: 'Operating system to impersonate: "windows", "macos", "linux", "android", "ios", or "random"',
+			http_version: 'HTTP version to use: "http1", "http2" (default), or "http3"',
+			preserve_ua:
+				"Preserve victim's User-Agent: false (default, uses surf's impersonated UA for perfect fingerprint match) or true (transparent proxying)",
+			user_agent: 'Custom User-Agent string override (overrides all other UA settings)',
 			tls: 'TLS certificate configuration for proxy domains',
 			access: 'Access control configuration (optional - defaults to private mode for security)',
 			mode: 'Access control mode: "public" (allow all traffic) or "private" (IP whitelist after lure access, DEFAULT), OR TLS mode: "managed" (Let\'s Encrypt) or "self-signed"',
@@ -1005,7 +1186,7 @@ export class ProxyYamlCompletionProvider {
 			to: 'Target phishing domain for this original domain',
 			rewrite_urls: 'URL rewrite rules for anti-detection - changes paths and query parameters',
 			query: 'Query parameter mappings for URL rewriting',
-			filter: 'Query parameters to keep (if empty, keep all)'
+			filter: 'Optional regex filter to match specific paths for URL rewriting'
 		};
 
 		return hoverData[word] || null;

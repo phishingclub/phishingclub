@@ -35,8 +35,18 @@ type Proxy struct {
 
 // ProxyServiceConfig represents the YAML configuration for proxy
 type ProxyServiceConfig struct {
-	Proxy  string             `yaml:"proxy,omitempty"`
-	Global *ProxyServiceRules `yaml:"global,omitempty"`
+	Proxy         string                     `yaml:"proxy,omitempty"`
+	Global        *ProxyServiceRules         `yaml:"global,omitempty"`
+	Impersonation *ProxyServiceImpersonation `yaml:"impersonation,omitempty"`
+}
+
+// ProxyServiceImpersonation represents browser and OS impersonation settings
+type ProxyServiceImpersonation struct {
+	Browser     string `yaml:"browser,omitempty"`      // chrome, firefox, or empty for none
+	OS          string `yaml:"os,omitempty"`           // windows, macos, linux, android, ios, random, or empty for auto
+	HTTPVersion string `yaml:"http_version,omitempty"` // http1, http2, http3, or empty for default
+	UserAgent   string `yaml:"user_agent,omitempty"`   // custom user agent override
+	PreserveUA  *bool  `yaml:"preserve_ua,omitempty"`  // preserve victim's user agent (default: false - use surf's impersonated UA)
 }
 
 // ProxyServiceDomainConfig represents configuration for a specific domain mapping
@@ -330,10 +340,11 @@ type ProxyServiceResponseRule struct {
 //	    find: "password=(.*?)&"
 //	    from: "request_body"
 type ProxyServiceConfigYAML struct {
-	Version string                               `yaml:"version,omitempty"`
-	Proxy   string                               `yaml:"proxy,omitempty"`
-	Global  *ProxyServiceRules                   `yaml:"global,omitempty"`
-	Hosts   map[string]*ProxyServiceDomainConfig `yaml:",inline"` // inline allows domain names as top-level keys
+	Version       string                               `yaml:"version,omitempty"`
+	Proxy         string                               `yaml:"proxy,omitempty"`
+	Global        *ProxyServiceRules                   `yaml:"global,omitempty"`
+	Impersonation *ProxyServiceImpersonation           `yaml:"impersonation,omitempty"`
+	Hosts         map[string]*ProxyServiceDomainConfig `yaml:",inline"` // inline allows domain names as top-level keys
 }
 
 // ValidateVersion validates that the version is supported
@@ -663,6 +674,11 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 
 	// validate version (after defaults are applied)
 	if err := ValidateVersion(&config); err != nil {
+		return validate.WrapErrorWithField(err, "proxyConfig")
+	}
+
+	// validate impersonation settings if configured
+	if err := m.validateImpersonation(&config); err != nil {
 		return validate.WrapErrorWithField(err, "proxyConfig")
 	}
 
@@ -1002,6 +1018,30 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 	// set default version to 0.0 if not specified
 	if config.Version == "" {
 		config.Version = "0.0"
+	}
+
+	// set default impersonation settings if not configured
+	if config.Impersonation == nil {
+		config.Impersonation = &ProxyServiceImpersonation{
+			Browser:     "chrome",
+			OS:          "windows",
+			HTTPVersion: "http2",
+		}
+	} else {
+		// fill in missing impersonation fields with defaults
+		if config.Impersonation.Browser == "" {
+			config.Impersonation.Browser = "chrome"
+		}
+		if config.Impersonation.OS == "" {
+			config.Impersonation.OS = "windows"
+		}
+		if config.Impersonation.HTTPVersion == "" {
+			config.Impersonation.HTTPVersion = "http2"
+		}
+		if config.Impersonation.PreserveUA == nil {
+			falseValue := false
+			config.Impersonation.PreserveUA = &falseValue
+		}
 	}
 
 	// set defaults for global TLS config
@@ -1354,6 +1394,87 @@ func (m *Proxy) validateDenyAction(action string) error {
 	)
 }
 
+// validateImpersonation validates browser and OS impersonation settings
+func (m *Proxy) validateImpersonation(config *ProxyServiceConfigYAML) error {
+	if config.Impersonation == nil {
+		return nil
+	}
+
+	imp := config.Impersonation
+
+	// validate browser if specified - must be exact match (case-insensitive)
+	if imp.Browser != "" {
+		validBrowsers := map[string]bool{
+			"chrome":  true,
+			"firefox": true,
+		}
+		browser := strings.ToLower(strings.TrimSpace(imp.Browser))
+		if !validBrowsers[browser] {
+			return errors.New("impersonation.browser must be exactly one of: 'chrome', 'firefox' (got: '" + imp.Browser + "')")
+		}
+		// normalize to lowercase
+		imp.Browser = browser
+	}
+
+	// validate os if specified - must be exact match (case-insensitive)
+	if imp.OS != "" {
+		validOSes := map[string]bool{
+			"windows": true,
+			"macos":   true,
+			"linux":   true,
+			"android": true,
+			"ios":     true,
+			"random":  true,
+		}
+		os := strings.ToLower(strings.TrimSpace(imp.OS))
+		if !validOSes[os] {
+			return errors.New("impersonation.os must be exactly one of: 'windows', 'macos', 'linux', 'android', 'ios', 'random' (got: '" + imp.OS + "')")
+		}
+		// normalize to lowercase
+		imp.OS = os
+	}
+
+	// validate http_version if specified - must be exact match (case-insensitive)
+	if imp.HTTPVersion != "" {
+		validVersions := map[string]bool{
+			"http1": true,
+			"http2": true,
+			"http3": true,
+		}
+		version := strings.ToLower(strings.TrimSpace(imp.HTTPVersion))
+		if !validVersions[version] {
+			return errors.New("impersonation.http_version must be exactly one of: 'http1', 'http2', 'http3' (got: '" + imp.HTTPVersion + "')")
+		}
+		// normalize to lowercase
+		imp.HTTPVersion = version
+	}
+
+	// validate user_agent if specified
+	if imp.UserAgent != "" {
+		trimmedUA := strings.TrimSpace(imp.UserAgent)
+		if len(trimmedUA) < 10 {
+			return errors.New("impersonation.user_agent must be at least 10 characters long")
+		}
+		if len(trimmedUA) > 500 {
+			return errors.New("impersonation.user_agent must not exceed 500 characters")
+		}
+		// check for reasonable user agent format (should contain at least one slash for version)
+		if !strings.Contains(trimmedUA, "/") {
+			return errors.New("impersonation.user_agent appears invalid (should contain version info like 'Mozilla/5.0')")
+		}
+	}
+
+	// validate preserve_ua is a boolean (already validated by YAML parser, but good to document)
+	// no additional validation needed - it's either nil, true, or false
+
+	// validate logical combinations
+	if imp.UserAgent != "" && imp.PreserveUA != nil && *imp.PreserveUA {
+		return errors.New("impersonation.user_agent and preserve_ua=true are mutually exclusive (custom UA overrides preservation)")
+	}
+
+	return nil
+}
+
 // validateProxyConfig validates Proxy configuration
 func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) error {
 	// validate Proxy configuration YAML
@@ -1378,6 +1499,11 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 
 	// validate version (after defaults are applied)
 	if err := ValidateVersion(&config); err != nil {
+		return validate.WrapErrorWithField(err, "proxyConfig")
+	}
+
+	// validate impersonation settings if configured
+	if err := m.validateImpersonation(&config); err != nil {
 		return validate.WrapErrorWithField(err, "proxyConfig")
 	}
 

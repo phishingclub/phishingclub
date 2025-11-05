@@ -69,6 +69,18 @@
 	const currentExample = `version: "0.0"
 proxy: "My Proxy Campaign"
 
+# browser and OS impersonation (optional - defaults shown below)
+impersonation:
+  browser: "chrome"             # chrome, firefox (default: chrome)
+  os: "windows"                 # windows, macos, linux, android, ios, random (default: windows)
+  http_version: "http2"         # http1, http2, http3 (default: http2)
+  preserve_ua: false            # preserve victim's User-Agent (default: false - uses surf's impersonated UA)
+  user_agent: ""                # custom user agent override (optional)
+  # Notes on User-Agent behavior:
+  # - preserve_ua: false (default) = surf's impersonated UA is sent (matches TLS fingerprint perfectly!)
+  # - preserve_ua: true = victim's browser UA is sent to target (transparent proxying)
+  # - user_agent: "custom" = always use this custom UA (overrides everything)
+
 # global TLS configuration (applies to all hosts unless overridden)
 global:
   tls:
