@@ -336,8 +336,20 @@ func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
 // checks if the request should be redirected
 // checks if the request is for a static page or static not found page
 func (s *Server) Handler(c *gin.Context) {
-	// inject ja4 fingerprint if available
-	s.ja4Middleware.GinHandler()(c)
+	if cacheEntry, ok := s.ja4Middleware.ConnectionFingerprints.Load(c.Request.RemoteAddr); ok {
+		if entry, ok := cacheEntry.(*middleware.FingerprintEntry); ok {
+			fingerprint := entry.Fingerprint
+			entry.LastAccess = time.Now()
+			c.Request.Header.Set(middleware.HeaderJA4, fingerprint)
+			c.Set(middleware.ContextKeyJA4, fingerprint)
+			s.logger.Debugw("ja4 fingerprint injected",
+				"fingerprint", fingerprint,
+				"remoteAddr", c.Request.RemoteAddr,
+				"path", c.Request.URL.Path,
+				"host", c.Request.Host,
+			)
+		}
+	}
 
 	// add error recovery for handler
 	defer func() {

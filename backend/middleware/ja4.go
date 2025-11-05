@@ -20,14 +20,15 @@ const (
 	ContextKeyJA4 = "ja4_fingerprint"
 )
 
-type fingerprintEntry struct {
-	fingerprint string
-	lastAccess  time.Time
+// FingerprintEntry stores a ja4 fingerprint with timestamp
+type FingerprintEntry struct {
+	Fingerprint string
+	LastAccess  time.Time
 }
 
 // JA4Middleware handles ja4+ fingerprinting for tls connections
 type JA4Middleware struct {
-	connectionFingerprints sync.Map
+	ConnectionFingerprints sync.Map
 	logger                 *zap.SugaredLogger
 }
 
@@ -54,10 +55,10 @@ func (m *JA4Middleware) periodicCleanup() {
 		staleThreshold := 10 * time.Minute
 		count := 0
 
-		m.connectionFingerprints.Range(func(key, value interface{}) bool {
-			if entry, ok := value.(*fingerprintEntry); ok {
-				if now.Sub(entry.lastAccess) > staleThreshold {
-					m.connectionFingerprints.Delete(key)
+		m.ConnectionFingerprints.Range(func(key, value interface{}) bool {
+			if entry, ok := value.(*FingerprintEntry); ok {
+				if now.Sub(entry.LastAccess) > staleThreshold {
+					m.ConnectionFingerprints.Delete(key)
 					count++
 				}
 			}
@@ -70,11 +71,11 @@ func (m *JA4Middleware) periodicCleanup() {
 // StoreFingerprintFromClientHello stores the ja4 fingerprint from tls clienthello
 func (m *JA4Middleware) StoreFingerprintFromClientHello(hello *tls.ClientHelloInfo) {
 	fingerprint := ja4plus.JA4(hello)
-	entry := &fingerprintEntry{
-		fingerprint: fingerprint,
-		lastAccess:  time.Now(),
+	entry := &FingerprintEntry{
+		Fingerprint: fingerprint,
+		LastAccess:  time.Now(),
 	}
-	m.connectionFingerprints.Store(hello.Conn.RemoteAddr().String(), entry)
+	m.ConnectionFingerprints.Store(hello.Conn.RemoteAddr().String(), entry)
 }
 
 // ConnStateCallback cleans up fingerprint cache when connection closes
@@ -82,7 +83,7 @@ func (m *JA4Middleware) ConnStateCallback(conn net.Conn, state http.ConnState) {
 	switch state {
 	case http.StateClosed, http.StateHijacked:
 		addr := conn.RemoteAddr().String()
-		m.connectionFingerprints.Delete(addr)
+		m.ConnectionFingerprints.Delete(addr)
 	}
 }
 
@@ -90,12 +91,12 @@ func (m *JA4Middleware) ConnStateCallback(conn net.Conn, state http.ConnState) {
 func (m *JA4Middleware) GinHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// try to get fingerprint from cache
-		if cacheEntry, ok := m.connectionFingerprints.Load(c.Request.RemoteAddr); ok {
-			if entry, ok := cacheEntry.(*fingerprintEntry); ok {
-				fingerprint := entry.fingerprint
+		if cacheEntry, ok := m.ConnectionFingerprints.Load(c.Request.RemoteAddr); ok {
+			if entry, ok := cacheEntry.(*FingerprintEntry); ok {
+				fingerprint := entry.Fingerprint
 
 				// update last access time
-				entry.lastAccess = time.Now()
+				entry.LastAccess = time.Now()
 
 				// set as internal header for downstream use
 				c.Request.Header.Set(HeaderJA4, fingerprint)
