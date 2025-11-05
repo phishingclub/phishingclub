@@ -19,7 +19,7 @@ require (
 	github.com/oapi-codegen/nullable v1.1.0
 	github.com/pquerna/otp v1.4.0
 	github.com/stretchr/testify v1.9.0
-	github.com/wneessen/go-mail v0.7.1
+	github.com/wneessen/go-mail v0.7.2
 	github.com/yeqown/go-qrcode/v2 v2.2.4
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.41.0
