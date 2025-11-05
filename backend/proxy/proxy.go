@@ -204,8 +204,11 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 		}
 	}
 
+	// capture victim's user agent before processing (for preserve_ua option)
+	victimUA := req.Header.Get("User-Agent")
+
 	// create http client
-	client, err := m.createHTTPClient(req, reqCtx.ProxyConfig)
+	client, err := m.createHTTPClient(req, reqCtx.ProxyConfig, victimUA)
 	if err != nil {
 		return errors.Errorf("failed to create proxy HTTP client: %w", err)
 	}
@@ -217,7 +220,7 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	}
 
 	// prepare request for target
-	m.prepareRequestForTarget(modifiedReq, client, reqCtx.ProxyConfig)
+	m.prepareRequestForTarget(modifiedReq, client, reqCtx.ProxyConfig, victimUA)
 
 	// execute request
 	targetResp, err := client.Do(modifiedReq)
@@ -247,7 +250,7 @@ func (m *ProxyHandler) extractTargetDomain(domain *database.Domain) string {
 	return targetDomain
 }
 
-func (m *ProxyHandler) createHTTPClient(req *http.Request, proxyConfig *service.ProxyServiceConfigYAML) (*http.Client, error) {
+func (m *ProxyHandler) createHTTPClient(req *http.Request, proxyConfig *service.ProxyServiceConfigYAML, victimUA string) (*http.Client, error) {
 	// create surf client with builder
 	builder := surf.NewClient().Builder()
 
@@ -285,6 +288,12 @@ func (m *ProxyHandler) createHTTPClient(req *http.Request, proxyConfig *service.
 			builder.ForceHTTP1()
 		case "http3":
 			builder.HTTP3()
+		}
+
+		// if preserve_ua is true, override surf's impersonated UA with victim's UA
+		if proxyConfig.Impersonation.PreserveUA != nil && *proxyConfig.Impersonation.PreserveUA && victimUA != "" {
+			builder.UserAgent(victimUA)
+			m.logger.Infow("preserve_ua=true: setting victim UA in surf builder", "victimUA", victimUA)
 		}
 		// note: if enabled: false, no impersonation is applied at all
 	}
@@ -749,16 +758,20 @@ func (m *ProxyHandler) patchRequestBodyWithContext(req *http.Request, reqCtx *Re
 	req.ContentLength = int64(len(body))
 }
 
-func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.Client, proxyConfig *service.ProxyServiceConfigYAML) {
+func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.Client, proxyConfig *service.ProxyServiceConfigYAML, victimUA string) {
 	req.RequestURI = ""
 	req.Header.Del("Accept-Encoding")
 
 	// handle user agent based on impersonation config (only if enabled)
 	if proxyConfig.Impersonation != nil && (proxyConfig.Impersonation.Enabled == nil || *proxyConfig.Impersonation.Enabled) {
-		// use surf's impersonated user agent - clear victim's UA so surf's will be used
-		req.Header.Del("User-Agent")
+		// if preserve_ua is false (default), clear victim's UA so surf's impersonated UA is used
+		if proxyConfig.Impersonation.PreserveUA == nil || !*proxyConfig.Impersonation.PreserveUA {
+			// use surf's impersonated user agent - clear victim's UA so surf's will be used
+			req.Header.Del("User-Agent")
+		}
+		// else: preserve_ua is true - victim's UA was already set in surf builder, no need to do anything here
 	}
-	// else: impersonation disabled - victim's UA passes through unchanged
+	// else: impersonation disabled - victim's UA and all headers pass through unchanged
 
 	// setup cookie jar for redirect handling
 	jar, _ := cookiejar.New(nil)

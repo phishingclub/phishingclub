@@ -75,9 +75,12 @@ impersonation:
   browser: "chrome"             # chrome, firefox (default: chrome)
   os: "windows"                 # windows, macos, linux, android, ios, random (default: windows)
   http_version: "http2"         # http1, http2, http3 (default: http2)
+  preserve_ua: false            # preserve victim's User-Agent (default: false)
   # Notes on impersonation:
   # - enabled: true (default) = full browser/OS/TLS impersonation (UA matches fingerprint perfectly)
   # - enabled: false = no impersonation, victim's UA and headers pass through unchanged
+  # - preserve_ua: false (default) = use surf's impersonated UA (matches TLS fingerprint)
+  # - preserve_ua: true = keep victim's UA, but still use TLS/HTTP/2 fingerprinting (creates UA/fingerprint mismatch)
 
 # global TLS configuration (applies to all hosts unless overridden)
 global:

