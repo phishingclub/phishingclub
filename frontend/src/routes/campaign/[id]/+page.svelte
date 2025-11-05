@@ -1274,7 +1274,7 @@
 							{#if campaign.allowDeny?.length}
 								{#each campaign.allowDeny as allowDeny, i}
 									<a
-										href="/ip-filter/?edit={allowDeny.id}"
+										href="/filter/?edit={allowDeny.id}"
 										class="text-cta-blue dark:text-white hover:underline"
 										target="_blank"
 									>

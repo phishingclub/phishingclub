@@ -3631,7 +3631,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 	}
 }
 
-// checkIPFilter checks if the IP is allowed for proxy requests
+// checkIPFilter checks if the IP and JA4 are allowed for proxy requests
 // returns (blocked, response) where blocked=true means the IP should be blocked
 func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) (bool, *http.Response) {
 	// use cached campaign info
@@ -3658,7 +3658,15 @@ func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) 
 		return false, nil
 	}
 
-	// check IP against allow/deny lists
+	// get ja4 fingerprint from request context
+	ja4 := ""
+	if val := req.Context().Value("ja4_fingerprint"); val != nil {
+		if fp, ok := val.(string); ok {
+			ja4 = fp
+		}
+	}
+
+	// check IP and JA4 against allow/deny lists
 	isAllowListing := false
 	allowed := false // for allow lists, default is deny
 
@@ -3671,10 +3679,20 @@ func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) 
 			}
 		}
 
-		ok, err := allowDeny.IsIPAllowed(ip)
+		// check IP filter
+		ipOk, err := allowDeny.IsIPAllowed(ip)
 		if err != nil {
 			continue
 		}
+
+		// check JA4 filter
+		ja4Ok, err := allowDeny.IsJA4Allowed(ja4)
+		if err != nil {
+			continue
+		}
+
+		// both IP and JA4 must pass for the filter to allow
+		ok := ipOk && ja4Ok
 
 		if isAllowListing && ok {
 			allowed = true

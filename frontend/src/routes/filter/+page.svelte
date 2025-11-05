@@ -43,6 +43,7 @@
 		id: null,
 		name: null,
 		cidrs: null,
+		ja4Fingerprints: null,
 		allowed: null
 	};
 	let allowDenyList = [];
@@ -63,7 +64,7 @@
 	};
 
 	$: {
-		modalText = getModalText('IP filter', modalMode);
+		modalText = getModalText('Filter', modalMode);
 	}
 
 	// hooks
@@ -94,7 +95,7 @@
 			allowDenyList = data.rows;
 			allowDenyListHasNextPage = data.hasNextPage;
 		} catch (e) {
-			addToast('Failed to get IP filters', 'Error');
+			addToast('Failed to get filters', 'Error');
 			console.error(e);
 		} finally {
 			isTableLoading = false;
@@ -113,8 +114,8 @@
 				throw res.error;
 			}
 		} catch (e) {
-			addToast('Failed to get IP filter', 'Error');
-			console.error('failed to get IP filter', e);
+			addToast('Failed to get filter', 'Error');
+			console.error('failed to get filter', e);
 		}
 	};
 
@@ -126,13 +127,22 @@
 			}
 			return res.data;
 		} catch (e) {
-			addToast('Failed to get IP filters', 'Error');
-			console.error('failed to get IP filters', e);
+			addToast('Failed to get filters', 'Error');
+			console.error('failed to get filters', e);
 		}
 		return [];
 	};
 
 	const onClickSubmit = async () => {
+		// validate that at least one of cidrs or ja4Fingerprints is provided
+		const hasCidrs = formValues.cidrs && formValues.cidrs.trim().length > 0;
+		const hasJA4 = formValues.ja4Fingerprints && formValues.ja4Fingerprints.trim().length > 0;
+
+		if (!hasCidrs && !hasJA4) {
+			formError = 'At least one of CIDRs or JA4 fingerprints must be provided';
+			return;
+		}
+
 		try {
 			isSubmitting = true;
 			if (modalMode === 'create' || modalMode === 'copy') {
@@ -149,16 +159,23 @@
 
 	const create = async () => {
 		formError = '';
-		formValues.cidrs = formValues.cidrs
-			.split('\n')
-			.map((line) => singleIPToCIDR(line))
-			.filter((line) => line.length > 0)
-			.join('\n');
+
+		// process cidrs only if provided
+		if (formValues.cidrs) {
+			formValues.cidrs = formValues.cidrs
+				.split('\n')
+				.map((line) => singleIPToCIDR(line))
+				.filter((line) => line.length > 0)
+				.join('\n');
+		} else {
+			formValues.cidrs = '';
+		}
 
 		try {
 			const res = await api.allowDeny.create({
 				name: formValues.name,
 				cidrs: formValues.cidrs,
+				ja4Fingerprints: formValues.ja4Fingerprints || '',
 				allowed: formValues.allowed,
 				companyID: contextCompanyID
 			});
@@ -166,39 +183,46 @@
 				formError = res.error;
 				return;
 			}
-			addToast('Created IP filter', 'Success');
+			addToast('Created filter', 'Success');
 			closeModal();
 		} catch (err) {
-			addToast('Failed to create IP filter', 'Error');
-			console.error('failed to create IP filter:', err);
+			addToast('Failed to create filter', 'Error');
+			console.error('failed to create filter:', err);
 		}
 		refreshAllowDenies();
 	};
 
 	const update = async () => {
 		formError = '';
-		formValues.cidrs = formValues.cidrs
-			.split('\n')
-			.map((line) => singleIPToCIDR(line))
-			.filter((line) => line.length > 0)
-			.join('\n');
+
+		// process cidrs only if provided
+		if (formValues.cidrs) {
+			formValues.cidrs = formValues.cidrs
+				.split('\n')
+				.map((line) => singleIPToCIDR(line))
+				.filter((line) => line.length > 0)
+				.join('\n');
+		} else {
+			formValues.cidrs = '';
+		}
 
 		try {
 			const res = await api.allowDeny.update({
 				id: formValues.id,
 				name: formValues.name,
 				cidrs: formValues.cidrs,
+				ja4Fingerprints: formValues.ja4Fingerprints || '',
 				companyID: formValues.companyID
 			});
 			if (res.success) {
-				addToast('Updated IP filter', 'Success');
+				addToast('Updated filter', 'Success');
 				closeModal();
 			} else {
 				formError = res.error;
 			}
 		} catch (e) {
-			addToast('Failed to update IP filter', 'Error');
-			console.error('failed to update IP filter', e);
+			addToast('Failed to update filter', 'Error');
+			console.error('failed to update filter', e);
 		}
 		refreshAllowDenies();
 	};
@@ -223,7 +247,7 @@
 				throw res.error;
 			})
 			.catch((e) => {
-				console.error('failed to delete IP filter:', e);
+				console.error('failed to delete filter:', e);
 			});
 		return action;
 	};
@@ -257,8 +281,8 @@
 			assignAllowDeny(allowDeny);
 			isModalVisible = true;
 		} catch (e) {
-			addToast('Failed to get IP filter', 'Error');
-			console.error('failed to get IP filter', e);
+			addToast('Failed to get filter', 'Error');
+			console.error('failed to get filter', e);
 		} finally {
 			hideIsLoading();
 		}
@@ -274,8 +298,8 @@
 			allowDeny.id = null;
 			isModalVisible = true;
 		} catch (e) {
-			addToast('Failed to get IP filter', 'Error');
-			console.error('failed to get IP filter', e);
+			addToast('Failed to get filter', 'Error');
+			console.error('failed to get filter', e);
 		} finally {
 			hideIsLoading();
 		}
@@ -286,6 +310,7 @@
 			id: allowDeny.id,
 			name: allowDeny.name,
 			cidrs: allowDeny.cidrs,
+			ja4Fingerprints: allowDeny.ja4Fingerprints || '',
 			allowed: allowDeny.allowed,
 			companyID: allowDeny.companyID
 		};
@@ -320,9 +345,9 @@
 	};
 </script>
 
-<HeadTitle title="IP filter" />
+<HeadTitle title="Filter" />
 <main>
-	<Headline>IP filters</Headline>
+	<Headline>Filters</Headline>
 	<BigButton on:click={openCreateModal}>New filter</BigButton>
 	<Table
 		columns={[
@@ -402,12 +427,21 @@
 						/>
 					{/if}
 					<TextareaField
-						required
-						minLength="1"
+						optional
 						bind:value={formValues.cidrs}
 						placeholder="8.8.8.8/16"
-						toolTipText="Newlines seperated CIDRs">CIDRs</TextareaField
+						toolTipText="Newlines seperated CIDRs (optional)">CIDRs</TextareaField
 					>
+					<TextareaField
+						optional
+						bind:value={formValues.ja4Fingerprints}
+						placeholder="t13d1715h2_8daaf6152771_02713d6af862"
+						toolTipText="Newlines separated JA4 fingerprints (optional)"
+						>JA4 Fingerprints</TextareaField
+					>
+					<p style="font-size: 0.875rem; color: #666; margin-top: 0.5rem;">
+						Note: At least one of CIDRs or JA4 Fingerprints must be provided.
+					</p>
 				</FormColumn>
 			</FormColumns>
 			<FormError message={formError} />

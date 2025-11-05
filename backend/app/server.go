@@ -1815,6 +1815,9 @@ func (s *Server) checkIPFilter(
 	domain *database.Domain,
 	campaignID *uuid.UUID,
 ) (bool, error) {
+	// get ja4 fingerprint from context
+	ja4 := middleware.GetJA4FromContext(ctx)
+
 	allowDenyLEntries, err := s.repositories.Campaign.GetAllDenyByCampaignID(ctx, campaignID)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		s.logger.Debugw("failed to get deny list for campaign",
@@ -1823,9 +1826,9 @@ func (s *Server) checkIPFilter(
 		)
 		return false, fmt.Errorf("failed to get deny list for campaign: %s", err)
 	}
-	// if there is a deny list, check if the IP allowed / denied
-	// when allow listing we must check all entries to see if we have a allowed IP
-	// when deny listing only a single entry needs to deny the IP
+	// if there is a deny list, check if the IP and JA4 allowed / denied
+	// when allow listing we must check all entries to see if we have a allowed IP/JA4
+	// when deny listing only a single entry needs to deny the IP/JA4
 	isAllowListing := false
 	allowed := len(allowDenyLEntries) == 0
 	for i, allowDeny := range allowDenyLEntries {
@@ -1836,22 +1839,38 @@ func (s *Server) checkIPFilter(
 				allowed = true
 			}
 		}
-		ok, err := allowDeny.IsIPAllowed(ip)
+
+		// check IP filter
+		ipOk, err := allowDeny.IsIPAllowed(ip)
 		if err != nil {
 			return false, errs.Wrap(err)
 		}
+
+		// check JA4 filter
+		ja4Ok, err := allowDeny.IsJA4Allowed(ja4)
+		if err != nil {
+			return false, errs.Wrap(err)
+		}
+
+		// both IP and JA4 must pass for the filter to allow
+		ok := ipOk && ja4Ok
+
 		if isAllowListing && ok {
-			s.logger.Debugw("IP is allow listed",
+			s.logger.Debugw("IP and JA4 are allow listed",
 				"ip", ip,
+				"ja4", ja4,
 				"list name", allowDeny.Name.MustGet().String(),
 				"list id", allowDeny.ID.MustGet().String(),
 			)
 			allowed = true
 			break
-			// if it is a deny list and a IP is not ok, we can break
+			// if it is a deny list and a IP/JA4 is not ok, we can break
 		} else if !isAllowListing && !ok {
-			s.logger.Debugw("IP is deny listed",
+			s.logger.Debugw("IP or JA4 is deny listed",
 				"ip", ip,
+				"ja4", ja4,
+				"ipOk", ipOk,
+				"ja4Ok", ja4Ok,
 				"list name", allowDeny.Name.MustGet().String(),
 				"list id", allowDeny.ID.MustGet().String(),
 			)
@@ -1860,8 +1879,9 @@ func (s *Server) checkIPFilter(
 		}
 	}
 	if !allowed {
-		s.logger.Debugw("IP is not allowed",
+		s.logger.Debugw("IP or JA4 is not allowed",
 			"ip", ip,
+			"ja4", ja4,
 		)
 		if denyPageID, err := campaign.DenyPageID.Get(); err == nil {
 			err = s.renderDenyPage(ctx, domain, &denyPageID)

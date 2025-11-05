@@ -16,13 +16,14 @@ import (
 
 // AllowDeny is a model for allow deny listing
 type AllowDeny struct {
-	ID        nullable.Nullable[uuid.UUID]     `json:"id"`
-	CreatedAt *time.Time                       `json:"createdAt"`
-	UpdatedAt *time.Time                       `json:"updatedAt"`
-	Name      nullable.Nullable[vo.String127]  `json:"name"`
-	Cidrs     nullable.Nullable[vo.IPNetSlice] `json:"cidrs"`
-	Allowed   nullable.Nullable[bool]          `json:"allowed"`
-	CompanyID nullable.Nullable[uuid.UUID]     `json:"companyID"`
+	ID              nullable.Nullable[uuid.UUID]     `json:"id"`
+	CreatedAt       *time.Time                       `json:"createdAt"`
+	UpdatedAt       *time.Time                       `json:"updatedAt"`
+	Name            nullable.Nullable[vo.String127]  `json:"name"`
+	Cidrs           nullable.Nullable[vo.IPNetSlice] `json:"cidrs"`
+	JA4Fingerprints nullable.Nullable[string]        `json:"ja4Fingerprints"`
+	Allowed         nullable.Nullable[bool]          `json:"allowed"`
+	CompanyID       nullable.Nullable[uuid.UUID]     `json:"companyID"`
 }
 
 // Validate checks if the allow deny list has a valid state
@@ -30,17 +31,31 @@ func (r *AllowDeny) Validate() error {
 	if err := validate.NullableFieldRequired("name", r.Name); err != nil {
 		return err
 	}
-	if err := validate.NullableFieldRequired("cidrs", r.Cidrs); err != nil {
-		return err
-	}
 	if err := validate.NullableFieldRequired("filter type", r.Allowed); err != nil {
 		return err
 	}
-	if v := r.Cidrs.MustGet(); len(v) == 0 {
+
+	// at least one of cidrs or ja4 fingerprints must be provided
+	hasCidrs := false
+	if r.Cidrs.IsSpecified() {
+		if cidrs, err := r.Cidrs.Get(); err == nil && len(cidrs) > 0 {
+			hasCidrs = true
+		}
+	}
+
+	hasJA4 := false
+	if r.JA4Fingerprints.IsSpecified() {
+		if ja4, err := r.JA4Fingerprints.Get(); err == nil && ja4 != "" {
+			hasJA4 = true
+		}
+	}
+
+	if !hasCidrs && !hasJA4 {
 		return errs.NewValidationError(
-			errors.New("cidrs must include atleast one CIDR"),
+			errors.New("at least one of CIDRs or JA4 fingerprints must be provided"),
 		)
 	}
+
 	return nil
 }
 
@@ -71,6 +86,12 @@ func (r *AllowDeny) ToDBMap() map[string]any {
 			m["cidrs"] = cidrsStr
 		}
 	}
+	if r.JA4Fingerprints.IsSpecified() {
+		m["ja4_fingerprints"] = ""
+		if ja4, err := r.JA4Fingerprints.Get(); err == nil {
+			m["ja4_fingerprints"] = ja4
+		}
+	}
 	if r.Allowed.IsSpecified() {
 		m["allowed"] = nil
 		if allowed, err := r.Allowed.Get(); err == nil {
@@ -90,9 +111,11 @@ func (r *AllowDeny) ToDBMap() map[string]any {
 
 func (r *AllowDeny) IsIPAllowed(ip string) (bool, error) {
 	isTypeAllowList := r.Allowed.MustGet()
+
+	// if no cidrs configured, skip ip check (always pass)
 	cidrs, err := r.Cidrs.Get()
-	if err != nil {
-		return false, errs.Wrap(err)
+	if err != nil || len(cidrs) == 0 {
+		return true, nil
 	}
 
 	netIP := net.ParseIP(ip)
@@ -119,4 +142,99 @@ func (r *AllowDeny) IsIPAllowed(ip string) (bool, error) {
 
 	// If this is a deny list and we didn't find the IP, it is allowed
 	return true, nil
+}
+
+// IsJA4Allowed checks if a JA4 fingerprint is allowed based on the filter rules
+func (r *AllowDeny) IsJA4Allowed(ja4 string) (bool, error) {
+	if ja4 == "" {
+		// if no ja4 fingerprint available, skip ja4 check
+		return true, nil
+	}
+
+	isTypeAllowList := r.Allowed.MustGet()
+
+	// get ja4 fingerprints list
+	ja4FingerprintsStr, err := r.JA4Fingerprints.Get()
+	if err != nil || ja4FingerprintsStr == "" {
+		// if no ja4 fingerprints configured, skip ja4 check
+		return true, nil
+	}
+
+	// parse fingerprints (newline separated)
+	fingerprints := parseFingerprints(ja4FingerprintsStr)
+
+	// check if ja4 matches any fingerprint
+	isMatch := false
+	for _, fp := range fingerprints {
+		if fp == ja4 {
+			isMatch = true
+			break
+		}
+	}
+
+	// if allow list and ja4 matches
+	if isTypeAllowList && isMatch {
+		return true, nil
+	}
+	// if deny list and ja4 matches
+	if !isTypeAllowList && isMatch {
+		return false, nil
+	}
+
+	// If this is an allow list and ja4 didn't match, not allowed
+	if isTypeAllowList {
+		return false, nil
+	}
+
+	// If this is a deny list and ja4 didn't match, it is allowed
+	return true, nil
+}
+
+// parseFingerprints splits newline-separated fingerprints and trims whitespace
+func parseFingerprints(input string) []string {
+	var result []string
+	lines := splitLines(input)
+	for _, line := range lines {
+		trimmed := trimSpace(line)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// splitLines splits a string by newlines
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
+// trimSpace removes leading and trailing whitespace
+func trimSpace(s string) string {
+	start := 0
+	end := len(s)
+
+	for start < end && isSpace(s[start]) {
+		start++
+	}
+	for end > start && isSpace(s[end-1]) {
+		end--
+	}
+
+	return s[start:end]
+}
+
+// isSpace checks if a byte is whitespace
+func isSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }

@@ -107,7 +107,7 @@
 			'/dashboard/': 'dashboard',
 			'/campaign/': 'campaigns_overview',
 			'/campaign-template/': 'campaign_templates',
-			'/ip-filter/': 'ip_filters',
+			'/filter/': 'filters',
 			'/webhook/': 'webhooks',
 			'/recipient/': 'recipients_overview',
 			'/recipient/group/': 'recipient_groups',

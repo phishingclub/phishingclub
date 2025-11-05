@@ -5,7 +5,6 @@ import (
 	"net"
 	"strings"
 
-	"github.com/go-errors/errors"
 	"github.com/phishingclub/phishingclub/errs"
 )
 
@@ -13,23 +12,30 @@ type IPNetSlice []IPNet
 
 // UnmarshalJSON implements custom unmarshaling for IPNetSlice
 func (s *IPNetSlice) UnmarshalJSON(data []byte) error {
-	// if empty string
-	if strings.TrimSpace(string(data)) == "\"\"" {
-		return errors.New("CIDRs is empty.")
-	}
 	var str string
 	if err := json.Unmarshal(data, &str); err != nil {
 		return err
 	}
+
+	// if empty string, return empty slice (allow empty cidrs for ja4-only filters)
+	if strings.TrimSpace(str) == "" {
+		*s = IPNetSlice{}
+		return nil
+	}
+
 	strs := strings.Split(str, "\n")
 	// Convert each string to IPNet
-	result := make(IPNetSlice, len(strs))
-	for i, cidr := range strs {
+	result := make(IPNetSlice, 0, len(strs))
+	for _, cidr := range strs {
+		// skip empty lines
+		if strings.TrimSpace(cidr) == "" {
+			continue
+		}
 		ipnet, err := NewIPNet(cidr)
 		if err != nil {
 			return unwrapError(err)
 		}
-		result[i] = *ipnet
+		result = append(result, *ipnet)
 	}
 
 	*s = result

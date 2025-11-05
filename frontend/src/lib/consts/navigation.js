@@ -78,8 +78,8 @@ export const route = {
 		route: '/api-sender/'
 	},
 	allowDeny: {
-		label: 'IP filters',
-		route: '/ip-filter/'
+		label: 'Filters',
+		route: '/filter/'
 	},
 	webhook: {
 		label: 'Webhooks',
