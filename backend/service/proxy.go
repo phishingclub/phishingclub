@@ -42,11 +42,10 @@ type ProxyServiceConfig struct {
 
 // ProxyServiceImpersonation represents browser and OS impersonation settings
 type ProxyServiceImpersonation struct {
+	Enabled     *bool  `yaml:"enabled,omitempty"`      // enable/disable impersonation (default: true)
 	Browser     string `yaml:"browser,omitempty"`      // chrome, firefox, or empty for none
 	OS          string `yaml:"os,omitempty"`           // windows, macos, linux, android, ios, random, or empty for auto
 	HTTPVersion string `yaml:"http_version,omitempty"` // http1, http2, http3, or empty for default
-	UserAgent   string `yaml:"user_agent,omitempty"`   // custom user agent override
-	PreserveUA  *bool  `yaml:"preserve_ua,omitempty"`  // preserve victim's user agent (default: false - use surf's impersonated UA)
 }
 
 // ProxyServiceDomainConfig represents configuration for a specific domain mapping
@@ -1022,13 +1021,19 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 
 	// set default impersonation settings if not configured
 	if config.Impersonation == nil {
+		trueValue := true
 		config.Impersonation = &ProxyServiceImpersonation{
+			Enabled:     &trueValue,
 			Browser:     "chrome",
 			OS:          "windows",
 			HTTPVersion: "http2",
 		}
 	} else {
 		// fill in missing impersonation fields with defaults
+		if config.Impersonation.Enabled == nil {
+			trueValue := true
+			config.Impersonation.Enabled = &trueValue
+		}
 		if config.Impersonation.Browser == "" {
 			config.Impersonation.Browser = "chrome"
 		}
@@ -1037,10 +1042,6 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 		}
 		if config.Impersonation.HTTPVersion == "" {
 			config.Impersonation.HTTPVersion = "http2"
-		}
-		if config.Impersonation.PreserveUA == nil {
-			falseValue := false
-			config.Impersonation.PreserveUA = &falseValue
 		}
 	}
 
@@ -1402,6 +1403,11 @@ func (m *Proxy) validateImpersonation(config *ProxyServiceConfigYAML) error {
 
 	imp := config.Impersonation
 
+	// if impersonation is disabled, skip all other validation
+	if imp.Enabled != nil && !*imp.Enabled {
+		return nil
+	}
+
 	// validate browser if specified - must be exact match (case-insensitive)
 	if imp.Browser != "" {
 		validBrowsers := map[string]bool{
@@ -1449,28 +1455,8 @@ func (m *Proxy) validateImpersonation(config *ProxyServiceConfigYAML) error {
 		imp.HTTPVersion = version
 	}
 
-	// validate user_agent if specified
-	if imp.UserAgent != "" {
-		trimmedUA := strings.TrimSpace(imp.UserAgent)
-		if len(trimmedUA) < 10 {
-			return errors.New("impersonation.user_agent must be at least 10 characters long")
-		}
-		if len(trimmedUA) > 500 {
-			return errors.New("impersonation.user_agent must not exceed 500 characters")
-		}
-		// check for reasonable user agent format (should contain at least one slash for version)
-		if !strings.Contains(trimmedUA, "/") {
-			return errors.New("impersonation.user_agent appears invalid (should contain version info like 'Mozilla/5.0')")
-		}
-	}
-
-	// validate preserve_ua is a boolean (already validated by YAML parser, but good to document)
+	// validate enabled is a boolean (already validated by YAML parser)
 	// no additional validation needed - it's either nil, true, or false
-
-	// validate logical combinations
-	if imp.UserAgent != "" && imp.PreserveUA != nil && *imp.PreserveUA {
-		return errors.New("impersonation.user_agent and preserve_ua=true are mutually exclusive (custom UA overrides preservation)")
-	}
 
 	return nil
 }

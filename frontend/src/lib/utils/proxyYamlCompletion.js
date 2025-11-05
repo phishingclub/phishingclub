@@ -113,8 +113,9 @@ export class ProxyYamlCompletionProvider {
 		if (linePrefix.match(/\s*http_version:\s*$/)) {
 			return this.getHTTPVersionSuggestions(range);
 		}
-		if (linePrefix.match(/\s*preserve_ua:\s*$/)) {
-			return this.getPreserveUASuggestions(range);
+		if (linePrefix.match(/\s*enabled:\s*$/)) {
+			// could be impersonation.enabled - return boolean suggestions
+			return this.getEnabledSuggestions(range);
 		}
 
 		// Handle array items
@@ -301,6 +302,14 @@ export class ProxyYamlCompletionProvider {
 	getImpersonationSuggestions(range) {
 		return [
 			{
+				label: 'enabled',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'enabled: ',
+				documentation:
+					'Enable or disable impersonation (true, false). Default: true. Set to false to pass through victim UA unchanged.',
+				range
+			},
+			{
 				label: 'browser',
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'browser: ',
@@ -320,20 +329,6 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'http_version: ',
 				documentation: 'HTTP version to use (http1, http2, http3)',
-				range
-			},
-			{
-				label: 'preserve_ua',
-				kind: this.monaco.languages.CompletionItemKind.Property,
-				insertText: 'preserve_ua: ',
-				documentation: "Preserve victim's User-Agent (true/false, default: false)",
-				range
-			},
-			{
-				label: 'user_agent',
-				kind: this.monaco.languages.CompletionItemKind.Property,
-				insertText: 'user_agent: ""',
-				documentation: 'Custom User-Agent override',
 				range
 			}
 		];
@@ -431,20 +426,20 @@ export class ProxyYamlCompletionProvider {
 		];
 	}
 
-	getPreserveUASuggestions(range) {
+	getEnabledSuggestions(range) {
 		return [
-			{
-				label: 'false',
-				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: 'false',
-				documentation: "Use surf's impersonated User-Agent (default, best for anti-detection)",
-				range
-			},
 			{
 				label: 'true',
 				kind: this.monaco.languages.CompletionItemKind.Value,
 				insertText: 'true',
-				documentation: "Preserve victim's original User-Agent (transparent proxying)",
+				documentation: 'Enable impersonation (default)',
+				range
+			},
+			{
+				label: 'false',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'false',
+				documentation: 'Disable impersonation completely',
 				range
 			}
 		];
@@ -1153,12 +1148,11 @@ export class ProxyYamlCompletionProvider {
 			version: 'Configuration version. Currently supports "0.0"',
 			global: 'Rules that apply to all domain mappings',
 			impersonation: 'Browser and OS impersonation settings for anti-detection',
+			enabled:
+				'Enable or disable impersonation: true (default, enables browser/OS impersonation) or false (disables impersonation completely)',
 			browser: 'Browser to impersonate: "chrome" (Chrome v142) or "firefox" (Firefox v144)',
 			os: 'Operating system to impersonate: "windows", "macos", "linux", "android", "ios", or "random"',
 			http_version: 'HTTP version to use: "http1", "http2" (default), or "http3"',
-			preserve_ua:
-				"Preserve victim's User-Agent: false (default, uses surf's impersonated UA for perfect fingerprint match) or true (transparent proxying)",
-			user_agent: 'Custom User-Agent string override (overrides all other UA settings)',
 			tls: 'TLS certificate configuration for proxy domains',
 			access: 'Access control configuration (optional - defaults to private mode for security)',
 			mode: 'Access control mode: "public" (allow all traffic) or "private" (IP whitelist after lure access, DEFAULT), OR TLS mode: "managed" (Let\'s Encrypt) or "self-signed"',
