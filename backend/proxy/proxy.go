@@ -295,6 +295,9 @@ func (m *ProxyHandler) createHTTPClient(req *http.Request, proxyConfig *service.
 			builder.UserAgent(victimUA)
 			m.logger.Infow("preserve_ua=true: setting victim UA in surf builder", "victimUA", victimUA)
 		}
+		// preserve the clients accept-lang
+		//builder.SetHeaders(map[string]string{"Accept-Langauge": req.Header.Get("Accept-Language")})
+
 		// note: if enabled: false, no impersonation is applied at all
 	}
 
@@ -761,6 +764,8 @@ func (m *ProxyHandler) patchRequestBodyWithContext(req *http.Request, reqCtx *Re
 func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.Client, proxyConfig *service.ProxyServiceConfigYAML, victimUA string) {
 	req.RequestURI = ""
 	req.Header.Del("Accept-Encoding")
+	// remove our internal ja4 header
+	req.Header.Del("x-ja4")
 
 	// handle user agent based on impersonation config (only if enabled)
 	if proxyConfig.Impersonation != nil && (proxyConfig.Impersonation.Enabled == nil || *proxyConfig.Impersonation.Enabled) {
