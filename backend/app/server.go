@@ -29,6 +29,7 @@ import (
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
+	"github.com/phishingclub/phishingclub/middleware"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/proxy"
 	"github.com/phishingclub/phishingclub/repository"
@@ -55,6 +56,7 @@ type Server struct {
 	services              *Services
 	repositories          *Repositories
 	proxyServer           *proxy.ProxyHandler
+	ja4Middleware         *middleware.JA4Middleware
 }
 
 // NewServer returns a new server
@@ -68,6 +70,8 @@ func NewServer(
 	logger *zap.SugaredLogger,
 	certMagicConfig *certmagic.Config,
 ) *Server {
+	// setup ja4 middleware for tls fingerprinting
+	ja4Middleware := middleware.NewJA4Middleware(logger)
 	// setup goproxy-based proxy server
 	proxyServer := proxy.NewProxyHandler(
 		logger,
@@ -107,6 +111,7 @@ func NewServer(
 		logger:                logger,
 		certMagicConfig:       certMagicConfig,
 		proxyServer:           proxyServer,
+		ja4Middleware:         ja4Middleware,
 	}
 }
 
@@ -331,6 +336,9 @@ func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
 // checks if the request should be redirected
 // checks if the request is for a static page or static not found page
 func (s *Server) Handler(c *gin.Context) {
+	// inject ja4 fingerprint if available
+	s.ja4Middleware.GinHandler()(c)
+
 	// add error recovery for handler
 	defer func() {
 		if r := recover(); r != nil {
@@ -1692,6 +1700,11 @@ func (s *Server) StartHTTPS(
 	// setup TLS config
 	tlsConf := s.certMagicConfig.TLSConfig()
 	tlsConf.NextProtos = append([]string{"h2"}, tlsConf.NextProtos...)
+
+	// configure ja4 middleware for tls fingerprinting
+	if s.ja4Middleware != nil {
+		tlsConf.GetConfigForClient = s.ja4Middleware.GetConfigForClient
+	}
 	// setup gin
 	ln, err := tls.Listen(
 		"tcp",
@@ -1702,6 +1715,11 @@ func (s *Server) StartHTTPS(
 		return nil, nil, fmt.Errorf("failed to listen on %s due to: %s", ln.Addr().String(), err)
 	}
 	s.HTTPSServer = s.defaultServer(r, true)
+
+	// register ja4 connection state callback for cleanup
+	if s.ja4Middleware != nil {
+		s.HTTPSServer.ConnState = s.ja4Middleware.ConnStateCallback
+	}
 	// start server
 	go func() {
 		s.logger.Debugw("starting phishing HTTPS server",
