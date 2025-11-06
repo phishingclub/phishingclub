@@ -1,0 +1,5 @@
+profile.cov
+string_crypt.go
+pool_ch.go_
+archive/
+tests/string_crypt_test.go

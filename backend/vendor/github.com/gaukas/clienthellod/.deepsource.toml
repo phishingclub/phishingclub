@@ -1,0 +1,12 @@
+version = 1
+
+test_patterns = ["**/*_test.go"]
+
+[[analyzers]]
+name = "go"
+
+  [analyzers.meta]
+  import_root = "github.com/gaukas/clienthellod"
+
+[[transformers]]
+name = "gofumpt"
