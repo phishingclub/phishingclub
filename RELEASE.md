@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.13.0] - 2025-01-07
+- Added proxy request JA4 impersonation
+- Added JA4 filtering with wildcard support in allow deny lists
+- Changed IP filtering to filtering
+- Bumped dependencies
+- Fixed overly eager proxy auto completion in editor
+- Fixed bug in obfuscation that could cause dublicate variables
+
 ## [1.12.0] - 2025-01-04
 - Added tls directive for proxy domains
 - Added self signed certificates for domains
