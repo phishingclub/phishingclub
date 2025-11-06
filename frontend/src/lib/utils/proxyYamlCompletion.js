@@ -144,6 +144,8 @@ export class ProxyYamlCompletionProvider {
 				return this.getTLSSuggestions(range);
 			case 'access':
 				return this.getAccessSuggestions(range);
+			case 'impersonate':
+				return this.getImpersonateSuggestions(range);
 			case 'capture':
 				return this.getCaptureSuggestions(range);
 			case 'rewrite':
@@ -190,6 +192,7 @@ export class ProxyYamlCompletionProvider {
 				// Nested sections
 				if (key === 'tls') return 'tls';
 				if (key === 'access') return 'access';
+				if (key === 'impersonate') return 'impersonate';
 				if (key === 'capture') return 'capture';
 				if (key === 'rewrite') return 'rewrite';
 				if (key === 'rewrite_urls') return 'rewrite_urls';
@@ -270,7 +273,14 @@ export class ProxyYamlCompletionProvider {
 				label: 'rewrite_urls',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'rewrite_urls:',
-				documentation: 'Global URL rewrite rules for anti-detection',
+				documentation: 'Rules for rewriting URLs in responses',
+				range
+			},
+			{
+				label: 'impersonate',
+				kind: this.monaco.languages.CompletionItemKind.Module,
+				insertText: 'impersonate:',
+				documentation: 'Client browser impersonation configuration using surf library',
 				range
 			}
 		];
@@ -356,6 +366,27 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Value,
 				insertText: '"self-signed"',
 				documentation: 'Automatically generated self-signed certificates',
+				range
+			}
+		];
+	}
+
+	getImpersonateSuggestions(range) {
+		return [
+			{
+				label: 'enabled',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'enabled: true',
+				documentation:
+					'Enable surf browser impersonation based on JA4 fingerprint. Replicates client TLS fingerprint, HTTP/2 settings, header ordering, and platform',
+				range
+			},
+			{
+				label: 'retain_ua',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'retain_ua: false',
+				documentation:
+					"Retain client's original User-Agent header instead of using surf's impersonated one. Useful when you want fingerprint matching but original UA",
 				range
 			}
 		];
@@ -978,6 +1009,12 @@ export class ProxyYamlCompletionProvider {
 		const hoverData = {
 			version: 'Configuration version. Currently supports "0.0"',
 			global: 'Rules that apply to all domain mappings',
+			impersonate:
+				'Client browser impersonation configuration. When enabled, uses surf library to replicate the exact TLS fingerprint, HTTP/2 settings, header ordering, and platform of the original client browser',
+			enabled:
+				'Enable surf browser impersonation based on client JA4 fingerprint. Detects browser (Chrome, Firefox, Safari, Edge) and platform (Windows, macOS, Linux, Android, iOS). Default: false',
+			retain_ua:
+				"Retain client's original User-Agent header instead of using surf's impersonated one. Useful when you want TLS/HTTP fingerprint matching but need to preserve the exact original User-Agent. Default: false",
 			tls: 'TLS certificate configuration for proxy domains',
 			access: 'Access control configuration (optional - defaults to private mode for security)',
 			mode: 'Access control mode: "public" (allow all traffic) or "private" (IP whitelist after lure access, DEFAULT), OR TLS mode: "managed" (Let\'s Encrypt) or "self-signed"',
