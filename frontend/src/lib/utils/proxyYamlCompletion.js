@@ -14,7 +14,7 @@ export class ProxyYamlCompletionProvider {
 		try {
 			if (!this.completionProvider) {
 				this.completionProvider = this.monaco.languages.registerCompletionItemProvider('yaml', {
-					triggerCharacters: [' ', ':', '-', '"', "'"],
+					triggerCharacters: ['-'],
 					provideCompletionItems: (model, position) => {
 						try {
 							return this.provideCompletionItems(model, position);
@@ -67,6 +67,17 @@ export class ProxyYamlCompletionProvider {
 		const linePrefix = lineContent.substring(0, position.column - 1);
 		const fullContent = model.getValue();
 		const linesAbove = model.getLinesContent().slice(0, position.lineNumber - 1);
+
+		// don't show autocomplete if user just typed a value after colon and space
+		// (likely wants to continue to next line)
+		const trimmedPrefix = linePrefix.trim();
+		if (trimmedPrefix.includes(':')) {
+			const afterColon = trimmedPrefix.split(':').pop().trim();
+			// if there's already a value after the colon, don't autocomplete
+			if (afterColon.length > 0 && !afterColon.endsWith('-')) {
+				return { suggestions: [] };
+			}
+		}
 
 		return {
 			suggestions: this.getSuggestions(linePrefix, range, linesAbove, fullContent)
