@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -163,10 +164,10 @@ func (r *AllowDeny) IsJA4Allowed(ja4 string) (bool, error) {
 	// parse fingerprints (newline separated)
 	fingerprints := parseFingerprints(ja4FingerprintsStr)
 
-	// check if ja4 matches any fingerprint
+	// check if ja4 matches any fingerprint (supports wildcard patterns with *)
 	isMatch := false
 	for _, fp := range fingerprints {
-		if fp == ja4 {
+		if matchJA4Pattern(fp, ja4) {
 			isMatch = true
 			break
 		}
@@ -188,6 +189,61 @@ func (r *AllowDeny) IsJA4Allowed(ja4 string) (bool, error) {
 
 	// If this is a deny list and ja4 didn't match, it is allowed
 	return true, nil
+}
+
+// matchJA4Pattern checks if a JA4 fingerprint matches a pattern with wildcard support
+// supports * as wildcard to match any characters
+// examples:
+//
+//	t13d151*h2_8daaf6152771_* matches any fingerprint with that prefix and cipher hash
+//	t13d*_*_* matches any TLS 1.3 fingerprint with SNI
+//	* matches everything
+func matchJA4Pattern(pattern, ja4 string) bool {
+	// exact match (no wildcards)
+	if pattern == ja4 {
+		return true
+	}
+
+	// if pattern doesn't contain *, no match
+	if !strings.Contains(pattern, "*") {
+		return false
+	}
+
+	// wildcard-only pattern matches everything
+	if pattern == "*" {
+		return true
+	}
+
+	// split pattern by * and check each part exists in order
+	parts := strings.Split(pattern, "*")
+	pos := 0
+
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+
+		// find the part in the remaining string
+		idx := strings.Index(ja4[pos:], part)
+		if idx == -1 {
+			return false
+		}
+
+		// for first part, must match at beginning
+		if i == 0 && idx != 0 {
+			return false
+		}
+
+		pos += idx + len(part)
+	}
+
+	// for last part, must match at end
+	lastPart := parts[len(parts)-1]
+	if lastPart != "" && !strings.HasSuffix(ja4, lastPart) {
+		return false
+	}
+
+	return true
 }
 
 // parseFingerprints splits newline-separated fingerprints and trims whitespace
