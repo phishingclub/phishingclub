@@ -47,10 +47,12 @@ func DefaultObfuscationConfig() ObfuscationConfig {
 // ObfuscateHTML obfuscates HTML content using compression, base64 encoding,
 // and random variable names to make it difficult to fingerprint
 func ObfuscateHTML(html string, config ObfuscationConfig) (string, error) {
-	// generate random variable names to avoid fingerprinting (need early for xor function name)
-	varNames := generateRandomVariableNames(11, config)
+	// generate random variable names
+	varNames := generateRandomVariableNames(15, config)
 	xorFuncName := varNames[9]
 	windowVar := varNames[10]
+	// xor function variables use indices 11-14 to avoid conflicts with windowVar
+	xorVars := []string{varNames[11], varNames[12], varNames[13], varNames[14]}
 
 	// randomly select method to access window object
 	windowAccessor := getRandomWindowAccessor()
@@ -63,10 +65,10 @@ func ObfuscateHTML(html string, config ObfuscationConfig) (string, error) {
 	// encode to base64
 	encoded := base64.StdEncoding.EncodeToString(compressed)
 
-	// split the base64 payload to avoid detection
+	// split the base64 payload
 	encodedSplit := splitStringRandom(encoded, config, xorFuncName)
 
-	// split critical strings to avoid detection
+	// split critical strings t
 	atobSplit := splitStringRandom("atob", config, xorFuncName)
 	uint8ArraySplit := splitStringRandom("Uint8Array", config, xorFuncName)
 	fromSplit := splitStringRandom("from", config, xorFuncName)
@@ -87,8 +89,7 @@ func ObfuscateHTML(html string, config ObfuscationConfig) (string, error) {
 	// create xor helper function if needed
 	xorFunc := ""
 	if config.UseXOR {
-		// obfuscate the xor function internals
-		xorVars := generateRandomVariableNames(4, config)
+		// obfuscate the xor function internals (xorVars already generated above to avoid conflicts)
 		// create a minimal config without xor to avoid recursion
 		noXorConfig := config
 		noXorConfig.UseXOR = false
