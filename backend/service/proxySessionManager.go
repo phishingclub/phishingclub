@@ -27,6 +27,9 @@ type ProxySession struct {
 	NextPageType          atomic.Value // string - accessed concurrently by multiple requests
 	IsComplete            atomic.Bool  // accessed concurrently when checking capture completion
 	CookieBundleSubmitted atomic.Bool  // accessed concurrently to prevent duplicate submissions
+
+	// client user-agent stored for analytics and logging
+	UserAgent string
 }
 
 // ProxySessionManager manages proxy session lifecycle and storage

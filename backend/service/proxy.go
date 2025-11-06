@@ -53,12 +53,13 @@ type ProxyServiceDomainConfig struct {
 // ProxyServiceRules represents capture and replace rules
 // ProxyServiceRules represents global rules that apply to all hosts
 type ProxyServiceRules struct {
-	TLS         *ProxyServiceTLSConfig       `yaml:"tls,omitempty"`
-	Access      *ProxyServiceAccessControl   `yaml:"access,omitempty"`
-	Capture     []ProxyServiceCaptureRule    `yaml:"capture,omitempty"`
-	Rewrite     []ProxyServiceReplaceRule    `yaml:"rewrite,omitempty"`
-	Response    []ProxyServiceResponseRule   `yaml:"response,omitempty"`
-	RewriteURLs []ProxyServiceURLRewriteRule `yaml:"rewrite_urls,omitempty"`
+	TLS         *ProxyServiceTLSConfig         `yaml:"tls,omitempty"`
+	Access      *ProxyServiceAccessControl     `yaml:"access,omitempty"`
+	Impersonate *ProxyServiceImpersonateConfig `yaml:"impersonate,omitempty"`
+	Capture     []ProxyServiceCaptureRule      `yaml:"capture,omitempty"`
+	Rewrite     []ProxyServiceReplaceRule      `yaml:"rewrite,omitempty"`
+	Response    []ProxyServiceResponseRule     `yaml:"response,omitempty"`
+	RewriteURLs []ProxyServiceURLRewriteRule   `yaml:"rewrite_urls,omitempty"`
 }
 
 // ProxyServiceTLSConfig represents TLS configuration for proxy domains
@@ -77,6 +78,12 @@ type ProxyServiceRules struct {
 //	    mode: "self-signed"  # override global setting
 type ProxyServiceTLSConfig struct {
 	Mode string `yaml:"mode"` // "managed" | "self-signed"
+}
+
+// ProxyServiceImpersonateConfig represents client impersonation configuration
+type ProxyServiceImpersonateConfig struct {
+	Enabled  bool `yaml:"enabled"`   // enable surf browser impersonation based on ja4 fingerprint
+	RetainUA bool `yaml:"retain_ua"` // retain client's original user-agent instead of using surf's impersonated one
 }
 
 // ProxyServiceAccessControl represents access control configuration
@@ -329,6 +336,26 @@ type ProxyServiceResponseRule struct {
 //	    path: "/login"
 //	    find: "password=(.*?)&"
 //	    from: "request_body"
+//
+// Example proxy configuration with client impersonation:
+//
+//	version: "0.0"
+//	proxy: "proxy.example.com:8080"  # optional upstream proxy
+//	global:
+//	  tls:
+//	    mode: "managed"
+//	  impersonate:
+//	    enabled: true       # enable surf browser impersonation (default: false)
+//	    retain_ua: false    # retain client's original user-agent (default: false)
+//	example.com:
+//	  to: "target.com"
+//
+// When impersonate.enabled is true, the proxy will:
+// - capture the client's ja4 tls fingerprint
+// - detect the client's browser (chrome, firefox, safari, edge) and platform (windows, macos, linux, android, ios)
+// - use surf library to replicate the exact tls fingerprint, http/2 settings, and header ordering
+// - this makes proxied requests appear identical to the original client's browser
+// When impersonate.retain_ua is true, the original client user-agent is preserved instead of using surf's impersonated one
 type ProxyServiceConfigYAML struct {
 	Version string                               `yaml:"version,omitempty"`
 	Proxy   string                               `yaml:"proxy,omitempty"`

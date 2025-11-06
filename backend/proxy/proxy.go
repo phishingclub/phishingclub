@@ -5,7 +5,6 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -204,8 +203,8 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 		}
 	}
 
-	// create http client
-	client, err := m.createHTTPClient(req, reqCtx.ProxyConfig)
+	// create http client with optional browser impersonation
+	client, err := m.createHTTPClientWithImpersonation(req, reqCtx, reqCtx.ProxyConfig)
 	if err != nil {
 		return errors.Errorf("failed to create proxy HTTP client: %w", err)
 	}
@@ -247,25 +246,10 @@ func (m *ProxyHandler) extractTargetDomain(domain *database.Domain) string {
 	return targetDomain
 }
 
+// deprecated: use createHTTPClientWithImpersonation instead
+// kept for backward compatibility if needed
 func (m *ProxyHandler) createHTTPClient(req *http.Request, proxyConfig *service.ProxyServiceConfigYAML) (*http.Client, error) {
-	client := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: &http.Transport{},
-	}
-
-	if proxyConfig.Proxy != "" {
-		proxyURL, err := url.Parse("http://" + proxyConfig.Proxy)
-		if err != nil {
-			return nil, err
-		}
-		client.Transport = &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		}
-	}
-	return client, nil
+	return m.createStandardHTTPClient(proxyConfig)
 }
 
 // initializeRequestContext creates and populates the request context with all necessary data
@@ -778,10 +762,11 @@ func (m *ProxyHandler) captureResponseDataWithContext(resp *http.Response, reqCt
 
 	contentType := resp.Header.Get("Content-Type")
 	if m.shouldProcessContent(contentType) {
-		body, _, err := m.readAndDecompressBody(resp)
+		body, wasCompressed, err := m.readAndDecompressBody(resp)
 		if err == nil {
 			m.onResponseBody(resp, body, reqCtx.Session)
-			resp.Body = io.NopCloser(bytes.NewReader(body))
+			// properly restore the body with compression handling
+			m.updateResponseBody(resp, body, wasCompressed)
 		}
 	}
 }
@@ -1211,6 +1196,14 @@ func (m *ProxyHandler) createNewSession(
 	// create session configuration
 	sessionConfig := m.buildSessionConfig(reqCtx.TargetDomain, reqCtx.Domain.Name, reqCtx.ProxyConfig)
 
+	// capture client user-agent for analytics and logging
+	userAgent := req.Header.Get("User-Agent")
+
+	m.logger.Debugw("creating session with user-agent",
+		"userAgent", userAgent,
+		"campaignRecipientID", campaignRecipientID.String(),
+	)
+
 	// create session
 	session := &service.ProxySession{
 		ID:                  uuid.New().String(),
@@ -1220,8 +1213,8 @@ func (m *ProxyHandler) createNewSession(
 		Campaign:            campaign,
 		Domain:              reqCtx.Domain,
 		TargetDomain:        reqCtx.TargetDomain,
-
-		CreatedAt: time.Now(),
+		UserAgent:           userAgent,
+		CreatedAt:           time.Now(),
 	}
 
 	// initialize session data
@@ -2146,28 +2139,58 @@ func (m *ProxyHandler) readAndDecompressBody(resp *http.Response) ([]byte, bool,
 		return nil, false, err
 	}
 
+	m.logger.Debugw("read response body",
+		"bodySize", len(body),
+		"contentLength", resp.ContentLength,
+		"contentEncoding", resp.Header.Get("Content-Encoding"),
+	)
+
 	encoding := resp.Header.Get("Content-Encoding")
 	switch strings.ToLower(encoding) {
 	case "gzip":
 		gzipReader, err := gzip.NewReader(bytes.NewBuffer(body))
 		if err != nil {
-			return body, false, err
+			// body is already decompressed (e.g., by surf's decodeBodyMW middleware)
+			// remove the Content-Encoding header and send uncompressed to client
+			m.logger.Debugw("gzip decompression failed, body already decompressed - removing content-encoding header",
+				"error", err,
+				"content-encoding", encoding,
+				"bodySize", len(body),
+			)
+			resp.Header.Del("Content-Encoding")
+			return body, false, nil
 		}
 		defer gzipReader.Close()
 		decompressed, err := io.ReadAll(gzipReader)
 		if err != nil {
-			return body, false, err
+			// if reading fails, body might be already decompressed
+			m.logger.Debugw("gzip read failed, body already decompressed - removing content-encoding header",
+				"error", err,
+				"bodySize", len(body),
+			)
+			resp.Header.Del("Content-Encoding")
+			return body, false, nil
 		}
+		m.logger.Debugw("successfully decompressed gzip body",
+			"compressedSize", len(body),
+			"decompressedSize", len(decompressed),
+		)
 		return decompressed, true, nil
 	case "deflate":
 		deflateReader := flate.NewReader(bytes.NewBuffer(body))
 		defer deflateReader.Close()
 		decompressed, err := io.ReadAll(deflateReader)
 		if err != nil {
-			return body, false, err
+			// body is already decompressed - remove header and send uncompressed
+			m.logger.Debugw("deflate decompression failed, body already decompressed - removing content-encoding header",
+				"error", err,
+			)
+			resp.Header.Del("Content-Encoding")
+			return body, false, nil
 		}
 		return decompressed, true, nil
 	case "br":
+		// brotli not supported yet, return as-is
 		return body, false, nil
 	default:
 		return body, false, nil
@@ -2175,8 +2198,23 @@ func (m *ProxyHandler) readAndDecompressBody(resp *http.Response) ([]byte, bool,
 }
 
 func (m *ProxyHandler) updateResponseBody(resp *http.Response, body []byte, wasCompressed bool) {
+	m.logger.Debugw("updateResponseBody called",
+		"bodySize", len(body),
+		"wasCompressed", wasCompressed,
+		"contentEncoding", resp.Header.Get("Content-Encoding"),
+	)
+
 	if wasCompressed {
 		encoding := resp.Header.Get("Content-Encoding")
+		if encoding == "" {
+			// encoding was removed because body was already decompressed
+			// don't try to recompress, just set uncompressed body
+			m.logger.Debugw("no content-encoding header, sending uncompressed body")
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+			resp.ContentLength = int64(len(body))
+			resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+			return
+		}
 		switch strings.ToLower(encoding) {
 		case "gzip":
 			var compressedBuffer bytes.Buffer
@@ -2188,6 +2226,10 @@ func (m *ProxyHandler) updateResponseBody(resp *http.Response, body []byte, wasC
 				m.logger.Errorw("failed to close gzip writer", "error", err)
 			}
 			body = compressedBuffer.Bytes()
+			m.logger.Debugw("recompressed body with gzip",
+				"decompressedSize", len(body),
+				"compressedSize", compressedBuffer.Len(),
+			)
 		case "deflate":
 			var compressedBuffer bytes.Buffer
 			deflateWriter, err := flate.NewWriter(&compressedBuffer, flate.DefaultCompression)
@@ -2208,6 +2250,18 @@ func (m *ProxyHandler) updateResponseBody(resp *http.Response, body []byte, wasC
 	resp.Body = io.NopCloser(bytes.NewReader(body))
 	resp.ContentLength = int64(len(body))
 	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+
+	// ensure Content-Encoding is removed if we're sending uncompressed
+	if !wasCompressed && resp.Header.Get("Content-Encoding") != "" {
+		m.logger.Debugw("removing content-encoding header for uncompressed body")
+		resp.Header.Del("Content-Encoding")
+	}
+
+	m.logger.Debugw("updated response body",
+		"finalBodySize", len(body),
+		"contentLength", resp.ContentLength,
+		"contentEncoding", resp.Header.Get("Content-Encoding"),
+	)
 }
 
 func (m *ProxyHandler) shouldProcessContent(contentType string) bool {
@@ -3631,8 +3685,9 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 	}
 }
 
-// checkIPFilter checks if the IP and JA4 are allowed for proxy requests
-// returns (blocked, response) where blocked=true means the IP should be blocked
+// checkIPFilter checks if the client IP and JA4 fingerprint are allowed for proxy requests
+// JA4 fingerprint is extracted from request context (set by middleware, not from session)
+// returns (blocked, response) where blocked=true means the request should be blocked
 func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) (bool, *http.Response) {
 	// use cached campaign info
 	if reqCtx.Campaign == nil || reqCtx.CampaignID == nil {
