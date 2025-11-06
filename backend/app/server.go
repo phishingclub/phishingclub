@@ -1852,30 +1852,34 @@ func (s *Server) checkIPFilter(
 			return false, errs.Wrap(err)
 		}
 
-		// both IP and JA4 must pass for the filter to allow
-		ok := ipOk && ja4Ok
-
-		if isAllowListing && ok {
-			s.logger.Debugw("IP and JA4 are allow listed",
-				"ip", ip,
-				"ja4", ja4,
-				"list name", allowDeny.Name.MustGet().String(),
-				"list id", allowDeny.ID.MustGet().String(),
-			)
-			allowed = true
-			break
-			// if it is a deny list and a IP/JA4 is not ok, we can break
-		} else if !isAllowListing && !ok {
-			s.logger.Debugw("IP or JA4 is deny listed",
-				"ip", ip,
-				"ja4", ja4,
-				"ipOk", ipOk,
-				"ja4Ok", ja4Ok,
-				"list name", allowDeny.Name.MustGet().String(),
-				"list id", allowDeny.ID.MustGet().String(),
-			)
-			allowed = false
-			break
+		// for allow lists: both IP and JA4 must pass
+		// for deny lists: either IP or JA4 failing blocks the request
+		if isAllowListing {
+			// allow list: both must be allowed
+			if ipOk && ja4Ok {
+				s.logger.Debugw("IP and JA4 are allow listed",
+					"ip", ip,
+					"ja4", ja4,
+					"list name", allowDeny.Name.MustGet().String(),
+					"list id", allowDeny.ID.MustGet().String(),
+				)
+				allowed = true
+				break
+			}
+		} else {
+			// deny list: if either IP or JA4 is denied, block the request
+			if !ipOk || !ja4Ok {
+				s.logger.Debugw("IP or JA4 is deny listed",
+					"ip", ip,
+					"ja4", ja4,
+					"ipOk", ipOk,
+					"ja4Ok", ja4Ok,
+					"list name", allowDeny.Name.MustGet().String(),
+					"list id", allowDeny.ID.MustGet().String(),
+				)
+				allowed = false
+				break
+			}
 		}
 	}
 	if !allowed {

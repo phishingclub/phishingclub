@@ -62,6 +62,7 @@ const (
 	PROXY_COOKIE_MAX_AGE     = 3600
 	CONVERT_TO_ORIGINAL_URLS = 0
 	CONVERT_TO_PHISHING_URLS = 1
+	HEADER_JA4               = "X-JA4"
 )
 
 var (
@@ -187,8 +188,9 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 		return m.writeResponse(w, rewriteResp)
 	}
 
-	// check ip filtering if we have a campaign recipient
-	if reqCtx.CampaignRecipientID != nil {
+	// check ip filtering for initial MITM requests (before session creation)
+	// at this point, initializeRequestContext has loaded all campaign data
+	if reqCtx.CampaignRecipientID != nil && reqCtx.Campaign != nil {
 		blocked, resp := m.checkIPFilter(req, reqCtx)
 		if blocked {
 			if resp != nil {
@@ -413,6 +415,32 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 		if err != nil {
 			m.logger.Errorw("failed to resolve session context", "error", err)
 			return req, m.createServiceUnavailableResponse("Service temporarily unavailable")
+		}
+
+		// load campaign recipient object if not already loaded (needed for deny page rendering)
+		if reqCtx.CampaignRecipientID != nil && reqCtx.CampaignRecipient == nil {
+			ctx := req.Context()
+			cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, reqCtx.CampaignRecipientID, &repository.CampaignRecipientOption{})
+			if err != nil {
+				m.logger.Errorw("failed to load campaign recipient for session", "error", err)
+			} else {
+				reqCtx.CampaignRecipient = cRecipient
+				// also update recipient ID if not set
+				if reqCtx.RecipientID == nil {
+					if rid, err := cRecipient.RecipientID.Get(); err == nil {
+						reqCtx.RecipientID = &rid
+					}
+				}
+			}
+		}
+
+		// check ip filtering for session-based requests (after session is resolved)
+		// skip if this is initial request (already checked before session creation)
+		if reqCtx.CampaignRecipientID != nil && !createSession {
+			blocked, resp := m.checkIPFilter(req, reqCtx)
+			if blocked {
+				return req, resp
+			}
 		}
 
 		// apply session-based request processing
@@ -692,6 +720,7 @@ func (m *ProxyHandler) patchRequestBodyWithContext(req *http.Request, reqCtx *Re
 func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.Client) {
 	req.RequestURI = ""
 	req.Header.Del("Accept-Encoding")
+	req.Header.Del(HEADER_JA4)
 
 	// setup cookie jar for redirect handling
 	jar, _ := cookiejar.New(nil)
@@ -3713,13 +3742,8 @@ func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) 
 		return false, nil
 	}
 
-	// get ja4 fingerprint from request context
-	ja4 := ""
-	if val := req.Context().Value("ja4_fingerprint"); val != nil {
-		if fp, ok := val.(string); ok {
-			ja4 = fp
-		}
-	}
+	// get ja4 fingerprint from request header (set by middleware)
+	ja4 := req.Header.Get(HEADER_JA4)
 
 	// check IP and JA4 against allow/deny lists
 	isAllowListing := false
@@ -3746,22 +3770,42 @@ func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) 
 			continue
 		}
 
-		// both IP and JA4 must pass for the filter to allow
-		ok := ipOk && ja4Ok
-
-		if isAllowListing && ok {
-			allowed = true
-			break
-		} else if !isAllowListing && !ok {
-			allowed = false
-			break
+		// for allow lists: both IP and JA4 must pass
+		// for deny lists: either IP or JA4 failing blocks the request
+		if isAllowListing {
+			// allow list: both must be allowed
+			if ipOk && ja4Ok {
+				allowed = true
+				break
+			}
+		} else {
+			// deny list: if either IP or JA4 is denied, block the request
+			if !ipOk || !ja4Ok {
+				allowed = false
+				break
+			}
 		}
 	}
 
 	if !allowed {
 		// try to serve deny page
 		if _, err := campaign.DenyPageID.Get(); err == nil {
-			resp := m.serveDenyPageResponseDirect(req, reqCtx, campaign, nil)
+			// load campaign template if not already loaded
+			cTemplate := reqCtx.CampaignTemplate
+			if cTemplate == nil {
+				templateID, err := campaign.TemplateID.Get()
+				if err == nil {
+					cTemplate, err = m.CampaignTemplateRepository.GetByID(req.Context(), &templateID, &repository.CampaignTemplateOption{
+						WithDomain:     true,
+						WithIdentifier: true,
+						WithEmail:      true,
+					})
+					if err != nil {
+						m.logger.Errorw("failed to load campaign template for deny page", "error", err)
+					}
+				}
+			}
+			resp := m.serveDenyPageResponseDirect(req, reqCtx, campaign, cTemplate)
 			return true, resp
 		}
 
