@@ -102,6 +102,11 @@ func (a *Attachment) Create(
 
 		// create root filesystem for the full context path (controlled paths only)
 		fullContextPath := filepath.Join(a.RootFolder, contextFolder)
+		// ensure context folder exists before opening it
+		if err := os.MkdirAll(fullContextPath, 0755); err != nil {
+			a.Logger.Debugw("failed to create context directory", "error", err)
+			return createdIDs, errs.Wrap(err)
+		}
 		contextRoot, err := os.OpenRoot(fullContextPath)
 		if err != nil {
 			a.Logger.Infow("failed to open context folder", "error", err)
