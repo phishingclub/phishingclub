@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.13.1] - 2025-01-07
+- Fix bad calculation for submitted on campaign page
+- Fix ensure folder exists for attachments
+
 ## [1.13.0] - 2025-01-07
 - Added proxy request JA4 impersonation
 - Added JA4 filtering with wildcard support in allow deny lists
