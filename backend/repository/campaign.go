@@ -775,13 +775,13 @@ func (r *Campaign) GetResultStats(
 	// Get unique submits
 	res = r.DB.Raw(`
     SELECT COUNT(*) FROM (
-        SELECT DISTINCT campaign_id
+        SELECT DISTINCT recipient_id
         FROM campaign_events
         WHERE campaign_id = ?
         AND event_id = ?
         AND recipient_id IS NOT NULL
         UNION
-        SELECT DISTINCT campaign_id
+        SELECT DISTINCT anonymized_id
         FROM campaign_events
         WHERE campaign_id = ?
         AND event_id = ?
