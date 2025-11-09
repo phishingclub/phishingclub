@@ -1,0 +1,2 @@
+# This file ensures the geoip directory is tracked by git
+# The actual .json files are generated via: make geoip-fetch

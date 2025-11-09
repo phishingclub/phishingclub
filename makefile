@@ -1,4 +1,4 @@
-.PHONY: build down up fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up
+.PHONY: build down up fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up geoip-fetch
 up:
 	sudo docker compose up -d backend frontend api-test-server pebble dbgate mailer dozzle stats dns test mitmproxy; \
 	sudo docker compose logs -f --tail 1000 backend frontend;
@@ -79,11 +79,11 @@ frontend-logs:
 
 # dbgate
 dbgate-restart:
-	sudo docker compose restart dbgate; 
+	sudo docker compose restart dbgate;
 dbgate-up:
-	sudo docker compose start dbgate; 
+	sudo docker compose start dbgate;
 dbgate-down:
-	sudo docker compose stopdbgate; 
+	sudo docker compose stopdbgate;
 
 # pebble
 pebble-attach:
@@ -161,3 +161,8 @@ mitmproxy-purge:
 	sudo docker volume rm -f phishingclub_mitmproxy_data; \
 	sudo docker compose up -d mitmproxy; \
 	sudo docker compose logs -f --tail 1000 mitmproxy;
+
+# geoip
+geoip-fetch:
+	@echo "Fetching GeoIP data from ipverse/rir-ip..."; \
+	cd backend/scripts && go run fetch-geoip-data.go
