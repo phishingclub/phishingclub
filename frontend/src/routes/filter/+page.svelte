@@ -358,20 +358,6 @@
 		}
 		return ip + '/32';
 	};
-
-	/** @param {*} event */
-	const onSetFile = (event) => {
-		// read file from event
-		const file = event.target.files[0];
-		const reader = new FileReader();
-		reader.onload = (e) => {
-			formValues.cidrs = e.target.result;
-		};
-		reader.readAsText(file);
-		formValues.cidrs = file;
-		// reset field
-		event.target.value = '';
-	};
 </script>
 
 <HeadTitle title="Filter" />
@@ -442,9 +428,6 @@
 						bind:value={formValues.name}
 						placeholder="Company allow range">Name</TextField
 					>
-					<FileField on:change={(event) => onSetFile(event)} optional
-						>Load content from file</FileField
-					>
 					{#if modalMode === 'create' || modalMode === 'copy'}
 						<SelectSquare
 							label="Filter Type"
@@ -478,9 +461,6 @@
 					>
 						Country Codes
 					</TextFieldMultiSelect>
-					<p style="font-size: 0.875rem; color: #666; margin-top: 0.5rem;">
-						Note: At least one of CIDRs, JA4 Fingerprints, or Country Codes must be provided.
-					</p>
 				</FormColumn>
 			</FormColumns>
 			<FormError message={formError} />
