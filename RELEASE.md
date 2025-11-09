@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.14.0] - 2025-01-09
+- Added allow / deny filtering based on geo IP
+- Added support for sock5 with authentication
+
 ## [1.13.1] - 2025-01-07
 - Fix bad calculation for submitted on campaign page
 - Fix ensure folder exists for attachments
