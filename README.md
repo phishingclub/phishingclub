@@ -4,7 +4,10 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?style=flat&logo=discord&logoColor=white)](https://discord.gg/Zssps7U8gX)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-The self-hosted phishing framework for penetration testing or security awareness training.
+**Phishing Club** is a phishing simulation and man-in-the-middle framework designed for companies that perform phishing simulation internally or as part of their business, and for aidding red teams obtaining initial access.
+
+It can be used both as a replacement for Gophish for phishers that are looking for more features and as an aid or alternative for offensive phishing tools like MITM frameworks.
+
 
 ![Phishing Club Dashboard](https://phishing.club/img/animated.gif)
 
@@ -25,6 +28,7 @@ Prebuild images of the latest version are also available.
 
 See [production docker compose example](https://github.com/phishingclub/phishingclub/blob/develop/docker-compose.production.yml) and [the latest images](https://github.com/phishingclub/phishingclub/pkgs/container/phishingclub)
 
+
 ## Features
 
 - **Multi-stage phishing flows** - Put together multiple phishing pages
@@ -40,14 +44,29 @@ See [production docker compose example](https://github.com/phishingclub/phishing
 - **Security features** - MFA, SSO, session management, IP filtering
 - **Operational tools** - In-app updates, CLI installer, config management
 
+## MITM and Red Team Features
+
+- **Full control** - Modify and capture requests and responses independently
+- **DOM rewriting** - Modify content using CSS/jQuery-like selectors or regex
+- **Path and param rewriting** - Rewrite URL paths and query parameters on the fly
+- **Dynamic obfuscation** - Avoid static detection with dynamically obfuscated landing pages
+- **Evasion page** - Customize the pre-lure evasion page
+- **Custom deny page** - Decide what bots or evaded visitors see
+- **Access control** - Default deny-list until visiting phishing lure URL
+- **Advanced filtering** - Use JA4, CIDR and geo-IP to control lure URL access
+- **Browser impersonation** - Impersonate JA4 fingerprints in proxied requests
+- **Response overwriting** - Shortcut proxying with custom responses
+- **Forward proxying** - Use HTTP and SOCKS5 proxies to ensure requests originate from the right location
 
 ### Students & Learning
 
-Phishing Club can be used by cybersecurity students or others who want try hands-on phishing. The development setup includes a local mail server (Mailpit) so you can see emails in without needing external SMTP. Spin up campaigns, test templates, and learn how phishing attacks work in a safe, contained environment.
+Phishing Club can be used by cybersecurity students or others who want try hands-on phishing. The development enviroment is an ideal place to get started. Spin up campaigns, test templates, and learn how phishing attacks work in a safe, contained environment. The enviroment comes with containers local SMTP/Mailbox and everything you need.
 
 To aid with the development of MITM proxys configurations there is also a `MITMProxy` container where you can view the traffic that flows towards the proxied site.
 
-To get started, clone the repo, ensure you have make and docker installed and run `make up`
+To get started, clone the repo, ensure you have make and docker installed and run `make up` and wait for the backend to be up and running. Copy the credentials and you are ready to go.
+
+Need help? Join the discord channel.
 
 ## Template Development
 
@@ -64,8 +83,6 @@ Speed up your template development with our template workbench tool:
 - **Included Templates** - Comes with example templates covering common phishing scenarios that you can import and customize
 
 ## Development Setup
-
-This repository contains the core Phishing Club platform.
 
 ### Prerequisites
 
@@ -224,7 +241,9 @@ For organizations that want to:
 
 There is no offical roadmap at this moment.
 
-But you can vote with emojis on the `[feature]` requests [on Github](https://github.com/phishingclub/phishingclub) or even add you own feature request.
+But you can vote with emojis on the `[feature]` requests [on Github](https://github.com/phishingclub/phishingclub) or add you own feature request.
+
+Feature request with a high number of votes will be prioritized, however it is no guaranteed they will be implemented. Ultimately what gets implemented, how and when highly depends on [me](https://github.com/ronniskansing) and what I think is right for the project.
 
 ## Contributing
 
@@ -244,14 +263,22 @@ We welcome contributions from the community! Please read our [Contributing Guide
 
 For complete details, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+**Suggestions for Contributors**
+- Improve or add templates to the [template project](https://github.com/phishingclub/templates)
+- Check existing feature requests - Want to work on something, make a comment.
+
 
 ## Support
 
 Need help? Join the [Phishing Club Discord](https://discord.gg/Zssps7U8gX)
 
+
+Community support is provided on a best-effort, volunteer basis. For dedicated assistance, paid support is available.
+
 - **General Support**: Join our Discord community or open a GitHub issue
 - **Commercial Licensing**: Contact [license@phishing.club](mailto:license@phishing.club)
 - **Security Issues**: See our [Security Policy](SECURITY.md)
+
 
 ## Security and Ethical Use
 

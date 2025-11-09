@@ -51,6 +51,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Note: EvilGinx2 itself incorporates and acknowledges code from the Bettercap project. Our usage maintains this attribution chain.
 
+## IPVerse
+
+**Source**: https://github.com/ipverse/rir-ip
+**License**: CC0 1.0 Universal
+**Copyright**:
+**Usage**: Used for geo IP filtering
+
 ---
 
 ## License Compatibility
