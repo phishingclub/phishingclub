@@ -9,6 +9,7 @@ import (
 
 	"github.com/enetx/surf"
 	"github.com/phishingclub/phishingclub/service"
+	"golang.org/x/net/proxy"
 )
 
 // browserProfile represents detected browser and platform information
@@ -133,9 +134,13 @@ func (m *ProxyHandler) createSurfClient(userAgent string, proxyConfig *service.P
 
 	// configure proxy if specified
 	if proxyConfig.Proxy != "" {
-		builder = builder.Proxy("http://" + proxyConfig.Proxy)
+		proxyURL, err := m.parseProxyURL(proxyConfig.Proxy)
+		if err != nil {
+			return nil, err
+		}
+		builder = builder.Proxy(proxyURL.String())
 		m.logger.Debugw("configured surf client with proxy",
-			"proxy", proxyConfig.Proxy,
+			"proxy", proxyURL.String(),
 		)
 	}
 
@@ -179,6 +184,29 @@ func (m *ProxyHandler) createHTTPClientWithImpersonation(req *http.Request, reqC
 	return client, nil
 }
 
+// parseProxyURL parses and normalizes the proxy URL string
+// if the proxy string is just an IP:port, it prepends "http://"
+// otherwise it uses the full string to support socks4/socks5 and authentication
+func (m *ProxyHandler) parseProxyURL(proxyStr string) (*url.URL, error) {
+	// check if the string already contains a scheme (http://, https://, socks4://, socks5://)
+	hasScheme := strings.Contains(proxyStr, "://")
+
+	// check if it contains authentication credentials
+	hasAuth := strings.Contains(proxyStr, "@")
+
+	// if it has a scheme or auth, use it as-is
+	if hasScheme || hasAuth {
+		// if it has auth but no scheme, default to http://
+		if hasAuth && !hasScheme {
+			proxyStr = "http://" + proxyStr
+		}
+		return url.Parse(proxyStr)
+	}
+
+	// otherwise, it's just an IP:port, so prepend http://
+	return url.Parse("http://" + proxyStr)
+}
+
 // createStandardHTTPClient creates a standard http client without impersonation
 func (m *ProxyHandler) createStandardHTTPClient(proxyConfig *service.ProxyServiceConfigYAML) (*http.Client, error) {
 	client := &http.Client{
@@ -187,15 +215,42 @@ func (m *ProxyHandler) createStandardHTTPClient(proxyConfig *service.ProxyServic
 	}
 
 	if proxyConfig.Proxy != "" {
-		proxyURL, err := url.Parse("http://" + proxyConfig.Proxy)
+		proxyURL, err := m.parseProxyURL(proxyConfig.Proxy)
 		if err != nil {
 			return nil, err
 		}
-		client.Transport = &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
+
+		// handle socks5 proxies
+		if proxyURL.Scheme == "socks5" {
+			var auth *proxy.Auth
+			if proxyURL.User != nil {
+				password, _ := proxyURL.User.Password()
+				auth = &proxy.Auth{
+					User:     proxyURL.User.Username(),
+					Password: password,
+				}
+			}
+
+			// create socks5 dialer
+			dialer, err := proxy.SOCKS5("tcp", proxyURL.Host, auth, proxy.Direct)
+			if err != nil {
+				return nil, err
+			}
+
+			client.Transport = &http.Transport{
+				Dial: dialer.Dial,
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			}
+		} else {
+			// handle http/https proxies
+			client.Transport = &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			}
 		}
 	}
 	return client, nil

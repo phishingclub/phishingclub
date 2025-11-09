@@ -1408,6 +1408,11 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 		return validate.WrapErrorWithField(err, "proxyConfig")
 	}
 
+	// validate forward proxy configuration
+	if err := m.validateForwardProxy(&config); err != nil {
+		return validate.WrapErrorWithField(err, "proxyConfig")
+	}
+
 	// validate that at least one domain mapping exists
 	if len(config.Hosts) == 0 {
 		return validate.WrapErrorWithField(errors.New("at least one domain mapping must be specified"), "proxyConfig")
@@ -1577,6 +1582,34 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 		// validate global response rules
 		if err := m.validateResponseRules(config.Global.Response); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+// validateForwardProxy validates the forward proxy configuration
+func (m *Proxy) validateForwardProxy(config *ProxyServiceConfigYAML) error {
+	if config.Proxy == "" {
+		return nil // proxy is optional
+	}
+
+	// check if it contains socks4 scheme
+	if strings.HasPrefix(config.Proxy, "socks4://") {
+		return errors.New("socks4 proxies are not supported. please use socks5:// instead")
+	}
+
+	// validate that it can be parsed as a URL if it has a scheme
+	if strings.Contains(config.Proxy, "://") {
+		parsedURL, err := url.Parse(config.Proxy)
+		if err != nil {
+			return errors.New("invalid proxy URL format: " + err.Error())
+		}
+
+		// validate supported schemes
+		scheme := parsedURL.Scheme
+		if scheme != "http" && scheme != "https" && scheme != "socks5" {
+			return errors.New(fmt.Sprintf("unsupported proxy scheme '%s'. supported schemes: http, https, socks5", scheme))
 		}
 	}
 

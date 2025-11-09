@@ -67,7 +67,15 @@
 	let isLoadingIPAllowList = false;
 
 	const currentExample = `version: "0.0"
-proxy: "My Proxy Campaign"
+
+# optional: forward proxy for outbound requests
+# if just ip:port is provided, http:// is automatically prepended
+# supported formats:
+# proxy: "192.168.1.100:8080"                          # http proxy (ip:port)
+# proxy: "http://192.168.1.100:8080"                   # http proxy with scheme
+# proxy: "socks5://192.168.1.100:1080"                 # socks5 proxy
+# proxy: "socks5://user:pass@192.168.1.100:1080"       # socks5 with auth
+# proxy: "http://user:pass@192.168.1.100:8080"         # http with auth
 
 # global TLS configuration (applies to all hosts unless overridden)
 global:
