@@ -29,6 +29,7 @@ import (
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
+	"github.com/phishingclub/phishingclub/geoip"
 	"github.com/phishingclub/phishingclub/middleware"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/proxy"
@@ -1818,6 +1819,16 @@ func (s *Server) checkIPFilter(
 	// get ja4 fingerprint from context
 	ja4 := middleware.GetJA4FromContext(ctx)
 
+	// get country code from GeoIP lookup
+	var countryCode string
+	if geo, err := geoip.Instance(); err == nil {
+		countryCode, _ = geo.Lookup(ip)
+	}
+	s.logger.Debugw("checking geo ip",
+		"ip", ip,
+		"country", countryCode,
+	)
+
 	allowDenyLEntries, err := s.repositories.Campaign.GetAllDenyByCampaignID(ctx, campaignID)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		s.logger.Debugw("failed to get deny list for campaign",
@@ -1852,14 +1863,17 @@ func (s *Server) checkIPFilter(
 			return false, errs.Wrap(err)
 		}
 
-		// for allow lists: both IP and JA4 must pass
-		// for deny lists: either IP or JA4 failing blocks the request
+		// check country code filter
+		countryOk := allowDeny.IsCountryAllowed(countryCode)
+		// for allow lists: all filters (IP, JA4, country) must pass
+		// for deny lists: any filter failing blocks the request
 		if isAllowListing {
-			// allow list: both must be allowed
-			if ipOk && ja4Ok {
-				s.logger.Debugw("IP and JA4 are allow listed",
+			// allow list: all must be allowed
+			if ipOk && ja4Ok && countryOk {
+				s.logger.Debugw("IP, JA4, and country are allow listed",
 					"ip", ip,
 					"ja4", ja4,
+					"country", countryCode,
 					"list name", allowDeny.Name.MustGet().String(),
 					"list id", allowDeny.ID.MustGet().String(),
 				)
@@ -1867,13 +1881,15 @@ func (s *Server) checkIPFilter(
 				break
 			}
 		} else {
-			// deny list: if either IP or JA4 is denied, block the request
-			if !ipOk || !ja4Ok {
-				s.logger.Debugw("IP or JA4 is deny listed",
+			// deny list: if any filter denies, block the request
+			if !ipOk || !ja4Ok || !countryOk {
+				s.logger.Debugw("IP, JA4, or country is deny listed",
 					"ip", ip,
 					"ja4", ja4,
+					"country", countryCode,
 					"ipOk", ipOk,
 					"ja4Ok", ja4Ok,
+					"countryOk", countryOk,
 					"list name", allowDeny.Name.MustGet().String(),
 					"list id", allowDeny.ID.MustGet().String(),
 				)
@@ -1883,9 +1899,10 @@ func (s *Server) checkIPFilter(
 		}
 	}
 	if !allowed {
-		s.logger.Debugw("IP or JA4 is not allowed",
+		s.logger.Debugw("IP, JA4, or country is not allowed",
 			"ip", ip,
 			"ja4", ja4,
+			"country", countryCode,
 		)
 		if denyPageID, err := campaign.DenyPageID.Get(); err == nil {
 			err = s.renderDenyPage(ctx, domain, &denyPageID)

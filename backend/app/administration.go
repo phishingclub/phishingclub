@@ -179,6 +179,8 @@ const (
 	ROUTE_V1_ALLOW_DENY          = "/api/v1/allow-deny"
 	ROUTE_V1_ALLOW_DENY_OVERVIEW = "/api/v1/allow-deny/overview"
 	ROUTE_V1_ALLOW_DENY_ID       = "/api/v1/allow-deny/:id"
+	// geoip
+	ROUTE_V1_GEOIP_METADATA = "/api/v1/geoip/metadata"
 	// web hooks
 	ROUTE_V1_WEBHOOK         = "/api/v1/webhook"
 	ROUTE_V1_WEBHOOK_ID      = "/api/v1/webhook/:id"
@@ -442,6 +444,8 @@ func setupRoutes(
 		POST(ROUTE_V1_ALLOW_DENY, middleware.SessionHandler, controllers.AllowDeny.Create).
 		PATCH(ROUTE_V1_ALLOW_DENY_ID, middleware.SessionHandler, controllers.AllowDeny.UpdateByID).
 		DELETE(ROUTE_V1_ALLOW_DENY_ID, middleware.SessionHandler, controllers.AllowDeny.DeleteByID).
+		// geoip
+		GET(ROUTE_V1_GEOIP_METADATA, middleware.SessionHandler, controllers.GeoIP.GetMetadata).
 		// web hooks
 		GET(ROUTE_V1_WEBHOOK, middleware.SessionHandler, controllers.Webhook.GetAll).
 		GET(ROUTE_V1_WEBHOOK_ID, middleware.SessionHandler, controllers.Webhook.GetByID).

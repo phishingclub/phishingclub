@@ -26,6 +26,7 @@ import (
 	"github.com/phishingclub/phishingclub/cache"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
+	"github.com/phishingclub/phishingclub/geoip"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/server"
@@ -191,7 +192,7 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	// check ip filtering for initial MITM requests (before session creation)
 	// at this point, initializeRequestContext has loaded all campaign data
 	if reqCtx.CampaignRecipientID != nil && reqCtx.Campaign != nil {
-		blocked, resp := m.checkIPFilter(req, reqCtx)
+		blocked, resp := m.checkFilter(req, reqCtx)
 		if blocked {
 			if resp != nil {
 				return m.writeResponse(w, resp)
@@ -437,7 +438,7 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 		// check ip filtering for session-based requests (after session is resolved)
 		// skip if this is initial request (already checked before session creation)
 		if reqCtx.CampaignRecipientID != nil && !createSession {
-			blocked, resp := m.checkIPFilter(req, reqCtx)
+			blocked, resp := m.checkFilter(req, reqCtx)
 			if blocked {
 				return req, resp
 			}
@@ -3714,10 +3715,10 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 	}
 }
 
-// checkIPFilter checks if the client IP and JA4 fingerprint are allowed for proxy requests
+// checkFilter checks if the client IP, JA4 fingerprint and geo ip are allowed for proxy requests
 // JA4 fingerprint is extracted from request context (set by middleware, not from session)
 // returns (blocked, response) where blocked=true means the request should be blocked
-func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) (bool, *http.Response) {
+func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (bool, *http.Response) {
 	// use cached campaign info
 	if reqCtx.Campaign == nil || reqCtx.CampaignID == nil {
 		return false, nil // allow if we can't get campaign info
@@ -3745,7 +3746,17 @@ func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) 
 	// get ja4 fingerprint from request header (set by middleware)
 	ja4 := req.Header.Get(HEADER_JA4)
 
-	// check IP and JA4 against allow/deny lists
+	// get country code from GeoIP lookup
+	var countryCode string
+	if geo, err := geoip.Instance(); err == nil {
+		countryCode, _ = geo.Lookup(ip)
+	}
+	m.logger.Debugw("checking geo ip",
+		"ip", ip,
+		"country", countryCode,
+	)
+
+	// check IP, JA4, and country code against allow/deny lists
 	isAllowListing := false
 	allowed := false // for allow lists, default is deny
 
@@ -3770,17 +3781,19 @@ func (m *ProxyHandler) checkIPFilter(req *http.Request, reqCtx *RequestContext) 
 			continue
 		}
 
-		// for allow lists: both IP and JA4 must pass
-		// for deny lists: either IP or JA4 failing blocks the request
+		// check country code filter
+		countryOk := allowDeny.IsCountryAllowed(countryCode)
+		// for allow lists: all filters (IP, JA4, country) must pass
+		// for deny lists: any filter failing blocks the request
 		if isAllowListing {
-			// allow list: both must be allowed
-			if ipOk && ja4Ok {
+			// allow list: all must be allowed
+			if ipOk && ja4Ok && countryOk {
 				allowed = true
 				break
 			}
 		} else {
-			// deny list: if either IP or JA4 is denied, block the request
-			if !ipOk || !ja4Ok {
+			// deny list: if any filter denies, block the request
+			if !ipOk || !ja4Ok || !countryOk {
 				allowed = false
 				break
 			}

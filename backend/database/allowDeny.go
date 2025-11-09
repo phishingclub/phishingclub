@@ -20,6 +20,7 @@ type AllowDeny struct {
 	Name            string     `gorm:"not null;uniqueIndex:idx_allow_denies_unique_name_and_company_id;"`
 	Cidrs           string     `gorm:"not null;default:''"`
 	JA4Fingerprints string     `gorm:"not null;default:''"`
+	CountryCodes    string     `gorm:"not null;default:''"`
 	Allowed         bool       `gorm:"not null;"`
 }
 

@@ -2658,15 +2658,17 @@ export class API {
 		 * @param {string} allowdeny.name
 		 * @param {string} allowdeny.cidrs
 		 * @param {string} allowdeny.ja4Fingerprints
+		 * @param {string} allowdeny.countryCodes
 		 * @param {boolean} allowdeny.allowed
 		 * @param {string} allowdeny.companyID
 		 * @returns {Promise<ApiResponse>}
 		 */
-		create: async ({ name, cidrs, ja4Fingerprints, allowed, companyID }) => {
+		create: async ({ name, cidrs, ja4Fingerprints, countryCodes, allowed, companyID }) => {
 			return await postJSON(this.getPath('/allow-deny'), {
 				name: name,
 				cidrs: cidrs,
 				ja4Fingerprints: ja4Fingerprints,
+				countryCodes: countryCodes,
 				allowed: allowed,
 				companyID: companyID
 			});
@@ -2718,14 +2720,16 @@ export class API {
 		 * @param {string} allowdeny.name
 		 * @param {string} allowdeny.cidrs
 		 * @param {string} allowdeny.ja4Fingerprints
+		 * @param {string} allowdeny.countryCodes
 		 * @param {string} allowdeny.companyID
 		 * @returns {Promise<ApiResponse>}
 		 */
-		update: async ({ id, name, cidrs, ja4Fingerprints, companyID }) => {
+		update: async ({ id, name, cidrs, ja4Fingerprints, countryCodes, companyID }) => {
 			return await patchJSON(this.getPath(`/allow-deny/${id}`), {
 				name: name,
 				cidrs: cidrs,
 				ja4Fingerprints: ja4Fingerprints,
+				countryCodes: countryCodes,
 				companyID: companyID
 			});
 		},
@@ -2738,6 +2742,20 @@ export class API {
 		 */
 		delete: async (id) => {
 			return await deleteJSON(this.getPath(`/allow-deny/${id}`));
+		}
+	};
+
+	/**
+	 * geoip is the API for GeoIP related operations.
+	 */
+	geoip = {
+		/**
+		 * Get GeoIP metadata including available country codes.
+		 *
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getMetadata: async () => {
+			return await getJSON(this.getPath('/geoip/metadata'));
 		}
 	};
 

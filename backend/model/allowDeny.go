@@ -23,6 +23,7 @@ type AllowDeny struct {
 	Name            nullable.Nullable[vo.String127]  `json:"name"`
 	Cidrs           nullable.Nullable[vo.IPNetSlice] `json:"cidrs"`
 	JA4Fingerprints nullable.Nullable[string]        `json:"ja4Fingerprints"`
+	CountryCodes    nullable.Nullable[string]        `json:"countryCodes"`
 	Allowed         nullable.Nullable[bool]          `json:"allowed"`
 	CompanyID       nullable.Nullable[uuid.UUID]     `json:"companyID"`
 }
@@ -36,7 +37,7 @@ func (r *AllowDeny) Validate() error {
 		return err
 	}
 
-	// at least one of cidrs or ja4 fingerprints must be provided
+	// at least one of cidrs, ja4 fingerprints, or country codes must be provided
 	hasCidrs := false
 	if r.Cidrs.IsSpecified() {
 		if cidrs, err := r.Cidrs.Get(); err == nil && len(cidrs) > 0 {
@@ -51,9 +52,16 @@ func (r *AllowDeny) Validate() error {
 		}
 	}
 
-	if !hasCidrs && !hasJA4 {
+	hasCountryCodes := false
+	if r.CountryCodes.IsSpecified() {
+		if codes, err := r.CountryCodes.Get(); err == nil && codes != "" {
+			hasCountryCodes = true
+		}
+	}
+
+	if !hasCidrs && !hasJA4 && !hasCountryCodes {
 		return errs.NewValidationError(
-			errors.New("at least one of CIDRs or JA4 fingerprints must be provided"),
+			errors.New("at least one of CIDRs, JA4 fingerprints, or country codes must be provided"),
 		)
 	}
 
@@ -91,6 +99,12 @@ func (r *AllowDeny) ToDBMap() map[string]any {
 		m["ja4_fingerprints"] = ""
 		if ja4, err := r.JA4Fingerprints.Get(); err == nil {
 			m["ja4_fingerprints"] = ja4
+		}
+	}
+	if r.CountryCodes.IsSpecified() {
+		m["country_codes"] = ""
+		if codes, err := r.CountryCodes.Get(); err == nil {
+			m["country_codes"] = codes
 		}
 	}
 	if r.Allowed.IsSpecified() {
@@ -293,4 +307,74 @@ func trimSpace(s string) string {
 // isSpace checks if a byte is whitespace
 func isSpace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
+}
+
+// IsCountryAllowed checks if a country code is allowed based on the filter rules
+func (r *AllowDeny) IsCountryAllowed(countryCode string) bool {
+	if countryCode == "" {
+		// if no country code available, skip country check
+		return true
+	}
+
+	isTypeAllowList := r.Allowed.MustGet()
+
+	// get country codes list
+	countryCodesStr, err := r.CountryCodes.Get()
+	if err != nil || countryCodesStr == "" {
+		// if no country codes configured, skip country check
+		return true
+	}
+
+	// if country code is empty but we have country filters configured
+	if countryCode == "" {
+		// in allow list mode: unknown country should be denied
+		// in deny list mode: unknown country should be allowed
+		if isTypeAllowList {
+			return false
+		}
+		return true
+	}
+
+	// parse country codes (newline separated)
+	codes := parseCountryCodes(countryCodesStr)
+
+	// check if country code matches any in the list (case-insensitive)
+	isMatch := false
+	countryCodeUpper := strings.ToUpper(countryCode)
+	for _, code := range codes {
+		if strings.ToUpper(code) == countryCodeUpper {
+			isMatch = true
+			break
+		}
+	}
+
+	// if allow list and country matches
+	if isTypeAllowList && isMatch {
+		return true
+	}
+	// if deny list and country matches
+	if !isTypeAllowList && isMatch {
+		return false
+	}
+
+	// If this is an allow list and country didn't match, not allowed
+	if isTypeAllowList {
+		return false
+	}
+
+	// If this is a deny list and country didn't match, it is allowed
+	return true
+}
+
+// parseCountryCodes splits newline-separated country codes and trims whitespace
+func parseCountryCodes(input string) []string {
+	var result []string
+	lines := splitLines(input)
+	for _, line := range lines {
+		trimmed := trimSpace(line)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

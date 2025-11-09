@@ -33,6 +33,7 @@
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
+	import TextFieldMultiSelect from '$lib/components/TextFieldMultiSelect.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -44,6 +45,7 @@
 		name: null,
 		cidrs: null,
 		ja4Fingerprints: null,
+		countryCodes: [],
 		allowed: null
 	};
 	let allowDenyList = [];
@@ -56,6 +58,7 @@
 	let isTableLoading = false;
 	let modalMode = null;
 	let modalText = '';
+	let availableCountryCodes = [];
 
 	let isDeleteAlertVisible = false;
 	let deleteValues = {
@@ -74,6 +77,7 @@
 		}
 		refreshAllowDenies();
 		tableURLParams.onChange(refreshAllowDenies);
+		loadGeoIPMetadata();
 
 		(async () => {
 			const editID = $page.url.searchParams.get('edit');
@@ -86,6 +90,18 @@
 			tableURLParams.unsubscribe();
 		};
 	});
+
+	// load geoip metadata to get country codes
+	const loadGeoIPMetadata = async () => {
+		try {
+			const res = await api.geoip.getMetadata();
+			if (res.success && res.data) {
+				availableCountryCodes = res.data.country_codes || [];
+			}
+		} catch (e) {
+			console.error('failed to load geoip metadata', e);
+		}
+	};
 
 	// component logic
 	const refreshAllowDenies = async () => {
@@ -134,12 +150,13 @@
 	};
 
 	const onClickSubmit = async () => {
-		// validate that at least one of cidrs or ja4Fingerprints is provided
+		// validate that at least one of cidrs, ja4Fingerprints, or countryCodes is provided
 		const hasCidrs = formValues.cidrs && formValues.cidrs.trim().length > 0;
 		const hasJA4 = formValues.ja4Fingerprints && formValues.ja4Fingerprints.trim().length > 0;
+		const hasCountryCodes = formValues.countryCodes && formValues.countryCodes.length > 0;
 
-		if (!hasCidrs && !hasJA4) {
-			formError = 'At least one of CIDRs or JA4 fingerprints must be provided';
+		if (!hasCidrs && !hasJA4 && !hasCountryCodes) {
+			formError = 'At least one of CIDRs, JA4 fingerprints, or Country Codes must be provided';
 			return;
 		}
 
@@ -176,6 +193,7 @@
 				name: formValues.name,
 				cidrs: formValues.cidrs,
 				ja4Fingerprints: formValues.ja4Fingerprints || '',
+				countryCodes: formValues.countryCodes.join('\n'),
 				allowed: formValues.allowed,
 				companyID: contextCompanyID
 			});
@@ -212,6 +230,7 @@
 				name: formValues.name,
 				cidrs: formValues.cidrs,
 				ja4Fingerprints: formValues.ja4Fingerprints || '',
+				countryCodes: formValues.countryCodes.join('\n'),
 				companyID: formValues.companyID
 			});
 			if (res.success) {
@@ -306,11 +325,21 @@
 	};
 
 	const assignAllowDeny = (allowDeny) => {
+		// parse country codes from newline-separated string to array
+		let countryCodesArray = [];
+		if (allowDeny.countryCodes) {
+			countryCodesArray = allowDeny.countryCodes
+				.split('\n')
+				.map((code) => code.trim())
+				.filter((code) => code.length > 0);
+		}
+
 		formValues = {
 			id: allowDeny.id,
 			name: allowDeny.name,
 			cidrs: allowDeny.cidrs,
 			ja4Fingerprints: allowDeny.ja4Fingerprints || '',
+			countryCodes: countryCodesArray,
 			allowed: allowDeny.allowed,
 			companyID: allowDeny.companyID
 		};
@@ -439,8 +468,18 @@
 						toolTipText="Newlines separated JA4 fingerprints (optional)"
 						>JA4 Fingerprints</TextareaField
 					>
+					<TextFieldMultiSelect
+						id="country-codes"
+						optional
+						bind:value={formValues.countryCodes}
+						options={availableCountryCodes}
+						placeholder="Select countries..."
+						toolTipText="Select country codes to filter (optional)"
+					>
+						Country Codes
+					</TextFieldMultiSelect>
 					<p style="font-size: 0.875rem; color: #666; margin-top: 0.5rem;">
-						Note: At least one of CIDRs or JA4 Fingerprints must be provided.
+						Note: At least one of CIDRs, JA4 Fingerprints, or Country Codes must be provided.
 					</p>
 				</FormColumn>
 			</FormColumns>

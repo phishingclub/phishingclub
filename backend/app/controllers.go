@@ -29,6 +29,7 @@ type Controllers struct {
 	QR                *controller.QRGenerator
 	APISender         *controller.APISender
 	AllowDeny         *controller.AllowDeny
+	GeoIP             *controller.GeoIP
 	Webhook           *controller.Webhook
 	Identifier        *controller.Identifier
 	Version           *controller.Version
@@ -184,6 +185,9 @@ func NewControllers(
 		Common:             common,
 		IPAllowListService: services.IPAllowList,
 	}
+	geoIP := &controller.GeoIP{
+		Common: common,
+	}
 
 	return &Controllers{
 		Asset:             asset,
@@ -207,6 +211,7 @@ func NewControllers(
 		QR:                qr,
 		APISender:         apiSender,
 		AllowDeny:         allowDeny,
+		GeoIP:             geoIP,
 		Webhook:           webhook,
 		Identifier:        identifier,
 		Version:           version,

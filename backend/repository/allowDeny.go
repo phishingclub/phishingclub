@@ -187,6 +187,7 @@ func ToAllowDeny(row *database.AllowDeny) *model.AllowDeny {
 	cidrsNullable := nullable.NewNullableWithValue(cidrs)
 
 	ja4Fingerprints := nullable.NewNullableWithValue(row.JA4Fingerprints)
+	countryCodes := nullable.NewNullableWithValue(row.CountryCodes)
 
 	return &model.AllowDeny{
 		ID:              id,
@@ -195,6 +196,7 @@ func ToAllowDeny(row *database.AllowDeny) *model.AllowDeny {
 		Name:            name,
 		Cidrs:           cidrsNullable,
 		JA4Fingerprints: ja4Fingerprints,
+		CountryCodes:    countryCodes,
 		Allowed:         nullable.NewNullableWithValue(row.Allowed),
 		CompanyID:       companyID,
 	}

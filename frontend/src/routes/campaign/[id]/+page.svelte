@@ -72,6 +72,7 @@
 		eventTypesIDToNameMap: {},
 		notableEventName: ''
 	};
+	let allowedFilter = null;
 	let campaignRecipients = [];
 	let recipientEventsRecipient = {
 		name: null,
@@ -223,6 +224,9 @@
 			campaign.notableEventName = t.notableEventName;
 			if (t.sendStartAt === null && t.sendEndAt === null) {
 				isSelfManaged = true;
+			}
+			if (campaign.allowDeny && campaign.allowDeny[0]) {
+				allowedFilter = campaign.allowDeny[0].allowed;
 			}
 		} catch (e) {
 			addToast('Failed to load campaign', 'Error');
@@ -1267,7 +1271,7 @@
 						>
 
 						<span class="text-grayblue-dark font-medium">
-							{campaign?.allowDeny ? (campaign.allowDeny.allowed ? 'Allow' : 'Deny') : ''}
+							{campaign?.allowDeny ? (allowedFilter ? 'Allow' : 'Deny') : ''}
 							IP Filters:
 						</span>
 						<span class="text-pc-darkblue dark:text-white">
