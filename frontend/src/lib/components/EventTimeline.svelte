@@ -45,6 +45,7 @@
 		campaign_recipient_before_page_visited: true,
 		campaign_recipient_page_visited: true,
 		campaign_recipient_after_page_visited: true,
+		campaign_recipient_deny_page_visited: true,
 		campaign_recipient_submitted_data: true,
 		campaign_recipient_reported: true
 	};
@@ -741,9 +742,11 @@
 			campaign_recipient_message_sent: '#94cae6',
 			campaign_recipient_message_failed: '#f2bb58',
 			campaign_recipient_message_read: '#4cb5b5',
+			campaign_recipient_evasion_page_visited: '#c8a2f0',
 			campaign_recipient_before_page_visited: '#eea5fa',
 			campaign_recipient_page_visited: '#f96dcf',
 			campaign_recipient_after_page_visited: '#f6287b',
+			campaign_recipient_deny_page_visited: '#ff6b35',
 			campaign_recipient_submitted_data: '#f42e41',
 			campaign_recipient_reported: '#2c3e50'
 		};
@@ -770,12 +773,16 @@
 				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>',
 			campaign_recipient_message_read:
 				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>',
+			campaign_recipient_evasion_page_visited:
+				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>',
 			campaign_recipient_before_page_visited:
 				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>',
 			campaign_recipient_page_visited:
 				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>',
 			campaign_recipient_after_page_visited:
 				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>',
+			campaign_recipient_deny_page_visited:
+				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>',
 			campaign_recipient_submitted_data:
 				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
 			campaign_recipient_reported:
@@ -798,9 +805,11 @@
 			campaign_recipient_message_sent: 'Email successfully delivered',
 			campaign_recipient_message_failed: 'Email delivery failed',
 			campaign_recipient_message_read: 'Recipient opened the email',
+			campaign_recipient_evasion_page_visited: 'Recipient encountered evasion page',
 			campaign_recipient_before_page_visited: 'Recipient browsing before target page',
 			campaign_recipient_page_visited: 'Recipient visited the target page',
 			campaign_recipient_after_page_visited: 'Recipient continued browsing after target',
+			campaign_recipient_deny_page_visited: 'Recipient was denied access',
 			campaign_recipient_submitted_data: 'Recipient submitted form data',
 			campaign_recipient_reported: 'Email was reported as spam'
 		};
@@ -1000,6 +1009,15 @@
 													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
 												/>
 												<span class="text-gray-600 dark:text-gray-300">After Page Visited</span>
+											</label>
+											<label class="flex items-center text-xs">
+												<input
+													type="checkbox"
+													bind:checked={eventFilters.campaign_recipient_deny_page_visited}
+													on:change={() => filterUpdateCounter++}
+													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
+												/>
+												<span class="text-gray-600 dark:text-gray-300">Deny Page Visited</span>
 											</label>
 											<label class="flex items-center text-xs">
 												<input

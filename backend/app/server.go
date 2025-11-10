@@ -1577,6 +1577,57 @@ func (s *Server) renderDenyPage(
 
 	c.Data(http.StatusOK, "text/html; charset=utf-8", buf.Bytes())
 	c.Abort()
+
+	// log deny page visited event
+	denyPageVisitEventID := uuid.New()
+	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED]
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
+	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
+
+	var denyPageVisitEvent *model.CampaignEvent
+	if !campaign.IsAnonymous.MustGet() {
+		denyPageVisitEvent = &model.CampaignEvent{
+			ID:          &denyPageVisitEventID,
+			CampaignID:  &campaignID,
+			RecipientID: &recipientID,
+			IP:          clientIP,
+			UserAgent:   userAgent,
+			EventID:     eventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+		}
+	} else {
+		denyPageVisitEvent = &model.CampaignEvent{
+			ID:          &denyPageVisitEventID,
+			CampaignID:  &campaignID,
+			RecipientID: nil,
+			IP:          vo.NewEmptyOptionalString64(),
+			UserAgent:   vo.NewEmptyOptionalString255(),
+			EventID:     eventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+		}
+	}
+
+	err = s.repositories.Campaign.SaveEvent(c, denyPageVisitEvent)
+	if err != nil {
+		s.logger.Errorw("failed to save deny page visit event",
+			"error", err,
+			"campaignID", campaignID.String(),
+		)
+	}
+
+	// check and update if most notable event for recipient
+	currentNotableEventID, _ := campaignRecipient.NotableEventID.Get()
+	if cache.IsMoreNotableCampaignRecipientEventID(&currentNotableEventID, eventID) {
+		campaignRecipient.NotableEventID.Set(*eventID)
+		err := s.repositories.CampaignRecipient.UpdateByID(c, &campaignRecipientID, campaignRecipient)
+		if err != nil {
+			s.logger.Errorw("failed to update campaign recipient notable event",
+				"error", err,
+				"campaignRecipientID", campaignRecipientID.String(),
+			)
+		}
+	}
+
 	// safely log with nil checks
 	pageName := "unknown"
 	if pageNameVal, err := page.Name.Get(); err == nil {

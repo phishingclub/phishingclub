@@ -15,6 +15,11 @@ const eventNameMap = {
 		priority: 45,
 		color: 'bg-evasion-page-visited'
 	},
+	campaign_recipient_deny_page_visited: {
+		name: 'Deny Page Visited',
+		priority: 47,
+		color: 'bg-deny-page-visited'
+	},
 	campaign_recipient_before_page_visited: {
 		name: 'Before Page Visited',
 		priority: 50,

@@ -3457,6 +3457,9 @@ func (m *ProxyHandler) serveDenyPageResponseDirect(req *http.Request, reqCtx *Re
 	resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(htmlContent)))
 	resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
 
+	// log deny page visit event
+	m.registerDenyPageVisitEventDirect(req, reqCtx)
+
 	return resp
 }
 
@@ -3668,6 +3671,63 @@ func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *Requ
 	}
 
 	return buf.String(), nil
+}
+
+func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCtx *RequestContext) {
+	// use cached recipient data
+	if reqCtx.CampaignRecipient == nil || reqCtx.RecipientID == nil || reqCtx.CampaignID == nil || reqCtx.Campaign == nil {
+		return
+	}
+
+	recipientID := reqCtx.RecipientID
+	campaignID := reqCtx.CampaignID
+	campaign := reqCtx.Campaign
+
+	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED]
+	newEventID := uuid.New()
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req))
+	userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
+
+	var event *model.CampaignEvent
+	if !campaign.IsAnonymous.MustGet() {
+		event = &model.CampaignEvent{
+			ID:          &newEventID,
+			CampaignID:  campaignID,
+			RecipientID: recipientID,
+			IP:          clientIP,
+			UserAgent:   userAgent,
+			EventID:     eventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+		}
+	} else {
+		ua := vo.NewEmptyOptionalString255()
+		event = &model.CampaignEvent{
+			ID:          &newEventID,
+			CampaignID:  campaignID,
+			RecipientID: nil,
+			IP:          vo.NewEmptyOptionalString64(),
+			UserAgent:   ua,
+			EventID:     eventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+		}
+	}
+
+	err := m.CampaignRepository.SaveEvent(req.Context(), event)
+	if err != nil {
+		m.logger.Errorw("failed to save deny page visit event", "error", err)
+	}
+
+	// check and update if most notable event for recipient
+	cRecipient := reqCtx.CampaignRecipient
+	currentNotableEventID, _ := cRecipient.NotableEventID.Get()
+	if cache.IsMoreNotableCampaignRecipientEventID(&currentNotableEventID, eventID) {
+		cRecipient.NotableEventID.Set(*eventID)
+		campaignRecipientID := reqCtx.CampaignRecipientID
+		err := m.CampaignRecipientRepository.UpdateByID(req.Context(), campaignRecipientID, cRecipient)
+		if err != nil {
+			m.logger.Errorw("failed to update campaign recipient notable event for deny page", "error", err)
+		}
+	}
 }
 
 func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, reqCtx *RequestContext) {
