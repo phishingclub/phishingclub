@@ -7,6 +7,10 @@ export const route = {
 		label: 'Settings',
 		route: '/settings/'
 	},
+	tools: {
+		label: 'Tools',
+		route: '/tools/'
+	},
 	sessions: {
 		label: 'Sessions',
 		route: '/sessions/'
@@ -128,6 +132,7 @@ export const topMenu = [
 	route.users,
 	route.companies,
 	route.settings,
+	route.tools,
 	route.userGuide
 ];
 
@@ -137,5 +142,6 @@ export const mobileTopMenu = [
 	route.users,
 	route.companies,
 	route.settings,
+	route.tools,
 	route.userGuide
 ];
