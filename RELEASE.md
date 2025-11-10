@@ -1,14 +1,14 @@
 # Changelog
 
-## [1.14.0] - 2025-01-09
+## [1.14.0] - 2025-11-09
 - Added allow / deny filtering based on geo IP
 - Added support for sock5 with authentication
 
-## [1.13.1] - 2025-01-07
+## [1.13.1] - 2025-11-07
 - Fix bad calculation for submitted on campaign page
 - Fix ensure folder exists for attachments
 
-## [1.13.0] - 2025-01-07
+## [1.13.0] - 2025-11-07
 - Added proxy request JA4 impersonation
 - Added JA4 filtering with wildcard support in allow deny lists
 - Changed IP filtering to filtering
@@ -16,7 +16,7 @@
 - Fixed overly eager proxy auto completion in editor
 - Fixed bug in obfuscation that could cause dublicate variables
 
-## [1.12.0] - 2025-01-04
+## [1.12.0] - 2025-11-04
 - Added tls directive for proxy domains
 - Added self signed certificates for domains
 - Added expand mode to SimpleCodeEditor
@@ -25,7 +25,7 @@
 - Clear proxy session when changing a proxy config
 - Fixed unused config field
 
-## [1.11.0] - 2025-01-01
+## [1.11.0] - 2025-11-01
 - Added option to use campaign obfuscation
 - Removed details/editor and added expand option to editor
 - Fix editor preview bug when toggled multiple times
