@@ -2229,6 +2229,7 @@ func (c *Campaign) saveSendingResult(
 			UserAgent:   vo.NewOptionalString255Must(""),
 			EventID:     eventID,
 			Data:        data,
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	} else {
 		campaignEvent = &model.CampaignEvent{
@@ -2239,6 +2240,7 @@ func (c *Campaign) saveSendingResult(
 			UserAgent:   vo.NewOptionalString255Must(""),
 			EventID:     eventID,
 			Data:        data,
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	}
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
@@ -2297,6 +2299,7 @@ func (c *Campaign) saveEventCampaignClose(
 		UserAgent:   vo.NewOptionalString255Must(""),
 		EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_CLOSED],
 		Data:        r,
+		Metadata:    vo.NewEmptyOptionalString1MB(),
 	}
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
 	if err != nil {
