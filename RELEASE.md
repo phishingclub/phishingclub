@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.15.0] - 2025-11-11
+- Added tools page with ip geo lookup and JA4 fingerprint builder
+- Added option to save additional recipient event data (ja4, Sec-CH-UA-Platform header and Accept-Lang header)
+- Deny page visits are now saved as events
+- Fix updating geo filter not updating filter
+
 ## [1.14.0] - 2025-11-09
 - Added allow / deny filtering based on geo IP
 - Added support for sock5 with authentication
