@@ -100,6 +100,10 @@
 
 		// always show campaign events, filter only recipient events
 		filteredEventsCache = events.filter((event) => {
+			// skip events with missing eventName
+			if (!event || !event.eventName) {
+				return false;
+			}
 			// always show campaign events
 			if (
 				event.eventName.startsWith('campaign_') &&
