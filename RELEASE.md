@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.15.1] - 2025-11-11
+- Fix missing meta data field on some events
+- Handle unknown events on campaign page
+
 ## [1.15.0] - 2025-11-11
 - Added tools page with ip geo lookup and JA4 fingerprint builder
 - Added option to save additional recipient event data (ja4, Sec-CH-UA-Platform header and Accept-Lang header)
