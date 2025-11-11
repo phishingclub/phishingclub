@@ -62,6 +62,7 @@
 		constraintStartTime: null,
 		constraintEndTime: null,
 		saveSubmittedData: false,
+		saveBrowserMetadata: false,
 		isAnonymous: false,
 
 		allowDenyIDs: [],
@@ -214,6 +215,7 @@
 			campaign.constraintStartTime = t.constraintStartTime;
 			campaign.constraintEndTime = t.constraintEndTime;
 			campaign.saveSubmittedData = t.saveSubmittedData;
+			campaign.saveBrowserMetadata = t.saveBrowserMetadata;
 			campaign.isAnonymous = t.isAnonymous;
 			campaign.allowDeny = t.allowDeny;
 			campaign.denyPage = t.denyPage;
@@ -1322,6 +1324,11 @@
 						<span class="text-grayblue-dark font-medium">Data Saving:</span>
 						<span class="text-pc-darkblue dark:text-white">
 							{campaign.saveSubmittedData ? 'Enabled' : 'Disabled'}
+						</span>
+
+						<span class="text-grayblue-dark font-medium">Metadata:</span>
+						<span class="text-pc-darkblue dark:text-white">
+							{campaign.saveBrowserMetadata ? 'Enabled' : 'Disabled'}
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Test:</span>
