@@ -20,6 +20,9 @@ type CampaignEvent struct {
 	// arbitrary data
 	Data string `gorm:"not null;"`
 
+	// metadata stores browser fingerprinting data (ja4, platform, accept-language) as json
+	Metadata string `gorm:"not null;default:''"`
+
 	// has one
 	CampaignID *uuid.UUID `gorm:"not null;index;type:uuid;"`
 	EventID    *uuid.UUID `gorm:"not null;index;type:uuid;"`

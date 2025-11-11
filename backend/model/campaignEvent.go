@@ -14,6 +14,7 @@ type CampaignEvent struct {
 	IP           *vo.OptionalString64  `json:"ip"`
 	UserAgent    *vo.OptionalString255 `json:"userAgent"`
 	Data         *vo.OptionalString1MB `json:"data"`
+	Metadata     *vo.OptionalString1MB `json:"metadata"`
 	AnonymizedID *uuid.UUID            `json:"anonymizedID"`
 	// if null the recipient has been anonymized
 	RecipientID *uuid.UUID `json:"recipientID"`

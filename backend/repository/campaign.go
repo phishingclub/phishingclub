@@ -1138,6 +1138,7 @@ func (r *Campaign) SaveEvent(
 		"ip_address":  campaignEvent.IP.String(),
 		"user_agent":  campaignEvent.UserAgent.String(),
 		"data":        campaignEvent.Data.String(),
+		"metadata":    campaignEvent.Metadata.String(),
 	}
 	if campaignEvent.RecipientID != nil {
 		row["recipient_id"] = campaignEvent.RecipientID.String()
@@ -1457,6 +1458,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		sendEndAt.SetNull()
 	}
 	saveSubmittedData := nullable.NewNullableWithValue(row.SaveSubmittedData)
+	saveBrowserMetadata := nullable.NewNullableWithValue(row.SaveBrowserMetadata)
 	isAnonymous := nullable.NewNullableWithValue(row.IsAnonymous)
 	isTest := nullable.NewNullableWithValue(row.IsTest)
 	obfuscate := nullable.NewNullableWithValue(row.Obfuscate)
@@ -1584,6 +1586,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		ConstraintStartTime: constraintStartTime,
 		ConstraintEndTime:   constraintEndTime,
 		SaveSubmittedData:   saveSubmittedData,
+		SaveBrowserMetadata: saveBrowserMetadata,
 		IsAnonymous:         isAnonymous,
 		IsTest:              isTest,
 		Obfuscate:           obfuscate,
@@ -1614,6 +1617,7 @@ func ToCampaignEvent(row *database.CampaignEvent) (*model.CampaignEvent, error) 
 	ip := vo.NewOptionalString64Must(row.IPAddress)
 	userAgent := vo.NewOptionalString255Must(row.UserAgent)
 	data := vo.NewOptionalString1MBMust(row.Data)
+	metadata := vo.NewOptionalString1MBMust(row.Metadata)
 
 	return &model.CampaignEvent{
 		ID:           row.ID,
@@ -1622,6 +1626,7 @@ func ToCampaignEvent(row *database.CampaignEvent) (*model.CampaignEvent, error) 
 		IP:           ip,
 		UserAgent:    userAgent,
 		Data:         data,
+		Metadata:     metadata,
 		AnonymizedID: row.AnonymizedID,
 		RecipientID:  row.RecipientID,
 		EventID:      row.EventID,

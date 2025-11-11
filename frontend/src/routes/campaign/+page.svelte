@@ -253,6 +253,7 @@
 		contraintStartTime: null,
 		contraintEndTime: null,
 		saveSubmittedData: true,
+		saveBrowserMetadata: false,
 		isAnonymous: null,
 		isTest: false,
 		obfuscate: false,
@@ -624,6 +625,7 @@
 				closeAt: closeAtUTC,
 				anonymizeAt: anonymizeAtUTC,
 				saveSubmittedData: formValues.saveSubmittedData,
+				saveBrowserMetadata: formValues.saveBrowserMetadata,
 				isAnonymous: formValues.isAnonymous,
 				isTest: formValues.isTest,
 				obfuscate: formValues.obfuscate,
@@ -683,6 +685,7 @@
 				sortOrder: sortOrder.byKey(formValues.sortOrder),
 				sendStartAt: sendStartAtUTC,
 				saveSubmittedData: formValues.saveSubmittedData,
+				saveBrowserMetadata: formValues.saveBrowserMetadata,
 				isAnonymous: formValues.isAnonymous,
 				isTest: formValues.isTest,
 				obfuscate: formValues.obfuscate,
@@ -798,7 +801,7 @@
 
 	const resetFormValues = () => {
 		formValues = {
-			name: null,
+			name: '',
 			sendStartAt: null,
 			sendEndAt: null,
 			scheduledStartAt: null,
@@ -816,6 +819,7 @@
 			contraintStartTime: null,
 			contraintEndTime: null,
 			saveSubmittedData: true,
+			saveBrowserMetadata: false,
 			isAnonymous: null,
 			isTest: false,
 			obfuscate: false,
@@ -920,6 +924,7 @@
 			closeAt: copyMode ? null : campaign.closeAt,
 			anonymizeAt: copyMode ? null : campaign.anonymizeAt,
 			saveSubmittedData: campaign.saveSubmittedData,
+			saveBrowserMetadata: campaign.saveBrowserMetadata ?? false,
 			isAnonymous: campaign.isAnonymous,
 			isTest: campaign.isTest,
 			obfuscate: campaign.obfuscate || false,
@@ -1559,6 +1564,16 @@
 							/>
 						</div>
 
+						<div class="mb-6">
+							<SelectSquare
+								optional
+								toolTipText="Saves JA4 fingerprint, Sec-CH-UA-Platform header, and Accept-Language header."
+								label="Save browser metadata?"
+								options={saveSubbmitedDataOptions}
+								bind:value={formValues.saveBrowserMetadata}
+							/>
+						</div>
+
 						{#if !showAdvancedOptionsStep4}
 							<div class="mt-4">
 								<button
@@ -1912,9 +1927,14 @@
 											{/if}
 										</span>
 
-										<span class="text-grayblue-dark font-medium">Save data:</span>
+										<span class="text-grayblue-dark font-medium">Save Data:</span>
 										<span class="text-pc-darkblue dark:text-white"
 											>{formValues.saveSubmittedData ? 'Enabled' : 'Disabled'}</span
+										>
+
+										<span class="text-grayblue-dark font-medium">Save Metadata:</span>
+										<span class="text-pc-darkblue dark:text-white"
+											>{formValues.saveBrowserMetadata ? 'Enabled' : 'Disabled'}</span
 										>
 
 										<!--

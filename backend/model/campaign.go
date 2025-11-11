@@ -33,23 +33,24 @@ type Campaign struct {
 
 	Name nullable.Nullable[vo.String64] `json:"name"`
 
-	SaveSubmittedData nullable.Nullable[bool]         `json:"saveSubmittedData"`
-	IsAnonymous       nullable.Nullable[bool]         `json:"isAnonymous"`
-	IsTest            nullable.Nullable[bool]         `json:"isTest"`
-	Obfuscate         nullable.Nullable[bool]         `json:"obfuscate"`
-	TemplateID        nullable.Nullable[uuid.UUID]    `json:"templateID"`
-	Template          *CampaignTemplate               `json:"template"`
-	CompanyID         nullable.Nullable[uuid.UUID]    `json:"companyID"`
-	Company           *Company                        `json:"company"`
-	RecipientGroups   []*RecipientGroup               `json:"recipientGroups"`
-	RecipientGroupIDs nullable.Nullable[[]*uuid.UUID] `json:"recipientGroupIDs,omitempty"`
-	AllowDeny         []*AllowDeny                    `json:"allowDeny"`
-	AllowDenyIDs      nullable.Nullable[[]*uuid.UUID] `json:"allowDenyIDs,omitempty"`
-	DenyPageID        nullable.Nullable[uuid.UUID]    `json:"denyPageID,omitempty"`
-	DenyPage          *Page                           `json:"denyPage"`
-	EvasionPageID     nullable.Nullable[uuid.UUID]    `json:"evasionPageID,omitempty"`
-	EvasionPage       *Page                           `json:"evasionPage"`
-	WebhookID         nullable.Nullable[uuid.UUID]    `json:"webhookID"`
+	SaveSubmittedData   nullable.Nullable[bool]         `json:"saveSubmittedData"`
+	SaveBrowserMetadata nullable.Nullable[bool]         `json:"saveBrowserMetadata"`
+	IsAnonymous         nullable.Nullable[bool]         `json:"isAnonymous"`
+	IsTest              nullable.Nullable[bool]         `json:"isTest"`
+	Obfuscate           nullable.Nullable[bool]         `json:"obfuscate"`
+	TemplateID          nullable.Nullable[uuid.UUID]    `json:"templateID"`
+	Template            *CampaignTemplate               `json:"template"`
+	CompanyID           nullable.Nullable[uuid.UUID]    `json:"companyID"`
+	Company             *Company                        `json:"company"`
+	RecipientGroups     []*RecipientGroup               `json:"recipientGroups"`
+	RecipientGroupIDs   nullable.Nullable[[]*uuid.UUID] `json:"recipientGroupIDs,omitempty"`
+	AllowDeny           []*AllowDeny                    `json:"allowDeny"`
+	AllowDenyIDs        nullable.Nullable[[]*uuid.UUID] `json:"allowDenyIDs,omitempty"`
+	DenyPageID          nullable.Nullable[uuid.UUID]    `json:"denyPageID,omitempty"`
+	DenyPage            *Page                           `json:"denyPage"`
+	EvasionPageID       nullable.Nullable[uuid.UUID]    `json:"evasionPageID,omitempty"`
+	EvasionPage         *Page                           `json:"evasionPage"`
+	WebhookID           nullable.Nullable[uuid.UUID]    `json:"webhookID"`
 
 	// must not be set by a user
 	NotableEventID   nullable.Nullable[uuid.UUID] `json:"notableEventID"`
@@ -305,6 +306,12 @@ func (c *Campaign) ToDBMap() map[string]any {
 		m["save_submitted_data"] = false
 		if v, err := c.SaveSubmittedData.Get(); err == nil {
 			m["save_submitted_data"] = v
+		}
+	}
+	if c.SaveBrowserMetadata.IsSpecified() {
+		m["save_browser_metadata"] = false
+		if v, err := c.SaveBrowserMetadata.Get(); err == nil {
+			m["save_browser_metadata"] = v
 		}
 	}
 	if c.IsTest.IsSpecified() {

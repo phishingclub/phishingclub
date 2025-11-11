@@ -1524,7 +1524,8 @@
 					{ column: 'Event', size: 'small' },
 					{ column: 'Details', size: 'small' },
 					{ column: 'User-Agent', size: 'small' },
-					{ column: 'Ip', size: 'small' }
+					{ column: 'Ip', size: 'small' },
+					{ column: 'Metadata', size: 'small' }
 				]}
 				sortable={[
 					'Created at',
@@ -1534,7 +1535,8 @@
 					'Event',
 					'Details',
 					'User-Agent',
-					'Ip'
+					'Ip',
+					'Metadata'
 				]}
 				pagination={eventsTableURLParams}
 				plural="events"
@@ -1593,6 +1595,9 @@
 						</TableCell>
 						<TableCell>
 							<CellCopy text={event.ip} />
+						</TableCell>
+						<TableCell>
+							<CellCopy text={event.metadata || ''} />
 						</TableCell>
 					</TableRow>
 				{/each}
@@ -1724,9 +1729,10 @@
 				{ column: 'Event', size: 'small' },
 				{ column: 'Details', size: 'small' },
 				{ column: 'User-Agent', size: 'small' },
-				{ column: 'Ip', size: 'small' }
+				{ column: 'Ip', size: 'small' },
+				{ column: 'Metadata', size: 'small' }
 			]}
-			sortable={['Created at', 'Event', 'Details', 'User-Agent', 'Ip']}
+			sortable={['Created at', 'Event', 'Details', 'User-Agent', 'Ip', 'Metadata']}
 			pagination={recipientEventsTableParams}
 			plural="events"
 			hasData={!!recipientEvents.length}
@@ -1762,6 +1768,9 @@
 					</TableCell>
 					<TableCell>
 						<CellCopy text={event.ip} />
+					</TableCell>
+					<TableCell>
+						<CellCopy text={event.metadata || ''} />
 					</TableCell>
 				</TableRow>
 			{/each}

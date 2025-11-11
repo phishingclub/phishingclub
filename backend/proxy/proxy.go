@@ -2567,12 +2567,16 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, 
 	session.IsComplete.Store(true)
 
 	clientIP := utils.ExtractClientIP(req)
+
+	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
+
 	event := &model.CampaignEvent{
 		ID:          &eventID,
 		CampaignID:  session.CampaignID,
 		RecipientID: session.RecipientID,
 		EventID:     submitDataEventID,
 		Data:        vo.NewOptionalString1MBMust(string(submittedDataJSON)),
+		Metadata:    metadata,
 		IP:          vo.NewOptionalString64Must(clientIP),
 		UserAgent:   vo.NewOptionalString255Must(req.UserAgent()),
 	}
@@ -3150,6 +3154,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 
 	var visitEvent *model.CampaignEvent
 	if !session.Campaign.IsAnonymous.MustGet() {
+		metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, session.Campaign)
 		visitEvent = &model.CampaignEvent{
 			ID:          &visitEventID,
 			CampaignID:  session.CampaignID,
@@ -3158,6 +3163,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 			UserAgent:   userAgent,
 			EventID:     eventID,
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    metadata,
 		}
 	} else {
 		visitEvent = &model.CampaignEvent{
@@ -3168,6 +3174,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 			UserAgent:   vo.NewEmptyOptionalString255(),
 			EventID:     eventID,
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	}
 
@@ -3690,6 +3697,7 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 
 	var event *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {
+		metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
 		event = &model.CampaignEvent{
 			ID:          &newEventID,
 			CampaignID:  campaignID,
@@ -3698,6 +3706,7 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 			UserAgent:   userAgent,
 			EventID:     eventID,
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    metadata,
 		}
 	} else {
 		ua := vo.NewEmptyOptionalString255()
@@ -3709,6 +3718,7 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 			UserAgent:   ua,
 			EventID:     eventID,
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	}
 
@@ -3747,6 +3757,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 
 	var event *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {
+		metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
 		event = &model.CampaignEvent{
 			ID:          &newEventID,
 			CampaignID:  campaignID,
@@ -3755,6 +3766,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 			UserAgent:   userAgent,
 			EventID:     eventID,
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    metadata,
 		}
 	} else {
 		ua := vo.NewEmptyOptionalString255()
@@ -3766,6 +3778,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 			UserAgent:   ua,
 			EventID:     eventID,
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	}
 

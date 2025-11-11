@@ -38,11 +38,12 @@ type Campaign struct {
 	// hh:mm
 	ConstraintStartTime *string `gorm:"index;"`
 	// hh:mm
-	ConstraintEndTime *string `gorm:"index;"`
-	SaveSubmittedData bool    `gorm:"not null;default:false"`
-	IsAnonymous       bool    `gorm:"not null;default:false"`
-	IsTest            bool    `gorm:"not null;default:false"`
-	Obfuscate         bool    `gorm:"not null;default:false"`
+	ConstraintEndTime   *string `gorm:"index;"`
+	SaveSubmittedData   bool    `gorm:"not null;default:false"`
+	SaveBrowserMetadata bool    `gorm:"not null;default:false"`
+	IsAnonymous         bool    `gorm:"not null;default:false"`
+	IsTest              bool    `gorm:"not null;default:false"`
+	Obfuscate           bool    `gorm:"not null;default:false"`
 
 	// has one
 	CampaignTemplateID *uuid.UUID `gorm:"index;type:uuid;"`

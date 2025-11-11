@@ -360,8 +360,8 @@
 		</Table>
 		<SubHeadline>Events</SubHeadline>
 		<Table
-			columns={['Event', 'Created', 'Campaign', 'Details', 'User-Agent', 'IP']}
-			sortable={['Event', 'Created', 'Campaign', 'Details', 'User-Agent', 'IP']}
+			columns={['Event', 'Created', 'Campaign', 'Details', 'User-Agent', 'IP', 'Metadata']}
+			sortable={['Event', 'Created', 'Campaign', 'Details', 'User-Agent', 'IP', 'Metadata']}
 			hasData={!!events?.length}
 			hasNextPage={eventsHasNextPage}
 			plural="events"
@@ -384,6 +384,9 @@
 					</TableCell>
 					<TableCell>
 						<CellCopy text={event.ip} />
+					</TableCell>
+					<TableCell>
+						<CellCopy text={event.metadata || ''} />
 					</TableCell>
 					<TableCellEmpty />
 					<TableCellAction>

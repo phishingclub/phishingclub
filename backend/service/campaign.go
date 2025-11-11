@@ -1105,7 +1105,8 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 			IP:          vo.NewEmptyOptionalString64(),
 			UserAgent:   userAgent,
 			EventID:     trackingPixelLoadedEventID,
-			Data:        vo.NewOptionalString1MBMust(""),
+			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	} else {
 		ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request))
@@ -1114,6 +1115,8 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 			ua = strings.TrimSpace(ua[:255])
 		}
 		userAgent := vo.NewOptionalString255Must(ua)
+		// extract metadata (ja4, platform, accept-language)
+		metadata := model.ExtractCampaignEventMetadata(ctx, campaign)
 		campaignEvent = &model.CampaignEvent{
 			ID:          &newEventID,
 			CampaignID:  &campaignID,
@@ -1121,7 +1124,8 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 			IP:          ip,
 			UserAgent:   userAgent,
 			EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ],
-			Data:        vo.NewOptionalString1MBMust(""),
+			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    metadata,
 		}
 	}
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
@@ -1257,6 +1261,9 @@ func (c *Campaign) UpdateByID(
 	// update values
 	if v, err := incoming.SaveSubmittedData.Get(); err == nil {
 		current.SaveSubmittedData.Set(v)
+	}
+	if v, err := incoming.SaveBrowserMetadata.Get(); err == nil {
+		current.SaveBrowserMetadata.Set(v)
 	}
 	if v, err := incoming.IsAnonymous.Get(); err == nil {
 		current.IsAnonymous.Set(v)

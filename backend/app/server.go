@@ -988,6 +988,7 @@ func (s *Server) checkAndServePhishingPage(
 		var event *model.CampaignEvent
 		// only save data if red team flag is set
 		if !campaign.IsAnonymous.MustGet() {
+			metadata := model.ExtractCampaignEventMetadata(c, campaign)
 			event = &model.CampaignEvent{
 				ID:          &newEventID,
 				CampaignID:  &campaignID,
@@ -996,6 +997,7 @@ func (s *Server) checkAndServePhishingPage(
 				UserAgent:   userAgent,
 				EventID:     submitDataEventID,
 				Data:        submittedData,
+				Metadata:    metadata,
 			}
 		} else {
 			ua := vo.NewEmptyOptionalString255()
@@ -1008,6 +1010,7 @@ func (s *Server) checkAndServePhishingPage(
 				UserAgent:   ua,
 				EventID:     submitDataEventID,
 				Data:        data,
+				Metadata:    vo.NewEmptyOptionalString1MB(),
 			}
 		}
 		err = s.repositories.Campaign.SaveEvent(c, event)
@@ -1154,6 +1157,7 @@ func (s *Server) checkAndServePhishingPage(
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 		var visitEvent *model.CampaignEvent
 		if !campaign.IsAnonymous.MustGet() {
+			metadata := model.ExtractCampaignEventMetadata(c, campaign)
 			visitEvent = &model.CampaignEvent{
 				ID:          &visitEventID,
 				CampaignID:  &campaignID,
@@ -1162,6 +1166,7 @@ func (s *Server) checkAndServePhishingPage(
 				UserAgent:   userAgent,
 				EventID:     eventID,
 				Data:        vo.NewEmptyOptionalString1MB(),
+				Metadata:    metadata,
 			}
 		} else {
 			ua := vo.NewEmptyOptionalString255()
@@ -1173,6 +1178,7 @@ func (s *Server) checkAndServePhishingPage(
 				UserAgent:   ua,
 				EventID:     eventID,
 				Data:        vo.NewEmptyOptionalString1MB(),
+				Metadata:    vo.NewEmptyOptionalString1MB(),
 			}
 		}
 
@@ -1363,7 +1369,6 @@ func (s *Server) checkAndServePhishingPage(
 		return true, fmt.Errorf("failed to render phishing page: %s", err)
 	}
 	// save the event of page has been visited
-	visitEventID := uuid.New()
 	eventName := ""
 	switch currentPageType {
 	case data.PAGE_TYPE_EVASION:
@@ -1375,37 +1380,42 @@ func (s *Server) checkAndServePhishingPage(
 	case data.PAGE_TYPE_AFTER:
 		eventName = data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED
 	}
-	eventID := cache.EventIDByName[eventName]
+
+	campaignEventID := cache.EventIDByName[eventName]
+	eventID := uuid.New()
 	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
-	var visitEvent *model.CampaignEvent
+	var event *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {
-		visitEvent = &model.CampaignEvent{
-			ID:          &visitEventID,
+		metadata := model.ExtractCampaignEventMetadata(c, campaign)
+		event = &model.CampaignEvent{
+			ID:          &eventID,
 			CampaignID:  &campaignID,
 			RecipientID: &recipientID,
 			IP:          clientIP,
 			UserAgent:   userAgent,
-			EventID:     eventID,
+			EventID:     campaignEventID,
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    metadata,
 		}
 	} else {
 		ua := vo.NewEmptyOptionalString255()
-		visitEvent = &model.CampaignEvent{
-			ID:          &visitEventID,
+		event = &model.CampaignEvent{
+			ID:          &eventID,
 			CampaignID:  &campaignID,
 			RecipientID: nil,
 			IP:          vo.NewEmptyOptionalString64(),
 			UserAgent:   ua,
-			EventID:     eventID,
+			EventID:     campaignEventID,
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	}
 	// only log the page visit if it is not after the final page
 	if currentPageType != data.PAGE_TYPE_DONE {
 		err = s.repositories.Campaign.SaveEvent(
 			c,
-			visitEvent,
+			event,
 		)
 		if err != nil {
 			return true, fmt.Errorf("failed to save campaign event: %s", err)
@@ -1415,9 +1425,9 @@ func (s *Server) checkAndServePhishingPage(
 	currentNotableEventID, _ := campaignRecipient.NotableEventID.Get()
 	if cache.IsMoreNotableCampaignRecipientEventID(
 		&currentNotableEventID,
-		eventID,
+		campaignEventID,
 	) {
-		campaignRecipient.NotableEventID.Set(*eventID)
+		campaignRecipient.NotableEventID.Set(*campaignEventID)
 		err := s.repositories.CampaignRecipient.UpdateByID(
 			c,
 			campaignRecipientIDPtr,
@@ -1426,7 +1436,7 @@ func (s *Server) checkAndServePhishingPage(
 		if err != nil {
 			s.logger.Errorw("failed to update notable event",
 				"campaignRecipientID", campaignRecipientID.String(),
-				"eventID", eventID.String(),
+				"eventID", campaignEventID.String(),
 				"error", err,
 			)
 			return true, errs.Wrap(err)
@@ -1583,10 +1593,10 @@ func (s *Server) renderDenyPage(
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED]
 	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
-
-	var denyPageVisitEvent *model.CampaignEvent
+	var event *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {
-		denyPageVisitEvent = &model.CampaignEvent{
+		metadata := model.ExtractCampaignEventMetadata(c, campaign)
+		event = &model.CampaignEvent{
 			ID:          &denyPageVisitEventID,
 			CampaignID:  &campaignID,
 			RecipientID: &recipientID,
@@ -1594,20 +1604,23 @@ func (s *Server) renderDenyPage(
 			UserAgent:   userAgent,
 			EventID:     eventID,
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    metadata,
 		}
 	} else {
-		denyPageVisitEvent = &model.CampaignEvent{
+		ua := vo.NewEmptyOptionalString255()
+		event = &model.CampaignEvent{
 			ID:          &denyPageVisitEventID,
 			CampaignID:  &campaignID,
 			RecipientID: nil,
 			IP:          vo.NewEmptyOptionalString64(),
-			UserAgent:   vo.NewEmptyOptionalString255(),
+			UserAgent:   ua,
 			EventID:     eventID,
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	}
 
-	err = s.repositories.Campaign.SaveEvent(c, denyPageVisitEvent)
+	err = s.repositories.Campaign.SaveEvent(c, event)
 	if err != nil {
 		s.logger.Errorw("failed to save deny page visit event",
 			"error", err,
