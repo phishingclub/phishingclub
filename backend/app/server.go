@@ -1137,6 +1137,87 @@ func (s *Server) checkAndServePhishingPage(
 			return true, fmt.Errorf("no phishing domain mapping found for start URL domain: %s", startDomain)
 		}
 
+		// create synthetic message_read event for landing/before/after pages
+		// this ensures that "emails read" stat is always >= "website visits" stat
+		// only create if recipient doesn't already have a message_read event
+		if currentPageType == data.PAGE_TYPE_LANDING ||
+			currentPageType == data.PAGE_TYPE_BEFORE ||
+			currentPageType == data.PAGE_TYPE_AFTER {
+
+			messageReadEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ]
+
+			// check if recipient already has a message_read event for this campaign
+			hasMessageRead, err := s.repositories.Campaign.HasMessageReadEvent(
+				c,
+				&campaignID,
+				&recipientID,
+				messageReadEventID,
+			)
+			if err != nil {
+				s.logger.Errorw("failed to check for existing message read event",
+					"error", err,
+					"proxyID", proxyID.String(),
+				)
+				// continue anyway to attempt creating the event
+			}
+
+			// only create synthetic event if no message_read event exists
+			if !hasMessageRead {
+				syntheticReadEventID := uuid.New()
+				clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
+				userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
+				syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
+
+				var syntheticReadEvent *model.CampaignEvent
+				if !campaign.IsAnonymous.MustGet() {
+					metadata := model.ExtractCampaignEventMetadata(c, campaign)
+					syntheticReadEvent = &model.CampaignEvent{
+						ID:          &syntheticReadEventID,
+						CampaignID:  &campaignID,
+						RecipientID: &recipientID,
+						IP:          clientIP,
+						UserAgent:   userAgent,
+						EventID:     messageReadEventID,
+						Data:        syntheticData,
+						Metadata:    metadata,
+					}
+				} else {
+					ua := vo.NewEmptyOptionalString255()
+					syntheticReadEvent = &model.CampaignEvent{
+						ID:          &syntheticReadEventID,
+						CampaignID:  &campaignID,
+						RecipientID: nil,
+						IP:          vo.NewEmptyOptionalString64(),
+						UserAgent:   ua,
+						EventID:     messageReadEventID,
+						Data:        syntheticData,
+						Metadata:    vo.NewEmptyOptionalString1MB(),
+					}
+				}
+
+				// save the synthetic message read event
+				err = s.repositories.Campaign.SaveEvent(c, syntheticReadEvent)
+				if err != nil {
+					s.logger.Errorw("failed to save synthetic message read event",
+						"error", err,
+						"proxyID", proxyID.String(),
+						"pageType", currentPageType,
+					)
+					// continue anyway to save the page visit event
+				} else {
+					s.logger.Debugw("created synthetic message read event from page visit",
+						"proxyID", proxyID.String(),
+						"pageType", currentPageType,
+					)
+				}
+			} else {
+				s.logger.Debugw("skipping synthetic message read event - already exists",
+					"proxyID", proxyID.String(),
+					"pageType", currentPageType,
+				)
+			}
+		}
+
 		// save the event of Proxy page being accessed
 		visitEventID := uuid.New()
 		eventName := ""
@@ -1368,6 +1449,88 @@ func (s *Server) checkAndServePhishingPage(
 	if err != nil {
 		return true, fmt.Errorf("failed to render phishing page: %s", err)
 	}
+
+	// create synthetic message_read event for landing/before/after pages
+	// this ensures that "emails read" stat is always >= "website visits" stat
+	// only create if recipient doesn't already have a message_read event
+	if currentPageType == data.PAGE_TYPE_LANDING ||
+		currentPageType == data.PAGE_TYPE_BEFORE ||
+		currentPageType == data.PAGE_TYPE_AFTER {
+
+		messageReadEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ]
+
+		// check if recipient already has a message_read event for this campaign
+		hasMessageRead, err := s.repositories.Campaign.HasMessageReadEvent(
+			c,
+			&campaignID,
+			&recipientID,
+			messageReadEventID,
+		)
+		if err != nil {
+			s.logger.Errorw("failed to check for existing message read event",
+				"error", err,
+				"campaignRecipientID", campaignRecipientID.String(),
+			)
+			// continue anyway to attempt creating the event
+		}
+
+		// only create synthetic event if no message_read event exists
+		if !hasMessageRead {
+			syntheticReadEventID := uuid.New()
+			clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
+			userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
+			syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
+
+			var syntheticReadEvent *model.CampaignEvent
+			if !campaign.IsAnonymous.MustGet() {
+				metadata := model.ExtractCampaignEventMetadata(c, campaign)
+				syntheticReadEvent = &model.CampaignEvent{
+					ID:          &syntheticReadEventID,
+					CampaignID:  &campaignID,
+					RecipientID: &recipientID,
+					IP:          clientIP,
+					UserAgent:   userAgent,
+					EventID:     messageReadEventID,
+					Data:        syntheticData,
+					Metadata:    metadata,
+				}
+			} else {
+				ua := vo.NewEmptyOptionalString255()
+				syntheticReadEvent = &model.CampaignEvent{
+					ID:          &syntheticReadEventID,
+					CampaignID:  &campaignID,
+					RecipientID: nil,
+					IP:          vo.NewEmptyOptionalString64(),
+					UserAgent:   ua,
+					EventID:     messageReadEventID,
+					Data:        syntheticData,
+					Metadata:    vo.NewEmptyOptionalString1MB(),
+				}
+			}
+
+			// save the synthetic message read event
+			err = s.repositories.Campaign.SaveEvent(c, syntheticReadEvent)
+			if err != nil {
+				s.logger.Errorw("failed to save synthetic message read event",
+					"error", err,
+					"campaignRecipientID", campaignRecipientID.String(),
+					"pageType", currentPageType,
+				)
+				// continue anyway to save the page visit event
+			} else {
+				s.logger.Debugw("created synthetic message read event from page visit",
+					"campaignRecipientID", campaignRecipientID.String(),
+					"pageType", currentPageType,
+				)
+			}
+		} else {
+			s.logger.Debugw("skipping synthetic message read event - already exists",
+				"campaignRecipientID", campaignRecipientID.String(),
+				"pageType", currentPageType,
+			)
+		}
+	}
+
 	// save the event of page has been visited
 	eventName := ""
 	switch currentPageType {

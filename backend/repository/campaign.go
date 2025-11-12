@@ -1151,6 +1151,31 @@ func (r *Campaign) SaveEvent(
 	return nil
 }
 
+// HasMessageReadEvent checks if a recipient has a MESSAGE_READ event for a campaign
+// returns true if the recipient has already opened the email (or has a synthetic event)
+func (r *Campaign) HasMessageReadEvent(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+	messageReadEventID *uuid.UUID,
+) (bool, error) {
+	var count int64
+
+	query := r.DB.Model(&database.CampaignEvent{}).
+		Where("campaign_id = ? AND event_id = ?", campaignID, messageReadEventID)
+
+	if recipientID != nil {
+		query = query.Where("recipient_id = ?", recipientID)
+	}
+
+	res := query.Count(&count)
+	if res.Error != nil {
+		return false, res.Error
+	}
+
+	return count > 0, nil
+}
+
 // UpdateByID updates a campaign by id
 // does not update the campaign recipient groups and campaign recipients
 func (r *Campaign) UpdateByID(
