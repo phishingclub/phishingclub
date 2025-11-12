@@ -456,10 +456,36 @@ X-Custom-Header: Hello Friend"
 									showVimToggle={true}
 									showExpandButton={false}
 									placeholder={`{
-  "to": "{{.Name}}",
-  "from": "{{.From}}",
-  "subject": "Important Security Alert",
-  "body": "{{.Content}}"
+  "to": "{{.Email}}",
+  "from": "{{.FromEmail}}",
+  "fromName": "{{.FromName}}",
+  "subject": "{{.Subject}}",
+  "body": "{{.Content}}",
+  "recipientInfo": {
+    "firstName": "{{.FirstName}}",
+    "lastName": "{{.LastName}}",
+    "email": "{{.Email}}",
+    "phone": "{{.Phone}}",
+    "position": "{{.Position}}",
+    "department": "{{.Department}}",
+    "city": "{{.City}}",
+    "country": "{{.Country}}",
+    "extraIdentifier": "{{.ExtraIdentifier}}",
+    "misc": "{{.Misc}}"
+  },
+  "campaignInfo": {
+    "url": "{{.URL}}",
+    "baseUrl": "{{.BaseURL}}",
+    "trackingUrl": "{{.TrackingURL}}",
+    "tracker": "{{.Tracker}}"
+  },
+  "apiSenderInfo": {
+    "apiKey": "{{.APIKey}}",
+    "customField1": "{{.CustomField1}}",
+    "customField2": "{{.CustomField2}}",
+    "customField3": "{{.CustomField3}}",
+    "customField4": "{{.CustomField4}}"
+  }
 }`}
 								/>
 							</div>

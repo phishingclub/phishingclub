@@ -7,6 +7,7 @@ import (
 	"html"
 	"io"
 	"math/rand"
+	"net/mail"
 	"net/url"
 	"strings"
 	"text/template"
@@ -426,8 +427,22 @@ func (t *Template) newTemplateDataMap(
 		recipientMisc = v.String()
 	}
 	mailHeaderFrom := ""
+	fromName := ""
+	fromEmail := ""
 	if v, err := email.MailHeaderFrom.Get(); err == nil {
 		mailHeaderFrom = v.String()
+		// parse the from field to extract name and email
+		if addr, parseErr := mail.ParseAddress(mailHeaderFrom); parseErr == nil {
+			fromName = addr.Name
+			fromEmail = addr.Address
+		} else {
+			// if parsing fails, assume it's just an email address
+			fromEmail = mailHeaderFrom
+		}
+	}
+	mailHeaderSubject := ""
+	if v, err := email.MailHeaderSubject.Get(); err == nil {
+		mailHeaderSubject = v.String()
 	}
 	m := map[string]any{
 		"rID":             id,
@@ -445,7 +460,10 @@ func (t *Template) newTemplateDataMap(
 		"Tracker":         trackingPixelMarkup,
 		"TrackingURL":     trackingPixelPath,
 		// sender fields
-		"From": mailHeaderFrom,
+		"From":      mailHeaderFrom,
+		"FromName":  fromName,
+		"FromEmail": fromEmail,
+		"Subject":   mailHeaderSubject,
 		// general fields
 		"BaseURL": baseURL,
 		"URL":     url,

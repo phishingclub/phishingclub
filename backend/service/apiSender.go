@@ -471,9 +471,9 @@ func (a *APISender) SendTest(
 	}
 	url, headers, body, err := a.buildRequest(
 		apiSender,
+		"api-sender-test.test",
 		"id",
 		"foo/bar",
-		"api-sender-test.test",
 		testCampaignRecipient,
 		testEmail,
 	)
@@ -592,6 +592,14 @@ func (a *APISender) SendWithCustomURL(
 		return err
 	}
 	defer respBodyClose()
+
+	// read response body once for reuse in error messages
+	resBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		a.Logger.Errorw("failed to read response body", "error", err)
+		return err
+	}
+
 	// check if response matches expectations
 	nullableExpectedResponseCode := apiSender.ExpectedResponseStatusCode
 	if nullableExpectedResponseCode.IsSpecified() && !nullableExpectedResponseCode.IsNull() {
@@ -599,8 +607,9 @@ func (a *APISender) SendWithCustomURL(
 		if resp.StatusCode != expectedResponseStatusCode {
 			a.Logger.Debugw("api sender got unexpected response status code",
 				"statusCode", resp.StatusCode,
+				"responseBody", string(resBody),
 			)
-			return fmt.Errorf("unexpected response status code: %d", resp.StatusCode)
+			return fmt.Errorf("unexpected response status code: %d, body: %s", resp.StatusCode, string(resBody))
 		}
 	}
 	// check for expected headers
@@ -615,8 +624,9 @@ func (a *APISender) SendWithCustomURL(
 					"expectedKey", expectedHeader.Key,
 					"expectedValue", expectedHeader.Value,
 					"header", header,
+					"responseBody", string(resBody),
 				)
-				return fmt.Errorf("unexpected response header: expected '%s' to contain '%s' but has '%s'", expectedHeader.Key, expectedHeader.Value, header)
+				return fmt.Errorf("unexpected response header: expected '%s' to contain '%s' but has '%s', body: %s", expectedHeader.Key, expectedHeader.Value, header, string(resBody))
 			}
 		}
 	}
@@ -624,20 +634,15 @@ func (a *APISender) SendWithCustomURL(
 	if nullableExpectedBody.IsSpecified() && !nullableExpectedBody.IsNull() {
 		expectedBody := nullableExpectedBody.MustGet()
 		// check for expected body
-		resBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			a.Logger.Errorw("failed to read response body", "error", err)
-			return err
-		}
 		if !bytes.Contains(resBody, []byte(expectedBody.String())) {
 			a.Logger.Debugw("api sender got unexpected response body",
 				"expectedBody", expectedBody,
-				"body", resp.Body,
+				"body", string(resBody),
 			)
 			return fmt.Errorf(
-				"unexpected response body: expected '%s' to contain '%s'",
+				"unexpected response body: expected to contain '%s', got: %s",
 				expectedBody,
-				resp.Body,
+				string(resBody),
 			)
 		}
 	}
@@ -646,6 +651,7 @@ func (a *APISender) SendWithCustomURL(
 
 func (a *APISender) buildHeader(
 	apiSender *model.APISender,
+	templateData *map[string]any,
 ) ([]*model.HTTPHeader, error) {
 	// setup headers
 	apiReqHeaders := []*model.HTTPHeader{}
@@ -659,7 +665,7 @@ func (a *APISender) buildHeader(
 			}
 			keyTemplate = keyTemplate.Funcs(TemplateFuncs())
 			var key bytes.Buffer
-			if err := keyTemplate.Execute(&key, nil); err != nil {
+			if err := keyTemplate.Execute(&key, templateData); err != nil {
 				return nil, errs.Wrap(err)
 			}
 			valueTemplate := template.New("value")
@@ -669,7 +675,7 @@ func (a *APISender) buildHeader(
 			}
 			valueTemplate = valueTemplate.Funcs(TemplateFuncs())
 			var value bytes.Buffer
-			if err := valueTemplate.Execute(&value, nil); err != nil {
+			if err := valueTemplate.Execute(&value, templateData); err != nil {
 				return nil, fmt.Errorf("failed to execute value template: %s", err)
 			}
 			apiReqHeaders = append(
@@ -747,19 +753,7 @@ func (a *APISender) buildRequestWithCustomURL(
 	email *model.Email,
 	customCampaignURL string,
 ) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
-	// setup headers
-	apiReqHeaders, err := a.buildHeader(apiSender)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to build headers: %s", err)
-	}
-	// setup URL
-	requestURL := apiSender.RequestURL.MustGet()
-	urlTemplate := template.New("url")
-	urlTemplate = urlTemplate.Funcs(TemplateFuncs())
-	urlTemplate, err = urlTemplate.Parse(requestURL.String())
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to parse url: %s", err)
-	}
+	// create template data first so it can be used in headers, url, and body
 	t := a.TemplateService.CreateMail(
 		domainName,
 		urlKey,
@@ -775,6 +769,20 @@ func (a *APISender) buildRequestWithCustomURL(
 		if customCampaignURL != templateURL {
 			(*t)["URL"] = customCampaignURL
 		}
+	}
+
+	// setup headers
+	apiReqHeaders, err := a.buildHeader(apiSender, t)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to build headers: %s", err)
+	}
+	// setup URL
+	requestURL := apiSender.RequestURL.MustGet()
+	urlTemplate := template.New("url")
+	urlTemplate = urlTemplate.Funcs(TemplateFuncs())
+	urlTemplate, err = urlTemplate.Parse(requestURL.String())
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to parse url: %s", err)
 	}
 	var apiURL bytes.Buffer
 	if err := urlTemplate.Execute(&apiURL, t); err != nil {
