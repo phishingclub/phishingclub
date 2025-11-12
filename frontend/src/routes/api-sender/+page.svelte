@@ -301,10 +301,11 @@
 		if (!headers) {
 			return '';
 		}
-		// if headers are a malformed array, we use a hack
-		if (headers[0]) {
-			headers = headers[0];
+		// if headers is an array of {key, value} objects
+		if (Array.isArray(headers)) {
+			return headers.map((header) => `${header.key}: ${header.value}`).join('\n');
 		}
+		// if headers is an object
 		return Object.keys(headers)
 			.map((key) => `${key}: ${headers[key]}`)
 			.join('\n');
