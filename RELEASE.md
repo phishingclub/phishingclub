@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.16.0] - 2025-11-12
+- Added synthetic 'email read' event when visiting a lure without having loaded a tracking pixel in a email
+- Added {{.FromName}}, {{.FromEmail}} and {{.Subject}} variable support to API sender
+- Fix {{.APIKey}} not rendered in API request header
+
 ## [1.15.1] - 2025-11-11
 - Fix missing meta data field on some events
 - Handle unknown events on campaign page
