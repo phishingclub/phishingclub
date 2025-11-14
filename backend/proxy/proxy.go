@@ -2698,6 +2698,30 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, 
 	if err != nil {
 		m.logger.Errorw("failed to create campaign submit event", "error", err)
 	}
+
+	// handle webhook for submitted data event
+	webhookID, err := m.CampaignRepository.GetWebhookIDByCampaignID(ctx, session.CampaignID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		m.logger.Errorw("failed to get webhook id by campaign id for MITM proxy submit",
+			"campaignID", session.CampaignID.String(),
+			"error", err,
+		)
+	}
+	if webhookID != nil {
+		err = m.CampaignService.HandleWebhook(
+			ctx,
+			webhookID,
+			session.CampaignID,
+			session.RecipientID,
+			data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
+		)
+		if err != nil {
+			m.logger.Errorw("failed to handle webhook for MITM proxy submit",
+				"error", err,
+				"campaignRecipientID", session.CampaignRecipientID.String(),
+			)
+		}
+	}
 }
 
 func (m *ProxyHandler) parseProxyConfig(configStr string) (*service.ProxyServiceConfigYAML, error) {
@@ -3932,6 +3956,30 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 			m.logger.Errorw("failed to update campaign recipient notable event for deny page", "error", err)
 		}
 	}
+
+	// handle webhook for deny page visit
+	webhookID, err := m.CampaignRepository.GetWebhookIDByCampaignID(req.Context(), campaignID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		m.logger.Errorw("failed to get webhook id by campaign id for deny page",
+			"campaignID", campaignID.String(),
+			"error", err,
+		)
+	}
+	if webhookID != nil {
+		err = m.CampaignService.HandleWebhook(
+			req.Context(),
+			webhookID,
+			campaignID,
+			recipientID,
+			data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED,
+		)
+		if err != nil {
+			m.logger.Errorw("failed to handle webhook for deny page visit",
+				"error", err,
+				"campaignRecipientID", reqCtx.CampaignRecipientID.String(),
+			)
+		}
+	}
 }
 
 func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, reqCtx *RequestContext) {
@@ -3979,6 +4027,30 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 	err := m.CampaignRepository.SaveEvent(req.Context(), event)
 	if err != nil {
 		m.logger.Errorw("failed to save evasion page visit event", "error", err)
+	}
+
+	// handle webhook for evasion page visit
+	webhookID, err := m.CampaignRepository.GetWebhookIDByCampaignID(req.Context(), campaignID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		m.logger.Errorw("failed to get webhook id by campaign id for evasion page",
+			"campaignID", campaignID.String(),
+			"error", err,
+		)
+	}
+	if webhookID != nil {
+		err = m.CampaignService.HandleWebhook(
+			req.Context(),
+			webhookID,
+			campaignID,
+			recipientID,
+			data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED,
+		)
+		if err != nil {
+			m.logger.Errorw("failed to handle webhook for evasion page visit",
+				"error", err,
+				"campaignRecipientID", reqCtx.CampaignRecipientID.String(),
+			)
+		}
 	}
 }
 
