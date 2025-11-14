@@ -1158,6 +1158,7 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 		&campaignID,
 		&recipientID,
 		data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ,
+		nil,
 	)
 	if err != nil {
 		return errs.Wrap(err)
@@ -1273,6 +1274,9 @@ func (c *Campaign) UpdateByID(
 	}
 	if v, err := incoming.Obfuscate.Get(); err == nil {
 		current.Obfuscate.Set(v)
+	}
+	if v, err := incoming.WebhookIncludeData.Get(); err == nil {
+		current.WebhookIncludeData.Set(v)
 	}
 	if v, err := incoming.SortField.Get(); err == nil {
 		current.SortField.Set(v)
@@ -2272,6 +2276,7 @@ func (c *Campaign) saveSendingResult(
 		&campaignID,
 		&recipientID,
 		eventName,
+		nil,
 	)
 	if err != nil {
 		return errs.Wrap(err)
@@ -2320,6 +2325,7 @@ func (c *Campaign) saveEventCampaignClose(
 		campaignID,
 		nil,
 		data.EVENT_CAMPAIGN_CLOSED,
+		nil,
 	)
 	if err != nil {
 		return errs.Wrap(err)
@@ -3023,6 +3029,7 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 		&campaignID,
 		&recipientID,
 		data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT,
+		nil,
 	)
 	if err != nil {
 		return errs.Wrap(err)
@@ -3038,6 +3045,7 @@ func (c *Campaign) HandleWebhook(
 	campaignID *uuid.UUID,
 	recipientID *uuid.UUID,
 	eventName string,
+	capturedData map[string]interface{},
 ) error {
 	campaignName, err := c.CampaignRepository.GetNameByID(ctx, campaignID)
 	if err != nil {
@@ -3051,11 +3059,25 @@ func (c *Campaign) HandleWebhook(
 	if err != nil {
 		return errs.Wrap(err)
 	}
+
+	// check if campaign has webhookIncludeData enabled
+	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{})
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	// only include captured data if webhookIncludeData is enabled
+	var dataToSend map[string]interface{}
+	if campaign.WebhookIncludeData.MustGet() {
+		dataToSend = capturedData
+	}
+
 	now := time.Now()
 	webhookReq := WebhookRequest{
 		Time:         &now,
 		CampaignName: campaignName,
 		Event:        eventName,
+		Data:         dataToSend,
 	}
 	if email != nil {
 		webhookReq.Email = email.String()

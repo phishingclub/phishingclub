@@ -979,10 +979,22 @@ func (s *Server) checkAndServePhishingPage(
 		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 		submittedData := vo.NewEmptyOptionalString1MB()
+
+		// prepare submitted data for webhook
+		var webhookData map[string]interface{}
 		if campaign.SaveSubmittedData.MustGet() {
 			submittedData, err = vo.NewOptionalString1MB(c.Request.PostForm.Encode())
 			if err != nil {
 				return true, fmt.Errorf("user submitted phishing data too large: %s", err)
+			}
+			// convert form data to map for webhook
+			webhookData = make(map[string]interface{})
+			for key, values := range c.Request.PostForm {
+				if len(values) == 1 {
+					webhookData[key] = values[0]
+				} else {
+					webhookData[key] = values
+				}
 			}
 		}
 		var event *model.CampaignEvent
@@ -1058,6 +1070,7 @@ func (s *Server) checkAndServePhishingPage(
 				&campaignID,
 				&recipientID,
 				data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
+				webhookData,
 			)
 			if err != nil {
 				return true, fmt.Errorf("failed to handle webhook: %s", err)
@@ -1317,6 +1330,7 @@ func (s *Server) checkAndServePhishingPage(
 				&campaignID,
 				&recipientID,
 				eventName,
+				nil,
 			)
 			if err != nil {
 				s.logger.Errorw("failed to handle webhook for Proxy page",
@@ -1629,6 +1643,7 @@ func (s *Server) checkAndServePhishingPage(
 			&campaignID,
 			&recipientID,
 			eventName,
+			nil,
 		)
 		if err != nil {
 			return true, fmt.Errorf("failed to handle webhook: %s", err)
@@ -1836,6 +1851,7 @@ func (s *Server) renderDenyPage(
 			&campaignID,
 			&recipientID,
 			data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED,
+			nil,
 		)
 		if err != nil {
 			s.logger.Errorw("failed to handle webhook for deny page visit",

@@ -497,6 +497,7 @@ export class API {
 		 * @param {string} campaign.templateID  uuid
 		 * @param {string} campaign.name
 		 * @param {boolean} [campaign.saveSubmittedData]
+		 * @param {boolean} [campaign.saveBrowserMetadata]
 		 * @param {boolean} [campaign.isAnonymous]
 		 * @param {boolean} [campaign.isTest]
 		 * @param {boolean} [campaign.obfuscate]
@@ -511,6 +512,7 @@ export class API {
 		 * @param {string} campaign.denyPageID uuid
 		 * @param {string} campaign.evasionPageID uuid
 		 * @param {string} campaign.webhookID uuid
+		 * @param {boolean} [campaign.webhookIncludeData]
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
@@ -536,6 +538,7 @@ export class API {
 			denyPageID,
 			evasionPageID,
 			webhookID,
+			webhookIncludeData,
 			constraintWeekDays,
 			constraintStartTime,
 			constraintEndTime
@@ -560,6 +563,7 @@ export class API {
 				denyPageID,
 				evasionPageID,
 				webhookID,
+				webhookIncludeData,
 				constraintWeekDays,
 				constraintStartTime,
 				constraintEndTime
@@ -567,11 +571,11 @@ export class API {
 		},
 
 		/**
-		 *
-		 * @param {object} campaign
-		 * @param {string} campaign.id
+		 * @param {Object} campaign
+		 * @param {string} campaign.id uuid
 		 * @param {string} campaign.name
 		 * @param {boolean} [campaign.saveSubmittedData]
+		 * @param {boolean} [campaign.saveBrowserMetadata]
 		 * @param {boolean} [campaign.isAnonymous]
 		 * @param {boolean} [campaign.isTest]
 		 * @param {boolean} [campaign.obfuscate]
@@ -581,12 +585,13 @@ export class API {
 		 * @param {string} campaign.sendEndAt
 		 * @param {string} [campaign.closeAt]
 		 * @param {string} [campaign.anonymizeAt]
-		 * @param {string} campaign.templateID  uuid
+		 * @param {string} campaign.templateID uuid
 		 * @param {string[]} campaign.recipientGroupIDs []uuid
 		 * @param {string[]} campaign.allowDenyIDs []uuid
 		 * @param {string} campaign.denyPageID uuid
 		 * @param {string} campaign.evasionPageID uuid
 		 * @param {string} campaign.webhookID uuid
+		 * @param {boolean} [campaign.webhookIncludeData]
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
@@ -594,6 +599,7 @@ export class API {
 		 */
 		update: async ({
 			id,
+			templateID,
 			name,
 			saveSubmittedData,
 			saveBrowserMetadata,
@@ -606,17 +612,18 @@ export class API {
 			sendEndAt,
 			closeAt,
 			anonymizeAt,
-			templateID,
 			recipientGroupIDs,
 			allowDenyIDs,
 			denyPageID,
 			evasionPageID,
 			webhookID,
+			webhookIncludeData,
 			constraintWeekDays,
 			constraintStartTime,
 			constraintEndTime
 		}) => {
 			return await postJSON(this.getPath(`/campaign/${id}`), {
+				templateID,
 				name,
 				isAnonymous,
 				isTest,
@@ -629,12 +636,12 @@ export class API {
 				sendEndAt,
 				closeAt,
 				anonymizeAt,
-				templateID,
 				recipientGroupIDs,
 				allowDenyIDs,
 				denyPageID,
 				evasionPageID,
 				webhookID,
+				webhookIncludeData,
 				constraintWeekDays,
 				constraintStartTime,
 				constraintEndTime

@@ -387,8 +387,9 @@ func (w *Webhook) Send(
 }
 
 type WebhookRequest struct {
-	Time         *time.Time `json:"time"`
-	CampaignName string     `json:"campaignName"`
-	Email        string     `json:"email"`
-	Event        string     `json:"event"`
+	Time         *time.Time             `json:"time"`
+	CampaignName string                 `json:"campaignName"`
+	Email        string                 `json:"email"`
+	Event        string                 `json:"event"`
+	Data         map[string]interface{} `json:"data,omitempty"`
 }

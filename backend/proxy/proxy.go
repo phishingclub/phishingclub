@@ -1584,7 +1584,11 @@ func (m *ProxyHandler) handlePathBasedCapture(capture service.ProxyServiceCaptur
 		m.checkCaptureCompletion(session, capture.Name)
 
 		if session.CampaignRecipientID != nil && session.CampaignID != nil {
-			m.createCampaignSubmitEvent(session, capturedData, resp.Request)
+			// convert to map[string]interface{} for webhook
+			webhookData := map[string]interface{}{
+				capture.Name: capturedData,
+			}
+			m.createCampaignSubmitEvent(session, webhookData, resp.Request)
 		}
 
 		// check if cookie bundle should be submitted now that this capture is complete
@@ -1682,7 +1686,11 @@ func (m *ProxyHandler) captureFromText(text string, capture service.ProxyService
 
 	// submit non-cookie captures immediately
 	if capture.From != "cookie" && session.CampaignRecipientID != nil && session.CampaignID != nil {
-		m.createCampaignSubmitEvent(session, capturedData, req)
+		// convert to map[string]interface{} for webhook
+		webhookData := map[string]interface{}{
+			capture.Name: capturedData,
+		}
+		m.createCampaignSubmitEvent(session, webhookData, req)
 	}
 
 	// check if we should submit cookie bundle (only when all captures complete)
@@ -2643,7 +2651,7 @@ func (m *ProxyHandler) buildCampaignFlowRedirectURL(session *service.ProxySessio
 	return targetURL
 }
 
-func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, capturedData interface{}, req *http.Request) {
+func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, capturedData map[string]interface{}, req *http.Request) {
 	if session.CampaignID == nil || session.CampaignRecipientID == nil {
 		return
 	}
@@ -2714,6 +2722,7 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, 
 			session.CampaignID,
 			session.RecipientID,
 			data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
+			capturedData,
 		)
 		if err != nil {
 			m.logger.Errorw("failed to handle webhook for MITM proxy submit",
@@ -3442,6 +3451,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 			session.CampaignID,
 			session.RecipientID,
 			eventName,
+			nil,
 		)
 		if err != nil {
 			m.logger.Errorw("failed to handle webhook for MITM page visit",
@@ -3972,6 +3982,7 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 			campaignID,
 			recipientID,
 			data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED,
+			nil,
 		)
 		if err != nil {
 			m.logger.Errorw("failed to handle webhook for deny page visit",
@@ -4044,6 +4055,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 			campaignID,
 			recipientID,
 			data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED,
+			nil,
 		)
 		if err != nil {
 			m.logger.Errorw("failed to handle webhook for evasion page visit",

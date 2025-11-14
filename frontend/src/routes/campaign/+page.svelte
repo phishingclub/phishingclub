@@ -258,7 +258,8 @@
 		isTest: false,
 		obfuscate: false,
 		selectedCount: 0,
-		webhookValue: null
+		webhookValue: null,
+		webhookIncludeData: false
 	};
 
 	let modalError = '';
@@ -636,7 +637,8 @@
 				constraintWeekDays: weekDaysAvailableToBinary(formValues.constraintWeekDays),
 				constraintStartTime: contraintStartTimeUTC,
 				constraintEndTime: contraintEndTimeUTC,
-				webhookID: webhookMap.byValueOrNull(formValues.webhookValue)
+				webhookID: webhookMap.byValueOrNull(formValues.webhookValue),
+				webhookIncludeData: formValues.webhookIncludeData
 			});
 
 			if (!res.success) {
@@ -699,7 +701,8 @@
 				allowDenyIDs: allowDenyIDs,
 				denyPageID: denyPageMap.byValueOrNull(formValues.denyPageValue),
 				evasionPageID: denyPageMap.byValueOrNull(formValues.evasionPageValue),
-				webhookID: webhookMap.byValueOrNull(formValues.webhookValue)
+				webhookID: webhookMap.byValueOrNull(formValues.webhookValue),
+				webhookIncludeData: formValues.webhookIncludeData
 			});
 
 			if (!res.success) {
@@ -824,7 +827,8 @@
 			isTest: false,
 			obfuscate: false,
 			selectedCount: 0,
-			webhookValue: null
+			webhookValue: null,
+			webhookIncludeData: false
 		};
 		scheduleType = 'basic';
 		allowDenyType = 'none';
@@ -929,7 +933,8 @@
 			isTest: campaign.isTest,
 			obfuscate: campaign.obfuscate || false,
 			template: templateMap.byKey(campaign.templateID),
-			webhookValue: webhookMap.byKey(campaign.webhookID)
+			webhookValue: webhookMap.byKey(campaign.webhookID),
+			webhookIncludeData: campaign.webhookIncludeData || false
 		};
 
 		if (copyMode) {
@@ -1595,6 +1600,24 @@
 									options={Array.from(webhookMap.values())}>Webhook</TextFieldSelect
 								>
 							</div>
+							{#if formValues.webhookValue}
+								<div class="mb-6">
+									<label class="flex items-center gap-2 cursor-pointer">
+										<input
+											type="checkbox"
+											bind:checked={formValues.webhookIncludeData}
+											class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
+										/>
+										<span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+											Include captured data in webhook
+										</span>
+									</label>
+									<p class="mt-1 ml-6 text-xs text-gray-500 dark:text-gray-400">
+										When enabled, captured data (credentials, cookies, etc.) will be included in the
+										webhook payload
+									</p>
+								</div>
+							{/if}
 
 							<div class="mb-6">
 								<SelectSquare
@@ -1947,6 +1970,10 @@
 										{#if formValues.webhookValue}
 											<span class="text-grayblue-dark font-medium">Webhook:</span>
 											<span class="text-pc-darkblue dark:text-white">{formValues.webhookValue}</span
+											>
+											<span class="text-grayblue-dark font-medium">Include Data:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.webhookIncludeData ? 'Yes' : 'No'}</span
 											>
 										{/if}
 
