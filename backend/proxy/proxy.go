@@ -493,6 +493,11 @@ func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, reqCtx *R
 		}
 	}
 
+	// append global rewrite rules to host config for requests without session
+	if reqCtx.ProxyConfig != nil && reqCtx.ProxyConfig.Global != nil && reqCtx.ProxyConfig.Global.Rewrite != nil {
+		hostConfig.Rewrite = append(hostConfig.Rewrite, reqCtx.ProxyConfig.Global.Rewrite...)
+	}
+
 	// apply header rewrite rules (no capture)
 	if hostConfig.Rewrite != nil {
 		for _, replacement := range hostConfig.Rewrite {
