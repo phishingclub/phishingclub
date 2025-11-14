@@ -69,8 +69,8 @@ const (
 )
 
 var (
-	MATCH_URL_REGEXP                = regexp.MustCompile(`\b(http[s]?:\/\/|\\\\|http[s]:\\x2F\\x2F)(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
-	MATCH_URL_REGEXP_WITHOUT_SCHEME = regexp.MustCompile(`\b(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
+	MATCH_URL_REGEXP                = regexp.MustCompile(`\b(http[s]?:\/\/|\\\\|http[s]:\\x2F\\x2F)(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|test|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
+	MATCH_URL_REGEXP_WITHOUT_SCHEME = regexp.MustCompile(`\b(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|test|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
 )
 
 // RequestContext holds all the context data for a proxy request
@@ -87,6 +87,7 @@ type RequestContext struct {
 	ParamName           string
 	PendingResponse     *http.Response
 	UsedImpersonation   bool
+	OriginalUserAgent   string // original user agent before any modifications
 	// cached response body to avoid double reads
 	CachedBody        []byte
 	BodyWasCompressed bool
@@ -215,6 +216,13 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 		}
 	}
 
+	// preserve original user agent before any modifications for accurate logging/events
+	reqCtx.OriginalUserAgent = req.Header.Get("User-Agent")
+
+	// apply request header replacements early (before creating surf client)
+	// this ensures custom user-agent replacements work with impersonation
+	m.applyEarlyRequestHeaderReplacements(req, reqCtx)
+
 	// create http client with optional browser impersonation
 	client, err := m.createHTTPClientWithImpersonation(req, reqCtx, reqCtx.ProxyConfig)
 	if err != nil {
@@ -230,6 +238,7 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	// prepare request for target server
 	m.prepareRequestForTarget(modifiedReq, client, reqCtx.UsedImpersonation)
 
+	// execute request</parameter>
 	// execute request
 	targetResp, err := client.Do(modifiedReq)
 	if err != nil {
@@ -256,12 +265,6 @@ func (m *ProxyHandler) extractTargetDomain(domain *database.Domain) string {
 		}
 	}
 	return targetDomain
-}
-
-// deprecated: use createHTTPClientWithImpersonation instead
-// kept for backward compatibility if needed
-func (m *ProxyHandler) createHTTPClient(req *http.Request, proxyConfig *service.ProxyServiceConfigYAML) (*http.Client, error) {
-	return m.createStandardHTTPClient(proxyConfig)
 }
 
 // initializeRequestContext creates and populates the request context with all necessary data
@@ -477,10 +480,14 @@ func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, reqCtx *R
 	dummySession := &service.ProxySession{
 		Config: sync.Map{},
 	}
-	// populate dummy config for normalization
-	dummySession.Config.Store(reqCtx.TargetDomain, service.ProxyServiceDomainConfig{
-		To: reqCtx.TargetDomain,
-	})
+	// populate dummy config for normalization - need to map phishing domains to target domains
+	if reqCtx.ProxyConfig != nil && reqCtx.ProxyConfig.Hosts != nil {
+		for targetDomain, hostConfig := range reqCtx.ProxyConfig.Hosts {
+			if hostConfig != nil {
+				dummySession.Config.Store(targetDomain, *hostConfig)
+			}
+		}
+	}
 
 	// normalize headers
 	m.normalizeRequestHeaders(req, dummySession)
@@ -561,32 +568,6 @@ func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, reqCtx *R
 			req.ContentLength = int64(len(body))
 		}
 	}
-	if req.Body != nil {
-		body, err := io.ReadAll(req.Body)
-		if err == nil {
-			if hostConfig.Rewrite != nil {
-				for _, replacement := range hostConfig.Rewrite {
-					if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
-						engine := replacement.Engine
-						if engine == "" {
-							engine = "regex"
-						}
-						if engine == "regex" {
-							re, err := regexp.Compile(replacement.Find)
-							if err == nil {
-								oldContent := string(body)
-								content := re.ReplaceAllString(oldContent, replacement.Replace)
-								body = []byte(content)
-							}
-						}
-					}
-				}
-			}
-			req.Body = io.NopCloser(bytes.NewBuffer(body))
-			req.ContentLength = int64(len(body))
-		}
-	}
-
 	return req
 }
 
@@ -659,8 +640,9 @@ func (m *ProxyHandler) applySessionToRequestWithContext(req *http.Request, reqCt
 		}
 	}
 
-	// handle any request with campaign recipient id (initial or existing session)
-	if reqCtx.CampaignRecipientID != nil {
+	// handle initial request with campaign recipient id (from URL parameters)
+	// use session's original target domain only for initial landing
+	if reqCtx.CampaignRecipientID != nil && reqCtx.SessionCreated {
 		req.Host = reqCtx.Session.TargetDomain
 		req.URL.Scheme = "https"
 		req.URL.Host = reqCtx.Session.TargetDomain
@@ -675,10 +657,17 @@ func (m *ProxyHandler) applySessionToRequestWithContext(req *http.Request, reqCt
 		}
 		req.URL.RawQuery = q.Encode()
 	} else {
-		// for subsequent requests, map to original host
-		originalHost := m.replaceHostWithOriginal(req.Host, reqCtx.ConfigMap)
-		req.Host = originalHost
-		req.URL.Host = originalHost
+		// for subsequent requests with session but no campaign recipient id,
+		// use current domain's target instead of session's original target
+		// this allows cross-domain requests to work correctly
+		targetDomain := reqCtx.TargetDomain
+		if targetDomain == "" {
+			// fallback to mapping from phishing host
+			targetDomain = m.replaceHostWithOriginal(req.Host, reqCtx.ConfigMap)
+		}
+		req.Host = targetDomain
+		req.URL.Host = targetDomain
+		req.URL.Scheme = "https"
 	}
 
 	// apply request processing
@@ -734,12 +723,9 @@ func (m *ProxyHandler) patchRequestBodyWithContext(req *http.Request, reqCtx *Re
 
 func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.Client, usedImpersonation bool) {
 	req.RequestURI = ""
-	// only delete accept-encoding when NOT using surf impersonation
-	// surf needs proper accept-encoding headers for browser fingerprinting
-	// we handle decompression with brotli/zstd libraries
-	if !usedImpersonation {
-		req.Header.Del("Accept-Encoding")
-	}
+	// we always use surf now, which handles decompression automatically
+	// keep accept-encoding headers for browser fingerprinting
+	// note: usedImpersonation tracks if impersonation features are enabled, not if surf is used
 	req.Header.Del(HEADER_JA4)
 
 	// setup cookie jar for redirect handling
@@ -848,11 +834,14 @@ func (m *ProxyHandler) processResponseWithSessionContext(resp *http.Response, re
 }
 
 func (m *ProxyHandler) setSessionCookieWithContext(resp *http.Response, reqCtx *RequestContext) {
+	// extract top-level domain to make session cookie work across all subdomains
+	topLevelDomain := m.extractTopLevelDomain(reqCtx.PhishDomain)
+
 	cookie := &http.Cookie{
 		Name:     m.cookieName,
 		Value:    reqCtx.SessionID,
 		Path:     "/",
-		Domain:   "." + reqCtx.PhishDomain,
+		Domain:   "." + topLevelDomain,
 		Expires:  time.Now().Add(time.Duration(PROXY_COOKIE_MAX_AGE) * time.Second),
 		HttpOnly: true,
 		Secure:   true,
@@ -896,10 +885,35 @@ func (m *ProxyHandler) rewriteResponseHeadersWithContext(resp *http.Response, re
 
 	// fix location header
 	if location := resp.Header.Get("Location"); location != "" {
+		m.logger.Debugw("rewriting location header",
+			"original_location", location,
+			"phish_domain", reqCtx.PhishDomain,
+			"target_domain", reqCtx.TargetDomain)
+
 		if rURL, err := url.Parse(location); err == nil {
+			m.logger.Debugw("parsed location URL",
+				"host", rURL.Host,
+				"path", rURL.Path)
+
 			if phishHost := m.replaceHostWithPhished(rURL.Host, reqCtx.ConfigMap); phishHost != "" {
+				m.logger.Debugw("found phish host mapping",
+					"original_host", rURL.Host,
+					"phish_host", phishHost)
 				rURL.Host = phishHost
 				resp.Header.Set("Location", rURL.String())
+				m.logger.Debugw("rewrote location header",
+					"new_location", rURL.String())
+			} else {
+				m.logger.Debugw("no phish host mapping found for location",
+					"host", rURL.Host,
+					"config_map_size", len(reqCtx.ConfigMap))
+
+				// log all available mappings
+				for origHost, cfg := range reqCtx.ConfigMap {
+					m.logger.Debugw("available mapping",
+						"original_host", origHost,
+						"phish_host", cfg.To)
+				}
 			}
 		}
 	}
@@ -1267,15 +1281,17 @@ func (m *ProxyHandler) createNewSession(
 	// create session configuration
 	sessionConfig := m.buildSessionConfig(reqCtx.TargetDomain, reqCtx.Domain.Name, reqCtx.ProxyConfig)
 
-	// capture client user-agent for analytics and logging
-	userAgent := req.Header.Get("User-Agent")
+	// capture client user-agent for analytics and logging - use original before any modifications
+	userAgent := reqCtx.OriginalUserAgent
+	if userAgent == "" {
+		userAgent = req.Header.Get("User-Agent")
+	}
 
-	m.logger.Debugw("creating session with user-agent",
+	m.logger.Debugw("creating session with original user-agent",
 		"userAgent", userAgent,
 		"campaignRecipientID", campaignRecipientID.String(),
 	)
 
-	// create session
 	session := &service.ProxySession{
 		ID:                  uuid.New().String(),
 		CampaignRecipientID: campaignRecipientID,
@@ -1284,7 +1300,7 @@ func (m *ProxyHandler) createNewSession(
 		Campaign:            campaign,
 		Domain:              reqCtx.Domain,
 		TargetDomain:        reqCtx.TargetDomain,
-		UserAgent:           userAgent,
+		UserAgent:           userAgent, // store original user-agent before any modifications
 		CreatedAt:           time.Now(),
 	}
 
@@ -1436,42 +1452,6 @@ func (m *ProxyHandler) onRequestHeader(req *http.Request, session *service.Proxy
 			}
 		}
 	}
-
-	// request header rewrite logic (mirrors applyRequestHeaderReplacements)
-	if hostConfig.Rewrite != nil {
-		for _, replacement := range hostConfig.Rewrite {
-			if replacement.From == "" || replacement.From == "request_header" || replacement.From == "any" {
-				engine := replacement.Engine
-				if engine == "" {
-					engine = "regex"
-				}
-				if engine == "regex" {
-					re, err := regexp.Compile(replacement.Find)
-					if err != nil {
-						m.logger.Errorw("invalid request_header replacement regex", "error", err, "sessionID", session.ID)
-						continue
-					}
-					for headerName, values := range req.Header {
-						newValues := make([]string, 0, len(values))
-						for _, val := range values {
-							fullHeader := headerName + ": " + val
-							replaced := re.ReplaceAllString(fullHeader, replacement.Replace)
-							if strings.HasPrefix(replaced, headerName+": ") {
-								newVal := replaced[len(headerName)+2:]
-								newValues = append(newValues, newVal)
-							} else if replaced != fullHeader {
-								m.logger.Warnw("header name changed by replacement, skipping", "original", headerName, "sessionID", session.ID)
-								newValues = append(newValues, val)
-							} else {
-								newValues = append(newValues, val)
-							}
-						}
-						req.Header[headerName] = newValues
-					}
-				}
-			}
-		}
-	}
 }
 
 func (m *ProxyHandler) onResponseBody(resp *http.Response, body []byte, session *service.ProxySession) {
@@ -1480,10 +1460,21 @@ func (m *ProxyHandler) onResponseBody(resp *http.Response, body []byte, session 
 		originalHost = session.TargetDomain
 	}
 
+	m.logger.Debugw("onResponseBody: checking for captures",
+		"originalHost", originalHost,
+		"sessionTargetDomain", session.TargetDomain,
+		"requestURL", resp.Request.URL.String())
+
 	hostConfig, exists := m.getHostConfig(session, originalHost)
 	if !exists {
+		m.logger.Debugw("onResponseBody: no host config found",
+			"originalHost", originalHost)
 		return
 	}
+
+	m.logger.Debugw("onResponseBody: found host config",
+		"originalHost", originalHost,
+		"captureCount", len(hostConfig.Capture))
 
 	if hostConfig.Capture != nil {
 		for _, capture := range hostConfig.Capture {
@@ -1603,7 +1594,7 @@ func (m *ProxyHandler) handlePathBasedCapture(capture service.ProxyServiceCaptur
 			webhookData := map[string]interface{}{
 				capture.Name: capturedData,
 			}
-			m.createCampaignSubmitEvent(session, webhookData, resp.Request)
+			m.createCampaignSubmitEvent(session, webhookData, resp.Request, session.UserAgent)
 		}
 
 		// check if cookie bundle should be submitted now that this capture is complete
@@ -1705,7 +1696,7 @@ func (m *ProxyHandler) captureFromText(text string, capture service.ProxyService
 		webhookData := map[string]interface{}{
 			capture.Name: capturedData,
 		}
-		m.createCampaignSubmitEvent(session, webhookData, req)
+		m.createCampaignSubmitEvent(session, webhookData, req, session.UserAgent)
 	}
 
 	// check if we should submit cookie bundle (only when all captures complete)
@@ -1803,7 +1794,7 @@ func (m *ProxyHandler) checkAndSubmitCookieBundleWhenComplete(session *service.P
 	cookieCaptures, requiredCookieCaptures := m.collectCookieCaptures(session)
 	if m.areAllCookieCapturesComplete(requiredCookieCaptures) && len(cookieCaptures) > 0 {
 		bundledData := m.createCookieBundle(cookieCaptures, session)
-		m.createCampaignSubmitEvent(session, bundledData, req)
+		m.createCampaignSubmitEvent(session, bundledData, req, session.UserAgent)
 		session.CookieBundleSubmitted.Store(true)
 	}
 }
@@ -2179,6 +2170,66 @@ func (m *ProxyHandler) getCampaignRecipientIDFromURLParams(req *http.Request) (*
 	return &campaignRecipientID, paramName
 }
 
+// applyEarlyRequestHeaderReplacements applies request header replacements before client creation
+// this is necessary for impersonation to work correctly with custom user-agent replacements
+func (m *ProxyHandler) applyEarlyRequestHeaderReplacements(req *http.Request, reqCtx *RequestContext) {
+	// only apply if we have proxy config
+	if reqCtx.ProxyConfig == nil {
+		return
+	}
+
+	// helper function to apply replacement rules
+	applyReplacements := func(replacements []service.ProxyServiceReplaceRule) {
+		for _, replacement := range replacements {
+			if replacement.From == "" || replacement.From == "request_header" || replacement.From == "any" {
+				engine := replacement.Engine
+				if engine == "" {
+					engine = "regex"
+				}
+				if engine == "regex" {
+					re, err := regexp.Compile(replacement.Find)
+					if err != nil {
+						m.logger.Errorw("invalid early request_header replacement regex", "error", err)
+						continue
+					}
+					for headerName, values := range req.Header {
+						newValues := make([]string, 0, len(values))
+						for _, val := range values {
+							fullHeader := headerName + ": " + val
+							replaced := re.ReplaceAllString(fullHeader, replacement.Replace)
+							if strings.HasPrefix(replaced, headerName+": ") {
+								newVal := replaced[len(headerName)+2:]
+								newValues = append(newValues, newVal)
+							} else if replaced != fullHeader {
+								m.logger.Warnw("header name changed by early replacement, skipping", "original", headerName)
+								newValues = append(newValues, val)
+							} else {
+								newValues = append(newValues, val)
+							}
+						}
+						req.Header[headerName] = newValues
+					}
+				}
+			}
+		}
+	}
+
+	// apply global rewrite rules first
+	if reqCtx.ProxyConfig.Global != nil && reqCtx.ProxyConfig.Global.Rewrite != nil {
+		applyReplacements(reqCtx.ProxyConfig.Global.Rewrite)
+	}
+
+	// then apply request_header replacements from all host configs
+	// this ensures replacements work for all domains in the session (e.g., CDN domains)
+	if reqCtx.ProxyConfig.Hosts != nil {
+		for _, domainConfig := range reqCtx.ProxyConfig.Hosts {
+			if domainConfig != nil && domainConfig.Rewrite != nil {
+				applyReplacements(domainConfig.Rewrite)
+			}
+		}
+	}
+}
+
 // Header normalization methods
 func (m *ProxyHandler) normalizeRequestHeaders(req *http.Request, session *service.ProxySession) {
 	configMap := m.configToMap(&session.Config)
@@ -2274,56 +2325,52 @@ func (m *ProxyHandler) readAndDecompressBody(resp *http.Response, usedImpersonat
 		}
 		return decompressed, true, nil
 	case "br":
-		// only decompress br/zstd when using impersonation
-		// non-impersonation path deletes accept-encoding so should never receive these
-		if usedImpersonation {
-			brReader := brotli.NewReader(bytes.NewBuffer(body))
-			decompressed, err := io.ReadAll(brReader)
-			if err != nil {
-				// body is already decompressed - remove header and send uncompressed
-				m.logger.Debugw("brotli decompression failed, body already decompressed - removing content-encoding header",
-					"error", err,
-				)
-				resp.Header.Del("Content-Encoding")
-				return body, false, nil
-			}
-			m.logger.Debugw("successfully decompressed brotli body",
-				"compressedSize", len(body),
-				"decompressedSize", len(decompressed),
+		// surf automatically decompresses br, but keeps the content-encoding header
+		// try to decompress, and if it fails, assume surf already decompressed
+		brReader := brotli.NewReader(bytes.NewBuffer(body))
+		decompressed, err := io.ReadAll(brReader)
+		if err != nil {
+			// body is already decompressed (e.g., by surf's decodeBodyMW middleware)
+			// remove the Content-Encoding header and send uncompressed to client
+			m.logger.Debugw("brotli decompression failed, body already decompressed - removing content-encoding header",
+				"error", err,
 			)
-			return decompressed, true, nil
+			resp.Header.Del("Content-Encoding")
+			return body, false, nil
 		}
-		return body, false, nil
+		m.logger.Debugw("successfully decompressed brotli body",
+			"compressedSize", len(body),
+			"decompressedSize", len(decompressed),
+		)
+		return decompressed, true, nil
 	case "zstd":
-		// only decompress br/zstd when using impersonation
-		// non-impersonation path deletes accept-encoding so should never receive these
-		if usedImpersonation {
-			zstdReader, err := zstd.NewReader(bytes.NewBuffer(body))
-			if err != nil {
-				// body is already decompressed - remove header and send uncompressed
-				m.logger.Debugw("zstd reader creation failed, body already decompressed - removing content-encoding header",
-					"error", err,
-				)
-				resp.Header.Del("Content-Encoding")
-				return body, false, nil
-			}
-			defer zstdReader.Close()
-			decompressed, err := io.ReadAll(zstdReader)
-			if err != nil {
-				// body is already decompressed - remove header and send uncompressed
-				m.logger.Debugw("zstd decompression failed, body already decompressed - removing content-encoding header",
-					"error", err,
-				)
-				resp.Header.Del("Content-Encoding")
-				return body, false, nil
-			}
-			m.logger.Debugw("successfully decompressed zstd body",
-				"compressedSize", len(body),
-				"decompressedSize", len(decompressed),
+		// surf automatically decompresses zstd, but keeps the content-encoding header
+		// try to decompress, and if it fails, assume surf already decompressed
+		zstdReader, err := zstd.NewReader(bytes.NewBuffer(body))
+		if err != nil {
+			// body is already decompressed (e.g., by surf's decodeBodyMW middleware)
+			// remove the Content-Encoding header and send uncompressed to client
+			m.logger.Debugw("zstd reader creation failed, body already decompressed - removing content-encoding header",
+				"error", err,
 			)
-			return decompressed, true, nil
+			resp.Header.Del("Content-Encoding")
+			return body, false, nil
 		}
-		return body, false, nil
+		defer zstdReader.Close()
+		decompressed, err := io.ReadAll(zstdReader)
+		if err != nil {
+			// body is already decompressed - remove header and send uncompressed
+			m.logger.Debugw("zstd decompression failed, body already decompressed - removing content-encoding header",
+				"error", err,
+			)
+			resp.Header.Del("Content-Encoding")
+			return body, false, nil
+		}
+		m.logger.Debugw("successfully decompressed zstd body",
+			"compressedSize", len(body),
+			"decompressedSize", len(decompressed),
+		)
+		return decompressed, true, nil
 	default:
 		// no encoding or unknown encoding - return as-is
 		return body, false, nil
@@ -2666,7 +2713,7 @@ func (m *ProxyHandler) buildCampaignFlowRedirectURL(session *service.ProxySessio
 	return targetURL
 }
 
-func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, capturedData map[string]interface{}, req *http.Request) {
+func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, capturedData map[string]interface{}, req *http.Request, originalUserAgent string) {
 	if session.CampaignID == nil || session.CampaignRecipientID == nil {
 		return
 	}
@@ -2714,7 +2761,7 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, 
 		Data:        vo.NewOptionalString1MBMust(string(submittedDataJSON)),
 		Metadata:    metadata,
 		IP:          vo.NewOptionalString64Must(clientIP),
-		UserAgent:   vo.NewOptionalString255Must(req.UserAgent()),
+		UserAgent:   vo.NewOptionalString255Must(originalUserAgent),
 	}
 
 	err = m.CampaignRepository.SaveEvent(ctx, event)
@@ -2823,6 +2870,19 @@ func (m *ProxyHandler) setProxyConfigDefaults(config *service.ProxyServiceConfig
 			config.Global.Access.OnDeny = "404"
 		}
 	}
+}
+
+// extractTopLevelDomain extracts the top-level domain from a hostname
+// e.g., "login.proxysaurous.test" -> "proxysaurous.test"
+// e.g., "assets-1.proxysaurous.test" -> "proxysaurous.test"
+func (m *ProxyHandler) extractTopLevelDomain(hostname string) string {
+	parts := strings.Split(hostname, ".")
+	if len(parts) <= 2 {
+		// already a top-level domain or single word
+		return hostname
+	}
+	// return the last two parts (domain.tld)
+	return parts[len(parts)-2] + "." + parts[len(parts)-1]
 }
 
 func (m *ProxyHandler) GetCookieName() string {
@@ -3313,7 +3373,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 			syntheticReadEventID := uuid.New()
 			clientIP := utils.ExtractClientIP(req)
 			clientIPVO := vo.NewOptionalString64Must(clientIP)
-			userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 255))
+			userAgent := vo.NewOptionalString255Must(utils.Substring(session.UserAgent, 0, 255))
 			syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
 
 			var syntheticReadEvent *model.CampaignEvent
@@ -3392,7 +3452,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 
 	clientIP := utils.ExtractClientIP(req)
 	clientIPVO := vo.NewOptionalString64Must(clientIP)
-	userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 255))
+	userAgent := vo.NewOptionalString255Must(utils.Substring(session.UserAgent, 0, 255))
 
 	var visitEvent *model.CampaignEvent
 	if !session.Campaign.IsAnonymous.MustGet() {
@@ -3948,7 +4008,7 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED]
 	newEventID := uuid.New()
 	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req))
-	userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
+	userAgent := vo.NewOptionalString255Must(utils.Substring(reqCtx.OriginalUserAgent, 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
 
 	var event *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {
@@ -4033,7 +4093,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED]
 	newEventID := uuid.New()
 	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req))
-	userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
+	userAgent := vo.NewOptionalString255Must(utils.Substring(reqCtx.OriginalUserAgent, 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
 
 	var event *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {
@@ -4211,10 +4271,11 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 // and returns a redirect response if a match is found
 func (m *ProxyHandler) checkAndApplyURLRewrite(req *http.Request, reqCtx *RequestContext) *http.Response {
 	// check if this is already a rewritten URL that we need to reverse map
-	originalURL := m.getReverseURLMapping(req.URL.Path, req.URL.RawQuery)
-	if originalURL != "" {
-		// this is a rewritten URL, update the request to use the original URL
-		m.applyReverseURLMapping(req, originalURL)
+	// lookup by path only to handle query parameter variations
+	originalPath := m.getReverseURLMapping(req.URL.Path)
+	if originalPath != "" {
+		// update request to use the original path (keep query as-is)
+		req.URL.Path = originalPath
 		return nil
 	}
 
@@ -4232,12 +4293,13 @@ func (m *ProxyHandler) checkAndApplyURLRewrite(req *http.Request, reqCtx *Reques
 	// check each rewrite rule
 	for _, rule := range rewriteRules {
 		if matched, rewrittenURL := m.applyURLRewriteRule(req, rule); matched {
-			// store the mapping for reverse lookup
-			originalURL := req.URL.Path
-			if req.URL.RawQuery != "" {
-				originalURL += "?" + req.URL.RawQuery
+			// store the mapping for reverse lookup using path only (not query)
+			// this allows the mapping to work even if query parameters change
+			rewrittenPath := rewrittenURL
+			if idx := strings.Index(rewrittenURL, "?"); idx != -1 {
+				rewrittenPath = rewrittenURL[:idx]
 			}
-			m.storeURLMapping(rewrittenURL, originalURL)
+			m.storeURLMapping(rewrittenPath, req.URL.Path)
 
 			// create redirect response
 			return &http.Response{
@@ -4335,35 +4397,13 @@ func (m *ProxyHandler) storeURLMapping(rewrittenURL, originalURL string) {
 	m.SessionManager.StoreURLMapping(rewrittenURL, originalURL)
 }
 
-// getReverseURLMapping gets the original URL for a rewritten URL
-func (m *ProxyHandler) getReverseURLMapping(path, query string) string {
-	rewrittenURL := path
-	if query != "" {
-		rewrittenURL += "?" + query
-	}
-
-	if originalURL, exists := m.SessionManager.GetURLMapping(rewrittenURL); exists {
-		return originalURL
+// getReverseURLMapping gets the original path for a rewritten path
+// only uses path for lookup to handle query parameter variations
+func (m *ProxyHandler) getReverseURLMapping(path string) string {
+	if originalPath, exists := m.SessionManager.GetURLMapping(path); exists {
+		return originalPath
 	}
 	return ""
-}
-
-// applyReverseURLMapping updates the request to use the original URL
-func (m *ProxyHandler) applyReverseURLMapping(req *http.Request, originalURL string) {
-	// parse the original URL
-	parsedURL, err := url.Parse(originalURL)
-	if err != nil {
-		m.logger.Errorw("failed to parse original URL during reverse mapping", "url", originalURL, "error", err)
-		return
-	}
-
-	// update request URL
-	req.URL.Path = parsedURL.Path
-	req.URL.RawQuery = parsedURL.RawQuery
-	req.RequestURI = req.URL.Path
-	if req.URL.RawQuery != "" {
-		req.RequestURI += "?" + req.URL.RawQuery
-	}
 }
 
 // applyURLPathRewrites applies URL path rewriting to response body content
