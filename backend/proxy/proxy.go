@@ -2679,9 +2679,6 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, 
 	eventID := uuid.New()
 	// use the event creation below instead of service call
 
-	// mark session as complete
-	session.IsComplete.Store(true)
-
 	clientIP := utils.ExtractClientIP(req)
 
 	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
