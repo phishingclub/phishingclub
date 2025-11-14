@@ -21,8 +21,10 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/andybalholm/brotli"
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
+	"github.com/klauspost/compress/zstd"
 	"github.com/phishingclub/phishingclub/cache"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
@@ -84,6 +86,10 @@ type RequestContext struct {
 	CampaignRecipientID *uuid.UUID
 	ParamName           string
 	PendingResponse     *http.Response
+	UsedImpersonation   bool
+	// cached response body to avoid double reads
+	CachedBody        []byte
+	BodyWasCompressed bool
 	// cached campaign data to avoid repeated queries
 	Campaign          *model.Campaign
 	CampaignTemplate  *model.CampaignTemplate
@@ -219,7 +225,7 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	}
 
 	// prepare request for target server
-	m.prepareRequestForTarget(modifiedReq, client)
+	m.prepareRequestForTarget(modifiedReq, client, reqCtx.UsedImpersonation)
 
 	// execute request
 	targetResp, err := client.Do(modifiedReq)
@@ -718,9 +724,14 @@ func (m *ProxyHandler) patchRequestBodyWithContext(req *http.Request, reqCtx *Re
 	req.ContentLength = int64(len(body))
 }
 
-func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.Client) {
+func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.Client, usedImpersonation bool) {
 	req.RequestURI = ""
-	req.Header.Del("Accept-Encoding")
+	// only delete accept-encoding when NOT using surf impersonation
+	// surf needs proper accept-encoding headers for browser fingerprinting
+	// we handle decompression with brotli/zstd libraries
+	if !usedImpersonation {
+		req.Header.Del("Accept-Encoding")
+	}
 	req.Header.Del(HEADER_JA4)
 
 	// setup cookie jar for redirect handling
@@ -792,11 +803,13 @@ func (m *ProxyHandler) captureResponseDataWithContext(resp *http.Response, reqCt
 
 	contentType := resp.Header.Get("Content-Type")
 	if m.shouldProcessContent(contentType) {
-		body, wasCompressed, err := m.readAndDecompressBody(resp)
+		body, wasCompressed, err := m.readAndDecompressBody(resp, reqCtx.UsedImpersonation)
 		if err == nil {
 			m.onResponseBody(resp, body, reqCtx.Session)
-			// properly restore the body with compression handling
-			m.updateResponseBody(resp, body, wasCompressed)
+			// cache body for rewrite phase to avoid double read
+			reqCtx.CachedBody = body
+			reqCtx.BodyWasCompressed = wasCompressed
+			// note: body will be restored in rewriteResponseBodyWithContext after URL patching
 		}
 	}
 }
@@ -934,11 +947,19 @@ func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCt
 		return
 	}
 
-	defer resp.Body.Close()
-	body, wasCompressed, err := m.readAndDecompressBody(resp)
-	if err != nil {
-		m.logger.Errorw("failed to read and decompress response body", "error", err)
-		return
+	// use cached body from capture phase to avoid double read
+	var body []byte
+	var wasCompressed bool
+	if reqCtx.CachedBody != nil {
+		body = reqCtx.CachedBody
+		wasCompressed = reqCtx.BodyWasCompressed
+	} else {
+		var err error
+		body, wasCompressed, err = m.readAndDecompressBody(resp, reqCtx.UsedImpersonation)
+		if err != nil {
+			m.logger.Errorw("failed to read and decompress response body", "error", err)
+			return
+		}
 	}
 
 	body = m.patchUrls(reqCtx.ConfigMap, body, CONVERT_TO_PHISHING_URLS)
@@ -1063,22 +1084,22 @@ func (m *ProxyHandler) rewriteLocationHeaderWithoutSession(resp *http.Response, 
 	}
 }
 
-func (m *ProxyHandler) rewriteResponseBodyWithoutSessionContext(resp *http.Response, reqCtx *RequestContext, config map[string]service.ProxyServiceDomainConfig) {
+func (m *ProxyHandler) rewriteResponseBodyWithoutSessionContext(resp *http.Response, reqCtx *RequestContext, configMap map[string]service.ProxyServiceDomainConfig) {
 	contentType := resp.Header.Get("Content-Type")
 	if !m.shouldProcessContent(contentType) {
 		return
 	}
 
 	defer resp.Body.Close()
-	body, wasCompressed, err := m.readAndDecompressBody(resp)
+	body, wasCompressed, err := m.readAndDecompressBody(resp, reqCtx.UsedImpersonation)
 	if err != nil {
 		m.logger.Errorw("failed to read and decompress response body", "error", err)
 		return
 	}
 
-	body = m.patchUrls(config, body, CONVERT_TO_PHISHING_URLS)
+	body = m.patchUrls(configMap, body, CONVERT_TO_PHISHING_URLS)
 	body = m.applyURLPathRewritesWithoutSession(body, reqCtx)
-	body = m.applyCustomReplacementsWithoutSession(body, config, reqCtx.TargetDomain)
+	body = m.applyCustomReplacementsWithoutSession(body, configMap, reqCtx.TargetDomain)
 
 	// apply obfuscation if enabled
 	if reqCtx.Campaign != nil && strings.Contains(contentType, "text/html") {
@@ -2168,7 +2189,7 @@ func (m *ProxyHandler) normalizeRequestHeaders(req *http.Request, session *servi
 	}
 }
 
-func (m *ProxyHandler) readAndDecompressBody(resp *http.Response) ([]byte, bool, error) {
+func (m *ProxyHandler) readAndDecompressBody(resp *http.Response, usedImpersonation bool) ([]byte, bool, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, false, err
@@ -2225,9 +2246,58 @@ func (m *ProxyHandler) readAndDecompressBody(resp *http.Response) ([]byte, bool,
 		}
 		return decompressed, true, nil
 	case "br":
-		// brotli not supported yet, return as-is
+		// only decompress br/zstd when using impersonation
+		// non-impersonation path deletes accept-encoding so should never receive these
+		if usedImpersonation {
+			brReader := brotli.NewReader(bytes.NewBuffer(body))
+			decompressed, err := io.ReadAll(brReader)
+			if err != nil {
+				// body is already decompressed - remove header and send uncompressed
+				m.logger.Debugw("brotli decompression failed, body already decompressed - removing content-encoding header",
+					"error", err,
+				)
+				resp.Header.Del("Content-Encoding")
+				return body, false, nil
+			}
+			m.logger.Debugw("successfully decompressed brotli body",
+				"compressedSize", len(body),
+				"decompressedSize", len(decompressed),
+			)
+			return decompressed, true, nil
+		}
+		return body, false, nil
+	case "zstd":
+		// only decompress br/zstd when using impersonation
+		// non-impersonation path deletes accept-encoding so should never receive these
+		if usedImpersonation {
+			zstdReader, err := zstd.NewReader(bytes.NewBuffer(body))
+			if err != nil {
+				// body is already decompressed - remove header and send uncompressed
+				m.logger.Debugw("zstd reader creation failed, body already decompressed - removing content-encoding header",
+					"error", err,
+				)
+				resp.Header.Del("Content-Encoding")
+				return body, false, nil
+			}
+			defer zstdReader.Close()
+			decompressed, err := io.ReadAll(zstdReader)
+			if err != nil {
+				// body is already decompressed - remove header and send uncompressed
+				m.logger.Debugw("zstd decompression failed, body already decompressed - removing content-encoding header",
+					"error", err,
+				)
+				resp.Header.Del("Content-Encoding")
+				return body, false, nil
+			}
+			m.logger.Debugw("successfully decompressed zstd body",
+				"compressedSize", len(body),
+				"decompressedSize", len(decompressed),
+			)
+			return decompressed, true, nil
+		}
 		return body, false, nil
 	default:
+		// no encoding or unknown encoding - return as-is
 		return body, false, nil
 	}
 }
@@ -2279,6 +2349,42 @@ func (m *ProxyHandler) updateResponseBody(resp *http.Response, body []byte, wasC
 				m.logger.Errorw("failed to close deflate writer", "error", err)
 			}
 			body = compressedBuffer.Bytes()
+		case "br":
+			// only recompress br/zstd when using impersonation
+			// non-impersonation path should never have these encodings
+			var compressedBuffer bytes.Buffer
+			brWriter := brotli.NewWriter(&compressedBuffer)
+			if _, err := brWriter.Write(body); err != nil {
+				m.logger.Errorw("failed to write brotli compressed body", "error", err)
+			}
+			if err := brWriter.Close(); err != nil {
+				m.logger.Errorw("failed to close brotli writer", "error", err)
+			}
+			body = compressedBuffer.Bytes()
+			m.logger.Debugw("recompressed body with brotli",
+				"decompressedSize", len(body),
+				"compressedSize", compressedBuffer.Len(),
+			)
+		case "zstd":
+			// only recompress br/zstd when using impersonation
+			// non-impersonation path should never have these encodings
+			var compressedBuffer bytes.Buffer
+			zstdWriter, err := zstd.NewWriter(&compressedBuffer)
+			if err != nil {
+				m.logger.Errorw("failed to create zstd writer", "error", err)
+				break
+			}
+			if _, err := zstdWriter.Write(body); err != nil {
+				m.logger.Errorw("failed to write zstd compressed body", "error", err)
+			}
+			if err := zstdWriter.Close(); err != nil {
+				m.logger.Errorw("failed to close zstd writer", "error", err)
+			}
+			body = compressedBuffer.Bytes()
+			m.logger.Debugw("recompressed body with zstd",
+				"decompressedSize", len(body),
+				"compressedSize", compressedBuffer.Len(),
+			)
 		}
 	}
 

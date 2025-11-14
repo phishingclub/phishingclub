@@ -162,6 +162,7 @@ func (m *ProxyHandler) createHTTPClientWithImpersonation(req *http.Request, reqC
 	}
 
 	if !impersonateEnabled {
+		reqCtx.UsedImpersonation = false
 		return m.createStandardHTTPClient(proxyConfig)
 	}
 
@@ -179,8 +180,10 @@ func (m *ProxyHandler) createHTTPClientWithImpersonation(req *http.Request, reqC
 		m.logger.Warnw("failed to create surf client, falling back to standard client",
 			"error", err,
 		)
+		reqCtx.UsedImpersonation = false
 		return m.createStandardHTTPClient(proxyConfig)
 	}
+	reqCtx.UsedImpersonation = true
 	return client, nil
 }
 
