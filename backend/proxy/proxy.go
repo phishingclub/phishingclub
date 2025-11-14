@@ -1716,18 +1716,24 @@ func (m *ProxyHandler) checkCaptureCompletion(session *service.ProxySession, cap
 		if _, hasData := session.CapturedData.Load(captureName); hasData {
 			session.RequiredCaptures.Store(captureName, true)
 
-			// check if all required captures are complete
-			allComplete := true
-			session.RequiredCaptures.Range(func(key, value interface{}) bool {
-				if !value.(bool) {
-					allComplete = false
-					return false
-				}
-				return true
-			})
+			// update session complete status
+			allComplete := m.areAllRequiredCapturesComplete(session)
 			session.IsComplete.Store(allComplete)
 		}
 	}
+}
+
+// areAllRequiredCapturesComplete checks if all required captures have been completed
+func (m *ProxyHandler) areAllRequiredCapturesComplete(session *service.ProxySession) bool {
+	allComplete := true
+	session.RequiredCaptures.Range(func(key, value interface{}) bool {
+		if !value.(bool) {
+			allComplete = false
+			return false
+		}
+		return true
+	})
+	return allComplete
 }
 
 func (m *ProxyHandler) checkAndSubmitCookieBundleWhenComplete(session *service.ProxySession, req *http.Request) {
@@ -1739,9 +1745,8 @@ func (m *ProxyHandler) checkAndSubmitCookieBundleWhenComplete(session *service.P
 		return
 	}
 
-	// only submit cookie bundle when ALL captures (including non-cookie ones) are complete
-	// this ensures we capture the final state after all authentication attempts
-	if !session.IsComplete.Load() {
+	// only submit cookie bundle when ALL required captures are complete
+	if !m.areAllRequiredCapturesComplete(session) {
 		return
 	}
 
