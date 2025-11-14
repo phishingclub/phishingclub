@@ -1818,6 +1818,33 @@ func (s *Server) renderDenyPage(
 		recipientEmailStr = recipientEmailVal.String()
 	}
 
+	// handle webhook for deny page visit
+	webhookID, err := s.repositories.Campaign.GetWebhookIDByCampaignID(
+		c,
+		&campaignID,
+	)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		s.logger.Errorw("failed to get webhook id by campaign id for deny page",
+			"campaignID", campaignID.String(),
+			"error", err,
+		)
+	}
+	if webhookID != nil {
+		err = s.services.Campaign.HandleWebhook(
+			context.TODO(),
+			webhookID,
+			&campaignID,
+			&recipientID,
+			data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED,
+		)
+		if err != nil {
+			s.logger.Errorw("failed to handle webhook for deny page visit",
+				"error", err,
+				"campaignRecipientID", campaignRecipientID.String(),
+			)
+		}
+	}
+
 	s.logger.Debugw("rendered deny page",
 		"pageName", pageName,
 		"pageID", pageIDStr,
