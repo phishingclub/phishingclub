@@ -2996,6 +2996,7 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 			UserAgent:   vo.NewOptionalString255Must(""),
 			EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT],
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	} else {
 		campaignEvent = &model.CampaignEvent{
@@ -3006,6 +3007,7 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 			UserAgent:   vo.NewOptionalString255Must(""),
 			EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT],
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	}
 
@@ -4260,6 +4262,7 @@ func (c *Campaign) ProcessReportedCSV(
 				UserAgent:   vo.NewEmptyOptionalString255(),
 				EventID:     reportedEventID,
 				Data:        vo.NewEmptyOptionalString1MB(),
+				Metadata:    vo.NewEmptyOptionalString1MB(),
 			}
 		} else {
 			campaignEvent = &model.CampaignEvent{
@@ -4270,6 +4273,7 @@ func (c *Campaign) ProcessReportedCSV(
 				UserAgent:   vo.NewEmptyOptionalString255(),
 				EventID:     reportedEventID,
 				Data:        vo.NewEmptyOptionalString1MB(),
+				Metadata:    vo.NewEmptyOptionalString1MB(),
 			}
 		}
 
