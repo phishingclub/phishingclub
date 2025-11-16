@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.17.0] - 2025-11-16
+- Added option to to add data to webhook events
+- Fix added a couple of webhook calls
+- Fix add global rewrite rules to requests without mitm session
+- Fix bad handling of brotli/gzip with browser empersonation 
+- Fix cookie events captured before all required captures
+- Removed unused sorting column
+
 ## [1.16.0] - 2025-11-12
 - Added synthetic 'email read' event when visiting a lure without having loaded a tracking pixel in a email
 - Added {{.FromName}}, {{.FromEmail}} and {{.Subject}} variable support to API sender
