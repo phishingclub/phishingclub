@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.17.1] - 2025-11-16
+- Fixed missing meta data on a couple of events
+
 ## [1.17.0] - 2025-11-16
 - Added option to to add data to webhook events
 - Fix added a couple of webhook calls
