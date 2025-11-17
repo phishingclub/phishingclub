@@ -516,6 +516,8 @@ export class API {
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
+		 * @param {number} [campaign.jitterMin]
+		 * @param {number} [campaign.jitterMax]
 		 * @returns {Promise<ApiResponse>}
 		 */
 		create: async ({
@@ -541,7 +543,9 @@ export class API {
 			webhookIncludeData,
 			constraintWeekDays,
 			constraintStartTime,
-			constraintEndTime
+			constraintEndTime,
+			jitterMin,
+			jitterMax
 		}) => {
 			return await postJSON(this.getPath('/campaign'), {
 				companyID,
@@ -566,7 +570,9 @@ export class API {
 				webhookIncludeData,
 				constraintWeekDays,
 				constraintStartTime,
-				constraintEndTime
+				constraintEndTime,
+				jitterMin,
+				jitterMax
 			});
 		},
 
@@ -595,6 +601,8 @@ export class API {
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
+		 * @param {number} [campaign.jitterMin]
+		 * @param {number} [campaign.jitterMax]
 		 * @returns {Promise<ApiResponse>}
 		 */
 		update: async ({
@@ -620,7 +628,9 @@ export class API {
 			webhookIncludeData,
 			constraintWeekDays,
 			constraintStartTime,
-			constraintEndTime
+			constraintEndTime,
+			jitterMin,
+			jitterMax
 		}) => {
 			return await postJSON(this.getPath(`/campaign/${id}`), {
 				templateID,
@@ -644,7 +654,9 @@ export class API {
 				webhookIncludeData,
 				constraintWeekDays,
 				constraintStartTime,
-				constraintEndTime
+				constraintEndTime,
+				jitterMin,
+				jitterMax
 			});
 		},
 

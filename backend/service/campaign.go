@@ -167,6 +167,9 @@ func (c *Campaign) Create(
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return nil, errs.Wrap(err)
 	}
+	// preserve jitter values from original campaign (not persisted to db)
+	createdCampaign.JitterMin = campaign.JitterMin
+	createdCampaign.JitterMax = campaign.JitterMax
 	err = c.schedule(ctx, session, createdCampaign)
 	if err != nil {
 		c.Logger.Errorw("failed to schedule campaign", "error", err)
@@ -180,6 +183,49 @@ func (c *Campaign) Create(
 
 // schedule campaign schedules the campaign
 // this is a service method that does not perform auth, use with consideration
+// applyJitter applies random jitter to a time based on jitter min/max in minutes
+// if min is negative of max (symmetric), randomly applies as positive or negative
+// e.g., min=-10, max=10 means randomly offset by 0-10 minutes, then randomly early or late
+// clamps the result to stay within startBound and endBound
+func applyJitter(baseTime time.Time, jitterMin, jitterMax int, startBound, endBound time.Time) time.Time {
+	if jitterMin == 0 && jitterMax == 0 {
+		return baseTime
+	}
+
+	var randomJitter int
+
+	// check if symmetric jitter (min = -max)
+	if jitterMin == -jitterMax {
+		// symmetric: pick random magnitude, then randomly apply as positive or negative
+		magnitude := rand.Intn(jitterMax + 1)
+		if rand.Intn(2) == 0 {
+			randomJitter = -magnitude
+		} else {
+			randomJitter = magnitude
+		}
+	} else {
+		// asymmetric: generate random jitter between min and max
+		jitterRange := jitterMax - jitterMin
+		if jitterRange > 0 {
+			randomJitter = jitterMin + rand.Intn(jitterRange+1)
+		} else {
+			randomJitter = jitterMin
+		}
+	}
+
+	jitteredTime := baseTime.Add(time.Duration(randomJitter) * time.Minute)
+
+	// clamp to campaign bounds
+	if jitteredTime.Before(startBound) {
+		return startBound
+	}
+	if jitteredTime.After(endBound) {
+		return endBound
+	}
+
+	return jitteredTime
+}
+
 func (c *Campaign) schedule(
 	ctx context.Context,
 	session *model.Session,
@@ -329,10 +375,27 @@ func (c *Campaign) schedule(
 		return fmt.Errorf("no recipients to schedule for '%s'", campaign.Name.MustGet())
 	}
 	scheduledEvent := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SCHEDULED]
+
+	// get jitter values if specified
+	jitterMin := 0
+	jitterMax := 0
+	if campaign.JitterMin.IsSpecified() && !campaign.JitterMin.IsNull() {
+		jitterMin = campaign.JitterMin.MustGet()
+	}
+	if campaign.JitterMax.IsSpecified() && !campaign.JitterMax.IsNull() {
+		jitterMax = campaign.JitterMax.MustGet()
+	}
+	c.Logger.Debugw("scheduling campaign with jitter",
+		"campaignName", campaign.Name.MustGet(),
+		"jitterMin", jitterMin,
+		"jitterMax", jitterMax,
+	)
+
 	// handle single recipient
 	if recipientsCount == 1 {
 		recpID := nullable.NewNullableWithValue(recipients[0].ID.MustGet())
 		campaignID := nullable.NewNullableWithValue(campaign.ID.MustGet())
+		startAt = applyJitter(startAt, jitterMin, jitterMax, startAt, endAt)
 		campaignRecipient := &model.CampaignRecipient{
 			RecipientID:    recpID,
 			CampaignID:     campaignID,
@@ -406,6 +469,8 @@ func (c *Campaign) schedule(
 					// get the next recipient
 					recipient := recipients[0]
 					recipients = recipients[1:]
+					// apply jitter to send time
+					currentDayStart = applyJitter(currentDayStart, jitterMin, jitterMax, startAt, endAt)
 					// save
 					campaignRecipient := &model.CampaignRecipient{
 						RecipientID:    recipient.ID,
@@ -451,6 +516,8 @@ func (c *Campaign) schedule(
 			sa := campaignRecipients[i-1].SendAt.MustGet().Add(interval * time.Duration(1))
 			sentAt = sa
 		}
+		// apply jitter to send time
+		sentAt = applyJitter(sentAt, jitterMin, jitterMax, startAt, endAt)
 		// todo perhaps this array is unnecesssary
 		//recpID := recipient.ID.MustGet()
 		//campaignID := campaign.ID.MustGet()
@@ -1411,6 +1478,9 @@ func (c *Campaign) UpdateByID(
 		c.Logger.Errorw("failed to add recipient groups", "error", err)
 		return errs.Wrap(err)
 	}
+	// preserve jitter values from incoming campaign (not persisted to db)
+	current.JitterMin = incoming.JitterMin
+	current.JitterMax = incoming.JitterMax
 	err = c.schedule(ctx, session, current)
 	if err != nil {
 		c.Logger.Errorw("failed to re-schedule campaign", "error", err)

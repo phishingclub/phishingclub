@@ -31,6 +31,10 @@ type Campaign struct {
 	ConstraintStartTime nullable.Nullable[vo.CampaignTimeConstraint] `json:"constraintStartTime"`
 	ConstraintEndTime   nullable.Nullable[vo.CampaignTimeConstraint] `json:"constraintEndTime"`
 
+	// jitter is used only during scheduling, not persisted to database
+	JitterMin nullable.Nullable[int] `json:"jitterMin,omitempty"`
+	JitterMax nullable.Nullable[int] `json:"jitterMax,omitempty"`
+
 	Name nullable.Nullable[vo.String64] `json:"name"`
 
 	SaveSubmittedData   nullable.Nullable[bool]         `json:"saveSubmittedData"`
@@ -163,6 +167,39 @@ func (c *Campaign) Validate() error {
 		if v, err := c.SendStartAt.Get(); err == nil {
 			if anonymizeAt.Before(v) {
 				return validate.WrapErrorWithField(errors.New("anonymize at must be after start date"), "AnonymizeAt")
+			}
+		}
+	}
+	// validate jitter values if specified
+	// negative values are allowed for asymmetric jitter (e.g., -10 to 20 means send 10 min early to 20 min late)
+	if c.JitterMin.IsSpecified() && !c.JitterMin.IsNull() && c.JitterMax.IsSpecified() && !c.JitterMax.IsNull() {
+		jitterMin := c.JitterMin.MustGet()
+		jitterMax := c.JitterMax.MustGet()
+		if jitterMax < jitterMin {
+			return validate.WrapErrorWithField(errors.New("jitter max must be greater than or equal to jitter min"), "jitterMax")
+		}
+		// validate jitter doesn't exceed campaign duration
+		if c.SendStartAt.IsSpecified() && !c.SendStartAt.IsNull() && c.SendEndAt.IsSpecified() && !c.SendEndAt.IsNull() {
+			startAt := c.SendStartAt.MustGet()
+			endAt := c.SendEndAt.MustGet()
+			campaignDuration := endAt.Sub(startAt)
+
+			// check if max jitter (positive) could push beyond end time
+			maxJitterDuration := time.Duration(jitterMax) * time.Minute
+			if maxJitterDuration > campaignDuration {
+				return validate.WrapErrorWithField(
+					errors.New("jitter max cannot exceed campaign duration"),
+					"jitterMax",
+				)
+			}
+
+			// check if min jitter (negative) could push before start time
+			minJitterDuration := time.Duration(jitterMin) * time.Minute
+			if minJitterDuration < -campaignDuration {
+				return validate.WrapErrorWithField(
+					errors.New("jitter min cannot exceed campaign duration"),
+					"jitterMin",
+				)
 			}
 		}
 	}
