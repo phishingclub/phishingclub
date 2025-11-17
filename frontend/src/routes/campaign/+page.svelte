@@ -50,6 +50,7 @@
 	import Datetime from '$lib/components/Datetime.svelte';
 	import RelativeTime from '$lib/components/RelativeTime.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
+	import CheckboxField from '$lib/components/CheckboxField.svelte';
 
 	let currentStep = 1;
 
@@ -270,6 +271,7 @@
 	let isValidatingName = false;
 	let weekDaysAvailable = [];
 	let isDeleteAlertVisible = false;
+	let webhookIncludeDataCheckbox = null;
 
 	$: {
 		modalText = getModalText('campaign', modalMode);
@@ -1602,20 +1604,13 @@
 							</div>
 							{#if formValues.webhookValue}
 								<div class="mb-6">
-									<label class="flex items-center gap-2 cursor-pointer">
-										<input
-											type="checkbox"
-											bind:checked={formValues.webhookIncludeData}
-											class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-gray-600"
-										/>
-										<span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-											Include captured data in webhook
-										</span>
-									</label>
-									<p class="mt-1 ml-6 text-xs text-gray-500 dark:text-gray-400">
-										When enabled, captured data (credentials, cookies, etc.) will be included in the
-										webhook payload
-									</p>
+									<CheckboxField
+										bind:bindTo={webhookIncludeDataCheckbox}
+										bind:value={formValues.webhookIncludeData}
+										toolTipText="When enabled, captured data (credentials, cookies, etc.) will be included in the webhook payload"
+									>
+										Include captured data
+									</CheckboxField>
 								</div>
 							{/if}
 
