@@ -269,8 +269,10 @@ func (r *CampaignRecipient) GetByCampaignRecipientID(
 // GetUnsendRecipients gets all campaign recipients that are not sent
 // and have been attempted or been cancelled
 // if limit is larger than 0 it will limit the number of results
+// if campaignID is not nil, it will filter by that campaign
 func (r *CampaignRecipient) GetUnsendRecipients(
 	ctx context.Context,
+	campaignID *uuid.UUID,
 	limit int,
 	options *CampaignRecipientOption,
 ) ([]*model.CampaignRecipient, error) {
@@ -289,6 +291,12 @@ func (r *CampaignRecipient) GetUnsendRecipients(
 			TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "last_attempt_at"),
 		),
 	)
+	if campaignID != nil {
+		q = q.Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "campaign_id")),
+			campaignID,
+		)
+	}
 	if limit > 0 {
 		q = q.Limit(limit)
 	}

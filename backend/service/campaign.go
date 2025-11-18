@@ -2603,13 +2603,14 @@ func (c *Campaign) closeCampaign(
 	if !isAuthorized {
 		return errs.ErrAuthorizationFailed
 	}
-	// find all recipients that are not sent and cancel them
+	// find all recipients that are not sent and cancel them for this campaign
 	campaignRecipients, err := c.CampaignRecipientRepository.GetUnsendRecipients(
 		ctx,
+		id,
 		repository.NO_LIMIT,
 		&repository.CampaignRecipientOption{},
 	)
-	c.Logger.Debugw("found unsent recipients to cancel", "count", len(campaignRecipients))
+	c.Logger.Debugw("found unsent recipients to cancel for campaign", "count", len(campaignRecipients), "campaignID", id.String())
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		c.Logger.Errorw("failed to get unsent recipients", "error", err)
 		return errs.Wrap(err)
