@@ -1,7 +1,13 @@
 # Changelog
 
+## [1.18.0] - 2025-11-18
+- Added option to add jitter to scheduling 
+- Fix set cancelled only for recipients of campaign
+- Fix missing tabindex and active style for checkboxes
+- Improve range slider for campaign distribution
+
 ## [1.17.1] - 2025-11-16
-- Fixed missing meta data on a couple of events
+- Fixed missing meta data on a couple of eserivents
 
 ## [1.17.0] - 2025-11-16
 - Added option to to add data to webhook events
