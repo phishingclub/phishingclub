@@ -172,7 +172,15 @@ func (c *Campaign) Validate() error {
 	}
 	// validate jitter values if specified
 	// negative values are allowed for asymmetric jitter (e.g., -10 to 20 means send 10 min early to 20 min late)
-	if c.JitterMin.IsSpecified() && !c.JitterMin.IsNull() && c.JitterMax.IsSpecified() && !c.JitterMax.IsNull() {
+	jitterMinSpecified := c.JitterMin.IsSpecified() && !c.JitterMin.IsNull()
+	jitterMaxSpecified := c.JitterMax.IsSpecified() && !c.JitterMax.IsNull()
+
+	// both must be specified together or both unspecified
+	if jitterMinSpecified != jitterMaxSpecified {
+		return validate.WrapErrorWithField(errors.New("jitter min and max must both be specified or both be unspecified"), "jitter")
+	}
+
+	if jitterMinSpecified && jitterMaxSpecified {
 		jitterMin := c.JitterMin.MustGet()
 		jitterMax := c.JitterMax.MustGet()
 		if jitterMax < jitterMin {

@@ -184,8 +184,8 @@ func (c *Campaign) Create(
 // schedule campaign schedules the campaign
 // this is a service method that does not perform auth, use with consideration
 // applyJitter applies random jitter to a time based on jitter min/max in minutes
-// if min is negative of max (symmetric), randomly applies as positive or negative
-// e.g., min=-10, max=10 means randomly offset by 0-10 minutes, then randomly early or late
+// if min is negative of max (symmetric), uses uniform distribution from min to max
+// e.g., min=-10, max=10 means randomly offset anywhere from -10 to +10 minutes
 // clamps the result to stay within startBound and endBound
 func applyJitter(baseTime time.Time, jitterMin, jitterMax int, startBound, endBound time.Time) time.Time {
 	if jitterMin == 0 && jitterMax == 0 {
@@ -196,13 +196,8 @@ func applyJitter(baseTime time.Time, jitterMin, jitterMax int, startBound, endBo
 
 	// check if symmetric jitter (min = -max)
 	if jitterMin == -jitterMax {
-		// symmetric: pick random magnitude, then randomly apply as positive or negative
-		magnitude := rand.Intn(jitterMax + 1)
-		if rand.Intn(2) == 0 {
-			randomJitter = -magnitude
-		} else {
-			randomJitter = magnitude
-		}
+		// symmetric: uniform distribution from -max to +max
+		randomJitter = rand.Intn(2*jitterMax+1) - jitterMax
 	} else {
 		// asymmetric: generate random jitter between min and max
 		jitterRange := jitterMax - jitterMin
@@ -395,11 +390,11 @@ func (c *Campaign) schedule(
 	if recipientsCount == 1 {
 		recpID := nullable.NewNullableWithValue(recipients[0].ID.MustGet())
 		campaignID := nullable.NewNullableWithValue(campaign.ID.MustGet())
-		startAt = applyJitter(startAt, jitterMin, jitterMax, startAt, endAt)
+		jitteredStartAt := applyJitter(startAt, jitterMin, jitterMax, startAt, endAt)
 		campaignRecipient := &model.CampaignRecipient{
 			RecipientID:    recpID,
 			CampaignID:     campaignID,
-			SendAt:         nullable.NewNullableWithValue(startAt),
+			SendAt:         nullable.NewNullableWithValue(jitteredStartAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 		}
 		_, err := c.CampaignRecipientRepository.Insert(ctx, campaignRecipient)
@@ -458,9 +453,10 @@ func (c *Campaign) schedule(
 				// iterate over the hours in the day and jump each interval
 				// if over the end time, break and skip to next day, saving the surplus of interval minutes
 				// to be added to next send
-				currentDayStart := currentDate.Truncate(24 * time.Hour).Add(dayStartTime.Minutes())
-				currentDayEnd := currentDate.Truncate(24 * time.Hour).Add(dayEndTime.Minutes())
-				for currentDayStart.Before(currentDayEnd) || currentDayStart.Equal(currentDayEnd) {
+				dayConstraintStart := currentDate.Truncate(24 * time.Hour).Add(dayStartTime.Minutes())
+				dayConstraintEnd := currentDate.Truncate(24 * time.Hour).Add(dayEndTime.Minutes())
+				currentDayStart := dayConstraintStart
+				for currentDayStart.Before(dayConstraintEnd) || currentDayStart.Equal(dayConstraintEnd) {
 					c.Logger.Debugw("scheduling date at", "currentDayStart", currentDayStart)
 					// check if we have any recipients left
 					if len(recipients) == 0 {
@@ -469,13 +465,13 @@ func (c *Campaign) schedule(
 					// get the next recipient
 					recipient := recipients[0]
 					recipients = recipients[1:]
-					// apply jitter to send time
-					currentDayStart = applyJitter(currentDayStart, jitterMin, jitterMax, startAt, endAt)
+					// apply jitter to send time, clamped to daily constraint bounds
+					jitteredTime := applyJitter(currentDayStart, jitterMin, jitterMax, dayConstraintStart, dayConstraintEnd)
 					// save
 					campaignRecipient := &model.CampaignRecipient{
 						RecipientID:    recipient.ID,
 						CampaignID:     campaign.ID,
-						SendAt:         nullable.NewNullableWithValue(currentDayStart),
+						SendAt:         nullable.NewNullableWithValue(jitteredTime),
 						NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 					}
 					_, err := c.CampaignRecipientRepository.Insert(ctx, campaignRecipient)
@@ -511,20 +507,17 @@ func (c *Campaign) schedule(
 	// TODO make this work in minutes
 	interval := time.Duration(campaignDuration.Nanoseconds() / int64(recipientsCount-1))
 	for i, recipient := range recipients {
-		sentAt := startAt
-		if i > 0 {
-			sa := campaignRecipients[i-1].SendAt.MustGet().Add(interval * time.Duration(1))
-			sentAt = sa
-		}
+		// calculate base time from original schedule, not previous jittered time
+		baseTime := startAt.Add(time.Duration(i) * interval)
 		// apply jitter to send time
-		sentAt = applyJitter(sentAt, jitterMin, jitterMax, startAt, endAt)
+		jitteredSentAt := applyJitter(baseTime, jitterMin, jitterMax, startAt, endAt)
 		// todo perhaps this array is unnecesssary
 		//recpID := recipient.ID.MustGet()
 		//campaignID := campaign.ID.MustGet()
 		campaignRecipients[i] = &model.CampaignRecipient{
 			RecipientID:    recipient.ID,
 			CampaignID:     campaign.ID,
-			SendAt:         nullable.NewNullableWithValue(sentAt),
+			SendAt:         nullable.NewNullableWithValue(jitteredSentAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 		}
 		// save

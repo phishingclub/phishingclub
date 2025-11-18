@@ -20,16 +20,26 @@
 	];
 
 	let selectedIndex = 0; // default to "no jitter"
+	let initialized = false;
 
-	// update values when index changes - symmetric jitter
-	$: {
-		const jitter = jitterOptions[selectedIndex].value;
-		valueMin = -jitter;
-		valueMax = jitter;
+	// initialize from incoming values when component first loads
+	// this runs once on mount to detect existing jitter values
+	$: if (!initialized && valueMax > 0 && valueMin === -valueMax) {
+		const index = jitterOptions.findIndex((opt) => opt.value === valueMax);
+		if (index >= 0) {
+			selectedIndex = index;
+			initialized = true;
+		}
 	}
 
 	function handleInput(event) {
 		selectedIndex = parseInt(event.currentTarget.value);
+		const jitter = jitterOptions[selectedIndex].value;
+		valueMin = -jitter;
+		valueMax = jitter;
+		if (!initialized) {
+			initialized = true;
+		}
 	}
 </script>
 
