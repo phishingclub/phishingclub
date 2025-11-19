@@ -19,6 +19,7 @@
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import Header from '$lib/components/header/Header.svelte';
 	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
+	import GameLauncher from '$lib/components/games/GameLauncher.svelte';
 	// Removed feature flags import - no longer needed
 
 	// services
@@ -239,6 +240,7 @@
 	<DeveloperPanel />
 	<Loader />
 	<Toast />
+	<GameLauncher />
 	<ChangeCompanyModal bind:visible={isChangeCompanyModalVisible} />
 	<CommandPalette bind:visible={isCommandPaletteVisible} {toggleChangeCompanyModal} />
 	<!-- VIEW -->
