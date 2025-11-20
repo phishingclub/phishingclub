@@ -25,6 +25,10 @@ type APISender struct {
 	CustomField3 string
 	CustomField4 string
 
+	// oauth provider for token-based authentication
+	OAuthProviderID *uuid.UUID     `gorm:"type:uuid;index;"`
+	OAuthProvider   *OAuthProvider `gorm:"foreignKey:OAuthProviderID"`
+
 	// Request fields
 	RequestMethod  string
 	RequestURL     string
@@ -38,6 +42,13 @@ type APISender struct {
 }
 
 func (e *APISender) Migrate(db *gorm.DB) error {
+	// add o_auth_provider_id column if it doesn't exist
+	if !db.Migrator().HasColumn(&APISender{}, "o_auth_provider_id") {
+		if err := db.Migrator().AddColumn(&APISender{}, "OAuthProviderID"); err != nil {
+			return err
+		}
+	}
+
 	// SQLITE
 	// ensure name + null company id is unique
 	return UniqueIndexNameAndNullCompanyID(db, "api_senders")

@@ -266,6 +266,7 @@ func main() {
 		atomicLogger,
 		utils,
 		db,
+		conf,
 	)
 	// setup admin account
 	isInstalled, err := controllers.InitialSetup.IsInstalled(context.Background())

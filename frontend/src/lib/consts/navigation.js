@@ -81,6 +81,10 @@ export const route = {
 		label: 'API Senders',
 		route: '/api-sender/'
 	},
+	oauthProviders: {
+		label: 'OAuth',
+		route: '/oauth-provider/'
+	},
 	allowDeny: {
 		label: 'Filters',
 		route: '/filter/'
@@ -122,7 +126,13 @@ export const menu = [
 	{
 		label: 'Emails',
 		type: 'submenu',
-		items: [route.emails, route.attachments, route.smtpConfigurations, route.apiSenders]
+		items: [
+			route.emails,
+			route.attachments,
+			route.smtpConfigurations,
+			route.apiSenders,
+			route.oauthProviders
+		]
 	}
 ];
 

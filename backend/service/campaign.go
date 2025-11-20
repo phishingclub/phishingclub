@@ -1692,6 +1692,7 @@ func (c *Campaign) sendCampaignMessages(
 		&repository.CampaignTemplateOption{
 			WithDomain:             true,
 			WithSMTPConfiguration:  true,
+			WithAPISender:          true,
 			WithIdentifier:         true,
 			WithBeforeLandingProxy: true,
 			WithLandingProxy:       true,
@@ -3368,6 +3369,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 		&repository.CampaignTemplateOption{
 			WithDomain:             true,
 			WithSMTPConfiguration:  true,
+			WithAPISender:          true,
 			WithIdentifier:         true,
 			WithBeforeLandingProxy: true,
 			WithLandingProxy:       true,

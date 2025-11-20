@@ -117,8 +117,8 @@
 				refreshApiSenders(),
 				refreshPages(),
 				refreshProxies(),
-				getCampaignTemplates(),
-				refreshIdentifiers()
+				refreshIdentifiers(),
+				getCampaignTemplates()
 			]);
 			tableURLParams.onChange(refreshCampaignTemplates);
 			const editID = $page.url.searchParams.get('edit');
@@ -395,7 +395,7 @@
 
 	const closeModal = () => {
 		isModalVisible = false;
-		form.reset();
+		form?.reset();
 		formValues = {
 			id: null,
 			templateType: 'Email',
@@ -413,8 +413,6 @@
 			stateIdentifier: 'session',
 			urlPath: ''
 		};
-		modalError = '';
-		showAdvancedOptions = false;
 	};
 
 	/** @param {string} id */
@@ -463,7 +461,7 @@
 		if (template.smtpConfigurationID) {
 			formValues.templateType = 'Email';
 		} else {
-			formValues.templateType = 'API Sender';
+			formValues.templateType = 'External API';
 		}
 		formValues.domain = domainMap.byKey(template.domainID);
 		formValues.email = emailMap.byKey(template.emailID);

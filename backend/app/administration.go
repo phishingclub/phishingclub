@@ -188,6 +188,12 @@ const (
 	ROUTE_V1_WEBHOOK_ID_TEST = "/api/v1/webhook/:id/test"
 	// identifiers
 	ROUTE_V1_IDENTIFIER = "/api/v1/identifier"
+	// oauth providers
+	ROUTE_V1_OAUTH_PROVIDER             = "/api/v1/oauth-provider"
+	ROUTE_V1_OAUTH_PROVIDER_ID          = "/api/v1/oauth-provider/:id"
+	ROUTE_V1_OAUTH_PROVIDER_REMOVE_AUTH = "/api/v1/oauth-provider/:id/remove-authorization"
+	ROUTE_V1_OAUTH_AUTHORIZE            = "/api/v1/oauth-authorize/:id"
+	ROUTE_V1_OAUTH_CALLBACK             = "/api/v1/oauth-callback"
 	// license
 	ROUTE_V1_LICENSE = "/api/v1/license"
 	// version
@@ -362,6 +368,15 @@ func setupRoutes(
 		// smtp configuration headers
 		PATCH(ROUTE_V1_SMTP_CONFIGURATION_HEADERS, middleware.SessionHandler, controllers.SMTPConfiguration.AddHeader).
 		DELETE(ROUTE_V1_SMTP_HEADER_ID, middleware.SessionHandler, controllers.SMTPConfiguration.RemoveHeader).
+		// oauth providers
+		GET(ROUTE_V1_OAUTH_PROVIDER, middleware.SessionHandler, controllers.OAuthProvider.GetAll).
+		GET(ROUTE_V1_OAUTH_PROVIDER_ID, middleware.SessionHandler, controllers.OAuthProvider.GetByID).
+		POST(ROUTE_V1_OAUTH_PROVIDER, middleware.SessionHandler, controllers.OAuthProvider.Create).
+		PATCH(ROUTE_V1_OAUTH_PROVIDER_ID, middleware.SessionHandler, controllers.OAuthProvider.UpdateByID).
+		DELETE(ROUTE_V1_OAUTH_PROVIDER_ID, middleware.SessionHandler, controllers.OAuthProvider.DeleteByID).
+		POST(ROUTE_V1_OAUTH_PROVIDER_REMOVE_AUTH, middleware.SessionHandler, controllers.OAuthProvider.RemoveAuthorization).
+		GET(ROUTE_V1_OAUTH_AUTHORIZE, middleware.SessionHandler, controllers.OAuthProvider.GetAuthorizationURL).
+		GET(ROUTE_V1_OAUTH_CALLBACK, controllers.OAuthProvider.HandleCallback).
 		// emails
 		GET(ROUTE_V1_EMAIL, middleware.SessionHandler, controllers.Email.GetAll).
 		GET(ROUTE_V1_EMAIL_OVERVIEW, middleware.SessionHandler, controllers.Email.GetOverviews).

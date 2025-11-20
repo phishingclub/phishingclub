@@ -1816,6 +1816,99 @@ export class API {
 	};
 
 	/**
+	 * oauthProvider is the API for OAuth Provider related operations.
+	 */
+	oauthProvider = {
+		/**
+		 * Get all OAuth Providers using pagination.
+		 *
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAll: async (options, companyID) => {
+			return await getJSON(
+				this.getPath(`/oauth-provider?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`)
+			);
+		},
+
+		/**
+		 * Get an OAuth Provider by its ID.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getByID: async (id) => {
+			return await getJSON(this.getPath(`/oauth-provider/${id}`));
+		},
+
+		/**
+		 * Create a new OAuth Provider.
+		 *
+		 * @param {Object} provider
+		 * @param {string} provider.name
+		 * @param {string} provider.clientID
+		 * @param {string} provider.clientSecret
+		 * @param {string} provider.authURL
+		 * @param {string} provider.tokenURL
+		 * @param {string} provider.scopes
+		 * @param {string} provider.companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		create: async (provider) => {
+			return await postJSON(this.getPath('/oauth-provider'), provider);
+		},
+
+		/**
+		 * Update an OAuth Provider.
+		 *
+		 * @param {Object} provider
+		 * @param {string} provider.id
+		 * @param {string} provider.name
+		 * @param {string} provider.clientID
+		 * @param {string} provider.clientSecret
+		 * @param {string} provider.authURL
+		 * @param {string} provider.tokenURL
+		 * @param {string} provider.scopes
+		 * @param {string} provider.companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		update: async (provider) => {
+			return await patchJSON(this.getPath(`/oauth-provider/${provider.id}`), provider);
+		},
+
+		/**
+		 * Delete an OAuth Provider.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		delete: async (id) => {
+			return await deleteJSON(this.getPath(`/oauth-provider/${id}`));
+		},
+
+		/**
+		 * Get the authorization URL for an OAuth Provider.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAuthorizationURL: async (id) => {
+			return await getJSON(this.getPath(`/oauth-authorize/${id}`));
+		},
+
+		/**
+		 * Remove authorization tokens from an OAuth Provider.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		removeAuthorization: async (id) => {
+			return await postJSON(this.getPath(`/oauth-provider/${id}/remove-authorization`), {});
+		}
+	};
+
+	/**
 	 * user is the API for user related operations - these actions also affect the user's sessions
 	 */
 	user = {
@@ -2501,6 +2594,7 @@ export class API {
 		 * @param {string} sender.customField2
 		 * @param {string} sender.customField3
 		 * @param {string} sender.customField4
+		 * @param {string} sender.oauthProviderID
 		 * @param {string} sender.requestMethod
 		 * @param {string} sender.requestURL
 		 * @param {APISenderHeader[]} sender.requestHeaders
@@ -2518,6 +2612,7 @@ export class API {
 			customField2,
 			customField3,
 			customField4,
+			oauthProviderID,
 			requestMethod,
 			requestURL,
 			requestHeaders,
@@ -2539,6 +2634,7 @@ export class API {
 				customField2: customField2,
 				customField3: customField3,
 				customField4: customField4,
+				oauthProviderID: oauthProviderID,
 				requestMethod: requestMethod,
 				requestURL: requestURL,
 				requestHeaders: requestHeaders,
@@ -2561,6 +2657,7 @@ export class API {
 		 * @param {string} sender.customField2
 		 * @param {string} sender.customField3
 		 * @param {string} sender.customField4
+		 * @param {string} sender.oauthProviderID
 		 * @param {string} sender.requestMethod
 		 * @param {string} sender.requestURL
 		 * @param {APISenderHeader[]} sender.requestHeaders
@@ -2578,6 +2675,7 @@ export class API {
 			customField2,
 			customField3,
 			customField4,
+			oauthProviderID,
 			requestMethod,
 			requestURL,
 			requestHeaders,
@@ -2602,6 +2700,7 @@ export class API {
 				customField2: customField2,
 				customField3: customField3,
 				customField4: customField4,
+				oauthProviderID: oauthProviderID,
 				requestMethod: requestMethod,
 				requestURL: requestURL,
 				requestHeaders: requestHeaders,

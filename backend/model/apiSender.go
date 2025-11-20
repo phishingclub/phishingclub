@@ -26,6 +26,8 @@ type APISender struct {
 	CustomField2               nullable.Nullable[vo.OptionalString255] `json:"customField2"`
 	CustomField3               nullable.Nullable[vo.OptionalString255] `json:"customField3"`
 	CustomField4               nullable.Nullable[vo.OptionalString255] `json:"customField4"`
+	OAuthProviderID            nullable.Nullable[uuid.UUID]            `json:"oauthProviderID"`
+	OAuthProvider              *OAuthProvider                          `json:"oauthProvider"`
 	RequestMethod              nullable.Nullable[vo.HTTPMethod]        `json:"requestMethod"`
 	RequestURL                 nullable.Nullable[vo.String255]         `json:"requestURL"`
 	RequestHeaders             nullable.Nullable[APISenderHeaders]     `json:"requestHeaders"`
@@ -147,6 +149,13 @@ func (a *APISender) ToDBMap() map[string]interface{} {
 		m["expected_response_body"] = nil
 		if expectedResponseBody, err := a.ExpectedResponseBody.Get(); err == nil {
 			m["expected_response_body"] = expectedResponseBody.String()
+		}
+	}
+	if a.OAuthProviderID.IsSpecified() {
+		if a.OAuthProviderID.IsNull() {
+			m["o_auth_provider_id"] = nil
+		} else {
+			m["o_auth_provider_id"] = a.OAuthProviderID.MustGet()
 		}
 	}
 	return m
