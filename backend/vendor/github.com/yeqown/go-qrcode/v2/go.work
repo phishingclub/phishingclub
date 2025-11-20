@@ -1,0 +1,12 @@
+go 1.19
+
+use (
+	.
+	./.issues
+	./writer/compressed
+	./writer/standard
+	./writer/terminal
+	./cmd/qrcode
+	./cmd/wasm
+	example
+)
