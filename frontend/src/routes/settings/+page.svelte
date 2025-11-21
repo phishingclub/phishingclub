@@ -22,6 +22,7 @@
 	import { addToast } from '$lib/store/toast';
 	import { onMount } from 'svelte';
 	import { onClickCopy } from '$lib/utils/common';
+	import { displayMode, DISPLAY_MODE } from '$lib/store/displayMode';
 
 	const logLevels = ['debug', 'info', 'warn', 'error'];
 	const dbLogLevels = ['silent', 'info', 'warn', 'error'];
@@ -67,6 +68,10 @@
 	let isImportResultModalVisible = false;
 	let importModalContent = null;
 
+	// display mode settings
+	let currentDisplayMode = DISPLAY_MODE.WHITEBOX;
+	let displayModeError = '';
+
 	// Company context for import
 	const appState = AppStateService.instance;
 	let isCompanyContext = false;
@@ -94,6 +99,7 @@
 			await refreshVersion();
 			await refreshUpdateCached();
 			await refreshBackupList();
+			await refreshDisplayMode();
 			if (!ssoSettingsFormValues.redirectURL) {
 				ssoSettingsFormValues.redirectURL = `${location.origin}/api/v1/sso/entra-id/auth`;
 			}
@@ -206,6 +212,38 @@
 			isSSOEnabled = sso.enabled;
 		} catch (e) {
 			console.error('failed to get SSO configuration', e);
+		}
+	}
+
+	async function refreshDisplayMode() {
+		try {
+			const res = immediateResponseHandler(await api.option.get('display_mode'));
+			if (res.success && res.data.value) {
+				currentDisplayMode = res.data.value;
+				displayMode.setMode(res.data.value);
+			}
+		} catch (e) {
+			console.error('failed to refresh display mode', e);
+		}
+	}
+
+	async function setDisplayMode(mode) {
+		try {
+			showIsLoading();
+			const res = await api.option.set('display_mode', mode);
+			if (res.success) {
+				currentDisplayMode = mode;
+				displayMode.setMode(mode);
+				addToast('Display mode updated successfully', 'Success');
+				displayModeError = '';
+			} else {
+				displayModeError = res.error || 'Failed to update display mode';
+			}
+		} catch (e) {
+			console.error('failed to set display mode', e);
+			displayModeError = 'Failed to update display mode';
+		} finally {
+			hideIsLoading();
 		}
 	}
 
@@ -592,6 +630,75 @@
 						</div>
 					</div>
 				</div>
+				<!-- Display Mode Card -->
+				<div
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
+				>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Display Mode
+					</h2>
+					<div class="flex flex-col h-full">
+						<div class="space-y-4">
+							<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+								Select which features are available
+							</p>
+							<div class="space-y-3">
+								<label
+									class="flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors {currentDisplayMode ===
+									DISPLAY_MODE.WHITEBOX
+										? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+										: 'border-gray-300 dark:border-gray-600'}"
+								>
+									<input
+										type="radio"
+										checked={currentDisplayMode === DISPLAY_MODE.WHITEBOX}
+										on:change={() => setDisplayMode(DISPLAY_MODE.WHITEBOX)}
+										class="mt-0.5 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+									/>
+									<div class="text-left flex-1">
+										<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
+											Whitebox Mode
+										</span>
+										<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
+											For Phishing Simulation
+										</span>
+									</div>
+								</label>
+								<label
+									class="flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors {currentDisplayMode ===
+									DISPLAY_MODE.BLACKBOX
+										? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+										: 'border-gray-300 dark:border-gray-600'}"
+								>
+									<input
+										type="radio"
+										checked={currentDisplayMode === DISPLAY_MODE.BLACKBOX}
+										on:change={() => setDisplayMode(DISPLAY_MODE.BLACKBOX)}
+										class="mt-0.5 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+									/>
+									<div class="text-left flex-1">
+										<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
+											Blackbox Mode
+										</span>
+										<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
+											For Red Teaming
+										</span>
+									</div>
+								</label>
+								<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+									Read about the difference between <a
+										class="white underline"
+										href="https://phishing.club/blog/white-box-vs-black-box-phishing/"
+										target="_blank">whitebox and blackbox phishing</a
+									>
+								</p>
+							</div>
+							<FormError message={displayModeError} />
+						</div>
+					</div>
+				</div>
 
 				<!-- Backup Section -->
 				<div
@@ -919,7 +1026,6 @@
 			</div>
 		</div>
 	{/if}
-
 	{#if isSSOModalVisible}
 		<Modal bind:visible={isSSOModalVisible} headerText="SSO configuration" onClose={closeSSOModal}>
 			<div class="mt-4">

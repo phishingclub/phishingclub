@@ -25,4 +25,8 @@ const (
 	OptionKeyAdminSSOLogin = "sso_login"
 
 	OptionKeyProxyCookieName = "proxy_cookie_name"
+
+	OptionKeyDisplayMode           = "display_mode"
+	OptionValueDisplayModeWhitebox = "whitebox"
+	OptionValueDisplayModeBlackbox = "blackbox"
 )

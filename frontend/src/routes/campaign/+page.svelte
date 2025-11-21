@@ -52,6 +52,7 @@
 	import RelativeTime from '$lib/components/RelativeTime.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
+	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 
 	let currentStep = 1;
 
@@ -1637,15 +1638,17 @@
 							/>
 						</div>
 
-						<div class="mb-6">
-							<SelectSquare
-								optional
-								toolTipText="Saves JA4 fingerprint, Sec-CH-UA-Platform header, and Accept-Language header."
-								label="Save browser metadata?"
-								options={saveSubbmitedDataOptions}
-								bind:value={formValues.saveBrowserMetadata}
-							/>
-						</div>
+						<ConditionalDisplay show="blackbox">
+							<div class="mb-6">
+								<SelectSquare
+									optional
+									toolTipText="Saves JA4 fingerprint, Sec-CH-UA-Platform header, and Accept-Language header."
+									label="Save browser metadata?"
+									options={saveSubbmitedDataOptions}
+									bind:value={formValues.saveBrowserMetadata}
+								/>
+							</div>
+						</ConditionalDisplay>
 
 						{#if !showAdvancedOptionsStep4}
 							<div class="mt-4">
@@ -1680,25 +1683,27 @@
 								</div>
 							{/if}
 
-							<div class="mb-6">
-								<SelectSquare
-									optional
-									label="Security Configuration"
-									options={[
-										{ value: false, label: 'Disabled' },
-										{ value: true, label: 'Enabled' }
-									]}
-									bind:value={showSecurityOptions}
-									onChange={() => {
-										if (!showSecurityOptions) {
-											formValues.denyPageValue = '';
-											formValues.evasionPageValue = '';
-											allowDenyType = 'none';
-											formValues.allowDeny = [];
-										}
-									}}
-								/>
-							</div>
+							<ConditionalDisplay show="blackbox">
+								<div class="mb-6">
+									<SelectSquare
+										optional
+										label="Security Configuration"
+										options={[
+											{ value: false, label: 'Disabled' },
+											{ value: true, label: 'Enabled' }
+										]}
+										bind:value={showSecurityOptions}
+										onChange={() => {
+											if (!showSecurityOptions) {
+												formValues.denyPageValue = '';
+												formValues.evasionPageValue = '';
+												allowDenyType = 'none';
+												formValues.allowDeny = [];
+											}
+										}}
+									/>
+								</div>
+							</ConditionalDisplay>
 						{/if}
 
 						{#if showAdvancedOptionsStep4 && showSecurityOptions}
@@ -2017,27 +2022,31 @@
 										Security & Privacy
 									</h3>
 									<div class="grid grid-cols-[120px_1fr] gap-y-3">
-										<span class="text-grayblue-dark font-medium">IP Filtering:</span>
-										<span class="text-pc-darkblue dark:text-white">
-											{#if allowDenyType === 'none'}
-												None
-											{:else}
-												{allowDenyType === 'allow' ? 'Allow-list' : 'Deny-list'}:
-												{formValues.allowDeny.length
-													? formValues.allowDeny.join(', ')
-													: 'No groups selected'}
-											{/if}
-										</span>
+										<ConditionalDisplay show="blackbox">
+											<span class="text-grayblue-dark font-medium">IP Filtering:</span>
+											<span class="text-pc-darkblue dark:text-white">
+												{#if allowDenyType === 'none'}
+													None
+												{:else}
+													{allowDenyType === 'allow' ? 'Allow-list' : 'Deny-list'}:
+													{formValues.allowDeny.length
+														? formValues.allowDeny.join(', ')
+														: 'No groups selected'}
+												{/if}
+											</span>
+										</ConditionalDisplay>
 
 										<span class="text-grayblue-dark font-medium">Save Data:</span>
 										<span class="text-pc-darkblue dark:text-white"
 											>{formValues.saveSubmittedData ? 'Enabled' : 'Disabled'}</span
 										>
 
-										<span class="text-grayblue-dark font-medium">Save Metadata:</span>
-										<span class="text-pc-darkblue dark:text-white"
-											>{formValues.saveBrowserMetadata ? 'Enabled' : 'Disabled'}</span
-										>
+										<ConditionalDisplay show="blackbox">
+											<span class="text-grayblue-dark font-medium">Save Metadata:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.saveBrowserMetadata ? 'Enabled' : 'Disabled'}</span
+											>
+										</ConditionalDisplay>
 
 										<!--
 										<span class="text-grayblue-dark font-medium">Anonymization:</span>

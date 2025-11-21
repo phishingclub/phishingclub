@@ -24,7 +24,7 @@
 	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
 	import Datetime from '$lib/components/Datetime.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
-	import { debounceTyping, onClickCopy } from '$lib/utils/common';
+	import { debounceTyping } from '$lib/utils/common';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import { toEvent } from '$lib/utils/events';
 	import Modal from '$lib/components/Modal.svelte';
@@ -43,6 +43,7 @@
 	import { goto } from '$app/navigation';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form';
 	import FileField from '$lib/components/FileField.svelte';
+	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -1253,45 +1254,51 @@
 							>{isSelfManaged ? 'Self Managed' : 'Scheduled'}</span
 						>
 
-						<span class="text-grayblue-dark font-medium">
-							{campaign?.allowDeny ? (allowedFilter ? 'Allow' : 'Deny') : ''}
-							IP Filters:
-						</span>
-						<span class="text-pc-darkblue dark:text-white">
-							{#if campaign.allowDeny?.length}
-								{#each campaign.allowDeny as allowDeny, i}
-									<a
-										href="/filter/?edit={allowDeny.id}"
-										class="text-cta-blue dark:text-white hover:underline"
-										target="_blank"
-									>
-										{allowDeny.name}
-									</a>
-									{#if i < campaign.allowDeny.length - 1},
-									{/if}
-								{/each}
-							{:else}
-								None
-							{/if}
-						</span>
+						<ConditionalDisplay show="blackbox">
+							<span class="text-grayblue-dark font-medium">
+								{campaign?.allowDeny ? (allowedFilter ? 'Allow' : 'Deny') : ''}
+								IP Filters:
+							</span>
+							<span class="text-pc-darkblue dark:text-white">
+								{#if campaign.allowDeny?.length}
+									{#each campaign.allowDeny as allowDeny, i}
+										<a
+											href="/filter/?edit={allowDeny.id}"
+											class="text-cta-blue dark:text-white hover:underline"
+											target="_blank"
+										>
+											{allowDeny.name}
+										</a>
+										{#if i < campaign.allowDeny.length - 1},
+										{/if}
+									{/each}
+								{:else}
+									None
+								{/if}
+							</span>
+						</ConditionalDisplay>
 
-						<span class="text-grayblue-dark font-medium">Deny Page:</span>
-						<span class="text-pc-darkblue dark:text-white">
-							{#if campaign.denyPage}
-								{campaign.denyPage.name}
-							{:else}
-								None
-							{/if}
-						</span>
+						<ConditionalDisplay show="blackbox">
+							<span class="text-grayblue-dark font-medium">Deny Page:</span>
+							<span class="text-pc-darkblue dark:text-white">
+								{#if campaign.denyPage}
+									{campaign.denyPage.name}
+								{:else}
+									None
+								{/if}
+							</span>
+						</ConditionalDisplay>
 
-						<span class="text-grayblue-dark font-medium">Evasion Page:</span>
-						<span class="text-pc-darkblue dark:text-white">
-							{#if campaign.evasionPage}
-								{campaign.evasionPage.name}
-							{:else}
-								None
-							{/if}
-						</span>
+						<ConditionalDisplay show="blackbox">
+							<span class="text-grayblue-dark font-medium">Evasion Page:</span>
+							<span class="text-pc-darkblue dark:text-white">
+								{#if campaign.evasionPage}
+									{campaign.evasionPage.name}
+								{:else}
+									None
+								{/if}
+							</span>
+						</ConditionalDisplay>
 
 						<span class="text-grayblue-dark font-medium">Webhook:</span>
 						<span class="text-pc-darkblue dark:text-white">
@@ -1307,10 +1314,12 @@
 							{campaign.saveSubmittedData ? 'Enabled' : 'Disabled'}
 						</span>
 
-						<span class="text-grayblue-dark font-medium">Metadata:</span>
-						<span class="text-pc-darkblue dark:text-white">
-							{campaign.saveBrowserMetadata ? 'Enabled' : 'Disabled'}
-						</span>
+						<ConditionalDisplay show="blackbox">
+							<span class="text-grayblue-dark font-medium">Metadata:</span>
+							<span class="text-pc-darkblue dark:text-white">
+								{campaign.saveBrowserMetadata ? 'Enabled' : 'Disabled'}
+							</span>
+						</ConditionalDisplay>
 
 						<span class="text-grayblue-dark font-medium">Test:</span>
 						<span class="text-pc-darkblue dark:text-white">{campaign.isTest ? 'Yes' : 'No'}</span>

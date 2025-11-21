@@ -9,7 +9,8 @@ export const route = {
 	},
 	tools: {
 		label: 'Tools',
-		route: '/tools/'
+		route: '/tools/',
+		blackbox: true
 	},
 	sessions: {
 		label: 'Sessions',
@@ -62,7 +63,8 @@ export const route = {
 	},
 	proxy: {
 		label: 'Proxies',
-		route: '/proxy/'
+		route: '/proxy/',
+		blackbox: true
 	},
 	campaignTemplates: {
 		label: 'Templates',
@@ -83,11 +85,13 @@ export const route = {
 	},
 	oauthProviders: {
 		label: 'OAuth',
-		route: '/oauth-provider/'
+		route: '/oauth-provider/',
+		blackbox: true
 	},
 	allowDeny: {
 		label: 'Filters',
-		route: '/filter/'
+		route: '/filter/',
+		blackbox: true
 	},
 	webhook: {
 		label: 'Webhooks',

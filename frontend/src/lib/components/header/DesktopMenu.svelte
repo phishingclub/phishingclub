@@ -26,6 +26,7 @@
 
 	const appState = AppStateService.instance;
 	import { createEventDispatcher } from 'svelte';
+	import ConditionalDisplay from '../ConditionalDisplay.svelte';
 	const dispatch = createEventDispatcher();
 
 	onMount(() => {
@@ -284,39 +285,41 @@
 
 						<div>
 							{#each link.items as item, i (i)}
-								<a
-									class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
+								<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
+									<a
+										class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
                                         {$page.url.pathname === item.route
-										? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
-										: 'text-blue-100 dark:text-gray-200 hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-gray-100'}"
-									class:hidden={shouldHideMenuItem(item.route)}
-									draggable="false"
-									href={item.route}
-									title={item.label}
-								>
-									<!-- Icon -->
-									<div class="flex-shrink-0 text-blue-100 dark:text-highlight-blue">
-										{@html getIconForRoute(item.route)}
-									</div>
+											? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
+											: 'text-blue-100 dark:text-gray-200 hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-gray-100'}"
+										class:hidden={shouldHideMenuItem(item.route)}
+										draggable="false"
+										href={item.route}
+										title={item.label}
+									>
+										<!-- Icon -->
+										<div class="flex-shrink-0 text-blue-100 dark:text-highlight-blue">
+											{@html getIconForRoute(item.route)}
+										</div>
 
-									{#if isExpanded}
-										<span class="ml-3 truncate">
-											{#if i === 0}
-												Overview
-											{:else if item.singleLabel}
-												{item.singleLabel}
-											{:else}
-												{item.label}
-											{/if}
-										</span>
-									{/if}
+										{#if isExpanded}
+											<span class="ml-3 truncate">
+												{#if i === 0}
+													Overview
+												{:else if item.singleLabel}
+													{item.singleLabel}
+												{:else}
+													{item.label}
+												{/if}
+											</span>
+										{/if}
 
-									{#if $page.url.pathname === item.route}
-										<div
-											class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-highlight-blue"
-										></div>
-									{/if}
-								</a>
+										{#if $page.url.pathname === item.route}
+											<div
+												class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-highlight-blue"
+											></div>
+										{/if}
+									</a>
+								</ConditionalDisplay>
 							{/each}
 						</div>
 					</div>

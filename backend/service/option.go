@@ -156,6 +156,20 @@ func (o *Option) SetOptionByKey(
 		fallthrough
 	case data.OptionKeyAdminSSOLogin:
 		// is allow listed
+		fallthrough
+	case data.OptionKeyDisplayMode:
+		// validate display mode value
+		if v != data.OptionValueDisplayModeWhitebox && v != data.OptionValueDisplayModeBlackbox {
+			o.Logger.Debugw("invalid display mode value",
+				"value", v,
+			)
+			return validate.WrapErrorWithField(
+				errs.NewValidationError(
+					errors.New("invalid display mode"),
+				),
+				"display mode",
+			)
+		}
 	default:
 		o.Logger.Debugw("invalid settings key", "key", k)
 		return validate.WrapErrorWithField(

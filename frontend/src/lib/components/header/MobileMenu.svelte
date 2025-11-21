@@ -1,8 +1,8 @@
 <script>
 	import { page } from '$app/stores';
 	import { menu, mobileTopMenu } from '$lib/consts/navigation';
-	import MenuLink from './MenuLink.svelte';
 	import { shouldHideMenuItem } from '$lib/utils/common';
+	import ConditionalDisplay from '../ConditionalDisplay.svelte';
 	import ThemeToggle from '../ThemeToggle.svelte';
 
 	export let visible = false;
@@ -23,7 +23,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
     </svg>`,
 
-		ip_filters: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
+		filters: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
   <path stroke-linecap="round" stroke-linejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
 </svg>`,
 
@@ -212,24 +212,26 @@
 			</h2>
 			<div class="space-y-2">
 				{#each mobileTopMenu as link}
-					<a
-						class="flex items-center w-full py-3 px-4 text-white text-lg font-medium rounded-lg transition-all duration-200 group {$page
-							.url.pathname === link.route
-							? 'bg-active-blue shadow-lg dark:bg-active-blue'
-							: 'hover:bg-highlight-blue/30 hover:shadow-md dark:hover:bg-highlight-blue/20'}"
-						class:hidden={shouldHideMenuItem(link.route)}
-						on:click={() => (visible = false)}
-						target={link.external ? '_blank' : '_self'}
-						href={link.route}
-					>
-						<div class="flex-shrink-0 mr-3 text-white dark:text-highlight-blue">
-							{@html getTopMenuIcon(link.label)}
-						</div>
-						<span class="flex-1 text-left">{link.label}</span>
-						{#if $page.url.pathname === link.route}
-							<div class="w-2 h-2 bg-white rounded-full"></div>
-						{/if}
-					</a>
+					<ConditionalDisplay show={link.blackbox ? 'blackbox' : 'both'}>
+						<a
+							class="flex items-center w-full py-3 px-4 text-white text-lg font-medium rounded-lg transition-all duration-200 group {$page
+								.url.pathname === link.route
+								? 'bg-active-blue shadow-lg dark:bg-active-blue'
+								: 'hover:bg-highlight-blue/30 hover:shadow-md dark:hover:bg-highlight-blue/20'}"
+							class:hidden={shouldHideMenuItem(link.route)}
+							on:click={() => (visible = false)}
+							target={link.external ? '_blank' : '_self'}
+							href={link.route}
+						>
+							<div class="flex-shrink-0 mr-3 text-white dark:text-highlight-blue">
+								{@html getTopMenuIcon(link.label)}
+							</div>
+							<span class="flex-1 text-left">{link.label}</span>
+							{#if $page.url.pathname === link.route}
+								<div class="w-2 h-2 bg-white rounded-full"></div>
+							{/if}
+						</a>
+					</ConditionalDisplay>
 				{/each}
 			</div>
 		</div>
@@ -257,26 +259,28 @@
 						<!-- submenu items -->
 						<div class="ml-4 space-y-1">
 							{#each link.items as item, i (i)}
-								<a
-									class="flex items-center w-full py-2.5 px-4 text-white/90 dark:text-gray-300 text-base font-medium rounded-lg transition-all duration-200 group hover:bg-highlight-blue/30 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-white"
-									href={item.route}
-									on:click={() => (visible = false)}
-								>
-									<div
-										class="flex-shrink-0 mr-3 text-white/70 dark:text-highlight-blue/80 group-hover:text-white"
+								<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
+									<a
+										class="flex items-center w-full py-2.5 px-4 text-white/90 dark:text-gray-300 text-base font-medium rounded-lg transition-all duration-200 group hover:bg-highlight-blue/30 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-white"
+										href={item.route}
+										on:click={() => (visible = false)}
 									>
-										{@html getIconForRoute(item.route)}
-									</div>
-									<span class="text-left">
-										{#if i === 0}
-											Overview
-										{:else if item.singleLabel}
-											{item.singleLabel}
-										{:else}
-											{item.label}
-										{/if}
-									</span>
-								</a>
+										<div
+											class="flex-shrink-0 mr-3 text-white/70 dark:text-highlight-blue/80 group-hover:text-white"
+										>
+											{@html getIconForRoute(item.route)}
+										</div>
+										<span class="text-left">
+											{#if i === 0}
+												Overview
+											{:else if item.singleLabel}
+												{item.singleLabel}
+											{:else}
+												{item.label}
+											{/if}
+										</span>
+									</a>
+								</ConditionalDisplay>
 							{/each}
 						</div>
 					{:else}
