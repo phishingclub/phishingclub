@@ -350,7 +350,7 @@
 	};
 
 	/** @param {string} campaignRecipientID */
-	const onClickCopyEmail = async (campaignRecipientID) => {
+	const onClickCopyEmailContent = async (campaignRecipientID) => {
 		try {
 			const res = await api.campaign.getEmail(campaignRecipientID);
 			if (!res.success) {
@@ -365,15 +365,25 @@
 				})
 			];
 			await navigator.clipboard.write(data);
-			addToast('Email copied to clipboard', 'Success');
+			addToast('Email content copied to clipboard', 'Success');
 		} catch (e) {
 			// handle missing template part
 			if (e.includes('has no')) {
 				addToast('Campaign template is incomplete', 'Error');
 			} else {
-				addToast('Failed to copy email', 'Error');
+				addToast('Failed to copy email content', 'Error');
 			}
-			console.error('failed to copy email to clipboard', e);
+			console.error('failed to copy email content to clipboard', e);
+		}
+	};
+
+	/** @param {string} email */
+	const onClickCopyEmail = async (email) => {
+		try {
+			await navigator.clipboard.writeText(email);
+			addToast('Email copied to clipboard', 'Success');
+		} catch (e) {
+			addToast('Failed to copy email', 'Error');
 		}
 	};
 
@@ -516,11 +526,6 @@
 		setAsSentRecipient = null;
 	};
 
-	// helper function to get appropriate messaging based on sender type
-	const getMessageType = () => {
-		return campaign.template?.email ? 'email' : 'message';
-	};
-
 	const onConfirmSendMessage = async () => {
 		try {
 			showIsLoading();
@@ -530,19 +535,15 @@
 			if (!res.success) {
 				throw res.error;
 			}
-			const messageType = getMessageType();
-			const message = isResend
-				? `${messageType.charAt(0).toUpperCase() + messageType.slice(1)} sent again successfully`
-				: `${messageType.charAt(0).toUpperCase() + messageType.slice(1)} sent successfully`;
-			addToast(message, 'Success');
+			addToast('Message Sent', 'Success');
 			await setCampaign();
 			await getEvents();
 			await refreshCampaignRecipients();
 			closeSendMessageModal();
 			return { success: true };
 		} catch (e) {
-			addToast(`Failed to send ${getMessageType()}`, 'Error');
-			console.error(`failed to send ${getMessageType()}`, e);
+			addToast(`Failed to send message}`, 'Error');
+			console.error(`failed to send message`, e);
 			throw e;
 		} finally {
 			hideIsLoading();
@@ -1662,9 +1663,13 @@
 						<TableCellAction>
 							<TableDropDownEllipsis>
 								<TableUpdateButton
-									name="Copy email"
+									name="Copy email content"
 									disabled={!!campaign.closedAt || !!campaign.anonymizedAt}
-									on:click={() => onClickCopyEmail(recp.id)}
+									on:click={() => onClickCopyEmailContent(recp.id)}
+								/>
+								<TableUpdateButton
+									name="Copy email"
+									on:click={() => onClickCopyEmail(recp?.recipient?.email)}
 								/>
 								<TableViewButton
 									name="View email"
@@ -1683,21 +1688,21 @@
 									on:click={() => openEventsModal(recp.recipientID)}
 								/>
 								<TableDropDownButton
-									name={recp.sentAt ? `Send ${getMessageType()} again` : `Send ${getMessageType()}`}
+									name={recp.sentAt ? `Send message again` : `Send message`}
 									title={recp.closedAt
 										? 'Campaign is closed'
 										: recp.cancelledAt
 											? 'Recipient cancelled'
 											: recp.sentAt
-												? `Send ${getMessageType()} again (last sent: ${new Date(recp.sentAt).toLocaleDateString()})`
-												: `Send ${getMessageType()} to recipient`}
+												? `Send message again (last sent: ${new Date(recp.sentAt).toLocaleDateString()})`
+												: `Send message to recipient`}
 									on:click={() => showSendMessageModal(recp.id, recp.recipient)}
 									disabled={!!campaign.closedAt || recp.cancelledAt}
 								/>
 								{#if !campaign.sendStartAt}
 									<!-- self managed campaign -->
 									<TableDropDownButton
-										name="Set as sent"
+										name="Set as message sent"
 										title={recp.closedAt ? 'Campaign is closed' : ''}
 										on:click={() => onClickSetEmailSent(recp.id, recp.recipient)}
 										disabled={!!campaign.closedAt || recp.cancelledAt}
@@ -2089,7 +2094,7 @@
 	</Alert>
 
 	<Alert
-		headline={`Send ${getMessageType().charAt(0).toUpperCase() + getMessageType().slice(1)}`}
+		headline={`Send message`}
 		bind:visible={isSendMessageModalVisible}
 		onConfirm={onConfirmSendMessage}
 	>
@@ -2099,8 +2104,8 @@
 				{#if recipient}
 					<p class="mb-4">
 						{recipient.sentAt
-							? `Are you sure you want to send the campaign ${getMessageType()} again to:`
-							: `Are you sure you want to send the campaign ${getMessageType()} to:`}
+							? `Are you sure you want to send the campaign message again to:`
+							: `Are you sure you want to send the campaign message to:`}
 					</p>
 					<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded mb-4">
 						<p class="font-medium">{sendMessageRecipient.name}</p>
@@ -2121,7 +2126,7 @@
 	</Alert>
 
 	<Alert
-		headline="Set as Sent"
+		headline="Set as Message Sent"
 		bind:visible={isSetAsSentModalVisible}
 		onConfirm={onConfirmSetAsSent}
 	>
