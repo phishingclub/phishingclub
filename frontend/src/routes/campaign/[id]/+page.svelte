@@ -82,7 +82,7 @@
 	let timelineEvents = [];
 	let isTimelineGhost = true;
 	let recipientEvents = [];
-	let template = null;
+
 	// local state
 	let result = {
 		recipients: 0,
@@ -116,7 +116,6 @@
 		return setRecipientEvents(recipientEventsRecipient.id);
 	});
 	let contextCompanyID = null;
-	let templateMap = new BiMap({});
 	let recipientGroupMap = new BiMap({});
 	// self managed campaign are not scheduled for sending
 	let isSelfManaged = false;
@@ -156,17 +155,10 @@
 		};
 	});
 
-	// lastPoll holds the last date we pulled from, so only pull the
-	// latest events and add them to the graph
-	const lastPoll = null;
 	const refresh = async (showLoading = true) => {
 		if (showLoading) {
 			showIsLoading();
 		}
-		const templates = await fetchAllRows((options) => {
-			return api.campaignTemplate.getAll(options, contextCompanyID);
-		});
-		templateMap = BiMap.FromArrayOfObjects(templates);
 		const recipientGroups = await fetchAllRows((options) => {
 			return api.recipient.getAllGroups(options, contextCompanyID);
 		});
@@ -221,7 +213,13 @@
 			campaign.denyPage = t.denyPage;
 			campaign.evasionPage = t.evasionPage;
 			campaign.webhookID = t.webhookID;
-			campaign.template = templateMap.byKey(t.templateID);
+			// fetch the full template object
+			if (t.templateID) {
+				const templateRes = await api.campaignTemplate.getByID(t.templateID, true);
+				if (templateRes.success) {
+					campaign.template = templateRes.data;
+				}
+			}
 			campaign.recipientGroups = t.recipientGroupIDs.map((id) => recipientGroupMap.byKey(id));
 			campaign.notableEventName = t.notableEventName;
 			if (t.sendStartAt === null && t.sendEndAt === null) {
@@ -331,23 +329,6 @@
 		}
 	};
 
-	/**
-	 * @param {string} id
-	 */
-	const setTemplate = async (id) => {
-		try {
-			const res = await api.campaignTemplate.getByID(id, true);
-			if (!res.success) {
-				throw res.error;
-			}
-			template = res.data;
-			return;
-		} catch (e) {
-			addToast('Failed to load recipient events', 'Error');
-			console.error('failed to load recipient events', e);
-		}
-	};
-
 	const setResults = async () => {
 		try {
 			const res = await api.campaign.getResultStats($page.params.id);
@@ -450,22 +431,11 @@
 	};
 
 	const openTemplateModal = async (id) => {
-		try {
-			showIsLoading();
-			await setTemplate(id);
-			isTemplateModalVisible = true;
-		} catch (e) {
-			addToast('Failed to get template details', 'Error');
-			console.error('failed to template details', e);
-		} finally {
-			hideIsLoading();
-		}
 		isTemplateModalVisible = true;
 	};
 
 	const closeTemplateModal = () => {
 		isTemplateModalVisible = false;
-		template = null;
 	};
 
 	/** @param {string} campaignRecipientID */
@@ -1247,10 +1217,10 @@
 							<button
 								class="cursor-pointer text-cta-blue dark:text-white underline hover:opacity-75"
 								on:click={() => {
-									openTemplateModal(templateMap.byValue(campaign.template));
+									openTemplateModal(campaign.template?.id);
 								}}
 							>
-								{campaign.template}
+								{campaign.template?.name}
 							</button>
 						</span>
 
@@ -1802,7 +1772,7 @@
 						<!-- First block is always the delivery method -->
 						<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
 							<div class="font-medium text-gray-800 dark:text-white">
-								{#if template.email}
+								{#if campaign.template?.email}
 									Email
 								{:else}
 									API
@@ -1811,20 +1781,20 @@
 						</div>
 
 						<!-- Only show arrow if there's a destination -->
-						{#if template.beforeLandingPage || template.beforeLandingProxy || template.landingPage || template.landingProxy}
+						{#if campaign.template?.beforeLandingPage || campaign.template?.beforeLandingProxy || campaign.template?.landingPage || campaign.template?.landingProxy}
 							<div class="mx-2">→</div>
 						{/if}
 
 						<!-- Before Landing -->
-						{#if template.beforeLandingPage}
+						{#if campaign.template?.beforeLandingPage}
 							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
 								<div class="font-medium text-gray-800 dark:text-white">Before Landing</div>
 							</div>
 							<!-- Only show arrow if there's a next step -->
-							{#if template.landingPage || template.landingProxy}
+							{#if campaign.template?.landingPage || campaign.template?.landingProxy}
 								<div class="mx-2">→</div>
 							{/if}
-						{:else if template.beforeLandingProxy}
+						{:else if campaign.template?.beforeLandingProxy}
 							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
 								<div
 									class="font-medium text-gray-800 dark:text-white flex items-center justify-center gap-1"
@@ -1833,21 +1803,21 @@
 								</div>
 							</div>
 							<!-- Only show arrow if there's a next step -->
-							{#if template.landingPage || template.landingProxy}
+							{#if campaign.template?.landingPage || campaign.template?.landingProxy}
 								<div class="mx-2">→</div>
 							{/if}
 						{/if}
 
 						<!-- Main Landing -->
-						{#if template.landingPage}
+						{#if campaign.template?.landingPage}
 							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
 								<div class="font-medium text-gray-800 dark:text-white">Main Landing</div>
 							</div>
 							<!-- Only show arrow if there's a next step -->
-							{#if template.afterLandingPage || template.afterLandingProxy || template.afterLandingPageRedirectURL}
+							{#if campaign.template?.afterLandingPage || campaign.template?.afterLandingProxy || campaign.template?.afterLandingPageRedirectURL}
 								<div class="mx-2">→</div>
 							{/if}
-						{:else if template.landingProxy}
+						{:else if campaign.template?.landingProxy}
 							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
 								<div
 									class="font-medium text-gray-800 dark:text-white flex items-center justify-center gap-1"
@@ -1856,17 +1826,17 @@
 								</div>
 							</div>
 							<!-- Only show arrow if there's a next step -->
-							{#if template.afterLandingPage || template.afterLandingProxy || template.afterLandingPageRedirectURL}
+							{#if campaign.template?.afterLandingPage || campaign.template?.afterLandingProxy || campaign.template?.afterLandingPageRedirectURL}
 								<div class="mx-2">→</div>
 							{/if}
 						{/if}
 
 						<!-- After Landing or Redirect -->
-						{#if template.afterLandingPage}
+						{#if campaign.template?.afterLandingPage}
 							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
 								<div class="font-medium text-gray-800 dark:text-white">After Landing</div>
 							</div>
-						{:else if template.afterLandingProxy}
+						{:else if campaign.template?.afterLandingProxy}
 							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
 								<div
 									class="font-medium text-gray-800 dark:text-white flex items-center justify-center gap-1"
@@ -1875,7 +1845,7 @@
 								</div>
 							</div>
 						{/if}
-						{#if template.afterLandingPageRedirectURL}
+						{#if campaign.template?.afterLandingPageRedirectURL}
 							<div class="mx-2">→</div>
 							<div class="text-center px-3 py-2 bg-pc-lightorange dark:bg-orange-600 rounded">
 								<div class="font-medium text-gray-800 dark:text-white">Redirect</div>
@@ -1894,95 +1864,104 @@
 					</h3>
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
 						<span class="text-grayblue-dark font-medium">Name:</span>
-						<span class="text-pc-darkblue dark:text-white">{template.name ?? ''}</span>
+						<span class="text-pc-darkblue dark:text-white">{campaign.template?.name ?? ''}</span>
 
 						<span class="text-grayblue-dark font-medium">Query Key:</span>
 						<span class="text-pc-darkblue dark:text-white"
-							>{template.urlIdentifier?.name ?? ''}</span
+							>{campaign.template?.urlIdentifier?.name ?? ''}</span
 						>
 
 						<span class="text-grayblue-dark font-medium">State Key:</span>
 						<span class="text-pc-darkblue dark:text-white"
-							>{template.stateIdentifier?.name ?? ''}</span
+							>{campaign.template?.stateIdentifier?.name ?? ''}</span
 						>
 
 						<span class="text-grayblue-dark font-medium">Delivery :</span>
 						<span class="text-pc-darkblue dark:text-white">
-							{#if template.email}
-								Email ({template.email.name ?? ''})
+							{#if campaign.template?.email}
+								Email ({campaign.template.email.name ?? ''})
 							{:else}
-								API Sender ({template.apiSender?.name ?? ''})
+								API Sender ({campaign.template?.apiSender?.name ?? ''})
 							{/if}
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Before Page:</span>
 						<span class="text-pc-darkblue dark:text-white">
-							{#if template.beforeLandingPage}
-								{template.beforeLandingPage.name}
-							{:else if template.beforeLandingProxy}
+							{#if campaign.template?.beforeLandingPage}
+								{campaign.template.beforeLandingPage.name}
+							{:else if campaign.template?.beforeLandingProxy}
 								<span class="flex items-center gap-1">
 									<ProxySvgIcon size="w-4 h-4" />
-									{template.beforeLandingProxy.name}
+									{campaign.template.beforeLandingProxy.name}
 								</span>
+							{:else}
+								N/A
 							{/if}
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Main Page:</span>
 						<span class="text-pc-darkblue dark:text-white">
-							{#if template.landingPage}
-								{template.landingPage.name}
-							{:else if template.landingProxy}
+							{#if campaign.template?.landingPage}
+								{campaign.template.landingPage.name}
+							{:else if campaign.template?.landingProxy}
 								<span class="flex items-center gap-1">
 									<ProxySvgIcon size="w-4 h-4" />
-									{template.landingProxy.name}
+									{campaign.template.landingProxy.name}
 								</span>
+							{:else}
+								N/A
 							{/if}
 						</span>
 
 						<span class="text-grayblue-dark font-medium">After Page:</span>
 						<span class="text-pc-darkblue dark:text-white">
-							{#if template.afterLandingPage}
-								{template.afterLandingPage.name}
-							{:else if template.afterLandingProxy}
+							{#if campaign.template?.afterLandingPage}
+								{campaign.template.afterLandingPage.name}
+							{:else if campaign.template?.afterLandingProxy}
 								<span class="flex items-center gap-1">
 									<ProxySvgIcon size="w-4 h-4" />
-									{template.afterLandingProxy.name}
+									{campaign.template.afterLandingProxy.name}
 								</span>
+							{:else}
+								N/A
 							{/if}
 						</span>
 
 						<span class="text-grayblue-dark font-medium">Redirect URL:</span>
 						<span class="text-pc-darkblue dark:text-white"
-							>{template.afterLandingPageRedirectURL ?? ''}</span
+							>{campaign.template?.afterLandingPageRedirectURL ?? 'N/A'}</span
 						>
 					</div>
 				</div>
 
 				<!-- Email Configuration -->
-				{#if template.email}
+				{#if campaign.template?.email}
 					<div class="p-6 rounded-lg">
 						<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
 							Email
 						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
 							<span class="text-grayblue-dark font-medium">Name:</span>
-							<span class="text-pc-darkblue dark:text-white">{template.email.name}</span>
+							<span class="text-pc-darkblue dark:text-white">{campaign.template?.email?.name}</span>
 
 							<span class="text-grayblue-dark font-medium">Envelope:</span>
-							<span class="text-pc-darkblue dark:text-white">{template.email.mailEnvelopeFrom}</span
+							<span class="text-pc-darkblue dark:text-white"
+								>{campaign.template?.email?.mailEnvelopeFrom}</span
 							>
 
 							<span class="text-grayblue-dark font-medium">From:</span>
-							<span class="text-pc-darkblue dark:text-white">{template.email.mailHeaderFrom}</span>
+							<span class="text-pc-darkblue dark:text-white"
+								>{campaign.template?.email?.mailHeaderFrom}</span
+							>
 
 							<span class="text-grayblue-dark font-medium">Subject:</span>
 							<span class="text-pc-darkblue dark:text-white"
-								>{template.email.mailHeaderSubject}</span
+								>{campaign.template?.email?.mailHeaderSubject}</span
 							>
 
 							<span class="text-grayblue-dark font-medium">Tracking:</span>
 							<span class="text-pc-darkblue dark:text-white"
-								>{template.email.addTrackingPixel ? 'Enabled' : 'Disabled'}</span
+								>{campaign.template?.email?.addTrackingPixel ? 'Enabled' : 'Disabled'}</span
 							>
 						</div>
 					</div>
@@ -1999,65 +1978,71 @@
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
 						<span class="text-grayblue-dark font-medium">Host Site:</span>
 						<span class="text-pc-darkblue dark:text-white"
-							>{template.domain.hostWebsite ? 'Yes' : 'No'}</span
+							>{campaign.template?.domain?.hostWebsite ? 'Yes' : 'No'}</span
 						>
 
 						<span class="text-grayblue-dark font-medium">Domain:</span>
 						<span class="text-pc-darkblue dark:text-white">
 							<a
-								href="https://{template.domain?.name}"
+								href="https://{campaign.template?.domain?.name}"
 								target="_blank"
 								class="text-cta-blue dark:text-white hover:underline"
 							>
-								{template.domain?.name}
+								{campaign.template?.domain?.name}
 							</a>
 						</span>
 
 						<span class="text-grayblue-dark font-medium">URL Path:</span>
-						<span class="text-pc-darkblue dark:text-white">{template.urlPath}</span>
+						<span class="text-pc-darkblue dark:text-white">{campaign.template?.urlPath}</span>
 
 						<span class="text-grayblue-dark font-medium">TLS:</span>
 						<span class="text-pc-darkblue dark:text-white">
-							{template.domain.managedTLS ? 'Managed' : template.domain.ownManagedTLS ? 'Own' : ''}
+							{campaign.template?.domain?.managedTLS
+								? 'Managed'
+								: campaign.template?.domain?.ownManagedTLS
+									? 'Own'
+									: ''}
 						</span>
 					</div>
 				</div>
 
 				<!-- SMTP/API Configuration -->
-				{#if template.smtpConfiguration || template.apiSender}
+				{#if campaign.template?.smtpConfiguration || campaign.template?.apiSender}
 					<div class="p-6 rounded-lg">
 						<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
-							{template.smtpConfiguration ? 'Email SMTP' : 'API Sender'}
+							{campaign.template?.smtpConfiguration ? 'Email SMTP' : 'API Sender'}
 						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
-							{#if template.smtpConfiguration}
+							{#if campaign.template?.smtpConfiguration}
 								<span class="text-grayblue-dark font-medium">Name:</span>
 								<span class="text-pc-darkblue dark:text-white"
-									>{template.smtpConfiguration.name}</span
+									>{campaign.template?.smtpConfiguration?.name}</span
 								>
 
 								<span class="text-grayblue-dark font-medium">Host:</span>
 								<span class="text-pc-darkblue dark:text-white"
-									>{template.smtpConfiguration.host}</span
+									>{campaign.template?.smtpConfiguration?.host}</span
 								>
 
 								<span class="text-grayblue-dark font-medium">Port:</span>
 								<span class="text-pc-darkblue dark:text-white"
-									>{template.smtpConfiguration.port}</span
+									>{campaign.template?.smtpConfiguration?.port}</span
 								>
 
 								<span class="text-grayblue-dark font-medium">Username:</span>
 								<span class="text-pc-darkblue dark:text-white">
-									{template.smtpConfiguration.username || 'Not configured'}
+									{campaign.template?.smtpConfiguration?.username || 'Not configured'}
 								</span>
 
 								<span class="text-grayblue-dark font-medium">Allow insecure: </span>
 								<span class="text-pc-darkblue dark:text-white">
-									{!template.smtpConfiguration.ignoreCertErrors ? 'Disabled' : 'Enabled'}
+									{!campaign.template?.smtpConfiguration?.ignoreCertErrors ? 'Disabled' : 'Enabled'}
 								</span>
 							{:else}
 								<span class="text-grayblue-dark font-medium">API Sender:</span>
-								<span class="text-pc-darkblue dark:text-white">{template.apiSender?.name}</span>
+								<span class="text-pc-darkblue dark:text-white"
+									>{campaign.template?.apiSender?.name}</span
+								>
 							{/if}
 						</div>
 					</div>
@@ -2109,7 +2094,7 @@
 						<p class="font-medium">{sendMessageRecipient.name}</p>
 						<p class="text-gray-600">{sendMessageRecipient.email}</p>
 						<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
-							Sender type: {campaign.template?.email ? 'Email (SMTP)' : 'API Sender'}
+							Sender type: {campaign.template?.smtpConfigurationID ? 'SMTP' : 'API Sender'}
 						</p>
 						{#if recipient.sentAt}
 							<p class="text-sm text-amber-600 mt-1">
