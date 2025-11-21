@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.19.0] - 2025-11-21
+- Added OAuth Providers and integration with API Senders
+- Added copy email on recipient actions on campaign page
+- Fix bad error message on custom sent message failure
+- Fix bad error sometimes caused by context cancellation on custom send message 
+- Fix campaign template able to be both SMTP and API Sender 
+- Fix has next page in pagination on campaign page
+- Fix campaign recipients endpoint uses standard response 
+- Improved recipient actions text on campaign page
+
 ## [1.18.0] - 2025-11-18
 - Added option to add jitter to scheduling 
 - Fix set cancelled only for recipients of campaign
