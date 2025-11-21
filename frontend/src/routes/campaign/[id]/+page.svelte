@@ -950,24 +950,30 @@
 			<AutoRefresh
 				isLoading={false}
 				onRefresh={async () => {
-					await setResults();
-					await setCampaign();
-					// await refreshCampaignRecipients();
+					try {
+						await setResults();
+						await setCampaign();
+						// await refreshCampaignRecipients();
 
-					const res = await api.campaign.getAllCampaignRecipients(
-						$page.params.id,
-						recipientTableUrlParams
-					);
-					if (!res.success) {
-						throw res.error;
+						const res = await api.campaign.getAllCampaignRecipients(
+							$page.params.id,
+							recipientTableUrlParams
+						);
+						if (!res.success) {
+							console.error('failed to refresh campaign recipients', res.error);
+							return;
+						}
+						// bug: svelte does not rerender the usage of campaignRecipients without
+						// clearing the ref and a tick
+						campaignRecipients = [];
+						await tick();
+						campaignRecipients = res.data?.rows ?? [];
+						await getEvents();
+						await refreshCampaignEventsSince();
+					} catch (e) {
+						console.error('failed to auto-refresh campaign data', e);
+						// don't show toast on auto-refresh errors to avoid spam
 					}
-					// bug: svelte does not rerender the usage of campaignRecipients without
-					// clearing the ref and a tick
-					campaignRecipients = [];
-					await tick();
-					campaignRecipients = res.data;
-					await getEvents();
-					await refreshCampaignEventsSince();
 				}}
 			/>
 		</div>

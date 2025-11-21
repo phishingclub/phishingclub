@@ -630,6 +630,10 @@ func (a *APISender) SendWithCustomURL(
 		customCampaignURL,
 		oauthAccessToken,
 	)
+	if err != nil {
+		a.Logger.Errorw("failed to build api sender request", "error", err)
+		return err
+	}
 
 	resp, respBodyClose, err := a.sendRequest(
 		ctx,
@@ -639,7 +643,7 @@ func (a *APISender) SendWithCustomURL(
 		body,
 	)
 	if err != nil {
-		a.Logger.Errorw("failed to build and send api sender request", "error", err)
+		a.Logger.Errorw("failed to send api sender request", "error", err)
 		return err
 	}
 	defer respBodyClose()
