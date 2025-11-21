@@ -555,19 +555,28 @@ func (o *OAuthProvider) getValidAccessTokenInternal(
 		return "", errors.New("oauth provider not authorized - user must complete authorization flow")
 	}
 
+	// validate that required tokens exist even if marked as authorized
+	accessToken, err := provider.AccessToken.Get()
+	if err != nil {
+		return "", errors.New("oauth provider marked as authorized but access token is missing - authorization may be incomplete")
+	}
+
+	refreshToken, err := provider.RefreshToken.Get()
+	if err != nil {
+		return "", errors.New("oauth provider marked as authorized but refresh token is missing - authorization may be incomplete")
+	}
+
 	// check if token needs refresh (5 minute buffer)
 	if provider.TokenExpiresAt != nil && time.Now().Add(5*time.Minute).Before(*provider.TokenExpiresAt) {
 		// token still valid, return as-is
-		accessToken, _ := provider.AccessToken.Get()
 		return accessToken.String(), nil
 	}
 
 	// token expired or about to expire, refresh it
 	o.Logger.Infow("refreshing oauth token", "providerID", providerID.String())
 
-	// get client secret and refresh token (stored as plain text)
+	// get client secret (stored as plain text)
 	clientSecret := provider.ClientSecret.MustGet().String()
-	refreshToken, _ := provider.RefreshToken.Get()
 
 	// refresh tokens
 	tokenURL := provider.TokenURL.MustGet()
@@ -589,9 +598,8 @@ func (o *OAuthProvider) getValidAccessTokenInternal(
 	// some providers return new refresh token, some don't
 	newRefreshToken := newTokens.RefreshToken
 	if newRefreshToken == "" {
-		// keep the old refresh token
-		oldRefresh, _ := provider.RefreshToken.Get()
-		newRefreshToken = oldRefresh.String()
+		// keep the old refresh token (already validated above)
+		newRefreshToken = refreshToken.String()
 	}
 
 	// update stored
