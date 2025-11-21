@@ -101,6 +101,13 @@
 		modalText = getModalText('template', modalMode);
 	}
 
+	// clear smtp or api sender when switching template type
+	$: if (formValues.templateType === 'Email') {
+		formValues.apiSender = null;
+	} else if (formValues.templateType === 'External API') {
+		formValues.smtpConfiguration = null;
+	}
+
 	// hooks
 	onMount(() => {
 		const context = appStateService.getContext();
