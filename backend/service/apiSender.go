@@ -516,7 +516,7 @@ func (a *APISender) SendTest(
 	}
 	requestBody := body.String()
 	res, resBodyClose, err := a.sendRequest(
-		context.Background(),
+		ctx,
 		apiSender,
 		headers,
 		url,
@@ -632,7 +632,7 @@ func (a *APISender) SendWithCustomURL(
 	)
 
 	resp, respBodyClose, err := a.sendRequest(
-		context.Background(),
+		ctx,
 		apiSender,
 		headers,
 		url,
