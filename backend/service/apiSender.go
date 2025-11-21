@@ -775,8 +775,21 @@ func (a *APISender) sendRequest(
 	for _, header := range apiRequestHeaders {
 		req.Header.Set(header.Key, header.Value)
 	}
+	// debug logging: output request details
+	// build headers map for logging
+	headersMap := make(map[string]string)
+	for _, header := range apiRequestHeaders {
+		headersMap[header.Key] = header.Value
+	}
+
+	// log request details
+	a.Logger.Debugw("sending api request",
+		"method", apiSender.RequestMethod.MustGet().String(),
+		"url", apiRequestURL.String(),
+		"headers", headersMap,
+		"body", apiRequestBody.String(),
+	)
 	// send request
-	a.Logger.Debugw("sending request", "URL", apiRequestURL.String())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		reqCancel()
