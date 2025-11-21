@@ -620,6 +620,7 @@ func (r *Recipient) DeleteByID(
 	anonymizedID := uuid.New()
 	err = r.CampaignRecipientRepository.Anonymize(
 		ctx,
+		nil, // nil campaignID means anonymize across all campaigns
 		id,
 		&anonymizedID,
 	)

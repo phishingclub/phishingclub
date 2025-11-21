@@ -735,7 +735,6 @@ func (c *Campaign) GetRecipientsByCampaignID(g *gin.Context) {
 	}
 	// endpoints is handled a bit differently and allows to
 	// fetch an unlimited amount of rows if no offset and limit is set.
-	// TODO this endpoint should be changed to a Result<T> so we fetch the rows as needed.
 	offset := g.DefaultQuery("offset", "")
 	limit := g.DefaultQuery("limit", "")
 	// parse request

@@ -470,6 +470,7 @@ func (r *RecipientGroup) RemoveRecipients(
 		anonymizedID := uuid.New()
 		err = r.RecipientService.CampaignRecipientRepository.Anonymize(
 			ctx,
+			nil, // nil campaignID means anonymize across all campaigns
 			recpID,
 			&anonymizedID,
 		)
@@ -547,6 +548,7 @@ func (r *RecipientGroup) DeleteByID(
 			}
 			err = r.RecipientService.CampaignRecipientRepository.Anonymize(
 				ctx,
+				nil, // nil campaignID means anonymize across all campaigns
 				&recpID,
 				&anonymizedID,
 			)

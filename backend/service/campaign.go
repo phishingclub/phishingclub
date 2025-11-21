@@ -871,15 +871,15 @@ func (c *Campaign) GetRecipientsByCampaignID(
 	session *model.Session,
 	campaignID *uuid.UUID,
 	options *repository.CampaignRecipientOption,
-) ([]*model.CampaignRecipient, error) {
+) (*model.Result[model.CampaignRecipient], error) {
 	ae := NewAuditEvent("Campaign.GetRecipientsByCampaignID", session)
 	ae.Details["campaignId"] = campaignID.String()
-	recipients := []*model.CampaignRecipient{}
+	result := model.NewEmptyResult[model.CampaignRecipient]()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		c.LogAuthError(err)
-		return recipients, errs.Wrap(err)
+		return result, errs.Wrap(err)
 	}
 	if !isAuthorized {
 		c.AuditLogNotAuthorized(ae)
@@ -889,17 +889,17 @@ func (c *Campaign) GetRecipientsByCampaignID(
 	if options.OrderBy == "" {
 		options.OrderBy = "campaign_recipients.sent_at"
 	}
-	recipients, err = c.CampaignRecipientRepository.GetByCampaignID(
+	result, err = c.CampaignRecipientRepository.GetByCampaignID(
 		ctx,
 		campaignID,
 		options,
 	)
 	if err != nil {
 		c.Logger.Errorw("failed to get recipients by campaign id", "error", err)
-		return recipients, errs.Wrap(err)
+		return result, errs.Wrap(err)
 	}
 	// no audit on read
-	return recipients, nil
+	return result, nil
 }
 
 // GetEventsByCampaignID gets all events for a campaign
@@ -3206,7 +3206,7 @@ func (c *Campaign) AnonymizeByID(
 	// assign a anonymized ID to each campaign recipient and make a map between
 	// their ID and the anonymized ID, this is a itermidiate step to anonymize the events
 	// where campaign receipients have both a anonymized ID and the recipient ID
-	campaignRecipients, err := c.CampaignRecipientRepository.GetByCampaignID(
+	campaignRecipientsResult, err := c.CampaignRecipientRepository.GetByCampaignID(
 		ctx,
 		id,
 		&repository.CampaignRecipientOption{},
@@ -3215,7 +3215,7 @@ func (c *Campaign) AnonymizeByID(
 		c.Logger.Errorw("failed to get campaign recipients by campaign id", "error", err)
 		return errs.Wrap(err)
 	}
-	for _, cr := range campaignRecipients {
+	for _, cr := range campaignRecipientsResult.Rows {
 		if cr.RecipientID.IsNull() {
 			c.Logger.Debug("skipping anonymization of campaign recipient without recipient")
 			continue
@@ -3224,17 +3224,17 @@ func (c *Campaign) AnonymizeByID(
 		anonymizedID := uuid.New()
 		cr.AnonymizedID = nullable.NewNullableWithValue(anonymizedID)
 		recipientID := cr.RecipientID.MustGet()
-		err := c.CampaignRecipientRepository.Anonymize(ctx, &recipientID, &anonymizedID)
-		if err != nil {
-			c.Logger.Errorw("failed to add anonymized ID to campaign recipient", "error", err)
-			return errs.Wrap(err)
-		}
-		// anonymize events and assign each anonymized ID so the events can still be tracked
 		campaignID, err := cr.CampaignID.Get()
 		if err != nil {
 			c.Logger.Debug("Recipient removed or anonymized, skipping in anonymization")
 			continue
 		}
+		err = c.CampaignRecipientRepository.Anonymize(ctx, &campaignID, &recipientID, &anonymizedID)
+		if err != nil {
+			c.Logger.Errorw("failed to add anonymized ID to campaign recipient", "error", err)
+			return errs.Wrap(err)
+		}
+		// anonymize events and assign each anonymized ID so the events can still be tracked
 		err = c.CampaignRepository.AnonymizeCampaignEvent(
 			ctx,
 			&campaignID,

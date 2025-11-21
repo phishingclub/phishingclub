@@ -75,6 +75,8 @@
 	};
 	let allowedFilter = null;
 	let campaignRecipients = [];
+	let campaignRecipientsHasNextPage = false;
+	let campaignEventsHasNextPage = false;
 	let recipientEventsRecipient = {
 		name: null,
 		id: null
@@ -280,7 +282,7 @@
 			if (!res.success) {
 				throw res.error;
 			}
-			const events = res.data.map((v) => ({
+			const events = (res.data?.rows ?? []).map((v) => ({
 				createdAt: v.sendAt,
 				eventName: 'campaign_recipient_scheduled',
 				recipient: v.recipient
@@ -732,7 +734,8 @@
 			if (!res.success) {
 				throw res.error;
 			}
-			campaignRecipients = res.data;
+			campaignRecipients = res.data?.rows ?? [];
+			campaignRecipientsHasNextPage = res.data?.hasNextPage ?? false;
 		} catch (e) {
 			addToast('Failed to load recipients', 'Error');
 			console.error('failed to load recipients', e);
@@ -759,7 +762,8 @@
 				eventsTableURLParams
 			);
 			if (res.success) {
-				campaign = { ...campaign, events: res.data.rows };
+				campaign = { ...campaign, events: res.data?.rows ?? [] };
+				campaignEventsHasNextPage = res.data?.hasNextPage ?? false;
 			}
 		} catch (e) {
 			addToast('Failed to load events', 'Error');
@@ -1518,6 +1522,7 @@
 				pagination={eventsTableURLParams}
 				plural="events"
 				hasData={!!campaign.events.length}
+				hasNextPage={campaignEventsHasNextPage}
 				hasActions={false}
 				isGhost={isEventTableLoading}
 			>
@@ -1603,6 +1608,7 @@
 			pagination={recipientTableUrlParams}
 			plural="recipients"
 			hasData={!!campaignRecipients.length}
+			hasNextPage={campaignRecipientsHasNextPage}
 			isGhost={isRecipientTableLoading}
 		>
 			{#each campaignRecipients as recp (recp.id)}
