@@ -752,8 +752,8 @@ func (a *APISender) sendRequest(
 	apiRequestBody *apiRequestBody,
 ) (*http.Response, func(), error) {
 	// prepare request
-	reqCtx, reqCancel := context.WithTimeout(ctx, 3*time.Second)
-	defer reqCancel()
+	reqCtx, reqCancel := context.WithTimeout(ctx, 10*time.Second)
+	// context must stay alive until response body is read
 	if apiRequestBody == nil {
 		apiRequestBody = bytes.NewBuffer([]byte{})
 	}
@@ -764,6 +764,7 @@ func (a *APISender) sendRequest(
 		apiRequestBody,
 	)
 	if err != nil {
+		reqCancel()
 		return nil, func() {}, errs.Wrap(err)
 	}
 	// TODO these headers should be enrished with template variables like {{.FirstName}} or etc
@@ -774,10 +775,16 @@ func (a *APISender) sendRequest(
 	a.Logger.Debugw("sending request", "URL", apiRequestURL.String())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		reqCancel()
 		return nil, func() {}, errs.Wrap(err)
 	}
-	// #nosec
-	return resp, func() { resp.Body.Close() }, nil
+	// return cleanup function that closes body and  cancels context
+	// context must not be canceled until after response body is read
+	// otherwise io.ReadAll(resp.Body) can fail with "context canceled"
+	return resp, func() {
+		resp.Body.Close()
+		reqCancel()
+	}, nil
 }
 
 type apiRequestURL = bytes.Buffer

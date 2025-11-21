@@ -2274,7 +2274,7 @@ func (c *Campaign) saveSendingResult(
 	if sendError != nil {
 		data, err = vo.NewOptionalString1MB(sendError.Error())
 		if err != nil {
-			return errs.Wrap(fmt.Errorf("failed to create data: %s", err))
+			return errs.Wrap(fmt.Errorf("failed to create reason: %s", err))
 		}
 	}
 	campaignID := campaignRecipient.CampaignID.MustGet()
@@ -3331,7 +3331,9 @@ func (c *Campaign) SendEmailByCampaignRecipientID(
 	// send the email using existing logic from sendCampaignMessages
 	err = c.sendSingleCampaignMessage(ctx, session, &campaignID, campaignRecipient)
 	if err != nil {
-		c.Logger.Errorw("failed to send campaign message", "error", err)
+		// the failure is already logged in the campaign event with reason
+		c.Logger.Warnw("failed to send campaign message", "reason", err)
+		// don't wrap error, return as-is so controller can handle it as bad request
 		return errs.Wrap(err)
 	}
 
@@ -3465,6 +3467,11 @@ func (c *Campaign) sendSingleCampaignMessage(
 	if saveErr != nil {
 		c.Logger.Errorw("failed to save sending result", "error", saveErr)
 		return errs.Wrap(saveErr)
+	}
+
+	// if there was a sending error, log it as info since it's expected (e.g., invalid recipient)
+	if err != nil {
+		c.Logger.Infow("campaign message delivery failed", "reason", err.Error())
 	}
 
 	return err

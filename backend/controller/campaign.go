@@ -870,8 +870,10 @@ func (c *Campaign) SendEmailByCampaignRecipientID(g *gin.Context) {
 	}
 	// send message (email or API depending on campaign template configuration)
 	err := c.CampaignService.SendEmailByCampaignRecipientID(g.Request.Context(), session, id)
-	// handle responses
-	if ok := c.handleErrors(g, err); !ok {
+	// handle responses - sending failures are expected (invalid recipient email etc)
+	// so return as bad request instead of internal server error
+	if err != nil {
+		c.Response.BadRequestMessage(g, err.Error())
 		return
 	}
 	c.Response.OK(g, gin.H{})
