@@ -14,7 +14,6 @@
 	export let multiple = false;
 	export let name = 'files';
 	export let accept = '*';
-	export let bgColor = '';
 	// bind to parent form element, if there is one
 	let parentForm = null;
 	// listen to parent form reset event, if one exists

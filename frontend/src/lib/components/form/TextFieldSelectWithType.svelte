@@ -312,7 +312,6 @@
 				class:pl-10={isFocused && showDropdown}
 				class:pl-20={!isFocused}
 				class:pl-4={isFocused && !showDropdown}
-				class:text-gray-400={!hasValue && !showDropdown}
 				placeholder={!hasValue && !showDropdown ? placeholder : ''}
 				{required}
 			/>

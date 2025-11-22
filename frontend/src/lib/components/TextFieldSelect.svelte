@@ -302,7 +302,6 @@
 				class="w-full relative rounded-md py-2 pr-10 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
 				class:pl-10={showDropdown}
 				class:pl-4={!showDropdown}
-				class:text-gray-400={!hasValue && !showDropdown}
 				placeholder={!hasValue && !showDropdown ? placeholder : ''}
 				{required}
 			/>
