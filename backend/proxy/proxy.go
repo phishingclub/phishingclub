@@ -567,32 +567,6 @@ func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, reqCtx *R
 			req.ContentLength = int64(len(body))
 		}
 	}
-	if req.Body != nil {
-		body, err := io.ReadAll(req.Body)
-		if err == nil {
-			if hostConfig.Rewrite != nil {
-				for _, replacement := range hostConfig.Rewrite {
-					if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
-						engine := replacement.Engine
-						if engine == "" {
-							engine = "regex"
-						}
-						if engine == "regex" {
-							re, err := regexp.Compile(replacement.Find)
-							if err == nil {
-								oldContent := string(body)
-								content := re.ReplaceAllString(oldContent, replacement.Replace)
-								body = []byte(content)
-							}
-						}
-					}
-				}
-			}
-			req.Body = io.NopCloser(bytes.NewBuffer(body))
-			req.ContentLength = int64(len(body))
-		}
-	}
-
 	return req
 }
 
