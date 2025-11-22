@@ -87,6 +87,7 @@ type RequestContext struct {
 	ParamName           string
 	PendingResponse     *http.Response
 	UsedImpersonation   bool
+	OriginalUserAgent   string // original user agent before any modifications
 	// cached response body to avoid double reads
 	CachedBody        []byte
 	BodyWasCompressed bool
@@ -215,6 +216,13 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 		}
 	}
 
+	// preserve original user agent before any modifications for accurate logging/events
+	reqCtx.OriginalUserAgent = req.Header.Get("User-Agent")
+
+	// apply request header replacements early (before creating surf client)
+	// this ensures custom user-agent replacements work with impersonation
+	m.applyEarlyRequestHeaderReplacements(req, reqCtx)
+
 	// create http client with optional browser impersonation
 	client, err := m.createHTTPClientWithImpersonation(req, reqCtx, reqCtx.ProxyConfig)
 	if err != nil {
@@ -256,12 +264,6 @@ func (m *ProxyHandler) extractTargetDomain(domain *database.Domain) string {
 		}
 	}
 	return targetDomain
-}
-
-// deprecated: use createHTTPClientWithImpersonation instead
-// kept for backward compatibility if needed
-func (m *ProxyHandler) createHTTPClient(req *http.Request, proxyConfig *service.ProxyServiceConfigYAML) (*http.Client, error) {
-	return m.createStandardHTTPClient(proxyConfig)
 }
 
 // initializeRequestContext creates and populates the request context with all necessary data
@@ -477,10 +479,14 @@ func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, reqCtx *R
 	dummySession := &service.ProxySession{
 		Config: sync.Map{},
 	}
-	// populate dummy config for normalization
-	dummySession.Config.Store(reqCtx.TargetDomain, service.ProxyServiceDomainConfig{
-		To: reqCtx.TargetDomain,
-	})
+	// populate dummy config for normalization - need to map phishing domains to target domains
+	if reqCtx.ProxyConfig != nil && reqCtx.ProxyConfig.Hosts != nil {
+		for targetDomain, hostConfig := range reqCtx.ProxyConfig.Hosts {
+			if hostConfig != nil {
+				dummySession.Config.Store(targetDomain, *hostConfig)
+			}
+		}
+	}
 
 	// normalize headers
 	m.normalizeRequestHeaders(req, dummySession)
@@ -742,12 +748,9 @@ func (m *ProxyHandler) patchRequestBodyWithContext(req *http.Request, reqCtx *Re
 
 func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.Client, usedImpersonation bool) {
 	req.RequestURI = ""
-	// only delete accept-encoding when NOT using surf impersonation
-	// surf needs proper accept-encoding headers for browser fingerprinting
-	// we handle decompression with brotli/zstd libraries
-	if !usedImpersonation {
-		req.Header.Del("Accept-Encoding")
-	}
+	// we always use surf now, which handles decompression automatically
+	// keep accept-encoding headers for browser fingerprinting
+	// note: usedImpersonation tracks if impersonation features are enabled, not if surf is used
 	req.Header.Del(HEADER_JA4)
 
 	// setup cookie jar for redirect handling
@@ -1303,15 +1306,17 @@ func (m *ProxyHandler) createNewSession(
 	// create session configuration
 	sessionConfig := m.buildSessionConfig(reqCtx.TargetDomain, reqCtx.Domain.Name, reqCtx.ProxyConfig)
 
-	// capture client user-agent for analytics and logging
-	userAgent := req.Header.Get("User-Agent")
+	// capture client user-agent for analytics and logging - use original before any modifications
+	userAgent := reqCtx.OriginalUserAgent
+	if userAgent == "" {
+		userAgent = req.Header.Get("User-Agent")
+	}
 
-	m.logger.Debugw("creating session with user-agent",
+	m.logger.Debugw("creating session with original user-agent",
 		"userAgent", userAgent,
 		"campaignRecipientID", campaignRecipientID.String(),
 	)
 
-	// create session
 	session := &service.ProxySession{
 		ID:                  uuid.New().String(),
 		CampaignRecipientID: campaignRecipientID,
@@ -1320,7 +1325,7 @@ func (m *ProxyHandler) createNewSession(
 		Campaign:            campaign,
 		Domain:              reqCtx.Domain,
 		TargetDomain:        reqCtx.TargetDomain,
-		UserAgent:           userAgent,
+		UserAgent:           userAgent, // store original user-agent before any modifications
 		CreatedAt:           time.Now(),
 	}
 
@@ -1465,46 +1470,11 @@ func (m *ProxyHandler) onRequestHeader(req *http.Request, session *service.Proxy
 	var buf bytes.Buffer
 	req.Header.Write(&buf)
 
+	// capture request headers (replacement logic moved to applyEarlyRequestHeaderReplacements)
 	if hostConfig.Capture != nil {
 		for _, capture := range hostConfig.Capture {
 			if m.shouldApplyCaptureRule(capture, "request_header", req) {
 				m.captureFromText(buf.String(), capture, session, req, "request_header")
-			}
-		}
-	}
-
-	// request header rewrite logic (mirrors applyRequestHeaderReplacements)
-	if hostConfig.Rewrite != nil {
-		for _, replacement := range hostConfig.Rewrite {
-			if replacement.From == "" || replacement.From == "request_header" || replacement.From == "any" {
-				engine := replacement.Engine
-				if engine == "" {
-					engine = "regex"
-				}
-				if engine == "regex" {
-					re, err := regexp.Compile(replacement.Find)
-					if err != nil {
-						m.logger.Errorw("invalid request_header replacement regex", "error", err, "sessionID", session.ID)
-						continue
-					}
-					for headerName, values := range req.Header {
-						newValues := make([]string, 0, len(values))
-						for _, val := range values {
-							fullHeader := headerName + ": " + val
-							replaced := re.ReplaceAllString(fullHeader, replacement.Replace)
-							if strings.HasPrefix(replaced, headerName+": ") {
-								newVal := replaced[len(headerName)+2:]
-								newValues = append(newValues, newVal)
-							} else if replaced != fullHeader {
-								m.logger.Warnw("header name changed by replacement, skipping", "original", headerName, "sessionID", session.ID)
-								newValues = append(newValues, val)
-							} else {
-								newValues = append(newValues, val)
-							}
-						}
-						req.Header[headerName] = newValues
-					}
-				}
 			}
 		}
 	}
@@ -1650,7 +1620,7 @@ func (m *ProxyHandler) handlePathBasedCapture(capture service.ProxyServiceCaptur
 			webhookData := map[string]interface{}{
 				capture.Name: capturedData,
 			}
-			m.createCampaignSubmitEvent(session, webhookData, resp.Request)
+			m.createCampaignSubmitEvent(session, webhookData, resp.Request, session.UserAgent)
 		}
 
 		// check if cookie bundle should be submitted now that this capture is complete
@@ -1752,7 +1722,7 @@ func (m *ProxyHandler) captureFromText(text string, capture service.ProxyService
 		webhookData := map[string]interface{}{
 			capture.Name: capturedData,
 		}
-		m.createCampaignSubmitEvent(session, webhookData, req)
+		m.createCampaignSubmitEvent(session, webhookData, req, session.UserAgent)
 	}
 
 	// check if we should submit cookie bundle (only when all captures complete)
@@ -1850,7 +1820,7 @@ func (m *ProxyHandler) checkAndSubmitCookieBundleWhenComplete(session *service.P
 	cookieCaptures, requiredCookieCaptures := m.collectCookieCaptures(session)
 	if m.areAllCookieCapturesComplete(requiredCookieCaptures) && len(cookieCaptures) > 0 {
 		bundledData := m.createCookieBundle(cookieCaptures, session)
-		m.createCampaignSubmitEvent(session, bundledData, req)
+		m.createCampaignSubmitEvent(session, bundledData, req, session.UserAgent)
 		session.CookieBundleSubmitted.Store(true)
 	}
 }
@@ -2224,6 +2194,66 @@ func (m *ProxyHandler) getCampaignRecipientIDFromURLParams(req *http.Request) (*
 
 	campaignRecipientID := campaignRecipient.ID.MustGet()
 	return &campaignRecipientID, paramName
+}
+
+// applyEarlyRequestHeaderReplacements applies request header replacements before client creation
+// this is necessary for impersonation to work correctly with custom user-agent replacements
+func (m *ProxyHandler) applyEarlyRequestHeaderReplacements(req *http.Request, reqCtx *RequestContext) {
+	// only apply if we have proxy config
+	if reqCtx.ProxyConfig == nil {
+		return
+	}
+
+	// helper function to apply replacement rules
+	applyReplacements := func(replacements []service.ProxyServiceReplaceRule) {
+		for _, replacement := range replacements {
+			if replacement.From == "" || replacement.From == "request_header" || replacement.From == "any" {
+				engine := replacement.Engine
+				if engine == "" {
+					engine = "regex"
+				}
+				if engine == "regex" {
+					re, err := regexp.Compile(replacement.Find)
+					if err != nil {
+						m.logger.Errorw("invalid early request_header replacement regex", "error", err)
+						continue
+					}
+					for headerName, values := range req.Header {
+						newValues := make([]string, 0, len(values))
+						for _, val := range values {
+							fullHeader := headerName + ": " + val
+							replaced := re.ReplaceAllString(fullHeader, replacement.Replace)
+							if strings.HasPrefix(replaced, headerName+": ") {
+								newVal := replaced[len(headerName)+2:]
+								newValues = append(newValues, newVal)
+							} else if replaced != fullHeader {
+								m.logger.Warnw("header name changed by early replacement, skipping", "original", headerName)
+								newValues = append(newValues, val)
+							} else {
+								newValues = append(newValues, val)
+							}
+						}
+						req.Header[headerName] = newValues
+					}
+				}
+			}
+		}
+	}
+
+	// apply global rewrite rules first
+	if reqCtx.ProxyConfig.Global != nil && reqCtx.ProxyConfig.Global.Rewrite != nil {
+		applyReplacements(reqCtx.ProxyConfig.Global.Rewrite)
+	}
+
+	// then apply request_header replacements from all host configs
+	// this ensures replacements work for all domains in the session (e.g., CDN domains)
+	if reqCtx.ProxyConfig.Hosts != nil {
+		for _, domainConfig := range reqCtx.ProxyConfig.Hosts {
+			if domainConfig != nil && domainConfig.Rewrite != nil {
+				applyReplacements(domainConfig.Rewrite)
+			}
+		}
+	}
 }
 
 // Header normalization methods
@@ -2713,7 +2743,7 @@ func (m *ProxyHandler) buildCampaignFlowRedirectURL(session *service.ProxySessio
 	return targetURL
 }
 
-func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, capturedData map[string]interface{}, req *http.Request) {
+func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, capturedData map[string]interface{}, req *http.Request, originalUserAgent string) {
 	if session.CampaignID == nil || session.CampaignRecipientID == nil {
 		return
 	}
@@ -2761,7 +2791,7 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, 
 		Data:        vo.NewOptionalString1MBMust(string(submittedDataJSON)),
 		Metadata:    metadata,
 		IP:          vo.NewOptionalString64Must(clientIP),
-		UserAgent:   vo.NewOptionalString255Must(req.UserAgent()),
+		UserAgent:   vo.NewOptionalString255Must(originalUserAgent),
 	}
 
 	err = m.CampaignRepository.SaveEvent(ctx, event)
@@ -3373,7 +3403,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 			syntheticReadEventID := uuid.New()
 			clientIP := utils.ExtractClientIP(req)
 			clientIPVO := vo.NewOptionalString64Must(clientIP)
-			userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 255))
+			userAgent := vo.NewOptionalString255Must(utils.Substring(session.UserAgent, 0, 255))
 			syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
 
 			var syntheticReadEvent *model.CampaignEvent
@@ -3452,7 +3482,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 
 	clientIP := utils.ExtractClientIP(req)
 	clientIPVO := vo.NewOptionalString64Must(clientIP)
-	userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 255))
+	userAgent := vo.NewOptionalString255Must(utils.Substring(session.UserAgent, 0, 255))
 
 	var visitEvent *model.CampaignEvent
 	if !session.Campaign.IsAnonymous.MustGet() {
@@ -4008,7 +4038,7 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED]
 	newEventID := uuid.New()
 	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req))
-	userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
+	userAgent := vo.NewOptionalString255Must(utils.Substring(reqCtx.OriginalUserAgent, 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
 
 	var event *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {
@@ -4093,7 +4123,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED]
 	newEventID := uuid.New()
 	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req))
-	userAgent := vo.NewOptionalString255Must(utils.Substring(req.UserAgent(), 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
+	userAgent := vo.NewOptionalString255Must(utils.Substring(reqCtx.OriginalUserAgent, 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
 
 	var event *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {
