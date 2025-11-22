@@ -1686,17 +1686,17 @@
 									name="Copy email"
 									on:click={() => onClickCopyEmail(recp?.recipient?.email)}
 								/>
-								<TableViewButton
-									name="View email"
-									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || !recp.recipient}
-									on:click={() => onClickPreviewEmail(recp.id)}
-								/>
+
 								<TableUpdateButton
 									name="Copy lure URL"
 									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || !recp.recipient}
 									on:click={() => onClickCopyURL(recp.id)}
 								/>
-
+								<TableViewButton
+									name="View email"
+									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || !recp.recipient}
+									on:click={() => onClickPreviewEmail(recp.id)}
+								/>
 								<TableViewButton
 									name="Events"
 									disabled={!recp.recipient}
