@@ -238,6 +238,7 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	// prepare request for target server
 	m.prepareRequestForTarget(modifiedReq, client, reqCtx.UsedImpersonation)
 
+	// execute request</parameter>
 	// execute request
 	targetResp, err := client.Do(modifiedReq)
 	if err != nil {
@@ -1444,7 +1445,6 @@ func (m *ProxyHandler) onRequestHeader(req *http.Request, session *service.Proxy
 	var buf bytes.Buffer
 	req.Header.Write(&buf)
 
-	// capture request headers (replacement logic moved to applyEarlyRequestHeaderReplacements)
 	if hostConfig.Capture != nil {
 		for _, capture := range hostConfig.Capture {
 			if m.shouldApplyCaptureRule(capture, "request_header", req) {
@@ -4275,10 +4275,11 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 // and returns a redirect response if a match is found
 func (m *ProxyHandler) checkAndApplyURLRewrite(req *http.Request, reqCtx *RequestContext) *http.Response {
 	// check if this is already a rewritten URL that we need to reverse map
-	originalURL := m.getReverseURLMapping(req.URL.Path, req.URL.RawQuery)
-	if originalURL != "" {
-		// this is a rewritten URL, update the request to use the original URL
-		m.applyReverseURLMapping(req, originalURL)
+	// lookup by path only to handle query parameter variations
+	originalPath := m.getReverseURLMapping(req.URL.Path)
+	if originalPath != "" {
+		// update request to use the original path (keep query as-is)
+		req.URL.Path = originalPath
 		return nil
 	}
 
@@ -4296,12 +4297,13 @@ func (m *ProxyHandler) checkAndApplyURLRewrite(req *http.Request, reqCtx *Reques
 	// check each rewrite rule
 	for _, rule := range rewriteRules {
 		if matched, rewrittenURL := m.applyURLRewriteRule(req, rule); matched {
-			// store the mapping for reverse lookup
-			originalURL := req.URL.Path
-			if req.URL.RawQuery != "" {
-				originalURL += "?" + req.URL.RawQuery
+			// store the mapping for reverse lookup using path only (not query)
+			// this allows the mapping to work even if query parameters change
+			rewrittenPath := rewrittenURL
+			if idx := strings.Index(rewrittenURL, "?"); idx != -1 {
+				rewrittenPath = rewrittenURL[:idx]
 			}
-			m.storeURLMapping(rewrittenURL, originalURL)
+			m.storeURLMapping(rewrittenPath, req.URL.Path)
 
 			// create redirect response
 			return &http.Response{
@@ -4399,35 +4401,13 @@ func (m *ProxyHandler) storeURLMapping(rewrittenURL, originalURL string) {
 	m.SessionManager.StoreURLMapping(rewrittenURL, originalURL)
 }
 
-// getReverseURLMapping gets the original URL for a rewritten URL
-func (m *ProxyHandler) getReverseURLMapping(path, query string) string {
-	rewrittenURL := path
-	if query != "" {
-		rewrittenURL += "?" + query
-	}
-
-	if originalURL, exists := m.SessionManager.GetURLMapping(rewrittenURL); exists {
-		return originalURL
+// getReverseURLMapping gets the original path for a rewritten path
+// only uses path for lookup to handle query parameter variations
+func (m *ProxyHandler) getReverseURLMapping(path string) string {
+	if originalPath, exists := m.SessionManager.GetURLMapping(path); exists {
+		return originalPath
 	}
 	return ""
-}
-
-// applyReverseURLMapping updates the request to use the original URL
-func (m *ProxyHandler) applyReverseURLMapping(req *http.Request, originalURL string) {
-	// parse the original URL
-	parsedURL, err := url.Parse(originalURL)
-	if err != nil {
-		m.logger.Errorw("failed to parse original URL during reverse mapping", "url", originalURL, "error", err)
-		return
-	}
-
-	// update request URL
-	req.URL.Path = parsedURL.Path
-	req.URL.RawQuery = parsedURL.RawQuery
-	req.RequestURI = req.URL.Path
-	if req.URL.RawQuery != "" {
-		req.RequestURI += "?" + req.URL.RawQuery
-	}
 }
 
 // applyURLPathRewrites applies URL path rewriting to response body content
