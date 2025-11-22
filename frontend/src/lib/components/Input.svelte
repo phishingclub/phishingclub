@@ -34,6 +34,6 @@
 		{type}
 		id={fieldName}
 		name={fieldName}
-		class="w-full p-2 rounded bg-pc-lightblue dark:bg-gray-900/60 dark:border-gray-700/60 dark:text-gray-300 dark:placeholder-gray-500 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
+		class="w-full p-2 rounded bg-pc-lightblue dark:bg-gray-900/60 dark:border-gray-700/60 dark:text-gray-300 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
 	/>
 </div>

@@ -156,6 +156,22 @@ func (o *Option) SetOptionByKey(
 		fallthrough
 	case data.OptionKeyAdminSSOLogin:
 		// is allow listed
+		fallthrough
+	case data.OptionKeyDisplayMode:
+		// validate display mode value
+		if v != data.OptionValueDisplayModeWhitebox && v != data.OptionValueDisplayModeBlackbox {
+			o.Logger.Debugw("invalid display mode value",
+				"value", v,
+			)
+			return validate.WrapErrorWithField(
+				errs.NewValidationError(
+					errors.New("invalid display mode"),
+				),
+				"display mode",
+			)
+		}
+	case data.OptionKeyObfuscationTemplate:
+		// is allow listed
 	default:
 		o.Logger.Debugw("invalid settings key", "key", k)
 		return validate.WrapErrorWithField(
@@ -176,4 +192,23 @@ func (o *Option) SetOptionByKey(
 	}
 	o.AuditLogAuthorized(ae)
 	return nil
+}
+
+// GetObfuscationTemplate gets the obfuscation template from options or returns default
+func (o *Option) GetObfuscationTemplate(ctx context.Context) (string, error) {
+	opt, err := o.OptionRepository.GetByKey(ctx, data.OptionKeyObfuscationTemplate)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// return default template if not found
+			return data.OptionValueObfuscationTemplateDefault, nil
+		}
+		o.Logger.Errorw("failed to get obfuscation template option", "error", err)
+		return "", errs.Wrap(err)
+	}
+	template := opt.Value.String()
+	if template == "" {
+		// return default if empty
+		return data.OptionValueObfuscationTemplateDefault, nil
+	}
+	return template, nil
 }

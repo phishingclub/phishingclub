@@ -167,6 +167,9 @@ func (c *Campaign) Create(
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return nil, errs.Wrap(err)
 	}
+	// preserve jitter values from original campaign (not persisted to db)
+	createdCampaign.JitterMin = campaign.JitterMin
+	createdCampaign.JitterMax = campaign.JitterMax
 	err = c.schedule(ctx, session, createdCampaign)
 	if err != nil {
 		c.Logger.Errorw("failed to schedule campaign", "error", err)
@@ -180,6 +183,44 @@ func (c *Campaign) Create(
 
 // schedule campaign schedules the campaign
 // this is a service method that does not perform auth, use with consideration
+// applyJitter applies random jitter to a time based on jitter min/max in minutes
+// if min is negative of max (symmetric), uses uniform distribution from min to max
+// e.g., min=-10, max=10 means randomly offset anywhere from -10 to +10 minutes
+// clamps the result to stay within startBound and endBound
+func applyJitter(baseTime time.Time, jitterMin, jitterMax int, startBound, endBound time.Time) time.Time {
+	if jitterMin == 0 && jitterMax == 0 {
+		return baseTime
+	}
+
+	var randomJitter int
+
+	// check if symmetric jitter (min = -max)
+	if jitterMin == -jitterMax {
+		// symmetric: uniform distribution from -max to +max
+		randomJitter = rand.Intn(2*jitterMax+1) - jitterMax
+	} else {
+		// asymmetric: generate random jitter between min and max
+		jitterRange := jitterMax - jitterMin
+		if jitterRange > 0 {
+			randomJitter = jitterMin + rand.Intn(jitterRange+1)
+		} else {
+			randomJitter = jitterMin
+		}
+	}
+
+	jitteredTime := baseTime.Add(time.Duration(randomJitter) * time.Minute)
+
+	// clamp to campaign bounds
+	if jitteredTime.Before(startBound) {
+		return startBound
+	}
+	if jitteredTime.After(endBound) {
+		return endBound
+	}
+
+	return jitteredTime
+}
+
 func (c *Campaign) schedule(
 	ctx context.Context,
 	session *model.Session,
@@ -329,14 +370,31 @@ func (c *Campaign) schedule(
 		return fmt.Errorf("no recipients to schedule for '%s'", campaign.Name.MustGet())
 	}
 	scheduledEvent := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SCHEDULED]
+
+	// get jitter values if specified
+	jitterMin := 0
+	jitterMax := 0
+	if campaign.JitterMin.IsSpecified() && !campaign.JitterMin.IsNull() {
+		jitterMin = campaign.JitterMin.MustGet()
+	}
+	if campaign.JitterMax.IsSpecified() && !campaign.JitterMax.IsNull() {
+		jitterMax = campaign.JitterMax.MustGet()
+	}
+	c.Logger.Debugw("scheduling campaign with jitter",
+		"campaignName", campaign.Name.MustGet(),
+		"jitterMin", jitterMin,
+		"jitterMax", jitterMax,
+	)
+
 	// handle single recipient
 	if recipientsCount == 1 {
 		recpID := nullable.NewNullableWithValue(recipients[0].ID.MustGet())
 		campaignID := nullable.NewNullableWithValue(campaign.ID.MustGet())
+		jitteredStartAt := applyJitter(startAt, jitterMin, jitterMax, startAt, endAt)
 		campaignRecipient := &model.CampaignRecipient{
 			RecipientID:    recpID,
 			CampaignID:     campaignID,
-			SendAt:         nullable.NewNullableWithValue(startAt),
+			SendAt:         nullable.NewNullableWithValue(jitteredStartAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 		}
 		_, err := c.CampaignRecipientRepository.Insert(ctx, campaignRecipient)
@@ -395,9 +453,10 @@ func (c *Campaign) schedule(
 				// iterate over the hours in the day and jump each interval
 				// if over the end time, break and skip to next day, saving the surplus of interval minutes
 				// to be added to next send
-				currentDayStart := currentDate.Truncate(24 * time.Hour).Add(dayStartTime.Minutes())
-				currentDayEnd := currentDate.Truncate(24 * time.Hour).Add(dayEndTime.Minutes())
-				for currentDayStart.Before(currentDayEnd) || currentDayStart.Equal(currentDayEnd) {
+				dayConstraintStart := currentDate.Truncate(24 * time.Hour).Add(dayStartTime.Minutes())
+				dayConstraintEnd := currentDate.Truncate(24 * time.Hour).Add(dayEndTime.Minutes())
+				currentDayStart := dayConstraintStart
+				for currentDayStart.Before(dayConstraintEnd) || currentDayStart.Equal(dayConstraintEnd) {
 					c.Logger.Debugw("scheduling date at", "currentDayStart", currentDayStart)
 					// check if we have any recipients left
 					if len(recipients) == 0 {
@@ -406,11 +465,13 @@ func (c *Campaign) schedule(
 					// get the next recipient
 					recipient := recipients[0]
 					recipients = recipients[1:]
+					// apply jitter to send time, clamped to daily constraint bounds
+					jitteredTime := applyJitter(currentDayStart, jitterMin, jitterMax, dayConstraintStart, dayConstraintEnd)
 					// save
 					campaignRecipient := &model.CampaignRecipient{
 						RecipientID:    recipient.ID,
 						CampaignID:     campaign.ID,
-						SendAt:         nullable.NewNullableWithValue(currentDayStart),
+						SendAt:         nullable.NewNullableWithValue(jitteredTime),
 						NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 					}
 					_, err := c.CampaignRecipientRepository.Insert(ctx, campaignRecipient)
@@ -446,18 +507,17 @@ func (c *Campaign) schedule(
 	// TODO make this work in minutes
 	interval := time.Duration(campaignDuration.Nanoseconds() / int64(recipientsCount-1))
 	for i, recipient := range recipients {
-		sentAt := startAt
-		if i > 0 {
-			sa := campaignRecipients[i-1].SendAt.MustGet().Add(interval * time.Duration(1))
-			sentAt = sa
-		}
+		// calculate base time from original schedule, not previous jittered time
+		baseTime := startAt.Add(time.Duration(i) * interval)
+		// apply jitter to send time
+		jitteredSentAt := applyJitter(baseTime, jitterMin, jitterMax, startAt, endAt)
 		// todo perhaps this array is unnecesssary
 		//recpID := recipient.ID.MustGet()
 		//campaignID := campaign.ID.MustGet()
 		campaignRecipients[i] = &model.CampaignRecipient{
 			RecipientID:    recipient.ID,
 			CampaignID:     campaign.ID,
-			SendAt:         nullable.NewNullableWithValue(sentAt),
+			SendAt:         nullable.NewNullableWithValue(jitteredSentAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 		}
 		// save
@@ -811,15 +871,15 @@ func (c *Campaign) GetRecipientsByCampaignID(
 	session *model.Session,
 	campaignID *uuid.UUID,
 	options *repository.CampaignRecipientOption,
-) ([]*model.CampaignRecipient, error) {
+) (*model.Result[model.CampaignRecipient], error) {
 	ae := NewAuditEvent("Campaign.GetRecipientsByCampaignID", session)
 	ae.Details["campaignId"] = campaignID.String()
-	recipients := []*model.CampaignRecipient{}
+	result := model.NewEmptyResult[model.CampaignRecipient]()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		c.LogAuthError(err)
-		return recipients, errs.Wrap(err)
+		return result, errs.Wrap(err)
 	}
 	if !isAuthorized {
 		c.AuditLogNotAuthorized(ae)
@@ -829,17 +889,17 @@ func (c *Campaign) GetRecipientsByCampaignID(
 	if options.OrderBy == "" {
 		options.OrderBy = "campaign_recipients.sent_at"
 	}
-	recipients, err = c.CampaignRecipientRepository.GetByCampaignID(
+	result, err = c.CampaignRecipientRepository.GetByCampaignID(
 		ctx,
 		campaignID,
 		options,
 	)
 	if err != nil {
 		c.Logger.Errorw("failed to get recipients by campaign id", "error", err)
-		return recipients, errs.Wrap(err)
+		return result, errs.Wrap(err)
 	}
 	// no audit on read
-	return recipients, nil
+	return result, nil
 }
 
 // GetEventsByCampaignID gets all events for a campaign
@@ -1158,6 +1218,7 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 		&campaignID,
 		&recipientID,
 		data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ,
+		nil,
 	)
 	if err != nil {
 		return errs.Wrap(err)
@@ -1273,6 +1334,9 @@ func (c *Campaign) UpdateByID(
 	}
 	if v, err := incoming.Obfuscate.Get(); err == nil {
 		current.Obfuscate.Set(v)
+	}
+	if v, err := incoming.WebhookIncludeData.Get(); err == nil {
+		current.WebhookIncludeData.Set(v)
 	}
 	if v, err := incoming.SortField.Get(); err == nil {
 		current.SortField.Set(v)
@@ -1407,6 +1471,9 @@ func (c *Campaign) UpdateByID(
 		c.Logger.Errorw("failed to add recipient groups", "error", err)
 		return errs.Wrap(err)
 	}
+	// preserve jitter values from incoming campaign (not persisted to db)
+	current.JitterMin = incoming.JitterMin
+	current.JitterMax = incoming.JitterMax
 	err = c.schedule(ctx, session, current)
 	if err != nil {
 		c.Logger.Errorw("failed to re-schedule campaign", "error", err)
@@ -1625,6 +1692,7 @@ func (c *Campaign) sendCampaignMessages(
 		&repository.CampaignTemplateOption{
 			WithDomain:             true,
 			WithSMTPConfiguration:  true,
+			WithAPISender:          true,
 			WithIdentifier:         true,
 			WithBeforeLandingProxy: true,
 			WithLandingProxy:       true,
@@ -2206,7 +2274,7 @@ func (c *Campaign) saveSendingResult(
 	if sendError != nil {
 		data, err = vo.NewOptionalString1MB(sendError.Error())
 		if err != nil {
-			return errs.Wrap(fmt.Errorf("failed to create data: %s", err))
+			return errs.Wrap(fmt.Errorf("failed to create reason: %s", err))
 		}
 	}
 	campaignID := campaignRecipient.CampaignID.MustGet()
@@ -2272,6 +2340,7 @@ func (c *Campaign) saveSendingResult(
 		&campaignID,
 		&recipientID,
 		eventName,
+		nil,
 	)
 	if err != nil {
 		return errs.Wrap(err)
@@ -2320,6 +2389,7 @@ func (c *Campaign) saveEventCampaignClose(
 		campaignID,
 		nil,
 		data.EVENT_CAMPAIGN_CLOSED,
+		nil,
 	)
 	if err != nil {
 		return errs.Wrap(err)
@@ -2527,13 +2597,14 @@ func (c *Campaign) closeCampaign(
 	if !isAuthorized {
 		return errs.ErrAuthorizationFailed
 	}
-	// find all recipients that are not sent and cancel them
+	// find all recipients that are not sent and cancel them for this campaign
 	campaignRecipients, err := c.CampaignRecipientRepository.GetUnsendRecipients(
 		ctx,
+		id,
 		repository.NO_LIMIT,
 		&repository.CampaignRecipientOption{},
 	)
-	c.Logger.Debugw("found unsent recipients to cancel", "count", len(campaignRecipients))
+	c.Logger.Debugw("found unsent recipients to cancel for campaign", "count", len(campaignRecipients), "campaignID", id.String())
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		c.Logger.Errorw("failed to get unsent recipients", "error", err)
 		return errs.Wrap(err)
@@ -2990,6 +3061,7 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 			UserAgent:   vo.NewOptionalString255Must(""),
 			EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT],
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	} else {
 		campaignEvent = &model.CampaignEvent{
@@ -3000,6 +3072,7 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 			UserAgent:   vo.NewOptionalString255Must(""),
 			EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT],
 			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	}
 
@@ -3023,6 +3096,7 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 		&campaignID,
 		&recipientID,
 		data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT,
+		nil,
 	)
 	if err != nil {
 		return errs.Wrap(err)
@@ -3038,6 +3112,7 @@ func (c *Campaign) HandleWebhook(
 	campaignID *uuid.UUID,
 	recipientID *uuid.UUID,
 	eventName string,
+	capturedData map[string]interface{},
 ) error {
 	campaignName, err := c.CampaignRepository.GetNameByID(ctx, campaignID)
 	if err != nil {
@@ -3051,11 +3126,25 @@ func (c *Campaign) HandleWebhook(
 	if err != nil {
 		return errs.Wrap(err)
 	}
+
+	// check if campaign has webhookIncludeData enabled
+	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{})
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	// only include captured data if webhookIncludeData is enabled
+	var dataToSend map[string]interface{}
+	if campaign.WebhookIncludeData.MustGet() {
+		dataToSend = capturedData
+	}
+
 	now := time.Now()
 	webhookReq := WebhookRequest{
 		Time:         &now,
 		CampaignName: campaignName,
 		Event:        eventName,
+		Data:         dataToSend,
 	}
 	if email != nil {
 		webhookReq.Email = email.String()
@@ -3117,7 +3206,7 @@ func (c *Campaign) AnonymizeByID(
 	// assign a anonymized ID to each campaign recipient and make a map between
 	// their ID and the anonymized ID, this is a itermidiate step to anonymize the events
 	// where campaign receipients have both a anonymized ID and the recipient ID
-	campaignRecipients, err := c.CampaignRecipientRepository.GetByCampaignID(
+	campaignRecipientsResult, err := c.CampaignRecipientRepository.GetByCampaignID(
 		ctx,
 		id,
 		&repository.CampaignRecipientOption{},
@@ -3126,7 +3215,7 @@ func (c *Campaign) AnonymizeByID(
 		c.Logger.Errorw("failed to get campaign recipients by campaign id", "error", err)
 		return errs.Wrap(err)
 	}
-	for _, cr := range campaignRecipients {
+	for _, cr := range campaignRecipientsResult.Rows {
 		if cr.RecipientID.IsNull() {
 			c.Logger.Debug("skipping anonymization of campaign recipient without recipient")
 			continue
@@ -3135,17 +3224,17 @@ func (c *Campaign) AnonymizeByID(
 		anonymizedID := uuid.New()
 		cr.AnonymizedID = nullable.NewNullableWithValue(anonymizedID)
 		recipientID := cr.RecipientID.MustGet()
-		err := c.CampaignRecipientRepository.Anonymize(ctx, &recipientID, &anonymizedID)
-		if err != nil {
-			c.Logger.Errorw("failed to add anonymized ID to campaign recipient", "error", err)
-			return errs.Wrap(err)
-		}
-		// anonymize events and assign each anonymized ID so the events can still be tracked
 		campaignID, err := cr.CampaignID.Get()
 		if err != nil {
 			c.Logger.Debug("Recipient removed or anonymized, skipping in anonymization")
 			continue
 		}
+		err = c.CampaignRecipientRepository.Anonymize(ctx, &campaignID, &recipientID, &anonymizedID)
+		if err != nil {
+			c.Logger.Errorw("failed to add anonymized ID to campaign recipient", "error", err)
+			return errs.Wrap(err)
+		}
+		// anonymize events and assign each anonymized ID so the events can still be tracked
 		err = c.CampaignRepository.AnonymizeCampaignEvent(
 			ctx,
 			&campaignID,
@@ -3242,7 +3331,9 @@ func (c *Campaign) SendEmailByCampaignRecipientID(
 	// send the email using existing logic from sendCampaignMessages
 	err = c.sendSingleCampaignMessage(ctx, session, &campaignID, campaignRecipient)
 	if err != nil {
-		c.Logger.Errorw("failed to send campaign message", "error", err)
+		// the failure is already logged in the campaign event with reason
+		c.Logger.Warnw("failed to send campaign message", "reason", err)
+		// don't wrap error, return as-is so controller can handle it as bad request
 		return errs.Wrap(err)
 	}
 
@@ -3280,6 +3371,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 		&repository.CampaignTemplateOption{
 			WithDomain:             true,
 			WithSMTPConfiguration:  true,
+			WithAPISender:          true,
 			WithIdentifier:         true,
 			WithBeforeLandingProxy: true,
 			WithLandingProxy:       true,
@@ -3375,6 +3467,11 @@ func (c *Campaign) sendSingleCampaignMessage(
 	if saveErr != nil {
 		c.Logger.Errorw("failed to save sending result", "error", saveErr)
 		return errs.Wrap(saveErr)
+	}
+
+	// if there was a sending error, log it as info since it's expected (e.g., invalid recipient)
+	if err != nil {
+		c.Logger.Infow("campaign message delivery failed", "reason", err.Error())
 	}
 
 	return err
@@ -4238,6 +4335,7 @@ func (c *Campaign) ProcessReportedCSV(
 				UserAgent:   vo.NewEmptyOptionalString255(),
 				EventID:     reportedEventID,
 				Data:        vo.NewEmptyOptionalString1MB(),
+				Metadata:    vo.NewEmptyOptionalString1MB(),
 			}
 		} else {
 			campaignEvent = &model.CampaignEvent{
@@ -4248,6 +4346,7 @@ func (c *Campaign) ProcessReportedCSV(
 				UserAgent:   vo.NewEmptyOptionalString255(),
 				EventID:     reportedEventID,
 				Data:        vo.NewEmptyOptionalString1MB(),
+				Metadata:    vo.NewEmptyOptionalString1MB(),
 			}
 		}
 

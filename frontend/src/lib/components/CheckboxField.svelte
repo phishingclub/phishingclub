@@ -73,14 +73,15 @@
 				bind:this={bindTo}
 				bind:checked={value}
 				on:change
+				tabindex="0"
 			/>
 			<div
 				class="w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
                         peer-checked:border-cta-blue dark:peer-checked:border-highlight-blue/80 peer-checked:bg-cta-blue dark:peer-checked:bg-highlight-blue/80
+                        peer-focus:border-slate-400 dark:peer-focus:border-highlight-blue/80 peer-focus:bg-gray-100 dark:peer-focus:bg-gray-700/60
                         transition-all duration-200 ease-in-out
                         flex items-center justify-center
-						bg-slate-50 dark:bg-gray-900/60
-                        focus-within:ring-2 focus-within:ring-cta-blue dark:focus-within:ring-highlight-blue/80 focus-within:ring-offset-2 dark:focus-within:ring-offset-gray-900"
+						bg-slate-50 dark:bg-gray-900/60"
 			>
 				{#if value}
 					<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">

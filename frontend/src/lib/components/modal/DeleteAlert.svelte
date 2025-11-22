@@ -10,6 +10,7 @@
 	export let confirm = false;
 	export let confirmWord = 'confirm';
 	export let permanent = true;
+	export let actionMessage = '';
 
 	let confirmText = '';
 
@@ -47,11 +48,19 @@
 				<h3 class="text-lg font-medium text-gray-900">Delete {type}</h3>
 				-->
 				<p class="mt-2 text-gray-600 dark:text-gray-400">
-					Are you sure you want to delete
-					{#if name?.length > 30}
-						<br />
+					{#if actionMessage}
+						{actionMessage}
+						{#if name?.length > 30}
+							<br />
+						{/if}
+						<span class="font-medium text-gray-900 dark:text-gray-300">"{name}"</span>?
+					{:else}
+						Are you sure you want to delete
+						{#if name?.length > 30}
+							<br />
+						{/if}
+						<span class="font-medium text-gray-900 dark:text-gray-300">"{name}"</span>?
 					{/if}
-					<span class="font-medium text-gray-900 dark:text-gray-300">"{name}"</span>?
 				</p>
 			</div>
 

@@ -31,6 +31,10 @@ type Campaign struct {
 	ConstraintStartTime nullable.Nullable[vo.CampaignTimeConstraint] `json:"constraintStartTime"`
 	ConstraintEndTime   nullable.Nullable[vo.CampaignTimeConstraint] `json:"constraintEndTime"`
 
+	// jitter is used only during scheduling, not persisted to database
+	JitterMin nullable.Nullable[int] `json:"jitterMin,omitempty"`
+	JitterMax nullable.Nullable[int] `json:"jitterMax,omitempty"`
+
 	Name nullable.Nullable[vo.String64] `json:"name"`
 
 	SaveSubmittedData   nullable.Nullable[bool]         `json:"saveSubmittedData"`
@@ -38,6 +42,7 @@ type Campaign struct {
 	IsAnonymous         nullable.Nullable[bool]         `json:"isAnonymous"`
 	IsTest              nullable.Nullable[bool]         `json:"isTest"`
 	Obfuscate           nullable.Nullable[bool]         `json:"obfuscate"`
+	WebhookIncludeData  nullable.Nullable[bool]         `json:"webhookIncludeData"`
 	TemplateID          nullable.Nullable[uuid.UUID]    `json:"templateID"`
 	Template            *CampaignTemplate               `json:"template"`
 	CompanyID           nullable.Nullable[uuid.UUID]    `json:"companyID"`
@@ -162,6 +167,47 @@ func (c *Campaign) Validate() error {
 		if v, err := c.SendStartAt.Get(); err == nil {
 			if anonymizeAt.Before(v) {
 				return validate.WrapErrorWithField(errors.New("anonymize at must be after start date"), "AnonymizeAt")
+			}
+		}
+	}
+	// validate jitter values if specified
+	// negative values are allowed for asymmetric jitter (e.g., -10 to 20 means send 10 min early to 20 min late)
+	jitterMinSpecified := c.JitterMin.IsSpecified() && !c.JitterMin.IsNull()
+	jitterMaxSpecified := c.JitterMax.IsSpecified() && !c.JitterMax.IsNull()
+
+	// both must be specified together or both unspecified
+	if jitterMinSpecified != jitterMaxSpecified {
+		return validate.WrapErrorWithField(errors.New("jitter min and max must both be specified or both be unspecified"), "jitter")
+	}
+
+	if jitterMinSpecified && jitterMaxSpecified {
+		jitterMin := c.JitterMin.MustGet()
+		jitterMax := c.JitterMax.MustGet()
+		if jitterMax < jitterMin {
+			return validate.WrapErrorWithField(errors.New("jitter max must be greater than or equal to jitter min"), "jitterMax")
+		}
+		// validate jitter doesn't exceed campaign duration
+		if c.SendStartAt.IsSpecified() && !c.SendStartAt.IsNull() && c.SendEndAt.IsSpecified() && !c.SendEndAt.IsNull() {
+			startAt := c.SendStartAt.MustGet()
+			endAt := c.SendEndAt.MustGet()
+			campaignDuration := endAt.Sub(startAt)
+
+			// check if max jitter (positive) could push beyond end time
+			maxJitterDuration := time.Duration(jitterMax) * time.Minute
+			if maxJitterDuration > campaignDuration {
+				return validate.WrapErrorWithField(
+					errors.New("jitter max cannot exceed campaign duration"),
+					"jitterMax",
+				)
+			}
+
+			// check if min jitter (negative) could push before start time
+			minJitterDuration := time.Duration(jitterMin) * time.Minute
+			if minJitterDuration < -campaignDuration {
+				return validate.WrapErrorWithField(
+					errors.New("jitter min cannot exceed campaign duration"),
+					"jitterMin",
+				)
 			}
 		}
 	}
@@ -330,6 +376,12 @@ func (c *Campaign) ToDBMap() map[string]any {
 		m["obfuscate"] = false
 		if v, err := c.Obfuscate.Get(); err == nil {
 			m["obfuscate"] = v
+		}
+	}
+	if c.WebhookIncludeData.IsSpecified() {
+		m["webhook_include_data"] = false
+		if v, err := c.WebhookIncludeData.Get(); err == nil {
+			m["webhook_include_data"] = v
 		}
 	}
 	if c.TemplateID.IsSpecified() {

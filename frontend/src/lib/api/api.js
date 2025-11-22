@@ -497,6 +497,7 @@ export class API {
 		 * @param {string} campaign.templateID  uuid
 		 * @param {string} campaign.name
 		 * @param {boolean} [campaign.saveSubmittedData]
+		 * @param {boolean} [campaign.saveBrowserMetadata]
 		 * @param {boolean} [campaign.isAnonymous]
 		 * @param {boolean} [campaign.isTest]
 		 * @param {boolean} [campaign.obfuscate]
@@ -511,9 +512,12 @@ export class API {
 		 * @param {string} campaign.denyPageID uuid
 		 * @param {string} campaign.evasionPageID uuid
 		 * @param {string} campaign.webhookID uuid
+		 * @param {boolean} [campaign.webhookIncludeData]
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
+		 * @param {number} [campaign.jitterMin]
+		 * @param {number} [campaign.jitterMax]
 		 * @returns {Promise<ApiResponse>}
 		 */
 		create: async ({
@@ -536,9 +540,12 @@ export class API {
 			denyPageID,
 			evasionPageID,
 			webhookID,
+			webhookIncludeData,
 			constraintWeekDays,
 			constraintStartTime,
-			constraintEndTime
+			constraintEndTime,
+			jitterMin,
+			jitterMax
 		}) => {
 			return await postJSON(this.getPath('/campaign'), {
 				companyID,
@@ -560,18 +567,21 @@ export class API {
 				denyPageID,
 				evasionPageID,
 				webhookID,
+				webhookIncludeData,
 				constraintWeekDays,
 				constraintStartTime,
-				constraintEndTime
+				constraintEndTime,
+				jitterMin,
+				jitterMax
 			});
 		},
 
 		/**
-		 *
-		 * @param {object} campaign
-		 * @param {string} campaign.id
+		 * @param {Object} campaign
+		 * @param {string} campaign.id uuid
 		 * @param {string} campaign.name
 		 * @param {boolean} [campaign.saveSubmittedData]
+		 * @param {boolean} [campaign.saveBrowserMetadata]
 		 * @param {boolean} [campaign.isAnonymous]
 		 * @param {boolean} [campaign.isTest]
 		 * @param {boolean} [campaign.obfuscate]
@@ -581,19 +591,23 @@ export class API {
 		 * @param {string} campaign.sendEndAt
 		 * @param {string} [campaign.closeAt]
 		 * @param {string} [campaign.anonymizeAt]
-		 * @param {string} campaign.templateID  uuid
+		 * @param {string} campaign.templateID uuid
 		 * @param {string[]} campaign.recipientGroupIDs []uuid
 		 * @param {string[]} campaign.allowDenyIDs []uuid
 		 * @param {string} campaign.denyPageID uuid
 		 * @param {string} campaign.evasionPageID uuid
 		 * @param {string} campaign.webhookID uuid
+		 * @param {boolean} [campaign.webhookIncludeData]
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
+		 * @param {number} [campaign.jitterMin]
+		 * @param {number} [campaign.jitterMax]
 		 * @returns {Promise<ApiResponse>}
 		 */
 		update: async ({
 			id,
+			templateID,
 			name,
 			saveSubmittedData,
 			saveBrowserMetadata,
@@ -606,17 +620,20 @@ export class API {
 			sendEndAt,
 			closeAt,
 			anonymizeAt,
-			templateID,
 			recipientGroupIDs,
 			allowDenyIDs,
 			denyPageID,
 			evasionPageID,
 			webhookID,
+			webhookIncludeData,
 			constraintWeekDays,
 			constraintStartTime,
-			constraintEndTime
+			constraintEndTime,
+			jitterMin,
+			jitterMax
 		}) => {
 			return await postJSON(this.getPath(`/campaign/${id}`), {
+				templateID,
 				name,
 				isAnonymous,
 				isTest,
@@ -629,15 +646,17 @@ export class API {
 				sendEndAt,
 				closeAt,
 				anonymizeAt,
-				templateID,
 				recipientGroupIDs,
 				allowDenyIDs,
 				denyPageID,
 				evasionPageID,
 				webhookID,
+				webhookIncludeData,
 				constraintWeekDays,
 				constraintStartTime,
-				constraintEndTime
+				constraintEndTime,
+				jitterMin,
+				jitterMax
 			});
 		},
 
@@ -1797,6 +1816,99 @@ export class API {
 	};
 
 	/**
+	 * oauthProvider is the API for OAuth Provider related operations.
+	 */
+	oauthProvider = {
+		/**
+		 * Get all OAuth Providers using pagination.
+		 *
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAll: async (options, companyID) => {
+			return await getJSON(
+				this.getPath(`/oauth-provider?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`)
+			);
+		},
+
+		/**
+		 * Get an OAuth Provider by its ID.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getByID: async (id) => {
+			return await getJSON(this.getPath(`/oauth-provider/${id}`));
+		},
+
+		/**
+		 * Create a new OAuth Provider.
+		 *
+		 * @param {Object} provider
+		 * @param {string} provider.name
+		 * @param {string} provider.clientID
+		 * @param {string} provider.clientSecret
+		 * @param {string} provider.authURL
+		 * @param {string} provider.tokenURL
+		 * @param {string} provider.scopes
+		 * @param {string} provider.companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		create: async (provider) => {
+			return await postJSON(this.getPath('/oauth-provider'), provider);
+		},
+
+		/**
+		 * Update an OAuth Provider.
+		 *
+		 * @param {Object} provider
+		 * @param {string} provider.id
+		 * @param {string} provider.name
+		 * @param {string} provider.clientID
+		 * @param {string} provider.clientSecret
+		 * @param {string} provider.authURL
+		 * @param {string} provider.tokenURL
+		 * @param {string} provider.scopes
+		 * @param {string} provider.companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		update: async (provider) => {
+			return await patchJSON(this.getPath(`/oauth-provider/${provider.id}`), provider);
+		},
+
+		/**
+		 * Delete an OAuth Provider.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		delete: async (id) => {
+			return await deleteJSON(this.getPath(`/oauth-provider/${id}`));
+		},
+
+		/**
+		 * Get the authorization URL for an OAuth Provider.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAuthorizationURL: async (id) => {
+			return await getJSON(this.getPath(`/oauth-authorize/${id}`));
+		},
+
+		/**
+		 * Remove authorization tokens from an OAuth Provider.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		removeAuthorization: async (id) => {
+			return await postJSON(this.getPath(`/oauth-provider/${id}/remove-authorization`), {});
+		}
+	};
+
+	/**
 	 * user is the API for user related operations - these actions also affect the user's sessions
 	 */
 	user = {
@@ -2092,7 +2204,7 @@ export class API {
 		/**
 		 * Get setting by key.
 		 *
-		 * @param {'is_installed'|'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'} key
+		 * @param {'is_installed'|'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'|'obfuscation_template'} key
 		 * @returns {Promise<ApiResponse>}
 		 */
 		get: async (key) => {
@@ -2102,7 +2214,7 @@ export class API {
 		/**
 		 * Set setting by key and value.
 		 *
-		 * @param {'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'} key
+		 * @param {'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'|'obfuscation_template'} key
 		 * @param {string} value
 		 * @returns {Promise<ApiResponse>}
 		 */
@@ -2482,6 +2594,7 @@ export class API {
 		 * @param {string} sender.customField2
 		 * @param {string} sender.customField3
 		 * @param {string} sender.customField4
+		 * @param {string} sender.oauthProviderID
 		 * @param {string} sender.requestMethod
 		 * @param {string} sender.requestURL
 		 * @param {APISenderHeader[]} sender.requestHeaders
@@ -2499,6 +2612,7 @@ export class API {
 			customField2,
 			customField3,
 			customField4,
+			oauthProviderID,
 			requestMethod,
 			requestURL,
 			requestHeaders,
@@ -2520,6 +2634,7 @@ export class API {
 				customField2: customField2,
 				customField3: customField3,
 				customField4: customField4,
+				oauthProviderID: oauthProviderID,
 				requestMethod: requestMethod,
 				requestURL: requestURL,
 				requestHeaders: requestHeaders,
@@ -2542,6 +2657,7 @@ export class API {
 		 * @param {string} sender.customField2
 		 * @param {string} sender.customField3
 		 * @param {string} sender.customField4
+		 * @param {string} sender.oauthProviderID
 		 * @param {string} sender.requestMethod
 		 * @param {string} sender.requestURL
 		 * @param {APISenderHeader[]} sender.requestHeaders
@@ -2559,6 +2675,7 @@ export class API {
 			customField2,
 			customField3,
 			customField4,
+			oauthProviderID,
 			requestMethod,
 			requestURL,
 			requestHeaders,
@@ -2583,6 +2700,7 @@ export class API {
 				customField2: customField2,
 				customField3: customField3,
 				customField4: customField4,
+				oauthProviderID: oauthProviderID,
 				requestMethod: requestMethod,
 				requestURL: requestURL,
 				requestHeaders: requestHeaders,

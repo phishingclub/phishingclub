@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/phishingclub/phishingclub/config"
 	"github.com/phishingclub/phishingclub/controller"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -38,6 +39,7 @@ type Controllers struct {
 	Import            *controller.Import
 	Backup            *controller.Backup
 	IPAllowList       *controller.IPAllowList
+	OAuthProvider     *controller.OAuthProvider
 }
 
 // NewControllers creates a collection of controllers
@@ -50,6 +52,7 @@ func NewControllers(
 	atomLogger *zap.AtomicLevel,
 	utillities *Utilities,
 	db *gorm.DB,
+	conf *config.Config,
 ) *Controllers {
 	common := controller.Common{
 		SessionService: services.Session,
@@ -188,6 +191,11 @@ func NewControllers(
 	geoIP := &controller.GeoIP{
 		Common: common,
 	}
+	oauthProvider := &controller.OAuthProvider{
+		Common:               common,
+		OAuthProviderService: services.OAuthProvider,
+		Config:               conf,
+	}
 
 	return &Controllers{
 		Asset:             asset,
@@ -220,5 +228,6 @@ func NewControllers(
 		Import:            importController,
 		Backup:            backup,
 		IPAllowList:       ipAllowList,
+		OAuthProvider:     oauthProvider,
 	}
 }

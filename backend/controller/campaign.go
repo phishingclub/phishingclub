@@ -735,7 +735,6 @@ func (c *Campaign) GetRecipientsByCampaignID(g *gin.Context) {
 	}
 	// endpoints is handled a bit differently and allows to
 	// fetch an unlimited amount of rows if no offset and limit is set.
-	// TODO this endpoint should be changed to a Result<T> so we fetch the rows as needed.
 	offset := g.DefaultQuery("offset", "")
 	limit := g.DefaultQuery("limit", "")
 	// parse request
@@ -870,8 +869,10 @@ func (c *Campaign) SendEmailByCampaignRecipientID(g *gin.Context) {
 	}
 	// send message (email or API depending on campaign template configuration)
 	err := c.CampaignService.SendEmailByCampaignRecipientID(g.Request.Context(), session, id)
-	// handle responses
-	if ok := c.handleErrors(g, err); !ok {
+	// handle responses - sending failures are expected (invalid recipient email etc)
+	// so return as bad request instead of internal server error
+	if err != nil {
+		c.Response.BadRequestMessage(g, err.Error())
 		return
 	}
 	c.Response.OK(g, gin.H{})

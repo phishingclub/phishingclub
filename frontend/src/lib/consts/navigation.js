@@ -9,7 +9,8 @@ export const route = {
 	},
 	tools: {
 		label: 'Tools',
-		route: '/tools/'
+		route: '/tools/',
+		blackbox: true
 	},
 	sessions: {
 		label: 'Sessions',
@@ -62,7 +63,8 @@ export const route = {
 	},
 	proxy: {
 		label: 'Proxies',
-		route: '/proxy/'
+		route: '/proxy/',
+		blackbox: true
 	},
 	campaignTemplates: {
 		label: 'Templates',
@@ -81,9 +83,15 @@ export const route = {
 		label: 'API Senders',
 		route: '/api-sender/'
 	},
+	oauthProviders: {
+		label: 'OAuth',
+		route: '/oauth-provider/',
+		blackbox: true
+	},
 	allowDeny: {
 		label: 'Filters',
-		route: '/filter/'
+		route: '/filter/',
+		blackbox: true
 	},
 	webhook: {
 		label: 'Webhooks',
@@ -122,7 +130,13 @@ export const menu = [
 	{
 		label: 'Emails',
 		type: 'submenu',
-		items: [route.emails, route.attachments, route.smtpConfigurations, route.apiSenders]
+		items: [
+			route.emails,
+			route.attachments,
+			route.smtpConfigurations,
+			route.apiSenders,
+			route.oauthProviders
+		]
 	}
 ];
 

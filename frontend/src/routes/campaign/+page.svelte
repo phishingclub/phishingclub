@@ -48,8 +48,11 @@
 	import BigButton from '$lib/components/BigButton.svelte';
 	import ToIcon from '$lib/components/ToIcon.svelte';
 	import Datetime from '$lib/components/Datetime.svelte';
+	import JitterSlider from '$lib/components/JitterSlider.svelte';
 	import RelativeTime from '$lib/components/RelativeTime.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
+	import CheckboxField from '$lib/components/CheckboxField.svelte';
+	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 
 	let currentStep = 1;
 
@@ -202,16 +205,30 @@
 	const SPREAD_MANUAL = 'manual';
 	const SPREAD_IMMEDIATE = 'immediate';
 	const SPREAD_1MIN = '1min';
+	const SPREAD_2MIN = '2min';
 	const SPREAD_5MIN = '5min';
+	const SPREAD_10MIN = '10min';
 	const SPREAD_20MIN = '20min';
+	const SPREAD_30MIN = '30min';
 	const SPREAD_1HOUR = '1hour';
+	const SPREAD_2HOUR = '2hour';
+	const SPREAD_5HOUR = '5hour';
+	const SPREAD_12HOUR = '12hour';
+	const SPREAD_24HOUR = '24hour';
 
 	const spreadOptionMap = new BiMap({
 		Manual: SPREAD_MANUAL,
 		'1 minute': SPREAD_1MIN,
+		'2 minutes': SPREAD_2MIN,
 		'5 minutes': SPREAD_5MIN,
+		'10 minutes': SPREAD_10MIN,
 		'20 minutes': SPREAD_20MIN,
-		'1 hour': SPREAD_1HOUR
+		'30 minutes': SPREAD_30MIN,
+		'1 hour': SPREAD_1HOUR,
+		'2 hours': SPREAD_2HOUR,
+		'5 hours': SPREAD_5HOUR,
+		'12 hours': SPREAD_12HOUR,
+		'24 hours': SPREAD_24HOUR
 	});
 
 	let spreadOption = SPREAD_MANUAL;
@@ -222,12 +239,26 @@
 				return 0;
 			case SPREAD_1MIN:
 				return 60000;
+			case SPREAD_2MIN:
+				return 120000;
 			case SPREAD_5MIN:
 				return 300000;
+			case SPREAD_10MIN:
+				return 600000;
 			case SPREAD_20MIN:
 				return 1200000;
+			case SPREAD_30MIN:
+				return 1800000;
 			case SPREAD_1HOUR:
 				return 3600000;
+			case SPREAD_2HOUR:
+				return 7200000;
+			case SPREAD_5HOUR:
+				return 18000000;
+			case SPREAD_12HOUR:
+				return 43200000;
+			case SPREAD_24HOUR:
+				return 86400000;
 			default:
 				return null;
 		}
@@ -258,7 +289,10 @@
 		isTest: false,
 		obfuscate: false,
 		selectedCount: 0,
-		webhookValue: null
+		webhookValue: null,
+		webhookIncludeData: false,
+		jitterMin: 0,
+		jitterMax: 0
 	};
 
 	let modalError = '';
@@ -269,6 +303,7 @@
 	let isValidatingName = false;
 	let weekDaysAvailable = [];
 	let isDeleteAlertVisible = false;
+	let webhookIncludeDataCheckbox = null;
 
 	$: {
 		modalText = getModalText('campaign', modalMode);
@@ -636,7 +671,10 @@
 				constraintWeekDays: weekDaysAvailableToBinary(formValues.constraintWeekDays),
 				constraintStartTime: contraintStartTimeUTC,
 				constraintEndTime: contraintEndTimeUTC,
-				webhookID: webhookMap.byValueOrNull(formValues.webhookValue)
+				webhookID: webhookMap.byValueOrNull(formValues.webhookValue),
+				webhookIncludeData: formValues.webhookIncludeData,
+				jitterMin: formValues.jitterMin !== 0 ? formValues.jitterMin : null,
+				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null
 			});
 
 			if (!res.success) {
@@ -699,7 +737,10 @@
 				allowDenyIDs: allowDenyIDs,
 				denyPageID: denyPageMap.byValueOrNull(formValues.denyPageValue),
 				evasionPageID: denyPageMap.byValueOrNull(formValues.evasionPageValue),
-				webhookID: webhookMap.byValueOrNull(formValues.webhookValue)
+				webhookID: webhookMap.byValueOrNull(formValues.webhookValue),
+				webhookIncludeData: formValues.webhookIncludeData,
+				jitterMin: formValues.jitterMin !== 0 ? formValues.jitterMin : null,
+				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null
 			});
 
 			if (!res.success) {
@@ -824,7 +865,10 @@
 			isTest: false,
 			obfuscate: false,
 			selectedCount: 0,
-			webhookValue: null
+			webhookValue: null,
+			webhookIncludeData: false,
+			jitterMin: 0,
+			jitterMax: 0
 		};
 		scheduleType = 'basic';
 		allowDenyType = 'none';
@@ -929,7 +973,8 @@
 			isTest: campaign.isTest,
 			obfuscate: campaign.obfuscate || false,
 			template: templateMap.byKey(campaign.templateID),
-			webhookValue: webhookMap.byKey(campaign.webhookID)
+			webhookValue: webhookMap.byKey(campaign.webhookID),
+			webhookIncludeData: campaign.webhookIncludeData || false
 		};
 
 		if (copyMode) {
@@ -1306,10 +1351,10 @@
 								</div>
 
 								{#if formValues.sendStartAt}
-									<div class="pl-36 pt-4 pb-6">
+									<div class="pt-4 pb-6">
 										<div class="flex flex-col gap-2">
 											<p
-												class="text-sm font-semibold text-slate-600 dark:text-gray-300 transition-colors duration-200"
+												class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
 											>
 												Distribution Speed
 
@@ -1318,32 +1363,53 @@
 													{#if spreadOption === SPREAD_MANUAL}
 														Manual timing
 													{:else if spreadOption === SPREAD_1MIN}
-														1 minutes apart
+														1 minute apart
+													{:else if spreadOption === SPREAD_2MIN}
+														2 minutes apart
 													{:else if spreadOption === SPREAD_5MIN}
 														5 minutes apart
+													{:else if spreadOption === SPREAD_10MIN}
+														10 minutes apart
 													{:else if spreadOption === SPREAD_20MIN}
 														20 minutes apart
+													{:else if spreadOption === SPREAD_30MIN}
+														30 minutes apart
 													{:else if spreadOption === SPREAD_1HOUR}
 														1 hour apart
+													{:else if spreadOption === SPREAD_2HOUR}
+														2 hours apart
+													{:else if spreadOption === SPREAD_5HOUR}
+														5 hours apart
+													{:else if spreadOption === SPREAD_12HOUR}
+														12 hours apart
+													{:else if spreadOption === SPREAD_24HOUR}
+														24 hours apart
 													{/if}
 													)
 												</span>
 											</p>
-											<div class="flex items-center gap-4">
+											<div class="flex items-center">
 												<input
 													type="range"
 													min="0"
-													max="4"
+													max="11"
 													bind:value={speedIndex}
-													class="w-48 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:cursor-pointer hover:[&::-webkit-slider-thumb]:bg-blue-700"
+													class="w-96 h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:cursor-pointer hover:[&::-webkit-slider-thumb]:bg-blue-700 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-blue-600 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer hover:[&::-moz-range-thumb]:bg-blue-700 transition-colors duration-200"
 													on:input={(event) => {
 														const index = parseInt(event.currentTarget.value);
 														const speeds = [
 															SPREAD_MANUAL,
 															SPREAD_1MIN,
+															SPREAD_2MIN,
 															SPREAD_5MIN,
+															SPREAD_10MIN,
 															SPREAD_20MIN,
-															SPREAD_1HOUR
+															SPREAD_30MIN,
+															SPREAD_1HOUR,
+															SPREAD_2HOUR,
+															SPREAD_5HOUR,
+															SPREAD_12HOUR,
+															SPREAD_24HOUR
 														];
 														spreadOption = speeds[index];
 														const milliseconds = getSpreadMilliseconds(spreadOption);
@@ -1513,6 +1579,14 @@
 										options={Array.from(sortOrder.keys())}>Delivery order</TextFieldSelect
 									>
 
+									<JitterSlider
+										id="jitter-slider"
+										bind:valueMin={formValues.jitterMin}
+										bind:valueMax={formValues.jitterMax}
+									>
+										Jitter
+									</JitterSlider>
+
 									<DateTimeField
 										bind:value={formValues.closeAt}
 										min={formValues.sendEndAt
@@ -1564,15 +1638,17 @@
 							/>
 						</div>
 
-						<div class="mb-6">
-							<SelectSquare
-								optional
-								toolTipText="Saves JA4 fingerprint, Sec-CH-UA-Platform header, and Accept-Language header."
-								label="Save browser metadata?"
-								options={saveSubbmitedDataOptions}
-								bind:value={formValues.saveBrowserMetadata}
-							/>
-						</div>
+						<ConditionalDisplay show="blackbox">
+							<div class="mb-6">
+								<SelectSquare
+									optional
+									toolTipText="Saves JA4 fingerprint, Sec-CH-UA-Platform header, and Accept-Language header."
+									label="Save browser metadata?"
+									options={saveSubbmitedDataOptions}
+									bind:value={formValues.saveBrowserMetadata}
+								/>
+							</div>
+						</ConditionalDisplay>
 
 						{#if !showAdvancedOptionsStep4}
 							<div class="mt-4">
@@ -1595,26 +1671,39 @@
 									options={Array.from(webhookMap.values())}>Webhook</TextFieldSelect
 								>
 							</div>
+							{#if formValues.webhookValue}
+								<div class="mb-6">
+									<CheckboxField
+										bind:bindTo={webhookIncludeDataCheckbox}
+										bind:value={formValues.webhookIncludeData}
+										toolTipText="When enabled, captured data (credentials, cookies, etc.) will be included in the webhook payload"
+									>
+										Include captured data
+									</CheckboxField>
+								</div>
+							{/if}
 
-							<div class="mb-6">
-								<SelectSquare
-									optional
-									label="Security Configuration"
-									options={[
-										{ value: false, label: 'Disabled' },
-										{ value: true, label: 'Enabled' }
-									]}
-									bind:value={showSecurityOptions}
-									onChange={() => {
-										if (!showSecurityOptions) {
-											formValues.denyPageValue = '';
-											formValues.evasionPageValue = '';
-											allowDenyType = 'none';
-											formValues.allowDeny = [];
-										}
-									}}
-								/>
-							</div>
+							<ConditionalDisplay show="blackbox">
+								<div class="mb-6">
+									<SelectSquare
+										optional
+										label="Security Configuration"
+										options={[
+											{ value: false, label: 'Disabled' },
+											{ value: true, label: 'Enabled' }
+										]}
+										bind:value={showSecurityOptions}
+										onChange={() => {
+											if (!showSecurityOptions) {
+												formValues.denyPageValue = '';
+												formValues.evasionPageValue = '';
+												allowDenyType = 'none';
+												formValues.allowDeny = [];
+											}
+										}}
+									/>
+								</div>
+							</ConditionalDisplay>
 						{/if}
 
 						{#if showAdvancedOptionsStep4 && showSecurityOptions}
@@ -1876,6 +1965,15 @@
 													{spreadOptionMap.byValue(spreadOption)}
 												</span>
 											{/if}
+
+											{#if formValues.jitterMin !== 0 || formValues.jitterMax !== 0}
+												<span class="text-grayblue-dark font-medium">Jitter:</span>
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
+													{formValues.jitterMin} to {formValues.jitterMax} minutes
+												</span>
+											{/if}
 										{:else if scheduleType === 'schedule'}
 											<span class="text-grayblue-dark font-medium">Active days:</span>
 											<span
@@ -1889,6 +1987,15 @@
 												<span class="text-grayblue-dark font-medium">Hours:</span>
 												<span class="text-pc-darkblue dark:text-white">
 													{formValues.contraintStartTime} - {formValues.contraintEndTime}
+												</span>
+											{/if}
+
+											{#if formValues.jitterMin !== 0 || formValues.jitterMax !== 0}
+												<span class="text-grayblue-dark font-medium">Jitter:</span>
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
+													{formValues.jitterMin} to {formValues.jitterMax} minutes
 												</span>
 											{/if}
 										{/if}
@@ -1915,27 +2022,31 @@
 										Security & Privacy
 									</h3>
 									<div class="grid grid-cols-[120px_1fr] gap-y-3">
-										<span class="text-grayblue-dark font-medium">IP Filtering:</span>
-										<span class="text-pc-darkblue dark:text-white">
-											{#if allowDenyType === 'none'}
-												None
-											{:else}
-												{allowDenyType === 'allow' ? 'Allow-list' : 'Deny-list'}:
-												{formValues.allowDeny.length
-													? formValues.allowDeny.join(', ')
-													: 'No groups selected'}
-											{/if}
-										</span>
+										<ConditionalDisplay show="blackbox">
+											<span class="text-grayblue-dark font-medium">IP Filtering:</span>
+											<span class="text-pc-darkblue dark:text-white">
+												{#if allowDenyType === 'none'}
+													None
+												{:else}
+													{allowDenyType === 'allow' ? 'Allow-list' : 'Deny-list'}:
+													{formValues.allowDeny.length
+														? formValues.allowDeny.join(', ')
+														: 'No groups selected'}
+												{/if}
+											</span>
+										</ConditionalDisplay>
 
 										<span class="text-grayblue-dark font-medium">Save Data:</span>
 										<span class="text-pc-darkblue dark:text-white"
 											>{formValues.saveSubmittedData ? 'Enabled' : 'Disabled'}</span
 										>
 
-										<span class="text-grayblue-dark font-medium">Save Metadata:</span>
-										<span class="text-pc-darkblue dark:text-white"
-											>{formValues.saveBrowserMetadata ? 'Enabled' : 'Disabled'}</span
-										>
+										<ConditionalDisplay show="blackbox">
+											<span class="text-grayblue-dark font-medium">Save Metadata:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.saveBrowserMetadata ? 'Enabled' : 'Disabled'}</span
+											>
+										</ConditionalDisplay>
 
 										<!--
 										<span class="text-grayblue-dark font-medium">Anonymization:</span>
@@ -1947,6 +2058,10 @@
 										{#if formValues.webhookValue}
 											<span class="text-grayblue-dark font-medium">Webhook:</span>
 											<span class="text-pc-darkblue dark:text-white">{formValues.webhookValue}</span
+											>
+											<span class="text-grayblue-dark font-medium">Include Data:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.webhookIncludeData ? 'Yes' : 'No'}</span
 											>
 										{/if}
 

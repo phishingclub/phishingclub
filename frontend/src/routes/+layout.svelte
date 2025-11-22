@@ -19,7 +19,7 @@
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import Header from '$lib/components/header/Header.svelte';
 	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
-	// Removed feature flags import - no longer needed
+	import { displayMode } from '$lib/store/displayMode';
 
 	// services
 	const session = Session.instance;
@@ -30,11 +30,6 @@
 	let loginStatus = AppStateService.LOGIN.UNKNOWN;
 	let installState = AppStateService.INSTALL.UNKNOWN;
 
-	let user = {
-		name: '',
-		username: '',
-		role: ''
-	};
 	let isProfileMenuVisible = false;
 	let isMobileMenuVisible = false;
 	let isChangeCompanyModalVisible = false;
@@ -95,12 +90,6 @@
 		})();
 
 		const appStateUnsubscribe = appState.subscribe((s) => {
-			// sync any changes to user and scope changes
-			user = {
-				name: s.user.name,
-				username: s.user.username,
-				role: s.user.role
-			};
 			// sync any changes related to view functionality
 			let loginChanged = false;
 			let installChanged = false;
@@ -141,11 +130,12 @@
 				return;
 			}
 
-			// if the user is logged in, check for updates
+			// if the user is logged in, check for updates and load display mode
 			if (loginChanged && loginStatus === AppStateService.LOGIN.LOGGED_IN) {
 				(async () => {
 					try {
 						await checkForUpdate();
+						await loadDisplayMode();
 					} catch (e) {
 						console.error(e);
 					}
@@ -193,6 +183,17 @@
 			appState.setIsUpdateAvailable(res.data.updateAvailable);
 		} catch (e) {
 			console.error('failed to check for update', e);
+		}
+	};
+
+	const loadDisplayMode = async () => {
+		try {
+			const res = await api.option.get('display_mode');
+			if (res.success && res.data.value) {
+				displayMode.setMode(res.data.value);
+			}
+		} catch (e) {
+			console.error('failed to load display mode', e);
 		}
 	};
 

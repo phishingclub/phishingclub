@@ -13,13 +13,19 @@
 	import FormColumn from '$lib/components/FormColumn.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
+	import { displayMode, DISPLAY_MODE } from '$lib/store/displayMode';
 
 	// services
 	const api = API.instance;
 	const appStateService = AppStateService.instance;
 
 	// installation steps - will be updated based on edition
-	let steps = [{ name: 'Profile' }, { name: 'Templates' }, { name: 'Complete' }];
+	let steps = [
+		{ name: 'Profile' },
+		{ name: 'Display Mode' },
+		{ name: 'Templates' },
+		{ name: 'Complete' }
+	];
 
 	let currentStep = 1;
 	let formError = '';
@@ -33,6 +39,9 @@
 		password: '',
 		repeatPassword: ''
 	};
+
+	// display mode step
+	let selectedDisplayMode = DISPLAY_MODE.WHITEBOX;
 
 	// templates step
 	let installTemplates = false;
@@ -90,10 +99,13 @@
 			case 1:
 				return validateProfile();
 			case 2:
-				// Step 2 is templates - no validation needed
+				// step 2 is display mode - no validation needed
 				return true;
 			case 3:
-				// Step 3 is always Complete now - no validation needed
+				// step 3 is templates - no validation needed
+				return true;
+			case 4:
+				// step 4 is always complete now - no validation needed
 				return true;
 			default:
 				return true;
@@ -128,7 +140,7 @@
 		showIsLoading();
 		isSubmitting = true;
 		try {
-			// Create user - no license setup during installation
+			// create user - no license setup during installation
 			const userRes = await api.application.install(
 				installForm.username,
 				installForm.name,
@@ -139,20 +151,29 @@
 				return;
 			}
 
-			// Install templates if requested
+			// set display mode
+			const displayModeRes = await api.option.set('display_mode', selectedDisplayMode);
+			if (!displayModeRes.success) {
+				console.warn('failed to set display mode', displayModeRes.error);
+				// continue with installation even if display mode setting fails
+			} else {
+				displayMode.setMode(selectedDisplayMode);
+			}
+
+			// install templates if requested
 			if (installTemplates) {
 				const templatesRes = await api.application.installTemplates();
 				if (!templatesRes.success) {
 					templatesError = templatesRes.error || 'Failed to install templates';
 					console.warn('failed to install templates', templatesRes.error);
-					// Continue with installation even if templates fail
+					// continue with installation even if templates fail
 				} else {
 					console.info('templates installed successfully');
 				}
 			}
 
 			appStateService.setIsInstalled();
-			// License configuration available in settings after installation
+			// license configuration available in settings after installation
 			console.info('install: setup completed - refreshing');
 			location.reload();
 		} catch (e) {
@@ -262,6 +283,69 @@
 								</div>
 							{:else if currentStep === 2}
 								<div class="text-center py-8" id="step-2">
+									<h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
+										Display Mode
+									</h3>
+									<div class="space-y-4 text-sm text-gray-600 dark:text-gray-300">
+										<p>Select which features are available</p>
+									</div>
+									<div class="mt-6 space-y-4">
+										<label
+											class="flex items-start justify-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors {selectedDisplayMode ===
+											DISPLAY_MODE.WHITEBOX
+												? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+												: 'border-gray-300 dark:border-gray-600'}"
+										>
+											<input
+												type="radio"
+												bind:group={selectedDisplayMode}
+												value={DISPLAY_MODE.WHITEBOX}
+												class="mt-1 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+											/>
+											<div class="text-left">
+												<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
+													Whitebox
+												</span>
+												<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
+													Phishing Simulation
+												</span>
+											</div>
+										</label>
+										<label
+											class="flex items-start justify-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors {selectedDisplayMode ===
+											DISPLAY_MODE.BLACKBOX
+												? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+												: 'border-gray-300 dark:border-gray-600'}"
+										>
+											<input
+												type="radio"
+												bind:group={selectedDisplayMode}
+												value={DISPLAY_MODE.BLACKBOX}
+												class="mt-1 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+											/>
+											<div class="text-left">
+												<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
+													Blackbox
+												</span>
+												<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
+													Red Team Phishing.
+												</span>
+											</div>
+										</label>
+										<p
+											class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200"
+										>
+											Read about the difference between <br />
+											<a
+												class="white underline"
+												href="https://phishing.club/blog/white-box-vs-black-box-phishing/"
+												target="_blank">whitebox and blackbox phishing</a
+											>
+										</p>
+									</div>
+								</div>
+							{:else if currentStep === 3}
+								<div class="text-center py-8" id="step-3">
 									<h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
 										Example Templates
 									</h3>

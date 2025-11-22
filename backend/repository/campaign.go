@@ -1487,6 +1487,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	isAnonymous := nullable.NewNullableWithValue(row.IsAnonymous)
 	isTest := nullable.NewNullableWithValue(row.IsTest)
 	obfuscate := nullable.NewNullableWithValue(row.Obfuscate)
+	webhookIncludeData := nullable.NewNullableWithValue(row.WebhookIncludeData)
 	var templateID nullable.Nullable[uuid.UUID]
 	if row.CampaignTemplateID != nil {
 		templateID = nullable.NewNullableWithValue(*row.CampaignTemplateID)
@@ -1615,6 +1616,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		IsAnonymous:         isAnonymous,
 		IsTest:              isTest,
 		Obfuscate:           obfuscate,
+		WebhookIncludeData:  webhookIncludeData,
 		TemplateID:          templateID,
 		Template:            template,
 		RecipientGroups:     recipientGroups,

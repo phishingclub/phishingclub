@@ -125,6 +125,15 @@ func (c *CampaignTemplate) Validate() error {
 		)
 	}
 
+	// validate that smtp configuration and api sender are mutually exclusive
+	_, errSMTP := c.SMTPConfigurationID.Get()
+	_, errAPISender := c.APISenderID.Get()
+	if errSMTP == nil && errAPISender == nil {
+		return errs.NewValidationError(
+			errors.New("smtp configuration and api sender cannot both be set"),
+		)
+	}
+
 	return nil
 }
 

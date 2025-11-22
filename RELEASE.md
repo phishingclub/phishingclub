@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.19.0] - 2025-11-21
+- Added OAuth Providers and integration with API Senders
+- Added copy email on recipient actions on campaign page
+- Fix bad error message on custom sent message failure
+- Fix bad error sometimes caused by context cancellation on custom send message 
+- Fix campaign template able to be both SMTP and API Sender 
+- Fix has next page in pagination on campaign page
+- Fix campaign recipients endpoint uses standard response 
+- Improved recipient actions text on campaign page
+
+## [1.18.0] - 2025-11-18
+- Added option to add jitter to scheduling 
+- Fix set cancelled only for recipients of campaign
+- Fix missing tabindex and active style for checkboxes
+- Improve range slider for campaign distribution
+
+## [1.17.1] - 2025-11-16
+- Fixed missing meta data on a couple of eserivents
+
+## [1.17.0] - 2025-11-16
+- Added option to to add data to webhook events
+- Fix added a couple of webhook calls
+- Fix add global rewrite rules to requests without mitm session
+- Fix bad handling of brotli/gzip with browser empersonation 
+- Fix cookie events captured before all required captures
+- Removed unused sorting column
+
 ## [1.16.0] - 2025-11-12
 - Added synthetic 'email read' event when visiting a lure without having loaded a tracking pixel in a email
 - Added {{.FromName}}, {{.FromEmail}} and {{.Subject}} variable support to API sender

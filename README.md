@@ -36,7 +36,7 @@ See [production docker compose example](https://github.com/phishingclub/phishing
 - **Domain proxying** - Configure domains to proxy and mirror content from target sites
 - **Flexible scheduling** - Time windows, business hours, or manual delivery
 - **Multiple domains** - Auto TLS, custom sites, asset management
-- **Advanced delivery** - SMTP configs or custom API endpoints
+- **Advanced delivery** - SMTP configs or custom API Sender with OAuth support
 - **Recipient tracking** - Groups, CSV import, repeat offender metrics
 - **Analytics** - Timelines, dashboards, per-user event history
 - **Automation** - HMAC-signed webhooks, REST API, import/export
@@ -57,6 +57,10 @@ See [production docker compose example](https://github.com/phishingclub/phishing
 - **Browser impersonation** - Impersonate JA4 fingerprints in proxied requests
 - **Response overwriting** - Shortcut proxying with custom responses
 - **Forward proxying** - Use HTTP and SOCKS5 proxies to ensure requests originate from the right location
+
+### Blogs & Resources
+- [Covert red team phishing with Phishing Club by Phishing Club](http://phishing.club/blog/covert-red-team-phishing-with-phishing-club/)
+- [Whitebox vs blackbox phishing by Phishing Club](http://phishing.club/blog/white-box-vs-black-box-phishing/)
 
 ### Students & Learning
 

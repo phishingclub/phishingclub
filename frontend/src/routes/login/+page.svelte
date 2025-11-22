@@ -275,7 +275,7 @@
 							type="text"
 							id="Username"
 							name="Username"
-							class="w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
+							class="w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
 						/>
 					</div>
 					<div class="flex flex-col w-full p-4 h-24">
@@ -322,7 +322,7 @@
 								type={inputType}
 								id="Password"
 								name="Password"
-								class="relative w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-400 focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
+								class="relative w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
 							/>
 						</div>
 					</div>

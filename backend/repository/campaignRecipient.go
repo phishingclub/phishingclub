@@ -159,11 +159,11 @@ func (r *CampaignRecipient) GetByCampaignID(
 	ctx context.Context,
 	campaignID *uuid.UUID,
 	options *CampaignRecipientOption,
-) ([]*model.CampaignRecipient, error) {
-	recps := []*model.CampaignRecipient{}
+) (*model.Result[model.CampaignRecipient], error) {
+	result := model.NewEmptyResult[model.CampaignRecipient]()
 	db, err := useQuery(r.DB, database.CAMPAIGN_TABLE, options.QueryArgs, allowedCampaignRecipientColumns...)
 	if err != nil {
-		return recps, errs.Wrap(err)
+		return result, errs.Wrap(err)
 	}
 	db = r.preload(db, options)
 	var dbCampaignRecipients []database.CampaignRecipient
@@ -176,16 +176,23 @@ func (r *CampaignRecipient) GetByCampaignID(
 		Find(&dbCampaignRecipients)
 
 	if res.Error != nil {
-		return recps, res.Error
+		return result, res.Error
 	}
+
+	hasNextPage, err := useHasNextPage(db, database.CAMPAIGN_RECIPIENT_TABLE_NAME, options.QueryArgs, allowedCampaignRecipientColumns...)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	result.HasNextPage = hasNextPage
+
 	for _, dbCampaignRecipient := range dbCampaignRecipients {
 		r, err := ToCampaignRecipient(&dbCampaignRecipient)
 		if err != nil {
-			return recps, nil
+			return result, nil
 		}
-		recps = append(recps, r)
+		result.Rows = append(result.Rows, r)
 	}
-	return recps, nil
+	return result, nil
 }
 
 // GetByID gets a campaign recipient by id
@@ -269,8 +276,10 @@ func (r *CampaignRecipient) GetByCampaignRecipientID(
 // GetUnsendRecipients gets all campaign recipients that are not sent
 // and have been attempted or been cancelled
 // if limit is larger than 0 it will limit the number of results
+// if campaignID is not nil, it will filter by that campaign
 func (r *CampaignRecipient) GetUnsendRecipients(
 	ctx context.Context,
+	campaignID *uuid.UUID,
 	limit int,
 	options *CampaignRecipientOption,
 ) ([]*model.CampaignRecipient, error) {
@@ -289,6 +298,12 @@ func (r *CampaignRecipient) GetUnsendRecipients(
 			TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "last_attempt_at"),
 		),
 	)
+	if campaignID != nil {
+		q = q.Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "campaign_id")),
+			campaignID,
+		)
+	}
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
@@ -406,6 +421,7 @@ func (c *CampaignRecipient) UpdateByID(
 // Anonymize adds an anonymized id to a campaign recipient
 func (r *CampaignRecipient) Anonymize(
 	ctx context.Context,
+	campaignID *uuid.UUID,
 	recipientID *uuid.UUID,
 	anonymizedID *uuid.UUID,
 ) error {
@@ -413,10 +429,17 @@ func (r *CampaignRecipient) Anonymize(
 		"anonymized_id": anonymizedID.String(),
 	}
 	AddUpdatedAt(row)
-	res := r.DB.
-		Model(&database.CampaignRecipient{}).
-		Where("recipient_id = ?", recipientID).
-		Updates(row)
+	db := r.DB.Model(&database.CampaignRecipient{})
+
+	// if campaignID is nil, anonymize across all campaigns (e.g., when deleting recipient)
+	// otherwise, only anonymize for the specific campaign
+	if campaignID != nil {
+		db = db.Where("campaign_id = ? AND recipient_id = ?", campaignID, recipientID)
+	} else {
+		db = db.Where("recipient_id = ?", recipientID)
+	}
+
+	res := db.Updates(row)
 
 	if res.Error != nil {
 		return res.Error

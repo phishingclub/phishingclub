@@ -31,6 +31,7 @@ type APISender struct {
 	TemplateService         *Template
 	CampaignTemplateService *CampaignTemplate
 	APISenderRepository     *repository.APISender
+	OAuthProviderService    *OAuthProvider
 }
 
 // APISenderTestResponse is a response for testing API sender
@@ -285,6 +286,13 @@ func (a *APISender) UpdateByID(
 	if v, err := incoming.Name.Get(); err == nil {
 		current.Name.Set(v)
 	}
+	if incoming.CompanyID.IsSpecified() {
+		if v, err := incoming.CompanyID.Get(); err == nil {
+			current.CompanyID.Set(v)
+		} else {
+			current.CompanyID.SetNull()
+		}
+	}
 	if v, err := incoming.APIKey.Get(); err == nil {
 		current.APIKey.Set(v)
 	}
@@ -324,6 +332,13 @@ func (a *APISender) UpdateByID(
 	}
 	if v, err := incoming.ExpectedResponseBody.Get(); err == nil {
 		current.ExpectedResponseBody.Set(v)
+	}
+	if incoming.OAuthProviderID.IsSpecified() {
+		if v, err := incoming.OAuthProviderID.Get(); err == nil {
+			current.OAuthProviderID.Set(v)
+		} else {
+			current.OAuthProviderID.SetNull()
+		}
 	}
 	if err := current.Validate(); err != nil {
 		a.Logger.Errorw("failed to validate API sender", "error", err)
@@ -399,11 +414,27 @@ func (a *APISender) SendTest(
 		return nil, errs.ErrAuthorizationFailed
 	}
 	a.Logger.Debugw("sending test request to API sender", "id", id.String())
-	// get the API sender
-	apiSender, err := a.APISenderRepository.GetByID(ctx, id, &repository.APISenderOption{})
+	// get the API sender with oauth provider
+	apiSender, err := a.APISenderRepository.GetByID(ctx, id, &repository.APISenderOption{
+		WithOAuthProvider: true,
+	})
 	if err != nil {
 		a.Logger.Errorw("failed to get API sender by ID", "error", err)
 		return nil, errs.Wrap(err)
+	}
+
+	// get oauth access token if oauth provider is configured on the api sender
+	var oauthAccessToken string
+	oauthProviderID, err := apiSender.OAuthProviderID.Get()
+	if err == nil && a.OAuthProviderService != nil {
+		// oauth provider is configured for this api sender
+		token, tokenErr := a.OAuthProviderService.GetValidAccessToken(ctx, oauthProviderID)
+		if tokenErr != nil {
+			a.Logger.Errorw("failed to get oauth access token for test", "error", tokenErr, "oauthProviderID", oauthProviderID)
+			return nil, errs.Wrap(tokenErr)
+		}
+		oauthAccessToken = token
+		a.Logger.Debugw("got oauth access token for api test request", "oauthProviderID", oauthProviderID)
 	}
 	emailRaw := "bob@enterprise.test"
 	email := *vo.NewEmailMust(emailRaw)
@@ -469,13 +500,15 @@ func (a *APISender) SendTest(
 			},
 		},
 	}
-	url, headers, body, err := a.buildRequest(
+	url, headers, body, err := a.buildRequestWithCustomURL(
 		apiSender,
 		"api-sender-test.test",
 		"id",
 		"foo/bar",
 		testCampaignRecipient,
 		testEmail,
+		"",
+		oauthAccessToken,
 	)
 	if err != nil {
 		a.Logger.Errorw("failed to build test request", "error", err)
@@ -483,7 +516,7 @@ func (a *APISender) SendTest(
 	}
 	requestBody := body.String()
 	res, resBodyClose, err := a.sendRequest(
-		context.Background(),
+		ctx,
 		apiSender,
 		headers,
 		url,
@@ -556,13 +589,29 @@ func (a *APISender) SendWithCustomURL(
 		ctx,
 		session,
 		&apiSenderID,
-		&repository.APISenderOption{},
+		&repository.APISenderOption{
+			WithOAuthProvider: true,
+		},
 	)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("api sender did not load: %s", err)
 	}
 	if apiSender == nil {
 		return errors.New("api sender did not load")
+	}
+
+	// get oauth access token if oauth provider is configured on the api sender
+	var oauthAccessToken string
+	oauthProviderID, err := apiSender.OAuthProviderID.Get()
+	if err == nil && a.OAuthProviderService != nil {
+		// oauth provider is configured for this api sender
+		token, err := a.OAuthProviderService.GetValidAccessToken(ctx, oauthProviderID)
+		if err != nil {
+			a.Logger.Errorw("failed to get oauth access token", "error", err, "oauthProviderID", oauthProviderID)
+			return fmt.Errorf("failed to get oauth access token: %w", err)
+		}
+		oauthAccessToken = token
+		a.Logger.Debugw("got oauth access token for api request", "oauthProviderID", oauthProviderID)
 	}
 
 	domainName := domain.Name.MustGet()
@@ -579,16 +628,22 @@ func (a *APISender) SendWithCustomURL(
 		campaignRecipient,
 		email,
 		customCampaignURL,
+		oauthAccessToken,
 	)
+	if err != nil {
+		a.Logger.Errorw("failed to build api sender request", "error", err)
+		return err
+	}
+
 	resp, respBodyClose, err := a.sendRequest(
-		context.Background(),
+		ctx,
 		apiSender,
 		headers,
 		url,
 		body,
 	)
 	if err != nil {
-		a.Logger.Errorw("failed to build and send api sender request", "error", err)
+		a.Logger.Errorw("failed to send api sender request", "error", err)
 		return err
 	}
 	defer respBodyClose()
@@ -701,8 +756,8 @@ func (a *APISender) sendRequest(
 	apiRequestBody *apiRequestBody,
 ) (*http.Response, func(), error) {
 	// prepare request
-	reqCtx, reqCancel := context.WithTimeout(ctx, 3*time.Second)
-	defer reqCancel()
+	reqCtx, reqCancel := context.WithTimeout(ctx, 10*time.Second)
+	// context must stay alive until response body is read
 	if apiRequestBody == nil {
 		apiRequestBody = bytes.NewBuffer([]byte{})
 	}
@@ -713,20 +768,40 @@ func (a *APISender) sendRequest(
 		apiRequestBody,
 	)
 	if err != nil {
+		reqCancel()
 		return nil, func() {}, errs.Wrap(err)
 	}
 	// TODO these headers should be enrished with template variables like {{.FirstName}} or etc
 	for _, header := range apiRequestHeaders {
 		req.Header.Set(header.Key, header.Value)
 	}
+	// debug logging: output request details
+	// build headers map for logging
+	headersMap := make(map[string]string)
+	for _, header := range apiRequestHeaders {
+		headersMap[header.Key] = header.Value
+	}
+
+	// log request details
+	a.Logger.Debugw("sending api request",
+		"method", apiSender.RequestMethod.MustGet().String(),
+		"url", apiRequestURL.String(),
+		"headers", headersMap,
+		"body", apiRequestBody.String(),
+	)
 	// send request
-	a.Logger.Debugw("sending request", "URL", apiRequestURL.String())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		reqCancel()
 		return nil, func() {}, errs.Wrap(err)
 	}
-	// #nosec
-	return resp, func() { resp.Body.Close() }, nil
+	// return cleanup function that closes body and  cancels context
+	// context must not be canceled until after response body is read
+	// otherwise io.ReadAll(resp.Body) can fail with "context canceled"
+	return resp, func() {
+		resp.Body.Close()
+		reqCancel()
+	}, nil
 }
 
 type apiRequestURL = bytes.Buffer
@@ -740,7 +815,7 @@ func (a *APISender) buildRequest(
 	campaignRecipient *model.CampaignRecipient,
 	email *model.Email, // todo is this superfluous? it should be in the campaign recipient?
 ) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
-	return a.buildRequestWithCustomURL(apiSender, domainName, urlKey, urlPath, campaignRecipient, email, "")
+	return a.buildRequestWithCustomURL(apiSender, domainName, urlKey, urlPath, campaignRecipient, email, "", "")
 }
 
 // buildRequestWithCustomURL builds an API request with optional custom campaign URL
@@ -752,6 +827,7 @@ func (a *APISender) buildRequestWithCustomURL(
 	campaignRecipient *model.CampaignRecipient,
 	email *model.Email,
 	customCampaignURL string,
+	oauthAccessToken string,
 ) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
 	// create template data first so it can be used in headers, url, and body
 	t := a.TemplateService.CreateMail(
@@ -762,6 +838,11 @@ func (a *APISender) buildRequestWithCustomURL(
 		email,
 		apiSender,
 	)
+
+	// add oauth access token to template data if available
+	if oauthAccessToken != "" {
+		(*t)["OAuthAccessToken"] = oauthAccessToken
+	}
 
 	// override campaign URL if custom one is provided
 	if customCampaignURL != "" {

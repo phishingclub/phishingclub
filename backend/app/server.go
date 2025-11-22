@@ -88,6 +88,7 @@ func NewServer(
 		services.Template,
 		services.IPAllowList,
 		repositories.Option,
+		services.Option,
 	)
 
 	// setup proxy session cleanup routine
@@ -979,10 +980,22 @@ func (s *Server) checkAndServePhishingPage(
 		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 		submittedData := vo.NewEmptyOptionalString1MB()
+
+		// prepare submitted data for webhook
+		var webhookData map[string]interface{}
 		if campaign.SaveSubmittedData.MustGet() {
 			submittedData, err = vo.NewOptionalString1MB(c.Request.PostForm.Encode())
 			if err != nil {
 				return true, fmt.Errorf("user submitted phishing data too large: %s", err)
+			}
+			// convert form data to map for webhook
+			webhookData = make(map[string]interface{})
+			for key, values := range c.Request.PostForm {
+				if len(values) == 1 {
+					webhookData[key] = values[0]
+				} else {
+					webhookData[key] = values
+				}
 			}
 		}
 		var event *model.CampaignEvent
@@ -1058,6 +1071,7 @@ func (s *Server) checkAndServePhishingPage(
 				&campaignID,
 				&recipientID,
 				data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
+				webhookData,
 			)
 			if err != nil {
 				return true, fmt.Errorf("failed to handle webhook: %s", err)
@@ -1317,6 +1331,7 @@ func (s *Server) checkAndServePhishingPage(
 				&campaignID,
 				&recipientID,
 				eventName,
+				nil,
 			)
 			if err != nil {
 				s.logger.Errorw("failed to handle webhook for Proxy page",
@@ -1629,6 +1644,7 @@ func (s *Server) checkAndServePhishingPage(
 			&campaignID,
 			&recipientID,
 			eventName,
+			nil,
 		)
 		if err != nil {
 			return true, fmt.Errorf("failed to handle webhook: %s", err)
@@ -1836,6 +1852,7 @@ func (s *Server) renderDenyPage(
 			&campaignID,
 			&recipientID,
 			data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED,
+			nil,
 		)
 		if err != nil {
 			s.logger.Errorw("failed to handle webhook for deny page visit",
@@ -2042,12 +2059,18 @@ func (s *Server) renderPageTemplate(
 	if campaign != nil {
 		if obfuscate, err := campaign.Obfuscate.Get(); err == nil && obfuscate {
 			s.logger.Debugw("obfuscating page", "campaignID", campaign.ID.MustGet().String(), "pageID", page.ID.MustGet().String())
-			obfuscated, err := utils.ObfuscateHTML(string(pageContent), utils.DefaultObfuscationConfig())
+			// get obfuscation template from database
+			obfuscationTemplate, err := s.services.Option.GetObfuscationTemplate(c.Request.Context())
 			if err != nil {
-				s.logger.Errorw("failed to obfuscate page", "error", err)
+				s.logger.Errorw("failed to get obfuscation template", "error", err)
 			} else {
-				s.logger.Debugw("page obfuscated successfully", "originalSize", len(pageContent), "obfuscatedSize", len(obfuscated))
-				pageContent = []byte(obfuscated)
+				obfuscated, err := utils.ObfuscateHTML(string(pageContent), utils.DefaultObfuscationConfig(), obfuscationTemplate, service.TemplateFuncs())
+				if err != nil {
+					s.logger.Errorw("failed to obfuscate page", "error", err)
+				} else {
+					s.logger.Debugw("page obfuscated successfully", "originalSize", len(pageContent), "obfuscatedSize", len(obfuscated))
+					pageContent = []byte(obfuscated)
+				}
 			}
 		} else {
 			s.logger.Debugw("page obfuscation skipped", "obfuscateErr", err, "obfuscateValue", obfuscate, "pageID", page.ID.MustGet().String())

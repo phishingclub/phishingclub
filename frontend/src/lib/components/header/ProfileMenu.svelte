@@ -3,6 +3,7 @@
 	import { fade } from 'svelte/transition';
 	import { topMenu } from '$lib/consts/navigation';
 	import { shouldHideMenuItem } from '$lib/utils/common';
+	import ConditionalDisplay from '../ConditionalDisplay.svelte';
 	export let logout;
 	export let visible = false;
 	export let toggleChangeCompanyModal;
@@ -111,24 +112,26 @@
 			</button>
 
 			{#each topMenu as item}
-				<a
-					class="flex items-center pl-5 py-2 text-white last:rounded-md first:rounded-t-md transition-colors duration-200 {$page
-						.url.pathname === item.route
-						? 'bg-active-blue shadow-md dark:bg-active-blue'
-						: 'hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20'}"
-					class:hidden={shouldHideMenuItem(item.route)}
-					target={item.external ? '_blank' : '_self'}
-					draggable="false"
-					on:click={() => {
-						visible = false;
-					}}
-					href={item.route}
-				>
-					<div class="flex-shrink-0 mr-3 text-white dark:text-highlight-blue">
-						{@html getTopMenuIcon(item.label)}
-					</div>
-					<span>{item.label}</span>
-				</a>
+				<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
+					<a
+						class="flex items-center pl-5 py-2 text-white last:rounded-md first:rounded-t-md transition-colors duration-200 {$page
+							.url.pathname === item.route
+							? 'bg-active-blue shadow-md dark:bg-active-blue'
+							: 'hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20'}"
+						class:hidden={shouldHideMenuItem(item.route)}
+						target={item.external ? '_blank' : '_self'}
+						draggable="false"
+						on:click={() => {
+							visible = false;
+						}}
+						href={item.route}
+					>
+						<div class="flex-shrink-0 mr-3 text-white dark:text-highlight-blue">
+							{@html getTopMenuIcon(item.label)}
+						</div>
+						<span>{item.label}</span>
+					</a>
+				</ConditionalDisplay>
 			{/each}
 			<button
 				on:click={logout}

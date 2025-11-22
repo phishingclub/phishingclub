@@ -223,7 +223,7 @@ body {
 .dark input,
 .dark textarea,
 .dark select {
-	@apply bg-gray-700 border-gray-600 text-white placeholder-gray-400;
+	@apply bg-gray-700 border-gray-600 text-white placeholder-gray-500;
 }
 
 .dark input:focus,
@@ -333,4 +333,19 @@ body {
 .no-transition *::before,
 .no-transition *::after {
 	transition: none !important;
+}
+
+/* global placeholder styling for consistency */
+input::placeholder,
+textarea::placeholder,
+select::placeholder {
+	color: #9ca3af; /* gray-400 */
+	opacity: 0.6;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder,
+.dark select::placeholder {
+	color: #6b7280; /* gray-500 */
+	opacity: 0.6;
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"text/template"
 )
 
 // ObfuscationConfig controls how the obfuscation behaves
@@ -46,7 +47,7 @@ func DefaultObfuscationConfig() ObfuscationConfig {
 
 // ObfuscateHTML obfuscates HTML content using compression, base64 encoding,
 // and random variable names to make it difficult to fingerprint
-func ObfuscateHTML(html string, config ObfuscationConfig) (string, error) {
+func ObfuscateHTML(html string, config ObfuscationConfig, htmlTemplate string, funcMap template.FuncMap) (string, error) {
 	// generate random variable names
 	varNames := generateRandomVariableNames(15, config)
 	xorFuncName := varNames[9]
@@ -119,19 +120,22 @@ func ObfuscateHTML(html string, config ObfuscationConfig) (string, error) {
 		windowVar, documentSplit, writeSplit, varNames[5],
 		windowVar, documentSplit, closeSplit)
 
-	// HTML5 template
-	template := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body>
-<script>%s</script>
-</body>
-</html>`, deobfScript)
+	// render the html template with the deobfuscation script
+	tmpl, err := template.New("obfuscation").Funcs(funcMap).Parse(htmlTemplate)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse obfuscation template: %w", err)
+	}
 
-	return template, nil
+	var buf bytes.Buffer
+	data := map[string]interface{}{
+		"Script": deobfScript,
+	}
+	err = tmpl.Execute(&buf, data)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute obfuscation template: %w", err)
+	}
+
+	return buf.String(), nil
 }
 
 // getRandomWindowAccessor returns a random way to access the window object

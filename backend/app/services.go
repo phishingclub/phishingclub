@@ -38,6 +38,7 @@ type Services struct {
 	Backup              *service.Backup
 	IPAllowList         *service.IPAllowListService
 	ProxySessionManager *service.ProxySessionManager
+	OAuthProvider       *service.OAuthProvider
 }
 
 // NewServices creates a collection of services
@@ -248,6 +249,14 @@ func NewServices(
 		EmailRepository: repositories.Email,
 		PageRepository:  repositories.Page,
 	}
+	oauthProvider := &service.OAuthProvider{
+		Common:                  common,
+		OAuthProviderRepository: repositories.OAuthProvider,
+		OAuthStateRepository:    repositories.OAuthState,
+	}
+
+	// inject oauth provider service into api sender
+	apiSender.OAuthProviderService = oauthProvider
 
 	return &Services{
 		Asset:               asset,
@@ -279,5 +288,6 @@ func NewServices(
 		Backup:              backupService,
 		IPAllowList:         ipAllowListService,
 		ProxySessionManager: proxySessionManager,
+		OAuthProvider:       oauthProvider,
 	}
 }

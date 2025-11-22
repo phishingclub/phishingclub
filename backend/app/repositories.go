@@ -28,6 +28,8 @@ type Repositories struct {
 	AllowDeny         *repository.AllowDeny
 	Webhook           *repository.Webhook
 	Identifier        *repository.Identifier
+	OAuthProvider     *repository.OAuthProvider
+	OAuthState        *repository.OAuthState
 }
 
 // NewRepositories creates a collection of repositories
@@ -57,5 +59,7 @@ func NewRepositories(
 		AllowDeny:         &repository.AllowDeny{DB: db},
 		Webhook:           &repository.Webhook{DB: db},
 		Identifier:        &repository.Identifier{DB: db},
+		OAuthProvider:     &repository.OAuthProvider{DB: db},
+		OAuthState:        &repository.OAuthState{DB: db},
 	}
 }

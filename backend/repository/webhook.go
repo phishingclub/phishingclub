@@ -17,7 +17,6 @@ var webhookAllowedColumns = assignTableToColumns(database.WEBHOOK_TABLE, []strin
 	"created_at",
 	"updated_at",
 	"name",
-	"allowed",
 })
 
 type WebhookOption struct {

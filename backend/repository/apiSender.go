@@ -24,6 +24,7 @@ type APISenderOption struct {
 
 	WithRequestHeaders  bool
 	WithResponseHeaders bool
+	WithOAuthProvider   bool
 }
 
 // APISender is a API sender repository
@@ -35,6 +36,9 @@ type APISender struct {
 func (a *APISender) preload(o *APISenderOption, db *gorm.DB) *gorm.DB {
 	if o == nil {
 		return db
+	}
+	if o.WithOAuthProvider {
+		db = db.Preload("OAuthProvider")
 	}
 	return db
 }
@@ -318,6 +322,16 @@ func ToAPISender(row *database.APISender) (*model.APISender, error) {
 		expectedResponseHeaders.SetUnspecified()
 	}
 
+	oauthProviderID := nullable.NewNullNullable[uuid.UUID]()
+	if row.OAuthProviderID != nil {
+		oauthProviderID.Set(*row.OAuthProviderID)
+	}
+
+	var oauthProvider *model.OAuthProvider
+	if row.OAuthProvider != nil {
+		oauthProvider = ToOAuthProvider(row.OAuthProvider)
+	}
+
 	return &model.APISender{
 		ID:                         id,
 		CreatedAt:                  row.CreatedAt,
@@ -329,6 +343,8 @@ func ToAPISender(row *database.APISender) (*model.APISender, error) {
 		CustomField2:               customField2,
 		CustomField3:               customField3,
 		CustomField4:               customField4,
+		OAuthProviderID:            oauthProviderID,
+		OAuthProvider:              oauthProvider,
 		RequestMethod:              requestMethod,
 		RequestURL:                 requestURL,
 		RequestHeaders:             requestHeaders,

@@ -36,6 +36,7 @@
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import CopyCell from '$lib/components/table/CopyCell.svelte';
 	import TextFieldSelectWithType from '$lib/components/form/TextFieldSelectWithType.svelte';
+	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -101,6 +102,13 @@
 		modalText = getModalText('template', modalMode);
 	}
 
+	// clear smtp or api sender when switching template type
+	$: if (formValues.templateType === 'Email') {
+		formValues.apiSender = null;
+	} else if (formValues.templateType === 'External API') {
+		formValues.smtpConfiguration = null;
+	}
+
 	// hooks
 	onMount(() => {
 		const context = appStateService.getContext();
@@ -117,8 +125,8 @@
 				refreshApiSenders(),
 				refreshPages(),
 				refreshProxies(),
-				getCampaignTemplates(),
-				refreshIdentifiers()
+				refreshIdentifiers(),
+				getCampaignTemplates()
 			]);
 			tableURLParams.onChange(refreshCampaignTemplates);
 			const editID = $page.url.searchParams.get('edit');
@@ -395,7 +403,7 @@
 
 	const closeModal = () => {
 		isModalVisible = false;
-		form.reset();
+		form?.reset();
 		formValues = {
 			id: null,
 			templateType: 'Email',
@@ -413,8 +421,6 @@
 			stateIdentifier: 'session',
 			urlPath: ''
 		};
-		modalError = '';
-		showAdvancedOptions = false;
 	};
 
 	/** @param {string} id */
@@ -463,7 +469,7 @@
 		if (template.smtpConfigurationID) {
 			formValues.templateType = 'Email';
 		} else {
-			formValues.templateType = 'API Sender';
+			formValues.templateType = 'External API';
 		}
 		formValues.domain = domainMap.byKey(template.domainID);
 		formValues.email = emailMap.byKey(template.emailID);
@@ -839,15 +845,25 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 								optional>Before Landing</TextFieldSelect
 							>
 
-							<!-- Landing Page -->
-							<TextFieldSelectWithType
-								id="landingPage"
-								bind:value={formValues.landingPage}
-								bind:type={formValues.landingPageType}
-								pageOptions={landingPageMap.values()}
-								proxyOptions={landingProxyMap.values()}
-								required>Landing</TextFieldSelectWithType
-							>
+							<ConditionalDisplay show="blackbox">
+								<!-- Landing Page -->
+								<TextFieldSelectWithType
+									id="landingPage"
+									bind:value={formValues.landingPage}
+									bind:type={formValues.landingPageType}
+									pageOptions={landingPageMap.values()}
+									proxyOptions={landingProxyMap.values()}
+									required>Landing</TextFieldSelectWithType
+								>
+							</ConditionalDisplay>
+							<ConditionalDisplay show="whitebox">
+								<TextFieldSelect
+									id="landingPage"
+									bind:value={formValues.landingPage}
+									options={landingPageMap.values()}
+									required>Landing</TextFieldSelect
+								>
+							</ConditionalDisplay>
 
 							<!-- After Landing Page -->
 							<TextFieldSelect

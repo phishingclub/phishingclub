@@ -26,6 +26,7 @@
 
 	const appState = AppStateService.instance;
 	import { createEventDispatcher } from 'svelte';
+	import ConditionalDisplay from '../ConditionalDisplay.svelte';
 	const dispatch = createEventDispatcher();
 
 	onMount(() => {
@@ -127,6 +128,11 @@
 </svg>
 `,
 
+		oauth_providers: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+</svg>
+`,
+
 		proxy: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
   <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
 </svg>
@@ -149,7 +155,8 @@
 			'/email/': 'emails_overview',
 			'/attachment/': 'attachments',
 			'/smtp-configuration/': 'smtp_configurations',
-			'/api-sender/': 'api_senders'
+			'/api-sender/': 'api_senders',
+			'/oauth-provider/': 'oauth_providers'
 		};
 
 		return icons[iconMap[route] || 'dashboard']; // fallback to dashboard if route not found
@@ -278,39 +285,41 @@
 
 						<div>
 							{#each link.items as item, i (i)}
-								<a
-									class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
+								<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
+									<a
+										class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
                                         {$page.url.pathname === item.route
-										? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
-										: 'text-blue-100 dark:text-gray-200 hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-gray-100'}"
-									class:hidden={shouldHideMenuItem(item.route)}
-									draggable="false"
-									href={item.route}
-									title={item.label}
-								>
-									<!-- Icon -->
-									<div class="flex-shrink-0 text-blue-100 dark:text-highlight-blue">
-										{@html getIconForRoute(item.route)}
-									</div>
+											? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
+											: 'text-blue-100 dark:text-gray-200 hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-gray-100'}"
+										class:hidden={shouldHideMenuItem(item.route)}
+										draggable="false"
+										href={item.route}
+										title={item.label}
+									>
+										<!-- Icon -->
+										<div class="flex-shrink-0 text-blue-100 dark:text-highlight-blue">
+											{@html getIconForRoute(item.route)}
+										</div>
 
-									{#if isExpanded}
-										<span class="ml-3 truncate">
-											{#if i === 0}
-												Overview
-											{:else if item.singleLabel}
-												{item.singleLabel}
-											{:else}
-												{item.label}
-											{/if}
-										</span>
-									{/if}
+										{#if isExpanded}
+											<span class="ml-3 truncate">
+												{#if i === 0}
+													Overview
+												{:else if item.singleLabel}
+													{item.singleLabel}
+												{:else}
+													{item.label}
+												{/if}
+											</span>
+										{/if}
 
-									{#if $page.url.pathname === item.route}
-										<div
-											class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-highlight-blue"
-										></div>
-									{/if}
-								</a>
+										{#if $page.url.pathname === item.route}
+											<div
+												class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-highlight-blue"
+											></div>
+										{/if}
+									</a>
+								</ConditionalDisplay>
 							{/each}
 						</div>
 					</div>

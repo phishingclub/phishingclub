@@ -17,11 +17,14 @@
 	import PasswordField from '$lib/components/PasswordField.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
 	import { AppStateService } from '$lib/service/appState';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import { addToast } from '$lib/store/toast';
 	import { onMount } from 'svelte';
 	import { onClickCopy } from '$lib/utils/common';
+	import { displayMode, DISPLAY_MODE } from '$lib/store/displayMode';
+	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 
 	const logLevels = ['debug', 'info', 'warn', 'error'];
 	const dbLogLevels = ['silent', 'info', 'warn', 'error'];
@@ -67,11 +70,21 @@
 	let isImportResultModalVisible = false;
 	let importModalContent = null;
 
+	// display mode settings
+	let currentDisplayMode = DISPLAY_MODE.WHITEBOX;
+	let displayModeError = '';
+
 	// Company context for import
 	const appState = AppStateService.instance;
 	let isCompanyContext = false;
 	let importForCompany = false;
 	let contextCompanyID = null;
+
+	// obfuscation template editor
+	let isObfuscationTemplateModalVisible = false;
+	let obfuscationTemplate = '';
+	let obfuscationTemplateError = '';
+	let isObfuscationTemplateSubmitting = false;
 
 	$: {
 		isCompanyContext = appState.isCompanyContext();
@@ -94,6 +107,7 @@
 			await refreshVersion();
 			await refreshUpdateCached();
 			await refreshBackupList();
+			await refreshDisplayMode();
 			if (!ssoSettingsFormValues.redirectURL) {
 				ssoSettingsFormValues.redirectURL = `${location.origin}/api/v1/sso/entra-id/auth`;
 			}
@@ -209,6 +223,38 @@
 		}
 	}
 
+	async function refreshDisplayMode() {
+		try {
+			const res = immediateResponseHandler(await api.option.get('display_mode'));
+			if (res.success && res.data.value) {
+				currentDisplayMode = res.data.value;
+				displayMode.setMode(res.data.value);
+			}
+		} catch (e) {
+			console.error('failed to refresh display mode', e);
+		}
+	}
+
+	async function setDisplayMode(mode) {
+		try {
+			showIsLoading();
+			const res = await api.option.set('display_mode', mode);
+			if (res.success) {
+				currentDisplayMode = mode;
+				displayMode.setMode(mode);
+				addToast('Display mode updated', 'Success');
+				displayModeError = '';
+			} else {
+				displayModeError = res.error || 'Failed to update display mode';
+			}
+		} catch (e) {
+			console.error('failed to set display mode', e);
+			displayModeError = 'Failed to update display mode';
+		} finally {
+			hideIsLoading();
+		}
+	}
+
 	async function refreshBackupList() {
 		isLoadingBackups = true;
 		try {
@@ -238,7 +284,7 @@
 			window.URL.revokeObjectURL(url);
 			document.body.removeChild(a);
 
-			addToast('Backup downloaded successfully', 'Success');
+			addToast('Backup downloaded', 'Success');
 		} catch (e) {
 			console.error('failed to download backup', e);
 			addToast('Failed to download backup', 'Error');
@@ -258,7 +304,7 @@
 		try {
 			const res = await api.application.createBackup();
 			if (res.success) {
-				addToast('Backup created successfully', 'Success');
+				addToast('Backup created', 'Success');
 				closeBackupModal();
 				await refreshBackupList(); // Refresh backup list
 			} else {
@@ -394,7 +440,7 @@
 			const response = await api.import.import(formData);
 
 			if (response.success) {
-				addToast('File has been imported successfully', 'Success');
+				addToast('File has been imported', 'Success');
 				importFile = null;
 				importResult = response.data;
 				isImportResultModalVisible = true;
@@ -425,6 +471,65 @@
 			isImportResultModalVisible = false;
 		} finally {
 			isImportSubmitting = false;
+		}
+	};
+
+	/**
+	 * Open obfuscation template modal
+	 */
+	const openObfuscationTemplateModal = async () => {
+		try {
+			showIsLoading();
+			const response = await api.option.get('obfuscation_template');
+			if (response.success) {
+				obfuscationTemplate = response.data.value || '';
+			} else {
+				obfuscationTemplateError = 'Failed to load template';
+			}
+		} catch (error) {
+			console.error('Failed to load obfuscation template:', error);
+			obfuscationTemplateError = 'Failed to load template';
+		} finally {
+			hideIsLoading();
+			isObfuscationTemplateModalVisible = true;
+		}
+	};
+
+	/**
+	 * Close obfuscation template modal
+	 */
+	const closeObfuscationTemplateModal = () => {
+		isObfuscationTemplateModalVisible = false;
+		obfuscationTemplateError = '';
+	};
+
+	/**
+	 * Submit obfuscation template
+	 */
+	const onSubmitObfuscationTemplate = async (event) => {
+		const saveOnly = event?.detail?.saveOnly || false;
+		isObfuscationTemplateSubmitting = true;
+		obfuscationTemplateError = '';
+
+		try {
+			const response = await api.option.set('obfuscation_template', obfuscationTemplate);
+
+			if (response.success) {
+				addToast(
+					saveOnly ? 'Obfuscation template saved' : 'Obfuscation template updated',
+					'Success'
+				);
+				if (!saveOnly) {
+					isObfuscationTemplateModalVisible = false;
+				}
+			} else {
+				obfuscationTemplateError = response.error || 'Failed to update template';
+			}
+		} catch (error) {
+			console.error('Failed to update obfuscation template:', error);
+			obfuscationTemplateError = 'Failed to update template';
+		} finally {
+			isObfuscationTemplateSubmitting = false;
 		}
 	};
 </script>
@@ -592,6 +697,75 @@
 						</div>
 					</div>
 				</div>
+				<!-- Display Mode Card -->
+				<div
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
+				>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Display Mode
+					</h2>
+					<div class="flex flex-col h-full">
+						<div class="space-y-4">
+							<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+								Select which features are available
+							</p>
+							<div class="space-y-3">
+								<label
+									class="flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors {currentDisplayMode ===
+									DISPLAY_MODE.WHITEBOX
+										? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+										: 'border-gray-300 dark:border-gray-600'}"
+								>
+									<input
+										type="radio"
+										checked={currentDisplayMode === DISPLAY_MODE.WHITEBOX}
+										on:change={() => setDisplayMode(DISPLAY_MODE.WHITEBOX)}
+										class="mt-0.5 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+									/>
+									<div class="text-left flex-1">
+										<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
+											Whitebox Mode
+										</span>
+										<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
+											For Phishing Simulation
+										</span>
+									</div>
+								</label>
+								<label
+									class="flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors {currentDisplayMode ===
+									DISPLAY_MODE.BLACKBOX
+										? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+										: 'border-gray-300 dark:border-gray-600'}"
+								>
+									<input
+										type="radio"
+										checked={currentDisplayMode === DISPLAY_MODE.BLACKBOX}
+										on:change={() => setDisplayMode(DISPLAY_MODE.BLACKBOX)}
+										class="mt-0.5 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+									/>
+									<div class="text-left flex-1">
+										<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
+											Blackbox Mode
+										</span>
+										<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
+											For Red Teaming
+										</span>
+									</div>
+								</label>
+								<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+									Read about the difference between <a
+										class="white underline"
+										href="https://phishing.club/blog/white-box-vs-black-box-phishing/"
+										target="_blank">whitebox and blackbox phishing</a
+									>
+								</p>
+							</div>
+							<FormError message={displayModeError} />
+						</div>
+					</div>
+				</div>
 
 				<!-- Backup Section -->
 				<div
@@ -657,6 +831,40 @@
 						</div>
 					</div>
 				</div>
+
+				<!-- Obfuscation Template Section -->
+				<ConditionalDisplay show="blackbox">
+					<div
+						class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 h-[420px] flex flex-col transition-colors duration-200"
+					>
+						<h2
+							class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+						>
+							Obfuscation Template
+						</h2>
+						<div class="flex flex-col h-full">
+							<div class="space-y-4">
+								<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+									Customize the template used when obfuscation is enabled to.
+								</p>
+								<div
+									class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md transition-colors duration-200"
+								>
+									<p class="text-sm text-gray-700 dark:text-gray-300 mb-2">
+										<strong>Internal obfuscation variable:</strong>
+									</p>
+									<p class="text-xs text-gray-600 dark:text-gray-400 font-mono">
+										{'{{.Script}}'}
+									</p>
+								</div>
+							</div>
+							<div class="mt-auto pt-4">
+								<Button size={'large'} on:click={openObfuscationTemplateModal}>Edit Template</Button
+								>
+							</div>
+						</div>
+					</div>
+				</ConditionalDisplay>
 			</div>
 		</div>
 
@@ -919,7 +1127,6 @@
 			</div>
 		</div>
 	{/if}
-
 	{#if isSSOModalVisible}
 		<Modal bind:visible={isSSOModalVisible} headerText="SSO configuration" onClose={closeSSOModal}>
 			<div class="mt-4">
@@ -1053,6 +1260,43 @@
 					closeModal={closeBackupModal}
 					isSubmitting={isCreatingBackup}
 					okText={isCreatingBackup ? 'Creating Backup...' : 'Create Backup'}
+				/>
+			</FormGrid>
+		</Modal>
+	{/if}
+
+	{#if isObfuscationTemplateModalVisible}
+		<Modal
+			bind:visible={isObfuscationTemplateModalVisible}
+			headerText="Edit Obfuscation Template"
+			onClose={closeObfuscationTemplateModal}
+			{isSubmitting}
+		>
+			<FormGrid
+				on:submit={onSubmitObfuscationTemplate}
+				isSubmitting={isObfuscationTemplateSubmitting}
+				modalMode="update"
+			>
+				<div
+					class="w-80vw col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+				>
+					<SimpleCodeEditor
+						bind:value={obfuscationTemplate}
+						language="html"
+						height="large"
+						showVimToggle={true}
+						showExpandButton={false}
+					/>
+					<p class="text-sm text-gray-600 dark:text-gray-300 my-4">
+						Example <code class="bg-gray-200 dark:bg-gray-700 p-1 rounded text-xs"
+							>{"eval(atob('{{base64 .Script}}'))"}</code
+						>
+					</p>
+					<FormError message={obfuscationTemplateError} />
+				</div>
+				<FormFooter
+					isSubmitting={isObfuscationTemplateSubmitting}
+					closeModal={closeObfuscationTemplateModal}
 				/>
 			</FormGrid>
 		</Modal>

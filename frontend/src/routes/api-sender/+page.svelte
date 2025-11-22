@@ -11,27 +11,30 @@
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import FormError from '$lib/components/FormError.svelte';
-	import { addToast } from '$lib/store/toast';
 	import { AppStateService } from '$lib/service/appState';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
-	import TextareaField from '$lib/components/TextareaField.svelte';
-	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
-	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
+	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
-	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
 	import { getModalText } from '$lib/utils/common';
 	import TableCopyButton from '$lib/components/table/TableCopyButton.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
+	import TextareaField from '$lib/components/TextareaField.svelte';
 	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
+	import { addToast } from '$lib/store/toast';
+	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
+	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
+	import { BiMap } from '$lib/utils/maps';
+	import { fetchAllRows } from '$lib/utils/api-utils';
+	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import VimToggle from '$lib/components/editor/VimToggle.svelte';
 
 	// services
@@ -40,6 +43,7 @@
 	// data
 	let form = null;
 	let contextCompanyID = null;
+	let oauthProviderMap = new BiMap({});
 	let formValues = {
 		name: '',
 		companyID: '',
@@ -48,6 +52,7 @@
 		customField2: '',
 		customField3: '',
 		customField4: '',
+		oauthProvider: null,
 		requestMethod: '',
 		requestURL: '',
 		requestHeaders: '',
@@ -87,6 +92,15 @@
 			contextCompanyID = appStateService.getContext().companyID;
 			formValues.companyID = contextCompanyID;
 		}
+
+		// load oauth providers
+		(async () => {
+			const oauthProviders = await fetchAllRows((options) => {
+				return api.oauthProvider.getAll(options, contextCompanyID);
+			});
+			oauthProviderMap = BiMap.FromArrayOfObjects(oauthProviders);
+		})();
+
 		refreshConfigurations();
 		tableURLParams.onChange(refreshConfigurations);
 		(async () => {
@@ -148,7 +162,10 @@
 
 	const onClickCreate = async () => {
 		try {
-			const res = await api.apiSender.create(formValues);
+			const res = await api.apiSender.create({
+				...formValues,
+				oauthProviderID: oauthProviderMap.byValueOrNull(formValues.oauthProvider)
+			});
 			if (!res.success) {
 				modalError = res.error;
 				return;
@@ -165,7 +182,10 @@
 
 	const onClickUpdate = async (saveOnly = false) => {
 		try {
-			const res = await api.apiSender.update(formValues);
+			const res = await api.apiSender.update({
+				...formValues,
+				oauthProviderID: oauthProviderMap.byValueOrNull(formValues.oauthProvider)
+			});
 			if (!res.success) {
 				modalError = res.error;
 				throw res.error;
@@ -177,6 +197,7 @@
 			}
 			refreshConfigurations();
 		} catch (err) {
+			addToast('Failed to update API sender', 'Error');
 			console.error('failed to update API sender:', err);
 		}
 	};
@@ -259,6 +280,7 @@
 
 	const assignAPISender = (apiSender) => {
 		formValues = apiSender;
+		formValues.oauthProvider = oauthProviderMap.byKey(apiSender.oauthProviderID);
 	};
 
 	const closeEditModal = () => {
@@ -418,7 +440,17 @@
 									maxLength={255}
 									optional={true}
 									toolTipText="Use as {'{{.APIKey}}'}"
-									placeholder="S3C-R37-AP1-K3Y">API Key</TextField
+									placeholder="your-api-key">API Key</TextField
+								>
+							</div>
+							<div>
+								<TextFieldSelect
+									id="oauthProvider"
+									bind:value={formValues.oauthProvider}
+									options={oauthProviderMap.values()}
+									optional={true}
+									toolTipText="OAuth provider for token-based authentication. Access token available as {'{{.OAuthAccessToken}}'}"
+									>OAuth Provider (Optional)</TextFieldSelect
 								>
 							</div>
 						</div>
@@ -589,7 +621,9 @@ X-Custom-Header: Hello Friend"
 	</Modal>
 
 	<Modal headerText="API Sender Test Results" visible={isTestModalVisible} onClose={closeTestModal}>
-		<div class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-6 select-text">
+		<div
+			class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-6 select-text overflow-x-hidden"
+		>
 			{#if !testResponse.error}
 				<!-- Successful Test -->
 				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
@@ -599,7 +633,7 @@ X-Custom-Header: Hello Friend"
 					<div
 						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
 					>
-						<div class="font-medium">
+						<div class="font-medium break-all">
 							{testResponse.apiSender?.requestMethod}
 							{testResponse?.request?.url}
 						</div>
@@ -611,21 +645,28 @@ X-Custom-Header: Hello Friend"
 						Request Headers
 					</h3>
 					<div
-						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 					>
-						<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-60">{headersToString(
-								testResponse.request?.headers
-							) || 'No headers'}</pre>
+						<div
+							class="text-xs whitespace-pre-wrap break-all max-h-60 overflow-y-auto font-mono"
+							style="word-break: break-all; overflow-wrap: anywhere;"
+						>
+							{headersToString(testResponse.request?.headers) || 'No headers'}
+						</div>
 					</div>
 				</div>
 
 				<div class="pt-4 pb-2 w-full">
 					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Request Body</h3>
 					<div
-						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 					>
-						<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-80">{testResponse.request
-								?.body || 'Empty body'}</pre>
+						<div
+							class="text-xs whitespace-pre-wrap break-all max-h-80 overflow-y-auto font-mono"
+							style="word-break: break-all; overflow-wrap: anywhere;"
+						>
+							{testResponse.request?.body || 'Empty body'}
+						</div>
 					</div>
 				</div>
 				<!-- response -->
@@ -635,7 +676,7 @@ X-Custom-Header: Hello Friend"
 					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<div
-							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 						>
 							<div class="text-sm font-medium mb-1">Received:</div>
 							<div
@@ -648,7 +689,7 @@ X-Custom-Header: Hello Friend"
 							</div>
 						</div>
 						<div
-							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 						>
 							<div class="text-sm font-medium mb-1">Expected:</div>
 							<div>{testResponse.apiSender?.expectedResponseStatusCode}</div>
@@ -662,19 +703,26 @@ X-Custom-Header: Hello Friend"
 					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<div
-							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 						>
 							<div class="text-sm font-medium mb-1">Received:</div>
-							<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-60">{headersToString(
-									testResponse.response?.headers
-								) || 'No headers'}</pre>
+							<div
+								class="text-xs whitespace-pre-wrap break-all max-h-60 overflow-y-auto font-mono"
+								style="word-break: break-all; overflow-wrap: anywhere;"
+							>
+								{headersToString(testResponse.response?.headers) || 'No headers'}
+							</div>
 						</div>
 						<div
-							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 						>
 							<div class="text-sm font-medium mb-1">Expected to contain:</div>
-							<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-60">{testResponse
-									.apiSender?.expectedResponseHeaders || 'No validation specified'}</pre>
+							<div
+								class="text-xs whitespace-pre-wrap break-all max-h-60 overflow-y-auto font-mono"
+								style="word-break: break-all; overflow-wrap: anywhere;"
+							>
+								{testResponse.apiSender?.expectedResponseHeaders || 'No validation specified'}
+							</div>
 						</div>
 					</div>
 				</div>
@@ -683,18 +731,26 @@ X-Custom-Header: Hello Friend"
 					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Response Body</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<div
-							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 						>
 							<div class="text-sm font-medium mb-1">Received:</div>
-							<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-80">{testResponse
-									.response?.body || 'Empty response'}</pre>
+							<div
+								class="text-xs whitespace-pre-wrap break-all max-h-80 overflow-y-auto font-mono"
+								style="word-break: break-all; overflow-wrap: anywhere;"
+							>
+								{testResponse.response?.body || 'Empty response'}
+							</div>
 						</div>
 						<div
-							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 						>
 							<div class="text-sm font-medium mb-1">Expected to contain:</div>
-							<pre class="text-xs whitespace-pre-wrap overflow-x-auto max-h-80">{testResponse
-									.apiSender?.expectedResponseBody || 'No validation specified'}</pre>
+							<div
+								class="text-xs whitespace-pre-wrap break-all max-h-80 overflow-y-auto font-mono"
+								style="word-break: break-all; overflow-wrap: anywhere;"
+							>
+								{testResponse.apiSender?.expectedResponseBody || 'No validation specified'}
+							</div>
 						</div>
 					</div>
 				</div>
@@ -705,9 +761,9 @@ X-Custom-Header: Hello Friend"
 						Request Details
 					</h3>
 					<div
-						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600"
+						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 					>
-						<div class="font-medium">
+						<div class="font-medium break-all">
 							{testResponse.apiSender?.requestMethod}
 							{testResponse.apiSender?.requestURL}
 						</div>
@@ -715,8 +771,8 @@ X-Custom-Header: Hello Friend"
 				</div>
 				<div class="pt-4 pb-2 w-full">
 					<h3 class="text-base font-medium text-red-600 mb-3">Error</h3>
-					<div class="p-4 bg-red-50 rounded-md border border-red-200">
-						<div class="text-red-600 whitespace-pre-wrap">{testResponse.error}</div>
+					<div class="p-4 bg-red-50 rounded-md border border-red-200 overflow-hidden">
+						<div class="text-red-600 whitespace-pre-wrap break-words">{testResponse.error}</div>
 					</div>
 				</div>
 			{/if}
