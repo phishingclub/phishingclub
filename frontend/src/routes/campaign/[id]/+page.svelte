@@ -44,6 +44,7 @@
 	import { globalButtonDisabledAttributes } from '$lib/utils/form';
 	import FileField from '$lib/components/FileField.svelte';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
+	import IconButton from '$lib/components/IconButton.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -1210,61 +1211,88 @@
 			<EventTimeline events={timelineEvents} isGhost={isTimelineGhost} />
 		</div>
 
-		<div class=" space-y-6">
-			<!-- First Row: Details and Timeline -->
-			<div class="grid grid-cols-1 lg:grid-cols-2">
-				<!-- Primary Campaign Info -->
-				<div class="py-6 rounded-lg">
-					<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
-						Details
-					</h3>
-					<div class="grid grid-cols-[120px_1fr] gap-y-3">
-						<span class="text-grayblue-dark font-medium">Status:</span>
+		<!-- details and actions section -->
+		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+			<!-- campaign details card -->
+			<div
+				class="bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
+			>
+				<h3
+					class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+				>
+					Campaign Details
+				</h3>
+				<div class="space-y-2.5 text-sm">
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Status:</span>
 						<span class="text-pc-darkblue dark:text-white font-semibold">
 							{toEvent(campaign.notableEventName).name}
 						</span>
+					</div>
 
-						<span class="text-grayblue-dark font-medium">Template:</span>
-						<span class="text-pc-darkblue dark:text-white">
-							<button
-								class="cursor-pointer text-cta-blue dark:text-white underline hover:opacity-75"
-								on:click={() => {
-									openTemplateModal(campaign.template?.id);
-								}}
-							>
-								{campaign.template?.name}
-							</button>
-						</span>
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Template:</span>
+						<button
+							class="text-cta-blue dark:text-blue-400 hover:underline text-right"
+							on:click={() => {
+								openTemplateModal(campaign.template?.id);
+							}}
+						>
+							{campaign.template?.name}
+						</button>
+					</div>
 
-						<span class="text-grayblue-dark font-medium">Groups:</span>
-						<span class="text-pc-darkblue dark:text-white">
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Groups:</span>
+						<div class="text-right">
 							{#each campaign.recipientGroups as group, i}
 								<a
-									class="hover:underline text-cta-blue dark:text-white hover:opacity-75 underline"
+									class="text-cta-blue dark:text-blue-400 hover:underline"
 									href="/recipient/group/{recipientGroupMap.byValue(group)}"
 									target="_blank">{group}</a
-								>{#if i !== (campaign.recipientGroups?.length ?? 0) - 1}
-									,&nbsp;
-								{/if}
+								>{#if i !== (campaign.recipientGroups?.length ?? 0) - 1},&nbsp;{/if}
 							{/each}
-						</span>
+						</div>
+					</div>
 
-						<span class="text-grayblue-dark font-medium">Type:</span>
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Type:</span>
 						<span class="text-pc-darkblue dark:text-white"
 							>{isSelfManaged ? 'Self Managed' : 'Scheduled'}</span
 						>
+					</div>
 
-						<ConditionalDisplay show="blackbox">
-							<span class="text-grayblue-dark font-medium">
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Webhook:</span>
+						<span class="text-pc-darkblue dark:text-white">
+							{campaign.webhookID ? 'Yes' : 'None'}
+						</span>
+					</div>
+
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Data Saving:</span>
+						<span class="text-pc-darkblue dark:text-white">
+							{campaign.saveSubmittedData ? 'Enabled' : 'Disabled'}
+						</span>
+					</div>
+
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Test:</span>
+						<span class="text-pc-darkblue dark:text-white">{campaign.isTest ? 'Yes' : 'No'}</span>
+					</div>
+
+					<ConditionalDisplay show="blackbox">
+						<div class="flex justify-between">
+							<span class="text-gray-600 dark:text-gray-400">
 								{campaign?.allowDeny ? (allowedFilter ? 'Allow' : 'Deny') : ''}
 								IP Filters:
 							</span>
-							<span class="text-pc-darkblue dark:text-white">
+							<div class="text-right">
 								{#if campaign.allowDeny?.length}
 									{#each campaign.allowDeny as allowDeny, i}
 										<a
 											href="/filter/?edit={allowDeny.id}"
-											class="text-cta-blue dark:text-white hover:underline"
+											class="text-cta-blue dark:text-blue-400 hover:underline"
 											target="_blank"
 										>
 											{allowDeny.name}
@@ -1273,238 +1301,216 @@
 										{/if}
 									{/each}
 								{:else}
-									None
+									<span class="text-pc-darkblue dark:text-white">None</span>
 								{/if}
-							</span>
-						</ConditionalDisplay>
+							</div>
+						</div>
 
-						<ConditionalDisplay show="blackbox">
-							<span class="text-grayblue-dark font-medium">Deny Page:</span>
+						<div class="flex justify-between">
+							<span class="text-gray-600 dark:text-gray-400">Deny Page:</span>
 							<span class="text-pc-darkblue dark:text-white">
-								{#if campaign.denyPage}
-									{campaign.denyPage.name}
-								{:else}
-									None
-								{/if}
+								{campaign.denyPage ? campaign.denyPage.name : 'None'}
 							</span>
-						</ConditionalDisplay>
+						</div>
 
-						<ConditionalDisplay show="blackbox">
-							<span class="text-grayblue-dark font-medium">Evasion Page:</span>
+						<div class="flex justify-between">
+							<span class="text-gray-600 dark:text-gray-400">Evasion Page:</span>
 							<span class="text-pc-darkblue dark:text-white">
-								{#if campaign.evasionPage}
-									{campaign.evasionPage.name}
-								{:else}
-									None
-								{/if}
+								{campaign.evasionPage ? campaign.evasionPage.name : 'None'}
 							</span>
-						</ConditionalDisplay>
+						</div>
 
-						<span class="text-grayblue-dark font-medium">Webhook:</span>
-						<span class="text-pc-darkblue dark:text-white">
-							{#if campaign.webhookID}
-								Yes
-							{:else}
-								None
-							{/if}
-						</span>
-
-						<span class="text-grayblue-dark font-medium">Data Saving:</span>
-						<span class="text-pc-darkblue dark:text-white">
-							{campaign.saveSubmittedData ? 'Enabled' : 'Disabled'}
-						</span>
-
-						<ConditionalDisplay show="blackbox">
-							<span class="text-grayblue-dark font-medium">Metadata:</span>
+						<div class="flex justify-between">
+							<span class="text-gray-600 dark:text-gray-400">Metadata:</span>
 							<span class="text-pc-darkblue dark:text-white">
 								{campaign.saveBrowserMetadata ? 'Enabled' : 'Disabled'}
 							</span>
-						</ConditionalDisplay>
-
-						<span class="text-grayblue-dark font-medium">Test:</span>
-						<span class="text-pc-darkblue dark:text-white">{campaign.isTest ? 'Yes' : 'No'}</span>
-					</div>
+						</div>
+					</ConditionalDisplay>
 				</div>
+			</div>
 
-				<div class="p-6 rounded-lg">
-					<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
-						Timeline
-					</h3>
-					<div class="grid grid-cols-[120px_1fr] gap-y-3">
-						<span class="text-grayblue-dark font-medium">Created:</span>
-						<span class="text-pc-darkblue dark:text-white"
+			<!-- timeline card -->
+			<div
+				class="bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
+			>
+				<h3
+					class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+				>
+					Timeline
+				</h3>
+				<div class="space-y-2.5 text-sm">
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Created:</span>
+						<span class="text-pc-darkblue dark:text-white text-right"
 							><Datetime value={campaign.createdAt} /></span
 						>
+					</div>
 
-						{#if !isSelfManaged}
-							<span class="text-grayblue-dark font-medium">Delivery start:</span>
-							<span class="text-pc-darkblue dark:text-white"
+					{#if !isSelfManaged}
+						<div class="flex justify-between">
+							<span class="text-gray-600 dark:text-gray-400">Delivery start:</span>
+							<span class="text-pc-darkblue dark:text-white text-right"
 								><Datetime value={campaign.sendStartAt} /></span
 							>
+						</div>
 
-							<span class="text-grayblue-dark font-medium">Delivery finish:</span>
-							<span class="text-pc-darkblue dark:text-white"
+						<div class="flex justify-between">
+							<span class="text-gray-600 dark:text-gray-400">Delivery finish:</span>
+							<span class="text-pc-darkblue dark:text-white text-right"
 								><Datetime value={campaign.sendEndAt} /></span
 							>
-						{/if}
+						</div>
+					{/if}
 
-						<span class="text-grayblue-dark font-medium">Close At:</span>
-						<span class="text-pc-darkblue dark:text-white"
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Close At:</span>
+						<span class="text-pc-darkblue dark:text-white text-right"
 							><Datetime value={campaign.closeAt} /></span
 						>
+					</div>
 
-						<span class="text-grayblue-dark font-medium">Closed:</span>
-						<span class="text-pc-darkblue dark:text-white"
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Closed:</span>
+						<span class="text-pc-darkblue dark:text-white text-right"
 							><Datetime value={campaign.closedAt} /></span
 						>
+					</div>
 
-						<span class="text-grayblue-dark font-medium">Anonymize At:</span>
-						<span class="text-pc-darkblue dark:text-white"
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Anonymize At:</span>
+						<span class="text-pc-darkblue dark:text-white text-right"
 							><Datetime value={campaign.anonymizeAt} /></span
 						>
+					</div>
 
-						<span class="text-grayblue-dark font-medium">Anonymized:</span>
-						<span class="text-pc-darkblue dark:text-white"
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Anonymized:</span>
+						<span class="text-pc-darkblue dark:text-white text-right"
 							><Datetime value={campaign.anonymizedAt} /></span
 						>
 					</div>
-
-					{#if campaign.constraintWeekDays}
-						<div class="py-6 rounded-lg">
-							<div class="flex gap-8">
-								<!-- Days Schedule -->
-								<div class="flex-1">
-									<div class="flex items-center justify-between mb-3">
-										<span class="text-grayblue-dark font-medium">Schedule:</span>
-									</div>
-									<div class="flex gap-1.5">
-										{#each formatWeekDays(campaign.constraintWeekDays).days as day}
-											<div class="relative flex flex-col items-center">
-												<div
-													class="w-10 h-10 flex items-center justify-center rounded-lg transition-all {day.isActive
-														? 'bg-cta-blue text-white font-medium shadow-sm hover:bg-cta-blue'
-														: 'bg-slate-50 text-slate-500 border border-slate-200 hover:bg-slate-100'}"
-													title={day.full}
-												>
-													{day.short}
-												</div>
-											</div>
-										{/each}
-									</div>
-									{#if formatWeekDays(campaign.constraintWeekDays).summary}
-										<div class="text-sm text-slate-500 mt-2">
-											{formatWeekDays(campaign.constraintWeekDays).summary}
-										</div>
-									{/if}
-								</div>
-
-								<!-- Time Schedule -->
-								{#if campaign.constraintStartTime && campaign.constraintEndTime}
-									<div class="flex-1">
-										<div class="mb-3">
-											<span class="text-grayblue-dark font-medium"></span>
-											<button
-												on:click={() => timeFormat.update((f) => !f)}
-												class="text-xs px-2 py-1 rounded border justify-self-start border-slate-200 hover:bg-slate-50 text-slate-600"
-											>
-												{$timeFormat ? '12h' : '24h'}
-											</button>
-										</div>
-										<div class="flex items-center gap-3">
-											<div
-												class="bg-cta-blue text-white w-16 text-center h-9 py-1 px-2 rounded-lg shadow-sm font-medium"
-												class:w-24={!$timeFormat}
-											>
-												{formatTimeConstraint(campaign.constraintStartTime, $timeFormat)}
-											</div>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												class="h-5 w-5 text-slate-400"
-												viewBox="0 0 20 20"
-												fill="currentColor"
-											>
-												<path
-													fill-rule="evenodd"
-													d="M12.293 5.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-2.293-2.293a1 1 0 010-1.414z"
-													clip-rule="evenodd"
-												/>
-											</svg>
-											<div
-												class="h-9 bg-cta-blue text-white text-center w-16 py-1 px-2 rounded-lg shadow-sm font-medium"
-												class:w-24={!$timeFormat}
-											>
-												{formatTimeConstraint(campaign.constraintEndTime, $timeFormat)}
-											</div>
-										</div>
-									</div>
-								{/if}
-							</div>
-						</div>
-						<div>&nbsp;</div>
-					{/if}
 				</div>
-			</div>
-			<!-- Second Row: Schedule Constraints and Actions -->
-			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-				<div></div>
-				<div class="p-6 rounded-lg">
-					<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
-						Actions
-					</h3>
-					<div class="space-y-4">
-						<!-- Action Buttons -->
-						<div class="flex flex-wrap gap-3">
-							{#if !campaignUpdateDisabledAndTitle(campaign).disabled}
-								<button
-									on:click={onClickUpdateCampaign}
-									class="px-4 py-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:opacity-80 text-white rounded-md transition-colors"
+
+				{#if campaign.constraintWeekDays}
+					<div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+						<div class="mb-3">
+							<span class="text-gray-600 dark:text-gray-400 text-sm font-medium">Schedule:</span>
+						</div>
+						<div class="flex gap-1.5 mb-3">
+							{#each formatWeekDays(campaign.constraintWeekDays).days as day}
+								<div
+									class="w-8 h-8 flex items-center justify-center rounded text-xs transition-all {day.isActive
+										? 'bg-cta-blue text-white font-medium'
+										: 'bg-gray-100 dark:bg-gray-800 text-gray-400 border border-gray-200 dark:border-gray-700'}"
+									title={day.full}
 								>
-									Update
+									{day.short}
+								</div>
+							{/each}
+						</div>
+						{#if campaign.constraintStartTime && campaign.constraintEndTime}
+							<div class="flex items-center gap-2 text-sm">
+								<span
+									class="bg-cta-blue text-white px-2 py-1 rounded text-xs font-medium"
+									class:px-3={!$timeFormat}
+								>
+									{formatTimeConstraint(campaign.constraintStartTime, $timeFormat)}
+								</span>
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									class="h-4 w-4 text-gray-400"
+									viewBox="0 0 20 20"
+									fill="currentColor"
+								>
+									<path
+										fill-rule="evenodd"
+										d="M12.293 5.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-2.293-2.293a1 1 0 010-1.414z"
+										clip-rule="evenodd"
+									/>
+								</svg>
+								<span
+									class="bg-cta-blue text-white px-2 py-1 rounded text-xs font-medium"
+									class:px-3={!$timeFormat}
+								>
+									{formatTimeConstraint(campaign.constraintEndTime, $timeFormat)}
+								</span>
+								<button
+									on:click={() => timeFormat.update((f) => !f)}
+									class="ml-auto text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400"
+								>
+									{$timeFormat ? '12h' : '24h'}
 								</button>
+							</div>
+						{/if}
+					</div>
+				{/if}
+			</div>
+
+			<!-- actions card -->
+			<div
+				class="bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
+			>
+				<h3
+					class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+				>
+					Actions
+				</h3>
+				<div class="space-y-3">
+					<!-- management actions -->
+					<div>
+						<p class="text-xs text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
+							Manage
+						</p>
+						<div class="flex flex-wrap gap-2">
+							{#if !campaignUpdateDisabledAndTitle(campaign).disabled}
+								<IconButton variant="blue" icon="edit" on:click={onClickUpdateCampaign}>
+									Update
+								</IconButton>
 							{/if}
-							<button
-								on:click={showCloseCampaignModal}
+							<IconButton
+								variant="orange"
+								icon="close"
 								disabled={!!campaign.closedAt}
-								class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
+								on:click={showCloseCampaignModal}
 							>
 								Close
-							</button>
-							<button
-								on:click={showAnonymizeModal}
+							</IconButton>
+							<IconButton
+								variant="red"
+								icon="anonymize"
 								disabled={!!campaign.anonymizedAt}
-								class="px-4 py-2 bg-gradient-to-r from-pc-red to-repeart-submissions hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
+								on:click={showAnonymizeModal}
 							>
 								Anonymize
-							</button>
+							</IconButton>
 						</div>
+					</div>
 
-						<!-- Export Buttons -->
-						<div class="flex flex-wrap gap-3">
-							<button
-								on:click={onClickExportEvents}
-								class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
-							>
-								Export events
-							</button>
-							<button
-								on:click={onClickExportSubmissions}
-								class="px-4 py-2 bg-gradient-to-r from-campaign-active to-campaign-scheduled hover:opacity-80 text-white rounded-md disabled:opacity-10 disabled:cursor-not-allowed transition-colors"
-							>
-								Export submitters
-							</button>
+					<!-- export actions -->
+					<div class="pt-3 border-t border-gray-200 dark:border-gray-700">
+						<p class="text-xs text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
+							Export
+						</p>
+						<div class="flex flex-wrap gap-2">
+							<IconButton variant="green" icon="export" on:click={onClickExportEvents}>
+								Export Events
+							</IconButton>
+							<IconButton variant="green" icon="export" on:click={onClickExportSubmissions}>
+								Export Submitters
+							</IconButton>
 						</div>
+					</div>
 
-						<!-- Upload Section -->
-						<div class="border-t pt-4">
-							<div>
-								<FileField accept=".csv" on:change={onUploadReportedCSV}>
-									Upload Reported CSV
-								</FileField>
-								<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-									CSV format: "Reported by" (email), "Date reported(UTC+02:00)"
-								</p>
-							</div>
-						</div>
+					<!-- import section -->
+					<div class="pt-3 border-t border-gray-200 dark:border-gray-700">
+						<p class="text-xs text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
+							Import
+						</p>
+						<FileField accept=".csv" on:change={onUploadReportedCSV}>Reported CSV</FileField>
+						<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+							Format: "Reported by" (email), "Date reported(UTC+02:00)"
+						</p>
 					</div>
 				</div>
 			</div>
