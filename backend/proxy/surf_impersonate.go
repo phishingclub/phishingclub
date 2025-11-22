@@ -115,12 +115,13 @@ func (m *ProxyHandler) createSurfClient(userAgent string, proxyConfig *service.P
 			m.logger.Debugw("applying default chrome browser impersonation")
 		}
 
-		// note: when retainUA is true, we don't call .UserAgent() on the builder
-		// because that would override request headers. instead, we let headers
-		// pass through naturally from the request after applyEarlyRequestHeaderReplacements
+		// when retainUA is true, explicitly set the client's user-agent to override
+		// the impersonation profile's default user-agent
+		if retainUA {
+			builder = builder.UserAgent(userAgent)
+			m.logger.Debugw("retaining client user-agent with impersonation", "userAgent", userAgent)
+		}
 	}
-	// note: we never call .UserAgent() on the builder to allow request headers
-	// to pass through naturally. this lets our custom header replacements work.
 
 	// configure timeout
 	builder = builder.Timeout(30 * time.Second)
