@@ -147,7 +147,7 @@
 		try {
 			const res = await api.asset.update(formValues.id, formValues.name, formValues.description);
 			if (res.success) {
-				addToast('Successfully updated asset', 'Success');
+				addToast('Updated asset', 'Success');
 				refreshAssets();
 				closeModal();
 				return;
@@ -184,7 +184,7 @@
 				modalError = res.error;
 				return;
 			}
-			addToast('Successfully uploaded asset', 'Success');
+			addToast('Uploaded asset', 'Success');
 			refreshAssets();
 			closeModal();
 		} catch (e) {
@@ -241,7 +241,7 @@
 				if (!res.success) {
 					throw res.error;
 				}
-				addToast('Successfully deleted asset', 'Success');
+				addToast('Deleted asset', 'Success');
 				refreshAssets();
 			})
 			.catch((e) => {

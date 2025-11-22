@@ -234,7 +234,7 @@
 			if (res.success) {
 				currentDisplayMode = mode;
 				displayMode.setMode(mode);
-				addToast('Display mode updated successfully', 'Success');
+				addToast('Display mode updated', 'Success');
 				displayModeError = '';
 			} else {
 				displayModeError = res.error || 'Failed to update display mode';
@@ -276,7 +276,7 @@
 			window.URL.revokeObjectURL(url);
 			document.body.removeChild(a);
 
-			addToast('Backup downloaded successfully', 'Success');
+			addToast('Backup downloaded', 'Success');
 		} catch (e) {
 			console.error('failed to download backup', e);
 			addToast('Failed to download backup', 'Error');
@@ -296,7 +296,7 @@
 		try {
 			const res = await api.application.createBackup();
 			if (res.success) {
-				addToast('Backup created successfully', 'Success');
+				addToast('Backup created', 'Success');
 				closeBackupModal();
 				await refreshBackupList(); // Refresh backup list
 			} else {
@@ -432,7 +432,7 @@
 			const response = await api.import.import(formData);
 
 			if (response.success) {
-				addToast('File has been imported successfully', 'Success');
+				addToast('File has been imported', 'Success');
 				importFile = null;
 				importResult = response.data;
 				isImportResultModalVisible = true;

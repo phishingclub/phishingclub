@@ -97,7 +97,7 @@
 				modalError = res.error;
 				return;
 			}
-			addToast('Successfully updated attachment', 'Success');
+			addToast('Updated attachment', 'Success');
 			refreshAttachments();
 			closeModal();
 		} catch (e) {
@@ -165,7 +165,7 @@
 				return;
 			}
 			closeModal();
-			addToast('Successfully created attachment', 'Success');
+			addToast('Created attachment', 'Success');
 			refreshAttachments();
 		} catch (e) {
 			addToast('Failed to create attachment', 'Error');

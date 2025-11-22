@@ -97,7 +97,7 @@
 		action
 			.then((res) => {
 				if (res.success) {
-					addToast('Recipient deleted successfully', 'Success');
+					addToast('Recipient deleted', 'Success');
 					refreshRecipients();
 					return;
 				}

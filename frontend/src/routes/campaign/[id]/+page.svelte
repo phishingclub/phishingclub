@@ -831,7 +831,7 @@
 
 			if (response.ok && result.success) {
 				addToast(
-					`Successfully processed ${result.data.processed} reported entries${result.data.skipped > 0 ? `, skipped ${result.data.skipped} invalid entries` : ''}`,
+					`Processed ${result.data.processed} reported entries${result.data.skipped > 0 ? `, skipped ${result.data.skipped} invalid entries` : ''}`,
 					'Success'
 				);
 				// refresh the stats, events, and recipients table
