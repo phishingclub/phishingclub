@@ -2204,7 +2204,7 @@ export class API {
 		/**
 		 * Get setting by key.
 		 *
-		 * @param {'is_installed'|'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'} key
+		 * @param {'is_installed'|'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'|'obfuscation_template'} key
 		 * @returns {Promise<ApiResponse>}
 		 */
 		get: async (key) => {
@@ -2214,7 +2214,7 @@ export class API {
 		/**
 		 * Set setting by key and value.
 		 *
-		 * @param {'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'} key
+		 * @param {'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'|'obfuscation_template'} key
 		 * @param {string} value
 		 * @returns {Promise<ApiResponse>}
 		 */

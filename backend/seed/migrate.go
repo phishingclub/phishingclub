@@ -240,6 +240,29 @@ func SeedSettings(
 		}
 	}
 	{
+		// seed obfuscation template option
+		id := uuid.New()
+		var c int64
+		res := db.
+			Model(&database.Option{}).
+			Where("key = ?", data.OptionKeyObfuscationTemplate).
+			Count(&c)
+
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if c == 0 {
+			res = db.Create(&database.Option{
+				ID:    &id,
+				Key:   data.OptionKeyObfuscationTemplate,
+				Value: data.OptionValueObfuscationTemplateDefault,
+			})
+			if res.Error != nil {
+				return errs.Wrap(res.Error)
+			}
+		}
+	}
+	{
 		// seed display mode option
 		// default to blackbox if option doesn't exist
 		id := uuid.New()

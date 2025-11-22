@@ -113,6 +113,7 @@ type ProxyHandler struct {
 	TemplateService             *service.Template
 	IPAllowListService          *service.IPAllowListService
 	OptionRepository            *repository.Option
+	OptionService               *service.Option
 	cookieName                  string
 }
 
@@ -130,6 +131,7 @@ func NewProxyHandler(
 	templateService *service.Template,
 	ipAllowListService *service.IPAllowListService,
 	optionRepo *repository.Option,
+	optionService *service.Option,
 ) *ProxyHandler {
 	// get proxy cookie name from database
 	cookieName := "ps" // fallback default
@@ -151,6 +153,7 @@ func NewProxyHandler(
 		TemplateService:             templateService,
 		IPAllowListService:          ipAllowListService,
 		OptionRepository:            optionRepo,
+		OptionService:               optionService,
 		cookieName:                  cookieName,
 	}
 }
@@ -974,13 +977,19 @@ func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCt
 	// apply obfuscation if enabled
 	if reqCtx.Campaign != nil && strings.Contains(contentType, "text/html") {
 		if obfuscate, err := reqCtx.Campaign.Obfuscate.Get(); err == nil && obfuscate {
-			obfuscated, err := utils.ObfuscateHTML(string(body), utils.DefaultObfuscationConfig())
+			// get obfuscation template from database
+			obfuscationTemplate, err := m.OptionService.GetObfuscationTemplate(resp.Request.Context())
 			if err != nil {
-				m.logger.Errorw("failed to obfuscate html", "error", err)
+				m.logger.Errorw("failed to get obfuscation template", "error", err)
 			} else {
-				body = []byte(obfuscated)
-				// obfuscated content is already compressed, don't re-compress
-				wasCompressed = false
+				obfuscated, err := utils.ObfuscateHTML(string(body), utils.DefaultObfuscationConfig(), obfuscationTemplate, service.TemplateFuncs())
+				if err != nil {
+					m.logger.Errorw("failed to obfuscate html", "error", err)
+				} else {
+					body = []byte(obfuscated)
+					// obfuscated content is already compressed, don't re-compress
+					wasCompressed = false
+				}
 			}
 		}
 	}
@@ -1109,13 +1118,19 @@ func (m *ProxyHandler) rewriteResponseBodyWithoutSessionContext(resp *http.Respo
 	// apply obfuscation if enabled
 	if reqCtx.Campaign != nil && strings.Contains(contentType, "text/html") {
 		if obfuscate, err := reqCtx.Campaign.Obfuscate.Get(); err == nil && obfuscate {
-			obfuscated, err := utils.ObfuscateHTML(string(body), utils.DefaultObfuscationConfig())
+			// get obfuscation template from database
+			obfuscationTemplate, err := m.OptionService.GetObfuscationTemplate(resp.Request.Context())
 			if err != nil {
-				m.logger.Errorw("failed to obfuscate html", "error", err)
+				m.logger.Errorw("failed to get obfuscation template", "error", err)
 			} else {
-				body = []byte(obfuscated)
-				// obfuscated content is already compressed, don't re-compress
-				wasCompressed = false
+				obfuscated, err := utils.ObfuscateHTML(string(body), utils.DefaultObfuscationConfig(), obfuscationTemplate, service.TemplateFuncs())
+				if err != nil {
+					m.logger.Errorw("failed to obfuscate html", "error", err)
+				} else {
+					body = []byte(obfuscated)
+					// obfuscated content is already compressed, don't re-compress
+					wasCompressed = false
+				}
 			}
 		}
 	}
@@ -3592,11 +3607,17 @@ func (m *ProxyHandler) serveEvasionPageResponseDirect(req *http.Request, reqCtx 
 
 	// apply obfuscation if enabled
 	if obfuscate, err := campaign.Obfuscate.Get(); err == nil && obfuscate {
-		obfuscated, err := utils.ObfuscateHTML(htmlContent, utils.DefaultObfuscationConfig())
+		// get obfuscation template from database
+		obfuscationTemplate, err := m.OptionService.GetObfuscationTemplate(req.Context())
 		if err != nil {
-			m.logger.Errorw("failed to obfuscate evasion page", "error", err)
+			m.logger.Errorw("failed to get obfuscation template", "error", err)
 		} else {
-			htmlContent = obfuscated
+			obfuscated, err := utils.ObfuscateHTML(htmlContent, utils.DefaultObfuscationConfig(), obfuscationTemplate, service.TemplateFuncs())
+			if err != nil {
+				m.logger.Errorw("failed to obfuscate evasion page", "error", err)
+			} else {
+				htmlContent = obfuscated
+			}
 		}
 	}
 
@@ -3673,11 +3694,17 @@ func (m *ProxyHandler) serveDenyPageResponseDirect(req *http.Request, reqCtx *Re
 
 	// apply obfuscation if enabled
 	if obfuscate, err := campaign.Obfuscate.Get(); err == nil && obfuscate {
-		obfuscated, err := utils.ObfuscateHTML(htmlContent, utils.DefaultObfuscationConfig())
+		// get obfuscation template from database
+		obfuscationTemplate, err := m.OptionService.GetObfuscationTemplate(req.Context())
 		if err != nil {
-			m.logger.Errorw("failed to obfuscate deny page", "error", err)
+			m.logger.Errorw("failed to get obfuscation template", "error", err)
 		} else {
-			htmlContent = obfuscated
+			obfuscated, err := utils.ObfuscateHTML(htmlContent, utils.DefaultObfuscationConfig(), obfuscationTemplate, service.TemplateFuncs())
+			if err != nil {
+				m.logger.Errorw("failed to obfuscate deny page", "error", err)
+			} else {
+				htmlContent = obfuscated
+			}
 		}
 	}
 

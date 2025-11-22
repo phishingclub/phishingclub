@@ -17,12 +17,14 @@
 	import PasswordField from '$lib/components/PasswordField.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
 	import { AppStateService } from '$lib/service/appState';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import { addToast } from '$lib/store/toast';
 	import { onMount } from 'svelte';
 	import { onClickCopy } from '$lib/utils/common';
 	import { displayMode, DISPLAY_MODE } from '$lib/store/displayMode';
+	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 
 	const logLevels = ['debug', 'info', 'warn', 'error'];
 	const dbLogLevels = ['silent', 'info', 'warn', 'error'];
@@ -77,6 +79,12 @@
 	let isCompanyContext = false;
 	let importForCompany = false;
 	let contextCompanyID = null;
+
+	// obfuscation template editor
+	let isObfuscationTemplateModalVisible = false;
+	let obfuscationTemplate = '';
+	let obfuscationTemplateError = '';
+	let isObfuscationTemplateSubmitting = false;
 
 	$: {
 		isCompanyContext = appState.isCompanyContext();
@@ -465,6 +473,65 @@
 			isImportSubmitting = false;
 		}
 	};
+
+	/**
+	 * Open obfuscation template modal
+	 */
+	const openObfuscationTemplateModal = async () => {
+		try {
+			showIsLoading();
+			const response = await api.option.get('obfuscation_template');
+			if (response.success) {
+				obfuscationTemplate = response.data.value || '';
+			} else {
+				obfuscationTemplateError = 'Failed to load template';
+			}
+		} catch (error) {
+			console.error('Failed to load obfuscation template:', error);
+			obfuscationTemplateError = 'Failed to load template';
+		} finally {
+			hideIsLoading();
+			isObfuscationTemplateModalVisible = true;
+		}
+	};
+
+	/**
+	 * Close obfuscation template modal
+	 */
+	const closeObfuscationTemplateModal = () => {
+		isObfuscationTemplateModalVisible = false;
+		obfuscationTemplateError = '';
+	};
+
+	/**
+	 * Submit obfuscation template
+	 */
+	const onSubmitObfuscationTemplate = async (event) => {
+		const saveOnly = event?.detail?.saveOnly || false;
+		isObfuscationTemplateSubmitting = true;
+		obfuscationTemplateError = '';
+
+		try {
+			const response = await api.option.set('obfuscation_template', obfuscationTemplate);
+
+			if (response.success) {
+				addToast(
+					saveOnly ? 'Obfuscation template saved' : 'Obfuscation template updated',
+					'Success'
+				);
+				if (!saveOnly) {
+					isObfuscationTemplateModalVisible = false;
+				}
+			} else {
+				obfuscationTemplateError = response.error || 'Failed to update template';
+			}
+		} catch (error) {
+			console.error('Failed to update obfuscation template:', error);
+			obfuscationTemplateError = 'Failed to update template';
+		} finally {
+			isObfuscationTemplateSubmitting = false;
+		}
+	};
 </script>
 
 <HeadTitle title="Settings" />
@@ -764,6 +831,40 @@
 						</div>
 					</div>
 				</div>
+
+				<!-- Obfuscation Template Section -->
+				<ConditionalDisplay show="blackbox">
+					<div
+						class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 h-[420px] flex flex-col transition-colors duration-200"
+					>
+						<h2
+							class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+						>
+							Obfuscation Template
+						</h2>
+						<div class="flex flex-col h-full">
+							<div class="space-y-4">
+								<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+									Customize the template used when obfuscation is enabled to.
+								</p>
+								<div
+									class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md transition-colors duration-200"
+								>
+									<p class="text-sm text-gray-700 dark:text-gray-300 mb-2">
+										<strong>Internal obfuscation variable:</strong>
+									</p>
+									<p class="text-xs text-gray-600 dark:text-gray-400 font-mono">
+										{'{{.Script}}'}
+									</p>
+								</div>
+							</div>
+							<div class="mt-auto pt-4">
+								<Button size={'large'} on:click={openObfuscationTemplateModal}>Edit Template</Button
+								>
+							</div>
+						</div>
+					</div>
+				</ConditionalDisplay>
 			</div>
 		</div>
 
@@ -1159,6 +1260,43 @@
 					closeModal={closeBackupModal}
 					isSubmitting={isCreatingBackup}
 					okText={isCreatingBackup ? 'Creating Backup...' : 'Create Backup'}
+				/>
+			</FormGrid>
+		</Modal>
+	{/if}
+
+	{#if isObfuscationTemplateModalVisible}
+		<Modal
+			bind:visible={isObfuscationTemplateModalVisible}
+			headerText="Edit Obfuscation Template"
+			onClose={closeObfuscationTemplateModal}
+			{isSubmitting}
+		>
+			<FormGrid
+				on:submit={onSubmitObfuscationTemplate}
+				isSubmitting={isObfuscationTemplateSubmitting}
+				modalMode="update"
+			>
+				<div
+					class="w-80vw col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+				>
+					<SimpleCodeEditor
+						bind:value={obfuscationTemplate}
+						language="html"
+						height="large"
+						showVimToggle={true}
+						showExpandButton={false}
+					/>
+					<p class="text-sm text-gray-600 dark:text-gray-300 my-4">
+						Example <code class="bg-gray-200 dark:bg-gray-700 p-1 rounded text-xs"
+							>{"eval(atob('{{base64 .Script}}'))"}</code
+						>
+					</p>
+					<FormError message={obfuscationTemplateError} />
+				</div>
+				<FormFooter
+					isSubmitting={isObfuscationTemplateSubmitting}
+					closeModal={closeObfuscationTemplateModal}
 				/>
 			</FormGrid>
 		</Modal>

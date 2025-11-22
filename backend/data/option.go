@@ -29,4 +29,18 @@ const (
 	OptionKeyDisplayMode           = "display_mode"
 	OptionValueDisplayModeWhitebox = "whitebox"
 	OptionValueDisplayModeBlackbox = "blackbox"
+
+	OptionKeyObfuscationTemplate = "obfuscation_template"
+	// OptionValueObfuscationTemplateDefault is the default HTML template for obfuscation
+	// the template receives {{.Script}} variable containing the obfuscated javascript
+	OptionValueObfuscationTemplateDefault = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+<script>{{.Script}}</script>
+</body>
+</html>`
 )

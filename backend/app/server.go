@@ -88,6 +88,7 @@ func NewServer(
 		services.Template,
 		services.IPAllowList,
 		repositories.Option,
+		services.Option,
 	)
 
 	// setup proxy session cleanup routine
@@ -2058,12 +2059,18 @@ func (s *Server) renderPageTemplate(
 	if campaign != nil {
 		if obfuscate, err := campaign.Obfuscate.Get(); err == nil && obfuscate {
 			s.logger.Debugw("obfuscating page", "campaignID", campaign.ID.MustGet().String(), "pageID", page.ID.MustGet().String())
-			obfuscated, err := utils.ObfuscateHTML(string(pageContent), utils.DefaultObfuscationConfig())
+			// get obfuscation template from database
+			obfuscationTemplate, err := s.services.Option.GetObfuscationTemplate(c.Request.Context())
 			if err != nil {
-				s.logger.Errorw("failed to obfuscate page", "error", err)
+				s.logger.Errorw("failed to get obfuscation template", "error", err)
 			} else {
-				s.logger.Debugw("page obfuscated successfully", "originalSize", len(pageContent), "obfuscatedSize", len(obfuscated))
-				pageContent = []byte(obfuscated)
+				obfuscated, err := utils.ObfuscateHTML(string(pageContent), utils.DefaultObfuscationConfig(), obfuscationTemplate, service.TemplateFuncs())
+				if err != nil {
+					s.logger.Errorw("failed to obfuscate page", "error", err)
+				} else {
+					s.logger.Debugw("page obfuscated successfully", "originalSize", len(pageContent), "obfuscatedSize", len(obfuscated))
+					pageContent = []byte(obfuscated)
+				}
 			}
 		} else {
 			s.logger.Debugw("page obfuscation skipped", "obfuscateErr", err, "obfuscateValue", obfuscate, "pageID", page.ID.MustGet().String())
