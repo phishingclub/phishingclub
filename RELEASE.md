@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.20.0] - 2025-11-23
+- Added Blackbox / Whitebox display mode
+- Obfuscation template can now be edited
+- For MITM proxying Surf HTTP client is now exclusively used 
+- Added copy recipient email (not content) to campaign action
+- Improved campaign page detail and actions UI 
+- Improved input placeholder color in dark mode
+- Fixed various MITM bugs related to impersonation and Surf HTTP client
+
 ## [1.19.0] - 2025-11-21
 - Added OAuth Providers and integration with API Senders
 - Added copy email on recipient actions on campaign page
