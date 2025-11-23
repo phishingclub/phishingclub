@@ -69,8 +69,8 @@ const (
 )
 
 var (
-	MATCH_URL_REGEXP                = regexp.MustCompile(`\b(http[s]?:\/\/|\\\\|http[s]:\\x2F\\x2F)(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
-	MATCH_URL_REGEXP_WITHOUT_SCHEME = regexp.MustCompile(`\b(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
+	MATCH_URL_REGEXP                = regexp.MustCompile(`\b(http[s]?:\/\/|\\\\|http[s]:\\x2F\\x2F)(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|test|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
+	MATCH_URL_REGEXP_WITHOUT_SCHEME = regexp.MustCompile(`\b(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|test|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
 )
 
 // RequestContext holds all the context data for a proxy request
@@ -2325,56 +2325,52 @@ func (m *ProxyHandler) readAndDecompressBody(resp *http.Response, usedImpersonat
 		}
 		return decompressed, true, nil
 	case "br":
-		// only decompress br/zstd when using impersonation
-		// non-impersonation path deletes accept-encoding so should never receive these
-		if usedImpersonation {
-			brReader := brotli.NewReader(bytes.NewBuffer(body))
-			decompressed, err := io.ReadAll(brReader)
-			if err != nil {
-				// body is already decompressed - remove header and send uncompressed
-				m.logger.Debugw("brotli decompression failed, body already decompressed - removing content-encoding header",
-					"error", err,
-				)
-				resp.Header.Del("Content-Encoding")
-				return body, false, nil
-			}
-			m.logger.Debugw("successfully decompressed brotli body",
-				"compressedSize", len(body),
-				"decompressedSize", len(decompressed),
+		// surf automatically decompresses br, but keeps the content-encoding header
+		// try to decompress, and if it fails, assume surf already decompressed
+		brReader := brotli.NewReader(bytes.NewBuffer(body))
+		decompressed, err := io.ReadAll(brReader)
+		if err != nil {
+			// body is already decompressed (e.g., by surf's decodeBodyMW middleware)
+			// remove the Content-Encoding header and send uncompressed to client
+			m.logger.Debugw("brotli decompression failed, body already decompressed - removing content-encoding header",
+				"error", err,
 			)
-			return decompressed, true, nil
+			resp.Header.Del("Content-Encoding")
+			return body, false, nil
 		}
-		return body, false, nil
+		m.logger.Debugw("successfully decompressed brotli body",
+			"compressedSize", len(body),
+			"decompressedSize", len(decompressed),
+		)
+		return decompressed, true, nil
 	case "zstd":
-		// only decompress br/zstd when using impersonation
-		// non-impersonation path deletes accept-encoding so should never receive these
-		if usedImpersonation {
-			zstdReader, err := zstd.NewReader(bytes.NewBuffer(body))
-			if err != nil {
-				// body is already decompressed - remove header and send uncompressed
-				m.logger.Debugw("zstd reader creation failed, body already decompressed - removing content-encoding header",
-					"error", err,
-				)
-				resp.Header.Del("Content-Encoding")
-				return body, false, nil
-			}
-			defer zstdReader.Close()
-			decompressed, err := io.ReadAll(zstdReader)
-			if err != nil {
-				// body is already decompressed - remove header and send uncompressed
-				m.logger.Debugw("zstd decompression failed, body already decompressed - removing content-encoding header",
-					"error", err,
-				)
-				resp.Header.Del("Content-Encoding")
-				return body, false, nil
-			}
-			m.logger.Debugw("successfully decompressed zstd body",
-				"compressedSize", len(body),
-				"decompressedSize", len(decompressed),
+		// surf automatically decompresses zstd, but keeps the content-encoding header
+		// try to decompress, and if it fails, assume surf already decompressed
+		zstdReader, err := zstd.NewReader(bytes.NewBuffer(body))
+		if err != nil {
+			// body is already decompressed (e.g., by surf's decodeBodyMW middleware)
+			// remove the Content-Encoding header and send uncompressed to client
+			m.logger.Debugw("zstd reader creation failed, body already decompressed - removing content-encoding header",
+				"error", err,
 			)
-			return decompressed, true, nil
+			resp.Header.Del("Content-Encoding")
+			return body, false, nil
 		}
-		return body, false, nil
+		defer zstdReader.Close()
+		decompressed, err := io.ReadAll(zstdReader)
+		if err != nil {
+			// body is already decompressed - remove header and send uncompressed
+			m.logger.Debugw("zstd decompression failed, body already decompressed - removing content-encoding header",
+				"error", err,
+			)
+			resp.Header.Del("Content-Encoding")
+			return body, false, nil
+		}
+		m.logger.Debugw("successfully decompressed zstd body",
+			"compressedSize", len(body),
+			"decompressedSize", len(decompressed),
+		)
+		return decompressed, true, nil
 	default:
 		// no encoding or unknown encoding - return as-is
 		return body, false, nil
