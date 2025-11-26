@@ -60,7 +60,8 @@ func NewServices(
 		Logger: logger,
 	}
 	templateService := &service.Template{
-		Common: common,
+		Common:              common,
+		RecipientRepository: repositories.Recipient,
 	}
 	file := &service.File{
 		Common: common,

@@ -3878,8 +3878,16 @@ func (m *ProxyHandler) renderDenyPageTemplate(req *http.Request, reqCtx *Request
 		RedirectURL:       domain.RedirectURL.MustGet().String(),
 	}
 
+	// get campaign's company context
+	var campaignCompanyID *uuid.UUID
+	if campaign.CompanyID.IsSpecified() && !campaign.CompanyID.IsNull() {
+		companyID := campaign.CompanyID.MustGet()
+		campaignCompanyID = &companyID
+	}
+
 	// use template service to render the deny page with full template processing
 	buf, err := m.TemplateService.CreatePhishingPageWithCampaign(
+		ctx,
 		dbDomain,
 		email,
 		reqCtx.CampaignRecipientID,
@@ -3889,6 +3897,7 @@ func (m *ProxyHandler) renderDenyPageTemplate(req *http.Request, reqCtx *Request
 		"", // no state parameter for deny pages
 		req.URL.Path,
 		campaign,
+		campaignCompanyID,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to render deny page template: %w", err)
@@ -3986,8 +3995,16 @@ func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *Requ
 		RedirectURL:       domain.RedirectURL.MustGet().String(),
 	}
 
+	// get campaign's company context
+	var campaignCompanyID *uuid.UUID
+	if campaign.CompanyID.IsSpecified() && !campaign.CompanyID.IsNull() {
+		companyID := campaign.CompanyID.MustGet()
+		campaignCompanyID = &companyID
+	}
+
 	// use template service to render the page with preserved original URL
 	buf, err := m.TemplateService.CreatePhishingPageWithCampaign(
+		ctx,
 		dbDomain,
 		email,
 		reqCtx.CampaignRecipientID,
@@ -3997,6 +4014,7 @@ func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *Requ
 		encryptedNextState,
 		originalURL,
 		campaign,
+		campaignCompanyID,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to render evasion page template: %w", err)

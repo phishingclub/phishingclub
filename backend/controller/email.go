@@ -258,12 +258,14 @@ func (m *Email) GetContentByID(g *gin.Context) {
 	}
 	apiSender := model.NewAPISenderExample()
 	emailBody, err := m.TemplateService.CreateMailBody(
+		g.Request.Context(),
 		"id",
 		"/foo",
 		domain,
 		&campaignRecipient,
 		email,
 		apiSender,
+		companyID, // use the company context from the email
 	)
 	if ok := m.handleErrors(g, err); !ok {
 		return

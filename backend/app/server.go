@@ -1748,8 +1748,16 @@ func (s *Server) renderDenyPage(
 		return fmt.Errorf("campaign recipient has no ID: %s", err)
 	}
 
+	// get campaign's company context
+	var campaignCompanyID *uuid.UUID
+	if campaign.CompanyID.IsSpecified() && !campaign.CompanyID.IsNull() {
+		companyID := campaign.CompanyID.MustGet()
+		campaignCompanyID = &companyID
+	}
+
 	// render with full template context
 	buf, err := s.services.Template.CreatePhishingPageWithCampaign(
+		ctx,
 		domain,
 		email,
 		&campaignRecipientID,
@@ -1759,6 +1767,7 @@ func (s *Server) renderDenyPage(
 		"", // no state parameter for deny pages
 		c.Request.URL.Path,
 		campaign,
+		campaignCompanyID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to render deny page template: %s", err)
@@ -2039,7 +2048,16 @@ func (s *Server) renderPageTemplate(
 	if err != nil {
 		return fmt.Errorf("no page content set to render: %s", err)
 	}
+
+	// get campaign's company context
+	var campaignCompanyID *uuid.UUID
+	if campaign.CompanyID.IsSpecified() && !campaign.CompanyID.IsNull() {
+		companyID := campaign.CompanyID.MustGet()
+		campaignCompanyID = &companyID
+	}
+
 	phishingPage, err := s.services.Template.CreatePhishingPageWithCampaign(
+		c.Request.Context(),
 		domain,
 		email,
 		campaignRecipientID,
@@ -2049,6 +2067,7 @@ func (s *Server) renderPageTemplate(
 		stateParam,
 		urlPath,
 		campaign,
+		campaignCompanyID,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create phishing page: %s", err)

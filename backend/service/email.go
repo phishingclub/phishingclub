@@ -584,7 +584,6 @@ func (m *Email) SendTestEmail(
 			)
 		}
 	}
-	msg.Subject(email.MailHeaderSubject.MustGet().String())
 	domainName, err := testDomain.Name.Get()
 	if err != nil {
 		m.Logger.Errorw("failed to get domain name", "error", err)
@@ -608,13 +607,30 @@ func (m *Email) SendTestEmail(
 		return errs.Wrap(err)
 	}
 	t := m.TemplateService.CreateMail(
+		ctx,
 		domainName.String(),
 		"id",
 		"/",
 		campaignRecipient,
 		email,
 		nil,
+		companyID,
 	)
+
+	// process subject through template
+	subjectTemplate, err := template.New("subject").Funcs(m.TemplateService.TemplateFuncsWithCompany(ctx, companyID)).Parse(email.MailHeaderSubject.MustGet().String())
+	if err != nil {
+		m.Logger.Errorw("failed to parse subject template", "error", err)
+		return errs.Wrap(err)
+	}
+	var subjectBuffer bytes.Buffer
+	err = subjectTemplate.Execute(&subjectBuffer, t)
+	if err != nil {
+		m.Logger.Errorw("failed to execute subject template", "error", err)
+		return errs.Wrap(err)
+	}
+	msg.Subject(subjectBuffer.String())
+
 	var bodyBuffer bytes.Buffer
 	err = mailTmpl.Execute(&bodyBuffer, t)
 	if err != nil {
@@ -656,12 +672,14 @@ func (m *Email) SendTestEmail(
 				*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 			)
 			attachmentStr, err := m.TemplateService.CreateMailBody(
+				ctx,
 				"id",
 				"/",
 				testDomain,
 				campaignRecipient,
 				&attachmentAsEmail,
 				nil,
+				companyID,
 			)
 			if err != nil {
 				return fmt.Errorf("failed to setup attachment with embedded content: %s", err)
