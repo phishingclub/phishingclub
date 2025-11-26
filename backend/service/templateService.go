@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"html"
@@ -19,6 +20,7 @@ import (
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/vo"
 	"github.com/yeqown/go-qrcode/v2"
@@ -30,6 +32,7 @@ const trackingPixelTemplate = "{{.Tracker}}"
 // templates such as websites, emails, etc.
 type Template struct {
 	Common
+	RecipientRepository *repository.Recipient
 }
 
 // CreateMailTemplate creates a new mail template
@@ -121,12 +124,14 @@ func (t *Template) ValidateEmailTemplate(content string) error {
 	apiSender := model.NewAPISenderExample()
 
 	_, err = t.CreateMailBody(
+		context.Background(),
 		"id",
 		"/test",
 		domain,
 		&campaignRecipient,
 		email,
 		apiSender,
+		nil, // no company context for validation
 	)
 	if err != nil {
 		return fmt.Errorf("failed to execute email template: %s", err)
@@ -191,6 +196,7 @@ func (t *Template) ApplyPageMock(content string) (*bytes.Buffer, error) {
 		StateIdentifier: stateIdentifier,
 	}
 	return t.CreatePhishingPageWithCampaign(
+		context.Background(),
 		domain,
 		email,
 		&campaignRecipientID,
@@ -199,20 +205,24 @@ func (t *Template) ApplyPageMock(content string) (*bytes.Buffer, error) {
 		campaignTemplate,
 		"stateParam",
 		"urlPath",
-		nil, // no campaign for mock, so DenyURL will be empty string
+		nil,
+		nil, // no company context for mock
 	)
 }
 
 // CreateMailBody returns a rendered mail body to string
 func (t *Template) CreateMailBody(
+	ctx context.Context,
 	urlIdentifier string,
 	urlPath string,
 	domain *model.Domain,
 	campaignRecipient *model.CampaignRecipient,
 	email *model.Email,
 	apiSender *model.APISender, // can be nil
+	companyID *uuid.UUID,
 ) (string, error) {
 	return t.CreateMailBodyWithCustomURL(
+		ctx,
 		urlIdentifier,
 		urlPath,
 		domain,
@@ -220,11 +230,13 @@ func (t *Template) CreateMailBody(
 		email,
 		apiSender,
 		"", // empty customURL means use template domain
+		companyID,
 	)
 }
 
 // CreateMailBodyWithCustomURL returns a rendered mail body to string with optional custom campaign URL
 func (t *Template) CreateMailBodyWithCustomURL(
+	ctx context.Context,
 	urlIdentifier string,
 	urlPath string,
 	domain *model.Domain,
@@ -232,6 +244,7 @@ func (t *Template) CreateMailBodyWithCustomURL(
 	email *model.Email,
 	apiSender *model.APISender, // can be nil
 	customCampaignURL string, // if provided, overrides the default campaign URL
+	companyID *uuid.UUID,
 ) (string, error) {
 	mailData := t.CreateMail(
 		domain.Name.MustGet().String(),
@@ -246,8 +259,12 @@ func (t *Template) CreateMailBodyWithCustomURL(
 	if customCampaignURL != "" {
 		(*mailData)["URL"] = customCampaignURL
 	}
+
+	// add random recipient data to template context
+	(*mailData)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID)
+
 	mailContentTemplate := template.New("mailContent")
-	mailContentTemplate = mailContentTemplate.Funcs(TemplateFuncs())
+	mailContentTemplate = mailContentTemplate.Funcs(t.TemplateFuncsWithCompany(ctx, companyID))
 	content, err := email.Content.Get()
 	if err != nil {
 		t.Logger.Errorw("failed to get email content", "error", err)
@@ -274,6 +291,7 @@ func (t *Template) CreateMailBodyWithCustomURL(
 
 // CreatePhishingPage creates a new phishing page
 func (t *Template) CreatePhishingPage(
+	ctx context.Context,
 	domain *database.Domain,
 	email *model.Email,
 	campaignRecipientID *uuid.UUID,
@@ -282,12 +300,14 @@ func (t *Template) CreatePhishingPage(
 	campaignTemplate *model.CampaignTemplate,
 	stateParam string,
 	urlPath string,
+	companyID *uuid.UUID,
 ) (*bytes.Buffer, error) {
-	return t.CreatePhishingPageWithCampaign(domain, email, campaignRecipientID, recipient, contentToRender, campaignTemplate, stateParam, urlPath, nil)
+	return t.CreatePhishingPageWithCampaign(ctx, domain, email, campaignRecipientID, recipient, contentToRender, campaignTemplate, stateParam, urlPath, nil, companyID)
 }
 
 // CreatePhishingPageWithCampaign creates a new phishing page with optional campaign for deny URL support
 func (t *Template) CreatePhishingPageWithCampaign(
+	ctx context.Context,
 	domain *database.Domain,
 	email *model.Email,
 	campaignRecipientID *uuid.UUID,
@@ -297,6 +317,7 @@ func (t *Template) CreatePhishingPageWithCampaign(
 	stateParam string,
 	urlPath string,
 	campaign *model.Campaign,
+	companyID *uuid.UUID,
 ) (*bytes.Buffer, error) {
 	w := bytes.NewBuffer([]byte{})
 	id := campaignRecipientID.String()
@@ -351,7 +372,7 @@ func (t *Template) CreatePhishingPageWithCampaign(
 	}
 
 	tmpl, err := template.New("page").
-		Funcs(TemplateFuncs()).
+		Funcs(t.TemplateFuncsWithCompany(ctx, companyID)).
 		Parse(contentToRender)
 
 	if err != nil {
@@ -368,6 +389,9 @@ func (t *Template) CreatePhishingPageWithCampaign(
 		email,
 		nil, // apiSender
 	)
+
+	// add random recipient data to template context
+	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID)
 	err = tmpl.Execute(w, data)
 	if err != nil {
 		return w, fmt.Errorf("failed to execute page template: %s", err)
@@ -536,6 +560,72 @@ func TemplateFuncs() template.FuncMap {
 			return base64.StdEncoding.EncodeToString([]byte(s))
 		},
 	}
+}
+
+// TemplateFuncsWithCompany returns template functions for templates with company context
+func (t *Template) TemplateFuncsWithCompany(ctx context.Context, companyID *uuid.UUID) template.FuncMap {
+	return TemplateFuncs()
+}
+
+// getRandomRecipientData gets a random recipient from a company and returns a map of their data
+func (t *Template) getRandomRecipientData(ctx context.Context, companyID *uuid.UUID) map[string]string {
+	data := map[string]string{
+		"FirstName":       "",
+		"LastName":        "",
+		"Email":           "",
+		"Phone":           "",
+		"Position":        "",
+		"Department":      "",
+		"City":            "",
+		"Country":         "",
+		"ExtraIdentifier": "",
+		"Misc":            "",
+	}
+
+	if t.RecipientRepository == nil {
+		t.Logger.Errorw("recipient repository not available for RandomRecipient")
+		return data
+	}
+
+	recipient, err := t.RecipientRepository.GetRandomByCompanyID(ctx, companyID)
+	if err != nil {
+		t.Logger.Errorw("failed to get random recipient", "error", err, "companyID", companyID)
+		return data
+	}
+
+	// populate the data map with recipient fields
+	if v, err := recipient.FirstName.Get(); err == nil {
+		data["FirstName"] = v.String()
+	}
+	if v, err := recipient.LastName.Get(); err == nil {
+		data["LastName"] = v.String()
+	}
+	if v, err := recipient.Email.Get(); err == nil {
+		data["Email"] = v.String()
+	}
+	if v, err := recipient.Phone.Get(); err == nil {
+		data["Phone"] = v.String()
+	}
+	if v, err := recipient.Position.Get(); err == nil {
+		data["Position"] = v.String()
+	}
+	if v, err := recipient.Department.Get(); err == nil {
+		data["Department"] = v.String()
+	}
+	if v, err := recipient.City.Get(); err == nil {
+		data["City"] = v.String()
+	}
+	if v, err := recipient.Country.Get(); err == nil {
+		data["Country"] = v.String()
+	}
+	if v, err := recipient.ExtraIdentifier.Get(); err == nil {
+		data["ExtraIdentifier"] = v.String()
+	}
+	if v, err := recipient.Misc.Get(); err == nil {
+		data["Misc"] = v.String()
+	}
+
+	return data
 }
 
 func (t *Template) AddTrackingPixel(content string) string {

@@ -656,12 +656,14 @@ func (m *Email) SendTestEmail(
 				*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 			)
 			attachmentStr, err := m.TemplateService.CreateMailBody(
+				ctx,
 				"id",
 				"/",
 				testDomain,
 				campaignRecipient,
 				&attachmentAsEmail,
 				nil,
+				companyID,
 			)
 			if err != nil {
 				return fmt.Errorf("failed to setup attachment with embedded content: %s", err)

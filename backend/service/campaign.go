@@ -1783,7 +1783,7 @@ func (c *Campaign) sendCampaignMessages(
 		return errs.Wrap(errors.Join(err, closeErr))
 	}
 	t := template.New("email")
-	t = t.Funcs(TemplateFuncs())
+	t = t.Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID))
 	mailTmpl, err := t.Parse(content.String())
 	if err != nil {
 		// if mail templates fails to parse, close the campaign
@@ -2132,6 +2132,7 @@ func (c *Campaign) sendCampaignMessages(
 				}
 
 				attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURL(
+					ctx,
 					urlIdentifier.Name.MustGet(),
 					urlPath,
 					domain,
@@ -2139,6 +2140,7 @@ func (c *Campaign) sendCampaignMessages(
 					&attachmentAsEmail,
 					nil,
 					customCampaignURL,
+					campaignCompanyID,
 				)
 				if err != nil {
 					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
@@ -2787,13 +2789,15 @@ func (c *Campaign) GetCampaignEmailBody(
 
 	// no audit on read
 	return c.TemplateService.CreateMailBodyWithCustomURL(
+		ctx,
 		urlIdentifier.Name.MustGet(),
 		urlPath,
 		domain,
 		campaignRecipient,
 		email,
-		nil,
+		nil, // no api sender for preview
 		customCampaignURL,
+		campaignCompanyID,
 	)
 }
 
@@ -3423,7 +3427,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 	}
 
 	t := template.New("email")
-	t = t.Funcs(TemplateFuncs())
+	t = t.Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID))
 	mailTmpl, err := t.Parse(content.String())
 	if err != nil {
 		return errs.Wrap(err)
@@ -3459,7 +3463,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 		)
 	} else {
 		// send via SMTP
-		err = c.sendSingleEmailSMTP(ctx, session, cTemplate, campaignRecipient, domain, mailTmpl, email)
+		err = c.sendSingleEmailSMTP(ctx, session, cTemplate, campaignRecipient, domain, mailTmpl, email, campaignCompanyID)
 	}
 
 	// save sending result
@@ -3486,6 +3490,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 	domain *model.Domain,
 	mailTmpl *template.Template,
 	email *model.Email,
+	campaignCompanyID *uuid.UUID,
 ) error {
 	// get SMTP configuration
 	smtpConfigID, err := cTemplate.SMTPConfigurationID.Get()
@@ -3675,6 +3680,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 			}
 
 			attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURL(
+				ctx,
 				urlIdentifier.Name.MustGet(),
 				urlPath,
 				domain,
@@ -3682,6 +3688,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 				&attachmentAsEmail,
 				nil,
 				customCampaignURL,
+				campaignCompanyID,
 			)
 			if err != nil {
 				return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))

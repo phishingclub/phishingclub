@@ -115,12 +115,14 @@ func (a *Attachment) GetContentByID(g *gin.Context) {
 		)
 		apiSender := model.NewAPISenderExample()
 		b, err := a.TemplateService.CreateMailBody(
+			g.Request.Context(),
 			"id",
 			"/foo",
 			domain,
 			&campaignRecipient,
 			email,
 			apiSender,
+			nil, // no company context for attachment preview
 		)
 		if err != nil {
 			a.Logger.Errorw("failed to appy template to attachment",

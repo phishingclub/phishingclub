@@ -670,6 +670,28 @@ func (r *Recipient) GetAllByCompanyID(
 	return result, nil
 }
 
+// GetRandomByCompanyID gets a random recipient from a company
+func (r *Recipient) GetRandomByCompanyID(
+	ctx context.Context,
+	companyID *uuid.UUID,
+) (*model.Recipient, error) {
+	var dbRecipient database.Recipient
+
+	db := r.DB.Table(database.RECIPIENT_TABLE)
+
+	// apply company filter including null context
+	db = withCompanyIncludingNullContext(db, companyID, database.RECIPIENT_TABLE)
+
+	// order randomly and get one
+	res := db.Order("RANDOM()").Limit(1).First(&dbRecipient)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+
+	return ToRecipient(&dbRecipient)
+}
+
 func (r *Recipient) GetByEmail(
 	ctx context.Context,
 	email *vo.Email,
