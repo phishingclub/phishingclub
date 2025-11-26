@@ -190,7 +190,7 @@
 		<!-- Switch Company Section -->
 		<div class="px-6 py-4 border-b border-white/20 dark:border-highlight-blue/30">
 			<button
-				class="flex items-center w-full py-3 px-4 text-white bg-active-blue dark:bg-highlight-blue/30 rounded-lg transition-all duration-200 hover:bg-active-blue/80 dark:hover:bg-highlight-blue/40 font-medium"
+				class="flex items-center w-full py-3 px-4 text-white bg-active-blue dark:bg-slate-800 rounded-lg transition-all duration-200 hover:bg-active-blue/80 dark:hover:bg-slate-700 font-medium"
 				on:click={() => {
 					visible = false;
 					toggleChangeCompanyModal();

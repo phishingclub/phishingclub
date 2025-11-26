@@ -99,7 +99,7 @@
 		>
 			<!-- Change Company at top with distinct styling -->
 			<button
-				class="flex items-center pl-5 py-3 text-white bg-active-blue dark:bg-highlight-blue/30 first:rounded-t-md transition-colors duration-200 hover:bg-active-blue/80 dark:hover:bg-highlight-blue/40 border-b border-active-blue/50 dark:border-highlight-blue/40"
+				class="flex items-center pl-5 py-3 text-white bg-active-blue dark:bg-slate-800 first:rounded-t-md transition-colors duration-200 hover:bg-active-blue/80 dark:hover:bg-slate-700 border-b border-active-blue/50 dark:border-slate-700"
 				on:click={() => {
 					visible = false;
 					toggleChangeCompanyModal();
