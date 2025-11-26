@@ -679,8 +679,8 @@ func (r *Recipient) GetRandomByCompanyID(
 
 	db := r.DB.Table(database.RECIPIENT_TABLE)
 
-	// apply company filter including null context
-	db = withCompanyIncludingNullContext(db, companyID, database.RECIPIENT_TABLE)
+	// apply company filter
+	db = whereCompany(db, database.RECIPIENT_TABLE, companyID)
 
 	// order randomly and get one
 	res := db.Order("RANDOM()").Limit(1).First(&dbRecipient)
