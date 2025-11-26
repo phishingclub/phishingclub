@@ -76,8 +76,12 @@ func (t *Template) CreateMail(
 		apiSender,
 	)
 
-	// add random recipient data to template context
-	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID)
+	// add random recipient data to template context (excluding current recipient)
+	var excludeRecipientID *uuid.UUID
+	if recipientID, err := campaignRecipient.Recipient.ID.Get(); err == nil {
+		excludeRecipientID = &recipientID
+	}
+	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, excludeRecipientID)
 
 	return data
 }
@@ -396,8 +400,12 @@ func (t *Template) CreatePhishingPageWithCampaign(
 		nil, // apiSender
 	)
 
-	// add random recipient data to template context
-	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID)
+	// add random recipient data to template context (excluding current recipient)
+	var excludeRecipientID *uuid.UUID
+	if recipientID, err := recipient.ID.Get(); err == nil {
+		excludeRecipientID = &recipientID
+	}
+	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, excludeRecipientID)
 	err = tmpl.Execute(w, data)
 	if err != nil {
 		return w, fmt.Errorf("failed to execute page template: %s", err)
@@ -574,7 +582,7 @@ func (t *Template) TemplateFuncsWithCompany(ctx context.Context, companyID *uuid
 }
 
 // getRandomRecipientData gets a random recipient from a company and returns a map of their data
-func (t *Template) getRandomRecipientData(ctx context.Context, companyID *uuid.UUID) map[string]string {
+func (t *Template) getRandomRecipientData(ctx context.Context, companyID *uuid.UUID, excludeRecipientID *uuid.UUID) map[string]string {
 	data := map[string]string{
 		"FirstName":       "",
 		"LastName":        "",
@@ -593,7 +601,7 @@ func (t *Template) getRandomRecipientData(ctx context.Context, companyID *uuid.U
 		return data
 	}
 
-	recipient, err := t.RecipientRepository.GetRandomByCompanyID(ctx, companyID)
+	recipient, err := t.RecipientRepository.GetRandomByCompanyID(ctx, companyID, excludeRecipientID)
 	if err != nil {
 		t.Logger.Errorw("failed to get random recipient", "error", err, "companyID", companyID)
 		return data
