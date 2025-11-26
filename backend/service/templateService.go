@@ -37,12 +37,14 @@ type Template struct {
 
 // CreateMailTemplate creates a new mail template
 func (t *Template) CreateMail(
+	ctx context.Context,
 	domainName string,
 	idKey string,
 	urlPath string,
 	campaignRecipient *model.CampaignRecipient,
 	email *model.Email,
 	apiSender *model.APISender,
+	companyID *uuid.UUID,
 ) *map[string]any {
 	baseURL := "https://" + domainName
 	url := fmt.Sprintf(
@@ -63,7 +65,7 @@ func (t *Template) CreateMail(
 		baseURL,
 		campaignRecipient.ID.MustGet().String(),
 	)
-	return t.newTemplateDataMap(
+	data := t.newTemplateDataMap(
 		idKey,
 		baseURL,
 		url,
@@ -73,6 +75,11 @@ func (t *Template) CreateMail(
 		email,
 		apiSender,
 	)
+
+	// add random recipient data to template context
+	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID)
+
+	return data
 }
 
 // ValidatePageTemplate validates that a page template can be parsed and executed without errors
@@ -247,12 +254,14 @@ func (t *Template) CreateMailBodyWithCustomURL(
 	companyID *uuid.UUID,
 ) (string, error) {
 	mailData := t.CreateMail(
+		ctx,
 		domain.Name.MustGet().String(),
 		urlIdentifier,
 		urlPath,
 		campaignRecipient,
 		email,
 		apiSender,
+		companyID,
 	)
 
 	// override campaign URL if custom one is provided

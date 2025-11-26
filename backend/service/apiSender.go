@@ -501,6 +501,7 @@ func (a *APISender) SendTest(
 		},
 	}
 	url, headers, body, err := a.buildRequestWithCustomURL(
+		ctx,
 		apiSender,
 		"api-sender-test.test",
 		"id",
@@ -509,6 +510,7 @@ func (a *APISender) SendTest(
 		testEmail,
 		"",
 		oauthAccessToken,
+		nil, // no company context for test
 	)
 	if err != nil {
 		a.Logger.Errorw("failed to build test request", "error", err)
@@ -561,8 +563,9 @@ func (a *APISender) Send(
 	domain *model.Domain,
 	mailTmpl *template.Template,
 	email *model.Email,
+	companyID *uuid.UUID,
 ) error {
-	return a.SendWithCustomURL(ctx, session, cTemplate, campaignRecipient, domain, mailTmpl, email, "")
+	return a.SendWithCustomURL(ctx, session, cTemplate, campaignRecipient, domain, mailTmpl, email, "", companyID)
 }
 
 // SendWithCustomURL sends an API request with optional custom campaign URL
@@ -575,6 +578,7 @@ func (a *APISender) SendWithCustomURL(
 	mailTmpl *template.Template,
 	email *model.Email,
 	customCampaignURL string,
+	companyID *uuid.UUID,
 ) error {
 	// get sender details
 	apiSenderID, err := cTemplate.APISenderID.Get()
@@ -621,6 +625,7 @@ func (a *APISender) SendWithCustomURL(
 	}
 	urlPath := cTemplate.URLPath.MustGet().String()
 	url, headers, body, err := a.buildRequestWithCustomURL(
+		ctx,
 		apiSender,
 		domainName.String(),
 		urlIdentifier.Name.MustGet(),
@@ -629,6 +634,7 @@ func (a *APISender) SendWithCustomURL(
 		email,
 		customCampaignURL,
 		oauthAccessToken,
+		companyID,
 	)
 	if err != nil {
 		a.Logger.Errorw("failed to build api sender request", "error", err)
@@ -808,18 +814,21 @@ type apiRequestURL = bytes.Buffer
 type apiRequestBody = bytes.Buffer
 
 func (a *APISender) buildRequest(
+	ctx context.Context,
 	apiSender *model.APISender,
 	domainName string,
 	urlKey string,
 	urlPath string,
 	campaignRecipient *model.CampaignRecipient,
 	email *model.Email, // todo is this superfluous? it should be in the campaign recipient?
+	companyID *uuid.UUID,
 ) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
-	return a.buildRequestWithCustomURL(apiSender, domainName, urlKey, urlPath, campaignRecipient, email, "", "")
+	return a.buildRequestWithCustomURL(ctx, apiSender, domainName, urlKey, urlPath, campaignRecipient, email, "", "", companyID)
 }
 
 // buildRequestWithCustomURL builds an API request with optional custom campaign URL
 func (a *APISender) buildRequestWithCustomURL(
+	ctx context.Context,
 	apiSender *model.APISender,
 	domainName string,
 	urlKey string,
@@ -828,15 +837,18 @@ func (a *APISender) buildRequestWithCustomURL(
 	email *model.Email,
 	customCampaignURL string,
 	oauthAccessToken string,
+	companyID *uuid.UUID,
 ) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
 	// create template data first so it can be used in headers, url, and body
 	t := a.TemplateService.CreateMail(
+		ctx,
 		domainName,
 		urlKey,
 		urlPath,
 		campaignRecipient,
 		email,
 		apiSender,
+		companyID,
 	)
 
 	// add oauth access token to template data if available

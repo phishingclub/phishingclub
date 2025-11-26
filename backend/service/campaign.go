@@ -1851,6 +1851,7 @@ func (c *Campaign) sendCampaignMessages(
 				mailTmpl,
 				email,
 				customCampaignURL,
+				campaignCompanyID,
 			)
 			if err != nil {
 				c.Logger.Errorw("failed to send message via. API", "error", err)
@@ -2046,7 +2047,7 @@ func (c *Campaign) sendCampaignMessages(
 				)
 			}
 		}
-		m.Subject(email.MailHeaderSubject.MustGet().String())
+
 		urlIdentifier := cTemplate.URLIdentifier
 		if urlIdentifier == nil {
 			c.Logger.Error("url identifier is MUST be loaded for the campaign template")
@@ -2070,12 +2071,14 @@ func (c *Campaign) sendCampaignMessages(
 		}
 
 		t := c.TemplateService.CreateMail(
+			ctx,
 			domainName.String(),
 			urlIdentifier.Name.MustGet(),
 			urlPath,
 			campaignRecipient,
 			email,
 			nil,
+			campaignCompanyID,
 		)
 
 		// override campaign URL if it's different from template domain URL
@@ -2083,6 +2086,21 @@ func (c *Campaign) sendCampaignMessages(
 		if customCampaignURL != templateURL {
 			(*t)["URL"] = customCampaignURL
 		}
+
+		// process subject through template
+		subjectTemplate, err := template.New("subject").Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID)).Parse(email.MailHeaderSubject.MustGet().String())
+		if err != nil {
+			c.Logger.Errorw("failed to parse subject template", "error", err)
+			return errs.Wrap(err)
+		}
+		var subjectBuffer bytes.Buffer
+		err = subjectTemplate.Execute(&subjectBuffer, t)
+		if err != nil {
+			c.Logger.Errorw("failed to execute subject template", "error", err)
+			return errs.Wrap(err)
+		}
+		m.Subject(subjectBuffer.String())
+
 		var bodyBuffer bytes.Buffer
 		err = mailTmpl.Execute(&bodyBuffer, t)
 		if err != nil {
@@ -3460,6 +3478,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 			mailTmpl,
 			email,
 			customCampaignURL,
+			campaignCompanyID,
 		)
 	} else {
 		// send via SMTP
@@ -3593,8 +3612,6 @@ func (c *Campaign) sendSingleEmailSMTP(
 		}
 	}
 
-	m.Subject(email.MailHeaderSubject.MustGet().String())
-
 	// setup template variables
 	urlIdentifier := cTemplate.URLIdentifier
 	if urlIdentifier == nil {
@@ -3617,12 +3634,14 @@ func (c *Campaign) sendSingleEmailSMTP(
 	}
 
 	t := c.TemplateService.CreateMail(
+		ctx,
 		domainName.String(),
 		urlIdentifier.Name.MustGet(),
 		urlPath,
 		campaignRecipient,
 		email,
 		nil,
+		campaignCompanyID,
 	)
 
 	// override campaign URL if it's different from template domain URL
@@ -3630,6 +3649,20 @@ func (c *Campaign) sendSingleEmailSMTP(
 	if customCampaignURL != templateURL {
 		(*t)["URL"] = customCampaignURL
 	}
+
+	// process subject through template
+	subjectTemplate, err := template.New("subject").Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID)).Parse(email.MailHeaderSubject.MustGet().String())
+	if err != nil {
+		c.Logger.Errorw("failed to parse subject template", "error", err)
+		return errs.Wrap(err)
+	}
+	var subjectBuffer bytes.Buffer
+	err = subjectTemplate.Execute(&subjectBuffer, t)
+	if err != nil {
+		c.Logger.Errorw("failed to execute subject template", "error", err)
+		return errs.Wrap(err)
+	}
+	m.Subject(subjectBuffer.String())
 
 	var bodyBuffer bytes.Buffer
 	err = mailTmpl.Execute(&bodyBuffer, t)
