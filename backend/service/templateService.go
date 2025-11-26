@@ -269,9 +269,6 @@ func (t *Template) CreateMailBodyWithCustomURL(
 		(*mailData)["URL"] = customCampaignURL
 	}
 
-	// add random recipient data to template context
-	(*mailData)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID)
-
 	mailContentTemplate := template.New("mailContent")
 	mailContentTemplate = mailContentTemplate.Funcs(t.TemplateFuncsWithCompany(ctx, companyID))
 	content, err := email.Content.Get()
