@@ -1189,9 +1189,6 @@ func (m *Proxy) validateReplaceRules(replaceRules []ProxyServiceReplaceRule) err
 					"proxyConfig",
 				)
 			}
-			if replace.Replace == "" {
-				return validate.WrapErrorWithField(errors.New("replace rule 'replace' is required for regex engine"), "proxyConfig")
-			}
 		} else if engine == "dom" {
 			if replace.Find == "" {
 				return validate.WrapErrorWithField(errors.New("replace rule 'find' is required for dom engine"), "proxyConfig")
