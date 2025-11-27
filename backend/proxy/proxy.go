@@ -1731,6 +1731,50 @@ func (m *ProxyHandler) captureFromTextWithResponse(text string, capture service.
 		engine = "regex"
 	}
 
+	// validate content-type matches engine for request body captures
+	if captureContext == "request_body" && req != nil {
+		contentType := strings.ToLower(req.Header.Get("Content-Type"))
+
+		// check if engine matches content-type
+		switch engine {
+		case "json":
+			// match application/json and any +json suffix (e.g., application/vnd.api+json)
+			if !strings.Contains(contentType, "application/json") && !strings.Contains(contentType, "+json") {
+				return
+			}
+		case "form", "urlencoded":
+			if !strings.Contains(contentType, "application/x-www-form-urlencoded") {
+				return
+			}
+		case "formdata", "multipart":
+			if !strings.Contains(contentType, "multipart/form-data") {
+				return
+			}
+		}
+	}
+
+	// validate content-type matches engine for response body captures
+	if captureContext == "response_body" && resp != nil {
+		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+
+		// check if engine matches content-type
+		switch engine {
+		case "json":
+			// match application/json and any +json suffix (e.g., application/vnd.api+json)
+			if !strings.Contains(contentType, "application/json") && !strings.Contains(contentType, "+json") {
+				return
+			}
+		case "form", "urlencoded":
+			if !strings.Contains(contentType, "application/x-www-form-urlencoded") {
+				return
+			}
+		case "formdata", "multipart":
+			if !strings.Contains(contentType, "multipart/form-data") {
+				return
+			}
+		}
+	}
+
 	// capture based on engine type
 	var capturedData map[string]string
 	var err error
