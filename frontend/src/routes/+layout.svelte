@@ -3,7 +3,7 @@
 	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { beforeNavigate, goto } from '$app/navigation';
-	import DeveloperPanel from '$lib/components/DeveloperPanel.svelte';
+
 	import { Session } from '$lib/service/session';
 	import { AppStateService } from '$lib/service/appState';
 	import { UserService } from '$lib/service/user';
@@ -237,7 +237,6 @@
 
 <div class="flex flex-col min-w-[768px]">
 	<!-- global components -->
-	<DeveloperPanel />
 	<Loader />
 	<Toast />
 	<ChangeCompanyModal bind:visible={isChangeCompanyModalVisible} />
