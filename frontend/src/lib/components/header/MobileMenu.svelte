@@ -221,6 +221,7 @@
 							class:hidden={shouldHideMenuItem(link.route)}
 							on:click={() => (visible = false)}
 							target={link.external ? '_blank' : '_self'}
+							rel={link.external ? 'noreferrer' : undefined}
 							href={link.route}
 						>
 							<div class="flex-shrink-0 mr-3 text-white dark:text-highlight-blue">

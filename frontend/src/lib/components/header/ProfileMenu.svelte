@@ -120,6 +120,7 @@
 							: 'hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20'}"
 						class:hidden={shouldHideMenuItem(item.route)}
 						target={item.external ? '_blank' : '_self'}
+						rel={item.external ? 'noreferrer' : undefined}
 						draggable="false"
 						on:click={() => {
 							visible = false;
