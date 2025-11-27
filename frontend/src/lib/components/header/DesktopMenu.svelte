@@ -18,6 +18,8 @@
 
 	$: isExpanded = isPinned ? true : isExpanded;
 	let menuElement;
+	let menuItemsElement;
+	let hasScrollbar = false;
 	let instantCollapse = false;
 	let context = {
 		current: '',
@@ -28,6 +30,17 @@
 	import { createEventDispatcher } from 'svelte';
 	import ConditionalDisplay from '../ConditionalDisplay.svelte';
 	const dispatch = createEventDispatcher();
+
+	// check if scrollbar is present
+	const checkScrollbar = () => {
+		if (menuItemsElement) {
+			hasScrollbar = menuItemsElement.scrollHeight > menuItemsElement.clientHeight;
+		}
+	};
+
+	$: if (isPinned && menuItemsElement) {
+		checkScrollbar();
+	}
 
 	onMount(() => {
 		const unsub = appState.subscribe((s) => {
@@ -44,10 +57,22 @@
 			}
 		};
 
+		// check scrollbar on resize
+		const resizeObserver = new ResizeObserver(() => {
+			if (isPinned) {
+				checkScrollbar();
+			}
+		});
+
+		if (menuItemsElement) {
+			resizeObserver.observe(menuItemsElement);
+		}
+
 		document.addEventListener('click', handleClickOutside);
 
 		return () => {
 			unsub();
+			resizeObserver.disconnect();
 			document.removeEventListener('click', handleClickOutside);
 		};
 	});
@@ -166,19 +191,17 @@
 <div class="flex">
 	<nav
 		bind:this={menuElement}
-		class="hidden lg:flex flex-col fixed top-16 z-10 bg-gradient-to-b from-pc-darkblue to-indigo-400 dark:from-gray-900 dark:to-gray-800 rounded-br-lg overflow-y-auto overflow-x-hidden min-h-0 max-h-[calc(100vh-4rem)] box-content border-r-[1px] border-pc-darkblue dark:border-highlight-blue/40"
+		class="hidden lg:flex flex-col fixed top-16 z-10 bg-gradient-to-b from-pc-darkblue to-indigo-400 dark:from-gray-900 dark:to-gray-800 rounded-br-lg overflow-x-hidden min-h-0 max-h-[calc(100vh-4rem)] box-content border-r-[1px] border-pc-darkblue dark:border-highlight-blue/40"
 		class:transition-all={!instantCollapse}
 		class:w-40={isExpanded}
 		class:w-12={!isExpanded}
 		class:!top-[89px]={hasCompanySelected}
 		class:!max-h-[calc(100vh-6rem)]={hasCompanySelected}
 	>
-		<div
-			class={isPinned
-				? 'absolute right-2 top-2 flex items-center justify-between px-0'
-				: 'sticky top-0 bg-highlight-blue/20 dark:bg-gray-800/70 border-b w-full border-blue-700/30 dark:border-highlight-blue/40 transform-none transition-colors duration-200 flex items-center justify-between px-1'}
-		>
-			{#if !isPinned}
+		{#if !isPinned}
+			<div
+				class="bg-highlight-blue/20 dark:bg-gray-800/70 border-b w-full border-blue-700/30 dark:border-highlight-blue/40 transition-colors duration-200 flex items-center justify-between px-1"
+			>
 				<div class="flex items-center w-full">
 					<button
 						class="flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-highlight-blue/20 transition-colors group px-3 py-2"
@@ -240,36 +263,41 @@
 						</button>
 					{/if}
 				</div>
-			{:else}
-				<button
-					class="flex items-center justify-center w-4 h-4 text-blue-100 dark:text-highlight-blue"
-					title="Unpin menu"
-					on:click={() => dispatch('pinToggle')}
-					type="button"
+			</div>
+		{/if}
+
+		{#if isPinned}
+			<button
+				class="absolute top-2 z-10 flex items-center justify-center w-6 h-6 rounded-md bg-blue-600/30 dark:bg-gray-800/70 hover:bg-blue-600/50 dark:hover:bg-gray-700 transition-colors"
+				class:right-5={hasScrollbar}
+				class:right-2={!hasScrollbar}
+				title="Unpin menu"
+				on:click={() => dispatch('pinToggle')}
+				type="button"
+			>
+				<svg
+					width="16"
+					height="16"
+					viewBox="0 0 24 24"
+					fill="none"
+					xmlns="http://www.w3.org/2000/svg"
+					class="w-4 h-4 text-blue-100 dark:text-highlight-blue"
 				>
-					<svg
-						width="16"
-						height="16"
-						viewBox="0 0 24 24"
-						fill="none"
-						xmlns="http://www.w3.org/2000/svg"
-						class="w-4 h-4 text-blue-100 dark:text-highlight-blue"
-					>
-						<path
-							d="M16 9V5a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v4l-4 4v2h6v5a1 1 0 0 0 2 0v-5h6v-2l-4-4z"
-							stroke="currentColor"
-							stroke-width="1.2"
-							stroke-linecap="round"
-							stroke-linejoin="round"
-						/>
-					</svg>
-				</button>
-			{/if}
-		</div>
+					<path
+						d="M16 9V5a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v4l-4 4v2h6v5a1 1 0 0 0 2 0v-5h6v-2l-4-4z"
+						stroke="currentColor"
+						stroke-width="1.2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+					/>
+				</svg>
+			</button>
+		{/if}
 
 		<!-- Navigation Items -->
 		<div
-			class="flex flex-col flex-1 overflow-y-auto {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue dark:[&::-webkit-scrollbar-track]:bg-gray-800"
+			bind:this={menuItemsElement}
+			class="flex flex-col flex-1 overflow-y-auto overflow-x-hidden {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue dark:[&::-webkit-scrollbar-track]:bg-gray-800"
 			class:py-4={!isPinned}
 		>
 			{#each menu as link}
