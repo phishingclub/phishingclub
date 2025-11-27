@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.20.1] - 2025-11-27
+- Added new capture engines for json, formdata and urlencoded
+- Added support for multiple find in captures 
+- Added Random Recipient variable 
+- Added support for variables in email subject line
+- Added support for proxy targers with ports
+- Added schema http/https in proxy
+- Fix added noreferrer to external links 
+- Minor UI improvements
+
 ## [1.20.0] - 2025-11-23
 - Added Blackbox / Whitebox display mode
 - Obfuscation template can now be edited
