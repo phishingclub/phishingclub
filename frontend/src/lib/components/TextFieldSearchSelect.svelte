@@ -99,7 +99,7 @@
 				on:keyup={_onKeyUp}
 				on:click|stopPropagation={() => {}}
 				autocomplete="off"
-				class="w-full relative rounded-md py-2 pl-4 focus:pl-10 text-gray-600 dark:text-gray-100 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-gray-500 focus:bg-gray-100 dark:focus:bg-gray-700 bg-grayblue-light dark:bg-gray-600 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
+				class="w-full relative rounded-md py-2 pl-4 focus:pl-10 text-gray-600 dark:text-gray-100 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
 				{id}
 				{required}
 			/>
