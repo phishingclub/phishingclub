@@ -91,7 +91,7 @@
 {#if visible}
 	<nav
 		id="profile-menu"
-		class="lg:flex flex-col h-fit lg:col-start-10 lg:col-span-3 row-start-1 xl:col-start-11 xl:col-span-2 2xl:col-start-11 2xl:col-span-2 sticky top-20 z-30"
+		class="lg:flex flex-col h-fit lg:col-start-10 lg:col-span-3 row-start-1 xl:col-start-11 xl:col-span-2 2xl:col-start-11 2xl:col-span-2 sticky top-20 z-30 min-w-[250px]"
 	>
 		<div
 			class="flex flex-col bg-gradient-to-b from-cta-blue to-indigo-500 dark:from-gray-800 dark:to-gray-700 rounded-md transition-colors duration-200 dark:border dark:border-highlight-blue/30"
