@@ -80,6 +80,7 @@ type RequestContext struct {
 	SessionCreated      bool
 	PhishDomain         string
 	TargetDomain        string
+	TargetScheme        string
 	Domain              *database.Domain
 	ProxyConfig         *service.ProxyServiceConfigYAML
 	Session             *service.ProxySession
@@ -255,17 +256,43 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	return m.writeResponse(w, finalResp)
 }
 
-func (m *ProxyHandler) extractTargetDomain(domain *database.Domain) string {
+// extractTargetHostAndScheme extracts both the host and scheme from the target domain
+// it first checks the config for an explicit scheme, then falls back to parsing the URL
+// returns the host (with port if present) and scheme (defaults to "https")
+func (m *ProxyHandler) extractTargetHostAndScheme(domain *database.Domain, config *service.ProxyServiceConfigYAML) (string, string) {
 	targetDomain := domain.ProxyTargetDomain
 	if targetDomain == "" {
-		return ""
+		return "", "https"
 	}
+
+	// extract the host first
+	host := targetDomain
+	schemeFromURL := ""
+
+	// check if it's a full URL with scheme
 	if strings.Contains(targetDomain, "://") {
 		if parsedURL, err := url.Parse(targetDomain); err == nil {
-			targetDomain = parsedURL.Host
+			host = parsedURL.Host
+			schemeFromURL = parsedURL.Scheme
 		}
 	}
-	return targetDomain
+
+	// determine the scheme to use
+	// priority: 1. config scheme field, 2. scheme from URL, 3. default to https
+	scheme := "https"
+
+	// check if there's a scheme specified in the config for this target domain
+	if config != nil && config.Hosts != nil {
+		if hostConfig, exists := config.Hosts[targetDomain]; exists && hostConfig.Scheme != "" {
+			scheme = hostConfig.Scheme
+		} else if schemeFromURL != "" {
+			scheme = schemeFromURL
+		}
+	} else if schemeFromURL != "" {
+		scheme = schemeFromURL
+	}
+
+	return host, scheme
 }
 
 // initializeRequestContext creates and populates the request context with all necessary data
@@ -280,8 +307,8 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 		return nil, errors.Errorf("failed to parse Proxy config for domain %s: %w", domain.Name, err)
 	}
 
-	// extract target domain
-	targetDomain := m.extractTargetDomain(domain)
+	// extract target domain and scheme
+	targetDomain, targetScheme := m.extractTargetHostAndScheme(domain, proxyConfig)
 	if targetDomain == "" {
 		return nil, errors.Errorf("domain has empty Proxy target domain")
 	}
@@ -292,6 +319,7 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 	reqCtx := &RequestContext{
 		PhishDomain:         req.Host,
 		TargetDomain:        targetDomain,
+		TargetScheme:        targetScheme,
 		Domain:              domain,
 		ProxyConfig:         proxyConfig,
 		CampaignRecipientID: campaignRecipientID,
@@ -475,7 +503,7 @@ func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, reqCtx *R
 	// set host and scheme
 	req.Host = reqCtx.TargetDomain
 	req.URL.Host = reqCtx.TargetDomain
-	req.URL.Scheme = "https"
+	req.URL.Scheme = reqCtx.TargetScheme
 
 	// create a dummy session for header normalization (no campaign/session data)
 	dummySession := &service.ProxySession{
@@ -645,7 +673,7 @@ func (m *ProxyHandler) applySessionToRequestWithContext(req *http.Request, reqCt
 	// use session's original target domain only for initial landing
 	if reqCtx.CampaignRecipientID != nil && reqCtx.SessionCreated {
 		req.Host = reqCtx.Session.TargetDomain
-		req.URL.Scheme = "https"
+		req.URL.Scheme = reqCtx.TargetScheme
 		req.URL.Host = reqCtx.Session.TargetDomain
 		// remove campaign parameters from query params
 		q := req.URL.Query()
@@ -668,7 +696,7 @@ func (m *ProxyHandler) applySessionToRequestWithContext(req *http.Request, reqCt
 		}
 		req.Host = targetDomain
 		req.URL.Host = targetDomain
-		req.URL.Scheme = "https"
+		req.URL.Scheme = reqCtx.TargetScheme
 	}
 
 	// apply request processing

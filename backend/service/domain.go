@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1109,17 +1110,47 @@ func (d *Domain) validateProxyDomain(ctx context.Context, domain *model.Domain) 
 		return validate.WrapErrorWithField(errors.New("proxy target domain cannot be empty"), "proxyTargetDomain")
 	}
 
-	// validate proxy target format - can be full URL or domain
+	// validate proxy target format - can be full URL or domain (with optional port)
 	if strings.Contains(targetDomainStr, "://") {
 		// full URL format - basic validation
 		if !strings.HasPrefix(targetDomainStr, "http://") && !strings.HasPrefix(targetDomainStr, "https://") {
 			return validate.WrapErrorWithField(errors.New("proxy target domain URL must start with http:// or https://"), "proxyTargetDomain")
 		}
 	} else {
-		// domain-only format - validate as domain
-		if !isValidDomain(targetDomainStr) {
-			return validate.WrapErrorWithField(errors.New("invalid domain format for proxy target domain"), "proxyTargetDomain")
+		// domain-only format (with optional port) - validate as domain, ip address, or localhost
+		domainPart := targetDomainStr
+
+		// try to split host and port using net.SplitHostPort for proper handling of ipv6
+		host, port, err := net.SplitHostPort(targetDomainStr)
+		if err == nil {
+			// port was present and successfully split
+			domainPart = host
+
+			// validate port is numeric and in valid range
+			portNum, err := strconv.Atoi(port)
+			if err != nil {
+				return validate.WrapErrorWithField(errors.New("port must be numeric in proxy target domain"), "proxyTargetDomain")
+			}
+			if portNum < 1 || portNum > 65535 {
+				return validate.WrapErrorWithField(errors.New("port must be between 1 and 65535"), "proxyTargetDomain")
+			}
 		}
+		// if SplitHostPort fails, targetDomainStr has no port, which is fine
+
+		// check if it's localhost (special case for single-label hostname)
+		if strings.ToLower(domainPart) == "localhost" {
+			// localhost is always valid
+			return nil
+		}
+
+		// check if it's an ip address (ipv4 or ipv6)
+		if net.ParseIP(domainPart) == nil {
+			// not an ip address, validate as domain
+			if !isValidDomain(domainPart) {
+				return validate.WrapErrorWithField(errors.New("invalid domain format for proxy target domain"), "proxyTargetDomain")
+			}
+		}
+		// if it's a valid ip address, no further validation needed
 	}
 
 	return nil

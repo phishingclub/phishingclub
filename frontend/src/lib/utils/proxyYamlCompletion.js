@@ -98,6 +98,9 @@ export class ProxyYamlCompletionProvider {
 		if (linePrefix.match(/\s*target:\s*$/)) {
 			return this.getTargetSuggestions(range);
 		}
+		if (linePrefix.match(/\s*scheme:\s*$/)) {
+			return this.getSchemeSuggestions(range);
+		}
 		if (linePrefix.match(/\s*mode:\s*$/)) {
 			// determine context for mode - could be access or tls
 			const context = this.findParentSection(linesAbove, currentIndent);
@@ -307,6 +310,13 @@ export class ProxyYamlCompletionProvider {
 				range
 			},
 			{
+				label: 'scheme',
+				kind: this.monaco.languages.CompletionItemKind.Field,
+				insertText: 'scheme: ',
+				documentation: 'Scheme for proxying to target (http or https, defaults to https)',
+				range
+			},
+			{
 				label: 'tls',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'tls:',
@@ -377,6 +387,25 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Value,
 				insertText: '"self-signed"',
 				documentation: 'Automatically generated self-signed certificates',
+				range
+			}
+		];
+	}
+
+	getSchemeSuggestions(range) {
+		return [
+			{
+				label: 'http',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'http',
+				documentation: 'Use HTTP when connecting to target',
+				range
+			},
+			{
+				label: 'https',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'https',
+				documentation: 'Use HTTPS when connecting to target (default)',
 				range
 			}
 		];
@@ -1137,6 +1166,8 @@ export class ProxyYamlCompletionProvider {
 			mode: 'Access control mode: "public" (allow all traffic) or "private" (IP whitelist after lure access, DEFAULT), OR TLS mode: "managed" (Let\'s Encrypt) or "self-signed"',
 			on_deny:
 				'Response when access is denied in private mode (e.g., "404", "https://example.com")',
+			scheme:
+				'Protocol scheme for proxying to target: "http" or "https" (defaults to https). Specifies whether to use HTTP or HTTPS when connecting to the target domain',
 			capture: 'Rules for capturing data from requests/responses',
 			name: 'Unique identifier for the rule',
 			method: 'HTTP method to match (GET, POST, PUT, DELETE, etc.)',

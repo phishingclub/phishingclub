@@ -84,6 +84,9 @@ global:
 
 portal.example.com:
   to: "evil.example.com"
+  # optional: specify scheme for proxying to target (defaults to https)
+  # scheme: "http"   # use http:// when connecting to target
+  # scheme: "https"  # use https:// when connecting to target
   # optional: override global TLS config for this specific host
   # tls:
   #   mode: "self-signed"

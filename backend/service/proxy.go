@@ -42,6 +42,7 @@ type ProxyServiceConfig struct {
 // ProxyServiceDomainConfig represents configuration for a specific domain mapping
 type ProxyServiceDomainConfig struct {
 	To          string                       `yaml:"to"`
+	Scheme      string                       `yaml:"scheme,omitempty"` // http or https (defaults to https)
 	TLS         *ProxyServiceTLSConfig       `yaml:"tls,omitempty"`
 	Access      *ProxyServiceAccessControl   `yaml:"access,omitempty"`
 	Capture     []ProxyServiceCaptureRule    `yaml:"capture,omitempty"`
@@ -1618,6 +1619,14 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 					}
 				}
 			}
+		}
+
+		// validate domain-specific scheme
+		if domainConfig.Scheme != "" && domainConfig.Scheme != "http" && domainConfig.Scheme != "https" {
+			return validate.WrapErrorWithField(
+				errors.New(fmt.Sprintf("scheme for domain '%s' must be either 'http' or 'https'", originalDomain)),
+				"proxyConfig",
+			)
 		}
 
 		// validate domain-specific TLS config

@@ -117,7 +117,8 @@ services:
     volumes:
       - ./api-test-server:/app
     networks:
-      - default
+      default:
+        ipv4_address: 172.20.0.135
     ports:
       - 8107:80
 
