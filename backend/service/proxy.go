@@ -169,10 +169,44 @@ type ProxyServiceCaptureRule struct {
 	Name     string         `yaml:"name"`
 	Method   string         `yaml:"method,omitempty"`
 	Path     string         `yaml:"path,omitempty"`
-	Find     string         `yaml:"find,omitempty"`
+	Find     interface{}    `yaml:"find,omitempty"` // can be string or []string
+	Engine   string         `yaml:"engine,omitempty"`
 	From     string         `yaml:"from,omitempty"`
 	Required *bool          `yaml:"required,omitempty"`
 	PathRe   *regexp.Regexp `yaml:"-"` // compiled regex for path matching
+}
+
+// GetFindAsStrings returns find field as a slice of strings
+func (c *ProxyServiceCaptureRule) GetFindAsStrings() []string {
+	if c.Find == nil {
+		return []string{}
+	}
+
+	switch v := c.Find.(type) {
+	case string:
+		return []string{v}
+	case []interface{}:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if str, ok := item.(string); ok {
+				result = append(result, str)
+			}
+		}
+		return result
+	case []string:
+		return v
+	default:
+		return []string{}
+	}
+}
+
+// GetFindAsString returns the first find value as a string
+func (c *ProxyServiceCaptureRule) GetFindAsString() string {
+	finds := c.GetFindAsStrings()
+	if len(finds) > 0 {
+		return finds[0]
+	}
+	return ""
 }
 
 // ProxyServiceReplaceRule represents a replacement rule
@@ -827,23 +861,95 @@ func (m *Proxy) validateCaptureRules(captureRules []ProxyServiceCaptureRule) err
 			return validate.WrapErrorWithField(errors.New("capture rule path is required"), "proxyConfig")
 		}
 
-		// allow empty find pattern for any method path-based navigation tracking
-		isNavigationTracking := capture.Path != "" && capture.Find == ""
+		// validate engine field
+		if capture.Engine != "" {
+			validEngines := []string{"regex", "header", "cookie", "json", "form", "urlencoded", "formdata", "multipart"}
+			valid := false
+			for _, validEngine := range validEngines {
+				if capture.Engine == validEngine {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				return validate.WrapErrorWithField(
+					errors.New("invalid 'engine' value in capture rule, must be one of: "+strings.Join(validEngines, ", ")),
+					"proxyConfig",
+				)
+			}
+		}
 
-		if capture.Find == "" && !isNavigationTracking {
+		// allow empty find pattern for any method path-based navigation tracking
+		findStr := capture.GetFindAsString()
+		isNavigationTracking := capture.Path != "" && findStr == ""
+
+		if findStr == "" && !isNavigationTracking {
 			return validate.WrapErrorWithField(
 				errors.New("capture rule must have a find pattern, except for path-based navigation tracking"),
 				"proxyConfig",
 			)
 		}
 
-		if capture.Find != "" {
-			// for cookie captures, find field contains cookie name (literal string)
-			// for other captures, find field contains regex pattern
-			if capture.From != "cookie" {
-				if _, err := regexp.Compile(capture.Find); err != nil {
+		if findStr != "" {
+			engine := capture.Engine
+			// backward compatibility: use 'from' to determine engine if not specified
+			if engine == "" && capture.From == "cookie" {
+				engine = "cookie"
+			}
+			if engine == "" {
+				engine = "regex"
+			}
+
+			// validate based on engine type
+			switch engine {
+			case "regex":
+				// validate regex pattern
+				if _, err := regexp.Compile(findStr); err != nil {
 					return validate.WrapErrorWithField(
 						errors.New("invalid regex pattern in capture rule: "+err.Error()),
+						"proxyConfig",
+					)
+				}
+			case "header":
+				// header engine: find is the header name
+				if findStr == "" {
+					return validate.WrapErrorWithField(
+						errors.New("capture rule with engine='header' must specify header name in 'find' field"),
+						"proxyConfig",
+					)
+				}
+			case "cookie":
+				// cookie engine: find is the cookie name
+				if findStr == "" {
+					return validate.WrapErrorWithField(
+						errors.New("capture rule with engine='cookie' must specify cookie name in 'find' field"),
+						"proxyConfig",
+					)
+				}
+				// validate cookie name format (basic validation)
+				cookieName := findStr
+				invalidChars := []string{" ", "\t", "\n", "\r", "=", ";", ","}
+				for _, char := range invalidChars {
+					if strings.Contains(cookieName, char) {
+						return validate.WrapErrorWithField(
+							errors.New(fmt.Sprintf("cookie name '%s' contains invalid character '%s'", cookieName, char)),
+							"proxyConfig",
+						)
+					}
+				}
+			case "json":
+				// json engine: find is the json path (e.g., "user.name" or "[0].user.name")
+				if findStr == "" {
+					return validate.WrapErrorWithField(
+						errors.New("capture rule with engine='json' must specify JSON path in 'find' field"),
+						"proxyConfig",
+					)
+				}
+			case "form", "urlencoded", "formdata", "multipart":
+				// form engines: find is the form field name
+				if findStr == "" {
+					return validate.WrapErrorWithField(
+						errors.New(fmt.Sprintf("capture rule with engine='%s' must specify form field name in 'find' field", engine)),
 						"proxyConfig",
 					)
 				}
@@ -869,33 +975,14 @@ func (m *Proxy) validateCaptureRules(captureRules []ProxyServiceCaptureRule) err
 			}
 		}
 
-		// validate cookie-specific rules
+		// validate cookie-specific rules (backward compatibility with from='cookie')
 		if capture.From == "cookie" {
-			if capture.Find == "" {
+			findStr := capture.GetFindAsString()
+			if findStr == "" {
 				return validate.WrapErrorWithField(
 					errors.New("capture rule with from='cookie' must specify cookie name in 'find' field"),
 					"proxyConfig",
 				)
-			}
-
-			// validate cookie name format (basic validation)
-			cookieName := capture.Find
-			if len(cookieName) == 0 {
-				return validate.WrapErrorWithField(
-					errors.New("cookie name cannot be empty"),
-					"proxyConfig",
-				)
-			}
-
-			// cookie names cannot contain certain characters
-			invalidChars := []string{" ", "\t", "\n", "\r", "=", ";", ","}
-			for _, char := range invalidChars {
-				if strings.Contains(cookieName, char) {
-					return validate.WrapErrorWithField(
-						errors.New(fmt.Sprintf("cookie name '%s' contains invalid character '%s'", cookieName, char)),
-						"proxyConfig",
-					)
-				}
 			}
 
 			// method should be specified for cookie captures
@@ -1059,6 +1146,14 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 				if domainConfig.Capture[i].From == "" {
 					domainConfig.Capture[i].From = "any"
 				}
+				// set default engine based on from field for backward compatibility
+				if domainConfig.Capture[i].Engine == "" {
+					if domainConfig.Capture[i].From == "cookie" {
+						domainConfig.Capture[i].Engine = "cookie"
+					} else {
+						domainConfig.Capture[i].Engine = "regex"
+					}
+				}
 			}
 		}
 		if domainConfig != nil && domainConfig.Response != nil {
@@ -1102,6 +1197,14 @@ func (m *Proxy) setProxyConfigDefaults(config *ProxyServiceConfigYAML) {
 			// set default 'from' to 'any' if not specified
 			if config.Global.Capture[i].From == "" {
 				config.Global.Capture[i].From = "any"
+			}
+			// set default engine based on from field for backward compatibility
+			if config.Global.Capture[i].Engine == "" {
+				if config.Global.Capture[i].From == "cookie" {
+					config.Global.Capture[i].Engine = "cookie"
+				} else {
+					config.Global.Capture[i].Engine = "regex"
+				}
 			}
 		}
 	}

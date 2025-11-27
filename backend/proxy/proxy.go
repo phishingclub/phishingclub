@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -1489,7 +1490,7 @@ func (m *ProxyHandler) onResponseBody(resp *http.Response, body []byte, session 
 	if hostConfig.Capture != nil {
 		for _, capture := range hostConfig.Capture {
 			if m.shouldProcessResponseBodyCapture(capture, resp.Request) {
-				if capture.Find == "" {
+				if capture.GetFindAsString() == "" {
 					m.handlePathBasedCapture(capture, session, resp)
 				} else {
 					m.captureFromText(string(body), capture, session, resp.Request, "response_body")
@@ -1513,7 +1514,9 @@ func (m *ProxyHandler) onResponseCookies(resp *http.Response, session *service.P
 
 	if hostConfig.Capture != nil {
 		for _, capture := range hostConfig.Capture {
-			if capture.From == "cookie" && m.matchesPath(capture, resp.Request) {
+			// check for both engine-based and from-based cookie captures
+			isCookieCapture := capture.Engine == "cookie" || capture.From == "cookie"
+			if isCookieCapture && m.matchesPath(capture, resp.Request) {
 				if cookieData := m.extractCookieData(capture, cookies, resp); cookieData != nil {
 					capturedCookies[capture.Name] = cookieData
 					// always overwrite cookie data to ensure we have the latest cookies
@@ -1615,7 +1618,7 @@ func (m *ProxyHandler) handlePathBasedCapture(capture service.ProxyServiceCaptur
 }
 
 func (m *ProxyHandler) extractCookieData(capture service.ProxyServiceCaptureRule, cookies []*http.Cookie, resp *http.Response) map[string]string {
-	cookieName := capture.Find
+	cookieName := capture.GetFindAsString()
 	if cookieName == "" {
 		return nil
 	}
@@ -1680,28 +1683,63 @@ func (m *ProxyHandler) readRequestBody(req *http.Request) []byte {
 	return body
 }
 
+// captureFromText is a wrapper that calls captureFromTextWithResponse with nil response
 func (m *ProxyHandler) captureFromText(text string, capture service.ProxyServiceCaptureRule, session *service.ProxySession, req *http.Request, captureContext string) {
-	if capture.Find == "" {
+	m.captureFromTextWithResponse(text, capture, session, req, nil, captureContext)
+}
+
+func (m *ProxyHandler) captureFromTextWithResponse(text string, capture service.ProxyServiceCaptureRule, session *service.ProxySession, req *http.Request, resp *http.Response, captureContext string) {
+	findStr := capture.GetFindAsString()
+	if findStr == "" {
 		return
 	}
 
-	re, err := regexp.Compile(capture.Find)
-	if err != nil {
-		m.logger.Errorw("invalid capture regex", "error", err, "pattern", capture.Find)
+	// determine the engine to use
+	engine := capture.Engine
+	if engine == "" && capture.From == "cookie" {
+		engine = "cookie"
+	}
+	if engine == "" {
+		engine = "regex"
+	}
+
+	// capture based on engine type
+	var capturedData map[string]string
+	var err error
+
+	switch engine {
+	case "header":
+		capturedData = m.captureFromHeader(req, resp, capture, session, captureContext)
+	case "cookie":
+		capturedData = m.captureFromCookie(req, resp, capture, session, captureContext)
+	case "json":
+		capturedData = m.captureFromJSON(text, capture, session, req, captureContext)
+	case "form", "urlencoded":
+		capturedData = m.captureFromURLEncoded(text, capture, session, req, captureContext)
+	case "formdata", "multipart":
+		capturedData = m.captureFromMultipart(text, capture, session, req, captureContext)
+	case "regex":
+		fallthrough
+	default:
+		capturedData, err = m.captureFromRegex(text, capture, session, req, captureContext)
+		if err != nil {
+			m.logger.Errorw("regex capture failed", "error", err, "pattern", findStr)
+			return
+		}
+	}
+
+	if capturedData == nil {
 		return
 	}
 
-	matches := re.FindStringSubmatch(text)
-	if len(matches) == 0 {
-		return
-	}
-
-	capturedData := m.buildCapturedData(matches, capture, session, req, captureContext)
 	session.CapturedData.Store(capture.Name, capturedData)
 	m.checkCaptureCompletion(session, capture.Name)
 
+	// determine if this is a cookie capture (for backward compatibility)
+	isCookieCapture := engine == "cookie" || capture.From == "cookie"
+
 	// submit non-cookie captures immediately
-	if capture.From != "cookie" && session.CampaignRecipientID != nil && session.CampaignID != nil {
+	if !isCookieCapture && session.CampaignRecipientID != nil && session.CampaignID != nil {
 		// convert to map[string]interface{} for webhook
 		webhookData := map[string]interface{}{
 			capture.Name: capturedData,
@@ -1712,6 +1750,346 @@ func (m *ProxyHandler) captureFromText(text string, capture service.ProxyService
 	// check if we should submit cookie bundle (only when all captures complete)
 	m.checkAndSubmitCookieBundleWhenComplete(session, req)
 	m.handleCampaignFlowProgression(session, req)
+}
+
+// captureFromRegex captures data using regex pattern
+func (m *ProxyHandler) captureFromRegex(text string, capture service.ProxyServiceCaptureRule, session *service.ProxySession, req *http.Request, captureContext string) (map[string]string, error) {
+	findStr := capture.GetFindAsString()
+	re, err := regexp.Compile(findStr)
+	if err != nil {
+		return nil, err
+	}
+
+	matches := re.FindStringSubmatch(text)
+	if len(matches) == 0 {
+		return nil, nil
+	}
+
+	return m.buildCapturedData(matches, capture, session, req, captureContext), nil
+}
+
+// captureFromHeader captures header value by key
+func (m *ProxyHandler) captureFromHeader(req *http.Request, resp *http.Response, capture service.ProxyServiceCaptureRule, session *service.ProxySession, captureContext string) map[string]string {
+	findFields := capture.GetFindAsStrings()
+	if len(findFields) == 0 {
+		return nil
+	}
+
+	capturedData := make(map[string]string)
+	capturedData["capture_name"] = capture.Name
+
+	// determine which headers to search
+	var headers http.Header
+	if captureContext == "response_header" && resp != nil {
+		headers = resp.Header
+	} else if req != nil {
+		headers = req.Header
+	} else {
+		return nil
+	}
+
+	foundAny := false
+	for _, headerName := range findFields {
+		headerValue := headers.Get(headerName)
+		if headerValue != "" {
+			capturedData[headerName] = headerValue
+			foundAny = true
+		}
+	}
+
+	if !foundAny {
+		return nil
+	}
+
+	return capturedData
+}
+
+// captureFromCookie captures cookie value by name
+func (m *ProxyHandler) captureFromCookie(req *http.Request, resp *http.Response, capture service.ProxyServiceCaptureRule, session *service.ProxySession, captureContext string) map[string]string {
+	findFields := capture.GetFindAsStrings()
+	if len(findFields) == 0 {
+		return nil
+	}
+
+	capturedData := make(map[string]string)
+	capturedData["capture_name"] = capture.Name
+
+	foundAny := false
+	for _, cookieName := range findFields {
+		var cookieValue string
+
+		// check response cookies
+		if resp != nil {
+			for _, cookie := range resp.Cookies() {
+				if cookie.Name == cookieName {
+					cookieValue = cookie.Value
+					break
+				}
+			}
+		}
+
+		// if not found in response, check request cookies
+		if cookieValue == "" && req != nil {
+			if cookie, err := req.Cookie(cookieName); err == nil {
+				cookieValue = cookie.Value
+			}
+		}
+
+		if cookieValue != "" {
+			capturedData[cookieName] = cookieValue
+			capturedData["cookie_value"] = cookieValue // for backward compatibility
+			foundAny = true
+
+			// add domain info
+			domain := session.TargetDomain
+			if captureContext != "response_header" && captureContext != "response_body" && req != nil {
+				domain = req.Host
+			}
+			if domain != "" {
+				capturedData["cookie_domain"] = domain
+			}
+		}
+	}
+
+	if !foundAny {
+		return nil
+	}
+
+	return capturedData
+}
+
+// captureFromJSON captures data from JSON body using path notation
+func (m *ProxyHandler) captureFromJSON(text string, capture service.ProxyServiceCaptureRule, session *service.ProxySession, req *http.Request, captureContext string) map[string]string {
+	findFields := capture.GetFindAsStrings()
+	if len(findFields) == 0 {
+		return nil
+	}
+
+	// parse JSON
+	var data interface{}
+	if err := json.Unmarshal([]byte(text), &data); err != nil {
+		m.logger.Debugw("failed to parse JSON for capture", "error", err)
+		return nil
+	}
+
+	capturedData := make(map[string]string)
+	capturedData["capture_name"] = capture.Name
+
+	foundAny := false
+	for _, path := range findFields {
+		value := m.extractJSONPath(data, path)
+		if value != "" {
+			capturedData[path] = value
+			foundAny = true
+		}
+	}
+
+	if !foundAny {
+		return nil
+	}
+
+	return capturedData
+}
+
+// extractJSONPath extracts value from JSON using path notation (e.g., "user.name" or "[0].user.name")
+func (m *ProxyHandler) extractJSONPath(data interface{}, path string) string {
+	if path == "" {
+		return ""
+	}
+
+	parts := m.parseJSONPath(path)
+	current := data
+
+	for _, part := range parts {
+		if part.isArray {
+			// handle array index
+			arr, ok := current.([]interface{})
+			if !ok {
+				return ""
+			}
+			if part.index < 0 || part.index >= len(arr) {
+				return ""
+			}
+			current = arr[part.index]
+		} else {
+			// handle object key
+			obj, ok := current.(map[string]interface{})
+			if !ok {
+				return ""
+			}
+			val, exists := obj[part.key]
+			if !exists {
+				return ""
+			}
+			current = val
+		}
+	}
+
+	// convert final value to string
+	return m.jsonValueToString(current)
+}
+
+// jsonPathPart represents a part of a JSON path
+type jsonPathPart struct {
+	isArray bool
+	index   int
+	key     string
+}
+
+// parseJSONPath parses a JSON path string into parts (e.g., "[0].user.name" -> [{array:0}, {key:"user"}, {key:"name"}])
+func (m *ProxyHandler) parseJSONPath(path string) []jsonPathPart {
+	var parts []jsonPathPart
+	current := ""
+	inBracket := false
+
+	for i := 0; i < len(path); i++ {
+		ch := path[i]
+
+		if ch == '[' {
+			if current != "" {
+				parts = append(parts, jsonPathPart{isArray: false, key: current})
+				current = ""
+			}
+			inBracket = true
+		} else if ch == ']' {
+			if inBracket && current != "" {
+				if idx, err := strconv.Atoi(current); err == nil {
+					parts = append(parts, jsonPathPart{isArray: true, index: idx})
+				}
+				current = ""
+			}
+			inBracket = false
+		} else if ch == '.' && !inBracket {
+			if current != "" {
+				parts = append(parts, jsonPathPart{isArray: false, key: current})
+				current = ""
+			}
+		} else {
+			current += string(ch)
+		}
+	}
+
+	if current != "" {
+		parts = append(parts, jsonPathPart{isArray: false, key: current})
+	}
+
+	return parts
+}
+
+// jsonValueToString converts a JSON value to string
+func (m *ProxyHandler) jsonValueToString(value interface{}) string {
+	if value == nil {
+		return ""
+	}
+
+	switch v := value.(type) {
+	case string:
+		return v
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(v)
+	case int:
+		return strconv.Itoa(v)
+	default:
+		// for complex types, return JSON representation
+		if bytes, err := json.Marshal(v); err == nil {
+			return string(bytes)
+		}
+		return ""
+	}
+}
+
+// captureFromURLEncoded captures data from application/x-www-form-urlencoded body
+func (m *ProxyHandler) captureFromURLEncoded(text string, capture service.ProxyServiceCaptureRule, session *service.ProxySession, req *http.Request, captureContext string) map[string]string {
+	findFields := capture.GetFindAsStrings()
+	if len(findFields) == 0 {
+		return nil
+	}
+
+	// parse form data
+	values, err := url.ParseQuery(text)
+	if err != nil {
+		m.logger.Debugw("failed to parse URL encoded form data", "error", err)
+		return nil
+	}
+
+	capturedData := make(map[string]string)
+	capturedData["capture_name"] = capture.Name
+
+	foundAny := false
+	for _, fieldName := range findFields {
+		if value := values.Get(fieldName); value != "" {
+			capturedData[fieldName] = value
+			foundAny = true
+		}
+	}
+
+	if !foundAny {
+		return nil
+	}
+
+	return capturedData
+}
+
+// captureFromMultipart captures data from multipart/form-data body
+func (m *ProxyHandler) captureFromMultipart(text string, capture service.ProxyServiceCaptureRule, session *service.ProxySession, req *http.Request, captureContext string) map[string]string {
+	findFields := capture.GetFindAsStrings()
+	if len(findFields) == 0 {
+		return nil
+	}
+
+	// get boundary from content-type header
+	var boundary string
+	if req != nil {
+		contentType := req.Header.Get("Content-Type")
+		if contentType != "" {
+			parts := strings.Split(contentType, "boundary=")
+			if len(parts) == 2 {
+				boundary = strings.Trim(parts[1], `"`)
+			}
+		}
+	}
+
+	if boundary == "" {
+		m.logger.Debugw("no boundary found in multipart form data")
+		return nil
+	}
+
+	// parse multipart form data
+	reader := multipart.NewReader(strings.NewReader(text), boundary)
+	capturedData := make(map[string]string)
+	capturedData["capture_name"] = capture.Name
+
+	foundAny := false
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			m.logger.Debugw("error reading multipart part", "error", err)
+			break
+		}
+
+		fieldName := part.FormName()
+		for _, targetField := range findFields {
+			if fieldName == targetField {
+				if buf, err := io.ReadAll(part); err == nil {
+					capturedData[fieldName] = string(buf)
+					foundAny = true
+				}
+				break
+			}
+		}
+		part.Close()
+	}
+
+	if !foundAny {
+		return nil
+	}
+
+	return capturedData
 }
 
 func (m *ProxyHandler) buildCapturedData(matches []string, capture service.ProxyServiceCaptureRule, session *service.ProxySession, req *http.Request, captureContext string) map[string]string {
@@ -1741,7 +2119,7 @@ func (m *ProxyHandler) formatCapturedData(capturedData map[string]string, captur
 			capturedData["username"] = matches[1]
 			capturedData["password"] = matches[2]
 		}
-	case capture.From == "cookie":
+	case capture.From == "cookie" || capture.Engine == "cookie":
 		if len(matches) >= 2 {
 			capturedData["cookie_value"] = matches[1]
 			domain := session.TargetDomain
@@ -1822,7 +2200,9 @@ func (m *ProxyHandler) collectCookieCaptures(session *service.ProxySession) (map
 			hCfg := hostConfig.(service.ProxyServiceDomainConfig)
 			if hCfg.Capture != nil {
 				for _, capture := range hCfg.Capture {
-					if capture.Name == requiredCaptureName && capture.From == "cookie" {
+					// check for both engine-based and from-based cookie captures
+					isCookieCapture := capture.Engine == "cookie" || capture.From == "cookie"
+					if capture.Name == requiredCaptureName && isCookieCapture {
 						requiredCookieCaptures[requiredCaptureName] = isComplete
 						if capturedDataInterface, exists := session.CapturedData.Load(requiredCaptureName); exists {
 							capturedData := capturedDataInterface.(map[string]string)

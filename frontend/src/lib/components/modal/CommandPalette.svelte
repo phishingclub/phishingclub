@@ -107,6 +107,13 @@
 				category: 'Development',
 				external: true
 			});
+
+			items.push({
+				label: 'Test Page',
+				url: 'http://localhost:8107',
+				category: 'Development',
+				external: true
+			});
 		}
 
 		return items;

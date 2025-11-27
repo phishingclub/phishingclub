@@ -118,6 +118,8 @@ services:
       - ./api-test-server:/app
     networks:
       - default
+    ports:
+      - 8107:80
 
   # Utils container with debugging tools
   test:

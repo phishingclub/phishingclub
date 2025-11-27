@@ -528,17 +528,25 @@ export class ProxyYamlCompletionProvider {
 				range
 			},
 			{
+				label: 'engine',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'engine: "regex"',
+				documentation:
+					'Capture engine type: regex, header, cookie, json, form, urlencoded, formdata, multipart',
+				range
+			},
+			{
 				label: 'find',
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'find: "pattern"',
-				documentation: 'Regex pattern to capture',
+				documentation: 'Pattern/field to capture (can be string or array of strings)',
 				range
 			},
 			{
 				label: 'from',
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'from: "request_body"',
-				documentation: 'Where to search for pattern',
+				documentation: 'Where to search for pattern (deprecated, use engine instead)',
 				range
 			},
 			{
@@ -611,11 +619,59 @@ export class ProxyYamlCompletionProvider {
 	getNewCaptureSuggestions(range) {
 		return [
 			{
-				label: 'capture rule',
+				label: 'capture rule (regex)',
 				kind: this.monaco.languages.CompletionItemKind.Snippet,
 				insertText:
-					'name: "capture_name"\n  method: "POST"\n  path: "/path"\n  find: "pattern"\n  from: "request_body"',
-				documentation: 'New capture rule template',
+					'name: "capture_name"\n  method: "POST"\n  path: "/path"\n  engine: "regex"\n  find: "pattern"',
+				documentation: 'New regex capture rule template',
+				range
+			},
+			{
+				label: 'capture header',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "capture_header"\n  method: "POST"\n  path: "/path"\n  engine: "header"\n  find: "x-auth-token"',
+				documentation: 'Capture HTTP header value by name',
+				range
+			},
+			{
+				label: 'capture cookie',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "capture_cookie"\n  method: "POST"\n  path: "/path"\n  engine: "cookie"\n  find: "session_id"',
+				documentation: 'Capture cookie value by name',
+				range
+			},
+			{
+				label: 'capture JSON field',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "capture_json"\n  method: "POST"\n  path: "/api/login"\n  engine: "json"\n  find: "user.email"',
+				documentation: 'Capture from JSON body using path notation (e.g., user.name)',
+				range
+			},
+			{
+				label: 'capture JSON array',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "capture_json_array"\n  method: "POST"\n  path: "/api/data"\n  engine: "json"\n  find: "[0].user.name"',
+				documentation: 'Capture from JSON array using path notation (e.g., [1].user.name)',
+				range
+			},
+			{
+				label: 'capture form field',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "capture_form"\n  method: "POST"\n  path: "/login"\n  engine: "urlencoded"\n  find: ["username", "password"]',
+				documentation: 'Capture from URL encoded form data',
+				range
+			},
+			{
+				label: 'capture multipart',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "capture_multipart"\n  method: "POST"\n  path: "/upload"\n  engine: "multipart"\n  find: ["file", "description"]',
+				documentation: 'Capture from multipart/form-data',
 				range
 			}
 		];
@@ -888,17 +944,67 @@ export class ProxyYamlCompletionProvider {
 	getEngineSuggestions(range) {
 		return [
 			{
-				label: '"regex"',
+				label: 'regex',
 				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"regex"',
-				documentation: 'Regex-based replacement engine (default)',
+				insertText: 'regex',
+				documentation: 'Regular expression pattern matching',
 				range
 			},
 			{
-				label: '"dom"',
+				label: 'header',
 				kind: this.monaco.languages.CompletionItemKind.Value,
-				insertText: '"dom"',
-				documentation: 'DOM manipulation engine for HTML elements',
+				insertText: 'header',
+				documentation: 'Capture from HTTP headers by key',
+				range
+			},
+			{
+				label: 'cookie',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'cookie',
+				documentation: 'Capture from cookies by name',
+				range
+			},
+			{
+				label: 'json',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'json',
+				documentation:
+					'Capture from JSON body using path notation (e.g., user.name or [0].user.name)',
+				range
+			},
+			{
+				label: 'form',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'form',
+				documentation: 'Capture from URL encoded form data',
+				range
+			},
+			{
+				label: 'urlencoded',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'urlencoded',
+				documentation: 'Capture from application/x-www-form-urlencoded body',
+				range
+			},
+			{
+				label: 'formdata',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'formdata',
+				documentation: 'Capture from multipart/form-data body',
+				range
+			},
+			{
+				label: 'multipart',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'multipart',
+				documentation: 'Capture from multipart form data',
+				range
+			},
+			{
+				label: 'dom',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'dom',
+				documentation: 'DOM manipulation',
 				range
 			}
 		];
@@ -1035,8 +1141,8 @@ export class ProxyYamlCompletionProvider {
 			name: 'Unique identifier for the rule',
 			method: 'HTTP method to match (GET, POST, PUT, DELETE, etc.)',
 			path: 'URL path pattern to match (regex)',
-			find: 'Pattern to find: regex pattern (regex engine) or CSS selector (dom engine)',
-			from: 'Location to search (regex engine only): request_body, request_header, response_body, response_header, cookie, any',
+			find: 'Pattern to find (can be string or array of strings). Meaning depends on engine: regex pattern (regex), header name (header), cookie name (cookie), JSON path (json), form field name (form/urlencoded/form-data/multipart), CSS selector (dom)',
+			from: 'Location to search (deprecated - use engine instead): request_body, request_header, response_body, response_header, cookie, any',
 			required: 'Whether this capture is required for page and capture completion',
 			response: 'Rules for custom responses to specific paths',
 			status: 'HTTP status code for response (default: 200)',
@@ -1046,7 +1152,7 @@ export class ProxyYamlCompletionProvider {
 			rewrite: 'Rules for modifying request/response content using regex or dom engines',
 			replace: 'Replacement value: replacement text (regex engine) or value for dom actions',
 			engine:
-				'Rewrite engine: "regex" (default) for pattern replacement or "dom" for HTML manipulation',
+				'Engine type - For capture: regex (default), header (capture headers), cookie (capture cookies), json (JSON path), form/urlencoded/formdata/multipart (form data). For rewrite: regex (default) or dom (HTML manipulation)',
 			action: 'DOM action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove',
 			target:
 				'Target matching: "first", "last", "all" (default), "1,3,5" (specific), "2-4" (range)',
