@@ -15,8 +15,12 @@
 
 	function handleKeydown(event) {
 		if (event.ctrlKey && event.key === 's') {
-			// only trigger if the form or its descendants have focus and we're in update mode
-			if (modalMode === 'update' && formElement && formElement.contains(document.activeElement)) {
+			// trigger if the form or its descendants have focus and we're in create, update, or copy mode
+			if (
+				(modalMode === 'create' || modalMode === 'update' || modalMode === 'copy') &&
+				formElement &&
+				formElement.contains(document.activeElement)
+			) {
 				event.preventDefault();
 				event.stopPropagation();
 				event.stopImmediatePropagation();
