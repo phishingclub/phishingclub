@@ -144,6 +144,8 @@
 	let templateMap = new BiMap({});
 	let recipientGroupsByID = {};
 	let recipientGroupMap = new BiMap({});
+	let recipientGroupRecipients = {}; // stores actual recipients for each group
+	let isRecipientModalVisible = false;
 	let denyPages = [];
 	let denyPageMap = new BiMap({});
 	let allowDenyMap = new BiMap({});
@@ -1037,11 +1039,13 @@
 	};
 	 */
 
-	const onAddReceipientGroup = (group) => {
+	const onAddReceipientGroup = async (group) => {
 		const groupLabel = recipientGroupMap.byValue(group);
 		const groupData = recipientGroupsByID[groupLabel];
 		formValues.selectedCount += groupData.recipientCount;
 		refreshEndTimeBySendSpread();
+		// load recipients for preview
+		await loadRecipientsForGroup(groupLabel);
 	};
 
 	const onRemoveReceipientGroup = (group) => {
@@ -1049,6 +1053,51 @@
 		const groupData = recipientGroupsByID[groupLabel];
 		formValues.selectedCount -= groupData.recipientCount;
 		refreshEndTimeBySendSpread();
+		// remove recipients from cache (groupLabel is actually the ID)
+		delete recipientGroupRecipients[groupLabel];
+	};
+
+	const loadRecipientsForGroup = async (groupID) => {
+		console.log('loadRecipientsForGroup called with groupID:', groupID);
+
+		// skip if already loaded
+		if (recipientGroupRecipients[groupID]) {
+			console.log('recipients already loaded for group:', groupID);
+			return;
+		}
+
+		try {
+			console.log('fetching recipients for group:', groupID);
+			const res = await api.recipient.getAllByGroupID(groupID, { perPage: 1000 });
+			console.log('api response:', res);
+
+			if (res.success && res.data?.rows) {
+				console.log('successfully loaded', res.data.rows.length, 'recipients for group:', groupID);
+				recipientGroupRecipients[groupID] = res.data.rows;
+				// trigger reactivity
+				recipientGroupRecipients = recipientGroupRecipients;
+			} else {
+				console.warn('api call succeeded but no data returned for group:', groupID);
+				recipientGroupRecipients[groupID] = [];
+			}
+		} catch (error) {
+			console.error('failed to load recipients for group:', groupID, error);
+			recipientGroupRecipients[groupID] = [];
+		}
+	};
+
+	const loadAllSelectedRecipients = async () => {
+		console.log('loadAllSelectedRecipients called for groups:', formValues.recipientGroups);
+
+		// load recipients for all selected groups
+		const promises = formValues.recipientGroups.map((groupName) => {
+			const groupID = recipientGroupMap.byValue(groupName);
+			console.log('mapping groupName to groupID:', groupName, '=>', groupID);
+			return loadRecipientsForGroup(groupID);
+		});
+		await Promise.all(promises);
+
+		console.log('all recipients loaded:', recipientGroupRecipients);
 	};
 
 	const refreshEndTimeBySendSpread = (milliseconds) => {
@@ -1215,7 +1264,12 @@
 		{/each}
 	</Table>
 
-	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
+	<Modal
+		headerText={modalText}
+		visible={isModalVisible}
+		onClose={closeModal}
+		isSubmitting={isSubmitting || isRecipientModalVisible}
+	>
 		<div class="relative flex justify-between items-center mb-8 w-full px-4">
 			<!-- Connector Line -->
 			<div
@@ -1306,7 +1360,7 @@
 				<!-- Recipients Step -->
 				<FormColumns id={'step-2'}>
 					<FormColumn>
-						<div class="mb-32">
+						<div class="mb-6">
 							<TextFieldMultiSelect
 								id="recipientGroupIDs"
 								bind:value={formValues.recipientGroups}
@@ -1316,6 +1370,35 @@
 								options={recipientGroupMap.values()}>Recipient Groups</TextFieldMultiSelect
 							>
 						</div>
+
+						{#if formValues.recipientGroups.length > 0}
+							<div>
+								<button
+									type="button"
+									class="text-sm font-medium text-white dark:text-white hover:text-gray-200 dark:hover:text-gray-300 flex items-center gap-1"
+									on:click={() => {
+										loadAllSelectedRecipients();
+										isRecipientModalVisible = true;
+									}}
+								>
+									<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+										/>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+										/>
+									</svg>
+									<span>View All Recipients</span>
+								</button>
+							</div>
+						{/if}
 					</FormColumn>
 				</FormColumns>
 			{:else if currentStep === 3}
@@ -1838,20 +1921,49 @@
 									>
 										Recipients
 									</h3>
-									<div class="grid grid-cols-[120px_1fr] gap-y-3">
-										<span class="text-grayblue-dark font-medium">Groups:</span>
-										<span
-											class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-										>
-											{formValues.recipientGroups.length
-												? formValues.recipientGroups.join(', ')
-												: 'None selected'}
-										</span>
+									<div class="space-y-4">
+										<div class="grid grid-cols-[120px_1fr] gap-y-3">
+											<span class="text-grayblue-dark font-medium">Groups:</span>
+											<span
+												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+											>
+												{formValues.recipientGroups.length
+													? formValues.recipientGroups.join(', ')
+													: 'None selected'}
+											</span>
 
-										<span class="text-grayblue-dark font-medium">Total:</span>
-										<span class="text-pc-darkblue dark:text-white"
-											>{formValues.selectedCount} recipients</span
-										>
+											<span class="text-grayblue-dark font-medium">Total:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.selectedCount} recipients</span
+											>
+										</div>
+
+										{#if formValues.recipientGroups.length > 0}
+											<button
+												type="button"
+												class="text-xs font-medium text-white dark:text-white hover:text-gray-200 dark:hover:text-gray-300 flex items-center gap-1"
+												on:click={() => {
+													loadAllSelectedRecipients();
+													isRecipientModalVisible = true;
+												}}
+											>
+												<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+													/>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+													/>
+												</svg>
+												<span>View All Recipients</span>
+											</button>
+										{/if}
 									</div>
 								</div>
 							</div>
@@ -2177,6 +2289,83 @@
 				{/if}
 			</div>
 		</FormGrid>
+	</Modal>
+
+	<!-- Recipient Preview Modal -->
+	<Modal
+		headerText="Recipients"
+		visible={isRecipientModalVisible}
+		onClose={() => (isRecipientModalVisible = false)}
+	>
+		<div class="p-4">
+			<div class="mb-4">
+				<p class="text-sm text-gray-600 dark:text-gray-400">
+					Total: <span class="font-semibold text-pc-darkblue dark:text-white"
+						>{formValues.selectedCount} recipients</span
+					>
+				</p>
+			</div>
+
+			<div class="space-y-4">
+				{#each formValues.recipientGroups as groupName}
+					{@const groupID = recipientGroupMap.byValue(groupName)}
+					{@const recipients = recipientGroupRecipients[groupID] || []}
+					<div
+						class="bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+					>
+						<details class="group">
+							<summary
+								class="cursor-pointer p-4 font-semibold text-base text-pc-darkblue dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg transition-colors list-none flex items-center gap-2"
+							>
+								<svg
+									class="w-4 h-4 transition-transform group-open:rotate-90"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M9 5l7 7-7 7"
+									/>
+								</svg>
+								<span>{groupName}</span>
+							</summary>
+							<div class="px-4 pb-4">
+								{#if recipients.length > 0}
+									<div class="space-y-1">
+										{#each recipients as recipient}
+											<div
+												class="flex items-center justify-between py-2 px-3 rounded hover:bg-white dark:hover:bg-gray-700/50 transition-colors"
+											>
+												<span
+													class="text-sm text-gray-900 dark:text-gray-100 font-medium truncate flex-1"
+												>
+													{recipient.email}
+												</span>
+												{#if recipient.firstName || recipient.lastName}
+													<span
+														class="text-sm text-gray-500 dark:text-gray-400 ml-4 whitespace-nowrap"
+													>
+														{recipient.firstName || ''}
+														{recipient.lastName || ''}
+													</span>
+												{/if}
+											</div>
+										{/each}
+									</div>
+								{:else}
+									<p class="text-sm text-gray-500 dark:text-gray-400 italic">
+										Loading recipients...
+									</p>
+								{/if}
+							</div>
+						</details>
+					</div>
+				{/each}
+			</div>
+		</div>
 	</Modal>
 
 	<DeleteAlert
