@@ -18,26 +18,35 @@
 	let lastFocusableElement;
 
 	let modalInitialized = false;
+	let wasVisible = false;
 
 	$: {
+		// only handle focus when modal visibility actually changes and not during submission
 		if (visible && !modalInitialized) {
 			window.addEventListener('keydown', keyHandler);
 			// Prevent body scrolling when modal is open
 			document.body.style.overflow = 'hidden';
-			handleModalOpen();
+			if (!isSubmitting) {
+				handleModalOpen();
+			}
 			modalInitialized = true;
+			wasVisible = true;
 		} else if (!visible && modalInitialized) {
 			window.removeEventListener('keydown', keyHandler);
 			// Restore body scrolling when modal is closed
 			document.body.style.overflow = 'auto';
 			handleModalClose();
 			modalInitialized = false;
+			wasVisible = false;
 		}
 	}
 
 	const keyHandler = (e) => {
 		if (e.key === 'Escape') {
-			close();
+			// don't close modal during submission
+			if (!isSubmitting) {
+				close();
+			}
 		} else if (e.key === 'Tab') {
 			// Check if the focused element is a dropdown option button
 			const focusedElement = document.activeElement;
@@ -227,6 +236,11 @@
 	};
 
 	const handleModalOpen = async () => {
+		// don't manage focus during form submission
+		if (isSubmitting) {
+			return;
+		}
+
 		// Store the currently focused element
 		previousActiveElement = document.activeElement;
 
@@ -285,6 +299,10 @@
 	});
 
 	const close = () => {
+		// prevent closing during submission
+		if (isSubmitting) {
+			return;
+		}
 		visible = false;
 		window.removeEventListener('keydown', keyHandler);
 		// Restore body scrolling when modal is closed

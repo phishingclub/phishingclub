@@ -194,8 +194,9 @@
 			addToast(saveOnly ? 'API sender saved' : 'Updated API sender', 'Success');
 			if (!saveOnly) {
 				closeEditModal();
+				// only refresh the table when actually closing the modal
+				refreshConfigurations();
 			}
-			refreshConfigurations();
 		} catch (err) {
 			addToast('Failed to update API sender', 'Error');
 			console.error('failed to update API sender:', err);

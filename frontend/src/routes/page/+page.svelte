@@ -189,8 +189,9 @@
 			addToast(saveOnly ? 'Page saved' : 'Page updated', 'Success');
 			if (!saveOnly) {
 				closeModal();
+				// only refresh the table when actually closing the modal
+				refreshPages();
 			}
-			refreshPages();
 		} catch (e) {
 			addToast(saveOnly ? 'Failed to save page' : 'Failed to update page', 'Error');
 			console.error('failed to update page', e);

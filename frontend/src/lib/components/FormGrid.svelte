@@ -15,10 +15,13 @@
 
 	function handleKeydown(event) {
 		if (event.ctrlKey && event.key === 's') {
-			// Only trigger if the form or its descendants have focus and we're in update mode
+			// only trigger if the form or its descendants have focus and we're in update mode
 			if (modalMode === 'update' && formElement && formElement.contains(document.activeElement)) {
 				event.preventDefault();
-				dispatch('submit', { ...event, saveOnly: true });
+				event.stopPropagation();
+				event.stopImmediatePropagation();
+				// dispatch to our event handler, not native form submit
+				dispatch('submit', { saveOnly: true });
 			}
 		}
 	}
@@ -34,7 +37,6 @@
 
 <form
 	on:submit|preventDefault
-	inert={isSubmitting}
 	class="grid grid-cols-3 grid-rows-1 w-full h-full flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 	class:opacity-70={isSubmitting}
 	bind:this={formElement}

@@ -277,8 +277,9 @@ portal.example.com:
 			addToast(saveOnly ? 'Proxy saved' : 'Proxy updated', 'Success');
 			if (!saveOnly) {
 				closeModal();
+				// only refresh the table when actually closing the modal
+				refreshProxies();
 			}
-			refreshProxies();
 		} catch (e) {
 			addToast(saveOnly ? 'Failed to save Proxy' : 'Failed to update Proxy', 'Error');
 			console.error('failed to update Proxy', e);

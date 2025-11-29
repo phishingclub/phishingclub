@@ -46,6 +46,7 @@
 	let contextCompanyID = null;
 	let form = null;
 	let sendTestForm = null;
+
 	let formValues = {
 		id: null,
 		name: null,
@@ -141,8 +142,8 @@
 
 	const onSubmit = async (event) => {
 		try {
-			isSubmitting = true;
 			const saveOnly = event?.detail?.saveOnly || false;
+			isSubmitting = true;
 			if (modalMode === 'create' || modalMode === 'copy') {
 				await onClickCreate();
 				return;
@@ -198,8 +199,9 @@
 			addToast(saveOnly ? 'Email saved' : 'Email updated', 'Success');
 			if (!saveOnly) {
 				closeModal();
+				// only refresh the table when actually closing the modal
+				refreshEmails();
 			}
-			refreshEmails();
 		} catch (e) {
 			addToast(saveOnly ? 'Failed to save email' : 'Failed to update email', 'Error');
 			console.error('failed to update email', e);
