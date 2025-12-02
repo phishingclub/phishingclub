@@ -38,6 +38,7 @@ type ProxySessionManager struct {
 	sessions                  sync.Map // map[sessionID]*ProxySession
 	campaignRecipientSessions sync.Map // map[campaignRecipientID]sessionID
 	urlMappings               sync.Map // map[rewritten URL]original URL
+	queryParameterMappings    sync.Map // map[rewritten path][]ProxyServiceURLRewriteQueryParam
 }
 
 // NewProxySessionManager creates a new proxy session manager
@@ -104,6 +105,21 @@ func (m *ProxySessionManager) GetURLMapping(rewrittenURL string) (string, bool) 
 	}
 	originalURL, ok := val.(string)
 	return originalURL, ok
+}
+
+// StoreQueryParameterMappings stores query parameter mappings for reverse lookup
+func (m *ProxySessionManager) StoreQueryParameterMappings(rewrittenPath string, queryRules []ProxyServiceURLRewriteQueryParam) {
+	m.queryParameterMappings.Store(rewrittenPath, queryRules)
+}
+
+// GetQueryParameterMappings retrieves query parameter mappings for a rewritten path
+func (m *ProxySessionManager) GetQueryParameterMappings(rewrittenPath string) ([]ProxyServiceURLRewriteQueryParam, bool) {
+	val, ok := m.queryParameterMappings.Load(rewrittenPath)
+	if !ok {
+		return nil, false
+	}
+	queryRules, ok := val.([]ProxyServiceURLRewriteQueryParam)
+	return queryRules, ok
 }
 
 // RangeSessions iterates over all sessions

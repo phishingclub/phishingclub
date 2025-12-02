@@ -4751,10 +4751,13 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 // and returns a redirect response if a match is found
 func (m *ProxyHandler) checkAndApplyURLRewrite(req *http.Request, reqCtx *RequestContext) *http.Response {
 	// check if this is already a rewritten URL that we need to reverse map
-	// lookup by path only to handle query parameter variations
-	originalPath := m.getReverseURLMapping(req.URL.Path)
+	// lookup by path and target domain to handle query parameter variations
+	originalPath := m.getReverseURLMapping(req.URL.Path, reqCtx.TargetDomain)
 	if originalPath != "" {
-		// update request to use the original path (keep query as-is)
+		// reverse query parameters first (before changing path)
+		rewrittenPath := req.URL.Path
+		m.reverseQueryParameters(req, rewrittenPath, reqCtx.TargetDomain)
+		// update request to use the original path
 		req.URL.Path = originalPath
 		return nil
 	}
@@ -4779,7 +4782,10 @@ func (m *ProxyHandler) checkAndApplyURLRewrite(req *http.Request, reqCtx *Reques
 			if idx := strings.Index(rewrittenURL, "?"); idx != -1 {
 				rewrittenPath = rewrittenURL[:idx]
 			}
-			m.storeURLMapping(rewrittenPath, req.URL.Path)
+			m.storeURLMapping(rewrittenPath, req.URL.Path, reqCtx.TargetDomain)
+
+			// store query parameter mappings for reverse lookup
+			m.storeQueryParameterMappings(rewrittenPath, rule.Query, reqCtx.TargetDomain)
 
 			// create redirect response
 			return &http.Response{
@@ -4873,17 +4879,53 @@ func contains(slice []string, item string) bool {
 }
 
 // storeURLMapping stores the mapping between rewritten and original URLs
-func (m *ProxyHandler) storeURLMapping(rewrittenURL, originalURL string) {
-	m.SessionManager.StoreURLMapping(rewrittenURL, originalURL)
+func (m *ProxyHandler) storeURLMapping(rewrittenURL, originalURL, targetDomain string) {
+	key := targetDomain + "|" + rewrittenURL
+	m.SessionManager.StoreURLMapping(key, originalURL)
+}
+
+// storeQueryParameterMappings stores query parameter mappings for reverse lookup
+func (m *ProxyHandler) storeQueryParameterMappings(rewrittenPath string, queryRules []service.ProxyServiceURLRewriteQueryParam, targetDomain string) {
+	key := targetDomain + "|" + rewrittenPath
+	m.SessionManager.StoreQueryParameterMappings(key, queryRules)
 }
 
 // getReverseURLMapping gets the original path for a rewritten path
-// only uses path for lookup to handle query parameter variations
-func (m *ProxyHandler) getReverseURLMapping(path string) string {
-	if originalPath, exists := m.SessionManager.GetURLMapping(path); exists {
+// uses path and target domain for lookup to handle per-host configurations
+func (m *ProxyHandler) getReverseURLMapping(path, targetDomain string) string {
+	key := targetDomain + "|" + path
+	if originalPath, exists := m.SessionManager.GetURLMapping(key); exists {
 		return originalPath
 	}
 	return ""
+}
+
+// reverseQueryParameters reverses query parameter names back to their originals
+func (m *ProxyHandler) reverseQueryParameters(req *http.Request, rewrittenPath, targetDomain string) {
+	key := targetDomain + "|" + rewrittenPath
+	queryRules, exists := m.SessionManager.GetQueryParameterMappings(key)
+	if !exists || len(queryRules) == 0 {
+		return
+	}
+
+	query := req.URL.Query()
+	reversedQuery := url.Values{}
+
+	// copy all parameters first
+	for key, values := range query {
+		reversedQuery[key] = values
+	}
+
+	// reverse the mapped parameters
+	for _, rule := range queryRules {
+		if values, exists := query[rule.Replace]; exists {
+			// remove the rewritten key and restore the original key
+			delete(reversedQuery, rule.Replace)
+			reversedQuery[rule.Find] = values
+		}
+	}
+
+	req.URL.RawQuery = reversedQuery.Encode()
 }
 
 // applyURLPathRewrites applies URL path rewriting to response body content
