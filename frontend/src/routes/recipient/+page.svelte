@@ -493,7 +493,8 @@
 						maxLength={255}
 						type="email"
 						bind:value={formValues.email}
-						placeholder="bob@example.test">Email</TextField
+						placeholder="bob@example.test"
+						readonly={modalMode === 'update'}>Email</TextField
 					>
 					<TextField
 						minLength={1}

@@ -102,5 +102,11 @@
 		class:w-60={width === 'medium'}
 		class:w-95={width === 'large'}
 		class:w-full={width === 'full'}
+		class:readonly
+		class:cursor-not-allowed={readonly}
+		class:bg-gray-200={readonly}
+		class:dark:bg-gray-800={readonly}
+		class:text-gray-500={readonly}
+		class:dark:text-gray-500={readonly}
 	/>
 </label>
