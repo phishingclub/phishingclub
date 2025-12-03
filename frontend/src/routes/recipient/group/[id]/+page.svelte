@@ -61,6 +61,7 @@
 		recipients: [],
 		ignoreOverwriteEmptyFields: true
 	};
+	let csvSkippedRows = [];
 	const tableImportParams = newTableParams({ sortBy: 'email' });
 	let selectedRecipientsImportPaginatedChunk = [];
 	let isImportModalVisible = false;
@@ -281,9 +282,15 @@
 		try {
 			for (let i = 0; i < files.length; i++) {
 				const file = files[i];
-				const recipientsForImport = await parseCSVToRecipients(file);
+				const result = await parseCSVToRecipients(file);
+
+				// track skipped rows
+				if (result.skipped && result.skipped.length > 0) {
+					console.info(`CSV import: ${result.skipped.length} rows skipped`, result.skipped);
+				}
+
 				importFormValues.recipients = importFormValues.recipients.concat(
-					recipientsForImport.filter(
+					result.recipients.filter(
 						(recipient) =>
 							!importFormValues.recipients.some(
 								(existingRecipient) => existingRecipient.email === recipient.email
@@ -291,6 +298,17 @@
 					)
 				);
 				refreshImportsPaginated();
+
+				// show info about skipped rows
+				if (result.skipped && result.skipped.length > 0) {
+					const skippedMsg = result.skipped
+						.slice(0, 3)
+						.map((s) => `Line ${s.line}: ${s.reason}`)
+						.join('\n');
+					const remaining =
+						result.skipped.length > 3 ? `\n... and ${result.skipped.length - 3} more` : '';
+					importError = `CSV rows skipped:\n${skippedMsg}${remaining}\n\nReview the data below before importing.`;
+				}
 			}
 		} catch (e) {
 			importError = e;
@@ -333,6 +351,8 @@
 	};
 
 	const openImportModal = () => {
+		csvSkippedRows = [];
+		importError = '';
 		isImportModalVisible = true;
 	};
 

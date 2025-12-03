@@ -62,6 +62,7 @@
 		recipients: [],
 		ignoreOverwriteEmptyFields: true
 	};
+	let csvSkippedRows = [];
 	const tableImportParams = newTableParams({ sortBy: 'email' });
 	let selectedRecipientsImportPaginatedChunk = [];
 	let isImportModalVisible = false;
@@ -209,12 +210,12 @@
 				importModalError = res.error;
 				return;
 			}
-			addToast('Recipients imported to group', 'Success');
+			addToast('Recipients imported', 'Success');
 			closeImportModal();
 			refreshRecipients();
 		} catch (err) {
-			addToast('Failed to import recipients to group', 'Error');
-			console.error('failed to import recipients to group', err);
+			addToast('Failed to import recipients', 'Error');
+			console.error('failed to import recipients', err);
 		} finally {
 			isSubmitting = false;
 		}
@@ -228,9 +229,16 @@
 			showIsLoading();
 			for (let i = 0; i < files.length; i++) {
 				const file = files[i];
-				const recipientsForImport = await parseCSVToRecipients(file);
+				const result = await parseCSVToRecipients(file);
+
+				// track skipped rows
+				if (result.skipped && result.skipped.length > 0) {
+					csvSkippedRows = csvSkippedRows.concat(result.skipped);
+					console.info(`CSV import: ${result.skipped.length} rows skipped`, result.skipped);
+				}
+
 				importFormValues.recipients = importFormValues.recipients.concat(
-					recipientsForImport.filter(
+					result.recipients.filter(
 						(recipient) =>
 							!importFormValues.recipients.some(
 								(existingRecipient) => existingRecipient.email === recipient.email
@@ -238,6 +246,17 @@
 					)
 				);
 				refreshImportsPaginated();
+
+				// show info about skipped rows
+				if (result.skipped && result.skipped.length > 0) {
+					const skippedMsg = result.skipped
+						.slice(0, 3)
+						.map((s) => `Line ${s.line}: ${s.reason}`)
+						.join('\n');
+					const remaining =
+						result.skipped.length > 3 ? `\n... and ${result.skipped.length - 3} more` : '';
+					importModalError = `CSV rows skipped:\n${skippedMsg}${remaining}\n\nReview the data before importing.`;
+				}
 			}
 		} catch (e) {
 			importModalError = e;
@@ -268,6 +287,8 @@
 	};
 
 	const openImportModal = () => {
+		csvSkippedRows = [];
+		importModalError = '';
 		isImportModalVisible = true;
 	};
 
