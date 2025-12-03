@@ -27,7 +27,7 @@
 	const api = API.instance;
 
 	// debug / dev
-	const isDevelopement = import.meta.env.DEV;
+	const isDevelopement = false;
 
 	// local state
 	let loginStatus = AppStateService.LOGIN.UNKNOWN;

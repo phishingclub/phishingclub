@@ -48,7 +48,7 @@
 	let templatesError = '';
 
 	// dev
-	const isDevelopement = import.meta.env.DEV;
+	const isDevelopement = false;
 
 	// initialize theme system
 	onMount(() => {
