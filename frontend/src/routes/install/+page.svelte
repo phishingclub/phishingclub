@@ -259,25 +259,35 @@
 				<FormGrid bind:bindTo={form}>
 					<FormColumns>
 						<FormColumn>
-							<div class="min-w-[600px]">
+							<div class="w-full sm:min-w-[500px]">
 								{#if currentStep === 1}
 									<div class="space-y-6 w-full flex flex-col items-center" id="step-1">
-										<TextField required bind:value={installForm.name}>Name</TextField>
+										<TextField required minLength="1" maxLength="64" bind:value={installForm.name}
+											>Name</TextField
+										>
 										<TextField
 											id="username"
 											required
+											minLength="1"
+											maxLength="64"
 											bind:value={installForm.username}
 											on:keyup={(e) => {
 												const ele = /** @type {HTMLInputElement} */ (e.target);
 												ele.setCustomValidity('');
 											}}>Username</TextField
 										>
-										<PasswordField id="password" required bind:value={installForm.password}
-											>Password</PasswordField
+										<PasswordField
+											id="password"
+											required
+											minLength="16"
+											maxLength="64"
+											bind:value={installForm.password}>Password</PasswordField
 										>
 										<PasswordField
 											id="repeatPassword"
 											required
+											minLength="16"
+											maxLength="64"
 											bind:value={installForm.repeatPassword}
 											on:keyup={(e) => {
 												const ele = /** @type {HTMLInputElement} */ (e.target);
