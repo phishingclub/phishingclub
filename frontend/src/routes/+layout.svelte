@@ -26,6 +26,9 @@
 	const appState = AppStateService.instance;
 	const api = API.instance;
 
+	// debug / dev
+	const isDevelopement = import.meta.env.DEV;
+
 	// local state
 	let loginStatus = AppStateService.LOGIN.UNKNOWN;
 	let installState = AppStateService.INSTALL.UNKNOWN;
@@ -155,7 +158,11 @@
 				console.log(s.loginStatus);
 				console.log('layout: navigating to /dashboard/');
 				// tick fixes weird bug where goto does not work inside this subscribe
-				tick().then(() => goto('/dashboard/'));
+				if (isDevelopement) {
+					console.log('dev: Skipping navigation');
+				} else {
+					tick().then(() => goto('/dashboard/'));
+				}
 				return;
 			}
 		});

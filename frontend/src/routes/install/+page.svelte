@@ -47,7 +47,8 @@
 	let installTemplates = false;
 	let templatesError = '';
 
-	// Removed edition detection - single unified installation
+	// dev
+	const isDevelopement = import.meta.env.DEV;
 
 	// initialize theme system
 	onMount(() => {
@@ -60,7 +61,11 @@
 	const isInstalled = appStateService.isInstalled();
 	if (isInstalled || user.role !== 'superadministrator') {
 		console.info('install - navigating to dashboard');
-		goto('/dashboard/');
+		if (isDevelopement) {
+			console.info('Skipping navigation due to development mode');
+		} else {
+			goto('/dashboard/');
+		}
 	}
 
 	const nextStep = () => {
