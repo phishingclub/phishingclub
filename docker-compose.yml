@@ -95,8 +95,12 @@ services:
   # Pebble - ACME server for testing
   # Used to test TLS certificate requesting via ACME
   pebble:
-    image: letsencrypt/pebble
-    command: pebble -config /test/my-pebble-config.json -dnsserver 172.20.0.137:5353
+    image: ghcr.io/letsencrypt/pebble:2.8.0
+    command:
+      - -config
+      - /test/my-pebble-config.json
+      - -dnsserver
+      - 172.20.0.137:5353
     ports:
       - 8201:14000 # ACME port
       - 8202:15000 # Management port
