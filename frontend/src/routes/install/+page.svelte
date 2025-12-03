@@ -252,235 +252,237 @@
 			</div>
 		</div>
 
-		<div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+		<div class="mt-8 sm:mx-auto sm:w-full sm:max-w-2xl">
 			<div
 				class="bg-white dark:bg-gray-800 px-4 shadow sm:rounded-lg sm:px-10 transition-colors duration-200"
 			>
 				<FormGrid bind:bindTo={form}>
 					<FormColumns>
 						<FormColumn>
-							{#if currentStep === 1}
-								<div class="space-y-6 w-full flex flex-col items-center" id="step-1">
-									<TextField required bind:value={installForm.name}>Name</TextField>
-									<TextField
-										id="username"
-										required
-										bind:value={installForm.username}
-										on:keyup={(e) => {
-											const ele = /** @type {HTMLInputElement} */ (e.target);
-											ele.setCustomValidity('');
-										}}>Username</TextField
-									>
-									<PasswordField id="password" required bind:value={installForm.password}
-										>Password</PasswordField
-									>
-									<PasswordField
-										id="repeatPassword"
-										required
-										bind:value={installForm.repeatPassword}
-										on:keyup={(e) => {
-											const ele = /** @type {HTMLInputElement} */ (e.target);
-											ele.setCustomValidity('');
-										}}
-									>
-										Confirm Password
-									</PasswordField>
-								</div>
-							{:else if currentStep === 2}
-								<div class="text-center py-8" id="step-2">
-									<h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
-										Display Mode
-									</h3>
-									<div class="space-y-4 text-sm text-gray-600 dark:text-gray-300">
-										<p>Select which features are available</p>
+							<div class="min-w-[600px]">
+								{#if currentStep === 1}
+									<div class="space-y-6 w-full flex flex-col items-center" id="step-1">
+										<TextField required bind:value={installForm.name}>Name</TextField>
+										<TextField
+											id="username"
+											required
+											bind:value={installForm.username}
+											on:keyup={(e) => {
+												const ele = /** @type {HTMLInputElement} */ (e.target);
+												ele.setCustomValidity('');
+											}}>Username</TextField
+										>
+										<PasswordField id="password" required bind:value={installForm.password}
+											>Password</PasswordField
+										>
+										<PasswordField
+											id="repeatPassword"
+											required
+											bind:value={installForm.repeatPassword}
+											on:keyup={(e) => {
+												const ele = /** @type {HTMLInputElement} */ (e.target);
+												ele.setCustomValidity('');
+											}}
+										>
+											Confirm Password
+										</PasswordField>
 									</div>
-									<div class="mt-6 space-y-4">
-										<label
-											class="flex items-start justify-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors {selectedDisplayMode ===
-											DISPLAY_MODE.WHITEBOX
-												? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
-												: 'border-gray-300 dark:border-gray-600'}"
-										>
-											<input
-												type="radio"
-												bind:group={selectedDisplayMode}
-												value={DISPLAY_MODE.WHITEBOX}
-												class="mt-1 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
-											/>
-											<div class="text-left">
-												<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
-													Whitebox
-												</span>
-												<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
-													Phishing Simulation
-												</span>
-											</div>
-										</label>
-										<label
-											class="flex items-start justify-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors {selectedDisplayMode ===
-											DISPLAY_MODE.BLACKBOX
-												? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
-												: 'border-gray-300 dark:border-gray-600'}"
-										>
-											<input
-												type="radio"
-												bind:group={selectedDisplayMode}
-												value={DISPLAY_MODE.BLACKBOX}
-												class="mt-1 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
-											/>
-											<div class="text-left">
-												<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
-													Blackbox
-												</span>
-												<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
-													Red Team Phishing.
-												</span>
-											</div>
-										</label>
-										<p
-											class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200"
-										>
-											Read about the difference between <br />
-											<a
-												class="white underline"
-												href="https://phishing.club/blog/white-box-vs-black-box-phishing/"
-												target="_blank">whitebox and blackbox phishing</a
+								{:else if currentStep === 2}
+									<div class="text-center py-8" id="step-2">
+										<h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
+											Display Mode
+										</h3>
+										<div class="space-y-4 text-sm text-gray-600 dark:text-gray-300">
+											<p>Select which features are available</p>
+										</div>
+										<div class="mt-6 space-y-4 max-w-xs mx-auto">
+											<label
+												class="flex items-start justify-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors {selectedDisplayMode ===
+												DISPLAY_MODE.WHITEBOX
+													? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+													: 'border-gray-300 dark:border-gray-600'}"
 											>
-										</p>
-									</div>
-								</div>
-							{:else if currentStep === 3}
-								<div class="text-center py-8" id="step-3">
-									<h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
-										Example Templates
-									</h3>
-									<div class="space-y-4 text-sm text-gray-600 dark:text-gray-300">
-										<p>Install example templates?</p>
-										<p class="text-xs text-gray-500 dark:text-gray-400">
-											Includes phishing pages and emails from
-											<a
-												href="https://github.com/phishingclub/templates"
-												target="_blank"
-												rel="noopener noreferrer"
-												class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+												<input
+													type="radio"
+													bind:group={selectedDisplayMode}
+													value={DISPLAY_MODE.WHITEBOX}
+													class="mt-1 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+												/>
+												<div class="text-left">
+													<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
+														Whitebox
+													</span>
+													<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
+														Phishing Simulation
+													</span>
+												</div>
+											</label>
+											<label
+												class="flex items-start justify-start gap-3 p-4 border rounded-lg cursor-pointer transition-colors {selectedDisplayMode ===
+												DISPLAY_MODE.BLACKBOX
+													? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+													: 'border-gray-300 dark:border-gray-600'}"
 											>
-												template builder
-											</a>
-										</p>
-									</div>
-									<div class="mt-6">
-										<label class="flex items-center justify-center gap-3">
-											<input
-												type="checkbox"
-												bind:checked={installTemplates}
-												class="w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
-											/>
-											<span class="text-sm font-medium text-gray-900 dark:text-gray-100">
-												Yes, install example templates
-											</span>
-										</label>
-									</div>
-									{#if templatesError}
-										<div
-											class="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md"
-										>
-											<p class="text-sm text-yellow-800 dark:text-yellow-200">
-												<strong>Note:</strong>
-												{templatesError}
-											</p>
-											<p class="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
-												You can manually import templates later from Settings.
+												<input
+													type="radio"
+													bind:group={selectedDisplayMode}
+													value={DISPLAY_MODE.BLACKBOX}
+													class="mt-1 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+												/>
+												<div class="text-left">
+													<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
+														Blackbox
+													</span>
+													<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
+														Red Team Phishing.
+													</span>
+												</div>
+											</label>
+											<p
+												class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200"
+											>
+												Read about the difference between <br />
+												<a
+													class="white underline"
+													href="https://phishing.club/blog/white-box-vs-black-box-phishing/"
+													target="_blank">whitebox and blackbox phishing</a
+												>
 											</p>
 										</div>
-									{/if}
-								</div>
-							{:else}
-								<div class="text-center py-8" id="step-{currentStep}">
-									<h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
-										Welcome to Phishing Club
-									</h3>
-									<div class="space-y-4 text-sm text-gray-600 dark:text-gray-300">
-										<p>
-											Get started by reading our
-											<a
-												href="https://phishing.club/guide/introduction/"
-												target="_blank"
-												rel="noopener noreferrer"
-												class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-											>
-												user guide
-											</a>
-										</p>
-										<p>
-											Have questions, bugs or suggestions? <br /> Contact us at
-											<a
-												href="mailto:support@phishing.club"
-												class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-											>
-												support@phishing.club
-											</a>
-										</p>
 									</div>
-								</div>
-							{/if}
-
-							<div class="w-full max-w-md mx-auto">
-								<FormError message={formError} />
-							</div>
-
-							<div class="flex justify-between items-center w-full mt-8">
-								{#if currentStep > 1}
-									<button
-										type="button"
-										class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-										on:click={previousStep}
-									>
-										<svg
-											class="mr-2 h-4 w-4"
-											xmlns="http://www.w3.org/2000/svg"
-											fill="none"
-											viewBox="0 0 24 24"
-											stroke="currentColor"
-										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M15 19l-7-7 7-7"
-											/>
-										</svg>
-										Previous
-									</button>
+								{:else if currentStep === 3}
+									<div class="text-center py-8" id="step-3">
+										<h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
+											Example Templates
+										</h3>
+										<div class="space-y-4 text-sm text-gray-600 dark:text-gray-300">
+											<p>Install example templates?</p>
+											<p class="text-xs text-gray-500 dark:text-gray-400">
+												Includes phishing pages and emails from
+												<a
+													href="https://github.com/phishingclub/templates"
+													target="_blank"
+													rel="noopener noreferrer"
+													class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+												>
+													template builder
+												</a>
+											</p>
+										</div>
+										<div class="mt-6">
+											<label class="flex items-center justify-center gap-3">
+												<input
+													type="checkbox"
+													bind:checked={installTemplates}
+													class="w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
+												/>
+												<span class="text-sm font-medium text-gray-900 dark:text-gray-100">
+													Yes, install example templates
+												</span>
+											</label>
+										</div>
+										{#if templatesError}
+											<div
+												class="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md"
+											>
+												<p class="text-sm text-yellow-800 dark:text-yellow-200">
+													<strong>Note:</strong>
+													{templatesError}
+												</p>
+												<p class="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
+													You can manually import templates later from Settings.
+												</p>
+											</div>
+										{/if}
+									</div>
 								{:else}
-									<div />
+									<div class="text-center py-8 mx-auto max-w-md" id="step-{currentStep}">
+										<h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
+											Welcome to Phishing Club
+										</h3>
+										<div class="space-y-4 text-sm text-gray-600 dark:text-gray-300">
+											<p>
+												Get started by reading our
+												<a
+													href="https://phishing.club/guide/introduction/"
+													target="_blank"
+													rel="noopener noreferrer"
+													class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+												>
+													user guide
+												</a>
+											</p>
+											<p>
+												Have questions, bugs or suggestions? <br /> Contact us at
+												<a
+													href="mailto:support@phishing.club"
+													class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+												>
+													support@phishing.club
+												</a>
+											</p>
+										</div>
+									</div>
 								{/if}
 
-								<button
-									type="button"
-									class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-									on:click={nextStep}
-									disabled={isSubmitting}
-								>
-									{#if currentStep === steps.length}
-										Setup
-									{:else}
-										Next
-										<svg
-											class="ml-2 h-4 w-4"
-											xmlns="http://www.w3.org/2000/svg"
-											fill="none"
-											viewBox="0 0 24 24"
-											stroke="currentColor"
+								<div class="w-full">
+									<FormError message={formError} />
+								</div>
+
+								<div class="flex justify-between items-center w-full mt-8">
+									{#if currentStep > 1}
+										<button
+											type="button"
+											class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+											on:click={previousStep}
 										>
-											<path
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												stroke-width="2"
-												d="M9 5l7 7-7 7"
-											/>
-										</svg>
+											<svg
+												class="mr-2 h-4 w-4"
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke="currentColor"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M15 19l-7-7 7-7"
+												/>
+											</svg>
+											Previous
+										</button>
+									{:else}
+										<div />
 									{/if}
-								</button>
+
+									<button
+										type="button"
+										class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+										on:click={nextStep}
+										disabled={isSubmitting}
+									>
+										{#if currentStep === steps.length}
+											Setup
+										{:else}
+											Next
+											<svg
+												class="ml-2 h-4 w-4"
+												xmlns="http://www.w3.org/2000/svg"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke="currentColor"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M9 5l7 7-7 7"
+												/>
+											</svg>
+										{/if}
+									</button>
+								</div>
 							</div>
 						</FormColumn>
 					</FormColumns>
