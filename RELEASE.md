@@ -1,6 +1,16 @@
 # Changelog
 
-## [1.20.1] - 2025-11-27
+## [1.22.0] - 2025-12-03
+- Added preview recipients modal to create campaign modal
+- Added readonly to recipient email on update modal
+- Added CTRL+s save on create modals that are primarily editors
+- Improved installer UI width
+- Added clientside validation to username and password on installer
+- Added recipient CSV clientside parsing warnings and errors 
+- Fix rewrite_urls query param mapping bug in proxies
+- Fix CTRL+s save on update now keep position in editor 
+
+## [1.21.0] - 2025-11-27
 - Added new capture engines for json, formdata and urlencoded
 - Added support for multiple find in captures 
 - Added Random Recipient variable 
