@@ -47,7 +47,8 @@
 		campaign_recipient_after_page_visited: true,
 		campaign_recipient_deny_page_visited: true,
 		campaign_recipient_submitted_data: true,
-		campaign_recipient_reported: true
+		campaign_recipient_reported: true,
+		campaign_recipient_websocket_event: true
 	};
 	let filterUpdateCounter = 0;
 
@@ -735,7 +736,7 @@
 		d3.select(svg).transition().duration(750).call(zoom.transform, resetTransform);
 	}
 
-	function getEventColor(eventName) {
+	function getEventColor(eventType) {
 		const eventColors = {
 			campaign_scheduled: '#62aded',
 			campaign_active: '#5557f6',
@@ -752,9 +753,10 @@
 			campaign_recipient_after_page_visited: '#f6287b',
 			campaign_recipient_deny_page_visited: '#ff6b35',
 			campaign_recipient_submitted_data: '#f42e41',
-			campaign_recipient_reported: '#2c3e50'
+			campaign_recipient_reported: '#2c3e50',
+			campaign_recipient_websocket_event: '#8b5cf6'
 		};
-		return eventColors[eventName] || '#6b7280';
+		return eventColors[eventType] || '#6b7280';
 	}
 
 	function getEventIcon(eventName) {
@@ -790,7 +792,9 @@
 			campaign_recipient_submitted_data:
 				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
 			campaign_recipient_reported:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>'
+				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>',
+			campaign_recipient_websocket_event:
+				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>'
 		};
 		return (
 			eventIcons[eventName] ||
@@ -815,7 +819,8 @@
 			campaign_recipient_after_page_visited: 'Recipient continued browsing after target',
 			campaign_recipient_deny_page_visited: 'Recipient was denied access',
 			campaign_recipient_submitted_data: 'Recipient submitted form data',
-			campaign_recipient_reported: 'Email was reported as spam'
+			campaign_recipient_reported: 'Email was reported as spam',
+			campaign_recipient_websocket_event: 'Custom WebSocket event triggered'
 		};
 		return descriptions[eventName] || 'Unknown event';
 	}
@@ -1037,9 +1042,18 @@
 													type="checkbox"
 													bind:checked={eventFilters.campaign_recipient_reported}
 													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
+													class="mr-2"
 												/>
 												<span class="text-gray-600 dark:text-gray-300">Reported</span>
+											</label>
+											<label class="flex items-center text-xs">
+												<input
+													type="checkbox"
+													bind:checked={eventFilters.campaign_recipient_websocket_event}
+													on:change={() => filterUpdateCounter++}
+													class="mr-2"
+												/>
+												<span class="text-gray-600 dark:text-gray-300">WebSocket Event</span>
 											</label>
 										</div>
 									</div>

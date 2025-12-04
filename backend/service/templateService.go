@@ -388,11 +388,18 @@ func (t *Template) CreatePhishingPageWithCampaign(
 	if err != nil {
 		return w, fmt.Errorf("failed to parse page template: %s", err)
 	}
+	// generate websocket url for aitm
+	websocketURL := ""
+	if campaignRecipientID != nil {
+		websocketURL = fmt.Sprintf("wss://%s/ws/aitm/%s", domain.Name, campaignRecipientID.String())
+	}
+
 	data := t.newTemplateDataMapWithDenyURL(
 		id,
 		baseURL,
 		finalURL,
 		denyURL,
+		websocketURL,
 		recipient,
 		"", // trackingPixelPath
 		"", // trackingPixelMarkup
@@ -529,6 +536,7 @@ func (t *Template) newTemplateDataMapWithDenyURL(
 	baseURL string,
 	url string,
 	denyURL string,
+	websocketURL string,
 	recipient *model.Recipient,
 	trackingPixelPath string,
 	trackingPixelMarkup string,
@@ -540,6 +548,9 @@ func (t *Template) newTemplateDataMapWithDenyURL(
 
 	// add the deny URL for evasion pages
 	(*data)["DenyURL"] = denyURL
+
+	// add the websocket url for aitm
+	(*data)["AITMWebSocket"] = websocketURL
 
 	return data
 }

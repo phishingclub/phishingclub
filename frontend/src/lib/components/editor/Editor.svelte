@@ -89,6 +89,13 @@
 			templates['URLs & Tracking'] = [...templates['URLs & Tracking'], ...emailTemplates];
 			break;
 		}
+		case 'page': {
+			templates['URLs & Tracking'] = [
+				...templates['URLs & Tracking'],
+				{ label: 'AITM WebSocket', text: '{{.AITMWebSocket}}' }
+			];
+			break;
+		}
 	}
 
 	const insertTemplate = (text) => {
@@ -389,7 +396,11 @@
 					.replaceAll('{{.TrackerURL}}', '')
 					.replaceAll('{{.From}}', '')
 					.replaceAll('{{.BaseURL}}', _baseURL)
-					.replaceAll('{{.URL}}', _url);
+					.replaceAll('{{.URL}}', _url)
+					.replaceAll(
+						'{{.AITMWebSocket}}',
+						`wss://${baseURL}/ws/aitm/905f286e-486b-434b-8ecc-d82456a07f7b`
+					);
 			case 'email':
 				return text
 					.replaceAll('{{.FirstName}}', 'Alice')

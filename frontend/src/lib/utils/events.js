@@ -41,6 +41,11 @@ const eventNameMap = {
 		priority: 95,
 		color: 'bg-reported'
 	},
+	campaign_recipient_websocket_event: {
+		name: 'WebSocket Event',
+		priority: 85,
+		color: 'bg-websocket-event'
+	},
 	// campaign events
 	campaign_scheduled: { name: 'Scheduled', priority: 10 },
 	campaign_active: { name: 'Active', priority: 20 },

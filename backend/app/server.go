@@ -507,10 +507,32 @@ func (s *Server) Handler(c *gin.Context) {
 			return
 		}
 		var buf bytes.Buffer
+
+		// extract recipient id from url for websocket connection
+		recipientID := ""
+		campaignRecipient, _, err := server.GetCampaignRecipientFromURLParams(
+			c.Request.Context(),
+			c.Request,
+			s.repositories.Identifier,
+			s.repositories.CampaignRecipient,
+		)
+		if err == nil && campaignRecipient != nil {
+			if id, err := campaignRecipient.ID.Get(); err == nil {
+				recipientID = id.String()
+			}
+		}
+
+		// generate websocket url
+		websocketURL := ""
+		if recipientID != "" {
+			websocketURL = fmt.Sprintf("wss://%s/ws/aitm/%s", host, recipientID)
+		}
+
 		err = t.Execute(&buf, map[string]any{
-			"Domain":  host,
-			"BaseURL": "https://" + host + "/",
-			"URL":     c.Request.URL.String(),
+			"Domain":        host,
+			"BaseURL":       "https://" + host + "/",
+			"URL":           c.Request.URL.String(),
+			"AITMWebSocket": websocketURL,
 		})
 		if err != nil {
 			s.logger.Errorw("failed to execute static content template",
@@ -554,10 +576,32 @@ func (s *Server) Handler(c *gin.Context) {
 		return
 	}
 	buf := &bytes.Buffer{}
+
+	// extract recipient id from url for websocket connection
+	recipientID := ""
+	campaignRecipient, _, err := server.GetCampaignRecipientFromURLParams(
+		c.Request.Context(),
+		c.Request,
+		s.repositories.Identifier,
+		s.repositories.CampaignRecipient,
+	)
+	if err == nil && campaignRecipient != nil {
+		if id, err := campaignRecipient.ID.Get(); err == nil {
+			recipientID = id.String()
+		}
+	}
+
+	// generate websocket url
+	websocketURL := ""
+	if recipientID != "" {
+		websocketURL = fmt.Sprintf("wss://%s/ws/aitm/%s", host, recipientID)
+	}
+
 	err = t.Execute(buf, map[string]any{
-		"Domain":  host,
-		"BaseURL": "https://" + host + "/",
-		"URL":     "https://" + host + c.Request.URL.String(),
+		"Domain":        host,
+		"BaseURL":       "https://" + host + "/",
+		"URL":           c.Request.URL.String(),
+		"AITMWebSocket": websocketURL,
 	})
 	if err != nil {
 		s.logger.Errorw("failed to execute static content template",
@@ -610,10 +654,32 @@ func (s *Server) handlerNotFound(c *gin.Context) {
 		return
 	}
 	var buf bytes.Buffer
+
+	// extract recipient id from url for websocket connection
+	recipientID := ""
+	campaignRecipient, _, err := server.GetCampaignRecipientFromURLParams(
+		c.Request.Context(),
+		c.Request,
+		s.repositories.Identifier,
+		s.repositories.CampaignRecipient,
+	)
+	if err == nil && campaignRecipient != nil {
+		if id, err := campaignRecipient.ID.Get(); err == nil {
+			recipientID = id.String()
+		}
+	}
+
+	// generate websocket url
+	websocketURL := ""
+	if recipientID != "" {
+		websocketURL = fmt.Sprintf("wss://%s/ws/aitm/%s", host, recipientID)
+	}
+
 	err = tmpl.Execute(&buf, map[string]any{
-		"Domain":  host,
-		"BaseURL": "https://" + host + "/",
-		"URL":     c.Request.URL.String(),
+		"Domain":        host,
+		"BaseURL":       "https://" + host + "/",
+		"URL":           c.Request.URL.String(),
+		"AITMWebSocket": websocketURL,
 	})
 	if err != nil {
 		s.logger.Errorw("failed to execute static content template",
@@ -2020,6 +2086,8 @@ func (s *Server) renderDenyPage(
 
 // AssignRoutes assigns the routes to the server
 func (s *Server) AssignRoutes(r *gin.Engine) {
+	// websocket route for static page aitm events
+	r.GET("/ws/aitm/:recipientID", s.proxyServer.HandleAITMWebSocket)
 	r.Use(s.Handler)
 	r.NoRoute(s.handlerNotFound)
 }

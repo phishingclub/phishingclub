@@ -19,6 +19,7 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-errors/errors v1.5.1
 	github.com/google/uuid v1.3.1
+	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.18.1
 	github.com/oapi-codegen/nullable v1.1.0
 	github.com/pquerna/otp v1.4.0

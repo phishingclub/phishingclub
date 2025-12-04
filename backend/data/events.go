@@ -18,6 +18,7 @@ const (
 	EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA       = "campaign_recipient_submitted_data"
 	EVENT_CAMPAIGN_RECIPIENT_REPORTED             = "campaign_recipient_reported"
 	EVENT_CAMPAIGN_RECIPIENT_CANCELLED            = "campaign_recipient_cancelled"
+	EVENT_CAMPAIGN_RECIPIENT_WEBSOCKET_EVENT      = "campaign_recipient_websocket_event"
 )
 
 var Events = []string{
@@ -39,4 +40,5 @@ var Events = []string{
 	EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
 	EVENT_CAMPAIGN_RECIPIENT_REPORTED,
 	EVENT_CAMPAIGN_RECIPIENT_CANCELLED,
+	EVENT_CAMPAIGN_RECIPIENT_WEBSOCKET_EVENT,
 }

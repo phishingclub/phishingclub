@@ -43,6 +43,7 @@ export default {
 				'deny-page-visited': '#ff6b35',
 				'submitted-data': '#f42e41',
 				reported: '#2c3e50',
+				'websocket-event': '#8b5cf6',
 				'completed-campaign': '#48bb78',
 				'repeat-offenders': '#ff6768',
 				'emails-read': '#e8e810',
