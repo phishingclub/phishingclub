@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/go-errors/errors"
+	"github.com/oapi-codegen/nullable"
 
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/data"
@@ -495,37 +496,84 @@ func (r *Recipient) GetByEmail(
 // Import imports recipients
 // if the recipient does not exists, it will be created and added to the group
 // if the recipient exits, it will be updated and added to the group
+
+// RecipientImportResult contains the results of importing recipients
+type RecipientImportResult struct {
+	SuccessIDs        []*uuid.UUID             `json:"successIDs"`
+	CreatedRecipients []RecipientImportSuccess `json:"createdRecipients"`
+	UpdatedRecipients []RecipientImportSuccess `json:"updatedRecipients"`
+	Failures          []RecipientImportFailure `json:"failures"`
+	Summary           RecipientImportSummary   `json:"summary"`
+}
+
+// RecipientImportSuccess contains information about a successful import
+type RecipientImportSuccess struct {
+	Email     string `json:"email"`
+	FirstName string `json:"firstName"`
+	LastName  string `json:"lastName"`
+	Index     int    `json:"index"`
+}
+
+// RecipientImportFailure contains information about a failed import
+type RecipientImportFailure struct {
+	Email  string `json:"email"`
+	Index  int    `json:"index"`
+	Reason string `json:"reason"`
+}
+
+// RecipientImportSummary contains summary statistics
+type RecipientImportSummary struct {
+	Total   int `json:"total"`
+	Success int `json:"success"`
+	Failed  int `json:"failed"`
+	Created int `json:"created"`
+	Updated int `json:"updated"`
+}
+
 func (r *Recipient) Import(
 	ctx context.Context,
 	session *model.Session,
 	recipients []*model.Recipient,
 	ignoreOverwriteEmptyFields bool,
 	companyID *uuid.UUID,
-) ([]*uuid.UUID, error) {
+) (*RecipientImportResult, error) {
 	ae := NewAuditEvent("Recipient.Import", session)
-	recipientsIDs := []*uuid.UUID{}
+	result := &RecipientImportResult{
+		SuccessIDs:        []*uuid.UUID{},
+		CreatedRecipients: []RecipientImportSuccess{},
+		UpdatedRecipients: []RecipientImportSuccess{},
+		Failures:          []RecipientImportFailure{},
+		Summary: RecipientImportSummary{
+			Total: len(recipients),
+		},
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		r.LogAuthError(err)
-		return recipientsIDs, errs.Wrap(err)
+		return result, errs.Wrap(err)
 	}
 	if !isAuthorized {
 		r.AuditLogNotAuthorized(ae)
-		return recipientsIDs, errs.ErrAuthorizationFailed
+		return result, errs.ErrAuthorizationFailed
 	}
 	if len(recipients) == 0 {
-		return recipientsIDs, validate.WrapErrorWithField(errors.New("no recipients"), "add recipients")
+		return result, validate.WrapErrorWithField(errors.New("no recipients"), "add recipients")
 	}
-	// first validate all the entries
-	for _, recipient := range recipients {
-		if err := recipient.Validate(); err != nil {
-			return recipientsIDs, errs.Wrap(err)
+
+	// process each recipient individually, collecting successes and failures
+	for i, incoming := range recipients {
+		// validate the recipient
+		if err := incoming.Validate(); err != nil {
+			result.Failures = append(result.Failures, RecipientImportFailure{
+				Email:  getEmailFromRecipient(incoming),
+				Index:  i,
+				Reason: err.Error(),
+			})
+			result.Summary.Failed++
+			continue
 		}
-	}
-	// if the recipient does not exist, create it
-	// if the recipient exists, update it
-	for _, incoming := range recipients {
+
 		// check if the recipient exists
 		email := incoming.Email.MustGet()
 		current, err := r.RecipientRepository.GetByEmail(
@@ -534,8 +582,17 @@ func (r *Recipient) Import(
 			"id", "email", "company_id",
 		)
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			r.Logger.Debugw("failed to import recipients - failed to get recipient", "error", err)
-			return recipientsIDs, errs.Wrap(err)
+			r.Logger.Debugw("failed to import recipient - failed to get recipient",
+				"error", err,
+				"email", email.String(),
+			)
+			result.Failures = append(result.Failures, RecipientImportFailure{
+				Email:  email.String(),
+				Index:  i,
+				Reason: "database error: " + err.Error(),
+			})
+			result.Summary.Failed++
+			continue
 		}
 		if current == nil {
 			// create recipient
@@ -548,12 +605,27 @@ func (r *Recipient) Import(
 				incoming,
 			)
 			if err != nil {
-				r.Logger.Debugw("failed to import recipients - failed to create recipient",
+				r.Logger.Debugw("failed to import recipient - failed to create recipient",
 					"error", err,
+					"email", email.String(),
 				)
-				return recipientsIDs, errs.Wrap(err)
+				result.Failures = append(result.Failures, RecipientImportFailure{
+					Email:  email.String(),
+					Index:  i,
+					Reason: "create failed: " + err.Error(),
+				})
+				result.Summary.Failed++
+				continue
 			}
-			recipientsIDs = append(recipientsIDs, recipientID)
+			result.SuccessIDs = append(result.SuccessIDs, recipientID)
+			result.Summary.Success++
+			result.Summary.Created++
+			result.CreatedRecipients = append(result.CreatedRecipients, RecipientImportSuccess{
+				Email:     email.String(),
+				FirstName: getStringFromOptional(incoming.FirstName),
+				LastName:  getStringFromOptional(incoming.LastName),
+				Index:     i,
+			})
 		} else {
 			// set the companyID to NOT SET, so it is not overwritten if supplied
 			incoming.CompanyID.SetUnspecified()
@@ -571,17 +643,47 @@ func (r *Recipient) Import(
 				incoming,
 			)
 			if err != nil {
-				r.Logger.Debugw("failed to import recipients - failed to update recipient",
+				r.Logger.Debugw("failed to import recipient - failed to update recipient",
 					"error", err,
+					"email", email.String(),
 				)
-				return recipientsIDs, errs.Wrap(err)
+				result.Failures = append(result.Failures, RecipientImportFailure{
+					Email:  email.String(),
+					Index:  i,
+					Reason: "update failed: " + err.Error(),
+				})
+				result.Summary.Failed++
+				continue
 			}
-			recipientsIDs = append(recipientsIDs, &recipientID)
+			result.SuccessIDs = append(result.SuccessIDs, &recipientID)
+			result.Summary.Success++
+			result.Summary.Updated++
+			result.UpdatedRecipients = append(result.UpdatedRecipients, RecipientImportSuccess{
+				Email:     email.String(),
+				FirstName: getStringFromOptional(incoming.FirstName),
+				LastName:  getStringFromOptional(incoming.LastName),
+				Index:     i,
+			})
 		}
 	}
 	r.AuditLogAuthorized(ae)
+	return result, nil
+}
 
-	return recipientsIDs, nil
+// getEmailFromRecipient safely extracts email from recipient for error reporting
+func getEmailFromRecipient(r *model.Recipient) string {
+	if r.Email.IsSpecified() && !r.Email.IsNull() {
+		return r.Email.MustGet().String()
+	}
+	return "<no email>"
+}
+
+// getStringFromOptional safely extracts string from optional field
+func getStringFromOptional(field nullable.Nullable[vo.OptionalString127]) string {
+	if field.IsSpecified() && !field.IsNull() {
+		return field.MustGet().String()
+	}
+	return ""
 }
 
 // Delete deletes a recipient

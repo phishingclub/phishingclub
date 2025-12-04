@@ -490,7 +490,7 @@ func (r *Recipient) Import(g *gin.Context) {
 	if !req.IgnoreOverwriteEmptyFields.IsSpecified() || req.IgnoreOverwriteEmptyFields.IsNull() {
 		req.IgnoreOverwriteEmptyFields = nullable.NewNullableWithValue(true)
 	}
-	_, err := r.RecipientService.Import(
+	result, err := r.RecipientService.Import(
 		g,
 		session,
 		req.Recipients,
@@ -500,7 +500,7 @@ func (r *Recipient) Import(g *gin.Context) {
 	if ok := r.handleErrors(g, err); !ok {
 		return
 	}
-	r.Response.OK(g, &gin.H{})
+	r.Response.OK(g, result)
 }
 
 // DeleteByID deletes a recipient by id
