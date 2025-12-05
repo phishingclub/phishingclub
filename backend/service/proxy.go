@@ -2092,13 +2092,13 @@ func (m *Proxy) validatePhishingDomainUniquenessForUpdate(ctx context.Context, p
 func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, proxyID *uuid.UUID, proxy *model.Proxy) error {
 	proxyConfig, err := proxy.ProxyConfig.Get()
 	if err != nil {
-		return fmt.Errorf("failed to get proxy config: %w", err)
+		return errs.NewCustomError(fmt.Errorf("failed to get proxy config: %w", err))
 	}
 
 	// parse complete YAML structure
 	var config ProxyServiceConfigYAML
 	if err := yaml.Unmarshal([]byte(proxyConfig.String()), &config); err != nil {
-		return fmt.Errorf("failed to parse proxy config YAML: %w", err)
+		return errs.NewCustomError(fmt.Errorf("failed to parse proxy config YAML: %w", err))
 	}
 
 	// set default values
@@ -2125,7 +2125,7 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			)
 			// rollback created domains on error
 			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return fmt.Errorf("'to' field is required for domain mapping '%s'", originalDomain)
+			return errs.NewCustomError(fmt.Errorf("'to' field is required for domain mapping '%s'", originalDomain))
 		}
 
 		// check if domain already exists (might be from previous failed attempt)
@@ -2138,7 +2138,7 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			)
 			// rollback created domains on error
 			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return fmt.Errorf("invalid phishing domain format %s: %w", domainConfig.To, err)
+			return errs.NewCustomError(fmt.Errorf("invalid phishing domain format %s: %w", domainConfig.To, err))
 		}
 
 		existingDomain, err := m.DomainRepository.GetByName(ctx, phishingDomainVO, &repository.DomainOption{})
@@ -2164,7 +2164,7 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			)
 			// rollback created domains on error
 			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return fmt.Errorf("domain %s already exists and is incompatible", domainConfig.To)
+			return errs.NewCustomError(fmt.Errorf("domain %s already exists and is incompatible", domainConfig.To))
 		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			// database error
 			m.Logger.Errorw("failed to check existing domain",
@@ -2194,7 +2194,7 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			)
 			// rollback created domains on error
 			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return fmt.Errorf("failed to create proxy target domain for %s: %w", domainConfig.To, err)
+			return errs.NewCustomError(fmt.Errorf("failed to create proxy target domain for %s: %w", domainConfig.To, err))
 		}
 		domain.ProxyTargetDomain.Set(*proxyTargetDomain)
 
@@ -2227,7 +2227,7 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			)
 			// rollback created domains on error
 			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return fmt.Errorf("failed to create page content for %s: %w", domainConfig.To, err)
+			return errs.NewCustomError(fmt.Errorf("failed to create page content for %s: %w", domainConfig.To, err))
 		}
 		domain.PageContent.Set(*pageContent)
 
@@ -2240,7 +2240,7 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			)
 			// rollback created domains on error
 			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return fmt.Errorf("failed to create page not found content for %s: %w", domainConfig.To, err)
+			return errs.NewCustomError(fmt.Errorf("failed to create page not found content for %s: %w", domainConfig.To, err))
 		}
 		domain.PageNotFoundContent.Set(*pageNotFoundContent)
 
@@ -2253,7 +2253,7 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			)
 			// rollback created domains on error
 			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return fmt.Errorf("failed to create redirect URL for %s: %w", domainConfig.To, err)
+			return errs.NewCustomError(fmt.Errorf("failed to create redirect URL for %s: %w", domainConfig.To, err))
 		}
 		domain.RedirectURL.Set(*redirectURL)
 
@@ -2270,7 +2270,7 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			)
 			// rollback created domains on error
 			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return fmt.Errorf("failed to create domain %s: %w", domainConfig.To, err)
+			return errs.NewCustomError(fmt.Errorf("failed to create domain %s: %w", domainConfig.To, err))
 		}
 
 		createdDomains = append(createdDomains, domainConfig.To)
@@ -2333,7 +2333,7 @@ func (m *Proxy) rollbackCreatedDomains(ctx context.Context, session *model.Sessi
 func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, proxyID *uuid.UUID, proxy *model.Proxy) error {
 	proxyConfig, err := proxy.ProxyConfig.Get()
 	if err != nil {
-		return fmt.Errorf("failed to get proxy config for sync: %w", err)
+		return errs.NewCustomError(fmt.Errorf("failed to get proxy config for sync: %w", err))
 	}
 
 	// get current proxy domains by proxy ID
@@ -2365,7 +2365,7 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 	// parse complete YAML structure
 	var config ProxyServiceConfigYAML
 	if err := yaml.Unmarshal([]byte(proxyConfig.String()), &config); err != nil {
-		return fmt.Errorf("failed to parse proxy config YAML for sync: %w", err)
+		return errs.NewCustomError(fmt.Errorf("failed to parse proxy config YAML for sync: %w", err))
 	}
 
 	// set default values
@@ -2628,7 +2628,7 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 
 	if errorCount > 0 {
 		errorDetails := strings.Join(syncErrors, "; ")
-		return fmt.Errorf("proxy domain sync failed with %d errors: %s", errorCount, errorDetails)
+		return errs.NewCustomError(fmt.Errorf("proxy domain sync failed with %d errors: %s", errorCount, errorDetails))
 	}
 
 	return nil
