@@ -60,7 +60,7 @@ See [production docker compose example](https://github.com/phishingclub/phishing
 
 ### Blogs & Resources
 - [Covert red team phishing with Phishing Club by Phishing Club](http://phishing.club/blog/covert-red-team-phishing-with-phishing-club/)
-- [Whitebox vs blackbox phishing by Phishing Club](http://phishing.club/blog/white-box-vs-black-box-phishing/)
+- [Phishing Simulation vs Red Team Phishing: Understanding Different Approaches](https://phishing.club/blog/phishing-simulation-vs-red-team-phishing/)
 
 ### Students & Learning
 

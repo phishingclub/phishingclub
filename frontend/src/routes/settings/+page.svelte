@@ -726,10 +726,7 @@
 									/>
 									<div class="text-left flex-1">
 										<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
-											Whitebox Mode
-										</span>
-										<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
-											For Phishing Simulation
+											Phishing Simulation
 										</span>
 									</div>
 								</label>
@@ -747,18 +744,15 @@
 									/>
 									<div class="text-left flex-1">
 										<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
-											Blackbox Mode
-										</span>
-										<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
-											For Red Teaming
+											Red Team Phishing
 										</span>
 									</div>
 								</label>
 								<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
 									Read about the difference between <a
 										class="white underline"
-										href="https://phishing.club/blog/white-box-vs-black-box-phishing/"
-										target="_blank">whitebox and blackbox phishing</a
+										href="https://phishing.club/blog/phishing-simulation-vs-red-team-phishing/"
+										target="_blank">phishing simulation and red team phishing</a
 									>
 								</p>
 							</div>
