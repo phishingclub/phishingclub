@@ -1,14 +1,20 @@
 # Changelog
 
-## [1.22.0] - 2025-12-03
+## [1.23.0] - 2025-12-13
+- Added Session Sushi as recommended handling of captured cookies
+- Rename whitebox/blackbox to Simulation/Red Team
+- Added support for capturing PUT, PATCH and more content types
+- Added status modal after import recipients
+
+## [1.22.0 / 1.21.1] - 2025-12-03
 - Added preview recipients modal to create campaign modal
 - Added readonly to recipient email on update modal
 - Added CTRL+s save on create modals that are primarily editors
 - Improved installer UI width
 - Added clientside validation to username and password on installer
-- Added recipient CSV clientside parsing warnings and errors 
+- Added recipient CSV clientside parsing warnings and errors
 - Fix rewrite_urls query param mapping bug in proxies
-- Fix CTRL+s save on update now keep position in editor 
+- Fix CTRL+s save on update now keep position in editor
 
 ## [1.21.0] - 2025-11-27
 - Added new capture engines for json, formdata and urlencoded

@@ -320,9 +320,6 @@
 												/>
 												<div class="text-left">
 													<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
-														Whitebox
-													</span>
-													<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
 														Phishing Simulation
 													</span>
 												</div>
@@ -341,10 +338,7 @@
 												/>
 												<div class="text-left">
 													<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
-														Blackbox
-													</span>
-													<span class="text-xs text-gray-600 dark:text-gray-400 block mt-1">
-														Red Team Phishing.
+														Red Team Phishing
 													</span>
 												</div>
 											</label>
@@ -354,8 +348,8 @@
 												Read about the difference between <br />
 												<a
 													class="white underline"
-													href="https://phishing.club/blog/white-box-vs-black-box-phishing/"
-													target="_blank">whitebox and blackbox phishing</a
+													href="https://phishing.club/blog/phishing-simulation-vs-red-team-phishing/"
+													target="_blank">phishing simulation and red team phishing</a
 												>
 											</p>
 										</div>

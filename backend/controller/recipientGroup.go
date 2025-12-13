@@ -221,7 +221,7 @@ func (r *RecipientGroup) Import(g *gin.Context) {
 		req.IgnoreOverwriteEmptyFields = nullable.NewNullableWithValue(true)
 	}
 
-	err := r.RecipientGroupService.Import(
+	result, err := r.RecipientGroupService.Import(
 		g,
 		session,
 		req.Recipients,
@@ -232,7 +232,7 @@ func (r *RecipientGroup) Import(g *gin.Context) {
 	if ok := r.handleErrors(g, err); !ok {
 		return
 	}
-	r.Response.OK(g, &gin.H{})
+	r.Response.OK(g, result)
 }
 
 // AddRecipients adds recipients to a recipient group

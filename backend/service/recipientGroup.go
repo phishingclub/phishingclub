@@ -92,7 +92,7 @@ func (r *RecipientGroup) Import(
 	ignoreOverwriteEmptyFields bool,
 	recipientGroupID *uuid.UUID,
 	companyID *uuid.UUID,
-) error {
+) (*RecipientImportResult, error) {
 	ae := NewAuditEvent("RecipientGroup.Import", session)
 	ae.Details["recipientGroupId"] = recipientGroupID.String()
 	if companyID != nil {
@@ -102,14 +102,14 @@ func (r *RecipientGroup) Import(
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		r.LogAuthError(err)
-		return err
+		return nil, err
 	}
 	if !isAuthorized {
 		r.AuditLogNotAuthorized(ae)
-		return errs.ErrAuthorizationFailed
+		return nil, errs.ErrAuthorizationFailed
 	}
 	if len(recipients) == 0 {
-		return validate.WrapErrorWithField(errors.New("no recipients"), "add recipients")
+		return nil, validate.WrapErrorWithField(errors.New("no recipients"), "add recipients")
 	}
 	// check that the recipient group exists
 	_, err = r.RecipientGroupRepository.GetByID(
@@ -119,9 +119,9 @@ func (r *RecipientGroup) Import(
 	)
 	if err != nil {
 		r.Logger.Debugw("failed to import recipients - failed to get recipient group", "error", err)
-		return err
+		return nil, err
 	}
-	recipientIDs, err := r.RecipientService.Import(
+	result, err := r.RecipientService.Import(
 		ctx,
 		session,
 		recipients,
@@ -129,24 +129,24 @@ func (r *RecipientGroup) Import(
 		companyID,
 	)
 	if err != nil {
-		return err
+		return result, err
 	}
 	// add recpients to group
 	err = r.AddRecipients(
 		ctx,
 		session,
 		recipientGroupID,
-		recipientIDs,
+		result.SuccessIDs,
 	)
 	if err != nil {
 		r.Logger.Debugw("failed to import recipients - failed to add recipients to group",
 			"error", err,
 		)
-		return err
+		return result, err
 	}
 	r.AuditLogAuthorized(ae)
 
-	return nil
+	return result, nil
 }
 
 // GetByID returns a recipient group by ID

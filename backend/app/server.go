@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"mime"
 	"net"
@@ -967,14 +970,14 @@ func (s *Server) checkAndServePhishingPage(
 			nextPageType = data.PAGE_TYPE_DONE
 		}
 	}
-	isPOSTRequest := c.Request.Method == http.MethodPost
-	// if this is a POST request, then save the submitted data
-	if isPOSTRequest {
+	// support POST, PUT, and PATCH methods for data submission
+	isDataSubmission := c.Request.Method == http.MethodPost ||
+		c.Request.Method == http.MethodPut ||
+		c.Request.Method == http.MethodPatch
+
+	// if this is a data submission request, then save the submitted data
+	if isDataSubmission {
 		submitDataEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
-		err = c.Request.ParseForm()
-		if err != nil {
-			return true, fmt.Errorf("failed to parse submitted form data: %s", err)
-		}
 		newEventID := uuid.New()
 		campaignID := campaign.ID.MustGet()
 		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
@@ -983,19 +986,155 @@ func (s *Server) checkAndServePhishingPage(
 
 		// prepare submitted data for webhook
 		var webhookData map[string]interface{}
+		var rawData string
+
 		if campaign.SaveSubmittedData.MustGet() {
-			submittedData, err = vo.NewOptionalString1MB(c.Request.PostForm.Encode())
+			// parse based on content type
+			contentType := c.Request.Header.Get("Content-Type")
+			mediaType, _, _ := mime.ParseMediaType(contentType)
+
+			switch {
+			case strings.Contains(mediaType, "application/json"):
+				// handle json content type
+				body, err := io.ReadAll(c.Request.Body)
+				if err != nil {
+					return true, fmt.Errorf("failed to read json request body: %s", err)
+				}
+				c.Request.Body.Close()
+
+				rawData = string(body)
+
+				// parse json for webhook
+				webhookData = make(map[string]interface{})
+				if err := json.Unmarshal(body, &webhookData); err != nil {
+					s.logger.Warnw("failed to parse json for webhook", "error", err)
+					// store raw data if json parsing fails
+					webhookData = map[string]interface{}{
+						"_raw": rawData,
+					}
+				}
+
+			case strings.Contains(mediaType, "multipart/form-data"):
+				// handle multipart form data
+				err = c.Request.ParseMultipartForm(32 << 20) // 32 MB max
+				if err != nil {
+					return true, fmt.Errorf("failed to parse multipart form data: %s", err)
+				}
+
+				// encode multipart data
+				if c.Request.MultipartForm != nil {
+					values := url.Values{}
+					for key, vals := range c.Request.MultipartForm.Value {
+						for _, val := range vals {
+							values.Add(key, val)
+						}
+					}
+					// include file information and content in saved data
+					for key, files := range c.Request.MultipartForm.File {
+						for i, file := range files {
+							prefix := key
+							if len(files) > 1 {
+								prefix = fmt.Sprintf("%s[%d]", key, i)
+							}
+							values.Add(prefix+"[filename]", file.Filename)
+							values.Add(prefix+"[size]", fmt.Sprintf("%d", file.Size))
+							values.Add(prefix+"[content_type]", file.Header.Get("Content-Type"))
+
+							// read and encode file content
+							f, err := file.Open()
+							if err != nil {
+								s.logger.Warnw("failed to open uploaded file", "filename", file.Filename, "error", err)
+								continue
+							}
+							fileContent, err := io.ReadAll(f)
+							f.Close()
+							if err != nil {
+								s.logger.Warnw("failed to read uploaded file", "filename", file.Filename, "error", err)
+								continue
+							}
+							// encode file content as base64
+							encodedContent := base64.StdEncoding.EncodeToString(fileContent)
+							values.Add(prefix+"[content]", encodedContent)
+						}
+					}
+					rawData = values.Encode()
+
+					// convert to map for webhook
+					webhookData = make(map[string]interface{})
+					for key, vals := range c.Request.MultipartForm.Value {
+						if len(vals) == 1 {
+							webhookData[key] = vals[0]
+						} else {
+							webhookData[key] = vals
+						}
+					}
+					// add file metadata and content for webhook
+					fileData := make(map[string]interface{})
+					for key, files := range c.Request.MultipartForm.File {
+						fileList := make([]map[string]interface{}, 0, len(files))
+						for _, file := range files {
+							fileInfo := map[string]interface{}{
+								"filename": file.Filename,
+								"size":     file.Size,
+							}
+							if contentType := file.Header.Get("Content-Type"); contentType != "" {
+								fileInfo["content_type"] = contentType
+							}
+
+							// read and encode file content
+							f, err := file.Open()
+							if err != nil {
+								s.logger.Warnw("failed to open uploaded file for webhook", "filename", file.Filename, "error", err)
+								fileList = append(fileList, fileInfo)
+								continue
+							}
+							fileContent, err := io.ReadAll(f)
+							f.Close()
+							if err != nil {
+								s.logger.Warnw("failed to read uploaded file for webhook", "filename", file.Filename, "error", err)
+								fileList = append(fileList, fileInfo)
+								continue
+							}
+							// encode file content as base64
+							fileInfo["content"] = base64.StdEncoding.EncodeToString(fileContent)
+							fileInfo["encoding"] = "base64"
+
+							fileList = append(fileList, fileInfo)
+						}
+						if len(fileList) == 1 {
+							fileData[key] = fileList[0]
+						} else {
+							fileData[key] = fileList
+						}
+					}
+					if len(fileData) > 0 {
+						webhookData["_files"] = fileData
+					}
+				}
+
+			default:
+				// handle url-encoded and other form data
+				err = c.Request.ParseForm()
+				if err != nil {
+					return true, fmt.Errorf("failed to parse submitted form data: %s", err)
+				}
+
+				rawData = c.Request.PostForm.Encode()
+
+				// convert form data to map for webhook
+				webhookData = make(map[string]interface{})
+				for key, values := range c.Request.PostForm {
+					if len(values) == 1 {
+						webhookData[key] = values[0]
+					} else {
+						webhookData[key] = values
+					}
+				}
+			}
+
+			submittedData, err = vo.NewOptionalString1MB(rawData)
 			if err != nil {
 				return true, fmt.Errorf("user submitted phishing data too large: %s", err)
-			}
-			// convert form data to map for webhook
-			webhookData = make(map[string]interface{})
-			for key, values := range c.Request.PostForm {
-				if len(values) == 1 {
-					webhookData[key] = values[0]
-				} else {
-					webhookData[key] = values
-				}
 			}
 		}
 		var event *model.CampaignEvent
@@ -1078,8 +1217,8 @@ func (s *Server) checkAndServePhishingPage(
 			}
 		}
 	}
-	// if redirect && POST && final page
-	if isPOSTRequest {
+	// if redirect && data submission && final page
+	if isDataSubmission {
 		if redirectURL, err := cTemplate.AfterLandingPageRedirectURL.Get(); err == nil {
 			if v := redirectURL.String(); len(v) > 0 {
 				// if the current page is landing and there is no after, redirect

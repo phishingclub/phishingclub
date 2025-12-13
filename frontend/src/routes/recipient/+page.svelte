@@ -22,6 +22,7 @@
 	import { getPaginatedChunkWithParams } from '$lib/service/paginationChunk';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
@@ -63,6 +64,8 @@
 		ignoreOverwriteEmptyFields: true
 	};
 	let csvSkippedRows = [];
+	let importResult = null;
+	let isImportResultModalVisible = false;
 	const tableImportParams = newTableParams({ sortBy: 'email' });
 	let selectedRecipientsImportPaginatedChunk = [];
 	let isImportModalVisible = false;
@@ -210,8 +213,29 @@
 				importModalError = res.error;
 				return;
 			}
-			addToast('Recipients imported', 'Success');
+
+			// store import result for display
+			importResult = res.data;
+
+			// build summary message
+			const summary = res.data.summary;
+			let message = `Import complete: ${summary.success} succeeded (${summary.created} created, ${summary.updated} updated)`;
+			if (summary.failed > 0) {
+				message += `, ${summary.failed} failed`;
+			}
+			if (csvSkippedRows.length > 0) {
+				message += `, ${csvSkippedRows.length} skipped in CSV`;
+			}
+
+			console.log(summary);
+			addToast(
+				'Import finished',
+				summary.failed > 0 || csvSkippedRows.length > 0 ? 'Warning' : 'Success'
+			);
+
+			// show result modal
 			closeImportModal();
+			isImportResultModalVisible = true;
 			refreshRecipients();
 		} catch (err) {
 			addToast('Failed to import recipients', 'Error');
@@ -289,6 +313,7 @@
 	const openImportModal = () => {
 		csvSkippedRows = [];
 		importModalError = '';
+		importResult = null;
 		isImportModalVisible = true;
 	};
 
@@ -685,4 +710,232 @@
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
 	></DeleteAlert>
+
+	{#if isImportResultModalVisible && importResult}
+		<Modal headerText="Recipient Import Summary" bind:visible={isImportResultModalVisible}>
+			<div class="p-6 max-h-[80vh] overflow-y-auto">
+				<div class="space-y-6">
+					<!-- Statistics Section -->
+					<div class="grid grid-cols-1 gap-6">
+						<div>
+							<h3 class="font-semibold text-gray-900 dark:text-gray-100 mb-2">Recipients</h3>
+							<ul class="space-y-1">
+								<li>Total: {importResult.summary.total}</li>
+								<li>Created: {importResult.summary.created}</li>
+								<li>Updated: {importResult.summary.updated}</li>
+								<li>Failed: {importResult.summary.failed}</li>
+								{#if csvSkippedRows.length > 0}
+									<li>Skipped in CSV: {csvSkippedRows.length}</li>
+								{/if}
+							</ul>
+						</div>
+					</div>
+
+					<!-- Details Section -->
+					<div class="border-t pt-6">
+						<div class="space-y-4">
+							{#if importResult.createdRecipients?.length > 0}
+								<div
+									class="bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+								>
+									<details class="group">
+										<summary
+											class="cursor-pointer p-4 font-semibold text-base text-pc-darkblue dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg transition-colors list-none flex items-center gap-2"
+										>
+											<svg
+												class="w-4 h-4 transition-transform group-open:rotate-90"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M9 5l7 7-7 7"
+												/>
+											</svg>
+											<span>Created ({importResult.createdRecipients.length})</span>
+										</summary>
+										<div class="px-4 pb-4">
+											<div class="space-y-1">
+												{#each importResult.createdRecipients as recipient}
+													<div
+														class="flex items-center justify-between py-2 px-3 rounded hover:bg-white dark:hover:bg-gray-700/50 transition-colors"
+													>
+														<span
+															class="text-sm text-gray-900 dark:text-gray-100 font-medium truncate flex-1"
+														>
+															{recipient.email}
+														</span>
+														{#if recipient.firstName || recipient.lastName}
+															<span
+																class="text-sm text-gray-500 dark:text-gray-400 ml-4 whitespace-nowrap"
+															>
+																{recipient.firstName || ''}
+																{recipient.lastName || ''}
+															</span>
+														{/if}
+													</div>
+												{/each}
+											</div>
+										</div>
+									</details>
+								</div>
+							{/if}
+
+							{#if importResult.updatedRecipients?.length > 0}
+								<div
+									class="bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+								>
+									<details class="group">
+										<summary
+											class="cursor-pointer p-4 font-semibold text-base text-pc-darkblue dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg transition-colors list-none flex items-center gap-2"
+										>
+											<svg
+												class="w-4 h-4 transition-transform group-open:rotate-90"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M9 5l7 7-7 7"
+												/>
+											</svg>
+											<span>Updated ({importResult.updatedRecipients.length})</span>
+										</summary>
+										<div class="px-4 pb-4">
+											<div class="space-y-1">
+												{#each importResult.updatedRecipients as recipient}
+													<div
+														class="flex items-center justify-between py-2 px-3 rounded hover:bg-white dark:hover:bg-gray-700/50 transition-colors"
+													>
+														<span
+															class="text-sm text-gray-900 dark:text-gray-100 font-medium truncate flex-1"
+														>
+															{recipient.email}
+														</span>
+														{#if recipient.firstName || recipient.lastName}
+															<span
+																class="text-sm text-gray-500 dark:text-gray-400 ml-4 whitespace-nowrap"
+															>
+																{recipient.firstName || ''}
+																{recipient.lastName || ''}
+															</span>
+														{/if}
+													</div>
+												{/each}
+											</div>
+										</div>
+									</details>
+								</div>
+							{/if}
+
+							{#if csvSkippedRows.length > 0}
+								<div
+									class="bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+								>
+									<details class="group">
+										<summary
+											class="cursor-pointer p-4 font-semibold text-base text-pc-darkblue dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg transition-colors list-none flex items-center gap-2"
+										>
+											<svg
+												class="w-4 h-4 transition-transform group-open:rotate-90"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M9 5l7 7-7 7"
+												/>
+											</svg>
+											<span>Skipped in CSV ({csvSkippedRows.length})</span>
+										</summary>
+										<div class="px-4 pb-4">
+											<p class="text-sm text-gray-500 dark:text-gray-400 mb-3">
+												These rows were skipped during CSV parsing (before import)
+											</p>
+											<div class="space-y-1">
+												{#each csvSkippedRows as skip}
+													<div
+														class="flex items-center justify-between py-2 px-3 rounded hover:bg-white dark:hover:bg-gray-700/50 transition-colors"
+													>
+														<span
+															class="text-sm text-gray-900 dark:text-gray-100 font-medium truncate flex-1"
+														>
+															Line {skip.line}: {skip.reason}
+															{#if skip.row?.email}
+																<span class="text-gray-500 dark:text-gray-400 ml-2"
+																	>({skip.row.email})</span
+																>
+															{/if}
+														</span>
+													</div>
+												{/each}
+											</div>
+										</div>
+									</details>
+								</div>
+							{/if}
+
+							{#if importResult.failures?.length > 0}
+								<div
+									class="bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+								>
+									<details class="group">
+										<summary
+											class="cursor-pointer p-4 font-semibold text-base text-pc-darkblue dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-lg transition-colors list-none flex items-center gap-2"
+										>
+											<svg
+												class="w-4 h-4 transition-transform group-open:rotate-90"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M9 5l7 7-7 7"
+												/>
+											</svg>
+											<span>Import Errors ({importResult.failures.length})</span>
+										</summary>
+										<div class="px-4 pb-4">
+											<p class="text-sm text-gray-500 dark:text-gray-400 mb-3">
+												These recipients failed to import (backend errors)
+											</p>
+											<div class="space-y-1">
+												{#each importResult.failures as err}
+													<div
+														class="flex items-center justify-between py-2 px-3 rounded hover:bg-white dark:hover:bg-gray-700/50 transition-colors"
+													>
+														<span
+															class="text-sm text-gray-900 dark:text-gray-100 font-medium truncate flex-1"
+														>
+															{err.email}: {err.reason}
+														</span>
+													</div>
+												{/each}
+											</div>
+										</div>
+									</details>
+								</div>
+							{/if}
+						</div>
+					</div>
+
+					<div class="mt-4 flex justify-end">
+						<Button on:click={() => (isImportResultModalVisible = false)}>Close</Button>
+					</div>
+				</div>
+			</div>
+		</Modal>
+	{/if}
 </section>
