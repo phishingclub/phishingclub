@@ -132,7 +132,7 @@
 	let isAnonymizeModalVisible = false;
 	let isSendMessageModalVisible = false;
 	let isSetAsSentModalVisible = false;
-	let isStorageAceModalVisible = false;
+	let isSessionSushiModalVisible = false;
 	let storedCookieData = '';
 	let sendMessageRecipient = null;
 	let setAsSentRecipient = null;
@@ -578,13 +578,13 @@
 		isAnonymizeModalVisible = false;
 	};
 
-	const closeStorageAceModal = () => {
-		isStorageAceModalVisible = false;
+	const closeSessionSushiModal = () => {
+		isSessionSushiModalVisible = false;
 		storedCookieData = '';
 	};
 
-	const onStorageAceModalOk = () => {
-		closeStorageAceModal();
+	const onSessionSushiModalOk = () => {
+		closeSessionSushiModal();
 	};
 
 	/** @param {string} eventData @param {string} eventName */
@@ -596,7 +596,7 @@
 
 			if (eventName === 'campaign_recipient_submitted_data' && eventData.startsWith('🍪')) {
 				storedCookieData = eventData;
-				isStorageAceModalVisible = true;
+				isSessionSushiModalVisible = true;
 			}
 
 			addToast('Copied to clipboard', 'Success');
@@ -2169,18 +2169,18 @@
 
 	<Modal
 		headerText={'Cookies captured'}
-		visible={isStorageAceModalVisible}
-		onClose={closeStorageAceModal}
+		visible={isSessionSushiModalVisible}
+		onClose={closeSessionSushiModal}
 	>
 		<div class="mt-4">
 			<!-- Introduction Section -->
 			<div>
 				<h3 class="text-xl font-semibold text-gray-700">Import cookie</h3>
 				<p class="text-gray-600 mb-4">
-					Cookies can be imported using the <a
-						href="https://chromewebstore.google.com/detail/storageace/cpbgcbmddckpmhfbdckeolkkhkjjmplo"
+					Cookies can be imported and exchanged for tokens using the <a
+						href="https://github.com/phishingclub/session-sushi"
 						target="_blank"
-						class="text-blue-600 dark:text-white hover:underline">StorageAce</a
+						class="text-blue-600 dark:text-white hover:underline">Session Sushi</a
 					> extension.
 				</p>
 			</div>
@@ -2203,7 +2203,7 @@
 				</button>
 			</div>
 		</div>
-		<FormGrid on:submit={onStorageAceModalOk}>
+		<FormGrid on:submit={onSessionSushiModalOk}>
 			<FormColumns>
 				<FormColumn>
 					<!-- Empty form column for structure -->
@@ -2214,7 +2214,7 @@
 			>
 				<button
 					type="button"
-					on:click={closeStorageAceModal}
+					on:click={closeSessionSushiModal}
 					class="bg-blue-600 hover:bg-blue-500 dark:bg-blue-500 dark:hover:bg-blue-400 text-sm uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
 				>
 					Close
