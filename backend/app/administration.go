@@ -194,6 +194,8 @@ const (
 	ROUTE_V1_OAUTH_PROVIDER_REMOVE_AUTH = "/api/v1/oauth-provider/:id/remove-authorization"
 	ROUTE_V1_OAUTH_AUTHORIZE            = "/api/v1/oauth-authorize/:id"
 	ROUTE_V1_OAUTH_CALLBACK             = "/api/v1/oauth-callback"
+	ROUTE_V1_OAUTH_IMPORT_TOKENS        = "/api/v1/oauth-provider/import-tokens"
+	ROUTE_V1_OAUTH_EXPORT_TOKENS        = "/api/v1/oauth-provider/:id/export-tokens"
 	// license
 	ROUTE_V1_LICENSE = "/api/v1/license"
 	// version
@@ -377,6 +379,8 @@ func setupRoutes(
 		POST(ROUTE_V1_OAUTH_PROVIDER_REMOVE_AUTH, middleware.SessionHandler, controllers.OAuthProvider.RemoveAuthorization).
 		GET(ROUTE_V1_OAUTH_AUTHORIZE, middleware.SessionHandler, controllers.OAuthProvider.GetAuthorizationURL).
 		GET(ROUTE_V1_OAUTH_CALLBACK, controllers.OAuthProvider.HandleCallback).
+		POST(ROUTE_V1_OAUTH_IMPORT_TOKENS, middleware.SessionHandler, controllers.OAuthProvider.ImportAuthorizedTokens).
+		GET(ROUTE_V1_OAUTH_EXPORT_TOKENS, middleware.SessionHandler, controllers.OAuthProvider.ExportAuthorizedTokens).
 		// emails
 		GET(ROUTE_V1_EMAIL, middleware.SessionHandler, controllers.Email.GetAll).
 		GET(ROUTE_V1_EMAIL_OVERVIEW, middleware.SessionHandler, controllers.Email.GetOverviews).

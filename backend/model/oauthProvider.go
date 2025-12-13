@@ -38,6 +38,10 @@ type OAuthProvider struct {
 	// status
 	IsAuthorized nullable.Nullable[bool] `json:"isAuthorized"` // whether oauth flow completed
 
+	// indicates if this provider was created via import (with pre-authorized tokens)
+	// imported providers cannot be authorized/reauthorized via oauth flow
+	IsImported nullable.Nullable[bool] `json:"isImported"`
+
 	CompanyID nullable.Nullable[uuid.UUID] `json:"companyID"`
 	Company   *Company                     `json:"company"`
 }
@@ -172,6 +176,13 @@ func (o *OAuthProvider) ToDBMap() map[string]any {
 			m["company_id"] = nil
 		} else {
 			m["company_id"] = o.CompanyID.MustGet()
+		}
+	}
+
+	if o.IsImported.IsSpecified() {
+		m["is_imported"] = nil
+		if isImported, err := o.IsImported.Get(); err == nil {
+			m["is_imported"] = isImported
 		}
 	}
 

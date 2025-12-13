@@ -1905,6 +1905,26 @@ export class API {
 		 */
 		removeAuthorization: async (id) => {
 			return await postJSON(this.getPath(`/oauth-provider/${id}/remove-authorization`), {});
+		},
+
+		/**
+		 * Import authorized OAuth tokens.
+		 *
+		 * @param {Array<{access_token: string, refresh_token: string, client_id: string, expires_at: number, name: string, user: string, scope: string, token_url?: string, created_at?: number}>} tokens
+		 * @returns {Promise<ApiResponse>}
+		 */
+		importTokens: async (tokens) => {
+			return await postJSON(this.getPath('/oauth-provider/import-tokens'), tokens);
+		},
+
+		/**
+		 * Export OAuth tokens for a provider.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		exportTokens: async (id) => {
+			return await getJSON(this.getPath(`/oauth-provider/${id}/export-tokens`));
 		}
 	};
 

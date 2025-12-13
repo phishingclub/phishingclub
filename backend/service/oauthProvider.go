@@ -212,6 +212,20 @@ func (o *OAuthProvider) UpdateByID(
 		return errs.Wrap(err)
 	}
 
+	// for imported providers, only allow name updates
+	if existing.IsImported.MustGet() {
+		// clear all fields except name and id
+		provider.AuthURL = nullable.NewNullNullable[vo.String512]()
+		provider.TokenURL = nullable.NewNullNullable[vo.String512]()
+		provider.Scopes = nullable.NewNullNullable[vo.String512]()
+		provider.ClientID = nullable.NewNullNullable[vo.String255]()
+		provider.ClientSecret = nullable.NewNullNullable[vo.OptionalString255]()
+		provider.AccessToken = nullable.NewNullNullable[vo.OptionalString1MB]()
+		provider.RefreshToken = nullable.NewNullNullable[vo.OptionalString1MB]()
+		provider.IsAuthorized = nullable.NewNullNullable[bool]()
+		provider.IsImported = nullable.NewNullNullable[bool]()
+	}
+
 	var companyID *uuid.UUID
 	if cid, err := existing.CompanyID.Get(); err == nil {
 		companyID = &cid
@@ -364,6 +378,11 @@ func (o *OAuthProvider) GetAuthorizationURL(
 			return "", errs.Wrap(err)
 		}
 		return "", errs.Wrap(err)
+	}
+
+	// prevent authorization on imported providers
+	if provider.IsImported.MustGet() {
+		return "", errors.New("cannot authorize imported providers - they use pre-authorized tokens")
 	}
 
 	// generate cryptographically random state token (32 bytes base64-encoded)
@@ -641,6 +660,179 @@ func (o *OAuthProvider) requestTokens(tokenURL string, data url.Values) (*TokenR
 	}
 
 	return &tokens, nil
+}
+
+// ImportAuthorizedTokens imports pre-authorized oauth tokens
+func (o *OAuthProvider) ImportAuthorizedTokens(
+	ctx context.Context,
+	session *model.Session,
+	tokens []model.ImportAuthorizedToken,
+) ([]uuid.UUID, error) {
+	ae := NewAuditEvent("OAuthProvider.ImportAuthorizedTokens", session)
+
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+
+	// validate input
+	if len(tokens) == 0 {
+		return nil, errors.New("no tokens provided")
+	}
+
+	var ids []uuid.UUID
+
+	for _, token := range tokens {
+		// validate token
+		if err := token.Validate(); err != nil {
+			return nil, err
+		}
+
+		// set default token url if not provided
+		token.SetDefaultTokenURL()
+
+		// convert expires_at from milliseconds to time
+		expiresAt := time.UnixMilli(token.ExpiresAt)
+
+		// create provider with imported flag
+		provider := &model.OAuthProvider{
+			Name:            nullable.NewNullableWithValue(*vo.NewString127Must(token.Name)),
+			AuthURL:         nullable.NewNullableWithValue(*vo.NewString512Must("n/a")), // placeholder for imported
+			TokenURL:        nullable.NewNullableWithValue(*vo.NewString512Must(token.TokenURL)),
+			Scopes:          nullable.NewNullableWithValue(*vo.NewString512Must(token.Scope)),
+			ClientID:        nullable.NewNullableWithValue(*vo.NewString255Must(token.ClientID)),
+			ClientSecret:    nullable.NewNullableWithValue(*vo.NewOptionalString255Must("n/a")), // placeholder for imported
+			AccessToken:     nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(token.AccessToken)),
+			RefreshToken:    nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(token.RefreshToken)),
+			TokenExpiresAt:  &expiresAt,
+			AuthorizedEmail: nullable.NewNullableWithValue(*vo.NewOptionalString255Must(token.User)),
+			AuthorizedAt:    ptrTime(time.Now()),
+			IsAuthorized:    nullable.NewNullableWithValue(true),
+			IsImported:      nullable.NewNullableWithValue(true),
+			CompanyID:       nullable.NewNullNullable[uuid.UUID](),
+		}
+
+		// check uniqueness
+		isOK, err := repository.CheckNameIsUnique(
+			ctx,
+			o.OAuthProviderRepository.DB,
+			"oauth_providers",
+			token.Name,
+			nil,
+			nil,
+		)
+		if err != nil {
+			o.Logger.Errorw("failed to check oauth provider uniqueness", "error", err)
+			return nil, errs.Wrap(err)
+		}
+		if !isOK {
+			o.Logger.Debugw("oauth provider name is already used", "name", token.Name)
+			return nil, validate.WrapErrorWithField(errors.New("is not unique"), "name")
+		}
+
+		// save
+		id, err := o.OAuthProviderRepository.Insert(ctx, provider)
+		if err != nil {
+			o.Logger.Errorw("failed to insert imported oauth provider", "error", err)
+			return nil, errs.Wrap(err)
+		}
+
+		ids = append(ids, *id)
+	}
+
+	ae.Details["count"] = len(ids)
+	o.AuditLogAuthorized(ae)
+
+	return ids, nil
+}
+
+// ExportAuthorizedTokens exports oauth tokens in the import format
+func (o *OAuthProvider) ExportAuthorizedTokens(
+	ctx context.Context,
+	session *model.Session,
+	providerID uuid.UUID,
+) (*model.ImportAuthorizedToken, error) {
+	ae := NewAuditEvent("OAuthProvider.ExportAuthorizedTokens", session)
+
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+
+	// get provider
+	provider, err := o.OAuthProviderRepository.GetByID(ctx, providerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errs.Wrap(err)
+		}
+		o.Logger.Errorw("failed to get oauth provider", "error", err)
+		return nil, errs.Wrap(err)
+	}
+
+	// check if provider is authorized
+	if !provider.IsAuthorized.MustGet() {
+		return nil, errors.New("provider is not authorized")
+	}
+
+	// extract tokens
+	accessToken := ""
+	if at, err := provider.AccessToken.Get(); err == nil {
+		accessToken = at.String()
+	}
+
+	refreshToken := ""
+	if rt, err := provider.RefreshToken.Get(); err == nil {
+		refreshToken = rt.String()
+	}
+
+	authorizedEmail := ""
+	if ae, err := provider.AuthorizedEmail.Get(); err == nil {
+		authorizedEmail = ae.String()
+	}
+
+	var expiresAt int64
+	if provider.TokenExpiresAt != nil {
+		expiresAt = provider.TokenExpiresAt.UnixMilli()
+	}
+
+	var createdAt int64
+	if provider.CreatedAt != nil {
+		createdAt = provider.CreatedAt.UnixMilli()
+	}
+
+	exported := &model.ImportAuthorizedToken{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ClientID:     provider.ClientID.MustGet().String(),
+		ExpiresAt:    expiresAt,
+		Name:         provider.Name.MustGet().String(),
+		User:         authorizedEmail,
+		Scope:        provider.Scopes.MustGet().String(),
+		TokenURL:     provider.TokenURL.MustGet().String(),
+		CreatedAt:    createdAt,
+	}
+
+	ae.Details["id"] = providerID.String()
+	o.AuditLogAuthorized(ae)
+
+	return exported, nil
+}
+
+// ptrTime returns a pointer to a time.Time
+func ptrTime(t time.Time) *time.Time {
+	return &t
 }
 
 /* @TODO the logic is here, but i dont think we really need to implement it

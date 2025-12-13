@@ -40,6 +40,10 @@ type OAuthProvider struct {
 	// status
 	IsAuthorized bool `gorm:"not null;default:false;"`
 
+	// indicates if this provider was created via import (with pre-authorized tokens)
+	// imported providers cannot be authorized/reauthorized via oauth flow
+	IsImported bool `gorm:"not null;default:false;"`
+
 	// can belong-to
 	CompanyID *uuid.UUID `gorm:"uniqueIndex:idx_oauth_providers_unique_name_and_company_id;"`
 	Company   *Company   `gorm:"foreignkey:CompanyID;"`

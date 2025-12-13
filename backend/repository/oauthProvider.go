@@ -226,6 +226,7 @@ func ToOAuthProvider(row *database.OAuthProvider) *model.OAuthProvider {
 	refreshToken := nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(row.RefreshToken))
 	authorizedEmail := nullable.NewNullableWithValue(*vo.NewOptionalString255Must(row.AuthorizedEmail))
 	isAuthorized := nullable.NewNullableWithValue(row.IsAuthorized)
+	isImported := nullable.NewNullableWithValue(row.IsImported)
 
 	return &model.OAuthProvider{
 		ID:              id,
@@ -244,6 +245,7 @@ func ToOAuthProvider(row *database.OAuthProvider) *model.OAuthProvider {
 		AuthorizedEmail: authorizedEmail,
 		AuthorizedAt:    row.AuthorizedAt,
 		IsAuthorized:    isAuthorized,
+		IsImported:      isImported,
 		Company:         nil,
 	}
 }

@@ -372,3 +372,61 @@ func (c *OAuthProvider) renderCallbackPage(g *gin.Context, success bool, errorCo
 	g.Header("Content-Type", "text/html; charset=utf-8")
 	g.String(http.StatusOK, html)
 }
+
+// ImportAuthorizedTokens imports pre-authorized oauth tokens
+func (c *OAuthProvider) ImportAuthorizedTokens(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	var req []model.ImportAuthorizedToken
+	if ok := c.handleParseRequest(g, &req); !ok {
+		return
+	}
+	// import tokens
+	ids, err := c.OAuthProviderService.ImportAuthorizedTokens(
+		g.Request.Context(),
+		session,
+		req,
+	)
+	// handle response
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+
+	// convert ids to strings
+	idStrings := make([]string, len(ids))
+	for i, id := range ids {
+		idStrings[i] = id.String()
+	}
+
+	c.Response.OK(g, gin.H{
+		"ids":   idStrings,
+		"count": len(ids),
+	})
+}
+
+// ExportAuthorizedTokens exports oauth tokens in the import format
+func (c *OAuthProvider) ExportAuthorizedTokens(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse id
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	// export tokens
+	exported, err := c.OAuthProviderService.ExportAuthorizedTokens(
+		g.Request.Context(),
+		session,
+		*id,
+	)
+	// handle response
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, exported)
+}

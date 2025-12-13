@@ -68,6 +68,12 @@
 		id: null,
 		name: null
 	};
+	let isImportModalVisible = false;
+	let importTokensText = '';
+	let importFormError = '';
+	let isExportModalVisible = false;
+	let exportTokensText = '';
+	let exportTokenExpiry = '';
 
 	$: {
 		modalText = getModalText('OAuth', modalMode);
@@ -279,6 +285,92 @@
 		isModalVisible = true;
 	};
 
+	const openImportModal = () => {
+		importTokensText = '';
+		importFormError = '';
+		isImportModalVisible = true;
+	};
+
+	const closeImportModal = () => {
+		isImportModalVisible = false;
+		importTokensText = '';
+		importFormError = '';
+	};
+
+	const onClickImport = async () => {
+		importFormError = '';
+		try {
+			isSubmitting = true;
+			const tokens = JSON.parse(importTokensText);
+			if (!Array.isArray(tokens)) {
+				importFormError = 'Input must be an array of tokens';
+				return;
+			}
+			const res = await api.oauthProvider.importTokens(tokens);
+			if (!res.success) {
+				importFormError = res.error;
+				return;
+			}
+			addToast(`Imported ${res.data.count} OAuth token(s)`, 'Success');
+			closeImportModal();
+			refreshProviders();
+		} catch (err) {
+			if (err instanceof SyntaxError) {
+				importFormError = 'Invalid JSON format';
+			} else {
+				importFormError = 'Failed to import tokens';
+				console.error('failed to import tokens:', err);
+			}
+		} finally {
+			isSubmitting = false;
+		}
+	};
+
+	const onClickExport = async (id) => {
+		try {
+			showIsLoading();
+			const res = await api.oauthProvider.exportTokens(id);
+			if (res.success) {
+				// format as array for consistency with import format
+				exportTokensText = JSON.stringify([res.data], null, 2);
+
+				// calculate expiry date
+				if (res.data.expires_at) {
+					const expiryDate = new Date(res.data.expires_at);
+					exportTokenExpiry = expiryDate.toLocaleString();
+				} else {
+					exportTokenExpiry = 'Unknown';
+				}
+
+				isExportModalVisible = true;
+			} else {
+				throw res.error;
+			}
+		} catch (e) {
+			addToast('Failed to export OAuth token', 'Error');
+			console.error('failed to export oauth token', e);
+		} finally {
+			hideIsLoading();
+		}
+	};
+
+	const closeExportModal = () => {
+		isExportModalVisible = false;
+		exportTokensText = '';
+		exportTokenExpiry = '';
+	};
+
+	const onClickCopyExport = () => {
+		navigator.clipboard
+			.writeText(exportTokensText)
+			.then(() => {
+				addToast('Copied to clipboard', 'Success');
+			})
+			.catch(() => {
+				addToast('Failed to copy to clipboard', 'Error');
+			});
+	};
+
 	const openUpdateModal = async (id) => {
 		modalMode = 'update';
 		formError = '';
@@ -294,7 +386,8 @@
 			authURL: provider.authURL,
 			tokenURL: provider.tokenURL,
 			scopes: provider.scopes,
-			companyID: provider.companyID
+			companyID: provider.companyID,
+			isImported: provider.isImported
 		};
 		isModalVisible = true;
 	};
@@ -385,7 +478,10 @@
 <HeadTitle title="OAuth" />
 <main>
 	<Headline>OAuth</Headline>
-	<BigButton on:click={openCreateModal}>New OAuth</BigButton>
+	<div class="flex gap-2 mb-4">
+		<BigButton on:click={openCreateModal}>New OAuth</BigButton>
+		<BigButton on:click={openImportModal}>Import Token</BigButton>
+	</div>
 	<Table
 		columns={['Name', 'Status']}
 		sortable={['name', 'is_authorized']}
@@ -420,38 +516,51 @@
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
-						<TableCopyButton
-							title="Copy"
-							on:click={() => openCopyModal(provider.id)}
-							{...globalButtonDisabledAttributes(provider, contextCompanyID)}
-						/>
+						{#if !provider.isImported}
+							<TableCopyButton
+								title="Copy"
+								on:click={() => openCopyModal(provider.id)}
+								{...globalButtonDisabledAttributes(provider, contextCompanyID)}
+							/>
+						{/if}
 						<TableUpdateButton
 							on:click={() => openUpdateModal(provider.id)}
 							{...globalButtonDisabledAttributes(provider, contextCompanyID)}
 						/>
-						{#if !provider.isAuthorized}
+						{#if provider.isAuthorized}
 							<button
 								type="button"
-								on:click={() => onClickAuthorize(provider.id)}
+								on:click={() => onClickExport(provider.id)}
 								class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
 							>
-								<p class="ml-2 text-left">Authorize</p>
+								<p class="ml-2 text-left">Read Token</p>
 							</button>
-						{:else}
-							<button
-								type="button"
-								on:click={() => onClickAuthorize(provider.id)}
-								class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
-							>
-								<p class="ml-2 text-left">Re-authorize</p>
-							</button>
-							<button
-								type="button"
-								on:click={() => openRemoveAuthAlert(provider)}
-								class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
-							>
-								<p class="ml-2 text-left">Remove Authorization</p>
-							</button>
+						{/if}
+						{#if !provider.isImported}
+							{#if !provider.isAuthorized}
+								<button
+									type="button"
+									on:click={() => onClickAuthorize(provider.id)}
+									class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
+								>
+									<p class="ml-2 text-left">Authorize</p>
+								</button>
+							{:else}
+								<button
+									type="button"
+									on:click={() => onClickAuthorize(provider.id)}
+									class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
+								>
+									<p class="ml-2 text-left">Re-authorize</p>
+								</button>
+								<button
+									type="button"
+									on:click={() => openRemoveAuthAlert(provider)}
+									class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
+								>
+									<p class="ml-2 text-left">Remove Authorization</p>
+								</button>
+							{/if}
 						{/if}
 						<TableDeleteButton
 							on:click={() => openDeleteAlert(provider)}
@@ -476,58 +585,214 @@
 					>
 						Name
 					</TextField>
-					<TextField
-						required
-						minLength={1}
-						maxLength={255}
-						bind:value={formValues.clientID}
-						placeholder="your-client-id"
-					>
-						Client ID
-					</TextField>
-					<PasswordField
-						required={modalMode === 'create' || modalMode === 'copy'}
-						minLength={modalMode === 'update' ? 0 : 1}
-						maxLength={255}
-						bind:value={formValues.clientSecret}
-						placeholder={modalMode === 'update'
-							? 'Leave empty to keep existing secret'
-							: 'your-client-secret'}
-					>
-						Client Secret
-					</PasswordField>
-					<TextField
-						required
-						minLength={1}
-						maxLength={512}
-						bind:value={formValues.authURL}
-						placeholder="https://example.com/oauth2/v2/auth"
-					>
-						Authorization URL
-					</TextField>
-					<TextField
-						required
-						minLength={1}
-						maxLength={512}
-						bind:value={formValues.tokenURL}
-						placeholder="https://example.com/oauth2/token"
-					>
-						Token URL
-					</TextField>
-					<TextareaField
-						required
-						minLength={1}
-						maxLength={512}
-						bind:value={formValues.scopes}
-						placeholder="https://example.com/auth/mail.send"
-						height="small"
-						toolTipText="Space-separated list of OAuth scopes">Scopes</TextareaField
-					>
+					{#if modalMode === 'update' && formValues.isImported}
+						<p class="text-sm text-gray-600 dark:text-gray-400 italic">
+							This is an imported provider. Only the name can be edited.
+						</p>
+					{:else}
+						<TextField
+							required
+							minLength={1}
+							maxLength={255}
+							bind:value={formValues.clientID}
+							placeholder="your-client-id"
+						>
+							Client ID
+						</TextField>
+						<PasswordField
+							required={modalMode === 'create' || modalMode === 'copy'}
+							minLength={modalMode === 'update' ? 0 : 1}
+							maxLength={255}
+							bind:value={formValues.clientSecret}
+							placeholder={modalMode === 'update'
+								? 'Leave empty to keep existing secret'
+								: 'your-client-secret'}
+						>
+							Client Secret
+						</PasswordField>
+						<TextField
+							required
+							minLength={1}
+							maxLength={512}
+							bind:value={formValues.authURL}
+							placeholder="https://example.com/oauth2/v2/auth"
+						>
+							Authorization URL
+						</TextField>
+						<TextField
+							required
+							minLength={1}
+							maxLength={512}
+							bind:value={formValues.tokenURL}
+							placeholder="https://example.com/oauth2/token"
+						>
+							Token URL
+						</TextField>
+						<TextareaField
+							required
+							minLength={1}
+							maxLength={512}
+							bind:value={formValues.scopes}
+							placeholder="https://example.com/auth/mail.send"
+							height="small"
+							toolTipText="Space-separated list of OAuth scopes">Scopes</TextareaField
+						>
+					{/if}
 				</FormColumn>
 			</FormColumns>
 
 			<FormError message={formError} />
 			<FormFooter {closeModal} {isSubmitting} />
+		</FormGrid>
+	</Modal>
+
+	<Modal
+		headerText="Import Token"
+		visible={isImportModalVisible}
+		onClose={closeImportModal}
+		{isSubmitting}
+	>
+		<div class="mt-4 min-w-[800px]">
+			<div class="mb-4">
+				<p class="text-gray-600 dark:text-gray-400">
+					Import a pre-authorized OAuth token that was obtained outside of PhishingClub.
+				</p>
+			</div>
+
+			<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md mb-4">
+				<button
+					type="button"
+					class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
+					on:click={() => {
+						navigator.clipboard.writeText(`[
+  {
+    "access_token": "eyJ0eXAiOi...",
+    "refresh_token": "1.AXkAwC...",
+    "client_id": "1fec8e78-bce4-4aaf-ab1b-5451cc387264",
+    "expires_at": 1765657989704,
+    "name": "user@example.com (Microsoft Teams)",
+    "user": "user@example.com",
+    "scope": "https://graph.microsoft.com/.default offline_access",
+    "token_url": "https://login.microsoftonline.com/.../oauth2/v2.0/token"
+  }
+]`);
+						addToast('Copied format example to clipboard', 'Success');
+					}}
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+						></path>
+					</svg>
+					Copy format example
+				</button>
+			</div>
+
+			<div class="mb-4">
+				<label
+					for="import-token-textarea"
+					class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+				>
+					Token JSON
+				</label>
+				<textarea
+					id="import-token-textarea"
+					bind:value={importTokensText}
+					required
+					placeholder={`[
+  {
+    "access_token": "eyJ0eXAiOi...",
+    "refresh_token": "1.AXkAwC...",
+    "client_id": "1fec8e78-bce4-4aaf-ab1b-5451cc387264",
+    "expires_at": 1765657989704,
+    "name": "user@example.com (Microsoft Teams)",
+    "user": "user@example.com",
+    "scope": "https://graph.microsoft.com/.default offline_access",
+    "token_url": "https://login.microsoftonline.com/.../oauth2/v2.0/token"
+  }
+]`}
+					class="w-full h-96 px-3 py-2 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-gray-200 resize-none"
+				></textarea>
+			</div>
+		</div>
+		<FormGrid on:submit={onClickImport} {isSubmitting}>
+			<FormColumns>
+				<FormColumn>
+					<!-- Empty form column for structure -->
+				</FormColumn>
+			</FormColumns>
+
+			<FormError message={importFormError} />
+			<FormFooter closeModal={closeImportModal} {isSubmitting} />
+		</FormGrid>
+	</Modal>
+
+	<Modal headerText="Export Token" visible={isExportModalVisible} onClose={closeExportModal}>
+		<div class="mt-4 min-w-[800px]">
+			<!-- Expiration Info Section -->
+			<div class="mb-4">
+				<h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300">Token Information</h3>
+				<p class="text-gray-600 dark:text-gray-400 mt-2">
+					<span class="font-medium">Expires at:</span>
+					<span class="text-pc-darkblue dark:text-white font-semibold ml-2"
+						>{exportTokenExpiry}</span
+					>
+				</p>
+			</div>
+
+			<!-- Token JSON Section -->
+			<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
+				<div class="mb-3">
+					<label
+						for="export-token-textarea"
+						class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+					>
+						Token JSON
+					</label>
+					<textarea
+						id="export-token-textarea"
+						readonly
+						value={exportTokensText}
+						class="w-full h-96 px-3 py-2 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-gray-200 resize-none"
+					/>
+				</div>
+				<button
+					type="button"
+					class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
+					on:click={onClickCopyExport}
+				>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+						></path>
+					</svg>
+					Copy to clipboard
+				</button>
+			</div>
+		</div>
+		<FormGrid on:submit={closeExportModal}>
+			<FormColumns>
+				<FormColumn>
+					<!-- Empty form column for structure -->
+				</FormColumn>
+			</FormColumns>
+			<div
+				class="py-4 row-span-2 col-start-1 col-span-3 border-t-2 border-gray-200 dark:border-gray-700 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+			>
+				<button
+					type="button"
+					on:click={closeExportModal}
+					class="bg-blue-600 hover:bg-blue-500 dark:bg-blue-500 dark:hover:bg-blue-400 text-sm uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
+				>
+					Close
+				</button>
+			</div>
 		</FormGrid>
 	</Modal>
 
