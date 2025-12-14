@@ -432,7 +432,6 @@
 	const closeEventsModal = () => {
 		recipientEventsTableParams.unsubscribe();
 		recipientEventsTableParams.search = '';
-		recipientEventsTableParams.sort('created_at', 'desc');
 		recipientEventsTableParams.page = defaultStartPage;
 		recipientEventsTableParams.perPage = defaultPerPage;
 
