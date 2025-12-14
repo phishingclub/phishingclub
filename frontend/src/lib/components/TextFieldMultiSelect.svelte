@@ -28,6 +28,7 @@
 	let dropdownElement;
 	let justSelected = false;
 	let inputValue = '';
+	let dropdownPosition = { top: 0, left: 0, width: 0 };
 
 	// Simple function to filter options based on input
 	const filterOptions = (searchValue) => {
@@ -57,6 +58,7 @@
 			showDropdown = true;
 			hasTyped = false; // Reset typing flag to show all options
 			allOptions = [...optionsArray]; // Show all options on click
+			updateDropdownPosition();
 		}
 	};
 
@@ -66,6 +68,7 @@
 		showDropdown = true;
 		hasTyped = true; // User has typed, enable filtering
 		allOptions = filterOptions(inputValue);
+		updateDropdownPosition();
 	};
 
 	// Select an option
@@ -92,6 +95,18 @@
 		const optionToRemove = event.target.dataset.value;
 		value = value.filter((item) => item !== optionToRemove);
 		onRemove(optionToRemove);
+	};
+
+	// Update dropdown position for fixed positioning
+	const updateDropdownPosition = () => {
+		if (inputElement) {
+			const rect = inputElement.getBoundingClientRect();
+			dropdownPosition = {
+				top: rect.bottom + 4,
+				left: rect.left,
+				width: rect.width
+			};
+		}
 	};
 
 	// Close dropdown
@@ -210,10 +225,14 @@
 		value = value || defaultValue;
 		const unsubscribe = activeFormElementSubscribe(_id, closeDropdown);
 		document.addEventListener('click', handleOutsideClick);
+		window.addEventListener('scroll', updateDropdownPosition, true);
+		window.addEventListener('resize', updateDropdownPosition);
 
 		return () => {
 			unsubscribe();
 			document.removeEventListener('click', handleOutsideClick);
+			window.removeEventListener('scroll', updateDropdownPosition, true);
+			window.removeEventListener('resize', updateDropdownPosition);
 		};
 	});
 
@@ -238,6 +257,8 @@
 			parentForm.removeEventListener('reset', parentFormResetListener);
 		}
 		document.removeEventListener('click', handleOutsideClick);
+		window.removeEventListener('scroll', updateDropdownPosition, true);
+		window.removeEventListener('resize', updateDropdownPosition);
 	});
 
 	// Generate unique IDs for accessibility
@@ -350,15 +371,14 @@
 		{#if showDropdown}
 			<div
 				bind:this={dropdownElement}
-				class="absolute top-10 z-50"
-				class:w-28={size == 'small'}
-				class:w-60={size == 'normal'}
+				class="fixed z-[9999]"
+				style="top: {dropdownPosition.top}px; left: {dropdownPosition.left}px; width: {dropdownPosition.width}px;"
 			>
 				<ul
 					id={listboxId}
 					role="listbox"
 					aria-labelledby={labelId}
-					class="bg-gray-100 dark:bg-gray-900 list-none mt-4 z-[999] rounded-md min-w-fit shadow-md border border-gray-200 dark:border-gray-700/60 max-h-40 overflow-y-scroll transition-colors duration-200"
+					class="bg-gray-100 dark:bg-gray-900 list-none mt-4 z-[9999] rounded-md min-w-fit shadow-lg border border-gray-200 dark:border-gray-700/60 max-h-40 overflow-y-scroll transition-colors duration-200"
 				>
 					{#if allOptions.length}
 						{#each allOptions as option, index}
