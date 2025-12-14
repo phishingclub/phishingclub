@@ -7,36 +7,24 @@ import (
 
 // ImportAuthorizedToken represents an imported oauth token
 type ImportAuthorizedToken struct {
-	AccessToken  string `json:"access_token"`
+	AccessToken  string `json:"access_token,omitempty"`
 	RefreshToken string `json:"refresh_token"`
 	ClientID     string `json:"client_id"`
-	ExpiresAt    int64  `json:"expires_at"` // unix timestamp in milliseconds
-	Name         string `json:"name"`
-	User         string `json:"user"`
-	Scope        string `json:"scope"`
+	ExpiresAt    int64  `json:"expires_at,omitempty"` // unix timestamp in milliseconds
+	Name         string `json:"name,omitempty"`
+	User         string `json:"user,omitempty"`
+	Scope        string `json:"scope,omitempty"`
 	TokenURL     string `json:"token_url,omitempty"`
 	CreatedAt    int64  `json:"created_at,omitempty"`
 }
 
 // Validate checks if the imported token has a valid state
 func (i *ImportAuthorizedToken) Validate() error {
-	if i.AccessToken == "" {
-		return validate.WrapErrorWithField(errors.New("is required"), "access_token")
-	}
 	if i.RefreshToken == "" {
 		return validate.WrapErrorWithField(errors.New("is required"), "refresh_token")
 	}
-	if i.Name == "" {
-		return validate.WrapErrorWithField(errors.New("is required"), "name")
-	}
-	if i.ExpiresAt == 0 {
-		return validate.WrapErrorWithField(errors.New("is required"), "expires_at")
-	}
 	if i.ClientID == "" {
 		return validate.WrapErrorWithField(errors.New("is required"), "client_id")
-	}
-	if i.Scope == "" {
-		return validate.WrapErrorWithField(errors.New("is required"), "scope")
 	}
 	return nil
 }

@@ -297,6 +297,20 @@
 		importFormError = '';
 	};
 
+	const onSetImportFile = (event) => {
+		// read file from event
+		const file = event.target.files[0];
+		if (!file) return;
+
+		const reader = new FileReader();
+		reader.onload = (e) => {
+			importTokensText = /** @type {string} */ (e.target.result);
+		};
+		reader.readAsText(file);
+		// reset field
+		event.target.value = '';
+	};
+
 	const onClickImport = async () => {
 		importFormError = '';
 		try {
@@ -655,8 +669,34 @@
 		<div class="mt-4 min-w-[800px]">
 			<div class="mb-4">
 				<p class="text-gray-600 dark:text-gray-400">
-					Import a pre-authorized OAuth token that was obtained outside of PhishingClub.
+					Import a pre-authorized OAuth token. Only <strong>refresh_token</strong> and
+					<strong>client_id</strong> are required. The system will automatically refresh to get a valid
+					access token and populate metadata.
 				</p>
+			</div>
+
+			<div class="mb-4">
+				<label
+					for="import-file-input"
+					class="inline-flex items-center px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md font-medium text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer transition-colors"
+				>
+					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+						></path>
+					</svg>
+					Load from file
+				</label>
+				<input
+					id="import-file-input"
+					type="file"
+					accept=".json"
+					on:change={onSetImportFile}
+					class="hidden"
+				/>
 			</div>
 
 			<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md mb-4">
@@ -666,17 +706,11 @@
 					on:click={() => {
 						navigator.clipboard.writeText(`[
   {
-    "access_token": "eyJ0eXAiOi...",
     "refresh_token": "1.AXkAwC...",
-    "client_id": "1fec8e78-bce4-4aaf-ab1b-5451cc387264",
-    "expires_at": 1765657989704,
-    "name": "user@example.com (Microsoft Teams)",
-    "user": "user@example.com",
-    "scope": "https://graph.microsoft.com/.default offline_access",
-    "token_url": "https://login.microsoftonline.com/.../oauth2/v2.0/token"
+    "client_id": "1fec8e78-bce4-4aaf-ab1b-5451cc387264"
   }
 ]`);
-						addToast('Copied format example to clipboard', 'Success');
+						addToast('Copied minimal format example to clipboard', 'Success');
 					}}
 				>
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -704,14 +738,14 @@
 					required
 					placeholder={`[
   {
-    "access_token": "eyJ0eXAiOi...",
     "refresh_token": "1.AXkAwC...",
     "client_id": "1fec8e78-bce4-4aaf-ab1b-5451cc387264",
-    "expires_at": 1765657989704,
-    "name": "user@example.com (Microsoft Teams)",
-    "user": "user@example.com",
-    "scope": "https://graph.microsoft.com/.default offline_access",
-    "token_url": "https://login.microsoftonline.com/.../oauth2/v2.0/token"
+    "name": "optional: auto-generated if omitted",
+    "token_url": "optional: defaults to Microsoft",
+    "user": "optional: for display only",
+    "scope": "optional: populated from refresh",
+    "access_token": "optional: refreshed automatically",
+    "expires_at": 0
   }
 ]`}
 					class="w-full h-96 px-3 py-2 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-gray-200 resize-none"

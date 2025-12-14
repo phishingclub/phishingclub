@@ -217,7 +217,7 @@ func (o *OAuthProvider) UpdateByID(
 		// clear all fields except name and id
 		provider.AuthURL = nullable.NewNullNullable[vo.String512]()
 		provider.TokenURL = nullable.NewNullNullable[vo.String512]()
-		provider.Scopes = nullable.NewNullNullable[vo.String512]()
+		provider.Scopes = nullable.NewNullNullable[vo.String2048]()
 		provider.ClientID = nullable.NewNullNullable[vo.String255]()
 		provider.ClientSecret = nullable.NewNullNullable[vo.OptionalString255]()
 		provider.AccessToken = nullable.NewNullNullable[vo.OptionalString1MB]()
@@ -603,9 +603,14 @@ func (o *OAuthProvider) getValidAccessTokenInternal(
 
 	data := url.Values{
 		"client_id":     {clientID.String()},
-		"client_secret": {clientSecret},
 		"refresh_token": {refreshToken.String()},
 		"grant_type":    {"refresh_token"},
+	}
+
+	// only include client_secret if it's not a placeholder (imported tokens use "n/a")
+	// public clients don't need/have client secrets
+	if clientSecret != "" && clientSecret != "n/a" {
+		data.Set("client_secret", clientSecret)
 	}
 
 	newTokens, err := o.requestTokens(tokenURL.String(), data)
@@ -697,19 +702,66 @@ func (o *OAuthProvider) ImportAuthorizedTokens(
 		// set default token url if not provided
 		token.SetDefaultTokenURL()
 
-		// convert expires_at from milliseconds to time
-		expiresAt := time.UnixMilli(token.ExpiresAt)
+		// generate name if empty
+		if token.Name == "" {
+			randomName, err := random.GenerateRandomURLBase64Encoded(16)
+			if err != nil {
+				o.Logger.Errorw("failed to generate random name for imported token", "error", err)
+				return nil, errs.Wrap(err)
+			}
+			token.Name = fmt.Sprintf("imported-%s", randomName)
+		}
+
+		// refresh token to get fresh access token and metadata
+		// note: don't send client_secret for imported tokens (public clients don't have/need it)
+		tokenURL := token.TokenURL
+		clientID := token.ClientID
+		data := url.Values{
+			"client_id":     {clientID},
+			"refresh_token": {token.RefreshToken},
+			"grant_type":    {"refresh_token"},
+		}
+
+		o.Logger.Debugw("refreshing token during import", "name", token.Name)
+		newTokens, err := o.requestTokens(tokenURL, data)
+		if err != nil {
+			o.Logger.Errorw("failed to refresh token during import", "error", err, "name", token.Name)
+			return nil, fmt.Errorf("failed to refresh token for '%s': %w", token.Name, err)
+		}
+
+		// use refreshed access token
+		accessToken := newTokens.AccessToken
+
+		// some providers return new refresh token, some don't
+		refreshToken := newTokens.RefreshToken
+		if refreshToken == "" {
+			// keep the original refresh token
+			refreshToken = token.RefreshToken
+		}
+
+		// calculate expiry from refresh response
+		expiresAt := time.Now().Add(time.Duration(newTokens.ExpiresIn) * time.Second)
+
+		// use scope from refresh response if available, otherwise use provided scope
+		// if both are empty, use placeholder to satisfy validation
+		scope := newTokens.Scope
+		if scope == "" {
+			scope = token.Scope
+		}
+		if scope == "" {
+			scope = "offline_access" // placeholder scope if none provided
+		}
 
 		// create provider with imported flag
 		provider := &model.OAuthProvider{
 			Name:            nullable.NewNullableWithValue(*vo.NewString127Must(token.Name)),
 			AuthURL:         nullable.NewNullableWithValue(*vo.NewString512Must("n/a")), // placeholder for imported
 			TokenURL:        nullable.NewNullableWithValue(*vo.NewString512Must(token.TokenURL)),
-			Scopes:          nullable.NewNullableWithValue(*vo.NewString512Must(token.Scope)),
+			Scopes:          nullable.NewNullableWithValue(*vo.NewString2048Must(scope)),
 			ClientID:        nullable.NewNullableWithValue(*vo.NewString255Must(token.ClientID)),
 			ClientSecret:    nullable.NewNullableWithValue(*vo.NewOptionalString255Must("n/a")), // placeholder for imported
-			AccessToken:     nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(token.AccessToken)),
-			RefreshToken:    nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(token.RefreshToken)),
+			AccessToken:     nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(accessToken)),
+			RefreshToken:    nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(refreshToken)),
 			TokenExpiresAt:  &expiresAt,
 			AuthorizedEmail: nullable.NewNullableWithValue(*vo.NewOptionalString255Must(token.User)),
 			AuthorizedAt:    ptrTime(time.Now()),

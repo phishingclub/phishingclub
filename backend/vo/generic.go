@@ -552,6 +552,113 @@ func (s OptionalString1024) String() string {
 	return s.inner
 }
 
+// String2048 is a trimmed string with a min of 1 and a max of 2048
+type String2048 struct {
+	inner string
+}
+
+// NewString2048 creates a new long string
+func NewString2048(s string) (*String2048, error) {
+	s = strings.TrimSpace(s)
+	err := validate.ErrorIfStringNotbetweenOrEqualTo(s, 1, 2048)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	return &String2048{
+		inner: s,
+	}, nil
+}
+
+// NewString2048Must creates a new long string and panics if it fails
+func NewString2048Must(s string) *String2048 {
+	a, err := NewString2048(s)
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+// MarshalJSON implements the json.Marshaler interface
+func (s String2048) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.inner)
+}
+
+// UnmarshalJSON unmarshals the json into a string
+func (s *String2048) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	ss, err := NewString2048(str)
+	if err != nil {
+		return unwrapError(err)
+	}
+	s.inner = ss.inner
+	return nil
+}
+
+// String returns the string representation of the long string
+func (s String2048) String() string {
+	return s.inner
+}
+
+// OptionalString2048 is a trimmed string with a min of 0 and a max of 2048
+type OptionalString2048 struct {
+	inner string
+}
+
+// NewEmptyOptionalString2048 creates a new empty string
+func NewEmptyOptionalString2048() *OptionalString2048 {
+	return &OptionalString2048{
+		inner: "",
+	}
+}
+
+// NewOptionalString2048 creates a new long string
+func NewOptionalString2048(s string) (*OptionalString2048, error) {
+	s = strings.TrimSpace(s)
+	err := validate.ErrorIfStringNotbetweenOrEqualTo(s, 0, 2048)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	return &OptionalString2048{
+		inner: s,
+	}, nil
+}
+
+// NewOptionalString2048Must creates a new long string and panics if it fails
+func NewOptionalString2048Must(s string) *OptionalString2048 {
+	a, err := NewOptionalString2048(s)
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+// MarshalJSON implements the json.Marshaler interface
+func (s OptionalString2048) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.inner)
+}
+
+// UnmarshalJSON unmarshals the json into a string
+func (s *OptionalString2048) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	ss, err := NewOptionalString2048(str)
+	if err != nil {
+		return unwrapError(err)
+	}
+	s.inner = ss.inner
+	return nil
+}
+
+// String returns the string representation of the long string
+func (s OptionalString2048) String() string {
+	return s.inner
+}
+
 // String1MB is a trimmed string with a min of 1 and a max of 1000000
 type String1MB struct {
 	inner string

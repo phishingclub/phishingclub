@@ -18,9 +18,9 @@ type OAuthProvider struct {
 	Name nullable.Nullable[vo.String127] `json:"name"`
 
 	// oauth endpoints (user configurable)
-	AuthURL  nullable.Nullable[vo.String512] `json:"authURL"`
-	TokenURL nullable.Nullable[vo.String512] `json:"tokenURL"`
-	Scopes   nullable.Nullable[vo.String512] `json:"scopes"`
+	AuthURL  nullable.Nullable[vo.String512]  `json:"authURL"`
+	TokenURL nullable.Nullable[vo.String512]  `json:"tokenURL"`
+	Scopes   nullable.Nullable[vo.String2048] `json:"scopes"`
 
 	// user's oauth app credentials
 	ClientID     nullable.Nullable[vo.String255]         `json:"clientID"`

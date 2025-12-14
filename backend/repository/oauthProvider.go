@@ -219,7 +219,7 @@ func ToOAuthProvider(row *database.OAuthProvider) *model.OAuthProvider {
 	name := nullable.NewNullableWithValue(*vo.NewString127Must(row.Name))
 	authURL := nullable.NewNullableWithValue(*vo.NewString512Must(row.AuthURL))
 	tokenURL := nullable.NewNullableWithValue(*vo.NewString512Must(row.TokenURL))
-	scopes := nullable.NewNullableWithValue(*vo.NewString512Must(row.Scopes))
+	scopes := nullable.NewNullableWithValue(*vo.NewString2048Must(row.Scopes))
 	clientID := nullable.NewNullableWithValue(*vo.NewString255Must(row.ClientID))
 	clientSecret := nullable.NewNullableWithValue(*vo.NewOptionalString255Must(row.ClientSecret))
 	accessToken := nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(row.AccessToken))

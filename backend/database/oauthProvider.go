@@ -22,7 +22,7 @@ type OAuthProvider struct {
 	// oauth endpoints (user configurable)
 	AuthURL  string `gorm:"not null;type:varchar(512);"`
 	TokenURL string `gorm:"not null;type:varchar(512);"`
-	Scopes   string `gorm:"not null;type:varchar(512);"`
+	Scopes   string `gorm:"not null;type:varchar(2048);"`
 
 	// user's oauth app credentials (stored as plain text like smtp passwords)
 	ClientID     string `gorm:"not null;type:varchar(255);"`
