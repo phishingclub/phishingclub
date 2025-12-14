@@ -134,7 +134,14 @@
 	let isSendMessageModalVisible = false;
 	let isSetAsSentModalVisible = false;
 	let isSessionSushiModalVisible = false;
+	let isTrackingPixelWarningVisible = false;
+	let pendingEmailPreviewRecipient = null;
 	let storedCookieData = '';
+
+	// cleanup when modal is cancelled
+	$: if (!isTrackingPixelWarningVisible && pendingEmailPreviewRecipient) {
+		pendingEmailPreviewRecipient = null;
+	}
 	let sendMessageRecipient = null;
 	let setAsSentRecipient = null;
 	let lastPoll3399Nano = '';
@@ -392,15 +399,34 @@
 
 	/** @param {string} campaignRecipientID */
 	const onClickPreviewEmail = async (campaignRecipientID) => {
+		// always show warning modal
+		pendingEmailPreviewRecipient = campaignRecipientID;
+		isTrackingPixelWarningVisible = true;
+	};
+
+	/**
+	 * Confirm preview with tracking pixel warning acknowledged
+	 */
+	const onConfirmPreviewWithTracking = async () => {
+		if (!pendingEmailPreviewRecipient) {
+			return { success: false, error: 'No pending email preview' };
+		}
+
 		try {
-			const res = await api.campaign.getEmail(campaignRecipientID);
+			const res = await api.campaign.getEmail(pendingEmailPreviewRecipient);
 			if (!res.success) {
 				throw res.error;
 			}
+
 			// open email in new tab as a blob
 			const blob = new Blob([res.data], { type: 'text/html' });
 			const url = URL.createObjectURL(blob);
 			window.open(url, '_blank');
+
+			// clear pending recipient
+			pendingEmailPreviewRecipient = null;
+
+			return { success: true };
 		} catch (e) {
 			if (e.includes('has no')) {
 				addToast('Campaign template is incomplete', 'Error');
@@ -408,6 +434,7 @@
 				addToast('Failed to preview email', 'Error');
 			}
 			console.error('failed to preview email', e);
+			return { success: false, error: e };
 		}
 	};
 
@@ -2226,4 +2253,17 @@
 			</div>
 		</FormGrid>
 	</Modal>
+	<Alert
+		headline="Email Preview Warning"
+		bind:visible={isTrackingPixelWarningVisible}
+		onConfirm={onConfirmPreviewWithTracking}
+		ok="View Email Anyway"
+		cancel="Cancel"
+	>
+		<div>
+			<p class="text-gray-600 dark:text-gray-400">
+				If this email contains a tracking pixel, viewing it will affect campaign statistics.
+			</p>
+		</div>
+	</Alert>
 </main>
