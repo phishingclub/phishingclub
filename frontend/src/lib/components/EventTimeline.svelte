@@ -1,40 +1,116 @@
 <script>
-	import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import * as d3 from 'd3';
 	import { toEvent } from '$lib/utils/events';
 
+	// props
 	export let events = [];
 	export let isGhost = false;
+	export let refreshInterval = 60000;
 
-	// theme management
+	// hoisted constant lookup tables (created once, not per-call)
+	const EVENT_COLORS = Object.freeze({
+		campaign_scheduled: '#62aded',
+		campaign_active: '#5557f6',
+		campaign_self_managed: '#9622fc',
+		campaign_closed: '#9f9f9f',
+		campaign_recipient_scheduled: '#4e68d8',
+		campaign_recipient_cancelled: '#161692',
+		campaign_recipient_message_sent: '#94cae6',
+		campaign_recipient_message_failed: '#f2bb58',
+		campaign_recipient_message_read: '#4cb5b5',
+		campaign_recipient_evasion_page_visited: '#c8a2f0',
+		campaign_recipient_before_page_visited: '#eea5fa',
+		campaign_recipient_page_visited: '#f96dcf',
+		campaign_recipient_after_page_visited: '#f6287b',
+		campaign_recipient_deny_page_visited: '#ff6b35',
+		campaign_recipient_submitted_data: '#f42e41',
+		campaign_recipient_reported: '#2c3e50'
+	});
+
+	const EVENT_ICONS = Object.freeze({
+		campaign_scheduled:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>',
+		campaign_active:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h1m4 0h1m-6 4h1m4 0h1M4 20h16a2 2 0 002-2V6a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>',
+		campaign_self_managed:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>',
+		campaign_closed:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+		campaign_recipient_scheduled:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>',
+		campaign_recipient_cancelled:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>',
+		campaign_recipient_message_sent:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>',
+		campaign_recipient_message_failed:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>',
+		campaign_recipient_message_read:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>',
+		campaign_recipient_evasion_page_visited:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>',
+		campaign_recipient_before_page_visited:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>',
+		campaign_recipient_page_visited:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>',
+		campaign_recipient_after_page_visited:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>',
+		campaign_recipient_deny_page_visited:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>',
+		campaign_recipient_submitted_data:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+		campaign_recipient_reported:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>'
+	});
+
+	const DEFAULT_ICON =
+		'<svg fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"></circle></svg>';
+	const DEFAULT_COLOR = '#6b7280';
+
+	// performance constants
+	const MAX_ZOOM_IN = 1000;
+	const MIN_ZOOM_OUT_PADDING = 0.1;
+	const MAX_VISIBLE_EVENTS = 1000;
+	const AXIS_DEBOUNCE_MS = 150;
+	const TOOLTIP_HIDE_DELAY = 100;
+	const RESIZE_DEBOUNCE_MS = 100;
+	const CURRENT_TIME_UPDATE_MS = 1000; // update every second so NOW line moves visibly
+
+	// layout constants
+	const HEIGHT = 200;
+	const MARGIN = Object.freeze({ top: 20, right: 20, bottom: 30, left: 20 });
+
+	// theme state
 	let isDarkMode = false;
-
-	const checkTheme = () => {
-		isDarkMode = document.documentElement.classList.contains('dark');
-	};
 
 	// dom references
 	let svg;
-	let tooltip;
 	let container;
 	let timelineGroup;
+	let currentTimeIndicator;
+	let currentTimeWindow;
+	let circlesGroup;
+	let circleSelection = null;
 
-	// layout properties
+	// layout state
 	let width = 800;
-	let height = 200;
-	let margin = { top: 20, right: 20, bottom: 30, left: 20 };
 
 	// timeline state
 	let currentCenterDate = new Date();
 	let zoom;
-	let currentTransform;
+	let currentTransform = null;
 	let xScale;
 	let use24Hour = true;
 	let initialized = false;
-	let themeObserver;
 	let showFilterDropdown = false;
 
-	// event filtering
+	// tooltip state (reactive for svelte template)
+	let tooltipVisible = false;
+	let tooltipX = 0;
+	let tooltipY = 0;
+	let tooltipEvent = null;
+
+	// filter state
 	let eventFilters = {
 		campaign_recipient_scheduled: true,
 		campaign_recipient_cancelled: true,
@@ -49,73 +125,95 @@
 		campaign_recipient_submitted_data: true,
 		campaign_recipient_reported: true
 	};
-	let filterUpdateCounter = 0;
 
-	// performance optimizations
-	const MAX_ZOOM_IN = 1000; // 1 second in milliseconds
-	const MIN_ZOOM_OUT_PADDING = 0.1; // 10% padding on each side when fully zoomed out
-
-	// throttling for zoom operations
-	let zoomThrottleTimeout;
-	let axisUpdateTimeout;
+	// caching - pre-processed events with timestamps
+	let processedEvents = [];
 	let filteredEventsCache = null;
 	let lastFilterHash = '';
+	let lastEventsRef = null;
 
-	// virtualization for large datasets
-	const MAX_VISIBLE_EVENTS = 1000;
-	let visibleEvents = [];
+	// animation and timing handles
+	let rafId = null;
+	let pendingZoomUpdate = false;
+	let axisUpdateId = null;
+	let tooltipHideId = null;
+	let resizeTimeoutId = null;
+	let currentTimeIntervalId = null;
+	let themeObserver = null;
+	let resizeObserver = null;
 
-	// debounced container resize
-	let resizeTimeout;
-	let resizeObserver;
+	// cached scale for RAF updates
+	let pendingScale = null;
 
-	// update timeline colors when theme changes
-	function updateTimelineColors() {
-		if (!timelineGroup) return;
+	// pre-cached circle nodes for fast iteration
+	let circleNodes = [];
+	let circleData = [];
 
-		requestAnimationFrame(() => {
-			timelineGroup.selectAll('circle').attr('stroke', isDarkMode ? '#374151' : '#fff');
-			// update center line color
-			timelineGroup.select('.center-line').attr('stroke', isDarkMode ? '#6b7280' : '#d1d5db');
-		});
+	// inline helper functions
+	const getEventColor = (eventName) => EVENT_COLORS[eventName] || DEFAULT_COLOR;
+	const getEventIcon = (eventName) => EVENT_ICONS[eventName] || DEFAULT_ICON;
+
+	function checkTheme() {
+		isDarkMode = document.documentElement.classList.contains('dark');
 	}
 
-	// optimized event filtering with caching
+	function updateTimelineColors() {
+		if (!timelineGroup) return;
+		const strokeColor = isDarkMode ? '#374151' : '#fff';
+		const centerLineColor = isDarkMode ? '#6b7280' : '#d1d5db';
+		const indicatorColor = isDarkMode ? '#6887ea' : '#445ecc';
+		const windowFill = isDarkMode ? 'rgba(104, 135, 234, 0.15)' : 'rgba(68, 94, 204, 0.15)';
+
+		if (circlesGroup) {
+			circlesGroup.selectAll('circle').attr('stroke', strokeColor);
+		}
+		timelineGroup.select('.center-line').attr('stroke', centerLineColor);
+		if (currentTimeIndicator) {
+			currentTimeIndicator.attr('stroke', indicatorColor);
+		}
+		if (currentTimeWindow) {
+			currentTimeWindow.attr('fill', windowFill);
+		}
+	}
+
+	// pre-process events with numeric timestamps for fast access
+	function processEvents(eventsList) {
+		if (!eventsList || eventsList.length === 0) return [];
+
+		return eventsList
+			.filter((e) => e?.eventName && e?.createdAt)
+			.map((e) => ({
+				...e,
+				_ts: new Date(e.createdAt).getTime() // pre-computed timestamp
+			}));
+	}
+
 	function getFilteredEvents() {
-		if (!events || events.length === 0) {
+		// fast path: no events
+		if (processedEvents.length === 0) {
 			filteredEventsCache = [];
 			return filteredEventsCache;
 		}
 
-		// create hash of current filter state
+		// check cache validity
 		const filterHash = JSON.stringify(eventFilters);
 		if (filterHash === lastFilterHash && filteredEventsCache) {
 			return filteredEventsCache;
 		}
 
-		// check if any recipient filters are enabled
-		const hasAnyRecipientFiltersEnabled = Object.values(eventFilters).some(
-			(filter) => filter === true
-		);
+		const hasAnyRecipientFiltersEnabled = Object.values(eventFilters).some(Boolean);
 
-		// always show campaign events, filter only recipient events
-		filteredEventsCache = events.filter((event) => {
-			// skip events with missing eventName
-			if (!event || !event.eventName) {
-				return false;
-			}
-			// always show campaign events
+		filteredEventsCache = processedEvents.filter((event) => {
+			// always show non-recipient campaign events
 			if (
 				event.eventName.startsWith('campaign_') &&
 				!event.eventName.startsWith('campaign_recipient_')
 			) {
 				return true;
 			}
-			// if no recipient filters are enabled, hide all recipient events
-			if (!hasAnyRecipientFiltersEnabled) {
-				return false;
-			}
-			// filter recipient events based on eventFilters
+
+			// filter recipient events
+			if (!hasAnyRecipientFiltersEnabled) return false;
 			return eventFilters[event.eventName] === true;
 		});
 
@@ -123,289 +221,61 @@
 		return filteredEventsCache;
 	}
 
-	// get visible events for current zoom level (virtualization)
 	function getVisibleEvents(scale) {
 		const filteredEvents = getFilteredEvents();
-
 		if (!scale || filteredEvents.length <= MAX_VISIBLE_EVENTS) {
 			return filteredEvents;
 		}
 
 		const domain = scale.domain();
-		const visibleRange = [domain[0].getTime(), domain[1].getTime()];
+		const rangeStart = domain[0].getTime();
+		const rangeEnd = domain[1].getTime();
+		const padding = (rangeEnd - rangeStart) * 0.1;
+		const extendedStart = rangeStart - padding;
+		const extendedEnd = rangeEnd + padding;
 
-		// add some padding to include events just outside visible area
-		const padding = (visibleRange[1] - visibleRange[0]) * 0.1;
-		const extendedRange = [visibleRange[0] - padding, visibleRange[1] + padding];
+		// use pre-computed _ts for fast filtering
+		const eventsInRange = filteredEvents.filter(
+			(e) => e._ts >= extendedStart && e._ts <= extendedEnd
+		);
 
-		// filter events within visible range
-		const eventsInRange = filteredEvents.filter((event) => {
-			const timestamp = new Date(event.createdAt).getTime();
-			return timestamp >= extendedRange[0] && timestamp <= extendedRange[1];
-		});
-
-		// if still too many events, sample them
 		if (eventsInRange.length > MAX_VISIBLE_EVENTS) {
 			const step = Math.ceil(eventsInRange.length / MAX_VISIBLE_EVENTS);
-			return eventsInRange.filter((_, index) => index % step === 0);
+			return eventsInRange.filter((_, i) => i % step === 0);
 		}
 
 		return eventsInRange;
 	}
 
-	// debounced container resize handler
-	function handleResize() {
-		if (resizeTimeout) clearTimeout(resizeTimeout);
-		resizeTimeout = setTimeout(() => {
-			if (container && initialized) {
-				const newWidth = container.offsetWidth - margin.left - margin.right;
-				if (newWidth > 0 && newWidth !== width) {
-					width = newWidth;
-					if (xScale) {
-						xScale.range([0, width]);
-						updateTimelineOptimized();
-					}
-				}
+	function updateCurrentTimeIndicatorImmediate() {
+		if (!currentTimeIndicator || !xScale) return;
+
+		const scale = currentTransform ? currentTransform.rescaleX(xScale) : xScale;
+		const now = Date.now();
+		const nowDate = new Date(now);
+		const xPos = scale(nowDate);
+		const domain = scale.domain();
+
+		if (nowDate >= domain[0] && nowDate <= domain[1]) {
+			const intervalMs = Math.max(refreshInterval, 60000);
+			const windowStartTime = new Date(now - intervalMs);
+			const xWindowStart = scale(windowStartTime);
+			const windowWidth = Math.max(xPos - xWindowStart, 2);
+
+			currentTimeIndicator.attr('x1', xPos).attr('x2', xPos).attr('opacity', 0.8);
+			if (currentTimeWindow) {
+				currentTimeWindow.attr('x', xWindowStart).attr('width', windowWidth).attr('opacity', 0.5);
 			}
-		}, 100);
-	}
-
-	function initializeTimeline() {
-		if (!svg || !container) {
-			return;
-		}
-
-		const containerWidth = container.offsetWidth;
-		width = containerWidth > 0 ? containerWidth - margin.left - margin.right : 800;
-		height = 200;
-
-		// clear any existing content
-		d3.select(svg).selectAll('*').remove();
-
-		// create the main timeline group
-		timelineGroup = d3
-			.select(svg)
-			.append('g')
-			.attr('transform', `translate(${margin.left}, ${margin.top})`);
-
-		// add the timeline line
-		timelineGroup
-			.append('line')
-			.attr('class', 'timeline-line')
-			.attr('x1', 0)
-			.attr('y1', (height - margin.top - margin.bottom) / 2)
-			.attr('x2', width)
-			.attr('y2', (height - margin.top - margin.bottom) / 2)
-			.attr('stroke', isDarkMode ? '#374151' : '#e5e7eb')
-			.attr('stroke-width', 2);
-
-		// add center reference line
-		timelineGroup
-			.append('line')
-			.attr('class', 'center-line')
-			.attr('x1', width / 2)
-			.attr('y1', 0)
-			.attr('x2', width / 2)
-			.attr('y2', height - margin.top - margin.bottom)
-			.attr('stroke', isDarkMode ? '#6b7280' : '#d1d5db')
-			.attr('stroke-width', 1)
-			.attr('opacity', 0.4);
-
-		// add x-axis group
-		d3.select(svg)
-			.append('g')
-			.attr('class', 'x-axis')
-			.attr('transform', `translate(${margin.left}, ${height - margin.bottom})`);
-
-		// create initial scale (always create one)
-		const now = new Date();
-		const defaultStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-		xScale = d3.scaleTime().domain([defaultStart, now]).range([0, width]);
-
-		// setup zoom behavior
-		setupZoomOptimized();
-
-		// setup theme observer
-		if (!themeObserver && typeof MutationObserver !== 'undefined') {
-			themeObserver = new MutationObserver(() => {
-				checkTheme();
-				updateTimelineColors();
-			});
-			themeObserver.observe(document.documentElement, {
-				attributes: true,
-				attributeFilter: ['class']
-			});
-		}
-
-		// setup resize observer
-		if (typeof ResizeObserver !== 'undefined') {
-			resizeObserver = new ResizeObserver(handleResize);
-			resizeObserver.observe(container);
-		}
-
-		initialized = true;
-
-		// show initial axes
-		updateAxesImmediate(xScale);
-		updateCenterDate(xScale);
-
-		// initialize with current events after everything is set up
-		if (!isGhost) {
-			updateTimelineOptimized();
 		} else {
-			handleGhost();
+			currentTimeIndicator.attr('opacity', 0);
+			if (currentTimeWindow) {
+				currentTimeWindow.attr('opacity', 0);
+			}
 		}
-	}
-
-	// optimized zoom setup with better performance
-	function setupZoomOptimized() {
-		zoom = d3
-			.zoom()
-			.scaleExtent([0.1, 1000000])
-			.extent([
-				[0, 0],
-				[width, height]
-			])
-			.filter((event) => {
-				// performance: check zoom limits only for wheel events
-				if (event.type === 'wheel') {
-					if (!currentTransform || !xScale) return true;
-
-					const newX = currentTransform.rescaleX(xScale);
-					const visibleDomain = newX.domain();
-					const visibleTimeSpan = visibleDomain[1] - visibleDomain[0];
-
-					// block zoom in when already at max zoom
-					if (visibleTimeSpan <= MAX_ZOOM_IN && event.deltaY < 0) {
-						return false;
-					}
-				}
-				return true;
-			})
-			.on('zoom', handleZoomThrottled);
-
-		d3.select(svg).call(zoom);
-	}
-
-	// throttled zoom handler for better performance
-	function handleZoomThrottled(event) {
-		if (!xScale) return;
-
-		// store the current transform immediately for responsive feel
-		currentTransform = event.transform;
-		const newX = event.transform.rescaleX(xScale);
-
-		// immediately update circle positions for smooth panning
-		timelineGroup.selectAll('circle').attr('cx', (d) => newX(new Date(d.createdAt)));
-
-		// throttle expensive operations
-		if (zoomThrottleTimeout) clearTimeout(zoomThrottleTimeout);
-		zoomThrottleTimeout = setTimeout(() => {
-			updateAxesOptimized(newX);
-			updateVisibleEventsOptimized(newX);
-		}, 16); // ~60fps
-	}
-
-	// optimized timeline update with minimal DOM manipulation
-	function updateTimelineOptimized() {
-		if (!initialized || !svg || !timelineGroup || !xScale) {
-			return;
-		}
-
-		const filteredEvents = getFilteredEvents();
-
-		// handle empty state
-		if (filteredEvents.length === 0) {
-			timelineGroup.selectAll('circle').remove();
-			// keep current scale but update center date
-			updateCenterDate(xScale);
-			return;
-		}
-
-		// calculate time domain
-		const timestamps = filteredEvents.map((d) => new Date(d.createdAt));
-		const timeRange = d3.extent(timestamps);
-		const timeSpan = timeRange[1] - timeRange[0];
-		const padding = Math.max(timeSpan * MIN_ZOOM_OUT_PADDING, 60000);
-
-		const domainStart = new Date(timeRange[0].getTime() - padding);
-		const domainEnd = new Date(timeRange[1].getTime() + padding);
-
-		xScale = d3.scaleTime().domain([domainStart, domainEnd]).range([0, width]);
-
-		// update visible events
-		updateVisibleEventsOptimized(xScale);
-		updateAxesImmediate(xScale);
-		updateCenterDate(xScale);
-
-		// apply current transform if exists
-		if (currentTransform) {
-			const newX = currentTransform.rescaleX(xScale);
-			updateAxesImmediate(newX);
-			timelineGroup.selectAll('circle').attr('cx', (d) => newX(new Date(d.createdAt)));
-		} else {
-			// set initial zoom
-			const optimalScale = calculateOptimalScale(domainStart, domainEnd);
-			const initialTranslate = (width - width * optimalScale) / 2;
-			currentTransform = d3.zoomIdentity.translate(initialTranslate, 0).scale(optimalScale);
-			d3.select(svg).call(zoom.transform, currentTransform);
-		}
-	}
-
-	// optimized visible events update with virtualization
-	function updateVisibleEventsOptimized(scale) {
-		const currentScale = scale || xScale;
-		if (!currentScale) return;
-
-		visibleEvents = getVisibleEvents(currentScale);
-
-		// use d3's data join for efficient updates
-		const circles = timelineGroup
-			.selectAll('circle')
-			.data(visibleEvents, (d) => d.id || `${d.createdAt}-${d.eventName}`);
-
-		// remove events no longer visible
-		circles.exit().remove();
-
-		// add new visible events
-		circles
-			.enter()
-			.append('circle')
-			.attr('r', 6)
-			.attr('stroke', isDarkMode ? '#374151' : '#fff')
-			.attr('stroke-width', 1)
-			.attr('cy', (height - margin.top - margin.bottom) / 2)
-			.merge(circles)
-			.attr('cx', (d) => currentScale(new Date(d.createdAt)))
-			.attr('fill', (d) => getEventColor(d.eventName))
-			.on('mouseover', showTooltipOptimized)
-			.on('mouseout', hideTooltipOptimized);
-	}
-
-	function calculateOptimalScale(start, end) {
-		if (!start || !end) return 0.9;
-
-		const timeSpan = end - start;
-		const targetTimeSpan = timeSpan * (1 + MIN_ZOOM_OUT_PADDING * 2);
-		const currentScale = width / targetTimeSpan;
-
-		return Math.min(Math.max(currentScale, 0.7), 0.95);
-	}
-
-	// optimized axis updates with throttling
-	function updateAxesOptimized(scale) {
-		if (axisUpdateTimeout) clearTimeout(axisUpdateTimeout);
-
-		axisUpdateTimeout = setTimeout(() => {
-			updateAxesImmediate(scale);
-		}, 32); // ~30fps for axis updates
 	}
 
 	function updateAxesImmediate(scale) {
-		if (!scale || !scale.domain || typeof scale.domain !== 'function') {
-			console.error('Invalid scale provided to updateAxes');
-			return;
-		}
+		if (!scale?.domain) return;
 
 		const domain = scale.domain();
 		const timeSpan = domain[1] - domain[0];
@@ -413,61 +283,271 @@
 		const maxTicks = Math.floor(width / minTickSpacing);
 
 		const xAxis = d3.select(svg).select('.x-axis');
-		if (!xAxis.empty()) {
-			let tickFunction;
-			let tickFormat;
+		if (xAxis.empty()) return;
 
-			// optimize tick calculation
-			if (timeSpan < 1000) {
-				tickFunction = d3.timeMillisecond.every(Math.ceil(timeSpan / maxTicks / 10) * 10);
-				tickFormat = d3.timeFormat(use24Hour ? '%H:%M:%S.%L' : '%I:%M:%S.%L %p');
-			} else if (timeSpan < 60000) {
-				tickFunction = d3.timeSecond.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 1000)));
-				tickFormat = d3.timeFormat(use24Hour ? '%H:%M:%S' : '%I:%M:%S %p');
-			} else if (timeSpan < 3600000) {
-				tickFunction = d3.timeMinute.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 60000)));
-				tickFormat = d3.timeFormat(use24Hour ? '%H:%M' : '%I:%M %p');
-			} else if (timeSpan < 86400000) {
-				tickFunction = d3.timeHour.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 3600000)));
-				tickFormat = d3.timeFormat(use24Hour ? '%H:%M' : '%I:%M %p');
-			} else if (timeSpan < 2592000000) {
-				tickFunction = d3.timeDay.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 86400000)));
-				tickFormat = d3.timeFormat('%d %b');
-			} else if (timeSpan < 31536000000) {
-				tickFunction = d3.timeMonth.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 2592000000)));
-				tickFormat = d3.timeFormat('%b %Y');
-			} else {
-				tickFunction = d3.timeYear.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 31536000000)));
-				tickFormat = d3.timeFormat('%Y');
-			}
+		let tickFunction;
+		let tickFormat;
 
-			xAxis.call(d3.axisBottom(scale).ticks(tickFunction).tickFormat(tickFormat));
-
-			xAxis
-				.selectAll('text')
-				.style('text-anchor', 'middle')
-				.attr('dy', '1em')
-				.attr('dx', '0')
-				.attr('transform', 'rotate(0)');
+		if (timeSpan < 1000) {
+			tickFunction = d3.timeMillisecond.every(Math.ceil(timeSpan / maxTicks / 10) * 10);
+			tickFormat = d3.timeFormat(use24Hour ? '%H:%M:%S.%L' : '%I:%M:%S.%L %p');
+		} else if (timeSpan < 60000) {
+			tickFunction = d3.timeSecond.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 1000)));
+			tickFormat = d3.timeFormat(use24Hour ? '%H:%M:%S' : '%I:%M:%S %p');
+		} else if (timeSpan < 3600000) {
+			tickFunction = d3.timeMinute.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 60000)));
+			tickFormat = d3.timeFormat(use24Hour ? '%H:%M' : '%I:%M %p');
+		} else if (timeSpan < 86400000) {
+			tickFunction = d3.timeHour.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 3600000)));
+			tickFormat = d3.timeFormat(use24Hour ? '%H:%M' : '%I:%M %p');
+		} else if (timeSpan < 2592000000) {
+			tickFunction = d3.timeDay.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 86400000)));
+			tickFormat = d3.timeFormat('%d %b');
+		} else if (timeSpan < 31536000000) {
+			tickFunction = d3.timeMonth.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 2592000000)));
+			tickFormat = d3.timeFormat('%b %Y');
+		} else {
+			tickFunction = d3.timeYear.every(Math.max(1, Math.ceil(timeSpan / maxTicks / 31536000000)));
+			tickFormat = d3.timeFormat('%Y');
 		}
 
+		xAxis.call(d3.axisBottom(scale).ticks(tickFunction).tickFormat(tickFormat));
+		xAxis.selectAll('text').style('text-anchor', 'middle').attr('dy', '1em');
+
 		updateCenterDate(scale);
+		updateCurrentTimeIndicatorImmediate();
+	}
+
+	function updateAxesDebounced(scale) {
+		if (axisUpdateId) clearTimeout(axisUpdateId);
+		axisUpdateId = setTimeout(() => updateAxesImmediate(scale), AXIS_DEBOUNCE_MS);
 	}
 
 	function updateCenterDate(scale) {
-		const currentScale = scale || xScale;
-		if (!currentScale) return;
-
+		if (!scale) return;
 		try {
-			const domain = currentScale.domain();
+			const domain = scale.domain();
 			const centerTime = new Date((domain[0].getTime() + domain[1].getTime()) / 2);
-
-			// only update if significantly different to avoid unnecessary reactivity
 			if (Math.abs(centerTime.getTime() - currentCenterDate.getTime()) > 1000) {
 				currentCenterDate = centerTime;
 			}
-		} catch (e) {
-			console.error('Error updating center date:', e);
+		} catch {
+			// ignore errors
+		}
+	}
+
+	function calculateOptimalScale(start, end) {
+		if (!start || !end) return 0.9;
+		const timeSpan = end - start;
+		const targetTimeSpan = timeSpan * (1 + MIN_ZOOM_OUT_PADDING * 2);
+		return Math.min(Math.max(width / targetTimeSpan, 0.7), 0.95);
+	}
+
+	// calculate optimal view based on events and current time
+	// returns { domainStart, domainEnd, centerTs } for the view
+	function calculateOptimalView(filteredEvents) {
+		const now = Date.now();
+
+		if (filteredEvents.length === 0) {
+			// no events: show last 24 hours centered on now
+			const dayMs = 24 * 60 * 60 * 1000;
+			return {
+				domainStart: new Date(now - dayMs),
+				domainEnd: new Date(now),
+				centerTs: now - dayMs / 2
+			};
+		}
+
+		// fast min/max calculation
+		let minTs = filteredEvents[0]._ts;
+		let maxTs = filteredEvents[0]._ts;
+		for (let i = 1; i < filteredEvents.length; i++) {
+			const ts = filteredEvents[i]._ts;
+			if (ts < minTs) minTs = ts;
+			if (ts > maxTs) maxTs = ts;
+		}
+
+		const timeSpan = maxTs - minTs;
+		const padding = Math.max(timeSpan * MIN_ZOOM_OUT_PADDING, 60000);
+
+		if (now > maxTs) {
+			// now is after last event: center view on middle of campaign
+			const campaignMiddle = minTs + timeSpan / 2;
+			return {
+				domainStart: new Date(minTs - padding),
+				domainEnd: new Date(maxTs + padding),
+				centerTs: campaignMiddle
+			};
+		} else {
+			// last event hasn't happened yet (scheduled): pan to NOW
+			// use same time span as campaign but centered on now
+			const viewSpan = Math.max(timeSpan + padding * 2, 60 * 60 * 1000); // at least 1 hour
+			return {
+				domainStart: new Date(now - viewSpan / 2),
+				domainEnd: new Date(now + viewSpan / 2),
+				centerTs: now
+			};
+		}
+	}
+
+	// cache circle nodes for fast iteration during zoom/pan
+	function cacheCircleNodes() {
+		if (!circlesGroup) {
+			circleNodes = [];
+			circleData = [];
+			return;
+		}
+		const selection = circlesGroup.selectAll('circle');
+		circleNodes = selection.nodes();
+		circleData = selection.data();
+	}
+
+	// render circles - only called on data change or zoom end
+	function renderCircles(scale) {
+		if (!scale || !circlesGroup) return;
+
+		const visibleData = getVisibleEvents(scale);
+		const strokeColor = isDarkMode ? '#374151' : '#fff';
+		const yPos = (HEIGHT - MARGIN.top - MARGIN.bottom) / 2;
+
+		const circles = circlesGroup.selectAll('circle').data(visibleData, (d) => d.id || d._ts);
+
+		circles.exit().remove();
+
+		const entered = circles
+			.enter()
+			.append('circle')
+			.attr('r', 6)
+			.attr('stroke', strokeColor)
+			.attr('stroke-width', 1)
+			.attr('cy', yPos)
+			.attr('cursor', 'pointer');
+
+		entered
+			.merge(circles)
+			.attr('cx', (d) => scale(d._ts))
+			.attr('fill', (d) => getEventColor(d.eventName));
+
+		// cache nodes after render
+		cacheCircleNodes();
+	}
+
+	// ultra-fast position update using cached nodes - no d3 overhead
+	function updateCirclePositionsFast(scale) {
+		const len = circleNodes.length;
+		for (let i = 0; i < len; i++) {
+			circleNodes[i].setAttribute('cx', scale(circleData[i]._ts));
+		}
+	}
+
+	// RAF-batched zoom handler
+	function scheduleZoomUpdate() {
+		if (pendingZoomUpdate) return;
+		pendingZoomUpdate = true;
+
+		rafId = requestAnimationFrame(() => {
+			pendingZoomUpdate = false;
+			if (pendingScale && circleNodes.length > 0) {
+				updateCirclePositionsFast(pendingScale);
+			}
+		});
+	}
+
+	function handleZoom(event) {
+		if (!xScale) return;
+
+		currentTransform = event.transform;
+		pendingScale = currentTransform.rescaleX(xScale);
+
+		// schedule RAF update for circle positions
+		scheduleZoomUpdate();
+
+		// hide time indicator during interaction
+		if (currentTimeIndicator) currentTimeIndicator.attr('opacity', 0);
+		if (currentTimeWindow) currentTimeWindow.attr('opacity', 0);
+
+		// debounce expensive operations (axis, virtualization)
+		updateAxesDebounced(pendingScale);
+	}
+
+	function handleZoomEnd() {
+		if (!pendingScale) return;
+
+		// on zoom end, do full re-render with virtualization
+		renderCircles(pendingScale);
+		updateAxesImmediate(pendingScale);
+		updateCurrentTimeIndicatorImmediate();
+	}
+
+	function setupZoom() {
+		zoom = d3
+			.zoom()
+			.scaleExtent([0.1, 1000000])
+			.extent([
+				[0, 0],
+				[width, HEIGHT]
+			])
+			.filter((event) => {
+				if (event.type === 'wheel' && currentTransform && xScale) {
+					const newX = currentTransform.rescaleX(xScale);
+					const visibleTimeSpan = newX.domain()[1] - newX.domain()[0];
+					if (visibleTimeSpan <= MAX_ZOOM_IN && event.deltaY < 0) {
+						return false;
+					}
+				}
+				return true;
+			})
+			.on('zoom', handleZoom)
+			.on('end', handleZoomEnd);
+
+		d3.select(svg).call(zoom);
+	}
+
+	function updateTimeline() {
+		if (!initialized || !svg || !timelineGroup || !xScale) return;
+
+		const filteredEvents = getFilteredEvents();
+
+		if (filteredEvents.length === 0) {
+			if (circlesGroup) {
+				circlesGroup.selectAll('circle').remove();
+				circleNodes = [];
+				circleData = [];
+			}
+			updateCenterDate(xScale);
+			return;
+		}
+
+		// use pre-computed timestamps with fast min/max
+		const timestamps = filteredEvents.map((d) => d._ts);
+		let minTs = timestamps[0];
+		let maxTs = timestamps[0];
+		for (let i = 1; i < timestamps.length; i++) {
+			if (timestamps[i] < minTs) minTs = timestamps[i];
+			if (timestamps[i] > maxTs) maxTs = timestamps[i];
+		}
+		const timeSpan = maxTs - minTs;
+		const padding = Math.max(timeSpan * MIN_ZOOM_OUT_PADDING, 60000);
+
+		const domainStart = new Date(minTs - padding);
+		const domainEnd = new Date(maxTs + padding);
+
+		xScale = d3.scaleTime().domain([domainStart, domainEnd]).range([0, width]);
+
+		renderCircles(xScale);
+		updateAxesImmediate(xScale);
+		updateCenterDate(xScale);
+		updateCurrentTimeIndicatorImmediate();
+
+		if (currentTransform) {
+			const newX = currentTransform.rescaleX(xScale);
+			updateAxesImmediate(newX);
+			updateCirclePositionsFast(newX);
+		} else {
+			const optimalScale = calculateOptimalScale(domainStart, domainEnd);
+			const initialTranslate = (width - width * optimalScale) / 2;
+			currentTransform = d3.zoomIdentity.translate(initialTranslate, 0).scale(optimalScale);
+			d3.select(svg).call(zoom.transform, currentTransform);
 		}
 	}
 
@@ -475,10 +555,8 @@
 		if (!initialized || !timelineGroup) return;
 
 		if (isGhost) {
-			// hide event dots and show ghost dots when in ghost mode
-			timelineGroup.selectAll('circle:not(.ghost-dot)').style('display', 'none');
+			if (circlesGroup) circlesGroup.selectAll('circle').style('display', 'none');
 
-			// create ghost dots if they don't exist
 			if (timelineGroup.selectAll('.ghost-dot').empty()) {
 				const ghostCount = Math.min(12, Math.max(3, Math.floor(width / 80)));
 				const ghostData = Array.from({ length: ghostCount }, (_, i) => ({
@@ -494,337 +572,198 @@
 					.attr('class', 'ghost-dot')
 					.attr('r', 6)
 					.attr('cx', (d) => d.x)
-					.attr('cy', (height - margin.top - margin.bottom) / 2)
+					.attr('cy', (HEIGHT - MARGIN.top - MARGIN.bottom) / 2)
 					.attr('fill', 'none')
 					.attr('stroke', isDarkMode ? '#6b7280' : '#9ca3af')
 					.attr('stroke-width', 1);
 			}
 		} else {
-			// remove ghost dots and show real events
 			timelineGroup.selectAll('.ghost-dot').remove();
-			timelineGroup.selectAll('circle:not(.ghost-dot)').style('display', null);
-			// update timeline with real data
-			updateTimelineOptimized();
+			if (circlesGroup) circlesGroup.selectAll('circle').style('display', null);
+			updateTimeline();
 		}
 	}
 
-	// optimized tooltip with reduced DOM manipulation
-	let tooltipTimeout;
-	function showTooltipOptimized(event, d) {
-		if (!tooltip || !d || !d.eventName) return;
-
-		// clear any pending hide
-		if (tooltipTimeout) clearTimeout(tooltipTimeout);
-
-		// use requestAnimationFrame for smooth tooltip positioning
-		requestAnimationFrame(() => {
-			const [x, y] = d3.pointer(event, container);
-			tooltip.style.display = 'block';
-
-			const tooltipWidth = 250;
-			const containerRect = container.getBoundingClientRect();
-			const leftPosition = x + 10;
-			const rightEdge = leftPosition + tooltipWidth;
-			const adjustedLeft = rightEdge > container.offsetWidth ? x - tooltipWidth - 10 : leftPosition;
-
-			tooltip.style.left = `${Math.max(10, adjustedLeft)}px`;
-			tooltip.style.top = `${Math.max(10, y - 10)}px`;
-
-			updateTooltipContent(d);
-		});
-	}
-
-	function hideTooltipOptimized() {
-		if (tooltipTimeout) clearTimeout(tooltipTimeout);
-		tooltipTimeout = setTimeout(() => {
-			if (tooltip) {
-				tooltip.style.display = 'none';
+	function handleResize() {
+		if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
+		resizeTimeoutId = setTimeout(() => {
+			if (container && initialized) {
+				const newWidth = container.offsetWidth - MARGIN.left - MARGIN.right;
+				if (newWidth > 0 && newWidth !== width) {
+					width = newWidth;
+					if (xScale) {
+						xScale.range([0, width]);
+						updateTimeline();
+					}
+				}
 			}
-		}, 100); // small delay to prevent flickering
+		}, RESIZE_DEBOUNCE_MS);
 	}
 
-	// separate tooltip content update for better performance
-	function updateTooltipContent(d) {
-		if (!tooltip) return;
+	function initializeTimeline() {
+		if (!svg || !container) return;
 
-		try {
-			const eventColor = getEventColor(d.eventName);
-			const eventInfo = toEvent(d.eventName);
-			const eventIcon = getEventIcon(d.eventName);
-			const dateObj = new Date(d.createdAt);
-			const formattedDate = dateObj.toLocaleDateString();
-			const formattedTime = dateObj.toLocaleTimeString([], {
-				hour12: !use24Hour,
-				hour: '2-digit',
-				minute: '2-digit',
-				second: '2-digit'
+		const containerWidth = container.offsetWidth;
+		width = containerWidth > 0 ? containerWidth - MARGIN.left - MARGIN.right : 800;
+
+		d3.select(svg).selectAll('*').remove();
+
+		timelineGroup = d3
+			.select(svg)
+			.append('g')
+			.attr('transform', `translate(${MARGIN.left}, ${MARGIN.top})`);
+
+		const yCenter = (HEIGHT - MARGIN.top - MARGIN.bottom) / 2;
+
+		// timeline base line
+		timelineGroup
+			.append('line')
+			.attr('class', 'timeline-line')
+			.attr('x1', 0)
+			.attr('y1', yCenter)
+			.attr('x2', width)
+			.attr('y2', yCenter)
+			.attr('stroke', isDarkMode ? '#374151' : '#e5e7eb')
+			.attr('stroke-width', 2);
+
+		// center reference line
+		timelineGroup
+			.append('line')
+			.attr('class', 'center-line')
+			.attr('x1', width / 2)
+			.attr('y1', 0)
+			.attr('x2', width / 2)
+			.attr('y2', HEIGHT - MARGIN.top - MARGIN.bottom)
+			.attr('stroke', isDarkMode ? '#6b7280' : '#d1d5db')
+			.attr('stroke-width', 1)
+			.attr('opacity', 0.4);
+
+		// current time window
+		currentTimeWindow = timelineGroup
+			.append('rect')
+			.attr('class', 'current-time-window')
+			.attr('y', 0)
+			.attr('height', HEIGHT - MARGIN.top - MARGIN.bottom)
+			.attr('fill', isDarkMode ? 'rgba(104, 135, 234, 0.15)' : 'rgba(68, 94, 204, 0.15)')
+			.attr('opacity', 0.5);
+
+		// current time indicator
+		currentTimeIndicator = timelineGroup
+			.append('line')
+			.attr('class', 'current-time-indicator')
+			.attr('y1', 0)
+			.attr('y2', HEIGHT - MARGIN.top - MARGIN.bottom)
+			.attr('stroke', isDarkMode ? '#6887ea' : '#445ecc')
+			.attr('stroke-width', 2)
+			.attr('stroke-dasharray', '4,4')
+			.attr('opacity', 0.8);
+
+		// dedicated group for circles (better for transforms)
+		circlesGroup = timelineGroup.append('g').attr('class', 'circles-group');
+
+		// x-axis
+		d3.select(svg)
+			.append('g')
+			.attr('class', 'x-axis')
+			.attr('transform', `translate(${MARGIN.left}, ${HEIGHT - MARGIN.bottom})`);
+
+		// event delegation for tooltips on circles group
+		circlesGroup.on('mouseover', handleCircleMouseOver).on('mouseout', handleCircleMouseOut);
+
+		// initial scale using optimal view calculation
+		const filteredEvents = getFilteredEvents();
+		const optimalView = calculateOptimalView(filteredEvents);
+
+		xScale = d3
+			.scaleTime()
+			.domain([optimalView.domainStart, optimalView.domainEnd])
+			.range([0, width]);
+
+		setupZoom();
+
+		// theme observer
+		if (typeof MutationObserver !== 'undefined') {
+			themeObserver = new MutationObserver(() => {
+				checkTheme();
+				updateTimelineColors();
 			});
-
-			tooltip.innerHTML = '';
-
-			// create main container
-			const container = document.createElement('div');
-			container.className = 'overflow-hidden';
-
-			// create header with colored border
-			const header = document.createElement('div');
-			header.className = 'border-t-4';
-			header.style.borderTopColor = eventColor;
-
-			const headerContent = document.createElement('div');
-			headerContent.className = 'px-4 py-3 text-gray-800 dark:text-gray-200';
-
-			const headerFlex = document.createElement('div');
-			headerFlex.className = 'flex items-center space-x-2';
-
-			// create icon container
-			const iconContainer = document.createElement('div');
-			iconContainer.className = 'flex-shrink-0 w-5 h-5';
-			iconContainer.style.color = eventColor;
-			iconContainer.innerHTML = eventIcon; // eventIcon is safe SVG from getEventIcon function
-
-			const textContainer = document.createElement('div');
-			textContainer.className = 'flex-1 min-w-0';
-
-			const title = document.createElement('h3');
-			title.className = 'text-sm font-bold truncate';
-			title.textContent = eventInfo.name;
-
-			textContainer.appendChild(title);
-			headerFlex.appendChild(iconContainer);
-			headerFlex.appendChild(textContainer);
-			headerContent.appendChild(headerFlex);
-			header.appendChild(headerContent);
-			container.appendChild(header);
-
-			// create body content
-			const body = document.createElement('div');
-			body.className = 'px-4 py-3 space-y-3';
-
-			// email section
-			if (d.recipient?.email) {
-				const emailSection = document.createElement('div');
-				emailSection.className = 'flex items-center space-x-2';
-
-				const emailIcon = document.createElement('div');
-				emailIcon.className = 'flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400';
-				emailIcon.innerHTML =
-					'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"/></svg>';
-
-				const emailText = document.createElement('span');
-				emailText.className = 'text-sm text-gray-700 dark:text-gray-300 truncate';
-				emailText.textContent = d.recipient.email;
-
-				emailSection.appendChild(emailIcon);
-				emailSection.appendChild(emailText);
-				body.appendChild(emailSection);
-			}
-
-			// time section
-			const timeSection = document.createElement('div');
-			timeSection.className = 'flex items-center space-x-2';
-
-			const timeIcon = document.createElement('div');
-			timeIcon.className = 'flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400';
-			timeIcon.innerHTML =
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
-
-			const timeText = document.createElement('div');
-			timeText.className = 'text-sm text-gray-700 dark:text-gray-300';
-			timeText.textContent = `${formattedDate.split(',')[0]} ${formattedTime}`;
-
-			timeSection.appendChild(timeIcon);
-			timeSection.appendChild(timeText);
-			body.appendChild(timeSection);
-
-			// ip/useragent section
-			if (d.ip || d.userAgent) {
-				const techSection = document.createElement('div');
-				techSection.className = 'mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 space-y-2';
-
-				if (d.ip) {
-					const ipSection = document.createElement('div');
-					ipSection.className = 'flex items-center space-x-2';
-
-					const ipIcon = document.createElement('div');
-					ipIcon.className = 'flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400';
-					ipIcon.innerHTML =
-						'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>';
-
-					const ipText = document.createElement('span');
-					ipText.className = 'text-xs text-gray-600 dark:text-gray-400 truncate';
-					ipText.textContent = d.ip;
-
-					ipSection.appendChild(ipIcon);
-					ipSection.appendChild(ipText);
-					techSection.appendChild(ipSection);
-				}
-
-				if (d.userAgent) {
-					const uaSection = document.createElement('div');
-					uaSection.className = 'flex items-start space-x-2';
-
-					const uaIcon = document.createElement('div');
-					uaIcon.className = 'flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5';
-					uaIcon.innerHTML =
-						'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>';
-
-					const uaText = document.createElement('span');
-					uaText.className = 'text-xs text-gray-600 dark:text-gray-400 break-words';
-					uaText.textContent =
-						d.userAgent.length > 80 ? d.userAgent.substring(0, 80) + '...' : d.userAgent;
-
-					uaSection.appendChild(uaIcon);
-					uaSection.appendChild(uaText);
-					techSection.appendChild(uaSection);
-				}
-
-				body.appendChild(techSection);
-			}
-
-			// data section
-			if (d.data) {
-				const dataSection = document.createElement('div');
-				dataSection.className = 'mt-3 pt-3 border-t border-gray-200 dark:border-gray-600';
-
-				const dataFlex = document.createElement('div');
-				dataFlex.className = 'flex items-start space-x-2';
-
-				const dataIcon = document.createElement('div');
-				dataIcon.className = 'flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5';
-				dataIcon.innerHTML =
-					'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
-
-				const dataText = document.createElement('div');
-				dataText.className = 'text-xs text-gray-600 dark:text-gray-400 break-words';
-				dataText.textContent = d.data.length > 100 ? d.data.substring(0, 100) + '...' : d.data;
-
-				dataFlex.appendChild(dataIcon);
-				dataFlex.appendChild(dataText);
-				dataSection.appendChild(dataFlex);
-				body.appendChild(dataSection);
-			}
-
-			container.appendChild(body);
-			tooltip.appendChild(container);
-		} catch (e) {
-			console.error('Error updating tooltip content:', e);
-			hideTooltipOptimized();
+			themeObserver.observe(document.documentElement, {
+				attributes: true,
+				attributeFilter: ['class']
+			});
 		}
+
+		// resize observer
+		if (typeof ResizeObserver !== 'undefined') {
+			resizeObserver = new ResizeObserver(handleResize);
+			resizeObserver.observe(container);
+		}
+
+		initialized = true;
+
+		updateAxesImmediate(xScale);
+		updateCenterDate(xScale);
+
+		if (!isGhost) {
+			updateTimeline();
+		} else {
+			handleGhost();
+		}
+	}
+
+	function handleCircleMouseOver(event) {
+		const target = event.target;
+		if (target.tagName !== 'circle') return;
+
+		const d = d3.select(target).datum();
+		if (!d?.eventName) return;
+
+		if (tooltipHideId) {
+			clearTimeout(tooltipHideId);
+			tooltipHideId = null;
+		}
+
+		const [x, y] = d3.pointer(event, container);
+		const tooltipWidth = 250;
+		const leftPosition = x + 10;
+		const rightEdge = leftPosition + tooltipWidth;
+		const adjustedLeft = rightEdge > container.offsetWidth ? x - tooltipWidth - 10 : leftPosition;
+
+		tooltipX = Math.max(10, adjustedLeft);
+		tooltipY = Math.max(10, y - 10);
+		tooltipEvent = d;
+		tooltipVisible = true;
+	}
+
+	function handleCircleMouseOut() {
+		if (tooltipHideId) clearTimeout(tooltipHideId);
+		tooltipHideId = setTimeout(() => {
+			tooltipVisible = false;
+			tooltipEvent = null;
+		}, TOOLTIP_HIDE_DELAY);
 	}
 
 	function resetZoom() {
 		if (!zoom || !svg || !xScale) return;
 
 		const filteredEvents = getFilteredEvents();
-		if (filteredEvents.length === 0) return;
+		const optimalView = calculateOptimalView(filteredEvents);
 
-		const timestamps = filteredEvents.map((d) => new Date(d.createdAt));
-		const timeRange = d3.extent(timestamps);
-		const timeSpan = timeRange[1] - timeRange[0];
-		const padding = Math.max(timeSpan * MIN_ZOOM_OUT_PADDING, 60000);
+		// update scale domain
+		xScale.domain([optimalView.domainStart, optimalView.domainEnd]);
 
-		const domainStart = new Date(timeRange[0].getTime() - padding);
-		const domainEnd = new Date(timeRange[1].getTime() + padding);
+		const optimalScale = calculateOptimalScale(optimalView.domainStart, optimalView.domainEnd);
 
-		const optimalScale = calculateOptimalScale(domainStart, domainEnd);
-		const initialTranslate = (width - width * optimalScale) / 2;
+		// calculate translate to center on the desired point
+		const domainSpan = optimalView.domainEnd.getTime() - optimalView.domainStart.getTime();
+		const centerRatio = (optimalView.centerTs - optimalView.domainStart.getTime()) / domainSpan;
+		const centerX = centerRatio * width;
+		const targetCenterX = width / 2;
+		const translateX = targetCenterX - centerX * optimalScale;
 
-		const resetTransform = d3.zoomIdentity.translate(initialTranslate, 0).scale(optimalScale);
+		const resetTransform = d3.zoomIdentity.translate(translateX, 0).scale(optimalScale);
 
 		d3.select(svg).transition().duration(750).call(zoom.transform, resetTransform);
-	}
-
-	function getEventColor(eventName) {
-		const eventColors = {
-			campaign_scheduled: '#62aded',
-			campaign_active: '#5557f6',
-			campaign_self_managed: '#9622fc',
-			campaign_closed: '#9f9f9f',
-			campaign_recipient_scheduled: '#4e68d8',
-			campaign_recipient_cancelled: '#161692',
-			campaign_recipient_message_sent: '#94cae6',
-			campaign_recipient_message_failed: '#f2bb58',
-			campaign_recipient_message_read: '#4cb5b5',
-			campaign_recipient_evasion_page_visited: '#c8a2f0',
-			campaign_recipient_before_page_visited: '#eea5fa',
-			campaign_recipient_page_visited: '#f96dcf',
-			campaign_recipient_after_page_visited: '#f6287b',
-			campaign_recipient_deny_page_visited: '#ff6b35',
-			campaign_recipient_submitted_data: '#f42e41',
-			campaign_recipient_reported: '#2c3e50'
-		};
-		return eventColors[eventName] || '#6b7280';
-	}
-
-	function getEventIcon(eventName) {
-		const eventIcons = {
-			campaign_scheduled:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>',
-			campaign_active:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h1m4 0h1m-6 4h1m4 0h1M4 20h16a2 2 0 002-2V6a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>',
-			campaign_self_managed:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>',
-			campaign_closed:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
-			campaign_recipient_scheduled:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>',
-			campaign_recipient_cancelled:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>',
-			campaign_recipient_message_sent:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>',
-			campaign_recipient_message_failed:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>',
-			campaign_recipient_message_read:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>',
-			campaign_recipient_evasion_page_visited:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>',
-			campaign_recipient_before_page_visited:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>',
-			campaign_recipient_page_visited:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>',
-			campaign_recipient_after_page_visited:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>',
-			campaign_recipient_deny_page_visited:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>',
-			campaign_recipient_submitted_data:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
-			campaign_recipient_reported:
-				'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>'
-		};
-		return (
-			eventIcons[eventName] ||
-			'<svg fill="currentColor" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"></circle></svg>'
-		);
-	}
-
-	function getEventDescription(eventName) {
-		const descriptions = {
-			campaign_scheduled: 'Campaign scheduled for future execution',
-			campaign_active: 'Campaign is currently running',
-			campaign_self_managed: 'Campaign is self-managed',
-			campaign_closed: 'Campaign has been completed',
-			campaign_recipient_scheduled: 'Recipient scheduled for campaign',
-			campaign_recipient_cancelled: 'Campaign cancelled for recipient',
-			campaign_recipient_message_sent: 'Email successfully delivered',
-			campaign_recipient_message_failed: 'Email delivery failed',
-			campaign_recipient_message_read: 'Recipient opened the email',
-			campaign_recipient_evasion_page_visited: 'Recipient encountered evasion page',
-			campaign_recipient_before_page_visited: 'Recipient browsing before target page',
-			campaign_recipient_page_visited: 'Recipient visited the target page',
-			campaign_recipient_after_page_visited: 'Recipient continued browsing after target',
-			campaign_recipient_deny_page_visited: 'Recipient was denied access',
-			campaign_recipient_submitted_data: 'Recipient submitted form data',
-			campaign_recipient_reported: 'Email was reported as spam'
-		};
-		return descriptions[eventName] || 'Unknown event';
-	}
-
-	function getEventStatus(eventName) {
-		if (eventName.startsWith('campaign_recipient_')) {
-			return 'recipient';
-		}
-		return 'campaign';
 	}
 
 	function handleClickOutside(event) {
@@ -833,65 +772,78 @@
 		}
 	}
 
+	function invalidateCacheAndUpdate() {
+		filteredEventsCache = null;
+		if (!isGhost && initialized) {
+			updateTimeline();
+		}
+	}
+
+	// computed tooltip values
+	$: tooltipColor = tooltipEvent ? getEventColor(tooltipEvent.eventName) : DEFAULT_COLOR;
+	$: tooltipIcon = tooltipEvent ? getEventIcon(tooltipEvent.eventName) : DEFAULT_ICON;
+	$: tooltipInfo = tooltipEvent ? toEvent(tooltipEvent.eventName) : null;
+	$: tooltipDate = tooltipEvent ? new Date(tooltipEvent.createdAt) : null;
+	$: tooltipFormattedDate = tooltipDate?.toLocaleDateString() || '';
+	$: tooltipFormattedTime =
+		tooltipDate?.toLocaleTimeString([], {
+			hour12: !use24Hour,
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit'
+		}) || '';
+
 	// lifecycle
 	onMount(() => {
 		checkTheme();
 	});
 
 	onDestroy(() => {
-		if (themeObserver) {
-			themeObserver.disconnect();
-		}
-		if (resizeObserver) {
-			resizeObserver.disconnect();
-		}
-		if (zoomThrottleTimeout) clearTimeout(zoomThrottleTimeout);
-		if (axisUpdateTimeout) clearTimeout(axisUpdateTimeout);
-		if (tooltipTimeout) clearTimeout(tooltipTimeout);
-		if (resizeTimeout) clearTimeout(resizeTimeout);
+		if (themeObserver) themeObserver.disconnect();
+		if (resizeObserver) resizeObserver.disconnect();
+		if (rafId) cancelAnimationFrame(rafId);
+		if (axisUpdateId) clearTimeout(axisUpdateId);
+		if (tooltipHideId) clearTimeout(tooltipHideId);
+		if (resizeTimeoutId) clearTimeout(resizeTimeoutId);
+		if (currentTimeIntervalId) clearInterval(currentTimeIntervalId);
 		window.removeEventListener('click', handleClickOutside);
 	});
 
-	// reactive statements - optimized to prevent unnecessary updates
-	$: if (container && svg && !initialized) {
-		initializeTimeline();
-	}
-
-	// simple width reactive update
-	$: if (container) {
-		const newWidth = container.offsetWidth - margin.left - margin.right;
-		if (newWidth > 0 && newWidth !== width) {
-			width = newWidth;
+	// reactive: process events when they change
+	$: if (events !== lastEventsRef) {
+		lastEventsRef = events;
+		processedEvents = processEvents(events);
+		filteredEventsCache = null;
+		circleNodes = [];
+		circleData = [];
+		if (initialized && !isGhost) {
+			updateTimeline();
 		}
 	}
 
-	// debounce timeline updates
-	let timelineUpdateTimeout;
-	$: if (initialized && xScale) {
-		if (timelineUpdateTimeout) clearTimeout(timelineUpdateTimeout);
-		timelineUpdateTimeout = setTimeout(() => {
-			filteredEventsCache = null; // invalidate cache
-			if (!isGhost) {
-				updateTimelineOptimized();
+	// reactive: initialize timeline
+	$: if (container && svg && !initialized) {
+		initializeTimeline();
+		if (currentTimeIntervalId) clearInterval(currentTimeIntervalId);
+		currentTimeIntervalId = setInterval(() => {
+			if (initialized && xScale) {
+				updateCurrentTimeIndicatorImmediate();
 			}
-		}, 50);
+		}, CURRENT_TIME_UPDATE_MS);
 	}
 
-	// debounce filter updates
-	$: if (initialized && filterUpdateCounter >= 0 && xScale) {
-		if (timelineUpdateTimeout) clearTimeout(timelineUpdateTimeout);
-		timelineUpdateTimeout = setTimeout(() => {
-			filteredEventsCache = null; // invalidate cache
-			updateTimelineOptimized();
-		}, 50);
-	}
-
-	// ghost mode handling
+	// reactive: ghost mode
 	$: if (initialized && timelineGroup) {
 		handleGhost();
 	}
 
-	// click outside handler
+	// reactive: time format changed
+	$: if (initialized && xScale && use24Hour !== undefined) {
+		const scale = currentTransform ? currentTransform.rescaleX(xScale) : xScale;
+		updateAxesImmediate(scale);
+	}
+
+	// reactive: filter dropdown click outside
 	$: if (showFilterDropdown) {
 		window.addEventListener('click', handleClickOutside);
 	} else {
@@ -904,13 +856,131 @@
 		<svg
 			bind:this={svg}
 			width="100%"
-			{height}
+			height={HEIGHT}
 			class="w-full bg-white dark:bg-gray-900/80 border border-gray-200 dark:border-gray-700/60 rounded-lg"
 		></svg>
-		<div
-			bind:this={tooltip}
-			class="absolute z-50 hidden bg-white dark:bg-gray-900 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700/60 max-w-xs"
-		></div>
+
+		<!-- svelte-native tooltip -->
+		{#if tooltipVisible && tooltipEvent}
+			<div
+				class="absolute z-50 bg-white dark:bg-gray-900 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700/60 max-w-xs overflow-hidden pointer-events-none"
+				style="left: {tooltipX}px; top: {tooltipY}px; will-change: transform;"
+			>
+				<div class="border-t-4" style="border-top-color: {tooltipColor}">
+					<div class="px-4 py-3 text-gray-800 dark:text-gray-200">
+						<div class="flex items-center space-x-2">
+							<div class="flex-shrink-0 w-5 h-5" style="color: {tooltipColor}">
+								{@html tooltipIcon}
+							</div>
+							<div class="flex-1 min-w-0">
+								<h3 class="text-sm font-bold truncate">{tooltipInfo?.name || 'Unknown'}</h3>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="px-4 py-3 space-y-3">
+					{#if tooltipEvent.recipient?.email}
+						<div class="flex items-center space-x-2">
+							<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400">
+								<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"
+									/>
+								</svg>
+							</div>
+							<span class="text-sm text-gray-700 dark:text-gray-300 truncate"
+								>{tooltipEvent.recipient.email}</span
+							>
+						</div>
+					{/if}
+
+					<div class="flex items-center space-x-2">
+						<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400">
+							<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+								/>
+							</svg>
+						</div>
+						<div class="text-sm text-gray-700 dark:text-gray-300">
+							{tooltipFormattedDate.split(',')[0]}
+							{tooltipFormattedTime}
+						</div>
+					</div>
+
+					{#if tooltipEvent.ip || tooltipEvent.userAgent}
+						<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 space-y-2">
+							{#if tooltipEvent.ip}
+								<div class="flex items-center space-x-2">
+									<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400">
+										<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+											/>
+										</svg>
+									</div>
+									<span class="text-xs text-gray-600 dark:text-gray-400 truncate"
+										>{tooltipEvent.ip}</span
+									>
+								</div>
+							{/if}
+							{#if tooltipEvent.userAgent}
+								<div class="flex items-start space-x-2">
+									<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5">
+										<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+											/>
+										</svg>
+									</div>
+									<span class="text-xs text-gray-600 dark:text-gray-400 break-words">
+										{tooltipEvent.userAgent.length > 80
+											? tooltipEvent.userAgent.substring(0, 80) + '...'
+											: tooltipEvent.userAgent}
+									</span>
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					{#if tooltipEvent.data}
+						<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+							<div class="flex items-start space-x-2">
+								<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5">
+									<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+										/>
+									</svg>
+								</div>
+								<div class="text-xs text-gray-600 dark:text-gray-400 break-words">
+									{tooltipEvent.data.length > 100
+										? tooltipEvent.data.substring(0, 100) + '...'
+										: tooltipEvent.data}
+								</div>
+							</div>
+						</div>
+					{/if}
+				</div>
+			</div>
+		{/if}
+
 		{#if !isGhost}
 			<div class="absolute top-2 right-2 flex gap-2">
 				<div class="relative filter-dropdown">
@@ -942,105 +1012,17 @@
 											Recipient Events
 										</h4>
 										<div class="space-y-1 pl-2">
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_scheduled}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">Scheduled</span>
-											</label>
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_cancelled}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">Cancelled</span>
-											</label>
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_message_sent}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">Message Sent</span>
-											</label>
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_message_failed}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">Message Failed</span>
-											</label>
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_message_read}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">Message Read</span>
-											</label>
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_before_page_visited}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">Before Page Visited</span>
-											</label>
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_page_visited}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">Page Visited</span>
-											</label>
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_after_page_visited}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">After Page Visited</span>
-											</label>
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_deny_page_visited}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">Deny Page Visited</span>
-											</label>
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_submitted_data}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">Data Submitted</span>
-											</label>
-											<label class="flex items-center text-xs">
-												<input
-													type="checkbox"
-													bind:checked={eventFilters.campaign_recipient_reported}
-													on:change={() => filterUpdateCounter++}
-													class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
-												/>
-												<span class="text-gray-600 dark:text-gray-300">Reported</span>
-											</label>
+											{#each [['campaign_recipient_scheduled', 'Scheduled'], ['campaign_recipient_cancelled', 'Cancelled'], ['campaign_recipient_message_sent', 'Message Sent'], ['campaign_recipient_message_failed', 'Message Failed'], ['campaign_recipient_message_read', 'Message Read'], ['campaign_recipient_before_page_visited', 'Before Page Visited'], ['campaign_recipient_page_visited', 'Page Visited'], ['campaign_recipient_after_page_visited', 'After Page Visited'], ['campaign_recipient_deny_page_visited', 'Deny Page Visited'], ['campaign_recipient_submitted_data', 'Data Submitted'], ['campaign_recipient_reported', 'Reported']] as [key, label]}
+												<label class="flex items-center text-xs">
+													<input
+														type="checkbox"
+														bind:checked={eventFilters[key]}
+														on:change={invalidateCacheAndUpdate}
+														class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
+													/>
+													<span class="text-gray-600 dark:text-gray-300">{label}</span>
+												</label>
+											{/each}
 										</div>
 									</div>
 								</div>
@@ -1048,10 +1030,8 @@
 								<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 flex gap-2">
 									<button
 										on:click={() => {
-											Object.keys(eventFilters).forEach((key) => {
-												eventFilters[key] = true;
-											});
-											filterUpdateCounter++;
+											Object.keys(eventFilters).forEach((k) => (eventFilters[k] = true));
+											invalidateCacheAndUpdate();
 										}}
 										class="flex-1 px-2 py-1 text-xs bg-cta-blue dark:bg-highlight-blue/80 text-white rounded hover:bg-blue-500 dark:hover:bg-highlight-blue focus:outline-none transition-colors duration-200"
 									>
@@ -1059,10 +1039,8 @@
 									</button>
 									<button
 										on:click={() => {
-											Object.keys(eventFilters).forEach((key) => {
-												eventFilters[key] = false;
-											});
-											filterUpdateCounter++;
+											Object.keys(eventFilters).forEach((k) => (eventFilters[k] = false));
+											invalidateCacheAndUpdate();
 										}}
 										class="flex-1 px-2 py-1 text-xs bg-slate-500 dark:bg-gray-700 text-white rounded hover:bg-slate-600 dark:hover:bg-gray-600 focus:outline-none transition-colors duration-200"
 									>
@@ -1135,20 +1113,33 @@
 		stroke: #374151;
 	}
 
-	:global(.ghost-dot-fill) {
-		fill: #e5e7eb;
-		animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-	}
-
-	:global(.dark .ghost-dot-fill) {
-		fill: #374151;
-	}
-
 	:global(.ghost-dot) {
 		animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 	}
 
 	:global(.center-line) {
 		pointer-events: none;
+	}
+
+	:global(.current-time-indicator) {
+		pointer-events: none;
+		filter: drop-shadow(0 0 2px rgba(68, 94, 204, 0.5));
+	}
+
+	:global(.dark .current-time-indicator) {
+		filter: drop-shadow(0 0 2px rgba(104, 135, 234, 0.6));
+	}
+
+	:global(.current-time-window) {
+		pointer-events: none;
+	}
+
+	:global(.circles-group circle) {
+		will-change: cx;
+		shape-rendering: geometricPrecision;
+	}
+
+	:global(.circles-group) {
+		contain: layout style;
 	}
 </style>

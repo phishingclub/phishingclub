@@ -32,6 +32,7 @@
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import TestLabel from '$lib/components/TestLabel.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
+	import { autoRefreshStore } from '$lib/store/autoRefresh';
 	import StatsCard from '$lib/components/StatsCard.svelte';
 	import Alert from '$lib/components/Alert.svelte';
 	import EventTimeline from '$lib/components/EventTimeline.svelte';
@@ -1207,7 +1208,11 @@
 		</div>
 		<div class=" mb-6">
 			<SubHeadline>Event Timeline</SubHeadline>
-			<EventTimeline events={timelineEvents} isGhost={isTimelineGhost} />
+			<EventTimeline
+				events={timelineEvents}
+				isGhost={isTimelineGhost}
+				refreshInterval={$autoRefreshStore.interval}
+			/>
 		</div>
 
 		<!-- details and actions section -->
