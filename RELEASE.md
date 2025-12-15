@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.24.0] - 2025-12-15
+- Added import oauth
+- Add warning before viewing email that cause an event to trigger
+- Improved campaign timeline performance and added now indicator
+- Fix multi select was cut off when overflowing modal
+- Fix campaign recipient event modal switching sort between asc and desc 
+
 ## [1.23.0] - 2025-12-13
 - Added Session Sushi as recommended handling of captured cookies
 - Rename whitebox/blackbox to Simulation/Red Team
