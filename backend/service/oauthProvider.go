@@ -688,7 +688,7 @@ func (o *OAuthProvider) ImportAuthorizedTokens(
 
 	// validate input
 	if len(tokens) == 0 {
-		return nil, errors.New("no tokens provided")
+		return nil, errs.NewCustomError(errors.New("no tokens provided"))
 	}
 
 	var ids []uuid.UUID
@@ -726,7 +726,7 @@ func (o *OAuthProvider) ImportAuthorizedTokens(
 		newTokens, err := o.requestTokens(tokenURL, data)
 		if err != nil {
 			o.Logger.Errorw("failed to refresh token during import", "error", err, "name", token.Name)
-			return nil, fmt.Errorf("failed to refresh token for '%s': %w", token.Name, err)
+			return nil, errs.NewCustomError(fmt.Errorf("failed to refresh token for '%s': %w", token.Name, err))
 		}
 
 		// use refreshed access token

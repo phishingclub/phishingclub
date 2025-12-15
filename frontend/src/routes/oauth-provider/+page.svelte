@@ -667,15 +667,7 @@
 		{isSubmitting}
 	>
 		<div class="mt-4 min-w-[800px]">
-			<div class="mb-4">
-				<p class="text-gray-600 dark:text-gray-400">
-					Import a pre-authorized OAuth token. Only <strong>refresh_token</strong> and
-					<strong>client_id</strong> are required. The system will automatically refresh to get a valid
-					access token and populate metadata.
-				</p>
-			</div>
-
-			<div class="mb-4">
+			<div class="mb-4 flex gap-2">
 				<label
 					for="import-file-input"
 					class="inline-flex items-center px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md font-medium text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer transition-colors"
@@ -697,23 +689,25 @@
 					on:change={onSetImportFile}
 					class="hidden"
 				/>
-			</div>
-
-			<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md mb-4">
 				<button
 					type="button"
-					class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
+					class="inline-flex items-center px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md font-medium text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
 					on:click={() => {
 						navigator.clipboard.writeText(`[
   {
     "refresh_token": "1.AXkAwC...",
-    "client_id": "1fec8e78-bce4-4aaf-ab1b-5451cc387264"
+    "client_id": "1fec8e78-bce4-4aaf-ab1b-5451cc387264",
+    "name": "optional: auto-generated if omitted",
+    "token_url": "optional: defaults to Microsoft",
+    "user": "optional: for display only",
+    "scope": "optional: populated from refresh",
+    "access_token": "optional: refreshed automatically"
   }
 ]`);
-						addToast('Copied minimal format example to clipboard', 'Success');
+						addToast('Copied format example to clipboard', 'Success');
 					}}
 				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path
 							stroke-linecap="round"
 							stroke-linejoin="round"
