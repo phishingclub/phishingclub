@@ -50,7 +50,7 @@ services:
 
   # Database Administration
   dbgate:
-    image: dbgate/dbgate:5.2.5
+    image: dbgate/dbgate:5.2.5@sha256:4db16a7232e21a466b46d3da450ec427250f94e4d37b6bcbdb95ee6a04c57888
     environment:
       CONNECTIONS: con1
       LABEL_con1: SQLite
@@ -69,7 +69,7 @@ services:
   # Mailer - SMTP server for testing
   # Mailpit for email testing and inspection
   mailer:
-    image: axllent/mailpit
+    image: axllent/mailpit@sha256:c076638db1e15662150be4fb62b8a6e96ef6ba5bde90c838a0239225854830f7
     container_name: mailpit
     restart: unless-stopped
     ports:
@@ -85,7 +85,7 @@ services:
 
   # SpamAssassin - Spam detection and scoring
   spamassassin:
-    image: axllent/spamassassin
+    image: axllent/spamassassin@sha256:0f63db7dc13da87d1c0654ad0bf061f11dce521b1a94a299ede641bbdfe2b048
     restart: unless-stopped
     volumes:
       - ./config/spamassassin/99_local_override.cf:/etc/mail/spamassassin/99_local_override.cf:ro
@@ -95,7 +95,7 @@ services:
   # Pebble - ACME server for testing
   # Used to test TLS certificate requesting via ACME
   pebble:
-    image: ghcr.io/letsencrypt/pebble:2.8.0
+    image: ghcr.io/letsencrypt/pebble:2.8.0@sha256:d9080f68f6cb6af8d82134ab26de0aaaf312ac9cba42aecc6d3aede6cb63007b
     command:
       - -config
       - /test/my-pebble-config.json
@@ -128,14 +128,14 @@ services:
 
   # Utils container with debugging tools
   test:
-    image: arunvelsriram/utils
+    image: arunvelsriram/utils@sha256:655ad18fd8d63526f17a28b4f795dccfeced41f8cde53e4ec48228b41cbc2586
     command: ["tail", "-f", "/dev/null"]
     networks:
       - default
 
   # Dozzle - container log viewer in the browser
   dozzle:
-    image: amir20/dozzle:latest
+    image: amir20/dozzle@sha256:9477f50189e583c7c118233619b08dbe724cb98dfdfe17be042b5c472807de37
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
@@ -147,7 +147,7 @@ services:
 
   # Container Statistics
   stats:
-    image: virtualzone/docker-container-stats
+    image: virtualzone/docker-container-stats@sha256:270105722ce8ff9c75409f4d8a701b8406cb8007d420a53ea22b85625893113e
     ports:
       - "8104:8080"
     environment:
@@ -161,7 +161,7 @@ services:
   # Web interface: http://localhost:8105 (check logs for auto-generated token) - Proxy available at 172.20.0.138:8080
   # Use this IP in your Proxy configs: proxy: '172.20.0.138:8080'
   mitmproxy:
-    image: mitmproxy/mitmproxy:latest
+    image: mitmproxy/mitmproxy@sha256:743b6cdc817211d64bc269f5defacca8d14e76e647fc474e5c7244dbcb645141
     command: mitmweb --web-host 0.0.0.0 --web-port 8080 --listen-port 8081 --no-web-open-browser
     tty: true
     ports:
@@ -177,7 +177,7 @@ services:
   # DNS Server for .test domain resolution
   dns:
     restart: always
-    image: strm/dnsmasq
+    image: strm/dnsmasq@sha256:dcf4c0aeb69ea6b9bca81314449d732ecd2ea021588d8a34d4be7c2304f89a39
     volumes:
       - ./docker/dnsmasq/startup.sh:/root/startup.sh
     cap_add:
