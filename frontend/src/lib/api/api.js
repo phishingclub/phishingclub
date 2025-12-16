@@ -512,7 +512,8 @@ export class API {
 		 * @param {string} campaign.denyPageID uuid
 		 * @param {string} campaign.evasionPageID uuid
 		 * @param {string} campaign.webhookID uuid
-		 * @param {boolean} [campaign.webhookIncludeData]
+		 * @param {string} [campaign.webhookIncludeData]
+		 * @param {number} [campaign.webhookEvents]
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
@@ -541,6 +542,7 @@ export class API {
 			evasionPageID,
 			webhookID,
 			webhookIncludeData,
+			webhookEvents,
 			constraintWeekDays,
 			constraintStartTime,
 			constraintEndTime,
@@ -568,6 +570,7 @@ export class API {
 				evasionPageID,
 				webhookID,
 				webhookIncludeData,
+				webhookEvents,
 				constraintWeekDays,
 				constraintStartTime,
 				constraintEndTime,
@@ -597,7 +600,8 @@ export class API {
 		 * @param {string} campaign.denyPageID uuid
 		 * @param {string} campaign.evasionPageID uuid
 		 * @param {string} campaign.webhookID uuid
-		 * @param {boolean} [campaign.webhookIncludeData]
+		 * @param {string} [campaign.webhookIncludeData]
+		 * @param {number} [campaign.webhookEvents]
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
@@ -626,6 +630,7 @@ export class API {
 			evasionPageID,
 			webhookID,
 			webhookIncludeData,
+			webhookEvents,
 			constraintWeekDays,
 			constraintStartTime,
 			constraintEndTime,
@@ -652,6 +657,7 @@ export class API {
 				evasionPageID,
 				webhookID,
 				webhookIncludeData,
+				webhookEvents,
 				constraintWeekDays,
 				constraintStartTime,
 				constraintEndTime,

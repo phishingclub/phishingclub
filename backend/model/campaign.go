@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
+	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/validate"
@@ -42,7 +43,8 @@ type Campaign struct {
 	IsAnonymous         nullable.Nullable[bool]         `json:"isAnonymous"`
 	IsTest              nullable.Nullable[bool]         `json:"isTest"`
 	Obfuscate           nullable.Nullable[bool]         `json:"obfuscate"`
-	WebhookIncludeData  nullable.Nullable[bool]         `json:"webhookIncludeData"`
+	WebhookIncludeData  nullable.Nullable[string]       `json:"webhookIncludeData"`
+	WebhookEvents       nullable.Nullable[int]          `json:"webhookEvents"`
 	TemplateID          nullable.Nullable[uuid.UUID]    `json:"templateID"`
 	Template            *CampaignTemplate               `json:"template"`
 	CompanyID           nullable.Nullable[uuid.UUID]    `json:"companyID"`
@@ -63,6 +65,53 @@ type Campaign struct {
 }
 
 // Validate checks if the campaign has a valid state
+const (
+	WebhookDataLevelNone  = "none"
+	WebhookDataLevelBasic = "basic"
+	WebhookDataLevelFull  = "full"
+)
+
+// WebhookEventsToBinary converts array of event names to bitwise int
+func WebhookEventsToBinary(events []string) int {
+	if len(events) == 0 {
+		return 0 // 0 means all events
+	}
+	binary := 0
+	for _, event := range events {
+		if bit, ok := data.WebhookEventToBit[event]; ok {
+			binary |= bit
+		}
+	}
+	return binary
+}
+
+// WebhookEventsFromBinary converts bitwise int to array of event names
+func WebhookEventsFromBinary(binary int) []string {
+	if binary == 0 {
+		return []string{} // empty array means all events
+	}
+	events := []string{}
+	for eventName, bit := range data.WebhookEventToBit {
+		if binary&bit != 0 {
+			events = append(events, eventName)
+		}
+	}
+	return events
+}
+
+// IsWebhookEventEnabled checks if an event should trigger webhook
+func IsWebhookEventEnabled(webhookEvents int, eventName string) bool {
+	// 0 means all events enabled (backward compatible)
+	if webhookEvents == 0 {
+		return true
+	}
+	// check if the event bit is set
+	if bit, ok := data.WebhookEventToBit[eventName]; ok {
+		return webhookEvents&bit != 0
+	}
+	return false
+}
+
 func (c *Campaign) Validate() error {
 	if err := validate.NullableFieldRequired("name", c.Name); err != nil {
 		return err
@@ -214,6 +263,32 @@ func (c *Campaign) Validate() error {
 	// must not be set from api consumers
 	if c.NotableEventID.IsSpecified() && !c.NotableEventID.IsNull() {
 		c.NotableEventID.SetNull()
+	}
+
+	// validate webhookIncludeData enum
+	if c.WebhookIncludeData.IsSpecified() {
+		if level, err := c.WebhookIncludeData.Get(); err == nil {
+			if level != WebhookDataLevelNone &&
+				level != WebhookDataLevelBasic &&
+				level != WebhookDataLevelFull {
+				return validate.WrapErrorWithField(
+					errors.New("must be 'none', 'basic', or 'full'"),
+					"webhookIncludeData",
+				)
+			}
+		}
+	}
+
+	// validate webhookEvents is non-negative
+	if c.WebhookEvents.IsSpecified() && !c.WebhookEvents.IsNull() {
+		if events, err := c.WebhookEvents.Get(); err == nil {
+			if events < 0 {
+				return validate.WrapErrorWithField(
+					errors.New("must be non-negative"),
+					"webhookEvents",
+				)
+			}
+		}
 	}
 
 	return nil
@@ -379,9 +454,15 @@ func (c *Campaign) ToDBMap() map[string]any {
 		}
 	}
 	if c.WebhookIncludeData.IsSpecified() {
-		m["webhook_include_data"] = false
+		m["webhook_include_data"] = WebhookDataLevelFull
 		if v, err := c.WebhookIncludeData.Get(); err == nil {
 			m["webhook_include_data"] = v
+		}
+	}
+	if c.WebhookEvents.IsSpecified() {
+		m["webhook_events"] = 0
+		if v, err := c.WebhookEvents.Get(); err == nil {
+			m["webhook_events"] = v
 		}
 	}
 	if c.TemplateID.IsSpecified() {

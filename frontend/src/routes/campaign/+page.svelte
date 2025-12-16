@@ -130,6 +130,92 @@
 		}
 	];
 
+	// webhook data level descriptions:
+	// - none: only send event type and timestamp - no campaign info, emails, or data
+	// - basic: send campaign name and event, but exclude emails and submission data
+	// - full: include all information: emails, captured credentials, and submission data
+	const webhookDataLevelOptions = [
+		{
+			label: 'Minimum',
+			value: 'none'
+		},
+		{
+			label: 'Basic',
+			value: 'basic'
+		},
+		{
+			label: 'Full',
+			value: 'full'
+		}
+	];
+
+	// webhook event options - 0 means all events will trigger webhook (default)
+	const webhookEventOptions = [
+		'campaign_recipient_message_sent',
+		'campaign_recipient_message_failed',
+		'campaign_recipient_message_read',
+		'campaign_recipient_submitted_data',
+		'campaign_recipient_page_visited',
+		'campaign_recipient_before_page_visited',
+		'campaign_recipient_after_page_visited',
+		'campaign_recipient_evasion_page_visited',
+		'campaign_recipient_deny_page_visited',
+		'campaign_closed'
+	];
+
+	// human-readable display names for webhook events
+	const webhookEventDisplayNames = {
+		campaign_closed: 'Campaign Closed',
+		campaign_recipient_message_sent: 'Message Sent',
+		campaign_recipient_message_failed: 'Message Failed',
+		campaign_recipient_message_read: 'Message Read',
+		campaign_recipient_submitted_data: 'Submitted Data',
+		campaign_recipient_evasion_page_visited: 'Evasion Page Visited',
+		campaign_recipient_before_page_visited: 'Before Page Visited',
+		campaign_recipient_page_visited: 'Page Visited',
+		campaign_recipient_after_page_visited: 'After Page Visited',
+		campaign_recipient_deny_page_visited: 'Deny Page Visited'
+	};
+
+	// create display options array with nice names
+	const webhookEventDisplayOptions = webhookEventOptions.map((event) => ({
+		value: event,
+		label: webhookEventDisplayNames[event] || event
+	}));
+
+	// map event names to bit positions (must match backend data.WebhookEventToBit)
+	const webhookEventToBit = {
+		campaign_closed: 1 << 0, // 1
+		campaign_recipient_message_sent: 1 << 1, // 2
+		campaign_recipient_message_failed: 1 << 2, // 4
+		campaign_recipient_message_read: 1 << 3, // 8
+		campaign_recipient_submitted_data: 1 << 4, // 16
+		campaign_recipient_evasion_page_visited: 1 << 5, // 32
+		campaign_recipient_before_page_visited: 1 << 6, // 64
+		campaign_recipient_page_visited: 1 << 7, // 128
+		campaign_recipient_after_page_visited: 1 << 8, // 256
+		campaign_recipient_deny_page_visited: 1 << 9 // 512
+	};
+
+	const WEBHOOK_EVENT_ALL_BITS = 1023; // 2^10 - 1, all 10 events selected
+
+	// convert array of event names to bitwise int
+	const webhookEventsToBinary = (events) => {
+		if (!events?.length) return 0; // 0 means all events
+		return events.reduce((binary, event) => binary | (webhookEventToBit[event] || 0), 0);
+	};
+
+	// convert bitwise int to array of event names (internal values, not display names)
+	const webhookEventsFromBinary = (binary) => {
+		if (binary === 0) return [...webhookEventOptions]; // 0 means all events, return all
+		return webhookEventOptions.filter((event) => binary & webhookEventToBit[event]);
+	};
+
+	// helper to get display name for an event
+	const getEventDisplayName = (eventValue) => {
+		return webhookEventDisplayNames[eventValue] || eventValue;
+	};
+
 	let deleteValues = {
 		id: null,
 		name: null
@@ -292,7 +378,8 @@
 		obfuscate: false,
 		selectedCount: 0,
 		webhookValue: null,
-		webhookIncludeData: false,
+		webhookIncludeData: 'full',
+		webhookEvents: [...webhookEventOptions], // all events selected by default
 		jitterMin: 0,
 		jitterMax: 0
 	};
@@ -305,7 +392,6 @@
 	let isValidatingName = false;
 	let weekDaysAvailable = [];
 	let isDeleteAlertVisible = false;
-	let webhookIncludeDataCheckbox = null;
 
 	$: {
 		modalText = getModalText('campaign', modalMode);
@@ -675,6 +761,7 @@
 				constraintEndTime: contraintEndTimeUTC,
 				webhookID: webhookMap.byValueOrNull(formValues.webhookValue),
 				webhookIncludeData: formValues.webhookIncludeData,
+				webhookEvents: webhookEventsToBinary(formValues.webhookEvents),
 				jitterMin: formValues.jitterMin !== 0 ? formValues.jitterMin : null,
 				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null
 			});
@@ -741,6 +828,7 @@
 				evasionPageID: denyPageMap.byValueOrNull(formValues.evasionPageValue),
 				webhookID: webhookMap.byValueOrNull(formValues.webhookValue),
 				webhookIncludeData: formValues.webhookIncludeData,
+				webhookEvents: webhookEventsToBinary(formValues.webhookEvents),
 				jitterMin: formValues.jitterMin !== 0 ? formValues.jitterMin : null,
 				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null
 			});
@@ -868,7 +956,8 @@
 			obfuscate: false,
 			selectedCount: 0,
 			webhookValue: null,
-			webhookIncludeData: false,
+			webhookIncludeData: 'full',
+			webhookEvents: [...webhookEventOptions], // all events selected by default
 			jitterMin: 0,
 			jitterMax: 0
 		};
@@ -976,7 +1065,8 @@
 			obfuscate: campaign.obfuscate || false,
 			template: templateMap.byKey(campaign.templateID),
 			webhookValue: webhookMap.byKey(campaign.webhookID),
-			webhookIncludeData: campaign.webhookIncludeData || false
+			webhookIncludeData: campaign.webhookIncludeData || 'full',
+			webhookEvents: webhookEventsFromBinary(campaign.webhookEvents || 0)
 		};
 
 		if (copyMode) {
@@ -1756,13 +1846,57 @@
 							</div>
 							{#if formValues.webhookValue}
 								<div class="mb-6">
-									<CheckboxField
-										bind:bindTo={webhookIncludeDataCheckbox}
+									<SelectSquare
 										bind:value={formValues.webhookIncludeData}
-										toolTipText="When enabled, captured data (credentials, cookies, etc.) will be included in the webhook payload"
-									>
-										Include captured data
-									</CheckboxField>
+										options={webhookDataLevelOptions}
+										label="Webhook Data Level"
+										toolTipText="Control what campaign and recipient information is sent to the webhook endpoint"
+									/>
+								</div>
+								<div class="mb-6 max-w-xl">
+									<label class="flex flex-col">
+										<div class="flex items-center py-2">
+											<p class="font-semibold text-slate-600 dark:text-gray-400">Webhook Events</p>
+											<div class="ml-2 text-sm text-gray-600 dark:text-gray-400">
+												<span class="text-xs"
+													>({formValues.webhookEvents.length === webhookEventOptions.length
+														? 'All'
+														: formValues.webhookEvents.length} selected)</span
+												>
+											</div>
+										</div>
+										<div class="flex flex-row flex-wrap gap-2 max-h-48 overflow-y-auto">
+											{#each webhookEventDisplayOptions as eventOption}
+												{@const isSelected = formValues.webhookEvents.includes(eventOption.value)}
+												<button
+													type="button"
+													on:click={() => {
+														if (isSelected) {
+															// prevent unselecting the last item
+															if (formValues.webhookEvents.length > 1) {
+																formValues.webhookEvents = formValues.webhookEvents.filter(
+																	(e) => e !== eventOption.value
+																);
+															}
+														} else {
+															formValues.webhookEvents = [
+																...formValues.webhookEvents,
+																eventOption.value
+															];
+														}
+													}}
+													class="flex flex-row items-center px-3 py-2 rounded-md text-xs transition-colors duration-200 flex-shrink-0 {isSelected
+														? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 border-2 border-green-400 dark:border-green-500 hover:bg-green-100 dark:hover:bg-green-900/40'
+														: 'bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
+													style="max-width: 280px;"
+												>
+													<span class="truncate block" style="max-width: 250px;">
+														{eventOption.label}
+													</span>
+												</button>
+											{/each}
+										</div>
+									</label>
 								</div>
 							{/if}
 
@@ -2171,10 +2305,16 @@
 											<span class="text-grayblue-dark font-medium">Webhook:</span>
 											<span class="text-pc-darkblue dark:text-white">{formValues.webhookValue}</span
 											>
-											<span class="text-grayblue-dark font-medium">Include Data:</span>
-											<span class="text-pc-darkblue dark:text-white"
-												>{formValues.webhookIncludeData ? 'Yes' : 'No'}</span
+											<span class="text-grayblue-dark font-medium">Data Level:</span>
+											<span class="text-pc-darkblue dark:text-white capitalize"
+												>{formValues.webhookIncludeData}</span
 											>
+											<span class="text-grayblue-dark font-medium">Webhook Events:</span>
+											<span class="text-pc-darkblue dark:text-white">
+												{formValues.webhookEvents.length === webhookEventOptions.length
+													? 'All Events'
+													: formValues.webhookEvents.length + ' selected'}
+											</span>
 										{/if}
 
 										{#if formValues.denyPageValue}

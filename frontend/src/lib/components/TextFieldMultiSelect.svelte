@@ -413,18 +413,19 @@
 		{/if}
 		<!-- Selected items -->
 		{#if value.length > 0}
-			<div class="flex flex-row flex-wrap mt-4 gap-2">
+			<div class="flex flex-row flex-wrap mt-4 gap-2 max-h-48 overflow-y-auto">
 				{#each value as option}
 					<button
 						type="button"
 						on:click|preventDefault={removeSelectedOption}
 						on:keypress|preventDefault={removeSelectedOption}
 						data-value={option}
-						class="flex flex-row items-center bg-gray-100 dark:bg-gray-800/60 hover:bg-gray-200 dark:hover:bg-gray-700/80 px-2 py-1 rounded-md text-gray-900 dark:text-gray-300 text-sm transition-colors duration-200"
+						class="flex flex-row items-center bg-gray-100 dark:bg-gray-800/60 hover:bg-gray-200 dark:hover:bg-gray-700/80 px-2 py-1 rounded-md text-gray-900 dark:text-gray-300 text-xs transition-colors duration-200 flex-shrink-0"
 						aria-label="Remove {option}"
+						style="max-width: 280px;"
 					>
-						{option}
-						<img class="w-3 ml-2 pointer-events-none" src="/delete2.svg" alt="" />
+						<span class="truncate block" style="max-width: 250px;">{option}</span>
+						<img class="w-3 ml-1 pointer-events-none flex-shrink-0" src="/delete2.svg" alt="" />
 					</button>
 				{/each}
 			</div>

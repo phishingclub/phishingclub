@@ -77,6 +77,14 @@ func (c *Campaign) Create(
 	if len(campaign.RecipientGroupIDs) == 0 {
 		return nil, validate.WrapErrorWithField(errors.New("no groups provided"), "Recipient Groups")
 	}
+	// set default webhookIncludeData for backward compatibility
+	if !campaign.WebhookIncludeData.IsSpecified() {
+		campaign.WebhookIncludeData.Set(model.WebhookDataLevelFull)
+	}
+	// set default webhookEvents (0 means all events) for backward compatibility
+	if !campaign.WebhookEvents.IsSpecified() {
+		campaign.WebhookEvents.Set(0)
+	}
 	// if the schedule type is scheduled, set the start time to start of day and end to the end of the last day
 	if campaign.ConstraintWeekDays.IsSpecified() && !campaign.ConstraintWeekDays.IsNull() {
 		if err := campaign.ValidateSendTimesSet(); err != nil {
@@ -1337,6 +1345,12 @@ func (c *Campaign) UpdateByID(
 	}
 	if v, err := incoming.WebhookIncludeData.Get(); err == nil {
 		current.WebhookIncludeData.Set(v)
+	}
+	if v, err := incoming.WebhookEvents.Get(); err == nil {
+		current.WebhookEvents.Set(v)
+	}
+	if v, err := incoming.TemplateID.Get(); err == nil {
+		current.TemplateID.Set(v)
 	}
 	if v, err := incoming.SortField.Get(); err == nil {
 		current.SortField.Set(v)
@@ -3149,27 +3163,50 @@ func (c *Campaign) HandleWebhook(
 		return errs.Wrap(err)
 	}
 
-	// check if campaign has webhookIncludeData enabled
+	// check campaign webhook data level
 	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{})
 	if err != nil {
 		return errs.Wrap(err)
 	}
 
-	// only include captured data if webhookIncludeData is enabled
-	var dataToSend map[string]interface{}
-	if campaign.WebhookIncludeData.MustGet() {
-		dataToSend = capturedData
+	// check if this event should trigger webhook notification
+	webhookEvents := 0
+	if events, err := campaign.WebhookEvents.Get(); err == nil {
+		webhookEvents = events
+	}
+	// 0 means all events (backward compatibility)
+	// otherwise check if the event bit is set
+	if !model.IsWebhookEventEnabled(webhookEvents, eventName) {
+		// event not in selected events, skip webhook
+		return nil
+	}
+
+	// determine what data to send based on webhookIncludeData level
+	dataLevel := model.WebhookDataLevelFull
+	if level, err := campaign.WebhookIncludeData.Get(); err == nil {
+		dataLevel = level
 	}
 
 	now := time.Now()
 	webhookReq := WebhookRequest{
-		Time:         &now,
-		CampaignName: campaignName,
-		Event:        eventName,
-		Data:         dataToSend,
+		Time:  &now,
+		Event: eventName,
 	}
-	if email != nil {
-		webhookReq.Email = email.String()
+
+	// apply data level filters
+	switch dataLevel {
+	case model.WebhookDataLevelNone:
+		// only time and event - no campaign name, no email, no data
+	case model.WebhookDataLevelBasic:
+		// include campaign name but no email or captured data
+		webhookReq.CampaignName = campaignName
+	case model.WebhookDataLevelFull:
+		// include everything
+		webhookReq.CampaignName = campaignName
+		webhookReq.Data = capturedData
+		if email != nil {
+			webhookReq.Email = email.String()
+		}
 	}
 	// the webhook is handles as a different go routine
 	// so we don't block the campaign handling thread

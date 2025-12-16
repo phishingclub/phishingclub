@@ -44,7 +44,21 @@ type Campaign struct {
 	IsAnonymous         bool    `gorm:"not null;default:false"`
 	IsTest              bool    `gorm:"not null;default:false"`
 	Obfuscate           bool    `gorm:"not null;default:false"`
-	WebhookIncludeData  bool    `gorm:"not null;default:false"`
+	WebhookIncludeData  string  `gorm:"not null;default:'full'"`
+	// WebhookEvents is a binary format storing selected events as bits (10 events)
+	// 0 = all events (default, backward compatible)
+	// non-zero = only selected events trigger webhooks
+	// bit 0 (1): campaign_closed
+	// bit 1 (2): campaign_recipient_message_sent
+	// bit 2 (4): campaign_recipient_message_failed
+	// bit 3 (8): campaign_recipient_message_read
+	// bit 4 (16): campaign_recipient_submitted_data
+	// bit 5 (32): campaign_recipient_evasion_page_visited
+	// bit 6 (64): campaign_recipient_before_page_visited
+	// bit 7 (128): campaign_recipient_page_visited
+	// bit 8 (256): campaign_recipient_after_page_visited
+	// bit 9 (512): campaign_recipient_deny_page_visited
+	WebhookEvents int `gorm:"not null;default:0"`
 
 	// has one
 	CampaignTemplateID *uuid.UUID `gorm:"index;type:uuid;"`

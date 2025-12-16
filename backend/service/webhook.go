@@ -386,10 +386,33 @@ func (w *Webhook) Send(
 	return data, nil
 }
 
+// WebhookRequest represents the payload sent to webhook endpoints.
+// webhooks are sent based on the campaign's webhookEvents setting (stored as bitwise int):
+// - 0: all events trigger webhooks (default, backward compatible)
+// - non-zero: only events with their bit set trigger webhooks
+//
+// webhook events (10 total - events that call HandleWebhook):
+// from campaign.go (4 events):
+// - campaign_closed: when a campaign finishes
+// - campaign_recipient_message_sent: when an email is successfully sent
+// - campaign_recipient_message_failed: when an email fails to send
+// - campaign_recipient_message_read: when tracking pixel is loaded
+// from proxy.go (6 events):
+// - campaign_recipient_submitted_data: when user submits data on phishing page
+// - campaign_recipient_evasion_page_visited: when evasion page is visited
+// - campaign_recipient_before_page_visited: when before page is visited
+// - campaign_recipient_page_visited: when landing page is visited
+// - campaign_recipient_after_page_visited: when after page is visited
+// - campaign_recipient_deny_page_visited: when deny page is visited
+//
+// the fields included depend on the campaign's webhookIncludeData setting:
+// - "none": only Time and Event are sent (maximum privacy)
+// - "basic": Time, Event, and CampaignName are sent (no PII)
+// - "full": all fields including Email and Data are sent (complete information)
 type WebhookRequest struct {
 	Time         *time.Time             `json:"time"`
-	CampaignName string                 `json:"campaignName"`
-	Email        string                 `json:"email"`
+	CampaignName string                 `json:"campaignName,omitempty"`
+	Email        string                 `json:"email,omitempty"`
 	Event        string                 `json:"event"`
 	Data         map[string]interface{} `json:"data,omitempty"`
 }
