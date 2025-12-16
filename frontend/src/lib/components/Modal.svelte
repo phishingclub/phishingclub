@@ -10,6 +10,7 @@
 	export let onClose = () => {};
 	export let bindTo = null;
 	export let resetTabFocus = () => {};
+	export let noAutoFocus = false;
 
 	let modalElement;
 	let previousActiveElement;
@@ -250,7 +251,7 @@
 		updateFocusableElements();
 
 		// Focus the first focusable element (excluding close button)
-		if (firstFocusableElement) {
+		if (!noAutoFocus && firstFocusableElement) {
 			firstFocusableElement.focus();
 		}
 	};

@@ -46,6 +46,9 @@
 	import FileField from '$lib/components/FileField.svelte';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
+	import papaparse from 'papaparse';
+	import FormFooter from '$lib/components/FormFooter.svelte';
+	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -135,6 +138,13 @@
 	let isSetAsSentModalVisible = false;
 	let isSessionSushiModalVisible = false;
 	let isTrackingPixelWarningVisible = false;
+	let isReportedCSVModalVisible = false;
+	let isReportedCSVSubmitting = false;
+	let reportedCSVFile = null;
+	let reportedCSVHeaders = [];
+	let reportedCSVPreview = [];
+	let reportedEmailColumn = '';
+	let reportedDateColumn = '';
 	let pendingEmailPreviewRecipient = null;
 	let storedCookieData = '';
 
@@ -843,12 +853,65 @@
 			return;
 		}
 
+		// parse csv file to extract headers and preview
+		papaparse.parse(file, {
+			preview: 5, // preview first 5 rows
+			skipEmptyLines: true,
+			complete: (results) => {
+				if (!results.data || results.data.length < 2) {
+					addToast('CSV file must have headers and at least one data row', 'Error');
+					event.target.value = '';
+					return;
+				}
+
+				reportedCSVFile = file;
+				reportedCSVHeaders = results.data[0]; // first row is headers
+				reportedCSVPreview = results.data.slice(1); // remaining rows are data preview
+				reportedEmailColumn = '';
+				reportedDateColumn = '';
+				isReportedCSVModalVisible = true;
+
+				// clear the file input
+				event.target.value = '';
+			},
+			error: (error) => {
+				addToast(`Failed to parse CSV: ${error.message}`, 'Error');
+				event.target.value = '';
+			}
+		});
+	};
+
+	const closeReportedCSVModal = () => {
+		isReportedCSVModalVisible = false;
+		reportedCSVFile = null;
+		reportedCSVHeaders = [];
+		reportedCSVPreview = [];
+		reportedEmailColumn = '';
+		reportedDateColumn = '';
+	};
+
+	const onConfirmUploadReportedCSV = async () => {
+		if (!reportedCSVFile) return;
+
+		// validate that columns are selected
+		if (!reportedEmailColumn || !reportedDateColumn) {
+			addToast('Please select both email and date columns', 'Error');
+			return;
+		}
+
 		const formData = new FormData();
-		formData.append('file', file);
+		formData.append('file', reportedCSVFile);
+
+		// build URL with column indices
+		const emailColIndex = reportedCSVHeaders.indexOf(reportedEmailColumn);
+		const dateColIndex = reportedCSVHeaders.indexOf(reportedDateColumn);
+
+		let url = `/api/v1/campaign/${$page.params.id}/upload/reported?emailColumn=${emailColIndex}&dateColumn=${dateColIndex}`;
 
 		try {
+			isReportedCSVSubmitting = true;
 			showIsLoading();
-			const response = await fetch(`/api/v1/campaign/${$page.params.id}/upload/reported`, {
+			const response = await fetch(url, {
 				method: 'POST',
 				body: formData,
 				credentials: 'include'
@@ -865,6 +928,7 @@
 				await setResults();
 				await refreshCampaignRecipients();
 				await getEvents();
+				closeReportedCSVModal();
 			} else {
 				// handle validation errors
 				const errorMessage = result.error || `HTTP ${response.status}`;
@@ -874,9 +938,8 @@
 			console.error('Upload error:', error);
 			addToast('Network error: Failed to upload CSV', 'Error');
 		} finally {
+			isReportedCSVSubmitting = false;
 			hideIsLoading();
-			// clear the file input
-			event.target.value = '';
 		}
 	};
 
@@ -1540,7 +1603,7 @@
 						</p>
 						<FileField accept=".csv" on:change={onUploadReportedCSV}>Reported CSV</FileField>
 						<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-							Format: "Reported by" (email), "Date reported(UTC+02:00)"
+							Auto-detects email and date columns. You can specify manually if needed.
 						</p>
 					</div>
 				</div>
@@ -2266,4 +2329,55 @@
 			</p>
 		</div>
 	</Alert>
+
+	<Modal
+		headerText="Upload Reported CSV"
+		visible={isReportedCSVModalVisible}
+		onClose={closeReportedCSVModal}
+		isSubmitting={isReportedCSVSubmitting}
+		noAutoFocus={true}
+	>
+		<FormGrid on:submit={onConfirmUploadReportedCSV} isSubmitting={isReportedCSVSubmitting}>
+			<FormColumns>
+				<FormColumn>
+					<p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+						Select which columns contain the email addresses and report dates:
+					</p>
+
+					<TextFieldSelect
+						required
+						id="reported-email-column"
+						bind:value={reportedEmailColumn}
+						options={reportedCSVHeaders}
+						placeholder="Select email column...">Email Column</TextFieldSelect
+					>
+
+					<TextFieldSelect
+						required
+						id="reported-date-column"
+						bind:value={reportedDateColumn}
+						options={reportedCSVHeaders}
+						placeholder="Select date column...">Date Column</TextFieldSelect
+					>
+				</FormColumn>
+				<FormColumn overflowX={true}>
+					<Table
+						columns={reportedCSVHeaders.map((h) => ({ column: h, size: 'small' }))}
+						hasData={!!reportedCSVPreview.length}
+						plural="rows"
+					>
+						{#each reportedCSVPreview as row}
+							<TableRow>
+								{#each row as cell}
+									<TableCell value={cell} />
+								{/each}
+								<TableCellEmpty />
+							</TableRow>
+						{/each}
+					</Table>
+				</FormColumn>
+			</FormColumns>
+			<FormFooter closeModal={closeReportedCSVModal} isSubmitting={isReportedCSVSubmitting} />
+		</FormGrid>
+	</Modal>
 </main>

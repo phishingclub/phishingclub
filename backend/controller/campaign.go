@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1104,8 +1105,35 @@ func (c *Campaign) UploadReportedCSV(g *gin.Context) {
 
 	c.Logger.Debugw("processing CSV", "rows", len(records), "headers", records[0])
 
+	// get required column indices from query params
+	emailColStr := g.Query("emailColumn")
+	if emailColStr == "" {
+		c.Response.ValidationFailed(g, "emailColumn", errors.New("emailColumn query parameter is required"))
+		return
+	}
+
+	dateColStr := g.Query("dateColumn")
+	if dateColStr == "" {
+		c.Response.ValidationFailed(g, "dateColumn", errors.New("dateColumn query parameter is required"))
+		return
+	}
+
+	emailColIdx, err := strconv.Atoi(emailColStr)
+	if err != nil || emailColIdx < 0 {
+		c.Response.ValidationFailed(g, "emailColumn", errors.New("emailColumn must be a valid non-negative integer"))
+		return
+	}
+
+	dateColIdx, err := strconv.Atoi(dateColStr)
+	if err != nil || dateColIdx < 0 {
+		c.Response.ValidationFailed(g, "dateColumn", errors.New("dateColumn must be a valid non-negative integer"))
+		return
+	}
+
+	c.Logger.Debugw("using provided column indices", "emailColumn", emailColIdx, "dateColumn", dateColIdx)
+
 	// process CSV
-	processed, skipped, err := c.CampaignService.ProcessReportedCSV(g.Request.Context(), session, id, records)
+	processed, skipped, err := c.CampaignService.ProcessReportedCSV(g.Request.Context(), session, id, records, emailColIdx, dateColIdx)
 	if err != nil {
 		c.Logger.Errorw("failed to process reported CSV", "error", err)
 		if ok := c.handleErrors(g, err); !ok {

@@ -4186,6 +4186,8 @@ func (c *Campaign) ProcessReportedCSV(
 	session *model.Session,
 	campaignID *uuid.UUID,
 	records [][]string,
+	emailColumnIndex int,
+	dateColumnIndex int,
 ) (int, int, error) {
 	ae := NewAuditEvent("Campaign.ProcessReportedCSV", session)
 	ae.Details["campaignID"] = campaignID.String()
@@ -4208,32 +4210,24 @@ func (c *Campaign) ProcessReportedCSV(
 		return 0, 0, errs.Wrap(err)
 	}
 
-	// validate CSV headers
-	headers := records[0]
-	reportedByIndex := -1
-	dateReportedIndex := -1
-
-	c.Logger.Debugw("processing CSV headers", "headers", headers)
-
-	for i, header := range headers {
-		switch strings.ToLower(strings.TrimSpace(header)) {
-		case "reported by":
-			reportedByIndex = i
-			c.Logger.Debugw("found reported by column", "index", i)
-		case "date reporter (utc+02:00)", "date reported(utc+02:00)", "date reported", "date reporter":
-			dateReportedIndex = i
-			c.Logger.Debugw("found date column", "index", i, "header", header)
-		}
+	if len(records) < 2 {
+		return 0, 0, errs.NewValidationError(errors.New("CSV must have at least a header row and one data row"))
 	}
 
-	if reportedByIndex == -1 {
-		c.Logger.Errorw("CSV missing required column", "expected", "reported by", "headers", headers)
-		return 0, 0, errs.NewValidationError(errors.New("CSV must have 'reported by' column"))
+	// validate column indices
+	if emailColumnIndex < 0 || emailColumnIndex >= len(records[0]) {
+		c.Logger.Errorw("invalid email column index", "index", emailColumnIndex, "columnCount", len(records[0]))
+		return 0, 0, errs.NewValidationError(errors.New("invalid email column index"))
 	}
-	if dateReportedIndex == -1 {
-		c.Logger.Errorw("CSV missing required date column", "expected", "date reported(utc+02:00)", "headers", headers)
-		return 0, 0, errs.NewValidationError(errors.New("CSV must have 'date reporter (utc+02:00)' or similar date column"))
+	if dateColumnIndex < 0 || dateColumnIndex >= len(records[0]) {
+		c.Logger.Errorw("invalid date column index", "index", dateColumnIndex, "columnCount", len(records[0]))
+		return 0, 0, errs.NewValidationError(errors.New("invalid date column index"))
 	}
+
+	reportedByIndex := emailColumnIndex
+	dateReportedIndex := dateColumnIndex
+
+	c.Logger.Infow("processing CSV columns", "emailColumn", reportedByIndex, "dateColumn", dateReportedIndex)
 
 	processed := 0
 	skipped := 0
@@ -4258,30 +4252,31 @@ func (c *Campaign) ProcessReportedCSV(
 		// parse date - try multiple formats and handle timezone
 		var parsedDate time.Time
 		dateFormats := []string{
-			"2006-01-02T15:04:05",
-			"2006-01-02 15:04:05",
+			// iso 8601 with fractional seconds (microsoft format)
+			"2006-01-02T15:04:05.999999999Z",
+			"2006-01-02T15:04:05.999999999-07:00",
+			"2006-01-02T15:04:05.999999999+02:00",
+			"2006-01-02T15:04:05.999999999+01:00",
+			// iso 8601 without fractional seconds
 			"2006-01-02T15:04:05Z",
 			"2006-01-02T15:04:05-07:00",
 			"2006-01-02T15:04:05+02:00",
+			"2006-01-02T15:04:05+01:00",
+			"2006-01-02T15:04:05",
+			// other common formats
+			"2006-01-02 15:04:05",
 			"2006-01-02",
 			"01/02/2006 15:04:05",
 			"01/02/2006",
 			"02-01-2006 15:04:05",
 			"02-01-2006",
+			"2006/01/02 15:04:05",
+			"2006/01/02",
 		}
 
 		dateParseError := true
 		for _, format := range dateFormats {
 			if pd, err := time.Parse(format, dateReported); err == nil {
-				// if the parsed date has no timezone info and the header mentions UTC+02:00,
-				// assume the time is in UTC+02:00 and convert to UTC
-				if pd.Location() == time.UTC && strings.Contains(strings.ToLower(headers[dateReportedIndex]), "utc+02:00") {
-					// treat as UTC+02:00 and convert to UTC
-					loc, _ := time.LoadLocation("Europe/Berlin") // UTC+2 (or use FixedZone)
-					if loc != nil {
-						pd = time.Date(pd.Year(), pd.Month(), pd.Day(), pd.Hour(), pd.Minute(), pd.Second(), pd.Nanosecond(), loc).UTC()
-					}
-				}
 				parsedDate = pd
 				dateParseError = false
 				break
