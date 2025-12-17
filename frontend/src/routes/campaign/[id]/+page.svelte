@@ -1602,9 +1602,6 @@
 							Import
 						</p>
 						<FileField accept=".csv" on:change={onUploadReportedCSV}>Reported CSV</FileField>
-						<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-							Auto-detects email and date columns. You can specify manually if needed.
-						</p>
 					</div>
 				</div>
 			</div>
