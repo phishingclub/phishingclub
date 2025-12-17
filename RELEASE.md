@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.25.0] - 2025-12-17
+- Added webhook data level selection and webhook filtering
+- Fix and improve upload campaign reporters with column selection
+- Fix disable webhook on created campaign 
+
 ## [1.24.0] - 2025-12-15
 - Added import oauth
 - Add warning before viewing email that cause an event to trigger
