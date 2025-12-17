@@ -1391,8 +1391,13 @@ func (c *Campaign) UpdateByID(
 	if v, err := incoming.RecipientGroupIDs.Get(); err == nil {
 		current.RecipientGroupIDs.Set(v)
 	}
-	if v, err := incoming.WebhookID.Get(); err == nil {
-		current.WebhookID.Set(v)
+	// handle webhook ID
+	if incoming.WebhookID.IsSpecified() {
+		if incoming.WebhookID.IsNull() {
+			current.WebhookID.SetNull()
+		} else {
+			current.WebhookID.Set(incoming.WebhookID.MustGet())
+		}
 	}
 
 	// check there is atleast one valid group
