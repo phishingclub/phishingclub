@@ -544,7 +544,6 @@ portal.example.com:
 							<TextField
 								required
 								minLength={3}
-								maxLength={255}
 								bind:value={formValues.startURL}
 								placeholder="https://login.example.com/auth"
 								toolTipText="Domain must be in proxy configuration">Start URL</TextField
