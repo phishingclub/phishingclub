@@ -897,6 +897,10 @@ func (a *APISender) buildRequestWithCustomURL(
 	if err := mailTemplate.Execute(&mailContent, t); err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to execute mail template: %s", err)
 	}
+
+	// store raw content (no escaping for output in json directly)
+	(*t)["ContentRaw"] = mailContent.String()
+
 	// Properly encode for JSON
 	var buf bytes.Buffer
 	encoder := json.NewEncoder(&buf)
