@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.26.0] - 2025-12-19
+- Added ContentRaw variable to API Senders
+- Fix proxy capturing on 302 responses
+- Fix remove frontend max length on start url
+- Fix removed frontend validation on email FROM
+- Fix import text description
+
 ## [1.25.0] - 2025-12-17
 - Added webhook data level selection and webhook filtering
 - Fix and improve upload campaign reporters with column selection
