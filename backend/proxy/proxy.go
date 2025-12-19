@@ -1577,7 +1577,7 @@ func (m *ProxyHandler) onResponseHeader(resp *http.Response, session *service.Pr
 	if hostConfig.Capture != nil {
 		for _, capture := range hostConfig.Capture {
 			if m.shouldApplyCaptureRule(capture, "response_header", resp.Request) {
-				m.captureFromText(buf.String(), capture, session, resp.Request, "response_header")
+				m.captureFromTextWithResponse(buf.String(), capture, session, resp.Request, resp, "response_header")
 				m.handleImmediateCampaignRedirect(session, resp, resp.Request, "response_header")
 			}
 		}
