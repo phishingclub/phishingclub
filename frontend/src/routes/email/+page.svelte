@@ -466,7 +466,6 @@
 							minLength={5}
 							maxLength={254}
 							required
-							pattern="([a-zA-Z0-9 ]+<)?[a-zA-Z0-9\._\-]+@[a-zA-Z0-9\._\-]+>?"
 							bind:value={formValues.mailHeaderFrom}
 							placeholder="Alice <a@example.test>"
 							toolTipText="Header From. ex. '<a@example.test>'"
