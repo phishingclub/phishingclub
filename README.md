@@ -59,8 +59,10 @@ See [production docker compose example](https://github.com/phishingclub/phishing
 - **Forward proxying** - Use HTTP and SOCKS5 proxies to ensure requests originate from the right location
 
 ### Blogs & Resources
-- [Covert red team phishing with Phishing Club by Phishing Club](http://phishing.club/blog/covert-red-team-phishing-with-phishing-club/)
+- [Covert red team phishing with Phishing Club](http://phishing.club/blog/covert-red-team-phishing-with-phishing-club/)
 - [Phishing Simulation vs Red Team Phishing: Understanding Different Approaches](https://phishing.club/blog/phishing-simulation-vs-red-team-phishing/)
+
+Wrote a blog post or write up about Phishing Club? Tell us about it and we might add it here. Reach out via. a github issue, discord or find our email :)
 
 ### Students & Learning
 
