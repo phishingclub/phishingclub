@@ -1514,9 +1514,11 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		}
 	}
 	allowDeny := []*model.AllowDeny{}
+	allowDenyIDs := []*uuid.UUID{}
 	if row.AllowDeny != nil {
 		for _, ad := range row.AllowDeny {
 			allowDeny = append(allowDeny, ToAllowDeny(ad))
+			allowDenyIDs = append(allowDenyIDs, ad.ID)
 		}
 	}
 	var denyPage *model.Page
@@ -1624,6 +1626,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		RecipientGroups:     recipientGroups,
 		RecipientGroupIDs:   nullable.NewNullableWithValue(recipientGroupIDs),
 		AllowDeny:           allowDeny,
+		AllowDenyIDs:        nullable.NewNullableWithValue(allowDenyIDs),
 		DenyPage:            denyPage,
 		DenyPageID:          denyPageID,
 		EvasionPage:         evasionPage,
