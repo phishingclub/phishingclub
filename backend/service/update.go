@@ -8,10 +8,12 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -240,17 +242,21 @@ func (u *Update) GetUpdateDetails(
 		return nil, errs.ErrNoUpdateAvailable
 	}
 
-	// Find the binary asset
+	// detect current system architecture
+	arch := runtime.GOARCH
+	expectedFilename := fmt.Sprintf("_linux_%s.tar.gz", arch)
+
+	// find the binary asset matching current architecture
 	var downloadURL string
 	for _, asset := range release.Assets {
-		if strings.Contains(asset.Name, ".tar.gz") {
+		if strings.Contains(asset.Name, expectedFilename) {
 			downloadURL = asset.BrowserDownloadURL
 			break
 		}
 	}
 
 	if downloadURL == "" {
-		return nil, errors.New("no downloadable binary found in latest release")
+		return nil, fmt.Errorf("no downloadable binary found for architecture %s in latest release", arch)
 	}
 
 	return &UpdateDetails{
