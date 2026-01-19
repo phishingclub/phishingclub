@@ -27,8 +27,10 @@ var EmailOrderByMap = map[string]string{
 }
 
 // AddAttachmentsToEmailRequest is a request to add attachments to a message
+// supports both old format (ids array) and new format (attachments array with isInline)
 type AddAttachmentsToEmailRequest struct {
-	Attachments []AttachmentWithInline `json:"attachments"`
+	IDs         []string               `json:"ids"`         // deprecated: old format for backward compatibility
+	Attachments []AttachmentWithInline `json:"attachments"` // new format with isInline support
 }
 
 // AttachmentWithInline represents an attachment ID with inline flag
@@ -72,6 +74,17 @@ func (m *Email) AddAttachments(g *gin.Context) {
 	if !ok {
 		return
 	}
+
+	// handle backward compatibility: if old format (ids) is used, convert to new format
+	if len(request.IDs) > 0 && len(request.Attachments) == 0 {
+		for _, idStr := range request.IDs {
+			request.Attachments = append(request.Attachments, AttachmentWithInline{
+				ID:       idStr,
+				IsInline: false, // default to false for backward compatibility
+			})
+		}
+	}
+
 	if len(request.Attachments) == 0 {
 		m.Response.BadRequestMessage(g, "No attachments provided")
 		return
