@@ -12,8 +12,9 @@ RUN groupadd -g 1000 appuser && \
 # set working directory
 WORKDIR /app
 
-# copy the binary from build context
-COPY build/phishingclub /app/phishingclub
+# copy the binary from build context based on target architecture
+ARG TARGETARCH
+COPY build/${TARGETARCH}/phishingclub /app/phishingclub
 
 # make binary executable and set ownership
 RUN chmod +x /app/phishingclub && \

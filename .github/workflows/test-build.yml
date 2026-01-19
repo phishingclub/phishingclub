@@ -18,7 +18,12 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set up Docker
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
@@ -49,16 +54,32 @@ jobs:
           mkdir -p backend/frontend/build
           cp -r frontend/build/* backend/frontend/build/
 
-      - name: Build binary
+      - name: Build binaries for multiple architectures
         run: |
+          mkdir -p build/amd64 build/arm64
+
+          # build amd64 binary
           sudo docker run --rm \
           -v "$(pwd)":/app \
           -w /app/backend \
           -e CGO_ENABLED=1 \
+          -e GOOS=linux \
+          -e GOARCH=amd64 \
           golang:1.25.1 \
           go build -trimpath \
           -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }}' \
-          -tags production -o ../build/phishingclub main.go
+          -tags production -o ../build/amd64/phishingclub main.go
+
+          # build arm64 binary
+          sudo docker run --rm \
+          -v "$(pwd)":/app \
+          -w /app/backend \
+          -e CGO_ENABLED=1 \
+          -e GOOS=linux \
+          -e GOARCH=arm64 \
+          -e CC=aarch64-linux-gnu-gcc \
+          golang:1.25.1 \
+          bash -c "apt-get update && apt-get install -y gcc-aarch64-linux-gnu && go build -trimpath -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }}' -tags production -o ../build/arm64/phishingclub main.go"
 
       - name: Fix build directory permissions
         run: |
@@ -71,20 +92,25 @@ jobs:
           if [ -n "${{ secrets.SIGNKEY_1 }}" ]; then
             echo "Testing binary signing..."
 
-            # Create directory for keys
+            # create directory for keys
             mkdir -p /tmp/keys
             chmod 700 /tmp/keys
 
-            # Save private key from GitHub secrets
+            # save private key from github secrets
             echo "${{ secrets.SIGNKEY_1 }}" > /tmp/keys/private1.pem
             chmod 600 /tmp/keys/private1.pem
 
-            # Sign binary with primary key
+            # sign amd64 binary with primary key
             openssl pkeyutl -sign -inkey /tmp/keys/private1.pem \
-                -rawin -in build/phishingclub \
-                -out build/phishingclub.sig
+                -rawin -in build/amd64/phishingclub \
+                -out build/amd64/phishingclub.sig
 
-            # Clean up keys
+            # sign arm64 binary with primary key
+            openssl pkeyutl -sign -inkey /tmp/keys/private1.pem \
+                -rawin -in build/arm64/phishingclub \
+                -out build/arm64/phishingclub.sig
+
+            # clean up keys
             rm -rf /tmp/keys
 
             echo "✅ Binary signing test successful"
@@ -96,32 +122,46 @@ jobs:
         run: |
           mkdir -p packages
 
-          # Test packaging
-          if [ -f build/phishingclub.sig ]; then
-            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
-                -C build \
+          # test packaging for amd64
+          if [ -f build/amd64/phishingclub.sig ]; then
+            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz \
+                -C build/amd64 \
                 phishingclub \
                 phishingclub.sig
-            echo "✅ Package created with signature"
+            echo "✅ AMD64 package created with signature"
           else
-            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
-                -C build \
+            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz \
+                -C build/amd64 \
                 phishingclub
-            echo "✅ Package created without signature"
+            echo "✅ AMD64 package created without signature"
           fi
 
-      - name: Build and push test Docker image
+          # test packaging for arm64
+          if [ -f build/arm64/phishingclub.sig ]; then
+            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz \
+                -C build/arm64 \
+                phishingclub \
+                phishingclub.sig
+            echo "✅ ARM64 package created with signature"
+          else
+            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz \
+                -C build/arm64 \
+                phishingclub
+            echo "✅ ARM64 package created without signature"
+          fi
+
+      - name: Build and push test multi-arch Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.release
           push: true
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}:test-latest
           labels: |
             org.opencontainers.image.title=PhishingClub-Test ${{ steps.get_version.outputs.VERSION }}
-            org.opencontainers.image.description=PhishingClub test build image (linux/amd64). Not for production deployment.
+            org.opencontainers.image.description=PhishingClub test build image (linux/amd64, linux/arm64). Not for production deployment.
             org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.get_version.outputs.VERSION }}
@@ -131,24 +171,43 @@ jobs:
       - name: Verify build artifacts
         run: |
           echo "=== Build Summary ==="
-          echo "Binary size: $(du -h build/phishingclub | cut -f1)"
-          echo "Binary info:"
-          file build/phishingclub
+          echo ""
+          echo "AMD64 Binary size: $(du -h build/amd64/phishingclub | cut -f1)"
+          echo "AMD64 Binary info:"
+          file build/amd64/phishingclub
 
-          if [ -f build/phishingclub.sig ]; then
-            echo "Signature size: $(du -h build/phishingclub.sig | cut -f1)"
+          if [ -f build/amd64/phishingclub.sig ]; then
+            echo "AMD64 Signature size: $(du -h build/amd64/phishingclub.sig | cut -f1)"
           fi
 
-          echo "Package size: $(du -h packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz | cut -f1)"
-          echo "Package contents:"
-          tar -tzf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz
+          echo ""
+          echo "ARM64 Binary size: $(du -h build/arm64/phishingclub | cut -f1)"
+          echo "ARM64 Binary info:"
+          file build/arm64/phishingclub
+
+          if [ -f build/arm64/phishingclub.sig ]; then
+            echo "ARM64 Signature size: $(du -h build/arm64/phishingclub.sig | cut -f1)"
+          fi
+
+          echo ""
+          echo "AMD64 Package size: $(du -h packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz | cut -f1)"
+          echo "AMD64 Package contents:"
+          tar -tzf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz
+
+          echo ""
+          echo "ARM64 Package size: $(du -h packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz | cut -f1)"
+          echo "ARM64 Package contents:"
+          tar -tzf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz
 
       - name: Upload build artifacts (for review)
         uses: actions/upload-artifact@v4
         with:
           name: phishingclub-test-build-${{ steps.get_version.outputs.HASH }}
           path: |
-            build/phishingclub
-            build/phishingclub.sig
-            packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz
+            build/amd64/phishingclub
+            build/amd64/phishingclub.sig
+            build/arm64/phishingclub
+            build/arm64/phishingclub.sig
+            packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz
+            packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz
           retention-days: 2

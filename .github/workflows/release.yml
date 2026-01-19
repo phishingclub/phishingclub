@@ -17,7 +17,12 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Set up Docker
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
@@ -49,16 +54,32 @@ jobs:
           mkdir -p backend/frontend/build
           cp -r frontend/build/* backend/frontend/build/
 
-      - name: Build single binary with all features
+      - name: Build binaries for multiple architectures
         run: |
+          mkdir -p build/amd64 build/arm64
+
+          # build amd64 binary
           sudo docker run --rm \
           -v "$(pwd)":/app \
           -w /app/backend \
           -e CGO_ENABLED=1 \
+          -e GOOS=linux \
+          -e GOARCH=amd64 \
           golang:1.25.1 \
           go build -trimpath \
           -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }}' \
-          -tags production -o ../build/phishingclub main.go
+          -tags production -o ../build/amd64/phishingclub main.go
+
+          # build arm64 binary
+          sudo docker run --rm \
+          -v "$(pwd)":/app \
+          -w /app/backend \
+          -e CGO_ENABLED=1 \
+          -e GOOS=linux \
+          -e GOARCH=arm64 \
+          -e CC=aarch64-linux-gnu-gcc \
+          golang:1.25.1 \
+          bash -c "apt-get update && apt-get install -y gcc-aarch64-linux-gnu && go build -trimpath -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }}' -tags production -o ../build/arm64/phishingclub main.go"
 
       - name: Fix build directory permissions
         run: |
@@ -66,49 +87,60 @@ jobs:
           chmod 755 build/
           ls -la build/
 
-      - name: Sign binary with Ed25519
+      - name: Sign binaries with Ed25519
         run: |
-          # Create directory for keys
+          # create directory for keys
           mkdir -p /tmp/keys
           chmod 700 /tmp/keys
 
-          # Save both private keys from GitHub secrets
+          # save both private keys from github secrets
           echo "${{ secrets.SIGNKEY_1 }}" > /tmp/keys/private1.pem
           echo "${{ secrets.SIGNKEY_2 }}" > /tmp/keys/private2.pem
           chmod 600 /tmp/keys/private1.pem
           chmod 600 /tmp/keys/private2.pem
 
-          # Sign binary with primary key (Key 1)
+          # sign amd64 binary with primary key (key 1)
           openssl pkeyutl -sign -inkey /tmp/keys/private1.pem \
-              -rawin -in build/phishingclub \
-              -out build/phishingclub.sig
+              -rawin -in build/amd64/phishingclub \
+              -out build/amd64/phishingclub.sig
 
-          # Clean up keys
+          # sign arm64 binary with primary key (key 1)
+          openssl pkeyutl -sign -inkey /tmp/keys/private1.pem \
+              -rawin -in build/arm64/phishingclub \
+              -out build/arm64/phishingclub.sig
+
+          # clean up keys
           rm -rf /tmp/keys
 
-      - name: Create compressed package with signature
+      - name: Create compressed packages with signatures
         run: |
           mkdir -p packages
 
-          # Package binary with signature
-          tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
-              -C build \
+          # package amd64 binary with signature
+          tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz \
+              -C build/amd64 \
               phishingclub \
               phishingclub.sig
 
-      - name: Build and push release Docker image
+          # package arm64 binary with signature
+          tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz \
+              -C build/arm64 \
+              phishingclub \
+              phishingclub.sig
+
+      - name: Build and push multi-arch Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile.release
           push: true
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.VERSION }}
           labels: |
             org.opencontainers.image.title=PhishingClub ${{ steps.get_version.outputs.VERSION }}
-            org.opencontainers.image.description=PhishingClub production release image (linux/amd64). Built from tag ${{ steps.get_version.outputs.TAG }}.
+            org.opencontainers.image.description=PhishingClub production release image (linux/amd64, linux/arm64). Built from tag ${{ steps.get_version.outputs.TAG }}.
             org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ steps.get_version.outputs.VERSION }}
@@ -152,7 +184,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ steps.get_version.outputs.TAG }} \
-            ./packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
+            ./packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz \
+            ./packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz \
             --title "PhishingClub ${{ steps.get_version.outputs.TAG }}" \
             --notes "${{ steps.get_release_notes.outputs.NOTES }}"
 
