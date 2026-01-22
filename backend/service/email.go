@@ -37,12 +37,18 @@ type Email struct {
 	AttachmentPath    string
 }
 
+// AttachmentWithInline represents an attachment with inline flag
+type AttachmentWithInline struct {
+	ID       *uuid.UUID
+	IsInline bool
+}
+
 // AddAttachments adds an attachments to a message
 func (m *Email) AddAttachments(
 	ctx context.Context,
 	session *model.Session,
 	messageID *uuid.UUID,
-	attachmentIDs []*uuid.UUID,
+	attachments []AttachmentWithInline,
 ) error {
 	ae := NewAuditEvent("Email.AddAttachments", session)
 	ae.Details["messageId"] = messageID.String()
@@ -69,13 +75,13 @@ func (m *Email) AddAttachments(
 	}
 	// add attachment to message
 	attachmentIdsStr := []string{}
-	for _, attachmentID := range attachmentIDs {
-		attachmentIdsStr = append(attachmentIdsStr, attachmentID.String())
+	for _, attachment := range attachments {
+		attachmentIdsStr = append(attachmentIdsStr, attachment.ID.String())
 		// get the message to ensure it exists and the user is privliged
 		_, err = m.AttachmentService.GetByID(
 			ctx,
 			session,
-			attachmentID,
+			attachment.ID,
 		)
 		if err != nil {
 			m.Logger.Errorw("failed to add attachment to email", "error", err)
@@ -84,7 +90,8 @@ func (m *Email) AddAttachments(
 		err = m.EmailRepository.AddAttachment(
 			ctx,
 			messageID,
-			attachmentID,
+			attachment.ID,
+			attachment.IsInline,
 		)
 		if err != nil {
 			m.Logger.Errorw("failed to add attachment to email", "error", err)
@@ -640,19 +647,73 @@ func (m *Email) SendTestEmail(
 	msg.SetBodyString("text/html", bodyBuffer.String())
 	// attachments
 	attachments := email.Attachments
-	for _, attachment := range attachments {
+	for _, emailAttachment := range attachments {
+		attachment := emailAttachment.Attachment
 		p, err := m.AttachmentService.GetPath(attachment)
 		if err != nil {
 			return fmt.Errorf("failed to get attachment path: %s", err)
 		}
-		if !attachment.EmbeddedContent.MustGet() {
+
+		// check if attachment should be inline (for cid: references)
+		if emailAttachment.IsInline {
+			// inline attachment - embedded in email body, can be referenced via cid:filename
+			if !attachment.EmbeddedContent.MustGet() {
+				// simple inline image - no template processing needed
+				msg.EmbedFile(p.String())
+			} else {
+				// inline image with template processing
+				attachmentContent, err := os.ReadFile(p.String())
+				if err != nil {
+					return errs.Wrap(err)
+				}
+				// setup attachment for executing as email template
+				attachmentAsEmail := model.Email{
+					ID:                email.ID,
+					CreatedAt:         email.CreatedAt,
+					UpdatedAt:         email.UpdatedAt,
+					Name:              email.Name,
+					MailEnvelopeFrom:  email.MailEnvelopeFrom,
+					MailHeaderFrom:    email.MailHeaderFrom,
+					MailHeaderSubject: email.MailHeaderSubject,
+					Content:           email.Content,
+					AddTrackingPixel:  email.AddTrackingPixel,
+					CompanyID:         email.CompanyID,
+					Attachments:       email.Attachments,
+					Company:           email.Company,
+				}
+				attachmentAsEmail.Content = nullable.NewNullableWithValue(
+					*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
+				)
+				attachmentStr, err := m.TemplateService.CreateMailBody(
+					ctx,
+					"id",
+					"/",
+					testDomain,
+					campaignRecipient,
+					&attachmentAsEmail,
+					nil,
+					companyID,
+				)
+				if err != nil {
+					return fmt.Errorf("failed to setup attachment with embedded content: %s", err)
+				}
+				// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
+				// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
+				msg.EmbedReader(
+					filepath.Base(p.String()),
+					strings.NewReader(attachmentStr),
+				)
+			}
+		} else if !attachment.EmbeddedContent.MustGet() {
+			// regular attachment - shows in attachment list
 			msg.AttachFile(p.String())
 		} else {
+			// inline attachment - embedded in email body, can be referenced via cid:filename
 			attachmentContent, err := os.ReadFile(p.String())
 			if err != nil {
 				return errs.Wrap(err)
 			}
-			// hacky setup of attachment for executing as email template
+			// setup attachment for executing as email template
 			attachmentAsEmail := model.Email{
 				ID:                email.ID,
 				CreatedAt:         email.CreatedAt,
@@ -667,7 +728,6 @@ func (m *Email) SendTestEmail(
 				Attachments:       email.Attachments,
 				Company:           email.Company,
 			}
-			// really hacky / unsafe
 			attachmentAsEmail.Content = nullable.NewNullableWithValue(
 				*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 			)
@@ -684,7 +744,9 @@ func (m *Email) SendTestEmail(
 			if err != nil {
 				return fmt.Errorf("failed to setup attachment with embedded content: %s", err)
 			}
-			msg.AttachReadSeeker(
+			// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
+			// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
+			msg.EmbedReader(
 				filepath.Base(p.String()),
 				strings.NewReader(attachmentStr),
 			)
@@ -907,25 +969,25 @@ func (m *Email) loadEmailAttachmentsWithContext(
 	email *model.Email,
 	companyID *uuid.UUID,
 ) error {
-	// get all attachment IDs associated with this email
-	attachmentIDs, err := m.EmailRepository.GetAttachmentIDsByEmailID(ctx, email.ID.MustGet())
+	// get all email-attachment relationships with isInline status
+	emailAttachments, err := m.EmailRepository.GetEmailAttachments(ctx, email.ID.MustGet())
 	if err != nil {
 		return errs.Wrap(err)
 	}
 
 	// if no attachments, nothing to do
-	if len(attachmentIDs) == 0 {
-		email.Attachments = []*model.Attachment{}
+	if len(emailAttachments) == 0 {
+		email.Attachments = []*model.EmailAttachment{}
 		return nil
 	}
 
 	// get attachments with proper context filtering
-	contextFilteredAttachments := []*model.Attachment{}
-	for _, attachmentID := range attachmentIDs {
-		attachment, err := m.AttachmentService.AttachmentRepository.GetByID(ctx, attachmentID)
+	contextFilteredAttachments := []*model.EmailAttachment{}
+	for _, ea := range emailAttachments {
+		attachment, err := m.AttachmentService.AttachmentRepository.GetByID(ctx, ea.AttachmentID)
 		if err != nil {
 			// if attachment doesn't exist, log and continue
-			m.Logger.Debugw("attachment not found", "attachmentID", attachmentID, "error", err)
+			m.Logger.Debugw("attachment not found", "attachmentID", ea.AttachmentID, "error", err)
 			continue
 		}
 
@@ -947,7 +1009,10 @@ func (m *Email) loadEmailAttachmentsWithContext(
 		}
 
 		if isAttachmentAccessible {
-			contextFilteredAttachments = append(contextFilteredAttachments, attachment)
+			contextFilteredAttachments = append(contextFilteredAttachments, &model.EmailAttachment{
+				Attachment: attachment,
+				IsInline:   ea.IsInline,
+			})
 		}
 	}
 

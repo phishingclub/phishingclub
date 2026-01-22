@@ -22,8 +22,8 @@ type Email struct {
 	AddTrackingPixel  nullable.Nullable[bool]                 `json:"addTrackingPixel"`
 	CompanyID         nullable.Nullable[uuid.UUID]            `json:"companyID"`
 
-	Attachments []*Attachment `json:"attachments"`
-	Company     *Company      `json:"company"`
+	Attachments []*EmailAttachment `json:"attachments"`
+	Company     *Company            `json:"company"`
 }
 
 // Validate checks if the mail has a valid state
@@ -131,4 +131,11 @@ type EmailOverview struct {
 	CompanyID         nullable.Nullable[uuid.UUID]            `json:"companyID"`
 
 	Company *Company `json:"company"`
+}
+
+// EmailAttachment represents an attachment associated with an email
+// with additional metadata about how it should be displayed
+type EmailAttachment struct {
+	*Attachment
+	IsInline bool `json:"isInline"` // if true, use Content-Disposition: inline and set Content-ID for cid: references
 }
