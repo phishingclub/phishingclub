@@ -2,6 +2,7 @@ package seed
 
 import (
 	"crypto/rand"
+	"strings"
 
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
@@ -350,13 +351,14 @@ func SeedSettings(
 	return nil
 }
 
-// Migration approach
+// Migration migrates db
 func migrate(db *gorm.DB) error {
 	// migration for attachments.embedded_content
 	// first add column as nullable
 	if err := db.Exec(`ALTER TABLE attachments ADD COLUMN embedded_content BOOLEAN`).Error; err != nil {
 		// column might already exist, ignore error
-		if err.Error() != "duplicate column name: embedded_content" {
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "duplicate") && !strings.Contains(errMsg, "already exists") {
 			return errs.Wrap(err)
 		}
 	}
@@ -370,7 +372,8 @@ func migrate(db *gorm.DB) error {
 	// first add column as nullable
 	if err := db.Exec(`ALTER TABLE email_attachments ADD COLUMN is_inline BOOLEAN`).Error; err != nil {
 		// column might already exist, ignore error
-		if err.Error() != "duplicate column name: is_inline" {
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "duplicate") && !strings.Contains(errMsg, "already exists") {
 			return errs.Wrap(err)
 		}
 	}
