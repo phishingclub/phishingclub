@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.0] - 2026-01-22
+- Added support for attachments as inline images in emails and the email editor
+- Fix delete orphans recipients when recipient is in active campaign
+- Fix error in update options
+- Fix faulty migration
+- Fix added AllowDenyIDs on get campaign by id endpoint for consistency 
+
 ## [1.26.0] - 2025-12-19
 - Added ContentRaw variable to API Senders
 - Fix proxy capturing on 302 responses
