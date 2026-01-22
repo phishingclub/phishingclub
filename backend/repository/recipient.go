@@ -434,45 +434,6 @@ func (r *Recipient) GetOrphaned(
 	return result, nil
 }
 
-// DeleteAllOrphaned deletes all recipients that are not in any group
-func (r *Recipient) DeleteAllOrphaned(
-	ctx context.Context,
-	companyID *uuid.UUID,
-) (int64, error) {
-	// build optimized LEFT JOIN delete query for orphaned recipients
-	var companyFilter string
-	var args []interface{}
-
-	if companyID != nil {
-		companyFilter = fmt.Sprintf("AND r.company_id = ?")
-		args = append(args, companyID)
-	} else {
-		companyFilter = fmt.Sprintf("AND r.company_id IS NULL")
-	}
-
-	// use raw SQL for optimized LEFT JOIN delete
-	query := fmt.Sprintf(`
-		DELETE FROM %s
-		WHERE id IN (
-			SELECT r.id FROM %s r
-			LEFT JOIN %s rgr ON r.id = rgr.recipient_id
-			WHERE rgr.recipient_id IS NULL %s
-		)`,
-		database.RECIPIENT_TABLE,
-		database.RECIPIENT_TABLE,
-		database.RECIPIENT_GROUP_RECIPIENT_TABLE,
-		companyFilter,
-	)
-
-	result := r.DB.Exec(query, args...)
-
-	if result.Error != nil {
-		return 0, result.Error
-	}
-
-	return result.RowsAffected, nil
-}
-
 // GetByID gets a recipient by id
 func (r *Recipient) GetByID(
 	ctx context.Context,
