@@ -12,6 +12,8 @@
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import TextFieldMultiSelect from '$lib/components/TextFieldMultiSelect.svelte';
+	import CheckboxField from '$lib/components/CheckboxField.svelte';
+	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import { BiMap } from '$lib/utils/maps';
@@ -34,7 +36,8 @@
 	// bindings
 	let formValues = {
 		emailID: '',
-		attachmentIDs: []
+		attachmentIDs: [],
+		isInline: false
 	};
 
 	// local state
@@ -140,16 +143,19 @@
 	const onClickAddAttachment = async () => {
 		try {
 			isSubmitting = true;
-			const idsToAdd = formValues.attachmentIDs.map((id) => {
-				return availableAttachmentMap.byValue(id);
+			const attachmentsToAdd = formValues.attachmentIDs.map((id) => {
+				return {
+					id: availableAttachmentMap.byValue(id),
+					isInline: formValues.isInline
+				};
 			});
-			const res = await api.email.addAttachments($page.params.id, idsToAdd);
+			const res = await api.email.addAttachments($page.params.id, attachmentsToAdd);
 			if (!res.success) {
 				addError = res.error;
 				return;
 			}
 			addError = '';
-			const msg = idsToAdd.length > 1 ? 'attachments' : 'attachment';
+			const msg = attachmentsToAdd.length > 1 ? 'attachments' : 'attachment';
 			addToast(`Added ${msg}`, 'Success');
 			refreshData();
 			showAddAttachmentModal = false;
@@ -186,12 +192,14 @@
 	const openModal = () => {
 		showAddAttachmentModal = true;
 		formValues.attachmentIDs = [];
+		formValues.isInline = false;
 		addError = '';
 	};
 
 	const closeModal = () => {
 		showAddAttachmentModal = false;
 		formValues.attachmentIDs = [];
+		formValues.isInline = false;
 		addError = '';
 	};
 </script>
@@ -201,8 +209,8 @@
 	<Headline>Attachments: {emailName}</Headline>
 	<BigButton on:click={openModal}>Add attachement</BigButton>
 	<Table
-		columns={['Name', 'Description', 'Filename']}
-		sortable={['Name', 'Description', 'Filename']}
+		columns={['Name', 'Description', 'Filename', { column: 'Inline', alignText: 'center' }]}
+		sortable={['Name', 'Description', 'Filename', 'Inline']}
 		pagination={tableParams}
 		hasData={!!allSelectedAttachmentsChunk}
 		{hasNextPage}
@@ -214,6 +222,7 @@
 				<TableCell value={attachment.name} />
 				<TableCell value={attachment.description} />
 				<TableCell value={attachment.fileName} />
+				<TableCellCheck value={attachment.isInline} />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
@@ -242,6 +251,13 @@
 						options={availableAttachmentMap.values()}
 						>Attachment
 					</TextFieldMultiSelect>
+				</FormColumn>
+				<FormColumn>
+					<CheckboxField
+						bind:value={formValues.isInline}
+						toolTipText="Inline attachments can be referenced in email HTML using cid:filename.jpg"
+						>Inline (for images)</CheckboxField
+					>
 				</FormColumn>
 			</FormColumns>
 			<FormError message={addError} />

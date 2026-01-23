@@ -19,6 +19,7 @@
 	export let domainMap = new BiMap({});
 	export let selectedDomain = '';
 	export let externalVimMode = null; // allow external control of vim mode
+	export let attachments = []; // array of email attachments for inline image preview
 	let localVimMode = externalVimMode !== null ? externalVimMode : $vimModeEnabled;
 	let editor = null;
 	let previewFrame = null;
@@ -287,6 +288,54 @@
 	};
 
 	const replaceTemplateVariables = async (text) => {
+		// replace inline image cid: references with data URLs for preview in shadow DOM
+		if (attachments && attachments.length > 0) {
+			// find all cid: references in the text
+			const cidRegex = /src=["']cid:([^"']+)["']/gi;
+			const matches = [];
+			let match;
+			while ((match = cidRegex.exec(text)) !== null) {
+				matches.push(match[1]);
+			}
+
+			// fetch and replace each cid: reference with data URL
+			for (const filename of matches) {
+				// find the attachment with this filename that is inline
+				const attachment = attachments.find((att) => att.isInline && att.fileName === filename);
+				if (attachment && attachment.id) {
+					try {
+						// fetch attachment content from API
+						const response = await fetch(`/api/v1/attachment/${attachment.id}/content`);
+						const json = await response.json();
+
+						if (json.success && json.data && json.data.file) {
+							// determine mime type from filename extension
+							const ext = filename.split('.').pop().toLowerCase();
+							const mimeTypes = {
+								png: 'image/png',
+								jpg: 'image/jpeg',
+								jpeg: 'image/jpeg',
+								gif: 'image/gif',
+								webp: 'image/webp',
+								svg: 'image/svg+xml',
+								bmp: 'image/bmp'
+							};
+							const mimeType = mimeTypes[ext] || 'image/png';
+
+							// create data URL from base64 data
+							const dataUrl = `data:${mimeType};base64,${json.data.file}`;
+
+							// replace cid: with data URL (escape filename for regex)
+							const escapedFilename = filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+							text = text.replace(new RegExp(`cid:${escapedFilename}`, 'g'), dataUrl);
+						}
+					} catch (error) {
+						console.error('Failed to fetch attachment for preview:', error);
+					}
+				}
+			}
+		}
+
 		let param = '?id=905f286e-486b-434b-8ecc-d82456a07f7b';
 		let _baseURL = `https://${baseURL}`;
 		let _url = `https://${baseURL}${param}`;

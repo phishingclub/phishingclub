@@ -149,14 +149,33 @@ func (o *Option) SetOptionByKey(
 			)
 		}
 	case data.OptionKeyLogLevel:
-		// is allow listed
-		fallthrough
+		// validate log level value
+		if v != "debug" && v != "info" && v != "warn" && v != "error" {
+			o.Logger.Debugw("invalid log level value",
+				"value", v,
+			)
+			return validate.WrapErrorWithField(
+				errs.NewValidationError(
+					errors.New("invalid log level"),
+				),
+				"log level",
+			)
+		}
 	case data.OptionKeyDBLogLevel:
-		// is allow listed
-		fallthrough
+		// validate db log level value
+		if v != "silent" && v != "info" && v != "warn" && v != "error" {
+			o.Logger.Debugw("invalid db log level value",
+				"value", v,
+			)
+			return validate.WrapErrorWithField(
+				errs.NewValidationError(
+					errors.New("invalid db log level"),
+				),
+				"db log level",
+			)
+		}
 	case data.OptionKeyAdminSSOLogin:
 		// is allow listed
-		fallthrough
 	case data.OptionKeyDisplayMode:
 		// validate display mode value
 		if v != data.OptionValueDisplayModeWhitebox && v != data.OptionValueDisplayModeBlackbox {

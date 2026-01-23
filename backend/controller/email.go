@@ -27,8 +27,16 @@ var EmailOrderByMap = map[string]string{
 }
 
 // AddAttachmentsToEmailRequest is a request to add attachments to a message
+// supports both old format (ids array) and new format (attachments array with isInline)
 type AddAttachmentsToEmailRequest struct {
-	Attachments []string `json:"ids"` // attachment IDs
+	IDs         []string               `json:"ids"`         // deprecated: old format for backward compatibility
+	Attachments []AttachmentWithInline `json:"attachments"` // new format with isInline support
+}
+
+// AttachmentWithInline represents an attachment ID with inline flag
+type AttachmentWithInline struct {
+	ID       string `json:"id"`
+	IsInline bool   `json:"isInline"`
 }
 
 // RemoveAttachmentFromEmailRequest is a request to remove an attachment from a message
@@ -66,13 +74,24 @@ func (m *Email) AddAttachments(g *gin.Context) {
 	if !ok {
 		return
 	}
+
+	// handle backward compatibility: if old format (ids) is used, convert to new format
+	if len(request.IDs) > 0 && len(request.Attachments) == 0 {
+		for _, idStr := range request.IDs {
+			request.Attachments = append(request.Attachments, AttachmentWithInline{
+				ID:       idStr,
+				IsInline: false, // default to false for backward compatibility
+			})
+		}
+	}
+
 	if len(request.Attachments) == 0 {
 		m.Response.BadRequestMessage(g, "No attachments provided")
 		return
 	}
-	attachmentIDs := []*uuid.UUID{}
-	for _, idParam := range request.Attachments {
-		id, err := uuid.Parse(idParam)
+	attachments := []service.AttachmentWithInline{}
+	for _, att := range request.Attachments {
+		id, err := uuid.Parse(att.ID)
 		if err != nil {
 			m.Logger.Debugw(errs.MsgFailedToParseUUID,
 				"error", err,
@@ -80,14 +99,17 @@ func (m *Email) AddAttachments(g *gin.Context) {
 			m.Response.BadRequestMessage(g, "Invalid attachment ID")
 			return
 		}
-		attachmentIDs = append(attachmentIDs, &id)
+		attachments = append(attachments, service.AttachmentWithInline{
+			ID:       &id,
+			IsInline: att.IsInline,
+		})
 	}
 	// add attachments to email
 	err := m.EmailService.AddAttachments(
 		g.Request.Context(),
 		session,
 		id,
-		attachmentIDs,
+		attachments,
 	)
 	// handle responses
 	if ok := m.handleErrors(g, err); !ok {

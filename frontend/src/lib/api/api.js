@@ -1528,12 +1528,12 @@ export class API {
 		 * Add attachments to a email.
 		 *
 		 * @param {string} emailID
-		 * @param {string[]} attachmentIDs
+		 * @param {Array<{id: string, isInline: boolean}>} attachments - Array of attachment objects with id and isInline flag
 		 * @returns {Promise<ApiResponse>}
 		 */
-		addAttachments: async (emailID, attachmentIDs) => {
+		addAttachments: async (emailID, attachments) => {
 			return await postJSON(this.getPath(`/email/${emailID}/attachment`), {
-				ids: attachmentIDs
+				attachments: attachments
 			});
 		},
 

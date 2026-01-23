@@ -54,11 +54,13 @@ func (m *Email) AddAttachment(
 	ctx context.Context,
 	emailID *uuid.UUID,
 	attachmentID *uuid.UUID,
+	isInline bool,
 ) error {
 	result := m.DB.Create(
 		&database.EmailAttachment{
 			EmailID:      emailID,
 			AttachmentID: attachmentID,
+			IsInline:     isInline,
 		},
 	)
 	if result.Error != nil {
@@ -101,6 +103,19 @@ func (m *Email) GetAttachmentIDsByEmailID(
 		attachmentIDs[i] = ea.AttachmentID
 	}
 	return attachmentIDs, nil
+}
+
+// GetEmailAttachments gets all email-attachment relationships for an email including isInline status
+func (m *Email) GetEmailAttachments(
+	ctx context.Context,
+	emailID uuid.UUID,
+) ([]database.EmailAttachment, error) {
+	var emailAttachments []database.EmailAttachment
+	result := m.DB.Where("email_id = ?", emailID).Find(&emailAttachments)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return emailAttachments, nil
 }
 
 // RemoveAttachment removes an attachments from a email by attachment ID
@@ -342,10 +357,8 @@ func ToEmail(row *database.Email) *model.Email {
 	content := nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(row.Content))
 	addTrackingPixel := nullable.NewNullableWithValue(row.AddTrackingPixel)
 
-	attachments := []*model.Attachment{}
-	for _, attachment := range row.Attachments {
-		attachments = append(attachments, ToAttachment(attachment))
-	}
+	// attachments are loaded separately via loadEmailAttachmentsWithContext
+	// which properly loads EmailAttachment with isInline status from junction table
 	return &model.Email{
 		ID:                id,
 		CreatedAt:         row.CreatedAt,
@@ -357,7 +370,7 @@ func ToEmail(row *database.Email) *model.Email {
 		Content:           content,
 		AddTrackingPixel:  addTrackingPixel,
 		CompanyID:         companyID,
-		Attachments:       attachments,
+		Attachments:       []*model.EmailAttachment{},
 	}
 }
 

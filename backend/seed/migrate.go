@@ -2,6 +2,7 @@ package seed
 
 import (
 	"crypto/rand"
+	"strings"
 
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
@@ -350,20 +351,35 @@ func SeedSettings(
 	return nil
 }
 
-// Migration approach
+// Migration migrates db
 func migrate(db *gorm.DB) error {
-	// First add column as nullable
+	// migration for attachments.embedded_content
+	// first add column as nullable
 	if err := db.Exec(`ALTER TABLE attachments ADD COLUMN embedded_content BOOLEAN`).Error; err != nil {
+		// column might already exist, ignore error
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "duplicate") && !strings.Contains(errMsg, "already exists") {
+			return errs.Wrap(err)
+		}
+	}
+
+	// update existing rows
+	if err := db.Exec(`UPDATE attachments SET embedded_content = false WHERE embedded_content IS NULL`).Error; err != nil {
 		return errs.Wrap(err)
 	}
 
-	// Update existing rows
-	if err := db.Exec(`UPDATE attachments SET embedded_content = false`).Error; err != nil {
-		return errs.Wrap(err)
+	// migration for email_attachments.is_inline
+	// first add column as nullable
+	if err := db.Exec(`ALTER TABLE email_attachments ADD COLUMN is_inline BOOLEAN`).Error; err != nil {
+		// column might already exist, ignore error
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "duplicate") && !strings.Contains(errMsg, "already exists") {
+			return errs.Wrap(err)
+		}
 	}
 
-	// Then make it not nullable
-	if err := db.Exec(`ALTER TABLE attachments MODIFY COLUMN embedded_content BOOLEAN NOT NULL DEFAULT false`).Error; err != nil {
+	// update existing rows - default to false (regular attachments)
+	if err := db.Exec(`UPDATE email_attachments SET is_inline = false WHERE is_inline IS NULL`).Error; err != nil {
 		return errs.Wrap(err)
 	}
 

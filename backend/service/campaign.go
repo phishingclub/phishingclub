@@ -2129,19 +2129,82 @@ func (c *Campaign) sendCampaignMessages(
 		m.SetBodyString("text/html", bodyBuffer.String())
 		// attachments
 		attachments := email.Attachments
-		for _, attachment := range attachments {
+		for _, emailAttachment := range attachments {
+			attachment := emailAttachment.Attachment
 			p, err := c.MailService.AttachmentService.GetPath(attachment)
 			if err != nil {
 				return fmt.Errorf("failed to get attachment path: %s", err)
 			}
-			if !attachment.EmbeddedContent.MustGet() {
+
+			// check if attachment should be inline (for cid: references)
+			if emailAttachment.IsInline {
+				// inline attachment - embedded in email body, can be referenced via cid:filename
+				if !attachment.EmbeddedContent.MustGet() {
+					// simple inline image - no template processing needed
+					m.EmbedFile(p.String())
+				} else {
+					// inline image with template processing
+					attachmentContent, err := os.ReadFile(p.String())
+					if err != nil {
+						return errs.Wrap(err)
+					}
+					// setup attachment for executing as email template
+					attachmentAsEmail := model.Email{
+						ID:                email.ID,
+						CreatedAt:         email.CreatedAt,
+						UpdatedAt:         email.UpdatedAt,
+						Name:              email.Name,
+						MailEnvelopeFrom:  email.MailEnvelopeFrom,
+						MailHeaderFrom:    email.MailHeaderFrom,
+						MailHeaderSubject: email.MailHeaderSubject,
+						Content:           email.Content,
+						AddTrackingPixel:  email.AddTrackingPixel,
+						CompanyID:         email.CompanyID,
+						Attachments:       email.Attachments,
+						Company:           email.Company,
+					}
+					attachmentAsEmail.Content = nullable.NewNullableWithValue(
+						*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
+					)
+					// generate custom campaign URL for attachment
+					recipientID := campaignRecipient.ID.MustGet()
+					customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+					if err != nil {
+						c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
+						return errs.Wrap(err)
+					}
+
+					attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURL(
+						ctx,
+						urlIdentifier.Name.MustGet(),
+						urlPath,
+						domain,
+						campaignRecipient,
+						&attachmentAsEmail,
+						nil,
+						customCampaignURL,
+						campaignCompanyID,
+					)
+					if err != nil {
+						return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
+					}
+					// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
+					// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
+					m.EmbedReader(
+						filepath.Base(p.String()),
+						strings.NewReader(attachmentStr),
+					)
+				}
+			} else if !attachment.EmbeddedContent.MustGet() {
+				// regular attachment - shows in attachment list
 				m.AttachFile(p.String())
 			} else {
+				// regular attachment with template processing
 				attachmentContent, err := os.ReadFile(p.String())
 				if err != nil {
 					return errs.Wrap(err)
 				}
-				// hacky setup of attachment for executing as email template
+				// setup attachment for executing as email template
 				attachmentAsEmail := model.Email{
 					ID:                email.ID,
 					CreatedAt:         email.CreatedAt,
@@ -2156,7 +2219,6 @@ func (c *Campaign) sendCampaignMessages(
 					Attachments:       email.Attachments,
 					Company:           email.Company,
 				}
-				// really hacky / unsafe
 				attachmentAsEmail.Content = nullable.NewNullableWithValue(
 					*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 				)
@@ -3716,14 +3778,77 @@ func (c *Campaign) sendSingleEmailSMTP(
 
 	// handle attachments
 	attachments := email.Attachments
-	for _, attachment := range attachments {
+	for _, emailAttachment := range attachments {
+		attachment := emailAttachment.Attachment
 		p, err := c.MailService.AttachmentService.GetPath(attachment)
 		if err != nil {
 			return fmt.Errorf("failed to get attachment path: %s", err)
 		}
-		if !attachment.EmbeddedContent.MustGet() {
+
+		// check if attachment should be inline (for cid: references)
+		if emailAttachment.IsInline {
+			// inline attachment - embedded in email body, can be referenced via cid:filename
+			if !attachment.EmbeddedContent.MustGet() {
+				// simple inline image - no template processing needed
+				m.EmbedFile(p.String())
+			} else {
+				// inline image with template processing
+				attachmentContent, err := os.ReadFile(p.String())
+				if err != nil {
+					return errs.Wrap(err)
+				}
+				// setup attachment for executing as email template
+				attachmentAsEmail := model.Email{
+					ID:                email.ID,
+					CreatedAt:         email.CreatedAt,
+					UpdatedAt:         email.UpdatedAt,
+					Name:              email.Name,
+					MailEnvelopeFrom:  email.MailEnvelopeFrom,
+					MailHeaderFrom:    email.MailHeaderFrom,
+					MailHeaderSubject: email.MailHeaderSubject,
+					Content:           email.Content,
+					AddTrackingPixel:  email.AddTrackingPixel,
+					CompanyID:         email.CompanyID,
+					Attachments:       email.Attachments,
+					Company:           email.Company,
+				}
+				attachmentAsEmail.Content = nullable.NewNullableWithValue(
+					*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
+				)
+				// generate custom campaign URL for attachment
+				recipientID := campaignRecipient.ID.MustGet()
+				customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+				if err != nil {
+					c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
+					return errs.Wrap(err)
+				}
+
+				attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURL(
+					ctx,
+					urlIdentifier.Name.MustGet(),
+					urlPath,
+					domain,
+					campaignRecipient,
+					&attachmentAsEmail,
+					nil,
+					customCampaignURL,
+					campaignCompanyID,
+				)
+				if err != nil {
+					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
+				}
+				// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
+				// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
+				m.EmbedReader(
+					filepath.Base(p.String()),
+					strings.NewReader(attachmentStr),
+				)
+			}
+		} else if !attachment.EmbeddedContent.MustGet() {
+			// regular attachment - shows in attachment list
 			m.AttachFile(p.String())
 		} else {
+			// regular attachment with template processing
 			attachmentContent, err := os.ReadFile(p.String())
 			if err != nil {
 				return errs.Wrap(err)

@@ -54,7 +54,8 @@
 		mailEnvelopeFrom: null,
 		mailHeaderFrom: null,
 		mailHeaderSubject: null,
-		addTrackingPixel: false
+		addTrackingPixel: false,
+		attachments: []
 	};
 	let isDeleteAlertVisible = false;
 	let deleteValues = {
@@ -259,7 +260,8 @@
 			mailEnvelopeFrom: null,
 			mailHeaderFrom: null,
 			mailHeaderSubject: null,
-			addTrackingPixel: false
+			addTrackingPixel: false,
+			attachments: []
 		};
 		form.reset();
 		isModalVisible = false;
@@ -310,6 +312,7 @@
 		formValues.mailHeaderFrom = email.mailHeaderFrom;
 		formValues.mailHeaderSubject = email.mailHeaderSubject;
 		formValues.addTrackingPixel = email.addTrackingPixel;
+		formValues.attachments = email.attachments || [];
 	};
 
 	const openSendTestModal = async (id) => {
@@ -437,7 +440,12 @@
 	</Table>
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
-			<Editor contentType="email" {domainMap} bind:value={formValues.content}>
+			<Editor
+				contentType="email"
+				{domainMap}
+				bind:value={formValues.content}
+				attachments={formValues.attachments}
+			>
 				<div class="flex flex-col lg:flex-row w-full pl-4">
 					<div class="flex flex-col lg:flex-row justify-between w-1/3">
 						<TextField

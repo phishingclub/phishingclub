@@ -437,15 +437,30 @@ func (r *Recipient) DeleteAllOrphaned(
 		r.AuditLogNotAuthorized(ae)
 		return 0, errs.ErrAuthorizationFailed
 	}
-	// delete orphaned recipients
-	count, err := r.RecipientRepository.DeleteAllOrphaned(
+
+	// get all orphaned recipients
+	orphanedRecipients, err := r.RecipientRepository.GetOrphaned(
 		ctx,
 		companyID,
+		&repository.RecipientOption{}, // no pagination, get all
 	)
 	if err != nil {
-		r.Logger.Errorw("failed to delete orphaned recipients - failed to delete orphaned recipients", "error", err)
+		r.Logger.Errorw("failed to get orphaned recipients", "error", err)
 		return 0, errs.Wrap(err)
 	}
+
+	// delete each orphaned recipient using core deletion logic
+	var count int64
+	for _, recipient := range orphanedRecipients.Rows {
+		recipientID := recipient.ID.MustGet()
+		err = r.deleteRecipientByID(ctx, &recipientID)
+		if err != nil {
+			r.Logger.Errorw("failed to delete orphaned recipient", "error", err, "recipientID", recipientID.String())
+			return count, errs.Wrap(err)
+		}
+		count++
+	}
+
 	ae.Details["count"] = count
 	r.AuditLogAuthorized(ae)
 	return count, nil
@@ -686,26 +701,13 @@ func getStringFromOptional(field nullable.Nullable[vo.OptionalString127]) string
 	return ""
 }
 
-// Delete deletes a recipient
-func (r *Recipient) DeleteByID(
+// deleteRecipientByID is the core deletion logic without permission checks or audit logging
+func (r *Recipient) deleteRecipientByID(
 	ctx context.Context,
-	session *model.Session,
 	id *uuid.UUID,
 ) error {
-	ae := NewAuditEvent("Recipient.DeleteByID", session)
-	ae.Details["id"] = id.String()
-	// check permissions
-	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
-	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
-		r.LogAuthError(err)
-		return err
-	}
-	if !isAuthorized {
-		r.AuditLogNotAuthorized(ae)
-		return errs.ErrAuthorizationFailed
-	}
 	// remove recipient from all groups
-	err = r.RecipientGroupRepository.RemoveRecipientByIDFromAllGroups(ctx, id)
+	err := r.RecipientGroupRepository.RemoveRecipientByIDFromAllGroups(ctx, id)
 	if err != nil {
 		r.Logger.Errorw("failed to delete recipient - failed to remove recipient from all groups",
 			"error", err,
@@ -758,7 +760,34 @@ func (r *Recipient) DeleteByID(
 		r.Logger.Errorw("failed to delete recipient - failed to delete recipient", "error", err)
 		return err
 	}
-	r.AuditLogAuthorized(ae)
 
+	return nil
+}
+
+// DeleteByID deletes a recipient
+func (r *Recipient) DeleteByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+) error {
+	ae := NewAuditEvent("Recipient.DeleteByID", session)
+	ae.Details["id"] = id.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		r.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		r.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+
+	err = r.deleteRecipientByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	r.AuditLogAuthorized(ae)
 	return nil
 }
