@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.27.1] - 2026-01-27
+- Fixed rID variable using key instead of value in email
+- Added experimental ARM support in all release builds
+
 ## [1.27.0] - 2026-01-22
 - Added support for attachments as inline images in emails and the email editor
 - Fix delete orphans recipients when recipient is in active campaign
