@@ -4787,14 +4787,15 @@ func (m *ProxyHandler) checkAndApplyURLRewrite(req *http.Request, reqCtx *Reques
 			// store query parameter mappings for reverse lookup
 			m.storeQueryParameterMappings(rewrittenPath, rule.Query, reqCtx.TargetDomain)
 
-			// create redirect response
-			return &http.Response{
-				StatusCode: http.StatusFound,
-				Header: http.Header{
-					"Location": []string{rewrittenURL},
-				},
-				Body: io.NopCloser(strings.NewReader("")),
+			// rewrite the request URL internally (don't redirect)
+			// parse the rewritten URL to extract path and query
+			if parsedURL, err := url.Parse(rewrittenURL); err == nil {
+				req.URL.Path = parsedURL.Path
+				req.URL.RawQuery = parsedURL.RawQuery
 			}
+
+			// continue processing with rewritten URL
+			return nil
 		}
 	}
 
