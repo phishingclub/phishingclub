@@ -46,27 +46,29 @@ func (t *Template) CreateMail(
 	apiSender *model.APISender,
 	companyID *uuid.UUID,
 ) *map[string]any {
+	rid := campaignRecipient.ID.MustGet()
+	ridStr := rid.String()
 	baseURL := "https://" + domainName
 	url := fmt.Sprintf(
 		"%s%s?%s=%s",
 		baseURL,
 		urlPath,
 		idKey,
-		campaignRecipient.ID.MustGet().String(),
+		ridStr,
 	)
 	// set body
 	trackingPixelPath := fmt.Sprintf(
 		"%s/wf/open?upn=%s",
 		baseURL,
-		campaignRecipient.ID.MustGet().String(),
+		ridStr,
 	)
 	trackingPixel := fmt.Sprintf(
 		"<img src=\"%s/wf/open?upn=%s\" alt=\"\" width=\"1\" height=\"1\" border=\"0\" style=\"height:1px !important;width:1px\" />",
 		baseURL,
-		campaignRecipient.ID.MustGet().String(),
+		ridStr,
 	)
 	data := t.newTemplateDataMap(
-		idKey,
+		ridStr,
 		baseURL,
 		url,
 		campaignRecipient.Recipient,
@@ -77,11 +79,7 @@ func (t *Template) CreateMail(
 	)
 
 	// add random recipient data to template context (excluding current recipient)
-	var excludeRecipientID *uuid.UUID
-	if recipientID, err := campaignRecipient.Recipient.ID.Get(); err == nil {
-		excludeRecipientID = &recipientID
-	}
-	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, excludeRecipientID)
+	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, &rid)
 
 	return data
 }
@@ -415,7 +413,7 @@ func (t *Template) CreatePhishingPageWithCampaign(
 
 // newTemplateDataMap creates a new data map for templates
 func (t *Template) newTemplateDataMap(
-	id string,
+	recipientID string,
 	baseURL string,
 	url string,
 	recipient *model.Recipient,
@@ -483,7 +481,7 @@ func (t *Template) newTemplateDataMap(
 		mailHeaderSubject = v.String()
 	}
 	m := map[string]any{
-		"rID":             id,
+		"rID":             recipientID,
 		"FirstName":       recipientFirstName,
 		"LastName":        recipientLastName,
 		"Email":           recipientEmail,
@@ -525,7 +523,7 @@ func (t *Template) newTemplateDataMap(
 
 // newTemplateDataMapWithDenyURL creates a new data map for templates with deny URL for evasion pages
 func (t *Template) newTemplateDataMapWithDenyURL(
-	id string,
+	recipientID string,
 	baseURL string,
 	url string,
 	denyURL string,
@@ -536,7 +534,7 @@ func (t *Template) newTemplateDataMapWithDenyURL(
 	apiSender *model.APISender,
 ) *map[string]any {
 	// get the standard template data
-	data := t.newTemplateDataMap(id, baseURL, url, recipient, trackingPixelPath, trackingPixelMarkup, email, apiSender)
+	data := t.newTemplateDataMap(recipientID, baseURL, url, recipient, trackingPixelPath, trackingPixelMarkup, email, apiSender)
 
 	// add the deny URL for evasion pages
 	(*data)["DenyURL"] = denyURL
