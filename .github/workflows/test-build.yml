@@ -150,20 +150,6 @@ jobs:
             echo "✅ ARM64 package created without signature"
           fi
 
-          # create legacy-named package (amd64) for backward compatibility with pre-arm versions
-          if [ -f build/amd64/phishingclub.sig ]; then
-            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
-                -C build/amd64 \
-                phishingclub \
-                phishingclub.sig
-            echo "✅ Legacy package created with signature"
-          else
-            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
-                -C build/amd64 \
-                phishingclub
-            echo "✅ Legacy package created without signature"
-          fi
-
       - name: Build and push test multi-arch Docker image
         uses: docker/build-push-action@v5
         with:
@@ -224,5 +210,4 @@ jobs:
             build/arm64/phishingclub.sig
             packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz
             packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz
-            packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz
           retention-days: 2

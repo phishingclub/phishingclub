@@ -128,12 +128,6 @@ jobs:
               phishingclub \
               phishingclub.sig
 
-          # create legacy-named package (amd64) for backward compatibility with pre-arm versions
-          tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
-              -C build/amd64 \
-              phishingclub \
-              phishingclub.sig
-
       - name: Build and push multi-arch Docker image
         uses: docker/build-push-action@v5
         with:
@@ -192,7 +186,6 @@ jobs:
           gh release create ${{ steps.get_version.outputs.TAG }} \
             ./packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz \
             ./packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz \
-            ./packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
             --title "PhishingClub ${{ steps.get_version.outputs.TAG }}" \
             --notes "${{ steps.get_release_notes.outputs.NOTES }}"
 
