@@ -498,6 +498,7 @@
 			onChangeDate={refreshCalendarCampaings}
 			bind:start={calendarStartDate}
 			bind:end={calendarEndDate}
+			showCompany={!contextCompanyID}
 		/>
 	</div>
 

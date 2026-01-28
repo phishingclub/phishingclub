@@ -337,6 +337,7 @@ func (c *Campaign) GetAllWithinDates(g *gin.Context) {
 		companyID,
 		&repository.CampaignOption{
 			QueryArgs:            queryArgs,
+			WithCompany:          true,
 			WithCampaignTemplate: true,
 			IncludeTestCampaigns: includeTestCampaigns,
 		},

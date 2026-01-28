@@ -4,8 +4,12 @@
 		format,
 		addMonths,
 		subMonths,
+		addWeeks,
+		subWeeks,
 		startOfMonth,
 		endOfMonth,
+		startOfWeek,
+		endOfWeek,
 		startOfDay,
 		endOfDay,
 		addDays,
@@ -17,6 +21,11 @@
 	} from 'date-fns';
 	import { scrollBarClassesHorizontal, scrollBarClassesVertical } from '$lib/utils/scrollbar';
 
+	// localStorage keys
+	const STORAGE_KEY_VIEW_MODE = 'calendar_view_mode';
+	const STORAGE_KEY_START_FROM_TODAY = 'calendar_start_from_today';
+	const STORAGE_KEY_FILTERS = 'calendar_filters';
+
 	/** @type * */
 	export let campaigns = [];
 	/** @type {Date} */
@@ -26,11 +35,19 @@
 
 	export let onChangeDate;
 
+	/** @type {boolean} - when true, shows company name on campaign items (for global context) */
+	export let showCompany = false;
+
 	let container;
-	let currentMonth = startOfMonth(new Date());
+	let currentDate = new Date();
 	let isLoadingNewMonth = false;
 	let weeks = [];
 	let isInitialized = false;
+
+	// view options with localStorage persistence
+	/** @type {'month' | 'week'} */
+	let viewMode = 'month';
+	let startFromToday = false;
 
 	let activeFilters = {
 		SCHEDULED: true,
@@ -41,7 +58,7 @@
 
 	let isGeneratingCalendar = false;
 
-	// Use consistent colors that match the design system - these work well in both light and dark modes
+	// use consistent colors that match the design system - these work well in both light and dark modes
 	const COLORS = {
 		SCHEDULED: '#62aded', // campaign-scheduled
 		ACTIVE: '#5557f6', // campaign-active
@@ -49,39 +66,89 @@
 		SELF_MANAGED: '#7C3AED' // darker purple
 	};
 
+	// load settings from localStorage
+	function loadSettings() {
+		try {
+			const storedViewMode = localStorage.getItem(STORAGE_KEY_VIEW_MODE);
+			if (storedViewMode === 'month' || storedViewMode === 'week') {
+				viewMode = storedViewMode;
+			}
+
+			const storedStartFromToday = localStorage.getItem(STORAGE_KEY_START_FROM_TODAY);
+			if (storedStartFromToday !== null) {
+				startFromToday = storedStartFromToday === 'true';
+			}
+
+			const storedFilters = localStorage.getItem(STORAGE_KEY_FILTERS);
+			if (storedFilters) {
+				const parsed = JSON.parse(storedFilters);
+				activeFilters = { ...activeFilters, ...parsed };
+			}
+		} catch (e) {
+			console.warn('failed to load calendar settings from localStorage', e);
+		}
+	}
+
+	// save settings to localStorage
+	function saveViewMode(mode) {
+		viewMode = mode;
+		try {
+			localStorage.setItem(STORAGE_KEY_VIEW_MODE, mode);
+		} catch (e) {
+			console.warn('failed to save view mode to localStorage', e);
+		}
+	}
+
+	function saveStartFromToday(value) {
+		startFromToday = value;
+		try {
+			localStorage.setItem(STORAGE_KEY_START_FROM_TODAY, String(value));
+		} catch (e) {
+			console.warn('failed to save startFromToday to localStorage', e);
+		}
+	}
+
+	function saveFilters() {
+		try {
+			localStorage.setItem(STORAGE_KEY_FILTERS, JSON.stringify(activeFilters));
+		} catch (e) {
+			console.warn('failed to save filters to localStorage', e);
+		}
+	}
+
 	function sortCampaignsByPriority(campaigns, day) {
 		const dayTime = startOfDay(day).getTime();
 
-		// Helper function to get campaign type priority
+		// helper function to get campaign type priority
 		function getTypePriority(campaign) {
 			if (campaign.sendStartAt && campaign.sendStartAt > new Date().toISOString()) {
-				return 0; // Scheduled gets highest priority
+				return 0; // scheduled gets highest priority
 			}
 			if (campaign.sendStartAt && !campaign.anonymizedAt && !campaign.closedAt) {
-				return 1; // Active gets second priority
+				return 1; // active gets second priority
 			}
 			if (!campaign.sendStartAt || !campaign.sendEndAt) {
-				return 2; // Self-managed gets third priority
+				return 2; // self-managed gets third priority
 			}
-			return 3; // Completed gets lowest priority
+			return 3; // completed gets lowest priority
 		}
 
 		return campaigns.sort((a, b) => {
-			// 1. Absolute highest priority: campaign's sendStartAt is on this day
+			// 1. absolute highest priority: campaign's sendStartAt is on this day
 			const aSendStartTime = a.sendStartAt ? startOfDay(new Date(a.sendStartAt)).getTime() : null;
 			const bSendStartTime = b.sendStartAt ? startOfDay(new Date(b.sendStartAt)).getTime() : null;
 
 			if (aSendStartTime === dayTime && bSendStartTime !== dayTime) return -1;
 			if (bSendStartTime === dayTime && aSendStartTime !== dayTime) return 1;
 
-			// 2. Second priority: type of campaign (scheduled > active > self-managed > completed)
+			// 2. second priority: type of campaign (scheduled > active > self-managed > completed)
 			const aTypePriority = getTypePriority(a);
 			const bTypePriority = getTypePriority(b);
 			if (aTypePriority !== bTypePriority) {
 				return aTypePriority - bTypePriority;
 			}
 
-			// 3. If same type, sort by sendStartAt date (if exists) or start date
+			// 3. if same type, sort by sendStartAt date (if exists) or start date
 			const aTime = aSendStartTime || startOfDay(a.start).getTime();
 			const bTime = bSendStartTime || startOfDay(b.start).getTime();
 			return aTime - bTime;
@@ -93,23 +160,46 @@
 	}
 
 	function updateDateRange() {
-		const monthStart = startOfMonth(currentMonth);
-		const monthEnd = endOfMonth(currentMonth);
+		if (viewMode === 'week') {
+			// week view
+			let weekStart;
+			if (startFromToday) {
+				// start from today, show 7 days forward
+				weekStart = startOfDay(currentDate);
+			} else {
+				// start from beginning of the week containing currentDate
+				weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
+			}
+			const weekEnd = addDays(weekStart, 6);
 
-		// Calculate first day of calendar (might be in previous month)
-		let calendarStart = monthStart;
-		const firstDayOfWeek = getDay(monthStart);
-		if (firstDayOfWeek > 0) {
-			calendarStart = subDays(monthStart, firstDayOfWeek);
+			start = weekStart;
+			end = endOfDay(weekEnd);
+		} else {
+			// month view
+			let monthStart;
+			if (startFromToday && isSameMonth(currentDate, new Date())) {
+				// if viewing current month and startFromToday is enabled, start from today
+				monthStart = startOfDay(new Date());
+			} else {
+				monthStart = startOfMonth(currentDate);
+			}
+			const monthEnd = endOfMonth(currentDate);
+
+			// calculate first day of calendar (might be in previous month)
+			let calendarStart = startOfMonth(currentDate);
+			const firstDayOfWeek = getDay(calendarStart);
+			if (firstDayOfWeek > 0) {
+				calendarStart = subDays(calendarStart, firstDayOfWeek);
+			}
+
+			// calculate last day of calendar (might be in next month)
+			const lastDayOfMonth = endOfMonth(currentDate);
+			const lastDayOfWeek = getDay(lastDayOfMonth);
+			const calendarEnd = addDays(lastDayOfMonth, 6 - lastDayOfWeek);
+
+			start = calendarStart;
+			end = calendarEnd;
 		}
-
-		// Calculate last day of calendar (might be in next month)
-		const lastDayOfMonth = endOfMonth(monthStart);
-		const lastDayOfWeek = getDay(lastDayOfMonth);
-		const calendarEnd = addDays(lastDayOfMonth, 6 - lastDayOfWeek);
-
-		start = calendarStart;
-		end = calendarEnd;
 	}
 
 	/** @type * */
@@ -177,14 +267,14 @@
 	function calculateCampaignLayers(campaigns, calendarStart, calendarEnd) {
 		const dayMap = new Map();
 
-		// Generate days
+		// generate days
 		let currentDay = new Date(calendarStart);
 		while (currentDay < calendarEnd) {
 			dayMap.set(currentDay.getTime(), []);
 			currentDay = addDays(currentDay, 1);
 		}
 
-		// Filter campaigns based on active filters
+		// filter campaigns based on active filters
 		const filteredCampaigns = campaigns.filter((campaign) => {
 			if (campaign.anonymizedAt || campaign.closedAt) {
 				return activeFilters.COMPLETED;
@@ -198,7 +288,7 @@
 			return activeFilters.ACTIVE;
 		});
 
-		// Map filtered campaigns to days
+		// map filtered campaigns to days
 		filteredCampaigns.forEach((campaign) => {
 			const campaignStart = startOfDay(campaign.start);
 			const campaignEnd = startOfDay(campaign.end);
@@ -215,14 +305,14 @@
 			}
 		});
 
-		// Sort campaigns for each day
+		// sort campaigns for each day
 		const visibleDayMap = new Map();
 
 		dayMap.forEach((dayCampaigns, dayTime) => {
 			const sortedCampaigns = sortCampaignsByPriority(dayCampaigns, new Date(Number(dayTime)));
 
 			visibleDayMap.set(dayTime, {
-				campaigns: sortedCampaigns, // All campaigns are now visible
+				campaigns: sortedCampaigns,
 				total: sortedCampaigns.length
 			});
 		});
@@ -237,55 +327,110 @@
 
 		const dayMap = calculateCampaignLayers(calendarCampaigns, start, end);
 
-		// Create weeks array
+		// create weeks array
 		weeks = [];
 		let week = [];
-		let currentDate = new Date(start);
+		let currentDateIter = new Date(start);
 
-		while (currentDate <= end) {
-			// Get campaign data for this day
-			const dayTime = currentDate.getTime();
+		while (currentDateIter <= end) {
+			// get campaign data for this day
+			const dayTime = currentDateIter.getTime();
 			const dayData = dayMap.get(dayTime) || { campaigns: [], total: 0 };
 
-			// Sort campaigns
+			// sort campaigns
 			const sortedCampaigns = sortByName(dayData.campaigns);
 
-			// Create day object
+			// determine if this day should be highlighted based on view mode
+			const isInCurrentPeriod =
+				viewMode === 'week'
+					? true // in week view, all days are "current"
+					: isSameMonth(currentDateIter, currentDate);
+
+			// determine if day is in next month (for visual separation when "start from today" is enabled)
+			const isNextMonth =
+				startFromToday &&
+				viewMode === 'month' &&
+				currentDateIter.getMonth() !== currentDate.getMonth();
+
+			// create day object
 			const day = {
-				date: new Date(currentDate),
-				isToday: isSameDay(currentDate, new Date()),
-				isCurrentMonth: isSameMonth(currentDate, currentMonth),
-				campaigns: sortedCampaigns, // All campaigns are visible now
+				date: new Date(currentDateIter),
+				isToday: isSameDay(currentDateIter, new Date()),
+				isCurrentMonth: isInCurrentPeriod,
+				isNextMonth,
+				campaigns: sortedCampaigns,
 				totalCampaigns: dayData.total
 			};
 
 			week.push(day);
 
-			// Start a new week if we've filled one
+			// start a new week if we've filled one
 			if (week.length === 7) {
 				weeks.push(week);
 				week = [];
 			}
 
-			// Move to next day
-			currentDate = addDays(currentDate, 1);
+			// move to next day
+			currentDateIter = addDays(currentDateIter, 1);
+		}
+
+		// for week view, we might have a partial week
+		if (week.length > 0) {
+			weeks.push(week);
 		}
 
 		isGeneratingCalendar = false;
 	}
 
-	async function previousMonth() {
+	async function navigatePrevious() {
 		isLoadingNewMonth = true;
-		currentMonth = subMonths(currentMonth, 1);
+		if (viewMode === 'week') {
+			currentDate = subWeeks(currentDate, 1);
+		} else {
+			currentDate = subMonths(currentDate, 1);
+		}
 		updateDateRange();
 		await onChangeDate();
 		isLoadingNewMonth = false;
 		await generateCalendarData();
 	}
 
-	async function nextMonth() {
+	async function navigateNext() {
 		isLoadingNewMonth = true;
-		currentMonth = addMonths(currentMonth, 1);
+		if (viewMode === 'week') {
+			currentDate = addWeeks(currentDate, 1);
+		} else {
+			currentDate = addMonths(currentDate, 1);
+		}
+		updateDateRange();
+		await onChangeDate();
+		isLoadingNewMonth = false;
+		await generateCalendarData();
+	}
+
+	async function goToToday() {
+		isLoadingNewMonth = true;
+		currentDate = new Date();
+		updateDateRange();
+		await onChangeDate();
+		isLoadingNewMonth = false;
+		await generateCalendarData();
+	}
+
+	async function handleViewModeChange(mode) {
+		if (mode === viewMode) return;
+		isLoadingNewMonth = true;
+		saveViewMode(mode);
+		updateDateRange();
+		await onChangeDate();
+		isLoadingNewMonth = false;
+		await generateCalendarData();
+	}
+
+	async function handleStartFromTodayChange(event) {
+		const checked = event.target.checked;
+		isLoadingNewMonth = true;
+		saveStartFromToday(checked);
 		updateDateRange();
 		await onChangeDate();
 		isLoadingNewMonth = false;
@@ -294,15 +439,60 @@
 
 	async function toggleFilter(key) {
 		activeFilters[key] = !activeFilters[key];
+		saveFilters();
 		await generateCalendarData();
 	}
 
+	/**
+	 * builds the tooltip text for a campaign
+	 * @param {*} campaign
+	 */
+	function buildTooltip(campaign) {
+		const status = campaign.isSelfManaged
+			? 'Self-managed'
+			: campaign.end < new Date()
+				? 'Completed'
+				: campaign.start <= new Date()
+					? 'Active'
+					: 'Scheduled';
+
+		const dateRange = campaign.isSelfManaged
+			? `${formatDateString(new Date(campaign.createdAt))} - ?`
+			: `${formatDateString(campaign.start)} - ${formatDateString(campaign.end)}`;
+
+		let tooltip = `${campaign.name} - ${status}, ${dateRange}`;
+
+		if (showCompany && campaign.company?.name) {
+			tooltip = `[${campaign.company.name}] ${tooltip}`;
+		}
+
+		return tooltip;
+	}
+
+	/**
+	 * formats the header title based on view mode
+	 */
+	function getHeaderTitle() {
+		if (viewMode === 'week') {
+			const weekEnd = addDays(start, 6);
+			if (isSameMonth(start, weekEnd)) {
+				return `${format(start, 'MMMM d')} - ${format(weekEnd, 'd, yyyy')}`;
+			} else if (start.getFullYear() === weekEnd.getFullYear()) {
+				return `${format(start, 'MMM d')} - ${format(weekEnd, 'MMM d, yyyy')}`;
+			} else {
+				return `${format(start, 'MMM d, yyyy')} - ${format(weekEnd, 'MMM d, yyyy')}`;
+			}
+		}
+		return format(currentDate, 'MMMM yyyy');
+	}
+
 	onMount(async () => {
+		loadSettings();
 		await generateCalendarData();
 		isInitialized = true;
 	});
 
-	$: if (calendarCampaigns) {
+	$: if (calendarCampaigns && isInitialized) {
 		generateCalendarData();
 	}
 </script>
@@ -310,76 +500,129 @@
 <div
 	class="w-full bg-white dark:bg-gray-900/80 rounded-lg shadow-sm p-4 border border-gray-200 dark:border-gray-700/60 transition-colors duration-200"
 >
-	<div class="space-y-4 max-w-5xl mx-auto min-h-[600px]">
-		<!-- Navigation Controls -->
-		<div class="flex justify-center items-center">
-			<button
-				class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800/60 mx-4 transition-colors duration-200"
-				on:click={previousMonth}
-				disabled={isLoadingNewMonth}
-			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 text-gray-600 dark:text-gray-400"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
+	<div class="space-y-4 min-h-[600px] max-w-[1600px] mx-auto">
+		<!-- Controls Row -->
+		<div class="flex flex-wrap items-center justify-between gap-2 px-2">
+			<!-- Left: View Mode & Options -->
+			<div class="flex flex-wrap items-center gap-2">
+				<label
+					class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
 				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M15 19l-7-7 7-7"
-					/>
-				</svg>
-			</button>
-
-			<h2 class="text-lg font-semibold text-gray-900 dark:text-gray-300">
-				{format(currentMonth, 'MMMM yyyy')}
-			</h2>
-
-			<button
-				class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800/60 mx-4 transition-colors duration-200"
-				on:click={nextMonth}
-				disabled={isLoadingNewMonth}
-			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 text-gray-600 dark:text-gray-400"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-				</svg>
-			</button>
-		</div>
-
-		<!-- Legend -->
-		<div class="flex justify-center flex-wrap gap-4 text-sm">
-			{#each [{ key: 'SCHEDULED', color: COLORS.SCHEDULED, label: 'Scheduled' }, { key: 'ACTIVE', color: COLORS.ACTIVE, label: 'Active' }, { key: 'COMPLETED', color: COLORS.COMPLETED, label: 'Completed' }, { key: 'SELF_MANAGED', color: COLORS.SELF_MANAGED, label: 'Self-managed' }] as item}
-				<button
-					class="flex items-center cursor-pointer select-none hover:opacity-80 transition-opacity duration-200"
-					on:click={() => toggleFilter(item.key)}
-				>
-					<div
-						class="w-3 h-3 rounded mr-2 transition-opacity duration-200"
-						style="background-color: {item.color}; opacity: {activeFilters[item.key] ? '1' : '0.3'}"
-					></div>
-					<span
-						class="transition-opacity duration-200 text-gray-700 dark:text-gray-400"
-						style="opacity: {activeFilters[item.key] ? '1' : '0.5'}">{item.label}</span
+					View:
+					<select
+						value={viewMode}
+						on:change={(e) =>
+							handleViewModeChange(/** @type {HTMLSelectElement} */ (e.target).value)}
+						class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
+						style="height: 1.5rem;"
 					>
+						<option value="month">Month</option>
+						<option value="week">Week</option>
+					</select>
+				</label>
+
+				<label
+					class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
+				>
+					Start from today:
+					<input
+						type="checkbox"
+						checked={startFromToday}
+						on:change={handleStartFromTodayChange}
+						class="accent-blue-600"
+					/>
+				</label>
+			</div>
+
+			<!-- Center: Navigation -->
+			<div class="flex items-center gap-1">
+				<button
+					class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-colors duration-200"
+					on:click={navigatePrevious}
+					disabled={isLoadingNewMonth}
+					title="Previous {viewMode}"
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-4 w-4 text-gray-600 dark:text-gray-400"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M15 19l-7-7 7-7"
+						/>
+					</svg>
 				</button>
-			{/each}
+
+				<button
+					class="px-2 py-0.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 border border-gray-300 dark:border-gray-600 hover:border-cta-blue dark:hover:border-highlight-blue rounded transition-colors duration-200"
+					on:click={goToToday}
+					disabled={isLoadingNewMonth}
+				>
+					Today
+				</button>
+
+				<h2
+					class="text-sm font-semibold text-gray-900 dark:text-gray-300 min-w-[180px] text-center"
+				>
+					{getHeaderTitle()}
+				</h2>
+
+				<button
+					class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-colors duration-200"
+					on:click={navigateNext}
+					disabled={isLoadingNewMonth}
+					title="Next {viewMode}"
+				>
+					<svg
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-4 w-4 text-gray-600 dark:text-gray-400"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M9 5l7 7-7 7"
+						/>
+					</svg>
+				</button>
+			</div>
+
+			<!-- Right: Legend/Filters -->
+			<div class="flex flex-wrap items-center gap-2">
+				{#each [{ key: 'SCHEDULED', color: COLORS.SCHEDULED, label: 'Scheduled' }, { key: 'ACTIVE', color: COLORS.ACTIVE, label: 'Active' }, { key: 'COMPLETED', color: COLORS.COMPLETED, label: 'Completed' }, { key: 'SELF_MANAGED', color: COLORS.SELF_MANAGED, label: 'Self-managed' }] as item}
+					<button
+						class="flex items-center cursor-pointer select-none hover:opacity-80 transition-opacity duration-200 text-xs text-gray-700 dark:text-gray-300"
+						on:click={() => toggleFilter(item.key)}
+					>
+						<div
+							class="w-2.5 h-2.5 rounded-full mr-1 transition-opacity duration-200"
+							style="background-color: {item.color}; opacity: {activeFilters[item.key]
+								? '1'
+								: '0.3'}"
+						></div>
+						<span
+							class="transition-opacity duration-200"
+							style="opacity: {activeFilters[item.key] ? '1' : '0.5'}">{item.label}</span
+						>
+					</button>
+				{/each}
+			</div>
 		</div>
 
 		<!-- Calendar Grid -->
-		<div class="calendar-container min-h-[480px]">
+		<div class="calendar-container" class:week-view={viewMode === 'week'}>
 			<!-- Day headers -->
 			<div class="grid grid-cols-7 text-center mb-1">
 				{#each ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as day}
-					<div class="text-sm font-medium text-gray-600 dark:text-gray-400">{day}</div>
+					<div class="text-sm font-medium text-gray-600 dark:text-gray-400 py-2">{day}</div>
 				{/each}
 			</div>
 
@@ -394,49 +637,58 @@
 					</div>
 				</div>
 			{:else}
-				<div class="grid grid-rows-{weeks.length} gap-1 min-h-[450px]">
+				<div
+					class="grid gap-1 min-h-[450px]"
+					style="grid-template-rows: repeat({weeks.length}, 1fr);"
+				>
 					{#each weeks as week, weekIndex}
 						<div class="grid grid-cols-7 gap-1">
 							{#each week as day}
 								<div
-									class="calendar-day relative border rounded-md overflow-hidden {scrollBarClassesHorizontal}  {day.isToday
-										? 'border-gray-700 dark:border-gray-500 bg-gray-50 dark:bg-gray-800/60'
+									class="calendar-day relative border rounded-md overflow-hidden {scrollBarClassesHorizontal} {day.isToday
+										? 'border-blue-500 dark:border-blue-400 bg-blue-50/50 dark:bg-blue-900/20 ring-1 ring-blue-500/30 dark:ring-blue-400/30'
 										: 'border-gray-200 dark:border-gray-700/60'}
-	                                {day.isCurrentMonth
-										? 'bg-white dark:bg-gray-900/60'
-										: 'bg-gray-50 dark:bg-gray-800/40'} transition-colors duration-200"
+									{day.isToday
+										? ''
+										: day.isCurrentMonth && !day.isNextMonth
+											? 'bg-white dark:bg-gray-900/60'
+											: 'bg-gray-50 dark:bg-gray-800/40'} transition-colors duration-200"
 								>
 									<!-- Date number -->
 									<div
-										class="text-sm p-1 {day.isToday
-											? 'font-bold text-gray-800 dark:text-gray-300'
-											: day.isCurrentMonth
+										class="date-header text-sm px-2 py-1 {day.isToday
+											? 'font-bold text-blue-600 dark:text-blue-400'
+											: day.isCurrentMonth && !day.isNextMonth
 												? 'text-gray-600 dark:text-gray-400'
 												: 'text-gray-400 dark:text-gray-600'}"
 									>
 										{day.date.getDate()}
 									</div>
 									<!-- Campaigns list -->
-									<div
-										class="campaign-container {scrollBarClassesVertical} {scrollBarClassesHorizontal}"
-									>
+									<div class="campaign-container {scrollBarClassesVertical}">
 										{#each day.campaigns as campaign}
 											<a
 												href={`/campaign/${campaign.id}`}
-												class="block mb-1 rounded-sm text-xs p-1 pl-2 overflow-hidden hover:bg-gray-200 dark:hover:bg-gray-700/40 transition-all duration-200 bg-gray-100 dark:bg-gray-800/30"
-												style="border-left: 3px solid {campaign.color};"
-												title="{campaign.name} - {campaign.isSelfManaged
-													? 'Self-managed'
-													: campaign.end < new Date()
-														? 'Completed'
-														: campaign.start <= new Date()
-															? 'Active'
-															: 'Scheduled'}, {campaign.isSelfManaged
-													? `${formatDateString(new Date(campaign.createdAt))} - ?`
-													: `${formatDateString(campaign.start)} - ${formatDateString(campaign.end)}`}"
+												class="campaign-item group flex items-start gap-2 mb-1.5 rounded px-2 py-1.5 overflow-hidden transition-all duration-150 hover:scale-[1.01] hover:shadow-sm bg-white/70 dark:bg-gray-800/50 border border-gray-200/70 dark:border-gray-700/40 hover:border-gray-300 dark:hover:border-gray-600"
+												title={buildTooltip(campaign)}
 											>
-												<div class="campaign-name truncate text-gray-700 dark:text-gray-300">
-													{truncateText(campaign.name, 18)}
+												<div
+													class="status-indicator flex-shrink-0 w-1 self-stretch rounded-full"
+													style="background-color: {campaign.color};"
+												></div>
+												<div class="flex-1 min-w-0">
+													{#if showCompany && campaign.company?.name}
+														<div
+															class="company-name truncate text-gray-500 dark:text-gray-400 text-[10px] font-medium uppercase tracking-wide leading-tight"
+														>
+															{truncateText(campaign.company.name, 22)}
+														</div>
+													{/if}
+													<div
+														class="campaign-name truncate text-xs leading-snug font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100"
+													>
+														{truncateText(campaign.name, 24)}
+													</div>
 												</div>
 											</a>
 										{/each}
@@ -453,69 +705,64 @@
 
 <style>
 	.calendar-container {
-		--cell-aspect-ratio: 0.75; /* Height to width ratio */
+		--cell-height: 140px;
 	}
 
 	.calendar-day {
-		height: 0;
-		padding-bottom: calc(100% / var(--cell-aspect-ratio));
-		position: relative;
+		height: var(--cell-height);
+		display: flex;
+		flex-direction: column;
+	}
+
+	.date-header {
+		flex-shrink: 0;
 	}
 
 	.campaign-container {
-		position: absolute;
-		top: 25px; /* Space for the date number */
-		bottom: 4px;
-		left: 4px;
-		right: 4px;
+		flex: 1;
 		overflow-y: auto;
 		overflow-x: hidden;
-	}
-
-	/* Custom scrollbar for campaign container
-	.campaign-container::-webkit-scrollbar {
-		width: 12px;
-	}
-
-	.campaign-container::-webkit-scrollbar-track {
-		background: transparent;
-	}
-
-	.campaign-container::-webkit-scrollbar-thumb {
-		background-color: rgba(0, 255, 255, 0.2);
-		border-radius: 24px;
-	}
-	 */
-
-	/* For Firefox */
-	.campaign-container {
+		padding: 2px 4px 4px 4px;
+		min-height: 0; /* important for flex child overflow */
 		scrollbar-width: thin;
-		/*
-		scrollbar-color: rgba(0, 255, 255, 0.2) transparent;
-		*/
+		scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+	}
+
+	.campaign-item {
+		min-height: fit-content;
+	}
+
+	.status-indicator {
+		min-height: 12px;
 	}
 
 	@media (min-width: 640px) {
 		.calendar-container {
-			--cell-aspect-ratio: 0.8;
+			--cell-height: 150px;
 		}
 	}
 
 	@media (min-width: 768px) {
 		.calendar-container {
-			--cell-aspect-ratio: 0.85;
+			--cell-height: 160px;
 		}
 	}
 
 	@media (min-width: 1024px) {
 		.calendar-container {
-			--cell-aspect-ratio: 0.9;
+			--cell-height: 175px;
 		}
 	}
 
 	@media (min-width: 1280px) {
 		.calendar-container {
-			--cell-aspect-ratio: 1;
+			--cell-height: 190px;
+		}
+	}
+
+	@media (min-width: 1536px) {
+		.calendar-container {
+			--cell-height: 210px;
 		}
 	}
 </style>
