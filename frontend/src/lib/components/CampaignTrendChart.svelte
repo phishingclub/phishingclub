@@ -543,12 +543,13 @@
 	function createLogScale(domain, range) {
 		const [d0, d1] = domain;
 		const [r0, r1] = range;
-		const min = Math.max(d0, 0.1);
+		// clamp minimum to 0.5 to avoid wasting space on very low values
+		const min = Math.max(d0, 0.5);
 		const logd0 = Math.log10(min);
 		const logd1 = Math.log10(d1);
 		const k = (r1 - r0) / (logd1 - logd0 || 1);
 		return (value) => {
-			const v = Math.max(value, 0.1);
+			const v = Math.max(value, 0.5);
 			return r0 + k * (Math.log10(v) - logd0);
 		};
 	}
@@ -591,10 +592,17 @@
 		defs.appendChild(gradient);
 		svg.appendChild(defs);
 
-		// Horizontal percentage reference lines
-		for (let i = 0; i <= 5; i++) {
-			const value = (100 / 5) * i;
+		// horizontal percentage reference lines
+		// use logarithmic tick values when log scale is enabled for better distribution
+		// starts at 0.5 to match the clamped log scale minimum
+		const tickValues = useLogScale
+			? [0.5, 1, 2, 5, 10, 20, 30, 50, 70, 100]
+			: [0, 20, 40, 60, 80, 100];
+
+		tickValues.forEach((value) => {
 			const y = yScale(value);
+			// skip if y is out of bounds
+			if (y < margin.top || y > height - margin.bottom) return;
 			const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
 			line.setAttribute('x1', margin.left.toString());
 			line.setAttribute('x2', (width - margin.right).toString());
@@ -607,7 +615,7 @@
 			line.setAttribute('stroke-width', '1');
 			line.setAttribute('opacity', '0.4');
 			svg.appendChild(line);
-		}
+		});
 
 		// Thin vertical background lines for data points
 		chartData.forEach((d, i) => {
@@ -652,23 +660,31 @@
 		xAxis.setAttribute('stroke-width', '2');
 		svg.appendChild(xAxis);
 
-		for (let i = 0; i <= 5; i++) {
-			const value = (100 / 5) * i;
+		// use logarithmic tick values when log scale is enabled for better distribution
+		// starts at 0.5 to match the clamped log scale minimum
+		const axisTickValues = useLogScale
+			? [0.5, 1, 2, 5, 10, 20, 30, 50, 70, 100]
+			: [0, 20, 40, 60, 80, 100];
+
+		axisTickValues.forEach((value) => {
 			const y = yScale(value);
+			// skip if y is out of bounds
+			if (y < margin.top || y > height - margin.bottom) return;
 			const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
 			text.setAttribute('x', (margin.left - 10).toString());
 			text.setAttribute('y', (y - 2).toString());
 			text.setAttribute('text-anchor', 'end');
-			text.setAttribute('font-size', useLogScale ? '8' : '11');
+			text.setAttribute('font-size', useLogScale ? '9' : '11');
 			text.setAttribute(
 				'fill',
 				document.documentElement.classList.contains('dark') ? '#e5e7eb' : '#6B7280'
 			);
 			text.setAttribute('font-weight', '500');
 			text.setAttribute('alignment-baseline', 'middle');
-			text.textContent = `${value}%`;
+			// format small values without trailing zeros
+			text.textContent = value < 1 ? `${value}%` : `${Math.round(value)}%`;
 			svg.appendChild(text);
-		}
+		});
 
 		// Show labels for EVERY campaign with valid dates
 		chartData.forEach((d, i) => {
