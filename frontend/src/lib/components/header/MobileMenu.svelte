@@ -220,7 +220,7 @@
 								: 'hover:bg-highlight-blue/30 hover:shadow-md dark:hover:bg-highlight-blue/20'}"
 							class:hidden={shouldHideMenuItem(link.route)}
 							on:click={() => (visible = false)}
-							target={link.external ? '_blank' : '_self'}
+							target={link.external ? '_blank' : undefined}
 							rel={link.external ? 'noreferrer' : undefined}
 							href={link.route}
 						>

@@ -1,11 +1,25 @@
-import { writable } from 'svelte/store';
+import { writable, derived } from 'svelte/store';
 
-export const isLoading = writable(false);
+// manual loading state (from explicit showIsLoading/hideIsLoading calls)
+const manualLoading = writable(false);
+
+// navigation loading state (from sveltekit navigation)
+export const navigationLoading = writable(false);
+
+// combined loading state - true if either manual or navigation is loading
+export const isLoading = derived(
+	[manualLoading, navigationLoading],
+	([$manual, $navigation]) => $manual || $navigation
+);
 
 export const showIsLoading = () => {
-	isLoading.set(true);
+	manualLoading.set(true);
 };
 
 export const hideIsLoading = () => {
-	isLoading.set(false);
+	manualLoading.set(false);
+};
+
+export const setNavigationLoading = (value) => {
+	navigationLoading.set(value);
 };

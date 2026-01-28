@@ -1,7 +1,7 @@
 <script>
 	import '../app.css';
 	import { onMount, tick } from 'svelte';
-	import { page } from '$app/stores';
+	import { page, navigating } from '$app/stores';
 	import { beforeNavigate, goto } from '$app/navigation';
 
 	import { Session } from '$lib/service/session';
@@ -16,7 +16,7 @@
 	import ChangeCompanyModal from '$lib/components/modal/ChangeCompanyModal.svelte';
 	import CommandPalette from '$lib/components/modal/CommandPalette.svelte';
 	import DesktopMenu from '$lib/components/header/DesktopMenu.svelte';
-	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
+	import { hideIsLoading, showIsLoading, setNavigationLoading } from '$lib/store/loading';
 	import Header from '$lib/components/header/Header.svelte';
 	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
 	import { displayMode } from '$lib/store/displayMode';
@@ -63,6 +63,9 @@
 			beforeNavigate.cancel();
 		}
 	});
+
+	// show loading spinner during navigation
+	$: setNavigationLoading(!!$navigating);
 
 	onMount(() => {
 		// initialize theme system
