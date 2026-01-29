@@ -23,6 +23,7 @@
 	export let pattern = null;
 	export let id = null;
 	export let onBlur = () => {};
+	export let error = false;
 	// type can only be set initially
 	export let type = 'text';
 	let inputType = 'text';
@@ -97,7 +98,9 @@
 		{required}
 		{placeholder}
 		{pattern}
-		class="text-ellipsis row-start-1 row-span-3 justify-self-center rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+		class="text-ellipsis row-start-1 row-span-3 justify-self-center rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border focus:outline-none focus:border-solid focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200 {error
+			? 'border-red-500 dark:border-red-400'
+			: 'border-transparent dark:border-gray-700/60 focus:border-slate-400 dark:focus:border-highlight-blue/80'}"
 		class:w-24={width === 'small'}
 		class:w-60={width === 'medium'}
 		class:w-95={width === 'large'}

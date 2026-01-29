@@ -29,12 +29,14 @@
 	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
+	import ProxyConfigBuilder from '$lib/components/proxy/ProxyConfigBuilder.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
 
 	// bindings
 	let form = null;
+	let proxyConfigBuilder = null;
 	let formValues = {
 		id: null,
 		name: null,
@@ -65,6 +67,147 @@
 	let ipAllowListEntries = [];
 	let selectedProxyForIPList = null;
 	let isLoadingIPAllowList = false;
+
+	// counter to force ProxyConfigBuilder recreation when modal opens
+	let modalOpenCounter = 0;
+
+	// file input reference for YAML mode import
+	let yamlFileInput = null;
+
+	// import configuration from YAML string with metadata (for YAML mode)
+	function importYamlConfig(yamlStr) {
+		if (!yamlStr || yamlStr.trim() === '') {
+			return;
+		}
+
+		try {
+			// dynamically import js-yaml
+			import('$lib/components/yaml/index.js').then((jsyaml) => {
+				const parsed = jsyaml.default.load(yamlStr);
+				if (!parsed || typeof parsed !== 'object') {
+					console.warn('Invalid YAML: not an object');
+					return;
+				}
+
+				// extract and apply general section
+				if (parsed._general) {
+					if (parsed._general.name) {
+						formValues.name = parsed._general.name;
+					}
+					if (parsed._general.description) {
+						formValues.description = parsed._general.description;
+					}
+					if (parsed._general.start_url) {
+						formValues.startURL = parsed._general.start_url;
+					}
+					// remove _general from parsed object before serializing back
+					delete parsed._general;
+				}
+
+				// serialize back to YAML without _meta for the config
+				const cleanYaml = jsyaml.default.dump(parsed, {
+					indent: 2,
+					lineWidth: -1,
+					quotingType: "'",
+					forceQuotes: false,
+					noRefs: true
+				});
+				formValues.proxyConfig = cleanYaml;
+			});
+		} catch (e) {
+			console.warn('Failed to parse imported YAML config:', e);
+		}
+	}
+
+	// export configuration to YAML file with metadata (for YAML mode)
+	function exportYamlConfig() {
+		import('$lib/components/yaml/index.js').then((jsyaml) => {
+			try {
+				// parse current config
+				const parsed = formValues.proxyConfig
+					? jsyaml.default.load(formValues.proxyConfig) || {}
+					: {};
+
+				// build output with _general first
+				const output = {};
+
+				// add general section with proxy metadata
+				output._general = {};
+				if (formValues.name) {
+					output._general.name = formValues.name;
+				}
+				if (formValues.description) {
+					output._general.description = formValues.description;
+				}
+				if (formValues.startURL) {
+					output._general.start_url = formValues.startURL;
+				}
+
+				// merge rest of config
+				Object.assign(output, parsed);
+
+				// serialize to YAML
+				const yamlContent = jsyaml.default.dump(output, {
+					indent: 2,
+					lineWidth: -1,
+					quotingType: "'",
+					forceQuotes: false,
+					noRefs: true
+				});
+
+				// create blob and download
+				const blob = new Blob([yamlContent], { type: 'application/x-yaml' });
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				const safeName = (formValues.name || 'proxy-config').replace(/[^a-zA-Z0-9-_]/g, '_');
+				a.download = `${safeName}.yaml`;
+				document.body.appendChild(a);
+				a.click();
+				document.body.removeChild(a);
+				URL.revokeObjectURL(url);
+			} catch (e) {
+				console.warn('Failed to export YAML config:', e);
+			}
+		});
+	}
+
+	// trigger file input for YAML mode import
+	function triggerYamlImport() {
+		yamlFileInput?.click();
+	}
+
+	// handle file selection for YAML mode import
+	function handleYamlImportFile(event) {
+		const file = event.target.files?.[0];
+		if (!file) return;
+
+		const reader = new FileReader();
+		reader.onload = (e) => {
+			const content = e.target?.result;
+			if (typeof content === 'string') {
+				importYamlConfig(content);
+			}
+		};
+		reader.readAsText(file);
+
+		// reset file input so same file can be imported again
+		event.target.value = '';
+	}
+
+	// editor mode: 'yaml' or 'gui' - restore from localStorage, default to yaml for safety
+	const EDITOR_MODE_STORAGE_KEY = 'proxy-editor-mode';
+	let editorMode =
+		(typeof localStorage !== 'undefined' && localStorage.getItem(EDITOR_MODE_STORAGE_KEY)) ||
+		'yaml';
+
+	// save editor mode to localStorage when it changes
+	$: if (typeof localStorage !== 'undefined' && editorMode) {
+		localStorage.setItem(EDITOR_MODE_STORAGE_KEY, editorMode);
+	}
+
+	// fullscreen mode for modal - automatically true when in GUI mode
+	$: isModalFullscreen = editorMode === 'gui';
 
 	const currentExample = `version: "0.0"
 
@@ -220,6 +363,16 @@ portal.example.com:
 		try {
 			isSubmitting = true;
 			const saveOnly = event?.detail?.saveOnly || false;
+
+			// validate config when in GUI mode
+			if (editorMode === 'gui' && proxyConfigBuilder) {
+				const validation = proxyConfigBuilder.validate();
+				if (!validation.valid) {
+					isSubmitting = false;
+					return;
+				}
+			}
+
 			if (modalMode === 'create' || modalMode === 'copy') {
 				await create();
 				return;
@@ -305,6 +458,7 @@ portal.example.com:
 
 	const openCreateModal = () => {
 		modalMode = 'create';
+		modalOpenCounter++;
 		isModalVisible = true;
 	};
 
@@ -322,6 +476,7 @@ portal.example.com:
 	/** @param {string} id */
 	const openUpdateModal = async (id) => {
 		modalMode = 'update';
+		modalOpenCounter++;
 		showIsLoading();
 
 		// reset form values first
@@ -353,6 +508,7 @@ portal.example.com:
 
 	const openCopyModal = async (id) => {
 		modalMode = 'copy';
+		modalOpenCounter++;
 		showIsLoading();
 
 		// reset form values first
@@ -511,48 +667,140 @@ portal.example.com:
 			</TableRow>
 		{/each}
 	</Table>
-	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
+	<Modal
+		headerText={modalText}
+		visible={isModalVisible}
+		onClose={closeModal}
+		{isSubmitting}
+		fullscreen={isModalFullscreen}
+	>
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
-			<div class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-8">
-				<!-- Basic Information Section -->
-				<div class="w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-						Basic Information
-					</h3>
-					<div class="grid grid-cols-1 md:grid-cols-[1fr_2fr_2fr] gap-4">
-						<div>
-							<TextField
-								required
-								minLength={1}
-								maxLength={64}
-								bind:value={formValues.name}
-								placeholder="Company Auth Proxy">Name</TextField
-							>
+			<div
+				class="col-span-3 w-full px-6 py-4 {isModalFullscreen
+					? 'flex flex-col min-h-0 overflow-hidden'
+					: 'overflow-y-auto space-y-8'}"
+			>
+				{#if editorMode === 'yaml'}
+					<!-- Basic Information Section - only shown in YAML mode -->
+					<div class="w-full mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600">
+						<div class="flex justify-between items-center mb-3">
+							<h3 class="text-base font-medium text-pc-darkblue dark:text-white">
+								Basic Information
+							</h3>
+							<div class="flex gap-2">
+								<input
+									type="file"
+									accept=".yaml,.yml"
+									bind:this={yamlFileInput}
+									on:change={handleYamlImportFile}
+									class="hidden"
+								/>
+								<button
+									type="button"
+									class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-gray-400 bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-md hover:bg-slate-200 dark:hover:bg-gray-700 transition-colors"
+									on:click={triggerYamlImport}
+									title="Import configuration from YAML file"
+								>
+									<svg
+										class="w-4 h-4"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+									>
+										<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+										<polyline points="7 10 12 15 17 10" />
+										<line x1="12" y1="15" x2="12" y2="3" />
+									</svg>
+									Import
+								</button>
+								<button
+									type="button"
+									class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-gray-400 bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-md hover:bg-slate-200 dark:hover:bg-gray-700 transition-colors"
+									on:click={exportYamlConfig}
+									title="Export configuration to YAML file"
+								>
+									<svg
+										class="w-4 h-4"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+									>
+										<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+										<polyline points="17 8 12 3 7 8" />
+										<line x1="12" y1="3" x2="12" y2="15" />
+									</svg>
+									Export
+								</button>
+							</div>
 						</div>
-						<div>
-							<TextField optional maxLength={255} bind:value={formValues.description}
-								>Description</TextField
-							>
-						</div>
-						<div class="flex justify-end">
-							<TextField
-								required
-								minLength={3}
-								bind:value={formValues.startURL}
-								placeholder="https://login.example.com/auth"
-								toolTipText="Domain must be in proxy configuration">Start URL</TextField
-							>
+						<div class="grid grid-cols-1 md:grid-cols-[1fr_2fr_2fr] gap-4">
+							<div>
+								<TextField
+									required
+									minLength={1}
+									maxLength={64}
+									bind:value={formValues.name}
+									placeholder="Company Auth Proxy">Name</TextField
+								>
+							</div>
+							<div>
+								<TextField optional maxLength={255} bind:value={formValues.description}
+									>Description</TextField
+								>
+							</div>
+							<div class="flex justify-end">
+								<TextField
+									required
+									minLength={3}
+									bind:value={formValues.startURL}
+									placeholder="https://login.example.com/auth"
+									toolTipText="Domain must match a phishing domain in the hosts configuration"
+									>Start URL</TextField
+								>
+							</div>
 						</div>
 					</div>
-				</div>
+				{/if}
 
 				<!-- Proxy Configuration Section -->
-				<div class="w-full">
-					<div class="space-y-6">
-						<div class="flex flex-col py-2 w-full">
-							<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+				<div
+					class="w-full {isModalFullscreen ? 'flex-1 flex flex-col min-h-0 overflow-hidden' : ''}"
+				>
+					<div class={isModalFullscreen ? 'flex flex-col h-full min-h-0' : 'space-y-4'}>
+						<div class="flex items-center justify-between mb-4">
+							<h3 class="text-base font-medium text-pc-darkblue dark:text-white">
 								Proxy Configuration
 							</h3>
+							<!-- Editor Mode Tabs -->
+							<div
+								class="flex border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden"
+							>
+								<button
+									type="button"
+									class="px-4 py-2 text-sm font-medium transition-colors duration-200 {editorMode ===
+									'yaml'
+										? 'bg-blue-600 text-white'
+										: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
+									on:click={() => (editorMode = 'yaml')}
+								>
+									YAML
+								</button>
+								<button
+									type="button"
+									class="px-4 py-2 text-sm font-medium transition-colors duration-200 {editorMode ===
+									'gui'
+										? 'bg-blue-600 text-white'
+										: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
+									on:click={() => (editorMode = 'gui')}
+								>
+									Visual
+								</button>
+							</div>
+						</div>
+
+						{#if editorMode === 'yaml'}
 							<div class="w-80vw">
 								<SimpleCodeEditor
 									bind:value={formValues.proxyConfig}
@@ -562,7 +810,23 @@ portal.example.com:
 									enableProxyCompletion={true}
 								/>
 							</div>
-						</div>
+						{:else}
+							<div class="flex-1 min-h-0 overflow-hidden">
+								{#key modalOpenCounter}
+									<ProxyConfigBuilder
+										bind:this={proxyConfigBuilder}
+										config={formValues.proxyConfig}
+										name={formValues.name}
+										description={formValues.description}
+										startURL={formValues.startURL}
+										on:change={(e) => (formValues.proxyConfig = e.detail)}
+										on:nameChange={(e) => (formValues.name = e.detail)}
+										on:descriptionChange={(e) => (formValues.description = e.detail)}
+										on:startURLChange={(e) => (formValues.startURL = e.detail)}
+									/>
+								{/key}
+							</div>
+						{/if}
 					</div>
 				</div>
 

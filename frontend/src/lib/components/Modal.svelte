@@ -11,6 +11,7 @@
 	export let bindTo = null;
 	export let resetTabFocus = () => {};
 	export let noAutoFocus = false;
+	export let fullscreen = false;
 
 	let modalElement;
 	let previousActiveElement;
@@ -25,7 +26,7 @@
 		// only handle focus when modal visibility actually changes and not during submission
 		if (visible && !modalInitialized) {
 			window.addEventListener('keydown', keyHandler);
-			// Prevent body scrolling when modal is open
+			// prevent body scrolling when modal is open
 			document.body.style.overflow = 'hidden';
 			if (!isSubmitting) {
 				handleModalOpen();
@@ -34,7 +35,7 @@
 			wasVisible = true;
 		} else if (!visible && modalInitialized) {
 			window.removeEventListener('keydown', keyHandler);
-			// Restore body scrolling when modal is closed
+			// restore body scrolling when modal is closed
 			document.body.style.overflow = 'auto';
 			handleModalClose();
 			modalInitialized = false;
@@ -49,13 +50,13 @@
 				close();
 			}
 		} else if (e.key === 'Tab') {
-			// Check if the focused element is a dropdown option button
+			// check if the focused element is a dropdown option button
 			const focusedElement = document.activeElement;
 			const isDropdownOption =
 				focusedElement?.closest('[role="listbox"]') && focusedElement?.role === 'option';
 
 			if (isDropdownOption) {
-				// Don't intercept tab from dropdown options - let them handle it first
+				// don't intercept tab from dropdown options - let them handle it first
 				return;
 			}
 
@@ -64,62 +65,62 @@
 	};
 
 	const handleTabKey = (e) => {
-		// Store the current focused element before updating the list
+		// store the current focused element before updating the list
 		const currentlyFocused = document.activeElement;
 
-		// Update focusable elements before handling tab to account for dynamic changes
+		// update focusable elements before handling tab to account for dynamic changes
 		updateFocusableElements();
 
 		if (focusableElements.length === 0) return;
 
-		// Always prevent default tab behavior to keep focus within modal
+		// always prevent default tab behavior to keep focus within modal
 		e.preventDefault();
 
 		let currentIndex = focusableElements.indexOf(currentlyFocused);
 
-		// If current element is not found (-1), try to find a related element
+		// if current element is not found (-1), try to find a related element
 		if (currentIndex === -1) {
-			// Check if the current element is inside a TextFieldSelect or similar component
+			// check if the current element is inside a TextFieldSelect or similar component
 			const parentComponent = currentlyFocused?.closest('.textfield-select-container');
 			if (parentComponent) {
-				// Look for the input element within the same component
+				// look for the input element within the same component
 				const inputInComponent = parentComponent.querySelector('input');
 				if (inputInComponent) {
 					const inputIndex = focusableElements.indexOf(inputInComponent);
 					if (inputIndex !== -1) {
-						// Use the input's position for navigation and continue tab flow
+						// use the input's position for navigation and continue tab flow
 						currentIndex = inputIndex;
 					}
 				}
 			}
 		}
 
-		// If we still can't find the element, handle it gracefully
+		// if we still can't find the element, handle it gracefully
 		if (currentIndex === -1) {
-			// Check if the current element is inside a TextFieldSelect or similar component
+			// check if the current element is inside a TextFieldSelect or similar component
 			const parentComponent = currentlyFocused?.closest('.textfield-select-container');
 			if (parentComponent) {
-				// Look for the input element within the same component
+				// look for the input element within the same component
 				const inputInComponent = parentComponent.querySelector('input');
 				if (inputInComponent) {
 					const inputIndex = focusableElements.indexOf(inputInComponent);
 					if (inputIndex !== -1) {
-						// Use the input's position for navigation
+						// use the input's position for navigation
 						currentIndex = inputIndex;
 					}
 				}
 			}
 		}
 
-		// If we still can't find the element, handle it gracefully
+		// if we still can't find the element, handle it gracefully
 		if (currentIndex === -1) {
-			// If we can't find the element or related element, try to be smarter
-			// Check if we should go forward or backward based on the shift key
+			// if we can't find the element or related element, try to be smarter
+			// check if we should go forward or backward based on the shift key
 			if (e.shiftKey) {
-				// Shift+Tab: go to last element
+				// shift+Tab: go to last element
 				lastFocusableElement?.focus();
 			} else {
-				// Tab: try to find the first input in the form, or fallback to first element
+				// tab: try to find the first input in the form, or fallback to first element
 				const firstInput = focusableElements.find((el) => el.tagName === 'INPUT');
 				if (firstInput) {
 					firstInput.focus();
@@ -130,23 +131,23 @@
 			return;
 		}
 
-		// Now handle normal tab navigation
+		// now handle normal tab navigation
 		if (e.shiftKey) {
-			// Shift + Tab - go to previous element
+			// shift + Tab - go to previous element
 			if (currentIndex <= 0) {
-				// If at first element, go to last
+				// if at first element, go to last
 				lastFocusableElement?.focus();
 			} else {
-				// Go to previous element
+				// go to previous element
 				focusableElements[currentIndex - 1]?.focus();
 			}
 		} else {
-			// Tab - go to next element
+			// tab - go to next element
 			if (currentIndex >= focusableElements.length - 1) {
-				// If at last element, go to first
+				// if at last element, go to first
 				firstFocusableElement?.focus();
 			} else {
-				// Go to next element
+				// go to next element
 				focusableElements[currentIndex + 1]?.focus();
 			}
 		}
@@ -206,7 +207,7 @@
 	const updateFocusableElements = () => {
 		focusableElements = getFocusableElements();
 
-		// Reorder elements: form controls first, then navigation buttons, then close button
+		// reorder elements: form controls first, then navigation buttons, then close button
 		const formElements = [];
 		const navigationButtons = [];
 		const closeButton = modalElement?.querySelector('[data-close-button]');
@@ -226,7 +227,7 @@
 			}
 		});
 
-		// Rebuild focusable elements in desired order: form controls, then navigation, then close
+		// rebuild focusable elements in desired order: form controls, then navigation, then close
 		focusableElements = [...formElements, ...navigationButtons];
 		if (closeButton) {
 			focusableElements.push(closeButton);
@@ -242,37 +243,37 @@
 			return;
 		}
 
-		// Store the currently focused element
+		// store the currently focused element
 		previousActiveElement = document.activeElement;
 
-		// Wait for the DOM to update
+		// wait for the DOM to update
 		await tick();
 
 		updateFocusableElements();
 
-		// Focus the first focusable element (excluding close button)
+		// focus the first focusable element (excluding close button)
 		if (!noAutoFocus && firstFocusableElement) {
 			firstFocusableElement.focus();
 		}
 	};
 
 	const handleModalClose = () => {
-		// Restore focus to the previously focused element
+		// restore focus to the previously focused element
 		if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
 			previousActiveElement.focus();
 		}
 	};
 
-	// Exposed function to reset tab focus when modal content changes
+	// exposed function to reset tab focus when modal content changes
 	const handleResetTabFocus = async () => {
-		// Check if a TextFieldSelect is currently selecting an option
+		// check if a TextFieldSelect is currently selecting an option
 		const isTextFieldSelectActive = modalElement?.querySelector('[data-selecting="true"]');
 
 		await tick();
 		updateFocusableElements();
 	};
 
-	// Call resetTabFocus when it changes
+	// call resetTabFocus when it changes
 	$: if (resetTabFocus) {
 		resetTabFocus = handleResetTabFocus;
 	}
@@ -280,9 +281,9 @@
 	onMount(() => {
 		return () => {
 			window.removeEventListener('keydown', keyHandler);
-			// Ensure body scrolling is restored when component is destroyed
+			// ensure body scrolling is restored when component is destroyed
 			document.body.style.overflow = 'auto';
-			// Restore focus if modal was open when component was destroyed
+			// restore focus if modal was open when component was destroyed
 			if (visible && previousActiveElement && typeof previousActiveElement.focus === 'function') {
 				previousActiveElement.focus();
 			}
@@ -306,7 +307,7 @@
 		}
 		visible = false;
 		window.removeEventListener('keydown', keyHandler);
-		// Restore body scrolling when modal is closed
+		// restore body scrolling when modal is closed
 		document.body.style.overflow = 'auto';
 		onClose();
 	};
@@ -324,11 +325,15 @@
 		>
 			<section
 				bind:this={modalElement}
-				class="shadow-xl dark:shadow-gray-900/70 w-auto ml-20 mr-8 max-h-[90vh] bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-colors duration-200"
+				class="shadow-xl dark:shadow-gray-900/70 bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-all duration-200
+					{fullscreen
+					? 'fixed inset-0 w-full h-full max-w-none max-h-none rounded-none'
+					: 'w-auto ml-20 mr-8 max-h-[90vh]'}"
 			>
 				<div
 					class:opacity-20={isSubmitting}
-					class="bg-cta-blue dark:bg-blue-800 text-white rounded-t-md py-4 px-8 flex justify-between flex-shrink-0 transition-colors duration-200"
+					class="bg-cta-blue dark:bg-blue-800 text-white py-4 px-8 flex justify-between flex-shrink-0 transition-colors duration-200
+						{fullscreen ? '' : 'rounded-t-md'}"
 				>
 					<div class="flex-1">
 						<h1 id="modal-title" class="uppercase mr-8 font-semibold text-2xl">{headerText}</h1>
@@ -346,7 +351,11 @@
 						<img class="w-full" src="/close-white.svg" alt="" />
 					</button>
 				</div>
-				<div class="px-8 overflow-y-auto overflow-x-visible {scrollBarClassesVertical}">
+				<div
+					class="px-8 overflow-y-auto overflow-x-visible {scrollBarClassesVertical} {fullscreen
+						? 'flex-1'
+						: ''}"
+				>
 					<slot />
 				</div>
 			</section>

@@ -57,6 +57,8 @@ See [production docker compose example](https://github.com/phishingclub/phishing
 - **Browser impersonation** - Impersonate JA4 fingerprints in proxied requests
 - **Response overwriting** - Shortcut proxying with custom responses
 - **Forward proxying** - Use HTTP and SOCKS5 proxies to ensure requests originate from the right location
+- **Visual Editor** - Use the visual editor to easily setup a proxy
+- **Import compromised oauth token** - Use compromised tokens to send more phishing via. oauth enabled endpoints
 
 ### Blogs & Resources
 - [Covert red team phishing with Phishing Club](http://phishing.club/blog/covert-red-team-phishing-with-phishing-club/)

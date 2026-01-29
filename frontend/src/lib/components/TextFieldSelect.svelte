@@ -21,6 +21,31 @@
 	// Ensure options is always an array
 	$: optionsArray = Array.isArray(options) ? options : Array.from(options);
 
+	// helper to get display label for an option (supports both string and {value, label} objects)
+	const getOptionLabel = (opt) => {
+		if (opt && typeof opt === 'object' && 'label' in opt) {
+			return opt.label;
+		}
+		return opt;
+	};
+
+	// helper to get value for an option (supports both string and {value, label} objects)
+	const getOptionValue = (opt) => {
+		if (opt && typeof opt === 'object' && 'value' in opt) {
+			return opt.value;
+		}
+		return opt;
+	};
+
+	// get display label for current value
+	const getDisplayLabel = (val) => {
+		const found = optionsArray.find((opt) => getOptionValue(opt) === val);
+		if (found) {
+			return getOptionLabel(found);
+		}
+		return val;
+	};
+
 	let allOptions = [];
 	let showDropdown = false;
 	let inputElement;
@@ -33,9 +58,10 @@
 		if (!searchValue) {
 			return [...optionsArray];
 		}
-		return optionsArray.filter(
-			(opt) => opt && opt.toLowerCase && opt.toLowerCase().includes(searchValue.toLowerCase())
-		);
+		return optionsArray.filter((opt) => {
+			const label = getOptionLabel(opt);
+			return label && label.toLowerCase && label.toLowerCase().includes(searchValue.toLowerCase());
+		});
 	};
 
 	// Track if user has typed (for filtering) vs just focused (show all)
@@ -68,11 +94,11 @@
 
 	// Select an option
 	const selectOption = (option) => {
-		value = option;
+		value = getOptionValue(option);
 		showDropdown = false;
 		hasTyped = false; // Reset typing flag after selection
 		justSelected = true; // Set flag to prevent dropdown reopening
-		onSelect(option);
+		onSelect(value);
 		// Focus the input field after selection without reopening dropdown
 		setTimeout(() => {
 			if (inputElement) {
@@ -244,6 +270,7 @@
 	const labelId = `${comboboxId}-label`;
 
 	// Reactive statements for accessibility
+	$: displayValue = getDisplayLabel(value);
 	$: hasValue = value && value !== '';
 	$: ariaExpanded = showDropdown;
 </script>
@@ -292,7 +319,7 @@
 				aria-controls={listboxId}
 				aria-autocomplete="list"
 				aria-haspopup="listbox"
-				bind:value
+				value={showDropdown ? value : displayValue}
 				on:focus={handleFocus}
 				on:blur={handleBlur}
 				on:input={handleInput}
@@ -358,7 +385,7 @@
 								<button
 									id="{listboxId}-option-{index}"
 									role="option"
-									aria-selected={value === option}
+									aria-selected={value === getOptionValue(option)}
 									class="w-full text-left bg-slate-100 dark:bg-gray-900 rounded-md text-gray-600 dark:text-gray-300 hover:bg-grayblue-dark dark:hover:bg-highlight-blue/40 hover:text-white py-2 px-2 cursor-pointer focus:bg-grayblue-dark dark:focus:bg-highlight-blue/40 focus:text-white focus:outline-none transition-colors duration-200"
 									on:click={(e) => {
 										e.preventDefault();
@@ -368,7 +395,7 @@
 									on:keydown={(e) => handleOptionKeyDown(e, option)}
 									on:blur={handleBlur}
 								>
-									{option}
+									{getOptionLabel(option)}
 								</button>
 							</li>
 						{/each}
