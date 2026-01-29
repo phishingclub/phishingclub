@@ -25,6 +25,7 @@
 	const STORAGE_KEY_VIEW_MODE = 'calendar_view_mode';
 	const STORAGE_KEY_START_FROM_TODAY = 'calendar_start_from_today';
 	const STORAGE_KEY_FILTERS = 'calendar_filters';
+	const STORAGE_KEY_WEEK_STARTS_ON = 'calendar_week_starts_on';
 
 	/** @type * */
 	export let campaigns = [];
@@ -48,6 +49,8 @@
 	/** @type {'month' | 'week'} */
 	let viewMode = 'month';
 	let startFromToday = false;
+	/** @type {0 | 1} - 0 = Sunday, 1 = Monday */
+	let weekStartsOn = 0;
 
 	let activeFilters = {
 		SCHEDULED: true,
@@ -84,6 +87,11 @@
 				const parsed = JSON.parse(storedFilters);
 				activeFilters = { ...activeFilters, ...parsed };
 			}
+
+			const storedWeekStartsOn = localStorage.getItem(STORAGE_KEY_WEEK_STARTS_ON);
+			if (storedWeekStartsOn === '0' || storedWeekStartsOn === '1') {
+				weekStartsOn = /** @type {0 | 1} */ (parseInt(storedWeekStartsOn));
+			}
 		} catch (e) {
 			console.warn('failed to load calendar settings from localStorage', e);
 		}
@@ -114,6 +122,22 @@
 		} catch (e) {
 			console.warn('failed to save filters to localStorage', e);
 		}
+	}
+
+	/** @param {0 | 1} value */
+	function saveWeekStartsOn(value) {
+		weekStartsOn = value;
+		try {
+			localStorage.setItem(STORAGE_KEY_WEEK_STARTS_ON, String(value));
+		} catch (e) {
+			console.warn('failed to save weekStartsOn to localStorage', e);
+		}
+	}
+
+	/** @param {0 | 1} value */
+	async function handleWeekStartsOnChange(value) {
+		saveWeekStartsOn(value);
+		await generateCalendarData();
 	}
 
 	function sortCampaignsByPriority(campaigns, day) {
@@ -168,7 +192,7 @@
 				weekStart = startOfDay(currentDate);
 			} else {
 				// start from beginning of the week containing currentDate
-				weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
+				weekStart = startOfWeek(currentDate, { weekStartsOn });
 			}
 			const weekEnd = addDays(weekStart, 6);
 
@@ -176,29 +200,35 @@
 			end = endOfDay(weekEnd);
 		} else {
 			// month view
-			let monthStart;
 			if (startFromToday && isSameMonth(currentDate, new Date())) {
 				// if viewing current month and startFromToday is enabled, start from today
-				monthStart = startOfDay(new Date());
+				const today = startOfDay(new Date());
+
+				// end at the last day of next month to show more upcoming campaigns
+				const nextMonth = addDays(endOfMonth(currentDate), 1);
+				const lastDayOfNextMonth = endOfMonth(nextMonth);
+				const lastDayOfWeek = getDay(lastDayOfNextMonth);
+				const calendarEnd = addDays(lastDayOfNextMonth, 6 - lastDayOfWeek);
+
+				start = today;
+				end = calendarEnd;
 			} else {
-				monthStart = startOfMonth(currentDate);
+				// standard month view
+				// calculate first day of calendar (might be in previous month)
+				let calendarStart = startOfMonth(currentDate);
+				const firstDayOfWeek = getDay(calendarStart);
+				if (firstDayOfWeek > 0) {
+					calendarStart = subDays(calendarStart, firstDayOfWeek);
+				}
+
+				// calculate last day of calendar (might be in next month)
+				const lastDayOfMonth = endOfMonth(currentDate);
+				const lastDayOfWeek = getDay(lastDayOfMonth);
+				const calendarEnd = addDays(lastDayOfMonth, 6 - lastDayOfWeek);
+
+				start = calendarStart;
+				end = calendarEnd;
 			}
-			const monthEnd = endOfMonth(currentDate);
-
-			// calculate first day of calendar (might be in previous month)
-			let calendarStart = startOfMonth(currentDate);
-			const firstDayOfWeek = getDay(calendarStart);
-			if (firstDayOfWeek > 0) {
-				calendarStart = subDays(calendarStart, firstDayOfWeek);
-			}
-
-			// calculate last day of calendar (might be in next month)
-			const lastDayOfMonth = endOfMonth(currentDate);
-			const lastDayOfWeek = getDay(lastDayOfMonth);
-			const calendarEnd = addDays(lastDayOfMonth, 6 - lastDayOfWeek);
-
-			start = calendarStart;
-			end = calendarEnd;
 		}
 	}
 
@@ -341,16 +371,25 @@
 			const sortedCampaigns = sortByName(dayData.campaigns);
 
 			// determine if this day should be highlighted based on view mode
-			const isInCurrentPeriod =
-				viewMode === 'week'
-					? true // in week view, all days are "current"
-					: isSameMonth(currentDateIter, currentDate);
+			let isInCurrentPeriod;
+			if (viewMode === 'week') {
+				isInCurrentPeriod = true; // in week view, all days are "current"
+			} else if (startFromToday && isSameMonth(currentDate, new Date())) {
+				// when starting from today, current month and next month are both "current"
+				const today = new Date();
+				isInCurrentPeriod =
+					isSameMonth(currentDateIter, today) ||
+					isSameMonth(currentDateIter, addDays(endOfMonth(today), 1));
+			} else {
+				isInCurrentPeriod = isSameMonth(currentDateIter, currentDate);
+			}
 
 			// determine if day is in next month (for visual separation when "start from today" is enabled)
 			const isNextMonth =
 				startFromToday &&
 				viewMode === 'month' &&
-				currentDateIter.getMonth() !== currentDate.getMonth();
+				isSameMonth(currentDate, new Date()) &&
+				!isSameMonth(currentDateIter, new Date());
 
 			// create day object
 			const day = {
@@ -483,6 +522,16 @@
 				return `${format(start, 'MMM d, yyyy')} - ${format(weekEnd, 'MMM d, yyyy')}`;
 			}
 		}
+		// when starting from today in month view, show the date range
+		if (startFromToday && isSameMonth(currentDate, new Date())) {
+			const today = new Date();
+			const nextMonthEnd = endOfMonth(addDays(endOfMonth(today), 1));
+			if (today.getFullYear() === nextMonthEnd.getFullYear()) {
+				return `${format(today, 'MMM d')} - ${format(nextMonthEnd, 'MMM d, yyyy')}`;
+			} else {
+				return `${format(today, 'MMM d, yyyy')} - ${format(nextMonthEnd, 'MMM d, yyyy')}`;
+			}
+		}
 		return format(currentDate, 'MMMM yyyy');
 	}
 
@@ -498,120 +547,209 @@
 </script>
 
 <div
-	class="w-full bg-white dark:bg-gray-900/80 rounded-lg shadow-sm p-4 border border-gray-200 dark:border-gray-700/60 transition-colors duration-200"
+	class="w-full bg-white dark:bg-gray-900/80 rounded-lg shadow-sm p-2 sm:p-4 border border-gray-200 dark:border-gray-700/60 transition-colors duration-200"
 >
-	<div class="space-y-4 min-h-[600px] max-w-[1600px] mx-auto">
+	<div class="space-y-3 sm:space-y-4 min-h-[400px] sm:min-h-[600px] max-w-[1600px] mx-auto">
 		<!-- Controls Row -->
-		<div class="flex flex-wrap items-center justify-between gap-2 px-2">
-			<!-- Left: View Mode & Options -->
-			<div class="flex flex-wrap items-center gap-2">
-				<label
-					class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
-				>
-					View:
+		<div class="flex flex-col gap-3 px-1 sm:px-2">
+			<!-- Top row: Navigation (centered on mobile, left on desktop) -->
+			<div class="flex items-center justify-center sm:justify-between gap-2 order-1 sm:order-2">
+				<!-- Left: View Mode & Options (hidden on mobile, shown in second row) -->
+				<div class="hidden sm:flex flex-wrap items-center gap-3">
+					<label
+						class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
+					>
+						View:
+						<select
+							value={viewMode}
+							on:change={(e) =>
+								handleViewModeChange(/** @type {HTMLSelectElement} */ (e.target).value)}
+							class="border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
+						>
+							<option value="month">Month</option>
+							<option value="week">Week</option>
+						</select>
+					</label>
+
+					<label
+						class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
+					>
+						Start from today:
+						<input
+							type="checkbox"
+							checked={startFromToday}
+							on:change={handleStartFromTodayChange}
+							class="h-4 w-4 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-blue-600 accent-blue-600 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
+						/>
+					</label>
+
+					{#if viewMode === 'week' && !startFromToday}
+						<label
+							class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
+						>
+							Week starts:
+							<select
+								value={weekStartsOn}
+								on:change={(e) =>
+									handleWeekStartsOnChange(
+										/** @type {0 | 1} */ (
+											parseInt(/** @type {HTMLSelectElement} */ (e.target).value)
+										)
+									)}
+								class="border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
+							>
+								<option value={0}>Sunday</option>
+								<option value={1}>Monday</option>
+							</select>
+						</label>
+					{/if}
+				</div>
+
+				<!-- Center: Navigation -->
+				<div class="flex items-center gap-1 sm:gap-2">
+					<button
+						class="p-2 sm:p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-colors duration-200"
+						on:click={navigatePrevious}
+						disabled={isLoadingNewMonth}
+						title="Previous {viewMode}"
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							class="h-5 w-5 sm:h-4 sm:w-4 text-gray-600 dark:text-gray-400"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M15 19l-7-7 7-7"
+							/>
+						</svg>
+					</button>
+
+					<button
+						class="px-3 py-1 sm:px-2 sm:py-0.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 border border-gray-300 dark:border-gray-600 hover:border-cta-blue dark:hover:border-highlight-blue rounded transition-colors duration-200"
+						on:click={goToToday}
+						disabled={isLoadingNewMonth}
+					>
+						Today
+					</button>
+
+					<h2
+						class="text-xs sm:text-sm font-semibold text-gray-900 dark:text-gray-300 min-w-[140px] sm:min-w-[180px] text-center"
+					>
+						{getHeaderTitle()}
+					</h2>
+
+					<button
+						class="p-2 sm:p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-colors duration-200"
+						on:click={navigateNext}
+						disabled={isLoadingNewMonth}
+						title="Next {viewMode}"
+					>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							class="h-5 w-5 sm:h-4 sm:w-4 text-gray-600 dark:text-gray-400"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M9 5l7 7-7 7"
+							/>
+						</svg>
+					</button>
+				</div>
+
+				<!-- Right: Legend/Filters (hidden on mobile) -->
+				<div class="hidden sm:flex flex-wrap items-center gap-3">
+					{#each [{ key: 'SCHEDULED', color: COLORS.SCHEDULED, label: 'Scheduled' }, { key: 'ACTIVE', color: COLORS.ACTIVE, label: 'Active' }, { key: 'COMPLETED', color: COLORS.COMPLETED, label: 'Completed' }, { key: 'SELF_MANAGED', color: COLORS.SELF_MANAGED, label: 'Self-managed' }] as item}
+						<button
+							class="flex items-center cursor-pointer select-none hover:opacity-80 transition-opacity duration-200 text-xs text-gray-700 dark:text-gray-300"
+							on:click={() => toggleFilter(item.key)}
+						>
+							<div
+								class="w-2.5 h-2.5 rounded-full mr-1.5 transition-opacity duration-200"
+								style="background-color: {item.color}; opacity: {activeFilters[item.key]
+									? '1'
+									: '0.3'}"
+							></div>
+							<span
+								class="transition-opacity duration-200"
+								style="opacity: {activeFilters[item.key] ? '1' : '0.5'}"
+							>
+								{item.label}
+							</span>
+						</button>
+					{/each}
+				</div>
+			</div>
+
+			<!-- Mobile controls row -->
+			<div class="flex sm:hidden flex-wrap items-center justify-center gap-x-4 gap-y-2 order-2">
+				<label class="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
 					<select
 						value={viewMode}
 						on:change={(e) =>
 							handleViewModeChange(/** @type {HTMLSelectElement} */ (e.target).value)}
-						class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
-						style="height: 1.5rem;"
+						class="border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200"
 					>
 						<option value="month">Month</option>
 						<option value="week">Week</option>
 					</select>
 				</label>
 
-				<label
-					class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
-				>
-					Start from today:
+				<label class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300">
+					Today:
 					<input
 						type="checkbox"
 						checked={startFromToday}
 						on:change={handleStartFromTodayChange}
-						class="accent-blue-600"
+						class="h-4 w-4 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-blue-600 accent-blue-600 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 					/>
 				</label>
+
+				{#if viewMode === 'week' && !startFromToday}
+					<label class="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300">
+						<select
+							value={weekStartsOn}
+							on:change={(e) =>
+								handleWeekStartsOnChange(
+									/** @type {0 | 1} */ (parseInt(/** @type {HTMLSelectElement} */ (e.target).value))
+								)}
+							class="border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200"
+						>
+							<option value={0}>Sun</option>
+							<option value={1}>Mon</option>
+						</select>
+					</label>
+				{/if}
 			</div>
 
-			<!-- Center: Navigation -->
-			<div class="flex items-center gap-1">
-				<button
-					class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-colors duration-200"
-					on:click={navigatePrevious}
-					disabled={isLoadingNewMonth}
-					title="Previous {viewMode}"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-4 w-4 text-gray-600 dark:text-gray-400"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M15 19l-7-7 7-7"
-						/>
-					</svg>
-				</button>
-
-				<button
-					class="px-2 py-0.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 border border-gray-300 dark:border-gray-600 hover:border-cta-blue dark:hover:border-highlight-blue rounded transition-colors duration-200"
-					on:click={goToToday}
-					disabled={isLoadingNewMonth}
-				>
-					Today
-				</button>
-
-				<h2
-					class="text-sm font-semibold text-gray-900 dark:text-gray-300 min-w-[180px] text-center"
-				>
-					{getHeaderTitle()}
-				</h2>
-
-				<button
-					class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-colors duration-200"
-					on:click={navigateNext}
-					disabled={isLoadingNewMonth}
-					title="Next {viewMode}"
-				>
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-4 w-4 text-gray-600 dark:text-gray-400"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M9 5l7 7-7 7"
-						/>
-					</svg>
-				</button>
-			</div>
-
-			<!-- Right: Legend/Filters -->
-			<div class="flex flex-wrap items-center gap-2">
-				{#each [{ key: 'SCHEDULED', color: COLORS.SCHEDULED, label: 'Scheduled' }, { key: 'ACTIVE', color: COLORS.ACTIVE, label: 'Active' }, { key: 'COMPLETED', color: COLORS.COMPLETED, label: 'Completed' }, { key: 'SELF_MANAGED', color: COLORS.SELF_MANAGED, label: 'Self-managed' }] as item}
+			<!-- Mobile filters row -->
+			<div class="flex sm:hidden flex-wrap items-center justify-center gap-x-3 gap-y-1 order-3">
+				{#each [{ key: 'SCHEDULED', color: COLORS.SCHEDULED, label: 'Sch' }, { key: 'ACTIVE', color: COLORS.ACTIVE, label: 'Act' }, { key: 'COMPLETED', color: COLORS.COMPLETED, label: 'Done' }, { key: 'SELF_MANAGED', color: COLORS.SELF_MANAGED, label: 'Self' }] as item}
 					<button
-						class="flex items-center cursor-pointer select-none hover:opacity-80 transition-opacity duration-200 text-xs text-gray-700 dark:text-gray-300"
+						class="flex items-center cursor-pointer select-none hover:opacity-80 transition-opacity duration-200 text-[10px] text-gray-700 dark:text-gray-300"
 						on:click={() => toggleFilter(item.key)}
 					>
 						<div
-							class="w-2.5 h-2.5 rounded-full mr-1 transition-opacity duration-200"
+							class="w-2 h-2 rounded-full mr-1 transition-opacity duration-200"
 							style="background-color: {item.color}; opacity: {activeFilters[item.key]
 								? '1'
 								: '0.3'}"
 						></div>
 						<span
 							class="transition-opacity duration-200"
-							style="opacity: {activeFilters[item.key] ? '1' : '0.5'}">{item.label}</span
+							style="opacity: {activeFilters[item.key] ? '1' : '0.5'}"
 						>
+							{item.label}
+						</span>
 					</button>
 				{/each}
 			</div>
@@ -620,11 +758,26 @@
 		<!-- Calendar Grid -->
 		<div class="calendar-container" class:week-view={viewMode === 'week'}>
 			<!-- Day headers -->
-			<div class="grid grid-cols-7 text-center mb-1">
-				{#each ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as day}
-					<div class="text-sm font-medium text-gray-600 dark:text-gray-400 py-2">{day}</div>
-				{/each}
-			</div>
+			{#if !(startFromToday && viewMode === 'month' && isSameMonth(currentDate, new Date()))}
+				{@const dayHeaders =
+					viewMode === 'week' && !startFromToday && weekStartsOn === 1
+						? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+						: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']}
+				{@const dayHeadersShort =
+					viewMode === 'week' && !startFromToday && weekStartsOn === 1
+						? ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+						: ['S', 'M', 'T', 'W', 'T', 'F', 'S']}
+				<div class="grid grid-cols-7 text-center mb-1">
+					{#each dayHeaders as day, i}
+						<div
+							class="text-[10px] sm:text-sm font-medium text-gray-600 dark:text-gray-400 py-1 sm:py-2"
+						>
+							<span class="hidden sm:inline">{day}</span>
+							<span class="sm:hidden">{dayHeadersShort[i]}</span>
+						</div>
+					{/each}
+				</div>
+			{/if}
 
 			<!-- Calendar grid -->
 			{#if !isInitialized || isGeneratingCalendar || isLoadingNewMonth}
@@ -637,65 +790,60 @@
 					</div>
 				</div>
 			{:else}
-				<div
-					class="grid gap-1 min-h-[450px]"
-					style="grid-template-rows: repeat({weeks.length}, 1fr);"
-				>
+				<div class="grid gap-1 min-h-[450px]" style="grid-template-columns: repeat(7, 1fr);">
 					{#each weeks as week, weekIndex}
-						<div class="grid grid-cols-7 gap-1">
-							{#each week as day}
+						{#each week as day}
+							<div
+								class="calendar-day relative border rounded-md overflow-hidden {scrollBarClassesHorizontal} {day.isToday
+									? 'border-blue-500 dark:border-blue-400 bg-blue-50/50 dark:bg-blue-900/20 ring-1 ring-blue-500/30 dark:ring-blue-400/30'
+									: 'border-gray-200 dark:border-gray-700/60'}
+										{day.isToday
+									? ''
+									: day.isCurrentMonth && !day.isNextMonth
+										? 'bg-white dark:bg-gray-900/60'
+										: 'bg-gray-50 dark:bg-gray-800/40'} transition-colors duration-200"
+							>
+								<!-- date number -->
 								<div
-									class="calendar-day relative border rounded-md overflow-hidden {scrollBarClassesHorizontal} {day.isToday
-										? 'border-blue-500 dark:border-blue-400 bg-blue-50/50 dark:bg-blue-900/20 ring-1 ring-blue-500/30 dark:ring-blue-400/30'
-										: 'border-gray-200 dark:border-gray-700/60'}
-									{day.isToday
-										? ''
+									class="date-header text-xs sm:text-sm px-1 sm:px-2 py-0.5 sm:py-1 {day.isToday
+										? 'font-bold text-blue-600 dark:text-blue-400'
 										: day.isCurrentMonth && !day.isNextMonth
-											? 'bg-white dark:bg-gray-900/60'
-											: 'bg-gray-50 dark:bg-gray-800/40'} transition-colors duration-200"
+											? 'text-gray-600 dark:text-gray-400'
+											: 'text-gray-400 dark:text-gray-600'}"
 								>
-									<!-- Date number -->
-									<div
-										class="date-header text-sm px-2 py-1 {day.isToday
-											? 'font-bold text-blue-600 dark:text-blue-400'
-											: day.isCurrentMonth && !day.isNextMonth
-												? 'text-gray-600 dark:text-gray-400'
-												: 'text-gray-400 dark:text-gray-600'}"
-									>
-										{day.date.getDate()}
-									</div>
-									<!-- Campaigns list -->
-									<div class="campaign-container {scrollBarClassesVertical}">
-										{#each day.campaigns as campaign}
-											<a
-												href={`/campaign/${campaign.id}`}
-												class="campaign-item group flex items-start gap-2 mb-1.5 rounded px-2 py-1.5 overflow-hidden transition-all duration-150 hover:scale-[1.01] hover:shadow-sm bg-white/70 dark:bg-gray-800/50 border border-gray-200/70 dark:border-gray-700/40 hover:border-gray-300 dark:hover:border-gray-600"
-												title={buildTooltip(campaign)}
-											>
-												<div
-													class="status-indicator flex-shrink-0 w-1 self-stretch rounded-full"
-													style="background-color: {campaign.color};"
-												></div>
-												<div class="flex-1 min-w-0">
-													{#if showCompany && campaign.company?.name}
-														<div
-															class="company-name truncate text-gray-500 dark:text-gray-400 text-[10px] font-medium uppercase tracking-wide leading-tight"
-														>
-															{truncateText(campaign.company.name, 22)}
-														</div>
-													{/if}
-													<div
-														class="campaign-name truncate text-xs leading-snug font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100"
-													>
-														{truncateText(campaign.name, 24)}
-													</div>
-												</div>
-											</a>
-										{/each}
-									</div>
+									{day.date.getDate()}
 								</div>
-							{/each}
-						</div>
+								<!-- campaigns list -->
+								<div class="campaign-container {scrollBarClassesVertical}">
+									{#each day.campaigns as campaign}
+										<a
+											href={`/campaign/${campaign.id}`}
+											class="campaign-item group flex items-start gap-1 sm:gap-2 mb-1 sm:mb-1.5 rounded px-1 sm:px-2 py-1 sm:py-1.5 overflow-hidden transition-all duration-150 hover:scale-[1.01] hover:shadow-sm bg-white/70 dark:bg-gray-800/50 border border-gray-200/70 dark:border-gray-700/40 hover:border-gray-300 dark:hover:border-gray-600"
+											title={buildTooltip(campaign)}
+										>
+											<div
+												class="status-indicator flex-shrink-0 w-0.5 sm:w-1 self-stretch rounded-full"
+												style="background-color: {campaign.color};"
+											></div>
+											<div class="flex-1 min-w-0">
+												{#if showCompany && campaign.company?.name}
+													<div
+														class="company-name truncate text-gray-500 dark:text-gray-400 text-[8px] sm:text-[10px] font-medium uppercase tracking-wide leading-tight"
+													>
+														{truncateText(campaign.company.name, 22)}
+													</div>
+												{/if}
+												<div
+													class="campaign-name truncate text-[10px] sm:text-xs leading-snug font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100"
+												>
+													{truncateText(campaign.name, 24)}
+												</div>
+											</div>
+										</a>
+									{/each}
+								</div>
+							</div>
+						{/each}
 					{/each}
 				</div>
 			{/if}
@@ -705,7 +853,7 @@
 
 <style>
 	.calendar-container {
-		--cell-height: 140px;
+		--cell-height: 80px;
 	}
 
 	.calendar-day {
@@ -722,7 +870,7 @@
 		flex: 1;
 		overflow-y: auto;
 		overflow-x: hidden;
-		padding: 2px 4px 4px 4px;
+		padding: 1px 2px 2px 2px;
 		min-height: 0; /* important for flex child overflow */
 		scrollbar-width: thin;
 		scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
@@ -733,24 +881,60 @@
 	}
 
 	.status-indicator {
-		min-height: 12px;
+		min-height: 8px;
+	}
+
+	/* mobile-first: small screens */
+	@media (max-width: 639px) {
+		.calendar-day :global(.campaign-item) {
+			padding: 0.25rem 0.375rem;
+			gap: 0.25rem;
+			margin-bottom: 0.25rem;
+		}
+
+		.calendar-day :global(.campaign-name) {
+			font-size: 0.625rem;
+			line-height: 1.1;
+		}
+
+		.calendar-day :global(.company-name) {
+			font-size: 0.5rem;
+		}
+
+		.calendar-day :global(.status-indicator) {
+			width: 2px;
+			min-height: 6px;
+		}
+
+		.date-header {
+			font-size: 0.625rem !important;
+			padding: 0.125rem 0.25rem !important;
+		}
 	}
 
 	@media (min-width: 640px) {
 		.calendar-container {
-			--cell-height: 150px;
+			--cell-height: 130px;
+		}
+
+		.campaign-container {
+			padding: 2px 4px 4px 4px;
+		}
+
+		.status-indicator {
+			min-height: 12px;
 		}
 	}
 
 	@media (min-width: 768px) {
 		.calendar-container {
-			--cell-height: 160px;
+			--cell-height: 150px;
 		}
 	}
 
 	@media (min-width: 1024px) {
 		.calendar-container {
-			--cell-height: 175px;
+			--cell-height: 170px;
 		}
 	}
 
@@ -762,7 +946,7 @@
 
 	@media (min-width: 1536px) {
 		.calendar-container {
-			--cell-height: 210px;
+			--cell-height: 200px;
 		}
 	}
 </style>
