@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/phishingclub/phishingclub/config"
 	"github.com/phishingclub/phishingclub/middleware"
@@ -40,4 +42,9 @@ func NewMiddlewares(
 		LoginRateLimiter: loginThrottle,
 		SessionHandler:   sessionHandler,
 	}
+}
+
+// ExtendedTimeout returns a middleware that extends the write deadline for long-running operations.
+func (m *Middlewares) ExtendedTimeout(timeout time.Duration) gin.HandlerFunc {
+	return middleware.ExtendedTimeout(timeout)
 }

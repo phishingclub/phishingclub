@@ -306,7 +306,7 @@ func (u *Update) RunUpdate(
 	req.Header.Set("User-Agent", "PhishingClub-Client")
 
 	client := &http.Client{
-		Timeout: 60 * time.Second, // Longer timeout for downloads
+		Timeout: 3 * time.Minute, // extended timeout for downloads
 	}
 
 	if !build.Flags.Production {

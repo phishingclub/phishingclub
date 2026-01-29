@@ -480,7 +480,7 @@ func setupRoutes(
 		GET(ROUTE_V1_VERSION, middleware.SessionHandler, controllers.Version.Get).
 		// update
 		GET(ROUTE_V1_UPDATE, middleware.SessionHandler, controllers.Update.GetUpdateDetails).
-		POST(ROUTE_V1_UPDATE, middleware.SessionHandler, controllers.Update.RunUpdate).
+		POST(ROUTE_V1_UPDATE, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.Update.RunUpdate).
 		// backup
 		POST(ROUTE_V1_BACKUP_CREATE, middleware.SessionHandler, controllers.Backup.CreateBackup).
 		GET(ROUTE_V1_BACKUP_LIST, middleware.SessionHandler, controllers.Backup.ListBackups).
