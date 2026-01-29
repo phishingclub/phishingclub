@@ -104,18 +104,16 @@ export class AppStateService {
 	}
 
 	clearContext() {
-		/*
-        this.#_store.update(state => {
-            return {
-                ...state,
-                context: {
-                    current: AppStateService.CONTEXT.SHARED,
-                    companyName: null,
-                    companyID: null
-                }
-            }
-        })
-        */
+		this.#_store.update((state) => {
+			return {
+				...state,
+				context: {
+					current: AppStateService.CONTEXT.SHARED,
+					companyName: null,
+					companyID: null
+				}
+			};
+		});
 	}
 
 	/**

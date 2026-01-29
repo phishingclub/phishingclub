@@ -195,8 +195,8 @@
 		class:transition-all={!instantCollapse}
 		class:w-40={isExpanded}
 		class:w-12={!isExpanded}
-		class:!top-[89px]={hasCompanySelected}
-		class:!max-h-[calc(100vh-6rem)]={hasCompanySelected}
+		class:!top-[100px]={hasCompanySelected}
+		class:!max-h-[calc(100vh-100px)]={hasCompanySelected}
 	>
 		{#if !isPinned}
 			<div
