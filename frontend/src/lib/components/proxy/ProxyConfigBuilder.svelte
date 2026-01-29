@@ -75,6 +75,13 @@
 		return generateYaml();
 	}
 
+	// expose import/export methods for parent to call
+	export function triggerImport() {
+		fileInput?.click();
+	}
+
+	export { exportConfig };
+
 	// expose method to validate and navigate to first error
 	// returns { valid: boolean, errors: object }
 	export function validate() {
@@ -993,9 +1000,6 @@
 	}
 
 	// trigger file input for import
-	function triggerImport() {
-		fileInput?.click();
-	}
 
 	// handle file selection for import
 	function handleImportFile(event) {
@@ -1198,44 +1202,17 @@
 				<!-- basic information tab content -->
 				<div class="basic-panel">
 					<!-- basic information section -->
+					<!-- hidden file input for import -->
+					<input
+						type="file"
+						accept=".yaml,.yml"
+						bind:this={fileInput}
+						on:change={handleImportFile}
+						class="hidden"
+					/>
 					<div class="settings-section">
 						<div class="settings-section-header">
 							<h3 class="settings-section-title">General</h3>
-							<div class="import-export-buttons">
-								<input
-									type="file"
-									accept=".yaml,.yml"
-									bind:this={fileInput}
-									on:change={handleImportFile}
-									class="hidden"
-								/>
-								<button
-									type="button"
-									class="import-export-btn"
-									on:click={triggerImport}
-									title="Import configuration from YAML file"
-								>
-									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-										<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-										<polyline points="7 10 12 15 17 10" />
-										<line x1="12" y1="15" x2="12" y2="3" />
-									</svg>
-									Import
-								</button>
-								<button
-									type="button"
-									class="import-export-btn"
-									on:click={exportConfig}
-									title="Export configuration to YAML file"
-								>
-									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-										<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-										<polyline points="17 8 12 3 7 8" />
-										<line x1="12" y1="3" x2="12" y2="15" />
-									</svg>
-									Export
-								</button>
-							</div>
 						</div>
 						<div class="settings-grid">
 							<div class="field-wrapper">
@@ -2853,47 +2830,6 @@
 
 	.settings-section-header + .settings-grid {
 		margin-top: 0;
-	}
-
-	.import-export-buttons {
-		display: flex;
-		gap: 0.5rem;
-	}
-
-	.import-export-btn {
-		display: flex;
-		align-items: center;
-		gap: 0.375rem;
-		padding: 0.375rem 0.75rem;
-		font-size: 0.75rem;
-		font-weight: 500;
-		color: rgb(71, 85, 105);
-		background: rgb(241, 245, 249);
-		border: 1px solid rgb(203, 213, 225);
-		border-radius: 0.375rem;
-		cursor: pointer;
-		transition: all 0.15s ease;
-	}
-
-	.import-export-btn:hover {
-		background: rgb(226, 232, 240);
-		border-color: rgb(148, 163, 184);
-	}
-
-	:global(.dark) .import-export-btn {
-		color: rgb(156, 163, 175);
-		background: rgb(31, 41, 55);
-		border-color: rgb(55, 65, 81);
-	}
-
-	:global(.dark) .import-export-btn:hover {
-		background: rgb(55, 65, 81);
-		border-color: rgb(75, 85, 99);
-	}
-
-	.import-export-btn svg {
-		width: 1rem;
-		height: 1rem;
 	}
 
 	.hidden {

@@ -687,54 +687,14 @@ portal.example.com:
 							<h3 class="text-base font-medium text-pc-darkblue dark:text-white">
 								Basic Information
 							</h3>
-							<div class="flex gap-2">
-								<input
-									type="file"
-									accept=".yaml,.yml"
-									bind:this={yamlFileInput}
-									on:change={handleYamlImportFile}
-									class="hidden"
-								/>
-								<button
-									type="button"
-									class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-gray-400 bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-md hover:bg-slate-200 dark:hover:bg-gray-700 transition-colors"
-									on:click={triggerYamlImport}
-									title="Import configuration from YAML file"
-								>
-									<svg
-										class="w-4 h-4"
-										viewBox="0 0 24 24"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-									>
-										<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-										<polyline points="7 10 12 15 17 10" />
-										<line x1="12" y1="15" x2="12" y2="3" />
-									</svg>
-									Import
-								</button>
-								<button
-									type="button"
-									class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-gray-400 bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-md hover:bg-slate-200 dark:hover:bg-gray-700 transition-colors"
-									on:click={exportYamlConfig}
-									title="Export configuration to YAML file"
-								>
-									<svg
-										class="w-4 h-4"
-										viewBox="0 0 24 24"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-									>
-										<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-										<polyline points="17 8 12 3 7 8" />
-										<line x1="12" y1="3" x2="12" y2="15" />
-									</svg>
-									Export
-								</button>
-							</div>
 						</div>
+						<input
+							type="file"
+							accept=".yaml,.yml"
+							bind:this={yamlFileInput}
+							on:change={handleYamlImportFile}
+							class="hidden"
+						/>
 						<div class="grid grid-cols-1 md:grid-cols-[1fr_2fr_2fr] gap-4">
 							<div>
 								<TextField
@@ -773,30 +733,79 @@ portal.example.com:
 							<h3 class="text-base font-medium text-pc-darkblue dark:text-white">
 								Proxy Configuration
 							</h3>
-							<!-- Editor Mode Tabs -->
-							<div
-								class="flex border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden"
-							>
-								<button
-									type="button"
-									class="px-4 py-2 text-sm font-medium transition-colors duration-200 {editorMode ===
-									'yaml'
-										? 'bg-blue-600 text-white'
-										: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
-									on:click={() => (editorMode = 'yaml')}
+							<div class="flex items-center gap-3">
+								<!-- Import/Export Buttons -->
+								<div class="flex gap-2">
+									<button
+										type="button"
+										class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-gray-400 bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-md hover:bg-slate-200 dark:hover:bg-gray-700 transition-colors"
+										on:click={() =>
+											editorMode === 'yaml'
+												? triggerYamlImport()
+												: proxyConfigBuilder?.triggerImport()}
+										title="Import configuration from YAML file"
+									>
+										<svg
+											class="w-4 h-4"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+										>
+											<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+											<polyline points="7 10 12 15 17 10" />
+											<line x1="12" y1="15" x2="12" y2="3" />
+										</svg>
+										Import
+									</button>
+									<button
+										type="button"
+										class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-gray-400 bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-md hover:bg-slate-200 dark:hover:bg-gray-700 transition-colors"
+										on:click={() =>
+											editorMode === 'yaml'
+												? exportYamlConfig()
+												: proxyConfigBuilder?.exportConfig()}
+										title="Export configuration to YAML file"
+									>
+										<svg
+											class="w-4 h-4"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+										>
+											<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+											<polyline points="17 8 12 3 7 8" />
+											<line x1="12" y1="3" x2="12" y2="15" />
+										</svg>
+										Export
+									</button>
+								</div>
+								<!-- Editor Mode Tabs -->
+								<div
+									class="flex border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden"
 								>
-									YAML
-								</button>
-								<button
-									type="button"
-									class="px-4 py-2 text-sm font-medium transition-colors duration-200 {editorMode ===
-									'gui'
-										? 'bg-blue-600 text-white'
-										: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
-									on:click={() => (editorMode = 'gui')}
-								>
-									Visual
-								</button>
+									<button
+										type="button"
+										class="px-4 py-2 text-sm font-medium transition-colors duration-200 {editorMode ===
+										'yaml'
+											? 'bg-blue-600 text-white'
+											: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
+										on:click={() => (editorMode = 'yaml')}
+									>
+										YAML
+									</button>
+									<button
+										type="button"
+										class="px-4 py-2 text-sm font-medium transition-colors duration-200 {editorMode ===
+										'gui'
+											? 'bg-blue-600 text-white'
+											: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
+										on:click={() => (editorMode = 'gui')}
+									>
+										Visual
+									</button>
+								</div>
 							</div>
 						</div>
 
