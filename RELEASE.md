@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.28.0] - 2026-01-29
+- Added proxy builder visual mode
+- Added proxy import / export 
+- Added calendar week mode, start by today, and start of week
+- Added option to add custom database DSN query params
+- Improved calendar UI
+- Improved view as company frame
+- Improve loading spinner on navigation
+- Improve campaign trend chart in log scale
+- Minor database index optimization
+- Fix complete refresh not required on links in profile menu
+
 ## [1.27.1] - 2026-01-27
 - Fixed rID variable using key instead of value in email
 - Added experimental ARM support in all release builds
