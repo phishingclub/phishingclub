@@ -57,6 +57,7 @@ type ProxyServiceRules struct {
 	TLS         *ProxyServiceTLSConfig         `yaml:"tls,omitempty"`
 	Access      *ProxyServiceAccessControl     `yaml:"access,omitempty"`
 	Impersonate *ProxyServiceImpersonateConfig `yaml:"impersonate,omitempty"`
+	Variables   *ProxyServiceVariablesConfig   `yaml:"variables,omitempty"`
 	Capture     []ProxyServiceCaptureRule      `yaml:"capture,omitempty"`
 	Rewrite     []ProxyServiceReplaceRule      `yaml:"rewrite,omitempty"`
 	Response    []ProxyServiceResponseRule     `yaml:"response,omitempty"`
@@ -91,6 +92,68 @@ type ProxyServiceImpersonateConfig struct {
 type ProxyServiceAccessControl struct {
 	Mode   string `yaml:"mode"`              // "public" | "private"
 	OnDeny string `yaml:"on_deny,omitempty"` // "404" | "redirect:URL" | status code (only used for private mode)
+}
+
+// ProxyServiceVariablesConfig represents template variable interpolation configuration
+// when enabled, template variables like {{.Email}} in rewrite rules will be replaced with recipient data
+//
+// available variables:
+// - recipient fields: rID, FirstName, LastName, Email, To, Phone, ExtraIdentifier, Position, Department, City, Country, Misc
+// - sender fields: From, FromName, FromEmail, Subject
+// - general fields: BaseURL, URL
+// - custom fields: CustomField1, CustomField2, CustomField3, CustomField4
+//
+// example usage:
+//
+//	global:
+//	  variables:
+//	    enabled: true
+//	    allowed: ["Email", "FirstName", "LastName"]  # optional: restrict to specific variables
+//	  rewrite:
+//	    - find: "PLACEHOLDER_EMAIL"
+//	      replace: "{{.Email}}"
+type ProxyServiceVariablesConfig struct {
+	Enabled bool     `yaml:"enabled"`           // enable template variable interpolation in rewrite rules
+	Allowed []string `yaml:"allowed,omitempty"` // if empty and enabled, all variables are allowed; if set, only these variables can be used
+}
+
+// ValidProxyVariables defines all valid template variable names that can be used in proxy rewrite rules
+var ValidProxyVariables = map[string]bool{
+	// recipient fields
+	"rID":             true,
+	"FirstName":       true,
+	"LastName":        true,
+	"Email":           true,
+	"To":              true,
+	"Phone":           true,
+	"ExtraIdentifier": true,
+	"Position":        true,
+	"Department":      true,
+	"City":            true,
+	"Country":         true,
+	"Misc":            true,
+	// sender fields
+	"From":      true,
+	"FromName":  true,
+	"FromEmail": true,
+	"Subject":   true,
+	// general fields
+	"BaseURL": true,
+	"URL":     true,
+	// custom fields
+	"CustomField1": true,
+	"CustomField2": true,
+	"CustomField3": true,
+	"CustomField4": true,
+}
+
+// GetValidProxyVariableNames returns a slice of all valid proxy variable names
+func GetValidProxyVariableNames() []string {
+	names := make([]string, 0, len(ValidProxyVariables))
+	for name := range ValidProxyVariables {
+		names = append(names, name)
+	}
+	return names
 }
 
 // Access control modes:
@@ -1392,6 +1455,27 @@ func (m *Proxy) validateTLSConfig(tlsConfig *ProxyServiceTLSConfig) error {
 	return nil
 }
 
+// validateVariablesConfig validates the variables configuration
+func (m *Proxy) validateVariablesConfig(variablesConfig *ProxyServiceVariablesConfig) error {
+	if variablesConfig == nil {
+		return nil
+	}
+
+	// validate allowed variable names if specified
+	if len(variablesConfig.Allowed) > 0 {
+		for _, varName := range variablesConfig.Allowed {
+			if !ValidProxyVariables[varName] {
+				return validate.WrapErrorWithField(
+					fmt.Errorf("invalid variable name '%s' in allowed list. valid variables: %v", varName, GetValidProxyVariableNames()),
+					"proxyConfig",
+				)
+			}
+		}
+	}
+
+	return nil
+}
+
 func (m *Proxy) validateAccessControl(accessControl *ProxyServiceAccessControl) error {
 	if accessControl == nil {
 		return nil // access control will be set to defaults
@@ -1676,6 +1760,9 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 			return err
 		}
 		if err := m.validateAccessControl(config.Global.Access); err != nil {
+			return err
+		}
+		if err := m.validateVariablesConfig(config.Global.Variables); err != nil {
 			return err
 		}
 		if err := m.validateCaptureRules(config.Global.Capture); err != nil {

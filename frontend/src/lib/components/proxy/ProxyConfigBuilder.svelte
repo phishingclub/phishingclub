@@ -26,6 +26,7 @@
 			tls: { mode: 'managed' },
 			access: { mode: 'private', on_deny: '' },
 			impersonate: { enabled: false, retain_ua: false },
+			variables: { enabled: false, allowed: [] },
 			capture: [],
 			rewrite: [],
 			response: [],
@@ -33,6 +34,36 @@
 		},
 		hosts: []
 	};
+
+	// valid proxy template variables that can be used in rewrite rules
+	const validProxyVariables = [
+		// recipient fields
+		'rID',
+		'FirstName',
+		'LastName',
+		'Email',
+		'To',
+		'Phone',
+		'ExtraIdentifier',
+		'Position',
+		'Department',
+		'City',
+		'Country',
+		'Misc',
+		// sender fields
+		'From',
+		'FromName',
+		'FromEmail',
+		'Subject',
+		// general fields
+		'BaseURL',
+		'URL',
+		// custom fields
+		'CustomField1',
+		'CustomField2',
+		'CustomField3',
+		'CustomField4'
+	];
 
 	// active tab for main sections
 	let activeTab = 'basic';
@@ -158,6 +189,10 @@
 						enabled: false,
 						retain_ua: false
 					};
+					configData.global.variables = parsed.global.variables || {
+						enabled: false,
+						allowed: []
+					};
 					configData.global.capture = (parsed.global.capture || []).map((r) => ({
 						...r,
 						_id: getRuleId()
@@ -224,6 +259,7 @@
 				tls: { mode: 'managed' },
 				access: { mode: 'private', on_deny: '' },
 				impersonate: { enabled: false, retain_ua: false },
+				variables: { enabled: false, allowed: [] },
 				capture: [],
 				rewrite: [],
 				response: [],
@@ -308,6 +344,14 @@
 			};
 			if (configData.global.impersonate.retain_ua) {
 				global.impersonate.retain_ua = configData.global.impersonate.retain_ua;
+			}
+		}
+		if (configData.global.variables?.enabled) {
+			global.variables = {
+				enabled: configData.global.variables.enabled
+			};
+			if (configData.global.variables.allowed?.length > 0) {
+				global.variables.allowed = configData.global.variables.allowed;
 			}
 		}
 		// filter and add global rules (only include touched/valid rules)
@@ -913,6 +957,14 @@
 				global.impersonate.retain_ua = configData.global.impersonate.retain_ua;
 			}
 		}
+		if (configData.global.variables?.enabled) {
+			global.variables = {
+				enabled: configData.global.variables.enabled
+			};
+			if (configData.global.variables.allowed?.length > 0) {
+				global.variables.allowed = configData.global.variables.allowed;
+			}
+		}
 		// filter and add global rules (only include touched/valid rules)
 		const globalCapture = (configData.global.capture || []).filter(isCaptureRuleTouched);
 		if (globalCapture.length > 0) {
@@ -1056,6 +1108,10 @@
 					enabled: false,
 					retain_ua: false
 				};
+				configData.global.variables = parsed.global.variables || {
+					enabled: false,
+					allowed: []
+				};
 				configData.global.capture = (parsed.global.capture || []).map((r) => ({
 					...r,
 					_id: getRuleId()
@@ -1078,6 +1134,7 @@
 					tls: { mode: 'managed' },
 					access: { mode: 'private', on_deny: '' },
 					impersonate: { enabled: false, retain_ua: false },
+					variables: { enabled: false, allowed: [] },
 					capture: [],
 					rewrite: [],
 					response: [],
@@ -2277,6 +2334,89 @@
 										>Use the client's User-Agent header instead of the impersonated browser's
 										default</span
 									>
+								{/if}
+							</div>
+						</div>
+
+						<!-- Template Variables -->
+						<div class="global-section">
+							<h3 class="section-title">
+								<svg
+									class="section-icon"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+								>
+									<path
+										d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
+									/>
+								</svg>
+								Template Variables
+							</h3>
+							<div class="section-content">
+								<label class="checkbox-label">
+									<input
+										type="checkbox"
+										checked={configData.global.variables.enabled}
+										on:change={(e) => {
+											configData.global.variables.enabled = e.currentTarget.checked;
+											if (!e.currentTarget.checked) {
+												configData.global.variables.allowed = [];
+											}
+											configData = configData;
+										}}
+										class="checkbox-input"
+									/>
+									<span class="checkbox-text">Enable Variables</span>
+								</label>
+								<span class="form-hint"
+									>Allow template variables like <code>{'{{.Email}}'}</code> in rewrite rules to be replaced
+									with recipient data</span
+								>
+								{#if configData.global.variables.enabled}
+									<div class="field-wrapper" style="margin-top: 0.75rem;">
+										<label class="flex flex-col">
+											<span class="text-sm font-medium text-pc-darkblue dark:text-white mb-1.5"
+												>Allowed Variables (optional)</span
+											>
+											<div class="variables-selector">
+												{#each validProxyVariables as varName}
+													<label class="variable-chip">
+														<input
+															type="checkbox"
+															checked={configData.global.variables.allowed?.includes(varName)}
+															on:change={(e) => {
+																if (e.currentTarget.checked) {
+																	configData.global.variables.allowed = [
+																		...(configData.global.variables.allowed || []),
+																		varName
+																	];
+																} else {
+																	configData.global.variables.allowed =
+																		configData.global.variables.allowed?.filter(
+																			(v) => v !== varName
+																		) || [];
+																}
+																configData = configData;
+															}}
+															class="hidden"
+														/>
+														<span
+															class="chip-text"
+															class:selected={configData.global.variables.allowed?.includes(
+																varName
+															)}>{varName}</span
+														>
+													</label>
+												{/each}
+											</div>
+										</label>
+										<span class="form-hint"
+											>Leave empty to allow all variables, or select specific ones to restrict which
+											can be used</span
+										>
+									</div>
 								{/if}
 							</div>
 						</div>
@@ -3639,5 +3779,84 @@
 		width: 1.25rem;
 		height: 1.25rem;
 		padding: 0.125rem;
+	}
+
+	/* Variables selector styles */
+	.variables-selector {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+		padding: 0.5rem;
+		background: #f8fafc;
+		border-radius: 0.5rem;
+		border: 1px solid #e2e8f0;
+	}
+
+	:global(.dark) .variables-selector {
+		background: rgba(17, 24, 39, 0.4);
+		border-color: rgba(55, 65, 81, 0.6);
+	}
+
+	.variable-chip {
+		cursor: pointer;
+	}
+
+	.chip-text {
+		display: inline-block;
+		padding: 0.25rem 0.5rem;
+		font-size: 0.75rem;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		border-radius: 0.25rem;
+		background: #e2e8f0;
+		color: #64748b;
+		transition: all 0.15s;
+		user-select: none;
+	}
+
+	:global(.dark) .chip-text {
+		background: rgba(55, 65, 81, 0.6);
+		color: #9ca3af;
+	}
+
+	.chip-text:hover {
+		background: #cbd5e1;
+		color: #475569;
+	}
+
+	:global(.dark) .chip-text:hover {
+		background: rgba(75, 85, 99, 0.8);
+		color: #d1d5db;
+	}
+
+	.chip-text.selected {
+		background: #3b82f6;
+		color: white;
+	}
+
+	:global(.dark) .chip-text.selected {
+		background: #2563eb;
+		color: white;
+	}
+
+	.chip-text.selected:hover {
+		background: #2563eb;
+	}
+
+	:global(.dark) .chip-text.selected:hover {
+		background: #1d4ed8;
+	}
+
+	.section-content code {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 0.8125rem;
+		padding: 0.125rem 0.375rem;
+		background: #e2e8f0;
+		border-radius: 0.25rem;
+		color: #475569;
+	}
+
+	:global(.dark) .section-content code {
+		background: rgba(55, 65, 81, 0.6);
+		color: #d1d5db;
 	}
 </style>

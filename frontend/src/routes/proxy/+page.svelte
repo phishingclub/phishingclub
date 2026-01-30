@@ -220,10 +220,14 @@
 # proxy: "socks5://user:pass@192.168.1.100:1080"       # socks5 with auth
 # proxy: "http://user:pass@192.168.1.100:8080"         # http with auth
 
-# global TLS configuration (applies to all hosts unless overridden)
+# global configuration (applies to all hosts unless overridden)
 global:
   tls:
     mode: "managed"  # "managed" (Let's Encrypt) or "self-signed"
+  # template variables allow recipient data in rewrite rules
+  # variables:
+  #   enabled: true
+  #   allowed: ["Email", "FirstName", "LastName"]  # optional: restrict to specific variables
 
 portal.example.com:
   to: "evil.example.com"
@@ -252,6 +256,11 @@ portal.example.com:
       find: "logo\\.png"
       replace: "evil-logo.png"
       from: "response_body"
+    # when variables are enabled, you can use recipient data:
+    # - name: "personalize_greeting"
+    #   find: "Welcome, User"
+    #   replace: "Welcome, {{.FirstName}}"
+    #   from: "response_body"
     # dom-based manipulations
     - name: "change_title"
       engine: "dom"
