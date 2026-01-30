@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.29.0] - 2026-01-30
+- Add search to proxy hosts in visual mode
+- Add support for recipient variables in proxies
+- Add support for {{.Origin}} in proxy response headers
+- Add support to remove header via. empty replace when using regex
+- Extended timeout for application update
+- Fix proxy dom engine should only handle content type HTML
+- Fix CTRL+S inside proxy visual mode
+
 ## [1.28.0] - 2026-01-29
 - Added proxy builder visual mode
 - Added proxy import / export 
