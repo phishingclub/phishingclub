@@ -2114,18 +2114,21 @@
 																	{/each}
 																</div>
 															{/if}
+															<span class="form-hint"
+																>Use <code>{'{{.Origin}}'}</code> to echo the request's Origin header</span
+															>
 														</div>
 													</div>
 													<div class="field-wrapper checkbox-wrapper">
 														<label class="checkbox-label">
 															<input
 																type="checkbox"
-																checked={rule.forward}
+																bind:checked={rule.forward}
+																class="checkbox-input"
 																on:change={(e) => {
 																	rule.forward = e.currentTarget.checked;
 																	configData = configData;
 																}}
-																class="checkbox-input"
 															/>
 															<span class="checkbox-text">Forward to target</span>
 														</label>
@@ -2884,13 +2887,16 @@
 																{/each}
 															</div>
 														{/if}
+														<span class="form-hint"
+															>Use <code>{'{{.Origin}}'}</code> to echo the request's Origin header</span
+														>
 													</div>
 												</div>
 												<div class="field-wrapper checkbox-wrapper">
 													<label class="checkbox-label">
 														<input
 															type="checkbox"
-															checked={rule.forward}
+															bind:checked={rule.forward}
 															on:change={(e) => {
 																rule.forward = e.currentTarget.checked;
 																configData = configData;

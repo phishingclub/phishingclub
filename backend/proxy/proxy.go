@@ -3658,8 +3658,19 @@ func (m *ProxyHandler) createResponseFromRule(rule service.ProxyServiceResponseR
 		Request:    req,
 	}
 
-	// set headers
+	// set headers with support for {{.Origin}} interpolation
+	requestOrigin := req.Header.Get("Origin")
 	for name, value := range rule.Headers {
+		// support {{.Origin}} placeholder to echo back the request's origin header
+		// this is useful for cors when credentials mode is 'include' and wildcard '*' is not allowed
+		if strings.Contains(value, "{{.Origin}}") {
+			if requestOrigin != "" {
+				value = strings.ReplaceAll(value, "{{.Origin}}", requestOrigin)
+			} else {
+				// if no origin header present, skip this header
+				continue
+			}
+		}
 		resp.Header.Set(name, value)
 	}
 
