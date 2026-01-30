@@ -981,7 +981,7 @@ func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithVariables(resp *
 		if hCfg.Rewrite != nil {
 			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "response_header" || replacement.From == "any" {
-					headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx)
+					headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx, "")
 				}
 			}
 		}
@@ -1034,7 +1034,7 @@ func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCt
 
 	// build variables context for template interpolation
 	varCtx := m.buildVariablesContext(resp.Request.Context(), reqCtx.Session, reqCtx.ProxyConfig)
-	body = m.applyCustomReplacementsWithVariables(body, reqCtx.Session, varCtx)
+	body = m.applyCustomReplacementsWithVariables(body, reqCtx.Session, varCtx, contentType)
 
 	// apply obfuscation if enabled
 	if reqCtx.Campaign != nil && strings.Contains(contentType, "text/html") {
@@ -1175,7 +1175,7 @@ func (m *ProxyHandler) rewriteResponseBodyWithoutSessionContext(resp *http.Respo
 
 	body = m.patchUrls(configMap, body, CONVERT_TO_PHISHING_URLS)
 	body = m.applyURLPathRewritesWithoutSession(body, reqCtx)
-	body = m.applyCustomReplacementsWithoutSession(body, configMap, reqCtx.TargetDomain)
+	body = m.applyCustomReplacementsWithoutSession(body, configMap, reqCtx.TargetDomain, contentType)
 
 	// apply obfuscation if enabled
 	if reqCtx.Campaign != nil && strings.Contains(contentType, "text/html") {
@@ -2359,7 +2359,7 @@ func (m *ProxyHandler) applyRequestBodyReplacementsWithVariables(req *http.Reque
 		if hCfg.Rewrite != nil {
 			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
-					body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx)
+					body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, "")
 				}
 			}
 		}
@@ -2369,17 +2369,17 @@ func (m *ProxyHandler) applyRequestBodyReplacementsWithVariables(req *http.Reque
 }
 
 func (m *ProxyHandler) applyCustomReplacements(body []byte, session *service.ProxySession) []byte {
-	return m.applyCustomReplacementsWithVariables(body, session, nil)
+	return m.applyCustomReplacementsWithVariables(body, session, nil, "")
 }
 
-func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session *service.ProxySession, varCtx *VariablesContext) []byte {
+func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session *service.ProxySession, varCtx *VariablesContext, contentType string) []byte {
 	// only apply rewrite rules for the current host
 	if hostConfig, ok := session.Config.Load(session.TargetDomain); ok {
 		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
 		if hCfg.Rewrite != nil {
 			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
-					body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx)
+					body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, contentType)
 				}
 			}
 		}
@@ -2388,13 +2388,13 @@ func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session
 }
 
 // applyCustomReplacementsWithoutSession applies rewrite rules for requests without session context
-func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config map[string]service.ProxyServiceDomainConfig, targetDomain string) []byte {
+func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config map[string]service.ProxyServiceDomainConfig, targetDomain string, contentType string) []byte {
 	// apply rewrite rules from all host configurations (matches session behavior)
 	for _, hostConfig := range config {
 		if hostConfig.Rewrite != nil {
 			for _, replacement := range hostConfig.Rewrite {
 				if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
-					body = m.applyReplacement(body, replacement, "no-session")
+					body = m.applyReplacement(body, replacement, "no-session", contentType)
 				}
 			}
 		}
@@ -2403,12 +2403,12 @@ func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config
 	return body
 }
 
-func (m *ProxyHandler) applyReplacement(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string) []byte {
-	return m.applyReplacementWithVariables(body, replacement, sessionID, nil)
+func (m *ProxyHandler) applyReplacement(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string, contentType string) []byte {
+	return m.applyReplacementWithVariables(body, replacement, sessionID, nil, contentType)
 }
 
 // applyReplacementWithVariables applies replacement with optional template variable interpolation
-func (m *ProxyHandler) applyReplacementWithVariables(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string, varCtx *VariablesContext) []byte {
+func (m *ProxyHandler) applyReplacementWithVariables(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string, varCtx *VariablesContext, contentType string) []byte {
 	// interpolate variables in the replacement value if enabled
 	replaceValue := replacement.Replace
 	if varCtx != nil && varCtx.Enabled && varCtx.Data != nil {
@@ -2429,7 +2429,7 @@ func (m *ProxyHandler) applyReplacementWithVariables(body []byte, replacement se
 	case "regex":
 		return m.applyRegexReplacement(body, interpolatedReplacement, sessionID)
 	case "dom":
-		return m.applyDomReplacement(body, interpolatedReplacement, sessionID)
+		return m.applyDomReplacement(body, interpolatedReplacement, sessionID, contentType)
 	default:
 		m.logger.Errorw("unsupported replacement engine", "engine", engine, "sessionID", sessionID)
 		return body
@@ -2589,7 +2589,14 @@ func (m *ProxyHandler) applyRegexReplacement(body []byte, replacement service.Pr
 }
 
 // applyDomReplacement applies DOM-based replacement
-func (m *ProxyHandler) applyDomReplacement(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string) []byte {
+func (m *ProxyHandler) applyDomReplacement(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string, contentType string) []byte {
+	// dom manipulation only works on html content
+	// goquery wraps non-html content in <html><head></head><body>...</body></html>
+	// which corrupts js/css/json files
+	if !strings.Contains(contentType, "text/html") {
+		return body
+	}
+
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
 	if err != nil {
 		m.logger.Errorw("failed to parse html for dom manipulation", "error", err, "sessionID", sessionID)

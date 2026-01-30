@@ -1381,7 +1381,8 @@ func (m *Proxy) validateReplaceRules(replaceRules []ProxyServiceReplaceRule) err
 			}
 
 			// validate that actions requiring a replace value have one
-			if (replace.Action == "setText" || replace.Action == "setHtml" || replace.Action == "setAttr" || replace.Action == "addClass" || replace.Action == "removeClass") && replace.Replace == "" {
+			// removeAttr needs the attribute name to remove in the replace field
+			if (replace.Action == "setText" || replace.Action == "setHtml" || replace.Action == "setAttr" || replace.Action == "removeAttr" || replace.Action == "addClass" || replace.Action == "removeClass") && replace.Replace == "" {
 				return validate.WrapErrorWithField(
 					errors.New("replace rule 'replace' is required for action '"+replace.Action+"'"),
 					"proxyConfig",
