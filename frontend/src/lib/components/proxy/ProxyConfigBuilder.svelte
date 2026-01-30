@@ -1213,9 +1213,26 @@
 			console.warn('Failed to parse imported YAML config:', e);
 		}
 	}
+
+	let wrapperElement;
+
+	function handleWrapperClick() {
+		// focus the wrapper so Ctrl+S works (FormGrid checks if activeElement is inside the form)
+		if (wrapperElement && document.activeElement === document.body) {
+			wrapperElement.focus();
+		}
+	}
 </script>
 
-<div class="proxy-builder-wrapper">
+<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-noninteractive-element-interactions -->
+<div
+	class="proxy-builder-wrapper"
+	tabindex="-1"
+	role="region"
+	aria-label="Proxy configuration builder"
+	bind:this={wrapperElement}
+	on:click={handleWrapperClick}
+>
 	<div class="proxy-builder">
 		<!-- main tabs -->
 		<div class="main-tabs">
