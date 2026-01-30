@@ -3,6 +3,7 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import TextareaField from '$lib/components/TextareaField.svelte';
+	import Search from '$lib/components/Search.svelte';
 	import jsyaml from '$lib/components/yaml/index.js';
 
 	export let config = null;
@@ -70,6 +71,34 @@
 
 	// expanded host index (-1 = none)
 	let expandedHostIndex = -1;
+
+	// host search
+	let hostSearchQuery = '';
+	// create a simple pagination-like object for the Search component
+	const hostSearchPagination = {
+		_search: '',
+		get search() {
+			return this._search;
+		},
+		set search(val) {
+			this._search = val;
+			hostSearchQuery = val || '';
+		},
+		onChange: (callback) => {
+			// not needed for our use case
+			return () => {};
+		}
+	};
+	$: filteredHosts = configData.hosts
+		.map((host, index) => ({ host, index }))
+		.filter(({ host }) => {
+			if (!hostSearchQuery.trim()) return true;
+			const query = hostSearchQuery.toLowerCase();
+			return (
+				(host.to || '').toLowerCase().includes(query) ||
+				(host.domain || '').toLowerCase().includes(query)
+			);
+		});
 
 	// active sub-tab per host - use reactive $: to track changes
 	let hostActiveTabs = {};
@@ -1366,10 +1395,15 @@
 								</svg>
 							</button>
 						</div>
+						{#if configData.hosts.length > 3}
+							<div class="px-2 pb-2 host-search-wrapper">
+								<Search pagination={hostSearchPagination} />
+							</div>
+						{/if}
 						<div class="flex-1 overflow-y-auto p-2">
 							{#if configData.hosts.length > 0}
 								<div class="flex flex-col gap-1.5">
-									{#each configData.hosts as host, i}
+									{#each filteredHosts as { host, index: i }}
 										<button
 											type="button"
 											class="flex flex-col gap-2 w-full p-3 text-left bg-white dark:bg-slate-800/40 border rounded-lg cursor-pointer transition-all duration-150
@@ -3183,6 +3217,14 @@
 
 	:global(.dark) .sidebar-title {
 		color: #9ca3af;
+	}
+
+	.host-search-wrapper :global(input) {
+		width: 100% !important;
+	}
+
+	.host-search-wrapper :global(> div) {
+		width: 100%;
 	}
 
 	/* host detail */
