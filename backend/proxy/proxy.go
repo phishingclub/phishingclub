@@ -2841,7 +2841,21 @@ func (m *ProxyHandler) applyEarlyRequestHeaderReplacements(req *http.Request, re
 						m.logger.Errorw("invalid early request_header replacement regex", "error", err)
 						continue
 					}
+
+					// check if this is a header deletion rule (empty replace)
+					isDelete := replacement.Replace == ""
+
+					// collect headers to delete (can't modify map while iterating)
+					var headersToDelete []string
+
 					for headerName, values := range req.Header {
+						fullHeader := headerName + ": " + values[0]
+						if re.MatchString(fullHeader) && isDelete {
+							// mark header for deletion
+							headersToDelete = append(headersToDelete, headerName)
+							continue
+						}
+
 						newValues := make([]string, 0, len(values))
 						for _, val := range values {
 							fullHeader := headerName + ": " + val
@@ -2857,6 +2871,11 @@ func (m *ProxyHandler) applyEarlyRequestHeaderReplacements(req *http.Request, re
 							}
 						}
 						req.Header[headerName] = newValues
+					}
+
+					// delete marked headers
+					for _, headerName := range headersToDelete {
+						req.Header.Del(headerName)
 					}
 				}
 			}
