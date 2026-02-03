@@ -130,7 +130,7 @@
 	let processedEvents = [];
 	let filteredEventsCache = null;
 	let lastFilterHash = '';
-	let lastEventsRef = null;
+	let lastEventsHash = '';
 
 	// animation and timing handles
 	let rafId = null;
@@ -534,16 +534,15 @@
 
 		xScale = d3.scaleTime().domain([domainStart, domainEnd]).range([0, width]);
 
-		renderCircles(xScale);
-		updateAxesImmediate(xScale);
+		// use transformed scale if available, otherwise base scale
+		const activeScale = currentTransform ? currentTransform.rescaleX(xScale) : xScale;
+
+		renderCircles(activeScale);
+		updateAxesImmediate(activeScale);
 		updateCenterDate(xScale);
 		updateCurrentTimeIndicatorImmediate();
 
-		if (currentTransform) {
-			const newX = currentTransform.rescaleX(xScale);
-			updateAxesImmediate(newX);
-			updateCirclePositionsFast(newX);
-		} else {
+		if (!currentTransform) {
 			const optimalScale = calculateOptimalScale(domainStart, domainEnd);
 			const initialTranslate = (width - width * optimalScale) / 2;
 			currentTransform = d3.zoomIdentity.translate(initialTranslate, 0).scale(optimalScale);
@@ -810,8 +809,11 @@
 	});
 
 	// reactive: process events when they change
-	$: if (events !== lastEventsRef) {
-		lastEventsRef = events;
+	// use content-based hash to detect changes (not reference equality)
+	// include all event ids to detect deletions from any position
+	$: eventsHash = events?.map((e) => e.id).join(',') || '';
+	$: if (eventsHash !== lastEventsHash) {
+		lastEventsHash = eventsHash;
 		processedEvents = processEvents(events);
 		filteredEventsCache = null;
 		circleNodes = [];

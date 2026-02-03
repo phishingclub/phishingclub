@@ -901,6 +901,31 @@ func (c *Campaign) DeleteByID(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
+// DeleteEventByID deletes a single campaign event by its id
+func (c *Campaign) DeleteEventByID(g *gin.Context) {
+	// handle session
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	// delete event
+	err := c.CampaignService.DeleteEventByID(g.Request.Context(), session, id)
+	// handle responses
+	if errors.Is(err, errs.ErrCampaignAlreadyClosed) {
+		c.Response.ValidationFailed(g, "", err)
+		return
+	}
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 // AnonymizeByID anonymizes a campaign by its id
 func (c *Campaign) AnonymizeByID(g *gin.Context) {
 	// handle session

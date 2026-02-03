@@ -1621,6 +1621,120 @@ func (c *Campaign) DeleteByID(
 	return nil
 }
 
+// DeleteEventByID deletes a single campaign event by its ID
+// only allows deletion on open campaigns (not closed)
+// recalculates the notable event if the deleted event was the notable one
+func (c *Campaign) DeleteEventByID(
+	ctx context.Context,
+	session *model.Session,
+	eventID *uuid.UUID,
+) error {
+	ae := NewAuditEvent("Campaign.DeleteEventByID", session)
+	ae.Details["eventID"] = eventID.String()
+
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+
+	// get the event to be deleted
+	event, err := c.CampaignRepository.GetEventByID(ctx, eventID)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign event by id", "error", err, "eventID", eventID.String())
+		return errs.Wrap(err)
+	}
+
+	ae.Details["campaignID"] = event.CampaignID.String()
+	if event.RecipientID != nil {
+		ae.Details["recipientID"] = event.RecipientID.String()
+	}
+
+	// get the campaign to check if it's closed
+	campaign, err := c.CampaignRepository.GetByID(ctx, event.CampaignID, &repository.CampaignOption{})
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign", "error", err, "campaignID", event.CampaignID.String())
+		return errs.Wrap(err)
+	}
+
+	// check if campaign is closed
+	if campaign.ClosedAt.IsSpecified() && !campaign.ClosedAt.IsNull() {
+		c.Logger.Debugw("cannot delete event from closed campaign",
+			"campaignID", event.CampaignID.String(),
+			"eventID", eventID.String(),
+		)
+		return errs.ErrCampaignAlreadyClosed
+	}
+
+	// get the campaign recipient to recalculate notable event after deletion
+	var campaignRecipient *model.CampaignRecipient
+
+	if event.RecipientID != nil {
+		campaignRecipient, err = c.CampaignRecipientRepository.GetByCampaignAndRecipientID(
+			ctx,
+			event.CampaignID,
+			event.RecipientID,
+			&repository.CampaignRecipientOption{},
+		)
+		if err != nil {
+			c.Logger.Errorw("failed to get campaign recipient",
+				"error", err,
+				"campaignID", event.CampaignID.String(),
+				"recipientID", event.RecipientID.String(),
+			)
+			return errs.Wrap(err)
+		}
+	}
+
+	// delete the event
+	err = c.CampaignRepository.DeleteEventByID(ctx, eventID)
+	if err != nil {
+		c.Logger.Errorw("failed to delete campaign event", "error", err, "eventID", eventID.String())
+		return errs.Wrap(err)
+	}
+
+	// recalculate notable event after deleting an event for this recipient
+	if campaignRecipient != nil {
+		campaignRecipientID, err := campaignRecipient.ID.Get()
+		if err != nil {
+			c.Logger.Errorw("campaign recipient has no ID, skipping notable event update",
+				"error", err,
+				"campaignID", event.CampaignID.String(),
+			)
+		} else {
+			mostNotableEventTypeID, err := c.CampaignRepository.GetMostNotableEventForRecipient(
+				ctx,
+				event.CampaignID,
+				event.RecipientID,
+				eventID,
+			)
+			if err != nil {
+				c.Logger.Errorw("failed to get most notable event for recipient",
+					"error", err,
+					"campaignID", event.CampaignID.String(),
+					"recipientID", event.RecipientID.String(),
+				)
+			} else {
+				err = c.CampaignRecipientRepository.UpdateNotableEventByID(ctx, &campaignRecipientID, mostNotableEventTypeID)
+				if err != nil {
+					c.Logger.Errorw("failed to update campaign recipient notable event",
+						"error", err,
+						"campaignRecipientID", campaignRecipientID.String(),
+					)
+				}
+			}
+		}
+	}
+
+	c.AuditLogAuthorized(ae)
+	return nil
+}
+
 // SendNextBatch sends the next batch of emails
 // atm this is only audit logged on auth failures
 func (c *Campaign) SendNextBatch(

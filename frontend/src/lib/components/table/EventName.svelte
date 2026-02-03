@@ -1,13 +1,9 @@
 <script>
 	import { toEvent } from '$lib/utils/events';
-	import { onMount } from 'svelte';
 	export let eventName;
 
-	let event = { name: '', priority: null, color: null };
-
-	onMount(() => {
-		event = toEvent(eventName);
-	});
+	// reactive statement to update event when eventName prop changes
+	$: event = toEvent(eventName);
 </script>
 
 <div

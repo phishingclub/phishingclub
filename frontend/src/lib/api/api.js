@@ -883,6 +883,16 @@ export class API {
 		},
 
 		/**
+		 * Delete a campaign event.
+		 *
+		 * @param {string} eventID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		deleteEvent: async (eventID) => {
+			return await deleteJSON(this.getPath(`/campaign/event/${eventID}`));
+		},
+
+		/**
 		 * Get campaign statistics by campaign ID.
 		 *
 		 * @param {string} campaignID

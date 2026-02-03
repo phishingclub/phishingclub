@@ -418,6 +418,30 @@ func (c *CampaignRecipient) UpdateByID(
 	return nil
 }
 
+// UpdateNotableEventByID updates only the notable event id for a campaign recipient
+func (c *CampaignRecipient) UpdateNotableEventByID(
+	ctx context.Context,
+	campaignRecipientID *uuid.UUID,
+	notableEventTypeID *uuid.UUID,
+) error {
+	if campaignRecipientID == nil {
+		return nil
+	}
+
+	row := map[string]any{
+		"notable_event_id": notableEventTypeID,
+	}
+	AddUpdatedAt(row)
+
+	res := c.DB.
+		WithContext(ctx).
+		Model(&database.CampaignRecipient{}).
+		Where("id = ?", campaignRecipientID).
+		Updates(row)
+
+	return res.Error
+}
+
 // Anonymize adds an anonymized id to a campaign recipient
 func (r *CampaignRecipient) Anonymize(
 	ctx context.Context,

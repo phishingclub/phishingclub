@@ -40,6 +40,8 @@
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
+	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
+	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import EventName from '$lib/components/table/EventName.svelte';
 	import { goto } from '$app/navigation';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form';
@@ -147,6 +149,12 @@
 	let reportedDateColumn = '';
 	let pendingEmailPreviewRecipient = null;
 	let storedCookieData = '';
+	let isDeleteEventAlertVisible = false;
+	let deleteEventValues = {
+		id: null,
+		name: null,
+		eventName: null
+	};
 
 	// cleanup when modal is cancelled
 	$: if (!isTrackingPixelWarningVisible && pendingEmailPreviewRecipient) {
@@ -657,6 +665,42 @@
 		}
 	};
 
+	const openDeleteEventAlert = (event) => {
+		isDeleteEventAlertVisible = true;
+		deleteEventValues.id = event.id;
+		deleteEventValues.name = event.recipient?.email || 'anonymized';
+		const systemEventName = campaign.eventTypesIDToNameMap[event.eventID] || '';
+		deleteEventValues.eventName = toEvent(systemEventName).name || 'Unknown Event';
+	};
+
+	const onClickDeleteEvent = async (eventID) => {
+		try {
+			const res = await api.campaign.deleteEvent(eventID);
+			if (res.success) {
+				addToast('Event deleted', 'Success');
+				// refresh events, stats, and recipients table (for notable event update)
+				await getEvents();
+				await setResults();
+				await refreshRecipientsTimes();
+				await refreshCampaignRecipients();
+				// reset timeline and refetch all events (timeline only fetches new events incrementally)
+				timelineEvents = [];
+				lastPoll3399Nano = '';
+				await tick();
+				await refreshCampaignEventsSince();
+				// refresh recipient events modal if open
+				if (isEventsModalVisible && recipientEventsRecipient.id) {
+					await setRecipientEvents(recipientEventsRecipient.id);
+				}
+			}
+			return res;
+		} catch (e) {
+			addToast('Failed to delete event', 'Error');
+			console.error('failed to delete campaign event:', e);
+			throw e;
+		}
+	};
+
 	const onConfirmCloseCampaign = async (a) => {
 		let res;
 		try {
@@ -774,7 +818,8 @@
 			if (!res.success) {
 				throw res.error;
 			}
-			campaignRecipients = res.data?.rows ?? [];
+			// force new array reference to trigger svelte reactivity
+			campaignRecipients = [...(res.data?.rows ?? [])];
 			campaignRecipientsHasNextPage = res.data?.hasNextPage ?? false;
 		} catch (e) {
 			addToast('Failed to load recipients', 'Error');
@@ -1636,7 +1681,6 @@
 				plural="events"
 				hasData={!!campaign.events.length}
 				hasNextPage={campaignEventsHasNextPage}
-				hasActions={false}
 				isGhost={isEventTableLoading}
 			>
 				{#each campaign.events as event (event.id)}
@@ -1694,6 +1738,20 @@
 						<TableCell>
 							<CellCopy text={event.metadata || ''} />
 						</TableCell>
+						<TableCellEmpty />
+						<TableCellAction>
+							<TableDropDownEllipsis>
+								<TableDeleteButton
+									on:click={() => openDeleteEventAlert(event)}
+									disabled={!!campaign.closedAt || !!campaign.anonymizedAt}
+									title={campaign.closedAt
+										? 'Cannot delete events from closed campaign'
+										: campaign.anonymizedAt
+											? 'Cannot delete events from anonymized campaign'
+											: 'Delete event'}
+								/>
+							</TableDropDownEllipsis>
+						</TableCellAction>
 					</TableRow>
 				{/each}
 			</Table>
@@ -1836,7 +1894,6 @@
 			pagination={recipientEventsTableParams}
 			plural="events"
 			hasData={!!recipientEvents.length}
-			hasActions={false}
 		>
 			{#each recipientEvents as event}
 				<TableRow>
@@ -1872,6 +1929,20 @@
 					<TableCell>
 						<CellCopy text={event.metadata || ''} />
 					</TableCell>
+					<TableCellEmpty />
+					<TableCellAction>
+						<TableDropDownEllipsis>
+							<TableDeleteButton
+								on:click={() => openDeleteEventAlert(event)}
+								disabled={!!campaign.closedAt || !!campaign.anonymizedAt}
+								title={campaign.closedAt
+									? 'Cannot delete events from closed campaign'
+									: campaign.anonymizedAt
+										? 'Cannot delete events from anonymized campaign'
+										: 'Delete event'}
+							/>
+						</TableDropDownEllipsis>
+					</TableCellAction>
 				</TableRow>
 			{/each}
 		</Table>
@@ -2377,4 +2448,9 @@
 			<FormFooter closeModal={closeReportedCSVModal} isSubmitting={isReportedCSVSubmitting} />
 		</FormGrid>
 	</Modal>
+	<DeleteAlert
+		name={`${deleteEventValues.eventName} event for ${deleteEventValues.name}`}
+		onClick={() => onClickDeleteEvent(deleteEventValues.id)}
+		bind:isVisible={isDeleteEventAlertVisible}
+	/>
 </main>

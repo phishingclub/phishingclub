@@ -1296,6 +1296,77 @@ func (r *Campaign) DeleteEventsByCampaignID(
 	return nil
 }
 
+// GetEventByID gets a campaign event by its id
+func (r *Campaign) GetEventByID(
+	ctx context.Context,
+	eventID *uuid.UUID,
+) (*database.CampaignEvent, error) {
+	var event database.CampaignEvent
+	res := r.DB.WithContext(ctx).
+		Where("id = ?", eventID).
+		First(&event)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return &event, nil
+}
+
+// DeleteEventByID deletes a campaign event by its id
+func (r *Campaign) DeleteEventByID(
+	ctx context.Context,
+	eventID *uuid.UUID,
+) error {
+	res := r.DB.WithContext(ctx).
+		Where("id = ?", eventID).
+		Delete(&database.CampaignEvent{})
+	return res.Error
+}
+
+// GetMostNotableEventForRecipient finds the most notable event for a recipient in a campaign
+// excludes the specified event id (the one being deleted)
+func (r *Campaign) GetMostNotableEventForRecipient(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+	excludeEventID *uuid.UUID,
+) (*uuid.UUID, error) {
+	var events []database.CampaignEvent
+	query := r.DB.WithContext(ctx).
+		Where("campaign_id = ?", campaignID).
+		Where("id != ?", excludeEventID)
+
+	// handle both regular and anonymized recipients
+	if recipientID != nil {
+		query = query.Where("recipient_id = ?", recipientID)
+	}
+
+	res := query.Find(&events)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+
+	if len(events) == 0 {
+		return nil, nil
+	}
+
+	// find the most notable event using priority
+	var mostNotableEventID *uuid.UUID
+	highestPriority := -1
+
+	for _, event := range events {
+		if event.EventID == nil {
+			continue
+		}
+		priority := cache.GetEventPriority(event.EventID)
+		if priority > highestPriority {
+			highestPriority = priority
+			mostNotableEventID = event.EventID
+		}
+	}
+
+	return mostNotableEventID, nil
+}
+
 // AddAnonymizedAt adds an anonymized at time to a campaign
 func (r *Campaign) AddAnonymizedAt(
 	ctx context.Context,

@@ -81,3 +81,16 @@ func IsMoreNotableCampaignRecipientEventID(currentID, newID *uuid.UUID) bool {
 
 	return IsMoreNotableCampaignRecipientEvent(newEventName, currentEventName)
 }
+
+// GetEventPriority returns the priority for an event type id, or -1 if not found
+func GetEventPriority(eventTypeID *uuid.UUID) int {
+	if eventTypeID == nil {
+		return -1
+	}
+	eventName := EventNameByID[eventTypeID.String()]
+	priority, exists := CampaignEventPriority[eventName]
+	if !exists {
+		return -1
+	}
+	return priority
+}
