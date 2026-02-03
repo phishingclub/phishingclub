@@ -1078,8 +1078,8 @@
 	{#if initialPageLoadComplete}
 		<div class="relative">
 			<div class="flex justify-between">
-				<Headline
-					>Campaign: {campaign.name ?? ''}
+				<Headline>
+					<span class="select-text">Campaign: {campaign.name ?? ''}</span>
 					{#if campaign.isTest}
 						<TestLabel />
 					{/if}

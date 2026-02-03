@@ -428,7 +428,7 @@
 	<Table
 		isGhost={isRecipientsTableLoading}
 		columns={[
-			{ column: 'Email', size: 'small' },
+			{ column: 'Email', size: 'large' },
 			{ column: 'First name', size: 'small' },
 			{ column: 'Last name', size: 'small' },
 			{ column: 'Phone', size: 'small' },

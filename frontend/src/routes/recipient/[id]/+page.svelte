@@ -141,7 +141,7 @@
 <section>
 	<div class="flex justify-between">
 		<Headline>
-			{recipient.email}
+			<span class="select-text">{recipient.email}</span>
 		</Headline>
 		<AutoRefresh
 			isLoading={false}
