@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.30.0] - 2026-02-04
+- Added toggle test campaigns from campaign page
+- Added proxy rewrite replace support multi lines
+- Added delete event for open campaigns
+- Added save pagination choice globally 
+- Minor table and select UI improvements
+- Fix missing allow / deny list on created campaign
+- Fix dashboard toggle test campaigns and label in table
+
 ## [1.29.0] - 2026-01-30
 - Add search to proxy hosts in visual mode
 - Add support for recipient variables in proxies
