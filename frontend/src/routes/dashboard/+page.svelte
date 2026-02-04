@@ -520,13 +520,14 @@
 			{#each activeCampaigns as campaign}
 				<TableRow>
 					<TableCell>
-						{#if campaign.isTest}
-							<TestLabel />
-						{/if}
-
-						<a href={`/campaign/${campaign.id}`}>
-							{campaign.name}
-						</a>
+						<span class="inline-flex items-center gap-1 py-1">
+							{#if campaign.isTest}
+								<TestLabel />
+							{/if}
+							<a href={`/campaign/${campaign.id}`}>
+								{campaign.name}
+							</a>
+						</span>
 					</TableCell>
 					<TableCell value={campaign.company?.name} />
 					<TableCell value={campaign.sendStartAt} isDate isRelative />
@@ -560,13 +561,14 @@
 			{#each scheduledCampaigns as campaign}
 				<TableRow>
 					<TableCell>
-						{#if campaign.isTest}
-							<TestLabel />
-						{/if}
-
-						<a href={`/campaign/${campaign.id}`}>
-							{campaign.name}
-						</a>
+						<span class="inline-flex items-center gap-1 py-1">
+							{#if campaign.isTest}
+								<TestLabel />
+							{/if}
+							<a href={`/campaign/${campaign.id}`}>
+								{campaign.name}
+							</a>
+						</span>
 					</TableCell>
 					<TableCell value={campaign.company?.name} />
 					<TableCell value={campaign.sendStartAt} isDate isRelative />
@@ -599,13 +601,14 @@
 			{#each completedCampaigns as campaign}
 				<TableRow>
 					<TableCell>
-						{#if campaign.isTest}
-							<TestLabel />
-						{/if}
-
-						<a href={`/campaign/${campaign.id}`}>
-							{campaign.name}
-						</a>
+						<span class="inline-flex items-center gap-1 py-1">
+							{#if campaign.isTest}
+								<TestLabel />
+							{/if}
+							<a href={`/campaign/${campaign.id}`}>
+								{campaign.name}
+							</a>
+						</span>
 					</TableCell>
 					<TableCell value={campaign.company?.name} />
 					<TableCell value={campaign.sendStartAt} isDate isRelative />

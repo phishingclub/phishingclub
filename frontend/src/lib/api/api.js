@@ -60,6 +60,7 @@ const appendQuery = (query) => {
 	const sortBy = query.sortBy || '';
 	const sortOrder = query.sortOrder || '';
 	const search = query.search || '';
+	const includeTest = query.includeTest;
 
 	const offset = getOffset(currentPage, perPage);
 
@@ -76,6 +77,9 @@ const appendQuery = (query) => {
 	}
 	if (search) {
 		urlQuery += `&search=${search}`;
+	}
+	if (includeTest) {
+		urlQuery += `&includeTest=true`;
 	}
 
 	return urlQuery;
