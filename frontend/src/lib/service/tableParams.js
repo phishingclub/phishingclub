@@ -1,6 +1,8 @@
+import { getPerPagePreference } from '$lib/store/preferences';
+
 const defaultOptions = {
 	page: 1,
-	perPage: 10,
+	perPage: getPerPagePreference(),
 	sortBy: 'name',
 	sortOrder: 'asc',
 	search: ''

@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import { setPerPagePreference } from '$lib/store/preferences';
 
 	/**
 	 * @type {*|null}
@@ -10,6 +11,8 @@
 
 	const setSearch = () => {
 		pagination.perPage = value;
+		// save to localStorage for persistence across pages
+		setPerPagePreference(value);
 	};
 
 	onMount(() => {

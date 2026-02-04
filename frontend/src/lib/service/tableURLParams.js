@@ -1,17 +1,18 @@
 import { goto } from '$app/navigation';
+import { getPerPagePreference } from '$lib/store/preferences';
 
 const minPage = 1;
 const minPerPage = 10;
 const maxPerPage = 100;
 export const defaultStartPage = 1;
-export const defaultPerPage = 10;
+export const defaultPerPage = getPerPagePreference();
 const acceptedPerPageValues = [10, 25, 50];
 const defaultSortBy = 'updated_at';
 const defaultSortOrder = 'desc';
 
 const defaultOptions = {
 	page: 1,
-	perPage: 10,
+	perPage: getPerPagePreference(),
 	sortBy: 'name',
 	sortOrder: 'asc',
 	search: '',
@@ -79,6 +80,9 @@ export const newTableURLParams = (
 		noScroll: false
 	}
 ) => {
+	// get stored perPage preference at runtime (fresh value)
+	const storedPerPage = getPerPagePreference();
+
 	let urlParams = new URLSearchParams(window.location.search);
 	const initialPath = window.location.pathname;
 
