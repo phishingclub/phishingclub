@@ -152,6 +152,7 @@ func (r *Campaign) Insert(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
+
 	if allowDeny, err := campaign.AllowDenyIDs.Get(); err == nil && len(allowDeny) > 0 {
 		err = r.AddAllowDenyLists(ctx, &id, allowDeny)
 		if err != nil {
@@ -211,7 +212,6 @@ func (r *Campaign) AddAllowDenyLists(
 	campaignID *uuid.UUID,
 	allowDenyIDs []*uuid.UUID,
 ) error {
-
 	batch := []database.CampaignAllowDeny{}
 	for _, id := range allowDenyIDs {
 		batch = append(batch, database.CampaignAllowDeny{

@@ -164,11 +164,13 @@ func (c *Campaign) Create(
 		c.Logger.Errorw("failed to create campaign", "error", err)
 		return nil, errs.Wrap(err)
 	}
+
 	createdCampaign, err := c.CampaignRepository.GetByID(
 		ctx,
 		id,
 		&repository.CampaignOption{
 			WithRecipientGroups: true,
+			WithAllowDeny:       true,
 		},
 	)
 	if err != nil {
