@@ -107,7 +107,7 @@
 				// serialize back to YAML without _meta for the config
 				const cleanYaml = jsyaml.default.dump(parsed, {
 					indent: 2,
-					lineWidth: -1,
+					lineWidth: 120,
 					quotingType: "'",
 					forceQuotes: false,
 					noRefs: true
@@ -149,7 +149,7 @@
 				// serialize to YAML
 				const yamlContent = jsyaml.default.dump(output, {
 					indent: 2,
-					lineWidth: -1,
+					lineWidth: 120,
 					quotingType: "'",
 					forceQuotes: false,
 					noRefs: true

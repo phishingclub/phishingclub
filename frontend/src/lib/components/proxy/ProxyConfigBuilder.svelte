@@ -449,7 +449,7 @@
 		// serialize to YAML with js-yaml
 		return jsyaml.dump(output, {
 			indent: 2,
-			lineWidth: -1, // don't wrap long lines
+			lineWidth: 120, // allow block scalars for multiline strings
 			quotingType: "'", // prefer single quotes
 			forceQuotes: false, // only quote when necessary
 			noRefs: true // don't use YAML references
@@ -1060,7 +1060,7 @@
 		// serialize to YAML
 		const yamlContent = jsyaml.dump(output, {
 			indent: 2,
-			lineWidth: -1,
+			lineWidth: 120, // allow block scalars for multiline strings
 			quotingType: "'",
 			forceQuotes: false,
 			noRefs: true
@@ -1985,8 +1985,8 @@
 														{/if}
 													</div>
 													<div class="field-wrapper full">
-														<TextField
-															width="full"
+														<TextareaField
+															fullWidth
 															bind:value={rule.replace}
 															placeholder={rule.engine === 'dom'
 																? rule.action === 'setAttr'
@@ -1995,9 +1995,7 @@
 																		? ''
 																		: 'New content'
 																: 'phishing.com'}
-															error={hasError(
-																`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.replace`
-															)}
+															height="medium"
 														>
 															{#if rule.engine === 'dom' && rule.action === 'setAttr'}
 																Value (attr:value)
@@ -2006,7 +2004,7 @@
 															{:else}
 																Replace
 															{/if}
-														</TextField>
+														</TextareaField>
 														{#if hasError(`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.replace`)}
 															<span class="field-error"
 																>{getError(
@@ -2772,8 +2770,8 @@
 													{/if}
 												</div>
 												<div class="field-wrapper full">
-													<TextField
-														width="full"
+													<TextareaField
+														fullWidth
 														bind:value={rule.replace}
 														placeholder={rule.engine === 'dom'
 															? rule.action === 'setAttr'
@@ -2782,7 +2780,7 @@
 																	? ''
 																	: 'New content'
 															: 'phishing.com'}
-														error={hasError(`global.rewrite.${i}.replace`)}
+														height="medium"
 													>
 														{#if rule.engine === 'dom' && rule.action === 'setAttr'}
 															Value (attr:value)
@@ -2791,7 +2789,7 @@
 														{:else}
 															Replace
 														{/if}
-													</TextField>
+													</TextareaField>
 													{#if hasError(`global.rewrite.${i}.replace`)}
 														<span class="field-error"
 															>{getError(`global.rewrite.${i}.replace`)}</span
