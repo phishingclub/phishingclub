@@ -844,6 +844,9 @@ func (r *Campaign) GetAll(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
+	// apply test campaign filter based on options
+	db = r.applyTestCampaignFilter(db, options)
+
 	var dbCampaigns []database.Campaign
 	res := db.Find(&dbCampaigns)
 	if res.Error != nil {

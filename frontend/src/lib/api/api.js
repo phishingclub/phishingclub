@@ -78,8 +78,10 @@ const appendQuery = (query) => {
 	if (search) {
 		urlQuery += `&search=${search}`;
 	}
-	if (includeTest) {
+	if (includeTest === true) {
 		urlQuery += `&includeTest=true`;
+	} else if (includeTest === false) {
+		urlQuery += `&includeTest=false`;
 	}
 
 	return urlQuery;

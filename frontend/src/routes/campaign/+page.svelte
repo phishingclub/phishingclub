@@ -226,6 +226,13 @@
 	const appStateService = AppStateService.instance;
 	let contextCompanyID = null;
 	let campaigns = [];
+	let includeTestCampaigns = true;
+
+	// handler for when include test campaigns toggle changes
+	const handleIncludeTestToggleChange = async () => {
+		await tick();
+		await refreshCampaigns();
+	};
 	let campaignsHasNextPage = false;
 	let templateMap = new BiMap({});
 	let recipientGroupsByID = {};
@@ -700,7 +707,11 @@
 
 	const getCampaigns = async () => {
 		try {
-			const res = await api.campaign.getAll(tableURLParams, contextCompanyID);
+			const options = {
+				...tableURLParams,
+				includeTest: includeTestCampaigns
+			};
+			const res = await api.campaign.getAll(options, contextCompanyID);
 			if (!res.success) {
 				throw res.error;
 			}
@@ -1280,9 +1291,17 @@
 <HeadTitle title="Campaigns" />
 
 <main>
-	<div class="relative">
+	<div class="flex justify-between">
 		<Headline>Campaigns</Headline>
-		<div class="absolute top-0 right-0">
+		<div class="flex gap-4 items-center">
+			<CheckboxField
+				bind:value={includeTestCampaigns}
+				on:change={handleIncludeTestToggleChange}
+				id="includeTestCampaigns"
+				inline={true}
+			>
+				Include test campaigns
+			</CheckboxField>
 			<AutoRefresh
 				isLoading={false}
 				onRefresh={() => {

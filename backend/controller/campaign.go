@@ -278,6 +278,9 @@ func (c *Campaign) GetAll(g *gin.Context) {
 	}
 	// parse request
 	companyID := companyIDFromRequestQuery(g)
+	// default to including test campaigns for backward compatibility
+	// only exclude when explicitly set to "false"
+	includeTestCampaigns := g.Query("includeTest") != "false"
 	queryArgs, ok := c.handleQueryArgs(g)
 	if !ok {
 		return
@@ -292,6 +295,7 @@ func (c *Campaign) GetAll(g *gin.Context) {
 		&repository.CampaignOption{
 			QueryArgs:            queryArgs,
 			WithCampaignTemplate: true,
+			IncludeTestCampaigns: includeTestCampaigns,
 		},
 	)
 	// handle responses
