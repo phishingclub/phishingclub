@@ -19,13 +19,6 @@
 	};
 	let username = '';
 
-	/*
-	let updateURL = 'https://user.phishing.club/downloads';
-	if (import.meta.env.DEV) {
-		updateURL = 'https://localhost:8009/downloads';
-	}
-	*/
-
 	onMount(() => {
 		const unsub = appState.subscribe((s) => {
 			context = {

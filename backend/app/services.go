@@ -53,7 +53,6 @@ func NewServices(
 	enviroment string,
 	certMagicConfig *certmagic.Config,
 	certMagicCache *certmagic.Cache,
-	licenseServerURL string,
 	filePath string,
 ) *Services {
 	common := service.Common{

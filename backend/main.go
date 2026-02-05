@@ -159,8 +159,6 @@ func main() {
 		db.Logger = db.Logger.LogMode(gormLogger.Silent)
 		atomicLogger.SetLevel(zap.InfoLevel)
 	}
-	// set license server url
-	licenseServer := data.GetCrmURL()
 	// output debug information
 	/*
 		wd, err := os.Getwd()
@@ -232,7 +230,6 @@ func main() {
 		buildMode,
 		certMagicConfig,
 		certMagicCache,
-		licenseServer,
 		*flagFilePath,
 	)
 	// get entra-id options and setup msal client

@@ -41,7 +41,7 @@
 	const installUpdate = async () => {
 		try {
 			if (!isUpdateLocal) {
-				window.open('https://user.phishing.club/downloads', '_blank');
+				window.open('https://github.com/phishingclub/phishingclub/releases', '_blank');
 			} else {
 				isUpdateAlertVisible = true;
 			}
