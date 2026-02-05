@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.30.1] - 2026-02-05
+- Fix various proxy rewrite replace bugs
+- Fix proxy multiline yaml
+
 ## [1.30.0] - 2026-02-04
 - Added toggle test campaigns from campaign page
 - Added proxy rewrite replace support multi lines
