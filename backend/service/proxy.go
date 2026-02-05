@@ -647,12 +647,6 @@ func (m *Proxy) GetByID(
 		return nil, errs.Wrap(err)
 	}
 
-	// apply defaults to Proxy configuration for display
-	if err := m.applyConfigurationDefaults(proxy); err != nil {
-		m.Logger.Errorw("failed to apply configuration defaults", "error", err)
-		// don't fail the request, just log the error
-	}
-
 	// no audit log on read
 	return proxy, nil
 }

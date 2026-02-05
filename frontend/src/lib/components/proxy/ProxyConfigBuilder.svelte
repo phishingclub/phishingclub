@@ -4,7 +4,7 @@
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import TextareaField from '$lib/components/TextareaField.svelte';
 	import Search from '$lib/components/Search.svelte';
-	import jsyaml from '$lib/components/yaml/index.js';
+	import jsyaml, { dumpWithLiteralStrings } from '$lib/components/yaml/index.js';
 
 	export let config = null;
 	// basic info fields passed from parent
@@ -446,14 +446,8 @@
 			output[host.domain] = cleanObject(hostObj);
 		}
 
-		// serialize to YAML with js-yaml
-		return jsyaml.dump(output, {
-			indent: 2,
-			lineWidth: 120, // allow block scalars for multiline strings
-			quotingType: "'", // prefer single quotes
-			forceQuotes: false, // only quote when necessary
-			noRefs: true // don't use YAML references
-		});
+		// serialize to YAML with literal block style for replace/body fields
+		return dumpWithLiteralStrings(output);
 	}
 
 	// host management
@@ -1057,14 +1051,8 @@
 			output[host.domain] = cleanObject(hostObj);
 		}
 
-		// serialize to YAML
-		const yamlContent = jsyaml.dump(output, {
-			indent: 2,
-			lineWidth: 120, // allow block scalars for multiline strings
-			quotingType: "'",
-			forceQuotes: false,
-			noRefs: true
-		});
+		// serialize to YAML with literal block style for replace/body fields
+		const yamlContent = dumpWithLiteralStrings(output);
 
 		// create blob and download
 		const blob = new Blob([yamlContent], { type: 'application/x-yaml' });

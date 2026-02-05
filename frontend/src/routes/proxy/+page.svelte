@@ -105,13 +105,8 @@
 				}
 
 				// serialize back to YAML without _meta for the config
-				const cleanYaml = jsyaml.default.dump(parsed, {
-					indent: 2,
-					lineWidth: 120,
-					quotingType: "'",
-					forceQuotes: false,
-					noRefs: true
-				});
+				// use dumpWithLiteralStrings to preserve literal block style for replace/body fields
+				const cleanYaml = jsyaml.dumpWithLiteralStrings(parsed);
 				formValues.proxyConfig = cleanYaml;
 			});
 		} catch (e) {
@@ -121,11 +116,11 @@
 
 	// export configuration to YAML file with metadata (for YAML mode)
 	function exportYamlConfig() {
-		import('$lib/components/yaml/index.js').then((jsyaml) => {
+		import('$lib/components/yaml/index.js').then((yamlModule) => {
 			try {
 				// parse current config
 				const parsed = formValues.proxyConfig
-					? jsyaml.default.load(formValues.proxyConfig) || {}
+					? yamlModule.default.load(formValues.proxyConfig) || {}
 					: {};
 
 				// build output with _general first
@@ -146,14 +141,8 @@
 				// merge rest of config
 				Object.assign(output, parsed);
 
-				// serialize to YAML
-				const yamlContent = jsyaml.default.dump(output, {
-					indent: 2,
-					lineWidth: 120,
-					quotingType: "'",
-					forceQuotes: false,
-					noRefs: true
-				});
+				// serialize to YAML with literal block style for replace/body fields
+				const yamlContent = yamlModule.dumpWithLiteralStrings(output);
 
 				// create blob and download
 				const blob = new Blob([yamlContent], { type: 'application/x-yaml' });
