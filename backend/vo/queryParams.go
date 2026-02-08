@@ -60,12 +60,15 @@ func (q *QueryArgs) DefaultSortBy(column string) {
 	}
 }
 
-// RemapOrderBy remaps the order by column
+// RemapOrderBy remaps the order by column using the provided mapping.
+// if the column is not found in the mapping, it is cleared to prevent SQL injection.
 func (q *QueryArgs) RemapOrderBy(m map[string]string) {
 	if q.OrderBy == "" {
 		return
 	}
 	if v, ok := m[q.OrderBy]; ok {
 		q.OrderBy = v
+	} else {
+		q.OrderBy = ""
 	}
 }

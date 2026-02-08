@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -383,6 +384,10 @@ func (r *Recipient) GetOrphaned(
 	// apply query args for sorting/pagination if provided
 	if options.QueryArgs != nil {
 		if options.QueryArgs.OrderBy != "" {
+			// validate orderBy against allowlist
+			if !slices.Contains(allowdRecipientColumns, options.QueryArgs.OrderBy) {
+				return result, fmt.Errorf("invalid order by column: %s", options.QueryArgs.OrderBy)
+			}
 			direction := "ASC"
 			if options.QueryArgs.Desc {
 				direction = "DESC"
