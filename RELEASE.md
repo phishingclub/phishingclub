@@ -1,7 +1,7 @@
 # Changelog
 
 ## [1.30.2] - 2026-02-08
-- Fix authenticated blind SQL injection related to orphans recipients. 
+- Fix authenticated blind SQL injection related to orphaned recipients. 
  
 Thanks to [Rayn Light](https://www.linkedin.com/in/rayn-light-723a6a261) for responsible disclosure, detailed report and quick feedback.
 
