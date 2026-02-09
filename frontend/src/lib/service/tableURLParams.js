@@ -71,7 +71,6 @@ class URLUpdateQueue {
 export const newTableURLParams = (
 	options = {
 		page: defaultStartPage,
-		perPage: defaultPerPage,
 		sortBy: defaultSortBy,
 		sortOrder: defaultSortOrder,
 		search: '',
@@ -88,7 +87,8 @@ export const newTableURLParams = (
 
 	// first add the default values
 	const state = {
-		...defaultOptions
+		...defaultOptions,
+		perPage: storedPerPage // use fresh value from localStorage instead of stale defaultOptions
 	};
 	if (options.page) {
 		state.page = options.page;
@@ -120,10 +120,11 @@ export const newTableURLParams = (
 	if (urlParamsPage) {
 		state.page = urlParamsPage;
 	}
-	const urlParamsperPage = parseInt(urlParams.get(param('perPage', state.prefix)));
-	if (urlParamsperPage) {
-		state.perPage = urlParamsperPage;
-	}
+	// don't override perPage from URL - localStorage preference takes priority
+	// const urlParamsperPage = parseInt(urlParams.get(param('perPage', state.prefix)));
+	// if (urlParamsperPage) {
+	// 	state.perPage = urlParamsperPage;
+	// }
 	const urlParamsSortBy = urlParams.get(param('sortBy', state.prefix));
 	if (urlParamsSortBy) {
 		state.sortBy = urlParamsSortBy;
@@ -144,7 +145,7 @@ export const newTableURLParams = (
 	}
 	if (state.perPage < minPerPage || state.perPage > maxPerPage) {
 		console.warn('adjusting pagination: perPage < minPerPage || perPage > maxPerPage');
-		state.perPage = defaultOptions.perPage;
+		state.perPage = storedPerPage;
 	}
 	if (acceptedPerPageValues.includes(state.perPage) === false) {
 		console.warn('adjusting pagination: acceptedPerPageValues.includes(perPage) === false');

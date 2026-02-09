@@ -12,11 +12,8 @@
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import { formatWeekDays, formatTimeConstraint, timeFormat } from '$lib/utils/date.js';
-	import {
-		defaultPerPage,
-		defaultStartPage,
-		newTableURLParams
-	} from '$lib/service/tableURLParams.js';
+	import { defaultStartPage, newTableURLParams } from '$lib/service/tableURLParams.js';
+	import { getPerPagePreference } from '$lib/store/preferences.js';
 	import Table from '$lib/components/table/Table.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
@@ -479,7 +476,7 @@
 		recipientEventsTableParams.unsubscribe();
 		recipientEventsTableParams.search = '';
 		recipientEventsTableParams.page = defaultStartPage;
-		recipientEventsTableParams.perPage = defaultPerPage;
+		recipientEventsTableParams.perPage = getPerPagePreference();
 
 		recipientEvents = [];
 		recipientEventsRecipient = {
