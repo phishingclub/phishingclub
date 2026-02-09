@@ -15,6 +15,7 @@ import (
 var AllowDenyColumnsMap = map[string]string{
 	"created_at":      repository.TableColumn(database.ALLOW_DENY_TABLE, "created_at"),
 	"updated_at":      repository.TableColumn(database.ALLOW_DENY_TABLE, "updated_at"),
+	"name":            repository.TableColumn(database.ALLOW_DENY_TABLE, "name"),
 	"hosting_website": repository.TableColumn(database.ALLOW_DENY_TABLE, "host_website"),
 	"redirects":       repository.TableColumn(database.ALLOW_DENY_TABLE, "redirect_url"),
 }

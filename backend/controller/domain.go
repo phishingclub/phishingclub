@@ -17,6 +17,7 @@ import (
 var DomainColumnsMap = map[string]string{
 	"created_at":      repository.TableColumn(database.DOMAIN_TABLE, "created_at"),
 	"updated_at":      repository.TableColumn(database.DOMAIN_TABLE, "updated_at"),
+	"name":            repository.TableColumn(database.DOMAIN_TABLE, "name"),
 	"hosting_website": repository.TableColumn(database.DOMAIN_TABLE, "host_website"),
 	"redirects":       repository.TableColumn(database.DOMAIN_TABLE, "redirect_url"),
 }
