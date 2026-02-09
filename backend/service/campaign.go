@@ -4307,18 +4307,10 @@ func (c *Campaign) CreateManualCampaignStats(ctx context.Context, session *model
 	id := uuid.New()
 	now := time.Now()
 
-	// Use provided date for created_at and updated_at, or current time if not provided
-	var statsDate time.Time
-	if req.CampaignStartDate != nil {
-		statsDate = *req.CampaignStartDate
-	} else {
-		statsDate = now
-	}
-
 	// Set required fields
 	req.ID = &id
-	req.CreatedAt = &statsDate
-	req.UpdatedAt = &statsDate
+	req.CreatedAt = &now
+	req.UpdatedAt = &now
 	req.CampaignID = nil // No campaign reference for manual stats
 
 	// Calculate total events

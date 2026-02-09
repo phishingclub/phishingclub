@@ -417,7 +417,7 @@
 					alignText="center"
 					value={`${pct.reported.count} (${pct.reported.absolute}%, rel: ${pct.reported.relative}%)`}
 				/>
-				<TableCell alignText="center" value={stats.createdAt} isDate isRelative />
+				<TableCell alignText="center" value={stats.campaignStartDate} isDate isRelative />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

@@ -1783,7 +1783,7 @@ func (r *Campaign) GetCampaignStats(ctx context.Context, campaignID *uuid.UUID) 
 func (r *Campaign) GetAllCampaignStats(ctx context.Context, companyID *uuid.UUID) ([]database.CampaignStats, error) {
 	var stats []database.CampaignStats
 
-	db := r.DB.WithContext(ctx).Order("created_at DESC")
+	db := r.DB.WithContext(ctx).Order("campaign_start_date DESC NULLS LAST, created_at DESC")
 
 	if companyID != nil {
 		db = db.Where("company_id = ?", companyID)
@@ -1817,7 +1817,7 @@ func (r *Campaign) DeleteCampaignStats(ctx context.Context, campaignID *uuid.UUI
 func (r *Campaign) GetManualCampaignStats(ctx context.Context, companyID *uuid.UUID) ([]database.CampaignStats, error) {
 	var stats []database.CampaignStats
 
-	db := r.DB.WithContext(ctx).Where("campaign_id IS NULL").Order("created_at DESC")
+	db := r.DB.WithContext(ctx).Where("campaign_id IS NULL").Order("campaign_start_date DESC NULLS LAST, created_at DESC")
 
 	if companyID != nil {
 		db = db.Where("company_id = ?", companyID)

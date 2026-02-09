@@ -287,20 +287,19 @@
 		// ignore errors
 	}
 
-	// Filtered campaigns based on selected time range (using sendStartAt or createdAt)
+	// Filtered campaigns based on selected time range (using sendStartAt)
 	$: filteredCampaignStats = (() => {
 		if (!campaignStats || campaignStats.length === 0) return [];
 		const range = Number(selectedTimeRange);
 		const now = new Date();
 		const cutoff = new Date(now.getFullYear(), now.getMonth() - range + 1, 1);
 		return campaignStats.filter((c) => {
-			const startDate = c.sendStartAt
-				? new Date(c.sendStartAt)
-				: c.createdAt
-					? new Date(c.createdAt)
-					: c.date instanceof Date
-						? c.date
-						: new Date(c.date);
+			// filter out stats with no dates (data integrity issue)
+			if (!c.campaignStartDate && !c.createdAt) {
+				console.warn('Filtering out campaign stat with missing dates:', c);
+				return false;
+			}
+			const startDate = c.campaignStartDate ? new Date(c.campaignStartDate) : new Date(c.createdAt);
 			return startDate >= cutoff;
 		});
 	})();
@@ -335,17 +334,18 @@
 		};
 	})();
 
-	// Update chartData to use filteredCampaignStats, using sendStartAt or createdAt as date, and sort by date ascending
+	// Update chartData to use filteredCampaignStats, using sendStartAt as date, and sort by date ascending
 	$: chartData = filteredCampaignStats
+		.filter((c) => {
+			if (!c.campaignStartDate && !c.createdAt) {
+				console.warn('Skipping campaign stat with missing dates in chart data:', c);
+				return false;
+			}
+			return true;
+		})
 		.map((c) => ({
 			...c,
-			date: c.sendStartAt
-				? new Date(c.sendStartAt)
-				: c.createdAt
-					? new Date(c.createdAt)
-					: c.date instanceof Date
-						? c.date
-						: new Date(c.date),
+			date: c.campaignStartDate ? new Date(c.campaignStartDate) : new Date(c.createdAt),
 			name: c.campaignName || c.name || c.title || ''
 		}))
 		.sort((a, b) => a.date.getTime() - b.date.getTime());
