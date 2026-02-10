@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.30.3] - 2026-02-10
+- Fix saved pagination value is handled by url params
+- Fix custom stat campaign start date
+- Fix missing sort column mapping for name on domain and allow deny
+
 ## [1.30.2] - 2026-02-08
 - Fix authenticated blind SQL injection related to orphaned recipients. 
  
