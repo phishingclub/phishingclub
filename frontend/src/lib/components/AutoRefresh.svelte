@@ -4,6 +4,7 @@
 	import { page } from '$app/stores';
 	import TextFieldSelect from './TextFieldSelect.svelte';
 	import { BiMap } from '$lib/utils/maps';
+	import { activeFormElement } from '$lib/store/activeFormElement';
 
 	export let onRefresh;
 	export let isLoading = false;
@@ -37,7 +38,8 @@
 		stopAutoRefresh();
 		if ($autoRefreshStore.enabled && $autoRefreshStore.interval > 0) {
 			intervalId = setInterval(async () => {
-				if (!$autoRefreshStore.enabled || isLoading) return;
+				// skip refresh if disabled, loading, or a dropdown is open
+				if (!$autoRefreshStore.enabled || isLoading || $activeFormElement !== null) return;
 				await onRefresh();
 			}, $autoRefreshStore.interval);
 		}
