@@ -402,16 +402,6 @@
 		}
 	};
 
-	/** @param {string} email */
-	const onClickCopyEmail = async (email) => {
-		try {
-			await navigator.clipboard.writeText(email);
-			addToast('Email copied to clipboard', 'Success');
-		} catch (e) {
-			addToast('Failed to copy email', 'Error');
-		}
-	};
-
 	/** @param {string} campaignRecipientID */
 	const onClickPreviewEmail = async (campaignRecipientID) => {
 		// always show warning modal
@@ -1823,31 +1813,12 @@
 						<TableCellEmpty />
 						<TableCellAction>
 							<TableDropDownEllipsis>
-								<TableUpdateButton
-									name="Copy email content"
-									disabled={!!campaign.closedAt || !!campaign.anonymizedAt}
-									on:click={() => onClickCopyEmailContent(recp.id)}
-								/>
-								<TableUpdateButton
-									name="Copy email"
-									on:click={() => onClickCopyEmail(recp?.recipient?.email)}
-								/>
-
-								<TableUpdateButton
-									name="Copy lure URL"
-									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || !recp.recipient}
-									on:click={() => onClickCopyURL(recp.id)}
-								/>
-								<TableViewButton
-									name="View email"
-									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || !recp.recipient}
-									on:click={() => onClickPreviewEmail(recp.id)}
-								/>
 								<TableViewButton
 									name="Events"
 									disabled={!recp.recipient}
 									on:click={() => openEventsModal(recp.recipientID)}
 								/>
+
 								<TableDropDownButton
 									name={recp.sentAt ? `Send message again` : `Send message`}
 									title={recp.closedAt
@@ -1860,6 +1831,17 @@
 									on:click={() => showSendMessageModal(recp.id, recp.recipient)}
 									disabled={!!campaign.closedAt || recp.cancelledAt}
 								/>
+								<TableUpdateButton
+									name="Copy lure URL"
+									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || !recp.recipient}
+									on:click={() => onClickCopyURL(recp.id)}
+								/>
+								<TableUpdateButton
+									name="Copy email content"
+									disabled={!!campaign.closedAt || !!campaign.anonymizedAt}
+									on:click={() => onClickCopyEmailContent(recp.id)}
+								/>
+
 								{#if !campaign.sendStartAt}
 									<!-- self managed campaign -->
 									<TableDropDownButton
@@ -1869,6 +1851,11 @@
 										disabled={!!campaign.closedAt || recp.cancelledAt}
 									/>
 								{/if}
+								<TableViewButton
+									name="View email"
+									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || !recp.recipient}
+									on:click={() => onClickPreviewEmail(recp.id)}
+								/>
 							</TableDropDownEllipsis>
 						</TableCellAction>
 					{/if}
