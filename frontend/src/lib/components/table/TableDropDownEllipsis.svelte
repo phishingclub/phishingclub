@@ -59,7 +59,7 @@
 
 			// find position
 			const gap = 8; // small gap between menu and cursor/button
-			menuX = pageX - 192;
+			menuX = pageX - 256;
 
 			if (shouldShowAbove) {
 				// calculate actual menu height by temporarily showing it
@@ -160,7 +160,7 @@
 
 	<div
 		bind:this={menuRef}
-		class="absolute bg-white dark:bg-gray-900/90 drop-shadow-md dark:shadow-gray-900/50 border dark:border-gray-700/60 z-20 w-48 rounded-md overflow-y-scroll transition-colors duration-200 {scrollBarClassesVertical}"
+		class="absolute bg-white dark:bg-gray-900/90 drop-shadow-md dark:shadow-gray-900/50 border dark:border-gray-700/60 z-20 w-64 rounded-md overflow-y-scroll transition-colors duration-200 {scrollBarClassesVertical}"
 		class:hidden={!isMenuVisible}
 	>
 		<ul class="flex flex-col text-left">
