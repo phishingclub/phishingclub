@@ -1225,9 +1225,11 @@
 								<strong>Note:</strong> This is not a substitute for having proper automated and tested
 								backup and recovery plans at the operating system level.
 							</p>
-							<div class="bg-blue-50 p-4 rounded-md">
-								<h3 class="font-semibold text-blue-800 mb-2">What will be backed up:</h3>
-								<ul class="text-sm text-blue-700 space-y-1">
+							<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
+								<h3 class="font-semibold text-gray-900 dark:text-white mb-2">
+									What will be backed up:
+								</h3>
+								<ul class="text-sm text-gray-700 dark:text-gray-300 space-y-1">
 									<li>• SQLite database (including WAL files)</li>
 									<li>• Asset files</li>
 									<li>• Attachment files</li>
@@ -1235,9 +1237,9 @@
 								</ul>
 							</div>
 
-							<div class="bg-yellow-50 p-4 rounded-md">
-								<h3 class="font-semibold text-yellow-800 mb-2">Important:</h3>
-								<ul class="text-sm text-yellow-700 space-y-1">
+							<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
+								<h3 class="font-semibold text-gray-900 dark:text-white mb-2">Important:</h3>
+								<ul class="text-sm text-gray-700 dark:text-gray-300 space-y-1">
 									<li>• Large databases may take significant time to backup</li>
 									<li>• Operations may be affected during the backup process</li>
 									<li>• Ensure you have sufficient disk space</li>
