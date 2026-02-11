@@ -2823,16 +2823,18 @@ export class API {
 		 * @param {string} allowdeny.cidrs
 		 * @param {string} allowdeny.ja4Fingerprints
 		 * @param {string} allowdeny.countryCodes
+		 * @param {string} allowdeny.headers
 		 * @param {boolean} allowdeny.allowed
 		 * @param {string} allowdeny.companyID
 		 * @returns {Promise<ApiResponse>}
 		 */
-		create: async ({ name, cidrs, ja4Fingerprints, countryCodes, allowed, companyID }) => {
+		create: async ({ name, cidrs, ja4Fingerprints, countryCodes, headers, allowed, companyID }) => {
 			return await postJSON(this.getPath('/allow-deny'), {
 				name: name,
 				cidrs: cidrs,
 				ja4Fingerprints: ja4Fingerprints,
 				countryCodes: countryCodes,
+				headers: headers,
 				allowed: allowed,
 				companyID: companyID
 			});
@@ -2885,15 +2887,17 @@ export class API {
 		 * @param {string} allowdeny.cidrs
 		 * @param {string} allowdeny.ja4Fingerprints
 		 * @param {string} allowdeny.countryCodes
+		 * @param {string} allowdeny.headers
 		 * @param {string} allowdeny.companyID
 		 * @returns {Promise<ApiResponse>}
 		 */
-		update: async ({ id, name, cidrs, ja4Fingerprints, countryCodes, companyID }) => {
+		update: async ({ id, name, cidrs, ja4Fingerprints, countryCodes, headers, companyID }) => {
 			return await patchJSON(this.getPath(`/allow-deny/${id}`), {
 				name: name,
 				cidrs: cidrs,
 				ja4Fingerprints: ja4Fingerprints,
 				countryCodes: countryCodes,
+				headers: headers,
 				companyID: companyID
 			});
 		},

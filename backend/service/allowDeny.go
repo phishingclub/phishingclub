@@ -133,6 +133,9 @@ func (s *AllowDeny) Update(
 	if v, err := incoming.CountryCodes.Get(); err == nil {
 		current.CountryCodes.Set(v)
 	}
+	if v, err := incoming.Headers.Get(); err == nil {
+		current.Headers.Set(v)
+	}
 	// allow can not be changed as it could mess up a campaign that
 	// uses multiple entries as all entries must be allow or deny.
 

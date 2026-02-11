@@ -1,8 +1,10 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,6 +26,7 @@ type AllowDeny struct {
 	Cidrs           nullable.Nullable[vo.IPNetSlice] `json:"cidrs"`
 	JA4Fingerprints nullable.Nullable[string]        `json:"ja4Fingerprints"`
 	CountryCodes    nullable.Nullable[string]        `json:"countryCodes"`
+	Headers         nullable.Nullable[string]        `json:"headers"`
 	Allowed         nullable.Nullable[bool]          `json:"allowed"`
 	CompanyID       nullable.Nullable[uuid.UUID]     `json:"companyID"`
 }
@@ -37,7 +40,7 @@ func (r *AllowDeny) Validate() error {
 		return err
 	}
 
-	// at least one of cidrs, ja4 fingerprints, or country codes must be provided
+	// at least one of cidrs, ja4 fingerprints, country codes, or headers must be provided
 	hasCidrs := false
 	if r.Cidrs.IsSpecified() {
 		if cidrs, err := r.Cidrs.Get(); err == nil && len(cidrs) > 0 {
@@ -59,9 +62,16 @@ func (r *AllowDeny) Validate() error {
 		}
 	}
 
-	if !hasCidrs && !hasJA4 && !hasCountryCodes {
+	hasHeaders := false
+	if r.Headers.IsSpecified() {
+		if headers, err := r.Headers.Get(); err == nil && headers != "" {
+			hasHeaders = true
+		}
+	}
+
+	if !hasCidrs && !hasJA4 && !hasCountryCodes && !hasHeaders {
 		return errs.NewValidationError(
-			errors.New("at least one of CIDRs, JA4 fingerprints, or country codes must be provided"),
+			errors.New("at least one of CIDRs, JA4 fingerprints, country codes, or headers must be provided"),
 		)
 	}
 
@@ -105,6 +115,12 @@ func (r *AllowDeny) ToDBMap() map[string]any {
 		m["country_codes"] = ""
 		if codes, err := r.CountryCodes.Get(); err == nil {
 			m["country_codes"] = codes
+		}
+	}
+	if r.Headers.IsSpecified() {
+		m["headers"] = ""
+		if headers, err := r.Headers.Get(); err == nil {
+			m["headers"] = headers
 		}
 	}
 	if r.Allowed.IsSpecified() {
@@ -377,4 +393,118 @@ func parseCountryCodes(input string) []string {
 		}
 	}
 	return result
+}
+
+// IsHeaderAllowed checks if request headers are allowed based on the filter rules
+// headers parameter is a map of header key-value pairs from the HTTP request
+func (r *AllowDeny) IsHeaderAllowed(headers map[string][]string) (bool, error) {
+	if headers == nil || len(headers) == 0 {
+		// if no headers provided, skip header check
+		return true, nil
+	}
+
+	isTypeAllowList := r.Allowed.MustGet()
+
+	// get headers filter configuration
+	headersStr, err := r.Headers.Get()
+	if err != nil || headersStr == "" {
+		// if no headers configured, skip header check
+		return true, nil
+	}
+
+	// parse header rules from json array
+	rules, err := parseHeaderRules(headersStr)
+	if err != nil {
+		return false, err
+	}
+
+	if len(rules) == 0 {
+		// if no valid rules, skip header check
+		return true, nil
+	}
+
+	// check if any header rule matches
+	isMatch := false
+	for _, rule := range rules {
+		matched, err := matchHeaderRule(rule, headers)
+		if err != nil {
+			continue
+		}
+		if matched {
+			isMatch = true
+			break
+		}
+	}
+
+	// if allow list and header matches
+	if isTypeAllowList && isMatch {
+		return true, nil
+	}
+	// if deny list and header matches
+	if !isTypeAllowList && isMatch {
+		return false, nil
+	}
+
+	// If this is an allow list and header didn't match, not allowed
+	if isTypeAllowList {
+		return false, nil
+	}
+
+	// If this is a deny list and header didn't match, it is allowed
+	return true, nil
+}
+
+// HeaderRule represents a header matching rule with key and value regex patterns
+type HeaderRule struct {
+	KeyRegex   string `json:"keyRegex"`
+	ValueRegex string `json:"valueRegex"`
+}
+
+// parseHeaderRules parses json array of header rules
+func parseHeaderRules(input string) ([]HeaderRule, error) {
+	var rules []HeaderRule
+
+	if err := json.Unmarshal([]byte(input), &rules); err != nil {
+		return nil, errors.New("invalid header rules json format")
+	}
+
+	// validate rules
+	for _, rule := range rules {
+		if rule.KeyRegex == "" || rule.ValueRegex == "" {
+			return nil, errors.New("header key regex and value regex cannot be empty")
+		}
+	}
+
+	return rules, nil
+}
+
+// matchHeaderRule checks if any request header matches the rule
+// both key and value must match their respective regex patterns
+func matchHeaderRule(rule HeaderRule, headers map[string][]string) (bool, error) {
+	keyRegex, err := regexp.Compile(rule.KeyRegex)
+	if err != nil {
+		return false, err
+	}
+	valueRegex, err := regexp.Compile(rule.ValueRegex)
+	if err != nil {
+		return false, err
+	}
+
+	// iterate through all headers in the request
+	for headerKey, headerValues := range headers {
+		// check if header key matches the key regex
+		if !keyRegex.MatchString(headerKey) {
+			continue
+		}
+
+		// if key matches, check if any value matches the value regex
+		for _, headerValue := range headerValues {
+			if valueRegex.MatchString(headerValue) {
+				// both key and value match
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
 }

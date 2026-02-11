@@ -90,7 +90,7 @@
 		}
 	];
 
-	const ipFilterOptions = [
+	const filteringOptions = [
 		{
 			label: 'None',
 			value: 'none',
@@ -256,7 +256,7 @@
 		showSecurityOptions = true;
 	}
 
-	// reactive statement to clear evasion page and IP filtering when deny page is cleared
+	// reactive statement to clear evasion page and filtering when deny page is cleared
 	$: if (!formValues.denyPageValue) {
 		if (formValues.evasionPageValue) {
 			formValues.evasionPageValue = null;
@@ -583,13 +583,13 @@
 	};
 
 	const validateMisc = () => {
-		// validate that deny page is selected if evasion page or IP filtering is used
+		// validate that deny page is selected if evasion page or filtering is used
 		if (formValues.evasionPageValue && !formValues.denyPageValue) {
 			modalError = 'Deny page is required when using an evasion page';
 			return false;
 		}
 		if (allowDenyType !== 'none' && !formValues.denyPageValue) {
-			modalError = 'Deny page is required when using IP filtering';
+			modalError = 'Deny page is required when using filtering';
 			return false;
 		}
 		return checkCurrentStepValidity();
@@ -1961,7 +1961,7 @@
 									id="deny-page"
 									bind:value={formValues.denyPageValue}
 									optional
-									toolTipText="Page to show when access is denied. Required for evasion pages and IP filtering."
+									toolTipText="Page to show when access is denied. Required for evasion pages and filtering."
 									onSelect={(page) => {
 										formValues.denyPageValue = page;
 									}}
@@ -1997,9 +1997,9 @@
 							<div class="mb-6">
 								{#if formValues.denyPageValue}
 									<SelectSquare
-										label="IP filtering"
-										toolTipText="Filter access based on IP address lists"
-										options={ipFilterOptions}
+										label="Filtering"
+										toolTipText="Filter access based on allow / deny lists"
+										options={filteringOptions}
 										width="small"
 										bind:value={allowDenyType}
 										onChange={() => {
@@ -2011,7 +2011,7 @@
 										<div class="mt-4">
 											<TextFieldMultiSelect
 												id="allowDenyIDs"
-												toolTipText="Select the IP groups to allow or block"
+												toolTipText="Select the alloy / deny filters"
 												bind:value={formValues.allowDeny}
 												options={Array.from(allowDenyMap.values())}>Lists</TextFieldMultiSelect
 											>
@@ -2022,8 +2022,8 @@
 										class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600"
 									>
 										<p class="text-gray-600 dark:text-gray-400 text-sm">
-											<strong>IP filtering mode</strong><br />
-											You must select a deny page first to use IP filtering.
+											<strong>Filtering mode</strong><br />
+											You must select a deny page first to use filtering.
 										</p>
 									</div>
 								{/if}
@@ -2288,7 +2288,7 @@
 									</h3>
 									<div class="grid grid-cols-[120px_1fr] gap-y-3">
 										<ConditionalDisplay show="blackbox">
-											<span class="text-grayblue-dark font-medium">IP Filtering:</span>
+											<span class="text-grayblue-dark font-medium">Filtering:</span>
 											<span class="text-pc-darkblue dark:text-white">
 												{#if allowDenyType === 'none'}
 													None

@@ -383,5 +383,20 @@ func migrate(db *gorm.DB) error {
 		return errs.Wrap(err)
 	}
 
+	// migration for allow_denies.headers
+	// first add column as nullable
+	if err := db.Exec(`ALTER TABLE allow_denies ADD COLUMN headers TEXT`).Error; err != nil {
+		// column might already exist, ignore error
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "duplicate") && !strings.Contains(errMsg, "already exists") {
+			return errs.Wrap(err)
+		}
+	}
+
+	// update existing rows to have empty string default
+	if err := db.Exec(`UPDATE allow_denies SET headers = '' WHERE headers IS NULL`).Error; err != nil {
+		return errs.Wrap(err)
+	}
+
 	return nil
 }

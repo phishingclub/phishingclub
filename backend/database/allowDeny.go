@@ -21,6 +21,7 @@ type AllowDeny struct {
 	Cidrs           string     `gorm:"not null;default:''"`
 	JA4Fingerprints string     `gorm:"not null;default:''"`
 	CountryCodes    string     `gorm:"not null;default:''"`
+	Headers         string     `gorm:"not null;default:''"`
 	Allowed         bool       `gorm:"not null;"`
 }
 

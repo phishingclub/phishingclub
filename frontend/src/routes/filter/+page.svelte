@@ -6,6 +6,7 @@
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
+	import ToolTip from '$lib/components/ToolTip.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
@@ -46,6 +47,7 @@
 		cidrs: null,
 		ja4Fingerprints: null,
 		countryCodes: [],
+		headers: [],
 		allowed: null
 	};
 	let allowDenyList = [];
@@ -150,13 +152,15 @@
 	};
 
 	const onClickSubmit = async () => {
-		// validate that at least one of cidrs, ja4Fingerprints, or countryCodes is provided
+		// validate that at least one of cidrs, ja4Fingerprints, countryCodes, or headers is provided
 		const hasCidrs = formValues.cidrs && formValues.cidrs.trim().length > 0;
 		const hasJA4 = formValues.ja4Fingerprints && formValues.ja4Fingerprints.trim().length > 0;
 		const hasCountryCodes = formValues.countryCodes && formValues.countryCodes.length > 0;
+		const hasHeaders = formValues.headers && formValues.headers.length > 0;
 
-		if (!hasCidrs && !hasJA4 && !hasCountryCodes) {
-			formError = 'At least one of CIDRs, JA4 fingerprints, or Country Codes must be provided';
+		if (!hasCidrs && !hasJA4 && !hasCountryCodes && !hasHeaders) {
+			formError =
+				'At least one of CIDRs, JA4 fingerprints, Country Codes, or Headers must be provided';
 			return;
 		}
 
@@ -189,11 +193,17 @@
 		}
 
 		try {
+			// convert headers array to json string
+			const headersStr = JSON.stringify(
+				formValues.headers.filter((h) => h.keyRegex && h.valueRegex)
+			);
+
 			const res = await api.allowDeny.create({
 				name: formValues.name,
 				cidrs: formValues.cidrs,
 				ja4Fingerprints: formValues.ja4Fingerprints || '',
 				countryCodes: formValues.countryCodes.join('\n'),
+				headers: headersStr,
 				allowed: formValues.allowed,
 				companyID: contextCompanyID
 			});
@@ -225,12 +235,18 @@
 		}
 
 		try {
+			// convert headers array to json string
+			const headersStr = JSON.stringify(
+				formValues.headers.filter((h) => h.keyRegex && h.valueRegex)
+			);
+
 			const res = await api.allowDeny.update({
 				id: formValues.id,
 				name: formValues.name,
 				cidrs: formValues.cidrs,
 				ja4Fingerprints: formValues.ja4Fingerprints || '',
 				countryCodes: formValues.countryCodes.join('\n'),
+				headers: headersStr,
 				companyID: formValues.companyID
 			});
 			if (res.success) {
@@ -334,15 +350,35 @@
 				.filter((code) => code.length > 0);
 		}
 
+		// parse headers from json string to array
+		let headersArray = [];
+		if (allowDeny.headers) {
+			try {
+				headersArray = JSON.parse(allowDeny.headers);
+			} catch (e) {
+				console.error('failed to parse headers json', e);
+				headersArray = [];
+			}
+		}
+
 		formValues = {
 			id: allowDeny.id,
 			name: allowDeny.name,
 			cidrs: allowDeny.cidrs,
 			ja4Fingerprints: allowDeny.ja4Fingerprints || '',
 			countryCodes: countryCodesArray,
+			headers: headersArray,
 			allowed: allowDeny.allowed,
 			companyID: allowDeny.companyID
 		};
+	};
+
+	const addHeaderRule = () => {
+		formValues.headers = [...formValues.headers, { keyRegex: '', valueRegex: '' }];
+	};
+
+	const removeHeaderRule = (index) => {
+		formValues.headers = formValues.headers.filter((_, i) => i !== index);
 	};
 
 	/** @param {string} ip */
@@ -438,18 +474,79 @@
 							bind:value={formValues.allowed}
 						/>
 					{/if}
-					<TextareaField
-						optional
-						bind:value={formValues.cidrs}
-						placeholder="8.8.8.8/16"
-						toolTipText="Newlines seperated CIDRs (optional)">CIDRs</TextareaField
-					>
+					<div class="mb-6 pt-4">
+						<label class="flex flex-col">
+							<div class="flex items-center py-2">
+								<p class="font-semibold text-slate-600 dark:text-gray-400">Header Rules</p>
+								<ToolTip>
+									Add header key/value regex patterns to match. Both key and value must match for
+									the rule to trigger.
+								</ToolTip>
+								<div
+									class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+								>
+									<p
+										class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200"
+									>
+										optional
+									</p>
+								</div>
+							</div>
+							<div class="space-y-3 min-w-[700px]">
+								{#each formValues.headers as header, index}
+									<div class="flex gap-2">
+										<div class="flex-1">
+											<TextField
+												bind:value={header.keyRegex}
+												placeholder="user-agent"
+												width="full"
+												required={false}>Key Regex</TextField
+											>
+										</div>
+										<div class="flex-1">
+											<TextField
+												bind:value={header.valueRegex}
+												placeholder=".*bot.*"
+												width="full"
+												required={false}>Value Regex</TextField
+											>
+										</div>
+										<div class="flex items-end pb-2">
+											<button
+												type="button"
+												class="p-2 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
+												on:click={() => removeHeaderRule(index)}
+												title="Remove this header rule"
+												aria-label="Remove header rule"
+											>
+												<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
+											</button>
+										</div>
+									</div>
+								{/each}
+								<button
+									type="button"
+									class="px-4 py-2 bg-gradient-to-b from-blue-500 to-indigo-400 dark:from-blue-600 dark:to-indigo-500 hover:from-blue-400 hover:to-indigo-400 dark:hover:from-blue-500 dark:hover:to-indigo-400 text-white font-semibold rounded-md transition-all duration-200"
+									on:click={addHeaderRule}
+								>
+									+ Add Header Rule
+								</button>
+							</div>
+						</label>
+					</div>
 					<TextareaField
 						optional
 						bind:value={formValues.ja4Fingerprints}
 						placeholder="t13d1715h2_8daaf6152771_02713d6af862"
-						toolTipText="Newlines separated JA4 fingerprints (optional)"
-						>JA4 Fingerprints</TextareaField
+						toolTipText="Newlines separated JA4 fingerprints (does not work behind Reverse Proxy)"
+						fullWidth>JA4 Fingerprints</TextareaField
+					>
+					<TextareaField
+						optional
+						bind:value={formValues.cidrs}
+						placeholder="192.168.1.0/24"
+						toolTipText="Newlines seperated CIDRs"
+						fullWidth>CIDRs</TextareaField
 					>
 					<TextFieldMultiSelect
 						id="country-codes"
@@ -457,9 +554,9 @@
 						bind:value={formValues.countryCodes}
 						options={availableCountryCodes}
 						placeholder="Select countries..."
-						toolTipText="Select country codes to filter (optional)"
+						toolTipText="Filter based on GeoIP country code lookup"
 					>
-						Country Codes
+						GeoIP Country Codes
 					</TextFieldMultiSelect>
 				</FormColumn>
 			</FormColumns>

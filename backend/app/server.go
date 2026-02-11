@@ -2300,12 +2300,20 @@ func (s *Server) checkIPFilter(
 
 		// check country code filter
 		countryOk := allowDeny.IsCountryAllowed(countryCode)
-		// for allow lists: all filters (IP, JA4, country) must pass
+
+		// check header filter
+		headers := ctx.Request.Header
+		headerOk, err := allowDeny.IsHeaderAllowed(headers)
+		if err != nil {
+			return false, errs.Wrap(err)
+		}
+
+		// for allow lists: all filters (IP, JA4, country, headers) must pass
 		// for deny lists: any filter failing blocks the request
 		if isAllowListing {
 			// allow list: all must be allowed
-			if ipOk && ja4Ok && countryOk {
-				s.logger.Debugw("IP, JA4, and country are allow listed",
+			if ipOk && ja4Ok && countryOk && headerOk {
+				s.logger.Debugw("IP, JA4, country, and headers are allow listed",
 					"ip", ip,
 					"ja4", ja4,
 					"country", countryCode,
@@ -2317,14 +2325,15 @@ func (s *Server) checkIPFilter(
 			}
 		} else {
 			// deny list: if any filter denies, block the request
-			if !ipOk || !ja4Ok || !countryOk {
-				s.logger.Debugw("IP, JA4, or country is deny listed",
+			if !ipOk || !ja4Ok || !countryOk || !headerOk {
+				s.logger.Debugw("IP, JA4, country, or headers is deny listed",
 					"ip", ip,
 					"ja4", ja4,
 					"country", countryCode,
 					"ipOk", ipOk,
 					"ja4Ok", ja4Ok,
 					"countryOk", countryOk,
+					"headerOk", headerOk,
 					"list name", allowDeny.Name.MustGet().String(),
 					"list id", allowDeny.ID.MustGet().String(),
 				)
@@ -2334,7 +2343,7 @@ func (s *Server) checkIPFilter(
 		}
 	}
 	if !allowed {
-		s.logger.Debugw("IP, JA4, or country is not allowed",
+		s.logger.Debugw("IP, JA4, country, or headers is not allowed",
 			"ip", ip,
 			"ja4", ja4,
 			"country", countryCode,

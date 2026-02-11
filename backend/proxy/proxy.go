@@ -4909,17 +4909,25 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 
 		// check country code filter
 		countryOk := allowDeny.IsCountryAllowed(countryCode)
-		// for allow lists: all filters (IP, JA4, country) must pass
+
+		// check header filter
+		headers := req.Header
+		headerOk, err := allowDeny.IsHeaderAllowed(headers)
+		if err != nil {
+			continue
+		}
+
+		// for allow lists: all filters (IP, JA4, country, headers) must pass
 		// for deny lists: any filter failing blocks the request
 		if isAllowListing {
 			// allow list: all must be allowed
-			if ipOk && ja4Ok && countryOk {
+			if ipOk && ja4Ok && countryOk && headerOk {
 				allowed = true
 				break
 			}
 		} else {
 			// deny list: if any filter denies, block the request
-			if !ipOk || !ja4Ok || !countryOk {
+			if !ipOk || !ja4Ok || !countryOk || !headerOk {
 				allowed = false
 				break
 			}
