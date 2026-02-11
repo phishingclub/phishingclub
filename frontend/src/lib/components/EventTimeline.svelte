@@ -103,6 +103,9 @@
 	let use24Hour = true;
 	let initialized = false;
 	let showFilterDropdown = false;
+	let followCurrentTime = false;
+	let previousFollowCurrentTime = false;
+	let isFollowUpdating = false;
 
 	// tooltip state (reactive for svelte template)
 	let tooltipVisible = false;
@@ -266,12 +269,38 @@
 			if (currentTimeWindow) {
 				currentTimeWindow.attr('x', xWindowStart).attr('width', windowWidth).attr('opacity', 0.5);
 			}
+
+			// if following current time, keep the view centered on now
+			// recenter on every tick to move in sync with now indicator
+			if (followCurrentTime && zoom && svg) {
+				isFollowUpdating = true;
+				centerOnTime(nowDate);
+				isFollowUpdating = false;
+			}
 		} else {
 			currentTimeIndicator.attr('opacity', 0);
 			if (currentTimeWindow) {
 				currentTimeWindow.attr('opacity', 0);
 			}
 		}
+	}
+
+	function centerOnTime(date) {
+		if (!xScale || !zoom || !svg) return;
+
+		const currentScale = currentTransform ? currentTransform.k : 1;
+
+		const targetX = xScale(date);
+		const centerX = width / 2;
+
+		// calculate the translation needed to center the target date
+		const translateX = centerX - targetX * currentScale;
+
+		// create new transform
+		const newTransform = d3.zoomIdentity.translate(translateX, 0).scale(currentScale);
+
+		// apply transform instantly
+		d3.select(svg).call(zoom.transform, newTransform);
 	}
 
 	function updateAxesImmediate(scale) {
@@ -456,15 +485,24 @@
 	function handleZoom(event) {
 		if (!xScale) return;
 
+		// skip all processing if this is a follow mode update
+		if (isFollowUpdating) {
+			currentTransform = event.transform;
+			pendingScale = currentTransform.rescaleX(xScale);
+			return;
+		}
+
 		currentTransform = event.transform;
 		pendingScale = currentTransform.rescaleX(xScale);
 
 		// schedule RAF update for circle positions
 		scheduleZoomUpdate();
 
-		// hide time indicator during interaction
-		if (currentTimeIndicator) currentTimeIndicator.attr('opacity', 0);
-		if (currentTimeWindow) currentTimeWindow.attr('opacity', 0);
+		// hide time indicator during interaction (only if user-initiated)
+		if (event.sourceEvent) {
+			if (currentTimeIndicator) currentTimeIndicator.attr('opacity', 0);
+			if (currentTimeWindow) currentTimeWindow.attr('opacity', 0);
+		}
 
 		// debounce expensive operations (axis, virtualization)
 		updateAxesDebounced(pendingScale);
@@ -472,6 +510,13 @@
 
 	function handleZoomEnd() {
 		if (!pendingScale) return;
+
+		// skip processing if this is a follow mode update to prevent infinite loop
+		if (isFollowUpdating) {
+			// but still update circle positions so events move with the timeline
+			updateCirclePositionsFast(pendingScale);
+			return;
+		}
 
 		// on zoom end, do full re-render with virtualization
 		renderCircles(pendingScale);
@@ -826,11 +871,13 @@
 	// reactive: initialize timeline
 	$: if (container && svg && !initialized) {
 		initializeTimeline();
+	}
+
+	// reactive: update interval for now indicator (same rate whether following or not)
+	$: if (initialized && xScale) {
 		if (currentTimeIntervalId) clearInterval(currentTimeIntervalId);
 		currentTimeIntervalId = setInterval(() => {
-			if (initialized && xScale) {
-				updateCurrentTimeIndicatorImmediate();
-			}
+			updateCurrentTimeIndicatorImmediate();
 		}, CURRENT_TIME_UPDATE_MS);
 	}
 
@@ -843,6 +890,25 @@
 	$: if (initialized && xScale && use24Hour !== undefined) {
 		const scale = currentTransform ? currentTransform.rescaleX(xScale) : xScale;
 		updateAxesImmediate(scale);
+	}
+
+	// reactive: follow mode toggled on
+	$: {
+		if (
+			followCurrentTime !== previousFollowCurrentTime &&
+			followCurrentTime &&
+			initialized &&
+			xScale &&
+			zoom &&
+			svg
+		) {
+			previousFollowCurrentTime = followCurrentTime;
+			// when follow mode is enabled, immediately center on current time
+			const now = new Date();
+			centerOnTime(now);
+		} else if (!followCurrentTime && previousFollowCurrentTime !== followCurrentTime) {
+			previousFollowCurrentTime = followCurrentTime;
+		}
 	}
 
 	// reactive: filter dropdown click outside
@@ -1059,6 +1125,12 @@
 						</div>
 					{/if}
 				</div>
+				<label
+					class="inline-flex items-center gap-1 px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+				>
+					Follow:
+					<input type="checkbox" bind:checked={followCurrentTime} class="accent-blue-600" />
+				</label>
 				<button
 					on:click={resetZoom}
 					class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 focus:outline-none focus:border-slate-400 dark:focus:border-highlight-blue/80 transition-colors duration-200"
