@@ -11,6 +11,7 @@ type CampaignEvent struct {
 	ID           *uuid.UUID            `json:"id"`
 	CreatedAt    *time.Time            `json:"createdAt"`
 	CampaignID   *uuid.UUID            `json:"campaignID"`
+	Campaign     *Campaign             `json:"campaign,omitempty"`
 	IP           *vo.OptionalString64  `json:"ip"`
 	UserAgent    *vo.OptionalString255 `json:"userAgent"`
 	Data         *vo.OptionalString1MB `json:"data"`

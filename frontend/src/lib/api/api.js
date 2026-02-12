@@ -808,6 +808,21 @@ export class API {
 		},
 
 		/**
+		 * Get all events across campaigns.
+		 *
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAllEvents: async (options, companyID = null) => {
+			return await getJSON(
+				this.getPath(
+					`/campaign/events?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`
+				)
+			);
+		},
+
+		/**
 		 * Get campaigns stats
 		 * if no company ID is provided it retrieves the global stats including all companies
 		 */

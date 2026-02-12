@@ -24,19 +24,26 @@
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import { fetchAllRows } from '$lib/utils/api-utils';
 	import { tick } from 'svelte';
+	import EventName from '$lib/components/table/EventName.svelte';
+	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import { autoRefreshStore, setPageAutoRefresh } from '$lib/store/autoRefresh';
+	import { BiMap } from '$lib/utils/maps';
 
 	// services
 	const appStateService = AppStateService.instance;
 
+	// auto-refresh options
+	const autoRefreshOptions = new BiMap({
+		Disabled: '0',
+		'5s': '5000',
+		'30s': '30000',
+		'1m': '60000',
+		'5m': '300000'
+	});
+
 	// local state
 	let contextCompanyID = null;
 	let contextCompanyName = '';
-	let completedTableURLParams = newTableURLParams({
-		prefix: 'completed',
-		sortBy: 'send_start_at',
-		sortOrder: 'desc',
-		noScroll: true
-	});
 	let scheduledTableURLParams = newTableURLParams({
 		prefix: 'scheduled',
 		sortBy: 'send_start_at',
@@ -49,10 +56,16 @@
 		sortOrder: 'desc',
 		noScroll: true
 	});
+	let eventsTableURLParams = newTableURLParams({
+		prefix: 'events',
+		sortBy: 'created_at',
+		sortOrder: 'desc',
+		noScroll: true
+	});
 
 	let isActiveCampaignsLoading = false;
 	let isUpcomingCampaignsLoading = false;
-	let isFinishedCampaignsLoading = false;
+	let isEventsLoading = false;
 
 	let active = 0;
 	let scheduled = 0;
@@ -65,8 +78,11 @@
 	let activeCampaignsHasNextPage = true;
 	let scheduledCampaigns = [];
 	let scheduledCampaignsHasNextPage = true;
-	let completedCampaigns = [];
-	let completedCampaignsHasNextPage = true;
+	let events = [];
+	let eventsHasNextPage = true;
+	let eventTypesIDToNameMap = {};
+	let availableEventTypes = [];
+	let selectedEventType = '';
 	let campaignStats = [];
 	let isCampaignStatsLoading = false;
 
@@ -86,6 +102,13 @@
 		await refresh(false);
 	};
 
+	const handleAutoRefreshChange = (optKey) => {
+		const value = Number(autoRefreshOptions.byKey(optKey));
+		autoRefreshStore.setEnabled(value > 0);
+		autoRefreshStore.setInterval(value);
+		setPageAutoRefresh('dashboard', $autoRefreshStore);
+	};
+
 	// hooks
 	onMount(() => {
 		const context = appStateService.getContext();
@@ -96,12 +119,12 @@
 		refresh();
 		activeTableURLParams.onChange(() => refreshActiveCampaigns(true));
 		scheduledTableURLParams.onChange(() => refreshScheduledCampaigns(true));
-		completedTableURLParams.onChange(() => refreshFinishedCampaigns(true));
+		eventsTableURLParams.onChange(() => refreshEvents(true));
 
 		return () => {
 			activeTableURLParams.unsubscribe();
 			scheduledTableURLParams.unsubscribe();
-			completedTableURLParams.unsubscribe();
+			eventsTableURLParams.unsubscribe();
 		};
 	});
 
@@ -121,10 +144,11 @@
 			active = res.data.active;
 			scheduled = res.data.upcoming;
 			finished = res.data.finished;
+			await setEventTypes();
 			await refreshCalendarCampaings();
 			await refreshActiveCampaigns(showLoading);
 			await refreshScheduledCampaigns(showLoading);
-			await refreshFinishedCampaigns(showLoading);
+			await refreshEvents(showLoading);
 			await refreshCampaignStats(showLoading);
 		} catch (e) {
 			addToast('Failed to load data', 'Error');
@@ -216,31 +240,47 @@
 		}
 	};
 
-	const refreshFinishedCampaigns = async (showLoading = true) => {
-		if (showLoading) {
-			isFinishedCampaignsLoading = true;
-		}
+	const setEventTypes = async () => {
 		try {
+			const res = await api.campaign.getAllEventTypes();
+			if (!res.success) {
+				addToast('Failed to load event types', 'Error');
+				console.error('failed to load event types', res.error);
+				return;
+			}
+			res.data.map((t) => (eventTypesIDToNameMap[t.id] = t.name));
+			availableEventTypes = res.data.map((t) => ({ value: t.id, label: t.name }));
+			availableEventTypes.unshift({ value: '', label: 'All Events' });
+		} catch (e) {
+			addToast('Failed to load event types', 'Error');
+			console.error('failed to load event types', e);
+		}
+	};
+
+	const refreshEvents = async (showIsLoading = true) => {
+		try {
+			if (showIsLoading) {
+				isEventsLoading = true;
+			}
 			const options = {
-				page: completedTableURLParams.currentPage,
-				perPage: completedTableURLParams.perPage,
-				sortBy: completedTableURLParams.sortBy,
-				sortOrder: completedTableURLParams.sortOrder,
-				search: completedTableURLParams.search,
+				page: eventsTableURLParams.page,
+				perPage: eventsTableURLParams.perPage,
+				sortBy: eventsTableURLParams.sortBy,
+				sortOrder: eventsTableURLParams.sortOrder,
+				search: eventsTableURLParams.search,
 				includeTest: includeTestCampaigns
 			};
-			const res = await api.campaign.getAllFinished(options, contextCompanyID);
-			if (!res.success) {
-				throw res.error;
+			const res = await api.campaign.getAllEvents(options, contextCompanyID);
+			if (res.success) {
+				events = res.data?.rows ?? [];
+				eventsHasNextPage = res.data?.hasNextPage ?? false;
 			}
-			completedCampaigns = res.data.rows;
-			completedCampaignsHasNextPage = res.data.hasNextPage;
 		} catch (e) {
-			addToast('Failed to load finshed campaigns', 'Error');
-			console.error('Failed to load finshed campaigns', e);
+			addToast('Failed to load events', 'Error');
+			console.error('failed to load events', e);
 		} finally {
-			if (showLoading) {
-				isFinishedCampaignsLoading = false;
+			if (showIsLoading) {
+				isEventsLoading = false;
 			}
 		}
 	};
@@ -288,98 +328,131 @@
 
 <HeadTitle title="Dashboard" />
 <main>
-	<div class="flex justify-between">
+	<div class="flex justify-between items-center mb-6">
 		<Headline>Dashboard</Headline>
-		<div class="flex gap-4 items-center">
-			<CheckboxField
-				bind:value={includeTestCampaigns}
-				on:change={handleToggleChange}
-				id="includeTestCampaigns"
-				inline={true}
-			>
-				Include test campaigns
-			</CheckboxField>
-
-			<AutoRefresh
-				isLoading={false}
-				onRefresh={async () => {
-					// refresh all data
-					let res = await api.campaign.getStats(contextCompanyID, {
-						includeTest: includeTestCampaigns
-					});
-					if (!res.success) {
-						throw res.error;
-					}
-					await refreshRepeatOffenders();
-
-					active = res.data.active;
-					scheduled = res.data.upcoming;
-					finished = res.data.finished;
-
-					// refresh table data directly like campaign page does
-					const activeOptions = {
-						page: activeTableURLParams.currentPage,
-						perPage: activeTableURLParams.perPage,
-						sortBy: activeTableURLParams.sortBy,
-						sortOrder: activeTableURLParams.sortOrder,
-						search: activeTableURLParams.search,
-						includeTest: includeTestCampaigns
-					};
-					const activeRes = await api.campaign.getAllActive(activeOptions, contextCompanyID);
-					if (activeRes.success) {
-						activeCampaigns = [];
-						await tick();
-						activeCampaigns = activeRes.data.rows;
-					}
-
-					const scheduledOptions = {
-						page: scheduledTableURLParams.currentPage,
-						perPage: scheduledTableURLParams.perPage,
-						sortBy: scheduledTableURLParams.sortBy,
-						sortOrder: scheduledTableURLParams.sortOrder,
-						search: scheduledTableURLParams.search,
-						includeTest: includeTestCampaigns
-					};
-					const scheduledRes = await api.campaign.getAllUpcoming(
-						scheduledOptions,
-						contextCompanyID
-					);
-					if (scheduledRes.success) {
-						scheduledCampaigns = [];
-						await tick();
-						scheduledCampaigns = scheduledRes.data.rows;
-					}
-
-					const completedOptions = {
-						page: completedTableURLParams.currentPage,
-						perPage: completedTableURLParams.perPage,
-						sortBy: completedTableURLParams.sortBy,
-						sortOrder: completedTableURLParams.sortOrder,
-						search: completedTableURLParams.search,
-						includeTest: includeTestCampaigns
-					};
-					const completedRes = await api.campaign.getAllFinished(
-						completedOptions,
-						contextCompanyID
-					);
-					if (completedRes.success) {
-						completedCampaigns = [];
-						await tick();
-						completedCampaigns = completedRes.data.rows;
-					}
-
-					const statsRes = await api.campaign.getAllCampaignStats(contextCompanyID);
-					if (statsRes.success) {
-						campaignStats = [];
-						await tick();
-						campaignStats = statsRes.data.rows || [];
-					}
-
-					await refreshCalendarCampaings();
-				}}
-			/>
+		<div class="flex items-center gap-4">
+			<label class="flex items-center gap-2 cursor-pointer">
+				<span class="font-semibold text-slate-600 dark:text-gray-300 whitespace-nowrap">
+					Include test campaigns
+				</span>
+				<div class="relative flex items-center">
+					<input
+						type="checkbox"
+						id="includeTestCampaigns"
+						bind:checked={includeTestCampaigns}
+						on:change={handleToggleChange}
+						class="peer sr-only"
+					/>
+					<div
+						class="w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
+						       peer-checked:border-cta-blue dark:peer-checked:border-highlight-blue/80 peer-checked:bg-cta-blue dark:peer-checked:bg-highlight-blue/80
+						       peer-focus:border-slate-400 dark:peer-focus:border-highlight-blue/80 peer-focus:bg-gray-100 dark:peer-focus:bg-gray-700/60
+						       transition-all duration-200 ease-in-out
+						       flex items-center justify-center
+						       bg-slate-50 dark:bg-gray-900/60"
+					>
+						{#if includeTestCampaigns}
+							<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="3"
+									d="M5 13l4 4L19 7"
+								/>
+							</svg>
+						{/if}
+					</div>
+				</div>
+			</label>
+			<div class="flex items-center gap-2">
+				<span class="font-semibold text-slate-600 dark:text-gray-300 whitespace-nowrap">
+					Auto-Refresh
+				</span>
+				<TextFieldSelect
+					id="autoRefresh"
+					value={$autoRefreshStore.enabled
+						? autoRefreshOptions.byValue($autoRefreshStore.interval.toString())
+						: 'Disabled'}
+					onSelect={handleAutoRefreshChange}
+					options={autoRefreshOptions.keys()}
+					inline={true}
+					size={'small'}
+				/>
+			</div>
 		</div>
 	</div>
+	<AutoRefresh
+		isLoading={false}
+		pageId="dashboard"
+		onRefresh={async () => {
+			// refresh all data
+			let res = await api.campaign.getStats(contextCompanyID, {
+				includeTest: includeTestCampaigns
+			});
+			if (!res.success) {
+				throw res.error;
+			}
+			await refreshRepeatOffenders();
+
+			active = res.data.active;
+			scheduled = res.data.upcoming;
+			finished = res.data.finished;
+
+			// refresh table data directly like campaign page does
+			const activeOptions = {
+				page: activeTableURLParams.currentPage,
+				perPage: activeTableURLParams.perPage,
+				sortBy: activeTableURLParams.sortBy,
+				sortOrder: activeTableURLParams.sortOrder,
+				search: activeTableURLParams.search,
+				includeTest: includeTestCampaigns
+			};
+			const activeRes = await api.campaign.getAllActive(activeOptions, contextCompanyID);
+			if (activeRes.success) {
+				activeCampaigns = activeRes.data.rows;
+				activeCampaignsHasNextPage = activeRes.data.hasNextPage;
+			}
+
+			// refresh scheduled campaigns
+			const scheduledOptions = {
+				page: scheduledTableURLParams.currentPage,
+				perPage: scheduledTableURLParams.perPage,
+				sortBy: scheduledTableURLParams.sortBy,
+				sortOrder: scheduledTableURLParams.sortOrder,
+				search: scheduledTableURLParams.search,
+				includeTest: includeTestCampaigns
+			};
+			const scheduledRes = await api.campaign.getAllUpcoming(scheduledOptions, contextCompanyID);
+			if (scheduledRes.success) {
+				scheduledCampaigns = scheduledRes.data.rows;
+				scheduledCampaignsHasNextPage = scheduledRes.data.hasNextPage;
+			}
+
+			// refresh events
+			const eventsOptions = {
+				page: eventsTableURLParams.currentPage,
+				perPage: eventsTableURLParams.perPage,
+				sortBy: eventsTableURLParams.sortBy,
+				sortOrder: eventsTableURLParams.sortOrder,
+				search: eventsTableURLParams.search,
+				includeTest: includeTestCampaigns
+			};
+			const eventsRes = await api.campaign.getAllEvents(eventsOptions, contextCompanyID);
+			if (eventsRes.success) {
+				events = eventsRes.data?.rows ?? [];
+				eventsHasNextPage = eventsRes.data?.hasNextPage ?? false;
+			}
+
+			const statsRes = await api.campaign.getAllCampaignStats(contextCompanyID);
+			if (statsRes.success) {
+				campaignStats = [];
+				await tick();
+				campaignStats = statsRes.data.rows || [];
+			}
+
+			await refreshCalendarCampaings();
+		}}
+	/>
 	{#if contextCompanyName}
 		<SubHeadline>{contextCompanyName}</SubHeadline>
 	{/if}
@@ -491,6 +564,56 @@
 		<CampaignTrendChart {campaignStats} isLoading={isCampaignStatsLoading} />
 	</div>
 
+	<SubHeadline>Recent events</SubHeadline>
+	<div class="min-h-[300px] mb-8">
+		<Table
+			columns={[
+				{ column: 'Time', size: 'large' },
+				{ column: 'Event', size: 'large' },
+				{ column: 'Campaign', size: 'large' },
+				{ column: 'Email', size: 'large' },
+				...(contextCompanyID ? [] : [{ column: 'Company', size: 'large' }])
+			]}
+			pagination={eventsTableURLParams}
+			plural="events"
+			hasData={!!events.length}
+			hasNextPage={eventsHasNextPage}
+			isGhost={isEventsLoading}
+			noSearch={true}
+			hasActions={false}
+		>
+			{#each events as event (event.id)}
+				<TableRow>
+					<TableCell isDate isRelative value={event.createdAt} />
+					<TableCell>
+						<EventName eventName={eventTypesIDToNameMap[event.eventID]} />
+					</TableCell>
+					<TableCell>
+						{#if event.campaign?.name}
+							<a href={`/campaign/${event.campaignID}`} class="block w-full py-1">
+								{event.campaign.name}
+							</a>
+						{/if}
+					</TableCell>
+					<TableCell>
+						{#if event.recipient?.email}
+							<a href={`/recipient/${event.recipient.id}`} class="block w-full py-1">
+								{event.recipient.email}
+							</a>
+						{/if}
+					</TableCell>
+					{#if !contextCompanyID}
+						<TableCell>
+							{#if event.campaign?.company?.name}
+								{event.campaign.company.name}
+							{/if}
+						</TableCell>
+					{/if}
+				</TableRow>
+			{/each}
+		</Table>
+	</div>
+
 	<SubHeadline>{contextCompanyName ? 'Calendar' : 'Shared Calendar'}</SubHeadline>
 	<div class="mb-8 min-h-[600px]">
 		<CampaignCalender
@@ -559,46 +682,6 @@
 			pagination={scheduledTableURLParams}
 		>
 			{#each scheduledCampaigns as campaign}
-				<TableRow>
-					<TableCell>
-						<span class="inline-flex items-center gap-1 py-1">
-							{#if campaign.isTest}
-								<TestLabel />
-							{/if}
-							<a href={`/campaign/${campaign.id}`}>
-								{campaign.name}
-							</a>
-						</span>
-					</TableCell>
-					<TableCell value={campaign.company?.name} />
-					<TableCell value={campaign.sendStartAt} isDate isRelative />
-					<TableCell value={campaign.sendEndAt} isDate isRelative />
-					<TableCellEmpty />
-					<TableCellAction>
-						<TableDropDownEllipsis>
-							<TableViewButton on:click={() => onClickViewCampaign(campaign.id)} />
-						</TableDropDownEllipsis>
-					</TableCellAction>
-				</TableRow>
-			{/each}
-		</Table>
-	</div>
-	<SubHeadline>Completed campaigns</SubHeadline>
-	<div class="min-h-[300px] mb-8">
-		<Table
-			isGhost={isFinishedCampaignsLoading}
-			columns={[
-				{ column: 'Name', size: 'large' },
-				{ column: 'Company', size: 'medium' },
-				{ title: 'Delivery started', column: 'Send start at', size: 'small' },
-				{ title: 'Delivery finished', column: 'Send end at', size: 'small' }
-			]}
-			hasData={!!completedCampaigns.length}
-			hasNextPage={completedCampaignsHasNextPage}
-			plural="completed campaigns"
-			pagination={completedTableURLParams}
-		>
-			{#each completedCampaigns as campaign}
 				<TableRow>
 					<TableCell>
 						<span class="inline-flex items-center gap-1 py-1">

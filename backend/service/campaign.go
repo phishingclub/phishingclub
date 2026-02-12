@@ -912,6 +912,44 @@ func (c *Campaign) GetRecipientsByCampaignID(
 	return result, nil
 }
 
+// GetAllEvents gets all events across campaigns
+func (c *Campaign) GetAllEvents(
+	ctx context.Context,
+	session *model.Session,
+	companyID *uuid.UUID,
+	queryArgs *vo.QueryArgs,
+	includeTestCampaigns bool,
+) (*model.Result[model.CampaignEvent], error) {
+	result := model.NewEmptyResult[model.CampaignEvent]()
+	ae := NewAuditEvent("Campaign.GetAllEvents", session)
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return result, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return result, errs.ErrAuthorizationFailed
+	}
+	result, err = c.CampaignRepository.GetAllEvents(
+		ctx,
+		companyID,
+		&repository.CampaignEventAllOption{
+			QueryArgs:            queryArgs,
+			WithUser:             true,
+			WithCampaign:         true,
+			IncludeTestCampaigns: includeTestCampaigns,
+		},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get all events", "error", err)
+		return result, errs.Wrap(err)
+	}
+	// no audit on read
+	return result, nil
+}
+
 // GetEventsByCampaignID gets all events for a campaign
 func (c *Campaign) GetEventsByCampaignID(
 	ctx context.Context,

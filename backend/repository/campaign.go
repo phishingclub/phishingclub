@@ -66,9 +66,17 @@ type CampaignOption struct {
 // CampaignEventOption is options for preloading
 type CampaignEventOption struct {
 	*vo.QueryArgs
-	// WithCampaign bool
+	WithCampaign bool
 	WithUser     bool
 	EventTypeIDs []string
+}
+
+// CampaignEventAllOption is options for preloading events across all campaigns
+type CampaignEventAllOption struct {
+	*vo.QueryArgs
+	WithCampaign         bool
+	WithUser             bool
+	IncludeTestCampaigns bool
 }
 
 // Campaign is a Campaign repository
@@ -116,8 +124,26 @@ func (r *Campaign) load(db *gorm.DB, options *CampaignOption) *gorm.DB {
 func (r *Campaign) preloadEventRecipient(db *gorm.DB, options *CampaignEventOption) *gorm.DB {
 	if options.WithUser {
 		db = db.Preload("Recipient", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id", "first_name", "last_name", "email")
+		})
+	}
+	if options.WithCampaign {
+		db = db.Preload("Campaign", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id", "name", "company_id").Preload("Company")
+		})
+	}
+	return db
+}
+
+// preloadAllEventRecipient preloads the event user for all events queries
+func (r *Campaign) preloadAllEventRecipient(db *gorm.DB, options *CampaignEventAllOption) *gorm.DB {
+	if options.WithUser {
+		db = db.Preload("Recipient", func(db *gorm.DB) *gorm.DB {
 			return db
 		})
+	}
+	if options.WithCampaign {
+		db = db.Preload("Campaign.Company")
 	}
 	return db
 }
@@ -579,6 +605,71 @@ func (r *Campaign) GetAllFinished(
 			return nil, errs.Wrap(err)
 		}
 		result.Rows = append(result.Rows, campaign)
+	}
+	return result, nil
+}
+
+// GetAllEvents gets all campaign events across campaigns
+func (r *Campaign) GetAllEvents(
+	ctx context.Context,
+	companyID *uuid.UUID,
+	options *CampaignEventAllOption,
+) (*model.Result[model.CampaignEvent], error) {
+	result := model.NewEmptyResult[model.CampaignEvent]()
+	db := r.preloadAllEventRecipient(r.DB, options)
+	db = r.joinEvent(db)
+	db, err := useQuery(db, database.CAMPAIGN_TABLE, options.QueryArgs, allowedCampaginEventViewColumns...)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	var dbCampaignEvents []database.CampaignEvent
+	db = db.
+		Joins(LeftJoinOn(
+			database.CAMPAIGN_EVENT_TABLE,
+			"recipient_id",
+			database.RECIPIENT_TABLE,
+			"id",
+		)).
+		Joins(LeftJoinOn(
+			database.CAMPAIGN_EVENT_TABLE,
+			"campaign_id",
+			database.CAMPAIGN_TABLE,
+			"id",
+		))
+
+	// filter by company if in company context
+	if companyID != nil {
+		db = db.Where(TableColumn(database.CAMPAIGN_TABLE, "company_id")+" = ?", companyID)
+	}
+
+	// filter test campaigns if not included
+	if !options.IncludeTestCampaigns {
+		db = db.Where(TableColumn(database.CAMPAIGN_TABLE, "is_test")+" = ?", false)
+	}
+
+	res := db.Find(&dbCampaignEvents)
+
+	if res.Error != nil {
+		return result, res.Error
+	}
+
+	hasNextPage, err := useHasNextPage(
+		db,
+		database.CAMPAIGN_TABLE,
+		options.QueryArgs,
+		allowedCampaginEventViewColumns...,
+	)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	result.HasNextPage = hasNextPage
+
+	for _, dbCampaignEvent := range dbCampaignEvents {
+		c, err := ToCampaignEvent(&dbCampaignEvent)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		result.Rows = append(result.Rows, c)
 	}
 	return result, nil
 }
@@ -1720,6 +1811,14 @@ func ToCampaignEvent(row *database.CampaignEvent) (*model.CampaignEvent, error) 
 		}
 		recipient = r
 	}
+	var campaign *model.Campaign
+	if row.Campaign != nil {
+		c, err := ToCampaign(row.Campaign)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		campaign = c
+	}
 	ip := vo.NewOptionalString64Must(row.IPAddress)
 	userAgent := vo.NewOptionalString255Must(row.UserAgent)
 	data := vo.NewOptionalString1MBMust(row.Data)
@@ -1729,6 +1828,7 @@ func ToCampaignEvent(row *database.CampaignEvent) (*model.CampaignEvent, error) 
 		ID:           row.ID,
 		CreatedAt:    row.CreatedAt,
 		CampaignID:   row.CampaignID,
+		Campaign:     campaign,
 		IP:           ip,
 		UserAgent:    userAgent,
 		Data:         data,

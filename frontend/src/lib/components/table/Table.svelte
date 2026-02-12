@@ -26,6 +26,7 @@
 	export let isGhost = false;
 	// if there is more data to paginate
 	export let hasNextPage = true;
+	export let noSearch = false;
 
 	let tableWrapper = null;
 	let columnsLength = columns.length;
@@ -52,7 +53,9 @@
 		<div class="flex justify-between items-center pb-4">
 			{#if pagination}
 				<Select {pagination}></Select>
-				<Search {pagination}></Search>
+				{#if !noSearch}
+					<Search {pagination}></Search>
+				{/if}
 			{/if}
 		</div>
 		<div

@@ -38,6 +38,7 @@ type CampaignEvent struct {
 	RecipientID *uuid.UUID `gorm:"index;type:uuid;"`
 	Recipient   *Recipient
 
+	Campaign  *Campaign
 	CompanyID *uuid.UUID `gorm:"type:uuid;"`
 }
 

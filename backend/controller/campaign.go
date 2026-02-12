@@ -468,6 +468,39 @@ func (c *Campaign) GetAllFinished(g *gin.Context) {
 	c.Response.OK(g, campaigns)
 }
 
+// GetAllEvents gets all events across campaigns
+func (c *Campaign) GetAllEvents(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	companyID := companyIDFromRequestQuery(g)
+	includeTestCampaigns := g.Query("includeTest") == "true"
+	queryArgs, ok := c.handleQueryArgs(g)
+	if !ok {
+		return
+	}
+	// force ordering by created_at desc for performance (no sorting allowed)
+	queryArgs.OrderBy = repository.TableColumn(database.CAMPAIGN_EVENT_TABLE, "created_at")
+	queryArgs.Desc = true
+	// disable search for performance
+	queryArgs.Search = ""
+	// get events
+	events, err := c.CampaignService.GetAllEvents(
+		g.Request.Context(),
+		session,
+		companyID,
+		queryArgs,
+		includeTestCampaigns,
+	)
+	// handle responses
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, events)
+}
+
 // GetEventsByCampaignID gets events by campaign id
 func (c *Campaign) GetEventsByCampaignID(g *gin.Context) {
 	session, _, ok := c.handleSession(g)

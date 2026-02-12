@@ -143,6 +143,7 @@ const (
 	ROUTE_V1_CAMPAIGN_RECIPIENTS         = "/api/v1/campaign/:id/recipients"
 	ROUTE_V1_CAMPAIGN_RESULT_STATS       = "/api/v1/campaign/:id/statistics"
 	ROUTE_V1_CAMPAIGN_EVENTS             = "/api/v1/campaign/:id/events"
+	ROUTE_V1_CAMPAIGN_ALL_EVENTS         = "/api/v1/campaign/events"
 	ROUTE_V1_CAMPAIGN_EVENT_ID           = "/api/v1/campaign/event/:id"
 	ROUTE_V1_CAMPAIGN_EVENT_NAMES        = "/api/v1/campaign/event-types"
 	ROUTE_V1_CAMPAIGN_STATS              = "/api/v1/campaign/statistics"
@@ -409,6 +410,7 @@ func setupRoutes(
 		GET(ROUTE_V1_CAMPAIGN_UPCOMING, middleware.SessionHandler, controllers.Campaign.GetAllUpcoming).
 		GET(ROUTE_V1_CAMPAIGN_FINISHED, middleware.SessionHandler, controllers.Campaign.GetAllFinished).
 		GET(ROUTE_V1_CAMPAIGN_EVENT_NAMES, middleware.SessionHandler, controllers.Campaign.GetAllEventTypes).
+		GET(ROUTE_V1_CAMPAIGN_ALL_EVENTS, middleware.SessionHandler, controllers.Campaign.GetAllEvents).
 		GET(ROUTE_V1_CAMPAIGN_EVENTS, middleware.SessionHandler, controllers.Campaign.GetEventsByCampaignID).
 		DELETE(ROUTE_V1_CAMPAIGN_EVENT_ID, middleware.SessionHandler, controllers.Campaign.DeleteEventByID).
 		GET(ROUTE_V1_CAMPAIGN_STATS, middleware.SessionHandler, controllers.Campaign.GetStats).
