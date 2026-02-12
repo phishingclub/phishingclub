@@ -511,10 +511,10 @@
 												required={false}>Value Regex</TextField
 											>
 										</div>
-										<div class="flex items-end pb-2">
+										<div class="flex items-end pb-4">
 											<button
 												type="button"
-												class="p-2 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
+												class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
 												on:click={() => removeHeaderRule(index)}
 												title="Remove this header rule"
 												aria-label="Remove header rule"
