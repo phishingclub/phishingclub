@@ -42,6 +42,10 @@
 	// pin state for menu
 	let isMenuPinned = false;
 
+	// interval IDs for cleanup
+	let updateCheckIntervalId;
+	let contextPollIntervalId;
+
 	// cookie helpers
 	function getCookie(name) {
 		const value = `; ${document.cookie}`;
@@ -87,12 +91,29 @@
 				console.error(e);
 			}
 
-			setInterval(
+			updateCheckIntervalId = setInterval(
 				async () => {
 					await checkForUpdate();
 				},
 				1000 * 60 * 60
 			);
+
+			// poll localStorage for context changes every 2 seconds
+			// this syncs context across all tabs/windows by reloading when context changes
+			let lastContextString = localStorage.getItem('context') || '';
+			contextPollIntervalId = setInterval(() => {
+				try {
+					const currentContextString = localStorage.getItem('context') || '';
+
+					// if context changed in localStorage, reload the page to ensure all data is fresh
+					if (currentContextString !== lastContextString) {
+						// reload immediately to load all data with new context
+						location.reload();
+					}
+				} catch (e) {
+					// silently fail - parsing errors are expected if context is being written
+				}
+			}, 2000);
 		})();
 
 		const appStateUnsubscribe = appState.subscribe((s) => {
@@ -180,6 +201,13 @@
 				console.error('tried to stop session but failed', e);
 			}
 			appStateUnsubscribe();
+			// clear intervals
+			if (updateCheckIntervalId) {
+				clearInterval(updateCheckIntervalId);
+			}
+			if (contextPollIntervalId) {
+				clearInterval(contextPollIntervalId);
+			}
 		};
 	});
 

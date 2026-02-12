@@ -1012,7 +1012,8 @@
 			const campaign = await getCampaign(id);
 			const jit = campaignUpdateDisabledAndTitle(campaign);
 			if (jit.disabled) {
-				addToast('Campaign can not be edited', 'Info');
+				// show specific message based on the reason
+				addToast(jit.title || 'Campaign can not be edited', 'Info');
 				refreshCampaigns();
 				return;
 			}
@@ -1249,7 +1250,35 @@
 		element.reportValidity();
 	};
 
+	// check if user is in the correct context for campaign actions
+	const isContextMismatch = (campaign) => {
+		const context = appStateService.getContext();
+
+		// if campaign is global (no companyID)
+		if (!campaign.companyID) {
+			// user must be in global/shared context
+			return context.current !== AppStateService.CONTEXT.SHARED;
+		}
+
+		// if campaign belongs to a company
+		// user must be in that specific company context
+		return (
+			context.current !== AppStateService.CONTEXT.COMPANY ||
+			context.companyID !== campaign.companyID
+		);
+	};
+
 	const campaignUpdateDisabledAndTitle = (campaign) => {
+		// check for context mismatch first
+		if (isContextMismatch(campaign)) {
+			return {
+				disabled: true,
+				title: campaign.companyID
+					? 'Switch to company view to perform this action'
+					: 'Switch to global view to perform this action'
+			};
+		}
+
 		const c = globalButtonDisabledAttributes(campaign, contextCompanyID);
 		if (c?.disabled) {
 			return c;
