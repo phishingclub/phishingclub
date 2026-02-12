@@ -37,6 +37,7 @@
 	import CopyCell from '$lib/components/table/CopyCell.svelte';
 	import TextFieldSelectWithType from '$lib/components/form/TextFieldSelectWithType.svelte';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
+	import { resourceContext } from '$lib/store/resourceContext';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -135,8 +136,11 @@
 			}
 			hideIsLoading();
 		})();
+
+		// cleanup resource context when leaving page
 		return () => {
 			tableURLParams.unsubscribe();
+			resourceContext.clear();
 		};
 	});
 
@@ -403,14 +407,13 @@
 
 	const closeModal = () => {
 		isModalVisible = false;
-		form?.reset();
 		formValues = {
 			id: null,
 			templateType: 'Email',
 			name: null,
 			domain: null,
 			landingPage: null,
-			landingPageType: 'page',
+			landingPageType: 'page', // 'page' or 'proxy'
 			beforeLandingPage: null,
 			afterLandingPage: null,
 			afterLandingPageRedirectURL: '',
@@ -421,6 +424,10 @@
 			stateIdentifier: 'session',
 			urlPath: ''
 		};
+		modalError = '';
+		showAdvancedOptions = false;
+		// clear resource context when closing modal
+		resourceContext.clear();
 	};
 
 	/** @param {string} id */
@@ -432,10 +439,26 @@
 			const r = globalButtonDisabledAttributes(template, contextCompanyID);
 			if (r.disabled) {
 				hideIsLoading();
+				resourceContext.clear();
 				return;
 			}
 
 			assignTemplate(template);
+
+			// if company exists but name is missing, fetch it
+			if (template.companyID && !template.company?.name) {
+				try {
+					const companyRes = await api.company.getByID(template.companyID);
+					if (companyRes.success && companyRes.data) {
+						template.company = companyRes.data;
+					}
+				} catch (e) {
+					console.error('failed to load company details', e);
+				}
+			}
+
+			// set resource context for banner
+			resourceContext.setResource('template', template.companyID, template.company?.name);
 			isModalVisible = true;
 		} catch (e) {
 			addToast('Failed to load campaign template', 'Error');
@@ -452,6 +475,21 @@
 			const template = await getTemplate(id);
 			assignTemplate(template);
 			formValues.id = null;
+
+			// if company exists but name is missing, fetch it
+			if (template.companyID && !template.company?.name) {
+				try {
+					const companyRes = await api.company.getByID(template.companyID);
+					if (companyRes.success && companyRes.data) {
+						template.company = companyRes.data;
+					}
+				} catch (e) {
+					console.error('failed to load company details', e);
+				}
+			}
+
+			// set resource context for banner
+			resourceContext.setResource('template', template.companyID, template.company?.name);
 			isModalVisible = true;
 		} catch (e) {
 			addToast('Failed to load campaign template', 'Error');
@@ -513,8 +551,9 @@
 </script>
 
 <HeadTitle title="Campaigns templates" />
+
 <main>
-	<Headline>Campaign templates</Headline>
+	<Headline>Campaigns templates</Headline>
 	<BigButton on:click={openCreateModal}>New template</BigButton>
 
 	<Table

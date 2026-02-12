@@ -48,6 +48,7 @@
 	import papaparse from 'papaparse';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import { resourceContext } from '$lib/store/resourceContext';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -76,7 +77,9 @@
 		recipientGroups: [],
 		events: [],
 		eventTypesIDToNameMap: {},
-		notableEventName: ''
+		notableEventName: '',
+		companyID: null,
+		company: null
 	};
 	let allowedFilter = null;
 	let campaignRecipients = [];
@@ -167,6 +170,7 @@
 		if (context) {
 			contextCompanyID = context.companyID;
 		}
+
 		(async () => {
 			await refresh();
 			recipientTableUrlParams.onChange(refreshRecipients);
@@ -176,9 +180,12 @@
 			await refreshRecipientsTimes();
 			await refreshCampaignEventsSince();
 		})();
+
+		// cleanup resource context when leaving page
 		return () => {
 			recipientTableUrlParams.unsubscribe();
 			eventsTableURLParams.unsubscribe();
+			resourceContext.clear();
 		};
 	});
 
@@ -240,6 +247,21 @@
 			campaign.denyPage = t.denyPage;
 			campaign.evasionPage = t.evasionPage;
 			campaign.webhookID = t.webhookID;
+			campaign.companyID = t.companyID;
+			campaign.company = t.company;
+
+			// if company exists but name is missing, fetch it
+			if (campaign.companyID && !campaign.company?.name) {
+				try {
+					const companyRes = await api.company.getByID(campaign.companyID);
+					if (companyRes.success && companyRes.data) {
+						campaign.company = companyRes.data;
+					}
+				} catch (e) {
+					console.error('failed to load company details', e);
+				}
+			}
+
 			// fetch the full template object
 			if (t.templateID) {
 				const templateRes = await api.campaignTemplate.getByID(t.templateID, true);
@@ -255,6 +277,9 @@
 			if (campaign.allowDeny && campaign.allowDeny[0]) {
 				allowedFilter = campaign.allowDeny[0].allowed;
 			}
+
+			// set resource context for banner
+			resourceContext.setResource('campaign', campaign.companyID, campaign.company?.name);
 		} catch (e) {
 			addToast('Failed to load campaign', 'Error');
 			console.error('failed to load campaign', e);
