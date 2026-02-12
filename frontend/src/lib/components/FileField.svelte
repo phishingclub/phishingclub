@@ -14,6 +14,7 @@
 	export let multiple = false;
 	export let name = 'files';
 	export let accept = '*';
+	export let disabled = false;
 	// bind to parent form element, if there is one
 	let parentForm = null;
 	// listen to parent form reset event, if one exists
@@ -69,6 +70,7 @@
 		{multiple}
 		{required}
 		{placeholder}
-		class="border-solid border-2 border-gray-300 dark:border-gray-600 py-2 px-2 rounded-md file:px-4 file:py-2 file:text-white file:cursor-pointer file:text-sm file:font-semibold bg-white dark:bg-gray-700 file:bg-cta-blue hover:cursor-pointer file:hover:bg-blue-600 dark:file:bg-indigo-600 dark:file:hover:bg-indigo-700 file:border-hidden file:rounded-md text-gray-900 dark:text-white transition-colors duration-200"
+		{disabled}
+		class="border-solid border-2 border-gray-300 dark:border-gray-600 py-2 px-2 rounded-md file:px-4 file:py-2 file:text-white file:cursor-pointer file:text-sm file:font-semibold bg-white dark:bg-gray-700 file:bg-cta-blue hover:cursor-pointer file:hover:bg-blue-600 dark:file:bg-indigo-600 dark:file:hover:bg-indigo-700 file:border-hidden file:rounded-md text-gray-900 dark:text-white transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed file:disabled:cursor-not-allowed"
 	/>
 </label>

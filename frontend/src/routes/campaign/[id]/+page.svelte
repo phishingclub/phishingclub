@@ -868,7 +868,35 @@
 		}
 	};
 
+	// check if user is in the correct context for campaign actions
+	const isContextMismatch = () => {
+		const context = appStateService.getContext();
+
+		// if campaign is global (no companyID)
+		if (!campaign.companyID) {
+			// user must be in global/shared context
+			return context.current !== AppStateService.CONTEXT.SHARED;
+		}
+
+		// if campaign belongs to a company
+		// user must be in that specific company context
+		return (
+			context.current !== AppStateService.CONTEXT.COMPANY ||
+			context.companyID !== campaign.companyID
+		);
+	};
+
 	const campaignUpdateDisabledAndTitle = (campaign) => {
+		// check for context mismatch first
+		if (isContextMismatch()) {
+			return {
+				disabled: true,
+				title: campaign.companyID
+					? 'Switch to company view to perform this action'
+					: 'Switch to global view to perform this action'
+			};
+		}
+
 		const c = globalButtonDisabledAttributes(campaign, contextCompanyID);
 		if (c?.disabled) {
 			return c;
@@ -1614,27 +1642,52 @@
 							Manage
 						</p>
 						<div class="flex flex-wrap gap-2">
-							{#if !campaignUpdateDisabledAndTitle(campaign).disabled}
-								<IconButton variant="blue" icon="edit" on:click={onClickUpdateCampaign}>
+							<div title={campaignUpdateDisabledAndTitle(campaign).title}>
+								<IconButton
+									variant="blue"
+									icon="edit"
+									disabled={campaignUpdateDisabledAndTitle(campaign).disabled}
+									on:click={onClickUpdateCampaign}
+								>
 									Update
 								</IconButton>
-							{/if}
-							<IconButton
-								variant="orange"
-								icon="close"
-								disabled={!!campaign.closedAt}
-								on:click={showCloseCampaignModal}
+							</div>
+							<div
+								title={isContextMismatch()
+									? campaign.companyID
+										? 'Switch to company view to perform this action'
+										: 'Switch to global view to perform this action'
+									: campaign.closedAt
+										? 'Campaign is already closed'
+										: ''}
 							>
-								Close
-							</IconButton>
-							<IconButton
-								variant="red"
-								icon="anonymize"
-								disabled={!!campaign.anonymizedAt}
-								on:click={showAnonymizeModal}
+								<IconButton
+									variant="orange"
+									icon="close"
+									disabled={!!campaign.closedAt || isContextMismatch()}
+									on:click={showCloseCampaignModal}
+								>
+									Close
+								</IconButton>
+							</div>
+							<div
+								title={isContextMismatch()
+									? campaign.companyID
+										? 'Switch to company view to perform this action'
+										: 'Switch to global view to perform this action'
+									: campaign.anonymizedAt
+										? 'Campaign is already anonymized'
+										: ''}
 							>
-								Anonymize
-							</IconButton>
+								<IconButton
+									variant="red"
+									icon="anonymize"
+									disabled={!!campaign.anonymizedAt || isContextMismatch()}
+									on:click={showAnonymizeModal}
+								>
+									Anonymize
+								</IconButton>
+							</div>
 						</div>
 					</div>
 
@@ -1658,7 +1711,19 @@
 						<p class="text-xs text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
 							Import
 						</p>
-						<FileField accept=".csv" on:change={onUploadReportedCSV}>Reported CSV</FileField>
+						<div
+							title={isContextMismatch()
+								? campaign.companyID
+									? 'Switch to company view to perform this action'
+									: 'Switch to global view to perform this action'
+								: ''}
+						>
+							<FileField
+								accept=".csv"
+								on:change={onUploadReportedCSV}
+								disabled={isContextMismatch()}>Reported CSV</FileField
+							>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -1755,12 +1820,16 @@
 							<TableDropDownEllipsis>
 								<TableDeleteButton
 									on:click={() => openDeleteEventAlert(event)}
-									disabled={!!campaign.closedAt || !!campaign.anonymizedAt}
-									title={campaign.closedAt
-										? 'Cannot delete events from closed campaign'
-										: campaign.anonymizedAt
-											? 'Cannot delete events from anonymized campaign'
-											: 'Delete event'}
+									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || isContextMismatch()}
+									title={isContextMismatch()
+										? campaign.companyID
+											? 'Switch to company view to perform this action'
+											: 'Switch to global view to perform this action'
+										: campaign.closedAt
+											? 'Cannot delete events from closed campaign'
+											: campaign.anonymizedAt
+												? 'Cannot delete events from anonymized campaign'
+												: 'Delete event'}
 								/>
 							</TableDropDownEllipsis>
 						</TableCellAction>
@@ -1846,24 +1915,51 @@
 
 								<TableDropDownButton
 									name={recp.sentAt ? `Send message again` : `Send message`}
-									title={recp.closedAt
-										? 'Campaign is closed'
-										: recp.cancelledAt
-											? 'Recipient cancelled'
-											: recp.sentAt
-												? `Send message again (last sent: ${new Date(recp.sentAt).toLocaleDateString()})`
-												: `Send message to recipient`}
+									title={isContextMismatch()
+										? campaign.companyID
+											? 'Switch to company view to perform this action'
+											: 'Switch to global view to perform this action'
+										: recp.closedAt
+											? 'Campaign is closed'
+											: recp.cancelledAt
+												? 'Recipient cancelled'
+												: recp.sentAt
+													? `Send message again (last sent: ${new Date(recp.sentAt).toLocaleDateString()})`
+													: `Send message to recipient`}
 									on:click={() => showSendMessageModal(recp.id, recp.recipient)}
-									disabled={!!campaign.closedAt || recp.cancelledAt}
+									disabled={!!campaign.closedAt || recp.cancelledAt || isContextMismatch()}
 								/>
 								<TableUpdateButton
 									name="Copy lure URL"
-									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || !recp.recipient}
+									disabled={!!campaign.closedAt ||
+										!!campaign.anonymizedAt ||
+										!recp.recipient ||
+										isContextMismatch()}
+									title={isContextMismatch()
+										? campaign.companyID
+											? 'Switch to company view to perform this action'
+											: 'Switch to global view to perform this action'
+										: campaign.closedAt
+											? 'Campaign is closed'
+											: campaign.anonymizedAt
+												? 'Campaign is anonymized'
+												: !recp.recipient
+													? 'Recipient not available'
+													: ''}
 									on:click={() => onClickCopyURL(recp.id)}
 								/>
 								<TableUpdateButton
 									name="Copy email content"
-									disabled={!!campaign.closedAt || !!campaign.anonymizedAt}
+									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || isContextMismatch()}
+									title={isContextMismatch()
+										? campaign.companyID
+											? 'Switch to company view to perform this action'
+											: 'Switch to global view to perform this action'
+										: campaign.closedAt
+											? 'Campaign is closed'
+											: campaign.anonymizedAt
+												? 'Campaign is anonymized'
+												: ''}
 									on:click={() => onClickCopyEmailContent(recp.id)}
 								/>
 
@@ -1871,14 +1967,34 @@
 									<!-- self managed campaign -->
 									<TableDropDownButton
 										name="Set as message sent"
-										title={recp.closedAt ? 'Campaign is closed' : ''}
+										title={isContextMismatch()
+											? campaign.companyID
+												? 'Switch to company view to perform this action'
+												: 'Switch to global view to perform this action'
+											: recp.closedAt
+												? 'Campaign is closed'
+												: ''}
 										on:click={() => onClickSetEmailSent(recp.id, recp.recipient)}
-										disabled={!!campaign.closedAt || recp.cancelledAt}
+										disabled={!!campaign.closedAt || recp.cancelledAt || isContextMismatch()}
 									/>
 								{/if}
 								<TableViewButton
 									name="View email"
-									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || !recp.recipient}
+									disabled={!!campaign.closedAt ||
+										!!campaign.anonymizedAt ||
+										!recp.recipient ||
+										isContextMismatch()}
+									title={isContextMismatch()
+										? campaign.companyID
+											? 'Switch to company view to perform this action'
+											: 'Switch to global view to perform this action'
+										: campaign.closedAt
+											? 'Campaign is closed'
+											: campaign.anonymizedAt
+												? 'Campaign is anonymized'
+												: !recp.recipient
+													? 'Recipient not available'
+													: ''}
 									on:click={() => onClickPreviewEmail(recp.id)}
 								/>
 							</TableDropDownEllipsis>
@@ -1943,12 +2059,16 @@
 						<TableDropDownEllipsis>
 							<TableDeleteButton
 								on:click={() => openDeleteEventAlert(event)}
-								disabled={!!campaign.closedAt || !!campaign.anonymizedAt}
-								title={campaign.closedAt
-									? 'Cannot delete events from closed campaign'
-									: campaign.anonymizedAt
-										? 'Cannot delete events from anonymized campaign'
-										: 'Delete event'}
+								disabled={!!campaign.closedAt || !!campaign.anonymizedAt || isContextMismatch()}
+								title={isContextMismatch()
+									? campaign.companyID
+										? 'Switch to company view to perform this action'
+										: 'Switch to global view to perform this action'
+									: campaign.closedAt
+										? 'Cannot delete events from closed campaign'
+										: campaign.anonymizedAt
+											? 'Cannot delete events from anonymized campaign'
+											: 'Delete event'}
 							/>
 						</TableDropDownEllipsis>
 					</TableCellAction>
