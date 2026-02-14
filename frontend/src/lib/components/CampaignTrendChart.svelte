@@ -19,6 +19,7 @@
 
 	export let campaignStats = [];
 	export let isLoading = false;
+	export let onCampaignClick = (campaignId) => {};
 
 	// Debounced loading state to prevent flash
 	let debouncedIsLoading = false;
@@ -373,6 +374,7 @@
 			index: index + 1,
 			date: stat.campaignClosedAt ? new Date(stat.campaignClosedAt) : null,
 			name: stat.campaignName || `Campaign ${index + 1}`,
+			campaignId: stat.campaignId,
 			openRate: pct(stat.trackingPixelLoaded, stat.totalRecipients),
 			clickRate: useRelativeMetrics
 				? pct(stat.websiteVisits, stat.trackingPixelLoaded)
@@ -759,7 +761,16 @@
 			circle.setAttribute('data-index', i.toString());
 			circle.setAttribute('data-metric', metric.key);
 			circle.style.filter = 'drop-shadow(0 2px 4px rgba(0,0,0,0.15))';
+			circle.style.cursor = point.campaignId ? 'pointer' : 'default';
 			svg.appendChild(circle);
+
+			// click handler for navigation to campaign
+			if (point.campaignId) {
+				circle.addEventListener('click', (e) => {
+					e.stopPropagation();
+					onCampaignClick(point.campaignId);
+				});
+			}
 
 			// per-point hover listeners to control only the matching glow element.
 			// this avoids affecting adjacent points while keeping the original hover UX.
@@ -1174,6 +1185,19 @@
 				body.appendChild(metricsSection);
 			}
 
+			// add click hint if campaign has an id
+			if (data.campaignId) {
+				const clickHint = document.createElement('div');
+				clickHint.className = 'mt-3 pt-3 border-t border-gray-200 dark:border-gray-600';
+
+				const hintText = document.createElement('p');
+				hintText.className = 'text-xs text-gray-500 dark:text-gray-400 text-center italic';
+				hintText.textContent = 'Click to view campaign details';
+
+				clickHint.appendChild(hintText);
+				body.appendChild(clickHint);
+			}
+
 			container.appendChild(body);
 			tooltip.appendChild(container);
 		} catch (e) {
@@ -1475,7 +1499,6 @@
 
 <style>
 	:global(.chart-point) {
-		cursor: pointer;
 		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 	}
 	:global(.chart-point:hover) {

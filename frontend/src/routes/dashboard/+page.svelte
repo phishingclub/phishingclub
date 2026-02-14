@@ -561,7 +561,11 @@
 
 	<SubHeadline>{contextCompanyName ? 'Campaign Trends' : 'Shared Campaign Trends'}</SubHeadline>
 	<div class="mb-8 w-full min-h-[300px]">
-		<CampaignTrendChart {campaignStats} isLoading={isCampaignStatsLoading} />
+		<CampaignTrendChart
+			{campaignStats}
+			isLoading={isCampaignStatsLoading}
+			onCampaignClick={(id) => goto(`/campaign/${id}`)}
+		/>
 	</div>
 
 	<SubHeadline>Recent events</SubHeadline>
