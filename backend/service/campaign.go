@@ -77,13 +77,36 @@ func (c *Campaign) Create(
 	if len(campaign.RecipientGroupIDs) == 0 {
 		return nil, validate.WrapErrorWithField(errors.New("no groups provided"), "Recipient Groups")
 	}
-	// set default webhookIncludeData for backward compatibility
-	if !campaign.WebhookIncludeData.IsSpecified() {
-		campaign.WebhookIncludeData.Set(model.WebhookDataLevelFull)
+
+	// handle backward compatibility: convert old single webhook to new array format
+	if campaign.WebhookID.IsSpecified() && !campaign.WebhookID.IsNull() {
+		webhookID := campaign.WebhookID.MustGet()
+		// set default values for old fields if not specified
+		if !campaign.WebhookIncludeData.IsSpecified() {
+			campaign.WebhookIncludeData.Set(model.WebhookDataLevelFull)
+		}
+		if !campaign.WebhookEvents.IsSpecified() {
+			campaign.WebhookEvents.Set(0)
+		}
+		// convert to new array format
+		webhookConfig := &model.CampaignWebhook{
+			WebhookID:          nullable.NewNullableWithValue(webhookID),
+			WebhookIncludeData: campaign.WebhookIncludeData,
+			WebhookEvents:      campaign.WebhookEvents,
+		}
+		campaign.Webhooks.Set([]*model.CampaignWebhook{webhookConfig})
+		// clear old fields
+		campaign.WebhookID.SetNull()
 	}
-	// set default webhookEvents (0 means all events) for backward compatibility
-	if !campaign.WebhookEvents.IsSpecified() {
-		campaign.WebhookEvents.Set(0)
+
+	// validate new webhooks array
+	if campaign.Webhooks.IsSpecified() && !campaign.Webhooks.IsNull() {
+		webhooks := campaign.Webhooks.MustGet()
+		for _, wh := range webhooks {
+			if err := wh.Validate(); err != nil {
+				return nil, errs.Wrap(err)
+			}
+		}
 	}
 	// if the schedule type is scheduled, set the start time to start of day and end to the end of the last day
 	if campaign.ConstraintWeekDays.IsSpecified() && !campaign.ConstraintWeekDays.IsNull() {
@@ -163,6 +186,18 @@ func (c *Campaign) Create(
 	if err != nil {
 		c.Logger.Errorw("failed to create campaign", "error", err)
 		return nil, errs.Wrap(err)
+	}
+
+	// save webhook configurations if present
+	if campaign.Webhooks.IsSpecified() && !campaign.Webhooks.IsNull() {
+		webhooks := campaign.Webhooks.MustGet()
+		if len(webhooks) > 0 {
+			err = c.CampaignRepository.AddWebhooks(ctx, id, webhooks)
+			if err != nil {
+				c.Logger.Errorw("failed to add webhooks to campaign", "error", err)
+				return nil, errs.Wrap(err)
+			}
+		}
 	}
 
 	createdCampaign, err := c.CampaignRepository.GetByID(
@@ -1251,18 +1286,9 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 		// logging was done in the previous call
 		return errs.Wrap(err)
 	}
-	// handle webhook
-	webhookID, err := c.CampaignRepository.GetWebhookIDByCampaignID(ctx, &campaignID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		c.Logger.Errorw("failed to get webhook id by campaign id", "error", err)
-		return errs.Wrap(err)
-	}
-	if errors.Is(err, gorm.ErrRecordNotFound) || webhookID == nil {
-		return nil
-	}
-	err = c.HandleWebhook(
+	// handle webhooks
+	err = c.HandleWebhooks(
 		ctx,
-		webhookID,
 		&campaignID,
 		&recipientID,
 		data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ,
@@ -1383,12 +1409,9 @@ func (c *Campaign) UpdateByID(
 	if v, err := incoming.Obfuscate.Get(); err == nil {
 		current.Obfuscate.Set(v)
 	}
-	if v, err := incoming.WebhookIncludeData.Get(); err == nil {
-		current.WebhookIncludeData.Set(v)
-	}
-	if v, err := incoming.WebhookEvents.Get(); err == nil {
-		current.WebhookEvents.Set(v)
-	}
+	// deprecated: webhookIncludeData and webhookEvents on the campaign root are not
+	// written back - they are only read for backward-compat in HandleWebhooks.
+	// per-webhook settings are managed via the webhooks array and campaign_webhooks table.
 	if v, err := incoming.TemplateID.Get(); err == nil {
 		current.TemplateID.Set(v)
 	}
@@ -1425,18 +1448,48 @@ func (c *Campaign) UpdateByID(
 	if v, err := incoming.AnonymizedAt.Get(); err == nil {
 		current.AnonymizedAt.Set(v.Truncate(time.Minute))
 	}
-	if v, err := incoming.TemplateID.Get(); err == nil {
-		current.TemplateID.Set(v)
-	}
 	if v, err := incoming.RecipientGroupIDs.Get(); err == nil {
 		current.RecipientGroupIDs.Set(v)
 	}
-	// handle webhook ID
-	if incoming.WebhookID.IsSpecified() {
-		if incoming.WebhookID.IsNull() {
-			current.WebhookID.SetNull()
+	// handle backward compatibility: convert old single webhook to new array format
+	if incoming.WebhookID.IsSpecified() && !incoming.WebhookID.IsNull() {
+		webhookID := incoming.WebhookID.MustGet()
+		// set default values for old fields if not specified
+		webhookIncludeData := model.WebhookDataLevelFull
+		if incoming.WebhookIncludeData.IsSpecified() && !incoming.WebhookIncludeData.IsNull() {
+			webhookIncludeData = incoming.WebhookIncludeData.MustGet()
+		}
+		webhookEvents := 0
+		if incoming.WebhookEvents.IsSpecified() && !incoming.WebhookEvents.IsNull() {
+			webhookEvents = incoming.WebhookEvents.MustGet()
+		}
+		// convert to new array format
+		webhookConfig := &model.CampaignWebhook{
+			WebhookID:          nullable.NewNullableWithValue(webhookID),
+			WebhookIncludeData: nullable.NewNullableWithValue(webhookIncludeData),
+			WebhookEvents:      nullable.NewNullableWithValue(webhookEvents),
+		}
+		incoming.Webhooks.Set([]*model.CampaignWebhook{webhookConfig})
+		// clear old fields
+		incoming.WebhookID.SetNull()
+	}
+
+	// handle new webhooks array
+	if incoming.Webhooks.IsSpecified() {
+		// always clear the deprecated webhook_id column when the new format is used
+		// so the legacy fallback in HandleWebhooks never reads a stale value
+		current.WebhookID.SetNull()
+		if incoming.Webhooks.IsNull() || len(incoming.Webhooks.MustGet()) == 0 {
+			current.Webhooks.SetNull()
 		} else {
-			current.WebhookID.Set(incoming.WebhookID.MustGet())
+			webhooks := incoming.Webhooks.MustGet()
+			// validate each webhook
+			for _, wh := range webhooks {
+				if err := wh.Validate(); err != nil {
+					return errs.Wrap(err)
+				}
+			}
+			current.Webhooks.Set(webhooks)
 		}
 	}
 
@@ -1486,6 +1539,27 @@ func (c *Campaign) UpdateByID(
 	if err != nil {
 		c.Logger.Errorw("failed to update campaign by id", "error", err)
 		return errs.Wrap(err)
+	}
+
+	// update webhook configurations
+	if current.Webhooks.IsSpecified() {
+		// remove all existing webhooks
+		err = c.CampaignRepository.RemoveWebhooksByCampaignID(ctx, id)
+		if err != nil {
+			c.Logger.Errorw("failed to remove webhooks from campaign", "error", err)
+			return errs.Wrap(err)
+		}
+		// add new webhooks if present
+		if !current.Webhooks.IsNull() {
+			webhooks := current.Webhooks.MustGet()
+			if len(webhooks) > 0 {
+				err = c.CampaignRepository.AddWebhooks(ctx, id, webhooks)
+				if err != nil {
+					c.Logger.Errorw("failed to add webhooks to campaign", "error", err)
+					return errs.Wrap(err)
+				}
+			}
+		}
 	}
 	// re-schedule the campaign
 	// TODO should this all be in the schedule method
@@ -2580,18 +2654,9 @@ func (c *Campaign) saveSendingResult(
 		// logging was done in the previous call
 		return errs.Wrap(err)
 	}
-	// handle webhook
-	webhookID, err := c.CampaignRepository.GetWebhookIDByCampaignID(ctx, &campaignID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		c.Logger.Errorw("failed to get webhook id by campaign id", "error", err)
-		return errs.Wrap(err)
-	}
-	if webhookID == nil {
-		return nil
-	}
-	err = c.HandleWebhook(
+	// handle webhooks
+	err = c.HandleWebhooks(
 		ctx,
-		webhookID,
 		&campaignID,
 		&recipientID,
 		eventName,
@@ -2629,18 +2694,9 @@ func (c *Campaign) saveEventCampaignClose(
 	if err != nil {
 		return fmt.Errorf("failed to save event: %s", err)
 	}
-	// handle webhook
-	webhookID, err := c.CampaignRepository.GetWebhookIDByCampaignID(ctx, campaignID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		c.Logger.Errorw("failed to get webhook id by campaign id", "error", err)
-		return errs.Wrap(err)
-	}
-	if webhookID == nil {
-		return nil
-	}
-	err = c.HandleWebhook(
+	// handle webhooks
+	err = c.HandleWebhooks(
 		ctx,
-		webhookID,
 		campaignID,
 		nil,
 		data.EVENT_CAMPAIGN_CLOSED,
@@ -3338,18 +3394,9 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 		return errs.Wrap(err)
 	}
 	c.AuditLogAuthorized(ae)
-	// handle webhook
-	webhookID, err := c.CampaignRepository.GetWebhookIDByCampaignID(ctx, &campaignID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		c.Logger.Errorw("failed to get webhook id by campaign id", "error", err)
-		return errs.Wrap(err)
-	}
-	if errors.Is(err, gorm.ErrRecordNotFound) || webhookID == nil {
-		return nil
-	}
-	err = c.HandleWebhook(
+	// handle webhooks
+	err = c.HandleWebhooks(
 		ctx,
-		webhookID,
 		&campaignID,
 		&recipientID,
 		data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT,
@@ -3361,8 +3408,138 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 	return nil
 }
 
-// HandleWebhook handles a webhook
-// it must only be called from secure contexts as it is not checked for permissions
+// HandleWebhooks handles multiple webhooks for a campaign event
+func (c *Campaign) HandleWebhooks(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+	eventName string,
+	capturedData map[string]interface{},
+) error {
+	// get campaign webhooks from junction table
+	webhooks, err := c.CampaignRepository.GetCampaignWebhooks(ctx, campaignID)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign webhooks", "error", err)
+		return errs.Wrap(err)
+	}
+
+	// if no webhooks in new format, check for old single webhook (backward compatibility)
+	if len(webhooks) == 0 {
+		campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{})
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		// check if old webhook_id is set
+		if campaign.WebhookID.IsSpecified() && !campaign.WebhookID.IsNull() {
+			webhookID := campaign.WebhookID.MustGet()
+			// use old webhook fields for backward compatibility
+			webhookIncludeData := model.WebhookDataLevelFull
+			if level, err := campaign.WebhookIncludeData.Get(); err == nil {
+				webhookIncludeData = level
+			}
+			webhookEvents := 0
+			if events, err := campaign.WebhookEvents.Get(); err == nil {
+				webhookEvents = events
+			}
+			webhooks = []*model.CampaignWebhook{{
+				WebhookID:          nullable.NewNullableWithValue(webhookID),
+				WebhookIncludeData: nullable.NewNullableWithValue(webhookIncludeData),
+				WebhookEvents:      nullable.NewNullableWithValue(webhookEvents),
+			}}
+		}
+	}
+
+	if len(webhooks) == 0 {
+		return nil
+	}
+
+	// get campaign name once for all webhooks
+	campaignName, err := c.CampaignRepository.GetNameByID(ctx, campaignID)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	// get email once for all webhooks
+	var email *vo.Email
+	if recipientID != nil {
+		email, err = c.RecipientRepository.GetEmailByID(ctx, recipientID)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return errs.Wrap(err)
+		}
+	}
+
+	// batch-fetch all webhook details in one query to avoid N+1 db calls
+	webhookIDs := make([]*uuid.UUID, 0, len(webhooks))
+	for _, wc := range webhooks {
+		id := wc.WebhookID.MustGet()
+		webhookIDs = append(webhookIDs, &id)
+	}
+	webhookDetails, err := c.WebhookRepository.GetByIDs(ctx, webhookIDs)
+	if err != nil {
+		c.Logger.Errorw("failed to batch-fetch webhook details", "error", err)
+		return errs.Wrap(err)
+	}
+	// index fetched webhooks by id for O(1) lookup inside the loop
+	webhookByID := make(map[string]*model.Webhook, len(webhookDetails))
+	for _, wd := range webhookDetails {
+		webhookByID[wd.ID.MustGet().String()] = wd
+	}
+
+	// send to each configured webhook
+	for _, webhookConfig := range webhooks {
+		webhookID := webhookConfig.WebhookID.MustGet()
+		webhookEvents := webhookConfig.GetWebhookEventsOrDefault()
+		dataLevel := webhookConfig.GetWebhookIncludeDataOrDefault()
+
+		// check if this event should trigger this webhook
+		if !model.IsWebhookEventEnabled(webhookEvents, eventName) {
+			continue
+		}
+
+		webhook, ok := webhookByID[webhookID.String()]
+		if !ok {
+			c.Logger.Errorw("webhook not found in batch result", "webhookID", webhookID.String())
+			continue
+		}
+
+		now := time.Now()
+		webhookReq := WebhookRequest{
+			Time:  &now,
+			Event: eventName,
+		}
+
+		// apply data level filters
+		switch dataLevel {
+		case model.WebhookDataLevelNone:
+			// only time and event - no campaign name, no email, no data
+		case model.WebhookDataLevelBasic:
+			// include campaign name but no email or captured data
+			webhookReq.CampaignName = campaignName
+		case model.WebhookDataLevelFull:
+			// include everything
+			webhookReq.CampaignName = campaignName
+			webhookReq.Data = capturedData
+			if email != nil {
+				webhookReq.Email = email.String()
+			}
+		}
+
+		// use context.Background() so a cancelled request context does not
+		// abort the send - the goroutine outlives the originating request
+		go func(wh *model.Webhook, req *WebhookRequest) {
+			c.Logger.Debugw("sending webhook", "url", wh.URL.MustGet().String())
+			_, err := c.WebhookService.Send(context.Background(), wh, req)
+			if err != nil {
+				c.Logger.Errorw("failed to send webhook", "error", err)
+			}
+			c.Logger.Debugw("sending webhook completed", "url", wh.URL.MustGet().String())
+		}(webhook, &webhookReq)
+	}
+
+	return nil
+}
+
+// HandleWebhook handles a single webhook (deprecated - kept for backward compatibility)
 func (c *Campaign) HandleWebhook(
 	ctx context.Context,
 	webhookID *uuid.UUID,
@@ -3371,75 +3548,8 @@ func (c *Campaign) HandleWebhook(
 	eventName string,
 	capturedData map[string]interface{},
 ) error {
-	campaignName, err := c.CampaignRepository.GetNameByID(ctx, campaignID)
-	if err != nil {
-		return errs.Wrap(err)
-	}
-	email, err := c.RecipientRepository.GetEmailByID(ctx, recipientID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return errs.Wrap(err)
-	}
-	webhook, err := c.WebhookRepository.GetByID(ctx, webhookID)
-	if err != nil {
-		return errs.Wrap(err)
-	}
-
-	// check campaign webhook data level
-	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{})
-	if err != nil {
-		return errs.Wrap(err)
-	}
-
-	// check if this event should trigger webhook notification
-	webhookEvents := 0
-	if events, err := campaign.WebhookEvents.Get(); err == nil {
-		webhookEvents = events
-	}
-	// 0 means all events (backward compatibility)
-	// otherwise check if the event bit is set
-	if !model.IsWebhookEventEnabled(webhookEvents, eventName) {
-		// event not in selected events, skip webhook
-		return nil
-	}
-
-	// determine what data to send based on webhookIncludeData level
-	dataLevel := model.WebhookDataLevelFull
-	if level, err := campaign.WebhookIncludeData.Get(); err == nil {
-		dataLevel = level
-	}
-
-	now := time.Now()
-	webhookReq := WebhookRequest{
-		Time:  &now,
-		Event: eventName,
-	}
-
-	// apply data level filters
-	switch dataLevel {
-	case model.WebhookDataLevelNone:
-		// only time and event - no campaign name, no email, no data
-	case model.WebhookDataLevelBasic:
-		// include campaign name but no email or captured data
-		webhookReq.CampaignName = campaignName
-	case model.WebhookDataLevelFull:
-		// include everything
-		webhookReq.CampaignName = campaignName
-		webhookReq.Data = capturedData
-		if email != nil {
-			webhookReq.Email = email.String()
-		}
-	}
-	// the webhook is handles as a different go routine
-	// so we don't block the campaign handling thread
-	go func() {
-		c.Logger.Debugw("sending webhook", "url", webhook.URL.MustGet().String())
-		_, err := c.WebhookService.Send(ctx, webhook, &webhookReq)
-		if err != nil {
-			c.Logger.Errorw("failed to send webhook", "error", err)
-		}
-		c.Logger.Debugw("sending webhook completed", "url", webhook.URL.MustGet().String())
-	}()
-	return nil
+	// for backward compatibility, delegate to HandleWebhooks
+	return c.HandleWebhooks(ctx, campaignID, recipientID, eventName, capturedData)
 }
 
 // AnonymizeByID anonymizes a campaign including the events

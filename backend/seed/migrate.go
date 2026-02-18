@@ -52,6 +52,7 @@ func initialInstallAndSeed(
 		&database.AllowDeny{},
 		&database.CampaignAllowDeny{},
 		&database.Webhook{},
+		&database.CampaignWebhook{},
 		&database.Identifier{},
 		&database.CampaignStats{},
 		&database.OAuthProvider{},
@@ -124,6 +125,13 @@ func initialInstallAndSeed(
 	if err != nil {
 		return errs.Wrap(
 			errors.Errorf("failed to seed identifiers: %w", err),
+		)
+	}
+	// run data migrations (idempotent - safe to run on every startup)
+	err = migrate(db)
+	if err != nil {
+		return errs.Wrap(
+			errors.Errorf("failed to run data migrations: %w", err),
 		)
 	}
 	return nil
@@ -395,6 +403,20 @@ func migrate(db *gorm.DB) error {
 
 	// update existing rows to have empty string default
 	if err := db.Exec(`UPDATE allow_denies SET headers = '' WHERE headers IS NULL`).Error; err != nil {
+		return errs.Wrap(err)
+	}
+
+	// migration for converting single webhook to multiple webhooks
+	// migrate existing campaigns with webhook_id to campaign_webhooks junction table
+	// ON CONFLICT DO NOTHING makes this idempotent on re-runs without relying on
+	// db-driver-specific error message strings
+	if err := db.Exec(`
+		INSERT INTO campaign_webhooks (campaign_id, webhook_id, webhook_include_data, webhook_events)
+		SELECT id, webhook_id, webhook_include_data, webhook_events
+		FROM campaigns
+		WHERE webhook_id IS NOT NULL
+		ON CONFLICT DO NOTHING
+	`).Error; err != nil {
 		return errs.Wrap(err)
 	}
 

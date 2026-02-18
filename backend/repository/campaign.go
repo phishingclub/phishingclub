@@ -60,6 +60,7 @@ type CampaignOption struct {
 	WithAllowDeny           bool
 	WithDenyPage            bool
 	WithEvasionPage         bool
+	WithWebhooks            bool
 	IncludeTestCampaigns    bool
 }
 
@@ -117,6 +118,9 @@ func (r *Campaign) load(db *gorm.DB, options *CampaignOption) *gorm.DB {
 	if options.WithEvasionPage {
 		db = db.Preload("EvasionPage")
 	}
+	// WithWebhooks is handled post-query via GetCampaignWebhooks
+	// because the junction table stores extra columns (include_data, events)
+	// that GORM many2many preload cannot populate into model.CampaignWebhook
 	return db
 }
 
@@ -253,6 +257,85 @@ func (r *Campaign) AddAllowDenyLists(
 	return nil
 }
 
+// AddWebhooks adds webhooks to campaign with per-webhook configuration
+func (r *Campaign) AddWebhooks(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	webhooks []*model.CampaignWebhook,
+) error {
+	batch := []database.CampaignWebhook{}
+	// deduplicate by webhook id to prevent unique constraint violations
+	seen := map[string]struct{}{}
+	for _, wh := range webhooks {
+		webhookID := wh.WebhookID.MustGet()
+		key := webhookID.String()
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		batch = append(batch, database.CampaignWebhook{
+			CampaignID:         campaignID,
+			WebhookID:          &webhookID,
+			WebhookIncludeData: wh.GetWebhookIncludeDataOrDefault(),
+			WebhookEvents:      wh.GetWebhookEventsOrDefault(),
+		})
+	}
+	if len(batch) == 0 {
+		return nil
+	}
+	res := r.DB.Create(&batch)
+
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// RemoveWebhooksByCampaignID removes all webhooks from a campaign
+func (r *Campaign) RemoveWebhooksByCampaignID(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) error {
+	res := r.DB.
+		Where("campaign_id = ?", campaignID).
+		Delete(&database.CampaignWebhook{})
+
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// GetCampaignWebhooks fetches webhook configurations for a campaign from junction table
+func (r *Campaign) GetCampaignWebhooks(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) ([]*model.CampaignWebhook, error) {
+	var rows []database.CampaignWebhook
+	res := r.DB.
+		Where("campaign_id = ?", campaignID.String()).
+		Find(&rows)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+
+	webhooks := []*model.CampaignWebhook{}
+	for _, row := range rows {
+		if row.WebhookID == nil {
+			continue
+		}
+		wh := &model.CampaignWebhook{
+			WebhookID:          nullable.NewNullableWithValue(*row.WebhookID),
+			WebhookIncludeData: nullable.NewNullableWithValue(row.WebhookIncludeData),
+			WebhookEvents:      nullable.NewNullableWithValue(row.WebhookEvents),
+		}
+		webhooks = append(webhooks, wh)
+	}
+
+	return webhooks, nil
+}
+
 // GetByWebhookID gets campaigns by webhook ID
 // not paginated
 func (r *Campaign) GetByWebhookID(
@@ -261,8 +344,41 @@ func (r *Campaign) GetByWebhookID(
 ) ([]*model.Campaign, error) {
 	rows := []*database.Campaign{}
 	models := []*model.Campaign{}
+
+	// use a map to deduplicate campaign IDs collected from both the junction
+	// table and the legacy webhook_id column - after migration a campaign will
+	// appear in both sources, so deduplication is required before the final query
+	seen := map[string]struct{}{}
+
+	// get from junction table
+	var junctionRows []database.CampaignWebhook
+	r.DB.Where("webhook_id = ?", webhookID.String()).Find(&junctionRows)
+	for _, row := range junctionRows {
+		if row.CampaignID != nil {
+			seen[row.CampaignID.String()] = struct{}{}
+		}
+	}
+
+	// get from old webhook_id field (backward compatibility)
+	var oldRows []*database.Campaign
+	r.DB.Where("webhook_id = ?", webhookID.String()).Find(&oldRows)
+	for _, row := range oldRows {
+		if row.ID != nil {
+			seen[row.ID.String()] = struct{}{}
+		}
+	}
+
+	if len(seen) == 0 {
+		return models, nil
+	}
+
+	campaignIDs := make([]string, 0, len(seen))
+	for id := range seen {
+		campaignIDs = append(campaignIDs, id)
+	}
+
 	res := r.DB.
-		Where("webhook_id = ?", webhookID.String()).
+		Where("id IN ?", campaignIDs).
 		Find(&rows)
 
 	if res.Error != nil {
@@ -348,11 +464,30 @@ func (r *Campaign) GetByTemplateIDs(
 	return models, nil
 }
 
+// RemoveWebhookFromJunctionByWebhookID removes all campaign_webhooks rows for a given webhook id
+// must be called before deleting a webhook to avoid orphaned junction rows
+func (r *Campaign) RemoveWebhookFromJunctionByWebhookID(
+	ctx context.Context,
+	webhookID *uuid.UUID,
+) error {
+	res := r.DB.
+		Where("webhook_id = ?", webhookID.String()).
+		Delete(&database.CampaignWebhook{})
+
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
 // RemoveWebhookByCampaignIDs removes the webhook from campaigns by ids
 func (r *Campaign) RemoveWebhookByCampaignIDs(
 	ctx context.Context,
 	campaignIDs []*uuid.UUID,
 ) error {
+	if len(campaignIDs) == 0 {
+		return nil
+	}
 	row := map[string]interface{}{}
 	ids := UUIDsToStrings(campaignIDs)
 	AddUpdatedAt(row)
@@ -1084,7 +1219,18 @@ func (r *Campaign) GetByID(
 	if res.Error != nil {
 		return nil, res.Error
 	}
-	return ToCampaign(&dbCampaign)
+	campaign, err := ToCampaign(&dbCampaign)
+	if err != nil {
+		return nil, err
+	}
+	if options.WithWebhooks {
+		webhooks, err := r.GetCampaignWebhooks(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		campaign.Webhooks = nullable.NewNullableWithValue(webhooks)
+	}
+	return campaign, nil
 }
 
 // GetNameByID gets a campaign name by id
@@ -1652,6 +1798,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	isAnonymous := nullable.NewNullableWithValue(row.IsAnonymous)
 	isTest := nullable.NewNullableWithValue(row.IsTest)
 	obfuscate := nullable.NewNullableWithValue(row.Obfuscate)
+	// deprecated fields - kept for backward compatibility
 	webhookIncludeData := nullable.NewNullableWithValue(row.WebhookIncludeData)
 	webhookEvents := nullable.NewNullableWithValue(row.WebhookEvents)
 	var templateID nullable.Nullable[uuid.UUID]
@@ -1740,10 +1887,14 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		}
 		constraintEndTime.Set(*t)
 	}
+	// handle old single webhook (backward compatibility)
 	webhookID := nullable.NewNullNullable[uuid.UUID]()
 	if row.WebhookID != nil {
 		webhookID.Set(*row.WebhookID)
 	}
+
+	// handle new multiple webhooks - will be populated separately if needed
+	webhooks := nullable.NewNullNullable[[]*model.CampaignWebhook]()
 	anonymizeAt := nullable.NewNullNullable[time.Time]()
 	if row.AnonymizeAt != nil {
 		anonymizeAt.Set(*row.AnonymizeAt)
@@ -1797,6 +1948,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		EvasionPage:         evasionPage,
 		EvasionPageID:       evasionPageID,
 		WebhookID:           webhookID,
+		Webhooks:            webhooks,
 		NotableEventID:      notableEventID,
 		NotableEventName:    notableEventName,
 	}, nil

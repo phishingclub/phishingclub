@@ -3428,29 +3428,19 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, 
 		m.logger.Errorw("failed to create campaign submit event", "error", err)
 	}
 
-	// handle webhook for submitted data event
-	webhookID, err := m.CampaignRepository.GetWebhookIDByCampaignID(ctx, session.CampaignID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		m.logger.Errorw("failed to get webhook id by campaign id for MITM proxy submit",
-			"campaignID", session.CampaignID.String(),
+	// handle webhooks for submitted data event
+	err = m.CampaignService.HandleWebhooks(
+		ctx,
+		session.CampaignID,
+		session.RecipientID,
+		data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
+		capturedData,
+	)
+	if err != nil {
+		m.logger.Errorw("failed to handle webhooks for MITM proxy submit",
 			"error", err,
+			"campaignRecipientID", session.CampaignRecipientID.String(),
 		)
-	}
-	if webhookID != nil {
-		err = m.CampaignService.HandleWebhook(
-			ctx,
-			webhookID,
-			session.CampaignID,
-			session.RecipientID,
-			data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
-			capturedData,
-		)
-		if err != nil {
-			m.logger.Errorw("failed to handle webhook for MITM proxy submit",
-				"error", err,
-				"campaignRecipientID", session.CampaignRecipientID.String(),
-			)
-		}
 	}
 }
 
@@ -4181,27 +4171,18 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 		}
 	}
 
-	// handle webhook for MITM page visit
-	webhookID, err := m.CampaignRepository.GetWebhookIDByCampaignID(ctx, session.CampaignID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		m.logger.Errorw("failed to get webhook id by campaign id for MITM proxy",
-			"campaignID", session.CampaignID.String(),
-			"error", err,
-		)
-	}
-	if webhookID != nil && currentPageType != data.PAGE_TYPE_DONE {
-		err = m.CampaignService.HandleWebhook(
+	// handle webhooks for MITM page visit
+	if currentPageType != data.PAGE_TYPE_DONE {
+		err = m.CampaignService.HandleWebhooks(
 			ctx,
-			webhookID,
 			session.CampaignID,
 			session.RecipientID,
 			eventName,
 			nil,
 		)
 		if err != nil {
-			m.logger.Errorw("failed to handle webhook for MITM page visit",
+			m.logger.Errorw("failed to handle webhooks for MITM page visit",
 				"error", err,
-				"campaignRecipientID", session.CampaignRecipientID.String(),
 			)
 		}
 	}
@@ -4742,29 +4723,18 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 		}
 	}
 
-	// handle webhook for deny page visit
-	webhookID, err := m.CampaignRepository.GetWebhookIDByCampaignID(req.Context(), campaignID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		m.logger.Errorw("failed to get webhook id by campaign id for deny page",
-			"campaignID", campaignID.String(),
+	// handle webhooks for deny page visit
+	err = m.CampaignService.HandleWebhooks(
+		req.Context(),
+		campaignID,
+		recipientID,
+		data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED,
+		nil,
+	)
+	if err != nil {
+		m.logger.Errorw("failed to handle webhooks for deny page visit",
 			"error", err,
 		)
-	}
-	if webhookID != nil {
-		err = m.CampaignService.HandleWebhook(
-			req.Context(),
-			webhookID,
-			campaignID,
-			recipientID,
-			data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED,
-			nil,
-		)
-		if err != nil {
-			m.logger.Errorw("failed to handle webhook for deny page visit",
-				"error", err,
-				"campaignRecipientID", reqCtx.CampaignRecipientID.String(),
-			)
-		}
 	}
 }
 
@@ -4815,29 +4785,18 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 		m.logger.Errorw("failed to save evasion page visit event", "error", err)
 	}
 
-	// handle webhook for evasion page visit
-	webhookID, err := m.CampaignRepository.GetWebhookIDByCampaignID(req.Context(), campaignID)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		m.logger.Errorw("failed to get webhook id by campaign id for evasion page",
-			"campaignID", campaignID.String(),
+	// handle webhooks for evasion page visit
+	err = m.CampaignService.HandleWebhooks(
+		req.Context(),
+		campaignID,
+		recipientID,
+		data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED,
+		nil,
+	)
+	if err != nil {
+		m.logger.Errorw("failed to handle webhooks for evasion page visit",
 			"error", err,
 		)
-	}
-	if webhookID != nil {
-		err = m.CampaignService.HandleWebhook(
-			req.Context(),
-			webhookID,
-			campaignID,
-			recipientID,
-			data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED,
-			nil,
-		)
-		if err != nil {
-			m.logger.Errorw("failed to handle webhook for evasion page visit",
-				"error", err,
-				"campaignRecipientID", reqCtx.CampaignRecipientID.String(),
-			)
-		}
 	}
 }
 

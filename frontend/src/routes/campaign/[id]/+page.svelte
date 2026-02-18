@@ -73,6 +73,7 @@
 
 		allowDenyIDs: [],
 		webhookID: null,
+		webhooks: [],
 		// groups by name, must be mapped to IDs before sending to the server
 		recipientGroups: [],
 		events: [],
@@ -81,6 +82,8 @@
 		companyID: null,
 		company: null
 	};
+	// map of webhook id -> webhook name for display
+	let webhookMap = new BiMap({});
 	let allowedFilter = null;
 	let campaignRecipients = [];
 	let campaignRecipientsHasNextPage = false;
@@ -247,8 +250,19 @@
 			campaign.denyPage = t.denyPage;
 			campaign.evasionPage = t.evasionPage;
 			campaign.webhookID = t.webhookID;
+			campaign.webhooks = t.webhooks ?? [];
 			campaign.companyID = t.companyID;
 			campaign.company = t.company;
+
+			// load webhook names for display
+			try {
+				const allWebhooks = await fetchAllRows((options) => {
+					return api.webhook.getAll(options, campaign.companyID ?? null);
+				});
+				webhookMap = BiMap.FromArrayOfObjects(allWebhooks);
+			} catch (e) {
+				console.error('failed to load webhooks for display', e);
+			}
 
 			// if company exists but name is missing, fetch it
 			if (campaign.companyID && !campaign.company?.name) {
@@ -1443,9 +1457,25 @@
 
 					<div class="flex justify-between">
 						<span class="text-gray-600 dark:text-gray-400">Webhook:</span>
-						<span class="text-pc-darkblue dark:text-white">
-							{campaign.webhookID ? 'Yes' : 'None'}
-						</span>
+						<div class="text-right">
+							{#if campaign.webhooks?.length}
+								{#each campaign.webhooks as wh, i}
+									<a
+										class="text-cta-blue dark:text-blue-400 hover:underline"
+										href="/webhook?edit={wh.webhookID}"
+										target="_blank">{webhookMap.byKey(wh.webhookID) || wh.webhookID}</a
+									>{#if i < campaign.webhooks.length - 1},&nbsp;{/if}
+								{/each}
+							{:else if campaign.webhookID}
+								<a
+									class="text-cta-blue dark:text-blue-400 hover:underline"
+									href="/webhook?edit={campaign.webhookID}"
+									target="_blank">{webhookMap.byKey(campaign.webhookID) || 'Yes'}</a
+								>
+							{:else}
+								<span class="text-pc-darkblue dark:text-white">None</span>
+							{/if}
+						</div>
 					</div>
 
 					<div class="flex justify-between">

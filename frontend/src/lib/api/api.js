@@ -517,9 +517,7 @@ export class API {
 		 * @param {string[]} campaign.allowDenyIDs []uuid
 		 * @param {string} campaign.denyPageID uuid
 		 * @param {string} campaign.evasionPageID uuid
-		 * @param {string} campaign.webhookID uuid
-		 * @param {string} [campaign.webhookIncludeData]
-		 * @param {number} [campaign.webhookEvents]
+		 * @param {Array} [campaign.webhooks] array of webhook configs
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
@@ -546,9 +544,7 @@ export class API {
 			allowDenyIDs,
 			denyPageID,
 			evasionPageID,
-			webhookID,
-			webhookIncludeData,
-			webhookEvents,
+			webhooks,
 			constraintWeekDays,
 			constraintStartTime,
 			constraintEndTime,
@@ -574,9 +570,7 @@ export class API {
 				allowDenyIDs,
 				denyPageID,
 				evasionPageID,
-				webhookID,
-				webhookIncludeData,
-				webhookEvents,
+				webhooks,
 				constraintWeekDays,
 				constraintStartTime,
 				constraintEndTime,
@@ -605,9 +599,7 @@ export class API {
 		 * @param {string[]} campaign.allowDenyIDs []uuid
 		 * @param {string} campaign.denyPageID uuid
 		 * @param {string} campaign.evasionPageID uuid
-		 * @param {string} campaign.webhookID uuid
-		 * @param {string} [campaign.webhookIncludeData]
-		 * @param {number} [campaign.webhookEvents]
+		 * @param {Array} [campaign.webhooks] array of webhook configs
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
@@ -634,9 +626,7 @@ export class API {
 			allowDenyIDs,
 			denyPageID,
 			evasionPageID,
-			webhookID,
-			webhookIncludeData,
-			webhookEvents,
+			webhooks,
 			constraintWeekDays,
 			constraintStartTime,
 			constraintEndTime,
@@ -661,9 +651,7 @@ export class API {
 				allowDenyIDs,
 				denyPageID,
 				evasionPageID,
-				webhookID,
-				webhookIncludeData,
-				webhookEvents,
+				webhooks,
 				constraintWeekDays,
 				constraintStartTime,
 				constraintEndTime,

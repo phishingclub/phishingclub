@@ -1190,31 +1190,17 @@ func (s *Server) checkAndServePhishingPage(
 				return true, errs.Wrap(err)
 			}
 		}
-		// handle webhook
-		webhookID, err := s.repositories.Campaign.GetWebhookIDByCampaignID(
-			c,
+		// handle webhooks
+		err = s.services.Campaign.HandleWebhooks(
+			// TODO this should be tied to a application wide context not the request
+			context.TODO(),
 			&campaignID,
+			&recipientID,
+			data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
+			webhookData,
 		)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			s.logger.Errorw("failed to get webhook id by campaign id",
-				"campaignID", campaignID.String(),
-				"error", err,
-			)
-			return true, errs.Wrap(err)
-		}
-		if webhookID != nil {
-			err = s.services.Campaign.HandleWebhook(
-				// TODO this should be tied to a application wide context not the request
-				context.TODO(),
-				webhookID,
-				&campaignID,
-				&recipientID,
-				data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
-				webhookData,
-			)
-			if err != nil {
-				return true, fmt.Errorf("failed to handle webhook: %s", err)
-			}
+		if err != nil {
+			return true, fmt.Errorf("failed to handle webhooks: %s", err)
 		}
 	}
 	// if redirect && data submission && final page
@@ -1451,32 +1437,23 @@ func (s *Server) checkAndServePhishingPage(
 			}
 		}
 
-		// handle webhook for Proxy page visit
-		webhookID, err := s.repositories.Campaign.GetWebhookIDByCampaignID(
-			c,
-			&campaignID,
-		)
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			s.logger.Errorw("failed to get webhook id by campaign id for proxy",
-				"campaignID", campaignID.String(),
-				"error", err,
-			)
-		}
-		if webhookID != nil && currentPageType != data.PAGE_TYPE_DONE {
-			err = s.services.Campaign.HandleWebhook(
+		// handle webhooks for Proxy page visit
+		if currentPageType != data.PAGE_TYPE_DONE {
+			err = s.services.Campaign.HandleWebhooks(
 				// TODO this should be tied to a application wide context not the request
 				context.TODO(),
-				webhookID,
 				&campaignID,
 				&recipientID,
 				eventName,
 				nil,
 			)
 			if err != nil {
-				s.logger.Errorw("failed to handle webhook for Proxy page",
+				s.logger.Errorw("failed to handle webhooks for Proxy page visit",
+					"campaignID", campaignID.String(),
+					"recipientID", recipientID.String(),
 					"error", err,
-					"proxyID", proxyID.String(),
 				)
+				return true, errs.Wrap(err)
 			}
 		}
 
@@ -1759,34 +1736,19 @@ func (s *Server) checkAndServePhishingPage(
 			return true, errs.Wrap(err)
 		}
 	}
-	// handle webhook
-	webhookID, err := s.repositories.Campaign.GetWebhookIDByCampaignID(
-		c,
-		&campaignID,
-	)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		s.logger.Errorw("failed to get webhook id by campaign id %s",
-			"campaignID", campaignID.String(),
-			"error", err,
-		)
-		return true, errs.Wrap(err)
-	}
-	if webhookID == nil {
-		return true, nil
-	}
+	// handle webhooks
 	// do not notify on visiting the page done as it is a repeat of the flow
 	if currentPageType != data.PAGE_TYPE_DONE {
-		err = s.services.Campaign.HandleWebhook(
+		err = s.services.Campaign.HandleWebhooks(
 			// TODO this should be tied to a application wide context not the request
 			context.TODO(),
-			webhookID,
 			&campaignID,
 			&recipientID,
 			eventName,
 			nil,
 		)
 		if err != nil {
-			return true, fmt.Errorf("failed to handle webhook: %s", err)
+			return true, fmt.Errorf("failed to handle webhooks: %s", err)
 		}
 	}
 
@@ -1982,32 +1944,21 @@ func (s *Server) renderDenyPage(
 		recipientEmailStr = recipientEmailVal.String()
 	}
 
-	// handle webhook for deny page visit
-	webhookID, err := s.repositories.Campaign.GetWebhookIDByCampaignID(
-		c,
+	// handle webhooks for deny page visit
+	err = s.services.Campaign.HandleWebhooks(
+		context.TODO(),
 		&campaignID,
+		&recipientID,
+		data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED,
+		nil,
 	)
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		s.logger.Errorw("failed to get webhook id by campaign id for deny page",
+	if err != nil {
+		s.logger.Errorw("failed to handle webhooks for deny page visit",
 			"campaignID", campaignID.String(),
+			"recipientID", recipientID.String(),
 			"error", err,
 		)
-	}
-	if webhookID != nil {
-		err = s.services.Campaign.HandleWebhook(
-			context.TODO(),
-			webhookID,
-			&campaignID,
-			&recipientID,
-			data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED,
-			nil,
-		)
-		if err != nil {
-			s.logger.Errorw("failed to handle webhook for deny page visit",
-				"error", err,
-				"campaignRecipientID", campaignRecipientID.String(),
-			)
-		}
+		// not returning error as we don't want to block page rendering
 	}
 
 	s.logger.Debugw("rendered deny page",

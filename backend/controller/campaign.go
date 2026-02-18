@@ -180,6 +180,7 @@ func (c *Campaign) GetByID(g *gin.Context) {
 			WithAllowDeny:       true,
 			WithDenyPage:        true,
 			WithEvasionPage:     true,
+			WithWebhooks:        true,
 		},
 	)
 	// handle responses

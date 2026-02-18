@@ -1,4 +1,5 @@
 <script>
+	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
@@ -78,6 +79,13 @@
 		}
 		refreshWebhooks();
 		tableURLParams.onChange(refreshWebhooks);
+
+		(async () => {
+			const editID = $page.url.searchParams.get('edit');
+			if (editID) {
+				await openEditModal(editID);
+			}
+		})();
 
 		return () => {
 			tableURLParams.unsubscribe();

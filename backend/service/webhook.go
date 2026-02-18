@@ -280,6 +280,13 @@ func (w *Webhook) DeleteByID(
 		w.Logger.Errorw("failed to remove web hook from campaigns", "error", err)
 		return err
 	}
+	// remove junction table rows for this webhook so no campaign retains
+	// a dangling reference in the new many-to-many format
+	err = w.CampaignRepository.RemoveWebhookFromJunctionByWebhookID(ctx, id)
+	if err != nil {
+		w.Logger.Errorw("failed to remove webhook from campaign_webhooks junction", "error", err)
+		return err
+	}
 	// delete
 	err = w.WebhookRepository.DeleteByID(ctx, id)
 	if err != nil {

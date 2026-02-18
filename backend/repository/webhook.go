@@ -127,6 +127,36 @@ func (r *Webhook) GetByID(
 	return ToWebhook(&row), nil
 }
 
+// GetByIDs fetches multiple webhooks by their IDs in a single query
+func (r *Webhook) GetByIDs(
+	ctx context.Context,
+	ids []*uuid.UUID,
+) ([]*model.Webhook, error) {
+	out := []*model.Webhook{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	idStrings := make([]string, 0, len(ids))
+	for _, id := range ids {
+		idStrings = append(idStrings, id.String())
+	}
+	var rows []*database.Webhook
+	res := r.DB.
+		Where(
+			fmt.Sprintf("%s IN ?", TableColumnID(database.WEBHOOK_TABLE)),
+			idStrings,
+		).
+		Find(&rows)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	for _, row := range rows {
+		out = append(out, ToWebhook(row))
+	}
+	return out, nil
+}
+
 // GetByNames gets webhooks by names
 func (r *Webhook) GetByName(
 	ctx context.Context,
