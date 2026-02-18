@@ -93,6 +93,7 @@
 	let trendN = 4;
 	let movingAvgN = 4;
 	let userHasSetTrendN = false; // track if user has manually changed trendN
+	let userHasSetMovingAvgN = false; // track if user has manually changed movingAvgN
 
 	// load saved trendN and movingAvgN from localStorage
 	try {
@@ -114,6 +115,7 @@
 			const parsed = Number(storedMovingAvgN);
 			if (!isNaN(parsed) && parsed > 0) {
 				movingAvgN = parsed;
+				userHasSetMovingAvgN = true;
 			}
 		}
 	} catch (e) {
@@ -128,12 +130,12 @@
 				trendN = chartData.length;
 			}
 
-			// If current movingAvgN is larger than available data, adjust it
-			if (movingAvgN > chartData.length) {
+			// if current movingAvgN is larger than available data, adjust it only if user hasn't set it
+			if (!userHasSetMovingAvgN && movingAvgN > chartData.length) {
 				movingAvgN = chartData.length;
 			}
-			// If movingAvgN is less than 1, set it to 1 (minimum)
-			if (movingAvgN < 1) {
+			// if movingAvgN is less than 1, set it to 1 (minimum) only if user hasn't set it
+			if (!userHasSetMovingAvgN && movingAvgN < 1) {
 				movingAvgN = 1;
 			}
 		}
@@ -1409,6 +1411,7 @@
 									min="2"
 									max={campaignStats.length}
 									bind:value={movingAvgN}
+									on:input={() => (userHasSetMovingAvgN = true)}
 									class="h-6 w-8 px-2 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 								/>
 							</label>
