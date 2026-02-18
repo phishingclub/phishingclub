@@ -253,6 +253,78 @@ func (r *Campaign) AddAllowDenyLists(
 	return nil
 }
 
+// AddWebhooks adds webhooks to campaign with per-webhook configuration
+func (r *Campaign) AddWebhooks(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	webhooks []*model.CampaignWebhook,
+) error {
+	batch := []database.CampaignWebhook{}
+	for _, wh := range webhooks {
+		webhookID := wh.WebhookID.MustGet()
+		batch = append(batch, database.CampaignWebhook{
+			CampaignID:         campaignID,
+			WebhookID:          &webhookID,
+			WebhookIncludeData: wh.GetWebhookIncludeDataOrDefault(),
+			WebhookEvents:      wh.GetWebhookEventsOrDefault(),
+		})
+	}
+	if len(batch) == 0 {
+		return nil
+	}
+	res := r.DB.Create(&batch)
+
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// RemoveWebhooksByCampaignID removes all webhooks from a campaign
+func (r *Campaign) RemoveWebhooksByCampaignID(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) error {
+	res := r.DB.
+		Where("campaign_id = ?", campaignID).
+		Delete(&database.CampaignWebhook{})
+
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// GetCampaignWebhooks fetches webhook configurations for a campaign from junction table
+func (r *Campaign) GetCampaignWebhooks(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) ([]*model.CampaignWebhook, error) {
+	var rows []database.CampaignWebhook
+	res := r.DB.
+		Where("campaign_id = ?", campaignID.String()).
+		Find(&rows)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+
+	webhooks := []*model.CampaignWebhook{}
+	for _, row := range rows {
+		if row.WebhookID == nil {
+			continue
+		}
+		wh := &model.CampaignWebhook{
+			WebhookID:          nullable.NewNullableWithValue(*row.WebhookID),
+			WebhookIncludeData: nullable.NewNullableWithValue(row.WebhookIncludeData),
+			WebhookEvents:      nullable.NewNullableWithValue(row.WebhookEvents),
+		}
+		webhooks = append(webhooks, wh)
+	}
+
+	return webhooks, nil
+}
+
 // GetByWebhookID gets campaigns by webhook ID
 // not paginated
 func (r *Campaign) GetByWebhookID(
@@ -261,8 +333,34 @@ func (r *Campaign) GetByWebhookID(
 ) ([]*model.Campaign, error) {
 	rows := []*database.Campaign{}
 	models := []*model.Campaign{}
+
+	// check both old webhook_id field and new many-to-many relationship
+	var campaignIDs []string
+
+	// get from junction table
+	var junctionRows []database.CampaignWebhook
+	r.DB.Where("webhook_id = ?", webhookID.String()).Find(&junctionRows)
+	for _, row := range junctionRows {
+		if row.CampaignID != nil {
+			campaignIDs = append(campaignIDs, row.CampaignID.String())
+		}
+	}
+
+	// get from old webhook_id field (backward compatibility)
+	var oldRows []*database.Campaign
+	r.DB.Where("webhook_id = ?", webhookID.String()).Find(&oldRows)
+	for _, row := range oldRows {
+		if row.ID != nil {
+			campaignIDs = append(campaignIDs, row.ID.String())
+		}
+	}
+
+	if len(campaignIDs) == 0 {
+		return models, nil
+	}
+
 	res := r.DB.
-		Where("webhook_id = ?", webhookID.String()).
+		Where("id IN ?", campaignIDs).
 		Find(&rows)
 
 	if res.Error != nil {
@@ -1652,6 +1750,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	isAnonymous := nullable.NewNullableWithValue(row.IsAnonymous)
 	isTest := nullable.NewNullableWithValue(row.IsTest)
 	obfuscate := nullable.NewNullableWithValue(row.Obfuscate)
+	// deprecated fields - kept for backward compatibility
 	webhookIncludeData := nullable.NewNullableWithValue(row.WebhookIncludeData)
 	webhookEvents := nullable.NewNullableWithValue(row.WebhookEvents)
 	var templateID nullable.Nullable[uuid.UUID]
@@ -1740,10 +1839,14 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		}
 		constraintEndTime.Set(*t)
 	}
+	// handle old single webhook (backward compatibility)
 	webhookID := nullable.NewNullNullable[uuid.UUID]()
 	if row.WebhookID != nil {
 		webhookID.Set(*row.WebhookID)
 	}
+
+	// handle new multiple webhooks - will be populated separately if needed
+	webhooks := nullable.NewNullNullable[[]*model.CampaignWebhook]()
 	anonymizeAt := nullable.NewNullNullable[time.Time]()
 	if row.AnonymizeAt != nil {
 		anonymizeAt.Set(*row.AnonymizeAt)
@@ -1797,6 +1900,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		EvasionPage:         evasionPage,
 		EvasionPageID:       evasionPageID,
 		WebhookID:           webhookID,
+		Webhooks:            webhooks,
 		NotableEventID:      notableEventID,
 		NotableEventName:    notableEventName,
 	}, nil

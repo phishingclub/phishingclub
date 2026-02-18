@@ -38,26 +38,31 @@ type Campaign struct {
 
 	Name nullable.Nullable[vo.String64] `json:"name"`
 
-	SaveSubmittedData   nullable.Nullable[bool]         `json:"saveSubmittedData"`
-	SaveBrowserMetadata nullable.Nullable[bool]         `json:"saveBrowserMetadata"`
-	IsAnonymous         nullable.Nullable[bool]         `json:"isAnonymous"`
-	IsTest              nullable.Nullable[bool]         `json:"isTest"`
-	Obfuscate           nullable.Nullable[bool]         `json:"obfuscate"`
-	WebhookIncludeData  nullable.Nullable[string]       `json:"webhookIncludeData"`
-	WebhookEvents       nullable.Nullable[int]          `json:"webhookEvents"`
-	TemplateID          nullable.Nullable[uuid.UUID]    `json:"templateID"`
-	Template            *CampaignTemplate               `json:"template"`
-	CompanyID           nullable.Nullable[uuid.UUID]    `json:"companyID"`
-	Company             *Company                        `json:"company"`
-	RecipientGroups     []*RecipientGroup               `json:"recipientGroups"`
-	RecipientGroupIDs   nullable.Nullable[[]*uuid.UUID] `json:"recipientGroupIDs,omitempty"`
-	AllowDeny           []*AllowDeny                    `json:"allowDeny"`
-	AllowDenyIDs        nullable.Nullable[[]*uuid.UUID] `json:"allowDenyIDs,omitempty"`
-	DenyPageID          nullable.Nullable[uuid.UUID]    `json:"denyPageID,omitempty"`
-	DenyPage            *Page                           `json:"denyPage"`
-	EvasionPageID       nullable.Nullable[uuid.UUID]    `json:"evasionPageID,omitempty"`
-	EvasionPage         *Page                           `json:"evasionPage"`
-	WebhookID           nullable.Nullable[uuid.UUID]    `json:"webhookID"`
+	SaveSubmittedData   nullable.Nullable[bool] `json:"saveSubmittedData"`
+	SaveBrowserMetadata nullable.Nullable[bool] `json:"saveBrowserMetadata"`
+	IsAnonymous         nullable.Nullable[bool] `json:"isAnonymous"`
+	IsTest              nullable.Nullable[bool] `json:"isTest"`
+	Obfuscate           nullable.Nullable[bool] `json:"obfuscate"`
+	// deprecated: use Webhooks array instead for multiple webhooks with per-webhook settings
+	WebhookIncludeData nullable.Nullable[string]    `json:"webhookIncludeData,omitempty"`
+	WebhookEvents      nullable.Nullable[int]       `json:"webhookEvents,omitempty"`
+	WebhookID          nullable.Nullable[uuid.UUID] `json:"webhookID,omitempty"`
+
+	TemplateID        nullable.Nullable[uuid.UUID]    `json:"templateID"`
+	Template          *CampaignTemplate               `json:"template"`
+	CompanyID         nullable.Nullable[uuid.UUID]    `json:"companyID"`
+	Company           *Company                        `json:"company"`
+	RecipientGroups   []*RecipientGroup               `json:"recipientGroups"`
+	RecipientGroupIDs nullable.Nullable[[]*uuid.UUID] `json:"recipientGroupIDs,omitempty"`
+	AllowDeny         []*AllowDeny                    `json:"allowDeny"`
+	AllowDenyIDs      nullable.Nullable[[]*uuid.UUID] `json:"allowDenyIDs,omitempty"`
+	DenyPageID        nullable.Nullable[uuid.UUID]    `json:"denyPageID,omitempty"`
+	DenyPage          *Page                           `json:"denyPage"`
+	EvasionPageID     nullable.Nullable[uuid.UUID]    `json:"evasionPageID,omitempty"`
+	EvasionPage       *Page                           `json:"evasionPage"`
+
+	// webhooks configuration with per-webhook settings
+	Webhooks nullable.Nullable[[]*CampaignWebhook] `json:"webhooks,omitempty"`
 
 	// must not be set by a user
 	NotableEventID   nullable.Nullable[uuid.UUID] `json:"notableEventID"`

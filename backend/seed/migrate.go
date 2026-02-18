@@ -52,6 +52,7 @@ func initialInstallAndSeed(
 		&database.AllowDeny{},
 		&database.CampaignAllowDeny{},
 		&database.Webhook{},
+		&database.CampaignWebhook{},
 		&database.Identifier{},
 		&database.CampaignStats{},
 		&database.OAuthProvider{},
@@ -396,6 +397,24 @@ func migrate(db *gorm.DB) error {
 	// update existing rows to have empty string default
 	if err := db.Exec(`UPDATE allow_denies SET headers = '' WHERE headers IS NULL`).Error; err != nil {
 		return errs.Wrap(err)
+	}
+
+	// migration for converting single webhook to multiple webhooks
+	// migrate existing campaigns with webhook_id to campaign_webhooks junction table
+	if err := db.Exec(`
+		INSERT INTO campaign_webhooks (campaign_id, webhook_id, webhook_include_data, webhook_events)
+		SELECT id, webhook_id, webhook_include_data, webhook_events
+		FROM campaigns
+		WHERE webhook_id IS NOT NULL
+		AND NOT EXISTS (
+			SELECT 1 FROM campaign_webhooks cw WHERE cw.campaign_id = campaigns.id AND cw.webhook_id = campaigns.webhook_id
+		)
+	`).Error; err != nil {
+		// log but don't fail - this might be a re-run
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "duplicate") && !strings.Contains(errMsg, "unique constraint") {
+			return errs.Wrap(err)
+		}
 	}
 
 	return nil

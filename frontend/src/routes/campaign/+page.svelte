@@ -53,6 +53,7 @@
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
+	import ToolTip from '$lib/components/ToolTip.svelte';
 
 	let currentStep = 1;
 
@@ -384,9 +385,7 @@
 		isTest: false,
 		obfuscate: false,
 		selectedCount: 0,
-		webhookValue: null,
-		webhookIncludeData: 'full',
-		webhookEvents: [...webhookEventOptions], // all events selected by default
+		webhooks: [], // array of {id, includeData, events}
 		jitterMin: 0,
 		jitterMax: 0
 	};
@@ -770,9 +769,11 @@
 				constraintWeekDays: weekDaysAvailableToBinary(formValues.constraintWeekDays),
 				constraintStartTime: contraintStartTimeUTC,
 				constraintEndTime: contraintEndTimeUTC,
-				webhookID: webhookMap.byValueOrNull(formValues.webhookValue),
-				webhookIncludeData: formValues.webhookIncludeData,
-				webhookEvents: webhookEventsToBinary(formValues.webhookEvents),
+				webhooks: formValues.webhooks.map((wh) => ({
+					webhookID: wh.id,
+					webhookIncludeData: wh.includeData,
+					webhookEvents: webhookEventsToBinary(wh.events)
+				})),
 				jitterMin: formValues.jitterMin !== 0 ? formValues.jitterMin : null,
 				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null
 			});
@@ -837,9 +838,11 @@
 				allowDenyIDs: allowDenyIDs,
 				denyPageID: denyPageMap.byValueOrNull(formValues.denyPageValue),
 				evasionPageID: denyPageMap.byValueOrNull(formValues.evasionPageValue),
-				webhookID: webhookMap.byValueOrNull(formValues.webhookValue),
-				webhookIncludeData: formValues.webhookIncludeData,
-				webhookEvents: webhookEventsToBinary(formValues.webhookEvents),
+				webhooks: formValues.webhooks.map((wh) => ({
+					webhookID: wh.id,
+					webhookIncludeData: wh.includeData,
+					webhookEvents: webhookEventsToBinary(wh.events)
+				})),
 				jitterMin: formValues.jitterMin !== 0 ? formValues.jitterMin : null,
 				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null
 			});
@@ -943,7 +946,7 @@
 
 	const resetFormValues = () => {
 		formValues = {
-			name: '',
+			name: null,
 			sendStartAt: null,
 			sendEndAt: null,
 			scheduledStartAt: null,
@@ -951,8 +954,8 @@
 			closeAt: null,
 			anonymizeAt: null,
 			template: null,
-			sortField: defaultSendField,
-			sortOrder: defaultSendOrder,
+			sortField: null,
+			sortOrder: null,
 			recipientGroups: [],
 			allowDeny: [],
 			denyPageValue: null,
@@ -966,9 +969,7 @@
 			isTest: false,
 			obfuscate: false,
 			selectedCount: 0,
-			webhookValue: null,
-			webhookIncludeData: 'full',
-			webhookEvents: [...webhookEventOptions], // all events selected by default
+			webhooks: [],
 			jitterMin: 0,
 			jitterMax: 0
 		};
@@ -1076,9 +1077,28 @@
 			isTest: campaign.isTest,
 			obfuscate: campaign.obfuscate || false,
 			template: templateMap.byKey(campaign.templateID),
-			webhookValue: webhookMap.byKey(campaign.webhookID),
-			webhookIncludeData: campaign.webhookIncludeData || 'full',
-			webhookEvents: webhookEventsFromBinary(campaign.webhookEvents || 0)
+			webhooks: (() => {
+				// handle new webhooks array format
+				if (campaign.webhooks && campaign.webhooks.length > 0) {
+					return campaign.webhooks.map((wh) => ({
+						id: wh.webhookID,
+						includeData: wh.webhookIncludeData ?? 'full',
+						events: webhookEventsFromBinary(wh.webhookEvents ?? 0)
+					}));
+				}
+				// handle old single webhook format (backward compatibility)
+				if (campaign.webhookID) {
+					return [
+						{
+							id: campaign.webhookID,
+							includeData: campaign.webhookIncludeData ?? 'full',
+							events: webhookEventsFromBinary(campaign.webhookEvents ?? 0)
+						}
+					];
+				}
+				// no webhooks
+				return [];
+			})()
 		};
 
 		if (copyMode) {
@@ -1247,7 +1267,37 @@
 		} else {
 			element.setCustomValidity('');
 		}
-		element.reportValidity();
+	};
+
+	// webhook helper functions
+	const addWebhook = () => {
+		formValues.webhooks = [
+			...formValues.webhooks,
+			{
+				id: null,
+				includeData: 'full',
+				events: [...webhookEventOptions] // all events by default
+			}
+		];
+	};
+
+	const removeWebhook = (index) => {
+		formValues.webhooks = formValues.webhooks.filter((_, i) => i !== index);
+	};
+
+	const toggleWebhookEvent = (webhookIndex, eventValue) => {
+		const webhook = formValues.webhooks[webhookIndex];
+		const isSelected = webhook.events.includes(eventValue);
+
+		if (isSelected) {
+			// prevent unselecting the last item
+			if (webhook.events.length > 1) {
+				webhook.events = webhook.events.filter((e) => e !== eventValue);
+			}
+		} else {
+			webhook.events = [...webhook.events, eventValue];
+		}
+		formValues.webhooks = [...formValues.webhooks]; // trigger reactivity
 	};
 
 	// check if user is in the correct context for campaign actions
@@ -1884,69 +1934,103 @@
 						{/if}
 
 						{#if showAdvancedOptionsStep4}
-							<div class="mb-6">
-								<TextFieldSelect
-									id="webhook"
-									bind:value={formValues.webhookValue}
-									optional
-									options={Array.from(webhookMap.values())}>Webhook</TextFieldSelect
-								>
-							</div>
-							{#if formValues.webhookValue}
-								<div class="mb-6">
-									<SelectSquare
-										bind:value={formValues.webhookIncludeData}
-										options={webhookDataLevelOptions}
-										label="Webhook Data Level"
-										toolTipText="Control what campaign and recipient information is sent to the webhook endpoint"
-									/>
-								</div>
-								<div class="mb-6 max-w-xl">
-									<label class="flex flex-col">
-										<div class="flex items-center py-2">
-											<p class="font-semibold text-slate-600 dark:text-gray-400">Webhook Events</p>
-											<div class="ml-2 text-sm text-gray-600 dark:text-gray-400">
-												<span class="text-xs"
-													>({formValues.webhookEvents.length === webhookEventOptions.length
-														? 'All'
-														: formValues.webhookEvents.length} selected)</span
-												>
+							<div class="mb-6 pt-4">
+								<label class="flex flex-col">
+									<div class="flex items-center py-2">
+										<p class="font-semibold text-slate-600 dark:text-gray-400">Webhooks</p>
+										<ToolTip>
+											Configure multiple webhooks to receive campaign event notifications. Each
+											webhook can have its own data level and event filters.
+										</ToolTip>
+										<div
+											class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+										>
+											<p
+												class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200"
+											>
+												optional
+											</p>
+										</div>
+									</div>
+									<div class="space-y-3 max-w-lg">
+										{#each formValues.webhooks as webhook, index}
+											<div
+												class="flex flex-col gap-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800/50 dark:to-gray-800/30 rounded-lg border border-gray-300 dark:border-gray-600/50 shadow-sm hover:shadow-md transition-all duration-200"
+											>
+												<div class="flex gap-2 items-start">
+													<div class="flex-1">
+														<TextFieldSelect
+															id="webhook-{index}"
+															bind:value={webhook.id}
+															optional
+															options={Array.from(webhookMap.values())}
+														>
+															Endpoint
+														</TextFieldSelect>
+													</div>
+													<div class="flex items-end pb-4">
+														<button
+															type="button"
+															class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
+															on:click={() => removeWebhook(index)}
+															title="Remove this webhook"
+															aria-label="Remove webhook"
+														>
+															<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
+														</button>
+													</div>
+												</div>
+
+												<div>
+													<SelectSquare
+														bind:value={webhook.includeData}
+														options={webhookDataLevelOptions}
+														label="Data Level"
+													/>
+												</div>
+
+												<div class="pt-1">
+													<div class="flex items-center gap-2 mb-2">
+														<p class="text-xs font-semibold text-gray-700 dark:text-gray-300">
+															Events
+														</p>
+														<span
+															class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
+														>
+															{webhook.events.length === webhookEventOptions.length
+																? 'All'
+																: webhook.events.length} / {webhookEventOptions.length}
+														</span>
+													</div>
+													<div
+														class="flex flex-row flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-white/50 dark:bg-gray-900/30 rounded border border-gray-200 dark:border-gray-700/50"
+													>
+														{#each webhookEventDisplayOptions as eventOption}
+															{@const isSelected = webhook.events.includes(eventOption.value)}
+															<button
+																type="button"
+																on:click={() => toggleWebhookEvent(index, eventOption.value)}
+																class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors duration-200 {isSelected
+																	? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 border border-green-400 dark:border-green-500 hover:bg-green-100 dark:hover:bg-green-900/40'
+																	: 'bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
+															>
+																{eventOption.label}
+															</button>
+														{/each}
+													</div>
+												</div>
 											</div>
-										</div>
-										<div class="flex flex-row flex-wrap gap-2 max-h-48 overflow-y-auto">
-											{#each webhookEventDisplayOptions as eventOption}
-												{@const isSelected = formValues.webhookEvents.includes(eventOption.value)}
-												<button
-													type="button"
-													on:click={() => {
-														if (isSelected) {
-															// prevent unselecting the last item
-															if (formValues.webhookEvents.length > 1) {
-																formValues.webhookEvents = formValues.webhookEvents.filter(
-																	(e) => e !== eventOption.value
-																);
-															}
-														} else {
-															formValues.webhookEvents = [
-																...formValues.webhookEvents,
-																eventOption.value
-															];
-														}
-													}}
-													class="flex flex-row items-center px-3 py-2 rounded-md text-xs transition-colors duration-200 flex-shrink-0 {isSelected
-														? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 border-2 border-green-400 dark:border-green-500 hover:bg-green-100 dark:hover:bg-green-900/40'
-														: 'bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 border-2 border-gray-200 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
-													style="max-width: 280px;"
-												>
-													<span class="truncate block" style="max-width: 250px;">
-														{eventOption.label}
-													</span>
-												</button>
-											{/each}
-										</div>
-									</label>
-								</div>
-							{/if}
+										{/each}
+										<button
+											type="button"
+											class="px-4 py-2 bg-gradient-to-b from-blue-500 to-indigo-400 dark:from-blue-600 dark:to-indigo-500 hover:from-blue-400 hover:to-indigo-400 dark:hover:from-blue-500 dark:hover:to-indigo-400 text-white font-semibold rounded-md transition-all duration-200"
+											on:click={addWebhook}
+										>
+											+ Add Webhook
+										</button>
+									</div>
+								</label>
+							</div>
 
 							<ConditionalDisplay show="blackbox">
 								<div class="mb-6">
@@ -2349,20 +2433,25 @@
 										>
 										 -->
 
-										{#if formValues.webhookValue}
-											<span class="text-grayblue-dark font-medium">Webhook:</span>
-											<span class="text-pc-darkblue dark:text-white">{formValues.webhookValue}</span
-											>
-											<span class="text-grayblue-dark font-medium">Data Level:</span>
-											<span class="text-pc-darkblue dark:text-white capitalize"
-												>{formValues.webhookIncludeData}</span
-											>
-											<span class="text-grayblue-dark font-medium">Webhook Events:</span>
-											<span class="text-pc-darkblue dark:text-white">
-												{formValues.webhookEvents.length === webhookEventOptions.length
-													? 'All Events'
-													: formValues.webhookEvents.length + ' selected'}
-											</span>
+										{#if formValues.webhooks.length > 0}
+											<span class="text-grayblue-dark font-medium">Webhooks:</span>
+											<div class="text-pc-darkblue dark:text-white space-y-2">
+												{#each formValues.webhooks as webhook, index}
+													<div class="border-l-2 border-blue-400 pl-3 py-1">
+														<div class="font-medium">
+															{webhookMap.byKey(webhook.id) || 'Not selected'}
+														</div>
+														<div class="text-sm text-gray-600 dark:text-gray-400">
+															Data Level: <span class="capitalize">{webhook.includeData}</span>
+														</div>
+														<div class="text-sm text-gray-600 dark:text-gray-400">
+															Events: {webhook.events.length === webhookEventOptions.length
+																? 'All Events'
+																: webhook.events.length + ' selected'}
+														</div>
+													</div>
+												{/each}
+											</div>
 										{/if}
 
 										{#if formValues.denyPageValue}
