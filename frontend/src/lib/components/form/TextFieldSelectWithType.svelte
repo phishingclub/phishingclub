@@ -308,7 +308,8 @@
 				on:keydown={handleKeyDown}
 				on:click={handleFocus}
 				autocomplete="off"
-				class="w-full relative rounded-md py-2 pr-10 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
+				style={optional && hasValue ? 'padding-right: 4rem;' : 'padding-right: 2.5rem;'}
+				class="w-full relative rounded-md py-2 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer focus:cursor-text transition-colors duration-200 overflow-hidden text-ellipsis whitespace-nowrap"
 				class:pl-10={isFocused && showDropdown}
 				class:pl-20={!isFocused}
 				class:pl-4={isFocused && !showDropdown}
@@ -328,7 +329,7 @@
 			<!-- Clear button for optional fields -->
 			{#if optional === true && hasValue}
 				<button
-					class="absolute right-10 z-10"
+					class="absolute right-8 z-10 hover:opacity-70 transition-opacity"
 					type="button"
 					aria-label="Clear selection"
 					on:click={(e) => {
@@ -344,7 +345,6 @@
 			<!-- Dropdown arrow -->
 			<img
 				class="absolute pointer-events-none w-4 right-3"
-				class:right-12={optional === true && hasValue}
 				src="/arrow.svg"
 				alt=""
 				aria-hidden="true"
