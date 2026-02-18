@@ -7,17 +7,17 @@
 	import { onMount } from 'svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import { addToast } from '$lib/store/toast';
-	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import StatsCard from '$lib/components/StatsCard.svelte';
 	import CampaignCalender from '$lib/components/CampaignCalendar.svelte';
 	import CampaignTrendChart from '$lib/components/CampaignTrendChart.svelte';
 	import { fetchAllRows } from '$lib/utils/api-utils';
-	import { tick } from 'svelte';
+	import { tick, onDestroy } from 'svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
-	import { autoRefreshStore, setPageAutoRefresh } from '$lib/store/autoRefresh';
+	import { autoRefreshStore, setPageAutoRefresh, getPageAutoRefresh } from '$lib/store/autoRefresh';
 	import { BiMap } from '$lib/utils/maps';
 	import { goto } from '$app/navigation';
 	import DashboardNav from '$lib/components/DashboardNav.svelte';
+	import { activeFormElement } from '$lib/store/activeFormElement';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -48,6 +48,7 @@
 	let calendarEndDate = null;
 
 	let includeTestCampaigns = false;
+	let autoRefreshIntervalId = null;
 
 	// handler for when toggle changes
 	const handleToggleChange = async () => {
@@ -60,6 +61,25 @@
 		autoRefreshStore.setEnabled(value > 0);
 		autoRefreshStore.setInterval(value);
 		setPageAutoRefresh('dashboard', $autoRefreshStore);
+		startAutoRefresh();
+	};
+
+	const startAutoRefresh = () => {
+		stopAutoRefresh();
+		if ($autoRefreshStore.enabled && $autoRefreshStore.interval > 0) {
+			autoRefreshIntervalId = setInterval(async () => {
+				// skip refresh if disabled or a dropdown is open
+				if (!$autoRefreshStore.enabled || $activeFormElement !== null) return;
+				await refresh(false);
+			}, $autoRefreshStore.interval);
+		}
+	};
+
+	const stopAutoRefresh = () => {
+		if (autoRefreshIntervalId) {
+			clearInterval(autoRefreshIntervalId);
+			autoRefreshIntervalId = null;
+		}
 	};
 
 	// hooks
@@ -69,7 +89,17 @@
 			contextCompanyID = context.companyID;
 			contextCompanyName = context.companyName;
 		}
+		// load saved auto-refresh settings for this page
+		const savedSettings = getPageAutoRefresh('dashboard');
+		if (savedSettings) {
+			autoRefreshStore.set(savedSettings);
+		}
 		refresh();
+		startAutoRefresh();
+	});
+
+	onDestroy(() => {
+		stopAutoRefresh();
 	});
 
 	const refresh = async (showLoading = true) => {
@@ -215,33 +245,6 @@
 		</div>
 	</div>
 
-	<AutoRefresh
-		isLoading={false}
-		pageId="dashboard"
-		onRefresh={async () => {
-			let res = await api.campaign.getStats(contextCompanyID, {
-				includeTest: includeTestCampaigns
-			});
-			if (!res.success) {
-				throw res.error;
-			}
-			await refreshRepeatOffenders();
-
-			active = res.data.active;
-			scheduled = res.data.upcoming;
-			finished = res.data.finished;
-
-			const statsRes = await api.campaign.getAllCampaignStats(contextCompanyID);
-			if (statsRes.success) {
-				campaignStats = [];
-				await tick();
-				campaignStats = statsRes.data.rows || [];
-			}
-
-			await refreshCalendarCampaings();
-		}}
-	/>
-
 	{#if contextCompanyName}
 		<SubHeadline>{contextCompanyName}</SubHeadline>
 	{/if}
@@ -255,6 +258,7 @@
 				iconColor="text-blue-500"
 			>
 				<svg
+					slot="icon"
 					xmlns="http://www.w3.org/2000/svg"
 					class="h-8 w-8"
 					fill="none"
@@ -279,6 +283,7 @@
 				iconColor="text-indigo-500"
 			>
 				<svg
+					slot="icon"
 					xmlns="http://www.w3.org/2000/svg"
 					class="h-8 w-8"
 					fill="none"
@@ -303,6 +308,7 @@
 				iconColor="text-green-500"
 			>
 				<svg
+					slot="icon"
 					xmlns="http://www.w3.org/2000/svg"
 					class="h-8 w-8"
 					fill="none"
@@ -327,6 +333,7 @@
 				iconColor="text-red-500"
 			>
 				<svg
+					slot="icon"
 					xmlns="http://www.w3.org/2000/svg"
 					class="h-8 w-8"
 					fill="none"
