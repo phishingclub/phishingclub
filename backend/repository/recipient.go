@@ -197,6 +197,23 @@ func (r *Recipient) GetAll(
 	// Apply sorting and pagination
 	if options.QueryArgs != nil {
 		if options.QueryArgs.OrderBy == "is_repeat_offender" {
+			// is_repeat_offender is a computed column, so we need to handle it specially
+			// first apply search/filters via useQuery with OrderBy/Limit/Offset cleared
+			// (pagination is applied separately below)
+			queryArgsNoSort := *options.QueryArgs
+			queryArgsNoSort.OrderBy = ""
+			queryArgsNoSort.Limit = 0
+			queryArgsNoSort.Offset = 0
+			var err error
+			db, err = useQuery(db, database.RECIPIENT_TABLE, &queryArgsNoSort, allowdRecipientColumns...)
+			if err != nil {
+				return result, errs.Wrap(err)
+			}
+			baseDb, err = useQuery(baseDb, database.RECIPIENT_TABLE, &queryArgsNoSort, allowdRecipientColumns...)
+			if err != nil {
+				return result, errs.Wrap(err)
+			}
+			// then manually apply ORDER BY for the computed column
 			if options.QueryArgs.Desc {
 				db = db.Order("is_repeat_offender DESC")
 				baseDb = baseDb.Order("is_repeat_offender DESC")
@@ -205,7 +222,7 @@ func (r *Recipient) GetAll(
 				baseDb = baseDb.Order("is_repeat_offender ASC")
 			}
 		} else {
-			// Use standard query handling for other columns
+			// use standard query handling for other columns
 			var err error
 			db, err = useQuery(db, database.RECIPIENT_TABLE, options.QueryArgs, allowdRecipientColumns...)
 			if err != nil {
@@ -243,6 +260,11 @@ func (r *Recipient) GetAll(
 			queryArgsNoPagination := *options.QueryArgs
 			queryArgsNoPagination.Limit = 0
 			queryArgsNoPagination.Offset = 0
+			// is_repeat_offender is a computed column in the SELECT query and doesn't exist
+			// in the base recipients table, so we can't use it for ordering in the count query
+			if queryArgsNoPagination.OrderBy == "is_repeat_offender" {
+				queryArgsNoPagination.OrderBy = ""
+			}
 			var err error
 			countDb, err = useQuery(countDb, database.RECIPIENT_TABLE, &queryArgsNoPagination, allowdRecipientColumns...)
 			if err != nil {

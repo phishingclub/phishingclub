@@ -116,9 +116,13 @@ func useQuery(db *gorm.DB, tableName string, q *vo.QueryArgs, allowdColumns ...s
 		return db, nil
 	}
 	db = withOffsetLimit(db, q.Offset, q.Limit)
-	db, err := WithOrderBy(db, assignTableToColumn(tableName, q.OrderBy), q.Desc, allowdColumns...)
-	if err != nil {
-		return db, errs.Wrap(err)
+	// only apply orderby if it's not empty to avoid generating invalid column names like `table`.``
+	var err error
+	if q.OrderBy != "" {
+		db, err = WithOrderBy(db, assignTableToColumn(tableName, q.OrderBy), q.Desc, allowdColumns...)
+		if err != nil {
+			return db, errs.Wrap(err)
+		}
 	}
 	// handle search
 	if q.Search != "" {
