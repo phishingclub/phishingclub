@@ -42,7 +42,7 @@
 
 	let calendarCampaigns = [];
 	let campaignStats = [];
-	let isCampaignStatsLoading = false;
+	let isCampaignStatsLoading = true; // start as true to show ghost on initial load
 
 	let calendarStartDate = null;
 	let calendarEndDate = null;

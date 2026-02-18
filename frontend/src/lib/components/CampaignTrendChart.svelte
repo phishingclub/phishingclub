@@ -23,23 +23,14 @@
 
 	// Debounced loading state to prevent flash
 	let debouncedIsLoading = false;
-	let debouncedShowPending = false;
 	let loadingTimeout;
-	let pendingTimeout;
 	let hasAttemptedLoad = false;
-	const LOADING_DEBOUNCE_MS = 200;
-	const PENDING_DEBOUNCE_MS = 300;
+	const LOADING_DEBOUNCE_MS = 0; // show loading immediately
 
 	$: {
 		if (isLoading) {
 			// Mark that we've attempted to load
 			hasAttemptedLoad = true;
-			// Clear pending timeout since we're now loading
-			if (pendingTimeout) {
-				clearTimeout(pendingTimeout);
-				pendingTimeout = null;
-			}
-			debouncedShowPending = false;
 			// Start showing loading after a delay
 			if (!loadingTimeout) {
 				loadingTimeout = setTimeout(() => {
@@ -47,29 +38,12 @@
 				}, LOADING_DEBOUNCE_MS);
 			}
 		} else {
-			// Immediately hide loading and clear any pending timeout
+			// Immediately hide loading and clear timeout
 			if (loadingTimeout) {
 				clearTimeout(loadingTimeout);
 				loadingTimeout = null;
 			}
 			debouncedIsLoading = false;
-		}
-	}
-
-	// Show pending message only if we haven't attempted load and it's taking a while
-	$: {
-		if (!hasAttemptedLoad && !pendingTimeout) {
-			pendingTimeout = setTimeout(() => {
-				if (!hasAttemptedLoad) {
-					debouncedShowPending = true;
-				}
-			}, PENDING_DEBOUNCE_MS);
-		} else if (hasAttemptedLoad) {
-			if (pendingTimeout) {
-				clearTimeout(pendingTimeout);
-				pendingTimeout = null;
-			}
-			debouncedShowPending = false;
 		}
 	}
 
@@ -1268,9 +1242,6 @@
 		if (loadingTimeout) {
 			clearTimeout(loadingTimeout);
 		}
-		if (pendingTimeout) {
-			clearTimeout(pendingTimeout);
-		}
 		if (tooltipTimeout) {
 			clearTimeout(tooltipTimeout);
 		}
@@ -1294,30 +1265,32 @@
 		class="chart-container w-full overflow-x-auto"
 		style="height:0;overflow:hidden;visibility:hidden;position:absolute;"
 	></div>
-	{#if !containerReady}
-		<div class="flex items-center justify-center min-h-[100px]">
-			<span class="text-gray-400 dark:text-gray-500 text-sm transition-colors duration-200"
-				>Preparing chart…</span
-			>
+	{#if isLoading || debouncedIsLoading}
+		<!-- ghost/skeleton loader matching final chart layout -->
+		<div
+			class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200 animate-pulse"
+		>
+			<!-- header skeleton -->
+			<div class="flex flex-row items-center justify-between mb-2 pb-0 flex-wrap gap-2">
+				<div class="h-5 w-48 bg-gray-200 dark:bg-gray-700 rounded"></div>
+			</div>
+			<div class="mb-8"></div>
+
+			<!-- invisible spacer matching stats grid height -->
+			<div class="h-[60px]"></div>
+
+			<div class="mt-8 mb-6"></div>
+
+			<!-- chart skeleton matching actual dimensions -->
+			<div class="relative">
+				<div
+					class="h-[240px] w-full box-border relative rounded-md bg-gray-50 dark:bg-gray-800/50 m-1"
+				></div>
+			</div>
 		</div>
 	{:else}
 		<div>
-			{#if debouncedIsLoading}
-				<div class="flex items-center justify-center h-64">
-					<div
-						class="animate-spin rounded-full h-8 w-8 border-b-2 border-cta-blue dark:border-highlight-blue transition-colors duration-200"
-					></div>
-					<span class="ml-2 text-gray-600 dark:text-gray-300 transition-colors duration-200"
-						>Loading trend data...</span
-					>
-				</div>
-			{:else if !hasAttemptedLoad && debouncedShowPending}
-				<div class="flex items-center justify-center h-64">
-					<span class="text-gray-400 dark:text-gray-500 text-sm transition-colors duration-200"
-						>Preparing trend data...</span
-					>
-				</div>
-			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && campaignStats.length < 2}
+			{#if hasAttemptedLoad && !isLoading && !debouncedIsLoading && campaignStats.length < 2}
 				<div
 					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200"
 				>
@@ -1361,7 +1334,7 @@
 						</div>
 					</div>
 				</div>
-			{:else if hasAttemptedLoad && !isLoading && !debouncedIsLoading && campaignStats.length >= 2}
+			{:else}
 				<div
 					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200"
 				>
