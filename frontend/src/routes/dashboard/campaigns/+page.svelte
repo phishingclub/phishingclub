@@ -104,9 +104,9 @@
 
 	const refresh = async () => {
 		await Promise.all([
-			refreshActiveCampaigns(false),
-			refreshScheduledCampaigns(false),
-			refreshCompletedCampaigns(false)
+			refreshActiveCampaigns(true),
+			refreshScheduledCampaigns(true),
+			refreshCompletedCampaigns(true)
 		]);
 	};
 

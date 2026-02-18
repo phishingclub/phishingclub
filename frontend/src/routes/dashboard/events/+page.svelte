@@ -62,14 +62,14 @@
 	};
 
 	// hooks
-	onMount(() => {
+	onMount(async () => {
 		const context = appStateService.getContext();
 		if (context) {
 			contextCompanyID = context.companyID;
 			contextCompanyName = context.companyName;
 		}
 		setEventTypes();
-		refreshEvents(true);
+		await refreshEvents(true);
 		eventsTableURLParams.onChange(() => refreshEvents(true));
 
 		return () => {
