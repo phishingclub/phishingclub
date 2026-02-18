@@ -316,7 +316,11 @@
 								<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
 									<a
 										class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
-                                        {$page.url.pathname === item.route
+                                        {(
+											item.route === '/dashboard/'
+												? $page.url.pathname.startsWith('/dashboard')
+												: $page.url.pathname === item.route
+										)
 											? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
 											: 'text-blue-100 dark:text-gray-200 hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-gray-100'}"
 										class:hidden={shouldHideMenuItem(item.route)}
@@ -341,7 +345,7 @@
 											</span>
 										{/if}
 
-										{#if $page.url.pathname === item.route}
+										{#if item.route === '/dashboard/' ? $page.url.pathname.startsWith('/dashboard') : $page.url.pathname === item.route}
 											<div
 												class="absolute left-0 top-0 bottom-0 w-1 bg-white dark:bg-highlight-blue"
 											></div>
