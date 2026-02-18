@@ -696,11 +696,7 @@
 							on:click={() => openUpdateModal(template.id)}
 							{...globalButtonDisabledAttributes(template, contextCompanyID)}
 						/>
-						<TableCopyButton
-							title={'Copy'}
-							on:click={() => openCopyModal(template.id)}
-							{...globalButtonDisabledAttributes(template, contextCompanyID)}
-						/>
+						<TableCopyButton title={'Copy'} on:click={() => openCopyModal(template.id)} />
 						{#if template.smtpConfigurationID}
 							<TableDropDownButton
 								name="Allow listing"
