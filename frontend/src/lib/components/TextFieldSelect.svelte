@@ -111,6 +111,8 @@
 	const closeDropdown = () => {
 		showDropdown = false;
 		hasTyped = false; // Reset typing flag when closing
+		// only clear activeFormElement if it was set by this component
+		activeFormElement.update((current) => (current === id ? null : current));
 	};
 
 	// Update dropdown position for fixed positioning

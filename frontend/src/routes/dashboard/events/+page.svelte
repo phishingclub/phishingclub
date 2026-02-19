@@ -56,8 +56,11 @@
 
 	const handleAutoRefreshChange = (optKey) => {
 		const value = Number(autoRefreshOptions.byKey(optKey));
-		autoRefreshStore.setEnabled(value > 0);
-		autoRefreshStore.setInterval(value);
+		// batch the update to prevent multiple reactive triggers
+		autoRefreshStore.set({
+			enabled: value > 0,
+			interval: value
+		});
 		setPageAutoRefresh('dashboard-events', $autoRefreshStore);
 	};
 

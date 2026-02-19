@@ -19,19 +19,15 @@
 	});
 
 	let intervalId;
-	let settings;
-
-	$: {
-		if (pageId) {
-			settings = getPageAutoRefresh(pageId);
-			autoRefreshStore.set(settings);
-		}
-	}
+	let initialized = false;
 
 	function handleIntervalChange(optKey) {
 		const value = Number(options.byKey(optKey));
-		autoRefreshStore.setEnabled(value > 0);
-		autoRefreshStore.setInterval(value);
+		// batch the update to prevent multiple reactive triggers
+		autoRefreshStore.set({
+			enabled: value > 0,
+			interval: value
+		});
 	}
 
 	const startAutoRefresh = () => {
@@ -52,7 +48,8 @@
 		}
 	};
 
-	$: if ($autoRefreshStore) {
+	// reactive statement to handle store changes and persist to localStorage
+	$: if (initialized && $autoRefreshStore) {
 		startAutoRefresh();
 		if (pageId) {
 			setPageAutoRefresh(pageId, $autoRefreshStore);
@@ -60,7 +57,13 @@
 	}
 
 	onMount(() => {
-		startAutoRefresh();
+		// load saved settings from localStorage only once on mount
+		if (pageId) {
+			const settings = getPageAutoRefresh(pageId);
+			autoRefreshStore.set(settings);
+		}
+		// mark as initialized to enable reactive statement which will start auto-refresh
+		initialized = true;
 	});
 
 	onDestroy(() => {
