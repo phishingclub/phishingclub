@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.31.0] - 2026-02-21
+- Split dashboard into multiple pages and added latest events.
+- Added header to allow / deny filters
+- Added campaign clickable on campaign trend line
+- Added follow mode on campaign event timeline
+- Improved company context switching synchronized across multiple browser tabs
+- Campaign actions restricted when viewing from different context
+- Various UI/UX improvements
+- Fix missing eclipses on TextFieldSelect and added hover title
+- Fix editing moving avg on campaign trend line 
+- Fix copy template not available in company context
+- Fix sort / search by repeat offender
+- Fix table dropdown disappearing on table refresh
+
 ## [1.30.3] - 2026-02-10
 - Fix saved pagination value is handled by url params
 - Fix custom stat campaign start date
