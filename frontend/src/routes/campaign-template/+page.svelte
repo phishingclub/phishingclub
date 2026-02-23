@@ -603,7 +603,11 @@
 				</TableCell>
 				<TableCell>
 					{#if template.domainID}
-						<a href={`/domain/?edit=${template.domainID}`} class="block w-full py-1">
+						<a
+							href={`/domain/?edit=${template.domainID}`}
+							class="block w-full py-1"
+							title={domainMap.byKey(template.domainID)}
+						>
 							{domainMap.byKey(template.domainID)}
 						</a>
 					{/if}
@@ -613,6 +617,7 @@
 						<a
 							href={`/smtp-configuration/?edit=${template.smtpConfigurationID}`}
 							class="block w-full py-1"
+							title={smtpConfigurationMap.byKey(template.smtpConfigurationID)}
 						>
 							{smtpConfigurationMap.byKey(template.smtpConfigurationID)}
 						</a>
@@ -620,25 +625,41 @@
 				</TableCell>
 				<TableCell>
 					{#if template.apiSenderID}
-						<a href={`/api-sender/?edit=${template.apiSenderID}`} class="block w-full py-1">
+						<a
+							href={`/api-sender/?edit=${template.apiSenderID}`}
+							class="block w-full py-1"
+							title={apiSenderMap.byKey(template.apiSenderID)}
+						>
 							{apiSenderMap.byKey(template.apiSenderID)}
 						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
 					{#if template.emailID}
-						<a href={`/email/?edit=${template.emailID}`} class="block w-full py-1">
+						<a
+							href={`/email/?edit=${template.emailID}`}
+							class="block w-full py-1"
+							title={emailMap.byKey(template.emailID)}
+						>
 							{emailMap.byKey(template.emailID)}
 						</a>
 					{/if}
 				</TableCell>
 				<TableCell>
 					{#if template.beforeLandingPageID}
-						<a href={`/page/?edit=${template.beforeLandingPageID}`} class="block w-full py-1">
+						<a
+							href={`/page/?edit=${template.beforeLandingPageID}`}
+							class="block w-full py-1"
+							title={beforeLandingPageMap.byKey(template.beforeLandingPageID)}
+						>
 							{beforeLandingPageMap.byKey(template.beforeLandingPageID)}
 						</a>
 					{:else if template.beforeLandingProxyID}
-						<a href={`/proxy/?edit=${template.beforeLandingProxyID}`} class="block w-full py-1">
+						<a
+							href={`/proxy/?edit=${template.beforeLandingProxyID}`}
+							class="block w-full py-1"
+							title={beforeLandingProxyMap.byKey(template.beforeLandingProxyID)}
+						>
 							<span class="flex items-center gap-1">
 								<ProxySvgIcon size="w-4 h-4" />
 								{beforeLandingProxyMap.byKey(template.beforeLandingProxyID)}
@@ -648,11 +669,19 @@
 				</TableCell>
 				<TableCell>
 					{#if template.landingPageID}
-						<a href={`/page/?edit=${template.landingPageID}`} class="block w-full py-1">
+						<a
+							href={`/page/?edit=${template.landingPageID}`}
+							class="block w-full py-1"
+							title={landingPageMap.byKey(template.landingPageID)}
+						>
 							{landingPageMap.byKey(template.landingPageID)}
 						</a>
 					{:else if template.landingProxyID}
-						<a href={`/proxy/?edit=${template.landingProxyID}`} class="block w-full py-1">
+						<a
+							href={`/proxy/?edit=${template.landingProxyID}`}
+							class="block w-full py-1"
+							title={landingProxyMap.byKey(template.landingProxyID)}
+						>
 							<span class="flex items-center gap-1">
 								<ProxySvgIcon size="w-4 h-4" />
 								{landingProxyMap.byKey(template.landingProxyID)}
@@ -662,11 +691,19 @@
 				</TableCell>
 				<TableCell>
 					{#if template.afterLandingPageID}
-						<a href={`/page/?edit=${template.afterLandingPageID}`} class="block w-full py-1">
+						<a
+							href={`/page/?edit=${template.afterLandingPageID}`}
+							class="block w-full py-1"
+							title={afterLandingPageMap.byKey(template.afterLandingPageID)}
+						>
 							{afterLandingPageMap.byKey(template.afterLandingPageID)}
 						</a>
 					{:else if template.afterLandingProxyID}
-						<a href={`/proxy/?edit=${template.afterLandingProxyID}`} class="block w-full py-1">
+						<a
+							href={`/proxy/?edit=${template.afterLandingProxyID}`}
+							class="block w-full py-1"
+							title={afterLandingProxyMap.byKey(template.afterLandingProxyID)}
+						>
 							<span class="flex items-center gap-1">
 								<ProxySvgIcon size="w-4 h-4" />
 								{afterLandingProxyMap.byKey(template.afterLandingProxyID)}
@@ -680,6 +717,7 @@
 							href={`${template.afterLandingPageRedirectURL}`}
 							target="_blank"
 							class="block w-full py-1"
+							title={template.afterLandingPageRedirectURL}
 						>
 							{template.afterLandingPageRedirectURL}
 						</a>
