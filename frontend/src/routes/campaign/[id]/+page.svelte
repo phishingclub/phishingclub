@@ -2375,7 +2375,9 @@
 	</Modal>
 	<Alert headline="close" bind:visible={isCloseModalVisible} onConfirm={onConfirmCloseCampaign}>
 		<div>
-			<ul class="list-disc ml-8 mt-4 mb-4">
+			<ul
+				class="list-disc ml-8 mt-4 mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+			>
 				<li class="list-tem">Stop any pending delivery</li>
 				<li class="list-tem">Links in e-mails and landing pages will stop working</li>
 				<li class="list-tem">Campaign will be set as completed</li>
@@ -2390,7 +2392,9 @@
 		verification="confirm"
 	>
 		<div>
-			<ul class="list-disc ml-8 mt-4 mb-4">
+			<ul
+				class="list-disc ml-8 mt-4 mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+			>
 				<li class="list-tem">Stop any pending delivery</li>
 				<li class="list-tem">Links in e-mails and landing pages will stop working</li>
 				<li class="list-tem">Anonymization is permanent and not reversable</li>
@@ -2408,24 +2412,34 @@
 			{#if sendMessageRecipient}
 				{@const recipient = campaignRecipients.find((r) => r.id === sendMessageRecipient.id)}
 				{#if recipient}
-					<p class="mb-4">
+					<p class="mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200">
 						{recipient.sentAt
 							? `Are you sure you want to send the campaign message again to:`
 							: `Are you sure you want to send the campaign message to:`}
 					</p>
-					<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded mb-4">
-						<p class="font-medium">{sendMessageRecipient.name}</p>
-						<p class="text-gray-600">{sendMessageRecipient.email}</p>
-						<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
+					<div
+						class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md mb-4 transition-colors duration-200"
+					>
+						<p class="font-medium text-gray-900 dark:text-gray-100 transition-colors duration-200">
+							{sendMessageRecipient.name}
+						</p>
+						<p class="text-gray-600 dark:text-gray-300 transition-colors duration-200">
+							{sendMessageRecipient.email}
+						</p>
+						<p class="text-xs text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-200">
 							Sender type: {campaign.template?.smtpConfigurationID ? 'SMTP' : 'API Sender'}
 						</p>
 						{#if recipient.sentAt}
-							<p class="text-sm text-amber-600 mt-1">
+							<p
+								class="text-sm text-amber-600 dark:text-amber-500 mt-1 transition-colors duration-200"
+							>
 								⚠️ Previously sent on {new Date(recipient.sentAt).toLocaleString()}
 							</p>
 						{/if}
 					</div>
-					<p class="text-sm text-gray-500">This action will immediately send the message.</p>
+					<p class="text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200">
+						This action will immediately send the message.
+					</p>
 				{/if}
 			{/if}
 		</div>
@@ -2440,17 +2454,27 @@
 			{#if setAsSentRecipient}
 				{@const recipient = campaignRecipients.find((r) => r.id === setAsSentRecipient.id)}
 				{#if recipient}
-					<p class="mb-4">Are you sure you want to mark the campaign as sent for:</p>
-					<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded mb-4">
-						<p class="font-medium">{setAsSentRecipient.name}</p>
-						<p class="text-gray-600">{setAsSentRecipient.email}</p>
+					<p class="mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200">
+						Are you sure you want to mark the campaign as sent for:
+					</p>
+					<div
+						class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md mb-4 transition-colors duration-200"
+					>
+						<p class="font-medium text-gray-900 dark:text-gray-100 transition-colors duration-200">
+							{setAsSentRecipient.name}
+						</p>
+						<p class="text-gray-600 dark:text-gray-300 transition-colors duration-200">
+							{setAsSentRecipient.email}
+						</p>
 						{#if recipient.sentAt}
-							<p class="text-sm text-amber-600 mt-1">
+							<p
+								class="text-sm text-amber-600 dark:text-amber-500 mt-1 transition-colors duration-200"
+							>
 								⚠️ Already marked as sent on {new Date(recipient.sentAt).toLocaleString()}
 							</p>
 						{/if}
 					</div>
-					<p class="text-sm text-gray-500">
+					<p class="text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200">
 						This action will mark the message as sent without actually sending it.
 					</p>
 				{/if}
@@ -2466,8 +2490,12 @@
 		<div class="mt-4">
 			<!-- Introduction Section -->
 			<div>
-				<h3 class="text-xl font-semibold text-gray-700">Import cookie</h3>
-				<p class="text-gray-600 mb-4">
+				<h3
+					class="text-xl font-semibold text-gray-700 dark:text-gray-200 transition-colors duration-200"
+				>
+					Import cookie
+				</h3>
+				<p class="text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
 					Cookies can be imported and exchanged for tokens using the <a
 						href="https://github.com/phishingclub/session-sushi"
 						target="_blank"
@@ -2477,7 +2505,7 @@
 			</div>
 
 			<!-- Copy Section -->
-			<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
+			<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md transition-colors duration-200">
 				<button
 					class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
 					on:click={onClickCopyCookies}
@@ -2521,7 +2549,7 @@
 		cancel="Cancel"
 	>
 		<div>
-			<p class="text-gray-600 dark:text-gray-400">
+			<p class="text-gray-600 dark:text-gray-300 transition-colors duration-200">
 				If this email contains a tracking pixel, viewing it will affect campaign statistics.
 			</p>
 		</div>
@@ -2537,7 +2565,7 @@
 		<FormGrid on:submit={onConfirmUploadReportedCSV} isSubmitting={isReportedCSVSubmitting}>
 			<FormColumns>
 				<FormColumn>
-					<p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+					<p class="text-sm text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
 						Select which columns contain the email addresses and report dates:
 					</p>
 
