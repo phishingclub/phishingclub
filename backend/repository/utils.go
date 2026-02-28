@@ -66,36 +66,6 @@ func WithOrderBy(db *gorm.DB, orderBy string, desc bool, allowed ...string) (*go
 	return db.Order(orderBy + " COLLATE NOCASE DESC"), nil
 }
 
-func WithOrderByOnTable(db *gorm.DB, table string, orderBy string, desc bool, allowed ...string) (*gorm.DB, error) {
-	if orderBy == "" {
-		return db, nil
-	}
-	// only check default columns if no allowed columns are provided
-	if _, ok := defaultAllowdColumns[orderBy]; !ok && len(allowed) == 0 {
-		return db, fmt.Errorf("invalid column: %s", orderBy)
-	}
-	for _, allowedOrderBy := range allowed {
-		if !slices.Contains(allowed, orderBy) {
-			return db, fmt.Errorf("invalid column: %s", allowedOrderBy)
-		}
-	}
-
-	// TODO this ruins all indexes performance but is a quick fix to work for all databases
-	// to ensure that the order by is case insensitive
-	// the real solution is to use a case insensitive collation
-	// but these differ per database, another option would be LOWER indexes for some columns however this is also not ideal
-	if !desc {
-		return db.Order(
-			//fmt.Sprintf("LOWER(`%s`.`%s`) ASC", table, orderBy),
-			fmt.Sprintf("LOWER(`%s`.`%s`) COLLATE NOCAS ASC", table, orderBy),
-		), nil
-	}
-	return db.Order(
-		//fmt.Sprintf("LOWER(`%s`.`%s`) DESC", table, orderBy),
-		fmt.Sprintf("LOWER(`%s`.`%s`) NO COLLATE DESC", table, orderBy),
-	), nil
-}
-
 func assignTableToColumn(table, column string) string {
 	// if the column already contains a dot, it is already formatted
 	if strings.Contains(column, ".") {
