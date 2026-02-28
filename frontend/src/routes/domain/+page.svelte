@@ -688,16 +688,14 @@
 				<TableCellCheck value={!!domain.redirectURL} />
 				<TableCellCheck value={domain.managedTLS} />
 				<TableCellCheck value={domain.ownManagedTLS || domain.selfSignedTLS} />
-				<TableCell>
-					<div class="flex justify-center">
-						<span title={domain.type === 'proxy' ? 'Proxy Domain' : 'Regular Domain'}>
-							{#if domain.type === 'proxy'}
-								<ProxySvgIcon size="w-5 h-5" />
-							{:else}
-								📄
-							{/if}
-						</span>
-					</div>
+				<TableCell alignText="center">
+					<span title={domain.type === 'proxy' ? 'Proxy Domain' : 'Regular Domain'}>
+						{#if domain.type === 'proxy'}
+							<ProxySvgIcon size="w-5 h-5" className="mx-auto" />
+						{:else}
+							📄
+						{/if}
+					</span>
 				</TableCell>
 				<TableCell>{domain.type === 'proxy' ? domain.proxyTargetDomain : ''}</TableCell>
 				{#if contextCompanyID}
