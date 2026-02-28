@@ -28,6 +28,7 @@
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
+	import FileField from '$lib/components/FileField.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -496,17 +497,7 @@
 							toolTipText={pathTooltip}>Path</TextField
 						>
 
-						<label for="file" class="flex flex-col py-2 w-60">
-							<p class="font-semibold text-slate-600 py-2">Files</p>
-
-							<input
-								id="files"
-								type="file"
-								name="files"
-								class="border-solid border-2 py-2 px-2 rounded-md file:px-4 file:py-2 file:text-white file:cursor-pointer file:text-sm file:font-semibold file:bg-cta-green hover:cursor-pointer file:hover:bg-teal-300 file:border-hidden file:rounded-md"
-								multiple
-							/>
-						</label>
+						<FileField name="files" multiple={true}>Files</FileField>
 					{/if}
 				</FormColumn>
 			</FormColumns>
