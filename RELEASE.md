@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.32.0] - 2026-02-28
+- Added support for multiple webhooks per campaign
+- Added webhook links on campaign page
+- Bumped / Cleaned vendor dependencies
+- Fix domain type centered on table
+- Fix upload files style on asset modal
+- Fix modal info style
+- Fix potential reuse of oauth on database failure to mark as used
+- Fix add missing timeout to oauth handler
+- Fix missed handled error in MFA login flow
+- Fix cookie expiration should be set with TLS flag
+
+
 ## [1.31.0] - 2026-02-21
 - Split dashboard into multiple pages and added latest events.
 - Added header to allow / deny filters
