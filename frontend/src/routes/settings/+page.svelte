@@ -1124,16 +1124,18 @@
 	{#if isSSOModalVisible}
 		<Modal bind:visible={isSSOModalVisible} headerText="SSO configuration" onClose={closeSSOModal}>
 			<div class="mt-4">
-				<!-- Introduction Section -->
+				<!-- introduction section -->
 				<div>
-					<h3 class="text-xl font-semibold text-gray-700">Microsoft SSO Setup</h3>
-					<p class="text-gray-600 mb-4">Configure Single Sign-On with Microsoft Azure AD.</p>
+					<h3 class="text-xl font-semibold text-gray-700 dark:text-white">Microsoft SSO Setup</h3>
+					<p class="text-gray-600 dark:text-gray-300 mb-4">
+						Configure Single Sign-On with Microsoft Azure AD.
+					</p>
 				</div>
 
-				<!-- Warning Message -->
-				<div class="bg-yellow-50 p-4 rounded-md">
-					<p class="text-yellow-800 font-bold">Important:</p>
-					<p class="text-yellow-700">
+				<!-- warning message -->
+				<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
+					<p class="font-semibold text-gray-900 dark:text-white mb-2">Important:</p>
+					<p class="text-sm text-gray-700 dark:text-gray-300">
 						Accounts that login with SSO will no longer be able to use password login.
 					</p>
 				</div>
