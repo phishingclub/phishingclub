@@ -1101,17 +1101,17 @@ func (u *User) CheckMFARecoveryCode(
 	userID *uuid.UUID,
 	recoveryCode *vo.String64,
 ) (bool, error) {
-	dbRecoveryCodeHash, err := u.UserRepository.GetMFARecoveryCode(
+	dbRecoveryCode, err := u.UserRepository.GetMFARecoveryCode(
 		ctx,
 		userID,
 	)
-	if subtle.ConstantTimeCompare([]byte(recoveryCode.String()), []byte(dbRecoveryCodeHash)) != 1 {
-		u.Logger.Info("invalid recovery code")
-		return false, errs.ErrUserWrongRecoveryCode
-	}
 	if err != nil {
 		u.Logger.Errorw("failed to get recovery code", "error", err)
 		return false, errs.Wrap(err)
+	}
+	if subtle.ConstantTimeCompare([]byte(recoveryCode.String()), []byte(dbRecoveryCode)) != 1 {
+		u.Logger.Info("invalid recovery code")
+		return false, errs.ErrUserWrongRecoveryCode
 	}
 	return true, nil
 }
