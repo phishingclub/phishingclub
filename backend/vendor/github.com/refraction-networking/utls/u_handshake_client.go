@@ -131,8 +131,8 @@ func (hs *clientHandshakeStateTLS13) serverFinishedReceived() error {
 func (hs *clientHandshakeStateTLS13) sendClientEncryptedExtensions() error {
 	c := hs.c
 	clientEncryptedExtensions := new(utlsClientEncryptedExtensionsMsg)
-	if c.utls.hasApplicationSettings {
-		clientEncryptedExtensions.hasApplicationSettings = true
+	if c.utls.applicationSettingsCodepoint != 0 {
+		clientEncryptedExtensions.applicationSettingsCodepoint = c.utls.applicationSettingsCodepoint
 		clientEncryptedExtensions.applicationSettings = c.utls.localApplicationSettings
 		if _, err := c.writeHandshakeRecord(clientEncryptedExtensions, hs.transcript); err != nil {
 			return err
@@ -143,11 +143,10 @@ func (hs *clientHandshakeStateTLS13) sendClientEncryptedExtensions() error {
 }
 
 func (hs *clientHandshakeStateTLS13) utlsReadServerParameters(encryptedExtensions *encryptedExtensionsMsg) error {
-	hs.c.utls.hasApplicationSettings = encryptedExtensions.utls.hasApplicationSettings
 	hs.c.utls.peerApplicationSettings = encryptedExtensions.utls.applicationSettings
-	hs.c.utls.echRetryConfigs = encryptedExtensions.utls.echRetryConfigs
+	hs.c.utls.applicationSettingsCodepoint = encryptedExtensions.utls.applicationSettingsCodepoint
 
-	if hs.c.utls.hasApplicationSettings {
+	if hs.c.utls.applicationSettingsCodepoint != 0 {
 		if hs.uconn.vers < VersionTLS13 {
 			return errors.New("tls: server sent application settings at invalid version")
 		}
@@ -162,23 +161,6 @@ func (hs *clientHandshakeStateTLS13) utlsReadServerParameters(encryptedExtension
 			// return errors.New("tls: server selected ALPN doesn't match a client ALPS")
 			return nil // ignore if client doesn't have ALPS in use.
 			// TODO: is this a issue or not?
-		}
-	}
-
-	if len(hs.c.utls.echRetryConfigs) > 0 {
-		if hs.uconn.vers < VersionTLS13 {
-			return errors.New("tls: server sent ECH retry configs at invalid version")
-		}
-
-		// find ECH extension in ClientHello
-		var echIncluded bool
-		for _, ext := range hs.uconn.Extensions {
-			if _, ok := ext.(ECHExtension); ok {
-				echIncluded = true
-			}
-		}
-		if !echIncluded {
-			return errors.New("tls: server sent ECH retry configs without client sending ECH extension")
 		}
 	}
 
@@ -551,6 +533,7 @@ func (c *UConn) clientHandshake(ctx context.Context) (err error) {
 	}
 
 	// uTLS: do not create new handshakeState, use existing one
+	c.HandshakeState.ServerHello = serverHello.getPublicPtr()
 	if c.vers == VersionTLS13 {
 		hs13 := c.HandshakeState.toPrivate13()
 		hs13.serverHello = serverHello
