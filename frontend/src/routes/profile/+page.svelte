@@ -552,8 +552,8 @@
 				<FormColumns>
 					<FormColumn>
 						<div class="space-y-4 w-full">
-							<div class="bg-yellow-50 p-4 rounded-md">
-								<p class="text-yellow-800">
+							<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
+								<p class="text-sm text-gray-700 dark:text-gray-300">
 									Disabling MFA will reduce the security of your account. Please confirm this action
 									by entering a verification code.
 								</p>
@@ -589,12 +589,14 @@
 							<!-- Step 1 -->
 							<div class="space-y-6 w-full">
 								<div>
-									<h3 class="text-xl font-semibold text-gray-700 mb-2">1. Scan QR Code</h3>
-									<p class="text-gray-600 mb-4">
+									<h3 class="text-xl font-semibold text-gray-700 dark:text-white mb-2">
+										1. Scan QR Code
+									</h3>
+									<p class="text-gray-600 dark:text-gray-300 mb-4">
 										Use your authenticator app (like Google Authenticator or Authy) to scan the QR
 										code below.
 									</p>
-									<div class="flex justify-center bg-gray-50 p-6 rounded-lg">
+									<div class="flex justify-center bg-gray-50 dark:bg-gray-700 p-6 rounded-lg">
 										<img class="max-w-[200px]" id="totp-qr-code" alt="QR code for MFA TOTP setup" />
 									</div>
 								</div>
@@ -642,16 +644,20 @@
 					<FormColumns>
 						<FormColumn>
 							<div class="space-y-6 w-full">
-								<div class="bg-green-50 p-4 rounded-md">
+								<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
 									<div class="flex items-center">
 										<div class="w-2 h-2 bg-green-500 rounded-full mr-3" />
-										<span class="text-green-700 font-medium">MFA Setup Successful</span>
+										<span class="text-gray-900 dark:text-white font-medium"
+											>MFA Setup Successful</span
+										>
 									</div>
 								</div>
 
 								<div>
-									<h3 class="text-xl font-semibold text-gray-700 mb-2">Save Your Recovery Code</h3>
-									<p class="text-gray-600 mb-4">
+									<h3 class="text-xl font-semibold text-gray-700 dark:text-white mb-2">
+										Save Your Recovery Code
+									</h3>
+									<p class="text-gray-600 dark:text-gray-300 mb-4">
 										Store this recovery code in a safe place. You'll need it if you lose access to
 										your authenticator app:
 									</p>
@@ -663,9 +669,9 @@
 										<img class="ml-2 w-4 h-4" src="/icon-copy.svg" alt="copy code" />
 									</button>
 
-									<div class="bg-yellow-50 p-4 rounded-md mb-6">
-										<p class="text-yellow-800 font-medium">Important:</p>
-										<p class="text-yellow-700">
+									<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md mb-6">
+										<p class="font-semibold text-gray-900 dark:text-white mb-2">Important:</p>
+										<p class="text-sm text-gray-700 dark:text-gray-300">
 											Without this recovery code, you may lose access to your account if you lose
 											your authenticator device.
 										</p>
