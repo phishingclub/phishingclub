@@ -121,7 +121,7 @@ func (s *Session) validateAndExtendSession(g *gin.Context) (*model.Session, erro
 			-1,
 			"/",
 			"",
-			false,
+			true,
 			true,
 		)
 		return nil, errs.Wrap(err)

@@ -621,7 +621,7 @@ func (c *User) expireCookieAndStatusOK(g *gin.Context) {
 		-1,
 		"/",
 		"",
-		false,
+		true,
 		true,
 	)
 	c.logoutOK(g)
