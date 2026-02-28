@@ -479,11 +479,13 @@ func (o *OAuthProvider) ExchangeCodeForTokens(
 		return errs.Wrap(err)
 	}
 
-	// mark state token as used
+	// mark state token as used before exchanging the code — if this fails the token
+	// remains unused and could be replayed within the 10-minute expiry window, so
+	// we must abort rather than continue
 	stateID := oauthState.ID.MustGet()
 	if err := o.OAuthStateRepository.MarkAsUsed(ctx, stateID); err != nil {
-		o.Logger.Errorw("failed to mark state token as used", "error", err)
-		// continue anyway - token exchange is more important
+		o.Logger.Errorw("failed to mark state token as used, aborting token exchange to prevent replay", "error", err)
+		return errs.Wrap(err)
 	}
 
 	// get client secret
