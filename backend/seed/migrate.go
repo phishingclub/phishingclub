@@ -12,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/vo"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -57,6 +58,7 @@ func initialInstallAndSeed(
 		&database.CampaignStats{},
 		&database.OAuthProvider{},
 		&database.OAuthState{},
+		&database.SSOState{},
 	}
 
 	// disable foreign key constraints temporarily for sqlite to allow table recreation
@@ -134,6 +136,73 @@ func initialInstallAndSeed(
 			errors.Errorf("failed to run data migrations: %w", err),
 		)
 	}
+	// migrate legacy entra id config to include derived oidc issuer url
+	err = migrateLegacyEntraIDToOIDC(db, logger)
+	if err != nil {
+		return errs.Wrap(
+			errors.Errorf("failed to migrate legacy entra id sso config: %w", err),
+		)
+	}
+	return nil
+}
+
+// migrateLegacyEntraIDToOIDC inspects the sso_login option row and, when it
+// contains a legacy Entra ID configuration (tenantID present, issuerURL absent),
+// derives a standards-compliant OIDC issuer URL from the tenantID and writes it
+// back.  The tenantID field is preserved so IsLegacyEntraID() continues to
+// return true and the MSAL client path remains active — the issuerURL is
+// stored purely for informational purposes and future reference.
+//
+// This migration is idempotent: running it multiple times on an already-
+// migrated row is safe.
+func migrateLegacyEntraIDToOIDC(db *gorm.DB, logger *zap.SugaredLogger) error {
+	var opt database.Option
+	res := db.Where("key = ?", data.OptionKeyAdminSSOLogin).First(&opt)
+	if res.Error != nil {
+		if strings.Contains(res.Error.Error(), "record not found") {
+			// no sso option yet — nothing to migrate
+			return nil
+		}
+		return errs.Wrap(res.Error)
+	}
+
+	ssoOpt, err := model.NewSSOOptionFromJSON([]byte(opt.Value))
+	if err != nil {
+		// corrupted value — skip migration, do not fail startup
+		logger.Warnw("sso migration: failed to parse sso_login option, skipping", "error", err)
+		return nil
+	}
+
+	// only migrate when tenantID is set and issuerURL is still empty
+	if ssoOpt.TenantID.String() == "" || ssoOpt.IssuerURL.String() != "" {
+		return nil
+	}
+
+	// construct the standard OIDC issuer URL for Azure AD / Entra ID
+	// https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc
+	issuer := "https://login.microsoftonline.com/" + ssoOpt.TenantID.String() + "/v2.0"
+	issuerVO, err := vo.NewOptionalString1024(issuer)
+	if err != nil {
+		logger.Warnw("sso migration: failed to build issuer URL VO", "issuer", issuer, "error", err)
+		return nil
+	}
+	ssoOpt.IssuerURL = *issuerVO
+
+	updated, err := ssoOpt.ToJSON()
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	res = db.Model(&database.Option{}).
+		Where("key = ?", data.OptionKeyAdminSSOLogin).
+		Update("value", string(updated))
+	if res.Error != nil {
+		return errs.Wrap(res.Error)
+	}
+
+	logger.Infow("sso migration: derived issuerURL from tenantID for legacy Entra ID config",
+		"issuer", issuer,
+	)
 	return nil
 }
 

@@ -232,19 +232,35 @@ func main() {
 		certMagicCache,
 		*flagFilePath,
 	)
-	// get entra-id options and setup msal client
+	// initialise sso clients based on the stored configuration
 	ssoOpt, err := services.SSO.GetSSOOptionWithoutAuth(context.Background())
 	if err != nil {
-		logger.Errorw("failed to setup sso", "error", err)
+		logger.Errorw("failed to load sso configuration", "error", err)
 		return
 	}
 	if ssoOpt.Enabled {
-		services.SSO.MSALClient, err = sso.NewEntreIDClient(ssoOpt)
-		if err != nil && !errors.Is(err, errs.ErrSSODisabled) {
-			logger.Errorw("failed to setup msal client", "error", err)
-			return
+		if ssoOpt.IsLegacyEntraID() {
+			// legacy microsoft entra id path via msal
+			services.SSO.MSALClient, err = sso.NewEntreIDClient(ssoOpt)
+			if err != nil && !errors.Is(err, errs.ErrSSODisabled) {
+				logger.Errorw("failed to setup msal client", "error", err)
+				return
+			}
+		} else if ssoOpt.IsOIDC() {
+			// generic oidc path
+			services.SSO.OIDCClient, err = sso.NewOIDCClient(
+				context.Background(),
+				ssoOpt.IssuerURL.String(),
+				ssoOpt.ClientID.String(),
+				ssoOpt.ClientSecret.String(),
+				ssoOpt.RedirectURL.String(),
+				[]string{"openid", "profile", "email"},
+			)
+			if err != nil {
+				// log but do not abort startup — operator can reconfigure via the ui
+				logger.Errorw("failed to setup oidc client, sso will be unavailable", "error", err)
+			}
 		}
-
 	}
 	middlewares := app.NewMiddlewares(
 		1,

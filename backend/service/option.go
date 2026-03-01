@@ -77,14 +77,16 @@ func (o *Option) GetOptionWithoutAuth(
 	return opt, nil
 }
 
-// MaskSSOSecret masks the sso secret
+// MaskSSOSecret masks the sso secret before returning the option to callers.
+// The ClientSecret field is zeroed so it is never sent over the wire.
+// All other fields, including the new OIDC and policy fields, are preserved.
 func (o *Option) MaskSSOSecret(opt *model.Option) (*model.Option, error) {
 	a, err := model.NewSSOOptionFromJSON([]byte(opt.Value.String()))
 	if err != nil {
 		o.Logger.Errorw("failed to read sso option", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	// mask the key
+	// zero the secret — never returned over the api
 	a.ClientSecret = *vo.NewOptionalString1024Must("")
 	b, err := a.ToJSON()
 	if err != nil {

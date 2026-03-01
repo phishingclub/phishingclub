@@ -39,6 +39,8 @@ type User struct {
 	CompanyRepository *repository.Company
 	PasswordVerifier  *password.Argon2Verifier
 	PasswordHasher    *password.Argon2Hasher
+	// OptionRepository is used to check the SSO-only policy on login.
+	OptionRepository *repository.Option
 }
 
 // Create creates a new user
@@ -835,6 +837,19 @@ func (u *User) AuthenticateUsernameWithPassword(
 	ae := NewAuditEvent("User.AuthenticateUsernameWithPassword", nil)
 	ae.IP = ip
 	ae.Details["username"] = username
+
+	// enforce SSO-only policy: reject local logins when the feature is active
+	if u.OptionRepository != nil {
+		opt, optErr := u.OptionRepository.GetByKey(ctx, data.OptionKeyAdminSSOLogin)
+		if optErr == nil && opt != nil {
+			ssoOpt, parseErr := model.NewSSOOptionFromJSON([]byte(opt.Value.String()))
+			if parseErr == nil && ssoOpt.Enabled && ssoOpt.SSOOnly {
+				u.Logger.Debugw("local login rejected: sso-only mode is active", "username", username)
+				return nil, errs.ErrAuthenticationFailed
+			}
+		}
+	}
+
 	// check the entities are valid before doing anything
 	usernameEntity, err := vo.NewUsername(username)
 	if err != nil {

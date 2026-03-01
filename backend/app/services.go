@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/caddyserver/certmagic"
+	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/service"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -100,6 +101,7 @@ func NewServices(
 		RoleRepository:    repositories.Role,
 		CompanyRepository: repositories.Company,
 		PasswordHasher:    utilities.PasswordHasher,
+		OptionRepository:  repositories.Option,
 	}
 	recipient := &service.Recipient{
 		Common:                      common,
@@ -228,7 +230,8 @@ func NewServices(
 		OptionsService: optionService,
 		UserService:    userService,
 		SessionService: sessionService,
-		// MSALClient:     msalClient, this dependency is set AFTER this function
+		SSOStateRepo:   &repository.SSOState{DB: db},
+		// MSALClient and OIDCClient are set AFTER this function on startup
 	}
 	backupService := &service.Backup{
 		Common:        common,
