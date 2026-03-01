@@ -3365,6 +3365,7 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 
 	var campaignEvent *model.CampaignEvent
 
+	details := vo.NewOptionalString1MBMust("manually set as sent")
 	if campaign.IsAnonymous.MustGet() {
 		campaignEvent = &model.CampaignEvent{
 			ID:          &id,
@@ -3373,7 +3374,7 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 			IP:          vo.NewOptionalString64Must(""),
 			UserAgent:   vo.NewOptionalString255Must(""),
 			EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT],
-			Data:        vo.NewEmptyOptionalString1MB(),
+			Data:        details,
 			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	} else {
@@ -3384,7 +3385,7 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 			IP:          vo.NewOptionalString64Must(""),
 			UserAgent:   vo.NewOptionalString255Must(""),
 			EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT],
-			Data:        vo.NewEmptyOptionalString1MB(),
+			Data:        details,
 			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	}
