@@ -1236,6 +1236,11 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return errs.Wrap(err)
 	}
+	// do not record events for closed campaigns
+	if !campaign.IsActive() {
+		c.Logger.Debugw("skipping tracking pixel event: campaign is closed", "campaignID", campaignID.String())
+		return nil
+	}
 	trackingPixelLoadedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ]
 	newEventID := uuid.New()
 	var campaignEvent *model.CampaignEvent
