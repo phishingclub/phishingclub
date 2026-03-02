@@ -1,4 +1,4 @@
-.PHONY: build down up fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up geoip-fetch
+.PHONY: build down up fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up geoip-fetch govulncheck
 up:
 	sudo docker compose up -d backend frontend api-test-server pebble dbgate mailer dozzle stats dns test mitmproxy; \
 	sudo docker compose logs -f --tail 1000 backend frontend;
@@ -166,3 +166,11 @@ mitmproxy-purge:
 geoip-fetch:
 	@echo "Fetching GeoIP data from ipverse/rir-ip..."; \
 	cd backend/scripts && go run fetch-geoip-data.go
+
+# security
+govulncheck:
+	sudo docker run --rm \
+		-v $(CURDIR)/backend:/app \
+		-w /app \
+		golang:1.25.1 \
+		sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./..."
