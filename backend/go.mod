@@ -1,6 +1,6 @@
 module github.com/phishingclub/phishingclub
 
-go 1.25.1
+go 1.25.7
 
 require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.3.2
