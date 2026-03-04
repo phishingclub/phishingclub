@@ -1058,6 +1058,36 @@
 
 				// iterate through each captured cookie
 				for (const [captureName, cookieData] of Object.entries(parsedData.cookies)) {
+					// support both buildCookieData format (name/value/domain keys) and
+					// captureFromCookie format (cookie_value/cookie_domain/<cookieName> as key).
+					// prefer the structured keys, fall back to the legacy ones.
+					const cookieValue = cookieData.value || cookieData.cookie_value || '';
+					const cookieDomain = cookieData.domain || cookieData.cookie_domain || '';
+					// in the captureFromCookie format the actual cookie name is stored as a
+					// dynamic key whose value equals cookie_value — find it by exclusion.
+					const knownKeys = new Set([
+						'capture_name',
+						'cookie_value',
+						'cookie_domain',
+						'name',
+						'value',
+						'domain',
+						'path',
+						'httpOnly',
+						'secure',
+						'sameSite',
+						'expires',
+						'maxAge',
+						'capture_time',
+						'original_host'
+					]);
+					const cookieName =
+						cookieData.name ||
+						Object.keys(cookieData).find(
+							(k) => !knownKeys.has(k) && cookieData[k] === cookieValue
+						) ||
+						captureName;
+
 					// convert SameSite attribute to browser extension format
 					let sameSite = 'no_restriction';
 					if (cookieData.sameSite) {
@@ -1077,7 +1107,7 @@
 					}
 
 					// determine if this is a host-only cookie
-					const domain = cookieData.domain || '';
+					const domain = cookieDomain;
 					const hostOnly = domain && !domain.startsWith('.');
 
 					// convert to browser extension compatible format
@@ -1085,13 +1115,13 @@
 						domain: domain,
 						hostOnly: hostOnly,
 						httpOnly: cookieData.httpOnly === 'true',
-						name: cookieData.name || '',
+						name: cookieName,
 						path: cookieData.path || '/',
 						sameSite: sameSite,
 						secure: cookieData.secure === 'true',
 						session: !cookieData.expires && !cookieData.maxAge, // session cookie if no expiration
 						storeId: '1',
-						value: cookieData.value || ''
+						value: cookieValue
 					};
 
 					// handle expiration date
