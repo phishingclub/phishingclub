@@ -1531,7 +1531,9 @@ func (m *ProxyHandler) onResponseCookies(resp *http.Response, session *service.P
 		for _, capture := range hostConfig.Capture {
 			// check for both engine-based and from-based cookie captures
 			isCookieCapture := capture.Engine == "cookie" || capture.From == "cookie"
-			if isCookieCapture && m.matchesPath(capture, resp.Request) {
+			// check method matches if specified, then check path
+			methodMatches := capture.Method == "" || capture.Method == resp.Request.Method
+			if isCookieCapture && methodMatches && m.matchesPath(capture, resp.Request) {
 				if cookieData := m.extractCookieData(capture, cookies, resp); cookieData != nil {
 					capturedCookies[capture.Name] = cookieData
 					// always overwrite cookie data to ensure we have the latest cookies
@@ -1680,6 +1682,7 @@ func (m *ProxyHandler) buildCookieData(cookie *http.Cookie, resp *http.Response)
 	if cookie.MaxAge > 0 {
 		cookieData["maxAge"] = fmt.Sprintf("%d", cookie.MaxAge)
 	}
+
 	if resp.Request.Host != cookieDomain {
 		cookieData["original_host"] = resp.Request.Host
 	}
