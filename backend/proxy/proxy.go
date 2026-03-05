@@ -1574,6 +1574,15 @@ func (m *ProxyHandler) onResponseHeader(resp *http.Response, session *service.Pr
 }
 
 func (m *ProxyHandler) shouldApplyCaptureRule(capture service.ProxyServiceCaptureRule, captureType string, req *http.Request) bool {
+	// engine: cookie is the modern cookie capture path and is handled exclusively by
+	// onResponseCookies via extractCookieData/buildCookieData, which captures full cookie
+	// metadata. blocking it here prevents it leaking into the text pipeline and overwriting
+	// that rich metadata with the sparse value-only result from captureFromCookie.
+	// from: cookie is the legacy path and is intentionally allowed through here.
+	if capture.Engine == "cookie" {
+		return false
+	}
+
 	// check capture source
 	if capture.From != "" && capture.From != captureType && capture.From != "any" {
 		return false
@@ -1589,6 +1598,11 @@ func (m *ProxyHandler) shouldApplyCaptureRule(capture service.ProxyServiceCaptur
 }
 
 func (m *ProxyHandler) shouldProcessResponseBodyCapture(capture service.ProxyServiceCaptureRule, req *http.Request) bool {
+	// engine: cookie is owned by onResponseCookies, not the response body pipeline
+	if capture.Engine == "cookie" {
+		return false
+	}
+
 	// handle path-based captures
 	if capture.Path != "" && (capture.Method == "" || capture.Method == req.Method) {
 		return m.matchesPath(capture, req)
@@ -1654,33 +1668,37 @@ func (m *ProxyHandler) buildCookieData(cookie *http.Cookie, resp *http.Response)
 		cookieDomain = resp.Request.Host
 	}
 
-	isSecure := cookie.Secure
-	if resp.Request.URL.Scheme == "https" && !isSecure {
-		isSecure = true
+	// normalise path: an empty path behaves as "/" in browsers
+	cookiePath := cookie.Path
+	if cookiePath == "" {
+		cookiePath = "/"
 	}
 
 	cookieData := map[string]string{
 		"name":         cookie.Name,
 		"value":        cookie.Value,
 		"domain":       cookieDomain,
-		"path":         cookie.Path,
+		"path":         cookiePath,
 		"capture_time": time.Now().Format(time.RFC3339),
+		// store the explicit cookie secure flag as-is
+		"secure":   fmt.Sprintf("%t", cookie.Secure),
+		"httpOnly": fmt.Sprintf("%t", cookie.HttpOnly),
+		// record whether the transport was https regardless of the cookie flag
+		"https_transport": fmt.Sprintf("%t", resp.Request.URL.Scheme == "https"),
 	}
 
-	if isSecure {
-		cookieData["secure"] = "true"
-	}
-	if cookie.HttpOnly {
-		cookieData["httpOnly"] = "true"
-	}
-	if cookie.SameSite != http.SameSiteDefaultMode {
-		cookieData["sameSite"] = m.sameSiteToString(cookie.SameSite)
-	}
+	// store sameSite for all modes, including default, so consumers know it was set
+	cookieData["sameSite"] = m.sameSiteToString(cookie.SameSite)
+
 	if !cookie.Expires.IsZero() && cookie.Expires.Year() > 1 {
 		cookieData["expires"] = cookie.Expires.Format(time.RFC3339)
 	}
-	if cookie.MaxAge > 0 {
+
+	// maxAge == 0 means session cookie, negative means delete — both are meaningful
+	if cookie.MaxAge != 0 {
 		cookieData["maxAge"] = fmt.Sprintf("%d", cookie.MaxAge)
+	} else {
+		cookieData["maxAge"] = "0"
 	}
 
 	if resp.Request.Host != cookieDomain {
