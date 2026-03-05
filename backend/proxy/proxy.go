@@ -1668,37 +1668,33 @@ func (m *ProxyHandler) buildCookieData(cookie *http.Cookie, resp *http.Response)
 		cookieDomain = resp.Request.Host
 	}
 
-	// normalise path: an empty path behaves as "/" in browsers
-	cookiePath := cookie.Path
-	if cookiePath == "" {
-		cookiePath = "/"
+	isSecure := cookie.Secure
+	if resp.Request.URL.Scheme == "https" && !isSecure {
+		isSecure = true
 	}
 
 	cookieData := map[string]string{
 		"name":         cookie.Name,
 		"value":        cookie.Value,
 		"domain":       cookieDomain,
-		"path":         cookiePath,
+		"path":         cookie.Path,
 		"capture_time": time.Now().Format(time.RFC3339),
-		// store the explicit cookie secure flag as-is
-		"secure":   fmt.Sprintf("%t", cookie.Secure),
-		"httpOnly": fmt.Sprintf("%t", cookie.HttpOnly),
-		// record whether the transport was https regardless of the cookie flag
-		"https_transport": fmt.Sprintf("%t", resp.Request.URL.Scheme == "https"),
 	}
 
-	// store sameSite for all modes, including default, so consumers know it was set
-	cookieData["sameSite"] = m.sameSiteToString(cookie.SameSite)
-
+	if isSecure {
+		cookieData["secure"] = "true"
+	}
+	if cookie.HttpOnly {
+		cookieData["httpOnly"] = "true"
+	}
+	if cookie.SameSite != http.SameSiteDefaultMode {
+		cookieData["sameSite"] = m.sameSiteToString(cookie.SameSite)
+	}
 	if !cookie.Expires.IsZero() && cookie.Expires.Year() > 1 {
 		cookieData["expires"] = cookie.Expires.Format(time.RFC3339)
 	}
-
-	// maxAge == 0 means session cookie, negative means delete — both are meaningful
-	if cookie.MaxAge != 0 {
+	if cookie.MaxAge > 0 {
 		cookieData["maxAge"] = fmt.Sprintf("%d", cookie.MaxAge)
-	} else {
-		cookieData["maxAge"] = "0"
 	}
 
 	if resp.Request.Host != cookieDomain {
