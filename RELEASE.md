@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.32.1] - 2026-03-07
+- Added detail when manually set recipient as sent
+- Bump go version 
+- Fix do not track email pixel after campaign closed
+- Fix default sort recipients on campaign creation
+- Fix missing method check on cookie capture with cookie engine
+- Fix legacy cookie capturing engine rule applied to cookie engine
+- Fix missing parsing of some captured cookie attributes
+
 ## [1.32.0] - 2026-02-28
 - Added support for multiple webhooks per campaign
 - Added webhook links on campaign page
