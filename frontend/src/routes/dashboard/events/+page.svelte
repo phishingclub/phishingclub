@@ -101,7 +101,7 @@
 				isEventsLoading = true;
 			}
 			const options = {
-				page: eventsTableURLParams.page,
+				page: eventsTableURLParams.currentPage,
 				perPage: eventsTableURLParams.perPage,
 				sortBy: eventsTableURLParams.sortBy,
 				sortOrder: eventsTableURLParams.sortOrder,
