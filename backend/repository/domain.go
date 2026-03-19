@@ -18,6 +18,7 @@ var domainAllowedColumns = assignTableToColumns(database.DOMAIN_TABLE, []string{
 	"name",
 	"redirect_url",
 	"host_website",
+	"type",
 })
 
 // DomainOption is for deciding if we should load full domain entities

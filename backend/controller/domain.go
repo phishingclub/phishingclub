@@ -20,6 +20,7 @@ var DomainColumnsMap = map[string]string{
 	"name":            repository.TableColumn(database.DOMAIN_TABLE, "name"),
 	"hosting_website": repository.TableColumn(database.DOMAIN_TABLE, "host_website"),
 	"redirects":       repository.TableColumn(database.DOMAIN_TABLE, "redirect_url"),
+	"type":            repository.TableColumn(database.DOMAIN_TABLE, "type"),
 }
 
 // Domain
