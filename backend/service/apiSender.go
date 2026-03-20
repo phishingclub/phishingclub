@@ -510,7 +510,9 @@ func (a *APISender) SendTest(
 		testEmail,
 		"",
 		oauthAccessToken,
-		nil, // no company context for test
+		nil,      // no company context for test
+		uuid.Nil, // no campaign context for test
+		uuid.Nil, // no recipient context for test
 	)
 	if err != nil {
 		a.Logger.Errorw("failed to build test request", "error", err)
@@ -561,11 +563,12 @@ func (a *APISender) Send(
 	cTemplate *model.CampaignTemplate,
 	campaignRecipient *model.CampaignRecipient,
 	domain *model.Domain,
-	mailTmpl *template.Template,
+	emailContent string,
 	email *model.Email,
 	companyID *uuid.UUID,
+	campaignID uuid.UUID,
 ) error {
-	return a.SendWithCustomURL(ctx, session, cTemplate, campaignRecipient, domain, mailTmpl, email, "", companyID)
+	return a.SendWithCustomURL(ctx, session, cTemplate, campaignRecipient, domain, emailContent, email, "", companyID, campaignID)
 }
 
 // SendWithCustomURL sends an API request with optional custom campaign URL
@@ -575,10 +578,11 @@ func (a *APISender) SendWithCustomURL(
 	cTemplate *model.CampaignTemplate,
 	campaignRecipient *model.CampaignRecipient,
 	domain *model.Domain,
-	mailTmpl *template.Template,
+	emailContent string,
 	email *model.Email,
 	customCampaignURL string,
 	companyID *uuid.UUID,
+	campaignID uuid.UUID,
 ) error {
 	// get sender details
 	apiSenderID, err := cTemplate.APISenderID.Get()
@@ -624,6 +628,9 @@ func (a *APISender) SendWithCustomURL(
 		return errors.New("url identifier MUST be loaded in campaign template")
 	}
 	urlPath := cTemplate.URLPath.MustGet().String()
+	// use the actual recipient id (not the campaign recipient row id) so the
+	// lookup key matches what the landing page path uses.
+	recipientID := campaignRecipient.RecipientID.MustGet()
 	url, headers, body, err := a.buildRequestWithCustomURL(
 		ctx,
 		apiSender,
@@ -635,6 +642,8 @@ func (a *APISender) SendWithCustomURL(
 		customCampaignURL,
 		oauthAccessToken,
 		companyID,
+		campaignID,
+		recipientID,
 	)
 	if err != nil {
 		a.Logger.Errorw("failed to build api sender request", "error", err)
@@ -822,8 +831,10 @@ func (a *APISender) buildRequest(
 	campaignRecipient *model.CampaignRecipient,
 	email *model.Email, // todo is this superfluous? it should be in the campaign recipient?
 	companyID *uuid.UUID,
+	campaignID uuid.UUID,
+	recipientID uuid.UUID,
 ) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
-	return a.buildRequestWithCustomURL(ctx, apiSender, domainName, urlKey, urlPath, campaignRecipient, email, "", "", companyID)
+	return a.buildRequestWithCustomURL(ctx, apiSender, domainName, urlKey, urlPath, campaignRecipient, email, "", "", companyID, campaignID, recipientID)
 }
 
 // buildRequestWithCustomURL builds an API request with optional custom campaign URL
@@ -838,6 +849,8 @@ func (a *APISender) buildRequestWithCustomURL(
 	customCampaignURL string,
 	oauthAccessToken string,
 	companyID *uuid.UUID,
+	campaignID uuid.UUID,
+	recipientID uuid.UUID,
 ) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
 	// create template data first so it can be used in headers, url, and body
 	t := a.TemplateService.CreateMail(
@@ -869,10 +882,13 @@ func (a *APISender) buildRequestWithCustomURL(
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to build headers: %s", err)
 	}
+	// build per-recipient template funcs so {{MicrosoftDeviceCode}} resolves correctly
+	recipientDeviceFuncs := a.TemplateService.TemplateFuncsWithDeviceCode(ctx, &campaignID, &recipientID)
+
 	// setup URL
 	requestURL := apiSender.RequestURL.MustGet()
 	urlTemplate := template.New("url")
-	urlTemplate = urlTemplate.Funcs(TemplateFuncs())
+	urlTemplate = urlTemplate.Funcs(recipientDeviceFuncs)
 	urlTemplate, err = urlTemplate.Parse(requestURL.String())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to parse url: %s", err)
@@ -884,7 +900,7 @@ func (a *APISender) buildRequestWithCustomURL(
 	// setup body
 	// first parse and execute the mail content
 	mailContentTemplate := template.New("mailContent")
-	mailContentTemplate = mailContentTemplate.Funcs(TemplateFuncs())
+	mailContentTemplate = mailContentTemplate.Funcs(recipientDeviceFuncs)
 	content, err := email.Content.Get()
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to get email content: %s", err)
@@ -912,7 +928,7 @@ func (a *APISender) buildRequestWithCustomURL(
 	jsonStr := strings.TrimSpace(buf.String())
 	(*t)["Content"] = jsonStr[1 : len(jsonStr)-1]
 	contentTemplate := template.New("content")
-	contentTemplate = contentTemplate.Funcs(TemplateFuncs())
+	contentTemplate = contentTemplate.Funcs(recipientDeviceFuncs)
 	contentTemplate, err = contentTemplate.Parse(apiSender.RequestBody.MustGet().String())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to parse body: %s", err)

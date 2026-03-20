@@ -41,6 +41,11 @@ const eventNameMap = {
 		priority: 95,
 		color: 'bg-reported'
 	},
+	campaign_recipient_info: {
+		name: 'Info',
+		priority: 25,
+		color: 'bg-message-sent'
+	},
 	// campaign events
 	campaign_scheduled: { name: 'Scheduled', priority: 10 },
 	campaign_active: { name: 'Active', priority: 20 },

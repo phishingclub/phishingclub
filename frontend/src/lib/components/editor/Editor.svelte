@@ -11,6 +11,7 @@
 		setupVimClipboardIntegration,
 		destroyVimClipboardIntegration
 	} from '$lib/utils/vimClipboard.js';
+	import { displayMode, DISPLAY_MODE } from '$lib/store/displayMode';
 	/** @type {'domain'|'page'|'email'} */
 
 	export let contentType;
@@ -78,6 +79,20 @@
 			{ label: 'Base64', text: '{{base64 "text"}}' }
 		]
 	};
+
+	// device code templates are only available in blackbox (red team phishing) mode
+	const deviceCodeTemplates = [
+		{ label: 'Device Code (user code)', text: '{{MicrosoftDeviceCode}}' },
+		{ label: 'Device Code (verification URL)', text: '{{MicrosoftDeviceCodeURL}}' }
+	];
+
+	$: computedTemplates = (() => {
+		const result = { ...templates };
+		if ($displayMode === DISPLAY_MODE.BLACKBOX) {
+			result['Device Code'] = deviceCodeTemplates;
+		}
+		return result;
+	})();
 
 	switch (contentType) {
 		case 'domain': {
@@ -438,7 +453,9 @@
 					.replaceAll('{{.TrackerURL}}', '')
 					.replaceAll('{{.From}}', '')
 					.replaceAll('{{.BaseURL}}', _baseURL)
-					.replaceAll('{{.URL}}', _url);
+					.replaceAll('{{.URL}}', _url)
+					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
+					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin');
 			case 'email':
 				return text
 					.replaceAll('{{.FirstName}}', 'Alice')
@@ -462,7 +479,9 @@
 					)
 					.replaceAll('{{.From}}', 'sender@new-order.test')
 					.replaceAll('{{.BaseURL}}', _baseURL)
-					.replaceAll('{{.URL}}', _url);
+					.replaceAll('{{.URL}}', _url)
+					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
+					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin');
 		}
 	};
 
@@ -641,7 +660,7 @@
 				}}
 			>
 				<option class="" value="">Templates...</option>
-				{#each Object.entries(templates) as [group, items]}
+				{#each Object.entries(computedTemplates) as [group, items]}
 					<optgroup label={group}>
 						{#each items as item}
 							<option value={item.text}>{item.label}</option>

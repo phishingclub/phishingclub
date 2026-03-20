@@ -25,7 +25,8 @@
 		campaign_recipient_after_page_visited: '#f6287b',
 		campaign_recipient_deny_page_visited: '#ff6b35',
 		campaign_recipient_submitted_data: '#f42e41',
-		campaign_recipient_reported: '#2c3e50'
+		campaign_recipient_reported: '#2c3e50',
+		campaign_recipient_info: '#94cae6'
 	});
 
 	const EVENT_ICONS = Object.freeze({
@@ -60,7 +61,9 @@
 		campaign_recipient_submitted_data:
 			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
 		campaign_recipient_reported:
-			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>'
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>',
+		campaign_recipient_info:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>'
 	});
 
 	const DEFAULT_ICON =
@@ -126,7 +129,8 @@
 		campaign_recipient_after_page_visited: true,
 		campaign_recipient_deny_page_visited: true,
 		campaign_recipient_submitted_data: true,
-		campaign_recipient_reported: true
+		campaign_recipient_reported: true,
+		campaign_recipient_info: true
 	};
 
 	// caching - pre-processed events with timestamps
@@ -1080,7 +1084,7 @@
 											Recipient Events
 										</h4>
 										<div class="space-y-1 pl-2">
-											{#each [['campaign_recipient_scheduled', 'Scheduled'], ['campaign_recipient_cancelled', 'Cancelled'], ['campaign_recipient_message_sent', 'Message Sent'], ['campaign_recipient_message_failed', 'Message Failed'], ['campaign_recipient_message_read', 'Message Read'], ['campaign_recipient_before_page_visited', 'Before Page Visited'], ['campaign_recipient_page_visited', 'Page Visited'], ['campaign_recipient_after_page_visited', 'After Page Visited'], ['campaign_recipient_deny_page_visited', 'Deny Page Visited'], ['campaign_recipient_submitted_data', 'Data Submitted'], ['campaign_recipient_reported', 'Reported']] as [key, label]}
+											{#each [['campaign_recipient_scheduled', 'Scheduled'], ['campaign_recipient_cancelled', 'Cancelled'], ['campaign_recipient_message_sent', 'Message Sent'], ['campaign_recipient_message_failed', 'Message Failed'], ['campaign_recipient_message_read', 'Message Read'], ['campaign_recipient_before_page_visited', 'Before Page Visited'], ['campaign_recipient_page_visited', 'Page Visited'], ['campaign_recipient_after_page_visited', 'After Page Visited'], ['campaign_recipient_deny_page_visited', 'Deny Page Visited'], ['campaign_recipient_submitted_data', 'Data Submitted'], ['campaign_recipient_reported', 'Reported'], ['campaign_recipient_info', 'Info']] as [key, label]}
 												<label class="flex items-center text-xs">
 													<input
 														type="checkbox"

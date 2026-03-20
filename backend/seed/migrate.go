@@ -57,6 +57,7 @@ func initialInstallAndSeed(
 		&database.CampaignStats{},
 		&database.OAuthProvider{},
 		&database.OAuthState{},
+		&database.MicrosoftDeviceCode{},
 	}
 
 	// disable foreign key constraints temporarily for sqlite to allow table recreation

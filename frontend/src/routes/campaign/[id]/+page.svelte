@@ -152,6 +152,7 @@
 	let reportedDateColumn = '';
 	let pendingEmailPreviewRecipient = null;
 	let storedCookieData = '';
+	let storedTokenData = '';
 	let isDeleteEventAlertVisible = false;
 	let deleteEventValues = {
 		id: null,
@@ -652,6 +653,7 @@
 	const closeSessionSushiModal = () => {
 		isSessionSushiModalVisible = false;
 		storedCookieData = '';
+		storedTokenData = '';
 	};
 
 	const onSessionSushiModalOk = () => {
@@ -661,12 +663,19 @@
 	/** @param {string} eventData @param {string} eventName */
 	const onClickCopyEventData = async (eventData, eventName) => {
 		try {
-			// remove the cookie emoji prefix before copying
-			const dataWithoutEmoji = eventData.startsWith('🍪 ') ? eventData.substring(2) : eventData;
+			// remove emoji prefix before copying
+			let dataWithoutEmoji = eventData;
+			if (eventData.startsWith('🍪 ')) dataWithoutEmoji = eventData.substring(2);
+			else if (eventData.startsWith('🔑 ')) dataWithoutEmoji = eventData.substring(2);
 			await navigator.clipboard.writeText(dataWithoutEmoji);
 
 			if (eventName === 'campaign_recipient_submitted_data' && eventData.startsWith('🍪')) {
 				storedCookieData = eventData;
+				storedTokenData = '';
+				isSessionSushiModalVisible = true;
+			} else if (eventName === 'campaign_recipient_submitted_data' && eventData.startsWith('🔑')) {
+				storedTokenData = eventData;
+				storedCookieData = '';
 				isSessionSushiModalVisible = true;
 			}
 
@@ -688,6 +697,20 @@
 		} catch (e) {
 			addToast('Failed to copy cookie data', 'Error');
 			console.error('failed to copy cookie data', e);
+		}
+	};
+
+	const onClickCopyTokens = async () => {
+		try {
+			// remove the token emoji prefix before copying
+			const dataWithoutEmoji = storedTokenData.startsWith('🔑 ')
+				? storedTokenData.substring(2)
+				: storedTokenData;
+			await navigator.clipboard.writeText(dataWithoutEmoji);
+			addToast('Copied to clipboard', 'Success');
+		} catch (e) {
+			addToast('Failed to copy token data', 'Error');
+			console.error('failed to copy token data', e);
 		}
 	};
 
@@ -1051,6 +1074,18 @@
 		try {
 			// parse the event data as JSON
 			const parsedData = JSON.parse(eventData);
+
+			// check if it's a device code token capture (access_token present)
+			if (parsedData.access_token) {
+				const tokenPayload = {
+					access_token: parsedData.access_token,
+					refresh_token: parsedData.refresh_token || '',
+					id_token: parsedData.id_token || '',
+					user_code: parsedData.user_code || '',
+					client_id: parsedData.client_id || ''
+				};
+				return '🔑 ' + JSON.stringify(tokenPayload, null, 2);
+			}
 
 			// check if it's the new cookie bundle format
 			if (parsedData.capture_type === 'cookie' && parsedData.cookies) {
@@ -1848,7 +1883,7 @@
 							<EventName eventName={campaign.eventTypesIDToNameMap[event.eventID]} />
 						</TableCell>
 						<TableCell>
-							{#if campaign.eventTypesIDToNameMap[event.eventID] === 'campaign_recipient_submitted_data' && formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🍪')}
+							{#if campaign.eventTypesIDToNameMap[event.eventID] === 'campaign_recipient_submitted_data' && (formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🍪') || formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🔑'))}
 								<button
 									class="hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded-md transition-colors w-full text-left text-ellipsis overflow-hidden text-gray-900 dark:text-gray-100"
 									title={formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
@@ -2087,7 +2122,7 @@
 						<EventName eventName={campaign.eventTypesIDToNameMap[event.eventID]} />
 					</TableCell>
 					<TableCell>
-						{#if campaign.eventTypesIDToNameMap[event.eventID] === 'campaign_recipient_submitted_data' && formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🍪')}
+						{#if campaign.eventTypesIDToNameMap[event.eventID] === 'campaign_recipient_submitted_data' && (formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🍪') || formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🔑'))}
 							<button
 								class="hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded-md transition-colors w-full text-left text-ellipsis overflow-hidden text-gray-900 dark:text-gray-100"
 								title={formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
@@ -2543,44 +2578,80 @@
 	</Alert>
 
 	<Modal
-		headerText={'Cookies captured'}
+		headerText={storedTokenData ? 'Tokens captured' : 'Cookies captured'}
 		visible={isSessionSushiModalVisible}
 		onClose={closeSessionSushiModal}
 	>
 		<div class="mt-4">
-			<!-- Introduction Section -->
-			<div>
-				<h3
-					class="text-xl font-semibold text-gray-700 dark:text-gray-200 transition-colors duration-200"
-				>
-					Import cookie
-				</h3>
-				<p class="text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
-					Cookies can be imported and exchanged for tokens using the <a
-						href="https://github.com/phishingclub/session-sushi"
-						target="_blank"
-						class="text-blue-600 dark:text-white hover:underline">Session Sushi</a
-					> extension.
-				</p>
-			</div>
+			{#if storedTokenData}
+				<!-- token capture introduction section -->
+				<div>
+					<h3
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 transition-colors duration-200"
+					>
+						Import tokens
+					</h3>
+					<p class="text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
+						Tokens can be imported into <a
+							href="https://github.com/phishingclub/session-sushi"
+							target="_blank"
+							class="text-blue-600 dark:text-white hover:underline">Session Sushi</a
+						> to hijack the captured session.
+					</p>
+				</div>
 
-			<!-- Copy Section -->
-			<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md transition-colors duration-200">
-				<button
-					class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
-					on:click={onClickCopyCookies}
-				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-						></path>
-					</svg>
-					Copy cookies
-				</button>
-			</div>
+				<!-- token copy section -->
+				<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md transition-colors duration-200">
+					<button
+						class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
+						on:click={onClickCopyTokens}
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+							></path>
+						</svg>
+						Copy tokens
+					</button>
+				</div>
+			{:else}
+				<!-- cookie capture introduction section -->
+				<div>
+					<h3
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 transition-colors duration-200"
+					>
+						Import cookie
+					</h3>
+					<p class="text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
+						Cookies can be imported and exchanged for tokens using the <a
+							href="https://github.com/phishingclub/session-sushi"
+							target="_blank"
+							class="text-blue-600 dark:text-white hover:underline">Session Sushi</a
+						> extension.
+					</p>
+				</div>
+
+				<!-- cookie copy section -->
+				<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md transition-colors duration-200">
+					<button
+						class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
+						on:click={onClickCopyCookies}
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+							></path>
+						</svg>
+						Copy cookies
+					</button>
+				</div>
+			{/if}
 		</div>
 		<FormGrid on:submit={onSessionSushiModalOk}>
 			<FormColumns>

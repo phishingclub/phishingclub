@@ -424,9 +424,10 @@ func main() {
 		logger.Fatalw("Failed to load system user", "error", err)
 	}
 	daemon := task.Runner{
-		CampaignService: services.Campaign,
-		UpdateService:   services.Update,
-		Logger:          logger,
+		CampaignService:     services.Campaign,
+		UpdateService:       services.Update,
+		MicrosoftDeviceCode: services.MicrosoftDeviceCode,
+		Logger:              logger,
 	}
 
 	// start tasks runner

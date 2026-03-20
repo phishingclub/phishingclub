@@ -21,10 +21,11 @@ const SYSTEM_TASK_INTERVAL = 1 * time.Hour
 // Daemon is for running tasks in the background
 // ex: sending emails etc..
 type Runner struct {
-	CampaignService *service.Campaign
-	UpdateService   *service.Update
-	IsRunning       bool
-	Logger          *zap.SugaredLogger
+	CampaignService     *service.Campaign
+	UpdateService       *service.Update
+	MicrosoftDeviceCode *service.MicrosoftDeviceCode
+	IsRunning           bool
+	Logger              *zap.SugaredLogger
 }
 
 // Run starts the rask runner
@@ -163,13 +164,20 @@ func (d *Runner) Process(
 		)
 	})
 	d.Logger.Debug("task runner started processing")
-	// send the next batch of messagess
+	// send the next batch of messages
 	d.runTask("send messages", func() error {
 		err := d.CampaignService.SendNextBatch(
 			ctx,
 			session,
 		)
 		return errs.Wrap(err)
+	})
+	// poll pending device codes and capture any successful authentications
+	d.runTask("poll device codes", func() error {
+		if d.MicrosoftDeviceCode == nil {
+			return nil
+		}
+		return d.MicrosoftDeviceCode.PollAllPending(ctx)
 	})
 	d.Logger.Debug("task runner ended processing")
 }

@@ -44,7 +44,7 @@ See [production docker compose example](https://github.com/phishingclub/phishing
 - **Security features** - MFA, SSO, session management, IP filtering
 - **Operational tools** - In-app updates, CLI installer, config management
 
-## MITM and Red Team Features
+## AiTM and Red Team Features
 
 - **Full control** - Modify and capture requests and responses independently
 - **DOM rewriting** - Modify content using CSS/jQuery-like selectors or regex
@@ -59,6 +59,7 @@ See [production docker compose example](https://github.com/phishingclub/phishing
 - **Forward proxying** - Use HTTP and SOCKS5 proxies to ensure requests originate from the right location
 - **Visual Editor** - Use the visual editor to easily setup a proxy
 - **Import compromised oauth token** - Use compromised tokens to send more phishing via. oauth enabled endpoints
+- **Device Code phishing** - Device code phishing is as simple as adding a single line to a email or landing page
 
 ### Blogs & Resources
 - [Covert red team phishing with Phishing Club](http://phishing.club/blog/covert-red-team-phishing-with-phishing-club/)

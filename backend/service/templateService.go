@@ -32,7 +32,8 @@ const trackingPixelTemplate = "{{.Tracker}}"
 // templates such as websites, emails, etc.
 type Template struct {
 	Common
-	RecipientRepository *repository.Recipient
+	RecipientRepository        *repository.Recipient
+	MicrosoftDeviceCodeService *MicrosoftDeviceCode
 }
 
 // CreateMailTemplate creates a new mail template
@@ -255,6 +256,38 @@ func (t *Template) CreateMailBodyWithCustomURL(
 	customCampaignURL string, // if provided, overrides the default campaign URL
 	companyID *uuid.UUID,
 ) (string, error) {
+	return t.CreateMailBodyWithCustomURLAndRecipient(
+		ctx,
+		urlIdentifier,
+		urlPath,
+		domain,
+		campaignRecipient,
+		email,
+		apiSender,
+		customCampaignURL,
+		companyID,
+		nil,
+		nil,
+	)
+}
+
+// CreateMailBodyWithCustomURLAndRecipient renders a mail body with an optional custom campaign URL.
+// when campaignID and recipientID are non-nil the DeviceCode template functions are wired to the
+// live implementation so that {{MicrosoftDeviceCode}} / {{MicrosoftDeviceCodeURL}} resolve correctly
+// in email bodies and attachments.
+func (t *Template) CreateMailBodyWithCustomURLAndRecipient(
+	ctx context.Context,
+	urlIdentifier string,
+	urlPath string,
+	domain *model.Domain,
+	campaignRecipient *model.CampaignRecipient,
+	email *model.Email,
+	apiSender *model.APISender, // can be nil
+	customCampaignURL string, // if provided, overrides the default campaign URL
+	companyID *uuid.UUID,
+	campaignID *uuid.UUID, // if non-nil, device code funcs are wired
+	recipientID *uuid.UUID, // if non-nil, device code funcs are wired
+) (string, error) {
 	mailData := t.CreateMail(
 		ctx,
 		domain.Name.MustGet().String(),
@@ -271,8 +304,16 @@ func (t *Template) CreateMailBodyWithCustomURL(
 		(*mailData)["URL"] = customCampaignURL
 	}
 
+	// use device code funcs when both ids are present so {{MicrosoftDeviceCode}} resolves
+	var funcs template.FuncMap
+	if campaignID != nil && recipientID != nil {
+		funcs = t.TemplateFuncsWithDeviceCode(ctx, campaignID, recipientID)
+	} else {
+		funcs = t.TemplateFuncsWithCompany(ctx, companyID)
+	}
+
 	mailContentTemplate := template.New("mailContent")
-	mailContentTemplate = mailContentTemplate.Funcs(t.TemplateFuncsWithCompany(ctx, companyID))
+	mailContentTemplate = mailContentTemplate.Funcs(funcs)
 	content, err := email.Content.Get()
 	if err != nil {
 		t.Logger.Errorw("failed to get email content", "error", err)
@@ -319,6 +360,26 @@ func (t *Template) CreatePhishingPageWithCampaign(
 	domain *database.Domain,
 	email *model.Email,
 	campaignRecipientID *uuid.UUID,
+	recipient *model.Recipient,
+	contentToRender string,
+	campaignTemplate *model.CampaignTemplate,
+	stateParam string,
+	urlPath string,
+	campaign *model.Campaign,
+	companyID *uuid.UUID,
+) (*bytes.Buffer, error) {
+	return t.CreatePhishingPageWithCampaignAndRecipient(ctx, domain, email, campaignRecipientID, nil, recipient, contentToRender, campaignTemplate, stateParam, urlPath, campaign, companyID)
+}
+
+// CreatePhishingPageWithCampaignAndRecipient creates a new phishing page with optional campaign and
+// explicit recipient id for device code phishing support. when recipientID is non-nil the DeviceCode
+// template function is wired to the live implementation.
+func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
+	ctx context.Context,
+	domain *database.Domain,
+	email *model.Email,
+	campaignRecipientID *uuid.UUID,
+	recipientID *uuid.UUID,
 	recipient *model.Recipient,
 	contentToRender string,
 	campaignTemplate *model.CampaignTemplate,
@@ -379,8 +440,16 @@ func (t *Template) CreatePhishingPageWithCampaign(
 		}
 	}
 
+	var templateFuncs template.FuncMap
+	if campaign != nil && recipientID != nil {
+		campaignID := campaign.ID.MustGet()
+		templateFuncs = t.TemplateFuncsWithDeviceCode(ctx, &campaignID, recipientID)
+	} else {
+		templateFuncs = t.TemplateFuncsWithCompany(ctx, companyID)
+	}
+
 	tmpl, err := template.New("page").
-		Funcs(t.TemplateFuncsWithCompany(ctx, companyID)).
+		Funcs(templateFuncs).
 		Parse(contentToRender)
 
 	if err != nil {
@@ -400,8 +469,8 @@ func (t *Template) CreatePhishingPageWithCampaign(
 
 	// add random recipient data to template context (excluding current recipient)
 	var excludeRecipientID *uuid.UUID
-	if recipientID, err := recipient.ID.Get(); err == nil {
-		excludeRecipientID = &recipientID
+	if rid, err := recipient.ID.Get(); err == nil {
+		excludeRecipientID = &rid
 	}
 	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, excludeRecipientID)
 	err = tmpl.Execute(w, data)
@@ -571,12 +640,84 @@ func TemplateFuncs() template.FuncMap {
 		"base64": func(s string) string {
 			return base64.StdEncoding.EncodeToString([]byte(s))
 		},
+		// MicrosoftDeviceCode is a no-op stub used during template validation; it is replaced with
+		// a live implementation via TemplateFuncsWithDeviceCode when rendering for real recipients.
+		"MicrosoftDeviceCode": func(args ...string) (string, error) {
+			return "ABCD-1234", nil
+		},
+		// MicrosoftDeviceCodeURL is a no-op stub used during template validation; it is replaced with
+		// a live implementation via TemplateFuncsWithDeviceCode when rendering for real recipients.
+		"MicrosoftDeviceCodeURL": func(args ...string) (string, error) {
+			return "https://microsoft.com/devicelogin", nil
+		},
 	}
 }
 
 // TemplateFuncsWithCompany returns template functions for templates with company context
 func (t *Template) TemplateFuncsWithCompany(ctx context.Context, companyID *uuid.UUID) template.FuncMap {
 	return TemplateFuncs()
+}
+
+// TemplateFuncsWithDeviceCode returns template functions with live MicrosoftDeviceCode and MicrosoftDeviceCodeURL
+// implementations bound to the given campaign and recipient. both functions accept optional keyword
+// arguments as alternating key/value string pairs, e.g.:
+//
+//	{{MicrosoftDeviceCode "clientId" "d3590ed6-..." "tenantId" "contoso.com"}}
+//	{{MicrosoftDeviceCodeURL "clientId" "d3590ed6-..." "tenantId" "contoso.com"}}
+//
+// supported keys: clientId, tenantId, resource, scope
+//
+// MicrosoftDeviceCode returns the short user code (e.g. "ABCD-1234") to display to the victim.
+// MicrosoftDeviceCodeURL returns the verification URI the victim should visit.
+func (t *Template) TemplateFuncsWithDeviceCode(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+) template.FuncMap {
+	funcs := TemplateFuncs()
+	if t.MicrosoftDeviceCodeService == nil || *campaignID == uuid.Nil || *recipientID == uuid.Nil {
+		// device code service not wired or no real ids available (e.g. test/preview context) —
+		// return the no-op stub so the template still renders with placeholder values
+		return funcs
+	}
+
+	// parseDeviceCodeOpts parses alternating key/value argument pairs into a MicrosoftDeviceCodeOptions struct
+	parseDeviceCodeOpts := func(args []string) MicrosoftDeviceCodeOptions {
+		opts := MicrosoftDeviceCodeOptions{}
+		for i := 0; i+1 < len(args); i += 2 {
+			switch args[i] {
+			case "clientId":
+				opts.ClientID = args[i+1]
+			case "tenantId":
+				opts.TenantID = args[i+1]
+			case "resource":
+				opts.Resource = args[i+1]
+			case "scope":
+				opts.Scope = args[i+1]
+			}
+		}
+		return opts
+	}
+
+	funcs["MicrosoftDeviceCode"] = func(args ...string) (string, error) {
+		opts := parseDeviceCodeOpts(args)
+		entry, err := t.MicrosoftDeviceCodeService.GetOrCreateDeviceCode(ctx, campaignID, recipientID, opts)
+		if err != nil {
+			return "", fmt.Errorf("MicrosoftDeviceCode: failed to get or create device code: %w", err)
+		}
+		return entry.UserCode, nil
+	}
+
+	funcs["MicrosoftDeviceCodeURL"] = func(args ...string) (string, error) {
+		opts := parseDeviceCodeOpts(args)
+		entry, err := t.MicrosoftDeviceCodeService.GetOrCreateDeviceCode(ctx, campaignID, recipientID, opts)
+		if err != nil {
+			return "", fmt.Errorf("MicrosoftDeviceCodeURL: failed to get or create device code: %w", err)
+		}
+		return entry.VerificationURI, nil
+	}
+
+	return funcs
 }
 
 // getRandomRecipientData gets a random recipient from a company and returns a map of their data

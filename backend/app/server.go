@@ -2146,11 +2146,20 @@ func (s *Server) renderPageTemplate(
 		campaignCompanyID = &companyID
 	}
 
-	phishingPage, err := s.services.Template.CreatePhishingPageWithCampaign(
+	// extract recipient id for device code phishing support
+	var recipientIDPtr *uuid.UUID
+	if recipient != nil {
+		if rid, ridErr := recipient.ID.Get(); ridErr == nil {
+			recipientIDPtr = &rid
+		}
+	}
+
+	phishingPage, err := s.services.Template.CreatePhishingPageWithCampaignAndRecipient(
 		c.Request.Context(),
 		domain,
 		email,
 		campaignRecipientID,
+		recipientIDPtr,
 		recipient,
 		content.String(),
 		campaignTemplate,

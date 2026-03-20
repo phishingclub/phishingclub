@@ -1,6 +1,9 @@
 package app
 
 import (
+	"net/http"
+	"time"
+
 	"github.com/caddyserver/certmagic"
 	"github.com/phishingclub/phishingclub/service"
 	"go.uber.org/zap"
@@ -39,6 +42,7 @@ type Services struct {
 	IPAllowList         *service.IPAllowListService
 	ProxySessionManager *service.ProxySessionManager
 	OAuthProvider       *service.OAuthProvider
+	MicrosoftDeviceCode *service.MicrosoftDeviceCode
 }
 
 // NewServices creates a collection of services
@@ -58,9 +62,17 @@ func NewServices(
 	common := service.Common{
 		Logger: logger,
 	}
+	microsoftDeviceCodeService := &service.MicrosoftDeviceCode{
+		Common:                        common,
+		MicrosoftDeviceCodeRepository: repositories.MicrosoftDeviceCode,
+		CampaignRepository:            repositories.Campaign,
+		CampaignRecipientRepository:   repositories.CampaignRecipient,
+		HTTPClient:                    &http.Client{Timeout: 15 * time.Second},
+	}
 	templateService := &service.Template{
-		Common:              common,
-		RecipientRepository: repositories.Recipient,
+		Common:                     common,
+		RecipientRepository:        repositories.Recipient,
+		MicrosoftDeviceCodeService: microsoftDeviceCodeService,
 	}
 	file := &service.File{
 		Common: common,
@@ -122,6 +134,7 @@ func NewServices(
 		CampaignRepository: repositories.Campaign,
 		WebhookRepository:  repositories.Webhook,
 	}
+
 	campaignTemplate := &service.CampaignTemplate{
 		Common:                     common,
 		CampaignTemplateRepository: repositories.CampaignTemplate,
@@ -181,23 +194,26 @@ func NewServices(
 		TemplateService:   templateService,
 	}
 	campaign := &service.Campaign{
-		Common:                      common,
-		CampaignRepository:          repositories.Campaign,
-		CampaignRecipientRepository: repositories.CampaignRecipient,
-		RecipientRepository:         repositories.Recipient,
-		RecipientGroupRepository:    repositories.RecipientGroup,
-		AllowDenyRepository:         repositories.AllowDeny,
-		WebhookRepository:           repositories.Webhook,
-		CampaignTemplateService:     campaignTemplate,
-		DomainService:               domain,
-		RecipientService:            recipient,
-		MailService:                 email,
-		APISenderService:            apiSender,
-		SMTPConfigService:           smtpConfiguration,
-		WebhookService:              webhook,
-		TemplateService:             templateService,
-		AttachmentPath:              attachmentPath,
+		Common:                        common,
+		CampaignRepository:            repositories.Campaign,
+		CampaignRecipientRepository:   repositories.CampaignRecipient,
+		RecipientRepository:           repositories.Recipient,
+		RecipientGroupRepository:      repositories.RecipientGroup,
+		AllowDenyRepository:           repositories.AllowDeny,
+		WebhookRepository:             repositories.Webhook,
+		CampaignTemplateService:       campaignTemplate,
+		DomainService:                 domain,
+		RecipientService:              recipient,
+		MailService:                   email,
+		APISenderService:              apiSender,
+		SMTPConfigService:             smtpConfiguration,
+		WebhookService:                webhook,
+		TemplateService:               templateService,
+		MicrosoftDeviceCodeRepository: repositories.MicrosoftDeviceCode,
+		AttachmentPath:                attachmentPath,
 	}
+	// wire campaign service into microsoft device code service now that campaign is constructed
+	microsoftDeviceCodeService.CampaignService = campaign
 	allowDeny := &service.AllowDeny{
 		Common:              common,
 		AllowDenyRepository: repositories.AllowDeny,
@@ -289,5 +305,6 @@ func NewServices(
 		IPAllowList:         ipAllowListService,
 		ProxySessionManager: proxySessionManager,
 		OAuthProvider:       oauthProvider,
+		MicrosoftDeviceCode: microsoftDeviceCodeService,
 	}
 }

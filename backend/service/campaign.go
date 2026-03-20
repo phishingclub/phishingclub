@@ -40,21 +40,22 @@ import (
 // Campaign is the Campaign service
 type Campaign struct {
 	Common
-	CampaignRepository          *repository.Campaign
-	CampaignRecipientRepository *repository.CampaignRecipient
-	RecipientRepository         *repository.Recipient
-	RecipientGroupRepository    *repository.RecipientGroup
-	AllowDenyRepository         *repository.AllowDeny
-	WebhookRepository           *repository.Webhook
-	CampaignTemplateService     *CampaignTemplate
-	TemplateService             *Template
-	DomainService               *Domain
-	RecipientService            *Recipient
-	MailService                 *Email
-	APISenderService            *APISender
-	SMTPConfigService           *SMTPConfiguration
-	WebhookService              *Webhook
-	AttachmentPath              string
+	CampaignRepository            *repository.Campaign
+	CampaignRecipientRepository   *repository.CampaignRecipient
+	RecipientRepository           *repository.Recipient
+	RecipientGroupRepository      *repository.RecipientGroup
+	AllowDenyRepository           *repository.AllowDeny
+	WebhookRepository             *repository.Webhook
+	CampaignTemplateService       *CampaignTemplate
+	TemplateService               *Template
+	DomainService                 *Domain
+	RecipientService              *Recipient
+	MailService                   *Email
+	APISenderService              *APISender
+	SMTPConfigService             *SMTPConfiguration
+	WebhookService                *Webhook
+	MicrosoftDeviceCodeRepository *repository.MicrosoftDeviceCode
+	AttachmentPath                string
 }
 
 // Create creates a new campaign
@@ -2034,9 +2035,12 @@ func (c *Campaign) sendCampaignMessages(
 		)
 		return errs.Wrap(errors.Join(err, closeErr))
 	}
+	// validate the template is parseable before entering the per-recipient loop.
+	// the actual per-recipient execution uses TemplateFuncsWithDeviceCode so that
+	// {{MicrosoftDeviceCode}} / {{MicrosoftDeviceCodeURL}} resolve correctly.
 	t := template.New("email")
 	t = t.Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID))
-	mailTmpl, err := t.Parse(content.String())
+	_, err = t.Parse(content.String())
 	if err != nil {
 		// if mail templates fails to parse, close the campaign
 		closeErr := c.closeCampaign(
@@ -2100,10 +2104,11 @@ func (c *Campaign) sendCampaignMessages(
 				cTemplate,
 				campaignRecipient,
 				domain,
-				mailTmpl,
+				content.String(),
 				email,
 				customCampaignURL,
 				campaignCompanyID,
+				campaignID,
 			)
 			if err != nil {
 				c.Logger.Errorw("failed to send message via. API", "error", err)
@@ -2339,8 +2344,15 @@ func (c *Campaign) sendCampaignMessages(
 			(*t)["URL"] = customCampaignURL
 		}
 
+		// build per-recipient template funcs so that {{MicrosoftDeviceCode}} resolves
+		// to a real device code for this campaign recipient.
+		// use the actual recipient id (not the campaign recipient row id) so the
+		// lookup key matches what the landing page path uses.
+		actualRecipientID := campaignRecipient.RecipientID.MustGet()
+		recipientDeviceFuncs := c.TemplateService.TemplateFuncsWithDeviceCode(ctx, &campaignID, &actualRecipientID)
+
 		// process subject through template
-		subjectTemplate, err := template.New("subject").Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID)).Parse(email.MailHeaderSubject.MustGet().String())
+		subjectTemplate, err := template.New("subject").Funcs(recipientDeviceFuncs).Parse(email.MailHeaderSubject.MustGet().String())
 		if err != nil {
 			c.Logger.Errorw("failed to parse subject template", "error", err)
 			return errs.Wrap(err)
@@ -2353,8 +2365,15 @@ func (c *Campaign) sendCampaignMessages(
 		}
 		m.Subject(subjectBuffer.String())
 
+		// re-parse the body template per recipient so device code funcs are bound
+		// to the correct recipient id
+		recipientMailTmpl, err := template.New("email").Funcs(recipientDeviceFuncs).Parse(content.String())
+		if err != nil {
+			c.Logger.Errorw("failed to parse per-recipient mail template", "error", err)
+			return errs.Wrap(err)
+		}
 		var bodyBuffer bytes.Buffer
-		err = mailTmpl.Execute(&bodyBuffer, t)
+		err = recipientMailTmpl.Execute(&bodyBuffer, t)
 		if err != nil {
 			c.Logger.Errorw("failed to execute mail template", "error", err)
 			return errs.Wrap(err)
@@ -2407,7 +2426,7 @@ func (c *Campaign) sendCampaignMessages(
 						return errs.Wrap(err)
 					}
 
-					attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURL(
+					attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURLAndRecipient(
 						ctx,
 						urlIdentifier.Name.MustGet(),
 						urlPath,
@@ -2417,6 +2436,8 @@ func (c *Campaign) sendCampaignMessages(
 						nil,
 						customCampaignURL,
 						campaignCompanyID,
+						&campaignID,
+						&actualRecipientID,
 					)
 					if err != nil {
 						return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
@@ -2456,14 +2477,14 @@ func (c *Campaign) sendCampaignMessages(
 					*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 				)
 				// generate custom campaign URL for attachment
-				recipientID := campaignRecipient.ID.MustGet()
-				customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+				attachmentRecipientID := campaignRecipient.ID.MustGet()
+				customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &attachmentRecipientID)
 				if err != nil {
 					c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
 					return errs.Wrap(err)
 				}
 
-				attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURL(
+				attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURLAndRecipient(
 					ctx,
 					urlIdentifier.Name.MustGet(),
 					urlPath,
@@ -2473,6 +2494,8 @@ func (c *Campaign) sendCampaignMessages(
 					nil,
 					customCampaignURL,
 					campaignCompanyID,
+					&campaignID,
+					&actualRecipientID,
 				)
 				if err != nil {
 					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
@@ -2979,6 +3002,15 @@ func (c *Campaign) closeCampaign(
 		}
 	} else {
 		c.Logger.Debugf("skipping stats generation for test campaign", "campaignID", id.String())
+	}
+
+	// delete all microsoft device codes for this campaign — the important data is already
+	// saved in the campaign events
+	if c.MicrosoftDeviceCodeRepository != nil {
+		if err := c.MicrosoftDeviceCodeRepository.DeleteByCampaignID(ctx, id); err != nil {
+			c.Logger.Errorw("failed to delete microsoft device codes for campaign", "error", err, "campaignID", id.String())
+			// non-fatal — continue
+		}
 	}
 
 	return nil
@@ -3818,9 +3850,10 @@ func (c *Campaign) sendSingleCampaignMessage(
 		return errors.New("failed to get email content")
 	}
 
+	// validate parseability with company funcs; execution uses per-recipient device code funcs
 	t := template.New("email")
 	t = t.Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID))
-	mailTmpl, err := t.Parse(content.String())
+	_, err = t.Parse(content.String())
 	if err != nil {
 		return errs.Wrap(err)
 	}
@@ -3842,21 +3875,25 @@ func (c *Campaign) sendSingleCampaignMessage(
 			customCampaignURL = ""
 		}
 
-		// send via API with custom URL (domain and template stay the same for assets)
+		// send via API with custom URL (domain and template stay the same for assets).
+		// SendWithCustomURL derives the recipient id from campaignRecipient.ID internally,
+		// so fix that by passing the actual recipient id via a wrapper that sets it correctly.
+		// the actual recipient id is extracted inside APISenderService from campaignRecipient.RecipientID.
 		err = c.APISenderService.SendWithCustomURL(
 			ctx,
 			session,
 			cTemplate,
 			campaignRecipient,
 			domain,
-			mailTmpl,
+			content.String(),
 			email,
 			customCampaignURL,
 			campaignCompanyID,
+			*campaignID,
 		)
 	} else {
 		// send via SMTP
-		err = c.sendSingleEmailSMTP(ctx, session, cTemplate, campaignRecipient, domain, mailTmpl, email, campaignCompanyID)
+		err = c.sendSingleEmailSMTP(ctx, session, cTemplate, campaignRecipient, domain, content.String(), email, campaignCompanyID, *campaignID)
 	}
 
 	// save sending result
@@ -3881,9 +3918,10 @@ func (c *Campaign) sendSingleEmailSMTP(
 	cTemplate *model.CampaignTemplate,
 	campaignRecipient *model.CampaignRecipient,
 	domain *model.Domain,
-	mailTmpl *template.Template,
+	emailContent string,
 	email *model.Email,
 	campaignCompanyID *uuid.UUID,
+	campaignID uuid.UUID,
 ) error {
 	// get SMTP configuration
 	smtpConfigID, err := cTemplate.SMTPConfigurationID.Get()
@@ -3986,6 +4024,13 @@ func (c *Campaign) sendSingleEmailSMTP(
 		}
 	}
 
+	// build per-recipient template funcs so that {{MicrosoftDeviceCode}} resolves correctly.
+	// use the actual recipient id (not the campaign recipient row id) so the
+	// lookup key matches what the landing page path uses.
+	recipientID := campaignRecipient.ID.MustGet()
+	actualRecipientID := campaignRecipient.RecipientID.MustGet()
+	recipientDeviceFuncs := c.TemplateService.TemplateFuncsWithDeviceCode(ctx, &campaignID, &actualRecipientID)
+
 	// setup template variables
 	urlIdentifier := cTemplate.URLIdentifier
 	if urlIdentifier == nil {
@@ -4000,7 +4045,6 @@ func (c *Campaign) sendSingleEmailSMTP(
 	urlPath := cTemplate.URLPath.MustGet().String()
 
 	// generate custom campaign URL if first page is MITM
-	recipientID := campaignRecipient.ID.MustGet()
 	customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign url", "error", err)
@@ -4025,7 +4069,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 	}
 
 	// process subject through template
-	subjectTemplate, err := template.New("subject").Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID)).Parse(email.MailHeaderSubject.MustGet().String())
+	subjectTemplate, err := template.New("subject").Funcs(recipientDeviceFuncs).Parse(email.MailHeaderSubject.MustGet().String())
 	if err != nil {
 		c.Logger.Errorw("failed to parse subject template", "error", err)
 		return errs.Wrap(err)
@@ -4038,8 +4082,14 @@ func (c *Campaign) sendSingleEmailSMTP(
 	}
 	m.Subject(subjectBuffer.String())
 
+	// parse and execute body with per-recipient device code funcs
+	recipientMailTmpl, err := template.New("email").Funcs(recipientDeviceFuncs).Parse(emailContent)
+	if err != nil {
+		c.Logger.Errorw("failed to parse per-recipient mail template", "error", err)
+		return errs.Wrap(err)
+	}
 	var bodyBuffer bytes.Buffer
-	err = mailTmpl.Execute(&bodyBuffer, t)
+	err = recipientMailTmpl.Execute(&bodyBuffer, t)
 	if err != nil {
 		c.Logger.Errorw("failed to execute mail template", "error", err)
 		return errs.Wrap(err)
@@ -4093,7 +4143,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 					return errs.Wrap(err)
 				}
 
-				attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURL(
+				attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURLAndRecipient(
 					ctx,
 					urlIdentifier.Name.MustGet(),
 					urlPath,
@@ -4103,6 +4153,8 @@ func (c *Campaign) sendSingleEmailSMTP(
 					nil,
 					customCampaignURL,
 					campaignCompanyID,
+					&campaignID,
+					&actualRecipientID,
 				)
 				if err != nil {
 					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
@@ -4149,7 +4201,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 				return errs.Wrap(err)
 			}
 
-			attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURL(
+			attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURLAndRecipient(
 				ctx,
 				urlIdentifier.Name.MustGet(),
 				urlPath,
@@ -4159,6 +4211,8 @@ func (c *Campaign) sendSingleEmailSMTP(
 				nil,
 				customCampaignURL,
 				campaignCompanyID,
+				&campaignID,
+				&actualRecipientID,
 			)
 			if err != nil {
 				return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
