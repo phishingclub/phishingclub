@@ -184,14 +184,15 @@ func NewServices(
 	}
 	ipAllowListService := service.NewIPAllowListService(logger, repositories.Proxy)
 	email := &service.Email{
-		Common:            common,
-		AttachmentPath:    attachmentPath,
-		AttachmentService: attachment,
-		DomainService:     domain,
-		EmailRepository:   repositories.Email,
-		SMTPService:       smtpConfiguration,
-		RecipientService:  recipient,
-		TemplateService:   templateService,
+		Common:                  common,
+		AttachmentPath:          attachmentPath,
+		AttachmentService:       attachment,
+		DomainService:           domain,
+		EmailRepository:         repositories.Email,
+		SMTPService:             smtpConfiguration,
+		RecipientService:        recipient,
+		TemplateService:         templateService,
+		CampaignTemplateService: campaignTemplate,
 	}
 	campaign := &service.Campaign{
 		Common:                        common,

@@ -28,13 +28,14 @@ import (
 // Email is a Email service
 type Email struct {
 	Common
-	EmailRepository   *repository.Email
-	SMTPService       *SMTPConfiguration
-	DomainService     *Domain
-	RecipientService  *Recipient
-	TemplateService   *Template
-	AttachmentService *Attachment
-	AttachmentPath    string
+	EmailRepository         *repository.Email
+	SMTPService             *SMTPConfiguration
+	DomainService           *Domain
+	RecipientService        *Recipient
+	TemplateService         *Template
+	AttachmentService       *Attachment
+	CampaignTemplateService *CampaignTemplate
+	AttachmentPath          string
 }
 
 // AttachmentWithInline represents an attachment with inline flag
@@ -946,6 +947,17 @@ func (m *Email) DeleteByID(
 	if !isAuthorized {
 		m.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
+	}
+	// remove the email from any campaign templates that reference it and close
+	// any active campaigns that use those templates
+	err = m.CampaignTemplateService.RemoveEmailByEmailID(
+		ctx,
+		session,
+		id,
+	)
+	if err != nil {
+		m.Logger.Errorw("failed to remove email relation from campaign templates", "error", err)
+		return errs.Wrap(err)
 	}
 	// delete email by id
 	err = m.EmailRepository.DeleteByID(

@@ -657,6 +657,70 @@ func (r *CampaignTemplate) RemoveSmtpIDFromAll(
 	return nil
 }
 
+// GetByEmailID gets all campaign templates by email ID
+func (r *CampaignTemplate) GetByEmailID(
+	ctx context.Context,
+	emailID *uuid.UUID,
+	options *CampaignTemplateOption,
+) ([]*model.CampaignTemplate, error) {
+	db := r.DB
+	if options.Columns != nil && len(options.Columns) > 0 {
+		db = db.Select(strings.Join(options.Columns, ","))
+	}
+	db = r.load(options, db)
+	db, err := useQuery(db, database.CAMPAIGN_TEMPLATE_TABLE, options.QueryArgs, allowdCampaignTemplatesColumns...)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	db = db.Where(
+		fmt.Sprintf(
+			"%s = ?",
+			TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "email_id"),
+		),
+		emailID.String(),
+	)
+	var tmpl []database.CampaignTemplate
+	res := db.Find(&tmpl)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	templates := []*model.CampaignTemplate{}
+	for _, t := range tmpl {
+		tmpl, err := ToCampaignTemplate(&t)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		templates = append(templates, tmpl)
+	}
+	return templates, nil
+}
+
+// RemoveEmailIDFromAll removes the email ID from all campaign templates that reference it
+// and marks them as not usable
+func (r *CampaignTemplate) RemoveEmailIDFromAll(
+	ctx context.Context,
+	emailID *uuid.UUID,
+) error {
+	row := map[string]any{}
+	AddUpdatedAt(row)
+	row["email_id"] = nil
+	row["is_usable"] = false
+	res := r.DB.
+		Model(&database.CampaignTemplate{}).
+		Where(
+			fmt.Sprintf(
+				"%s = ?",
+				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "email_id"),
+			),
+			emailID.String(),
+		).
+		Updates(row)
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
 // RemovePageIDFromAll removes the page ID from any matching columns
 // landing_page_id, before_landing_page_id and after_landing_page_id
 func (r *CampaignTemplate) RemovePageIDFromAll(

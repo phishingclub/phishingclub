@@ -412,6 +412,73 @@ func (c *CampaignTemplate) RemoveSmtpBySmtpID(
 	return nil
 }
 
+// RemoveEmailByEmailID removes the email ID from all campaign templates that reference it,
+// marks them as not usable, and closes any active campaigns that use those templates.
+func (c *CampaignTemplate) RemoveEmailByEmailID(
+	ctx context.Context,
+	session *model.Session,
+	emailID *uuid.UUID,
+) error {
+	ae := NewAuditEvent("CampaignTemplate.RemoveEmailByEmailID", session)
+	ae.Details["emailId"] = emailID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// find all campaign templates that reference this email
+	templatesAffected, err := c.CampaignTemplateRepository.GetByEmailID(
+		ctx,
+		emailID,
+		&repository.CampaignTemplateOption{},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get affected campaign templates", "error", err)
+		return err
+	}
+	templateIDs := []*uuid.UUID{}
+	for _, t := range templatesAffected {
+		id := t.ID.MustGet()
+		templateIDs = append(templateIDs, &id)
+	}
+	// close any active campaigns that use the affected templates
+	campaignsAffected, err := c.CampaignRepository.GetByTemplateIDs(ctx, templateIDs)
+	if err != nil {
+		c.Logger.Errorw("failed to get affected campaigns", "error", err)
+		return err
+	}
+	for _, campaign := range campaignsAffected {
+		if !campaign.IsActive() {
+			continue
+		}
+		err := campaign.Close()
+		if err != nil {
+			c.Logger.Errorw("failed to close campaign", "error", err)
+		}
+		campaignID := campaign.ID.MustGet()
+		err = c.CampaignRepository.UpdateByID(
+			ctx,
+			&campaignID,
+			campaign,
+		)
+		if err != nil {
+			c.Logger.Errorw("failed to update closed campaign", "error", err)
+		}
+	}
+	// remove the email id from all affected templates
+	err = c.CampaignTemplateRepository.RemoveEmailIDFromAll(ctx, emailID)
+	if err != nil {
+		c.Logger.Errorw("failed to remove email ID from all campaign templates", "error", err)
+		return err
+	}
+	return nil
+}
+
 // RemovePageByPageID removes the page ID from a template
 // this makes the template unusable until a domain has been added.
 func (c *CampaignTemplate) RemovePagesByPageID(
