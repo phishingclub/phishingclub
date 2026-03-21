@@ -84,7 +84,7 @@
 	const deviceCodeTemplates = [
 		{ label: 'User Code', text: '{{MicrosoftDeviceCode}}' },
 		{ label: 'Verification URL', text: '{{MicrosoftDeviceCodeURL}}' },
-		{ label: 'Captured', text: '{{.DeviceCodeCaptured}}' }
+		{ label: 'Captured', text: '{{DeviceCodeCaptured}}' }
 	];
 
 	$: computedTemplates = (() => {
@@ -457,7 +457,7 @@
 					.replaceAll('{{.URL}}', _url)
 					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
 					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin')
-					.replaceAll('{{.DeviceCodeCaptured}}', 'false');
+					.replaceAll('{{DeviceCodeCaptured}}', 'false');
 			case 'email':
 				return text
 					.replaceAll('{{.FirstName}}', 'Alice')
@@ -484,7 +484,7 @@
 					.replaceAll('{{.URL}}', _url)
 					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
 					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin')
-					.replaceAll('{{.DeviceCodeCaptured}}', 'false');
+					.replaceAll('{{DeviceCodeCaptured}}', 'false');
 		}
 	};
 

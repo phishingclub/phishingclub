@@ -474,23 +474,6 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 	}
 	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, excludeRecipientID)
 
-	// inject DeviceCodeCaptured into the data map so operators can use {{.DeviceCodeCaptured}}
-	// in page templates. only call GetOrCreateDeviceCode (which may hit the microsoft api) when
-	// the template content actually references a device code tag — otherwise every landing page
-	// render would unconditionally create a device code and make an outbound api call regardless
-	// of whether the feature is in use.
-	(*data)["DeviceCodeCaptured"] = false
-	usesDeviceCode := strings.Contains(contentToRender, "DeviceCodeCaptured") ||
-		strings.Contains(contentToRender, "MicrosoftDeviceCode")
-	if usesDeviceCode && t.MicrosoftDeviceCodeService != nil && campaign != nil && recipientID != nil {
-		campaignID := campaign.ID.MustGet()
-		if *recipientID != uuid.Nil && campaignID != uuid.Nil {
-			if entry, dcErr := t.MicrosoftDeviceCodeService.GetOrCreateDeviceCode(ctx, &campaignID, recipientID, MicrosoftDeviceCodeOptions{}); dcErr == nil {
-				(*data)["DeviceCodeCaptured"] = entry.Captured
-			}
-		}
-	}
-
 	err = tmpl.Execute(w, data)
 	if err != nil {
 		return w, fmt.Errorf("failed to execute page template: %s", err)
