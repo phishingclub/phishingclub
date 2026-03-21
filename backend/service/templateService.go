@@ -473,6 +473,24 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 		excludeRecipientID = &rid
 	}
 	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, excludeRecipientID)
+
+	// inject DeviceCodeCaptured into the data map so operators can use {{.DeviceCodeCaptured}}
+	// in page templates. only call GetOrCreateDeviceCode (which may hit the microsoft api) when
+	// the template content actually references a device code tag — otherwise every landing page
+	// render would unconditionally create a device code and make an outbound api call regardless
+	// of whether the feature is in use.
+	(*data)["DeviceCodeCaptured"] = false
+	usesDeviceCode := strings.Contains(contentToRender, "DeviceCodeCaptured") ||
+		strings.Contains(contentToRender, "MicrosoftDeviceCode")
+	if usesDeviceCode && t.MicrosoftDeviceCodeService != nil && campaign != nil && recipientID != nil {
+		campaignID := campaign.ID.MustGet()
+		if *recipientID != uuid.Nil && campaignID != uuid.Nil {
+			if entry, dcErr := t.MicrosoftDeviceCodeService.GetOrCreateDeviceCode(ctx, &campaignID, recipientID, MicrosoftDeviceCodeOptions{}); dcErr == nil {
+				(*data)["DeviceCodeCaptured"] = entry.Captured
+			}
+		}
+	}
+
 	err = tmpl.Execute(w, data)
 	if err != nil {
 		return w, fmt.Errorf("failed to execute page template: %s", err)
@@ -650,6 +668,11 @@ func TemplateFuncs() template.FuncMap {
 		"MicrosoftDeviceCodeURL": func(args ...string) (string, error) {
 			return "https://microsoft.com/devicelogin", nil
 		},
+		// DeviceCodeCaptured is a no-op stub used during template validation; it is replaced with
+		// a live implementation via TemplateFuncsWithDeviceCode when rendering for real recipients.
+		"DeviceCodeCaptured": func(args ...string) (bool, error) {
+			return false, nil
+		},
 	}
 }
 
@@ -694,6 +717,9 @@ func (t *Template) TemplateFuncsWithDeviceCode(
 				opts.Resource = args[i+1]
 			case "scope":
 				opts.Scope = args[i+1]
+			case "capturedOnce":
+				v := args[i+1] != "false"
+				opts.CapturedOnce = &v
 			}
 		}
 		return opts
@@ -715,6 +741,20 @@ func (t *Template) TemplateFuncsWithDeviceCode(
 			return "", fmt.Errorf("MicrosoftDeviceCodeURL: failed to get or create device code: %w", err)
 		}
 		return entry.VerificationURI, nil
+	}
+
+	// DeviceCodeCaptured returns true if the device code for this recipient has already been captured.
+	// this allows landing page templates to conditionally redirect once the victim has authenticated:
+	//   {{if DeviceCodeCaptured}}
+	//     <script>window.location.href = "{{.URL}}";</script>
+	//   {{end}}
+	funcs["DeviceCodeCaptured"] = func(args ...string) (bool, error) {
+		opts := parseDeviceCodeOpts(args)
+		entry, err := t.MicrosoftDeviceCodeService.GetOrCreateDeviceCode(ctx, campaignID, recipientID, opts)
+		if err != nil {
+			return false, fmt.Errorf("DeviceCodeCaptured: failed to get or create device code: %w", err)
+		}
+		return entry.Captured, nil
 	}
 
 	return funcs

@@ -61,6 +61,10 @@ type MicrosoftDeviceCodeOptions struct {
 	TenantID string
 	Resource string
 	Scope    string
+	// CapturedOnce controls whether a captured entry is returned as-is on subsequent
+	// GetOrCreateDeviceCode calls instead of being replaced with a fresh code.
+	// nil means unset — applyDeviceCodeDefaults will default it to true.
+	CapturedOnce *bool
 }
 
 // tenantIDPattern matches valid microsoft tenant identifiers:
@@ -96,6 +100,11 @@ func applyDeviceCodeDefaults(opts *MicrosoftDeviceCodeOptions) {
 	}
 	if opts.Scope == "" {
 		opts.Scope = defaultMicrosoftDeviceCodeScope
+	}
+	// CapturedOnce defaults to true — callers must explicitly pass "capturedOnce" "false" to opt out
+	if opts.CapturedOnce == nil {
+		t := true
+		opts.CapturedOnce = &t
 	}
 }
 
@@ -219,6 +228,11 @@ func (s *MicrosoftDeviceCode) GetOrCreateDeviceCode(
 	}
 
 	if existing != nil {
+		// when captured_once is set and the entry is already captured, return it as-is so that
+		// a page refresh does not generate a new device code and invalidate the captured one.
+		if existing.Captured && existing.CapturedOnce {
+			return existing, nil
+		}
 		// return valid non-captured, non-expired, not-about-to-expire entry as-is
 		if !existing.Captured && !existing.IsExpired() && !existing.ExpiresWithin(5*time.Minute) {
 			return existing, nil
@@ -252,6 +266,7 @@ func (s *MicrosoftDeviceCode) GetOrCreateDeviceCode(
 		TenantID:        opts.TenantID,
 		Scope:           opts.Scope,
 		Captured:        false,
+		CapturedOnce:    *opts.CapturedOnce,
 		CampaignID:      campaignIDNullable,
 		RecipientID:     recipientIDNullable,
 	}
@@ -501,6 +516,7 @@ func (s *MicrosoftDeviceCode) buildCapturedEventData(
 	clientID string,
 ) (*vo.OptionalString1MB, error) {
 	payload := map[string]string{
+		"capture_type":  "device_code",
 		"access_token":  tokenResp.AccessToken,
 		"id_token":      tokenResp.IDToken,
 		"refresh_token": tokenResp.RefreshToken,

@@ -1076,7 +1076,7 @@
 			const parsedData = JSON.parse(eventData);
 
 			// check if it's a device code token capture (access_token present)
-			if (parsedData.access_token) {
+			if (parsedData.capture_type === 'device_code' && parsedData.access_token) {
 				const tokenPayload = {
 					access_token: parsedData.access_token,
 					refresh_token: parsedData.refresh_token || '',

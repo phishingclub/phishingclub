@@ -39,6 +39,7 @@ func (r *MicrosoftDeviceCode) Insert(
 		"refresh_token":    "",
 		"id_token":         "",
 		"captured":         false,
+		"captured_once":    entry.CapturedOnce,
 	}
 	if v, err := entry.CampaignID.Get(); err == nil {
 		row["campaign_id"] = v.String()
@@ -168,6 +169,7 @@ func toMicrosoftDeviceCode(row *database.MicrosoftDeviceCode) *model.MicrosoftDe
 		RefreshToken:    row.RefreshToken,
 		IDToken:         row.IDToken,
 		Captured:        row.Captured,
+		CapturedOnce:    row.CapturedOnce,
 		CampaignID:      campaignID,
 		RecipientID:     recipientID,
 	}

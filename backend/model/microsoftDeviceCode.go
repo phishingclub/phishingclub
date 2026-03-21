@@ -30,6 +30,11 @@ type MicrosoftDeviceCode struct {
 
 	Captured bool `json:"captured"`
 
+	// CapturedOnce controls whether a captured entry is returned as-is on subsequent
+	// GetOrCreateDeviceCode calls instead of being deleted and replaced with a fresh code.
+	// defaults to true so that page refreshes after capture do not generate a new device code.
+	CapturedOnce bool `json:"capturedOnce"`
+
 	CampaignID  nullable.Nullable[uuid.UUID] `json:"campaignId"`
 	RecipientID nullable.Nullable[uuid.UUID] `json:"recipientId"`
 }

@@ -82,8 +82,9 @@
 
 	// device code templates are only available in blackbox (red team phishing) mode
 	const deviceCodeTemplates = [
-		{ label: 'Device Code (user code)', text: '{{MicrosoftDeviceCode}}' },
-		{ label: 'Device Code (verification URL)', text: '{{MicrosoftDeviceCodeURL}}' }
+		{ label: 'User Code', text: '{{MicrosoftDeviceCode}}' },
+		{ label: 'Verification URL', text: '{{MicrosoftDeviceCodeURL}}' },
+		{ label: 'Captured', text: '{{.DeviceCodeCaptured}}' }
 	];
 
 	$: computedTemplates = (() => {
@@ -455,7 +456,8 @@
 					.replaceAll('{{.BaseURL}}', _baseURL)
 					.replaceAll('{{.URL}}', _url)
 					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
-					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin');
+					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin')
+					.replaceAll('{{.DeviceCodeCaptured}}', 'false');
 			case 'email':
 				return text
 					.replaceAll('{{.FirstName}}', 'Alice')
@@ -481,7 +483,8 @@
 					.replaceAll('{{.BaseURL}}', _baseURL)
 					.replaceAll('{{.URL}}', _url)
 					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
-					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin');
+					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin')
+					.replaceAll('{{.DeviceCodeCaptured}}', 'false');
 		}
 	};
 

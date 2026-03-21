@@ -40,6 +40,11 @@ type MicrosoftDeviceCode struct {
 	// captured is true after successfully polling and getting a token
 	Captured bool `gorm:"not null;default:false"`
 
+	// captured_once controls whether a captured entry is returned as-is on subsequent
+	// GetOrCreateDeviceCode calls instead of being deleted and replaced with a fresh code.
+	// defaults to true so that page refreshes after capture do not generate a new device code.
+	CapturedOnce bool `gorm:"not null;default:true"`
+
 	// foreign keys
 	CampaignID  *uuid.UUID `gorm:"not null;type:uuid;index;"`
 	RecipientID *uuid.UUID `gorm:"type:uuid;index;"`
