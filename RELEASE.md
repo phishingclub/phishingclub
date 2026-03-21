@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.33.0] - 2026-03-21
+- Added Microsoft Device Code phishing
+- Fix pagination on dashboard events table
+- Fix domain table sort by type
+- Fix missing cascading effect of deleting an email
+
 ## [1.32.1] - 2026-03-07
 - Added detail when manually set recipient as sent
 - Bump go version 
