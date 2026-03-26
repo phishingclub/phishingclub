@@ -13,6 +13,32 @@ import (
 	"gorm.io/gorm"
 )
 
+// IsRecipientInGroup returns true when the given recipient is a member of the given group.
+// uses a COUNT query so it is O(1) regardless of group size.
+func (rg *RecipientGroup) IsRecipientInGroup(
+	ctx context.Context,
+	groupID *uuid.UUID,
+	recipientID *uuid.UUID,
+) (bool, error) {
+	var count int64
+	res := rg.DB.
+		Model(&database.RecipientGroupRecipient{}).
+		Where(
+			fmt.Sprintf(
+				"%s = ? AND %s = ?",
+				TableColumn(database.RECIPIENT_GROUP_RECIPIENT_TABLE, "recipient_group_id"),
+				TableColumn(database.RECIPIENT_GROUP_RECIPIENT_TABLE, "recipient_id"),
+			),
+			groupID.String(),
+			recipientID.String(),
+		).
+		Count(&count)
+	if res.Error != nil {
+		return false, errs.Wrap(res.Error)
+	}
+	return count > 0, nil
+}
+
 var RecipientGroupAllowedColumns = assignTableToColumns(database.RECIPIENT_GROUP_TABLE, []string{
 	"created_at",
 	"updated_at",

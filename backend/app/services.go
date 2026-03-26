@@ -43,6 +43,8 @@ type Services struct {
 	ProxySessionManager *service.ProxySessionManager
 	OAuthProvider       *service.OAuthProvider
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
+	CompanyScimConfig   *service.CompanyScimConfig
+	Scim                *service.Scim
 }
 
 // NewServices creates a collection of services
@@ -274,8 +276,22 @@ func NewServices(
 
 	// inject oauth provider service into api sender
 	apiSender.OAuthProviderService = oauthProvider
+	companyScimConfig := &service.CompanyScimConfig{
+		Common:                      common,
+		CompanyScimConfigRepository: repositories.CompanyScimConfig,
+	}
+	scim := &service.Scim{
+		Common:                      common,
+		CompanyScimConfigRepository: repositories.CompanyScimConfig,
+		CompanyScimConfigService:    companyScimConfig,
+		RecipientRepository:         repositories.Recipient,
+		RecipientGroupRepository:    repositories.RecipientGroup,
+		CampaignRepository:          repositories.Campaign,
+	}
 
 	return &Services{
+		CompanyScimConfig:   companyScimConfig,
+		Scim:                scim,
 		Asset:               asset,
 		Attachment:          attachment,
 		Company:             companyService,

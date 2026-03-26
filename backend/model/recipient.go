@@ -24,6 +24,7 @@ type Recipient struct {
 	City            nullable.Nullable[vo.OptionalString127] `json:"city"`
 	Country         nullable.Nullable[vo.OptionalString127] `json:"country"`
 	Misc            nullable.Nullable[vo.OptionalString127] `json:"misc"`
+	ScimUserName    nullable.Nullable[vo.OptionalString127] `json:"scimUserName"`
 	CompanyID       nullable.Nullable[uuid.UUID]            `json:"companyID"`
 
 	Company *Company                             `json:"-"`
@@ -176,6 +177,12 @@ func (r *Recipient) ToDBMap() map[string]any {
 		m["misc"] = nil
 		if misc, err := r.Misc.Get(); err == nil {
 			m["misc"] = misc.String()
+		}
+	}
+	if r.ScimUserName.IsSpecified() {
+		m["scim_user_name"] = nil
+		if scimUserName, err := r.ScimUserName.Get(); err == nil {
+			m["scim_user_name"] = scimUserName.String()
 		}
 	}
 	if r.CompanyID.IsSpecified() {

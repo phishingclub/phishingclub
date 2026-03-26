@@ -1241,6 +1241,28 @@ export class API {
 		 */
 		delete: async (id) => {
 			return await deleteJSON(this.getPath(`/company/${id}`));
+		},
+
+		scim: {
+			// get the scim config for a company
+			getByCompanyID: async (companyID) => {
+				return await getJSON(this.getPath(`/company/scim/${companyID}`));
+			},
+			// upsert the scim config for a company
+			upsert: async (companyID, { linkedGroupID, enabled }) => {
+				return await postJSON(this.getPath(`/company/scim/${companyID}`), {
+					linkedGroupID: linkedGroupID ?? null,
+					enabled: enabled
+				});
+			},
+			// rotate the scim bearer token for a company
+			rotateToken: async (companyID) => {
+				return await postJSON(this.getPath(`/company/scim/${companyID}/token`), {});
+			},
+			// delete the scim config for a company
+			delete: async (companyID) => {
+				return await deleteJSON(this.getPath(`/company/scim/${companyID}`));
+			}
 		}
 	};
 

@@ -21,13 +21,14 @@ type Recipient struct {
 	Phone           *string `gorm:";index"`
 	ExtraIdentifier *string `gorm:";index"`
 
-	FirstName  string `gorm:";"`
-	LastName   string `gorm:";"`
-	Position   string `gorm:";"`
-	Department string `gorm:";"`
-	City       string `gorm:";"`
-	Country    string `gorm:";"`
-	Misc       string `gorm:";"`
+	FirstName    string `gorm:";"`
+	LastName     string `gorm:";"`
+	Position     string `gorm:";"`
+	Department   string `gorm:";"`
+	City         string `gorm:";"`
+	Country      string `gorm:";"`
+	Misc         string `gorm:";"`
+	ScimUserName string `gorm:";"`
 
 	// can belong to
 	CompanyID *uuid.UUID `gorm:"type:uuid;index;"`

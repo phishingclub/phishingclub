@@ -321,7 +321,7 @@ func main() {
 			"trusted_ip_header", conf.IPSecurity.TrustedIPHeader,
 		)
 	}
-	adminRouter.Use(middlewares.IPLimiter)
+
 	adminServer := app.NewAdministrationServer(
 		adminRouter,
 		controllers,

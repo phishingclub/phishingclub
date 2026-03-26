@@ -839,6 +839,9 @@ func ToRecipient(row *database.Recipient) (*model.Recipient, error) {
 	misc := nullable.NewNullableWithValue(
 		*vo.NewOptionalString127Must(row.Misc),
 	)
+	scimUserName := nullable.NewNullableWithValue(
+		*vo.NewOptionalString127Must(row.ScimUserName),
+	)
 	var company *model.Company
 	if row.Company != nil {
 		company = ToCompany(row.Company)
@@ -869,6 +872,7 @@ func ToRecipient(row *database.Recipient) (*model.Recipient, error) {
 		City:            city,
 		Country:         country,
 		Misc:            misc,
+		ScimUserName:    scimUserName,
 		Company:         company,
 		Groups:          nullable.NewNullableWithValue(groups),
 	}, nil

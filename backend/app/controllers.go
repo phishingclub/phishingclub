@@ -40,6 +40,8 @@ type Controllers struct {
 	Backup            *controller.Backup
 	IPAllowList       *controller.IPAllowList
 	OAuthProvider     *controller.OAuthProvider
+	CompanyScimConfig *controller.CompanyScimConfig
+	Scim              *controller.Scim
 }
 
 // NewControllers creates a collection of controllers
@@ -196,6 +198,14 @@ func NewControllers(
 		OAuthProviderService: services.OAuthProvider,
 		Config:               conf,
 	}
+	companyScimConfig := &controller.CompanyScimConfig{
+		Common:                   common,
+		CompanyScimConfigService: services.CompanyScimConfig,
+	}
+	scim := &controller.Scim{
+		Common:      common,
+		ScimService: services.Scim,
+	}
 
 	return &Controllers{
 		Asset:             asset,
@@ -229,5 +239,7 @@ func NewControllers(
 		Backup:            backup,
 		IPAllowList:       ipAllowList,
 		OAuthProvider:     oauthProvider,
+		CompanyScimConfig: companyScimConfig,
+		Scim:              scim,
 	}
 }

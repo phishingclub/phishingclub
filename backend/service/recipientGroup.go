@@ -243,6 +243,7 @@ func (r *RecipientGroup) GetAll(
 		r.AuditLogNotAuthorized(ae)
 		return result, errs.ErrAuthorizationFailed
 	}
+
 	// get recipient groups
 	result, err = r.RecipientGroupRepository.GetAll(
 		ctx,

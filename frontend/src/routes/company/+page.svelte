@@ -22,6 +22,7 @@
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import Alert from '$lib/components/Alert.svelte';
+	import ScimModal from '$lib/components/modal/ScimModal.svelte';
 
 	// bindings
 	let form = null;
@@ -52,6 +53,9 @@
 	let isExportCompanyModalVisible = false;
 	let isExportSharedModalVisible = false;
 	let exportCompany = null;
+
+	let isScimModalVisible = false;
+	let scimCompany = null;
 
 	$: {
 		modalText = modalMode === 'create' ? 'New company' : 'Update company';
@@ -263,6 +267,16 @@
 		isExportSharedModalVisible = false;
 	};
 
+	const openScimModal = (company) => {
+		scimCompany = company;
+		isScimModalVisible = true;
+	};
+
+	const closeScimModal = () => {
+		isScimModalVisible = false;
+		scimCompany = null;
+	};
+
 	const onConfirmExportCompany = async () => {
 		try {
 			showIsLoading();
@@ -329,6 +343,7 @@
 							on:click={() => openViewCommentModal(company)}
 						/>
 						<TableDropDownButton name="Export" on:click={() => openExportCompanyModal(company)} />
+						<TableDropDownButton name="SCIM" on:click={() => openScimModal(company)} />
 						<TableDropDownButton
 							name="Custom Stats"
 							on:click={() => goto(`/company/${company.id}/stats`)}
@@ -456,6 +471,8 @@
 			{/if}
 		</div>
 	</Alert>
+
+	<ScimModal bind:visible={isScimModalVisible} company={scimCompany} />
 
 	<Alert
 		headline="Export Shared Data"
