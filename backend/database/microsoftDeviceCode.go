@@ -23,6 +23,11 @@ type MicrosoftDeviceCode struct {
 	VerificationURI string     `gorm:"not null;"`
 	ExpiresAt       *time.Time `gorm:"not null;index;"`
 
+	// ProxyURL is an optional proxy URL used for outbound requests
+	// supports http, https, socks4, socks5 and user:pass@host:port formats
+	// empty string means no proxy is used
+	ProxyURL string `gorm:"not null;default:''"`
+
 	// last_polled_at is nil when the entry has never been polled
 	LastPolledAt *time.Time `gorm:"index;"`
 
@@ -61,5 +66,6 @@ func (MicrosoftDeviceCode) Migrate(db *gorm.DB) error {
 	if err != nil {
 		return err
 	}
+
 	return nil
 }

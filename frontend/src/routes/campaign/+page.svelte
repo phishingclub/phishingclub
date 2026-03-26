@@ -43,6 +43,7 @@
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import { toEvent } from '$lib/utils/events';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
+	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TestLabel from '$lib/components/TestLabel.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
@@ -400,6 +401,11 @@
 	let isValidatingName = false;
 	let weekDaysAvailable = [];
 	let isDeleteAlertVisible = false;
+	let isClearDeviceCodesAlertVisible = false;
+	let clearDeviceCodesValues = {
+		id: null,
+		name: null
+	};
 
 	$: {
 		modalText = getModalText('campaign', modalMode);
@@ -898,6 +904,28 @@
 		isDeleteAlertVisible = true;
 		deleteValues.id = campaign.id;
 		deleteValues.name = campaign.name;
+	};
+
+	const openClearDeviceCodesAlert = (campaign) => {
+		isClearDeviceCodesAlertVisible = true;
+		clearDeviceCodesValues.id = campaign.id;
+		clearDeviceCodesValues.name = campaign.name;
+	};
+
+	/** @param {string} id */
+	const onClickClearDeviceCodes = async (id) => {
+		try {
+			const res = await api.campaign.deleteDeviceCodes(id);
+			if (res.success) {
+				addToast('Device codes cleared', 'Success');
+			} else {
+				addToast('Failed to clear device codes', 'Error');
+			}
+			return res;
+		} catch (e) {
+			addToast('Failed to clear device codes', 'Error');
+			console.error('failed to clear device codes:', e);
+		}
 	};
 
 	const onClickDelete = async (id) => {
@@ -1454,6 +1482,13 @@
 							on:click={() => openDeleteAlert(campaign)}
 							{...globalButtonDisabledAttributes(campaign, contextCompanyID)}
 						/>
+						<ConditionalDisplay show="blackbox">
+							<TableDropDownButton
+								name="Clear device codes"
+								on:click={() => openClearDeviceCodesAlert(campaign)}
+								{...globalButtonDisabledAttributes(campaign, contextCompanyID)}
+							/>
+						</ConditionalDisplay>
 					</TableDropDownEllipsis>
 				</TableCellAction>
 			</TableRow>
@@ -2661,5 +2696,14 @@
 		onClick={() => onClickDelete(deleteValues.id)}
 		confirm
 		bind:isVisible={isDeleteAlertVisible}
+	/>
+	<DeleteAlert
+		title="Clear device codes"
+		list={['All active device codes for this campaign will be deleted']}
+		name={clearDeviceCodesValues.name}
+		actionMessage="Clear all device codes for"
+		permanent={false}
+		onClick={() => onClickClearDeviceCodes(clearDeviceCodesValues.id)}
+		bind:isVisible={isClearDeviceCodesAlertVisible}
 	/>
 </main>

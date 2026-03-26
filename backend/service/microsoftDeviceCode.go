@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
@@ -65,6 +66,10 @@ type MicrosoftDeviceCodeOptions struct {
 	// GetOrCreateDeviceCode calls instead of being replaced with a fresh code.
 	// nil means unset — applyDeviceCodeDefaults will default it to true.
 	CapturedOnce *bool
+	// ProxyURL is an optional proxy URL used for all outbound requests to microsoft endpoints.
+	// supports http, https, socks4, socks5 and user:pass@host:port formats.
+	// empty string means no proxy is used.
+	ProxyURL string
 }
 
 // tenantIDPattern matches valid microsoft tenant identifiers:
@@ -133,15 +138,101 @@ type microsoftTokenErrorResponse struct {
 	ErrorDescription string `json:"error_description"`
 }
 
+// httpClientWithProxy returns an *http.Client configured with the given proxy URL string.
+// if proxyURL is empty, s.HTTPClient is returned unchanged.
+// a new transport is built each time so there is no risk of stale connections if a proxy is rotated.
+func (s *MicrosoftDeviceCode) httpClientWithProxy(proxyURL string) (*http.Client, error) {
+	if proxyURL == "" {
+		return s.HTTPClient, nil
+	}
+	parsed, err := parseDeviceCodeProxyURL(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid proxy URL %q: %w", redactProxyURL(proxyURL), err)
+	}
+	return &http.Client{
+		Timeout: s.HTTPClient.Timeout,
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(parsed),
+		},
+	}, nil
+}
+
+// parseDeviceCodeProxyURL parses and normalises a proxy URL string.
+// if the string has no scheme, it prepends "http://" to support bare host:port,
+// user:pass@host:port, and socks4/socks5 strings that already carry a scheme.
+func parseDeviceCodeProxyURL(proxyStr string) (*url.URL, error) {
+	if !strings.Contains(proxyStr, "://") {
+		proxyStr = "http://" + proxyStr
+	}
+	return url.Parse(proxyStr)
+}
+
+// redactProxyURL returns a copy of proxyURL with any userinfo (username and/or password)
+// removed so the result is safe to include in logs and event data.
+// if parsing fails the host portion is returned as-is without credentials.
+// e.g. "socks5://user:pass@10.0.0.1:1080" → "socks5://10.0.0.1:1080"
+func redactProxyURL(proxyURL string) string {
+	if proxyURL == "" {
+		return ""
+	}
+	parsed, err := parseDeviceCodeProxyURL(proxyURL)
+	if err != nil {
+		// best-effort: strip everything before the last '@' if present
+		if idx := strings.LastIndex(proxyURL, "@"); idx != -1 && utf8.ValidString(proxyURL[idx+1:]) {
+			return proxyURL[idx+1:]
+		}
+		return "(unparseable proxy url)"
+	}
+	parsed.User = nil
+	return parsed.String()
+}
+
+// isProxyConnectionError returns true when err looks like a transport-level connection failure
+// (dial refused, connection reset, i/o timeout, etc.) rather than a well-formed HTTP/API error
+// from the upstream server. it is used to distinguish "cannot reach proxy" from "microsoft
+// returned an error response".
+func isProxyConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	keywords := []string{
+		"connection refused",
+		"connection reset",
+		"connection timed out",
+		"no such host",
+		"network is unreachable",
+		"dial tcp",
+		"dial udp",
+		"i/o timeout",
+		"eof",
+		"proxy",
+		"socks",
+	}
+	for _, kw := range keywords {
+		if strings.Contains(msg, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // requestDeviceCode calls microsoft's device code endpoint and returns the parsed response
 func (s *MicrosoftDeviceCode) requestDeviceCode(opts *MicrosoftDeviceCodeOptions) (*microsoftDeviceCodeResponse, error) {
+	client, err := s.httpClientWithProxy(opts.ProxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("device code request: failed to build http client: %w", err)
+	}
 	endpoint := fmt.Sprintf(microsoftDeviceCodeEndpoint, opts.TenantID)
 	form := url.Values{
 		"client_id": {opts.ClientID},
 		"scope":     {opts.Scope},
 	}
-	resp, err := s.HTTPClient.PostForm(endpoint, form)
+	resp, err := client.PostForm(endpoint, form)
 	if err != nil {
+		if opts.ProxyURL != "" && isProxyConnectionError(err) {
+			return nil, fmt.Errorf("device code request: proxy connection failed (%s): %w", redactProxyURL(opts.ProxyURL), err)
+		}
 		return nil, fmt.Errorf("device code request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -166,44 +257,53 @@ func (s *MicrosoftDeviceCode) requestDeviceCode(opts *MicrosoftDeviceCodeOptions
 // returns (tokenResponse, isPending, error).
 // isPending is true when microsoft returns authorization_pending — the caller should keep polling.
 // any other error means polling should stop for this code.
-func (s *MicrosoftDeviceCode) pollTokenEndpoint(tenantID, clientID, deviceCode string) (*microsoftTokenResponse, bool, error) {
-	endpoint := fmt.Sprintf(microsoftTokenEndpoint, tenantID)
+// proxyConnectionErr is true when the failure is a transport-level dial/connect failure against
+// the configured proxy rather than a response from the microsoft endpoint.
+func (s *MicrosoftDeviceCode) pollTokenEndpoint(entry *model.MicrosoftDeviceCode) (tokenResp *microsoftTokenResponse, isPending bool, proxyConnErr bool, err error) {
+	client, buildErr := s.httpClientWithProxy(entry.ProxyURL)
+	if buildErr != nil {
+		return nil, false, false, fmt.Errorf("poll token: failed to build http client: %w", buildErr)
+	}
+	endpoint := fmt.Sprintf(microsoftTokenEndpoint, entry.TenantID)
 	form := url.Values{
 		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
-		"client_id":   {clientID},
-		"device_code": {deviceCode},
+		"client_id":   {entry.ClientID},
+		"device_code": {entry.DeviceCode},
 	}
-	resp, err := s.HTTPClient.PostForm(endpoint, form)
-	if err != nil {
-		return nil, false, fmt.Errorf("token poll request failed: %w", err)
+	resp, postErr := client.PostForm(endpoint, form)
+	if postErr != nil {
+		if entry.ProxyURL != "" && isProxyConnectionError(postErr) {
+			return nil, false, true, fmt.Errorf("token poll: proxy connection failed (%s): %w", redactProxyURL(entry.ProxyURL), postErr)
+		}
+		return nil, false, false, fmt.Errorf("token poll request failed: %w", postErr)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to read token poll response body: %w", err)
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if readErr != nil {
+		return nil, false, false, fmt.Errorf("failed to read token poll response body: %w", readErr)
 	}
 
 	if resp.StatusCode == http.StatusOK {
-		var tokenResp microsoftTokenResponse
-		if err := json.Unmarshal(body, &tokenResp); err != nil {
-			return nil, false, fmt.Errorf("failed to parse token response: %w", err)
+		var tr microsoftTokenResponse
+		if jsonErr := json.Unmarshal(body, &tr); jsonErr != nil {
+			return nil, false, false, fmt.Errorf("failed to parse token response: %w", jsonErr)
 		}
-		return &tokenResp, false, nil
+		return &tr, false, false, nil
 	}
 
 	// non-200 — check for authorization_pending vs terminal errors
 	var errResp microsoftTokenErrorResponse
-	if err := json.Unmarshal(body, &errResp); err != nil {
-		return nil, false, fmt.Errorf("token endpoint returned status %d and unparseable body: %s", resp.StatusCode, string(body))
+	if jsonErr := json.Unmarshal(body, &errResp); jsonErr != nil {
+		return nil, false, false, fmt.Errorf("token endpoint returned status %d and unparseable body: %s", resp.StatusCode, string(body))
 	}
 
 	if errResp.Error == errAuthorizationPending {
-		return nil, true, nil
+		return nil, true, false, nil
 	}
 
 	// any other error (expired_token, authorization_declined, bad_verification_code, etc.) is terminal
-	return nil, false, fmt.Errorf("token endpoint error: %s — %s", errResp.Error, errResp.ErrorDescription)
+	return nil, false, false, fmt.Errorf("token endpoint error: %s — %s", errResp.Error, errResp.ErrorDescription)
 }
 
 // GetOrCreateDeviceCode returns an existing valid (non-expired, non-captured) device code for the
@@ -247,6 +347,16 @@ func (s *MicrosoftDeviceCode) GetOrCreateDeviceCode(
 	// request a fresh device code from microsoft
 	dcResp, err := s.requestDeviceCode(&opts)
 	if err != nil {
+		if opts.ProxyURL != "" && isProxyConnectionError(err) {
+			// log at error level with redacted proxy — never include raw proxy URL (may contain credentials)
+			safeMsg := fmt.Sprintf("proxy connection failed: %s", redactProxyURL(opts.ProxyURL))
+			s.Logger.Errorw("device code creation: proxy connection error",
+				"error", safeMsg,
+				"proxy", redactProxyURL(opts.ProxyURL),
+			)
+			s.saveDeviceCodeCreatedEvent(ctx, campaignID, recipientID, "", "", safeMsg)
+			return nil, errs.Wrap(fmt.Errorf("%s", safeMsg))
+		}
 		s.Logger.Errorw("failed to request device code from microsoft", "error", err)
 		return nil, errs.Wrap(err)
 	}
@@ -267,6 +377,7 @@ func (s *MicrosoftDeviceCode) GetOrCreateDeviceCode(
 		Scope:           opts.Scope,
 		Captured:        false,
 		CapturedOnce:    *opts.CapturedOnce,
+		ProxyURL:        opts.ProxyURL,
 		CampaignID:      campaignIDNullable,
 		RecipientID:     recipientIDNullable,
 	}
@@ -380,8 +491,25 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 		)
 	}
 
-	tokenResp, isPending, err := s.pollTokenEndpoint(entry.TenantID, entry.ClientID, entry.DeviceCode)
+	tokenResp, isPending, proxyConnErr, err := s.pollTokenEndpoint(entry)
 	if err != nil {
+		if proxyConnErr {
+			// proxy connection failure — log at error level so operators can see it, and save
+			// a campaign info event with a sanitised message (no credentials).
+			safeMsg := fmt.Sprintf("proxy connection failed: %s", redactProxyURL(entry.ProxyURL))
+			s.Logger.Errorw("device code poll: proxy connection error",
+				"error", safeMsg,
+				"proxy", redactProxyURL(entry.ProxyURL),
+				"userCode", entry.UserCode,
+				"deviceCodeID", entryID,
+			)
+			campaignID, cidErr := entry.CampaignID.Get()
+			recipientID, ridErr := entry.RecipientID.Get()
+			if cidErr == nil && ridErr == nil {
+				s.saveDeviceCodeCreatedEvent(ctx, &campaignID, &recipientID, entry.UserCode, entry.VerificationURI, safeMsg)
+			}
+			return nil
+		}
 		// terminal error from microsoft — log at debug level since this is expected for
 		// denied/expired codes and we don't want to spam the error logs
 		s.Logger.Debugw("device code polling returned terminal error",

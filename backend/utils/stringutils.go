@@ -2,10 +2,22 @@ package utils
 
 import (
 	"path"
+	"regexp"
 	"strconv"
 
 	"github.com/phishingclub/phishingclub/errs"
 )
+
+// credentialsPattern matches userinfo (user, or user:pass) inside a URL authority component.
+// it captures scheme://user:pass@host and scheme://user@host forms.
+var credentialsPattern = regexp.MustCompile(`(?i)([a-z][a-z0-9+\-.]*://)([^@/\s]+@)`)
+
+// RedactCredentialsFromString replaces any embedded URL credentials (user:pass@ or user@) found
+// in s with the scheme and host only, so the result is safe to write to logs or error messages.
+// e.g. "socks5://proxyuser:SecretDino123@10.0.0.1:1080" → "socks5://10.0.0.1:1080"
+func RedactCredentialsFromString(s string) string {
+	return credentialsPattern.ReplaceAllString(s, "$1")
+}
 
 // Substring returns a substring of the input text from the start index to the end index.
 // If the start index is less than 0, it is set to 0.

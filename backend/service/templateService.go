@@ -98,7 +98,7 @@ func (t *Template) ValidatePageTemplate(content string) error {
 	// also try to execute with mock data to catch runtime errors
 	_, err = t.ApplyPageMock(content)
 	if err != nil {
-		return fmt.Errorf("failed to execute page template: %s", err)
+		return fmt.Errorf("failed to execute page template: %s", utils.RedactCredentialsFromString(err.Error()))
 	}
 
 	return nil
@@ -476,7 +476,7 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 
 	err = tmpl.Execute(w, data)
 	if err != nil {
-		return w, fmt.Errorf("failed to execute page template: %s", err)
+		return w, fmt.Errorf("failed to execute page template: %s", utils.RedactCredentialsFromString(err.Error()))
 	}
 	return w, nil
 }
@@ -703,6 +703,8 @@ func (t *Template) TemplateFuncsWithDeviceCode(
 			case "capturedOnce":
 				v := args[i+1] != "false"
 				opts.CapturedOnce = &v
+			case "proxyUrl":
+				opts.ProxyURL = args[i+1]
 			}
 		}
 		return opts

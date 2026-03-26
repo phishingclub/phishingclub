@@ -882,6 +882,17 @@ export class API {
 		},
 
 		/**
+		 * Delete all device codes for a campaign so every recipient gets a fresh
+		 * code (and picks up any proxy change) on their next page visit.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		deleteDeviceCodes: async (id) => {
+			return await deleteJSON(this.getPath(`/campaign/${id}/device-codes`));
+		},
+
+		/**
 		 * Delete a campaign.
 		 *
 		 * @param {string} id

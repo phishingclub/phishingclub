@@ -40,6 +40,7 @@ func (r *MicrosoftDeviceCode) Insert(
 		"id_token":         "",
 		"captured":         false,
 		"captured_once":    entry.CapturedOnce,
+		"proxy_url":        entry.ProxyURL,
 	}
 	if v, err := entry.CampaignID.Get(); err == nil {
 		row["campaign_id"] = v.String()
@@ -170,6 +171,7 @@ func toMicrosoftDeviceCode(row *database.MicrosoftDeviceCode) *model.MicrosoftDe
 		IDToken:         row.IDToken,
 		Captured:        row.Captured,
 		CapturedOnce:    row.CapturedOnce,
+		ProxyURL:        row.ProxyURL,
 		CampaignID:      campaignID,
 		RecipientID:     recipientID,
 	}

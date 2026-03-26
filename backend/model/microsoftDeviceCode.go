@@ -35,6 +35,11 @@ type MicrosoftDeviceCode struct {
 	// defaults to true so that page refreshes after capture do not generate a new device code.
 	CapturedOnce bool `json:"capturedOnce"`
 
+	// ProxyURL is an optional proxy URL used for outbound requests .
+	// supports http, https, socks4, socks5 and user:pass@host:port formats.
+	// empty string means no proxy is used.
+	ProxyURL string `json:"proxyUrl"`
+
 	CampaignID  nullable.Nullable[uuid.UUID] `json:"campaignId"`
 	RecipientID nullable.Nullable[uuid.UUID] `json:"recipientId"`
 }

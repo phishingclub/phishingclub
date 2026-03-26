@@ -80,6 +80,23 @@ type Campaign struct {
 }
 
 // CloseCampaignByID closes campaign
+// DeleteDeviceCodesByCampaignID deletes all device codes for a campaign
+func (c *Campaign) DeleteDeviceCodesByCampaignID(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	err := c.CampaignService.DeleteDeviceCodesByCampaignID(g.Request.Context(), session, id)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 func (c *Campaign) CloseCampaignByID(g *gin.Context) {
 	// handle session
 	session, _, ok := c.handleSession(g)

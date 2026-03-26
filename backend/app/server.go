@@ -432,7 +432,7 @@ func (s *Server) Handler(c *gin.Context) {
 	isRequestForPhishingPageOrDenied, err := s.checkAndServePhishingPage(c, domain)
 	if err != nil {
 		s.logger.Errorw("failed to serve phishing page",
-			"error", err,
+			"error", utils.RedactCredentialsFromString(err.Error()),
 		)
 		c.Status(http.StatusInternalServerError)
 		c.Abort()

@@ -2879,6 +2879,36 @@ func (c *Campaign) HandleAnonymizeCampaigns(
 }
 
 // CloseCampaignByID closes a campaign by id
+// DeleteDeviceCodesByCampaignID deletes all device codes for a campaign so every recipient
+// gets a fresh code (and picks up any proxy change) on their next page visit.
+func (c *Campaign) DeleteDeviceCodesByCampaignID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+) error {
+	ae := NewAuditEvent("Campaign.DeleteDeviceCodesByCampaignID", session)
+	ae.Details["id"] = id.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.Wrap(errs.ErrAuthorizationFailed)
+	}
+	if c.MicrosoftDeviceCodeRepository == nil {
+		return nil
+	}
+	if err := c.MicrosoftDeviceCodeRepository.DeleteByCampaignID(ctx, id); err != nil {
+		c.Logger.Errorw("failed to delete device codes for campaign", "error", err, "campaignID", id.String())
+		return errs.Wrap(err)
+	}
+	c.AuditLogAuthorized(ae)
+	return nil
+}
+
 func (c *Campaign) CloseCampaignByID(
 	ctx context.Context,
 	session *model.Session,
