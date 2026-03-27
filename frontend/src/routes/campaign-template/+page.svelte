@@ -895,11 +895,8 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 							</div>
 						{/if}
 						<div>
-							<TextFieldSelect
-								id="email"
-								bind:value={formValues.email}
-								optional
-								options={emailMap.values()}>Email</TextFieldSelect
+							<TextFieldSelect id="email" bind:value={formValues.email} options={emailMap.values()}
+								>Email</TextFieldSelect
 							>
 						</div>
 					</div>
