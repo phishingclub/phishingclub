@@ -169,7 +169,7 @@
 	>
 		<!-- Header -->
 		<div
-			class="mobile-menu-header flex justify-between h-20 items-center bg-pc-darkblue/90 dark:bg-gray-900/90 backdrop-blur-sm px-6 border-b border-white/10 dark:border-gray-700/50"
+			class="mobile-menu-header flex justify-between h-20 items-center bg-pc-darkblue/90 dark:bg-gray-900/90 px-6 border-b border-white/10 dark:border-gray-700/50"
 		>
 			<img class="w-40 h-auto" src="/logo-white.svg" alt="logo" />
 			<div class="flex items-center gap-2">

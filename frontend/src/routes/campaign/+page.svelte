@@ -612,9 +612,15 @@
 			return api.recipient.getAllGroups(options, contextCompanyID);
 		});
 		recipientGroups = recipientGroups
-			.filter((group) => group.recipientCount)
+			.filter((group) => group.isDynamic || group.recipientCount)
 			.map((group) => {
-				group.name = group.name + ` (${group.recipientCount})`;
+				// dynamic groups show their count or "dynamic" if count is unavailable
+				const countLabel = group.isDynamic
+					? group.recipientCount != null
+						? group.recipientCount
+						: 'dynamic'
+					: group.recipientCount;
+				group.name = group.name + ` (${countLabel})`;
 				return group;
 			});
 		recipientGroupsByID = recipientGroups.reduce((acc, group) => {
@@ -1144,9 +1150,11 @@
 				recipientGroupMap.byKey(id)
 			);
 			formValues.selectedCount = formValues.recipientGroups.reduce((acc, label) => {
+				if (!label) return acc;
 				const id = recipientGroupMap.byValue(label);
 				const group = recipientGroupsByID[id];
-				return acc + group.recipientCount;
+				if (!group) return acc;
+				return acc + (group.recipientCount ?? 0);
 			}, 0);
 		}
 

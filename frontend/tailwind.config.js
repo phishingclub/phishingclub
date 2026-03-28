@@ -9,6 +9,7 @@ export default {
 				titilium: ['Titillium Web', 'sans-serif']
 			},
 			colors: {
+				overlay: 'rgb(10 10 12 / <alpha-value>)',
 				'pc-pink': '#ff00ff',
 				'pc-pink-hover': '#fa48ff',
 				'pc-purple': '#9622fc',

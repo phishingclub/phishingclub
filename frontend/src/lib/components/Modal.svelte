@@ -1,4 +1,5 @@
 <script>
+	import { fade } from 'svelte/transition';
 	import { onMount, tick } from 'svelte';
 	import { beforeNavigate } from '$app/navigation';
 	import { scrollBarClassesVertical } from '$lib/utils/scrollbar';
@@ -315,9 +316,13 @@
 
 {#if visible}
 	<div bind:this={bindTo}>
-		<div class="fixed top-0 left-0 w-full h-full opacity-[0.5]" />
 		<div
-			class="fixed top-0 left-0 w-full h-full flex justify-center items-center backdrop-blur-sm z-20"
+			transition:fade={{ duration: 150 }}
+			class="fixed top-0 left-0 w-full h-full bg-overlay/[0.92]"
+			style="z-index: 19;"
+		/>
+		<div
+			class="fixed top-0 left-0 w-full h-full flex justify-center items-center z-20"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="modal-title"
@@ -325,7 +330,7 @@
 		>
 			<section
 				bind:this={modalElement}
-				class="shadow-xl dark:shadow-gray-900/70 bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-all duration-200
+				class="ring-1 ring-white/10 bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-all duration-200
 					{fullscreen
 					? 'fixed inset-0 w-full h-full max-w-none max-h-none rounded-none'
 					: 'w-auto ml-20 mr-8 max-h-[90vh]'}"
