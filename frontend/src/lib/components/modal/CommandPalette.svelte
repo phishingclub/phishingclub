@@ -236,11 +236,15 @@
 </script>
 
 {#if visible}
+	<div
+		transition:fade={{ duration: 150 }}
+		class="fixed inset-0 bg-overlay/[0.92]"
+		style="z-index: 49;"
+	/>
 	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 	<div
-		transition:fade={{ duration: 150, easing: cubicOut }}
-		class="fixed inset-0 z-50 flex items-start justify-center pt-20 bg-overlay/[0.92]"
+		class="fixed inset-0 z-50 flex items-start justify-center pt-20"
 		on:click|self={close}
 		on:keydown={handleKeydown}
 		role="dialog"

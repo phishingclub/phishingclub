@@ -317,12 +317,12 @@
 {#if visible}
 	<div bind:this={bindTo}>
 		<div
-			class="fixed top-0 left-0 w-full h-full opacity-[0.5]"
 			transition:fade={{ duration: 150 }}
+			class="fixed top-0 left-0 w-full h-full bg-overlay/[0.92]"
+			style="z-index: 19;"
 		/>
 		<div
-			transition:fade={{ duration: 150 }}
-			class="fixed top-0 left-0 w-full h-full flex justify-center items-center bg-overlay/[0.92] z-20"
+			class="fixed top-0 left-0 w-full h-full flex justify-center items-center z-20"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="modal-title"
@@ -330,7 +330,7 @@
 		>
 			<section
 				bind:this={modalElement}
-				class="shadow-2xl ring-1 ring-white/10 dark:shadow-gray-900/80 bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-all duration-200
+				class="ring-1 ring-white/10 bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-all duration-200
 					{fullscreen
 					? 'fixed inset-0 w-full h-full max-w-none max-h-none rounded-none'
 					: 'w-auto ml-20 mr-8 max-h-[90vh]'}"

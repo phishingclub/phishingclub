@@ -18,13 +18,13 @@
 	$: {
 		if (visible && !confirmInitialized) {
 			window.addEventListener('keydown', keyHandler);
-			// Prevent body scrolling when confirm prompt is open
+			// prevent body scrolling when confirm prompt is open
 			document.body.style.overflow = 'hidden';
 			handleConfirmOpen();
 			confirmInitialized = true;
 		} else if (!visible && confirmInitialized) {
 			window.removeEventListener('keydown', keyHandler);
-			// Restore body scrolling when confirm prompt is closed
+			// restore body scrolling when confirm prompt is closed
 			document.body.style.overflow = 'auto';
 			handleConfirmClose();
 			confirmInitialized = false;
@@ -163,7 +163,8 @@
 {#if visible}
 	<div
 		transition:fade={{ duration: 150 }}
-		class="fixed top-0 left-0 w-full h-full bg-overlay/[0.93] transition-colors duration-200"
+		class="fixed top-0 left-0 w-full h-full bg-overlay/[0.92]"
+		style="z-index: 19;"
 	/>
 	<div
 		class="fixed top-0 left-0 w-full h-full flex justify-center items-center z-20"
@@ -174,7 +175,7 @@
 	>
 		<section
 			bind:this={confirmElement}
-			class="flex flex-col items-center w-1/3 bg-slate-100 dark:bg-gray-800 shadow-2xl ring-1 ring-white/10 dark:shadow-gray-900/80 rounded-md transition-colors duration-200"
+			class="flex flex-col items-center w-1/3 bg-slate-100 dark:bg-gray-800 ring-1 ring-white/10 rounded-md transition-colors duration-200"
 		>
 			<div
 				class="bg-cta-orange2 dark:bg-orange-600 text-white rounded-tl-md rounded-tr-md w-full transition-colors duration-200"

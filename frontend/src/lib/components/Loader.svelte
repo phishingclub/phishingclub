@@ -15,7 +15,6 @@
 </script>
 
 {#if $isLoading && isAnimating}
-	<div class="fixed top-0 left-0 w-full h-full opacity-[0.5]" transition:fade={{ duration }} />
 	<div
 		transition:fade={{ duration }}
 		class="fixed top-0 left-0 w-full h-full flex justify-center items-center z-50"
