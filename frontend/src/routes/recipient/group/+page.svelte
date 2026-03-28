@@ -6,6 +6,8 @@
 	import { goto } from '$app/navigation';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
+	import DynamicLabel from '$lib/components/DynamicLabel.svelte';
+	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
@@ -33,15 +35,29 @@
 	// services
 	const appStateService = AppStateService.instance;
 
+	// the recipient fields that can be used as a dynamic filter
+	const dynamicFilterFields = ['position', 'department', 'city', 'country', 'misc'];
+
 	// data
 	let form = null;
+	let dynamicForm = null;
 	let modalError = '';
+	let dynamicModalError = '';
+
 	let formValues = {
 		name: null,
 		companyID: null,
 		recipients: []
 	};
+
+	let dynamicFormValues = {
+		name: null,
+		filterField: dynamicFilterFields[0],
+		filterValue: null
+	};
+
 	let isModalVisible = false;
+	let isDynamicModalVisible = false;
 	let isSubmitting = false;
 	let isTableLoading = false;
 	const tableURLParams = newTableURLParams();
@@ -55,6 +71,17 @@
 	let deleteValues = {
 		id: null,
 		name: null
+	};
+
+	// dynamic update modal state
+	let isDynamicUpdateModalVisible = false;
+	let dynamicUpdateForm = null;
+	let dynamicUpdateError = '';
+	let dynamicUpdateValues = {
+		id: null,
+		name: null,
+		filterField: dynamicFilterFields[0],
+		filterValue: null
 	};
 
 	$: {
@@ -162,6 +189,54 @@
 		}
 	};
 
+	const onSubmitDynamicCreate = async () => {
+		try {
+			isSubmitting = true;
+			const res = await api.recipient.createDynamicGroup(
+				dynamicFormValues.name,
+				contextCompanyID,
+				dynamicFormValues.filterField,
+				dynamicFormValues.filterValue
+			);
+			if (!res.success) {
+				dynamicModalError = res.error;
+				return;
+			}
+			addToast('Dynamic group created', 'Success');
+			refreshGroups();
+			closeDynamicModal();
+		} catch (e) {
+			addToast('Failed to create dynamic group', 'Error');
+			console.error('failed to create dynamic group', e);
+		} finally {
+			isSubmitting = false;
+		}
+	};
+
+	const onSubmitDynamicUpdate = async () => {
+		try {
+			isSubmitting = true;
+			const res = await api.recipient.updateDynamicGroup({
+				id: dynamicUpdateValues.id,
+				name: dynamicUpdateValues.name,
+				filterField: dynamicUpdateValues.filterField,
+				filterValue: dynamicUpdateValues.filterValue
+			});
+			if (!res.success) {
+				dynamicUpdateError = res.error;
+				return;
+			}
+			addToast('Dynamic group updated', 'Success');
+			refreshGroups();
+			closeDynamicUpdateModal();
+		} catch (err) {
+			addToast('Failed to update dynamic group', 'Error');
+			console.error('failed to update dynamic group', err);
+		} finally {
+			isSubmitting = false;
+		}
+	};
+
 	const openDeleteAlert = async (group) => {
 		isDeleteAlertVisible = true;
 		deleteValues.id = group.id;
@@ -195,6 +270,16 @@
 		isModalVisible = true;
 	};
 
+	const openDynamicCreateModal = () => {
+		dynamicFormValues = {
+			name: null,
+			filterField: dynamicFilterFields[0],
+			filterValue: null
+		};
+		dynamicModalError = '';
+		isDynamicModalVisible = true;
+	};
+
 	/** @param {string} id */
 	const openUpdateModal = async (id) => {
 		modalMode = 'update';
@@ -212,10 +297,41 @@
 		}
 	};
 
+	/** @param {string} id */
+	const openDynamicUpdateModal = async (id) => {
+		try {
+			showIsLoading();
+			const group = await loadGroup(id);
+			dynamicUpdateValues.id = id;
+			dynamicUpdateValues.name = group.name;
+			dynamicUpdateValues.filterField = group.filterField ?? dynamicFilterFields[0];
+			dynamicUpdateValues.filterValue = group.filterValue ?? '';
+			dynamicUpdateError = '';
+			isDynamicUpdateModalVisible = true;
+		} catch (e) {
+			addToast('Failed to load group', 'Error');
+			console.error('failed to load group', e);
+		} finally {
+			hideIsLoading();
+		}
+	};
+
 	const closeModal = () => {
 		isModalVisible = false;
 		form.reset();
 		modalError = '';
+	};
+
+	const closeDynamicModal = () => {
+		isDynamicModalVisible = false;
+		if (dynamicForm) dynamicForm.reset();
+		dynamicModalError = '';
+	};
+
+	const closeDynamicUpdateModal = () => {
+		isDynamicUpdateModalVisible = false;
+		if (dynamicUpdateForm) dynamicUpdateForm.reset();
+		dynamicUpdateError = '';
 	};
 </script>
 
@@ -224,6 +340,7 @@
 	<Headline>Groups</Headline>
 	<div class="flex gap-3">
 		<BigButton on:click={openCreateModal}>New group</BigButton>
+		<BigButton on:click={openDynamicCreateModal}>New dynamic group</BigButton>
 		<BigButton on:click={() => goto('/recipient/orphaned/')}>View Orphaned</BigButton>
 	</div>
 	<Table
@@ -242,12 +359,16 @@
 		{#each groups as group}
 			<TableRow>
 				<TableCellLink href={`/recipient/group/${group.id}`} title={group.name}>
+					{#if group.isDynamic}
+						<DynamicLabel />
+					{/if}
 					{group.name}
 				</TableCellLink>
 
 				<TableCellLink href={`/recipient/group/${group.id}`} title={group.recipientCount}>
 					{group.recipientCount}
 				</TableCellLink>
+
 				{#if contextCompanyID}
 					<TableCellScope companyID={group.companyID} />
 				{/if}
@@ -259,10 +380,17 @@
 							on:click={() => gotoEditGroupRecipients(group.id)}
 							{...globalButtonDisabledAttributes(group, contextCompanyID)}
 						/>
-						<TableUpdateButton
-							on:click={() => openUpdateModal(group.id)}
-							{...globalButtonDisabledAttributes(group, contextCompanyID)}
-						/>
+						{#if group.isDynamic}
+							<TableUpdateButton
+								on:click={() => openDynamicUpdateModal(group.id)}
+								{...globalButtonDisabledAttributes(group, contextCompanyID)}
+							/>
+						{:else}
+							<TableUpdateButton
+								on:click={() => openUpdateModal(group.id)}
+								{...globalButtonDisabledAttributes(group, contextCompanyID)}
+							/>
+						{/if}
 						<TableDeleteButton
 							on:click={() => openDeleteAlert(group)}
 							{...globalButtonDisabledAttributes(group, contextCompanyID)}
@@ -273,6 +401,7 @@
 		{/each}
 	</Table>
 
+	<!-- static group modal -->
 	<Modal headerText={modalText} bind:visible={isModalVisible} onClose={closeModal} {isSubmitting}>
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
 			<FormColumns>
@@ -284,21 +413,91 @@
 						bind:value={formValues.name}
 						placeholder="Marketing">Name</TextField
 					>
-					<section>
-						{#each formValues.recipients as recipient}
-							<div class="row">
-								<div class="col-12">
-									{recipient.email}
-								</div>
-							</div>
-						{/each}
-					</section>
 				</FormColumn>
 			</FormColumns>
 			<FormError message={modalError} />
 			<FormFooter {closeModal} {isSubmitting} />
 		</FormGrid>
 	</Modal>
+
+	<!-- dynamic group create modal -->
+	<Modal
+		headerText="New dynamic group"
+		bind:visible={isDynamicModalVisible}
+		onClose={closeDynamicModal}
+		{isSubmitting}
+	>
+		<FormGrid on:submit={onSubmitDynamicCreate} bind:bindTo={dynamicForm} {isSubmitting}>
+			<FormColumns>
+				<FormColumn>
+					<TextField
+						required
+						minLength={1}
+						maxLength={127}
+						bind:value={dynamicFormValues.name}
+						placeholder="Marketing">Name</TextField
+					>
+					<TextFieldSelect
+						id="dynamic-group-filter-field"
+						required
+						bind:value={dynamicFormValues.filterField}
+						options={dynamicFilterFields}
+					>
+						Filter field
+					</TextFieldSelect>
+					<TextField
+						required
+						minLength={1}
+						maxLength={127}
+						bind:value={dynamicFormValues.filterValue}
+						placeholder="e.g. Engineering">Filter value</TextField
+					>
+				</FormColumn>
+			</FormColumns>
+			<FormError message={dynamicModalError} />
+			<FormFooter closeModal={closeDynamicModal} {isSubmitting} />
+		</FormGrid>
+	</Modal>
+
+	<!-- dynamic group update modal -->
+	<Modal
+		headerText="Update dynamic group"
+		bind:visible={isDynamicUpdateModalVisible}
+		onClose={closeDynamicUpdateModal}
+		{isSubmitting}
+	>
+		<FormGrid on:submit={onSubmitDynamicUpdate} bind:bindTo={dynamicUpdateForm} {isSubmitting}>
+			<FormColumns>
+				<FormColumn>
+					<TextField
+						required
+						minLength={1}
+						maxLength={127}
+						bind:value={dynamicUpdateValues.name}
+						placeholder="Marketing">Name</TextField
+					>
+					<TextFieldSelect
+						id="dynamic-group-filter-field-a"
+						required
+						bind:value={dynamicUpdateValues.filterField}
+						options={dynamicFilterFields}
+					>
+						Filter field
+					</TextFieldSelect>
+					<TextField
+						required
+						minLength={1}
+						maxLength={127}
+						bind:value={dynamicUpdateValues.filterValue}
+						placeholder="e.g. Engineering">Filter value</TextField
+					>
+				</FormColumn>
+			</FormColumns>
+			<FormError message={dynamicUpdateError} />
+			<FormFooter closeModal={closeDynamicUpdateModal} {isSubmitting} />
+		</FormGrid>
+	</Modal>
+
 	<DeleteAlert
 		list={[
 			'All assets will be deleted',

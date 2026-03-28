@@ -2495,6 +2495,25 @@ export class API {
 		},
 
 		/**
+		 * Create a dynamic recipient group.
+		 *
+		 * @param {string} name
+		 * @param {string|null} companyID
+		 * @param {string} filterField - recipient attribute to filter on (position, department, city, country, misc)
+		 * @param {string} filterValue - value to match against the filter field
+		 * @returns {Promise<ApiResponse>}
+		 */
+		createDynamicGroup: async (name, companyID, filterField, filterValue) => {
+			return await postJSON(this.getPath('/recipient/group'), {
+				name: name,
+				companyID: companyID,
+				isDynamic: true,
+				filterField: filterField,
+				filterValue: filterValue
+			});
+		},
+
+		/**
 		 * Update a recipient group - not the recipients in the group.
 		 *
 		 * @param {object} group
@@ -2507,6 +2526,25 @@ export class API {
 			return await patchJSON(this.getPath(`/recipient/group/${id}`), {
 				name: name,
 				companyID: companyID
+			});
+		},
+
+		/**
+		 * Update a dynamic recipient group.
+		 *
+		 * @param {object} group
+		 * @param {string} group.id
+		 * @param {string} [group.name]
+		 * @param {string} [group.filterField]
+		 * @param {string} [group.filterValue]
+		 * @returns {Promise<ApiResponse>}
+		 */
+		updateDynamicGroup: async ({ id, name, filterField, filterValue }) => {
+			return await patchJSON(this.getPath(`/recipient/group/${id}`), {
+				name: name,
+				isDynamic: true,
+				filterField: filterField,
+				filterValue: filterValue
 			});
 		},
 

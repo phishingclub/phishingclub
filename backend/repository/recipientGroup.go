@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
@@ -123,7 +124,8 @@ func (rg *RecipientGroup) AddRecipients(
 	return nil
 }
 
-// countRecipients gets the count of recipient groups
+// countRecipients gets the count of recipients in a group.
+// uses the already-loaded group to avoid an extra DB fetch.
 func (rg *RecipientGroup) countRecipients(
 	ctx context.Context,
 	group *database.RecipientGroup,
@@ -131,12 +133,19 @@ func (rg *RecipientGroup) countRecipients(
 ) (int64, error) {
 	count := model.RECIPIENT_COUNT_NOT_LOADED
 	if options.WithRecipientCount {
-		// if recipients is loaded then we can get the count from the slice
-		if options.WithRecipients {
+		// dynamic groups always require a filter query; the junction table is not used
+		if group.IsDynamic {
+			c, err := rg.countDynamicRecipients(ctx, group)
+			if err != nil {
+				return count, errs.Wrap(err)
+			}
+			count = c
+		} else if options.WithRecipients {
+			// if recipients is loaded then we can get the count from the slice
 			count = int64(len(group.Recipients))
 		} else {
-			// otherwise we need to query the storage
-			c, err := rg.GetRecipientCount(ctx, group.ID)
+			// otherwise we need to query the junction table
+			c, err := rg.countStaticRecipients(ctx, group.ID)
 			if err != nil {
 				return count, errs.Wrap(err)
 			}
@@ -250,8 +259,30 @@ func (rg *RecipientGroup) GetAllByCompanyID(
 	return recipientGroups, nil
 }
 
-// GetRecipientCount gets the recipient count of a recipient group
+// GetRecipientCount gets the recipient count of a recipient group.
+// for dynamic groups the count is derived from the filter query; for static groups
+// it counts rows in the junction table.
 func (rg *RecipientGroup) GetRecipientCount(
+	ctx context.Context,
+	groupID *uuid.UUID,
+) (int64, error) {
+	// fetch the group to determine whether it is dynamic
+	var group database.RecipientGroup
+	res := rg.DB.
+		Where(TableColumnID(database.RECIPIENT_GROUP_TABLE)+" = ?", groupID.String()).
+		First(&group)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+
+	if group.IsDynamic {
+		return rg.countDynamicRecipients(ctx, &group)
+	}
+	return rg.countStaticRecipients(ctx, groupID)
+}
+
+// countStaticRecipients counts rows in the junction table for a static group
+func (rg *RecipientGroup) countStaticRecipients(
 	ctx context.Context,
 	groupID *uuid.UUID,
 ) (int64, error) {
@@ -268,6 +299,25 @@ func (rg *RecipientGroup) GetRecipientCount(
 		Count(&count)
 	if result.Error != nil {
 		return 0, result.Error
+	}
+	return count, nil
+}
+
+// countDynamicRecipients counts recipients that match a dynamic group's filter
+func (rg *RecipientGroup) countDynamicRecipients(
+	ctx context.Context,
+	group *database.RecipientGroup,
+) (int64, error) {
+	if !slices.Contains(model.DynamicGroupAllowedFields, group.FilterField) {
+		return 0, fmt.Errorf("invalid filter field: %s", group.FilterField)
+	}
+	db := rg.DB.Model(&database.Recipient{}).
+		Where(fmt.Sprintf("`%s`.`deleted_at` IS NULL", database.RECIPIENT_TABLE)).
+		Where(fmt.Sprintf("`%s`.`%s` = ?", database.RECIPIENT_TABLE, group.FilterField), group.FilterValue)
+	db = whereCompany(db, database.RECIPIENT_TABLE, group.CompanyID)
+	var count int64
+	if err := db.Count(&count).Error; err != nil {
+		return 0, err
 	}
 	return count, nil
 }
@@ -367,13 +417,29 @@ func (rg *RecipientGroup) GetByNameAndCompanyID(
 	return recpGroup, nil
 }
 
-// GetRecipientsByGroupID gets recipients by recipient group id
+// GetRecipientsByGroupID gets recipients by recipient group id.
+// for dynamic groups members are resolved by the filter query; for static groups
+// members are fetched from the junction table.
 func (rg *RecipientGroup) GetRecipientsByGroupID(
 	ctx context.Context,
 	id *uuid.UUID,
 	options *RecipientOption,
 ) (*model.Result[model.Recipient], error) {
 	result := model.NewEmptyResult[model.Recipient]()
+
+	// fetch the group to determine whether it is dynamic
+	var group database.RecipientGroup
+	res := rg.DB.
+		Where(TableColumnID(database.RECIPIENT_GROUP_TABLE)+" = ?", id.String()).
+		First(&group)
+	if res.Error != nil {
+		return result, res.Error
+	}
+
+	if group.IsDynamic {
+		return rg.getDynamicRecipientsByGroup(ctx, &group, options)
+	}
+
 	db := rg.DB
 	var recipients []database.Recipient
 	if options.WithCompany {
@@ -395,6 +461,55 @@ func (rg *RecipientGroup) GetRecipientsByGroupID(
 		).
 		Find(&recipients)
 
+	if dbRes.Error != nil {
+		return result, dbRes.Error
+	}
+
+	hasNextPage, err := useHasNextPage(
+		db, database.RECIPIENT_TABLE, options.QueryArgs, allowdRecipientColumns...,
+	)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	result.HasNextPage = hasNextPage
+
+	for _, recipient := range recipients {
+		r, err := ToRecipient(&recipient)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		result.Rows = append(result.Rows, r)
+	}
+	return result, nil
+}
+
+// getDynamicRecipientsByGroup resolves members of a dynamic group via its filter
+func (rg *RecipientGroup) getDynamicRecipientsByGroup(
+	ctx context.Context,
+	group *database.RecipientGroup,
+	options *RecipientOption,
+) (*model.Result[model.Recipient], error) {
+	result := model.NewEmptyResult[model.Recipient]()
+
+	if !slices.Contains(model.DynamicGroupAllowedFields, group.FilterField) {
+		return result, fmt.Errorf("invalid filter field: %s", group.FilterField)
+	}
+
+	db := rg.DB
+	if options.WithCompany {
+		db = db.Preload("Company")
+	}
+	db, err := useQuery(db, database.RECIPIENT_TABLE, options.QueryArgs, allowdRecipientColumns...)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	db = db.Model(&database.Recipient{}).
+		Where(fmt.Sprintf("`%s`.`deleted_at` IS NULL", database.RECIPIENT_TABLE)).
+		Where(fmt.Sprintf("`%s`.`%s` = ?", database.RECIPIENT_TABLE, group.FilterField), group.FilterValue)
+	db = whereCompany(db, database.RECIPIENT_TABLE, group.CompanyID)
+
+	var recipients []database.Recipient
+	dbRes := db.Find(&recipients)
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
@@ -503,6 +618,7 @@ func (rg *RecipientGroup) DeleteByID(
 	return nil
 }
 
+// ToRecipientGroup converts a database row to a model
 func ToRecipientGroup(row *database.RecipientGroup) (*model.RecipientGroup, error) {
 	id := nullable.NewNullableWithValue(*row.ID)
 	companyID := nullable.NewNullNullable[uuid.UUID]()
@@ -527,6 +643,9 @@ func ToRecipientGroup(row *database.RecipientGroup) (*model.RecipientGroup, erro
 		UpdatedAt:      row.UpdatedAt,
 		Name:           name,
 		CompanyID:      companyID,
+		IsDynamic:      nullable.NewNullableWithValue(row.IsDynamic),
+		FilterField:    nullable.NewNullableWithValue(row.FilterField),
+		FilterValue:    nullable.NewNullableWithValue(row.FilterValue),
 		Recipients:     recipients,
 		RecipientCount: nullable.NewNullNullable[int64](),
 	}, nil
