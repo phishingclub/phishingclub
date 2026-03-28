@@ -1,4 +1,5 @@
 <script>
+	import { fade } from 'svelte/transition';
 	import { onMount, tick } from 'svelte';
 	import { beforeNavigate } from '$app/navigation';
 
@@ -161,10 +162,11 @@
 
 {#if visible}
 	<div
-		class="fixed top-0 left-0 w-full h-full bg-cta-blue dark:bg-gray-900 opacity-20 blur-xl transition-colors duration-200"
+		transition:fade={{ duration: 150 }}
+		class="fixed top-0 left-0 w-full h-full bg-overlay/[0.93] transition-colors duration-200"
 	/>
 	<div
-		class="fixed top-0 left-0 w-full h-full flex justify-center items-center backdrop-blur-sm z-20"
+		class="fixed top-0 left-0 w-full h-full flex justify-center items-center z-20"
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="confirm-title"
@@ -172,7 +174,7 @@
 	>
 		<section
 			bind:this={confirmElement}
-			class="flex flex-col items-center w-1/3 bg-slate-100 dark:bg-gray-800 shadow-xl dark:shadow-gray-900/70 rounded-md transition-colors duration-200"
+			class="flex flex-col items-center w-1/3 bg-slate-100 dark:bg-gray-800 shadow-2xl ring-1 ring-white/10 dark:shadow-gray-900/80 rounded-md transition-colors duration-200"
 		>
 			<div
 				class="bg-cta-orange2 dark:bg-orange-600 text-white rounded-tl-md rounded-tr-md w-full transition-colors duration-200"

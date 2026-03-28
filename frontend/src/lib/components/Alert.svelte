@@ -1,4 +1,5 @@
 <script>
+	import { fade } from 'svelte/transition';
 	import { onMount, tick } from 'svelte';
 	import FormButton from './FormButton.svelte';
 	import Input from './Input.svelte';
@@ -245,7 +246,8 @@
 {#if visible}
 	<div class="fixed top-0 left-0 w-full h-full opacity-[0.5]" />
 	<div
-		class="fixed top-0 left-0 w-full h-full flex justify-center items-center backdrop-blur-sm z-20"
+		transition:fade={{ duration: 150 }}
+		class="fixed top-0 left-0 w-full h-full flex justify-center items-center bg-overlay/[0.92] z-20"
 		role="dialog"
 		aria-modal="true"
 		aria-labelledby="alert-title"
@@ -253,7 +255,7 @@
 	>
 		<section
 			bind:this={alertElement}
-			class="shadow-xl dark:shadow-gray-900/70 w-[32rem] bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-colors duration-200"
+			class="shadow-2xl ring-1 ring-white/10 dark:shadow-gray-900/80 w-[32rem] bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-colors duration-200"
 		>
 			<!-- Header -->
 			<div

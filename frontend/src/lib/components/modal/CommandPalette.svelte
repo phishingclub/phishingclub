@@ -1,4 +1,6 @@
 <script>
+	import { fade } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { menu, topMenu } from '$lib/consts/navigation';
@@ -237,7 +239,8 @@
 	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 	<div
-		class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm z-50 flex items-start justify-center pt-20"
+		transition:fade={{ duration: 150, easing: cubicOut }}
+		class="fixed inset-0 z-50 flex items-start justify-center pt-20 bg-overlay/[0.92]"
 		on:click|self={close}
 		on:keydown={handleKeydown}
 		role="dialog"
