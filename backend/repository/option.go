@@ -106,7 +106,7 @@ func (o *Option) InsertWithTransaction(
 
 func ToOption(dbModel *database.Option) (*model.Option, error) {
 	id := nullable.NewNullableWithValue(*dbModel.ID)
-	key, err := vo.NewString64(dbModel.Key)
+	key, err := vo.NewString127(dbModel.Key)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}

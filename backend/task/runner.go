@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/service"
@@ -24,13 +26,12 @@ type Runner struct {
 	CampaignService     *service.Campaign
 	UpdateService       *service.Update
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
-	IsRunning           bool
+	OptionService       *service.Option
+	RecipientService    *service.Recipient
 	Logger              *zap.SugaredLogger
 }
 
-// Run starts the rask runner
-// TODO implement a abort signal so things can be handled gracefully
-// func (d *daemon) Run(abortSignal chan struct{}) {
+// Run starts the task runner
 func (d *Runner) Run(
 	ctx context.Context,
 	session *model.Session,
@@ -45,11 +46,7 @@ func (d *Runner) Run(
 			go d.Run(ctx, session)
 		}
 	}()
-	//
 	d.Logger.Debug("task runner started")
-	// on the start of the next minute create a event loop that runs every minute
-	// this is to ensure that the daemon runs every minute
-	//lastFinishedAt := time.Now()
 	for {
 		now := time.Now()
 
@@ -58,22 +55,10 @@ func (d *Runner) Run(
 			d.Logger.Debugf("Task runner stopping due to signal")
 			return
 		default:
-			/*
-				if lastFinishedAt.Add(time.Minute).After(now) {
-					d.Logger.Warn("Last task took longer than a minute (processing tick) to complete")
-				}
-				d.Logger.Debugw("Task processing tick took", "error ,time.Since(now).Milliseconds())
-			*/
-			// sleep until the next minute change (ex 12:00:00 -> 12:01:00 and not 12:00:31 -> 12:01:31)
-			//
+			// sleep until the start of the next tick interval (ex 12:00:00 -> 12:00:10)
 			nextTick := now.Truncate(TASK_INTERVAL).Add(TASK_INTERVAL)
-
 			time.Sleep(time.Until(nextTick))
-			// time.Sleep(time.Until(now.Truncate(time.Minute).Add(time.Minute)))
-			d.Process(
-				ctx,
-				session,
-			)
+			d.Process(ctx, session)
 		}
 	}
 }
@@ -91,7 +76,8 @@ func (d *Runner) RunSystemTasks(
 			d.Logger.Info("Restarting inline system runner daemon in 5 seconds")
 			time.Sleep(5 * time.Second)
 			// Restart in a new goroutine to avoid recursive stack growth
-			go d.RunSystemTasks(ctx, session, nil) // Pass nil for wg to avoid double Done()
+			// pass nil for wg to avoid double Done()
+			go d.RunSystemTasks(ctx, session, nil)
 		}
 	}()
 	initialRunCompleted := false
@@ -163,7 +149,6 @@ func (d *Runner) Process(
 			session,
 		)
 	})
-	d.Logger.Debug("task runner started processing")
 	// send the next batch of messages
 	d.runTask("send messages", func() error {
 		err := d.CampaignService.SendNextBatch(
@@ -180,6 +165,7 @@ func (d *Runner) Process(
 		return d.MicrosoftDeviceCode.PollAllPending(ctx)
 	})
 	d.Logger.Debug("task runner ended processing")
+
 }
 
 // Process system tasks
@@ -206,4 +192,48 @@ func (d *Runner) ProcessSystemTasks(
 		_, _, err := d.UpdateService.CheckForUpdate(ctx, session)
 		return err
 	})
+	d.runTask("system - prune orphaned recipients", func() error {
+		return d.PruneOrphanedRecipients(ctx, session)
+	})
+}
+
+// PruneOrphanedRecipients prunes orphaned recipients for global scope and all companies
+// where auto-prune is enabled.
+func (d *Runner) PruneOrphanedRecipients(
+	ctx context.Context,
+	session *model.Session,
+) error {
+	// read the single option row once — contains the global flag and all per-company entries
+	opt, err := d.OptionService.GetAutoPruneOptionInternal(ctx)
+	if err != nil {
+		d.Logger.Warnw("failed to load auto-prune option", "error", err)
+		// non-fatal: nothing to prune without the setting
+		return nil
+	}
+
+	// global (shared / nil-company) scope
+	if opt.Enabled {
+		count, err := d.RecipientService.DeleteAllOrphaned(ctx, nil, session)
+		if err != nil {
+			d.Logger.Errorw("failed to prune global orphaned recipients", "error", err)
+		} else {
+			d.Logger.Debugw("pruned global orphaned recipients", "count", count)
+		}
+	}
+
+	// per-company scope — only prune companies that have explicitly opted in
+	for _, companyIDStr := range opt.Companies {
+		companyID, err := uuid.Parse(companyIDStr)
+		if err != nil {
+			d.Logger.Errorw("failed to parse company id in auto-prune option", "companyID", companyIDStr, "error", err)
+			continue
+		}
+		count, err := d.RecipientService.DeleteAllOrphaned(ctx, &companyID, session)
+		if err != nil {
+			d.Logger.Errorw("failed to prune company orphaned recipients", "companyID", companyID, "error", err)
+			continue
+		}
+		d.Logger.Debugw("pruned company orphaned recipients", "companyID", companyID, "count", count)
+	}
+	return nil
 }

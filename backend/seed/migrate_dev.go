@@ -104,7 +104,7 @@ func RunSeedDevelopmentData(
 		id := uuid.New()
 		optSeedDev := &model.Option{
 			ID:    nullable.NewNullableWithValue(id),
-			Key:   *vo.NewString64Must(data.OptionKeyDevelopmentSeeded),
+			Key:   *vo.NewString127Must(data.OptionKeyDevelopmentSeeded),
 			Value: *vo.NewOptionalString1MBMust(data.OptionValueSeeded),
 		}
 		_, err := repositories.Option.Insert(context.TODO(), optSeedDev)

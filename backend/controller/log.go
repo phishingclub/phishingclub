@@ -126,7 +126,7 @@ func (c *Log) SetLevel(g *gin.Context) {
 		// set db log level in database
 		dbLevel := vo.NewOptionalString1MBMust(request.DBLevel)
 		dbLogLevelOption := model.Option{
-			Key:   *vo.NewString64Must(data.OptionKeyDBLogLevel),
+			Key:   *vo.NewString127Must(data.OptionKeyDBLogLevel),
 			Value: *dbLevel,
 		}
 		err := c.persist(
@@ -159,7 +159,7 @@ func (c *Log) SetLevel(g *gin.Context) {
 
 		// set log level in in memory logger struct
 		logLevel := model.Option{
-			Key:   *vo.NewString64Must(data.OptionKeyLogLevel),
+			Key:   *vo.NewString127Must(data.OptionKeyLogLevel),
 			Value: *vo.NewOptionalString1MBMust(request.Level),
 		}
 		err := c.persist(

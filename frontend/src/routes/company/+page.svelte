@@ -25,6 +25,8 @@
 
 	// bindings
 	let form = null;
+	let companyAutoPruneEnabled = false;
+	let companyAutoPruneEnabledOriginal = false;
 	const formValues = {
 		name: null,
 		comment: null
@@ -151,6 +153,9 @@
 				modalError = res.error;
 				return;
 			}
+			if (companyAutoPruneEnabled !== companyAutoPruneEnabledOriginal) {
+				await saveCompanyAutoPrune(formValues.id, companyAutoPruneEnabled);
+			}
 			addToast('Company updated', 'Success');
 			closeUpdateModal();
 		} catch (e) {
@@ -158,6 +163,18 @@
 			console.error('failed to update company', e);
 		}
 		refreshCompanies();
+	};
+
+	const saveCompanyAutoPrune = async (id, enabled) => {
+		try {
+			const res = await api.company.setAutoPrune(id, enabled);
+			if (!res.success) {
+				addToast('Failed to save auto-prune setting', 'Error');
+			}
+		} catch (e) {
+			addToast('Failed to save auto-prune setting', 'Error');
+			console.error('failed to save company auto-prune', e);
+		}
 	};
 
 	const openDeleteAlert = async (company) => {
@@ -216,6 +233,13 @@
 			formValues.id = company.id;
 			formValues.name = company.name;
 			formValues.comment = company.comment || null;
+			try {
+				const optRes = await api.company.getAutoPrune(id);
+				companyAutoPruneEnabled = optRes.success && optRes.data?.enabled === true;
+				companyAutoPruneEnabledOriginal = companyAutoPruneEnabled;
+			} catch (_) {
+				companyAutoPruneEnabled = false;
+			}
 			isModalVisible = true;
 		} catch (e) {
 			addToast('Failed to get company', 'Error');
@@ -232,6 +256,8 @@
 		formValues.id = null;
 		formValues.name = null;
 		formValues.comment = null;
+		companyAutoPruneEnabled = false;
+		companyAutoPruneEnabledOriginal = false;
 		form.reset();
 	};
 
@@ -383,10 +409,60 @@
 							id="company-comment"
 							bind:value={formValues.comment}
 							maxlength={1000000}
-							rows="20"
+							rows="8"
 							placeholder="Add notes about this company..."
 							class="w-full p-4 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y dark:bg-gray-700 dark:border-gray-600 dark:text-white"
 						/>
+					</div>
+
+					<div>
+						<div class="flex items-center mb-2">
+							<p class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+								Auto-Prune Orphaned Recipients
+							</p>
+						</div>
+						<div class="inline-flex flex-col space-y-2 min-w-64 mb-4">
+							<label
+								class="flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors {companyAutoPruneEnabled
+									? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+									: 'border-gray-300 dark:border-gray-600'}"
+							>
+								<input
+									type="radio"
+									checked={companyAutoPruneEnabled}
+									on:change={() => (companyAutoPruneEnabled = true)}
+									class="mt-0.5 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+								/>
+								<div class="text-left flex-1">
+									<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block"
+										>Enabled</span
+									>
+									<span class="text-xs text-gray-500 dark:text-gray-400 block mt-0.5"
+										>Orphaned recipients are deleted automatically each hour</span
+									>
+								</div>
+							</label>
+							<label
+								class="flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors {!companyAutoPruneEnabled
+									? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+									: 'border-gray-300 dark:border-gray-600'}"
+							>
+								<input
+									type="radio"
+									checked={!companyAutoPruneEnabled}
+									on:change={() => (companyAutoPruneEnabled = false)}
+									class="mt-0.5 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+								/>
+								<div class="text-left flex-1">
+									<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block"
+										>Disabled</span
+									>
+									<span class="text-xs text-gray-500 dark:text-gray-400 block mt-0.5"
+										>Orphaned recipients are kept until manually deleted</span
+									>
+								</div>
+							</label>
+						</div>
 					</div>
 				</div>
 

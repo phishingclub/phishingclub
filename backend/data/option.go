@@ -30,6 +30,8 @@ const (
 	OptionValueDisplayModeWhitebox = "whitebox"
 	OptionValueDisplayModeBlackbox = "blackbox"
 
+	OptionKeyAutoPruneOrphanedRecipients = "auto_prune_orphaned_recipients"
+
 	OptionKeyObfuscationTemplate = "obfuscation_template"
 	// OptionValueObfuscationTemplateDefault is the default HTML template for obfuscation
 	// the template receives {{.Script}} variable containing the obfuscated javascript

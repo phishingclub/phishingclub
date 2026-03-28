@@ -74,7 +74,7 @@ func (l *SSOOption) ToOption() (*Option, error) {
 		return nil, errs.Wrap(err)
 	}
 	return &Option{
-		Key:   *vo.NewString64Must(data.OptionKeyAdminSSOLogin),
+		Key:   *vo.NewString127Must(data.OptionKeyAdminSSOLogin),
 		Value: *str,
 	}, nil
 }

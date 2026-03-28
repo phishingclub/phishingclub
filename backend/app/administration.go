@@ -76,6 +76,9 @@ const (
 	// option
 	ROUTE_V1_OPTION     = "/api/v1/option"
 	ROUTE_V1_OPTION_GET = "/api/v1/option/:key"
+	// auto-prune options
+	ROUTE_V1_OPTION_AUTO_PRUNE         = "/api/v1/option/auto-prune"
+	ROUTE_V1_COMPANY_OPTION_AUTO_PRUNE = "/api/v1/company/:id/option/auto-prune"
 	// installation
 	ROUTE_V1_INSTALL           = "/api/v1/install"
 	ROUTE_V1_INSTALL_TEMPLATES = "/api/v1/install/templates"
@@ -313,6 +316,11 @@ func setupRoutes(
 		// options
 		GET(ROUTE_V1_OPTION_GET, middleware.SessionHandler, controllers.Option.Get).
 		POST(ROUTE_V1_OPTION, middleware.SessionHandler, middleware.SessionHandler, controllers.Option.Update).
+		// auto-prune options
+		GET(ROUTE_V1_OPTION_AUTO_PRUNE, middleware.SessionHandler, controllers.Option.GetAutoPrune).
+		POST(ROUTE_V1_OPTION_AUTO_PRUNE, middleware.SessionHandler, controllers.Option.SetAutoPrune).
+		GET(ROUTE_V1_COMPANY_OPTION_AUTO_PRUNE, middleware.SessionHandler, controllers.Option.GetCompanyAutoPrune).
+		POST(ROUTE_V1_COMPANY_OPTION_AUTO_PRUNE, middleware.SessionHandler, controllers.Option.SetCompanyAutoPrune).
 		// domain
 		GET(ROUTE_V1_DOMAIN, middleware.SessionHandler, controllers.Domain.GetAll).
 		GET(ROUTE_V1_DOMAIN_SUBSET, middleware.SessionHandler, controllers.Domain.GetAllOverview).
