@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import DynamicLabel from '$lib/components/DynamicLabel.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import { page } from '$app/stores';
@@ -45,7 +46,10 @@
 	let groupValues = {
 		id: null,
 		name: null,
-		companyID: null
+		companyID: null,
+		isDynamic: false,
+		filterField: null,
+		filterValue: null
 	};
 	let recipientSearch = '';
 	let searchOptions = [];
@@ -112,6 +116,9 @@
 			groupValues.id = res.data.id;
 			groupValues.name = res.data.name;
 			groupValues.companyID = res.data.companyID;
+			groupValues.isDynamic = res.data.isDynamic ?? false;
+			groupValues.filterField = res.data.filterField ?? null;
+			groupValues.filterValue = res.data.filterValue ?? null;
 		} catch (err) {
 			addToast('Failed to load group', 'Error');
 			console.error('failed to load group', err);
@@ -395,16 +402,35 @@
 <HeadTitle title="Group ({groupValues.name}" />
 <main>
 	<Headline>Group Recipients</Headline>
-	<SubHeadline>{groupValues.name}</SubHeadline>
-	<BigButton
-		on:click={openAddRecipientsModal}
-		{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Add Recipients</BigButton
-	>
-	<BigButton
-		on:click={openImportModal}
-		{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Import from CSV</BigButton
-	>
-	<SubHeadline>Recipients</SubHeadline>
+	<SubHeadline>
+		{#if groupValues.isDynamic}
+			<DynamicLabel />
+		{/if}
+		{groupValues.name}
+	</SubHeadline>
+	{#if groupValues.isDynamic}
+		<p class="text-sm font-semibold text-slate-600 dark:text-gray-400 mt-2">Dynamic group</p>
+		<p class="text-sm text-gray-500 dark:text-gray-400 mb-8">
+			Recipients where
+			<span class="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded"
+				>{groupValues.filterField}</span
+			>
+			equals
+			<span class="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded"
+				>{groupValues.filterValue}</span
+			>
+			are included automatically.
+		</p>
+	{:else}
+		<BigButton
+			on:click={openAddRecipientsModal}
+			{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Add Recipients</BigButton
+		>
+		<BigButton
+			on:click={openImportModal}
+			{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Import from CSV</BigButton
+		>
+	{/if}
 	<Table
 		columns={[
 			{ column: 'Email', size: 'large' },
@@ -456,10 +482,12 @@
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
-						<TableDeleteButton
-							on:click={() => openDeleteAlert(recipient)}
-							{...globalButtonDisabledAttributes(recipient, contextCompanyID)}
-						></TableDeleteButton>
+						{#if !groupValues.isDynamic}
+							<TableDeleteButton
+								on:click={() => openDeleteAlert(recipient)}
+								{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}
+							></TableDeleteButton>
+						{/if}
 					</TableDropDownEllipsis>
 				</TableCellAction>
 			</TableRow>

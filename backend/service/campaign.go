@@ -290,19 +290,47 @@ func (c *Campaign) schedule(
 			group, err := c.RecipientGroupRepository.GetByID(
 				ctx,
 				groupID,
-				&repository.RecipientGroupOption{
-					WithRecipients: true,
-				},
+				&repository.RecipientGroupOption{},
 			)
 			if err != nil {
 				c.Logger.Errorw("failed to get recipient group by id", "error", err)
 				return errs.Wrap(err)
 			}
-			recps := group.Recipients
-			if recps == nil {
-				c.Logger.Error("recipient group did not load recipients")
-				return errors.New("recipient group did not load recipients")
+
+			var recps []*model.Recipient
+			// dynamic groups resolve members via their filter query at schedule time
+			isDynamic := group.IsDynamic.IsSpecified() && !group.IsDynamic.IsNull() && group.IsDynamic.MustGet()
+			if isDynamic {
+				result, err := c.RecipientGroupRepository.GetRecipientsByGroupID(
+					ctx,
+					groupID,
+					&repository.RecipientOption{},
+				)
+				if err != nil {
+					c.Logger.Errorw("failed to get dynamic group recipients", "error", err)
+					return errs.Wrap(err)
+				}
+				recps = result.Rows
+			} else {
+				// static groups: reload with recipients preloaded from the junction table
+				groupWithRecipients, err := c.RecipientGroupRepository.GetByID(
+					ctx,
+					groupID,
+					&repository.RecipientGroupOption{
+						WithRecipients: true,
+					},
+				)
+				if err != nil {
+					c.Logger.Errorw("failed to get recipient group recipients", "error", err)
+					return errs.Wrap(err)
+				}
+				recps = groupWithRecipients.Recipients
+				if recps == nil {
+					c.Logger.Error("recipient group did not load recipients")
+					return errors.New("recipient group did not load recipients")
+				}
 			}
+
 			// collect all and remove duplicates
 			for _, recp := range recps {
 				id := recp.ID.MustGet().String()

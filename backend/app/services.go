@@ -122,6 +122,7 @@ func NewServices(
 		CampaignRepository:          repositories.Campaign,
 		CampaignRecipientRepository: repositories.CampaignRecipient,
 	}
+
 	recipientGroup := &service.RecipientGroup{
 		Common:                      common,
 		CampaignRepository:          repositories.Campaign,

@@ -42,6 +42,13 @@ func (r *RecipientGroup) Create(
 		r.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
+	// if dynamic, validate that filter fields are present, allowed, and non-empty
+	isDynamic := group.IsDynamic.IsSpecified() && !group.IsDynamic.IsNull() && group.IsDynamic.MustGet()
+	if isDynamic {
+		if err := group.ValidateDynamic(); err != nil {
+			return nil, errs.Wrap(err)
+		}
+	}
 	// check uniqueness
 	var companyID *uuid.UUID
 	if cid, err := group.CompanyID.Get(); err == nil {
@@ -112,7 +119,7 @@ func (r *RecipientGroup) Import(
 		return nil, validate.WrapErrorWithField(errors.New("no recipients"), "add recipients")
 	}
 	// check that the recipient group exists
-	_, err = r.RecipientGroupRepository.GetByID(
+	group, err := r.RecipientGroupRepository.GetByID(
 		ctx,
 		recipientGroupID,
 		&repository.RecipientGroupOption{},
@@ -120,6 +127,10 @@ func (r *RecipientGroup) Import(
 	if err != nil {
 		r.Logger.Debugw("failed to import recipients - failed to get recipient group", "error", err)
 		return nil, err
+	}
+	// dynamic groups do not support explicit membership via import
+	if group.IsDynamic.IsSpecified() && !group.IsDynamic.IsNull() && group.IsDynamic.MustGet() {
+		return nil, validate.WrapErrorWithField(errors.New("cannot import recipients into a dynamic group"), "group")
 	}
 	result, err := r.RecipientService.Import(
 		ctx,
@@ -346,6 +357,34 @@ func (r *RecipientGroup) UpdateByID(
 		}
 		current.Name.Set(name)
 	}
+	// disallow toggling isDynamic after creation
+	if incoming.IsDynamic.IsSpecified() && !incoming.IsDynamic.IsNull() {
+		currentIsDynamic := current.IsDynamic.IsSpecified() && !current.IsDynamic.IsNull() && current.IsDynamic.MustGet()
+		if incoming.IsDynamic.MustGet() != currentIsDynamic {
+			return validate.WrapErrorWithField(errors.New("cannot change after creation"), "isDynamic")
+		}
+	}
+
+	isDynamic := current.IsDynamic.IsSpecified() && !current.IsDynamic.IsNull() && current.IsDynamic.MustGet()
+	if isDynamic {
+		// propagate filter field/value updates; ValidateDynamic carries the allowlist check
+		if incoming.FilterField.IsSpecified() && !incoming.FilterField.IsNull() {
+			current.FilterField.Set(incoming.FilterField.MustGet())
+		}
+		if incoming.FilterValue.IsSpecified() && !incoming.FilterValue.IsNull() {
+			current.FilterValue.Set(incoming.FilterValue.MustGet())
+		}
+		// re-validate the merged state so allowlist and length rules are enforced
+		if err := current.ValidateDynamic(); err != nil {
+			return errs.Wrap(err)
+		}
+	} else {
+		// reject filter field/value changes on a static group
+		if (incoming.FilterField.IsSpecified() && !incoming.FilterField.IsNull()) ||
+			(incoming.FilterValue.IsSpecified() && !incoming.FilterValue.IsNull()) {
+			return validate.WrapErrorWithField(errors.New("cannot set filter fields on a static group"), "filterField")
+		}
+	}
 	// update recipient group
 	err = r.RecipientGroupRepository.UpdateByID(
 		ctx,
@@ -363,7 +402,8 @@ func (r *RecipientGroup) UpdateByID(
 	return nil
 }
 
-// AddRecipients adds recipients to a recipient group
+// AddRecipients adds recipients to a recipient group.
+// returns an error if the group is dynamic, as membership is derived from the filter query.
 func (r *RecipientGroup) AddRecipients(
 	ctx context.Context,
 	session *model.Session,
@@ -392,6 +432,10 @@ func (r *RecipientGroup) AddRecipients(
 	if err != nil {
 		r.Logger.Errorw("failed to add recipients - failed to get recipient group", "error", err)
 		return err
+	}
+	// dynamic groups do not support explicit membership
+	if group.IsDynamic.IsSpecified() && !group.IsDynamic.IsNull() && group.IsDynamic.MustGet() {
+		return validate.WrapErrorWithField(errors.New("cannot add recipients to a dynamic group"), "group")
 	}
 	// check if the recipients can be added to group
 	for _, recipientID := range recipients {
@@ -440,7 +484,8 @@ func (r *RecipientGroup) AddRecipients(
 	return nil
 }
 
-// RemoveRecipients removes a recipient from a recipient group
+// RemoveRecipients removes recipients from a recipient group.
+// returns an error if the group is dynamic, as membership is derived from the filter query.
 func (r *RecipientGroup) RemoveRecipients(
 	ctx context.Context,
 	session *model.Session,
@@ -459,6 +504,19 @@ func (r *RecipientGroup) RemoveRecipients(
 	if !isAuthorized {
 		r.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
+	}
+	// dynamic groups do not support explicit membership removal
+	existingGroup, err := r.RecipientGroupRepository.GetByID(
+		ctx,
+		groupID,
+		&repository.RecipientGroupOption{},
+	)
+	if err != nil {
+		r.Logger.Errorw("failed to remove recipients - failed to get recipient group", "error", err)
+		return err
+	}
+	if existingGroup.IsDynamic.IsSpecified() && !existingGroup.IsDynamic.IsNull() && existingGroup.IsDynamic.MustGet() {
+		return validate.WrapErrorWithField(errors.New("cannot remove recipients from a dynamic group"), "group")
 	}
 	// anonymize recipients in any recipient-campaign data
 	for _, recpID := range recipientIDs {
@@ -527,7 +585,8 @@ func (r *RecipientGroup) DeleteByID(
 		r.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	// get all recipients in group
+	// get all recipients in group; for dynamic groups the junction table is empty so we
+	// must resolve members via the filter query before anonymizing campaign data
 	group, err := r.RecipientGroupRepository.GetByID(
 		ctx,
 		id,
@@ -535,9 +594,30 @@ func (r *RecipientGroup) DeleteByID(
 			WithRecipients: true,
 		},
 	)
-	if len(group.Recipients) > 0 {
+	if err != nil {
+		r.Logger.Errorw("failed to delete recipient group - failed to get recipient group", "error", err)
+		return err
+	}
+
+	recipients := group.Recipients
+	isDynamic := group.IsDynamic.IsSpecified() && !group.IsDynamic.IsNull() && group.IsDynamic.MustGet()
+	if isDynamic {
+		// dynamic groups carry no junction-table rows; resolve members via filter query
+		dynamicResult, err := r.RecipientGroupRepository.GetRecipientsByGroupID(
+			ctx,
+			id,
+			&repository.RecipientOption{},
+		)
+		if err != nil {
+			r.Logger.Errorw("failed to delete recipient group - failed to get dynamic group recipients", "error", err)
+			return err
+		}
+		recipients = dynamicResult.Rows
+	}
+
+	if len(recipients) > 0 {
 		// anonymize recipients in any recipient-campaign data
-		for _, recipient := range group.Recipients {
+		for _, recipient := range recipients {
 			anonymizedID := uuid.New()
 			recpID := recipient.ID.MustGet()
 
