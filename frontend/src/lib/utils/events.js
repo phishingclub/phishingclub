@@ -50,6 +50,7 @@ const eventNameMap = {
 	campaign_scheduled: { name: 'Scheduled', priority: 10 },
 	campaign_active: { name: 'Active', priority: 20 },
 	campaign_self_managed: { name: 'Self managed', priority: 20 },
+	campaign_pending_schedule: { name: 'Pending Schedule', priority: 5 },
 	campaign_closed: { name: 'Closed', priority: 30, color: 'bg-closed' }
 };
 

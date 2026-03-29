@@ -9,6 +9,7 @@
 	export let optional = false;
 	export let id = null;
 	export let inline = false;
+	export let disabled = false;
 
 	let parentForm = null;
 	let parentFormResetListener = null;
@@ -44,6 +45,8 @@
 	class:flex-col={!inline}
 	class:flex-row={inline}
 	class:items-center={inline}
+	class:opacity-50={disabled}
+	class:cursor-not-allowed={disabled}
 >
 	<div class="flex items-center">
 		<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
@@ -65,7 +68,11 @@
 		{/if}
 	</div>
 	<div class="mt-1" class:mt-0={inline} class:ml-3={inline}>
-		<label class="relative flex items-center cursor-pointer">
+		<label
+			class="relative flex items-center"
+			class:cursor-pointer={!disabled}
+			class:cursor-not-allowed={disabled}
+		>
 			<input
 				{id}
 				type="checkbox"
@@ -74,6 +81,7 @@
 				bind:checked={value}
 				on:change
 				tabindex="0"
+				{disabled}
 			/>
 			<div
 				class="w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded

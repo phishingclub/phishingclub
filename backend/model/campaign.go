@@ -28,11 +28,14 @@ type Campaign struct {
 	SortOrder           nullable.Nullable[vo.CampaignSendingOrder]   `json:"sortOrder"`
 	SendStartAt         nullable.Nullable[time.Time]                 `json:"sendStartAt"`
 	SendEndAt           nullable.Nullable[time.Time]                 `json:"sendEndAt"`
+	ScheduleAt          nullable.Nullable[time.Time]                 `json:"scheduleAt"`
 	ConstraintWeekDays  nullable.Nullable[vo.CampaignWeekDays]       `json:"constraintWeekDays"`
 	ConstraintStartTime nullable.Nullable[vo.CampaignTimeConstraint] `json:"constraintStartTime"`
 	ConstraintEndTime   nullable.Nullable[vo.CampaignTimeConstraint] `json:"constraintEndTime"`
 
-	// jitter is used only during scheduling, not persisted to database
+	// jitter is persisted to the database only when ScheduleAt is set (late-scheduling),
+	// so the task runner can apply it when schedule() is called hours later.
+	// For immediately-scheduled campaigns jitter lives in memory only and is never written to the DB.
 	JitterMin nullable.Nullable[int] `json:"jitterMin,omitempty"`
 	JitterMax nullable.Nullable[int] `json:"jitterMax,omitempty"`
 
@@ -410,6 +413,12 @@ func (c *Campaign) ToDBMap() map[string]any {
 			m["send_end_at"] = utils.RFC3339UTC(v)
 		}
 	}
+	if c.ScheduleAt.IsSpecified() {
+		m["schedule_at"] = nil
+		if v, err := c.ScheduleAt.Get(); err == nil {
+			m["schedule_at"] = utils.RFC3339UTC(v)
+		}
+	}
 	if c.CloseAt.IsSpecified() {
 		m["close_at"] = nil
 		if v, err := c.CloseAt.Get(); err == nil {
@@ -503,6 +512,18 @@ func (c *Campaign) ToDBMap() map[string]any {
 	}
 	if v, err := c.NotableEventID.Get(); err == nil {
 		m["notable_event_id"] = v.String()
+	}
+	if c.JitterMin.IsSpecified() {
+		m["jitter_min"] = nil
+		if v, err := c.JitterMin.Get(); err == nil {
+			m["jitter_min"] = v
+		}
+	}
+	if c.JitterMax.IsSpecified() {
+		m["jitter_max"] = nil
+		if v, err := c.JitterMax.Get(); err == nil {
+			m["jitter_max"] = v
+		}
 	}
 
 	return m

@@ -118,6 +118,33 @@ func (c *Campaign) Create(
 			return nil, errs.Wrap(err)
 		}
 	}
+	// late-schedule (indicated by a non-null schedule_at) is not compatible with self-managed campaigns
+	if campaign.ScheduleAt.IsSpecified() && !campaign.ScheduleAt.IsNull() {
+		if campaign.IsSelfManaged() {
+			return nil, validate.WrapErrorWithField(
+				errors.New("late scheduling is not available for self-managed campaigns"),
+				"scheduleAt",
+			)
+		}
+		// scheduleAt must be in the future
+		scheduleAt := campaign.ScheduleAt.MustGet()
+		if !scheduleAt.After(time.Now().UTC()) {
+			return nil, validate.WrapErrorWithField(
+				errors.New("schedule time must be in the future"),
+				"scheduleAt",
+			)
+		}
+		// send_start_at must be more than 24h after schedule_at
+		if campaign.SendStartAt.IsSpecified() && !campaign.SendStartAt.IsNull() {
+			sendStartAt := campaign.SendStartAt.MustGet()
+			if sendStartAt.Sub(scheduleAt) < 24*time.Hour {
+				return nil, validate.WrapErrorWithField(
+					errors.New("send start must be at least 24 hours after the schedule-at time"),
+					"scheduleAt",
+				)
+			}
+		}
+	}
 	// validate
 	if err := campaign.Validate(); err != nil {
 		return nil, errs.Wrap(err)
@@ -213,14 +240,26 @@ func (c *Campaign) Create(
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	// preserve jitter values from original campaign (not persisted to db)
-	createdCampaign.JitterMin = campaign.JitterMin
-	createdCampaign.JitterMax = campaign.JitterMax
-	err = c.schedule(ctx, session, createdCampaign)
-	if err != nil {
-		c.Logger.Errorw("failed to schedule campaign", "error", err)
-		// TODO we should delete the campaign as it was not scheduled
-		return nil, errs.Wrap(err)
+	if createdCampaign.ScheduleAt.IsSpecified() && !createdCampaign.ScheduleAt.IsNull() {
+		// Late-scheduling: persist jitter to the DB so the task runner can apply it
+		// when schedule() is called hours later. The in-memory copy on createdCampaign
+		// is set too so setMostNotableCampaignEvent's UpdateByID writes the columns.
+		createdCampaign.JitterMin = campaign.JitterMin
+		createdCampaign.JitterMax = campaign.JitterMax
+		err = c.setMostNotableCampaignEvent(ctx, createdCampaign, data.EVENT_CAMPAIGN_PENDING_SCHEDULE)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+	} else {
+		// Immediate scheduling: jitter lives in memory only for this call, never written to DB.
+		createdCampaign.JitterMin = campaign.JitterMin
+		createdCampaign.JitterMax = campaign.JitterMax
+		err = c.schedule(ctx, session, createdCampaign)
+		if err != nil {
+			c.Logger.Errorw("failed to schedule campaign", "error", err)
+			// TODO we should delete the campaign as it was not scheduled
+			return nil, errs.Wrap(err)
+		}
 	}
 	ae.Details["id"] = id.String()
 	c.AuditLogAuthorized(ae)
@@ -1482,6 +1521,15 @@ func (c *Campaign) UpdateByID(
 	if v, err := incoming.AnonymizedAt.Get(); err == nil {
 		current.AnonymizedAt.Set(v.Truncate(time.Minute))
 	}
+	if v, err := incoming.ScheduleAt.Get(); err == nil {
+		current.ScheduleAt.Set(v)
+	} else if incoming.ScheduleAt.IsSpecified() {
+		// incoming was explicitly null — clear the scheduled time, reverting to immediate scheduling
+		current.ScheduleAt.SetNull()
+		// also clear any persisted jitter — it was stored for late-scheduling and is no longer needed
+		current.JitterMin.SetNull()
+		current.JitterMax.SetNull()
+	}
 	if v, err := incoming.RecipientGroupIDs.Get(); err == nil {
 		current.RecipientGroupIDs.Set(v)
 	}
@@ -1565,6 +1613,47 @@ func (c *Campaign) UpdateByID(
 			current.EvasionPageID.Set(incoming.EvasionPageID.MustGet())
 		}
 	}
+	// late-schedule (indicated by a non-null schedule_at) is not compatible with self-managed campaigns
+	if current.ScheduleAt.IsSpecified() && !current.ScheduleAt.IsNull() {
+		if current.IsSelfManaged() {
+			return validate.WrapErrorWithField(
+				errors.New("late scheduling is not available for self-managed campaigns"),
+				"scheduleAt",
+			)
+		}
+		// reject scheduleAt if the campaign has already moved past pending_schedule —
+		// at that point recipients have been resolved and scheduling is done; there is
+		// nothing meaningful for a new scheduleAt to do and it would revert the campaign
+		// back to pending_schedule state unexpectedly.
+		if currentNotableEventID, err := current.NotableEventID.Get(); err == nil {
+			if currentEventName, ok := cache.EventNameByID[currentNotableEventID.String()]; ok {
+				if cache.IsMoreNotableCampaignRecipientEvent(currentEventName, data.EVENT_CAMPAIGN_PENDING_SCHEDULE) {
+					return validate.WrapErrorWithField(
+						errors.New("scheduleAt cannot be set on a campaign that has already been scheduled"),
+						"scheduleAt",
+					)
+				}
+			}
+		}
+		// scheduleAt must be in the future
+		scheduleAt := current.ScheduleAt.MustGet()
+		if !scheduleAt.After(time.Now().UTC()) {
+			return validate.WrapErrorWithField(
+				errors.New("schedule time must be in the future"),
+				"scheduleAt",
+			)
+		}
+		// send_start_at must be more than 24h after schedule_at
+		if current.SendStartAt.IsSpecified() && !current.SendStartAt.IsNull() {
+			sendStartAt := current.SendStartAt.MustGet()
+			if sendStartAt.Sub(scheduleAt) < 24*time.Hour {
+				return validate.WrapErrorWithField(
+					errors.New("send start must be at least 24 hours after the schedule-at time"),
+					"scheduleAt",
+				)
+			}
+		}
+	}
 	// validate and update
 	if err := current.Validate(); err != nil {
 		return errs.Wrap(err)
@@ -1638,13 +1727,27 @@ func (c *Campaign) UpdateByID(
 		c.Logger.Errorw("failed to add recipient groups", "error", err)
 		return errs.Wrap(err)
 	}
-	// preserve jitter values from incoming campaign (not persisted to db)
-	current.JitterMin = incoming.JitterMin
-	current.JitterMax = incoming.JitterMax
-	err = c.schedule(ctx, session, current)
-	if err != nil {
-		c.Logger.Errorw("failed to re-schedule campaign", "error", err)
-		return errs.Wrap(err)
+	if current.ScheduleAt.IsSpecified() && !current.ScheduleAt.IsNull() {
+		// Late-scheduling: persist jitter to the DB so the task runner can apply it
+		// when schedule() is called hours later. Only overwrite jitter when the incoming
+		// payload explicitly specifies it — unspecified means "leave existing value alone".
+		if incoming.JitterMin.IsSpecified() {
+			current.JitterMin = incoming.JitterMin
+			current.JitterMax = incoming.JitterMax
+		}
+		err = c.setMostNotableCampaignEvent(ctx, current, data.EVENT_CAMPAIGN_PENDING_SCHEDULE)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+	} else {
+		// Immediate scheduling: jitter lives in memory only for this call, never written to DB.
+		current.JitterMin = incoming.JitterMin
+		current.JitterMax = incoming.JitterMax
+		err = c.schedule(ctx, session, current)
+		if err != nil {
+			c.Logger.Errorw("failed to re-schedule campaign", "error", err)
+			return errs.Wrap(err)
+		}
 	}
 	c.AuditLogAuthorized(ae)
 	return nil
@@ -2902,6 +3005,65 @@ func (c *Campaign) HandleAnonymizeCampaigns(
 	if len(affectedIds) > 0 {
 		ae.Details["anonymizedCampaignIds"] = affectedIds
 		c.AuditLogAuthorized(ae)
+	}
+	return nil
+}
+
+// SchedulePendingCampaigns is called by the task runner. It finds all campaigns
+// whose schedule_at time has passed and triggers schedule() for each.
+func (c *Campaign) SchedulePendingCampaigns(
+	ctx context.Context,
+	session *model.Session,
+) error {
+	ae := NewAuditEvent("Campaign.SchedulePendingCampaigns", session)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	pending, err := c.CampaignRepository.GetReadyToLateSchedule(
+		ctx,
+		&repository.CampaignOption{
+			WithRecipientGroups: true,
+			WithAllowDeny:       true,
+		},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaigns ready for late scheduling", "error", err)
+		return errs.Wrap(err)
+	}
+	for _, campaign := range pending.Rows {
+		campaignID := campaign.ID.MustGet()
+		// Clear schedule_at BEFORE calling schedule() so that a concurrent task runner tick
+		// or a second server instance cannot pick up the same campaign and double-schedule it.
+		// If schedule() subsequently fails the campaign will remain in pending_schedule state
+		// with a null schedule_at; an operator can re-set schedule_at to retry.
+		clearScheduleAt := model.Campaign{}
+		clearScheduleAt.ScheduleAt.SetNull()
+		if err := c.CampaignRepository.UpdateByID(ctx, &campaignID, &clearScheduleAt); err != nil {
+			c.Logger.Errorw("failed to clear schedule_at before late-scheduling, skipping campaign", "campaignID", campaignID, "error", err)
+			// skip this campaign — better to retry next tick than to risk a double-schedule
+			continue
+		}
+		// Jitter is loaded from the DB columns (persisted at creation/update time).
+		if err := c.schedule(ctx, session, campaign); err != nil {
+			c.Logger.Errorw("failed to late-schedule campaign", "campaignID", campaignID, "error", err)
+			// continue to next — don't abort the whole run
+			continue
+		}
+		// Clear persisted jitter now that scheduling is done — it is no longer needed.
+		clearJitter := model.Campaign{}
+		clearJitter.JitterMin.SetNull()
+		clearJitter.JitterMax.SetNull()
+		if err := c.CampaignRepository.UpdateByID(ctx, &campaignID, &clearJitter); err != nil {
+			c.Logger.Errorw("failed to clear jitter after late-scheduling", "campaignID", campaignID, "error", err)
+			// non-fatal — jitter columns being non-null is harmless after scheduling
+		}
+		c.Logger.Infow("late-scheduled campaign", "campaignID", campaignID)
 	}
 	return nil
 }

@@ -1366,6 +1366,41 @@ func (r *Campaign) GetReadyToAnonymize(
 	return result, nil
 }
 
+// GetReadyToLateSchedule returns campaigns where schedule_at <= now and
+// the campaign has not yet been scheduled (notable event is still pending_schedule).
+func (r *Campaign) GetReadyToLateSchedule(
+	ctx context.Context,
+	options *CampaignOption,
+) (*model.Result[model.Campaign], error) {
+	result := model.NewEmptyResult[model.Campaign]()
+	db := r.load(r.DB, options)
+	db, err := useQuery(db, database.CAMPAIGN_TABLE, options.QueryArgs)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	pendingEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_PENDING_SCHEDULE]
+	var dbCampaigns []database.Campaign
+	res := db.
+		Where("schedule_at <= ? AND notable_event_id = ?", utils.NowRFC3339UTC(), pendingEventID).
+		Find(&dbCampaigns)
+	if res.Error != nil {
+		return result, res.Error
+	}
+	hasNextPage, err := useHasNextPage(db, database.CAMPAIGN_TABLE, options.QueryArgs)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	result.HasNextPage = hasNextPage
+	for _, dbCampaign := range dbCampaigns {
+		campaign, err := ToCampaign(&dbCampaign)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		result.Rows = append(result.Rows, campaign)
+	}
+	return result, nil
+}
+
 // SaveEvent saves a campaign event
 func (r *Campaign) SaveEvent(
 	ctx context.Context,
@@ -1793,6 +1828,24 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	} else {
 		sendEndAt.SetNull()
 	}
+	var scheduleAt nullable.Nullable[time.Time]
+	if row.ScheduleAt != nil {
+		scheduleAt = nullable.NewNullableWithValue(*row.ScheduleAt)
+	} else {
+		scheduleAt.SetNull()
+	}
+	var jitterMin nullable.Nullable[int]
+	if row.JitterMin != nil {
+		jitterMin = nullable.NewNullableWithValue(*row.JitterMin)
+	} else {
+		jitterMin.SetNull()
+	}
+	var jitterMax nullable.Nullable[int]
+	if row.JitterMax != nil {
+		jitterMax = nullable.NewNullableWithValue(*row.JitterMax)
+	} else {
+		jitterMax.SetNull()
+	}
 	saveSubmittedData := nullable.NewNullableWithValue(row.SaveSubmittedData)
 	saveBrowserMetadata := nullable.NewNullableWithValue(row.SaveBrowserMetadata)
 	isAnonymous := nullable.NewNullableWithValue(row.IsAnonymous)
@@ -1927,6 +1980,9 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		SortOrder:           sortOrder,
 		SendStartAt:         sendStartAt,
 		SendEndAt:           sendEndAt,
+		ScheduleAt:          scheduleAt,
+		JitterMin:           jitterMin,
+		JitterMax:           jitterMax,
 		ConstraintWeekDays:  constraintWeekDays,
 		ConstraintStartTime: constraintStartTime,
 		ConstraintEndTime:   constraintEndTime,

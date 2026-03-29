@@ -25,6 +25,15 @@ type Campaign struct {
 	SortOrder    string     `gorm:";"` // 'asc,desc,random'
 	SendStartAt  *time.Time `gorm:"index;"`
 	SendEndAt    *time.Time `gorm:"index;"`
+	// ScheduleAt is set when the campaign uses late-scheduling.
+	// the task runner will call schedule() when now >= ScheduleAt.
+	// null means the campaign was scheduled immediately at creation.
+	ScheduleAt *time.Time `gorm:"index;"`
+	// JitterMin and JitterMax are persisted only when ScheduleAt is set (late-scheduling).
+	// They are cleared after the campaign is scheduled by the task runner.
+	// For immediately-scheduled campaigns these columns remain null.
+	JitterMin *int `gorm:""`
+	JitterMax *int `gorm:""`
 
 	// ConstraintWeekDays is a binary format.
 	// 0b00000001 = 1 = sunday
