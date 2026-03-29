@@ -62,6 +62,11 @@
 	let isSSOEnabled = false;
 	let isSSODeleteAlertVisible = false;
 
+	// auto-prune settings
+	let autoPruneOption = { enabled: false, companies: [] };
+	let autoPruneEnabled = false;
+	let autoPruneError = '';
+
 	// Import functionality
 	let importError = '';
 	let isImportSubmitting = false;
@@ -108,6 +113,7 @@
 			await refreshUpdateCached();
 			await refreshBackupList();
 			await refreshDisplayMode();
+			await refreshAutoPrune();
 			if (!ssoSettingsFormValues.redirectURL) {
 				ssoSettingsFormValues.redirectURL = `${location.origin}/api/v1/sso/entra-id/auth`;
 			}
@@ -117,6 +123,37 @@
 	});
 
 	// component logic
+	async function refreshAutoPrune() {
+		try {
+			const res = await api.option.getAutoPrune();
+			if (res.success) {
+				autoPruneOption = res.data;
+				autoPruneEnabled = res.data.enabled === true;
+			}
+		} catch (e) {
+			console.error('failed to load auto-prune setting', e);
+		}
+	}
+
+	async function setAutoPruneValue(enabled) {
+		autoPruneError = '';
+		// read-modify-write: preserve per-company entries
+		const updated = { ...autoPruneOption, enabled };
+		try {
+			const res = await api.option.setAutoPrune(updated);
+			if (!res.success) {
+				autoPruneError = res.error;
+				return;
+			}
+			autoPruneOption = updated;
+			autoPruneEnabled = enabled;
+			addToast('Auto-prune setting saved', 'Success');
+		} catch (e) {
+			autoPruneError = 'Failed to save auto-prune setting';
+			console.error('failed to set auto-prune setting', e);
+		}
+	}
+
 	async function refreshSettings() {
 		try {
 			const res = immediateResponseHandler(await api.option.get('max_file_upload_size_mb'));
@@ -575,6 +612,67 @@
 							{:else}
 								<Button size={'large'} on:click={openSSOModal}>Configure SSO</Button>
 							{/if}
+						</div>
+					</div>
+				</div>
+
+				<!-- Auto-Prune Recipients Card -->
+				<div
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
+				>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Auto-Prune Recipients
+					</h2>
+					<div class="flex flex-col h-full">
+						<div class="space-y-4">
+							<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+								Automatically delete orphaned recipients (not in any group) on a hourly schedule.
+							</p>
+							<div class="space-y-3">
+								<label
+									class="flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors {autoPruneEnabled
+										? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+										: 'border-gray-300 dark:border-gray-600'}"
+								>
+									<input
+										type="radio"
+										checked={autoPruneEnabled}
+										on:change={() => setAutoPruneValue(true)}
+										class="mt-0.5 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+									/>
+									<div class="text-left flex-1">
+										<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
+											Enabled
+										</span>
+										<span class="text-xs text-gray-500 dark:text-gray-400 block mt-0.5">
+											Orphaned recipients are deleted automatically each hour
+										</span>
+									</div>
+								</label>
+								<label
+									class="flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors {!autoPruneEnabled
+										? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500 dark:border-blue-600'
+										: 'border-gray-300 dark:border-gray-600'}"
+								>
+									<input
+										type="radio"
+										checked={!autoPruneEnabled}
+										on:change={() => setAutoPruneValue(false)}
+										class="mt-0.5 w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:ring-2"
+									/>
+									<div class="text-left flex-1">
+										<span class="text-sm font-medium text-gray-900 dark:text-gray-100 block">
+											Disabled
+										</span>
+										<span class="text-xs text-gray-500 dark:text-gray-400 block mt-0.5">
+											Orphaned recipients are kept until manually deleted
+										</span>
+									</div>
+								</label>
+							</div>
+							<FormError message={autoPruneError} />
 						</div>
 					</div>
 				</div>

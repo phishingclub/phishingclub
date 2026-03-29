@@ -70,7 +70,7 @@ func (is *InitialSetup) HandleInitialSetup(ctx context.Context) error {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("%w: could not get '%s' option", err, data.OptionKeyIsInstalled)
 		}
-		key := vo.NewString64Must(data.OptionKeyIsInstalled)
+		key := vo.NewString127Must(data.OptionKeyIsInstalled)
 		value := vo.NewOptionalString1MBMust(data.OptionValueIsNotInstalled)
 		isInstalledOptionWithoutID := model.Option{
 			Key:   *key,
@@ -101,7 +101,7 @@ func (is *InitialSetup) HandleInitialSetup(ctx context.Context) error {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("%w: could not get '%s' option", err, data.OptionKeyInstanceID)
 		}
-		key := vo.NewString64Must(data.OptionKeyInstanceID)
+		key := vo.NewString127Must(data.OptionKeyInstanceID)
 		instanceID := uuid.New()
 		value := vo.NewOptionalString1MBMust(instanceID.String())
 		instanceIDOption = &model.Option{
@@ -318,7 +318,7 @@ func (in *Install) install(g *gin.Context, tx *gorm.DB) bool {
 	}
 	// update installed option to installed
 	option := model.Option{
-		Key:   *vo.NewString64Must(data.OptionKeyIsInstalled),
+		Key:   *vo.NewString127Must(data.OptionKeyIsInstalled),
 		Value: *vo.NewOptionalString1MBMust(data.OptionValueIsInstalled),
 	}
 	err = in.OptionRepository.UpdateByKeyWithTransaction(

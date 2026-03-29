@@ -325,6 +325,33 @@ func SeedSettings(
 		}
 	}
 	{
+		// seed auto-prune orphaned recipients option as JSON (disabled by default)
+		id := uuid.New()
+		var c int64
+		res := db.
+			Model(&database.Option{}).
+			Where("key = ?", data.OptionKeyAutoPruneOrphanedRecipients).
+			Count(&c)
+
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if c == 0 {
+			defaultVal, err := model.NewAutoPruneOptionDefault().ToJSON()
+			if err != nil {
+				return errs.Wrap(err)
+			}
+			res = db.Create(&database.Option{
+				ID:    &id,
+				Key:   data.OptionKeyAutoPruneOrphanedRecipients,
+				Value: string(defaultVal),
+			})
+			if res.Error != nil {
+				return errs.Wrap(res.Error)
+			}
+		}
+	}
+	{
 		// seed proxy cookie name
 		id := uuid.New()
 		var c int64

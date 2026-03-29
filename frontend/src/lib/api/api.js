@@ -1263,6 +1263,29 @@ export class API {
 			delete: async (companyID) => {
 				return await deleteJSON(this.getPath(`/company/scim/${companyID}`));
 			}
+		},
+		/**
+		 * Get the auto-prune orphaned recipients setting for a company.
+		 * Returns only the per-company enabled flag.
+		 *
+		 * @param {string} id - company ID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAutoPrune: async (id) => {
+			return await getJSON(this.getPath(`/company/${id}/option/auto-prune`));
+		},
+
+		/**
+		 * Set the auto-prune orphaned recipients setting for a company.
+		 *
+		 * @param {string} id - company ID
+		 * @param {boolean} enabled
+		 * @returns {Promise<ApiResponse>}
+		 */
+		setAutoPrune: async (id, enabled) => {
+			return await postJSON(this.getPath(`/company/${id}/option/auto-prune`), {
+				enabled: enabled
+			});
 		}
 	};
 
@@ -2287,6 +2310,27 @@ export class API {
 		 */
 		get: async (key) => {
 			return await getJSON(this.getPath(`/option/${key}`));
+		},
+
+		/**
+		 * Get the global auto-prune orphaned recipients setting.
+		 * Returns the full option including per-company entries.
+		 *
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAutoPrune: async () => {
+			return await getJSON(this.getPath(`/option/auto-prune`));
+		},
+
+		/**
+		 * Set the global auto-prune orphaned recipients setting.
+		 * The full option object (including per-company entries) must be supplied.
+		 *
+		 * @param {{ enabled: boolean, companies?: string[] }} option
+		 * @returns {Promise<ApiResponse>}
+		 */
+		setAutoPrune: async (option) => {
+			return await postJSON(this.getPath(`/option/auto-prune`), option);
 		},
 
 		/**

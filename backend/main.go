@@ -427,6 +427,8 @@ func main() {
 		CampaignService:     services.Campaign,
 		UpdateService:       services.Update,
 		MicrosoftDeviceCode: services.MicrosoftDeviceCode,
+		OptionService:       services.Option,
+		RecipientService:    services.Recipient,
 		Logger:              logger,
 	}
 

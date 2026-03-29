@@ -9,6 +9,6 @@ import (
 // Option is an Option
 type Option struct {
 	ID    nullable.Nullable[uuid.UUID] `json:"id"`
-	Key   vo.String64                  `json:"key"`
+	Key   vo.String127                 `json:"key"`
 	Value vo.OptionalString1MB         `json:"value"`
 }

@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/go-errors/errors"
+	"github.com/google/uuid"
 
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
@@ -189,6 +190,15 @@ func (o *Option) SetOptionByKey(
 				"display mode",
 			)
 		}
+	case data.OptionKeyAutoPruneOrphanedRecipients:
+		// stored as JSON — validate by parsing
+		if _, err := model.NewAutoPruneOptionFromJSON([]byte(v)); err != nil {
+			o.Logger.Debugw("invalid auto-prune option value", "value", v)
+			return validate.WrapErrorWithField(
+				errs.NewValidationError(errors.New("invalid value")),
+				"value",
+			)
+		}
 	case data.OptionKeyObfuscationTemplate:
 		// is allow listed
 	default:
@@ -210,6 +220,156 @@ func (o *Option) SetOptionByKey(
 		return err
 	}
 	o.AuditLogAuthorized(ae)
+	return nil
+}
+
+// GetAutoPruneOption returns the single auto-prune option row (requires global auth).
+// Both the global flag and all per-company entries are embedded in the returned value.
+func (o *Option) GetAutoPruneOption(
+	ctx context.Context,
+	session *model.Session,
+) (*model.AutoPruneOption, error) {
+	ae := NewAuditEvent("Option.GetAutoPruneOption", session)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+	o.AuditLogAuthorized(ae)
+	return o.getAutoPruneOption(ctx)
+}
+
+// SetAutoPruneOption persists the full auto-prune option as a single JSON row
+// (requires global auth). The caller supplies the complete AutoPruneOption
+// value including any per-company entries.
+func (o *Option) SetAutoPruneOption(
+	ctx context.Context,
+	session *model.Session,
+	autoPruneOpt *model.AutoPruneOption,
+) error {
+	ae := NewAuditEvent("Option.SetAutoPruneOption", session)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	if err := o.upsertAutoPruneOption(ctx, autoPruneOpt); err != nil {
+		return err
+	}
+	o.AuditLogAuthorized(ae)
+	return nil
+}
+
+// GetCompanyAutoPruneOption returns whether the given company has opted in to auto-pruning
+// by reading the single shared auto-prune option row (requires global auth).
+func (o *Option) GetCompanyAutoPruneOption(
+	ctx context.Context,
+	session *model.Session,
+	companyID *uuid.UUID,
+) (bool, error) {
+	ae := NewAuditEvent("Option.GetCompanyAutoPruneOption", session)
+	ae.Details["companyID"] = companyID.String()
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return false, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return false, errs.ErrAuthorizationFailed
+	}
+	opt, err := o.getAutoPruneOption(ctx)
+	if err != nil {
+		return false, err
+	}
+	o.AuditLogAuthorized(ae)
+	return opt.IsCompanyEnabled(companyID), nil
+}
+
+// SetCompanyAutoPruneOption updates the per-company enabled flag within the
+// single shared auto-prune option row (requires global auth).
+func (o *Option) SetCompanyAutoPruneOption(
+	ctx context.Context,
+	session *model.Session,
+	companyID *uuid.UUID,
+	enabled bool,
+) error {
+	ae := NewAuditEvent("Option.SetCompanyAutoPruneOption", session)
+	ae.Details["companyID"] = companyID.String()
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// read-modify-write the single row
+	opt, err := o.getAutoPruneOption(ctx)
+	if err != nil {
+		return err
+	}
+	opt.SetCompanyEnabled(companyID, enabled)
+	if err := o.upsertAutoPruneOption(ctx, opt); err != nil {
+		return err
+	}
+	o.AuditLogAuthorized(ae)
+	return nil
+}
+
+// GetAutoPruneOptionInternal returns the full auto-prune option without any
+// authorization check. intended for internal/task-runner use only.
+func (o *Option) GetAutoPruneOptionInternal(ctx context.Context) (*model.AutoPruneOption, error) {
+	return o.getAutoPruneOption(ctx)
+}
+
+// getAutoPruneOption reads the single auto-prune option row, returning the
+// default (all-disabled) value when the row does not exist yet.
+func (o *Option) getAutoPruneOption(ctx context.Context) (*model.AutoPruneOption, error) {
+	raw, err := o.OptionRepository.GetByKey(ctx, data.OptionKeyAutoPruneOrphanedRecipients)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.NewAutoPruneOptionDefault(), nil
+		}
+		o.Logger.Errorw("failed to get auto-prune option", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	return model.NewAutoPruneOptionFromJSON([]byte(raw.Value.String()))
+}
+
+// upsertAutoPruneOption inserts or updates the single auto-prune option row.
+func (o *Option) upsertAutoPruneOption(ctx context.Context, autoPruneOpt *model.AutoPruneOption) error {
+	opt, err := autoPruneOpt.ToOption()
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	_, getErr := o.OptionRepository.GetByKey(ctx, data.OptionKeyAutoPruneOrphanedRecipients)
+	if getErr != nil {
+		if !errors.Is(getErr, gorm.ErrRecordNotFound) {
+			o.Logger.Errorw("failed to check auto-prune option existence", "error", getErr)
+			return errs.Wrap(getErr)
+		}
+		// row does not exist yet — insert
+		if _, insertErr := o.OptionRepository.Insert(ctx, opt); insertErr != nil {
+			o.Logger.Errorw("failed to insert auto-prune option", "error", insertErr)
+			return errs.Wrap(insertErr)
+		}
+		return nil
+	}
+	// row exists — update
+	if updateErr := o.OptionRepository.UpdateByKey(ctx, opt); updateErr != nil {
+		o.Logger.Errorw("failed to update auto-prune option", "error", updateErr)
+		return errs.Wrap(updateErr)
+	}
 	return nil
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/utils"
+
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
 )
@@ -381,26 +382,68 @@ func (r *Recipient) GetOrphaned(
 ) (*model.Result[model.Recipient], error) {
 	result := model.NewEmptyResult[model.Recipient]()
 
-	// build optimized LEFT JOIN query for orphaned recipients
+	// build company scope filter applied to both the recipient table and the
+	// dynamic group subquery so they stay in the same scope.
 	var companyFilter string
+	var dynamicGroupCompanyFilter string
 	var args []interface{}
+	var countArgs []interface{}
 
 	if companyID != nil {
 		companyFilter = fmt.Sprintf("AND %s.company_id = ?", database.RECIPIENT_TABLE)
-		args = append(args, companyID)
+		dynamicGroupCompanyFilter = "AND rg.company_id = ?"
+		args = append(args, companyID, companyID)
+		countArgs = append(countArgs, companyID, companyID)
 	} else {
 		companyFilter = fmt.Sprintf("AND %s.company_id IS NULL", database.RECIPIENT_TABLE)
+		dynamicGroupCompanyFilter = "AND rg.company_id IS NULL"
 	}
 
-	query := fmt.Sprintf(`
-		SELECT %s.* FROM %s
+	// A recipient is orphaned when:
+	//   1. it has no row in the static many-to-many join table, AND
+	//   2. it does not match any dynamic group filter in the same company scope.
+	//
+	// The dynamic group exclusion subquery joins recipient_groups on the
+	// field/value columns so the filtering happens entirely in SQL, keeping
+	// pagination and counts accurate.
+	orphanCondition := fmt.Sprintf(`
 		LEFT JOIN %s rgr ON %s.id = rgr.recipient_id
-		WHERE rgr.recipient_id IS NULL %s`,
-		database.RECIPIENT_TABLE,
-		database.RECIPIENT_TABLE,
+		WHERE rgr.recipient_id IS NULL %s
+		AND %s.id NOT IN (
+			SELECT DISTINCT %s.id FROM %s
+			INNER JOIN %s rg
+				ON rg.is_dynamic = true
+				AND rg.filter_field != ''
+				AND rg.filter_value != ''
+				%s
+				AND (
+					(rg.filter_field = 'position'   AND %s.position   = rg.filter_value) OR
+					(rg.filter_field = 'department' AND %s.department = rg.filter_value) OR
+					(rg.filter_field = 'city'       AND %s.city       = rg.filter_value) OR
+					(rg.filter_field = 'country'    AND %s.country    = rg.filter_value) OR
+					(rg.filter_field = 'misc'       AND %s.misc       = rg.filter_value)
+				)
+		)`,
 		database.RECIPIENT_GROUP_RECIPIENT_TABLE,
 		database.RECIPIENT_TABLE,
 		companyFilter,
+		database.RECIPIENT_TABLE,
+		// subquery
+		database.RECIPIENT_TABLE,
+		database.RECIPIENT_TABLE,
+		database.RECIPIENT_GROUP_TABLE,
+		dynamicGroupCompanyFilter,
+		database.RECIPIENT_TABLE,
+		database.RECIPIENT_TABLE,
+		database.RECIPIENT_TABLE,
+		database.RECIPIENT_TABLE,
+	)
+
+	query := fmt.Sprintf(
+		"SELECT %s.* FROM %s %s",
+		database.RECIPIENT_TABLE,
+		database.RECIPIENT_TABLE,
+		orphanCondition,
 	)
 
 	// apply query args for sorting/pagination if provided
@@ -428,20 +471,17 @@ func (r *Recipient) GetOrphaned(
 		return result, dbRes.Error
 	}
 
-	// check for next page using raw query
+	// check for next page using the same orphan condition so the count
+	// reflects the dynamic-group exclusion too.
 	if options.QueryArgs != nil && options.QueryArgs.Limit > 0 {
-		countQuery := fmt.Sprintf(`
-			SELECT COUNT(*) FROM %s
-			LEFT JOIN %s rgr ON %s.id = rgr.recipient_id
-			WHERE rgr.recipient_id IS NULL %s`,
+		countQuery := fmt.Sprintf(
+			"SELECT COUNT(*) FROM %s %s",
 			database.RECIPIENT_TABLE,
-			database.RECIPIENT_GROUP_RECIPIENT_TABLE,
-			database.RECIPIENT_TABLE,
-			companyFilter,
+			orphanCondition,
 		)
 
 		var totalCount int64
-		if err := r.DB.Raw(countQuery, args...).Count(&totalCount).Error; err != nil {
+		if err := r.DB.Raw(countQuery, countArgs...).Count(&totalCount).Error; err != nil {
 			return result, errs.Wrap(err)
 		}
 
