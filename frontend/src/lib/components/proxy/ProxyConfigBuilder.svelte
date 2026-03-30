@@ -525,6 +525,7 @@
 				find: '',
 				replace: '',
 				from: 'response_body',
+				action: '',
 				path: '',
 				method: ''
 			}
@@ -592,6 +593,7 @@
 				find: '',
 				replace: '',
 				from: 'response_body',
+				action: '',
 				path: '',
 				method: ''
 			}
@@ -727,8 +729,40 @@
 	];
 	const engines = [
 		{ value: 'regex', label: 'Regex' },
-		{ value: 'dom', label: 'DOM' }
+		{ value: 'dom', label: 'DOM' },
+		{ value: 'header', label: 'Header' }
 	];
+
+	const headerActions = [
+		{ value: 'set', label: 'Set' },
+		{ value: 'add', label: 'Add' },
+		{ value: 'remove', label: 'Remove' }
+	];
+
+	const rewriteHeaderFromOptions = [
+		{ value: 'request_header', label: 'Request Header' },
+		{ value: 'response_header', label: 'Response Header' },
+		{ value: 'any', label: 'Any' }
+	];
+
+	function getFromOptionsForRewriteEngine(engine) {
+		if (engine === 'header') return rewriteHeaderFromOptions;
+		return fromOptions;
+	}
+
+	function getDefaultFromForRewriteEngine(engine) {
+		if (engine === 'header') return 'response_header';
+		return 'response_body';
+	}
+
+	function handleRewriteEngineChange(rule, newEngine) {
+		rule.engine = newEngine;
+		rule.from = getDefaultFromForRewriteEngine(newEngine);
+		if (newEngine !== 'dom') {
+			rule.action = newEngine === 'header' ? 'set' : '';
+		}
+		configData = configData;
+	}
 	const domActions = [
 		{ value: 'setText', label: 'Set Text' },
 		{ value: 'setHtml', label: 'Set HTML' },
@@ -1910,6 +1944,7 @@
 															bind:value={rule.engine}
 															options={engines}
 															size="normal"
+															on:change={() => handleRewriteEngineChange(rule, rule.engine)}
 														>
 															Engine
 														</TextFieldSelect>
@@ -1966,31 +2001,45 @@
 																>Also supports numeric list (1,3,5) or range (2-4)</span
 															>
 														</div>
-													{:else}
+													{:else if rule.engine === 'header'}
 														<div class="field-wrapper">
 															<TextFieldSelect
-																id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-from`}
-																bind:value={rule.from}
-																options={fromOptions}
+																id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-action`}
+																bind:value={rule.action}
+																options={headerActions}
 																size="normal"
 															>
-																From
+																Action
 															</TextFieldSelect>
 														</div>
 													{/if}
+													<div class="field-wrapper">
+														<TextFieldSelect
+															id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-from`}
+															bind:value={rule.from}
+															options={getFromOptionsForRewriteEngine(rule.engine)}
+															size="normal"
+														>
+															From
+														</TextFieldSelect>
+													</div>
 													<div class="field-wrapper full">
 														<TextField
 															width="full"
 															bind:value={rule.find}
 															placeholder={rule.engine === 'dom'
 																? 'div.logo, #header img'
-																: 'target\\.com'}
+																: rule.engine === 'header'
+																	? 'Server'
+																	: 'target\\.com'}
 															error={hasError(
 																`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.find`
 															)}
 														>
 															{#if rule.engine === 'dom'}
 																Selector (CSS)
+															{:else if rule.engine === 'header'}
+																Header Name
 															{:else}
 																Find (regex)
 															{/if}
@@ -2005,59 +2054,69 @@
 															<span class="form-hint">
 																{#if rule.engine === 'dom'}
 																	CSS selector to find HTML elements
+																{:else if rule.engine === 'header'}
+																	Exact header name (e.g. Server, X-Powered-By)
 																{:else}
 																	Regex pattern to search for in content
 																{/if}
 															</span>
 														{/if}
 													</div>
-													<div class="field-wrapper full">
-														<TextareaField
-															fullWidth
-															bind:value={rule.replace}
-															placeholder={rule.engine === 'dom'
-																? rule.action === 'setAttr'
-																	? 'href:https://example.com'
-																	: rule.action === 'remove'
-																		? ''
-																		: 'New content'
-																: 'phishing.com'}
-															height="medium"
-														>
-															{#if rule.engine === 'dom' && rule.action === 'setAttr'}
-																Value (attr:value)
-															{:else if rule.engine === 'dom' && rule.action === 'remove'}
-																Value (not required)
-															{:else}
-																Replace
-															{/if}
-														</TextareaField>
-														{#if hasError(`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.replace`)}
-															<span class="field-error"
-																>{getError(
-																	`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.replace`
-																)}</span
+													{#if rule.engine !== 'header' || rule.action !== 'remove'}
+														<div class="field-wrapper full">
+															<TextareaField
+																fullWidth
+																bind:value={rule.replace}
+																placeholder={rule.engine === 'dom'
+																	? rule.action === 'setAttr'
+																		? 'href:https://example.com'
+																		: rule.action === 'remove'
+																			? ''
+																			: 'New content'
+																	: rule.engine === 'header'
+																		? 'new-value'
+																		: 'phishing.com'}
+																height="medium"
 															>
-														{:else}
-															<span class="form-hint">
-																{#if rule.engine === 'dom'}
-																	{#if rule.action === 'setAttr'}
-																		Format: attribute:value (e.g. href:https://example.com)
-																	{:else if rule.action === 'remove'}
-																		Not required for remove action
-																	{:else if rule.action === 'removeAttr'}
-																		Attribute name to remove
-																	{:else if rule.action === 'addClass' || rule.action === 'removeClass'}
-																		CSS class name
-																	{:else}
-																		New content for matched elements
-																	{/if}
+																{#if rule.engine === 'dom' && rule.action === 'setAttr'}
+																	Value (attr:value)
+																{:else if rule.engine === 'dom' && rule.action === 'remove'}
+																	Value (not required)
+																{:else if rule.engine === 'header'}
+																	New Value
 																{:else}
-																	Replacement text (use $1, $2 for capture groups)
+																	Replace
 																{/if}
-															</span>
-														{/if}
-													</div>
+															</TextareaField>
+															{#if hasError(`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.replace`)}
+																<span class="field-error"
+																	>{getError(
+																		`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.replace`
+																	)}</span
+																>
+															{:else}
+																<span class="form-hint">
+																	{#if rule.engine === 'dom'}
+																		{#if rule.action === 'setAttr'}
+																			Format: attribute:value (e.g. href:https://example.com)
+																		{:else if rule.action === 'remove'}
+																			Not required for remove action
+																		{:else if rule.action === 'removeAttr'}
+																			Attribute name to remove
+																		{:else if rule.action === 'addClass' || rule.action === 'removeClass'}
+																			CSS class name
+																		{:else}
+																			New content for matched elements
+																		{/if}
+																	{:else if rule.engine === 'header'}
+																		New value for the header
+																	{:else}
+																		Replacement text (use $1, $2 for capture groups)
+																	{/if}
+																</span>
+															{/if}
+														</div>
+													{/if}
 												</div>
 											</div>
 										{/each}
@@ -2724,6 +2783,7 @@
 														bind:value={rule.engine}
 														options={engines}
 														size="normal"
+														on:change={() => handleRewriteEngineChange(rule, rule.engine)}
 													>
 														Engine
 													</TextFieldSelect>
@@ -2778,29 +2838,43 @@
 															>Also supports numeric list (1,3,5) or range (2-4)</span
 														>
 													</div>
-												{:else}
+												{:else if rule.engine === 'header'}
 													<div class="field-wrapper">
 														<TextFieldSelect
-															id={`global-rewrite-${i}-from`}
-															bind:value={rule.from}
-															options={fromOptions}
+															id={`global-rewrite-${i}-action`}
+															bind:value={rule.action}
+															options={headerActions}
 															size="normal"
 														>
-															From
+															Action
 														</TextFieldSelect>
 													</div>
 												{/if}
+												<div class="field-wrapper">
+													<TextFieldSelect
+														id={`global-rewrite-${i}-from`}
+														bind:value={rule.from}
+														options={getFromOptionsForRewriteEngine(rule.engine)}
+														size="normal"
+													>
+														From
+													</TextFieldSelect>
+												</div>
 												<div class="field-wrapper full">
 													<TextField
 														width="full"
 														bind:value={rule.find}
 														placeholder={rule.engine === 'dom'
 															? 'div.logo, #header img'
-															: 'target\\.com'}
+															: rule.engine === 'header'
+																? 'Server'
+																: 'target\\.com'}
 														error={hasError(`global.rewrite.${i}.find`)}
 													>
 														{#if rule.engine === 'dom'}
 															Selector (CSS)
+														{:else if rule.engine === 'header'}
+															Header Name
 														{:else}
 															Find (regex)
 														{/if}
@@ -2811,57 +2885,67 @@
 														<span class="form-hint">
 															{#if rule.engine === 'dom'}
 																CSS selector to find HTML elements
+															{:else if rule.engine === 'header'}
+																Exact header name (e.g. Server, X-Powered-By)
 															{:else}
 																Regex pattern to search for in content
 															{/if}
 														</span>
 													{/if}
 												</div>
-												<div class="field-wrapper full">
-													<TextareaField
-														fullWidth
-														bind:value={rule.replace}
-														placeholder={rule.engine === 'dom'
-															? rule.action === 'setAttr'
-																? 'href:https://example.com'
-																: rule.action === 'remove'
-																	? ''
-																	: 'New content'
-															: 'phishing.com'}
-														height="medium"
-													>
-														{#if rule.engine === 'dom' && rule.action === 'setAttr'}
-															Value (attr:value)
-														{:else if rule.engine === 'dom' && rule.action === 'remove'}
-															Value (not required)
-														{:else}
-															Replace
-														{/if}
-													</TextareaField>
-													{#if hasError(`global.rewrite.${i}.replace`)}
-														<span class="field-error"
-															>{getError(`global.rewrite.${i}.replace`)}</span
+												{#if rule.engine !== 'header' || rule.action !== 'remove'}
+													<div class="field-wrapper full">
+														<TextareaField
+															fullWidth
+															bind:value={rule.replace}
+															placeholder={rule.engine === 'dom'
+																? rule.action === 'setAttr'
+																	? 'href:https://example.com'
+																	: rule.action === 'remove'
+																		? ''
+																		: 'New content'
+																: rule.engine === 'header'
+																	? 'new-value'
+																	: 'phishing.com'}
+															height="medium"
 														>
-													{:else}
-														<span class="form-hint">
-															{#if rule.engine === 'dom'}
-																{#if rule.action === 'setAttr'}
-																	Format: attribute:value (e.g. href:https://example.com)
-																{:else if rule.action === 'remove'}
-																	Not required for remove action
-																{:else if rule.action === 'removeAttr'}
-																	Attribute name to remove
-																{:else if rule.action === 'addClass' || rule.action === 'removeClass'}
-																	CSS class name
-																{:else}
-																	New content for matched elements
-																{/if}
+															{#if rule.engine === 'dom' && rule.action === 'setAttr'}
+																Value (attr:value)
+															{:else if rule.engine === 'dom' && rule.action === 'remove'}
+																Value (not required)
+															{:else if rule.engine === 'header'}
+																New Value
 															{:else}
-																Replacement text (use $1, $2 for capture groups)
+																Replace
 															{/if}
-														</span>
-													{/if}
-												</div>
+														</TextareaField>
+														{#if hasError(`global.rewrite.${i}.replace`)}
+															<span class="field-error"
+																>{getError(`global.rewrite.${i}.replace`)}</span
+															>
+														{:else}
+															<span class="form-hint">
+																{#if rule.engine === 'dom'}
+																	{#if rule.action === 'setAttr'}
+																		Format: attribute:value (e.g. href:https://example.com)
+																	{:else if rule.action === 'remove'}
+																		Not required for remove action
+																	{:else if rule.action === 'removeAttr'}
+																		Attribute name to remove
+																	{:else if rule.action === 'addClass' || rule.action === 'removeClass'}
+																		CSS class name
+																	{:else}
+																		New content for matched elements
+																	{/if}
+																{:else if rule.engine === 'header'}
+																	New value for the header
+																{:else}
+																	Replacement text (use $1, $2 for capture groups)
+																{/if}
+															</span>
+														{/if}
+													</div>
+												{/if}
 											</div>
 										</div>
 									{/each}

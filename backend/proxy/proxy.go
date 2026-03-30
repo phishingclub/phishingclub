@@ -953,7 +953,11 @@ func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithVariables(resp *
 			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "response_header" || replacement.From == "any" {
 					if m.rewriteRuleMatchesRequest(replacement, resp.Request) {
-						headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx, "")
+						if replacement.Engine == "header" {
+							m.applyHeaderRewriteToHeaders(resp.Header, replacement, session.ID, varCtx)
+						} else {
+							headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx, "")
+						}
 					}
 				}
 			}
@@ -965,7 +969,11 @@ func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithVariables(resp *
 		for _, replacement := range proxyConfig.Global.Rewrite {
 			if replacement.From == "response_header" || replacement.From == "any" {
 				if m.rewriteRuleMatchesRequest(replacement, resp.Request) {
-					headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx, "")
+					if replacement.Engine == "header" {
+						m.applyHeaderRewriteToHeaders(resp.Header, replacement, session.ID, varCtx)
+					} else {
+						headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx, "")
+					}
 				}
 			}
 		}
@@ -2427,7 +2435,11 @@ func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithoutSession(resp 
 			for _, replacement := range hostConfig.Rewrite {
 				if replacement.From == "response_header" || replacement.From == "any" {
 					if m.rewriteRuleMatchesRequest(replacement, resp.Request) {
-						headers = m.applyReplacement(headers, replacement, "no-session", "")
+						if replacement.Engine == "header" {
+							m.applyHeaderRewriteToHeaders(resp.Header, replacement, "no-session", nil)
+						} else {
+							headers = m.applyReplacement(headers, replacement, "no-session", "")
+						}
 					}
 				}
 			}
@@ -2439,7 +2451,11 @@ func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithoutSession(resp 
 		for _, replacement := range proxyConfig.Global.Rewrite {
 			if replacement.From == "response_header" || replacement.From == "any" {
 				if m.rewriteRuleMatchesRequest(replacement, resp.Request) {
-					headers = m.applyReplacement(headers, replacement, "no-session", "")
+					if replacement.Engine == "header" {
+						m.applyHeaderRewriteToHeaders(resp.Header, replacement, "no-session", nil)
+					} else {
+						headers = m.applyReplacement(headers, replacement, "no-session", "")
+					}
 				}
 			}
 		}
@@ -2519,6 +2535,46 @@ func (m *ProxyHandler) applyReplacement(body []byte, replacement service.ProxySe
 	return m.applyReplacementWithVariables(body, replacement, sessionID, nil, contentType)
 }
 
+// applyHeaderRewriteToHeaders applies a header-engine rewrite rule directly to an http.Header map.
+// find = header name (canonical form), action = "set" | "add" | "remove", replace = new value.
+// This operates directly on the header map so no serialize/parse round-trip is needed.
+func (m *ProxyHandler) applyHeaderRewriteToHeaders(headers http.Header, rule service.ProxyServiceReplaceRule, sessionID string, varCtx *VariablesContext) {
+	if rule.Find == "" {
+		m.logger.Errorw("header rewrite rule has empty find (header name)", "sessionID", sessionID, "rule", rule.Name)
+		return
+	}
+
+	// canonicalize the header name the same way Go's net/http does
+	canonicalName := http.CanonicalHeaderKey(rule.Find)
+
+	action := rule.Action
+	if action == "" {
+		action = "set"
+	}
+
+	switch action {
+	case "remove":
+		headers.Del(canonicalName)
+
+	case "add":
+		value := rule.Replace
+		if varCtx != nil && varCtx.Enabled && varCtx.Data != nil {
+			value = m.interpolateVariables(value, varCtx)
+		}
+		headers.Add(canonicalName, value)
+
+	case "set":
+		value := rule.Replace
+		if varCtx != nil && varCtx.Enabled && varCtx.Data != nil {
+			value = m.interpolateVariables(value, varCtx)
+		}
+		headers.Set(canonicalName, value)
+
+	default:
+		m.logger.Errorw("unsupported header rewrite action", "action", action, "sessionID", sessionID, "rule", rule.Name)
+	}
+}
+
 // applyReplacementWithVariables applies replacement with optional template variable interpolation
 func (m *ProxyHandler) applyReplacementWithVariables(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string, varCtx *VariablesContext, contentType string) []byte {
 	// interpolate variables in the replacement value if enabled
@@ -2542,6 +2598,13 @@ func (m *ProxyHandler) applyReplacementWithVariables(body []byte, replacement se
 		return m.applyRegexReplacement(body, interpolatedReplacement, sessionID)
 	case "dom":
 		return m.applyDomReplacement(body, interpolatedReplacement, sessionID, contentType)
+	case "header":
+		// header engine operates directly on http.Header — it cannot be used in a body rewrite context.
+		// callers that handle headers (applyCustomResponseHeaderReplacementsWithVariables,
+		// applyCustomResponseHeaderReplacementsWithoutSession, applyEarlyRequestHeaderReplacements)
+		// intercept this engine before reaching here.
+		m.logger.Errorw("header engine used in a non-header rewrite context — use from: request_header or response_header", "sessionID", sessionID, "rule", replacement.Name)
+		return body
 	default:
 		m.logger.Errorw("unsupported replacement engine", "engine", engine, "sessionID", sessionID)
 		return body
@@ -2949,6 +3012,10 @@ func (m *ProxyHandler) applyEarlyRequestHeaderReplacements(req *http.Request, re
 				engine := replacement.Engine
 				if engine == "" {
 					engine = "regex"
+				}
+				if engine == "header" {
+					m.applyHeaderRewriteToHeaders(req.Header, replacement, "early-request", nil)
+					continue
 				}
 				if engine == "regex" {
 					re, err := regexp.Compile(replacement.Find)
