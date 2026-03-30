@@ -1641,7 +1641,12 @@ func (m *ProxyHandler) matchesPath(capture service.ProxyServiceCaptureRule, req 
 	if capture.PathRe == nil {
 		return true
 	}
-	return capture.PathRe.MatchString(req.URL.Path)
+	// normalize empty path to "/" so rules like path: / match root requests
+	path := req.URL.Path
+	if path == "" {
+		path = "/"
+	}
+	return capture.PathRe.MatchString(path)
 }
 
 func (m *ProxyHandler) handlePathBasedCapture(capture service.ProxyServiceCaptureRule, session *service.ProxySession, resp *http.Response) {
