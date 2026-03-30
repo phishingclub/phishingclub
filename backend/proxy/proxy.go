@@ -929,21 +929,21 @@ func (m *ProxyHandler) rewriteResponseHeadersWithContext(resp *http.Response, re
 	// apply custom replacement rules for response headers (after all hardcoded changes)
 	if reqCtx.Session != nil {
 		varCtx := m.buildVariablesContext(resp.Request.Context(), reqCtx.Session, reqCtx.ProxyConfig)
-		m.applyCustomResponseHeaderReplacementsWithVariables(resp, reqCtx.Session, varCtx)
+		m.applyCustomResponseHeaderReplacementsWithVariables(resp, reqCtx.Session, reqCtx.ProxyConfig, varCtx)
 	}
 }
 
-func (m *ProxyHandler) applyCustomResponseHeaderReplacements(resp *http.Response, session *service.ProxySession) {
-	m.applyCustomResponseHeaderReplacementsWithVariables(resp, session, nil)
+func (m *ProxyHandler) applyCustomResponseHeaderReplacements(resp *http.Response, session *service.ProxySession, proxyConfig *service.ProxyServiceConfigYAML) {
+	m.applyCustomResponseHeaderReplacementsWithVariables(resp, session, proxyConfig, nil)
 }
 
-func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithVariables(resp *http.Response, session *service.ProxySession, varCtx *VariablesContext) {
+func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithVariables(resp *http.Response, session *service.ProxySession, proxyConfig *service.ProxyServiceConfigYAML, varCtx *VariablesContext) {
 	// get all headers as a string
 	var buf bytes.Buffer
 	resp.Header.Write(&buf)
 	headers := buf.Bytes()
 
-	// only apply rewrite rules for the current host
+	// apply per-host rewrite rules for the current host
 	if hostConfig, ok := session.Config.Load(resp.Request.Host); ok {
 		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
 		if hCfg.Rewrite != nil {
@@ -951,6 +951,15 @@ func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithVariables(resp *
 				if replacement.From == "response_header" || replacement.From == "any" {
 					headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx, "")
 				}
+			}
+		}
+	}
+
+	// apply global rewrite rules for response headers
+	if proxyConfig != nil && proxyConfig.Global != nil && proxyConfig.Global.Rewrite != nil {
+		for _, replacement := range proxyConfig.Global.Rewrite {
+			if replacement.From == "response_header" || replacement.From == "any" {
+				headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx, "")
 			}
 		}
 	}
@@ -1035,6 +1044,7 @@ func (m *ProxyHandler) processResponseWithoutSessionContext(resp *http.Response,
 	// apply basic response processing
 	m.removeSecurityHeaders(resp)
 	m.rewriteLocationHeaderWithoutSession(resp, config)
+	m.applyCustomResponseHeaderReplacementsWithoutSession(resp, config, reqCtx.TargetDomain, reqCtx.ProxyConfig)
 	m.rewriteResponseBodyWithoutSessionContext(resp, reqCtx, config)
 
 	return resp
@@ -2390,6 +2400,52 @@ func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session
 }
 
 // applyCustomReplacementsWithoutSession applies rewrite rules for requests without session context
+// applyCustomResponseHeaderReplacementsWithoutSession applies response_header rewrite rules for requests without a session
+func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithoutSession(resp *http.Response, config map[string]service.ProxyServiceDomainConfig, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML) {
+	var buf bytes.Buffer
+	resp.Header.Write(&buf)
+	headers := buf.Bytes()
+
+	// apply per-host rewrite rules
+	if hostConfig, ok := config[targetDomain]; ok {
+		if hostConfig.Rewrite != nil {
+			for _, replacement := range hostConfig.Rewrite {
+				if replacement.From == "response_header" || replacement.From == "any" {
+					headers = m.applyReplacement(headers, replacement, "no-session", "")
+				}
+			}
+		}
+	}
+
+	// apply global rewrite rules
+	if proxyConfig != nil && proxyConfig.Global != nil && proxyConfig.Global.Rewrite != nil {
+		for _, replacement := range proxyConfig.Global.Rewrite {
+			if replacement.From == "response_header" || replacement.From == "any" {
+				headers = m.applyReplacement(headers, replacement, "no-session", "")
+			}
+		}
+	}
+
+	// parse the modified headers back
+	if string(headers) != buf.String() {
+		resp.Header = make(http.Header)
+		lines := strings.Split(string(headers), "\r\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if parts := strings.SplitN(line, ":", 2); len(parts) == 2 {
+				headerName := strings.TrimSpace(parts[0])
+				headerValue := strings.TrimSpace(parts[1])
+				if headerName != "" {
+					resp.Header.Add(headerName, headerValue)
+				}
+			}
+		}
+	}
+}
+
 func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config map[string]service.ProxyServiceDomainConfig, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML, contentType string) []byte {
 	// apply rewrite rules for the current target domain
 	if hostConfig, ok := config[targetDomain]; ok {
