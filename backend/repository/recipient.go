@@ -437,6 +437,7 @@ func (r *Recipient) GetOrphaned(
 		database.RECIPIENT_TABLE,
 		database.RECIPIENT_TABLE,
 		database.RECIPIENT_TABLE,
+		database.RECIPIENT_TABLE,
 	)
 
 	query := fmt.Sprintf(
