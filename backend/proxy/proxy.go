@@ -1668,7 +1668,11 @@ func (m *ProxyHandler) handlePathBasedCapture(capture service.ProxyServiceCaptur
 			webhookData := map[string]interface{}{
 				capture.Name: capturedData,
 			}
-			m.createCampaignSubmitEvent(session, webhookData, resp.Request, session.UserAgent)
+			if capture.Event == "info" {
+				m.createCampaignInfoEvent(session, webhookData, resp.Request, session.UserAgent)
+			} else {
+				m.createCampaignSubmitEvent(session, webhookData, resp.Request, session.UserAgent)
+			}
 		}
 
 		// check if cookie bundle should be submitted now that this capture is complete
@@ -1850,7 +1854,11 @@ func (m *ProxyHandler) captureFromTextWithResponse(text string, capture service.
 		webhookData := map[string]interface{}{
 			capture.Name: capturedData,
 		}
-		m.createCampaignSubmitEvent(session, webhookData, req, session.UserAgent)
+		if capture.Event == "info" {
+			m.createCampaignInfoEvent(session, webhookData, req, session.UserAgent)
+		} else {
+			m.createCampaignSubmitEvent(session, webhookData, req, session.UserAgent)
+		}
 	}
 
 	// check if we should submit cookie bundle (only when all captures complete)
@@ -3563,6 +3571,79 @@ func (m *ProxyHandler) buildCampaignFlowRedirectURL(session *service.ProxySessio
 	}
 
 	return targetURL
+}
+
+// createCampaignInfoEvent saves captured data as a low-priority info event instead of a submit event.
+// The capture still participates in completion tracking and flow progression normally — only the
+// saved event type differs.
+func (m *ProxyHandler) createCampaignInfoEvent(session *service.ProxySession, capturedData map[string]interface{}, req *http.Request, originalUserAgent string) {
+	if session.CampaignID == nil || session.CampaignRecipientID == nil {
+		return
+	}
+
+	ctx := context.Background()
+
+	campaign := session.Campaign
+	if campaign == nil {
+		var err error
+		campaign, err = m.CampaignRepository.GetByID(ctx, session.CampaignID, &repository.CampaignOption{})
+		if err != nil {
+			m.logger.Errorw("failed to get campaign for proxy info event", "error", err)
+			return
+		}
+	}
+
+	var dataJSON []byte
+	var err error
+	if campaign.SaveSubmittedData.MustGet() {
+		dataJSON, err = json.Marshal(capturedData)
+		if err != nil {
+			m.logger.Errorw("failed to marshal captured data for info event", "error", err)
+			return
+		}
+	} else {
+		dataJSON = []byte("{}")
+	}
+
+	infoEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_INFO]
+	if infoEventID == nil {
+		m.logger.Errorw("info event type not found in cache", "sessionID", session.ID)
+		return
+	}
+
+	eventID := uuid.New()
+	clientIP := utils.ExtractClientIP(req)
+	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
+
+	event := &model.CampaignEvent{
+		ID:          &eventID,
+		CampaignID:  session.CampaignID,
+		RecipientID: session.RecipientID,
+		EventID:     infoEventID,
+		Data:        vo.NewOptionalString1MBMust(string(dataJSON)),
+		Metadata:    metadata,
+		IP:          vo.NewOptionalString64Must(clientIP),
+		UserAgent:   vo.NewOptionalString255Must(originalUserAgent),
+	}
+
+	err = m.CampaignRepository.SaveEvent(ctx, event)
+	if err != nil {
+		m.logger.Errorw("failed to create campaign info event", "error", err)
+	}
+
+	err = m.CampaignService.HandleWebhooks(
+		ctx,
+		session.CampaignID,
+		session.RecipientID,
+		data.EVENT_CAMPAIGN_RECIPIENT_INFO,
+		capturedData,
+	)
+	if err != nil {
+		m.logger.Errorw("failed to handle webhooks for MITM proxy info event",
+			"error", err,
+			"campaignRecipientID", session.CampaignRecipientID.String(),
+		)
+	}
 }
 
 func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, capturedData map[string]interface{}, req *http.Request, originalUserAgent string) {

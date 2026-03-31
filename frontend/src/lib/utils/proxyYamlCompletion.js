@@ -90,7 +90,10 @@ export class ProxyYamlCompletionProvider {
 
 		// Handle specific field value completions
 		if (linePrefix.match(/\s*engine:\s*$/)) {
-			return this.getEngineSuggestions(range);
+			return this.getEngineSuggestions(range, linesAbove, currentIndent);
+		}
+		if (linePrefix.match(/\s*event:\s*$/)) {
+			return this.getEventSuggestions(range);
 		}
 		if (linePrefix.match(/\s*action:\s*$/)) {
 			return this.getDomActionSuggestions(range);
@@ -584,6 +587,13 @@ export class ProxyYamlCompletionProvider {
 				insertText: 'required: true',
 				documentation: 'Whether capture is required',
 				range
+			},
+			{
+				label: 'event',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'event: "submit"',
+				documentation: 'Event type to save: "submit" (default) or "info"',
+				range
 			}
 		];
 	}
@@ -601,7 +611,7 @@ export class ProxyYamlCompletionProvider {
 				label: 'engine',
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'engine: "regex"',
-				documentation: 'Rewrite engine: "regex" (default) or "dom"',
+				documentation: 'Rewrite engine: "regex" (default), "dom", or "header"',
 				range
 			},
 			{
@@ -609,29 +619,31 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'find: "pattern"',
 				documentation:
-					'Pattern/selector to find (regex pattern for regex engine, CSS selector for dom engine)',
+					'Pattern/selector/header to find (regex pattern, CSS selector, or exact header name)',
 				range
 			},
 			{
 				label: 'replace',
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'replace: "replacement"',
-				documentation: 'Replacement value (replacement text for regex, value for dom actions)',
+				documentation:
+					'Replacement value (replacement text for regex, value for dom/header actions)',
 				range
 			},
 			{
 				label: 'action',
 				kind: this.monaco.languages.CompletionItemKind.Property,
-				insertText: 'action: "setText"',
+				insertText: 'action: "set"',
 				documentation:
-					'DOM action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove',
+					'DOM action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove — Header action: set, add, remove',
 				range
 			},
 			{
 				label: 'target',
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'target: "all"',
-				documentation: 'Target matching: "first", "last", "all" (default), "1,3,5", "2-4"',
+				documentation:
+					'Target matching (dom engine only): "first", "last", "all" (default), "1,3,5", "2-4"',
 				range
 			},
 			{
@@ -639,7 +651,21 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'from: "response_body"',
 				documentation:
-					'Where to apply replacement (regex engine only - dom engine always uses response_body)',
+					'Where to apply replacement: response_body (default), request_body, response_header, request_header, any',
+				range
+			},
+			{
+				label: 'path',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'path: "^/login"',
+				documentation: 'Optional regex to restrict rule to matching request paths',
+				range
+			},
+			{
+				label: 'method',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'method: "POST"',
+				documentation: 'Optional HTTP method to restrict this rule to (GET, POST, etc.)',
 				range
 			}
 		];
@@ -651,7 +677,7 @@ export class ProxyYamlCompletionProvider {
 				label: 'capture rule (regex)',
 				kind: this.monaco.languages.CompletionItemKind.Snippet,
 				insertText:
-					'name: "capture_name"\n  method: "POST"\n  path: "/path"\n  engine: "regex"\n  find: "pattern"',
+					'name: "capture_name"\n  method: "POST"\n  path: "/path"\n  engine: "regex"\n  find: "pattern"\n  event: "submit"',
 				documentation: 'New regex capture rule template',
 				range
 			},
@@ -659,7 +685,7 @@ export class ProxyYamlCompletionProvider {
 				label: 'capture header',
 				kind: this.monaco.languages.CompletionItemKind.Snippet,
 				insertText:
-					'name: "capture_header"\n  method: "POST"\n  path: "/path"\n  engine: "header"\n  find: "x-auth-token"',
+					'name: "capture_header"\n  method: "POST"\n  path: "/path"\n  engine: "header"\n  find: "x-auth-token"\n  event: "submit"',
 				documentation: 'Capture HTTP header value by name',
 				range
 			},
@@ -667,7 +693,7 @@ export class ProxyYamlCompletionProvider {
 				label: 'capture cookie',
 				kind: this.monaco.languages.CompletionItemKind.Snippet,
 				insertText:
-					'name: "capture_cookie"\n  method: "POST"\n  path: "/path"\n  engine: "cookie"\n  find: "session_id"',
+					'name: "capture_cookie"\n  method: "POST"\n  path: "/path"\n  engine: "cookie"\n  find: "session_id"\n  event: "submit"',
 				documentation: 'Capture cookie value by name',
 				range
 			},
@@ -675,7 +701,7 @@ export class ProxyYamlCompletionProvider {
 				label: 'capture JSON field',
 				kind: this.monaco.languages.CompletionItemKind.Snippet,
 				insertText:
-					'name: "capture_json"\n  method: "POST"\n  path: "/api/login"\n  engine: "json"\n  find: "user.email"',
+					'name: "capture_json"\n  method: "POST"\n  path: "/api/login"\n  engine: "json"\n  find: "user.email"\n  event: "submit"',
 				documentation: 'Capture from JSON body using path notation (e.g., user.name)',
 				range
 			},
@@ -683,7 +709,7 @@ export class ProxyYamlCompletionProvider {
 				label: 'capture JSON array',
 				kind: this.monaco.languages.CompletionItemKind.Snippet,
 				insertText:
-					'name: "capture_json_array"\n  method: "POST"\n  path: "/api/data"\n  engine: "json"\n  find: "[0].user.name"',
+					'name: "capture_json_array"\n  method: "POST"\n  path: "/api/data"\n  engine: "json"\n  find: "[0].user.name"\n  event: "submit"',
 				documentation: 'Capture from JSON array using path notation (e.g., [1].user.name)',
 				range
 			},
@@ -691,7 +717,7 @@ export class ProxyYamlCompletionProvider {
 				label: 'capture form field',
 				kind: this.monaco.languages.CompletionItemKind.Snippet,
 				insertText:
-					'name: "capture_form"\n  method: "POST"\n  path: "/login"\n  engine: "urlencoded"\n  find: ["username", "password"]',
+					'name: "capture_form"\n  method: "POST"\n  path: "/login"\n  engine: "urlencoded"\n  find: ["username", "password"]\n  event: "submit"',
 				documentation: 'Capture from URL encoded form data',
 				range
 			},
@@ -699,8 +725,16 @@ export class ProxyYamlCompletionProvider {
 				label: 'capture multipart',
 				kind: this.monaco.languages.CompletionItemKind.Snippet,
 				insertText:
-					'name: "capture_multipart"\n  method: "POST"\n  path: "/upload"\n  engine: "multipart"\n  find: ["file", "description"]',
+					'name: "capture_multipart"\n  method: "POST"\n  path: "/upload"\n  engine: "multipart"\n  find: ["file", "description"]\n  event: "submit"',
 				documentation: 'Capture from multipart/form-data',
+				range
+			},
+			{
+				label: 'capture info (no submit)',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText:
+					'name: "capture_info"\n  method: "GET"\n  path: "/path"\n  engine: "header"\n  find: "x-request-id"\n  event: "info"',
+				documentation: 'Capture and save as info event (does not count as submitted data)',
 				range
 			}
 		];
@@ -970,8 +1004,12 @@ export class ProxyYamlCompletionProvider {
 		];
 	}
 
-	getEngineSuggestions(range) {
-		return [
+	getEngineSuggestions(range, linesAbove, currentIndent) {
+		// Determine context — rewrite rules have 'dom' and 'header', capture rules don't have 'dom'
+		const context = this.findParentSection(linesAbove || [], currentIndent);
+		const isRewrite = context === 'rewrite';
+
+		const captureEngines = [
 			{
 				label: 'regex',
 				kind: this.monaco.languages.CompletionItemKind.Value,
@@ -983,7 +1021,9 @@ export class ProxyYamlCompletionProvider {
 				label: 'header',
 				kind: this.monaco.languages.CompletionItemKind.Value,
 				insertText: 'header',
-				documentation: 'Capture from HTTP headers by key',
+				documentation: isRewrite
+					? 'Directly set, add, or remove a header by name (use with action: set/add/remove)'
+					: 'Capture from HTTP headers by key',
 				range
 			},
 			{
@@ -1028,12 +1068,36 @@ export class ProxyYamlCompletionProvider {
 				insertText: 'multipart',
 				documentation: 'Capture from multipart form data',
 				range
-			},
+			}
+		];
+
+		const rewriteOnlyEngines = [
 			{
 				label: 'dom',
 				kind: this.monaco.languages.CompletionItemKind.Value,
 				insertText: 'dom',
-				documentation: 'DOM manipulation',
+				documentation: 'DOM manipulation — modify HTML elements via CSS selectors',
+				range
+			}
+		];
+
+		return isRewrite ? [...captureEngines, ...rewriteOnlyEngines] : captureEngines;
+	}
+
+	getEventSuggestions(range) {
+		return [
+			{
+				label: 'submit',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'submit',
+				documentation: 'Save as a submitted-data event (default)',
+				range
+			},
+			{
+				label: 'info',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'info',
+				documentation: 'Save as a low-priority info event',
 				range
 			}
 		];
@@ -1173,20 +1237,24 @@ export class ProxyYamlCompletionProvider {
 			method: 'HTTP method to match (GET, POST, PUT, DELETE, etc.)',
 			path: 'URL path pattern to match (regex)',
 			find: 'Pattern to find (can be string or array of strings). Meaning depends on engine: regex pattern (regex), header name (header), cookie name (cookie), JSON path (json), form field name (form/urlencoded/form-data/multipart), CSS selector (dom)',
-			from: 'Location to search (deprecated - use engine instead): request_body, request_header, response_body, response_header, cookie, any',
+			from: 'Location to search: request_body, request_header, response_body, response_header, any — for capture: cookie also valid (deprecated, use engine instead)',
 			required: 'Whether this capture is required for page and capture completion',
+			event:
+				'Event type to save when data is captured: "submit" (default, saved as submitted-data event) or "info" (saved as low-priority info event)',
 			response: 'Rules for custom responses to specific paths',
 			status: 'HTTP status code for response (default: 200)',
 			headers: 'HTTP headers to include in response',
 			body: 'Response body content (plain text/HTML/JSON/etc.)',
 			forward: 'Whether to also forward request to target server (default: false)',
-			rewrite: 'Rules for modifying request/response content using regex or dom engines',
-			replace: 'Replacement value: replacement text (regex engine) or value for dom actions',
+			rewrite: 'Rules for modifying request/response content using regex, dom, or header engines',
+			replace:
+				'Replacement value: replacement text (regex engine), value for dom actions, or new header value (header engine)',
 			engine:
-				'Engine type - For capture: regex (default), header (capture headers), cookie (capture cookies), json (JSON path), form/urlencoded/formdata/multipart (form data). For rewrite: regex (default) or dom (HTML manipulation)',
-			action: 'DOM action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove',
+				'Engine type - For capture: regex (default), header, cookie, json, form/urlencoded/formdata/multipart. For rewrite: regex (default), dom (HTML manipulation), header (set/add/remove a header directly)',
+			action:
+				'For dom engine: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove — For header engine: set (overwrite), add (append), remove (delete)',
 			target:
-				'Target matching: "first", "last", "all" (default), "1,3,5" (specific), "2-4" (range)',
+				'Target matching (dom engine only): "first", "last", "all" (default), "1,3,5" (specific), "2-4" (range)',
 			to: 'Target phishing domain for this original domain',
 			rewrite_urls: 'URL rewrite rules for anti-detection - changes paths and query parameters',
 			query: 'Query parameter mappings for URL rewriting',

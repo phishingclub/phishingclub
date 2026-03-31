@@ -224,6 +224,7 @@
 					};
 					configData.global.capture = (parsed.global.capture || []).map((r) => ({
 						...r,
+						event: r.event || 'submit',
 						_id: getRuleId()
 					}));
 					configData.global.rewrite = (parsed.global.rewrite || []).map((r) => ({
@@ -261,7 +262,11 @@
 								mode: hostData.access?.mode || '',
 								on_deny: hostData.access?.on_deny || ''
 							},
-							capture: (hostData.capture || []).map((r) => ({ ...r, _id: getRuleId() })),
+							capture: (hostData.capture || []).map((r) => ({
+								...r,
+								event: r.event || 'submit',
+								_id: getRuleId()
+							})),
 							rewrite: (hostData.rewrite || []).map((r) => ({ ...r, _id: getRuleId() })),
 							response: (hostData.response || []).map((r) => ({ ...r, _id: getRuleId() })),
 							rewrite_urls: (hostData.rewrite_urls || []).map((r) => ({ ...r, _id: getRuleId() }))
@@ -495,6 +500,11 @@
 	}
 
 	// global rule management
+	const captureEventOptions = [
+		{ value: 'submit', label: 'Submit' },
+		{ value: 'info', label: 'Info' }
+	];
+
 	function addGlobalCaptureRule() {
 		configData.global.capture = [
 			...configData.global.capture,
@@ -506,7 +516,8 @@
 				find: '',
 				engine: 'regex',
 				from: 'request_body',
-				required: false
+				required: false,
+				event: 'submit'
 			}
 		];
 	}
@@ -570,7 +581,8 @@
 				find: '',
 				engine: 'regex',
 				from: 'request_body',
-				required: false
+				required: false,
+				event: 'submit'
 			}
 		];
 		configData.hosts = [...configData.hosts];
@@ -1183,6 +1195,7 @@
 				};
 				configData.global.capture = (parsed.global.capture || []).map((r) => ({
 					...r,
+					event: r.event || 'submit',
 					_id: getRuleId()
 				}));
 				configData.global.rewrite = (parsed.global.rewrite || []).map((r) => ({
@@ -1233,7 +1246,11 @@
 							mode: hostData.access?.mode || '',
 							on_deny: hostData.access?.on_deny || ''
 						},
-						capture: (hostData.capture || []).map((r) => ({ ...r, _id: getRuleId() })),
+						capture: (hostData.capture || []).map((r) => ({
+							...r,
+							event: r.event || 'submit',
+							_id: getRuleId()
+						})),
 						rewrite: (hostData.rewrite || []).map((r) => ({ ...r, _id: getRuleId() })),
 						response: (hostData.response || []).map((r) => ({ ...r, _id: getRuleId() })),
 						rewrite_urls: (hostData.rewrite_urls || []).map((r) => ({ ...r, _id: getRuleId() }))
@@ -1884,6 +1901,16 @@
 															>Must be captured before session completes and campaign flow
 															progresses</span
 														>
+													</div>
+													<div class="field-wrapper">
+														<TextFieldSelect
+															id={`host-${expandedHostIndex}-capture-${ruleIndex}-event`}
+															bind:value={rule.event}
+															options={captureEventOptions}
+															size="normal"
+														>
+															Event Type
+														</TextFieldSelect>
 													</div>
 												</div>
 											</div>
@@ -2731,6 +2758,16 @@
 													<span class="form-hint"
 														>Must be captured before session completes and campaign flow progresses</span
 													>
+												</div>
+												<div class="field-wrapper">
+													<TextFieldSelect
+														id={`global-capture-${i}-event`}
+														bind:value={rule.event}
+														options={captureEventOptions}
+														size="normal"
+													>
+														Event Type
+													</TextFieldSelect>
 												</div>
 											</div>
 										</div>

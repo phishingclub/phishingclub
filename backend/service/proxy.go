@@ -270,7 +270,8 @@ type ProxyServiceCaptureRule struct {
 	Engine   string         `yaml:"engine,omitempty"`
 	From     string         `yaml:"from,omitempty"`
 	Required *bool          `yaml:"required,omitempty"`
-	PathRe   *regexp.Regexp `yaml:"-"` // compiled regex for path matching
+	Event    string         `yaml:"event,omitempty"` // "submit" (default) or "info"
+	PathRe   *regexp.Regexp `yaml:"-"`               // compiled regex for path matching
 }
 
 // GetFindAsStrings returns find field as a slice of strings
@@ -1047,6 +1048,24 @@ func (m *Proxy) validateCaptureRules(captureRules []ProxyServiceCaptureRule) err
 						"proxyConfig",
 					)
 				}
+			}
+		}
+
+		// validate 'event' field if specified
+		if capture.Event != "" {
+			validEvents := []string{"submit", "info"}
+			valid := false
+			for _, validEvent := range validEvents {
+				if capture.Event == validEvent {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				return validate.WrapErrorWithField(
+					errors.New("invalid 'event' value in capture rule, must be one of: "+strings.Join(validEvents, ", ")),
+					"proxyConfig",
+				)
 			}
 		}
 
