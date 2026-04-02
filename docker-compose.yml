@@ -162,7 +162,7 @@ services:
   # Use this IP in your Proxy configs: proxy: '172.20.0.138:8080'
   mitmproxy:
     image: mitmproxy/mitmproxy@sha256:743b6cdc817211d64bc269f5defacca8d14e76e647fc474e5c7244dbcb645141
-    command: mitmweb --web-host 0.0.0.0 --web-port 8080 --listen-port 8081 --no-web-open-browser
+    command: mitmweb --web-host 0.0.0.0 --web-port 8080 --listen-port 8081 --no-web-open-browser --ssl-insecure
     tty: true
     ports:
       - "8105:8080" # Web interface

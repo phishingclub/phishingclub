@@ -1,10 +1,11 @@
 package data
 
 const (
-	EVENT_CAMPAIGN_SCHEDULED    = "campaign_scheduled"
-	EVENT_CAMPAIGN_ACTIVE       = "campaign_active"
-	EVENT_CAMPAIGN_SELF_MANAGED = "campaign_self_managed"
-	EVENT_CAMPAIGN_CLOSED       = "campaign_closed"
+	EVENT_CAMPAIGN_SCHEDULED        = "campaign_scheduled"
+	EVENT_CAMPAIGN_ACTIVE           = "campaign_active"
+	EVENT_CAMPAIGN_SELF_MANAGED     = "campaign_self_managed"
+	EVENT_CAMPAIGN_PENDING_SCHEDULE = "campaign_pending_schedule"
+	EVENT_CAMPAIGN_CLOSED           = "campaign_closed"
 
 	EVENT_CAMPAIGN_RECIPIENT_SCHEDULED            = "campaign_recipient_scheduled"
 	EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT         = "campaign_recipient_message_sent"
@@ -26,6 +27,7 @@ var Events = []string{
 	EVENT_CAMPAIGN_SCHEDULED,
 	EVENT_CAMPAIGN_ACTIVE,
 	EVENT_CAMPAIGN_SELF_MANAGED,
+	EVENT_CAMPAIGN_PENDING_SCHEDULE,
 	EVENT_CAMPAIGN_CLOSED,
 	// campaign recipient events
 	EVENT_CAMPAIGN_RECIPIENT_SCHEDULED,

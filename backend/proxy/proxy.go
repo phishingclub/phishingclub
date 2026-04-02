@@ -553,6 +553,9 @@ func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, reqCtx *R
 			if hostConfig.Rewrite != nil {
 				for _, replacement := range hostConfig.Rewrite {
 					if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
+						if !m.rewriteRuleMatchesRequest(replacement, req) {
+							continue
+						}
 						engine := replacement.Engine
 						if engine == "" {
 							engine = "regex"
@@ -929,27 +932,48 @@ func (m *ProxyHandler) rewriteResponseHeadersWithContext(resp *http.Response, re
 	// apply custom replacement rules for response headers (after all hardcoded changes)
 	if reqCtx.Session != nil {
 		varCtx := m.buildVariablesContext(resp.Request.Context(), reqCtx.Session, reqCtx.ProxyConfig)
-		m.applyCustomResponseHeaderReplacementsWithVariables(resp, reqCtx.Session, varCtx)
+		m.applyCustomResponseHeaderReplacementsWithVariables(resp, reqCtx.Session, reqCtx.ProxyConfig, varCtx)
 	}
 }
 
-func (m *ProxyHandler) applyCustomResponseHeaderReplacements(resp *http.Response, session *service.ProxySession) {
-	m.applyCustomResponseHeaderReplacementsWithVariables(resp, session, nil)
+func (m *ProxyHandler) applyCustomResponseHeaderReplacements(resp *http.Response, session *service.ProxySession, proxyConfig *service.ProxyServiceConfigYAML) {
+	m.applyCustomResponseHeaderReplacementsWithVariables(resp, session, proxyConfig, nil)
 }
 
-func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithVariables(resp *http.Response, session *service.ProxySession, varCtx *VariablesContext) {
+func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithVariables(resp *http.Response, session *service.ProxySession, proxyConfig *service.ProxyServiceConfigYAML, varCtx *VariablesContext) {
 	// get all headers as a string
 	var buf bytes.Buffer
 	resp.Header.Write(&buf)
 	headers := buf.Bytes()
 
-	// only apply rewrite rules for the current host
+	// apply per-host rewrite rules for the current host
 	if hostConfig, ok := session.Config.Load(resp.Request.Host); ok {
 		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
 		if hCfg.Rewrite != nil {
 			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "response_header" || replacement.From == "any" {
-					headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx, "")
+					if m.rewriteRuleMatchesRequest(replacement, resp.Request) {
+						if replacement.Engine == "header" {
+							m.applyHeaderRewriteToHeaders(resp.Header, replacement, session.ID, varCtx)
+						} else {
+							headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx, "")
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// apply global rewrite rules for response headers
+	if proxyConfig != nil && proxyConfig.Global != nil && proxyConfig.Global.Rewrite != nil {
+		for _, replacement := range proxyConfig.Global.Rewrite {
+			if replacement.From == "response_header" || replacement.From == "any" {
+				if m.rewriteRuleMatchesRequest(replacement, resp.Request) {
+					if replacement.Engine == "header" {
+						m.applyHeaderRewriteToHeaders(resp.Header, replacement, session.ID, varCtx)
+					} else {
+						headers = m.applyReplacementWithVariables(headers, replacement, session.ID, varCtx, "")
+					}
 				}
 			}
 		}
@@ -1002,7 +1026,7 @@ func (m *ProxyHandler) rewriteResponseBodyWithContext(resp *http.Response, reqCt
 
 	// build variables context for template interpolation
 	varCtx := m.buildVariablesContext(resp.Request.Context(), reqCtx.Session, reqCtx.ProxyConfig)
-	body = m.applyCustomReplacementsWithVariables(body, reqCtx.Session, reqCtx.TargetDomain, reqCtx.ProxyConfig, varCtx, contentType)
+	body = m.applyCustomReplacementsWithVariables(body, reqCtx.Session, reqCtx.TargetDomain, reqCtx.ProxyConfig, varCtx, contentType, resp.Request)
 
 	// apply obfuscation if enabled
 	if reqCtx.Campaign != nil && strings.Contains(contentType, "text/html") {
@@ -1035,6 +1059,7 @@ func (m *ProxyHandler) processResponseWithoutSessionContext(resp *http.Response,
 	// apply basic response processing
 	m.removeSecurityHeaders(resp)
 	m.rewriteLocationHeaderWithoutSession(resp, config)
+	m.applyCustomResponseHeaderReplacementsWithoutSession(resp, config, reqCtx.TargetDomain, reqCtx.ProxyConfig)
 	m.rewriteResponseBodyWithoutSessionContext(resp, reqCtx, config)
 
 	return resp
@@ -1142,7 +1167,7 @@ func (m *ProxyHandler) rewriteResponseBodyWithoutSessionContext(resp *http.Respo
 
 	body = m.patchUrls(configMap, body, CONVERT_TO_PHISHING_URLS)
 	body = m.applyURLPathRewritesWithoutSession(body, reqCtx)
-	body = m.applyCustomReplacementsWithoutSession(body, configMap, reqCtx.TargetDomain, reqCtx.ProxyConfig, contentType)
+	body = m.applyCustomReplacementsWithoutSession(body, configMap, reqCtx.TargetDomain, reqCtx.ProxyConfig, contentType, resp.Request)
 
 	// apply obfuscation if enabled
 	if reqCtx.Campaign != nil && strings.Contains(contentType, "text/html") {
@@ -1616,7 +1641,12 @@ func (m *ProxyHandler) matchesPath(capture service.ProxyServiceCaptureRule, req 
 	if capture.PathRe == nil {
 		return true
 	}
-	return capture.PathRe.MatchString(req.URL.Path)
+	// normalize empty path to "/" so rules like path: / match root requests
+	path := req.URL.Path
+	if path == "" {
+		path = "/"
+	}
+	return capture.PathRe.MatchString(path)
 }
 
 func (m *ProxyHandler) handlePathBasedCapture(capture service.ProxyServiceCaptureRule, session *service.ProxySession, resp *http.Response) {
@@ -1638,7 +1668,11 @@ func (m *ProxyHandler) handlePathBasedCapture(capture service.ProxyServiceCaptur
 			webhookData := map[string]interface{}{
 				capture.Name: capturedData,
 			}
-			m.createCampaignSubmitEvent(session, webhookData, resp.Request, session.UserAgent)
+			if capture.Event == "info" {
+				m.createCampaignInfoEvent(session, webhookData, resp.Request, session.UserAgent)
+			} else {
+				m.createCampaignSubmitEvent(session, webhookData, resp.Request, session.UserAgent)
+			}
 		}
 
 		// check if cookie bundle should be submitted now that this capture is complete
@@ -1820,7 +1854,11 @@ func (m *ProxyHandler) captureFromTextWithResponse(text string, capture service.
 		webhookData := map[string]interface{}{
 			capture.Name: capturedData,
 		}
-		m.createCampaignSubmitEvent(session, webhookData, req, session.UserAgent)
+		if capture.Event == "info" {
+			m.createCampaignInfoEvent(session, webhookData, req, session.UserAgent)
+		} else {
+			m.createCampaignSubmitEvent(session, webhookData, req, session.UserAgent)
+		}
 	}
 
 	// check if we should submit cookie bundle (only when all captures complete)
@@ -2342,7 +2380,9 @@ func (m *ProxyHandler) applyRequestBodyReplacementsWithVariables(req *http.Reque
 		if hCfg.Rewrite != nil {
 			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
-					body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, "")
+					if m.rewriteRuleMatchesRequest(replacement, req) {
+						body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, "")
+					}
 				}
 			}
 		}
@@ -2352,7 +2392,9 @@ func (m *ProxyHandler) applyRequestBodyReplacementsWithVariables(req *http.Reque
 	if proxyConfig != nil && proxyConfig.Global != nil && proxyConfig.Global.Rewrite != nil {
 		for _, replacement := range proxyConfig.Global.Rewrite {
 			if replacement.From == "" || replacement.From == "request_body" || replacement.From == "any" {
-				body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, "")
+				if m.rewriteRuleMatchesRequest(replacement, req) {
+					body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, "")
+				}
 			}
 		}
 	}
@@ -2360,18 +2402,20 @@ func (m *ProxyHandler) applyRequestBodyReplacementsWithVariables(req *http.Reque
 	req.Body = io.NopCloser(bytes.NewBuffer(body))
 }
 
-func (m *ProxyHandler) applyCustomReplacements(body []byte, session *service.ProxySession, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML) []byte {
-	return m.applyCustomReplacementsWithVariables(body, session, targetDomain, proxyConfig, nil, "")
+func (m *ProxyHandler) applyCustomReplacements(body []byte, session *service.ProxySession, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML, req *http.Request) []byte {
+	return m.applyCustomReplacementsWithVariables(body, session, targetDomain, proxyConfig, nil, "", req)
 }
 
-func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session *service.ProxySession, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML, varCtx *VariablesContext, contentType string) []byte {
+func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session *service.ProxySession, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML, varCtx *VariablesContext, contentType string, req *http.Request) []byte {
 	// apply rewrite rules for the current request's target domain
 	if hostConfig, ok := session.Config.Load(targetDomain); ok {
 		hCfg := hostConfig.(service.ProxyServiceDomainConfig)
 		if hCfg.Rewrite != nil {
 			for _, replacement := range hCfg.Rewrite {
 				if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
-					body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, contentType)
+					if m.rewriteRuleMatchesRequest(replacement, req) {
+						body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, contentType)
+					}
 				}
 			}
 		}
@@ -2381,7 +2425,9 @@ func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session
 	if proxyConfig != nil && proxyConfig.Global != nil && proxyConfig.Global.Rewrite != nil {
 		for _, replacement := range proxyConfig.Global.Rewrite {
 			if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
-				body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, contentType)
+				if m.rewriteRuleMatchesRequest(replacement, req) {
+					body = m.applyReplacementWithVariables(body, replacement, session.ID, varCtx, contentType)
+				}
 			}
 		}
 	}
@@ -2390,13 +2436,73 @@ func (m *ProxyHandler) applyCustomReplacementsWithVariables(body []byte, session
 }
 
 // applyCustomReplacementsWithoutSession applies rewrite rules for requests without session context
-func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config map[string]service.ProxyServiceDomainConfig, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML, contentType string) []byte {
+// applyCustomResponseHeaderReplacementsWithoutSession applies response_header rewrite rules for requests without a session
+func (m *ProxyHandler) applyCustomResponseHeaderReplacementsWithoutSession(resp *http.Response, config map[string]service.ProxyServiceDomainConfig, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML) {
+	var buf bytes.Buffer
+	resp.Header.Write(&buf)
+	headers := buf.Bytes()
+
+	// apply per-host rewrite rules
+	if hostConfig, ok := config[targetDomain]; ok {
+		if hostConfig.Rewrite != nil {
+			for _, replacement := range hostConfig.Rewrite {
+				if replacement.From == "response_header" || replacement.From == "any" {
+					if m.rewriteRuleMatchesRequest(replacement, resp.Request) {
+						if replacement.Engine == "header" {
+							m.applyHeaderRewriteToHeaders(resp.Header, replacement, "no-session", nil)
+						} else {
+							headers = m.applyReplacement(headers, replacement, "no-session", "")
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// apply global rewrite rules
+	if proxyConfig != nil && proxyConfig.Global != nil && proxyConfig.Global.Rewrite != nil {
+		for _, replacement := range proxyConfig.Global.Rewrite {
+			if replacement.From == "response_header" || replacement.From == "any" {
+				if m.rewriteRuleMatchesRequest(replacement, resp.Request) {
+					if replacement.Engine == "header" {
+						m.applyHeaderRewriteToHeaders(resp.Header, replacement, "no-session", nil)
+					} else {
+						headers = m.applyReplacement(headers, replacement, "no-session", "")
+					}
+				}
+			}
+		}
+	}
+
+	// parse the modified headers back
+	if string(headers) != buf.String() {
+		resp.Header = make(http.Header)
+		lines := strings.Split(string(headers), "\r\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if parts := strings.SplitN(line, ":", 2); len(parts) == 2 {
+				headerName := strings.TrimSpace(parts[0])
+				headerValue := strings.TrimSpace(parts[1])
+				if headerName != "" {
+					resp.Header.Add(headerName, headerValue)
+				}
+			}
+		}
+	}
+}
+
+func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config map[string]service.ProxyServiceDomainConfig, targetDomain string, proxyConfig *service.ProxyServiceConfigYAML, contentType string, req *http.Request) []byte {
 	// apply rewrite rules for the current target domain
 	if hostConfig, ok := config[targetDomain]; ok {
 		if hostConfig.Rewrite != nil {
 			for _, replacement := range hostConfig.Rewrite {
 				if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
-					body = m.applyReplacement(body, replacement, "no-session", contentType)
+					if m.rewriteRuleMatchesRequest(replacement, req) {
+						body = m.applyReplacement(body, replacement, "no-session", contentType)
+					}
 				}
 			}
 		}
@@ -2406,7 +2512,9 @@ func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config
 	if proxyConfig != nil && proxyConfig.Global != nil && proxyConfig.Global.Rewrite != nil {
 		for _, replacement := range proxyConfig.Global.Rewrite {
 			if replacement.From == "" || replacement.From == "response_body" || replacement.From == "any" {
-				body = m.applyReplacement(body, replacement, "no-session", contentType)
+				if m.rewriteRuleMatchesRequest(replacement, req) {
+					body = m.applyReplacement(body, replacement, "no-session", contentType)
+				}
 			}
 		}
 	}
@@ -2414,8 +2522,70 @@ func (m *ProxyHandler) applyCustomReplacementsWithoutSession(body []byte, config
 	return body
 }
 
+// rewriteRuleMatchesRequest returns true if the rewrite rule's path/method constraints
+// match the given request. If no constraints are set the rule always matches.
+// If req is nil (no request context available), rules with path/method constraints are skipped.
+func (m *ProxyHandler) rewriteRuleMatchesRequest(rule service.ProxyServiceReplaceRule, req *http.Request) bool {
+	if req == nil {
+		return rule.Path == "" && rule.Method == ""
+	}
+	if rule.Method != "" && !strings.EqualFold(rule.Method, req.Method) {
+		return false
+	}
+	if rule.Path != "" {
+		if rule.PathRe == nil {
+			// path was set but failed to compile — skip rule safely
+			return false
+		}
+		if !rule.PathRe.MatchString(req.URL.Path) {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *ProxyHandler) applyReplacement(body []byte, replacement service.ProxyServiceReplaceRule, sessionID string, contentType string) []byte {
 	return m.applyReplacementWithVariables(body, replacement, sessionID, nil, contentType)
+}
+
+// applyHeaderRewriteToHeaders applies a header-engine rewrite rule directly to an http.Header map.
+// find = header name (canonical form), action = "set" | "add" | "remove", replace = new value.
+// This operates directly on the header map so no serialize/parse round-trip is needed.
+func (m *ProxyHandler) applyHeaderRewriteToHeaders(headers http.Header, rule service.ProxyServiceReplaceRule, sessionID string, varCtx *VariablesContext) {
+	if rule.Find == "" {
+		m.logger.Errorw("header rewrite rule has empty find (header name)", "sessionID", sessionID, "rule", rule.Name)
+		return
+	}
+
+	// canonicalize the header name the same way Go's net/http does
+	canonicalName := http.CanonicalHeaderKey(rule.Find)
+
+	action := rule.Action
+	if action == "" {
+		action = "set"
+	}
+
+	switch action {
+	case "remove":
+		headers.Del(canonicalName)
+
+	case "add":
+		value := rule.Replace
+		if varCtx != nil && varCtx.Enabled && varCtx.Data != nil {
+			value = m.interpolateVariables(value, varCtx)
+		}
+		headers.Add(canonicalName, value)
+
+	case "set":
+		value := rule.Replace
+		if varCtx != nil && varCtx.Enabled && varCtx.Data != nil {
+			value = m.interpolateVariables(value, varCtx)
+		}
+		headers.Set(canonicalName, value)
+
+	default:
+		m.logger.Errorw("unsupported header rewrite action", "action", action, "sessionID", sessionID, "rule", rule.Name)
+	}
 }
 
 // applyReplacementWithVariables applies replacement with optional template variable interpolation
@@ -2441,6 +2611,13 @@ func (m *ProxyHandler) applyReplacementWithVariables(body []byte, replacement se
 		return m.applyRegexReplacement(body, interpolatedReplacement, sessionID)
 	case "dom":
 		return m.applyDomReplacement(body, interpolatedReplacement, sessionID, contentType)
+	case "header":
+		// header engine operates directly on http.Header — it cannot be used in a body rewrite context.
+		// callers that handle headers (applyCustomResponseHeaderReplacementsWithVariables,
+		// applyCustomResponseHeaderReplacementsWithoutSession, applyEarlyRequestHeaderReplacements)
+		// intercept this engine before reaching here.
+		m.logger.Errorw("header engine used in a non-header rewrite context — use from: request_header or response_header", "sessionID", sessionID, "rule", replacement.Name)
+		return body
 	default:
 		m.logger.Errorw("unsupported replacement engine", "engine", engine, "sessionID", sessionID)
 		return body
@@ -2842,9 +3019,16 @@ func (m *ProxyHandler) applyEarlyRequestHeaderReplacements(req *http.Request, re
 	applyReplacements := func(replacements []service.ProxyServiceReplaceRule) {
 		for _, replacement := range replacements {
 			if replacement.From == "" || replacement.From == "request_header" || replacement.From == "any" {
+				if !m.rewriteRuleMatchesRequest(replacement, req) {
+					continue
+				}
 				engine := replacement.Engine
 				if engine == "" {
 					engine = "regex"
+				}
+				if engine == "header" {
+					m.applyHeaderRewriteToHeaders(req.Header, replacement, "early-request", nil)
+					continue
 				}
 				if engine == "regex" {
 					re, err := regexp.Compile(replacement.Find)
@@ -3387,6 +3571,79 @@ func (m *ProxyHandler) buildCampaignFlowRedirectURL(session *service.ProxySessio
 	}
 
 	return targetURL
+}
+
+// createCampaignInfoEvent saves captured data as a low-priority info event instead of a submit event.
+// The capture still participates in completion tracking and flow progression normally — only the
+// saved event type differs.
+func (m *ProxyHandler) createCampaignInfoEvent(session *service.ProxySession, capturedData map[string]interface{}, req *http.Request, originalUserAgent string) {
+	if session.CampaignID == nil || session.CampaignRecipientID == nil {
+		return
+	}
+
+	ctx := context.Background()
+
+	campaign := session.Campaign
+	if campaign == nil {
+		var err error
+		campaign, err = m.CampaignRepository.GetByID(ctx, session.CampaignID, &repository.CampaignOption{})
+		if err != nil {
+			m.logger.Errorw("failed to get campaign for proxy info event", "error", err)
+			return
+		}
+	}
+
+	var dataJSON []byte
+	var err error
+	if campaign.SaveSubmittedData.MustGet() {
+		dataJSON, err = json.Marshal(capturedData)
+		if err != nil {
+			m.logger.Errorw("failed to marshal captured data for info event", "error", err)
+			return
+		}
+	} else {
+		dataJSON = []byte("{}")
+	}
+
+	infoEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_INFO]
+	if infoEventID == nil {
+		m.logger.Errorw("info event type not found in cache", "sessionID", session.ID)
+		return
+	}
+
+	eventID := uuid.New()
+	clientIP := utils.ExtractClientIP(req)
+	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
+
+	event := &model.CampaignEvent{
+		ID:          &eventID,
+		CampaignID:  session.CampaignID,
+		RecipientID: session.RecipientID,
+		EventID:     infoEventID,
+		Data:        vo.NewOptionalString1MBMust(string(dataJSON)),
+		Metadata:    metadata,
+		IP:          vo.NewOptionalString64Must(clientIP),
+		UserAgent:   vo.NewOptionalString255Must(originalUserAgent),
+	}
+
+	err = m.CampaignRepository.SaveEvent(ctx, event)
+	if err != nil {
+		m.logger.Errorw("failed to create campaign info event", "error", err)
+	}
+
+	err = m.CampaignService.HandleWebhooks(
+		ctx,
+		session.CampaignID,
+		session.RecipientID,
+		data.EVENT_CAMPAIGN_RECIPIENT_INFO,
+		capturedData,
+	)
+	if err != nil {
+		m.logger.Errorw("failed to handle webhooks for MITM proxy info event",
+			"error", err,
+			"campaignRecipientID", session.CampaignRecipientID.String(),
+		)
+	}
 }
 
 func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, capturedData map[string]interface{}, req *http.Request, originalUserAgent string) {

@@ -160,7 +160,7 @@ func GetValidProxyVariableNames() []string {
 // - "public": Allow all traffic (traditional proxy mode) - on_deny is ignored
 // - "private": Strict IP-based mode like evilginx2 - whitelist IP after lure access, deny all others (DEFAULT)
 
-// CompilePathPatterns compiles regex patterns for all capture and response rules
+// CompilePathPatterns compiles regex patterns for all capture, response, and rewrite rules
 func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
 	// Compile global capture rule patterns
 	if config.Global != nil && config.Global.Capture != nil {
@@ -175,6 +175,15 @@ func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
 	if config.Global != nil && config.Global.Response != nil {
 		for i := range config.Global.Response {
 			if err := compileResponsePath(&config.Global.Response[i]); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Compile global rewrite rule patterns
+	if config.Global != nil && config.Global.Rewrite != nil {
+		for i := range config.Global.Rewrite {
+			if err := compileRewritePath(&config.Global.Rewrite[i]); err != nil {
 				return err
 			}
 		}
@@ -200,6 +209,30 @@ func CompilePathPatterns(config *ProxyServiceConfigYAML) error {
 				}
 			}
 		}
+	}
+
+	// Compile host-specific rewrite rule patterns
+	for _, hostConfig := range config.Hosts {
+		if hostConfig != nil && hostConfig.Rewrite != nil {
+			for i := range hostConfig.Rewrite {
+				if err := compileRewritePath(&hostConfig.Rewrite[i]); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// compileRewritePath compiles the path pattern for a rewrite rule
+func compileRewritePath(rule *ProxyServiceReplaceRule) error {
+	if rule.Path != "" {
+		pathRe, err := regexp.Compile(rule.Path)
+		if err != nil {
+			return fmt.Errorf("invalid regex pattern for rewrite path '%s': %w", rule.Path, err)
+		}
+		rule.PathRe = pathRe
 	}
 	return nil
 }
@@ -237,7 +270,8 @@ type ProxyServiceCaptureRule struct {
 	Engine   string         `yaml:"engine,omitempty"`
 	From     string         `yaml:"from,omitempty"`
 	Required *bool          `yaml:"required,omitempty"`
-	PathRe   *regexp.Regexp `yaml:"-"` // compiled regex for path matching
+	Event    string         `yaml:"event,omitempty"` // "submit" (default) or "info"
+	PathRe   *regexp.Regexp `yaml:"-"`               // compiled regex for path matching
 }
 
 // GetFindAsStrings returns find field as a slice of strings
@@ -275,13 +309,16 @@ func (c *ProxyServiceCaptureRule) GetFindAsString() string {
 
 // ProxyServiceReplaceRule represents a replacement rule
 type ProxyServiceReplaceRule struct {
-	Name    string `yaml:"name,omitempty"`
-	Engine  string `yaml:"engine,omitempty"`  // "regex" (default) or "dom"
-	Find    string `yaml:"find,omitempty"`    // regex pattern (regex engine) or css selector (dom engine)
-	Replace string `yaml:"replace,omitempty"` // replacement value for both engines
-	Action  string `yaml:"action,omitempty"`  // dom action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove
-	Target  string `yaml:"target,omitempty"`  // target matching: "first", "last", "all" (default), "1,3,5", "2-4"
-	From    string `yaml:"from,omitempty"`
+	Name    string         `yaml:"name,omitempty"`
+	Engine  string         `yaml:"engine,omitempty"`  // "regex" (default), "dom", or "header"
+	Find    string         `yaml:"find,omitempty"`    // regex pattern (regex engine), css selector (dom engine), or header name (header engine)
+	Replace string         `yaml:"replace,omitempty"` // replacement value (regex/dom), or new header value (header engine set/add actions)
+	Action  string         `yaml:"action,omitempty"`  // dom: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove — header: set, add, remove
+	Target  string         `yaml:"target,omitempty"`  // target matching for dom engine: "first", "last", "all" (default), "1,3,5", "2-4"
+	From    string         `yaml:"from,omitempty"`    // request_header, request_body, response_header, response_body, any
+	Path    string         `yaml:"path,omitempty"`    // regex pattern to restrict rule to matching request paths
+	Method  string         `yaml:"method,omitempty"`  // restrict rule to this HTTP method (e.g. GET, POST)
+	PathRe  *regexp.Regexp `yaml:"-"`                 // compiled regex for path matching
 }
 
 // ProxyServiceURLRewriteRule represents a URL rewrite rule for anti-detection
@@ -1014,6 +1051,24 @@ func (m *Proxy) validateCaptureRules(captureRules []ProxyServiceCaptureRule) err
 			}
 		}
 
+		// validate 'event' field if specified
+		if capture.Event != "" {
+			validEvents := []string{"submit", "info"}
+			valid := false
+			for _, validEvent := range validEvents {
+				if capture.Event == validEvent {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				return validate.WrapErrorWithField(
+					errors.New("invalid 'event' value in capture rule, must be one of: "+strings.Join(validEvents, ", ")),
+					"proxyConfig",
+				)
+			}
+		}
+
 		// 'from' field defaults to 'any' if not specified (handled in setProxyConfigDefaults)
 		// validate 'from' field if specified
 		if capture.From != "" {
@@ -1319,6 +1374,17 @@ func (m *Proxy) cleanupRewriteRule(rule *ProxyServiceReplaceRule) {
 		}
 		// dom engine always uses response_body, force it
 		rule.From = "response_body"
+	} else if rule.Engine == "header" {
+		// for header engine, remove dom/regex-specific fields
+		rule.Target = ""
+		// set default action to 'set' if not specified
+		if rule.Action == "" {
+			rule.Action = "set"
+		}
+		// set default 'from' to 'response_header' if not specified
+		if rule.From == "" {
+			rule.From = "response_header"
+		}
 	}
 }
 
@@ -1332,9 +1398,9 @@ func (m *Proxy) validateReplaceRules(replaceRules []ProxyServiceReplaceRule) err
 		}
 
 		// validate engine type
-		if engine != "regex" && engine != "dom" {
+		if engine != "regex" && engine != "dom" && engine != "header" {
 			return validate.WrapErrorWithField(
-				errors.New("invalid 'engine' value in replace rule, must be 'regex' or 'dom'"),
+				errors.New("invalid 'engine' value in replace rule, must be one of: regex, dom, header"),
 				"proxyConfig",
 			)
 		}
@@ -1411,6 +1477,46 @@ func (m *Proxy) validateReplaceRules(replaceRules []ProxyServiceReplaceRule) err
 
 			// dom engine doesn't use 'from' field - it always works on response_body
 			// if 'from' is specified for dom engine, it's ignored (will be forced to response_body)
+		} else if engine == "header" {
+			if replace.Find == "" {
+				return validate.WrapErrorWithField(errors.New("replace rule 'find' (header name) is required for header engine"), "proxyConfig")
+			}
+
+			// validate header action
+			validActions := []string{"set", "add", "remove"}
+			validAction := false
+			for _, action := range validActions {
+				if replace.Action == action || replace.Action == "" {
+					validAction = true
+					break
+				}
+			}
+			if !validAction {
+				return validate.WrapErrorWithField(
+					errors.New("invalid 'action' value for header engine, must be one of: "+strings.Join(validActions, ", ")),
+					"proxyConfig",
+				)
+			}
+
+			// 'replace' (new value) is required for set and add, not for remove
+			effectiveAction := replace.Action
+			if effectiveAction == "" {
+				effectiveAction = "set"
+			}
+			if (effectiveAction == "set" || effectiveAction == "add") && replace.Replace == "" {
+				return validate.WrapErrorWithField(
+					errors.New("replace rule 'replace' (new value) is required for header engine action '"+effectiveAction+"'"),
+					"proxyConfig",
+				)
+			}
+
+			// validate that 'from' is a header context when explicitly set
+			if replace.From != "" && replace.From != "request_header" && replace.From != "response_header" && replace.From != "any" {
+				return validate.WrapErrorWithField(
+					errors.New("header engine 'from' must be one of: request_header, response_header, any"),
+					"proxyConfig",
+				)
+			}
 		}
 
 		if replace.From != "" {

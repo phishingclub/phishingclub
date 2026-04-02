@@ -51,10 +51,11 @@ var CampaignEventPriority = map[string]int{
 	data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT:         20,
 	data.EVENT_CAMPAIGN_RECIPIENT_SCHEDULED:            10,
 	// campaign events
-	data.EVENT_CAMPAIGN_CLOSED:       30,
-	data.EVENT_CAMPAIGN_ACTIVE:       20,
-	data.EVENT_CAMPAIGN_SELF_MANAGED: 20,
-	data.EVENT_CAMPAIGN_SCHEDULED:    10,
+	data.EVENT_CAMPAIGN_CLOSED:           30,
+	data.EVENT_CAMPAIGN_ACTIVE:           20,
+	data.EVENT_CAMPAIGN_SELF_MANAGED:     20,
+	data.EVENT_CAMPAIGN_SCHEDULED:        10,
+	data.EVENT_CAMPAIGN_PENDING_SCHEDULE: 5,
 }
 
 // IsMoreNotableCampaignRecipientEvent returns true if newEvent is more notable than currentEvent

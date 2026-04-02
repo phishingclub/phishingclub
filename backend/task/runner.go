@@ -195,6 +195,9 @@ func (d *Runner) ProcessSystemTasks(
 	d.runTask("system - prune orphaned recipients", func() error {
 		return d.PruneOrphanedRecipients(ctx, session)
 	})
+	d.runTask("system - late schedule campaigns", func() error {
+		return d.CampaignService.SchedulePendingCampaigns(ctx, session)
+	})
 }
 
 // PruneOrphanedRecipients prunes orphaned recipients for global scope and all companies

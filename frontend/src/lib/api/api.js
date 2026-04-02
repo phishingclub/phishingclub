@@ -513,6 +513,7 @@ export class API {
 		 * @param {string} campaign.sendEndAt
 		 * @param {string} [campaign.closeAt]
 		 * @param {string} [campaign.anonymizeAt]
+		 * @param {string} [campaign.scheduleAt]
 		 * @param {string[]} campaign.recipientGroupIDs []uuid
 		 * @param {string[]} campaign.allowDenyIDs []uuid
 		 * @param {string} campaign.denyPageID uuid
@@ -540,6 +541,7 @@ export class API {
 			sendEndAt,
 			closeAt,
 			anonymizeAt,
+			scheduleAt,
 			recipientGroupIDs,
 			allowDenyIDs,
 			denyPageID,
@@ -566,6 +568,7 @@ export class API {
 				sendEndAt,
 				closeAt,
 				anonymizeAt,
+				scheduleAt,
 				recipientGroupIDs,
 				allowDenyIDs,
 				denyPageID,
@@ -594,6 +597,7 @@ export class API {
 		 * @param {string} campaign.sendEndAt
 		 * @param {string} [campaign.closeAt]
 		 * @param {string} [campaign.anonymizeAt]
+		 * @param {string} [campaign.scheduleAt]
 		 * @param {string} campaign.templateID uuid
 		 * @param {string[]} campaign.recipientGroupIDs []uuid
 		 * @param {string[]} campaign.allowDenyIDs []uuid
@@ -622,6 +626,7 @@ export class API {
 			sendEndAt,
 			closeAt,
 			anonymizeAt,
+			scheduleAt,
 			recipientGroupIDs,
 			allowDenyIDs,
 			denyPageID,
@@ -647,6 +652,7 @@ export class API {
 				sendEndAt,
 				closeAt,
 				anonymizeAt,
+				scheduleAt,
 				recipientGroupIDs,
 				allowDenyIDs,
 				denyPageID,

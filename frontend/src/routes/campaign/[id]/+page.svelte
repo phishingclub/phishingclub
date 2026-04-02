@@ -70,6 +70,7 @@
 		saveSubmittedData: false,
 		saveBrowserMetadata: false,
 		isAnonymous: false,
+		scheduleAt: null,
 
 		allowDenyIDs: [],
 		webhookID: null,
@@ -286,6 +287,7 @@
 			}
 			campaign.recipientGroups = t.recipientGroupIDs.map((id) => recipientGroupMap.byKey(id));
 			campaign.notableEventName = t.notableEventName;
+			campaign.scheduleAt = t.scheduleAt ?? null;
 			if (t.sendStartAt === null && t.sendEndAt === null) {
 				isSelfManaged = true;
 			}
@@ -1622,6 +1624,15 @@
 					</div>
 
 					{#if !isSelfManaged}
+						{#if campaign.scheduleAt}
+							<div class="flex justify-between">
+								<span class="text-gray-600 dark:text-gray-400">Schedules at:</span>
+								<span class="text-pc-darkblue dark:text-white text-right"
+									><Datetime value={campaign.scheduleAt} /></span
+								>
+							</div>
+						{/if}
+
 						<div class="flex justify-between">
 							<span class="text-gray-600 dark:text-gray-400">Delivery start:</span>
 							<span class="text-pc-darkblue dark:text-white text-right"
@@ -1932,172 +1943,174 @@
 				{/each}
 			</Table>
 		</div>
-		<SubHeadline>Recipients overview</SubHeadline>
-		<Table
-			columns={[
-				{ column: 'First name', size: 'small' },
-				{ column: 'Last name', size: 'small' },
-				{ column: 'Email', size: 'large' },
-				{ column: 'Status', size: 'small' },
-				{ column: 'Send at', title: 'Scheduled', size: 'small' },
-				{ column: 'Sent at', title: 'Delivered', size: 'small' },
-				{ column: 'Cancelled at', size: 'small' }
-			]}
-			sortable={[
-				'First name',
-				'Last name',
-				'Email',
-				'Status',
-				'Send at',
-				'Sent at',
-				'Cancelled at'
-			]}
-			pagination={recipientTableUrlParams}
-			plural="recipients"
-			hasData={!!campaignRecipients.length}
-			hasNextPage={campaignRecipientsHasNextPage}
-			isGhost={isRecipientTableLoading}
-		>
-			{#each campaignRecipients as recp (recp.id)}
-				<TableRow>
-					{#if recp?.anonymizedID}
-						<TableCell value={'anonymized'} />
-						<TableCell value={'anonymized'} />
-						<TableCell value={'anonymized'} />
-					{:else}
-						<TableCell>
-							<button
-								on:click={() => openEventsModal(recp.recipientID)}
-								class="block w-full py-1 text-left"
-							>
-								{recp.recipient.firstName}
-							</button>
-						</TableCell>
-						<TableCell>
-							<button
-								on:click={() => openEventsModal(recp.recipientID)}
-								class="block w-full py-1 text-left"
-							>
-								{recp.recipient.lastName}
-							</button>
-						</TableCell>
-						<TableCell>
-							{#if recp?.recipient?.email}
+		{#if campaign.notableEventName !== 'campaign_pending_schedule'}
+			<SubHeadline>Recipients overview</SubHeadline>
+			<Table
+				columns={[
+					{ column: 'First name', size: 'small' },
+					{ column: 'Last name', size: 'small' },
+					{ column: 'Email', size: 'large' },
+					{ column: 'Status', size: 'small' },
+					{ column: 'Send at', title: 'Scheduled', size: 'small' },
+					{ column: 'Sent at', title: 'Delivered', size: 'small' },
+					{ column: 'Cancelled at', size: 'small' }
+				]}
+				sortable={[
+					'First name',
+					'Last name',
+					'Email',
+					'Status',
+					'Send at',
+					'Sent at',
+					'Cancelled at'
+				]}
+				pagination={recipientTableUrlParams}
+				plural="recipients"
+				hasData={!!campaignRecipients.length}
+				hasNextPage={campaignRecipientsHasNextPage}
+				isGhost={isRecipientTableLoading}
+			>
+				{#each campaignRecipients as recp (recp.id)}
+					<TableRow>
+						{#if recp?.anonymizedID}
+							<TableCell value={'anonymized'} />
+							<TableCell value={'anonymized'} />
+							<TableCell value={'anonymized'} />
+						{:else}
+							<TableCell>
 								<button
 									on:click={() => openEventsModal(recp.recipientID)}
 									class="block w-full py-1 text-left"
 								>
-									{recp.recipient.email}
+									{recp.recipient.firstName}
 								</button>
-							{/if}
-						</TableCell>
-					{/if}
-					<TableCell>
-						<EventName eventName={recp?.notableEventName} />
-					</TableCell>
-					<TableCell value={recp?.sendAt} isDate />
-					<TableCell value={recp?.sentAt} isDate />
-					<TableCell value={recp?.cancelledAt} isDate />
-					{#if !campaign.sentAt}
-						<TableCellEmpty />
-						<TableCellAction>
-							<TableDropDownEllipsis>
-								<TableViewButton
-									name="Events"
-									disabled={!recp.recipient}
+							</TableCell>
+							<TableCell>
+								<button
 									on:click={() => openEventsModal(recp.recipientID)}
-								/>
+									class="block w-full py-1 text-left"
+								>
+									{recp.recipient.lastName}
+								</button>
+							</TableCell>
+							<TableCell>
+								{#if recp?.recipient?.email}
+									<button
+										on:click={() => openEventsModal(recp.recipientID)}
+										class="block w-full py-1 text-left"
+									>
+										{recp.recipient.email}
+									</button>
+								{/if}
+							</TableCell>
+						{/if}
+						<TableCell>
+							<EventName eventName={recp?.notableEventName} />
+						</TableCell>
+						<TableCell value={recp?.sendAt} isDate />
+						<TableCell value={recp?.sentAt} isDate />
+						<TableCell value={recp?.cancelledAt} isDate />
+						{#if !campaign.sentAt}
+							<TableCellEmpty />
+							<TableCellAction>
+								<TableDropDownEllipsis>
+									<TableViewButton
+										name="Events"
+										disabled={!recp.recipient}
+										on:click={() => openEventsModal(recp.recipientID)}
+									/>
 
-								<TableDropDownButton
-									name={recp.sentAt ? `Send message again` : `Send message`}
-									title={isContextMismatch()
-										? campaign.companyID
-											? 'Switch to company view to perform this action'
-											: 'Switch to global view to perform this action'
-										: recp.closedAt
-											? 'Campaign is closed'
-											: recp.cancelledAt
-												? 'Recipient cancelled'
-												: recp.sentAt
-													? `Send message again (last sent: ${new Date(recp.sentAt).toLocaleDateString()})`
-													: `Send message to recipient`}
-									on:click={() => showSendMessageModal(recp.id, recp.recipient)}
-									disabled={!!campaign.closedAt || recp.cancelledAt || isContextMismatch()}
-								/>
-								<TableUpdateButton
-									name="Copy lure URL"
-									disabled={!!campaign.closedAt ||
-										!!campaign.anonymizedAt ||
-										!recp.recipient ||
-										isContextMismatch()}
-									title={isContextMismatch()
-										? campaign.companyID
-											? 'Switch to company view to perform this action'
-											: 'Switch to global view to perform this action'
-										: campaign.closedAt
-											? 'Campaign is closed'
-											: campaign.anonymizedAt
-												? 'Campaign is anonymized'
-												: !recp.recipient
-													? 'Recipient not available'
-													: ''}
-									on:click={() => onClickCopyURL(recp.id)}
-								/>
-								<TableUpdateButton
-									name="Copy email content"
-									disabled={!!campaign.closedAt || !!campaign.anonymizedAt || isContextMismatch()}
-									title={isContextMismatch()
-										? campaign.companyID
-											? 'Switch to company view to perform this action'
-											: 'Switch to global view to perform this action'
-										: campaign.closedAt
-											? 'Campaign is closed'
-											: campaign.anonymizedAt
-												? 'Campaign is anonymized'
-												: ''}
-									on:click={() => onClickCopyEmailContent(recp.id)}
-								/>
-
-								{#if !campaign.sendStartAt}
-									<!-- self managed campaign -->
 									<TableDropDownButton
-										name="Set as message sent"
+										name={recp.sentAt ? `Send message again` : `Send message`}
 										title={isContextMismatch()
 											? campaign.companyID
 												? 'Switch to company view to perform this action'
 												: 'Switch to global view to perform this action'
 											: recp.closedAt
 												? 'Campaign is closed'
-												: ''}
-										on:click={() => onClickSetEmailSent(recp.id, recp.recipient)}
+												: recp.cancelledAt
+													? 'Recipient cancelled'
+													: recp.sentAt
+														? `Send message again (last sent: ${new Date(recp.sentAt).toLocaleDateString()})`
+														: `Send message to recipient`}
+										on:click={() => showSendMessageModal(recp.id, recp.recipient)}
 										disabled={!!campaign.closedAt || recp.cancelledAt || isContextMismatch()}
 									/>
-								{/if}
-								<TableViewButton
-									name="View email"
-									disabled={!!campaign.closedAt ||
-										!!campaign.anonymizedAt ||
-										!recp.recipient ||
-										isContextMismatch()}
-									title={isContextMismatch()
-										? campaign.companyID
-											? 'Switch to company view to perform this action'
-											: 'Switch to global view to perform this action'
-										: campaign.closedAt
-											? 'Campaign is closed'
-											: campaign.anonymizedAt
-												? 'Campaign is anonymized'
-												: !recp.recipient
-													? 'Recipient not available'
+									<TableUpdateButton
+										name="Copy lure URL"
+										disabled={!!campaign.closedAt ||
+											!!campaign.anonymizedAt ||
+											!recp.recipient ||
+											isContextMismatch()}
+										title={isContextMismatch()
+											? campaign.companyID
+												? 'Switch to company view to perform this action'
+												: 'Switch to global view to perform this action'
+											: campaign.closedAt
+												? 'Campaign is closed'
+												: campaign.anonymizedAt
+													? 'Campaign is anonymized'
+													: !recp.recipient
+														? 'Recipient not available'
+														: ''}
+										on:click={() => onClickCopyURL(recp.id)}
+									/>
+									<TableUpdateButton
+										name="Copy email content"
+										disabled={!!campaign.closedAt || !!campaign.anonymizedAt || isContextMismatch()}
+										title={isContextMismatch()
+											? campaign.companyID
+												? 'Switch to company view to perform this action'
+												: 'Switch to global view to perform this action'
+											: campaign.closedAt
+												? 'Campaign is closed'
+												: campaign.anonymizedAt
+													? 'Campaign is anonymized'
 													: ''}
-									on:click={() => onClickPreviewEmail(recp.id)}
-								/>
-							</TableDropDownEllipsis>
-						</TableCellAction>
-					{/if}
-				</TableRow>
-			{/each}
-		</Table>
+										on:click={() => onClickCopyEmailContent(recp.id)}
+									/>
+
+									{#if !campaign.sendStartAt}
+										<!-- self managed campaign -->
+										<TableDropDownButton
+											name="Set as message sent"
+											title={isContextMismatch()
+												? campaign.companyID
+													? 'Switch to company view to perform this action'
+													: 'Switch to global view to perform this action'
+												: recp.closedAt
+													? 'Campaign is closed'
+													: ''}
+											on:click={() => onClickSetEmailSent(recp.id, recp.recipient)}
+											disabled={!!campaign.closedAt || recp.cancelledAt || isContextMismatch()}
+										/>
+									{/if}
+									<TableViewButton
+										name="View email"
+										disabled={!!campaign.closedAt ||
+											!!campaign.anonymizedAt ||
+											!recp.recipient ||
+											isContextMismatch()}
+										title={isContextMismatch()
+											? campaign.companyID
+												? 'Switch to company view to perform this action'
+												: 'Switch to global view to perform this action'
+											: campaign.closedAt
+												? 'Campaign is closed'
+												: campaign.anonymizedAt
+													? 'Campaign is anonymized'
+													: !recp.recipient
+														? 'Recipient not available'
+														: ''}
+										on:click={() => onClickPreviewEmail(recp.id)}
+									/>
+								</TableDropDownEllipsis>
+							</TableCellAction>
+						{/if}
+					</TableRow>
+				{/each}
+			</Table>
+		{/if}
 	{/if}
 	<Modal headerText={'Events'} visible={isEventsModalVisible} onClose={closeEventsModal}>
 		<div class="mt-8"></div>

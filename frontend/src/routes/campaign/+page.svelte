@@ -252,8 +252,40 @@
 	let allowDenyType = 'none';
 	let allAllowDeny = [];
 	let showSecurityOptions = false;
+	let lateScheduleEnabled = false;
 	let showAdvancedOptionsStep3 = false;
 	let showAdvancedOptionsStep4 = false;
+
+	// reactive: true when at least one selected recipient group is dynamic
+	$: hasDynamicGroup = formValues.recipientGroups.some((label) => {
+		const id = recipientGroupMap.byValue(label);
+		return recipientGroupsByID[id]?.isDynamic === true;
+	});
+
+	// reset distribution speed to manual when a dynamic group is selected —
+	// we don't know the final recipient count so automatic spreading is meaningless
+	$: if (hasDynamicGroup) {
+		spreadOption = SPREAD_MANUAL;
+	}
+
+	// reactive statement to keep scheduleAt in sync when sendStartAt changes while late scheduling is enabled.
+	// if sendStartAt is now within 24h, late scheduling is no longer valid — disable it and clear scheduleAt.
+	$: if (lateScheduleEnabled) {
+		if (!formValues.sendStartAt || !lateScheduleAvailable(formValues.sendStartAt)) {
+			lateScheduleEnabled = false;
+			formValues.scheduleAt = null;
+		} else {
+			formValues.scheduleAt = new Date(
+				new Date(formValues.sendStartAt).getTime() - 24 * 60 * 60 * 1000
+			).toISOString();
+		}
+	}
+
+	// returns true if sendStartAt is more than 24h in the future (late scheduling is meaningful)
+	const lateScheduleAvailable = (sendStartAt) => {
+		if (!sendStartAt) return false;
+		return new Date(sendStartAt).getTime() - Date.now() > 24 * 60 * 60 * 1000;
+	};
 
 	// reactive statement to enable security options when deny page is set
 	$: if (formValues.denyPageValue && formValues.denyPageValue.trim() !== '') {
@@ -760,6 +792,9 @@
 			const contraintEndTimeUTC = formValues.contraintEndTime
 				? localTimeToUTC(formValues.contraintEndTime)
 				: null;
+			const scheduleAtUTC = formValues.scheduleAt
+				? new Date(formValues.scheduleAt).toISOString()
+				: null;
 
 			const res = await api.campaign.create({
 				name: formValues.name,
@@ -791,7 +826,8 @@
 						webhookEvents: webhookEventsToBinary(wh.events)
 					})),
 				jitterMin: formValues.jitterMin !== 0 ? formValues.jitterMin : null,
-				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null
+				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null,
+				scheduleAt: scheduleAtUTC
 			});
 
 			if (!res.success) {
@@ -831,6 +867,9 @@
 			const contraintEndTimeUTC = formValues.contraintEndTime
 				? localTimeToUTC(formValues.contraintEndTime)
 				: null;
+			const scheduleAtUTC = formValues.scheduleAt
+				? new Date(formValues.scheduleAt).toISOString()
+				: null;
 
 			const res = await api.campaign.update({
 				id: formValues.id,
@@ -862,7 +901,8 @@
 						webhookEvents: webhookEventsToBinary(wh.events)
 					})),
 				jitterMin: formValues.jitterMin !== 0 ? formValues.jitterMin : null,
-				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null
+				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null,
+				scheduleAt: scheduleAtUTC
 			});
 
 			if (!res.success) {
@@ -1029,6 +1069,8 @@
 		formValues.contraintEndTime = null;
 		formValues.sendStartAt = null;
 		formValues.sendEndAt = null;
+		lateScheduleEnabled = false;
+		formValues.scheduleAt = null;
 	};
 
 	const onChangeAllowDenyType = () => {
@@ -1106,6 +1148,7 @@
 				: campaign.sendEndAt
 					? local_yyyy_mm_dd(new Date(campaign.sendEndAt))
 					: null,
+			scheduleAt: copyMode ? null : (campaign.scheduleAt ?? null),
 			constraintWeekDays: copyMode ? [] : weekDayBinaryToAvailable(campaign.constraintWeekDays),
 			contraintStartTime: copyMode ? null : utcTimeToLocal(campaign.constraintStartTime),
 			contraintEndTime: copyMode ? null : utcTimeToLocal(campaign.constraintEndTime),
@@ -1180,7 +1223,8 @@
 		}
 
 		// set advanced options visibility based on campaign configuration
-		showAdvancedOptionsStep3 = !!(campaign.closeAt || campaign.anonymizeAt);
+		lateScheduleEnabled = !!campaign.scheduleAt;
+		showAdvancedOptionsStep3 = !!(campaign.closeAt || campaign.anonymizeAt || campaign.scheduleAt);
 
 		showAdvancedOptionsStep4 = !!(
 			campaign.webhookID ||
@@ -1663,16 +1707,35 @@
 									>
 										Delivery start
 									</DateTimeField>
-									<button
-										class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200"
-										on:click|preventDefault={() =>
-											(formValues.sendStartAt = new Date().toISOString())}
-									>
-										set to now
-									</button>
+									<div class="flex items-center gap-1">
+										<button
+											type="button"
+											class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+											on:click|preventDefault={() =>
+												(formValues.sendStartAt = new Date().toISOString())}
+										>
+											Now
+										</button>
+										<button
+											type="button"
+											class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+											on:click|preventDefault={() =>
+												(formValues.sendStartAt = new Date(Date.now() + 86400000).toISOString())}
+										>
+											+1 Day
+										</button>
+										<button
+											type="button"
+											class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+											on:click|preventDefault={() =>
+												(formValues.sendStartAt = new Date(Date.now() + 604800000).toISOString())}
+										>
+											+1 Week
+										</button>
+									</div>
 								</div>
 
-								{#if formValues.sendStartAt}
+								{#if formValues.sendStartAt && !hasDynamicGroup}
 									<div class="pt-4 pb-6">
 										<div class="flex flex-col gap-2">
 											<p
@@ -1756,14 +1819,32 @@
 										Delivery end
 									</DateTimeField>
 									{#if spreadOption === SPREAD_MANUAL}
-										<button
-											class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200"
-											on:click|preventDefault={() => {
-												formValues.sendEndAt = new Date().toISOString();
-											}}
-										>
-											set to now
-										</button>
+										<div class="flex items-center gap-1">
+											<button
+												type="button"
+												class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+												on:click|preventDefault={() =>
+													(formValues.sendEndAt = new Date().toISOString())}
+											>
+												Now
+											</button>
+											<button
+												type="button"
+												class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+												on:click|preventDefault={() =>
+													(formValues.sendEndAt = new Date(Date.now() + 86400000).toISOString())}
+											>
+												+1 Day
+											</button>
+											<button
+												type="button"
+												class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+												on:click|preventDefault={() =>
+													(formValues.sendEndAt = new Date(Date.now() + 604800000).toISOString())}
+											>
+												+1 Week
+											</button>
+										</div>
 									{/if}
 								</div>
 							{:else if scheduleType === 'schedule'}
@@ -1885,6 +1966,23 @@
 								{/if}
 
 								{#if showAdvancedOptionsStep3}
+									<CheckboxField
+										bind:value={lateScheduleEnabled}
+										disabled={!lateScheduleAvailable(formValues.sendStartAt)}
+										toolTipText={!lateScheduleAvailable(formValues.sendStartAt)
+											? 'Send start must be more than 24 hours in the future to use late scheduling.'
+											: 'When enabled, recipients are resolved and the campaign is scheduled 24 hours before send start, not at creation.'}
+										on:change={() => {
+											if (lateScheduleEnabled && formValues.sendStartAt) {
+												formValues.scheduleAt = new Date(
+													new Date(formValues.sendStartAt).getTime() - 24 * 60 * 60 * 1000
+												).toISOString();
+											} else {
+												formValues.scheduleAt = null;
+											}
+										}}>Late Schedule</CheckboxField
+									>
+
 									<TextFieldSelect
 										id="sortField"
 										bind:value={formValues.sortField}
@@ -2251,13 +2349,20 @@
 													: 'None selected'}
 											</span>
 
-											<span class="text-grayblue-dark font-medium">Total:</span>
-											<span class="text-pc-darkblue dark:text-white"
-												>{formValues.selectedCount} recipients</span
-											>
+											{#if !lateScheduleEnabled}
+												<span class="text-grayblue-dark font-medium">Total:</span>
+												<span class="text-pc-darkblue dark:text-white"
+													>{formValues.selectedCount} recipients</span
+												>
+											{/if}
 										</div>
 
-										{#if formValues.recipientGroups.length > 0}
+										{#if lateScheduleEnabled}
+											<p class="text-sm text-amber-600 dark:text-amber-400">
+												Recipients will be resolved when the campaign is scheduled.<br />
+												Campaign is scheduled 24 hours before send start.
+											</p>
+										{:else if formValues.recipientGroups.length > 0}
 											<button
 												type="button"
 												class="text-xs font-medium text-white dark:text-white hover:text-gray-200 dark:hover:text-gray-300 flex items-center gap-1"
@@ -2377,10 +2482,7 @@
 												<RelativeTime value={formValues.sendStartAt} />
 											</span>
 
-											<span
-												class="text-grayblue-dark dark:text-gray-300 font-medium transition-colors duration-200"
-												>End:</span
-											>
+											<span class="text-grayblue-dark font-medium">End:</span>
 											<span
 												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 											>
@@ -2429,6 +2531,16 @@
 													{formValues.jitterMin} to {formValues.jitterMax} minutes
 												</span>
 											{/if}
+										{/if}
+
+										{#if formValues.scheduleAt}
+											<span class="text-grayblue-dark font-medium">Schedule at:</span>
+											<span
+												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+											>
+												<Datetime value={formValues.scheduleAt} />
+												<RelativeTime value={formValues.scheduleAt} />
+											</span>
 										{/if}
 
 										{#if formValues.closeAt}
