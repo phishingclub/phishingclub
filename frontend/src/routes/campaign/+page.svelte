@@ -2482,10 +2482,7 @@
 												<RelativeTime value={formValues.sendStartAt} />
 											</span>
 
-											<span
-												class="text-grayblue-dark dark:text-gray-300 font-medium transition-colors duration-200"
-												>End:</span
-											>
+											<span class="text-grayblue-dark font-medium">End:</span>
 											<span
 												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 											>
