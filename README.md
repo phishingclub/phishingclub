@@ -4,10 +4,7 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?style=flat&logo=discord&logoColor=white)](https://discord.gg/Zssps7U8gX)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-**Phishing Club** is a phishing simulation and man-in-the-middle framework designed for companies that perform phishing simulation internally or as part of their business, and for aidding red teams obtaining initial access.
-
-It can be used both as a replacement for Gophish for phishers that are looking for more features and as an aid or alternative for offensive phishing tools like MITM frameworks.
-
+**Phishing Club** is a phishing simulation and red team phishing framework.
 
 ![Phishing Club Dashboard](https://phishing.club/img/animated.gif)
 
@@ -22,20 +19,20 @@ curl -fsSL https://raw.githubusercontent.com/phishingclub/phishingclub/main/inst
 
 Remember to copy the admin URL and password
 
-For a manual step by step guide or more in depth installation information - [click here](https://phishing.club/guide/management/#install)
+[Manual installation](https://phishing.club/guide/management/#install)
 
-Prebuild images of the latest version are also available.
+[GHCR Images](https://github.com/phishingclub/phishingclub/pkgs/container/phishingclub)
 
-See [production docker compose example](https://github.com/phishingclub/phishingclub/blob/develop/docker-compose.production.yml) and [the latest images](https://github.com/phishingclub/phishingclub/pkgs/container/phishingclub)
-
+[production docker compose example](https://github.com/phishingclub/phishingclub/blob/develop/docker-compose.production.yml) 
 
 ## Features
 
+Phishing Club providers a lot of features for simulation and red teaming, here are some highlights.
+
 - **Multi-stage phishing flows** - Put together multiple phishing pages
-- **Reverse proxy phishing** - Capture sessions to bypass weak MFA
 - **Domain proxying** - Configure domains to proxy and mirror content from target sites
 - **Flexible scheduling** - Time windows, business hours, or manual delivery
-- **Multiple domains** - Auto TLS, custom sites, asset management
+- **Multiple domains** - Auto TLS, custom sites and asset management
 - **Advanced delivery** - SMTP configs or custom API Sender with OAuth support
 - **Recipient tracking** - Groups, CSV import, repeat offender metrics
 - **Analytics** - Timelines, dashboards, per-user event history
@@ -46,6 +43,7 @@ See [production docker compose example](https://github.com/phishingclub/phishing
 
 ## AiTM and Red Team Features
 
+- **Reverse proxy phishing** - Capture sessions to bypass weak MFA
 - **Full control** - Modify and capture requests and responses independently
 - **DOM rewriting** - Modify content using CSS/jQuery-like selectors or regex
 - **Path and param rewriting** - Rewrite URL paths and query parameters on the fly
@@ -62,6 +60,7 @@ See [production docker compose example](https://github.com/phishingclub/phishing
 - **Device Code phishing** - Device code phishing is as simple as adding a single line to a email or landing page
 
 ### Blogs & Resources
+- [Phishing Club User Guide](https://phishing.club/guide/)
 - [Covert red team phishing with Phishing Club](http://phishing.club/blog/covert-red-team-phishing-with-phishing-club/)
 - [Phishing Simulation vs Red Team Phishing: Understanding Different Approaches](https://phishing.club/blog/phishing-simulation-vs-red-team-phishing/)
 
@@ -244,11 +243,11 @@ For organizations that want to:
 - Offer Phishing Club as a service without source code disclosure
 - Modify or modify the codebase without source code disclosure
 
-**Contact us for commercial licensing**: [license@phishing.club](mailto:license@phishing.club)
+**Contact for commercial licensing**: [license@phishing.club](mailto:license@phishing.club)
 
 ## Roadmap
 
-There is no offical roadmap at this moment.
+There is no offical roadmap.
 
 But you can vote with emojis on the `[feature]` requests [on Github](https://github.com/phishingclub/phishingclub) or add you own feature request.
 
@@ -256,12 +255,7 @@ Feature request with a high number of votes will be prioritized, however it is n
 
 ## Contributing
 
-We welcome contributions from the community! Please read our [Contributing Guidelines](CONTRIBUTING.md) for detailed information on:
-
-- Development setup and workflow
-- Code standards and conventions
-- Submission requirements
-- License agreements
+We welcome contributions from the community! Please read our [Contributing Guidelines](CONTRIBUTING.md) 
 
 **Quick Start for Contributors:**
 1. Check existing issues and create a feature request if needed
@@ -285,7 +279,6 @@ Need help? Join the [Phishing Club Discord](https://discord.gg/Zssps7U8gX)
 Community support is provided on a best-effort, volunteer basis. For dedicated assistance, paid support is available.
 
 - **General Support**: Join our Discord community or open a GitHub issue
-- **Commercial Licensing**: Contact [license@phishing.club](mailto:license@phishing.club)
 - **Security Issues**: See our [Security Policy](SECURITY.md)
 
 
