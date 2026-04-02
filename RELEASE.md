@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.34.0] - 2026-04-02
+- Added dynamic groups
+- Added late scheduling to campaigns
+- Added option to auto prune orphans
+- Added option to clear generated device codes for campaign
+- Added proxy (socks5) for device code
+- Added optional request path and method on proxy rewrites
+- Added proxy rewrite header engine
+- Added support for proxy capturing as info event instead of submit event
+- Fix proxy replace not working on header responses
+- Fix email is not optional in campaign template
+- Fix proxy normalize empty path to /
+- Minor UI fixes / improvements
+
 ## [1.33.0] - 2026-03-21
 - Added Microsoft Device Code phishing
 - Fix pagination on dashboard events table
