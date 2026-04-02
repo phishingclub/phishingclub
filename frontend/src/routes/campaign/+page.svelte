@@ -1707,13 +1707,32 @@
 									>
 										Delivery start
 									</DateTimeField>
-									<button
-										class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200"
-										on:click|preventDefault={() =>
-											(formValues.sendStartAt = new Date().toISOString())}
-									>
-										set to now
-									</button>
+									<div class="flex items-center gap-1">
+										<button
+											type="button"
+											class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+											on:click|preventDefault={() =>
+												(formValues.sendStartAt = new Date().toISOString())}
+										>
+											Now
+										</button>
+										<button
+											type="button"
+											class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+											on:click|preventDefault={() =>
+												(formValues.sendStartAt = new Date(Date.now() + 86400000).toISOString())}
+										>
+											+1 Day
+										</button>
+										<button
+											type="button"
+											class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+											on:click|preventDefault={() =>
+												(formValues.sendStartAt = new Date(Date.now() + 604800000).toISOString())}
+										>
+											+1 Week
+										</button>
+									</div>
 								</div>
 
 								{#if formValues.sendStartAt && !hasDynamicGroup}
@@ -1800,14 +1819,32 @@
 										Delivery end
 									</DateTimeField>
 									{#if spreadOption === SPREAD_MANUAL}
-										<button
-											class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200"
-											on:click|preventDefault={() => {
-												formValues.sendEndAt = new Date().toISOString();
-											}}
-										>
-											set to now
-										</button>
+										<div class="flex items-center gap-1">
+											<button
+												type="button"
+												class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+												on:click|preventDefault={() =>
+													(formValues.sendEndAt = new Date().toISOString())}
+											>
+												Now
+											</button>
+											<button
+												type="button"
+												class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+												on:click|preventDefault={() =>
+													(formValues.sendEndAt = new Date(Date.now() + 86400000).toISOString())}
+											>
+												+1 Day
+											</button>
+											<button
+												type="button"
+												class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+												on:click|preventDefault={() =>
+													(formValues.sendEndAt = new Date(Date.now() + 604800000).toISOString())}
+											>
+												+1 Week
+											</button>
+										</div>
 									{/if}
 								</div>
 							{:else if scheduleType === 'schedule'}
