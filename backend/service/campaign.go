@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+
 	"slices"
 	"sort"
 	"strings"
@@ -3437,22 +3438,13 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 			firstPageProxy = nil
 		} else {
 			// use phishing domain directly
-			startURL, err := firstPageProxy.StartURL.Get()
-			if err != nil {
-				c.Logger.Errorw("failed to get start url from first page proxy", "error", err)
-				return "", errs.Wrap(err)
-			}
-			parsedStartURL, err := url.Parse(startURL.String())
-			if err != nil {
-				c.Logger.Errorw("failed to parse start url from first page proxy", "error", err)
-				return "", errs.Wrap(err)
-			}
 			baseURL = "https://" + phishingDomain
-			// use campaign template URLPath if available, otherwise fall back to proxy StartURL path
+			// use template url path if set, otherwise root — the real start url path is an
+			// internal proxy detail and must never appear in a lure url sent to a victim
 			if templateURLPath, err := cTemplate.URLPath.Get(); err == nil && templateURLPath.String() != "" {
 				urlPath = templateURLPath.String()
 			} else {
-				urlPath = parsedStartURL.Path
+				urlPath = "/"
 			}
 		}
 	}
@@ -3482,9 +3474,6 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 
 	// build final url
 	separator := "?"
-	if strings.Contains(baseURL, "?") {
-		separator = "&"
-	}
 	url := fmt.Sprintf("%s%s%s%s=%s", baseURL, urlPath, separator, idIdentifier, campaignRecipientID.String())
 	// no audit on read
 	return url, nil
