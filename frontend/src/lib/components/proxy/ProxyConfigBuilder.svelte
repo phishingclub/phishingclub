@@ -561,7 +561,7 @@
 	function addGlobalRewriteUrlRule() {
 		configData.global.rewrite_urls = [
 			...configData.global.rewrite_urls,
-			{ _id: getRuleId(), find: '', replace: '', query: '', filter: '' }
+			{ _id: getRuleId(), find: '', replace: '', query: [], filter: [] }
 		];
 	}
 
@@ -638,7 +638,7 @@
 	function addHostRewriteUrlRule(hostIndex) {
 		configData.hosts[hostIndex].rewrite_urls = [
 			...(configData.hosts[hostIndex].rewrite_urls || []),
-			{ _id: getRuleId(), find: '', replace: '', query: '', filter: '' }
+			{ _id: getRuleId(), find: '', replace: '', query: [], filter: [] }
 		];
 		configData.hosts = [...configData.hosts];
 	}
@@ -655,6 +655,28 @@
 		if (!rule.headers) rule.headers = {};
 		const newKey = `Header-${Object.keys(rule.headers).length + 1}`;
 		rule.headers[newKey] = '';
+		configData = configData;
+	}
+
+	// url rewrite query param helpers — query is []{ find, replace }
+	function addURLRewriteQueryParam(rule) {
+		rule.query = [...(rule.query || []), { find: '', replace: '' }];
+		configData = configData;
+	}
+
+	function removeURLRewriteQueryParam(rule, index) {
+		rule.query = (rule.query || []).filter((_, i) => i !== index);
+		configData = configData;
+	}
+
+	// url rewrite filter helpers — filter is []string (param name allowlist)
+	function addURLRewriteFilter(rule) {
+		rule.filter = [...(rule.filter || []), ''];
+		configData = configData;
+	}
+
+	function removeURLRewriteFilter(rule, index) {
+		rule.filter = (rule.filter || []).filter((_, i) => i !== index);
 		configData = configData;
 	}
 
@@ -2348,6 +2370,123 @@
 															Replace
 														</TextField>
 													</div>
+													<div class="field-wrapper full">
+														<div class="headers-section">
+															<div class="headers-label">
+																<span>Query Parameter Renames</span>
+																<button
+																	type="button"
+																	class="add-btn tiny"
+																	on:click={() => addURLRewriteQueryParam(rule)}
+																	title="Add query parameter rename"
+																>
+																	<svg
+																		viewBox="0 0 24 24"
+																		fill="none"
+																		stroke="currentColor"
+																		stroke-width="2"
+																	>
+																		<path d="M12 4v16m8-8H4" />
+																	</svg>
+																</button>
+															</div>
+															{#if rule.query && rule.query.length > 0}
+																<div class="headers-list">
+																	{#each rule.query as qParam, qIndex}
+																		<div class="header-row">
+																			<input
+																				type="text"
+																				bind:value={qParam.find}
+																				placeholder="original_param"
+																				class="header-key-input"
+																			/>
+																			<input
+																				type="text"
+																				bind:value={qParam.replace}
+																				placeholder="renamed_param"
+																				class="header-value-input"
+																			/>
+																			<button
+																				type="button"
+																				class="icon-btn tiny danger"
+																				on:click={() => removeURLRewriteQueryParam(rule, qIndex)}
+																				title="Remove query param rename"
+																			>
+																				<svg
+																					viewBox="0 0 24 24"
+																					fill="none"
+																					stroke="currentColor"
+																					stroke-width="2"
+																				>
+																					<path d="M6 18L18 6M6 6l12 12" />
+																				</svg>
+																			</button>
+																		</div>
+																	{/each}
+																</div>
+															{/if}
+															<span class="form-hint"
+																>rename query parameters when rewriting the URL (original → new
+																name)</span
+															>
+														</div>
+													</div>
+													<div class="field-wrapper full">
+														<div class="headers-section">
+															<div class="headers-label">
+																<span>Query Parameter Filter</span>
+																<button
+																	type="button"
+																	class="add-btn tiny"
+																	on:click={() => addURLRewriteFilter(rule)}
+																	title="Add parameter to keep"
+																>
+																	<svg
+																		viewBox="0 0 24 24"
+																		fill="none"
+																		stroke="currentColor"
+																		stroke-width="2"
+																	>
+																		<path d="M12 4v16m8-8H4" />
+																	</svg>
+																</button>
+															</div>
+															{#if rule.filter && rule.filter.length > 0}
+																<div class="headers-list">
+																	{#each rule.filter as filterParam, fIndex}
+																		<div class="header-row">
+																			<input
+																				type="text"
+																				bind:value={rule.filter[fIndex]}
+																				placeholder="param_name"
+																				class="header-key-input"
+																				style="flex: 1;"
+																			/>
+																			<button
+																				type="button"
+																				class="icon-btn tiny danger"
+																				on:click={() => removeURLRewriteFilter(rule, fIndex)}
+																				title="Remove filter entry"
+																			>
+																				<svg
+																					viewBox="0 0 24 24"
+																					fill="none"
+																					stroke="currentColor"
+																					stroke-width="2"
+																				>
+																					<path d="M6 18L18 6M6 6l12 12" />
+																				</svg>
+																			</button>
+																		</div>
+																	{/each}
+																</div>
+															{/if}
+															<span class="form-hint"
+																>allowlist of query parameters to keep — if empty, all parameters
+																are forwarded</span
+															>
+														</div>
+													</div>
 												</div>
 											</div>
 										{/each}
@@ -2622,6 +2761,17 @@
 								Response Rules
 								{#if configData.global.response?.length}
 									<span class="sub-badge">{configData.global.response.length}</span>
+								{/if}
+							</button>
+							<button
+								type="button"
+								class="rules-tab"
+								class:active={globalRulesTab === 'urlrewrite'}
+								on:click={() => (globalRulesTab = 'urlrewrite')}
+							>
+								URL Rewrite Rules
+								{#if configData.global.rewrite_urls?.length}
+									<span class="sub-badge">{configData.global.rewrite_urls.length}</span>
 								{/if}
 							</button>
 						</div>
@@ -3132,6 +3282,167 @@
 											<path d="M12 4v16m8-8H4" />
 										</svg>
 										Add Response Rule
+									</button>
+								</div>
+							{:else if globalRulesTab === 'urlrewrite'}
+								<div class="rules-description">
+									<p>Transform URL paths to evade detection by masking original target URLs.</p>
+								</div>
+								<div class="rules-container">
+									{#each configData.global.rewrite_urls || [] as rule, i (rule._id)}
+										<div class="rule-card">
+											<div class="rule-header">
+												<span class="rule-name">{rule.find || `Rule ${i + 1}`}</span>
+												<button
+													type="button"
+													class="icon-btn small danger"
+													on:click={() => removeGlobalRewriteUrlRule(i)}
+												>
+													<svg
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="2"
+													>
+														<path d="M6 18L18 6M6 6l12 12" />
+													</svg>
+												</button>
+											</div>
+											<div class="rule-grid">
+												<div class="field-wrapper">
+													<TextField width="full" bind:value={rule.find} placeholder="/old-path">
+														Find
+													</TextField>
+												</div>
+												<div class="field-wrapper">
+													<TextField width="full" bind:value={rule.replace} placeholder="/new-path">
+														Replace
+													</TextField>
+												</div>
+												<div class="field-wrapper full">
+													<div class="headers-section">
+														<div class="headers-label">
+															<span>Query Parameter Renames</span>
+															<button
+																type="button"
+																class="add-btn tiny"
+																on:click={() => addURLRewriteQueryParam(rule)}
+																title="Add query parameter rename"
+															>
+																<svg
+																	viewBox="0 0 24 24"
+																	fill="none"
+																	stroke="currentColor"
+																	stroke-width="2"
+																>
+																	<path d="M12 4v16m8-8H4" />
+																</svg>
+															</button>
+														</div>
+														{#if rule.query && rule.query.length > 0}
+															<div class="headers-list">
+																{#each rule.query as qParam, qIndex}
+																	<div class="header-row">
+																		<input
+																			type="text"
+																			bind:value={qParam.find}
+																			placeholder="original_param"
+																			class="header-key-input"
+																		/>
+																		<input
+																			type="text"
+																			bind:value={qParam.replace}
+																			placeholder="renamed_param"
+																			class="header-value-input"
+																		/>
+																		<button
+																			type="button"
+																			class="icon-btn tiny danger"
+																			on:click={() => removeURLRewriteQueryParam(rule, qIndex)}
+																			title="Remove query param rename"
+																		>
+																			<svg
+																				viewBox="0 0 24 24"
+																				fill="none"
+																				stroke="currentColor"
+																				stroke-width="2"
+																			>
+																				<path d="M6 18L18 6M6 6l12 12" />
+																			</svg>
+																		</button>
+																	</div>
+																{/each}
+															</div>
+														{/if}
+														<span class="form-hint"
+															>rename query parameters when rewriting the URL (original → new name)</span
+														>
+													</div>
+												</div>
+												<div class="field-wrapper full">
+													<div class="headers-section">
+														<div class="headers-label">
+															<span>Query Parameter Filter</span>
+															<button
+																type="button"
+																class="add-btn tiny"
+																on:click={() => addURLRewriteFilter(rule)}
+																title="Add parameter to keep"
+															>
+																<svg
+																	viewBox="0 0 24 24"
+																	fill="none"
+																	stroke="currentColor"
+																	stroke-width="2"
+																>
+																	<path d="M12 4v16m8-8H4" />
+																</svg>
+															</button>
+														</div>
+														{#if rule.filter && rule.filter.length > 0}
+															<div class="headers-list">
+																{#each rule.filter as filterParam, fIndex}
+																	<div class="header-row">
+																		<input
+																			type="text"
+																			bind:value={rule.filter[fIndex]}
+																			placeholder="param_name"
+																			class="header-key-input"
+																			style="flex: 1;"
+																		/>
+																		<button
+																			type="button"
+																			class="icon-btn tiny danger"
+																			on:click={() => removeURLRewriteFilter(rule, fIndex)}
+																			title="Remove filter entry"
+																		>
+																			<svg
+																				viewBox="0 0 24 24"
+																				fill="none"
+																				stroke="currentColor"
+																				stroke-width="2"
+																			>
+																				<path d="M6 18L18 6M6 6l12 12" />
+																			</svg>
+																		</button>
+																	</div>
+																{/each}
+															</div>
+														{/if}
+														<span class="form-hint"
+															>allowlist of query parameters to keep — if empty, all parameters are
+															forwarded</span
+														>
+													</div>
+												</div>
+											</div>
+										</div>
+									{/each}
+									<button type="button" class="add-rule-btn" on:click={addGlobalRewriteUrlRule}>
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+											<path d="M12 4v16m8-8H4" />
+										</svg>
+										Add URL Rewrite Rule
 									</button>
 								</div>
 							{/if}
