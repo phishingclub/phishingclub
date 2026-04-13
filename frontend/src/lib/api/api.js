@@ -1081,7 +1081,8 @@ export class API {
 			urlIdentifierID,
 			stateIdentifierID,
 			afterLandingPageRedirectURL,
-			emailID: emailID
+			emailID: emailID,
+			urlPath: urlPath
 		}) => {
 			return await postJSON(this.getPath('/campaign/template'), {
 				name: name,
@@ -1098,7 +1099,8 @@ export class API {
 				afterLandingPageRedirectURL: afterLandingPageRedirectURL,
 				urlIdentifierID: urlIdentifierID,
 				stateIdentifierID: stateIdentifierID,
-				emailID: emailID
+				emailID: emailID,
+				urlPath: urlPath
 			});
 		},
 
