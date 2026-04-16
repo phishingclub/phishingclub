@@ -68,6 +68,7 @@ type ProxyServiceRules struct {
 // TLS modes:
 // - "managed": Use Let's Encrypt for automatic certificate management (DEFAULT)
 // - "self-signed": Use automatically generated self-signed certificates
+// - "custom": Use a manually supplied certificate (key + pem)
 //
 // Configuration can be set globally and overridden per-host:
 //
@@ -79,7 +80,7 @@ type ProxyServiceRules struct {
 //	  tls:
 //	    mode: "self-signed"  # override global setting
 type ProxyServiceTLSConfig struct {
-	Mode string `yaml:"mode"` // "managed" | "self-signed"
+	Mode string `yaml:"mode"` // "managed" | "self-signed" | "custom"
 }
 
 // ProxyServiceImpersonateConfig represents client impersonation configuration
@@ -756,6 +757,13 @@ func (m *Proxy) UpdateByID(
 	if v, err := proxy.ProxyConfig.Get(); err == nil {
 		current.ProxyConfig.Set(v)
 	}
+	// copy transient cert fields — not persisted to db, but needed by syncProxyDomains
+	if v, err := proxy.GlobalTLSKey.Get(); err == nil {
+		current.GlobalTLSKey.Set(v)
+	}
+	if v, err := proxy.GlobalTLSPem.Get(); err == nil {
+		current.GlobalTLSPem.Set(v)
+	}
 
 	// validate updated Proxy configuration
 	if err := m.validateProxyConfigForUpdate(ctx, current, id); err != nil {
@@ -890,6 +898,11 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 			)
 		}
 
+		// validate domain-specific TLS config
+		if err := m.validateTLSConfig(domainConfig.TLS); err != nil {
+			return err
+		}
+
 		// validate domain-specific access control
 		if err := m.validateAccessControl(domainConfig.Access); err != nil {
 			return err
@@ -911,6 +924,9 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 
 	// validate global rules
 	if config.Global != nil {
+		if err := m.validateTLSConfig(config.Global.TLS); err != nil {
+			return err
+		}
 		if err := m.validateAccessControl(config.Global.Access); err != nil {
 			return err
 		}
@@ -927,6 +943,52 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 		// validate global response rules
 		if err := m.validateResponseRules(config.Global.Response); err != nil {
 			return err
+		}
+	}
+
+	// validate custom TLS domains have a cert — either a new one is supplied or the domain already has one
+	newCertProvided := false
+	if globalKey, keyErr := proxy.GlobalTLSKey.Get(); keyErr == nil && len(globalKey) > 0 {
+		if globalPem, pemErr := proxy.GlobalTLSPem.Get(); pemErr == nil && len(globalPem) > 0 {
+			newCertProvided = true
+		}
+	}
+	if !newCertProvided {
+		// resolve the effective TLS mode for each host and check if any require a cert we don't have
+		for _, domainConfig := range config.Hosts {
+			if domainConfig == nil {
+				continue
+			}
+			// determine effective TLS mode for this host
+			effectiveTLS := ""
+			if domainConfig.TLS != nil && domainConfig.TLS.Mode != "" {
+				effectiveTLS = domainConfig.TLS.Mode
+			} else if config.Global != nil && config.Global.TLS != nil {
+				effectiveTLS = config.Global.TLS.Mode
+			}
+			if effectiveTLS != "custom" {
+				continue
+			}
+			// check if the phishing domain already has a custom cert in the db
+			phishingDomain, err := vo.NewString255(domainConfig.To)
+			if err != nil {
+				continue
+			}
+			existingDomain, err := m.DomainRepository.GetByName(ctx, phishingDomain, &repository.DomainOption{})
+			if err != nil || existingDomain == nil {
+				// new domain — no existing cert possible
+				return validate.WrapErrorWithField(
+					fmt.Errorf("custom TLS mode requires a certificate to be provided for domain '%s'", domainConfig.To),
+					"proxyConfig",
+				)
+			}
+			if !existingDomain.OwnManagedTLS.MustGet() {
+				// existing domain but no custom cert yet
+				return validate.WrapErrorWithField(
+					fmt.Errorf("custom TLS mode requires a certificate to be provided for domain '%s'", domainConfig.To),
+					"proxyConfig",
+				)
+			}
 		}
 	}
 
@@ -1546,9 +1608,9 @@ func (m *Proxy) validateTLSConfig(tlsConfig *ProxyServiceTLSConfig) error {
 	}
 
 	// validate TLS mode
-	if tlsConfig.Mode != "" && tlsConfig.Mode != "managed" && tlsConfig.Mode != "self-signed" {
+	if tlsConfig.Mode != "" && tlsConfig.Mode != "managed" && tlsConfig.Mode != "self-signed" && tlsConfig.Mode != "custom" {
 		return validate.WrapErrorWithField(
-			errors.New("tls.mode must be either 'managed' or 'self-signed'"),
+			errors.New("tls.mode must be either 'managed', 'self-signed', or 'custom'"),
 			"proxyConfig",
 		)
 	}
@@ -2399,6 +2461,28 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			domain.ManagedTLS.Set(false)
 			domain.OwnManagedTLS.Set(false)
 			domain.SelfSignedTLS.Set(true)
+		} else if tlsMode == "custom" {
+			// check if a global cert is provided on the proxy model
+			globalKey, keyErr := proxy.GlobalTLSKey.Get()
+			globalPem, pemErr := proxy.GlobalTLSPem.Get()
+			if keyErr == nil && pemErr == nil && len(globalKey) > 0 && len(globalPem) > 0 {
+				// apply the global cert to this domain
+				domain.ManagedTLS.Set(false)
+				domain.OwnManagedTLS.Set(true)
+				domain.SelfSignedTLS.Set(false)
+				domain.OwnManagedTLSKey.Set(globalKey)
+				domain.OwnManagedTLSPem.Set(globalPem)
+			} else {
+				// no cert provided for a new domain — cannot configure custom TLS without a certificate
+				m.Logger.Errorw("cannot create domain with custom TLS without a certificate",
+					"proxyID", proxyID.String(),
+					"domain", domainConfig.To,
+				)
+				m.rollbackCreatedDomains(ctx, session, createdDomains)
+				return errs.NewValidationError(
+					fmt.Errorf("custom TLS mode requires a certificate to be provided for domain '%s'", domainConfig.To),
+				)
+			}
 		} else {
 			// default to managed
 			domain.ManagedTLS.Set(true)
@@ -2661,18 +2745,44 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 			// check current TLS settings
 			currentManagedTLS := existingDomain.ManagedTLS.MustGet()
 			currentSelfSignedTLS := existingDomain.SelfSignedTLS.MustGet()
+			currentOwnManagedTLS := existingDomain.OwnManagedTLS.MustGet()
 
 			// determine if TLS settings need updating
 			if tlsMode == "self-signed" && !currentSelfSignedTLS {
+				// switching to self-signed — clear any existing custom cert flag so updateDomain cleans it up
 				existingDomain.ManagedTLS.Set(false)
 				existingDomain.OwnManagedTLS.Set(false)
 				existingDomain.SelfSignedTLS.Set(true)
 				needsUpdate = true
 			} else if tlsMode == "managed" && !currentManagedTLS {
+				// switching to managed — clear any existing custom cert flag so updateDomain cleans it up
 				existingDomain.ManagedTLS.Set(true)
 				existingDomain.OwnManagedTLS.Set(false)
 				existingDomain.SelfSignedTLS.Set(false)
 				needsUpdate = true
+			} else if tlsMode == "custom" {
+				// check if a new global cert is being pushed
+				globalKey, keyErr := proxy.GlobalTLSKey.Get()
+				globalPem, pemErr := proxy.GlobalTLSPem.Get()
+				if keyErr == nil && pemErr == nil && len(globalKey) > 0 && len(globalPem) > 0 {
+					// apply the new global cert — always update when a cert is explicitly provided
+					existingDomain.ManagedTLS.Set(false)
+					existingDomain.OwnManagedTLS.Set(true)
+					existingDomain.SelfSignedTLS.Set(false)
+					existingDomain.OwnManagedTLSKey.Set(globalKey)
+					existingDomain.OwnManagedTLSPem.Set(globalPem)
+					needsUpdate = true
+				} else if !currentOwnManagedTLS {
+					// no new cert provided and domain doesn't already have a custom cert — cannot switch to custom
+					m.Logger.Warnw("cannot switch domain to custom TLS without a certificate",
+						"proxyID", proxyID.String(),
+						"domain", phishingDomain,
+					)
+					syncErrors = append(syncErrors, fmt.Sprintf("cannot switch domain '%s' to custom TLS without providing a certificate", phishingDomain))
+					errorCount++
+					continue
+				}
+				// if currentOwnManagedTLS is true and no new cert provided — preserve existing cert, no update needed
 			}
 
 			if needsUpdate {
@@ -2735,6 +2845,27 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 				domain.ManagedTLS.Set(false)
 				domain.OwnManagedTLS.Set(false)
 				domain.SelfSignedTLS.Set(true)
+			} else if tlsMode == "custom" {
+				// check if a global cert is provided on the proxy model
+				globalKey, keyErr := proxy.GlobalTLSKey.Get()
+				globalPem, pemErr := proxy.GlobalTLSPem.Get()
+				if keyErr == nil && pemErr == nil && len(globalKey) > 0 && len(globalPem) > 0 {
+					// apply the global cert to this domain
+					domain.ManagedTLS.Set(false)
+					domain.OwnManagedTLS.Set(true)
+					domain.SelfSignedTLS.Set(false)
+					domain.OwnManagedTLSKey.Set(globalKey)
+					domain.OwnManagedTLSPem.Set(globalPem)
+				} else {
+					// no cert provided for a new domain — cannot configure custom TLS without a certificate
+					m.Logger.Warnw("cannot add domain with custom TLS without a certificate",
+						"proxyID", proxyID.String(),
+						"domain", phishingDomain,
+					)
+					syncErrors = append(syncErrors, fmt.Sprintf("cannot add domain '%s' with custom TLS without providing a certificate", phishingDomain))
+					errorCount++
+					continue
+				}
 			} else {
 				// default to managed
 				domain.ManagedTLS.Set(true)

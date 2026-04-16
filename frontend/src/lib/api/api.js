@@ -3226,15 +3226,27 @@ export class API {
 		 * @param {string} proxy.startURL
 		 * @param {string} proxy.proxyConfig
 		 * @param {string} proxy.companyID
+		 * @param {string} [proxy.globalTLSKey]
+		 * @param {string} [proxy.globalTLSPem]
 		 * @returns {Promise<ApiResponse>}
 		 */
-		create: async ({ name, description, startURL, proxyConfig, companyID }) => {
+		create: async ({
+			name,
+			description,
+			startURL,
+			proxyConfig,
+			companyID,
+			globalTLSKey,
+			globalTLSPem
+		}) => {
 			return await postJSON(this.getPath('/proxy'), {
 				name: name,
 				description: description,
 				startURL: startURL,
 				proxyConfig: proxyConfig,
-				companyID: companyID
+				companyID: companyID,
+				...(globalTLSKey ? { globalTLSKey } : {}),
+				...(globalTLSPem ? { globalTLSPem } : {})
 			});
 		},
 
@@ -3247,6 +3259,8 @@ export class API {
 		 * @param {string} proxy.description
 		 * @param {string} proxy.startURL
 		 * @param {string} proxy.proxyConfig
+		 * @param {string} [proxy.globalTLSKey]
+		 * @param {string} [proxy.globalTLSPem]
 		 * @returns {Promise<ApiResponse>}
 		 */
 		update: async (id, proxy) => {

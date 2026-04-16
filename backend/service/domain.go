@@ -903,6 +903,19 @@ func (d *Domain) handleOwnManagedTLS(
 			)
 			return nil, errs.Wrap(err)
 		}
+		// evict any previously cached certs for this domain so the stale cert is not served
+		existingCerts := d.CertMagicCache.AllMatchingCertificates(name)
+		if len(existingCerts) > 0 {
+			hashes := make([]string, 0, len(existingCerts))
+			for _, c := range existingCerts {
+				hashes = append(hashes, c.Hash())
+			}
+			d.CertMagicCache.Remove(hashes)
+			d.Logger.Debugw("evicted stale cached certs before replacing",
+				"domain", name,
+				"count", len(hashes),
+			)
+		}
 		// Create fresh buffers for caching since upload consumed the original buffers
 		keyBufferForCache := bytes.NewBufferString(key)
 		pemBufferForCache := bytes.NewBufferString(pem)
@@ -910,7 +923,7 @@ func (d *Domain) handleOwnManagedTLS(
 			ctx,
 			pemBufferForCache.Bytes(),
 			keyBufferForCache.Bytes(),
-			[]string{name},
+			[]string{},
 		)
 		if err != nil {
 			d.Logger.Errorw(
@@ -1033,7 +1046,7 @@ func (d *Domain) handleSelfSignedTLS(
 		ctx,
 		pemBytes,
 		keyBytes,
-		[]string{name},
+		[]string{},
 	)
 	if err != nil {
 		d.Logger.Errorw(
