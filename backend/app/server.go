@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	textTmpl "text/template"
@@ -1240,10 +1241,9 @@ func (s *Server) checkAndServePhishingPage(
 			return true, fmt.Errorf("Proxy page has no configuration: %s", err)
 		}
 
-		// extract the phishing domain from Proxy configuration
-		var rawConfig map[string]interface{}
-		err = yaml.Unmarshal([]byte(proxyConfig.String()), &rawConfig)
-		if err != nil {
+		// parse proxy config as typed struct so rewrite_urls rules are accessible
+		var parsedConfig service.ProxyServiceConfigYAML
+		if err := yaml.Unmarshal([]byte(proxyConfig.String()), &parsedConfig); err != nil {
 			return true, fmt.Errorf("invalid Proxy configuration YAML: %s", err)
 		}
 
@@ -1256,19 +1256,13 @@ func (s *Server) checkAndServePhishingPage(
 
 		// find the phishing domain mapping for the start URL domain
 		phishingDomain := ""
-		for originalHost, domainData := range rawConfig {
-			if originalHost == "proxy" || originalHost == "global" {
+		for originalHost, hostCfg := range parsedConfig.Hosts {
+			if hostCfg == nil {
 				continue
 			}
 			if originalHost == startDomain {
-				if domainMap, ok := domainData.(map[string]interface{}); ok {
-					if to, exists := domainMap["to"]; exists {
-						if toStr, ok := to.(string); ok {
-							phishingDomain = toStr
-							break
-						}
-					}
-				}
+				phishingDomain = hostCfg.To
+				break
 			}
 		}
 
@@ -1485,29 +1479,87 @@ func (s *Server) checkAndServePhishingPage(
 			"phishingDomainType", phishingDomainRecord.Type,
 		)
 
-		// build the redirect URL to the phishing domain with campaign recipient ID
+		// build the redirect URL to the phishing domain with campaign recipient ID.
+		// apply rewrite_urls rules so the victim sees the friendly path, not the real
+		// start url path. query params from the start url are carried through but
+		// remapped according to rule.Query so they match what checkAndApplyURLRewrite
+		// expects when the request arrives at the proxy.
 		urlParam := cTemplate.URLIdentifier.Name.MustGet()
 
-		// construct the redirect URL properly
+		// collect rewrite_urls rules for the start domain — host-specific first, then global
+		var rewriteRules []service.ProxyServiceURLRewriteRule
+		if hostCfg, ok := parsedConfig.Hosts[startDomain]; ok && hostCfg != nil {
+			rewriteRules = append(rewriteRules, hostCfg.RewriteURLs...)
+		}
+		if parsedConfig.Global != nil {
+			rewriteRules = append(rewriteRules, parsedConfig.Global.RewriteURLs...)
+		}
+
+		// start from the start url path and query, then apply the first matching rule
+		redirectPath := parsedStartURL.Path
+		startQuery := url.Values{}
+		if parsedStartURL.RawQuery != "" {
+			startQuery, _ = url.ParseQuery(parsedStartURL.RawQuery)
+		}
+
+		for _, rule := range rewriteRules {
+			pattern := strings.TrimPrefix(rule.Find, "^")
+			pattern = strings.TrimSuffix(pattern, "$")
+			re, reErr := regexp.Compile("^" + pattern)
+			if reErr != nil {
+				continue
+			}
+			if !re.MatchString(parsedStartURL.Path) {
+				continue
+			}
+
+			// rewrite path to the friendly replacement
+			redirectPath = rule.Replace
+
+			// remap query param keys: find → replace
+			if len(rule.Query) > 0 {
+				remapped := url.Values{}
+				for k, v := range startQuery {
+					remapped[k] = v
+				}
+				for _, qRule := range rule.Query {
+					if vals, exists := remapped[qRule.Find]; exists {
+						delete(remapped, qRule.Find)
+						remapped[qRule.Replace] = vals
+					}
+				}
+				startQuery = remapped
+			}
+
+			// apply filter: keep only the listed query param names
+			if len(rule.Filter) > 0 {
+				allowed := make(map[string]struct{}, len(rule.Filter))
+				for _, name := range rule.Filter {
+					allowed[name] = struct{}{}
+				}
+				filtered := url.Values{}
+				for k, v := range startQuery {
+					if _, ok := allowed[k]; ok {
+						filtered[k] = v
+					}
+				}
+				startQuery = filtered
+			}
+
+			break
+		}
+
 		u := &url.URL{
 			Scheme: "https",
 			Host:   phishingDomain,
-			Path:   parsedStartURL.Path,
+			Path:   redirectPath,
 		}
 
-		q := u.Query()
+		// merge start url query params (rewritten) with campaign params
+		q := startQuery
 		q.Set(urlParam, campaignRecipientID.String())
 		if encryptedParam != "" {
 			q.Set(stateParamKey, encryptedParam)
-		}
-		// preserve any existing query params from start URL
-		if parsedStartURL.RawQuery != "" {
-			startQuery, _ := url.ParseQuery(parsedStartURL.RawQuery)
-			for key, values := range startQuery {
-				for _, value := range values {
-					q.Add(key, value)
-				}
-			}
 		}
 		u.RawQuery = q.Encode()
 

