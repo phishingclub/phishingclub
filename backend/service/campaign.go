@@ -1834,6 +1834,17 @@ func (c *Campaign) DeleteByID(
 		c.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
+	// delete all campaign-webhook junction records
+	err = c.CampaignRepository.RemoveWebhooksByCampaignID(ctx, id)
+	if err != nil {
+		c.Logger.Errorw("failed to delete campaign webhooks by campaign id", "error", err)
+		return errs.Wrap(err)
+	}
+	// delete all microsoft device codes for the campaign
+	if err = c.MicrosoftDeviceCodeRepository.DeleteByCampaignID(ctx, id); err != nil {
+		c.Logger.Errorw("failed to delete microsoft device codes by campaign id", "error", err)
+		return errs.Wrap(err)
+	}
 	// delete all campaign-allowDeny relations to the campaign
 	err = c.CampaignRepository.RemoveAllowDenyListsByCampaignID(ctx, id)
 	if err != nil {
