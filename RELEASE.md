@@ -1,4 +1,12 @@
 # Changelog
+## [1.35.0] - 2026-04-23
+- Added support for custom certificates in proxy configuration
+- Added support for URL rewrite in visual proxy editor
+- Fix apply rewrite rules when redirecting to proxy pages
+- Fix recipient URL using start URL in proxy
+- Fix remove campaign webhooks and device codes on campaign deletion
+- Fix company email attachments not working
+- Fix create template did not include URL path
 
 ## [1.34.0] - 2026-04-02
 - Added dynamic groups
