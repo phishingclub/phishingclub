@@ -1616,10 +1616,12 @@ export class API {
 		 * Get a email by ID.
 		 *
 		 * @param {string} id
+		 * @param {string|null} [companyID]
 		 * @returns {Promise<ApiResponse>}
 		 */
-		getByID: async (id) => {
-			return await getJSON(this.getPath(`/email/${id}`));
+		getByID: async (id, companyID = null) => {
+			const companyQuery = companyID ? `?${this.companyQuery(companyID)}` : '';
+			return await getJSON(this.getPath(`/email/${id}${companyQuery}`));
 		},
 
 		/**
