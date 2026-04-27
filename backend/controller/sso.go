@@ -1,8 +1,12 @@
 package controller
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/phishingclub/phishingclub/data"
@@ -10,6 +14,8 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/service"
 )
+
+const ssoStateCookieKey = "sso_state"
 
 // SSO the single sign on controller
 type SSO struct {
@@ -60,10 +66,45 @@ func (s *SSO) EntreIDLogin(g *gin.Context) {
 		s.Response.BadRequest(g)
 		return
 	}
-	g.Redirect(http.StatusTemporaryRedirect, authURL)
+
+	stateBytes := make([]byte, 32)
+	if _, err := rand.Read(stateBytes); err != nil {
+		s.Response.ServerError(g)
+		return
+	}
+	state := hex.EncodeToString(stateBytes)
+
+	http.SetCookie(g.Writer, &http.Cookie{
+		Name:     ssoStateCookieKey,
+		Value:    state,
+		Path:     "/",
+		MaxAge:   int(5 * time.Minute / time.Second),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	g.Redirect(http.StatusTemporaryRedirect, authURL+"&state="+state)
 }
 
 func (s *SSO) EntreIDCallBack(g *gin.Context) {
+	stateCookie, err := g.Request.Cookie(ssoStateCookieKey)
+	http.SetCookie(g.Writer, &http.Cookie{
+		Name:     ssoStateCookieKey,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	stateParam := g.Query("state")
+	if err != nil || stateCookie.Value == "" || stateParam == "" ||
+		subtle.ConstantTimeCompare([]byte(stateCookie.Value), []byte(stateParam)) != 1 {
+		g.Redirect(http.StatusTemporaryRedirect, "/login?ssoAuthError=1")
+		return
+	}
+
 	code := g.Query("code")
 	session, err := s.SSO.HandlEntraIDCallback(g, code)
 	if err != nil {
