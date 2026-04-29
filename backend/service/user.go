@@ -37,8 +37,9 @@ type User struct {
 	UserRepository    *repository.User
 	RoleRepository    *repository.Role
 	CompanyRepository *repository.Company
-	PasswordVerifier  *password.Argon2Verifier
-	PasswordHasher    *password.Argon2Hasher
+	PasswordVerifier *password.Argon2Verifier
+	PasswordHasher   *password.Argon2Hasher
+	TOTPReplayCache  *TOTPReplayCache
 }
 
 // Create creates a new user
@@ -708,11 +709,16 @@ func (u *User) SetupCheckTOTP(
 	}
 	// verify the token
 	u.Logger.Debug("verifying TOTP")
+	if u.TOTPReplayCache.isUsed(userID.String(), token.String()) {
+		u.Logger.Debug("failed to verify TOTP - token already used")
+		return errs.ErrUserWrongTOTP
+	}
 	valid := totp.Validate(token.String(), secret)
 	if !valid {
 		u.Logger.Debug("failed to verify TOTP - invalid token")
 		return errs.ErrUserWrongTOTP
 	}
+	u.TOTPReplayCache.markUsed(userID.String(), token.String())
 	u.Logger.Debugw("Enabling MFA TOTP for user", "userID", userID)
 	// enable TOTP
 	err = u.UserRepository.EnableTOTP(
@@ -807,6 +813,10 @@ func (u *User) CheckTOTP(
 	userID *uuid.UUID,
 	token *vo.String64,
 ) error {
+	if u.TOTPReplayCache.isUsed(userID.String(), token.String()) {
+		u.Logger.Debug("failed to verify TOTP - token already used")
+		return errs.ErrUserWrongTOTP
+	}
 	// get the secret
 	secret, _, err := u.UserRepository.GetTOTP(
 		ctx,
@@ -822,6 +832,7 @@ func (u *User) CheckTOTP(
 		u.Logger.Debug("failed to verify TOTP - invalid token")
 		return errs.ErrUserWrongTOTP
 	}
+	u.TOTPReplayCache.markUsed(userID.String(), token.String())
 	return nil
 }
 

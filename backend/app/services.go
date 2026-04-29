@@ -112,6 +112,7 @@ func NewServices(
 		RoleRepository:    repositories.Role,
 		CompanyRepository: repositories.Company,
 		PasswordHasher:    utilities.PasswordHasher,
+		TOTPReplayCache:   service.NewTOTPReplayCache(),
 	}
 	recipient := &service.Recipient{
 		Common:                      common,
