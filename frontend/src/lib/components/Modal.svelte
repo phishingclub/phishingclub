@@ -347,6 +347,7 @@
 						{/if}
 					</div>
 					<button
+						type="button"
 						class="w-4 hover:scale-110 flex-shrink-0"
 						on:click={close}
 						disabled={isSubmitting}

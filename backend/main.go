@@ -322,6 +322,13 @@ func main() {
 		)
 	}
 	adminRouter.Use(middlewares.IPLimiter)
+
+	// read the seeded victim WS path for the remote browser endpoint
+	rbWSPath := "rbws" // fallback - real value is seeded at first startup
+	if opt, err := repositories.Option.GetByKey(context.Background(), data.OptionKeyRemoteBrowserWSPath); err == nil {
+		rbWSPath = opt.Value.String()
+	}
+
 	adminServer := app.NewAdministrationServer(
 		adminRouter,
 		controllers,
@@ -363,6 +370,7 @@ func main() {
 		repositories,
 		logger,
 		certMagicConfig,
+		rbWSPath,
 	)
 
 	var r *gin.Engine

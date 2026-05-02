@@ -1,0 +1,20 @@
+# Go vendor dependencies
+backend/vendor/
+
+# Embedded GeoIP data blobs
+backend/embedded/geoip/
+
+# Node.js dependencies
+frontend/node_modules/
+
+# Dev runtime artifacts
+backend/.dev/
+backend/.dev-air/
+frontend/.svelte-kit/
+
+# Compiled binaries
+build/
+
+# Temporary files
+tmp/
+.tmp/

@@ -66,6 +66,10 @@ export const route = {
 		route: '/proxy/',
 		blackbox: true
 	},
+	remoteBrowser: {
+		label: 'Remote Browsers',
+		route: '/remote-browser/'
+	},
 	campaignTemplates: {
 		label: 'Templates',
 		singleLabel: 'Templates',
@@ -137,6 +141,12 @@ export const menu = [
 			route.apiSenders,
 			route.oauthProviders
 		]
+	},
+	{
+		label: 'Remote Browsers',
+		type: 'submenu',
+		blackbox: true,
+		items: [route.remoteBrowser]
 	}
 ];
 

@@ -92,6 +92,9 @@
 		if ($displayMode === DISPLAY_MODE.BLACKBOX) {
 			result['Device Code'] = deviceCodeTemplates;
 		}
+		if ($displayMode === DISPLAY_MODE.BLACKBOX && contentType === 'page') {
+			result['Remote Browser'] = [{ label: 'Script', text: '{{RemoteBrowserScript "remote_browser_name"}}' }];
+		}
 		return result;
 	})();
 
@@ -457,7 +460,8 @@
 					.replaceAll('{{.URL}}', _url)
 					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
 					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin')
-					.replaceAll('{{DeviceCodeCaptured}}', 'false');
+					.replaceAll('{{DeviceCodeCaptured}}', 'false')
+					.replace(/\{\{RemoteBrowserScript\s+"[^"]*"\}\}/g, '<!-- RemoteBrowserScript (injected at runtime) -->');
 			case 'email':
 				return text
 					.replaceAll('{{.FirstName}}', 'Alice')
@@ -533,6 +537,7 @@
 			fileInputRef.click();
 		}
 	};
+
 
 	// formatDate converts readable date format (YmdHis) to formatted date string
 	const formatDate = (date, format) => {
@@ -658,7 +663,7 @@
 					const t = /** @type {HTMLSelectElement} */ (e.target);
 					if (t.value) {
 						insertTemplate(t.value);
-						t.value = ''; // reset selection
+						t.value = '';
 					}
 				}}
 			>

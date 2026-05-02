@@ -1,7 +1,8 @@
-FROM debian:12-slim
+FROM debian:12-slim@sha256:b29f74a267526ae6ea104eed6c46133b0ca70ce812525df8cd5817698f0a624a
 
 # install ca-certificates for https requests
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y ca-certificates tzdata && \
     rm -rf /var/lib/apt/lists/*
 

@@ -1,7 +1,9 @@
 <script>
-	import { onMount, onDestroy } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import { activeFormElement } from '$lib/store/activeFormElement';
 	import { scrollBarClassesVertical } from '$lib/utils/scrollbar';
+
+	export let victimConnected = false;
 
 	let isMenuVisible = false;
 	let menuX = 0;
@@ -9,10 +11,8 @@
 	let menuRef = null;
 	let buttonRef = null;
 
-	// generate unique id for this dropdown instance
 	const dropdownId = Symbol();
 
-	// subscribe to active dropdown store
 	const unsubscribe = activeFormElement.subscribe((activeId) => {
 		isMenuVisible = activeId === dropdownId;
 	});
@@ -23,7 +23,7 @@
 		} else {
 			document.addEventListener('click', handleClickWhenVisible);
 			document.addEventListener('keydown', handleGlobalKeydown);
-			activeFormElement.set(dropdownId); // set this as active, closing others
+			activeFormElement.set(dropdownId);
 
 			const viewportHeight = window.innerHeight;
 			const viewportWidth = window.innerWidth;
@@ -63,9 +63,9 @@
 	const handleClickWhenVisible = (event) => {
 		if (isMenuVisible && menuRef && buttonRef) {
 			activeFormElement.set(null);
+			event.preventDefault();
+			event.stopPropagation();
 		}
-		event.preventDefault();
-		event.stopPropagation();
 		document.removeEventListener('click', handleClickWhenVisible);
 	};
 
@@ -92,49 +92,30 @@
 		document.removeEventListener('click', handleClickWhenVisible);
 		document.removeEventListener('keydown', handleGlobalKeydown);
 		unsubscribe();
-		// clear active dropdown if this one was active
 		activeFormElement.update((current) => (current === dropdownId ? null : current));
 	};
 
 	onDestroy(_onDestroy);
-
-	onMount(() => {
-		return () => {
-			_onDestroy();
-		};
-	});
 </script>
 
-<div class="">
+<div>
 	<button
 		bind:this={buttonRef}
-		class="w-full h-full py-3 flex items-center justify-center"
+		class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold transition-colors duration-150 focus:outline-none {victimConnected
+			? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-400 dark:hover:bg-green-800/50'
+			: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/40 dark:text-yellow-400 dark:hover:bg-yellow-800/50'}"
 		on:click|stopPropagation|preventDefault={toggle}
 		on:keydown={handleKeydown}
 	>
-		<svg width="3.335557" height="16.465519" viewBox="0 0 0.88253281 4.3565019">
-			<g transform="translate(-892.25669,88.863024)">
-				<g transform="matrix(0,1.0139418,-1.0139418,0,802.48114,-807.2715)">
-					<circle
-						class="fill-cta-blue dark:fill-blue-500 transition-colors duration-200"
-						cx="708.99603"
-						cy="-88.976357"
-						r="0.40846577"
-					/>
-					<circle
-						class="fill-cta-blue dark:fill-blue-500 transition-colors duration-200"
-						cx="710.67859"
-						cy="-88.976357"
-						r="0.40846577"
-					/>
-					<circle
-						class="fill-cta-blue dark:fill-blue-500 transition-colors duration-200"
-						cx="712.36115"
-						cy="-88.976357"
-						r="0.40846577"
-					/>
-				</g>
-			</g>
+		{#if victimConnected}
+			<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block"></span>
+			Live
+		{:else}
+			<span class="w-1.5 h-1.5 rounded-full bg-yellow-500 inline-block"></span>
+			Active
+		{/if}
+		<svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor">
+			<path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
 		</svg>
 	</button>
 

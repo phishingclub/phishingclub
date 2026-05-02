@@ -161,6 +161,11 @@
 		proxy: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
   <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
 </svg>
+`,
+
+		remote_browser: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0H3" />
+</svg>
 `
 	};
 
@@ -176,6 +181,7 @@
 			'/domain/': 'domains_overview',
 			'/page/': 'pages',
 			'/proxy/': 'proxy',
+			'/remote-browser/': 'remote_browser',
 			'/asset/': 'assets',
 			'/email/': 'emails_overview',
 			'/attachment/': 'attachments',
@@ -302,6 +308,7 @@
 		>
 			{#each menu as link}
 				{#if link.type === 'submenu'}
+					<ConditionalDisplay show={link.whitebox ? 'whitebox' : link.blackbox ? 'blackbox' : 'both'}>
 					<div class="py-1 mt-4 first:mt-0">
 						{#if isExpanded}
 							<div
@@ -355,6 +362,7 @@
 							{/each}
 						</div>
 					</div>
+					</ConditionalDisplay>
 				{:else}
 					<a
 						class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group

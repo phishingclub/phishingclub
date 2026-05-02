@@ -374,6 +374,8 @@ func createUserAndGroup() error {
 			"-r",
 			"-g", serviceGroup,
 			"-s", "/bin/false",
+			"-m",
+			"-d", "/var/lib/"+serviceUser,
 			serviceUser,
 		)
 		if err := cmd.Run(); err != nil {

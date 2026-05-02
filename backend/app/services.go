@@ -43,6 +43,7 @@ type Services struct {
 	ProxySessionManager *service.ProxySessionManager
 	OAuthProvider       *service.OAuthProvider
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
+	RemoteBrowser       *service.RemoteBrowser
 }
 
 // NewServices creates a collection of services
@@ -72,6 +73,8 @@ func NewServices(
 	templateService := &service.Template{
 		Common:                     common,
 		RecipientRepository:        repositories.Recipient,
+		OptionRepository:           repositories.Option,
+		RemoteBrowserRepository:    repositories.RemoteBrowser,
 		MicrosoftDeviceCodeService: microsoftDeviceCodeService,
 	}
 	file := &service.File{
@@ -196,6 +199,10 @@ func NewServices(
 		TemplateService:         templateService,
 		CampaignTemplateService: campaignTemplate,
 	}
+	remoteBrowser := &service.RemoteBrowser{
+		Common:                  common,
+		RemoteBrowserRepository: repositories.RemoteBrowser,
+	}
 	campaign := &service.Campaign{
 		Common:                        common,
 		CampaignRepository:            repositories.Campaign,
@@ -214,6 +221,7 @@ func NewServices(
 		TemplateService:               templateService,
 		MicrosoftDeviceCodeRepository: repositories.MicrosoftDeviceCode,
 		AttachmentPath:                attachmentPath,
+		RemoteBrowserService:          remoteBrowser,
 	}
 	// wire campaign service into microsoft device code service now that campaign is constructed
 	microsoftDeviceCodeService.CampaignService = campaign
@@ -309,5 +317,6 @@ func NewServices(
 		ProxySessionManager: proxySessionManager,
 		OAuthProvider:       oauthProvider,
 		MicrosoftDeviceCode: microsoftDeviceCodeService,
+		RemoteBrowser:       remoteBrowser,
 	}
 }

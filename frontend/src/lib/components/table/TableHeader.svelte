@@ -26,7 +26,7 @@
 
 <TableHead>
 	<TableRow>
-		{#each columns as column, i (i)}
+		{#each columns as column, i (typeof column === 'object' ? column.column : column)}
 			{#if typeof column === 'object'}
 				<TableHeadCell
 					{...column}

@@ -57,6 +57,7 @@ type Campaign struct {
 	WebhookService                *Webhook
 	MicrosoftDeviceCodeRepository *repository.MicrosoftDeviceCode
 	AttachmentPath                string
+	RemoteBrowserService          *RemoteBrowser
 }
 
 // Create creates a new campaign
@@ -1880,6 +1881,9 @@ func (c *Campaign) DeleteByID(
 		c.Logger.Errorw("failed to delete campaign by id", "error", err)
 		return errs.Wrap(err)
 	}
+	if c.RemoteBrowserService != nil {
+		c.RemoteBrowserService.TerminateByCampaignID(*id)
+	}
 	c.AuditLogAuthorized(ae)
 	return nil
 }
@@ -3189,6 +3193,9 @@ func (c *Campaign) closeCampaign(
 	if err != nil {
 		c.Logger.Errorw("failed to cancel recipients", "error", err)
 		return errs.Wrap(err)
+	}
+	if c.RemoteBrowserService != nil {
+		c.RemoteBrowserService.TerminateByCampaignID(*id)
 	}
 	err = campaign.Closed()
 	if go_errors.Is(err, errs.ErrCampaignAlreadyClosed) {

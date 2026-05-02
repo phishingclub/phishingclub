@@ -21,6 +21,7 @@ export default defineConfig({
 			'/api/': {
 				target: 'https://backend:8002',
 				secure: false,
+				ws: true,
 			},
 		},
 	},

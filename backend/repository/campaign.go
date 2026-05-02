@@ -1413,7 +1413,7 @@ func (r *Campaign) SaveEvent(
 		"ip_address":  campaignEvent.IP.String(),
 		"user_agent":  campaignEvent.UserAgent.String(),
 		"data":        campaignEvent.Data.String(),
-		"metadata":    campaignEvent.Metadata.String(),
+		"metadata":    func() string { if campaignEvent.Metadata == nil { return "" }; return campaignEvent.Metadata.String() }(),
 	}
 	if campaignEvent.RecipientID != nil {
 		row["recipient_id"] = campaignEvent.RecipientID.String()

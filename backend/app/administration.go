@@ -208,6 +208,14 @@ const (
 	ROUTE_V1_VERSION = "/api/v1/version"
 	// import
 	ROUTE_V1_IMPORT = "/api/v1/import"
+	// remote browser
+	ROUTE_V1_REMOTE_BROWSER              = "/api/v1/remote-browser"
+	ROUTE_V1_REMOTE_BROWSER_OVERVIEW     = "/api/v1/remote-browser/overview"
+	ROUTE_V1_REMOTE_BROWSER_ID           = "/api/v1/remote-browser/:id"
+	ROUTE_V1_REMOTE_BROWSER_ID_RUN       = "/api/v1/remote-browser/:id/run"
+	ROUTE_V1_REMOTE_BROWSER_LIVE         = "/api/v1/remote-browser/live"
+	ROUTE_V1_REMOTE_BROWSER_LIVE_CRID    = "/api/v1/remote-browser/live/:crID"
+	ROUTE_V1_REMOTE_BROWSER_LIVE_STREAM  = "/api/v1/remote-browser/live/:crID/stream"
 )
 
 // administrationServer is the administrationServer app
@@ -500,7 +508,18 @@ func setupRoutes(
 		GET(ROUTE_V1_BACKUP_LIST, middleware.SessionHandler, controllers.Backup.ListBackups).
 		GET(ROUTE_V1_BACKUP_DOWNLOAD, middleware.SessionHandler, controllers.Backup.DownloadBackup).
 		// import
-		POST(ROUTE_V1_IMPORT, middleware.SessionHandler, controllers.Import.Import)
+		POST(ROUTE_V1_IMPORT, middleware.SessionHandler, controllers.Import.Import).
+		// remote browser
+		GET(ROUTE_V1_REMOTE_BROWSER, middleware.SessionHandler, controllers.RemoteBrowser.GetAll).
+		GET(ROUTE_V1_REMOTE_BROWSER_OVERVIEW, middleware.SessionHandler, controllers.RemoteBrowser.GetOverview).
+		GET(ROUTE_V1_REMOTE_BROWSER_ID, middleware.SessionHandler, controllers.RemoteBrowser.GetByID).
+		POST(ROUTE_V1_REMOTE_BROWSER, middleware.SessionHandler, controllers.RemoteBrowser.Create).
+		PATCH(ROUTE_V1_REMOTE_BROWSER_ID, middleware.SessionHandler, controllers.RemoteBrowser.UpdateByID).
+		DELETE(ROUTE_V1_REMOTE_BROWSER_ID, middleware.SessionHandler, controllers.RemoteBrowser.DeleteByID).
+		GET(ROUTE_V1_REMOTE_BROWSER_ID_RUN, middleware.SessionHandler, controllers.RemoteBrowser.RunByID).
+		GET(ROUTE_V1_REMOTE_BROWSER_LIVE, middleware.SessionHandler, controllers.RemoteBrowser.ListLiveSessions).
+		DELETE(ROUTE_V1_REMOTE_BROWSER_LIVE_CRID, middleware.SessionHandler, controllers.RemoteBrowser.CloseLiveSession).
+		GET(ROUTE_V1_REMOTE_BROWSER_LIVE_STREAM, middleware.SessionHandler, controllers.RemoteBrowser.StreamLiveSession)
 
 	return r
 }

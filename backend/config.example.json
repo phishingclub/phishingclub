@@ -20,5 +20,9 @@
   "log": {
     "path": "",
     "errorPath": ""
+  },
+  "remote_browser": {
+    "enabled": false,
+    "exec_path": ""
   }
 }

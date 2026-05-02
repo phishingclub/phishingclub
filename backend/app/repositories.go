@@ -31,6 +31,7 @@ type Repositories struct {
 	OAuthProvider       *repository.OAuthProvider
 	OAuthState          *repository.OAuthState
 	MicrosoftDeviceCode *repository.MicrosoftDeviceCode
+	RemoteBrowser       *repository.RemoteBrowser
 }
 
 // NewRepositories creates a collection of repositories
@@ -63,5 +64,6 @@ func NewRepositories(
 		OAuthProvider:       &repository.OAuthProvider{DB: db},
 		OAuthState:          &repository.OAuthState{DB: db},
 		MicrosoftDeviceCode: &repository.MicrosoftDeviceCode{DB: db},
+		RemoteBrowser:       &repository.RemoteBrowser{DB: db},
 	}
 }

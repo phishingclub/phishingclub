@@ -55,7 +55,7 @@
 				class="font-bold text-slate-600 dark:text-gray-200 text-{alignText} flex transition-colors duration-200"
 			>
 				{#if !isGhost}
-					{title.length ? title : column}
+					{title?.length ? title : column}
 				{:else}
 					<GhostText />
 				{/if}

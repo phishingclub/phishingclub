@@ -49,6 +49,8 @@
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import { resourceContext } from '$lib/store/resourceContext';
+	import RemoteBrowserStream from '$lib/components/remote-browser/RemoteBrowserStream.svelte';
+	import LiveSessionBadgeDropdown from '$lib/components/remote-browser/LiveSessionBadgeDropdown.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -169,6 +171,17 @@
 	let setAsSentRecipient = null;
 	let lastPoll3399Nano = '';
 
+	// live remote browser sessions
+	/** @type {Map<string, {crID: string, campaignID: string, recipientID: string, createdAt: string, victimConnected: boolean}>} */
+	let liveSessions = new Map();
+	let liveSessionPollInterval = null;
+	let streamModalVisible = false;
+	let streamCRID = '';
+	let streamControlMode = false;
+	let streamEmail = '';
+	let isTerminateSessionAlertVisible = false;
+	let terminateSessionCRID = '';
+
 	// hooks
 	onMount(() => {
 		const context = appStateService.getContext();
@@ -186,13 +199,54 @@
 			await refreshCampaignEventsSince();
 		})();
 
+		// poll live sessions every 5 seconds
+		liveSessionPollInterval = setInterval(refreshLiveSessions, 5000);
+		refreshLiveSessions();
+
 		// cleanup resource context when leaving page
 		return () => {
 			recipientTableUrlParams.unsubscribe();
 			eventsTableURLParams.unsubscribe();
 			resourceContext.clear();
+			clearInterval(liveSessionPollInterval);
 		};
 	});
+
+	const refreshLiveSessions = async () => {
+		try {
+			const campaignID = $page.params.id;
+			const res = await api.remoteBrowser.getLiveSessions(campaignID);
+			if (!res.success) return;
+			const map = new Map();
+			for (const s of res.data ?? []) {
+				map.set(s.crID, s);
+			}
+			liveSessions = map;
+		} catch {
+			// network error during poll — silently skip this tick
+		}
+	};
+
+	const openStreamModal = (crID, control, recipientEmail = '') => {
+		streamCRID = crID;
+		streamControlMode = control;
+		streamEmail = recipientEmail;
+		streamModalVisible = true;
+	};
+
+	const openTerminateAlert = (crID) => {
+		terminateSessionCRID = crID;
+		isTerminateSessionAlertVisible = true;
+	};
+
+	const doTerminateSession = async () => {
+		const res = await api.remoteBrowser.closeLiveSession(terminateSessionCRID);
+		if (!res.success) {
+			return { success: false, error: 'Failed to terminate session' };
+		}
+		await refreshLiveSessions();
+		return { success: true };
+	};
 
 	const refresh = async (showLoading = true) => {
 		if (showLoading) {
@@ -1947,6 +2001,7 @@
 			<SubHeadline>Recipients overview</SubHeadline>
 			<Table
 				columns={[
+					...(liveSessions.size > 0 ? [{ column: 'Remote', size: 'small' }] : []),
 					{ column: 'First name', size: 'small' },
 					{ column: 'Last name', size: 'small' },
 					{ column: 'Email', size: 'large' },
@@ -1972,6 +2027,29 @@
 			>
 				{#each campaignRecipients as recp (recp.id)}
 					<TableRow>
+						{#if liveSessions.size > 0}
+							<TableCell>
+								{#if liveSessions.has(recp.id)}
+									{@const ls = liveSessions.get(recp.id)}
+									<LiveSessionBadgeDropdown victimConnected={ls.victimConnected}>
+										{#if ls.canStream}
+											<TableDropDownButton
+												name="View"
+												on:click={() => openStreamModal(recp.id, false, recp.recipient?.email)}
+											/>
+											<TableDropDownButton
+												name="Control"
+												on:click={() => openStreamModal(recp.id, true, recp.recipient?.email)}
+											/>
+										{/if}
+										<TableDropDownButton
+											name="Terminate"
+											on:click={() => openTerminateAlert(recp.id)}
+										/>
+									</LiveSessionBadgeDropdown>
+								{/if}
+							</TableCell>
+						{/if}
 						{#if recp?.anonymizedID}
 							<TableCell value={'anonymized'} />
 							<TableCell value={'anonymized'} />
@@ -2104,6 +2182,23 @@
 														: ''}
 										on:click={() => onClickPreviewEmail(recp.id)}
 									/>
+									{#if liveSessions.has(recp.id)}
+										{@const ls = liveSessions.get(recp.id)}
+										{#if ls.canStream}
+											<TableViewButton
+												name="View remote session"
+												on:click={() => openStreamModal(recp.id, false, recp.recipient?.email)}
+											/>
+											<TableDropDownButton
+												name="Control remote session"
+												on:click={() => openStreamModal(recp.id, true, recp.recipient?.email)}
+											/>
+										{/if}
+										<TableDropDownButton
+											name="Terminate remote session"
+											on:click={() => openTerminateAlert(recp.id)}
+										/>
+									{/if}
 								</TableDropDownEllipsis>
 							</TableCellAction>
 						{/if}
@@ -2112,6 +2207,23 @@
 			</Table>
 		{/if}
 	{/if}
+	<RemoteBrowserStream
+		bind:visible={streamModalVisible}
+		crID={streamCRID}
+		controlMode={streamControlMode}
+		email={streamEmail}
+		on:closed={() => { streamModalVisible = false; refreshLiveSessions(); }}
+	/>
+
+	<Alert
+		headline="Terminate session"
+		bind:visible={isTerminateSessionAlertVisible}
+		onConfirm={doTerminateSession}
+		ok="Yes, terminate"
+	>
+		Are you sure you want to terminate this live session? The victim's browser will be closed.
+	</Alert>
+
 	<Modal headerText={'Events'} visible={isEventsModalVisible} onClose={closeEventsModal}>
 		<div class="mt-8"></div>
 		<Table

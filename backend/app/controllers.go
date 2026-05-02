@@ -40,6 +40,7 @@ type Controllers struct {
 	Backup            *controller.Backup
 	IPAllowList       *controller.IPAllowList
 	OAuthProvider     *controller.OAuthProvider
+	RemoteBrowser     *controller.RemoteBrowserController
 }
 
 // NewControllers creates a collection of controllers
@@ -196,6 +197,16 @@ func NewControllers(
 		OAuthProviderService: services.OAuthProvider,
 		Config:               conf,
 	}
+	remoteBrowser := &controller.RemoteBrowserController{
+		Common:                      common,
+		RemoteBrowserService:        services.RemoteBrowser,
+		RemoteBrowserRepository:     repositories.RemoteBrowser,
+		CampaignRecipientRepository: repositories.CampaignRecipient,
+		CampaignRepository:          repositories.Campaign,
+		CampaignService:             services.Campaign,
+		ExecPath:                    conf.RemoteBrowser.ExecPath,
+		Enabled:                     conf.RemoteBrowser.Enabled,
+	}
 
 	return &Controllers{
 		Asset:             asset,
@@ -229,5 +240,6 @@ func NewControllers(
 		Backup:            backup,
 		IPAllowList:       ipAllowList,
 		OAuthProvider:     oauthProvider,
+		RemoteBrowser:     remoteBrowser,
 	}
 }

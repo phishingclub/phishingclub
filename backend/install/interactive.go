@@ -240,7 +240,8 @@ func (m ConfigModel) renderAdvancedSections(b *strings.Builder) {
 		{"Database Configuration", 6, 8},
 		{"TLS Configuration", 8, 10},
 		{"Logging Configuration", 10, 12},
-		{"Security Configuration", 12, len(m.inputs)},
+		{"Security Configuration", 12, 15},
+		{"Remote Browser", 15, len(m.inputs)},
 	}
 
 	currentSection := -1
@@ -324,6 +325,10 @@ func (m *ConfigModel) createAdvancedInputs() []InputWithHelp {
 		{"Admin allowed IPs", "", "192.168.1.0/24,10.0.0.1", "comma-separated list of IP/CIDR ranges allowed to access admin (empty for all)"},
 		{"Trusted proxies", "", "192.168.1.1,10.0.0.1", "comma-separated list of trusted proxy IPs/CIDR ranges"},
 		{"Trusted IP header", config.DefaultTrustedIPHeader, "X-Real-IP", "header name to check for real client IP from trusted proxies"},
+
+		// remote browser configuration
+		{"Enable remote browser", "false", "true/false", "enable the remote browser feature - only enable when all operators are fully trusted"},
+		{"Chrome binary path", "", "/usr/bin/chromium-browser", "path to Chrome/Chromium binary (leave empty to use auto-downloaded Chromium)"},
 	}
 
 	for i, p := range prompts {
@@ -457,6 +462,13 @@ func (m *ConfigModel) applyAdvancedConfig() error {
 	m.config.IPSecurity.AdminAllowed = adminAllowedList
 	m.config.IPSecurity.TrustedProxies = trustedProxiesList
 	m.config.IPSecurity.TrustedIPHeader = trustedIPHeader
+
+	// remote browser configuration
+	rbEnabled := strings.ToLower(getValueOrDefault(m.inputs[15].Value(), "false")) == "true"
+	m.config.SetRemoteBrowserEnabled(rbEnabled)
+	if execPath := m.inputs[16].Value(); execPath != "" {
+		m.config.SetRemoteBrowserExecPath(execPath)
+	}
 
 	return nil
 }

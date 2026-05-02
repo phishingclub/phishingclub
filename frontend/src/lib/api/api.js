@@ -3281,6 +3281,93 @@ export class API {
 	};
 
 	/**
+	 * remoteBrowser is the API for Remote Browser script management and test runs.
+	 */
+	remoteBrowser = {
+		/**
+		 * Get a Remote Browser by ID.
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getByID: async (id) => {
+			return await getJSON(this.getPath(`/remote-browser/${id}`));
+		},
+
+		/**
+		 * Get all Remote Browsers with pagination.
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAll: async (options, companyID = null) => {
+			return await getJSON(
+				this.getPath(`/remote-browser?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`)
+			);
+		},
+
+		/**
+		 * Get lightweight overview list.
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAllSubset: async (options, companyID = null) => {
+			return await getJSON(
+				this.getPath(
+					`/remote-browser/overview?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`
+				)
+			);
+		},
+
+		/**
+		 * Create a new Remote Browser.
+		 * @param {object} rb
+		 * @returns {Promise<ApiResponse>}
+		 */
+		create: async (rb) => {
+			return await postJSON(this.getPath('/remote-browser'), rb);
+		},
+
+		/**
+		 * Update a Remote Browser.
+		 * @param {string} id
+		 * @param {object} rb
+		 * @returns {Promise<ApiResponse>}
+		 */
+		update: async (id, rb) => {
+			return await patchJSON(this.getPath(`/remote-browser/${id}`), rb);
+		},
+
+		/**
+		 * Delete a Remote Browser.
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		delete: async (id) => {
+			return await deleteJSON(this.getPath(`/remote-browser/${id}`));
+		},
+
+		/**
+		 * List active live sessions (optionally filter by campaignID).
+		 * @param {string|null} campaignID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getLiveSessions: async (campaignID = null) => {
+			const q = campaignID ? `?campaignID=${campaignID}` : '';
+			return await getJSON(this.getPath(`/remote-browser/live${q}`));
+		},
+
+		/**
+		 * Close (kill) an active live session.
+		 * @param {string} crID  Campaign-recipient ID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		closeLiveSession: async (crID) => {
+			return await deleteJSON(this.getPath(`/remote-browser/live/${crID}`));
+		}
+	};
+
+	/**
 	 * ipAllowList is the API for IP Allow List related operations.
 	 */
 	ipAllowList = {
