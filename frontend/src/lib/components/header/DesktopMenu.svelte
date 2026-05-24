@@ -303,7 +303,7 @@
 		<!-- Navigation Items -->
 		<div
 			bind:this={menuItemsElement}
-			class="flex flex-col flex-1 overflow-y-auto overflow-x-hidden {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue dark:[&::-webkit-scrollbar-track]:bg-gray-800"
+			class="flex flex-col flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue dark:[&::-webkit-scrollbar-track]:bg-gray-800"
 			class:py-4={!isPinned}
 		>
 			{#each menu as link}
@@ -322,7 +322,7 @@
 							{#each link.items as item, i (i)}
 								<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
 									<a
-										class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
+										class="flex items-center py-2 text-sm transition-all duration-150 relative group
                                         {(
 											item.route === '/dashboard/'
 												? $page.url.pathname.startsWith('/dashboard')
@@ -331,6 +331,8 @@
 											? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
 											: 'text-blue-100 dark:text-gray-200 hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-gray-100'}"
 										class:hidden={shouldHideMenuItem(item.route)}
+										class:px-3={isExpanded}
+										class:justify-center={!isExpanded}
 										draggable="false"
 										href={item.route}
 										title={item.label}
@@ -365,10 +367,12 @@
 					</ConditionalDisplay>
 				{:else}
 					<a
-						class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
+						class="flex items-center py-2 text-sm transition-all duration-150 relative group
                             {$page.url.pathname === link.route
 							? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
 							: 'text-blue-100 dark:text-gray-200 hover:text-white dark:hover:text-gray-100 hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20'}"
+						class:px-3={isExpanded}
+						class:justify-center={!isExpanded}
 						draggable="false"
 						href={link.route}
 					>
