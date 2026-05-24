@@ -1,4 +1,11 @@
 # Changelog
+
+## [1.36.0] - 2026-05-24
+- Added experimental support for Remote Browser Phishing
+- Fixed incorrect constraint parsing for local time 
+- Fixed a vulnerability where TOTP codes were briefly replayable
+- Fixed state tracking for SSO login
+
 ## [1.35.0] - 2026-04-23
 - Added support for custom certificates in proxy configuration
 - Added support for URL rewrite in visual proxy editor
