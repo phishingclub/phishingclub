@@ -381,7 +381,18 @@ interface Session {
   // ── Mouse ─────────────────────────────────────────────────────────────────
   click(selector: string): void;
   doubleClick(selector: string): void;
+  /**
+   * Move to absolute coordinates along a curved Bezier path with micro-jitter
+   * before clicking. Prefer this over bare clickXY when bot detection is a concern.
+   */
   clickXY(x: number, y: number): void;
+  /**
+   * Smoothly move the mouse to absolute page coordinates without clicking.
+   * Uses a cubic Bezier curve with ease-in-out timing and micro-jitter.
+   * @param opts.duration Movement duration in ms. Default: random 200-400 ms.
+   * @param opts.jitter  Jitter amplitude in px (0 = none). Default: 1.5 px.
+   */
+  moveMouse(x: number, y: number, opts?: { duration?: number; jitter?: number }): void;
   scrollIntoView(selector: string): void;
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
@@ -530,6 +541,7 @@ interface FrameSession {
   click(selector: string): void;
   doubleClick(selector: string): void;
   clickXY(x: number, y: number): void;
+  moveMouse(x: number, y: number, opts?: { duration?: number; jitter?: number }): void;
   scrollIntoView(selector: string): void;
 
   // ── Keyboard ──────────────────────────────────────────────────────────────

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"math/rand"
 	"regexp"
 	"strings"
 	"sync"
@@ -658,11 +660,100 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		return goja.Undefined()
 	})
 
+	// mouseX/Y tracks the last position dispatched by humanMoveTo so that
+	// consecutive moveMouse and clickXY calls produce a continuous path.
+	var mouseX, mouseY float64
+
+	// humanMoveTo moves the CDP cursor from the last tracked position to
+	// (targetX, targetY) along a cubic Bezier curve with ease-in-out timing
+	// and optional micro-jitter, mimicking natural hand movement.
+	// durationMs <= 0 picks a random value in [200, 400].
+	// jitterPx < 0 uses the default amplitude of 1.5 px.
+	humanMoveTo := func(targetX, targetY, durationMs, jitterPx float64) {
+		if durationMs <= 0 {
+			durationMs = 200 + rand.Float64()*200
+		}
+		if jitterPx < 0 {
+			jitterPx = 1.5
+		}
+		startX, startY := mouseX, mouseY
+		dx, dy := targetX-startX, targetY-startY
+		dist := math.Sqrt(dx*dx + dy*dy)
+		if dist < 2 {
+			page.Mouse.MoveTo(proto.Point{X: targetX, Y: targetY}) //nolint:errcheck
+			mouseX, mouseY = targetX, targetY
+			return
+		}
+		// Perpendicular unit vector for Bezier deviation.
+		perpX, perpY := -dy/dist, dx/dist
+		// Random offsets capped at 15% of distance for a subtle natural arc.
+		maxDev := dist * 0.15
+		c1x := startX + dx*0.33 + perpX*(rand.Float64()*2-1)*maxDev
+		c1y := startY + dy*0.33 + perpY*(rand.Float64()*2-1)*maxDev
+		c2x := startX + dx*0.67 + perpX*(rand.Float64()*2-1)*maxDev
+		c2y := startY + dy*0.67 + perpY*(rand.Float64()*2-1)*maxDev
+
+		steps := int(durationMs / 10)
+		if steps < 5 {
+			steps = 5
+		}
+		if steps > 60 {
+			steps = 60
+		}
+		stepDur := time.Duration(float64(time.Millisecond) * durationMs / float64(steps))
+
+		for i := 1; i <= steps; i++ {
+			select {
+			case <-page.GetContext().Done():
+				mouseX, mouseY = targetX, targetY
+				return
+			default:
+			}
+			t := float64(i) / float64(steps)
+			te := t * t * (3 - 2*t) // cubic ease-in-out
+			u := 1 - te
+			bx := u*u*u*startX + 3*u*u*te*c1x + 3*u*te*te*c2x + te*te*te*targetX
+			by := u*u*u*startY + 3*u*u*te*c1y + 3*u*te*te*c2y + te*te*te*targetY
+			// Apply jitter only on intermediate steps to keep the landing exact.
+			if jitterPx > 0 && i < steps {
+				bx += (rand.Float64()*2 - 1) * jitterPx
+				by += (rand.Float64()*2 - 1) * jitterPx
+			}
+			page.Mouse.MoveTo(proto.Point{X: bx, Y: by}) //nolint:errcheck
+			if i < steps {
+				time.Sleep(stepDur)
+			}
+		}
+		page.Mouse.MoveTo(proto.Point{X: targetX, Y: targetY}) //nolint:errcheck
+		mouseX, mouseY = targetX, targetY
+	}
+
+	pc.Set("moveMouse", func(call goja.FunctionCall) goja.Value {
+		targetX := call.Argument(0).ToFloat()
+		targetY := call.Argument(1).ToFloat()
+		durationMs := -1.0
+		jitterPx := -1.0
+		if len(call.Arguments) > 2 {
+			if obj := call.Argument(2).ToObject(vm); obj != nil {
+				if v := obj.Get("duration"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+					durationMs = v.ToFloat()
+				}
+				if v := obj.Get("jitter"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+					jitterPx = v.ToFloat()
+				}
+			}
+		}
+		dbg(fmt.Sprintf("→ moveMouse %.0f,%.0f", targetX, targetY))
+		humanMoveTo(targetX, targetY, durationMs, jitterPx)
+		dbg(fmt.Sprintf("✓ moveMouse %.0f,%.0f", targetX, targetY))
+		return goja.Undefined()
+	})
+
 	pc.Set("clickXY", func(call goja.FunctionCall) goja.Value {
 		x := call.Argument(0).ToFloat()
 		y := call.Argument(1).ToFloat()
 		dbg(fmt.Sprintf("→ clickXY %.0f,%.0f", x, y))
-		must(page.Mouse.MoveTo(proto.Point{X: x, Y: y}))
+		humanMoveTo(x, y, -1, -1)
 		must(page.Mouse.Click(proto.InputMouseButtonLeft, 1))
 		dbg(fmt.Sprintf("✓ clickXY %.0f,%.0f", x, y))
 		return goja.Undefined()

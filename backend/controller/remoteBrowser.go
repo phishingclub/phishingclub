@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/draw"
 	"image/jpeg"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"sync"
@@ -574,6 +575,11 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 
 	// Read loop: forward victim events into the runner; route stream_input with coord offset.
 	go func() {
+		// Per-stream last mousemove dispatch time used to cap stream_input mousemove
+		// events at 60 Hz. Clicks and other actions are always forwarded immediately.
+		streamMouseMoveLast := map[string]time.Time{}
+		const streamMouseMoveMinInterval = 16 * time.Millisecond
+
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -614,6 +620,16 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 				continue
 			}
 			if cmd.Type == "stream_input" && cmd.Name != "" && cmd.Action != "" {
+				// Rate-limit mousemove to 60 Hz - the captcha screencast frame rate
+				// is typically well below this, so extra events never make it into
+				// a frame and only add unnecessary CDP round-trips.
+				if cmd.Action == "mousemove" {
+					now := time.Now()
+					if now.Sub(streamMouseMoveLast[cmd.Name]) < streamMouseMoveMinInterval {
+						continue
+					}
+					streamMouseMoveLast[cmd.Name] = now
+				}
 				if val, exists := activeNamedStreams.Load(cmd.Name); exists {
 					si := val.(*streamInfo)
 					// cmd.X/Y are in cropped-canvas JPEG pixels; map back to CDP CSS coords.
@@ -1278,9 +1294,13 @@ func (m *RemoteBrowserController) dispatchInput(page *rod.Page, msg []byte) {
 	mods := int(cmd.Modifiers)
 	switch cmd.Type {
 	case "mousemove":
+		// Add ±0.5 px uniform noise so canvas-quantized coordinates have
+		// subpixel variation, matching natural pointer imprecision.
+		jx := cmd.X + (rand.Float64()*2-1)*0.5
+		jy := cmd.Y + (rand.Float64()*2-1)*0.5
 		proto.InputDispatchMouseEvent{
 			Type: proto.InputDispatchMouseEventTypeMouseMoved,
-			X:    cmd.X, Y: cmd.Y, Modifiers: mods,
+			X:    jx, Y: jy, Modifiers: mods,
 		}.Call(page) //nolint:errcheck
 	case "mousedown":
 		proto.InputDispatchMouseEvent{

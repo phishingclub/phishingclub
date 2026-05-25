@@ -659,16 +659,15 @@ func (r *Runner) Run(ctx context.Context) error {
 				browser.Close() //nolint:errcheck
 				return goja.Undefined()
 			}
-			/*
-				// ignore "debugger;" code lines explicitly
-				err = proto.DebuggerSetSkipAllPauses{Skip: true}.Call(page)
-				if err != nil {
-					emitter.errorf(fmt.Sprintf("skip debug failed: %v", err))
-					browser.Close() //nolint:errcheck
-					return goja.Undefined()
-				}
-				// patch console Log
-				_, err = page.EvalOnNewDocument(`() => {
+			// ignore "debugger;" code lines explicitly
+			err = proto.DebuggerSetSkipAllPauses{Skip: true}.Call(page)
+			if err != nil {
+				emitter.errorf(fmt.Sprintf("skip debug failed: %v", err))
+				browser.Close() //nolint:errcheck
+				return goja.Undefined()
+			}
+			// patch console Log
+			_, err = page.EvalOnNewDocument(`() => {
 						const noop = () => {};
 
 						console.log = noop;
@@ -678,12 +677,11 @@ func (r *Runner) Run(ctx context.Context) error {
 						console.info = noop;
 						console.warn = noop;
 				}`)
-				if err != nil {
-					emitter.errorf(fmt.Sprintf("console patch failed: %v", err))
-					browser.Close() //nolint:errcheck
-					return goja.Undefined()
-				}
-			*/
+			if err != nil {
+				emitter.errorf(fmt.Sprintf("console patch failed: %v", err))
+				browser.Close() //nolint:errcheck
+				return goja.Undefined()
+			}
 		}
 
 		// Apply user-agent override. When headless and no explicit UA is set we use
