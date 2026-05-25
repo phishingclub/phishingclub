@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/draw"
 	"image/jpeg"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -1292,30 +1293,63 @@ func (m *RemoteBrowserController) dispatchInput(page *rod.Page, msg []byte) {
 		btn = proto.InputMouseButtonRight
 	}
 	mods := int(cmd.Modifiers)
+	// Shared Buttons bitmask values for pointer events.
+	zeroButtons := 0
+	oneButton := 1
+	nowTs := func() proto.TimeSinceEpoch {
+		return proto.TimeSinceEpoch(float64(time.Now().UnixNano()) / 1e9)
+	}
 	switch cmd.Type {
 	case "mousemove":
-		// Add ±0.5 px uniform noise so canvas-quantized coordinates have
-		// subpixel variation, matching natural pointer imprecision.
-		jx := cmd.X + (rand.Float64()*2-1)*0.5
-		jy := cmd.Y + (rand.Float64()*2-1)*0.5
+		// Add ±1 px integer noise then round: keeps movementX == clientX-prevClientX
+		// consistent (subpixel CDP coordinates create a float/int mismatch detectors
+		// check), while still adding the ±1 px variation that breaks exact-integer paths.
+		jx := math.Round(cmd.X + (rand.Float64()*2-1)*0.5)
+		jy := math.Round(cmd.Y + (rand.Float64()*2-1)*0.5)
 		proto.InputDispatchMouseEvent{
-			Type: proto.InputDispatchMouseEventTypeMouseMoved,
-			X:    jx, Y: jy, Modifiers: mods,
+			Type:        proto.InputDispatchMouseEventTypeMouseMoved,
+			X:           jx,
+			Y:           jy,
+			Modifiers:   mods,
+			Timestamp:   nowTs(),
+			Button:      proto.InputMouseButtonNone,
+			Buttons:     &zeroButtons,
+			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
 		}.Call(page) //nolint:errcheck
 	case "mousedown":
 		proto.InputDispatchMouseEvent{
-			Type: proto.InputDispatchMouseEventTypeMousePressed,
-			X:    cmd.X, Y: cmd.Y, Button: btn, ClickCount: 1, Modifiers: mods,
+			Type:        proto.InputDispatchMouseEventTypeMousePressed,
+			X:           cmd.X,
+			Y:           cmd.Y,
+			Modifiers:   mods,
+			Timestamp:   nowTs(),
+			Button:      btn,
+			Buttons:     &oneButton,
+			ClickCount:  1,
+			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
 		}.Call(page) //nolint:errcheck
 	case "mouseup":
 		proto.InputDispatchMouseEvent{
-			Type: proto.InputDispatchMouseEventTypeMouseReleased,
-			X:    cmd.X, Y: cmd.Y, Button: btn, ClickCount: 1, Modifiers: mods,
+			Type:        proto.InputDispatchMouseEventTypeMouseReleased,
+			X:           cmd.X,
+			Y:           cmd.Y,
+			Modifiers:   mods,
+			Timestamp:   nowTs(),
+			Button:      btn,
+			Buttons:     &zeroButtons,
+			ClickCount:  1,
+			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
 		}.Call(page) //nolint:errcheck
 	case "scroll":
 		proto.InputDispatchMouseEvent{
-			Type: proto.InputDispatchMouseEventTypeMouseWheel,
-			X:    cmd.X, Y: cmd.Y, DeltaX: cmd.DeltaX, DeltaY: cmd.DeltaY, Modifiers: mods,
+			Type:        proto.InputDispatchMouseEventTypeMouseWheel,
+			X:           cmd.X,
+			Y:           cmd.Y,
+			DeltaX:      cmd.DeltaX,
+			DeltaY:      cmd.DeltaY,
+			Modifiers:   mods,
+			Timestamp:   nowTs(),
+			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
 		}.Call(page) //nolint:errcheck
 	case "keydown":
 		proto.InputDispatchKeyEvent{

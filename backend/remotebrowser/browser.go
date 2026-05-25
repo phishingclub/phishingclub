@@ -664,6 +664,27 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 	// consecutive moveMouse and clickXY calls produce a continuous path.
 	var mouseX, mouseY float64
 
+	// cdpMouseMove dispatches a MouseMoved event with all required fields set.
+	// Using proto.InputDispatchMouseEvent directly (instead of page.Mouse.MoveTo)
+	// lets us set Timestamp, PointerType, and Buttons - fields that rod omits
+	// and that detectors use to distinguish CDP-injected events from hardware input.
+	zeroButtons := 0
+	cdpMouseMove := func(x, y float64) {
+		// Round to integers: Chrome stores cursor position as float internally and
+		// computes movementX/Y from the float delta, but event.clientX/Y are integers.
+		// Subpixel coordinates create a movementX != clientX-prevClientX mismatch
+		// that detectors use as a CDP fingerprint.
+		proto.InputDispatchMouseEvent{
+			Type:        proto.InputDispatchMouseEventTypeMouseMoved,
+			X:           math.Round(x),
+			Y:           math.Round(y),
+			Timestamp:   proto.TimeSinceEpoch(float64(time.Now().UnixNano()) / 1e9),
+			Button:      proto.InputMouseButtonNone,
+			Buttons:     &zeroButtons,
+			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
+		}.Call(page) //nolint:errcheck
+	}
+
 	// humanMoveTo moves the CDP cursor from the last tracked position to
 	// (targetX, targetY) along a cubic Bezier curve with ease-in-out timing
 	// and optional micro-jitter, mimicking natural hand movement.
@@ -680,7 +701,7 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		dx, dy := targetX-startX, targetY-startY
 		dist := math.Sqrt(dx*dx + dy*dy)
 		if dist < 2 {
-			page.Mouse.MoveTo(proto.Point{X: targetX, Y: targetY}) //nolint:errcheck
+			cdpMouseMove(targetX, targetY)
 			mouseX, mouseY = targetX, targetY
 			return
 		}
@@ -719,12 +740,12 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 				bx += (rand.Float64()*2 - 1) * jitterPx
 				by += (rand.Float64()*2 - 1) * jitterPx
 			}
-			page.Mouse.MoveTo(proto.Point{X: bx, Y: by}) //nolint:errcheck
+			cdpMouseMove(bx, by)
 			if i < steps {
 				time.Sleep(stepDur)
 			}
 		}
-		page.Mouse.MoveTo(proto.Point{X: targetX, Y: targetY}) //nolint:errcheck
+		cdpMouseMove(targetX, targetY)
 		mouseX, mouseY = targetX, targetY
 	}
 
@@ -750,11 +771,39 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 	})
 
 	pc.Set("clickXY", func(call goja.FunctionCall) goja.Value {
-		x := call.Argument(0).ToFloat()
-		y := call.Argument(1).ToFloat()
+		x := math.Round(call.Argument(0).ToFloat())
+		y := math.Round(call.Argument(1).ToFloat())
 		dbg(fmt.Sprintf("→ clickXY %.0f,%.0f", x, y))
 		humanMoveTo(x, y, -1, -1)
-		must(page.Mouse.Click(proto.InputMouseButtonLeft, 1))
+		// Dispatch mousedown and mouseup directly so we can set Timestamp,
+		// PointerType, and Buttons - and add a realistic hold duration.
+		// page.Mouse.Click omits these fields and has 0 ms hold time.
+		oneButton := 1
+		proto.InputDispatchMouseEvent{
+			Type:        proto.InputDispatchMouseEventTypeMousePressed,
+			X:           x,
+			Y:           y,
+			Timestamp:   proto.TimeSinceEpoch(float64(time.Now().UnixNano()) / 1e9),
+			Button:      proto.InputMouseButtonLeft,
+			Buttons:     &oneButton,
+			ClickCount:  1,
+			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
+		}.Call(page) //nolint:errcheck
+		// Human click hold: 80-150 ms between press and release.
+		time.Sleep(time.Duration(80+rand.Intn(70)) * time.Millisecond)
+		proto.InputDispatchMouseEvent{
+			Type:        proto.InputDispatchMouseEventTypeMouseReleased,
+			X:           x,
+			Y:           y,
+			Timestamp:   proto.TimeSinceEpoch(float64(time.Now().UnixNano()) / 1e9),
+			Button:      proto.InputMouseButtonLeft,
+			Buttons:     &zeroButtons,
+			ClickCount:  1,
+			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
+		}.Call(page) //nolint:errcheck
+		// Sync rod's internal position tracker so any subsequent rod operations
+		// (e.g. el.Click) see the correct cursor location.
+		page.Mouse.MoveTo(proto.Point{X: x, Y: y}) //nolint:errcheck
 		dbg(fmt.Sprintf("✓ clickXY %.0f,%.0f", x, y))
 		return goja.Undefined()
 	})
