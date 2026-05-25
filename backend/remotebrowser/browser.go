@@ -2,7 +2,6 @@ package remotebrowser
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -622,13 +621,8 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 			el, err := page.Element(sel)
 			must(err)
 			if err = el.Click(proto.InputMouseButtonLeft, 1); err != nil {
-				var npe *rod.NoPointerEventsError
-				if errors.As(err, &npe) {
-					_, evalErr := el.Eval(`() => this.click()`)
-					must(evalErr)
-				} else {
-					must(err)
-				}
+				_, evalErr := el.Eval(`() => this.click()`)
+				must(evalErr)
 			}
 		} else {
 			must(evalInFrame(target, fmt.Sprintf("var el=document.querySelector(%q);if(el)el.click()", sel)))
@@ -645,13 +639,8 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 			el, err := page.Element(sel)
 			must(err)
 			if err = el.Click(proto.InputMouseButtonLeft, 2); err != nil {
-				var npe *rod.NoPointerEventsError
-				if errors.As(err, &npe) {
-					_, evalErr := el.Eval(`() => { this.click(); this.click(); }`)
-					must(evalErr)
-				} else {
-					must(err)
-				}
+				_, evalErr := el.Eval(`() => { this.click(); this.click(); }`)
+				must(evalErr)
 			}
 		} else {
 			must(evalInFrame(target, fmt.Sprintf("var el=document.querySelector(%q);if(el){el.click();el.click()}", sel)))
