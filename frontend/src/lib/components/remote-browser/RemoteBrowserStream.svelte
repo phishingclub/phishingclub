@@ -31,6 +31,16 @@
 	let injectEvent = '';
 	let injectData = '';
 
+	/** @type {{ x: number, y: number } | null} */
+	let contextMenu = null;
+
+	// drag-select tracking
+	let dragStartX = 0;
+	let dragStartY = 0;
+	let dragStartCanvasX = 0;
+	let dragStartCanvasY = 0;
+	let isDragging = false;
+
 	function onLogPanelWheel(e) {
 		if (e.deltaY < 0) logScrolledUp = true;
 	}
@@ -151,6 +161,10 @@
 					if (!urlBarFocused) urlBarValue = msg.value;
 				} else if (msg.type === 'tabs') {
 					tabs = msg.tabs || [];
+				} else if (msg.type === 'selection_text') {
+					if (msg.text) {
+						navigator.clipboard.writeText(msg.text).catch(() => {});
+					}
 				} else if (msg.type === 'closed') {
 					status = 'Session ended';
 					sessionClosed = true;
@@ -226,28 +240,53 @@
 		const scaleX = remoteWidth / rect.width;
 		const scaleY = remoteHeight / rect.height;
 		return {
-			x: Math.round((e.clientX - rect.left) * scaleX),
-			y: Math.round((e.clientY - rect.top) * scaleY)
+			x: Math.max(0, Math.min(remoteWidth,  Math.round((e.clientX - rect.left) * scaleX))),
+			y: Math.max(0, Math.min(remoteHeight, Math.round((e.clientY - rect.top)  * scaleY)))
 		};
 	}
 
-	function onMouseMove(e) {
+	function onPointerDown(e) {
 		if (!controlMode) return;
-		const { x, y } = canvasCoords(e);
-		sendInput({ type: 'mousemove', x, y });
-	}
-
-	function onMouseDown(e) {
-		if (!controlMode) return;
+		if (e.pointerType !== 'mouse') return;
 		e.preventDefault();
+		// Capture the pointer so pointermove and pointerup keep firing on this
+		// element even when the mouse leaves it - required for drag-to-select.
+		canvas.setPointerCapture(e.pointerId);
 		const { x, y } = canvasCoords(e);
+		if (e.button === 0) {
+			dragStartX = e.clientX;
+			dragStartY = e.clientY;
+			dragStartCanvasX = x;
+			dragStartCanvasY = y;
+			isDragging = false;
+		}
 		sendInput({ type: 'mousedown', x, y, button: e.button === 2 ? 'right' : 'left' });
 	}
 
-	function onMouseUp(e) {
+	function onPointerMove(e) {
 		if (!controlMode) return;
+		if (e.pointerType !== 'mouse') return;
+		const { x, y } = canvasCoords(e);
+		if (e.buttons === 1) {
+			const dx = e.clientX - dragStartX;
+			const dy = e.clientY - dragStartY;
+			if (dx * dx + dy * dy > 25) isDragging = true;
+		}
+		sendInput({ type: 'mousemove', x, y, buttons: e.buttons });
+	}
+
+	function onPointerUp(e) {
+		if (!controlMode) return;
+		if (e.pointerType !== 'mouse') return;
 		const { x, y } = canvasCoords(e);
 		sendInput({ type: 'mouseup', x, y, button: e.button === 2 ? 'right' : 'left' });
+		// Left-button drag ended - use caretRangeFromPoint in the remote browser
+		// to set the exact selection, since CDP mousemove events alone are
+		// unreliable for triggering Chrome's text selection engine.
+		if (e.button === 0 && isDragging) {
+			sendInput({ type: 'select_range', x1: dragStartCanvasX, y1: dragStartCanvasY, x2: x, y2: y });
+		}
+		isDragging = false;
 	}
 
 	function onWheel(e) {
@@ -255,6 +294,33 @@
 		e.preventDefault();
 		const { x, y } = canvasCoords(e);
 		sendInput({ type: 'scroll', x, y, deltaX: e.deltaX, deltaY: e.deltaY });
+	}
+
+	function onContextMenu(e) {
+		if (!controlMode) return;
+		e.preventDefault();
+		contextMenu = { x: e.clientX, y: e.clientY };
+	}
+
+	function closeContextMenu() {
+		contextMenu = null;
+	}
+
+	function copyFromRemote() {
+		closeContextMenu();
+		sendInput({ type: 'get_selection' });
+	}
+
+	async function pasteToRemote() {
+		closeContextMenu();
+		try {
+			const text = await navigator.clipboard.readText();
+			if (text) sendInput({ type: 'paste', text });
+		} catch {
+			// clipboard access denied - fall back to Ctrl+V
+			sendInput({ type: 'keydown', key: 'v', code: 'KeyV', keyCode: 86, modifiers: 2, charText: '' });
+			sendInput({ type: 'keyup',   key: 'v', code: 'KeyV', keyCode: 86, modifiers: 2 });
+		}
 	}
 
 	function mods(e) {
@@ -457,13 +523,34 @@
 			<canvas
 				bind:this={canvas}
 				class="max-w-full max-h-full object-contain"
-				style={controlMode ? 'cursor: crosshair;' : ''}
-				on:mousemove={onMouseMove}
-				on:mousedown={onMouseDown}
-				on:mouseup={onMouseUp}
+				style={controlMode ? 'cursor: crosshair; touch-action: none;' : ''}
+				on:pointerdown={onPointerDown}
+				on:pointermove={onPointerMove}
+				on:pointerup={onPointerUp}
 				on:wheel|nonpassive={onWheel}
-				on:contextmenu|preventDefault
+				on:contextmenu={onContextMenu}
 			/>
+
+			{#if contextMenu}
+				<!-- svelte-ignore a11y-click-events-have-key-events -->
+				<!-- svelte-ignore a11y-no-static-element-interactions -->
+				<div class="fixed inset-0 z-40" on:click={closeContextMenu} on:contextmenu|preventDefault={closeContextMenu}></div>
+				<div
+					class="fixed z-50 bg-gray-800 border border-gray-600 rounded shadow-xl py-1 min-w-32 text-sm"
+					style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
+				>
+					<button
+						type="button"
+						class="w-full text-left px-3 py-1.5 text-gray-200 hover:bg-gray-700 transition-colors"
+						on:click={copyFromRemote}
+					>Copy</button>
+					<button
+						type="button"
+						class="w-full text-left px-3 py-1.5 text-gray-200 hover:bg-gray-700 transition-colors"
+						on:click={pasteToRemote}
+					>Paste</button>
+				</div>
+			{/if}
 
 			{#if logPanelOpen}
 				<div

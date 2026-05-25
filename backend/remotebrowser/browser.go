@@ -649,6 +649,90 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		return goja.Undefined()
 	})
 
+	pc.Set("rightClick", func(call goja.FunctionCall) goja.Value {
+		sel := argStr(call.Argument(0))
+		dbg("→ rightClick " + sel)
+		target := findPage(sel)
+		if target == page {
+			el, err := page.Element(sel)
+			must(err)
+			must(el.ScrollIntoView())
+			posRes, posErr := el.Eval(`function(){var r=this.getBoundingClientRect();return[r.left+r.width/2,r.top+r.height/2]}`)
+			must(posErr)
+			pts := posRes.Value.Arr()
+			cx := math.Round(pts[0].Num())
+			cy := math.Round(pts[1].Num())
+			twoB, zeroB := 2, 0
+			proto.InputDispatchMouseEvent{
+				Type:        proto.InputDispatchMouseEventTypeMousePressed,
+				X:           cx, Y: cy,
+				Timestamp:   proto.TimeSinceEpoch(float64(time.Now().UnixNano()) / 1e9),
+				Button:      proto.InputMouseButtonRight,
+				Buttons:     &twoB,
+				ClickCount:  1,
+				PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
+			}.Call(page) //nolint:errcheck
+			time.Sleep(time.Duration(80+rand.Intn(70)) * time.Millisecond)
+			proto.InputDispatchMouseEvent{
+				Type:        proto.InputDispatchMouseEventTypeMouseReleased,
+				X:           cx, Y: cy,
+				Timestamp:   proto.TimeSinceEpoch(float64(time.Now().UnixNano()) / 1e9),
+				Button:      proto.InputMouseButtonRight,
+				Buttons:     &zeroB,
+				ClickCount:  1,
+				PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
+			}.Call(page) //nolint:errcheck
+		} else {
+			must(evalInFrame(target, fmt.Sprintf(
+				"var el=document.querySelector(%q);if(el)el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2,buttons:2}))",
+				sel)))
+		}
+		dbg("✓ rightClick " + sel)
+		return goja.Undefined()
+	})
+
+	pc.Set("rightClickXY", func(call goja.FunctionCall) goja.Value {
+		x := math.Round(call.Argument(0).ToFloat())
+		y := math.Round(call.Argument(1).ToFloat())
+		dbg(fmt.Sprintf("→ rightClickXY %.0f,%.0f", x, y))
+		twoB, zeroB := 2, 0
+		proto.InputDispatchMouseEvent{
+			Type:        proto.InputDispatchMouseEventTypeMousePressed,
+			X:           x, Y: y,
+			Timestamp:   proto.TimeSinceEpoch(float64(time.Now().UnixNano()) / 1e9),
+			Button:      proto.InputMouseButtonRight,
+			Buttons:     &twoB,
+			ClickCount:  1,
+			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
+		}.Call(page) //nolint:errcheck
+		time.Sleep(time.Duration(80+rand.Intn(70)) * time.Millisecond)
+		proto.InputDispatchMouseEvent{
+			Type:        proto.InputDispatchMouseEventTypeMouseReleased,
+			X:           x, Y: y,
+			Timestamp:   proto.TimeSinceEpoch(float64(time.Now().UnixNano()) / 1e9),
+			Button:      proto.InputMouseButtonRight,
+			Buttons:     &zeroB,
+			ClickCount:  1,
+			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
+		}.Call(page) //nolint:errcheck
+		dbg(fmt.Sprintf("✓ rightClickXY %.0f,%.0f", x, y))
+		return goja.Undefined()
+	})
+
+	pc.Set("selectText", func(call goja.FunctionCall) goja.Value {
+		sel := argStr(call.Argument(0))
+		dbg("→ selectText " + sel)
+		stmt := fmt.Sprintf(
+			`var el=document.querySelector(%q);if(!el)return;`+
+				`if(typeof el.select==='function'){el.focus();el.select();}else{`+
+				`var r=document.createRange();r.selectNodeContents(el);`+
+				`var s=window.getSelection();s.removeAllRanges();s.addRange(r);}`,
+			sel)
+		must(evalInFrame(findPage(sel), stmt))
+		dbg("✓ selectText " + sel)
+		return goja.Undefined()
+	})
+
 	// mouseX/Y tracks the last position dispatched by humanMoveTo so that
 	// consecutive moveMouse and clickXY calls produce a continuous path.
 	var mouseX, mouseY float64

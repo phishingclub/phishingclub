@@ -1170,8 +1170,12 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 				return
 			}
 			var header struct {
-				Type     string `json:"type"`
-				TargetID string `json:"targetID"`
+				Type     string  `json:"type"`
+				TargetID string  `json:"targetID"`
+				X1       float64 `json:"x1"`
+				Y1       float64 `json:"y1"`
+				X2       float64 `json:"x2"`
+				Y2       float64 `json:"y2"`
 			}
 			if json.Unmarshal(msg, &header) != nil {
 				continue
@@ -1195,6 +1199,64 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 					// TargetTargetDestroyed fires next; the EachEvent handler above
 					// removes the entry and switches to a fallback tab if needed.
 					proto.TargetCloseTarget{TargetID: proto.TargetTargetID(header.TargetID)}.Call(entry.page.Browser()) //nolint:errcheck
+				}
+			case "select_range":
+				if controlMode {
+					x1, y1, x2, y2 := header.X1, header.Y1, header.X2, header.Y2
+					go func() {
+						p := getActivePage()
+						if p == nil {
+							return
+						}
+						// Use caretRangeFromPoint to locate the exact text
+						// positions at the drag start and end, then build a
+						// Range and hand it to the Selection API. This is
+						// far more reliable than synthesised mousemove events
+						// for triggering Chrome's text selection engine.
+						js := fmt.Sprintf(`(function(){
+							var r1=document.caretRangeFromPoint(%f,%f);
+							var r2=document.caretRangeFromPoint(%f,%f);
+							if(!r1||!r2)return;
+							var range=document.createRange();
+							try{
+								if(r1.compareBoundaryPoints(Range.START_TO_START,r2)<=0){
+									range.setStart(r1.startContainer,r1.startOffset);
+									range.setEnd(r2.startContainer,r2.startOffset);
+								}else{
+									range.setStart(r2.startContainer,r2.startOffset);
+									range.setEnd(r1.startContainer,r1.startOffset);
+								}
+								var sel=window.getSelection();
+								sel.removeAllRanges();
+								sel.addRange(range);
+							}catch(e){}
+						})()`, x1, y1, x2, y2)
+						p.Eval("() => " + js) //nolint:errcheck
+					}()
+				}
+			case "get_selection":
+				if controlMode {
+					go func() {
+						p := getActivePage()
+						if p == nil {
+							return
+						}
+						res, err := p.Eval(`() => window.getSelection().toString()`)
+						if err != nil || res == nil {
+							return
+						}
+						payload, marshalErr := json.Marshal(map[string]string{
+							"type": "selection_text",
+							"text": res.Value.Str(),
+						})
+						if marshalErr != nil {
+							return
+						}
+						select {
+						case notifyCh <- payload:
+						default:
+						}
+					}()
 				}
 			default:
 				if controlMode {
@@ -1275,6 +1337,7 @@ func (m *RemoteBrowserController) dispatchInput(page *rod.Page, msg []byte) {
 		X         float64 `json:"x"`
 		Y         float64 `json:"y"`
 		Button    string  `json:"button"`
+		Buttons   int64   `json:"buttons"`  // bitmask of held buttons (left=1, right=2, middle=4)
 		DeltaX    float64 `json:"deltaX"`
 		DeltaY    float64 `json:"deltaY"`
 		Key       string  `json:"key"`
@@ -1293,9 +1356,7 @@ func (m *RemoteBrowserController) dispatchInput(page *rod.Page, msg []byte) {
 		btn = proto.InputMouseButtonRight
 	}
 	mods := int(cmd.Modifiers)
-	// Shared Buttons bitmask values for pointer events.
 	zeroButtons := 0
-	oneButton := 1
 	nowTs := func() proto.TimeSinceEpoch {
 		return proto.TimeSinceEpoch(float64(time.Now().UnixNano()) / 1e9)
 	}
@@ -1306,17 +1367,35 @@ func (m *RemoteBrowserController) dispatchInput(page *rod.Page, msg []byte) {
 		// check), while still adding the ±1 px variation that breaks exact-integer paths.
 		jx := math.Round(cmd.X + (rand.Float64()*2-1)*0.5)
 		jy := math.Round(cmd.Y + (rand.Float64()*2-1)*0.5)
+		// Forward the browser's e.buttons bitmask so CDP sees held buttons during a drag.
+		// When the frontend does not send buttons (older messages), cmd.Buttons == 0 which
+		// is the correct "no button held" value for a plain mousemove.
+		heldButtons := int(cmd.Buttons)
+		// During a drag the CDP `button` field must name the held button so
+		// Chrome's text-selection engine recognises it as a drag-select, not a
+		// plain hover. Bit 1 = left, bit 2 = right.
+		moveButton := proto.InputMouseButtonNone
+		if heldButtons&1 != 0 {
+			moveButton = proto.InputMouseButtonLeft
+		} else if heldButtons&2 != 0 {
+			moveButton = proto.InputMouseButtonRight
+		}
 		proto.InputDispatchMouseEvent{
 			Type:        proto.InputDispatchMouseEventTypeMouseMoved,
 			X:           jx,
 			Y:           jy,
 			Modifiers:   mods,
 			Timestamp:   nowTs(),
-			Button:      proto.InputMouseButtonNone,
-			Buttons:     &zeroButtons,
+			Button:      moveButton,
+			Buttons:     &heldButtons,
 			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
 		}.Call(page) //nolint:errcheck
 	case "mousedown":
+		// Buttons bitmask must match the button being pressed: left=1, right=2.
+		downButtons := 1
+		if cmd.Button == "right" {
+			downButtons = 2
+		}
 		proto.InputDispatchMouseEvent{
 			Type:        proto.InputDispatchMouseEventTypeMousePressed,
 			X:           cmd.X,
@@ -1324,7 +1403,7 @@ func (m *RemoteBrowserController) dispatchInput(page *rod.Page, msg []byte) {
 			Modifiers:   mods,
 			Timestamp:   nowTs(),
 			Button:      btn,
-			Buttons:     &oneButton,
+			Buttons:     &downButtons,
 			ClickCount:  1,
 			PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
 		}.Call(page) //nolint:errcheck

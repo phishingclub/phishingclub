@@ -381,6 +381,15 @@ interface Session {
   // ── Mouse ─────────────────────────────────────────────────────────────────
   click(selector: string): void;
   doubleClick(selector: string): void;
+  /** Right-click an element by selector, triggering its context menu. */
+  rightClick(selector: string): void;
+  /** Right-click at absolute page coordinates. */
+  rightClickXY(x: number, y: number): void;
+  /**
+   * Select all text content of an element.
+   * Works on inputs/textareas (uses .select()) and general DOM nodes (uses Selection API).
+   */
+  selectText(selector: string): void;
   /**
    * Move to absolute coordinates along a curved Bezier path with micro-jitter
    * before clicking. Prefer this over bare clickXY when bot detection is a concern.
@@ -540,6 +549,9 @@ interface FrameSession {
   // ── Mouse ─────────────────────────────────────────────────────────────────
   click(selector: string): void;
   doubleClick(selector: string): void;
+  rightClick(selector: string): void;
+  rightClickXY(x: number, y: number): void;
+  selectText(selector: string): void;
   clickXY(x: number, y: number): void;
   moveMouse(x: number, y: number, opts?: { duration?: number; jitter?: number }): void;
   scrollIntoView(selector: string): void;
