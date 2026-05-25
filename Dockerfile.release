@@ -1,10 +1,35 @@
 FROM debian:12-slim@sha256:b29f74a267526ae6ea104eed6c46133b0ca70ce812525df8cd5817698f0a624a
 
-# install ca-certificates for https requests
+# install ca-certificates, tzdata, and Chromium runtime dependencies.
+# The Chromium binary is auto-downloaded by rod at first use; these shared
+# libraries must already be present or it will fail to start.
 RUN apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y ca-certificates tzdata && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        tzdata \
+        libglib2.0-0 \
+        libnss3 \
+        libnspr4 \
+        libatk1.0-0 \
+        libatk-bridge2.0-0 \
+        libcups2 \
+        libdrm2 \
+        libxkbcommon0 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxrandr2 \
+        libgbm1 \
+        libasound2 \
+        libpango-1.0-0 \
+        libcairo2 \
+        fonts-liberation \
+        libx11-6 \
+        libx11-xcb1 \
+        libxcb1 \
+        libxext6 \
+    && rm -rf /var/lib/apt/lists/*
 
 # create non-root user
 RUN groupadd -g 1000 appuser && \
