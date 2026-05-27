@@ -59,6 +59,7 @@ func NewServices(
 	certMagicConfig *certmagic.Config,
 	certMagicCache *certmagic.Cache,
 	filePath string,
+	trustedProxies []string,
 ) *Services {
 	common := service.Common{
 		Logger: logger,
@@ -222,6 +223,7 @@ func NewServices(
 		MicrosoftDeviceCodeRepository: repositories.MicrosoftDeviceCode,
 		AttachmentPath:                attachmentPath,
 		RemoteBrowserService:          remoteBrowser,
+		TrustedProxies:                trustedProxies,
 	}
 	// wire campaign service into microsoft device code service now that campaign is constructed
 	microsoftDeviceCodeService.CampaignService = campaign

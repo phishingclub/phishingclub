@@ -231,6 +231,7 @@ func main() {
 		certMagicConfig,
 		certMagicCache,
 		*flagFilePath,
+		conf.IPSecurity.TrustedProxies,
 	)
 	// get entra-id options and setup msal client
 	ssoOpt, err := services.SSO.GetSSOOptionWithoutAuth(context.Background())
@@ -371,6 +372,7 @@ func main() {
 		logger,
 		certMagicConfig,
 		rbWSPath,
+		conf.IPSecurity.TrustedProxies,
 	)
 
 	var r *gin.Engine

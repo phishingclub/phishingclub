@@ -1,12 +1,11 @@
 package middleware
 
 import (
-	"net"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/phishingclub/phishingclub/config"
+	"github.com/phishingclub/phishingclub/utils"
 	"go.uber.org/zap"
 )
 
@@ -17,33 +16,8 @@ func NewAllowIPMiddleware(conf *config.Config, logger *zap.SugaredLogger) gin.Ha
 			c.Next()
 			return
 		}
-		c.RemoteIP()
 		clientIP := c.ClientIP()
-		allowed := false
-		for _, allowedIP := range conf.IPSecurity.AdminAllowed {
-			// check if the allowed entry is a CIDR
-			if strings.Contains(allowedIP, "/") {
-				_, ipNet, err := net.ParseCIDR(allowedIP)
-				if err != nil {
-					logger.Errorw("Invalid CIDR in allowed IPs",
-						"cidr", allowedIP,
-						"error", err)
-					continue
-				}
-
-				ip := net.ParseIP(clientIP)
-				if ipNet.Contains(ip) {
-					allowed = true
-					break
-				}
-			} else {
-				// Direct IP comparison
-				if clientIP == allowedIP {
-					allowed = true
-					break
-				}
-			}
-		}
+		allowed := utils.IPMatchesList(clientIP, conf.IPSecurity.AdminAllowed)
 
 		if !allowed {
 			logger.Infow("blocked unauthorized IP access attempt",

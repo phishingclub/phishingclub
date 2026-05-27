@@ -58,6 +58,7 @@ type Campaign struct {
 	MicrosoftDeviceCodeRepository *repository.MicrosoftDeviceCode
 	AttachmentPath                string
 	RemoteBrowserService          *RemoteBrowser
+	TrustedProxies                []string
 }
 
 // Create creates a new campaign
@@ -1327,7 +1328,7 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	} else {
-		ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request))
+		ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.TrustedProxies))
 		ua := ctx.Request.UserAgent()
 		if len(ua) > 255 {
 			ua = strings.TrimSpace(ua[:255])

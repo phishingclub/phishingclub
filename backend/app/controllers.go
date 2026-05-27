@@ -206,6 +206,7 @@ func NewControllers(
 		CampaignService:             services.Campaign,
 		ExecPath:                    conf.RemoteBrowser.ExecPath,
 		Enabled:                     conf.RemoteBrowser.Enabled,
+		TrustedProxies:              conf.IPSecurity.TrustedProxies,
 	}
 
 	return &Controllers{
