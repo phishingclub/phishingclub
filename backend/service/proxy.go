@@ -918,8 +918,10 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 			return err
 		}
 
-		// note: domain uniqueness validation is skipped during updates
-		// the syncProxyDomains method will handle domain management properly
+		// validate that the phishing domain is not owned by a different proxy
+		if err := m.validatePhishingDomainOwnership(ctx, domainConfig.To, proxyID); err != nil {
+			return err
+		}
 	}
 
 	// validate global rules
@@ -1829,45 +1831,6 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 			)
 		}
 
-		// validate that phishing domain doesn't already exist (unless it's managed by this proxy)
-		phishingDomainVO, err := vo.NewString255(domainConfig.To)
-		if err != nil {
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("invalid phishing domain format: %s", domainConfig.To)),
-				"proxyConfig",
-			)
-		}
-
-		existingDomain, err := m.DomainRepository.GetByName(ctx, phishingDomainVO, &repository.DomainOption{})
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		if existingDomain != nil {
-			// check if this domain is managed by a different proxy or is a regular domain
-			if existingDomain.Type.MustGet().String() != "proxy" {
-				return validate.WrapErrorWithField(
-					errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", domainConfig.To)),
-					"proxyConfig",
-				)
-			} else {
-				// it's a proxy domain, check if it belongs to a different proxy
-				existingTarget, err := existingDomain.ProxyTargetDomain.Get()
-				if err == nil {
-					startURL, err := proxy.StartURL.Get()
-					if err == nil {
-						// extract domain from start URL for comparison
-						startURLParsed, err := url.Parse(startURL.String())
-						if err == nil && existingTarget.String() != startURLParsed.Host {
-							return validate.WrapErrorWithField(
-								errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration", domainConfig.To)),
-								"proxyConfig",
-							)
-						}
-					}
-				}
-			}
-		}
-
 		// validate domain-specific scheme
 		if domainConfig.Scheme != "" && domainConfig.Scheme != "http" && domainConfig.Scheme != "https" {
 			return validate.WrapErrorWithField(
@@ -2101,8 +2064,9 @@ func (m *Proxy) deleteProxyDomains(ctx context.Context, session *model.Session, 
 	return nil
 }
 
-// validatePhishingDomainUniqueness checks if a phishing domain is already used by another proxy
-func (m *Proxy) validatePhishingDomainUniqueness(ctx context.Context, phishingDomain string, excludeProxyID *uuid.UUID) error {
+// validatePhishingDomainOwnership checks that a phishing domain is either unclaimed or owned by the given proxy.
+// Used during updates where the proxy already has an ID.
+func (m *Proxy) validatePhishingDomainOwnership(ctx context.Context, phishingDomain string, proxyID *uuid.UUID) error {
 	phishingDomainVO, err := vo.NewString255(phishingDomain)
 	if err != nil {
 		return validate.WrapErrorWithField(
@@ -2115,31 +2079,32 @@ func (m *Proxy) validatePhishingDomainUniqueness(ctx context.Context, phishingDo
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	if existingDomain != nil {
-		// check if this domain is managed by a different proxy
-		if existingDomain.Type.MustGet().String() == "proxy" {
-			// check if it's managed by the same proxy we're updating (allowed)
-			if excludeProxyID != nil {
-				// this is a bit of a workaround - we'd need to track which proxy owns which domain
-				// for now, we'll allow updates to existing proxy domains
-				// TODO: add a proxy_id field to domains table for proper tracking
-				return nil
-			}
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("phishing domain '%s' is already used by another proxy", phishingDomain)),
-				"proxyConfig",
-			)
-		} else {
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", phishingDomain)),
-				"proxyConfig",
-			)
-		}
+	if existingDomain == nil {
+		return nil
 	}
-	return nil
+
+	if existingDomain.Type.MustGet().String() != "proxy" {
+		return validate.WrapErrorWithField(
+			errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", phishingDomain)),
+			"proxyConfig",
+		)
+	}
+
+	existingProxyID, err := existingDomain.ProxyID.Get()
+	if err != nil {
+		return nil // no owner — allow
+	}
+	if existingProxyID == *proxyID {
+		return nil // owned by this proxy — allow
+	}
+	return validate.WrapErrorWithField(
+		errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration", phishingDomain)),
+		"proxyConfig",
+	)
 }
 
-// validatePhishingDomainUniquenessByStartURL checks if a phishing domain is already used by another proxy using start URL comparison
+// validatePhishingDomainUniquenessByStartURL checks if a phishing domain is already claimed by another proxy.
+// Uses proxy_id for owned domains; falls back to target domain comparison for legacy rows with no proxy_id.
 func (m *Proxy) validatePhishingDomainUniquenessByStartURL(ctx context.Context, phishingDomain string, currentStartURL string) error {
 	phishingDomainVO, err := vo.NewString255(phishingDomain)
 	if err != nil {
@@ -2153,185 +2118,46 @@ func (m *Proxy) validatePhishingDomainUniquenessByStartURL(ctx context.Context, 
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	if existingDomain != nil {
-		if existingDomain.Type.MustGet().String() == "proxy" {
-			// check if it belongs to a different proxy by comparing target domains
-			existingTarget, err := existingDomain.ProxyTargetDomain.Get()
-			if err == nil {
-				// extract domain from current start URL for comparison
-				currentStartURLParsed, err := url.Parse(currentStartURL)
-				if err != nil {
-					return validate.WrapErrorWithField(
-						errors.New(fmt.Sprintf("invalid start URL format: %s", currentStartURL)),
-						"proxyConfig",
-					)
-				}
-
-				// normalize and extract domain for comparison
-				existingTargetStr := strings.ToLower(strings.TrimSpace(existingTarget.String()))
-				currentHostNormalized := strings.ToLower(strings.TrimSpace(currentStartURLParsed.Host))
-
-				// if existing target is a full URL, extract just the host part
-				var existingTargetNormalized string
-				if strings.Contains(existingTargetStr, "://") {
-					// it's a full URL, parse it to get the host
-					existingTargetParsed, err := url.Parse(existingTargetStr)
-					if err != nil {
-						return validate.WrapErrorWithField(
-							errors.New(fmt.Sprintf("invalid existing target URL format: %s", existingTargetStr)),
-							"proxyConfig",
-						)
-					}
-					existingTargetNormalized = strings.ToLower(strings.TrimSpace(existingTargetParsed.Host))
-				} else {
-					// it's already just a domain
-					existingTargetNormalized = existingTargetStr
-				}
-
-				if existingTargetNormalized != currentHostNormalized {
-					return validate.WrapErrorWithField(
-						errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration", phishingDomain)),
-						"proxyConfig",
-					)
-				}
-			}
-		} else {
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", phishingDomain)),
-				"proxyConfig",
-			)
-		}
+	if existingDomain == nil {
+		return nil
 	}
-	return nil
-}
 
-// validatePhishingDomainUniquenessForUpdate validates phishing domain uniqueness during proxy updates
-func (m *Proxy) validatePhishingDomainUniquenessForUpdate(ctx context.Context, phishingDomain string, currentStartURL string, currentProxyID *uuid.UUID) error {
-	m.Logger.Debugw("validating phishing domain uniqueness for update",
-		"phishingDomain", phishingDomain,
-		"currentStartURL", currentStartURL,
-		"currentProxyID", currentProxyID.String(),
-	)
-
-	phishingDomainVO, err := vo.NewString255(phishingDomain)
-	if err != nil {
-		m.Logger.Errorw("invalid phishing domain format",
-			"phishingDomain", phishingDomain,
-			"error", err,
-		)
+	if existingDomain.Type.MustGet().String() != "proxy" {
 		return validate.WrapErrorWithField(
-			errors.New(fmt.Sprintf("invalid phishing domain format: %s", phishingDomain)),
+			errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", phishingDomain)),
 			"proxyConfig",
 		)
 	}
 
-	existingDomain, err := m.DomainRepository.GetByName(ctx, phishingDomainVO, &repository.DomainOption{})
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		m.Logger.Errorw("error getting existing domain",
-			"phishingDomain", phishingDomain,
-			"error", err,
+	// proxy_id is set — domain is owned by another proxy
+	if _, err := existingDomain.ProxyID.Get(); err == nil {
+		return validate.WrapErrorWithField(
+			errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration", phishingDomain)),
+			"proxyConfig",
 		)
-		return err
 	}
 
-	if existingDomain == nil {
-		m.Logger.Debugw("no existing domain found, validation passed",
-			"phishingDomain", phishingDomain,
-		)
+	// proxy_id is null (legacy row) — fall back to target domain comparison
+	existingTarget, err := existingDomain.ProxyTargetDomain.Get()
+	if err != nil {
 		return nil
 	}
-
-	m.Logger.Debugw("existing domain found",
-		"phishingDomain", phishingDomain,
-		"existingDomainType", existingDomain.Type.MustGet().String(),
-	)
-
-	if existingDomain.Type.MustGet().String() == "proxy" {
-		// check if it belongs to a different proxy by comparing target domains
-		existingTarget, err := existingDomain.ProxyTargetDomain.Get()
-		if err != nil {
-			m.Logger.Errorw("error getting existing domain proxy target",
-				"phishingDomain", phishingDomain,
-				"error", err,
-			)
-			return err
-		}
-
-		m.Logger.Debugw("existing domain proxy target found",
-			"phishingDomain", phishingDomain,
-			"existingTarget", existingTarget.String(),
-		)
-
-		// extract domain from current start URL for comparison
-		currentStartURLParsed, err := url.Parse(currentStartURL)
-		if err != nil {
-			m.Logger.Errorw("error parsing current start URL",
-				"currentStartURL", currentStartURL,
-				"error", err,
-			)
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("invalid start URL format: %s", currentStartURL)),
-				"proxyConfig",
-			)
-		}
-
-		// normalize and extract domain for comparison
-		existingTargetStr := strings.ToLower(strings.TrimSpace(existingTarget.String()))
-		currentHostNormalized := strings.ToLower(strings.TrimSpace(currentStartURLParsed.Host))
-
-		// if existing target is a full URL, extract just the host part
-		var existingTargetNormalized string
-		if strings.Contains(existingTargetStr, "://") {
-			// it's a full URL, parse it to get the host
-			existingTargetParsed, err := url.Parse(existingTargetStr)
-			if err != nil {
-				m.Logger.Errorw("error parsing existing target URL",
-					"existingTarget", existingTargetStr,
-					"error", err,
-				)
-				return err
-			}
-			existingTargetNormalized = strings.ToLower(strings.TrimSpace(existingTargetParsed.Host))
-		} else {
-			// it's already just a domain
-			existingTargetNormalized = existingTargetStr
-		}
-
-		m.Logger.Debugw("comparing normalized domains",
-			"phishingDomain", phishingDomain,
-			"existingTargetStr", existingTargetStr,
-			"existingTargetNormalized", existingTargetNormalized,
-			"currentHostNormalized", currentHostNormalized,
-		)
-
-		// if target domains don't match, it belongs to a different proxy
-		if existingTargetNormalized != currentHostNormalized {
-			m.Logger.Warnw("phishing domain belongs to different proxy",
-				"phishingDomain", phishingDomain,
-				"existingTargetNormalized", existingTargetNormalized,
-				"currentHostNormalized", currentHostNormalized,
-				"currentProxyID", currentProxyID.String(),
-			)
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration (existing target: %s, current target: %s)", phishingDomain, existingTargetNormalized, currentHostNormalized)),
-				"proxyConfig",
-			)
-		}
-
-		// if target domains match, this domain belongs to the current proxy being updated, so it's allowed
-		m.Logger.Debugw("phishing domain belongs to current proxy, allowing reuse",
-			"domain", phishingDomain,
-			"proxyID", currentProxyID.String(),
-			"existingTarget", existingTargetNormalized,
-			"currentHost", currentHostNormalized,
-		)
-	} else {
-		m.Logger.Warnw("domain exists as regular domain, not proxy",
-			"phishingDomain", phishingDomain,
-			"existingDomainType", existingDomain.Type.MustGet().String(),
-		)
+	currentStartURLParsed, err := url.Parse(currentStartURL)
+	if err != nil {
 		return validate.WrapErrorWithField(
-			errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", phishingDomain)),
+			errors.New(fmt.Sprintf("invalid start URL format: %s", currentStartURL)),
+			"proxyConfig",
+		)
+	}
+	existingTargetStr := strings.ToLower(strings.TrimSpace(existingTarget.String()))
+	if strings.Contains(existingTargetStr, "://") {
+		if parsed, err := url.Parse(existingTargetStr); err == nil {
+			existingTargetStr = strings.ToLower(strings.TrimSpace(parsed.Host))
+		}
+	}
+	if existingTargetStr != strings.ToLower(strings.TrimSpace(currentStartURLParsed.Host)) {
+		return validate.WrapErrorWithField(
+			errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration", phishingDomain)),
 			"proxyConfig",
 		)
 	}
