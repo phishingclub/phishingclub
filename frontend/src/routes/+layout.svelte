@@ -310,13 +310,16 @@
 </div>
 
 <style>
+	:global(body) {
+		min-width: 768px;
+		overflow-x: auto;
+	}
+
 	:global(body, table th) {
 		user-select: none;
 
 		/* font-family: "Phudu"; */
 		font-family: 'Titillium Web';
-		min-width: 768px;
-		overflow-x: auto;
 	}
 	:global(table) {
 		user-select: text;

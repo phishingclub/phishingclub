@@ -35,7 +35,6 @@
 					{isGhost}
 					sortable={sortableMap[column.column.toLowerCase()]}
 					last={i === columns.length - 1}
-					fillRest={i === columns.length - 1 && !hasActions}
 				/>
 			{:else}
 				<TableHeadCell
@@ -43,7 +42,6 @@
 					{pagination}
 					sortable={sortableMap[column.toLowerCase()]}
 					last={i === columns.length - 1}
-					fillRest={i === columns.length - 1 && !hasActions}
 				/>
 			{/if}
 		{/each}
