@@ -25,12 +25,22 @@
 			document.addEventListener('keydown', handleGlobalKeydown);
 			activeFormElement.set(dropdownId); // set this as active, closing others
 
-			const viewportHeight = window.innerHeight;
-			const viewportWidth = window.innerWidth;
+			// Use clientWidth/clientHeight (excludes scrollbars, matches CSS layout) rather than
+			// window.innerWidth which can report stale or incorrect values after client-side navigation
+			// when the page previously had horizontal overflow (e.g. navigating from dashboard).
+			const viewportHeight = document.documentElement.clientHeight;
+			const viewportWidth = document.documentElement.clientWidth;
 			const buffer = 20;
 			const minHeight = 64;
 			const maxHeight = 400;
 			const gap = 8;
+
+			// Capture scroll offsets so we can express the final position in document coordinates.
+			// position:absolute (relative to initial containing block) requires document coords,
+			// which avoids the position:fixed quirk where body overflow-x:auto can cause the
+			// containing block to shift after cross-page navigation (e.g. dashboard → filters).
+			const scrollX = window.scrollX || document.documentElement.scrollLeft || 0;
+			const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
 
 			const buttonRect = buttonRef.getBoundingClientRect();
 
@@ -40,6 +50,7 @@
 			const availableSpace = shouldShowAbove ? spaceAbove : spaceBelow;
 			const optimalHeight = Math.min(Math.max(availableSpace, minHeight), maxHeight);
 
+			// Calculate in viewport coordinates first, then clamp to viewport bounds.
 			const menuWidth = 256;
 			const spaceOnRight = viewportWidth - buttonRect.right - buffer;
 			menuX = spaceOnRight >= menuWidth ? buttonRect.left : buttonRect.right - menuWidth;
@@ -56,7 +67,8 @@
 				menuY = buttonRect.bottom + gap;
 			}
 
-			menuRef.style = `left: ${menuX}px; top: ${menuY}px; max-height: ${optimalHeight}px`;
+			// Convert viewport coordinates to document coordinates for position:absolute.
+			menuRef.style = `left: ${menuX + scrollX}px; top: ${menuY + scrollY}px; max-height: ${optimalHeight}px`;
 		}
 	};
 
@@ -140,7 +152,7 @@
 
 	<div
 		bind:this={menuRef}
-		class="fixed bg-white dark:bg-gray-900/90 drop-shadow-md dark:shadow-gray-900/50 border dark:border-gray-700/60 z-50 w-64 rounded-md overflow-y-scroll transition-colors duration-200 {scrollBarClassesVertical}"
+		class="absolute bg-white dark:bg-gray-900/90 drop-shadow-md dark:shadow-gray-900/50 border dark:border-gray-700/60 z-50 w-64 rounded-md overflow-y-scroll transition-colors duration-200 {scrollBarClassesVertical}"
 		class:hidden={!isMenuVisible}
 	>
 		<ul class="flex flex-col text-left">
