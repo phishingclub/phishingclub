@@ -1,8 +1,8 @@
 {
-  "generated": "2025-11-09T09:43:50Z",
+  "generated": "2026-05-28T13:21:05Z",
   "source": "https://github.com/ipverse/rir-ip",
   "license": "CC0-1.0 (Public Domain)",
-  "countries": 237,
+  "countries": 238,
   "country_codes": [
     "AD",
     "AE",
@@ -12,6 +12,7 @@
     "AL",
     "AM",
     "AO",
+    "AQ",
     "AR",
     "AS",
     "AT",

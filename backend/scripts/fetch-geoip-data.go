@@ -22,13 +22,13 @@ const (
 // countryData represents the structure from ipverse aggregated.json files
 type countryData struct {
 	Country          string   `json:"country"`
-	CountryCode      string   `json:"country-code"`
-	DelegationStatus []string `json:"delegation-status"`
-	Mode             string   `json:"mode"`
+	CountryCode      string   `json:"countryCode"`
+	DelegationStatus []string `json:"delegationStatus"`
+	Mode             string   `json:"exportMode"`
 	Subnets          struct {
 		IPv4 []string `json:"ipv4"`
 		IPv6 []string `json:"ipv6"`
-	} `json:"subnets"`
+	} `json:"prefixes"`
 }
 
 // optimizedData is our simplified format for embedding
