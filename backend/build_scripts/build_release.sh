@@ -34,7 +34,7 @@ mkdir -p phishingclub/frontend/frontend/build
 sudo docker run --rm \
 -v "$(pwd)":/app \
 -w /app/phishingclub/frontend \
-node:alpine \
+node:22-alpine \
 sh -c "npm ci && npm run build-production"
 
 # Get current user and group IDs
@@ -49,7 +49,7 @@ echo "Building application..."
 sudo docker run --rm \
 -v "$(pwd)":/app \
 -w /app/phishingclub/frontend \
-golang:alpine \
+golang:1.25.10-alpine \
 go build -trimpath \
 -ldflags="-X github.com/phishingclub/phishingclub/version.hash=ph$GIT_HASH" \
 -tags production -o ../build/phishingclub_${VERSION} main.go

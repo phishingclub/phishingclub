@@ -43,7 +43,7 @@ jobs:
           sudo docker run --rm \
           -v "$(pwd)":/app \
           -w /app \
-          node:alpine \
+          node:22-alpine \
           sh -c "npm ci && npm run build-production"
 
       - name: Move frontend build to backend
