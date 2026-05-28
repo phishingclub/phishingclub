@@ -2185,7 +2185,6 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 		companyID = &cid
 	}
 
-	startURL := proxy.StartURL.MustGet()
 	createdDomains := make([]string, 0)
 
 	// create domains for each mapping
@@ -2199,58 +2198,8 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 				"proxyID", proxyID.String(),
 				"originalDomain", originalDomain,
 			)
-			// rollback created domains on error
 			m.rollbackCreatedDomains(ctx, session, createdDomains)
 			return errs.NewCustomError(fmt.Errorf("'to' field is required for domain mapping '%s'", originalDomain))
-		}
-
-		// check if domain already exists (might be from previous failed attempt)
-		phishingDomainVO, err := vo.NewString255(domainConfig.To)
-		if err != nil {
-			m.Logger.Warnw("invalid phishing domain format",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"error", err,
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return errs.NewCustomError(fmt.Errorf("invalid phishing domain format %s: %w", domainConfig.To, err))
-		}
-
-		existingDomain, err := m.DomainRepository.GetByName(ctx, phishingDomainVO, &repository.DomainOption{})
-		if err == nil && existingDomain != nil {
-			// domain already exists, check if it's compatible
-			if existingDomain.Type.MustGet().String() == "proxy" {
-				existingTarget, err := existingDomain.ProxyTargetDomain.Get()
-				if err == nil && existingTarget.String() == startURL.String() {
-					// compatible existing domain, skip creation
-					m.Logger.Debugw("proxy domain already exists, skipping creation",
-						"proxyID", proxyID.String(),
-						"domain", domainConfig.To,
-					)
-					createdDomains = append(createdDomains, domainConfig.To)
-					continue
-				}
-			}
-			// incompatible domain exists
-			m.Logger.Warnw("incompatible domain already exists",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"existingType", existingDomain.Type.MustGet().String(),
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return errs.NewCustomError(fmt.Errorf("domain %s already exists and is incompatible", domainConfig.To))
-		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			// database error
-			m.Logger.Errorw("failed to check existing domain",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"error", err,
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return fmt.Errorf("failed to check existing domain %s: %w", domainConfig.To, err)
 		}
 
 		// create new domain
@@ -2265,7 +2214,6 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			m.Logger.Errorw("failed to create proxy target domain",
 				"proxyID", proxyID.String(),
 				"domain", domainConfig.To,
-				"startURL", startURL.String(),
 				"error", err,
 			)
 			// rollback created domains on error
@@ -2316,44 +2264,9 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			domain.SelfSignedTLS.Set(false)
 		}
 
-		pageContent, err := vo.NewOptionalString1MB("")
-		if err != nil {
-			m.Logger.Errorw("failed to create page content",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"error", err,
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return errs.NewCustomError(fmt.Errorf("failed to create page content for %s: %w", domainConfig.To, err))
-		}
-		domain.PageContent.Set(*pageContent)
-
-		pageNotFoundContent, err := vo.NewOptionalString1MB("")
-		if err != nil {
-			m.Logger.Errorw("failed to create page not found content",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"error", err,
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return errs.NewCustomError(fmt.Errorf("failed to create page not found content for %s: %w", domainConfig.To, err))
-		}
-		domain.PageNotFoundContent.Set(*pageNotFoundContent)
-
-		redirectURL, err := vo.NewOptionalString1024("")
-		if err != nil {
-			m.Logger.Errorw("failed to create redirect URL",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"error", err,
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return errs.NewCustomError(fmt.Errorf("failed to create redirect URL for %s: %w", domainConfig.To, err))
-		}
-		domain.RedirectURL.Set(*redirectURL)
+		domain.PageContent.Set(*vo.NewOptionalString1MBMust(""))
+		domain.PageNotFoundContent.Set(*vo.NewOptionalString1MBMust(""))
+		domain.RedirectURL.Set(*vo.NewOptionalString1024Must(""))
 
 		if companyID != nil {
 			domain.CompanyID.Set(*companyID)
