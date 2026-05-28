@@ -3,6 +3,7 @@ package middleware
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,32 @@ import (
 	"github.com/phishingclub/phishingclub/service"
 	"go.uber.org/zap"
 )
+
+// NewSoftSessionHandler is like NewSessionHandler but returns 404 on auth failure
+// instead of 401, so unauthenticated requests are indistinguishable from missing resources.
+func NewSoftSessionHandler(
+	sessionService *service.Session,
+	userService *service.User,
+	logger *zap.SugaredLogger,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		isValidAPISession := handleAPISession(c, userService, logger)
+		if isValidAPISession {
+			return
+		}
+		s, err := sessionService.GetAndExtendSession(c)
+		if err != nil {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		if s.User == nil {
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		controller.SetSessionInGinContext(c, s)
+		c.Next()
+	}
+}
 
 // NewSessionHandler creates a middleware that authenticates the user
 // by checking it has a session, and if it does, it extends the session and puts

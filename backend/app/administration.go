@@ -220,12 +220,13 @@ const (
 
 // administrationServer is the administrationServer app
 type administrationServer struct {
-	Server          *http.Server
-	router          *gin.Engine
-	logger          *zap.SugaredLogger
-	production      bool
-	embedBackendFS  *embed.FS
-	certMagicConfig *certmagic.Config
+	Server             *http.Server
+	router             *gin.Engine
+	logger             *zap.SugaredLogger
+	production         bool
+	embedBackendFS     *embed.FS
+	certMagicConfig    *certmagic.Config
+	softSessionHandler gin.HandlerFunc
 }
 
 // NewAdministrationServer creates a new administration app
@@ -240,10 +241,11 @@ func NewAdministrationServer(
 	router = setupRoutes(router, controllers, middlewares)
 
 	return &administrationServer{
-		router:          router,
-		logger:          logger,
-		production:      production,
-		certMagicConfig: certMagicConfig,
+		router:             router,
+		logger:             logger,
+		production:         production,
+		certMagicConfig:    certMagicConfig,
+		softSessionHandler: middlewares.SoftSessionHandler,
 	}
 }
 
@@ -713,6 +715,15 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 	embedFS := frontend.GetEmbededFS()
 	// make embedded .html work
 	frontend.LoadHTMLFromEmbedFS(a.router, *embedFS, "build/*.html")
+	// serve favicons only to authenticated users — unauthenticated requests get 404
+	// so the file is not indexable by scanners probing common paths
+	for _, faviconPath := range []string{"/favicon.ico", "/favicon.png"} {
+		fp := faviconPath
+		a.router.GET(fp, a.softSessionHandler, func(c *gin.Context) {
+			name := fp[1:] // strip leading /
+			c.FileFromFS("build/"+name, http.FS(*embedFS))
+		})
+	}
 	rootDir, err := embedFS.ReadDir("build")
 	if err != nil {
 		return errs.Wrap(err)
@@ -726,6 +737,10 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 				a.router.GET("/", func(c *gin.Context) {
 					c.HTML(http.StatusOK, "build/index.html", nil)
 				})
+				continue
+			}
+			// skip favicons — registered separately with session gating
+			if path == "favicon.png" || path == "favicon.ico" {
 				continue
 			}
 			// any file in the root folder gets server as a file
