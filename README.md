@@ -23,7 +23,7 @@ Remember to copy the admin URL and password
 
 [GHCR Images](https://github.com/phishingclub/phishingclub/pkgs/container/phishingclub)
 
-[production docker compose example](https://github.com/phishingclub/phishingclub/blob/develop/docker-compose.production.yml) 
+[production docker compose example](https://github.com/phishingclub/phishingclub/blob/develop/docker-compose.production.yml)
 
 ## Features
 
@@ -44,6 +44,7 @@ Phishing Club providers a lot of features for simulation and red teaming, here a
 ## AiTM and Red Team Features
 
 - **Reverse proxy phishing** - Capture sessions to bypass weak MFA
+- **Remote browser phishing** - Stream and interact with a victim's live browser session
 - **Full control** - Modify and capture requests and responses independently
 - **DOM rewriting** - Modify content using CSS/jQuery-like selectors or regex
 - **Path and param rewriting** - Rewrite URL paths and query parameters on the fly
