@@ -173,4 +173,4 @@ govulncheck:
 		-v $(CURDIR)/backend:/app \
 		-w /app \
 		golang:1.25.7 \
-		sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./..."
+		sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./... -show verbose"
