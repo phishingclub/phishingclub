@@ -485,11 +485,19 @@ interface Session {
   close(): void;
 
   // ── Event-driven API ─────────────────────────────────────────────────────
-  /** Register a handler called when the victim page sends this event */
+  /**
+   * Register a handler for a named event. Must be called before s.listen().
+   *
+   * Built-in lifecycle events emitted automatically by the server:
+   * - `"disconnect"` — victim closed their browser or navigated away; no data
+   * - `"navigate"`   — main frame navigated to a new URL; data: `{ url: string }`
+   *
+   * All other event names are victim-page events sent via `rb.emit(name, data)`.
+   */
   on(event: string, handler: (data: any) => void): void;
-  /** Start processing incoming victim events; blocks until done() is called */
+  /** Start processing incoming events; blocks until done() is called */
   listen(): void;
-  /** Signal listen() to stop processing */
+  /** Exit the listen() loop */
   done(): void;
 
   // ── Race ──────────────────────────────────────────────────────────────────
@@ -584,9 +592,11 @@ interface FrameSession {
   // ── JavaScript evaluation ─────────────────────────────────────────────────
   evaluate(expression: string): any;
 
-  // ── Screenshots ───────────────────────────────────────────────────────────
+  // ── Screenshots & DOM capture ────────────────────────────────────────────
   screenshot(name: string): void;
   screenshotElement(selector: string, name: string): void;
+  /** Capture the full page HTML and emit it as a named dom_dump event for debugging */
+  domDump(name: string): void;
 
   // ── Viewport & emulation ─────────────────────────────────────────────────
   setViewport(width: number, height: number): void;

@@ -764,6 +764,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		})
 
 		// Event-driven API: s.on(event, fn) + s.listen() + s.done()
+		// Built-in lifecycle events emitted by the server:
+		//   "disconnect" — victim WebSocket connection dropped
+		//   "navigate"   — main frame navigated; data: { url: string }
 		handlers := map[string]goja.Callable{}
 		listenDone := make(chan struct{}, 1)
 

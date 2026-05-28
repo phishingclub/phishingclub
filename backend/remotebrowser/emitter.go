@@ -8,7 +8,7 @@ import (
 
 // RunEvent is an event emitted during script execution.
 type RunEvent struct {
-	Type    string `json:"type"`              // "event", "log", "error", "done", "capture", "screenshot", "info", "submit"
+	Type    string `json:"type"`              // "event", "log", "error", "done", "capture", "screenshot", "dom_dump", "info", "submit"
 	Key     string `json:"key,omitempty"`     // for type=event/screenshot (label)
 	Value   any    `json:"value,omitempty"`   // for type=event/capture/screenshot/submit (base64 data URI or arbitrary data)
 	URL     string `json:"url,omitempty"`     // for type=screenshot (page URL at capture time)
@@ -70,6 +70,16 @@ func (e *channelEmitter) capture(data interface{}) {
 	e.send(RunEvent{
 		Type:  "capture",
 		Value: data,
+		Time:  time.Now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
+func (e *channelEmitter) domDump(label string, html string, pageURL string) {
+	e.send(RunEvent{
+		Type:  "dom_dump",
+		Key:   label,
+		Value: html,
+		URL:   pageURL,
 		Time:  time.Now().UTC().Format(time.RFC3339Nano),
 	})
 }
