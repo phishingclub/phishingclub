@@ -135,7 +135,7 @@ Open `https://localhost:8003` and setup the admin account using the credentials 
 
 Visit the [Phishing Club Guide](https://phishing.club/guide/introduction/) for more information.
 
-## Services and Ports
+## Development Services and Ports
 
 | Port | Service | Description |
 |------|---------|-------------|
