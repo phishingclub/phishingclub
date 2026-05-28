@@ -30,10 +30,12 @@ func NewSoftSessionHandler(
 		}
 		s, err := sessionService.GetAndExtendSession(c)
 		if err != nil {
+			c.Header("Cache-Control", "no-store")
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
 		if s.User == nil {
+			c.Header("Cache-Control", "no-store")
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
