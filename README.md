@@ -64,6 +64,8 @@ Phishing Club providers a lot of features for simulation and red teaming, here a
 - [Phishing Club User Guide](https://phishing.club/guide/)
 - [Covert red team phishing with Phishing Club](http://phishing.club/blog/covert-red-team-phishing-with-phishing-club/)
 - [Phishing Simulation vs Red Team Phishing: Understanding Different Approaches](https://phishing.club/blog/phishing-simulation-vs-red-team-phishing/)
+- [Remote Browsering Phishing with Phishing Club](https://phishing.club/blog/remote-browser-phishing/)
+
 
 Wrote a blog post or write up about Phishing Club? Tell us about it and we might add it here. Reach out via. a github issue, discord or find our email :)
 
