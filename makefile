@@ -172,5 +172,5 @@ govulncheck:
 	sudo docker run --rm \
 		-v $(CURDIR)/backend:/app \
 		-w /app \
-		golang:1.25.7 \
+		golang:1.25.10 \
 		sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./... -show verbose"
