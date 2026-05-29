@@ -22,6 +22,8 @@
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import Alert from '$lib/components/Alert.svelte';
+	import Editor from '$lib/components/editor/Editor.svelte';
+	import FormGrid from '$lib/components/FormGrid.svelte';
 
 	// bindings
 	let form = null;
@@ -54,6 +56,13 @@
 	let isExportCompanyModalVisible = false;
 	let isExportSharedModalVisible = false;
 	let exportCompany = null;
+
+	let isCompanyReportTemplateModalVisible = false;
+	let companyReportTemplateContent = '';
+	let companyReportTemplateID = null;
+	let companyReportTemplateError = '';
+	let isCompanyReportTemplateSubmitting = false;
+	let activeReportTemplateCompany = null;
 
 	$: {
 		modalText = modalMode === 'create' ? 'New company' : 'Update company';
@@ -318,6 +327,90 @@
 			hideIsLoading();
 		}
 	};
+
+	const openCompanyReportTemplateModal = async (company) => {
+		activeReportTemplateCompany = company;
+		companyReportTemplateContent = '';
+		companyReportTemplateID = null;
+		companyReportTemplateError = '';
+		try {
+			showIsLoading();
+			const response = await api.reportTemplate.getAll(company.id);
+			if (response.success && response.data?.rows?.length > 0) {
+				const tmpl = response.data.rows[0];
+				companyReportTemplateContent = tmpl.content || '';
+				companyReportTemplateID = tmpl.id || null;
+			}
+		} catch (error) {
+			console.error('Failed to load company report template:', error);
+			companyReportTemplateError = 'Failed to load template';
+		} finally {
+			hideIsLoading();
+			isCompanyReportTemplateModalVisible = true;
+		}
+	};
+
+	const closeCompanyReportTemplateModal = () => {
+		isCompanyReportTemplateModalVisible = false;
+		activeReportTemplateCompany = null;
+		companyReportTemplateError = '';
+	};
+
+	const onSubmitCompanyReportTemplate = async (event) => {
+		const saveOnly = event?.detail?.saveOnly || false;
+		isCompanyReportTemplateSubmitting = true;
+		companyReportTemplateError = '';
+		try {
+			let response;
+			if (companyReportTemplateID) {
+				response = await api.reportTemplate.update(companyReportTemplateID, {
+					content: companyReportTemplateContent
+				});
+			} else {
+				response = await api.reportTemplate.create({
+					content: companyReportTemplateContent,
+					companyID: activeReportTemplateCompany.id
+				});
+				if (response.success && response.data?.id) {
+					companyReportTemplateID = response.data.id;
+				}
+			}
+			if (response.success) {
+				addToast('Report template saved', 'Success');
+				if (!saveOnly) {
+					isCompanyReportTemplateModalVisible = false;
+				}
+			} else {
+				companyReportTemplateError = response.error || 'Failed to save template';
+			}
+		} catch (error) {
+			console.error('Failed to save company report template:', error);
+			companyReportTemplateError = 'Failed to save template';
+		} finally {
+			isCompanyReportTemplateSubmitting = false;
+		}
+	};
+
+	const onDeleteCompanyReportTemplate = async () => {
+		if (!companyReportTemplateID) return;
+		isCompanyReportTemplateSubmitting = true;
+		try {
+			const response = await api.reportTemplate.delete(companyReportTemplateID);
+			if (response.success) {
+				addToast('Report template deleted', 'Success');
+				companyReportTemplateID = null;
+				companyReportTemplateContent = '';
+				isCompanyReportTemplateModalVisible = false;
+			} else {
+				companyReportTemplateError = response.error || 'Failed to delete template';
+			}
+		} catch (error) {
+			console.error('Failed to delete company report template:', error);
+			companyReportTemplateError = 'Failed to delete template';
+		} finally {
+			isCompanyReportTemplateSubmitting = false;
+		}
+	};
 </script>
 
 <HeadTitle title="companies" />
@@ -358,6 +451,10 @@
 						<TableDropDownButton
 							name="Custom Stats"
 							on:click={() => goto(`/company/${company.id}/stats`)}
+						/>
+						<TableDropDownButton
+							name="Report Template"
+							on:click={() => openCompanyReportTemplateModal(company)}
 						/>
 						<TableDeleteButton on:click={() => openDeleteAlert(company)} />
 					</TableDropDownEllipsis>
@@ -546,4 +643,44 @@
 			</p>
 		</div>
 	</Alert>
+
+	{#if isCompanyReportTemplateModalVisible}
+		<Modal
+			bind:visible={isCompanyReportTemplateModalVisible}
+			headerText="Report Template — {activeReportTemplateCompany?.name}"
+			onClose={closeCompanyReportTemplateModal}
+		>
+			<FormGrid
+				on:submit={onSubmitCompanyReportTemplate}
+				isSubmitting={isCompanyReportTemplateSubmitting}
+				modalMode="update"
+			>
+				<div
+					class="w-80vw col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+				>
+					<Editor
+						contentType="report"
+						bind:value={companyReportTemplateContent}
+					/>
+					<FormError message={companyReportTemplateError} />
+					{#if companyReportTemplateID}
+						<div class="mt-4">
+							<button
+								type="button"
+								class="text-sm text-red-600 dark:text-red-400 hover:underline"
+								on:click={onDeleteCompanyReportTemplate}
+								disabled={isCompanyReportTemplateSubmitting}
+							>
+								Delete company template (fall back to global)
+							</button>
+						</div>
+					{/if}
+				</div>
+				<FormFooter
+					isSubmitting={isCompanyReportTemplateSubmitting}
+					closeModal={closeCompanyReportTemplateModal}
+				/>
+			</FormGrid>
+		</Modal>
+	{/if}
 </main>

@@ -2170,3 +2170,87 @@ func (r *Campaign) DeleteCampaignStatsByID(ctx context.Context, statsID *uuid.UU
 	res := r.DB.WithContext(ctx).Where("id = ?", statsID).Delete(&database.CampaignStats{})
 	return res.Error
 }
+
+// reportRecipientRow is the scan target for GetReportRecipients
+type reportRecipientRow struct {
+	FirstName     string `gorm:"column:first_name"`
+	LastName      string `gorm:"column:last_name"`
+	Email         string `gorm:"column:email"`
+	Department    string `gorm:"column:department"`
+	Position      string `gorm:"column:position"`
+	ClickedLink   bool   `gorm:"column:clicked_link"`
+	SubmittedData bool   `gorm:"column:submitted_data"`
+	Reported      bool   `gorm:"column:reported"`
+}
+
+// GetReportRecipients returns per-recipient click/submit/reported results for a campaign.
+// Only non-anonymized recipients (recipient_id IS NOT NULL) are included.
+func (r *Campaign) GetReportRecipients(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) ([]model.ReportRecipient, error) {
+	var rows []reportRecipientRow
+
+	res := r.DB.WithContext(ctx).Raw(`
+		SELECT
+			rec.first_name,
+			rec.last_name,
+			rec.email,
+			rec.department,
+			rec.position,
+			CASE WHEN clicked.recipient_id IS NOT NULL THEN 1 ELSE 0 END AS clicked_link,
+			CASE WHEN submitted.recipient_id IS NOT NULL THEN 1 ELSE 0 END AS submitted_data,
+			CASE WHEN reported.recipient_id IS NOT NULL THEN 1 ELSE 0 END AS reported
+		FROM campaign_recipients cr
+		JOIN recipients rec ON rec.id = cr.recipient_id
+		LEFT JOIN (
+			SELECT DISTINCT recipient_id
+			FROM campaign_events
+			WHERE campaign_id = ? AND recipient_id IS NOT NULL
+			AND event_id IN (?, ?, ?)
+		) AS clicked ON clicked.recipient_id = cr.recipient_id
+		LEFT JOIN (
+			SELECT DISTINCT recipient_id
+			FROM campaign_events
+			WHERE campaign_id = ? AND recipient_id IS NOT NULL
+			AND event_id = ?
+		) AS submitted ON submitted.recipient_id = cr.recipient_id
+		LEFT JOIN (
+			SELECT DISTINCT recipient_id
+			FROM campaign_events
+			WHERE campaign_id = ? AND recipient_id IS NOT NULL
+			AND event_id = ?
+		) AS reported ON reported.recipient_id = cr.recipient_id
+		WHERE cr.campaign_id = ? AND cr.recipient_id IS NOT NULL
+		ORDER BY rec.last_name, rec.first_name
+	`,
+		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED],
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED],
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED],
+		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA],
+		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED],
+		campaignID,
+	).Scan(&rows)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+
+	result := make([]model.ReportRecipient, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, model.ReportRecipient{
+			FirstName:     row.FirstName,
+			LastName:      row.LastName,
+			Email:         row.Email,
+			Department:    row.Department,
+			Position:      row.Position,
+			ClickedLink:   row.ClickedLink,
+			SubmittedData: row.SubmittedData,
+			Reported:      row.Reported,
+		})
+	}
+	return result, nil
+}

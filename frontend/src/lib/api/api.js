@@ -497,6 +497,14 @@ export class API {
 		},
 
 		/**
+		 * Generate a PDF report for a campaign
+		 * @param {string} campaignID
+		 */
+		generateReport: async (campaignID) => {
+			window.open(this.getPath(`/campaign/${campaignID}/report`), '_blank');
+		},
+
+		/**
 		 *
 		 * @param {object} campaign
 		 * @param {string} [campaign.companyID]   uuid
@@ -3389,6 +3397,31 @@ export class API {
 		 */
 		clearForProxyConfig: async (proxyConfigID) => {
 			return await deleteJSON(this.getPath(`/ip-allow-list/clear-proxy-config/${proxyConfigID}`));
+		}
+	};
+
+	/**
+	 * reportTemplate manages global and per-company report templates
+	 */
+	reportTemplate = {
+		getAll: async (companyID) => {
+			const params = companyID ? `?companyID=${companyID}` : '';
+			return await getJSON(this.getPath(`/report-template${params}`));
+		},
+		getByID: async (id) => {
+			return await getJSON(this.getPath(`/report-template/${id}`));
+		},
+		create: async (data) => {
+			return await postJSON(this.getPath('/report-template'), data);
+		},
+		update: async (id, data) => {
+			return await patchJSON(this.getPath(`/report-template/${id}`), data);
+		},
+		delete: async (id) => {
+			return await deleteJSON(this.getPath(`/report-template/${id}`));
+		},
+		wipeBrowserCache: async () => {
+			return await deleteJSON(this.getPath('/report-pdf/browser-cache'));
 		}
 	};
 

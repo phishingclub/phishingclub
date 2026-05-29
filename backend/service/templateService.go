@@ -690,6 +690,9 @@ func TemplateFuncs() template.FuncMap {
 		"base64": func(s string) string {
 			return base64.StdEncoding.EncodeToString([]byte(s))
 		},
+		"mul": func(a, b float64) float64 {
+			return a * b
+		},
 		// MicrosoftDeviceCode is a no-op stub used during template validation; it is replaced with
 		// a live implementation via TemplateFuncsWithDeviceCode when rendering for real recipients.
 		"MicrosoftDeviceCode": func(args ...string) (string, error) {

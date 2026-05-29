@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{.CampaignName}}</title>
+<style>
+  @page { margin: 0; size: A4 portrait; }
+
+  :root {
+    --dark:    #111827;
+    --dark2:   #1f2937;
+    --dark3:   #374151;
+    --accent:  #2563eb;
+    --white:   #f9fafb;
+    --muted:   rgba(249,250,251,0.65);
+    --border:  rgba(249,250,251,0.08);
+    --danger:  #ef4444;
+    --warning: #f59e0b;
+    --safe:    #10b981;
+    --info:    #2563eb;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { overflow: hidden; width: 100%; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    background: var(--dark);
+    color: var(--white);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  /* COVER */
+  .cover {
+    width: 100%;
+    height: 297mm;
+    background: var(--dark);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 52px 60px;
+    position: relative;
+    page-break-after: always;
+    overflow: hidden;
+  }
+
+  /* Left-edge accent bar */
+  .cover::after {
+    content: '';
+    position: absolute;
+    left: 0; top: 15%; bottom: 15%;
+    width: 3px;
+    background: linear-gradient(to bottom, transparent, var(--accent) 30%, var(--accent) 70%, transparent);
+  }
+
+  /* Cover top: logo + confidential on the same baseline */
+  .cover-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .cover-logo { width: 176px; flex-shrink: 0; }
+  .cover-confidential {
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid rgba(249,250,251,0.14);
+    padding: 5px 12px;
+  }
+
+  /* Cover middle: eyebrow + large campaign name */
+  .cover-middle {
+    padding-left: 20px;
+  }
+  .cover-eyebrow {
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  .cover-campaign-name {
+    font-size: 42px;
+    font-weight: 700;
+    line-height: 1.08;
+    color: var(--white);
+    word-break: break-word;
+    hyphens: auto;
+    max-width: 520px;
+  }
+  .cover-campaign-label {
+    font-size: 15px;
+    font-weight: 300;
+    color: var(--muted);
+    margin-top: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* Cover bottom: divider + meta */
+  .cover-bottom {
+    padding-left: 20px;
+  }
+  .cover-rule {
+    width: 40px; height: 2px;
+    background: var(--accent);
+    margin-bottom: 20px;
+  }
+  .cover-meta {
+    display: grid;
+    grid-template-columns: 110px 1fr;
+    row-gap: 5px;
+    font-size: 12px;
+    max-width: 340px;
+  }
+  .cover-meta .key { color: var(--muted); }
+  .cover-meta .val { color: var(--white); font-weight: 500; }
+
+  /* PAGES */
+  .page {
+    width: 100%;
+    padding: 44px 60px 70px 60px;
+    page-break-after: always;
+    min-height: 297mm;
+    position: relative;
+    background: var(--dark);
+  }
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 13px;
+    margin-bottom: 26px;
+  }
+  .page-header .section-label {
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .page-header .company { font-size: 11px; color: var(--muted); }
+
+  .section-title {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+    margin-top: 22px;
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  /* Metric cards — 3-column */
+  .mcards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .mcard {
+    background: var(--dark2);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--dark3);
+    padding: 14px 13px 12px;
+  }
+  .mcard.c-neutral { border-top-color: var(--dark3); }
+  .mcard.c-info    { border-top-color: var(--info); }
+  .mcard.c-warning { border-top-color: var(--warning); }
+  .mcard.c-danger  { border-top-color: var(--danger); }
+  .mcard.c-safe    { border-top-color: var(--safe); }
+  .mcard-label {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .mcard-value {
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 3px;
+    color: var(--white);
+  }
+  .mcard-sub { font-size: 10px; color: var(--muted); }
+
+  /* Relative conversion cards */
+  .conv-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+  .conv-card {
+    background: var(--dark2);
+    border: 1px solid var(--border);
+    padding: 11px 12px;
+    display: flex;
+    gap: 9px;
+    align-items: flex-start;
+  }
+  .conv-pct {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--white);
+    white-space: nowrap;
+    line-height: 1.2;
+    flex-shrink: 0;
+  }
+  .conv-label {
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.5;
+    padding-top: 1px;
+  }
+  .conv-label strong { color: rgba(249,250,251,0.85); font-weight: 500; }
+
+  /* Donut charts */
+  .donuts-row {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    margin-bottom: 26px;
+    padding: 10px 20px;
+  }
+  .donut-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .donut-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: center;
+  }
+  .donut-count { font-size: 11px; color: var(--muted); text-align: center; }
+
+  /* General table */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 22px; }
+  thead { display: table-header-group; }
+  thead tr { border-bottom: 1px solid var(--accent); }
+  th {
+    font-size: 9px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 7px 9px;
+    text-align: left;
+    font-weight: 400;
+  }
+  td {
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--border);
+    color: rgba(249,250,251,0.85);
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  tr { page-break-inside: avoid; }
+
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 7px;
+    font-size: 9px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge-danger  { background: rgba(239,68,68,0.14);  color: var(--danger); }
+  .badge-warning { background: rgba(245,158,11,0.14); color: var(--warning); }
+  .badge-safe    { background: rgba(16,185,129,0.14); color: var(--safe); }
+  .badge-info    { background: rgba(37,99,235,0.14);  color: var(--info); }
+  .badge-muted   { background: rgba(55,65,81,0.5);    color: var(--muted); }
+
+  /* Page footer */
+  .page-footer {
+    position: absolute;
+    bottom: 26px; left: 60px; right: 60px;
+    padding-top: 9px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--muted);
+  }
+
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .cover, .page { page-break-after: always; }
+  }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+
+  <div class="cover-top">
+    <svg class="cover-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 205.63 17.27">
+      <path fill="#f9fafb" d="m13.18,2.73v8.15l-2.63,2.63H3.46v3.66H0V.1h10.54l2.63,2.63ZM3.46,10.69h6.25V2.93H3.46v7.76Z"/>
+      <path fill="#f9fafb" d="m15.22,17.18V.1h3.46v6.73h6.69V.1h3.46v17.08h-3.46v-7.22h-6.69v7.22h-3.46Z"/>
+      <path fill="#f9fafb" d="m31.21,17.27v-2.78l2.42-.12V2.9l-2.42-.12V0l4.15.2,4.15-.2v2.78l-2.42.12v11.47l2.42.12v2.78l-4.15-.2-4.15.2Z"/>
+      <path fill="#f9fafb" d="m42.06,17.18v-3.03h9.47v-3.95l-9.71-.8V2.63L44.36.1h10.39v3.03h-9.47v3.71l9.71.81v7l-2.54,2.54h-10.39Z"/>
+      <path fill="#f9fafb" d="m57.48,17.18V.1h3.46v6.73h6.69V.1h3.46v17.08h-3.46v-7.22h-6.69v7.22h-3.46Z"/>
+      <path fill="#f9fafb" d="m73.46,17.27v-2.78l2.42-.12V2.9l-2.42-.12V0l4.15.2,4.15-.2v2.78l-2.42.12v11.47l2.42.12v2.78l-4.15-.2-4.15.2Z"/>
+      <path fill="#f9fafb" d="m84.13,17.18V.1h3.64l7.15,12.08V.1h3.27v17.08h-3.63l-7.15-12.08v12.08h-3.27Z"/>
+      <path fill="#f9fafb" d="m100.67,14.54V2.73l2.64-2.63h9.76v3.03h-8.93v11.03h6.73v-4.34h-4.1v-2.81h7.22v10.17h-10.69l-2.64-2.63Z"/>
+      <path fill="#f9fafb" d="m148.15,14.54V2.73l2.64-2.63h8.73v3.15h-7.81v10.78h8.05v3.15h-8.98l-2.64-2.63Z"/>
+      <path fill="#f9fafb" d="m161.72,17.18V.1h3.46v14.15h5.76v-3.9h3.12v6.83h-12.35Z"/>
+      <path fill="#f9fafb" d="m176.01,14.54V.1h3.46v13.96h6.39V.1h3.46v14.44l-2.63,2.63h-8.05l-2.64-2.63Z"/>
+      <path fill="#f9fafb" d="m205.15,2.63v4.32l-1.34,1.15,1.83,1.56v4.98l-2.54,2.54h-11.22V.1h10.74l2.54,2.54Zm-9.81,4.46h6.29V2.93h-6.29v4.17Zm0,7.25h6.73v-4.71h-6.73v4.71Z"/>
+      <path fill="#2563eb" d="m126.63,8.2l-4.5-2.6c-.58-.34-1.31.08-1.31.75v5.19c0,.67.73,1.09,1.31.75l4.5-2.6c.58-.34.58-1.17,0-1.51Z"/>
+      <path fill="#2563eb" d="m140.97,7.67l-11.77-6.8c-.99-.57-2.23.14-2.23,1.28v3.81l3.18,1.84c.76.44.76,1.54,0,1.98l-3.18,1.84v4.13c0,1.14,1.24,1.86,2.23,1.28l11.77-6.8c.99-.57.99-2,0-2.57Z"/>
+    </svg>
+    <div class="cover-confidential">Confidential</div>
+  </div>
+
+  <div class="cover-middle">
+    <div class="cover-eyebrow">Phishing Simulation Report</div>
+    <div class="cover-campaign-name">{{.CampaignName}}</div>
+    <div class="cover-campaign-label">Campaign Results</div>
+  </div>
+
+  <div class="cover-bottom">
+    <div class="cover-rule"></div>
+    <div class="cover-meta">
+      {{if .CompanyName}}
+      <span class="key">Company</span><span class="val">{{.CompanyName}}</span>
+      {{end}}
+      <span class="key">Date</span><span class="val">{{.ReportDate}}</span>
+      {{if .CampaignStartDate}}
+      <span class="key">Started</span><span class="val">{{.CampaignStartDate}}</span>
+      {{end}}
+      {{if .CampaignClosedAt}}
+      <span class="key">Closed</span><span class="val">{{.CampaignClosedAt}}</span>
+      {{end}}
+    </div>
+  </div>
+
+</div>
+
+<!-- PAGE 1: RESULTS -->
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Results</span>
+    {{if .CompanyName}}<span class="company">{{.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Campaign results</div>
+  <div class="mcards">
+    <div class="mcard c-neutral">
+      <div class="mcard-label">Recipients</div>
+      <div class="mcard-value">{{.TotalTargets}}</div>
+      <div class="mcard-sub">total targets</div>
+    </div>
+    <div class="mcard c-neutral">
+      <div class="mcard-label">Emails Sent</div>
+      <div class="mcard-value">{{.EmailsSent}}</div>
+      <div class="mcard-sub">{{printf "%.0f" .SentRate}}% of recipients</div>
+    </div>
+    <div class="mcard c-info">
+      <div class="mcard-label">Emails Read</div>
+      <div class="mcard-value">{{.EmailsOpened}}</div>
+      <div class="mcard-sub">{{printf "%.0f" .OpenRate}}% of recipients</div>
+    </div>
+  </div>
+  <div class="mcards">
+    <div class="mcard c-warning">
+      <div class="mcard-label">Website Visits</div>
+      <div class="mcard-value">{{.ResultClicked}}</div>
+      <div class="mcard-sub">{{.ResultClickedPercent}}% of recipients</div>
+    </div>
+    <div class="mcard c-danger">
+      <div class="mcard-label">Data Submitted</div>
+      <div class="mcard-value">{{.ResultSubmitted}}</div>
+      <div class="mcard-sub">{{.ResultSubmittedPercent}}% of recipients</div>
+    </div>
+    <div class="mcard c-safe">
+      <div class="mcard-label">Reported</div>
+      <div class="mcard-value">{{.ResultReported}}</div>
+      <div class="mcard-sub">{{.ResultReportedPercent}}% of recipients</div>
+    </div>
+  </div>
+
+  <div class="section-title">Outcome</div>
+  <div class="donuts-row">
+
+    <div class="donut-item">
+      <svg viewBox="0 0 140 140" width="136" height="136">
+        <circle cx="70" cy="70" r="50" fill="none" stroke="rgba(249,250,251,0.06)" stroke-width="14"/>
+        {{if .OpenRate}}
+        <circle cx="70" cy="70" r="50" fill="none" stroke="#2563eb" stroke-width="14"
+                stroke-linecap="round"
+                stroke-dasharray="{{printf "%.2f" (mul .OpenRate 3.1416)}} 314.16"
+                transform="rotate(-90 70 70)"/>
+        {{end}}
+        <text x="70" y="66" text-anchor="middle" font-size="20" font-weight="700" fill="#f9fafb">{{printf "%.0f" .OpenRate}}%</text>
+        <text x="70" y="81" text-anchor="middle" font-size="9" fill="rgba(249,250,251,0.55)">of recipients</text>
+      </svg>
+      <div class="donut-label" style="color:#2563eb">Emails Read</div>
+      <div class="donut-count">{{.EmailsOpened}} recipients</div>
+    </div>
+
+    <div class="donut-item">
+      <svg viewBox="0 0 140 140" width="136" height="136">
+        <circle cx="70" cy="70" r="50" fill="none" stroke="rgba(249,250,251,0.06)" stroke-width="14"/>
+        {{if .ClickRate}}
+        <circle cx="70" cy="70" r="50" fill="none" stroke="#f59e0b" stroke-width="14"
+                stroke-linecap="round"
+                stroke-dasharray="{{printf "%.2f" (mul .ClickRate 3.1416)}} 314.16"
+                transform="rotate(-90 70 70)"/>
+        {{end}}
+        <text x="70" y="66" text-anchor="middle" font-size="20" font-weight="700" fill="#f9fafb">{{.ResultClickedPercent}}%</text>
+        <text x="70" y="81" text-anchor="middle" font-size="9" fill="rgba(249,250,251,0.55)">of recipients</text>
+      </svg>
+      <div class="donut-label" style="color:#f59e0b">Website Visits</div>
+      <div class="donut-count">{{.ResultClicked}} recipients</div>
+    </div>
+
+    <div class="donut-item">
+      <svg viewBox="0 0 140 140" width="136" height="136">
+        <circle cx="70" cy="70" r="50" fill="none" stroke="rgba(249,250,251,0.06)" stroke-width="14"/>
+        {{if .SubmitRate}}
+        <circle cx="70" cy="70" r="50" fill="none" stroke="#ef4444" stroke-width="14"
+                stroke-linecap="round"
+                stroke-dasharray="{{printf "%.2f" (mul .SubmitRate 3.1416)}} 314.16"
+                transform="rotate(-90 70 70)"/>
+        {{end}}
+        <text x="70" y="66" text-anchor="middle" font-size="20" font-weight="700" fill="#f9fafb">{{.ResultSubmittedPercent}}%</text>
+        <text x="70" y="81" text-anchor="middle" font-size="9" fill="rgba(249,250,251,0.55)">of recipients</text>
+      </svg>
+      <div class="donut-label" style="color:#ef4444">Data Submitted</div>
+      <div class="donut-count">{{.ResultSubmitted}} recipients</div>
+    </div>
+
+    <div class="donut-item">
+      <svg viewBox="0 0 140 140" width="136" height="136">
+        <circle cx="70" cy="70" r="50" fill="none" stroke="rgba(249,250,251,0.06)" stroke-width="14"/>
+        {{if .ReportRate}}
+        <circle cx="70" cy="70" r="50" fill="none" stroke="#10b981" stroke-width="14"
+                stroke-linecap="round"
+                stroke-dasharray="{{printf "%.2f" (mul .ReportRate 3.1416)}} 314.16"
+                transform="rotate(-90 70 70)"/>
+        {{end}}
+        <text x="70" y="66" text-anchor="middle" font-size="20" font-weight="700" fill="#f9fafb">{{.ResultReportedPercent}}%</text>
+        <text x="70" y="81" text-anchor="middle" font-size="9" fill="rgba(249,250,251,0.55)">of recipients</text>
+      </svg>
+      <div class="donut-label" style="color:#10b981">Reported</div>
+      <div class="donut-count">{{.ResultReported}} recipients</div>
+    </div>
+
+  </div>
+
+  <div class="section-title">Conversion</div>
+  <div class="conv-row">
+    <div class="conv-card">
+      <div class="conv-pct">{{.OpenedOfSent}}%</div>
+      <div class="conv-label">of those who received<br><strong>read the email</strong></div>
+    </div>
+    <div class="conv-card">
+      <div class="conv-pct">{{.ClickedOfOpened}}%</div>
+      <div class="conv-label">of those who read<br><strong>visited the website</strong></div>
+    </div>
+    <div class="conv-card">
+      <div class="conv-pct">{{.SubmittedOfClicked}}%</div>
+      <div class="conv-label">of those who visited<br><strong>submitted data</strong></div>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{.CampaignName}}</span>
+  </div>
+</div>
+
+{{if .Recipients}}
+<!-- PAGE 2: INDIVIDUAL RESULTS -->
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Individual results</span>
+    {{if .CompanyName}}<span class="company">{{.CompanyName}}</span>{{end}}
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Email</th>
+        <th style="width:56px;text-align:center">Visited</th>
+        <th style="width:68px;text-align:center">Submitted</th>
+        <th style="width:62px;text-align:center">Reported</th>
+        <th style="width:84px">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Recipients}}
+      <tr>
+        <td>{{.FirstName}} {{.LastName}}</td>
+        <td>{{.Email}}</td>
+        <td style="text-align:center">{{if .ClickedLink}}<span style="color:#f59e0b;font-weight:600">Yes</span>{{else}}<span style="color:rgba(249,250,251,0.35)">-</span>{{end}}</td>
+        <td style="text-align:center">{{if .SubmittedData}}<span style="color:#ef4444;font-weight:600">Yes</span>{{else}}<span style="color:rgba(249,250,251,0.35)">-</span>{{end}}</td>
+        <td style="text-align:center">{{if .Reported}}<span style="color:#10b981;font-weight:600">Yes</span>{{else}}<span style="color:rgba(249,250,251,0.35)">-</span>{{end}}</td>
+        <td>
+          {{if .SubmittedData}}<span class="badge badge-danger">Submitted</span>
+          {{else if .ClickedLink}}<span class="badge badge-warning">Visited</span>
+          {{else if .Reported}}<span class="badge badge-safe">Reported</span>
+          {{else}}<span class="badge badge-muted">No Action</span>{{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+
+</body>
+</html>

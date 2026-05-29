@@ -44,6 +44,7 @@ type Services struct {
 	OAuthProvider       *service.OAuthProvider
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
 	RemoteBrowser       *service.RemoteBrowser
+	ReportTemplate      *service.ReportTemplate
 }
 
 // NewServices creates a collection of services
@@ -223,6 +224,7 @@ func NewServices(
 		MicrosoftDeviceCodeRepository: repositories.MicrosoftDeviceCode,
 		AttachmentPath:                attachmentPath,
 		RemoteBrowserService:          remoteBrowser,
+		ReportTemplateRepository:      repositories.ReportTemplate,
 		TrustedProxies:                trustedProxies,
 	}
 	// wire campaign service into microsoft device code service now that campaign is constructed
@@ -287,6 +289,11 @@ func NewServices(
 	// inject oauth provider service into api sender
 	apiSender.OAuthProviderService = oauthProvider
 
+	reportTemplate := &service.ReportTemplate{
+		Common:                   common,
+		ReportTemplateRepository: repositories.ReportTemplate,
+	}
+
 	return &Services{
 		Asset:               asset,
 		Attachment:          attachment,
@@ -320,5 +327,6 @@ func NewServices(
 		OAuthProvider:       oauthProvider,
 		MicrosoftDeviceCode: microsoftDeviceCodeService,
 		RemoteBrowser:       remoteBrowser,
+		ReportTemplate:      reportTemplate,
 	}
 }

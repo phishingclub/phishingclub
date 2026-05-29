@@ -158,6 +158,11 @@ const (
 	ROUTE_V1_CAMPAIGN_STATS_DELETE       = "/api/v1/campaign/stats/:id"
 	ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED    = "/api/v1/campaign/:id/upload/reported"
 	ROUTE_V1_CAMPAIGN_DEVICE_CODES       = "/api/v1/campaign/:id/device-codes"
+	ROUTE_V1_CAMPAIGN_REPORT = "/api/v1/campaign/:id/report"
+	// report templates
+	ROUTE_V1_REPORT_TEMPLATE              = "/api/v1/report-template"
+	ROUTE_V1_REPORT_TEMPLATE_ID           = "/api/v1/report-template/:id"
+	ROUTE_V1_REPORT_PDF_BROWSER_CACHE     = "/api/v1/report-pdf/browser-cache"
 	// campaign-recipient
 	ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL      = "/api/v1/campaign/recipient/:id/email"
 	ROUTE_V1_CAMPAIGN_RECIPIENT_URL        = "/api/v1/campaign/recipient/:id/url"
@@ -452,6 +457,15 @@ func setupRoutes(
 		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE, middleware.SessionHandler, controllers.Campaign.AnonymizeByID).
 		DELETE(ROUTE_V1_CAMPAIGN_DEVICE_CODES, middleware.SessionHandler, controllers.Campaign.DeleteDeviceCodesByCampaignID).
 		DELETE(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.DeleteByID).
+		// campaign PDF report — ExtendedTimeout required for headless browser rendering
+		GET(ROUTE_V1_CAMPAIGN_REPORT, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.ReportTemplate.GeneratePDFByCampaignID).
+		// report templates
+		GET(ROUTE_V1_REPORT_TEMPLATE, middleware.SessionHandler, controllers.ReportTemplate.GetAll).
+		POST(ROUTE_V1_REPORT_TEMPLATE, middleware.SessionHandler, controllers.ReportTemplate.Create).
+		GET(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.GetByID).
+		PATCH(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.UpdateByID).
+		DELETE(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.DeleteByID).
+		DELETE(ROUTE_V1_REPORT_PDF_BROWSER_CACHE, middleware.SessionHandler, controllers.ReportTemplate.WipeBrowserCache).
 		// campaign-recipient
 		GET(ROUTE_V1_CAMPAIGN_RECIPIENTS, middleware.SessionHandler, controllers.Campaign.GetRecipientsByCampaignID).
 		GET(ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL, middleware.SessionHandler, controllers.Campaign.GetCampaignEmail).

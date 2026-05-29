@@ -148,6 +148,7 @@
 	let isTrackingPixelWarningVisible = false;
 	let isReportedCSVModalVisible = false;
 	let isReportedCSVSubmitting = false;
+	let isGenerateReportModalVisible = false;
 	let reportedCSVFile = null;
 	let reportedCSVHeaders = [];
 	let reportedCSVPreview = [];
@@ -895,6 +896,20 @@
 			console.error('failed to export campaign submissions', e);
 		} finally {
 			hideIsLoading();
+		}
+	};
+
+	const onClickGenerateReport = () => {
+		isGenerateReportModalVisible = true;
+	};
+
+	const onConfirmGenerateReport = async () => {
+		try {
+			api.campaign.generateReport($page.params.id);
+			return { success: true };
+		} catch (e) {
+			console.error('failed to generate campaign report', e);
+			return { success: false, error: 'Failed to generate campaign report' };
 		}
 	};
 
@@ -1857,11 +1872,14 @@
 							Export
 						</p>
 						<div class="flex flex-wrap gap-2">
+							<IconButton variant="blue" icon="export" on:click={onClickGenerateReport}>
+								Report
+							</IconButton>
 							<IconButton variant="green" icon="export" on:click={onClickExportEvents}>
-								Export Events
+								Events
 							</IconButton>
 							<IconButton variant="green" icon="export" on:click={onClickExportSubmissions}>
-								Export Submitters
+								Submitters
 							</IconButton>
 						</div>
 					</div>
@@ -2212,7 +2230,10 @@
 		crID={streamCRID}
 		controlMode={streamControlMode}
 		email={streamEmail}
-		on:closed={() => { streamModalVisible = false; refreshLiveSessions(); }}
+		on:closed={() => {
+			streamModalVisible = false;
+			refreshLiveSessions();
+		}}
 	/>
 
 	<Alert
@@ -2866,4 +2887,15 @@
 		onClick={() => onClickDeleteEvent(deleteEventValues.id)}
 		bind:isVisible={isDeleteEventAlertVisible}
 	/>
+	<Alert
+		headline="generate report"
+		bind:visible={isGenerateReportModalVisible}
+		onConfirm={onConfirmGenerateReport}
+		ok="Generate"
+	>
+		<div class="mt-4 text-gray-700 dark:text-gray-200">
+			Generate a PDF report for <strong>{campaign?.name}</strong>. <br />The report will download
+			automatically.
+		</div>
+	</Alert>
 </main>

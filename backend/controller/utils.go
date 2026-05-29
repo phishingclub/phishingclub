@@ -213,6 +213,14 @@ func (c *Common) responseWithZIP(
 	}
 }
 
+// responseWithPDF writes a PDF response
+func (c *Common) responseWithPDF(g *gin.Context, data []byte, name string) {
+	setSecureContentDisposition(g, name)
+	g.Header("Content-Type", "application/pdf")
+	g.Header("Content-Length", fmt.Sprint(len(data)))
+	_, _ = g.Writer.Write(data)
+}
+
 // companyIDFromRequestQuery returns the companyID as a UUID from the query
 // or nil if not found
 func companyIDFromRequestQuery(g *gin.Context) *uuid.UUID {

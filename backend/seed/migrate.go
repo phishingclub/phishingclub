@@ -59,6 +59,7 @@ func initialInstallAndSeed(
 		&database.OAuthState{},
 		&database.MicrosoftDeviceCode{},
 		&database.RemoteBrowser{},
+		&database.ReportTemplate{},
 	}
 
 	// disable foreign key constraints temporarily for sqlite to allow table recreation
@@ -127,6 +128,13 @@ func initialInstallAndSeed(
 	if err != nil {
 		return errs.Wrap(
 			errors.Errorf("failed to seed identifiers: %w", err),
+		)
+	}
+	// seed default report template
+	err = SeedReportTemplate(db)
+	if err != nil {
+		return errs.Wrap(
+			errors.Errorf("failed to seed report template: %w", err),
 		)
 	}
 	// run data migrations (idempotent - safe to run on every startup)

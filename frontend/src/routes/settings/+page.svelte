@@ -18,6 +18,7 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
+	import Editor from '$lib/components/editor/Editor.svelte';
 	import { AppStateService } from '$lib/service/appState';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import { addToast } from '$lib/store/toast';
@@ -90,6 +91,14 @@
 	let obfuscationTemplate = '';
 	let obfuscationTemplateError = '';
 	let isObfuscationTemplateSubmitting = false;
+
+	// report template editor
+	let isReportTemplateModalVisible = false;
+	let reportTemplateContent = '';
+	let reportTemplateID = null;
+	let reportTemplateError = '';
+	let isReportTemplateSubmitting = false;
+	let isWipingBrowserCache = false;
 
 	$: {
 		isCompanyContext = appState.isCompanyContext();
@@ -569,6 +578,78 @@
 			isObfuscationTemplateSubmitting = false;
 		}
 	};
+
+	const openReportTemplateModal = async () => {
+		try {
+			showIsLoading();
+			reportTemplateContent = '';
+			reportTemplateID = null;
+			reportTemplateError = '';
+			const response = await api.reportTemplate.getAll(null);
+			if (response.success && response.data?.rows?.length > 0) {
+				const tmpl = response.data.rows[0];
+				reportTemplateContent = tmpl.content || '';
+				reportTemplateID = tmpl.id || null;
+			}
+		} catch (error) {
+			console.error('Failed to load report template:', error);
+			reportTemplateError = 'Failed to load template';
+		} finally {
+			hideIsLoading();
+			isReportTemplateModalVisible = true;
+		}
+	};
+
+	const closeReportTemplateModal = () => {
+		isReportTemplateModalVisible = false;
+		reportTemplateError = '';
+	};
+
+	const onWipeBrowserCache = async () => {
+		isWipingBrowserCache = true;
+		try {
+			const response = await api.reportTemplate.wipeBrowserCache();
+			if (response.success) {
+				addToast('Browser cache wiped', 'Success');
+			} else {
+				addToast(response.error || 'Failed to wipe browser cache', 'Error');
+			}
+		} catch (e) {
+			addToast('Failed to wipe browser cache', 'Error');
+		} finally {
+			isWipingBrowserCache = false;
+		}
+	};
+
+	const onSubmitReportTemplate = async (event) => {
+		const saveOnly = event?.detail?.saveOnly || false;
+		isReportTemplateSubmitting = true;
+		reportTemplateError = '';
+		try {
+			let response;
+			if (reportTemplateID) {
+				response = await api.reportTemplate.update(reportTemplateID, { content: reportTemplateContent });
+			} else {
+				response = await api.reportTemplate.create({ content: reportTemplateContent });
+				if (response.success && response.data?.id) {
+					reportTemplateID = response.data.id;
+				}
+			}
+			if (response.success) {
+				addToast('Report template saved', 'Success');
+				if (!saveOnly) {
+					isReportTemplateModalVisible = false;
+				}
+			} else {
+				reportTemplateError = response.error || 'Failed to save template';
+			}
+		} catch (error) {
+			console.error('Failed to save report template:', error);
+			reportTemplateError = 'Failed to save template';
+		} finally {
+			isReportTemplateSubmitting = false;
+		}
+	};
 </script>
 
 <HeadTitle title="Settings" />
@@ -957,6 +1038,52 @@
 						</div>
 					</div>
 				</ConditionalDisplay>
+
+				<!-- Report Template Section -->
+				{#if !isCompanyContext}
+				<div
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 h-[420px] flex flex-col transition-colors duration-200"
+				>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Report Template
+					</h2>
+					<div class="flex flex-col h-full">
+						<div class="space-y-4">
+							<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+								Default HTML template used when generating campaign PDF reports. Companies without their own template fall back to this.
+							</p>
+						</div>
+						<div class="mt-auto pt-4">
+							<Button size={'large'} on:click={openReportTemplateModal}>Edit Template</Button>
+						</div>
+					</div>
+				</div>
+				{/if}
+
+				<!-- Browser Cache Section -->
+				<div
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 h-[420px] flex flex-col transition-colors duration-200"
+				>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						Browser Cache
+					</h2>
+					<div class="flex flex-col h-full">
+						<div class="space-y-4">
+							<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+								Chromium is downloaded and cached for PDF reports and remote browser sessions. Wipe to force a fresh download.
+							</p>
+						</div>
+						<div class="mt-auto pt-4">
+							<Button size={'large'} backgroundColor="bg-red-600" disabled={isWipingBrowserCache} on:click={onWipeBrowserCache}>
+								{isWipingBrowserCache ? 'Wiping...' : 'Wipe Browser Cache'}
+							</Button>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 
@@ -1393,6 +1520,34 @@
 				<FormFooter
 					isSubmitting={isObfuscationTemplateSubmitting}
 					closeModal={closeObfuscationTemplateModal}
+				/>
+			</FormGrid>
+		</Modal>
+	{/if}
+
+	{#if isReportTemplateModalVisible}
+		<Modal
+			bind:visible={isReportTemplateModalVisible}
+			headerText="Edit Report Template"
+			onClose={closeReportTemplateModal}
+		>
+			<FormGrid
+				on:submit={onSubmitReportTemplate}
+				isSubmitting={isReportTemplateSubmitting}
+				modalMode="update"
+			>
+				<div
+					class="w-80vw col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+				>
+					<Editor
+						contentType="report"
+						bind:value={reportTemplateContent}
+					/>
+					<FormError message={reportTemplateError} />
+				</div>
+				<FormFooter
+					isSubmitting={isReportTemplateSubmitting}
+					closeModal={closeReportTemplateModal}
 				/>
 			</FormGrid>
 		</Modal>

@@ -58,6 +58,7 @@ type Campaign struct {
 	MicrosoftDeviceCodeRepository *repository.MicrosoftDeviceCode
 	AttachmentPath                string
 	RemoteBrowserService          *RemoteBrowser
+	ReportTemplateRepository      *repository.ReportTemplate
 	TrustedProxies                []string
 }
 
@@ -5148,4 +5149,156 @@ func (c *Campaign) saveReportedEvent(
 		return res.Error
 	}
 	return nil
+}
+
+// BuildReportHTML renders a report HTML string for a campaign using the resolved
+// report template (company-specific, then global, then built-in default).
+func (c *Campaign) BuildReportHTML(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+) (htmlContent string, campaignName string, err error) {
+	ae := NewAuditEvent("Campaign.BuildReportHTML", session)
+	ae.Details["campaignId"] = campaignID.String()
+	isAuthorized, authErr := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if authErr != nil && !errors.Is(authErr, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(authErr)
+		return "", "", errs.Wrap(authErr)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return "", "", errs.ErrAuthorizationFailed
+	}
+
+	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{WithCompany: true})
+	if err != nil {
+		return "", "", errs.Wrap(err)
+	}
+
+	stats, err := c.CampaignRepository.GetResultStats(ctx, campaignID)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign result stats for report", "error", err)
+		return "", "", errs.Wrap(err)
+	}
+
+	var companyID *uuid.UUID
+	if cid, cErr := campaign.CompanyID.Get(); cErr == nil {
+		companyID = &cid
+	}
+
+	reportTmpl, tmplErr := c.ReportTemplateRepository.GetForCampaign(ctx, companyID)
+	if tmplErr != nil {
+		c.Logger.Errorw("failed to fetch report template", "error", tmplErr)
+		return "", "", errs.Wrap(tmplErr)
+	}
+	templateContentVO, cErr := reportTmpl.Content.Get()
+	if cErr != nil {
+		return "", "", errs.Wrap(cErr)
+	}
+	templateContent := templateContentVO.String()
+
+	name := ""
+	if n, nErr := campaign.Name.Get(); nErr == nil {
+		name = n.String()
+	}
+	companyName := ""
+	if campaign.Company != nil {
+		if n, nErr := campaign.Company.Name.Get(); nErr == nil {
+			companyName = n.String()
+		}
+	}
+
+	// Only query per-recipient data for non-anonymous, non-anonymized campaigns
+	var recipients []model.ReportRecipient
+	isAnon, _ := campaign.IsAnonymous.Get()
+	isAnonymized := campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull()
+	if !isAnon && !isAnonymized {
+		recipients, err = c.CampaignRepository.GetReportRecipients(ctx, campaignID)
+		if err != nil {
+			c.Logger.Warnw("failed to get report recipients, continuing without detail table", "error", err)
+			recipients = nil
+		}
+	}
+
+	data := buildReportData(name, companyName, campaign, stats, recipients)
+
+	var buf bytes.Buffer
+	tmpl, err := template.New("report").Funcs(TemplateFuncs()).Parse(templateContent)
+	if err != nil {
+		c.Logger.Errorw("failed to parse report template", "error", err)
+		return "", "", errs.Wrap(err)
+	}
+	if err := tmpl.Execute(&buf, data); err != nil {
+		c.Logger.Errorw("failed to execute report template", "error", err)
+		return "", "", errs.Wrap(err)
+	}
+	// no audit on read
+	return buf.String(), name, nil
+}
+
+func buildReportData(
+	campaignName string,
+	companyName string,
+	campaign *model.Campaign,
+	stats *model.CampaignResultView,
+	recipients []model.ReportRecipient,
+) *model.ReportData {
+	total := stats.Recipients
+	rate := func(count int64) float64 {
+		if total == 0 {
+			return 0
+		}
+		return float64(count) / float64(total) * 100
+	}
+	pct := func(count int64) string {
+		return fmt.Sprintf("%.0f", rate(count))
+	}
+	relPct := func(numerator, denominator int64) string {
+		if denominator == 0 {
+			return "0"
+		}
+		return fmt.Sprintf("%.0f", float64(numerator)/float64(denominator)*100)
+	}
+	formatDate := func(t *time.Time) string {
+		if t == nil {
+			return ""
+		}
+		return t.Format("2006-01-02")
+	}
+	var startDate, endDate, closedAt string
+	if v, err := campaign.SendStartAt.Get(); err == nil {
+		startDate = formatDate(&v)
+	}
+	if v, err := campaign.SendEndAt.Get(); err == nil {
+		endDate = formatDate(&v)
+	}
+	if v, err := campaign.ClosedAt.Get(); err == nil {
+		closedAt = formatDate(&v)
+	}
+	return &model.ReportData{
+		CampaignName:           campaignName,
+		CompanyName:            companyName,
+		ReportDate:             time.Now().Format("January 2, 2006"),
+		CampaignStartDate:      startDate,
+		CampaignEndDate:        endDate,
+		CampaignClosedAt:       closedAt,
+		TotalTargets:           stats.Recipients,
+		EmailsSent:             stats.EmailsSent,
+		EmailsOpened:           stats.TrackingPixelLoaded,
+		ResultClicked:          stats.WebsiteLoaded,
+		ResultSubmitted:        stats.SubmittedData,
+		ResultReported:         stats.Reported,
+		ResultClickedPercent:   pct(stats.WebsiteLoaded),
+		ResultSubmittedPercent: pct(stats.SubmittedData),
+		ResultReportedPercent:  pct(stats.Reported),
+		SentRate:               rate(stats.EmailsSent),
+		OpenRate:               rate(stats.TrackingPixelLoaded),
+		ClickRate:              rate(stats.WebsiteLoaded),
+		SubmitRate:             rate(stats.SubmittedData),
+		ReportRate:             rate(stats.Reported),
+		OpenedOfSent:           relPct(stats.TrackingPixelLoaded, stats.EmailsSent),
+		ClickedOfOpened:        relPct(stats.WebsiteLoaded, stats.TrackingPixelLoaded),
+		SubmittedOfClicked:     relPct(stats.SubmittedData, stats.WebsiteLoaded),
+		Recipients:             recipients,
+	}
 }

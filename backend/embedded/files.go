@@ -19,3 +19,6 @@ var SigningKey1 []byte
 //
 //go:embed signingkeys/public2.bin
 var SigningKey2 []byte
+
+//go:embed default_report.html
+var DefaultReportHTML string
