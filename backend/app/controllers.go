@@ -213,6 +213,7 @@ func NewControllers(
 		Common:                common,
 		ReportTemplateService: services.ReportTemplate,
 		CampaignService:       services.Campaign,
+		OptionService:         services.Option,
 		ExecPath:              conf.RemoteBrowser.ExecPath,
 	}
 

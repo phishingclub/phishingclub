@@ -12,6 +12,7 @@
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Headline from '$lib/components/Headline.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
+	import Alert from '$lib/components/Alert.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import PasswordField from '$lib/components/PasswordField.svelte';
@@ -99,6 +100,9 @@
 	let reportTemplateError = '';
 	let isReportTemplateSubmitting = false;
 	let isWipingBrowserCache = false;
+	let isReportPDFEnabled = false;
+	let isReportPDFEnableModalVisible = false;
+	let isTogglingReportPDF = false;
 
 	$: {
 		isCompanyContext = appState.isCompanyContext();
@@ -123,6 +127,7 @@
 			await refreshBackupList();
 			await refreshDisplayMode();
 			await refreshAutoPrune();
+			await refreshReportPDFEnabled();
 			if (!ssoSettingsFormValues.redirectURL) {
 				ssoSettingsFormValues.redirectURL = `${location.origin}/api/v1/sso/entra-id/auth`;
 			}
@@ -605,6 +610,54 @@
 		reportTemplateError = '';
 	};
 
+	const refreshReportPDFEnabled = async () => {
+		const response = await api.option.get('report_pdf_enabled');
+		isReportPDFEnabled = response.success && response.data?.value === 'true';
+	};
+
+	const onClickReportPDFToggle = () => {
+		if (isReportPDFEnabled) {
+			onDisableReportPDF();
+		} else {
+			isReportPDFEnableModalVisible = true;
+		}
+	};
+
+	const onDisableReportPDF = async () => {
+		isTogglingReportPDF = true;
+		try {
+			const response = await api.option.set('report_pdf_enabled', 'false');
+			if (response.success) {
+				isReportPDFEnabled = false;
+				addToast('PDF reports disabled', 'Success');
+			} else {
+				addToast(response.error || 'Failed to update setting', 'Error');
+			}
+		} catch (e) {
+			addToast('Failed to update setting', 'Error');
+		} finally {
+			isTogglingReportPDF = false;
+		}
+	};
+
+	const onConfirmEnableReportPDF = async () => {
+		isTogglingReportPDF = true;
+		try {
+			const response = await api.option.set('report_pdf_enabled', 'true');
+			if (response.success) {
+				isReportPDFEnabled = true;
+				isReportPDFEnableModalVisible = false;
+				addToast('PDF reports enabled', 'Success');
+			} else {
+				addToast(response.error || 'Failed to update setting', 'Error');
+			}
+		} catch (e) {
+			addToast('Failed to update setting', 'Error');
+		} finally {
+			isTogglingReportPDF = false;
+		}
+	};
+
 	const onWipeBrowserCache = async () => {
 		isWipingBrowserCache = true;
 		try {
@@ -1061,6 +1114,37 @@
 					</div>
 				</div>
 				{/if}
+
+				<!-- PDF Reports Section -->
+				<div
+					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 h-[420px] flex flex-col transition-colors duration-200"
+				>
+					<h2
+						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
+					>
+						PDF Reports
+					</h2>
+					<div class="flex flex-col h-full">
+						<div class="space-y-4">
+							<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+								Generate PDF reports for campaigns. Requires Chromium and system dependencies.
+							</p>
+							<p class="text-sm font-medium transition-colors duration-200" class:text-green-600={isReportPDFEnabled} class:dark:text-green-400={isReportPDFEnabled} class:text-gray-500={!isReportPDFEnabled} class:dark:text-gray-400={!isReportPDFEnabled}>
+								{isReportPDFEnabled ? 'Enabled' : 'Disabled'}
+							</p>
+						</div>
+						<div class="mt-auto pt-4">
+							<Button
+								size={'large'}
+								backgroundColor={isReportPDFEnabled ? 'bg-red-600' : 'bg-cta-blue'}
+								disabled={isTogglingReportPDF}
+								on:click={onClickReportPDFToggle}
+							>
+								{isReportPDFEnabled ? 'Disable' : 'Enable'}
+							</Button>
+						</div>
+					</div>
+				</div>
 
 				<!-- Browser Cache Section -->
 				<div
@@ -1551,5 +1635,19 @@
 				/>
 			</FormGrid>
 		</Modal>
+	{/if}
+	{#if isReportPDFEnableModalVisible}
+		<Alert
+			headline="Enable PDF Reports"
+			bind:visible={isReportPDFEnableModalVisible}
+			onConfirm={onConfirmEnableReportPDF}
+			ok="Enable"
+		>
+			<div class="mt-4 text-gray-700 dark:text-gray-200 space-y-3">
+				<p>PDF report generation requires Chromium and additional system dependencies that are not part of the standard installation.</p>
+				<p>Before enabling, ensure the host has the required libraries and any AppArmor restrictions on unprivileged user namespaces have been addressed.</p>
+				<p>See <a href="https://phishing.club/guide/settings/#pdf-reports" target="_blank" class="underline">the setup guide</a> for dependency installation and AppArmor configuration.</p>
+			</div>
+		</Alert>
 	{/if}
 </main>

@@ -426,6 +426,28 @@ func SeedSettings(
 			}
 		}
 	}
+	{
+		// seed report PDF enabled (disabled by default)
+		id := uuid.New()
+		var c int64
+		res := db.
+			Model(&database.Option{}).
+			Where("key = ?", data.OptionKeyReportPDFEnabled).
+			Count(&c)
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if c == 0 {
+			res = db.Create(&database.Option{
+				ID:    &id,
+				Key:   data.OptionKeyReportPDFEnabled,
+				Value: "false",
+			})
+			if res.Error != nil {
+				return errs.Wrap(res.Error)
+			}
+		}
+	}
 	return nil
 }
 

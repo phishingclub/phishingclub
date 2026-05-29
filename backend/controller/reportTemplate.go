@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/remotebrowser"
 	"github.com/phishingclub/phishingclub/repository"
@@ -16,6 +17,7 @@ type ReportTemplate struct {
 	Common
 	ReportTemplateService *service.ReportTemplate
 	CampaignService       *service.Campaign
+	OptionService         *service.Option
 	ExecPath              string
 }
 
@@ -119,6 +121,11 @@ func (r *ReportTemplate) DeleteByID(g *gin.Context) {
 func (r *ReportTemplate) GeneratePDFByCampaignID(g *gin.Context) {
 	session, _, ok := r.handleSession(g)
 	if !ok {
+		return
+	}
+	opt, _ := r.OptionService.GetOptionWithoutAuth(g.Request.Context(), data.OptionKeyReportPDFEnabled)
+	if opt == nil || opt.Value.String() != "true" {
+		r.Response.NotFound(g)
 		return
 	}
 	id, ok := r.handleParseIDParam(g)

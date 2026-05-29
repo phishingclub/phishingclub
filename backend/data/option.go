@@ -37,6 +37,8 @@ const (
 
 	OptionKeyAutoPruneOrphanedRecipients = "auto_prune_orphaned_recipients"
 
+	OptionKeyReportPDFEnabled = "report_pdf_enabled"
+
 	OptionKeyObfuscationTemplate = "obfuscation_template"
 	// OptionValueObfuscationTemplateDefault is the default HTML template for obfuscation
 	// the template receives {{.Script}} variable containing the obfuscated javascript

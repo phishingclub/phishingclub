@@ -149,6 +149,7 @@
 	let isReportedCSVModalVisible = false;
 	let isReportedCSVSubmitting = false;
 	let isGenerateReportModalVisible = false;
+	let isReportPDFEnabled = false;
 	let reportedCSVFile = null;
 	let reportedCSVHeaders = [];
 	let reportedCSVPreview = [];
@@ -173,7 +174,7 @@
 	let lastPoll3399Nano = '';
 
 	// live remote browser sessions
-	/** @type {Map<string, {crID: string, campaignID: string, recipientID: string, createdAt: string, victimConnected: boolean}>} */
+	/** @type {Map<string, {crID: string, campaignID: string, recipientID: string, createdAt: string, victimConnected: boolean, canStream: boolean}>} */
 	let liveSessions = new Map();
 	let liveSessionPollInterval = null;
 	let streamModalVisible = false;
@@ -191,6 +192,8 @@
 		}
 
 		(async () => {
+			const pdfOpt = await api.option.get('report_pdf_enabled');
+			isReportPDFEnabled = pdfOpt.success && pdfOpt.data?.value === 'true';
 			await refresh();
 			recipientTableUrlParams.onChange(refreshRecipients);
 			eventsTableURLParams.onChange(refreshEvents);
@@ -899,7 +902,13 @@
 		}
 	};
 
+	let isReportPDFDisabledModalVisible = false;
+
 	const onClickGenerateReport = () => {
+		if (!isReportPDFEnabled) {
+			isReportPDFDisabledModalVisible = true;
+			return;
+		}
 		isGenerateReportModalVisible = true;
 	};
 
@@ -2896,6 +2905,20 @@
 		<div class="mt-4 text-gray-700 dark:text-gray-200">
 			Generate a PDF report for <strong>{campaign?.name}</strong>. <br />The report will download
 			automatically.
+		</div>
+	</Alert>
+	<Alert
+		headline="PDF reports disabled"
+		bind:visible={isReportPDFDisabledModalVisible}
+		onConfirm={() => {
+			isReportPDFDisabledModalVisible = false;
+			return { success: true };
+		}}
+		noCancel={true}
+		ok="OK"
+	>
+		<div class="mt-4 text-gray-700 dark:text-gray-200">
+			PDF report generation is not enabled. <br />Enable it in <strong>Settings</strong> under PDF Reports.
 		</div>
 	</Alert>
 </main>
