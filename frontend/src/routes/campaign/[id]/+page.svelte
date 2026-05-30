@@ -95,6 +95,7 @@
 		name: null,
 		id: null
 	};
+	let timelineEventsMap = new Map();
 	let timelineEvents = [];
 	let isTimelineGhost = true;
 	let recipientEvents = [];
@@ -407,12 +408,22 @@
 			if (!res.success) {
 				throw res.error;
 			}
-			const events = (res.data?.rows ?? []).map((v) => ({
-				createdAt: v.sendAt,
-				eventName: 'campaign_recipient_scheduled',
-				recipient: v.recipient
-			}));
-			timelineEvents = [...timelineEvents, ...events.filter((v) => v.createdAt)];
+			const rawEvents = (res.data?.rows ?? [])
+				.filter((v) => v.sendAt)
+				.map((v) => ({
+					id: `sched_${v.id ?? (v.recipient?.email + '_' + v.sendAt)}`,
+					createdAt: v.sendAt,
+					eventName: 'campaign_recipient_scheduled',
+					recipient: v.recipient
+				}));
+			let schedChanged = false;
+			for (const e of rawEvents) {
+				if (!timelineEventsMap.has(e.id)) {
+					timelineEventsMap.set(e.id, e);
+					schedChanged = true;
+				}
+			}
+			if (schedChanged) timelineEvents = Array.from(timelineEventsMap.values());
 		} catch (e) {
 			addToast('failed to recipient schedule', 'Error');
 			console.error('failed to load recipient schedule', e);
@@ -445,8 +456,15 @@
 				eventName: campaign.eventTypesIDToNameMap[v.eventID]
 			}));
 
-			// Only update timelineEvents, not the main events table
-			timelineEvents = [...timelineEvents, ...rows];
+			let evChanged = false;
+			for (const row of rows) {
+				const key = `ev_${row.id}`;
+				if (!timelineEventsMap.has(key)) {
+					timelineEventsMap.set(key, row);
+					evChanged = true;
+				}
+			}
+			if (evChanged) timelineEvents = Array.from(timelineEventsMap.values());
 			isTimelineGhost = false;
 
 			// Don't update campaign.events here - that should only happen via getEvents()
@@ -793,6 +811,7 @@
 				await refreshRecipientsTimes();
 				await refreshCampaignRecipients();
 				// reset timeline and refetch all events (timeline only fetches new events incrementally)
+				timelineEventsMap = new Map();
 				timelineEvents = [];
 				lastPoll3399Nano = '';
 				await tick();
@@ -863,6 +882,7 @@
 			await getEvents();
 			await refreshCampaignRecipients();
 			// bug: have to clear ref and wait a tick or svelte does not re-render
+			timelineEventsMap = new Map();
 			timelineEvents = [];
 			await tick();
 			await refreshRecipientsTimes();

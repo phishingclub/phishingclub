@@ -160,6 +160,24 @@
 	const getEventColor = (eventName) => EVENT_COLORS[eventName] || DEFAULT_COLOR;
 	const getEventIcon = (eventName) => EVENT_ICONS[eventName] || DEFAULT_ICON;
 
+	function parseUserAgent(ua) {
+		if (!ua) return '';
+		let os = '';
+		if (/Windows/.test(ua)) os = 'Windows';
+		else if (/Android/.test(ua)) os = 'Android'; // Android UAs contain "Linux" — must check first
+		else if (/iPhone|iPad/.test(ua)) os = 'iOS'; // iOS UAs contain "Mac OS X" — must check before it
+		else if (/Mac OS X/.test(ua)) os = 'macOS';
+		else if (/Linux/.test(ua)) os = 'Linux';
+		let browser = '';
+		if (/Edg\//.test(ua)) browser = 'Edge';
+		else if (/OPR\/|Opera/.test(ua)) browser = 'Opera';
+		else if (/Chrome\//.test(ua)) browser = 'Chrome';
+		else if (/Firefox\//.test(ua)) browser = 'Firefox';
+		else if (/Safari\//.test(ua)) browser = 'Safari';
+		const parsed = [browser, os].filter(Boolean).join(' / ');
+		return parsed || ua.substring(0, 60);
+	}
+
 	function checkTheme() {
 		isDarkMode = document.documentElement.classList.contains('dark');
 	}
@@ -171,8 +189,9 @@
 		const indicatorColor = isDarkMode ? '#6887ea' : '#445ecc';
 		const windowFill = isDarkMode ? 'rgba(104, 135, 234, 0.15)' : 'rgba(68, 94, 204, 0.15)';
 
-		if (circlesGroup) {
-			circlesGroup.selectAll('circle').attr('stroke', strokeColor);
+		const len = circleNodes.length;
+		for (let i = 0; i < len; i++) {
+			circleNodes[i].setAttribute('stroke', strokeColor);
 		}
 		timelineGroup.select('.center-line').attr('stroke', centerLineColor);
 		if (currentTimeIndicator) {
@@ -247,8 +266,20 @@
 		);
 
 		if (eventsInRange.length > MAX_VISIBLE_EVENTS) {
-			const step = Math.ceil(eventsInRange.length / MAX_VISIBLE_EVENTS);
-			return eventsInRange.filter((_, i) => i % step === 0);
+			const HIGH_PRIORITY_THRESHOLD = 70;
+			const high = [];
+			const low = [];
+			for (const e of eventsInRange) {
+				if ((toEvent(e.eventName)?.priority ?? 0) >= HIGH_PRIORITY_THRESHOLD) {
+					high.push(e);
+				} else {
+					low.push(e);
+				}
+			}
+			if (high.length >= MAX_VISIBLE_EVENTS) return high.slice(0, MAX_VISIBLE_EVENTS);
+			const slotsForLow = MAX_VISIBLE_EVENTS - high.length;
+			const step = Math.ceil(low.length / slotsForLow);
+			return [...high, ...low.filter((_, i) => i % step === 0)];
 		}
 
 		return eventsInRange;
@@ -459,7 +490,8 @@
 		entered
 			.merge(circles)
 			.attr('cx', (d) => scale(d._ts))
-			.attr('fill', (d) => getEventColor(d.eventName));
+			.attr('fill', (d) => getEventColor(d.eventName))
+			.sort((a, b) => (toEvent(a.eventName)?.priority ?? 0) - (toEvent(b.eventName)?.priority ?? 0));
 
 		// cache nodes after render
 		cacheCircleNodes();
@@ -772,7 +804,7 @@
 		}
 
 		const [x, y] = d3.pointer(event, container);
-		const tooltipWidth = 250;
+		const tooltipWidth = 320;
 		const leftPosition = x + 10;
 		const rightEdge = leftPosition + tooltipWidth;
 		const adjustedLeft = rightEdge > container.offsetWidth ? x - tooltipWidth - 10 : leftPosition;
@@ -857,10 +889,16 @@
 		window.removeEventListener('click', handleClickOutside);
 	});
 
+	// reactive: count of events passing current filter (for display)
+	$: filteredCount = processedEvents.filter((event) => {
+		if (event.eventName.startsWith('campaign_') && !event.eventName.startsWith('campaign_recipient_'))
+			return true;
+		return eventFilters[event.eventName] === true;
+	}).length;
+
 	// reactive: process events when they change
-	// use content-based hash to detect changes (not reference equality)
-	// include all event ids to detect deletions from any position
-	$: eventsHash = events?.map((e) => e.id).join(',') || '';
+	// length + last id is O(1) and sufficient since events only accumulate
+	$: eventsHash = events ? `${events.length}_${events[events.length - 1]?.id ?? ''}` : '';
 	$: if (eventsHash !== lastEventsHash) {
 		lastEventsHash = eventsHash;
 		processedEvents = processEvents(events);
@@ -936,7 +974,7 @@
 		{#if tooltipVisible && tooltipEvent}
 			<div
 				class="absolute z-50 bg-white dark:bg-gray-900 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700/60 max-w-xs overflow-hidden pointer-events-none"
-				style="left: {tooltipX}px; top: {tooltipY}px; will-change: transform;"
+				style="left: {tooltipX}px; top: {tooltipY}px;"
 			>
 				<div class="border-t-4" style="border-top-color: {tooltipColor}">
 					<div class="px-4 py-3 text-gray-800 dark:text-gray-200">
@@ -951,9 +989,9 @@
 					</div>
 				</div>
 
-				<div class="px-4 py-3 space-y-3">
+				<div class="px-4 py-3 space-y-2.5">
 					{#if tooltipEvent.recipient?.email}
-						<div class="flex items-center space-x-2">
+						<div class="flex items-center gap-2 min-w-0">
 							<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400">
 								<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path
@@ -964,13 +1002,13 @@
 									/>
 								</svg>
 							</div>
-							<span class="text-sm text-gray-700 dark:text-gray-300 truncate"
+							<span class="min-w-0 text-sm text-gray-700 dark:text-gray-300 truncate"
 								>{tooltipEvent.recipient.email}</span
 							>
 						</div>
 					{/if}
 
-					<div class="flex items-center space-x-2">
+					<div class="flex items-center gap-2 min-w-0">
 						<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400">
 							<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path
@@ -981,16 +1019,16 @@
 								/>
 							</svg>
 						</div>
-						<div class="text-sm text-gray-700 dark:text-gray-300">
+						<span class="min-w-0 text-sm text-gray-700 dark:text-gray-300">
 							{tooltipFormattedDate.split(',')[0]}
 							{tooltipFormattedTime}
-						</div>
+						</span>
 					</div>
 
 					{#if tooltipEvent.ip || tooltipEvent.userAgent}
-						<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 space-y-2">
+						<div class="pt-2.5 border-t border-gray-200 dark:border-gray-600 space-y-2">
 							{#if tooltipEvent.ip}
-								<div class="flex items-center space-x-2">
+								<div class="flex items-center gap-2 min-w-0">
 									<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400">
 										<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path
@@ -1001,13 +1039,13 @@
 											/>
 										</svg>
 									</div>
-									<span class="text-xs text-gray-600 dark:text-gray-400 truncate"
+									<span class="min-w-0 text-xs text-gray-600 dark:text-gray-400 truncate"
 										>{tooltipEvent.ip}</span
 									>
 								</div>
 							{/if}
 							{#if tooltipEvent.userAgent}
-								<div class="flex items-start space-x-2">
+								<div class="flex items-start gap-2 min-w-0">
 									<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5">
 										<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path
@@ -1018,10 +1056,8 @@
 											/>
 										</svg>
 									</div>
-									<span class="text-xs text-gray-600 dark:text-gray-400 break-words">
-										{tooltipEvent.userAgent.length > 80
-											? tooltipEvent.userAgent.substring(0, 80) + '...'
-											: tooltipEvent.userAgent}
+									<span class="min-w-0 text-xs text-gray-600 dark:text-gray-400 break-words">
+										{parseUserAgent(tooltipEvent.userAgent)}
 									</span>
 								</div>
 							{/if}
@@ -1029,8 +1065,8 @@
 					{/if}
 
 					{#if tooltipEvent.data}
-						<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
-							<div class="flex items-start space-x-2">
+						<div class="pt-2.5 border-t border-gray-200 dark:border-gray-600">
+							<div class="flex items-start gap-2 min-w-0">
 								<div class="flex-shrink-0 w-4 h-4 text-gray-500 dark:text-gray-400 mt-0.5">
 									<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path
@@ -1041,11 +1077,11 @@
 										/>
 									</svg>
 								</div>
-								<div class="text-xs text-gray-600 dark:text-gray-400 break-words">
+								<span class="min-w-0 text-xs text-gray-600 dark:text-gray-400 break-all">
 									{tooltipEvent.data.length > 100
-										? tooltipEvent.data.substring(0, 100) + '...'
+										? tooltipEvent.data.substring(0, 100) + '…'
 										: tooltipEvent.data}
-								</div>
+								</span>
 							</div>
 						</div>
 					{/if}
@@ -1084,15 +1120,21 @@
 											Recipient Events
 										</h4>
 										<div class="space-y-1 pl-2">
-											{#each [['campaign_recipient_scheduled', 'Scheduled'], ['campaign_recipient_cancelled', 'Cancelled'], ['campaign_recipient_message_sent', 'Message Sent'], ['campaign_recipient_message_failed', 'Message Failed'], ['campaign_recipient_message_read', 'Message Read'], ['campaign_recipient_before_page_visited', 'Before Page Visited'], ['campaign_recipient_page_visited', 'Page Visited'], ['campaign_recipient_after_page_visited', 'After Page Visited'], ['campaign_recipient_deny_page_visited', 'Deny Page Visited'], ['campaign_recipient_submitted_data', 'Data Submitted'], ['campaign_recipient_reported', 'Reported'], ['campaign_recipient_info', 'Info']] as [key, label]}
-												<label class="flex items-center text-xs">
+											{#each Object.keys(eventFilters) as key}
+												<label class="flex items-center gap-2 text-xs">
 													<input
 														type="checkbox"
 														bind:checked={eventFilters[key]}
 														on:change={invalidateCacheAndUpdate}
-														class="mr-2 rounded border-slate-300 dark:border-gray-700/60"
+														class="rounded border-slate-300 dark:border-gray-700/60"
 													/>
-													<span class="text-gray-600 dark:text-gray-300">{label}</span>
+													<span
+														class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+														style="background-color: {getEventColor(key)}"
+													></span>
+													<span class="text-gray-600 dark:text-gray-300"
+														>{toEvent(key)?.name ?? key}</span
+													>
 												</label>
 											{/each}
 										</div>
@@ -1130,7 +1172,9 @@
 					{/if}
 				</div>
 				<label
-					class="inline-flex items-center gap-1 px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+					class="inline-flex items-center gap-1 px-2 py-1 border rounded-md text-xs font-medium transition-colors duration-200 {followCurrentTime
+						? 'border-blue-400 text-blue-600 bg-blue-50 dark:border-highlight-blue/60 dark:text-highlight-blue dark:bg-highlight-blue/10'
+						: 'border-slate-300 dark:border-gray-700/60 text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60'}"
 				>
 					Follow:
 					<input type="checkbox" bind:checked={followCurrentTime} class="accent-blue-600" />
@@ -1151,7 +1195,7 @@
 			<div
 				class="absolute top-2 left-2 text-xs text-slate-600 dark:text-gray-400 bg-grayblue-light dark:bg-gray-900/60 px-2 py-1 rounded border border-slate-300 dark:border-gray-700/60"
 			>
-				{currentCenterDate.toLocaleString()}
+				{currentCenterDate.toLocaleString()} &middot; {filteredCount}/{processedEvents.length}
 			</div>
 		{/if}
 	</div>
