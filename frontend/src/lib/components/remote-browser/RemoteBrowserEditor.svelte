@@ -489,10 +489,10 @@ interface Session {
    * Register a handler for a named event. Must be called before s.listen().
    *
    * Built-in lifecycle events emitted automatically by the server:
-   * - `"disconnect"` — victim closed their browser or navigated away; no data
-   * - `"navigate"`   — main frame navigated to a new URL; data: `{ url: string }`
+   * - \`"disconnect"\` - victim closed their browser or navigated away; no data
+   * - \`"navigate"\`   - main frame navigated to a new URL; data: \`{ url: string }\`
    *
-   * All other event names are victim-page events sent via `rb.emit(name, data)`.
+   * All other event names are victim-page events sent via \`rb.emit(name, data)\`.
    */
   on(event: string, handler: (data: any) => void): void;
   /** Start processing incoming events; blocks until done() is called */
