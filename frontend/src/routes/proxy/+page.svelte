@@ -30,6 +30,7 @@
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import ProxyConfigBuilder from '$lib/components/proxy/ProxyConfigBuilder.svelte';
+	import jsyaml, { dumpWithLiteralStrings } from '$lib/components/yaml/index.js';
 	import FileField from '$lib/components/FileField.svelte';
 
 	// services
@@ -100,34 +101,30 @@
 		}
 
 		try {
-			// dynamically import js-yaml
-			import('$lib/components/yaml/index.js').then((jsyaml) => {
-				const parsed = jsyaml.default.load(yamlStr);
-				if (!parsed || typeof parsed !== 'object') {
-					console.warn('Invalid YAML: not an object');
-					return;
-				}
+			const parsed = jsyaml.load(yamlStr);
+			if (!parsed || typeof parsed !== 'object') {
+				console.warn('Invalid YAML: not an object');
+				return;
+			}
 
-				// extract and apply general section
-				if (parsed._general) {
-					if (parsed._general.name) {
-						formValues.name = parsed._general.name;
-					}
-					if (parsed._general.description) {
-						formValues.description = parsed._general.description;
-					}
-					if (parsed._general.start_url) {
-						formValues.startURL = parsed._general.start_url;
-					}
-					// remove _general from parsed object before serializing back
-					delete parsed._general;
+			// extract and apply general section
+			if (parsed._general) {
+				if (parsed._general.name) {
+					formValues.name = parsed._general.name;
 				}
+				if (parsed._general.description) {
+					formValues.description = parsed._general.description;
+				}
+				if (parsed._general.start_url) {
+					formValues.startURL = parsed._general.start_url;
+				}
+				// remove _general from parsed object before serializing back
+				delete parsed._general;
+			}
 
-				// serialize back to YAML without _meta for the config
-				// use dumpWithLiteralStrings to preserve literal block style for replace/body fields
-				const cleanYaml = jsyaml.dumpWithLiteralStrings(parsed);
-				formValues.proxyConfig = cleanYaml;
-			});
+			// serialize back to YAML without _meta for the config
+			// use dumpWithLiteralStrings to preserve literal block style for replace/body fields
+			formValues.proxyConfig = dumpWithLiteralStrings(parsed);
 		} catch (e) {
 			console.warn('Failed to parse imported YAML config:', e);
 		}
@@ -135,12 +132,11 @@
 
 	// export configuration to YAML file with metadata (for YAML mode)
 	function exportYamlConfig() {
-		import('$lib/components/yaml/index.js').then((yamlModule) => {
-			try {
-				// parse current config
-				const parsed = formValues.proxyConfig
-					? yamlModule.default.load(formValues.proxyConfig) || {}
-					: {};
+		try {
+			// parse current config
+			const parsed = formValues.proxyConfig
+				? jsyaml.load(formValues.proxyConfig) || {}
+				: {};
 
 				// build output with _general first
 				const output = {};
@@ -160,24 +156,23 @@
 				// merge rest of config
 				Object.assign(output, parsed);
 
-				// serialize to YAML with literal block style for replace/body fields
-				const yamlContent = yamlModule.dumpWithLiteralStrings(output);
+			// serialize to YAML with literal block style for replace/body fields
+			const yamlContent = dumpWithLiteralStrings(output);
 
-				// create blob and download
-				const blob = new Blob([yamlContent], { type: 'application/x-yaml' });
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement('a');
-				a.href = url;
-				const safeName = (formValues.name || 'proxy-config').replace(/[^a-zA-Z0-9-_]/g, '_');
-				a.download = `${safeName}.yaml`;
-				document.body.appendChild(a);
-				a.click();
-				document.body.removeChild(a);
-				URL.revokeObjectURL(url);
-			} catch (e) {
-				console.warn('Failed to export YAML config:', e);
-			}
-		});
+			// create blob and download
+			const blob = new Blob([yamlContent], { type: 'application/x-yaml' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			const safeName = (formValues.name || 'proxy-config').replace(/[^a-zA-Z0-9-_]/g, '_');
+			a.download = `${safeName}.yaml`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			console.warn('Failed to export YAML config:', e);
+		}
 	}
 
 	// trigger file input for YAML mode import

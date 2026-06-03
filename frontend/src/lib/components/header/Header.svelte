@@ -9,7 +9,6 @@
 
 	export let isProfileMenuVisible = false;
 	export let isMobileMenuVisible = false;
-	export let toggleChangeCompanyModal;
 
 	let isUpdateAvailable = false;
 	let isInstalled = false;

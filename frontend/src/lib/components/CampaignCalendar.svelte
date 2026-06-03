@@ -9,15 +9,13 @@
 		startOfMonth,
 		endOfMonth,
 		startOfWeek,
-		endOfWeek,
 		startOfDay,
 		endOfDay,
 		addDays,
 		subDays,
 		isSameDay,
 		isSameMonth,
-		getDay,
-		getDaysInMonth
+		getDay
 	} from 'date-fns';
 	import { scrollBarClassesHorizontal, scrollBarClassesVertical } from '$lib/utils/scrollbar';
 
