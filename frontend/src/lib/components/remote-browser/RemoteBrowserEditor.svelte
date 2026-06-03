@@ -1077,9 +1077,9 @@ declare var Infinity: number;
 				{#if activeTab === 'config'}
 					<div class="space-y-4">
 						<div>
-							<label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+							<p class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
 								Browser Mode
-							</label>
+							</p>
 							<div class="flex gap-2">
 								<button
 									type="button"

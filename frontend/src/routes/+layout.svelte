@@ -285,7 +285,7 @@
 	{:else if loginStatus === AppStateService.LOGIN.LOGGED_OUT && $page.route.id === '/login'}
 		<slot />
 	{:else if loginStatus === AppStateService.LOGIN.LOGGED_IN && $page.route.id !== '/login'}
-		<Header bind:isProfileMenuVisible bind:isMobileMenuVisible {toggleChangeCompanyModal} />
+		<Header bind:isProfileMenuVisible bind:isMobileMenuVisible />
 		{#if installState === AppStateService.INSTALL.INSTALLED}
 			<DesktopMenu
 				bind:this={desktopMenuRef}
