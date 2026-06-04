@@ -7,6 +7,9 @@
 	import FormError from '$lib/components/FormError.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import TextFieldMultiSelect from '$lib/components/TextFieldMultiSelect.svelte';
+	import TextareaField from '$lib/components/TextareaField.svelte';
+	import CheckboxField from '$lib/components/CheckboxField.svelte';
+	import { addToast } from '$lib/store/toast';
 
 	let ipAddress = '';
 	let isSubmitting = false;
@@ -446,6 +449,262 @@
 		};
 		return alpnMap[alpn] || 'h2 - HTTP/2 (h2)';
 	}
+
+	// ics calendar invitation builder
+	let icsSummary = 'IT Portal Access Validation';
+	let icsOrganizerName = 'IT Department';
+	let icsOrganizerEmail = 'it@example.com';
+	let icsAttendee = '{{.Email}}';
+	let icsLocation = '{{.URL}}';
+	let icsDescription = 'Please review your account details here: {{.URL}}';
+	let icsDate = '';
+	let icsTime = '09:00';
+	let icsDuration = '30';
+	let icsTimezone = 'floating';
+	let icsAddReminder = false;
+	let icsReminder = '15';
+	// the uid stays stable while editing so the same invite is not seen as a new
+	// event on every keystroke. regenerate it explicitly with the button.
+	let icsUID = '';
+	let icsResult = '';
+
+	const durationOptions = [
+		{ value: '15', label: '15 minutes' },
+		{ value: '30', label: '30 minutes' },
+		{ value: '45', label: '45 minutes' },
+		{ value: '60', label: '1 hour' },
+		{ value: '90', label: '1 hour 30 minutes' },
+		{ value: '120', label: '2 hours' },
+		{ value: '240', label: '4 hours' },
+		{ value: '480', label: 'Full day (8 hours)' }
+	];
+
+	const reminderOptions = [
+		{ value: '5', label: '5 minutes before' },
+		{ value: '10', label: '10 minutes before' },
+		{ value: '15', label: '15 minutes before' },
+		{ value: '30', label: '30 minutes before' },
+		{ value: '60', label: '1 hour before' },
+		{ value: '1440', label: '1 day before' }
+	];
+
+	// floating shows the entered time as is in the recipient calendar, UTC pins it to
+	// an absolute instant, a named zone carries the wall time plus a VTIMEZONE block.
+	const timezoneOptions = [
+		{ value: 'floating', label: 'Recipient local time' },
+		{ value: 'UTC', label: 'UTC' },
+		{ value: 'America/Los_Angeles', label: 'Los Angeles (Pacific)' },
+		{ value: 'America/Chicago', label: 'Chicago (Central)' },
+		{ value: 'America/New_York', label: 'New York (Eastern)' },
+		{ value: 'Europe/London', label: 'London' },
+		{ value: 'Europe/Paris', label: 'Paris / Berlin / Madrid' },
+		{ value: 'Europe/Athens', label: 'Athens / Helsinki' },
+		{ value: 'Asia/Dubai', label: 'Dubai' },
+		{ value: 'Asia/Kolkata', label: 'India' },
+		{ value: 'Asia/Singapore', label: 'Singapore' },
+		{ value: 'Asia/Tokyo', label: 'Tokyo' },
+		{ value: 'Australia/Sydney', label: 'Sydney' }
+	];
+
+	const pad = (n) => n.toString().padStart(2, '0');
+
+	function newICSUID() {
+		const random =
+			typeof crypto !== 'undefined' && crypto.randomUUID
+				? crypto.randomUUID()
+				: Math.random().toString(36).slice(2) + Date.now().toString(36);
+		icsUID = `${random}@phishing.club`;
+	}
+
+	// utc timestamp YYYYMMDDTHHMMSSZ, used for DTSTAMP which is always absolute
+	function toICSStamp(date) {
+		return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+	}
+
+	// the entered date and time are read as wall clock, so format from the utc
+	// fields of a date built with a trailing Z. this keeps the browser timezone
+	// from shifting the value the user typed.
+	function toWallStamp(date) {
+		return (
+			`${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}` +
+			`T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}00`
+		);
+	}
+
+	// offset like +0200 for a named zone at a given instant, DST aware for that date
+	function tzOffsetString(zone, date) {
+		const dtf = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'longOffset' });
+		const namePart = dtf.formatToParts(date).find((p) => p.type === 'timeZoneName');
+		const match = /GMT([+-])(\d{2}):?(\d{2})?/.exec(namePart ? namePart.value : '');
+		if (!match) {
+			return '+0000';
+		}
+		return `${match[1]}${match[2]}${match[3] || '00'}`;
+	}
+
+	// escape per RFC 5545: backslash, semicolon, comma and newlines carry meaning
+	function escapeICSText(text) {
+		return text
+			.replace(/\\/g, '\\\\')
+			.replace(/;/g, '\\;')
+			.replace(/,/g, '\\,')
+			.replace(/\r?\n/g, '\\n');
+	}
+
+	// fold a content line at 75 octets with a CRLF followed by a single space,
+	// as required by RFC 5545. exchange is strict about this.
+	function foldICSLine(line) {
+		const limit = 73;
+		if (line.length <= limit) {
+			return line;
+		}
+		const parts = [line.slice(0, limit)];
+		let rest = line.slice(limit);
+		while (rest.length > limit - 1) {
+			parts.push(' ' + rest.slice(0, limit - 1));
+			rest = rest.slice(limit - 1);
+		}
+		parts.push(' ' + rest);
+		return parts.join('\r\n');
+	}
+
+	function buildICS() {
+		if (!icsUID) {
+			return;
+		}
+		// build with a trailing Z so getUTC* returns exactly the wall clock the user typed
+		const base = icsDate && icsTime ? new Date(`${icsDate}T${icsTime}:00Z`) : null;
+		if (!base || isNaN(base.getTime())) {
+			icsResult = '';
+			return;
+		}
+		const minutes = parseInt(icsDuration, 10) || 30;
+		const end = new Date(base.getTime() + minutes * 60000);
+
+		// resolve DTSTART, DTEND and any timezone definition based on the selected mode
+		let dtStart;
+		let dtEnd;
+		let vtimezone = [];
+		if (icsTimezone === 'floating') {
+			dtStart = `DTSTART:${toWallStamp(base)}`;
+			dtEnd = `DTEND:${toWallStamp(end)}`;
+		} else if (icsTimezone === 'UTC') {
+			dtStart = `DTSTART:${toWallStamp(base)}Z`;
+			dtEnd = `DTEND:${toWallStamp(end)}Z`;
+		} else {
+			const offset = tzOffsetString(icsTimezone, base);
+			dtStart = `DTSTART;TZID=${icsTimezone}:${toWallStamp(base)}`;
+			dtEnd = `DTEND;TZID=${icsTimezone}:${toWallStamp(end)}`;
+			vtimezone = [
+				'BEGIN:VTIMEZONE',
+				`TZID:${icsTimezone}`,
+				'BEGIN:STANDARD',
+				'DTSTART:19700101T000000',
+				`TZOFFSETFROM:${offset}`,
+				`TZOFFSETTO:${offset}`,
+				`TZNAME:${icsTimezone}`,
+				'END:STANDARD',
+				'END:VTIMEZONE'
+			];
+		}
+
+		const lines = [
+			'BEGIN:VCALENDAR',
+			'VERSION:2.0',
+			'PRODID:-//Phishing Club//Calendar Invitation//EN',
+			'CALSCALE:GREGORIAN',
+			'METHOD:REQUEST',
+			...vtimezone,
+			'BEGIN:VEVENT',
+			`UID:${icsUID}`,
+			`DTSTAMP:${toICSStamp(new Date())}`,
+			dtStart,
+			dtEnd,
+			'SEQUENCE:0',
+			'STATUS:CONFIRMED',
+			`SUMMARY:${escapeICSText(icsSummary)}`
+		];
+		if (icsDescription.trim()) {
+			lines.push(`DESCRIPTION:${escapeICSText(icsDescription)}`);
+		}
+		if (icsLocation.trim()) {
+			lines.push(`LOCATION:${escapeICSText(icsLocation)}`);
+		}
+		if (icsOrganizerEmail.trim()) {
+			// CN is a parameter value, so it is double quoted rather than text escaped
+			const name = icsOrganizerName.trim();
+			const cn = name ? `;CN="${name.replace(/"/g, '')}"` : '';
+			lines.push(`ORGANIZER${cn}:mailto:${icsOrganizerEmail.trim()}`);
+		}
+		if (icsAttendee.trim()) {
+			lines.push(
+				`ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${icsAttendee.trim()}`
+			);
+		}
+		if (icsAddReminder) {
+			const reminderMinutes = parseInt(icsReminder, 10) || 15;
+			lines.push(
+				'BEGIN:VALARM',
+				'ACTION:DISPLAY',
+				'DESCRIPTION:Reminder',
+				`TRIGGER:-PT${reminderMinutes}M`,
+				'END:VALARM'
+			);
+		}
+		lines.push('END:VEVENT', 'END:VCALENDAR');
+
+		icsResult = lines.map(foldICSLine).join('\r\n') + '\r\n';
+	}
+
+	function copyICS() {
+		if (!icsResult) {
+			return;
+		}
+		navigator.clipboard.writeText(icsResult);
+		addToast('Copied calendar invitation to clipboard', 'Success');
+	}
+
+	function downloadICS() {
+		if (!icsResult) {
+			return;
+		}
+		const blob = new Blob([icsResult], { type: 'text/calendar;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = 'invitation.ics';
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+	}
+
+	// rebuild whenever any field changes
+	$: icsSummary,
+		icsOrganizerName,
+		icsOrganizerEmail,
+		icsAttendee,
+		icsLocation,
+		icsDescription,
+		icsDate,
+		icsTime,
+		icsDuration,
+		icsTimezone,
+		icsAddReminder,
+		icsReminder,
+		icsUID,
+		buildICS();
+
+	onMount(() => {
+		newICSUID();
+		// default to tomorrow so the invite is always in the future
+		const tomorrow = new Date();
+		tomorrow.setDate(tomorrow.getDate() + 1);
+		icsDate = `${tomorrow.getFullYear()}-${(tomorrow.getMonth() + 1)
+			.toString()
+			.padStart(2, '0')}-${tomorrow.getDate().toString().padStart(2, '0')}`;
+		buildICS();
+	});
 </script>
 
 <HeadTitle title="Tools" />
@@ -601,6 +860,168 @@
 					>
 						Learn more about JA4
 					</a>
+				</div>
+			</div>
+
+			<!-- ICS Calendar Invitation Builder Card - Double Width and Double Height -->
+			<div
+				class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 h-[420px] lg:h-[858px] flex flex-col transition-colors duration-200 lg:col-span-2 lg:row-span-2"
+			>
+				<h2
+					class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-1 transition-colors duration-200"
+				>
+					Calendar Invitation Builder
+				</h2>
+				<p class="text-xs text-gray-500 dark:text-gray-400 mb-4 transition-colors duration-200">
+					Builds an Outlook ready meeting request (.ics). Save it as an email attachment with
+					embedded content enabled so template variables resolve per recipient.
+				</p>
+
+				<div class="flex-1 overflow-y-auto pr-2 space-y-2">
+					<TextField bind:value={icsSummary} width="full" placeholder="Meeting title">
+						Title
+					</TextField>
+
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+						<TextField bind:value={icsOrganizerName} width="full" placeholder="IT Department">
+							Organizer name
+						</TextField>
+						<TextField
+							bind:value={icsOrganizerEmail}
+							width="full"
+							placeholder="it@example.com"
+						>
+							Organizer email
+						</TextField>
+					</div>
+
+					<TextField
+						bind:value={icsAttendee}
+						width="full"
+						toolTipText="Defaults to the recipient. Resolves per recipient when the attachment uses embedded content."
+					>
+						Attendee
+					</TextField>
+
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+						<label class="flex flex-col py-2">
+							<p
+								class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+							>
+								Start date
+							</p>
+							<input
+								type="date"
+								bind:value={icsDate}
+								autocomplete="off"
+								class="rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+							/>
+						</label>
+						<label class="flex flex-col py-2">
+							<p
+								class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+							>
+								Start time
+							</p>
+							<input
+								type="time"
+								bind:value={icsTime}
+								autocomplete="off"
+								class="rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+							/>
+						</label>
+						<label class="flex flex-col py-2">
+							<p
+								class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+							>
+								Duration
+							</p>
+							<select
+								bind:value={icsDuration}
+								class="rounded-md py-2 pl-2 pr-8 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer transition-colors duration-200"
+							>
+								{#each durationOptions as opt}
+									<option value={opt.value}>{opt.label}</option>
+								{/each}
+							</select>
+						</label>
+						<label class="flex flex-col py-2">
+							<p
+								class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+							>
+								Timezone
+							</p>
+							<select
+								bind:value={icsTimezone}
+								class="rounded-md py-2 pl-2 pr-8 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer transition-colors duration-200"
+							>
+								{#each timezoneOptions as opt}
+									<option value={opt.value}>{opt.label}</option>
+								{/each}
+							</select>
+						</label>
+					</div>
+
+					<TextField bind:value={icsLocation} width="full" placeholder={'{{.URL}} or a meeting link'}>
+						Location
+					</TextField>
+
+					<TextareaField bind:value={icsDescription} fullWidth height="small">
+						Description
+					</TextareaField>
+
+					<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 items-center">
+						<CheckboxField bind:value={icsAddReminder} inline>Add reminder</CheckboxField>
+						{#if icsAddReminder}
+							<label class="flex flex-col py-2">
+								<select
+									bind:value={icsReminder}
+									class="rounded-md py-2 pl-2 pr-8 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer transition-colors duration-200"
+								>
+									{#each reminderOptions as opt}
+										<option value={opt.value}>{opt.label}</option>
+									{/each}
+								</select>
+							</label>
+						{/if}
+					</div>
+				</div>
+
+				<div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+					<div class="flex items-center justify-between mb-2">
+						<p class="text-xs text-gray-600 dark:text-gray-400">Preview (.ics)</p>
+						<button
+							type="button"
+							class="text-xs text-blue-600 dark:text-blue-400 hover:underline transition-colors duration-200"
+							on:click={newICSUID}
+						>
+							Regenerate UID
+						</button>
+					</div>
+					{#if icsResult}
+						<pre
+							class="text-xs font-mono text-gray-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 rounded-md p-3 max-h-32 overflow-y-auto whitespace-pre-wrap break-all transition-colors duration-200">{icsResult}</pre>
+						<div class="flex flex-row justify-end items-center gap-2 mt-3">
+							<button
+								type="button"
+								on:click={copyICS}
+								class="bg-slate-400 hover:bg-slate-300 dark:bg-slate-600 dark:hover:bg-slate-500 text-sm uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
+							>
+								Copy
+							</button>
+							<button
+								type="button"
+								on:click={downloadICS}
+								class="bg-cta-blue hover:opacity-80 dark:hover:opacity-90 text-sm uppercase font-bold px-4 py-2 text-white rounded-md transition-all duration-200"
+							>
+								Download
+							</button>
+						</div>
+					{:else}
+						<p class="text-xs text-gray-500 dark:text-gray-500">
+							Pick a start date and time to generate the invitation.
+						</p>
+					{/if}
 				</div>
 			</div>
 
