@@ -583,7 +583,8 @@ func (c *User) Login(g *gin.Context) {
 				return
 			}
 			// as the recovery code is valid, we can now disable MFA
-			err = c.UserService.DisableTOTP(g, &userID)
+			// no session exists yet during login so pass nil
+			err = c.UserService.DisableTOTP(g, nil, &userID)
 			if ok := c.handleErrors(g, err); !ok {
 				return
 			}
@@ -830,7 +831,7 @@ func (c *User) IsTOTPEnabled(g *gin.Context) {
 
 // DisableTOTP disables TOTP
 func (c *User) DisableTOTP(g *gin.Context) {
-	_, user, ok := c.handleSession(g)
+	session, user, ok := c.handleSession(g)
 	if !ok {
 		return
 	}
@@ -866,6 +867,7 @@ func (c *User) DisableTOTP(g *gin.Context) {
 	// disable TOTP
 	err = c.UserService.DisableTOTP(
 		g.Request.Context(),
+		session,
 		&userID,
 	)
 	// handle response

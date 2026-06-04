@@ -791,10 +791,15 @@ func (u *User) IsTOTPEnabledByUserID(
 
 // DisableTOTP disables TOTP
 // without checking if the user privilige, use with consideration
+// session may be nil when called during a pre session flow such as
+// login with a recovery code
 func (u *User) DisableTOTP(
 	ctx context.Context,
+	session *model.Session,
 	userID *uuid.UUID,
 ) error {
+	ae := NewAuditEvent("User.DisableTOTP", session)
+	ae.Details["userId"] = userID.String()
 	err := u.UserRepository.RemoveTOTP(
 		ctx,
 		userID,
@@ -803,7 +808,7 @@ func (u *User) DisableTOTP(
 		u.Logger.Errorw("failed to disable TOTP", "error", err)
 		return err
 	}
-	// TODO audit log successful TOTP disable
+	u.AuditLogAuthorized(ae)
 	return nil
 }
 
