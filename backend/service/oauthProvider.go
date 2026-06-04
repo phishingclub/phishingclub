@@ -450,7 +450,7 @@ func (o *OAuthProvider) ExchangeCodeForTokens(
 	oauthState, err := o.OAuthStateRepository.GetByStateToken(ctx, stateToken)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			o.Logger.Warnw("invalid or expired state token", "stateToken", stateToken)
+			o.Logger.Warn("invalid or expired state token")
 			return errors.New("invalid or expired state token")
 		}
 		o.Logger.Errorw("failed to retrieve state token", "error", err)
@@ -459,13 +459,13 @@ func (o *OAuthProvider) ExchangeCodeForTokens(
 
 	// validate state token hasn't been used (prevent replay attacks)
 	if oauthState.Used {
-		o.Logger.Warnw("state token already used", "stateToken", stateToken)
+		o.Logger.Warnw("state token already used", "oauthProviderID", oauthState.OAuthProviderID.MustGet().String())
 		return errors.New("state token already used")
 	}
 
 	// validate state token hasn't expired
 	if oauthState.ExpiresAt != nil && time.Now().After(*oauthState.ExpiresAt) {
-		o.Logger.Warnw("state token expired", "stateToken", stateToken, "expiresAt", oauthState.ExpiresAt)
+		o.Logger.Warnw("state token expired", "oauthProviderID", oauthState.OAuthProviderID.MustGet().String(), "expiresAt", oauthState.ExpiresAt)
 		return errors.New("state token expired")
 	}
 
