@@ -100,7 +100,7 @@ Speed up your template development with our template workbench tool:
 
 - Docker and Docker Compose
 - Git
-- Make (optional, for convenience commands)
+- Make (recommended, the development workflow is built around make)
 
 ### Quick Start
 
@@ -113,9 +113,9 @@ cd phishingclub
 2. **Start the services:**
 ```bash
 make up
-# or manually:
-docker compose up -d
 ```
+
+Wait for the backend to finish starting before continuing. Follow the startup with `make logs`.
 
 3. **Access the platform:**
 - Administration: `https://localhost:8003`
@@ -129,6 +129,8 @@ The **username** and **password** are output in the terminal when you start the 
 ```bash
 make backend-password
 ```
+
+`make backend-password` outputs the password from the latest setup, so you can use it instead of scrolling back through the logs.
 
 5. **Setup and start phishing:**
 
@@ -187,7 +189,9 @@ make backend-password
 
 ## Development Domains
 
-For development we use `.test` for all domains. But this must also be handled on the host level. You must either modify the hosts file and add the domains you use or run a local DNS server and ensure all *.test domains resolves to 127.0.0.1.
+For development we use `.test` for all domains.
+
+The Docker Compose stack includes a DNSMasq container that resolves `.test` domains on the internal Docker network, so the containers can reach each other. This does not cover your host. You must ALSO handle resolution on your own machine, either by adding the `.test` domains you use to your hosts file or by running a local DNS server that resolves all `*.test` domains to 127.0.0.1.
 
 ### Option 1: DNSMasq (Recommended)
 ```bash
