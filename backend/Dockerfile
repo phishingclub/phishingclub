@@ -1,5 +1,5 @@
 # development docker file
-FROM golang:1.25.10
+FROM golang:1.25.10@sha256:c138bff780910acf4254ab3a6f7ff0f64bbd841f27bd82bfa986fe122c109538
 
 EXPOSE 8000 8001
 
