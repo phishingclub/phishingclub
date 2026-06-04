@@ -53,7 +53,7 @@ jobs:
           cp -r frontend/build/* backend/frontend/build/
 
       - name: Cache Go build cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/go-build-cache
           key: go-build-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}
@@ -68,7 +68,7 @@ jobs:
           -v "$(pwd)":/app \
           -v /tmp/go-build-cache:/root/.cache/go-build \
           -w /app/backend \
-          golang@sha256:8d22e29d960bc50cd025d93d5b7c7d220b1ee9aa7a239b3c8f55a57e987e8d45 `# golang:1.25.10-alpine` \
+          golang@sha256:c4ea15b4a7912716eb362a022e2b12317762eca387423760bc59c0f9ae69423c `# golang:1.25.10-alpine linux/amd64` \
           sh -c "apk add --no-cache gcc musl-dev && go build -trimpath \
           -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }} -linkmode=external -extldflags=-static' \
           -tags production -o ../build/amd64/phishingclub main.go"
@@ -79,7 +79,7 @@ jobs:
           -v "$(pwd)":/app \
           -v /tmp/go-build-cache:/root/.cache/go-build \
           -w /app/backend \
-          golang@sha256:8d22e29d960bc50cd025d93d5b7c7d220b1ee9aa7a239b3c8f55a57e987e8d45 `# golang:1.25.10-alpine` \
+          golang@sha256:5331adf7f8a0803631d9dc28843e288874789c14b97a3d0b54ed13e59f9e0589 `# golang:1.25.10-alpine linux/arm64` \
           sh -c "apk add --no-cache gcc musl-dev && go build -trimpath \
           -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }} -linkmode=external -extldflags=-static' \
           -tags production -o ../build/arm64/phishingclub main.go"
