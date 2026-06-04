@@ -8,7 +8,7 @@
 
 ![Phishing Club Dashboard](https://phishing.club/img/animated.gif)
 
-## Quick start
+## Quick start (production)
 
 ⚡ For systemd-enabled distributions, installation is quick and easy
 
@@ -27,7 +27,7 @@ Remember to copy the admin URL and password
 
 ## Features
 
-Phishing Club providers a lot of features for simulation and red teaming, here are some highlights.
+Phishing Club provides a lot of features for simulation and red teaming, here are some highlights.
 
 - **Multi-stage phishing flows** - Put together multiple phishing pages
 - **Domain proxying** - Configure domains to proxy and mirror content from target sites
@@ -58,23 +58,23 @@ Phishing Club providers a lot of features for simulation and red teaming, here a
 - **Response overwriting** - Shortcut proxying with custom responses
 - **Forward proxying** - Use HTTP and SOCKS5 proxies to ensure requests originate from the right location
 - **Visual Editor** - Use the visual editor to easily setup a proxy
-- **Import compromised oauth token** - Use compromised tokens to send more phishing via. oauth enabled endpoints
+- **Import compromised oauth token** - Use compromised tokens to send more phishing via OAuth enabled endpoints
 - **Device Code phishing** - Device code phishing is as simple as adding a single line to a email or landing page
 
 ### Blogs & Resources
 - [Phishing Club User Guide](https://phishing.club/guide/)
 - [Covert red team phishing with Phishing Club](http://phishing.club/blog/covert-red-team-phishing-with-phishing-club/)
 - [Phishing Simulation vs Red Team Phishing: Understanding Different Approaches](https://phishing.club/blog/phishing-simulation-vs-red-team-phishing/)
-- [Remote Browsering Phishing with Phishing Club](https://phishing.club/blog/remote-browser-phishing/)
+- [Remote Browser Phishing with Phishing Club](https://phishing.club/blog/remote-browser-phishing/)
 
 
-Wrote a blog post or write up about Phishing Club? Tell us about it and we might add it here. Reach out via. a github issue, discord or find our email :)
+Wrote a blog post or write up about Phishing Club? Tell us about it and we might add it here. Reach out via a GitHub issue, discord or find our email :)
 
 ### Students & Learning
 
-Phishing Club can be used by cybersecurity students or others who want try hands-on phishing. The development enviroment is an ideal place to get started. Spin up campaigns, test templates, and learn how phishing attacks work in a safe, contained environment. The enviroment comes with containers local SMTP/Mailbox and everything you need.
+Phishing Club can be used by cybersecurity students or others who want to try hands-on phishing. The development environment is an ideal place to get started. Spin up campaigns, test templates, and learn how phishing attacks work in a safe, contained environment. The environment comes with containers for local SMTP/Mailbox and everything you need.
 
-To aid with the development of MITM proxys configurations there is also a `MITMProxy` container where you can view the traffic that flows towards the proxied site.
+To aid with the development of MITM proxy configurations there is also a `MITMProxy` container where you can view the traffic that flows towards the proxied site.
 
 To get started, clone the repo, ensure you have make and docker installed and run `make up` and wait for the backend to be up and running. Copy the credentials and you are ready to go.
 
@@ -118,7 +118,7 @@ docker compose up -d
 ```
 
 3. **Access the platform:**
-- Administration: `http://localhost:8003`
+- Administration: `https://localhost:8003`
 - HTTP Phishing Server: `http://localhost:80`
 - HTTPS Phishing Server: `https://localhost:443`
 
@@ -148,10 +148,12 @@ Visit the [Phishing Club Guide](https://phishing.club/guide/introduction/) for m
 | 8102 | Mail Server | Mailpit SMTP server with SpamAssassin integration |
 | 8103 | Container Logs | Dozzle log viewer |
 | 8104 | Container Stats | Docker container statistics |
-| 8105 | MITMProxy| MITMProxy web interface |
+| 8105 | MITMProxy | MITMProxy web interface |
 | 8106 | MITMProxy | MITMProxy external access |
+| 8107 | API Test Server | Test endpoint for the API Sender |
 | 8201 | ACME Server | Pebble ACME server for certificates |
 | 8202 | ACME Management | Pebble management interface |
+| 8203 | ACME Challenge | Pebble challenge test server |
 
 
 ## Development Commands
@@ -245,15 +247,15 @@ This project is licensed under the GNU Affero General Public License v3.0 (AGPL-
 For organizations that want to:
 - Use Phishing Club in commercial products without AGPL restrictions
 - Offer Phishing Club as a service without source code disclosure
-- Modify or modify the codebase without source code disclosure
+- Modify the codebase without source code disclosure
 
 **Contact for commercial licensing**: [license@phishing.club](mailto:license@phishing.club)
 
 ## Roadmap
 
-There is no offical roadmap.
+There is no official roadmap.
 
-But you can vote with emojis on the `[feature]` requests [on Github](https://github.com/phishingclub/phishingclub) or add you own feature request.
+But you can vote with emojis on the `[feature]` requests [on Github](https://github.com/phishingclub/phishingclub/issues?q=is%3Aissue+label%3Afeature) or add your own feature request.
 
 Feature request with a high number of votes will be prioritized, however it is no guaranteed they will be implemented. Ultimately what gets implemented, how and when highly depends on [me](https://github.com/ronniskansing) and what I think is right for the project.
 
