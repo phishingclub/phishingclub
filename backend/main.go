@@ -27,6 +27,7 @@ import (
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/install"
+	"github.com/phishingclub/phishingclub/middleware"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/seed"
@@ -323,6 +324,7 @@ func main() {
 		)
 	}
 	adminRouter.Use(middlewares.IPLimiter)
+	adminRouter.Use(middleware.SecurityHeaders())
 
 	// read the seeded victim WS path for the remote browser endpoint
 	rbWSPath := "rbws" // fallback - real value is seeded at first startup
