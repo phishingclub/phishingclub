@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.37.0] - 2026-06-06
+- Added generate campaign report
+- Added global and company level campaign report customization 
+- Added calendar invite builder
+- Added calendar invite attachment handling
+- Added trusted IP header forwarding now works for phishing server 
+- Added musl for statically linked binary - no libc dependency anymore
+- Added security headers to admin server
+- Bump dependencies
+- Update geo ips to latest
+- Improve UI of setting page
+- Improve UI of tools page
+- Improve UI on event timeline and campaign trendline
+- Fix remove TOTP from logs
+- Fix added missing audit logs for TOTP disable
+- Fix only the first found API key worked
+- Fix favicon fingerprinting
+- Fix validation when AiTM proxies reuse domains without errors 
+- Fix bug in table layout were last column would get cut
+- Fix delete group modal warning was incorrect 
+- Remote Browser: Add lifecycle events
+- Remote Browser: Added dependencies to image builds
+- Remote Browser: Add right click context menu with copy paste
+- Remote Browser: Fix click outside of element bug
+- Remote Browser: Add mouse movement and console trap patch 
+
 ## [1.36.0] - 2026-05-24
 - Added experimental support for Remote Browser Phishing
 - Fixed incorrect constraint parsing for local time 
