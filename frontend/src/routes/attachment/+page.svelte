@@ -29,6 +29,7 @@
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
+	import FileField from '$lib/components/FileField.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -389,18 +390,7 @@
 						>
 					{/if}
 					{#if modalMode === 'create'}
-						<label for="file" class="flex flex-col py-2 w-60">
-							<p class="font-semibold text-slate-600 py-2">Files</p>
-
-							<input
-								id="files"
-								type="file"
-								name="files"
-								class="border-solid border-2 py-2 px-2 rounded-md file:px-4 file:py-2 file:text-white file:cursor-pointer file:text-sm file:font-semibold file:bg-cta-green hover:cursor-pointer file:hover:bg-cta-orange file:border-hidden file:rounded-md"
-								on:change={onFilesSelected}
-								multiple
-							/>
-						</label>
+						<FileField name="files" multiple on:change={onFilesSelected}>Files</FileField>
 					{/if}
 				</FormColumn>
 			</FormColumns>
