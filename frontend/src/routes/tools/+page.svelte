@@ -460,13 +460,21 @@
 	let icsDate = '';
 	let icsTime = '09:00';
 	let icsDuration = '30';
-	let icsTimezone = 'floating';
+	let icsTimezone = 'UTC';
 	let icsAddReminder = false;
 	let icsReminder = '15';
 	// the uid stays stable while editing so the same invite is not seen as a new
 	// event on every keystroke. regenerate it explicitly with the button.
 	let icsUID = '';
 	let icsResult = '';
+	let icsClass = 'PUBLIC';
+	let icsSequence = '0';
+	let icsAttendeePartstat = 'NEEDS-ACTION';
+	let icsMsTeamsUrl = '';
+	let icsMsSuppressRsvp = true;
+	let icsMsBusyStatus = '';
+	let icsMsDisallowCounter = true;
+	let icsGoogleConference = '';
 
 	const durationOptions = [
 		{ value: '15', label: '15 minutes' },
@@ -488,16 +496,13 @@
 		{ value: '1440', label: '1 day before' }
 	];
 
-	// floating shows the entered time as is in the recipient calendar, UTC pins it to
-	// an absolute instant, a named zone carries the wall time plus a VTIMEZONE block.
 	const timezoneOptions = [
-		{ value: 'floating', label: 'Recipient local time' },
 		{ value: 'UTC', label: 'UTC' },
 		{ value: 'America/Los_Angeles', label: 'Los Angeles (Pacific)' },
 		{ value: 'America/Chicago', label: 'Chicago (Central)' },
 		{ value: 'America/New_York', label: 'New York (Eastern)' },
 		{ value: 'Europe/London', label: 'London' },
-		{ value: 'Europe/Paris', label: 'Paris / Berlin / Madrid' },
+		{ value: 'Europe/Paris', label: 'Paris / Berlin / Copenhagen / Madrid' },
 		{ value: 'Europe/Athens', label: 'Athens / Helsinki' },
 		{ value: 'Asia/Dubai', label: 'Dubai' },
 		{ value: 'Asia/Kolkata', label: 'India' },
@@ -607,10 +612,7 @@
 		let dtStart;
 		let dtEnd;
 		let vtimezone = [];
-		if (icsTimezone === 'floating') {
-			dtStart = `DTSTART:${toWallStamp(base)}`;
-			dtEnd = `DTEND:${toWallStamp(end)}`;
-		} else if (icsTimezone === 'UTC') {
+		if (icsTimezone === 'UTC') {
 			dtStart = `DTSTART:${toWallStamp(base)}Z`;
 			dtEnd = `DTEND:${toWallStamp(end)}Z`;
 		} else {
@@ -642,8 +644,9 @@
 			`DTSTAMP:${toICSStamp(new Date())}`,
 			dtStart,
 			dtEnd,
-			'SEQUENCE:0',
+			`SEQUENCE:${icsSequence || '0'}`,
 			'STATUS:CONFIRMED',
+			`CLASS:${icsClass}`,
 			`SUMMARY:${escapeICSText(icsSummary)}`
 		];
 		if (icsDescription.trim()) {
@@ -660,8 +663,23 @@
 		}
 		if (icsAttendee.trim()) {
 			lines.push(
-				`ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${icsAttendee.trim()}`
+				`ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=${icsAttendeePartstat};RSVP=TRUE:mailto:${icsAttendee.trim()}`
 			);
+		}
+		if (icsMsTeamsUrl.trim()) {
+			lines.push(`X-MICROSOFT-SKYPETEAMSMEETINGURL:${icsMsTeamsUrl.trim()}`);
+		}
+		if (icsMsSuppressRsvp) {
+			lines.push('X-MICROSOFT-ISRESPONSEREQUESTED:FALSE');
+		}
+		if (icsMsBusyStatus) {
+			lines.push(`X-MICROSOFT-CDO-BUSYSTATUS:${icsMsBusyStatus}`);
+		}
+		if (icsMsDisallowCounter) {
+			lines.push('X-MICROSOFT-DISALLOW-COUNTER:TRUE');
+		}
+		if (icsGoogleConference.trim()) {
+			lines.push(`X-GOOGLE-CONFERENCE:${icsGoogleConference.trim()}`);
 		}
 		if (icsAddReminder) {
 			const reminderMinutes = parseInt(icsReminder, 10) || 15;
@@ -706,6 +724,7 @@
 		icsOrganizerName,
 		icsOrganizerEmail,
 		icsAttendee,
+		icsAttendeePartstat,
 		icsLocation,
 		icsDescription,
 		icsDate,
@@ -715,6 +734,13 @@
 		icsAddReminder,
 		icsReminder,
 		icsUID,
+		icsClass,
+		icsSequence,
+		icsMsTeamsUrl,
+		icsMsSuppressRsvp,
+		icsMsBusyStatus,
+		icsMsDisallowCounter,
+		icsGoogleConference,
 		buildICS();
 
 	onMount(() => {
@@ -890,14 +916,10 @@
 				class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 h-[420px] lg:h-[858px] flex flex-col transition-colors duration-200 lg:col-span-2 lg:row-span-2"
 			>
 				<h2
-					class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-1 transition-colors duration-200"
+					class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-4 transition-colors duration-200"
 				>
 					Calendar Invitation Builder
 				</h2>
-				<p class="text-xs text-gray-500 dark:text-gray-400 mb-4 transition-colors duration-200">
-					Builds an Outlook ready meeting request (.ics). Save it as an email attachment with
-					embedded content enabled so template variables resolve per recipient.
-				</p>
 
 				<div class="flex-1 overflow-y-auto pr-2 space-y-2">
 					<TextField bind:value={icsSummary} width="full" placeholder="Meeting title">
@@ -920,7 +942,7 @@
 					<TextField
 						bind:value={icsAttendee}
 						width="full"
-						toolTipText="Defaults to the recipient. Resolves per recipient when the attachment uses embedded content."
+						toolTipText="Resolves per recipient when the attachment uses embedded content."
 					>
 						Attendee
 					</TextField>
@@ -981,7 +1003,7 @@
 									<option value={opt.value}>{opt.label}</option>
 								{/each}
 							</select>
-						</label>
+							</label>
 					</div>
 
 					<TextField bind:value={icsLocation} width="full" placeholder={'{{.URL}} or a meeting link'}>
@@ -1006,6 +1028,116 @@
 								</select>
 							</label>
 						{/if}
+					</div>
+
+					<div class="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+						<p class="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+							Event
+						</p>
+						<div class="grid grid-cols-2 gap-x-3">
+							<label class="flex flex-col py-1">
+								<p
+									class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+								>
+									Class
+								</p>
+								<select
+									bind:value={icsClass}
+									class="rounded-md py-2 pl-2 pr-8 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer transition-colors duration-200"
+								>
+									<option value="PUBLIC">Public</option>
+									<option value="PRIVATE">Private</option>
+									<option value="CONFIDENTIAL">Confidential</option>
+								</select>
+							</label>
+							<label class="flex flex-col py-1">
+								<p
+									class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+								>
+									Sequence
+								</p>
+								<input
+									type="number"
+									min="0"
+									bind:value={icsSequence}
+									autocomplete="off"
+									class="rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+								/>
+							</label>
+						</div>
+						<label class="flex flex-col py-1">
+							<p
+								class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+							>
+								Attendee initial response
+							</p>
+							<select
+								bind:value={icsAttendeePartstat}
+								class="rounded-md py-2 pl-2 pr-8 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer transition-colors duration-200"
+							>
+								<option value="NEEDS-ACTION">Needs action (default)</option>
+								<option value="ACCEPTED">Accepted</option>
+								<option value="TENTATIVE">Tentative</option>
+								<option value="DECLINED">Declined</option>
+							</select>
+						</label>
+					</div>
+
+					<div class="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+						<p class="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+							Microsoft / Outlook
+						</p>
+						<TextField
+							bind:value={icsMsTeamsUrl}
+							width="full"
+							placeholder="https://teams.microsoft.com/l/meetup-join/..."
+							toolTipText="Renders a Join button in Outlook and Teams. Any URL works."
+						>
+							Teams meeting URL
+						</TextField>
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 items-center">
+							<CheckboxField
+								bind:value={icsMsSuppressRsvp}
+								inline
+								toolTipText="Prevents Outlook from sending RSVP replies to the organizer."
+							>
+								Suppress RSVP replies
+							</CheckboxField>
+							<CheckboxField bind:value={icsMsDisallowCounter} inline>
+								Disallow counter proposals
+							</CheckboxField>
+						</div>
+						<label class="flex flex-col py-1">
+							<p
+								class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+							>
+								Show as
+							</p>
+							<select
+								bind:value={icsMsBusyStatus}
+								class="rounded-md py-2 pl-2 pr-8 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer transition-colors duration-200"
+							>
+								<option value="">Default</option>
+								<option value="FREE">Free</option>
+								<option value="BUSY">Busy</option>
+								<option value="TENTATIVE">Tentative</option>
+								<option value="OOF">Out of office</option>
+							</select>
+						</label>
+					</div>
+
+					<div class="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+						<p class="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+							Google
+						</p>
+						<TextField
+							bind:value={icsGoogleConference}
+							width="full"
+							placeholder="https://meet.google.com/..."
+							toolTipText="Renders a Meet button. Restricted to meet.google.com. Use Location for other URLs."
+						>
+							Conference URL
+						</TextField>
 					</div>
 				</div>
 
