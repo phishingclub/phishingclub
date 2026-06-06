@@ -2,10 +2,11 @@
 	// reusable settings panel card: title, body slot, optional footer slot.
 	// fixed comfortable width so panels can wrap cards consistently.
 	export let title = '';
+export let widthClass = 'w-full sm:w-96';
 </script>
 
 <div
-	class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 flex flex-col w-full sm:w-96 transition-colors duration-200"
+	class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 flex flex-col {widthClass} transition-colors duration-200"
 >
 	<h2
 		class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
