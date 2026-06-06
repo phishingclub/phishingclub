@@ -509,11 +509,10 @@
 	const pad = (n) => n.toString().padStart(2, '0');
 
 	function newICSUID() {
-		const random =
+		icsUID =
 			typeof crypto !== 'undefined' && crypto.randomUUID
 				? crypto.randomUUID()
 				: Math.random().toString(36).slice(2) + Date.now().toString(36);
-		icsUID = `${random}@phishing.club`;
 	}
 
 	// utc timestamp YYYYMMDDTHHMMSSZ, used for DTSTAMP which is always absolute
@@ -553,19 +552,42 @@
 
 	// fold a content line at 75 octets with a CRLF followed by a single space,
 	// as required by RFC 5545. exchange is strict about this.
+	// a {{ ... }} template action is kept whole, since splitting one across a
+	// fold turns it into invalid syntax when phishing club renders the invite
+	// for each recipient.
 	function foldICSLine(line) {
 		const limit = 73;
 		if (line.length <= limit) {
 			return line;
 		}
-		const parts = [line.slice(0, limit)];
-		let rest = line.slice(limit);
-		while (rest.length > limit - 1) {
-			parts.push(' ' + rest.slice(0, limit - 1));
-			rest = rest.slice(limit - 1);
+		// atomic chunks, every template action stays intact, other text breaks anywhere
+		const tokens = line.split(/(\{\{.*?\}\})/).filter((t) => t !== '');
+		const out = [];
+		let cur = '';
+		const max = () => (out.length === 0 ? limit : limit - 1);
+		const flush = () => {
+			out.push((out.length === 0 ? '' : ' ') + cur);
+			cur = '';
+		};
+		for (const tok of tokens) {
+			if (/^\{\{.*\}\}$/.test(tok)) {
+				if (cur !== '' && cur.length + tok.length > max()) {
+					flush();
+				}
+				cur += tok;
+			} else {
+				for (const ch of tok) {
+					if (cur !== '' && cur.length + 1 > max()) {
+						flush();
+					}
+					cur += ch;
+				}
+			}
 		}
-		parts.push(' ' + rest);
-		return parts.join('\r\n');
+		if (cur !== '') {
+			out.push((out.length === 0 ? '' : ' ') + cur);
+		}
+		return out.join('\r\n');
 	}
 
 	function buildICS() {
