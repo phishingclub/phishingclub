@@ -275,13 +275,15 @@ func (u *Update) RunUpdate(
 	u.updateMutex.Lock()
 	defer u.updateMutex.Unlock()
 
+	ae := NewAuditEvent("Update.Run", session)
+
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
 		u.LogAuthError(err)
 		return errs.Wrap(err)
 	}
 	if !isAuthorized {
-		// skip audit logging on this endpoint
+		u.AuditLogNotAuthorized(ae)
 		return errors.New("unauthorized")
 	}
 
@@ -401,6 +403,8 @@ func (u *Update) RunUpdate(
 	}
 
 	u.Logger.Infow("update completed successfully", "version", details.LatestVersion)
+	ae.Details["version"] = details.LatestVersion
+	u.AuditLogAuthorized(ae)
 
 	// Schedule shutdown after a brief delay to allow HTTP response to be sent
 	go func() {
