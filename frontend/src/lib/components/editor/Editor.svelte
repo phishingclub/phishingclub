@@ -467,6 +467,26 @@
 		}
 
 		switch (contentType) {
+			case 'report':
+				return text
+					.replaceAll('{{.CampaignName}}', 'Q1 Phishing Simulation')
+					.replaceAll('{{.CompanyName}}', 'World Corp')
+					.replaceAll('{{.ReportDate}}', new Date().toLocaleDateString())
+					.replaceAll('{{.CampaignStartDate}}', '2025-01-01')
+					.replaceAll('{{.CampaignEndDate}}', '2025-01-31')
+					.replaceAll('{{.CampaignClosedAt}}', '2025-02-01')
+					.replaceAll('{{.TotalTargets}}', '120')
+					.replaceAll('{{.EmailsSent}}', '118')
+					.replaceAll('{{.EmailsOpened}}', '74')
+					.replaceAll('{{.ResultClicked}}', '32')
+					.replaceAll('{{.ResultClickedPercent}}', '27.1')
+					.replaceAll('{{.ResultSubmitted}}', '14')
+					.replaceAll('{{.ResultSubmittedPercent}}', '11.9')
+					.replaceAll('{{.ResultReported}}', '8')
+					.replaceAll('{{.ResultReportedPercent}}', '6.8')
+					.replaceAll('{{.OpenedOfSent}}', '62.7')
+					.replaceAll('{{.ClickedOfOpened}}', '43.2')
+					.replaceAll('{{.SubmittedOfClicked}}', '43.8');
 			case 'domain':
 				return text.replaceAll('{{.BaseURL}}', _baseURL);
 			case 'page':
