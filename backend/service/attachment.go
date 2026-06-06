@@ -296,6 +296,9 @@ func (a *Attachment) UpdateByID(
 	if attachment.EmbeddedContent.IsSpecified() {
 		current.EmbeddedContent = attachment.EmbeddedContent
 	}
+	if attachment.SendAsCalendar.IsSpecified() {
+		current.SendAsCalendar = attachment.SendAsCalendar
+	}
 	// validate
 	if err := attachment.Validate(); err != nil {
 		a.Logger.Debugw("failed to validate attachment", "error", err)

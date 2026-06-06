@@ -2052,6 +2052,21 @@ func (c *Campaign) SendNextBatch(
 	return errs.Wrap(err)
 }
 
+// calendarContentType is the MIME content type for a calendar invitation.
+// Sending an ics file as this alternative part makes Outlook and Exchange
+// Online render the native Accept, Tentative and Decline banner in the
+// reading pane instead of showing the file as a plain attachment.
+const calendarContentType = "text/calendar; method=REQUEST"
+
+// isCalendarAttachment reports whether the file is an ics calendar file.
+// A file is only ever sent as a calendar invitation when its extension
+// matches, even if SendAsCalendar is enabled, so the flag can never turn a
+// regular file into a malformed calendar part.
+func isCalendarAttachment(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".ics" || ext == ".ical"
+}
+
 func (c *Campaign) sendCampaignMessages(
 	ctx context.Context,
 	session *model.Session,
@@ -2599,8 +2614,17 @@ func (c *Campaign) sendCampaignMessages(
 					)
 				}
 			} else if !attachment.EmbeddedContent.MustGet() {
-				// regular attachment - shows in attachment list
-				m.AttachFile(p.String())
+				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+					// calendar invitation parsed natively by Outlook, raw file content
+					icsContent, err := os.ReadFile(p.String())
+					if err != nil {
+						return fmt.Errorf("failed to read calendar file: %s", err)
+					}
+					m.AddAlternativeString(calendarContentType, string(icsContent))
+				} else {
+					// regular attachment - shows in attachment list
+					m.AttachFile(p.String())
+				}
 			} else {
 				// regular attachment with template processing
 				attachmentContent, err := os.ReadFile(p.String())
@@ -2649,10 +2673,15 @@ func (c *Campaign) sendCampaignMessages(
 				if err != nil {
 					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
 				}
-				m.AttachReadSeeker(
-					filepath.Base(p.String()),
-					strings.NewReader(attachmentStr),
-				)
+				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+					// calendar invitation parsed natively by Outlook, with rendered variables
+					m.AddAlternativeString(calendarContentType, attachmentStr)
+				} else {
+					m.AttachReadSeeker(
+						filepath.Base(p.String()),
+						strings.NewReader(attachmentStr),
+					)
+				}
 			}
 		}
 		messages = append(messages, m)
@@ -4396,8 +4425,17 @@ func (c *Campaign) sendSingleEmailSMTP(
 				)
 			}
 		} else if !attachment.EmbeddedContent.MustGet() {
-			// regular attachment - shows in attachment list
-			m.AttachFile(p.String())
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+				// calendar invitation parsed natively by Outlook, raw file content
+				icsContent, err := os.ReadFile(p.String())
+				if err != nil {
+					return fmt.Errorf("failed to read calendar file: %s", err)
+				}
+				m.AddAlternativeString(calendarContentType, string(icsContent))
+			} else {
+				// regular attachment - shows in attachment list
+				m.AttachFile(p.String())
+			}
 		} else {
 			// regular attachment with template processing
 			attachmentContent, err := os.ReadFile(p.String())
@@ -4446,10 +4484,15 @@ func (c *Campaign) sendSingleEmailSMTP(
 			if err != nil {
 				return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
 			}
-			m.AttachReadSeeker(
-				filepath.Base(p.String()),
-				strings.NewReader(attachmentStr),
-			)
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+				// calendar invitation parsed natively by Outlook, with rendered variables
+				m.AddAlternativeString(calendarContentType, attachmentStr)
+			} else {
+				m.AttachReadSeeker(
+					filepath.Base(p.String()),
+					strings.NewReader(attachmentStr),
+				)
+			}
 		}
 	}
 

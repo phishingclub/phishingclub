@@ -418,13 +418,15 @@ export class API {
 		 * @param {string} attachment.name
 		 * @param {string} attachment.description
 		 * @param {Boolean} attachment.embeddedContent
+		 * @param {Boolean} attachment.sendAsCalendar
 		 * @returns {Promise<ApiResponse>}
 		 */
-		update: async ({ id, name, description, embeddedContent }) => {
+		update: async ({ id, name, description, embeddedContent, sendAsCalendar }) => {
 			return await patchJSON(this.getPath(`/attachment/${id}`), {
 				name: name,
 				description: description,
-				embeddedContent: embeddedContent
+				embeddedContent: embeddedContent,
+				sendAsCalendar: sendAsCalendar
 			});
 		},
 

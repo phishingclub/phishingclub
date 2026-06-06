@@ -26,6 +26,10 @@ type Attachment struct {
 	Description     string `gorm:";"`
 	Filename        string `gorm:"not null;index"`
 	EmbeddedContent bool   `gorm:"not null;default:false;index"`
+	// SendAsCalendar sends an ics file as a text/calendar; method=REQUEST
+	// alternative part so Outlook and Exchange Online render it as a native
+	// calendar invitation instead of a plain attachment
+	SendAsCalendar bool `gorm:"not null;default:false;index"`
 }
 
 func (Attachment) TableName() string {

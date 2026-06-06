@@ -468,6 +468,21 @@ func migrate(db *gorm.DB) error {
 		return errs.Wrap(err)
 	}
 
+	// migration for attachments.send_as_calendar
+	// first add column as nullable
+	if err := db.Exec(`ALTER TABLE attachments ADD COLUMN send_as_calendar BOOLEAN`).Error; err != nil {
+		// column might already exist, ignore error
+		errMsg := strings.ToLower(err.Error())
+		if !strings.Contains(errMsg, "duplicate") && !strings.Contains(errMsg, "already exists") {
+			return errs.Wrap(err)
+		}
+	}
+
+	// update existing rows
+	if err := db.Exec(`UPDATE attachments SET send_as_calendar = false WHERE send_as_calendar IS NULL`).Error; err != nil {
+		return errs.Wrap(err)
+	}
+
 	// migration for email_attachments.is_inline
 	// first add column as nullable
 	if err := db.Exec(`ALTER TABLE email_attachments ADD COLUMN is_inline BOOLEAN`).Error; err != nil {
