@@ -240,7 +240,7 @@ func (c *Scim) ListGroups(g *gin.Context) {
 	}
 	base := scimBaseURL(g, companyID)
 	startIndex := parseIntQuery(g, "startIndex", 1)
-	count := parseIntQuery(g, "count", 0)
+	count := parseIntQuery(g, "count", -1)
 	filter := g.Query("filter")
 	excludedAttributes := g.Query("excludedAttributes")
 
@@ -447,7 +447,7 @@ func (c *Scim) ListUsers(g *gin.Context) {
 	base := scimBaseURL(g, companyID)
 	filter := g.Query("filter")
 	startIndex := parseIntQuery(g, "startIndex", 1)
-	count := parseIntQuery(g, "count", 0)
+	count := parseIntQuery(g, "count", -1)
 	sortBy := g.Query("sortBy")
 	sortOrder := g.Query("sortOrder")
 

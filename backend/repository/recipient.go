@@ -746,6 +746,33 @@ func (r *Recipient) GetByEmail(
 	return ToRecipient(&dbRecipient)
 }
 
+// GetByEmailLowerAndCompanyID looks up a recipient by a case-insensitive email
+// match within a company. the supplied email is compared with LOWER() on both
+// sides so that differently cased addresses (e.g. John@X.com vs john@x.com) are
+// treated as the same recipient. used by SCIM provisioning to dedupe.
+func (r *Recipient) GetByEmailLowerAndCompanyID(
+	ctx context.Context,
+	email *vo.Email,
+	companyID *uuid.UUID,
+	fields ...string,
+) (*model.Recipient, error) {
+	var dbRecipient database.Recipient
+	emailCol := TableColumn(database.RECIPIENT_TABLE, "email")
+	companyCol := TableColumn(database.RECIPIENT_TABLE, "company_id")
+	q := r.DB.Where(
+		fmt.Sprintf("LOWER(%s) = LOWER(?) AND %s = ?", emailCol, companyCol),
+		email.String(),
+		companyID,
+	)
+	fields = assignTableToColumns(database.RECIPIENT_TABLE, fields)
+	q = useSelect(q, fields)
+	res := q.First(&dbRecipient)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return ToRecipient(&dbRecipient)
+}
+
 func (r *Recipient) GetByEmailAndCompanyID(
 	ctx context.Context,
 	email *vo.Email,

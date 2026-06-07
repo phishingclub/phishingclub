@@ -33,6 +33,28 @@ func NewIPRateLimiterMiddleware(limit float64, burst int) gin.HandlerFunc {
 	}
 }
 
+// NewScimRateLimiterMiddleware limits SCIM requests per company rather than per
+// IP. cloud identity providers (Microsoft Entra, Okta) send every tenant's SCIM
+// traffic from a shared pool of source IPs, so an IP based limit would throttle
+// all companies together. keying on the companyID path param gives each company
+// its own bucket. requests without a companyID fall back to the client IP.
+// limit is requests per second, burst is the maximum burst size.
+func NewScimRateLimiterMiddleware(limit float64, burst int) gin.HandlerFunc {
+	companyLimiter := NewKeyRateLimiter(rate.Limit(limit), burst, 10*time.Minute)
+	return func(c *gin.Context) {
+		key := c.Param("companyID")
+		if key == "" {
+			key = c.ClientIP()
+		}
+		limiter := companyLimiter.GetLimiter(key)
+		if !limiter.Allow() {
+			c.AbortWithStatus(http.StatusTooManyRequests)
+			return
+		}
+		c.Next()
+	}
+}
+
 // KeyRateLimiter is a rate limiter for key such as username, email or IP
 type KeyRateLimiter struct {
 	// key is a map of key to limiterEntry

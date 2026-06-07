@@ -280,8 +280,11 @@ func setupRoutes(
 	controllers *Controllers,
 	middleware *Middlewares,
 ) *gin.Engine {
-	// scim v2 provisioning endpoints — no ip allowlist, bearer-token auth only
-	r.
+	// scim v2 provisioning endpoints — no ip allowlist, bearer-token auth only.
+	// rate limited per company so cloud IdPs sharing source IPs across tenants
+	// do not throttle each other.
+	scim := r.Group("/", middleware.ScimRateLimiter)
+	scim.
 		GET(ROUTE_SCIM_V2_SERVICE_PROVIDER_CONFIG, controllers.Scim.ServiceProviderConfig).
 		GET(ROUTE_SCIM_V2_RESOURCE_TYPES, controllers.Scim.ResourceTypes).
 		GET(ROUTE_SCIM_V2_SCHEMAS, controllers.Scim.Schemas).
