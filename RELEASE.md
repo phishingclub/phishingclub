@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.37.1] - 2026-06-07
+- Fix disable CSP giving issue when previews
+- Fix preview for report template
+
 ## [1.37.0] - 2026-06-06
 - Added generate campaign report
 - Added global and company level campaign report customization 
