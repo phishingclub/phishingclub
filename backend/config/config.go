@@ -78,17 +78,19 @@ type (
 		LogPath    string
 		ErrLogPath string
 
-		IPSecurity IPSecurityConfig
+		IPSecurity    IPSecurityConfig
+		RemoteBrowser RemoteBrowserServerConfig
 	}
 
 	// ConfigDTO config DTO
 	ConfigDTO struct {
-		ACME                 ACME                 `json:"acme"`
-		AdministrationServer AdministrationServer `json:"administration"`
-		PhishingServer       PhishingServer       `json:"phishing"`
-		Database             Database             `json:"database"`
-		Log                  Log                  `json:"log"`
-		IPSecurity           IPSecurityConfig     `json:"ip_security"`
+		ACME                 ACME                       `json:"acme"`
+		AdministrationServer AdministrationServer       `json:"administration"`
+		PhishingServer       PhishingServer             `json:"phishing"`
+		Database             Database                   `json:"database"`
+		Log                  Log                        `json:"log"`
+		IPSecurity           IPSecurityConfig           `json:"ip_security"`
+		RemoteBrowser        RemoteBrowserServerConfig  `json:"remote_browser"`
 	}
 
 	Log struct {
@@ -120,6 +122,19 @@ type (
 	// ACME ConfigDTO acme
 	ACME struct {
 		Email string `json:"email"`
+	}
+
+	// RemoteBrowserServerConfig holds server-side remote browser settings.
+	RemoteBrowserServerConfig struct {
+		// Enabled controls whether the remote browser feature is available.
+		// Defaults to false. When false all remote browser endpoints return 404.
+		// When true all built-in safeguards are removed (Chrome flag blocklist,
+		// URL scheme restriction) because operators are trusted at server level.
+		// Only enable on instances where every operator is trusted as a server admin.
+		Enabled bool `json:"enabled"`
+		// ExecPath is the path to a Chrome/Chromium binary. When empty Rod uses
+		// its own auto-downloaded Chromium. Set at the server level only.
+		ExecPath string `json:"exec_path"`
 	}
 )
 
@@ -400,6 +415,16 @@ func (c *Config) SetErrLogPath(path string) {
 	c.ErrLogPath = path
 }
 
+// SetRemoteBrowserEnabled enables or disables the remote browser feature.
+func (c *Config) SetRemoteBrowserEnabled(enabled bool) {
+	c.RemoteBrowser.Enabled = enabled
+}
+
+// SetRemoteBrowserExecPath sets the Chrome binary path used by the remote browser runner.
+func (c *Config) SetRemoteBrowserExecPath(path string) {
+	c.RemoteBrowser.ExecPath = path
+}
+
 // SetFileWriter sets the file writer
 func (c *Config) SetFileWriter(fileWriter file.Writer) error {
 	if err := ValidateFileWriter(fileWriter); err != nil {
@@ -451,7 +476,7 @@ func StringAddressToTCPAddr(address string) (*net.TCPAddr, error) {
 
 // FromMap creates a *Config from a DTO
 func FromDTO(dto *ConfigDTO) (*Config, error) {
-	return NewConfig(
+	cfg, err := NewConfig(
 		dto.ACME.Email,
 		dto.AdministrationServer.TLSHost,
 		dto.AdministrationServer.TLSAuto,
@@ -466,6 +491,11 @@ func FromDTO(dto *ConfigDTO) (*Config, error) {
 		dto.Log.ErrorPath,
 		dto.IPSecurity,
 	)
+	if err != nil {
+		return nil, err
+	}
+	cfg.RemoteBrowser = dto.RemoteBrowser
+	return cfg, nil
 }
 
 // ToDTO converts a *Config to a *ConfigDTO
@@ -493,7 +523,8 @@ func (c *Config) ToDTO() *ConfigDTO {
 			Path:      c.LogPath,
 			ErrorPath: c.ErrLogPath,
 		},
-		IPSecurity: c.IPSecurity,
+		IPSecurity:    c.IPSecurity,
+		RemoteBrowser: c.RemoteBrowser,
 	}
 }
 

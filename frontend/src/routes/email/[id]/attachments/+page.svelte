@@ -118,7 +118,7 @@
 
 	const getEmail = async () => {
 		try {
-			const res = await api.email.getByID($page.params.id);
+			const res = await api.email.getByID($page.params.id, contextCompanyID);
 			if (!res.success) {
 				throw res.error;
 			}

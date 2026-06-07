@@ -16,7 +16,12 @@ export const getJSON = async (url) => {
 	const res = await fetch(url, {
 		method: 'GET'
 	});
-	const body = await res.json();
+	let body = {};
+	try {
+		body = await res.json();
+	} catch (e) {
+		body = { success: false, error: 'invalid JSON in response' };
+	}
 	return newResponse(body.success, res.status, body.error, body.data);
 };
 

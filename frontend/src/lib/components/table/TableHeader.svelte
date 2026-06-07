@@ -26,7 +26,7 @@
 
 <TableHead>
 	<TableRow>
-		{#each columns as column, i (i)}
+		{#each columns as column, i (typeof column === 'object' ? column.column : column)}
 			{#if typeof column === 'object'}
 				<TableHeadCell
 					{...column}
@@ -35,7 +35,6 @@
 					{isGhost}
 					sortable={sortableMap[column.column.toLowerCase()]}
 					last={i === columns.length - 1}
-					fillRest={i === columns.length - 1 && !hasActions}
 				/>
 			{:else}
 				<TableHeadCell
@@ -43,7 +42,6 @@
 					{pagination}
 					sortable={sortableMap[column.toLowerCase()]}
 					last={i === columns.length - 1}
-					fillRest={i === columns.length - 1 && !hasActions}
 				/>
 			{/if}
 		{/each}

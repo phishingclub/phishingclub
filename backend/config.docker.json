@@ -16,5 +16,8 @@
   "database": {
     "engine": "sqlite3",
     "dsn": "file:/app/.dev/db.sqlite3"
+  },
+  "remote_browser": {
+    "enabled": true
   }
 }

@@ -25,58 +25,50 @@
 			document.addEventListener('keydown', handleGlobalKeydown);
 			activeFormElement.set(dropdownId); // set this as active, closing others
 
-			const viewportHeight = window.innerHeight;
-			const buffer = 20; // extra space to ensure some padding from viewport edges
-			const minHeight = 64; // minimum dropdown height
-			const maxHeight = 400; // maximum dropdown height
+			// Use clientWidth/clientHeight (excludes scrollbars, matches CSS layout) rather than
+			// window.innerWidth which can report stale or incorrect values after client-side navigation
+			// when the page previously had horizontal overflow (e.g. navigating from dashboard).
+			const viewportHeight = document.documentElement.clientHeight;
+			const viewportWidth = document.documentElement.clientWidth;
+			const buffer = 20;
+			const minHeight = 64;
+			const maxHeight = 400;
+			const gap = 8;
 
-			let clickViewportY, pageX, pageY;
+			// Capture scroll offsets so we can express the final position in document coordinates.
+			// position:absolute (relative to initial containing block) requires document coords,
+			// which avoids the position:fixed quirk where body overflow-x:auto can cause the
+			// containing block to shift after cross-page navigation (e.g. dashboard → filters).
+			const scrollX = window.scrollX || document.documentElement.scrollLeft || 0;
+			const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
 
-			// handle both mouse and keyboard events
-			if (e.clientY !== undefined && e.pageX !== undefined) {
-				// mouse event
-				clickViewportY = e.clientY;
-				pageX = e.pageX;
-				pageY = e.pageY;
-			} else {
-				// keyboard event - use button position
-				const buttonRect = buttonRef.getBoundingClientRect();
-				clickViewportY = buttonRect.top;
-				pageX = buttonRect.left + window.scrollX;
-				pageY = buttonRect.top + window.scrollY;
-			}
+			const buttonRect = buttonRef.getBoundingClientRect();
 
-			// calculate available space above and below
-			const spaceAbove = clickViewportY - buffer;
-			const spaceBelow = viewportHeight - clickViewportY - buffer;
-
-			// choose position based on available space, with preference for below
+			const spaceAbove = buttonRect.top - buffer;
+			const spaceBelow = viewportHeight - buttonRect.bottom - buffer;
 			const shouldShowAbove = spaceBelow < minHeight && spaceAbove > spaceBelow;
 			const availableSpace = shouldShowAbove ? spaceAbove : spaceBelow;
-
-			// calculate optimal height within bounds
 			const optimalHeight = Math.min(Math.max(availableSpace, minHeight), maxHeight);
 
-			// find position
-			const gap = 8; // small gap between menu and cursor/button
-			menuX = pageX - 256;
+			// Calculate in viewport coordinates first, then clamp to viewport bounds.
+			const menuWidth = 256;
+			const spaceOnRight = viewportWidth - buttonRect.right - buffer;
+			menuX = spaceOnRight >= menuWidth ? buttonRect.left : buttonRect.right - menuWidth;
+			menuX = Math.max(buffer, Math.min(menuX, viewportWidth - menuWidth - buffer));
 
 			if (shouldShowAbove) {
-				// calculate actual menu height by temporarily showing it
 				menuRef.style.visibility = 'hidden';
 				menuRef.style.display = 'block';
 				const actualMenuHeight = menuRef.scrollHeight;
 				menuRef.style.display = '';
 				menuRef.style.visibility = '';
-
-				// position above by moving up by the actual menu height
-				menuY = pageY - actualMenuHeight - gap;
+				menuY = buttonRect.top - actualMenuHeight - gap;
 			} else {
-				// for below positioning, use original click/button position
-				menuY = pageY + gap;
+				menuY = buttonRect.bottom + gap;
 			}
 
-			menuRef.style = `left: ${menuX}px; top: ${menuY}px; max-height: ${optimalHeight}px`;
+			// Convert viewport coordinates to document coordinates for position:absolute.
+			menuRef.style = `left: ${menuX + scrollX}px; top: ${menuY + scrollY}px; max-height: ${optimalHeight}px`;
 		}
 	};
 
@@ -160,7 +152,7 @@
 
 	<div
 		bind:this={menuRef}
-		class="absolute bg-white dark:bg-gray-900/90 drop-shadow-md dark:shadow-gray-900/50 border dark:border-gray-700/60 z-20 w-64 rounded-md overflow-y-scroll transition-colors duration-200 {scrollBarClassesVertical}"
+		class="absolute bg-white dark:bg-gray-900/90 drop-shadow-md dark:shadow-gray-900/50 border dark:border-gray-700/60 z-50 w-64 rounded-md overflow-y-scroll transition-colors duration-200 {scrollBarClassesVertical}"
 		class:hidden={!isMenuVisible}
 	>
 		<ul class="flex flex-col text-left">

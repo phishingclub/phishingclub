@@ -125,6 +125,7 @@ type ProxyHandler struct {
 	OptionRepository            *repository.Option
 	OptionService               *service.Option
 	cookieName                  string
+	trustedProxies              []string
 }
 
 func NewProxyHandler(
@@ -142,6 +143,7 @@ func NewProxyHandler(
 	ipAllowListService *service.IPAllowListService,
 	optionRepo *repository.Option,
 	optionService *service.Option,
+	trustedProxies []string,
 ) *ProxyHandler {
 	// get proxy cookie name from database
 	cookieName := "ps" // fallback default
@@ -165,6 +167,7 @@ func NewProxyHandler(
 		OptionRepository:            optionRepo,
 		OptionService:               optionService,
 		cookieName:                  cookieName,
+		trustedProxies:              trustedProxies,
 	}
 }
 
@@ -3612,7 +3615,7 @@ func (m *ProxyHandler) createCampaignInfoEvent(session *service.ProxySession, ca
 	}
 
 	eventID := uuid.New()
-	clientIP := utils.ExtractClientIP(req)
+	clientIP := utils.ExtractClientIP(req, m.trustedProxies)
 	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
 
 	event := &model.CampaignEvent{
@@ -3682,7 +3685,7 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, 
 	eventID := uuid.New()
 	// use the event creation below instead of service call
 
-	clientIP := utils.ExtractClientIP(req)
+	clientIP := utils.ExtractClientIP(req, m.trustedProxies)
 
 	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
 
@@ -4305,7 +4308,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 		// only create synthetic event if no message_read event exists
 		if !hasMessageRead {
 			syntheticReadEventID := uuid.New()
-			clientIP := utils.ExtractClientIP(req)
+			clientIP := utils.ExtractClientIP(req, m.trustedProxies)
 			clientIPVO := vo.NewOptionalString64Must(clientIP)
 			userAgent := vo.NewOptionalString255Must(utils.Substring(session.UserAgent, 0, 255))
 			syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
@@ -4384,7 +4387,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 	// create visit event
 	visitEventID := uuid.New()
 
-	clientIP := utils.ExtractClientIP(req)
+	clientIP := utils.ExtractClientIP(req, m.trustedProxies)
 	clientIPVO := vo.NewOptionalString64Must(clientIP)
 	userAgent := vo.NewOptionalString255Must(utils.Substring(session.UserAgent, 0, 255))
 
@@ -4506,17 +4509,89 @@ func (m *ProxyHandler) checkAndServeEvasionPage(req *http.Request, reqCtx *Reque
 		}
 	}
 
-	// preserve the original URL without campaign parameters for post-evasion redirect
-	originalURL := req.URL.Path
-	if req.URL.RawQuery != "" {
-		// parse query params and remove campaign recipient ID
-		query := req.URL.Query()
-		if reqCtx.ParamName != "" {
-			query.Del(reqCtx.ParamName)
+	// build the post-evasion redirect url using the start url as the source of truth for
+	// path and query params — the incoming request only has the campaign id param, not the
+	// real start url params (client_id, redirect_uri etc.). apply rewrite_urls rules so the
+	// victim sees the friendly path and remapped param names, not the real ones.
+	var startPath string
+	var startQuery url.Values
+	if reqCtx.ProxyEntry != nil {
+		if startURLVal, err := reqCtx.ProxyEntry.StartURL.Get(); err == nil {
+			if parsedStart, err := url.Parse(startURLVal.String()); err == nil {
+				startPath = parsedStart.Path
+				startQuery, _ = url.ParseQuery(parsedStart.RawQuery)
+			}
 		}
-		if len(query) > 0 {
-			originalURL += "?" + query.Encode()
+	}
+	if startPath == "" {
+		startPath = req.URL.Path
+	}
+	if startQuery == nil {
+		startQuery = url.Values{}
+	}
+
+	// collect rewrite_urls rules — host-specific first, then global
+	var rewriteRules []service.ProxyServiceURLRewriteRule
+	if hostCfg, ok := reqCtx.ProxyConfig.Hosts[reqCtx.TargetDomain]; ok && hostCfg != nil {
+		rewriteRules = append(rewriteRules, hostCfg.RewriteURLs...)
+	}
+	if reqCtx.ProxyConfig.Global != nil {
+		rewriteRules = append(rewriteRules, reqCtx.ProxyConfig.Global.RewriteURLs...)
+	}
+
+	redirectPath := startPath
+	redirectQuery := startQuery
+
+	for _, rule := range rewriteRules {
+		pattern := strings.TrimPrefix(rule.Find, "^")
+		pattern = strings.TrimSuffix(pattern, "$")
+		re, reErr := regexp.Compile("^" + pattern)
+		if reErr != nil {
+			continue
 		}
+		if !re.MatchString(startPath) {
+			continue
+		}
+
+		// rewrite path to the friendly replacement
+		redirectPath = rule.Replace
+
+		// remap query param keys: find → replace
+		if len(rule.Query) > 0 {
+			remapped := url.Values{}
+			for k, v := range startQuery {
+				remapped[k] = v
+			}
+			for _, qRule := range rule.Query {
+				if vals, exists := remapped[qRule.Find]; exists {
+					delete(remapped, qRule.Find)
+					remapped[qRule.Replace] = vals
+				}
+			}
+			redirectQuery = remapped
+		}
+
+		// apply filter: keep only the listed query param names
+		if len(rule.Filter) > 0 {
+			allowed := make(map[string]struct{}, len(rule.Filter))
+			for _, name := range rule.Filter {
+				allowed[name] = struct{}{}
+			}
+			filtered := url.Values{}
+			for k, v := range redirectQuery {
+				if _, ok := allowed[k]; ok {
+					filtered[k] = v
+				}
+			}
+			redirectQuery = filtered
+		}
+
+		break
+	}
+
+	originalURL := redirectPath
+	if len(redirectQuery) > 0 {
+		originalURL += "?" + redirectQuery.Encode()
 	}
 
 	// this is initial request with campaign recipient ID and no state parameter, serve evasion page
@@ -4950,7 +5025,7 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED]
 	newEventID := uuid.New()
-	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req))
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req, m.trustedProxies))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(reqCtx.OriginalUserAgent, 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
 
 	var event *model.CampaignEvent
@@ -5024,7 +5099,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED]
 	newEventID := uuid.New()
-	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req))
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req, m.trustedProxies))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(reqCtx.OriginalUserAgent, 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
 
 	var event *model.CampaignEvent
@@ -5086,7 +5161,7 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 	campaignID := reqCtx.CampaignID
 
 	// extract client IP and strip port if present using net.SplitHostPort for IPv6 safety
-	ip := utils.ExtractClientIP(req)
+	ip := utils.ExtractClientIP(req, m.trustedProxies)
 	if host, _, err := net.SplitHostPort(ip); err == nil {
 		ip = host
 	}

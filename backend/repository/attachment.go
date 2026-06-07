@@ -18,6 +18,7 @@ var attachmentAllowedColumns = assignTableToColumns(database.ATTACHMENT_TABLE, [
 	"name",
 	"description",
 	"embedded_content",
+	"send_as_calendar",
 	"filename",
 })
 
@@ -164,6 +165,7 @@ func ToAttachment(row *database.Attachment) *model.Attachment {
 		*vo.NewFileNameMust(row.Filename),
 	)
 	embeddedContent := nullable.NewNullableWithValue(row.EmbeddedContent)
+	sendAsCalendar := nullable.NewNullableWithValue(row.SendAsCalendar)
 	attachment := &model.Attachment{
 		ID:              id,
 		CreatedAt:       row.CreatedAt,
@@ -172,6 +174,7 @@ func ToAttachment(row *database.Attachment) *model.Attachment {
 		Description:     description,
 		FileName:        filename,
 		EmbeddedContent: embeddedContent,
+		SendAsCalendar:  sendAsCalendar,
 	}
 
 	attachment.CompanyID = nullable.NewNullNullable[uuid.UUID]()

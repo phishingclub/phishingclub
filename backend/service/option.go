@@ -199,6 +199,13 @@ func (o *Option) SetOptionByKey(
 				"value",
 			)
 		}
+	case data.OptionKeyReportPDFEnabled:
+		if v != "true" && v != "false" {
+			return validate.WrapErrorWithField(
+				errs.NewValidationError(errors.New("invalid value")),
+				"value",
+			)
+		}
 	case data.OptionKeyObfuscationTemplate:
 		// is allow listed
 	default:

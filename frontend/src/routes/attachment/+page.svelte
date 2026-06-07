@@ -29,6 +29,7 @@
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
+	import FileField from '$lib/components/FileField.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -38,7 +39,26 @@
 	let formValues = {
 		name: '',
 		description: '',
-		embeddedContent: false
+		embeddedContent: false,
+		sendAsCalendar: false,
+		fileName: ''
+	};
+
+	// the send as calendar option only applies to ics calendar files
+	let showCalendarOption = false;
+	const isCalendarFileName = (name) => {
+		if (!name) {
+			return false;
+		}
+		const lower = name.toLowerCase();
+		return lower.endsWith('.ics') || lower.endsWith('.ical');
+	};
+	const onFilesSelected = (e) => {
+		const files = e.target.files;
+		showCalendarOption = Array.from(files).some((f) => isCalendarFileName(f.name));
+		if (!showCalendarOption) {
+			formValues.sendAsCalendar = false;
+		}
 	};
 
 	let attachments = [];
@@ -155,6 +175,7 @@
 			formData.append('name', formValues.name);
 			formData.append('description', formValues.description);
 			formData.append('embeddedContent', formValues.embeddedContent ? 'true' : 'false');
+			formData.append('sendAsCalendar', formValues.sendAsCalendar ? 'true' : 'false');
 			if (contextCompanyID) {
 				formData.append('companyID', contextCompanyID);
 			}
@@ -196,6 +217,9 @@
 			formValues.name = res.data.name;
 			formValues.description = res.data.description;
 			formValues.embeddedContent = res.data.embeddedContent;
+			formValues.sendAsCalendar = res.data.sendAsCalendar;
+			formValues.fileName = res.data.fileName;
+			showCalendarOption = isCalendarFileName(res.data.fileName);
 			isModalVisible = true;
 		} catch (e) {
 			addToast('Failed to get attachment', 'Error');
@@ -211,6 +235,9 @@
 		formValues.name = '';
 		formValues.description = '';
 		formValues.embeddedContent = false;
+		formValues.sendAsCalendar = false;
+		formValues.fileName = '';
+		showCalendarOption = false;
 		isModalVisible = false;
 	};
 
@@ -248,6 +275,7 @@
 			'Description',
 			'Filename',
 			{ column: 'Embedded Content', alignText: 'center' },
+			{ column: 'Send As Calendar', alignText: 'center' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={[
@@ -255,6 +283,7 @@
 			'Description',
 			'Filename',
 			'Embedded Content',
+			'Send As Calendar',
 			...(contextCompanyID ? ['scope'] : [])
 		]}
 		hasData={!!attachments.length}
@@ -307,6 +336,7 @@
 					{/if}
 				</TableCell>
 				<TableCellCheck value={attachment.embeddedContent} />
+				<TableCellCheck value={attachment.sendAsCalendar} />
 				{#if contextCompanyID}
 					<TableCellScope companyID={attachment.companyID} />
 				{/if}
@@ -351,18 +381,16 @@
 						optional
 						toolTipText="File contains template variables">Embedded content</CheckboxField
 					>
+					{#if showCalendarOption}
+						<CheckboxField
+							bind:value={formValues.sendAsCalendar}
+							defaultValue={false}
+							optional
+							toolTipText="Send ics files as a calendar invitation so Outlook shows Accept, Tentative and Decline">Send as calendar</CheckboxField
+						>
+					{/if}
 					{#if modalMode === 'create'}
-						<label for="file" class="flex flex-col py-2 w-60">
-							<p class="font-semibold text-slate-600 py-2">Files</p>
-
-							<input
-								id="files"
-								type="file"
-								name="files"
-								class="border-solid border-2 py-2 px-2 rounded-md file:px-4 file:py-2 file:text-white file:cursor-pointer file:text-sm file:font-semibold file:bg-cta-green hover:cursor-pointer file:hover:bg-cta-orange file:border-hidden file:rounded-md"
-								multiple
-							/>
-						</label>
+						<FileField name="files" multiple on:change={onFilesSelected}>Files</FileField>
 					{/if}
 				</FormColumn>
 			</FormColumns>

@@ -161,6 +161,11 @@
 		proxy: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
   <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
 </svg>
+`,
+
+		remote_browser: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0H3" />
+</svg>
 `
 	};
 
@@ -176,6 +181,7 @@
 			'/domain/': 'domains_overview',
 			'/page/': 'pages',
 			'/proxy/': 'proxy',
+			'/remote-browser/': 'remote_browser',
 			'/asset/': 'assets',
 			'/email/': 'emails_overview',
 			'/attachment/': 'attachments',
@@ -297,11 +303,12 @@
 		<!-- Navigation Items -->
 		<div
 			bind:this={menuItemsElement}
-			class="flex flex-col flex-1 overflow-y-auto overflow-x-hidden {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue dark:[&::-webkit-scrollbar-track]:bg-gray-800"
+			class="flex flex-col flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue dark:[&::-webkit-scrollbar-track]:bg-gray-800"
 			class:py-4={!isPinned}
 		>
 			{#each menu as link}
 				{#if link.type === 'submenu'}
+					<ConditionalDisplay show={link.whitebox ? 'whitebox' : link.blackbox ? 'blackbox' : 'both'}>
 					<div class="py-1 mt-4 first:mt-0">
 						{#if isExpanded}
 							<div
@@ -315,7 +322,7 @@
 							{#each link.items as item, i (i)}
 								<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
 									<a
-										class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
+										class="flex items-center py-2 text-sm transition-all duration-150 relative group
                                         {(
 											item.route === '/dashboard/'
 												? $page.url.pathname.startsWith('/dashboard')
@@ -324,6 +331,8 @@
 											? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
 											: 'text-blue-100 dark:text-gray-200 hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-gray-100'}"
 										class:hidden={shouldHideMenuItem(item.route)}
+										class:px-3={isExpanded}
+										class:justify-center={!isExpanded}
 										draggable="false"
 										href={item.route}
 										title={item.label}
@@ -355,12 +364,15 @@
 							{/each}
 						</div>
 					</div>
+					</ConditionalDisplay>
 				{:else}
 					<a
-						class="flex items-center px-3 py-2 text-sm transition-all duration-150 relative group
+						class="flex items-center py-2 text-sm transition-all duration-150 relative group
                             {$page.url.pathname === link.route
 							? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
 							: 'text-blue-100 dark:text-gray-200 hover:text-white dark:hover:text-gray-100 hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20'}"
+						class:px-3={isExpanded}
+						class:justify-center={!isExpanded}
 						draggable="false"
 						href={link.route}
 					>

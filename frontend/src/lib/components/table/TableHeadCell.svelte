@@ -10,7 +10,6 @@
 	export let size = '';
 	// last tells if it the last field column before the actions column
 	export let last = false;
-	export let fillRest = false;
 	export let isGhost = false;
 	export let title = '';
 
@@ -40,7 +39,6 @@
 	class:w-48={size === 'small'}
 	class:w-56={size === 'medium'}
 	class:w-80={size === 'large'}
-	class:w-full={fillRest}
 >
 	<button
 		class="flex group cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30 rounded-md p-1 transition-colors duration-200"
@@ -55,7 +53,7 @@
 				class="font-bold text-slate-600 dark:text-gray-200 text-{alignText} flex transition-colors duration-200"
 			>
 				{#if !isGhost}
-					{title.length ? title : column}
+					{title?.length ? title : column}
 				{:else}
 					<GhostText />
 				{/if}

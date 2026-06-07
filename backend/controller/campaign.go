@@ -1228,3 +1228,4 @@ func (c *Campaign) UploadReportedCSV(g *gin.Context) {
 		"message":   "CSV processed successfully",
 	})
 }
+

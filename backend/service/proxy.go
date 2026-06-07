@@ -68,6 +68,7 @@ type ProxyServiceRules struct {
 // TLS modes:
 // - "managed": Use Let's Encrypt for automatic certificate management (DEFAULT)
 // - "self-signed": Use automatically generated self-signed certificates
+// - "custom": Use a manually supplied certificate (key + pem)
 //
 // Configuration can be set globally and overridden per-host:
 //
@@ -79,7 +80,7 @@ type ProxyServiceRules struct {
 //	  tls:
 //	    mode: "self-signed"  # override global setting
 type ProxyServiceTLSConfig struct {
-	Mode string `yaml:"mode"` // "managed" | "self-signed"
+	Mode string `yaml:"mode"` // "managed" | "self-signed" | "custom"
 }
 
 // ProxyServiceImpersonateConfig represents client impersonation configuration
@@ -756,6 +757,13 @@ func (m *Proxy) UpdateByID(
 	if v, err := proxy.ProxyConfig.Get(); err == nil {
 		current.ProxyConfig.Set(v)
 	}
+	// copy transient cert fields — not persisted to db, but needed by syncProxyDomains
+	if v, err := proxy.GlobalTLSKey.Get(); err == nil {
+		current.GlobalTLSKey.Set(v)
+	}
+	if v, err := proxy.GlobalTLSPem.Get(); err == nil {
+		current.GlobalTLSPem.Set(v)
+	}
 
 	// validate updated Proxy configuration
 	if err := m.validateProxyConfigForUpdate(ctx, current, id); err != nil {
@@ -890,6 +898,11 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 			)
 		}
 
+		// validate domain-specific TLS config
+		if err := m.validateTLSConfig(domainConfig.TLS); err != nil {
+			return err
+		}
+
 		// validate domain-specific access control
 		if err := m.validateAccessControl(domainConfig.Access); err != nil {
 			return err
@@ -905,12 +918,17 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 			return err
 		}
 
-		// note: domain uniqueness validation is skipped during updates
-		// the syncProxyDomains method will handle domain management properly
+		// validate that the phishing domain is not owned by a different proxy
+		if err := m.validatePhishingDomainOwnership(ctx, domainConfig.To, proxyID); err != nil {
+			return err
+		}
 	}
 
 	// validate global rules
 	if config.Global != nil {
+		if err := m.validateTLSConfig(config.Global.TLS); err != nil {
+			return err
+		}
 		if err := m.validateAccessControl(config.Global.Access); err != nil {
 			return err
 		}
@@ -927,6 +945,52 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 		// validate global response rules
 		if err := m.validateResponseRules(config.Global.Response); err != nil {
 			return err
+		}
+	}
+
+	// validate custom TLS domains have a cert — either a new one is supplied or the domain already has one
+	newCertProvided := false
+	if globalKey, keyErr := proxy.GlobalTLSKey.Get(); keyErr == nil && len(globalKey) > 0 {
+		if globalPem, pemErr := proxy.GlobalTLSPem.Get(); pemErr == nil && len(globalPem) > 0 {
+			newCertProvided = true
+		}
+	}
+	if !newCertProvided {
+		// resolve the effective TLS mode for each host and check if any require a cert we don't have
+		for _, domainConfig := range config.Hosts {
+			if domainConfig == nil {
+				continue
+			}
+			// determine effective TLS mode for this host
+			effectiveTLS := ""
+			if domainConfig.TLS != nil && domainConfig.TLS.Mode != "" {
+				effectiveTLS = domainConfig.TLS.Mode
+			} else if config.Global != nil && config.Global.TLS != nil {
+				effectiveTLS = config.Global.TLS.Mode
+			}
+			if effectiveTLS != "custom" {
+				continue
+			}
+			// check if the phishing domain already has a custom cert in the db
+			phishingDomain, err := vo.NewString255(domainConfig.To)
+			if err != nil {
+				continue
+			}
+			existingDomain, err := m.DomainRepository.GetByName(ctx, phishingDomain, &repository.DomainOption{})
+			if err != nil || existingDomain == nil {
+				// new domain — no existing cert possible
+				return validate.WrapErrorWithField(
+					fmt.Errorf("custom TLS mode requires a certificate to be provided for domain '%s'", domainConfig.To),
+					"proxyConfig",
+				)
+			}
+			if !existingDomain.OwnManagedTLS.MustGet() {
+				// existing domain but no custom cert yet
+				return validate.WrapErrorWithField(
+					fmt.Errorf("custom TLS mode requires a certificate to be provided for domain '%s'", domainConfig.To),
+					"proxyConfig",
+				)
+			}
 		}
 	}
 
@@ -1546,9 +1610,9 @@ func (m *Proxy) validateTLSConfig(tlsConfig *ProxyServiceTLSConfig) error {
 	}
 
 	// validate TLS mode
-	if tlsConfig.Mode != "" && tlsConfig.Mode != "managed" && tlsConfig.Mode != "self-signed" {
+	if tlsConfig.Mode != "" && tlsConfig.Mode != "managed" && tlsConfig.Mode != "self-signed" && tlsConfig.Mode != "custom" {
 		return validate.WrapErrorWithField(
-			errors.New("tls.mode must be either 'managed' or 'self-signed'"),
+			errors.New("tls.mode must be either 'managed', 'self-signed', or 'custom'"),
 			"proxyConfig",
 		)
 	}
@@ -1765,45 +1829,6 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 				errors.New(fmt.Sprintf("'to' field is required for domain mapping '%s'", originalDomain)),
 				"proxyConfig",
 			)
-		}
-
-		// validate that phishing domain doesn't already exist (unless it's managed by this proxy)
-		phishingDomainVO, err := vo.NewString255(domainConfig.To)
-		if err != nil {
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("invalid phishing domain format: %s", domainConfig.To)),
-				"proxyConfig",
-			)
-		}
-
-		existingDomain, err := m.DomainRepository.GetByName(ctx, phishingDomainVO, &repository.DomainOption{})
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		if existingDomain != nil {
-			// check if this domain is managed by a different proxy or is a regular domain
-			if existingDomain.Type.MustGet().String() != "proxy" {
-				return validate.WrapErrorWithField(
-					errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", domainConfig.To)),
-					"proxyConfig",
-				)
-			} else {
-				// it's a proxy domain, check if it belongs to a different proxy
-				existingTarget, err := existingDomain.ProxyTargetDomain.Get()
-				if err == nil {
-					startURL, err := proxy.StartURL.Get()
-					if err == nil {
-						// extract domain from start URL for comparison
-						startURLParsed, err := url.Parse(startURL.String())
-						if err == nil && existingTarget.String() != startURLParsed.Host {
-							return validate.WrapErrorWithField(
-								errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration", domainConfig.To)),
-								"proxyConfig",
-							)
-						}
-					}
-				}
-			}
 		}
 
 		// validate domain-specific scheme
@@ -2039,8 +2064,9 @@ func (m *Proxy) deleteProxyDomains(ctx context.Context, session *model.Session, 
 	return nil
 }
 
-// validatePhishingDomainUniqueness checks if a phishing domain is already used by another proxy
-func (m *Proxy) validatePhishingDomainUniqueness(ctx context.Context, phishingDomain string, excludeProxyID *uuid.UUID) error {
+// validatePhishingDomainOwnership checks that a phishing domain is either unclaimed or owned by the given proxy.
+// Used during updates where the proxy already has an ID.
+func (m *Proxy) validatePhishingDomainOwnership(ctx context.Context, phishingDomain string, proxyID *uuid.UUID) error {
 	phishingDomainVO, err := vo.NewString255(phishingDomain)
 	if err != nil {
 		return validate.WrapErrorWithField(
@@ -2053,31 +2079,32 @@ func (m *Proxy) validatePhishingDomainUniqueness(ctx context.Context, phishingDo
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	if existingDomain != nil {
-		// check if this domain is managed by a different proxy
-		if existingDomain.Type.MustGet().String() == "proxy" {
-			// check if it's managed by the same proxy we're updating (allowed)
-			if excludeProxyID != nil {
-				// this is a bit of a workaround - we'd need to track which proxy owns which domain
-				// for now, we'll allow updates to existing proxy domains
-				// TODO: add a proxy_id field to domains table for proper tracking
-				return nil
-			}
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("phishing domain '%s' is already used by another proxy", phishingDomain)),
-				"proxyConfig",
-			)
-		} else {
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", phishingDomain)),
-				"proxyConfig",
-			)
-		}
+	if existingDomain == nil {
+		return nil
 	}
-	return nil
+
+	if existingDomain.Type.MustGet().String() != "proxy" {
+		return validate.WrapErrorWithField(
+			errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", phishingDomain)),
+			"proxyConfig",
+		)
+	}
+
+	existingProxyID, err := existingDomain.ProxyID.Get()
+	if err != nil {
+		return nil // no owner — allow
+	}
+	if existingProxyID == *proxyID {
+		return nil // owned by this proxy — allow
+	}
+	return validate.WrapErrorWithField(
+		errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration", phishingDomain)),
+		"proxyConfig",
+	)
 }
 
-// validatePhishingDomainUniquenessByStartURL checks if a phishing domain is already used by another proxy using start URL comparison
+// validatePhishingDomainUniquenessByStartURL checks if a phishing domain is already claimed by another proxy.
+// Uses proxy_id for owned domains; falls back to target domain comparison for legacy rows with no proxy_id.
 func (m *Proxy) validatePhishingDomainUniquenessByStartURL(ctx context.Context, phishingDomain string, currentStartURL string) error {
 	phishingDomainVO, err := vo.NewString255(phishingDomain)
 	if err != nil {
@@ -2091,185 +2118,46 @@ func (m *Proxy) validatePhishingDomainUniquenessByStartURL(ctx context.Context, 
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	if existingDomain != nil {
-		if existingDomain.Type.MustGet().String() == "proxy" {
-			// check if it belongs to a different proxy by comparing target domains
-			existingTarget, err := existingDomain.ProxyTargetDomain.Get()
-			if err == nil {
-				// extract domain from current start URL for comparison
-				currentStartURLParsed, err := url.Parse(currentStartURL)
-				if err != nil {
-					return validate.WrapErrorWithField(
-						errors.New(fmt.Sprintf("invalid start URL format: %s", currentStartURL)),
-						"proxyConfig",
-					)
-				}
-
-				// normalize and extract domain for comparison
-				existingTargetStr := strings.ToLower(strings.TrimSpace(existingTarget.String()))
-				currentHostNormalized := strings.ToLower(strings.TrimSpace(currentStartURLParsed.Host))
-
-				// if existing target is a full URL, extract just the host part
-				var existingTargetNormalized string
-				if strings.Contains(existingTargetStr, "://") {
-					// it's a full URL, parse it to get the host
-					existingTargetParsed, err := url.Parse(existingTargetStr)
-					if err != nil {
-						return validate.WrapErrorWithField(
-							errors.New(fmt.Sprintf("invalid existing target URL format: %s", existingTargetStr)),
-							"proxyConfig",
-						)
-					}
-					existingTargetNormalized = strings.ToLower(strings.TrimSpace(existingTargetParsed.Host))
-				} else {
-					// it's already just a domain
-					existingTargetNormalized = existingTargetStr
-				}
-
-				if existingTargetNormalized != currentHostNormalized {
-					return validate.WrapErrorWithField(
-						errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration", phishingDomain)),
-						"proxyConfig",
-					)
-				}
-			}
-		} else {
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", phishingDomain)),
-				"proxyConfig",
-			)
-		}
+	if existingDomain == nil {
+		return nil
 	}
-	return nil
-}
 
-// validatePhishingDomainUniquenessForUpdate validates phishing domain uniqueness during proxy updates
-func (m *Proxy) validatePhishingDomainUniquenessForUpdate(ctx context.Context, phishingDomain string, currentStartURL string, currentProxyID *uuid.UUID) error {
-	m.Logger.Debugw("validating phishing domain uniqueness for update",
-		"phishingDomain", phishingDomain,
-		"currentStartURL", currentStartURL,
-		"currentProxyID", currentProxyID.String(),
-	)
-
-	phishingDomainVO, err := vo.NewString255(phishingDomain)
-	if err != nil {
-		m.Logger.Errorw("invalid phishing domain format",
-			"phishingDomain", phishingDomain,
-			"error", err,
-		)
+	if existingDomain.Type.MustGet().String() != "proxy" {
 		return validate.WrapErrorWithField(
-			errors.New(fmt.Sprintf("invalid phishing domain format: %s", phishingDomain)),
+			errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", phishingDomain)),
 			"proxyConfig",
 		)
 	}
 
-	existingDomain, err := m.DomainRepository.GetByName(ctx, phishingDomainVO, &repository.DomainOption{})
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		m.Logger.Errorw("error getting existing domain",
-			"phishingDomain", phishingDomain,
-			"error", err,
+	// proxy_id is set — domain is owned by another proxy
+	if _, err := existingDomain.ProxyID.Get(); err == nil {
+		return validate.WrapErrorWithField(
+			errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration", phishingDomain)),
+			"proxyConfig",
 		)
-		return err
 	}
 
-	if existingDomain == nil {
-		m.Logger.Debugw("no existing domain found, validation passed",
-			"phishingDomain", phishingDomain,
-		)
+	// proxy_id is null (legacy row) — fall back to target domain comparison
+	existingTarget, err := existingDomain.ProxyTargetDomain.Get()
+	if err != nil {
 		return nil
 	}
-
-	m.Logger.Debugw("existing domain found",
-		"phishingDomain", phishingDomain,
-		"existingDomainType", existingDomain.Type.MustGet().String(),
-	)
-
-	if existingDomain.Type.MustGet().String() == "proxy" {
-		// check if it belongs to a different proxy by comparing target domains
-		existingTarget, err := existingDomain.ProxyTargetDomain.Get()
-		if err != nil {
-			m.Logger.Errorw("error getting existing domain proxy target",
-				"phishingDomain", phishingDomain,
-				"error", err,
-			)
-			return err
-		}
-
-		m.Logger.Debugw("existing domain proxy target found",
-			"phishingDomain", phishingDomain,
-			"existingTarget", existingTarget.String(),
-		)
-
-		// extract domain from current start URL for comparison
-		currentStartURLParsed, err := url.Parse(currentStartURL)
-		if err != nil {
-			m.Logger.Errorw("error parsing current start URL",
-				"currentStartURL", currentStartURL,
-				"error", err,
-			)
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("invalid start URL format: %s", currentStartURL)),
-				"proxyConfig",
-			)
-		}
-
-		// normalize and extract domain for comparison
-		existingTargetStr := strings.ToLower(strings.TrimSpace(existingTarget.String()))
-		currentHostNormalized := strings.ToLower(strings.TrimSpace(currentStartURLParsed.Host))
-
-		// if existing target is a full URL, extract just the host part
-		var existingTargetNormalized string
-		if strings.Contains(existingTargetStr, "://") {
-			// it's a full URL, parse it to get the host
-			existingTargetParsed, err := url.Parse(existingTargetStr)
-			if err != nil {
-				m.Logger.Errorw("error parsing existing target URL",
-					"existingTarget", existingTargetStr,
-					"error", err,
-				)
-				return err
-			}
-			existingTargetNormalized = strings.ToLower(strings.TrimSpace(existingTargetParsed.Host))
-		} else {
-			// it's already just a domain
-			existingTargetNormalized = existingTargetStr
-		}
-
-		m.Logger.Debugw("comparing normalized domains",
-			"phishingDomain", phishingDomain,
-			"existingTargetStr", existingTargetStr,
-			"existingTargetNormalized", existingTargetNormalized,
-			"currentHostNormalized", currentHostNormalized,
-		)
-
-		// if target domains don't match, it belongs to a different proxy
-		if existingTargetNormalized != currentHostNormalized {
-			m.Logger.Warnw("phishing domain belongs to different proxy",
-				"phishingDomain", phishingDomain,
-				"existingTargetNormalized", existingTargetNormalized,
-				"currentHostNormalized", currentHostNormalized,
-				"currentProxyID", currentProxyID.String(),
-			)
-			return validate.WrapErrorWithField(
-				errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration (existing target: %s, current target: %s)", phishingDomain, existingTargetNormalized, currentHostNormalized)),
-				"proxyConfig",
-			)
-		}
-
-		// if target domains match, this domain belongs to the current proxy being updated, so it's allowed
-		m.Logger.Debugw("phishing domain belongs to current proxy, allowing reuse",
-			"domain", phishingDomain,
-			"proxyID", currentProxyID.String(),
-			"existingTarget", existingTargetNormalized,
-			"currentHost", currentHostNormalized,
-		)
-	} else {
-		m.Logger.Warnw("domain exists as regular domain, not proxy",
-			"phishingDomain", phishingDomain,
-			"existingDomainType", existingDomain.Type.MustGet().String(),
-		)
+	currentStartURLParsed, err := url.Parse(currentStartURL)
+	if err != nil {
 		return validate.WrapErrorWithField(
-			errors.New(fmt.Sprintf("domain '%s' already exists as a regular domain", phishingDomain)),
+			errors.New(fmt.Sprintf("invalid start URL format: %s", currentStartURL)),
+			"proxyConfig",
+		)
+	}
+	existingTargetStr := strings.ToLower(strings.TrimSpace(existingTarget.String()))
+	if strings.Contains(existingTargetStr, "://") {
+		if parsed, err := url.Parse(existingTargetStr); err == nil {
+			existingTargetStr = strings.ToLower(strings.TrimSpace(parsed.Host))
+		}
+	}
+	if existingTargetStr != strings.ToLower(strings.TrimSpace(currentStartURLParsed.Host)) {
+		return validate.WrapErrorWithField(
+			errors.New(fmt.Sprintf("phishing domain '%s' is already used by another Proxy configuration", phishingDomain)),
 			"proxyConfig",
 		)
 	}
@@ -2297,7 +2185,6 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 		companyID = &cid
 	}
 
-	startURL := proxy.StartURL.MustGet()
 	createdDomains := make([]string, 0)
 
 	// create domains for each mapping
@@ -2311,58 +2198,8 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 				"proxyID", proxyID.String(),
 				"originalDomain", originalDomain,
 			)
-			// rollback created domains on error
 			m.rollbackCreatedDomains(ctx, session, createdDomains)
 			return errs.NewCustomError(fmt.Errorf("'to' field is required for domain mapping '%s'", originalDomain))
-		}
-
-		// check if domain already exists (might be from previous failed attempt)
-		phishingDomainVO, err := vo.NewString255(domainConfig.To)
-		if err != nil {
-			m.Logger.Warnw("invalid phishing domain format",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"error", err,
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return errs.NewCustomError(fmt.Errorf("invalid phishing domain format %s: %w", domainConfig.To, err))
-		}
-
-		existingDomain, err := m.DomainRepository.GetByName(ctx, phishingDomainVO, &repository.DomainOption{})
-		if err == nil && existingDomain != nil {
-			// domain already exists, check if it's compatible
-			if existingDomain.Type.MustGet().String() == "proxy" {
-				existingTarget, err := existingDomain.ProxyTargetDomain.Get()
-				if err == nil && existingTarget.String() == startURL.String() {
-					// compatible existing domain, skip creation
-					m.Logger.Debugw("proxy domain already exists, skipping creation",
-						"proxyID", proxyID.String(),
-						"domain", domainConfig.To,
-					)
-					createdDomains = append(createdDomains, domainConfig.To)
-					continue
-				}
-			}
-			// incompatible domain exists
-			m.Logger.Warnw("incompatible domain already exists",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"existingType", existingDomain.Type.MustGet().String(),
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return errs.NewCustomError(fmt.Errorf("domain %s already exists and is incompatible", domainConfig.To))
-		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			// database error
-			m.Logger.Errorw("failed to check existing domain",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"error", err,
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return fmt.Errorf("failed to check existing domain %s: %w", domainConfig.To, err)
 		}
 
 		// create new domain
@@ -2377,7 +2214,6 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			m.Logger.Errorw("failed to create proxy target domain",
 				"proxyID", proxyID.String(),
 				"domain", domainConfig.To,
-				"startURL", startURL.String(),
 				"error", err,
 			)
 			// rollback created domains on error
@@ -2399,6 +2235,28 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			domain.ManagedTLS.Set(false)
 			domain.OwnManagedTLS.Set(false)
 			domain.SelfSignedTLS.Set(true)
+		} else if tlsMode == "custom" {
+			// check if a global cert is provided on the proxy model
+			globalKey, keyErr := proxy.GlobalTLSKey.Get()
+			globalPem, pemErr := proxy.GlobalTLSPem.Get()
+			if keyErr == nil && pemErr == nil && len(globalKey) > 0 && len(globalPem) > 0 {
+				// apply the global cert to this domain
+				domain.ManagedTLS.Set(false)
+				domain.OwnManagedTLS.Set(true)
+				domain.SelfSignedTLS.Set(false)
+				domain.OwnManagedTLSKey.Set(globalKey)
+				domain.OwnManagedTLSPem.Set(globalPem)
+			} else {
+				// no cert provided for a new domain — cannot configure custom TLS without a certificate
+				m.Logger.Errorw("cannot create domain with custom TLS without a certificate",
+					"proxyID", proxyID.String(),
+					"domain", domainConfig.To,
+				)
+				m.rollbackCreatedDomains(ctx, session, createdDomains)
+				return errs.NewValidationError(
+					fmt.Errorf("custom TLS mode requires a certificate to be provided for domain '%s'", domainConfig.To),
+				)
+			}
 		} else {
 			// default to managed
 			domain.ManagedTLS.Set(true)
@@ -2406,44 +2264,9 @@ func (m *Proxy) createProxyDomains(ctx context.Context, session *model.Session, 
 			domain.SelfSignedTLS.Set(false)
 		}
 
-		pageContent, err := vo.NewOptionalString1MB("")
-		if err != nil {
-			m.Logger.Errorw("failed to create page content",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"error", err,
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return errs.NewCustomError(fmt.Errorf("failed to create page content for %s: %w", domainConfig.To, err))
-		}
-		domain.PageContent.Set(*pageContent)
-
-		pageNotFoundContent, err := vo.NewOptionalString1MB("")
-		if err != nil {
-			m.Logger.Errorw("failed to create page not found content",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"error", err,
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return errs.NewCustomError(fmt.Errorf("failed to create page not found content for %s: %w", domainConfig.To, err))
-		}
-		domain.PageNotFoundContent.Set(*pageNotFoundContent)
-
-		redirectURL, err := vo.NewOptionalString1024("")
-		if err != nil {
-			m.Logger.Errorw("failed to create redirect URL",
-				"proxyID", proxyID.String(),
-				"domain", domainConfig.To,
-				"error", err,
-			)
-			// rollback created domains on error
-			m.rollbackCreatedDomains(ctx, session, createdDomains)
-			return errs.NewCustomError(fmt.Errorf("failed to create redirect URL for %s: %w", domainConfig.To, err))
-		}
-		domain.RedirectURL.Set(*redirectURL)
+		domain.PageContent.Set(*vo.NewOptionalString1MBMust(""))
+		domain.PageNotFoundContent.Set(*vo.NewOptionalString1MBMust(""))
+		domain.RedirectURL.Set(*vo.NewOptionalString1024Must(""))
 
 		if companyID != nil {
 			domain.CompanyID.Set(*companyID)
@@ -2661,18 +2484,44 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 			// check current TLS settings
 			currentManagedTLS := existingDomain.ManagedTLS.MustGet()
 			currentSelfSignedTLS := existingDomain.SelfSignedTLS.MustGet()
+			currentOwnManagedTLS := existingDomain.OwnManagedTLS.MustGet()
 
 			// determine if TLS settings need updating
 			if tlsMode == "self-signed" && !currentSelfSignedTLS {
+				// switching to self-signed — clear any existing custom cert flag so updateDomain cleans it up
 				existingDomain.ManagedTLS.Set(false)
 				existingDomain.OwnManagedTLS.Set(false)
 				existingDomain.SelfSignedTLS.Set(true)
 				needsUpdate = true
 			} else if tlsMode == "managed" && !currentManagedTLS {
+				// switching to managed — clear any existing custom cert flag so updateDomain cleans it up
 				existingDomain.ManagedTLS.Set(true)
 				existingDomain.OwnManagedTLS.Set(false)
 				existingDomain.SelfSignedTLS.Set(false)
 				needsUpdate = true
+			} else if tlsMode == "custom" {
+				// check if a new global cert is being pushed
+				globalKey, keyErr := proxy.GlobalTLSKey.Get()
+				globalPem, pemErr := proxy.GlobalTLSPem.Get()
+				if keyErr == nil && pemErr == nil && len(globalKey) > 0 && len(globalPem) > 0 {
+					// apply the new global cert — always update when a cert is explicitly provided
+					existingDomain.ManagedTLS.Set(false)
+					existingDomain.OwnManagedTLS.Set(true)
+					existingDomain.SelfSignedTLS.Set(false)
+					existingDomain.OwnManagedTLSKey.Set(globalKey)
+					existingDomain.OwnManagedTLSPem.Set(globalPem)
+					needsUpdate = true
+				} else if !currentOwnManagedTLS {
+					// no new cert provided and domain doesn't already have a custom cert — cannot switch to custom
+					m.Logger.Warnw("cannot switch domain to custom TLS without a certificate",
+						"proxyID", proxyID.String(),
+						"domain", phishingDomain,
+					)
+					syncErrors = append(syncErrors, fmt.Sprintf("cannot switch domain '%s' to custom TLS without providing a certificate", phishingDomain))
+					errorCount++
+					continue
+				}
+				// if currentOwnManagedTLS is true and no new cert provided — preserve existing cert, no update needed
 			}
 
 			if needsUpdate {
@@ -2735,6 +2584,27 @@ func (m *Proxy) syncProxyDomains(ctx context.Context, session *model.Session, pr
 				domain.ManagedTLS.Set(false)
 				domain.OwnManagedTLS.Set(false)
 				domain.SelfSignedTLS.Set(true)
+			} else if tlsMode == "custom" {
+				// check if a global cert is provided on the proxy model
+				globalKey, keyErr := proxy.GlobalTLSKey.Get()
+				globalPem, pemErr := proxy.GlobalTLSPem.Get()
+				if keyErr == nil && pemErr == nil && len(globalKey) > 0 && len(globalPem) > 0 {
+					// apply the global cert to this domain
+					domain.ManagedTLS.Set(false)
+					domain.OwnManagedTLS.Set(true)
+					domain.SelfSignedTLS.Set(false)
+					domain.OwnManagedTLSKey.Set(globalKey)
+					domain.OwnManagedTLSPem.Set(globalPem)
+				} else {
+					// no cert provided for a new domain — cannot configure custom TLS without a certificate
+					m.Logger.Warnw("cannot add domain with custom TLS without a certificate",
+						"proxyID", proxyID.String(),
+						"domain", phishingDomain,
+					)
+					syncErrors = append(syncErrors, fmt.Sprintf("cannot add domain '%s' with custom TLS without providing a certificate", phishingDomain))
+					errorCount++
+					continue
+				}
 			} else {
 				// default to managed
 				domain.ManagedTLS.Set(true)

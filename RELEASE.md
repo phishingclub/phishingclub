@@ -1,5 +1,64 @@
 # Changelog
 
+## [1.37.1] - 2026-06-07
+- Fix disable CSP giving issue when previews
+- Fix preview for report template
+
+## [1.37.0] - 2026-06-06
+- Added generate campaign report
+- Added global and company level campaign report customization 
+- Added calendar invite builder
+- Added calendar invite attachment handling
+- Added trusted IP header forwarding now works for phishing server 
+- Added musl for statically linked binary - no libc dependency anymore
+- Added security headers to admin server
+- Bump dependencies
+- Update geo ips to latest
+- Improve UI of setting page
+- Improve UI of tools page
+- Improve UI on event timeline and campaign trendline
+- Fix remove TOTP from logs
+- Fix added missing audit logs for TOTP disable
+- Fix only the first found API key worked
+- Fix favicon fingerprinting
+- Fix validation when AiTM proxies reuse domains without errors 
+- Fix bug in table layout were last column would get cut
+- Fix delete group modal warning was incorrect 
+- Remote Browser: Add lifecycle events
+- Remote Browser: Added dependencies to image builds
+- Remote Browser: Add right click context menu with copy paste
+- Remote Browser: Fix click outside of element bug
+- Remote Browser: Add mouse movement and console trap patch 
+
+## [1.36.0] - 2026-05-24
+- Added experimental support for Remote Browser Phishing
+- Fixed incorrect constraint parsing for local time 
+- Fixed a vulnerability where TOTP codes were briefly replayable
+- Fixed state tracking for SSO login
+
+## [1.35.0] - 2026-04-23
+- Added support for custom certificates in proxy configuration
+- Added support for URL rewrite in visual proxy editor
+- Fix apply rewrite rules when redirecting to proxy pages
+- Fix recipient URL using start URL in proxy
+- Fix remove campaign webhooks and device codes on campaign deletion
+- Fix company email attachments not working
+- Fix create template did not include URL path
+
+## [1.34.0] - 2026-04-02
+- Added dynamic groups
+- Added late scheduling to campaigns
+- Added option to auto prune orphans
+- Added option to clear generated device codes for campaign
+- Added proxy (socks5) for device code
+- Added optional request path and method on proxy rewrites
+- Added proxy rewrite header engine
+- Added support for proxy capturing as info event instead of submit event
+- Fix proxy replace not working on header responses
+- Fix email is not optional in campaign template
+- Fix proxy normalize empty path to /
+- Minor UI fixes / improvements
+
 ## [1.33.0] - 2026-03-21
 - Added Microsoft Device Code phishing
 - Fix pagination on dashboard events table

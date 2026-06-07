@@ -4,6 +4,7 @@
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import TextareaField from '$lib/components/TextareaField.svelte';
 	import Search from '$lib/components/Search.svelte';
+	import FileField from '$lib/components/FileField.svelte';
 	import jsyaml, { dumpWithLiteralStrings } from '$lib/components/yaml/index.js';
 
 	export let config = null;
@@ -302,6 +303,8 @@
 			hosts: []
 		};
 		expandedHostIndex = -1;
+		globalTLSKey = '';
+		globalTLSPem = '';
 	}
 
 	// helper to remove internal _id fields before serialization
@@ -561,7 +564,7 @@
 	function addGlobalRewriteUrlRule() {
 		configData.global.rewrite_urls = [
 			...configData.global.rewrite_urls,
-			{ _id: getRuleId(), find: '', replace: '', query: '', filter: '' }
+			{ _id: getRuleId(), find: '', replace: '', query: [], filter: [] }
 		];
 	}
 
@@ -638,7 +641,7 @@
 	function addHostRewriteUrlRule(hostIndex) {
 		configData.hosts[hostIndex].rewrite_urls = [
 			...(configData.hosts[hostIndex].rewrite_urls || []),
-			{ _id: getRuleId(), find: '', replace: '', query: '', filter: '' }
+			{ _id: getRuleId(), find: '', replace: '', query: [], filter: [] }
 		];
 		configData.hosts = [...configData.hosts];
 	}
@@ -655,6 +658,28 @@
 		if (!rule.headers) rule.headers = {};
 		const newKey = `Header-${Object.keys(rule.headers).length + 1}`;
 		rule.headers[newKey] = '';
+		configData = configData;
+	}
+
+	// url rewrite query param helpers — query is []{ find, replace }
+	function addURLRewriteQueryParam(rule) {
+		rule.query = [...(rule.query || []), { find: '', replace: '' }];
+		configData = configData;
+	}
+
+	function removeURLRewriteQueryParam(rule, index) {
+		rule.query = (rule.query || []).filter((_, i) => i !== index);
+		configData = configData;
+	}
+
+	// url rewrite filter helpers — filter is []string (param name allowlist)
+	function addURLRewriteFilter(rule) {
+		rule.filter = [...(rule.filter || []), ''];
+		configData = configData;
+	}
+
+	function removeURLRewriteFilter(rule, index) {
+		rule.filter = (rule.filter || []).filter((_, i) => i !== index);
 		configData = configData;
 	}
 
@@ -675,7 +700,8 @@
 	// options
 	const tlsModes = [
 		{ value: 'managed', label: 'Managed' },
-		{ value: 'self-signed', label: 'Self-signed' }
+		{ value: 'self-signed', label: 'Self-signed' },
+		{ value: 'custom', label: 'Custom' }
 	];
 	const tlsModesWithEmpty = [
 		{ value: '', label: '(Use global default)' },
@@ -999,6 +1025,36 @@
 
 	// file input reference for import
 	let fileInput = null;
+
+	// global cert for custom TLS mode (not part of yaml config, sent separately to parent)
+	let globalTLSKey = '';
+	let globalTLSPem = '';
+
+	/**
+	 * @param {Event} event
+	 * @param {'globalTLSKey'|'globalTLSPem'} target
+	 */
+	function onGlobalCertFile(event, target) {
+		const file = /** @type {HTMLInputElement} */ (event.target).files[0];
+		if (!file) return;
+		const reader = new FileReader();
+		reader.onload = (e) => {
+			if (target === 'globalTLSKey') {
+				globalTLSKey = e.target.result.toString();
+			} else {
+				globalTLSPem = e.target.result.toString();
+			}
+			dispatchCertChange();
+		};
+		reader.readAsText(file);
+	}
+
+	function dispatchCertChange() {
+		dispatch('certChange', {
+			globalTLSKey,
+			globalTLSPem
+		});
+	}
 
 	// export configuration to YAML file with metadata
 	function exportConfig() {
@@ -1358,1288 +1414,402 @@
 
 		<!-- tab content -->
 		<div class="tab-content">
-			{#if activeTab === 'basic'}
-				<!-- basic information tab content -->
-				<div class="basic-panel">
-					<!-- basic information section -->
-					<!-- hidden file input for import -->
-					<input
-						type="file"
-						accept=".yaml,.yml"
-						bind:this={fileInput}
-						on:change={handleImportFile}
-						class="hidden"
-					/>
-					<div class="settings-section">
-						<div class="settings-section-header">
-							<h3 class="settings-section-title">General</h3>
-						</div>
-						<div class="settings-grid">
-							<div class="field-wrapper">
-								<label class="flex flex-col py-2">
-									<div class="flex items-center">
-										<p
-											class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
-										>
-											Name
-										</p>
-									</div>
-									<input
-										type="text"
-										value={name}
-										on:input={handleNameInput}
-										placeholder="Company Auth Proxy"
-										required
-										minlength="1"
-										maxlength="64"
-										class="w-full text-ellipsis rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
-									/>
-								</label>
-							</div>
-							<div class="field-wrapper">
-								<label class="flex flex-col py-2">
-									<div class="flex items-center">
-										<p
-											class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
-										>
-											Description
-										</p>
-									</div>
-									<input
-										type="text"
-										value={description}
-										on:input={handleDescriptionInput}
-										placeholder="Optional description"
-										maxlength="255"
-										class="w-full text-ellipsis rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
-									/>
-								</label>
-							</div>
-							<div class="field-wrapper full">
-								<label class="flex flex-col py-2">
-									<div class="flex items-center">
-										<p
-											class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
-										>
-											Start URL
-										</p>
-									</div>
-									<input
-										type="text"
-										value={startURL}
-										on:input={handleStartURLInput}
-										placeholder="https://login.example.com/auth"
-										required
-										minlength="3"
-										class="w-full text-ellipsis rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
-									/>
-								</label>
-								<span class="settings-field-hint"
-									>Domain must match a phishing domain in the Hosts tab</span
-								>
-							</div>
-						</div>
+			<!-- basic information tab content -->
+			<div class="basic-panel" style={activeTab !== 'basic' ? 'display:none' : ''}>
+				<!-- basic information section -->
+				<!-- hidden file input for import -->
+				<input
+					type="file"
+					accept=".yaml,.yml"
+					bind:this={fileInput}
+					on:change={handleImportFile}
+					class="hidden"
+				/>
+				<div class="settings-section">
+					<div class="settings-section-header">
+						<h3 class="settings-section-title">General</h3>
 					</div>
-					<!-- proxy configuration section -->
-					<div class="settings-section">
-						<h3 class="settings-section-title">Proxy Settings</h3>
-						<div class="settings-grid">
-							<div class="field-wrapper">
-								<TextField
-									width="full"
-									bind:value={configData.proxy}
-									placeholder="socks5://proxy.example.com:1080 (optional)"
-								>
-									Forward Proxy
-								</TextField>
-								<span class="settings-field-hint">Route all traffic through this proxy</span>
-							</div>
+					<div class="settings-grid">
+						<div class="field-wrapper">
+							<label class="flex flex-col py-2">
+								<div class="flex items-center">
+									<p
+										class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+									>
+										Name
+									</p>
+								</div>
+								<input
+									type="text"
+									value={name}
+									on:input={handleNameInput}
+									placeholder="Company Auth Proxy"
+									required
+									minlength="1"
+									maxlength="64"
+									class="w-full text-ellipsis rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+								/>
+							</label>
+						</div>
+						<div class="field-wrapper">
+							<label class="flex flex-col py-2">
+								<div class="flex items-center">
+									<p
+										class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+									>
+										Description
+									</p>
+								</div>
+								<input
+									type="text"
+									value={description}
+									on:input={handleDescriptionInput}
+									placeholder="Optional description"
+									maxlength="255"
+									class="w-full text-ellipsis rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+								/>
+							</label>
+						</div>
+						<div class="field-wrapper full">
+							<label class="flex flex-col py-2">
+								<div class="flex items-center">
+									<p
+										class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+									>
+										Start URL
+									</p>
+								</div>
+								<input
+									type="text"
+									value={startURL}
+									on:input={handleStartURLInput}
+									placeholder="https://login.example.com/auth"
+									required
+									minlength="3"
+									class="w-full text-ellipsis rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+								/>
+							</label>
+							<span class="settings-field-hint"
+								>Domain must match a phishing domain in the Hosts tab</span
+							>
 						</div>
 					</div>
 				</div>
-			{:else if activeTab === 'hosts'}
-				<div class="hosts-panel">
-					<!-- hosts list sidebar -->
-					<div class="hosts-sidebar">
-						<div class="sidebar-header">
-							<span class="sidebar-title">Domain Mappings</span>
-							<button type="button" class="add-btn small" on:click={addHost} title="Add Host">
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<path d="M12 4v16m8-8H4" />
-								</svg>
-							</button>
-						</div>
-						{#if configData.hosts.length > 3}
-							<div class="px-2 pb-2 host-search-wrapper">
-								<Search pagination={hostSearchPagination} />
-							</div>
-						{/if}
-						<div class="flex-1 overflow-y-auto p-2">
-							{#if configData.hosts.length > 0}
-								<div class="flex flex-col gap-1.5">
-									{#each filteredHosts as { host, index: i }}
-										<button
-											type="button"
-											class="flex flex-col gap-2 w-full p-3 text-left bg-white dark:bg-slate-800/40 border rounded-lg cursor-pointer transition-all duration-150
-												{expandedHostIndex === i
-												? 'border-sky-600 dark:border-sky-400 bg-sky-50 dark:bg-sky-900/20 shadow-sm ring-1 ring-sky-600/20 dark:ring-sky-400/20'
-												: 'border-gray-200 dark:border-gray-700/60 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/30'}"
-											on:click={() => (expandedHostIndex = i)}
-										>
-											<div class="flex flex-col gap-0.5 min-w-0">
-												<span
-													class="text-[0.625rem] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider"
-													>From</span
-												>
-												<span
-													class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate"
-													title={host.to || 'New Host'}>{host.to || 'New Host'}</span
-												>
-											</div>
-											<div class="flex flex-col gap-0.5 min-w-0">
-												<span
-													class="text-[0.625rem] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider"
-													>To</span
-												>
-												<span
-													class="text-sm text-gray-600 dark:text-gray-300 truncate"
-													title={host.domain || '...'}>{host.domain || '...'}</span
-												>
-											</div>
-											{#if host.capture?.length || host.rewrite?.length || host.response?.length}
-												<div
-													class="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 border-t border-gray-100 dark:border-gray-700/40 text-[0.6875rem]"
-												>
-													{#if host.capture?.length}
-														<span
-															class="flex items-center gap-1 text-green-600 dark:text-green-400"
-														>
-															<span class="w-1.5 h-1.5 rounded-full bg-green-500 dark:bg-green-400"
-															></span>
-															{host.capture.length} capture
-														</span>
-													{/if}
-													{#if host.rewrite?.length}
-														<span class="flex items-center gap-1 text-blue-600 dark:text-blue-400">
-															<span class="w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400"
-															></span>
-															{host.rewrite.length} rewrite
-														</span>
-													{/if}
-													{#if host.response?.length}
-														<span
-															class="flex items-center gap-1 text-amber-600 dark:text-amber-400"
-														>
-															<span class="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400"
-															></span>
-															{host.response.length} response
-														</span>
-													{/if}
-												</div>
-											{/if}
-										</button>
-									{/each}
-								</div>
-							{:else}
-								<div class="empty-state small">
-									<p>No hosts configured</p>
-									<button type="button" class="add-btn" on:click={addHost}>
-										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-											<path d="M12 4v16m8-8H4" />
-										</svg>
-										Add First Host
-									</button>
-								</div>
-							{/if}
+				<!-- proxy configuration section -->
+				<div class="settings-section">
+					<h3 class="settings-section-title">Proxy Settings</h3>
+					<div class="settings-grid">
+						<div class="field-wrapper">
+							<TextField
+								width="full"
+								bind:value={configData.proxy}
+								placeholder="socks5://proxy.example.com:1080 (optional)"
+							>
+								Forward Proxy
+							</TextField>
+							<span class="settings-field-hint">Route all traffic through this proxy</span>
 						</div>
 					</div>
-
-					<!-- host detail panel -->
-					<div class="host-detail">
-						{#if expandedHostIndex >= 0 && configData.hosts[expandedHostIndex]}
-							<div class="detail-header">
-								<div class="detail-title">
-									<span class="domain-label"
-										>{configData.hosts[expandedHostIndex].to || 'New Host'}</span
-									>
-									<span class="arrow">→</span>
-									<span class="target-label"
-										>{configData.hosts[expandedHostIndex].domain || 'target'}</span
-									>
-								</div>
-								<div class="detail-actions">
+				</div>
+			</div>
+			<div class="hosts-panel" style={activeTab !== 'hosts' ? 'display:none' : ''}>
+				<!-- hosts list sidebar -->
+				<div class="hosts-sidebar">
+					<div class="sidebar-header">
+						<span class="sidebar-title">Domain Mappings</span>
+						<button type="button" class="add-btn small" on:click={addHost} title="Add Host">
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+								<path d="M12 4v16m8-8H4" />
+							</svg>
+						</button>
+					</div>
+					{#if configData.hosts.length > 3}
+						<div class="px-2 pb-2 host-search-wrapper">
+							<Search pagination={hostSearchPagination} />
+						</div>
+					{/if}
+					<div class="flex-1 overflow-y-auto p-2">
+						{#if configData.hosts.length > 0}
+							<div class="flex flex-col gap-1.5">
+								{#each filteredHosts as { host, index: i }}
 									<button
 										type="button"
-										class="icon-btn"
-										title="Duplicate"
-										on:click={() => duplicateHost(expandedHostIndex)}
+										class="flex flex-col gap-2 w-full p-3 text-left bg-white dark:bg-slate-800/40 border rounded-lg cursor-pointer transition-all duration-150
+												{expandedHostIndex === i
+											? 'border-sky-600 dark:border-sky-400 bg-sky-50 dark:bg-sky-900/20 shadow-sm ring-1 ring-sky-600/20 dark:ring-sky-400/20'
+											: 'border-gray-200 dark:border-gray-700/60 hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/30'}"
+										on:click={() => (expandedHostIndex = i)}
 									>
-										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-											<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-											<path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-										</svg>
-									</button>
-									<button
-										type="button"
-										class="icon-btn danger"
-										title="Delete"
-										on:click={() => removeHost(expandedHostIndex)}
-									>
-										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-											<path
-												d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-											/>
-										</svg>
-									</button>
-								</div>
-							</div>
-
-							<!-- sub tabs -->
-							<div class="sub-tabs">
-								<button
-									type="button"
-									class="sub-tab"
-									class:active={currentHostTab === 'settings'}
-									on:click={() => setHostActiveTab(expandedHostIndex, 'settings')}
-								>
-									Settings
-								</button>
-								<button
-									type="button"
-									class="sub-tab"
-									class:active={currentHostTab === 'capture'}
-									on:click={() => setHostActiveTab(expandedHostIndex, 'capture')}
-								>
-									Capture
-									{#if configData.hosts[expandedHostIndex].capture?.length}
-										<span class="sub-badge"
-											>{configData.hosts[expandedHostIndex].capture.length}</span
-										>
-									{/if}
-								</button>
-								<button
-									type="button"
-									class="sub-tab"
-									class:active={currentHostTab === 'rewrite'}
-									on:click={() => setHostActiveTab(expandedHostIndex, 'rewrite')}
-								>
-									Rewrite
-									{#if configData.hosts[expandedHostIndex].rewrite?.length}
-										<span class="sub-badge"
-											>{configData.hosts[expandedHostIndex].rewrite.length}</span
-										>
-									{/if}
-								</button>
-								<button
-									type="button"
-									class="sub-tab"
-									class:active={currentHostTab === 'response'}
-									on:click={() => setHostActiveTab(expandedHostIndex, 'response')}
-								>
-									Response
-									{#if configData.hosts[expandedHostIndex].response?.length}
-										<span class="sub-badge"
-											>{configData.hosts[expandedHostIndex].response.length}</span
-										>
-									{/if}
-								</button>
-								<button
-									type="button"
-									class="sub-tab"
-									class:active={currentHostTab === 'urlrewrite'}
-									on:click={() => setHostActiveTab(expandedHostIndex, 'urlrewrite')}
-								>
-									URL Rewrite
-									{#if configData.hosts[expandedHostIndex].rewrite_urls?.length}
-										<span class="sub-badge"
-											>{configData.hosts[expandedHostIndex].rewrite_urls.length}</span
-										>
-									{/if}
-								</button>
-							</div>
-
-							<div class="sub-content">
-								{#if currentHostTab === 'settings'}
-									<div class="settings-grid host-settings">
-										<div class="field-wrapper full">
-											<TextField
-												width="full"
-												bind:value={configData.hosts[expandedHostIndex].to}
-												placeholder="login.phish.test"
-												required
-												error={hasError(`hosts.${expandedHostIndex}.to`)}
+										<div class="flex flex-col gap-0.5 min-w-0">
+											<span
+												class="text-[0.625rem] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider"
+												>From</span
 											>
-												Phishing Domain
-											</TextField>
-											{#if hasError(`hosts.${expandedHostIndex}.to`)}
-												<span class="field-error">{getError(`hosts.${expandedHostIndex}.to`)}</span>
-											{:else}
-												<span class="form-hint"
-													>Your phishing domain that will serve the content</span
-												>
-											{/if}
-										</div>
-										<div class="field-wrapper full">
-											<TextField
-												width="full"
-												bind:value={configData.hosts[expandedHostIndex].domain}
-												placeholder="login.target.com"
-												required
-												error={hasError(`hosts.${expandedHostIndex}.domain`)}
+											<span
+												class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate"
+												title={host.to || 'New Host'}>{host.to || 'New Host'}</span
 											>
-												Target Domain
-											</TextField>
-											{#if hasError(`hosts.${expandedHostIndex}.domain`)}
-												<span class="field-error"
-													>{getError(`hosts.${expandedHostIndex}.domain`)}</span
-												>
-											{:else}
-												<span class="form-hint">The legitimate domain being impersonated</span>
-											{/if}
 										</div>
-										<div class="field-wrapper">
-											<TextFieldSelect
-												id={`host-${expandedHostIndex}-scheme`}
-												bind:value={configData.hosts[expandedHostIndex].scheme}
-												options={schemes}
-												size="normal"
+										<div class="flex flex-col gap-0.5 min-w-0">
+											<span
+												class="text-[0.625rem] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider"
+												>To</span
 											>
-												Scheme
-											</TextFieldSelect>
+											<span
+												class="text-sm text-gray-600 dark:text-gray-300 truncate"
+												title={host.domain || '...'}>{host.domain || '...'}</span
+											>
 										</div>
-										{#if configData.hosts[expandedHostIndex].tls}
-											<div class="field-wrapper">
-												<TextFieldSelect
-													id={`host-${expandedHostIndex}-tls-mode`}
-													bind:value={configData.hosts[expandedHostIndex].tls.mode}
-													options={tlsModesWithEmpty}
-													size="normal"
-													optional
-												>
-													TLS Mode
-												</TextFieldSelect>
+										{#if host.capture?.length || host.rewrite?.length || host.response?.length}
+											<div
+												class="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 border-t border-gray-100 dark:border-gray-700/40 text-[0.6875rem]"
+											>
+												{#if host.capture?.length}
+													<span class="flex items-center gap-1 text-green-600 dark:text-green-400">
+														<span class="w-1.5 h-1.5 rounded-full bg-green-500 dark:bg-green-400"
+														></span>
+														{host.capture.length} capture
+													</span>
+												{/if}
+												{#if host.rewrite?.length}
+													<span class="flex items-center gap-1 text-blue-600 dark:text-blue-400">
+														<span class="w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400"
+														></span>
+														{host.rewrite.length} rewrite
+													</span>
+												{/if}
+												{#if host.response?.length}
+													<span class="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+														<span class="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400"
+														></span>
+														{host.response.length} response
+													</span>
+												{/if}
 											</div>
 										{/if}
-										{#if configData.hosts[expandedHostIndex].access}
-											<div class="field-wrapper">
-												<TextFieldSelect
-													id={`host-${expandedHostIndex}-access-mode`}
-													bind:value={configData.hosts[expandedHostIndex].access.mode}
-													options={accessModesWithEmpty}
-													size="normal"
-													optional
-												>
-													Access Mode
-												</TextFieldSelect>
-												<span class="form-hint"
-													>Private requires visiting a lure URL first (recommended)</span
-												>
-											</div>
-											{#if configData.hosts[expandedHostIndex].access?.mode === 'private'}
-												<div class="field-wrapper">
-													<TextField
-														width="full"
-														bind:value={configData.hosts[expandedHostIndex].access.on_deny}
-														placeholder="404"
-													>
-														On Deny
-													</TextField>
-													<span class="form-hint"
-														>Status code (e.g. 404, 503) or redirect URL (e.g. https://example.com)</span
-													>
-												</div>
-											{/if}
-										{/if}
-									</div>
-								{:else if currentHostTab === 'capture'}
-									<div class="rules-description">
-										<p>Extract credentials, tokens, and other data from requests and responses.</p>
-									</div>
-									<div class="rules-container">
-										{#each configData.hosts[expandedHostIndex].capture || [] as rule, ruleIndex (rule._id)}
-											<div class="rule-card">
-												<div class="rule-header">
-													<span class="rule-name">{rule.name || `Rule ${ruleIndex + 1}`}</span>
-													<button
-														type="button"
-														class="icon-btn small danger"
-														on:click={() => removeHostCaptureRule(expandedHostIndex, ruleIndex)}
-													>
-														<svg
-															viewBox="0 0 24 24"
-															fill="none"
-															stroke="currentColor"
-															stroke-width="2"
-														>
-															<path d="M6 18L18 6M6 6l12 12" />
-														</svg>
-													</button>
-												</div>
-												<div class="rule-grid">
-													<div class="field-wrapper">
-														<TextField
-															width="full"
-															bind:value={rule.name}
-															placeholder="username"
-															error={hasError(
-																`hosts.${expandedHostIndex}.capture.${ruleIndex}.name`
-															)}
-														>
-															Name
-														</TextField>
-														{#if hasError(`hosts.${expandedHostIndex}.capture.${ruleIndex}.name`)}
-															<span class="field-error"
-																>{getError(
-																	`hosts.${expandedHostIndex}.capture.${ruleIndex}.name`
-																)}</span
-															>
-														{/if}
-													</div>
-													<div class="field-wrapper">
-														<TextFieldSelect
-															id={`host-${expandedHostIndex}-capture-${ruleIndex}-method`}
-															bind:value={rule.method}
-															options={methods}
-															size="normal"
-														>
-															Method
-														</TextFieldSelect>
-													</div>
-													<div class="field-wrapper">
-														<TextField
-															width="full"
-															bind:value={rule.path}
-															placeholder="/login"
-															error={hasError(
-																`hosts.${expandedHostIndex}.capture.${ruleIndex}.path`
-															)}
-														>
-															Path (regex)
-														</TextField>
-														{#if hasError(`hosts.${expandedHostIndex}.capture.${ruleIndex}.path`)}
-															<span class="field-error"
-																>{getError(
-																	`hosts.${expandedHostIndex}.capture.${ruleIndex}.path`
-																)}</span
-															>
-														{/if}
-													</div>
-													<div class="field-wrapper">
-														<TextFieldSelect
-															id={`host-${expandedHostIndex}-capture-${ruleIndex}-engine`}
-															value={rule.engine}
-															options={captureEngines}
-															size="normal"
-															onSelect={(val) => handleCaptureEngineChange(rule, val)}
-														>
-															Engine
-														</TextFieldSelect>
-													</div>
-													{#if rule.engine !== 'cookie'}
-														<div class="field-wrapper">
-															<TextFieldSelect
-																id={`host-${expandedHostIndex}-capture-${ruleIndex}-from`}
-																bind:value={rule.from}
-																options={getFromOptionsForEngine(rule.engine)}
-																size="normal"
-															>
-																From
-															</TextFieldSelect>
-														</div>
-													{/if}
-													<div class="field-wrapper full">
-														<TextField
-															width="full"
-															bind:value={rule.find}
-															placeholder={rule.engine === 'regex'
-																? 'username=([^&]+)'
-																: rule.engine === 'header'
-																	? 'Authorization'
-																	: rule.engine === 'cookie'
-																		? 'session_id'
-																		: rule.engine === 'json'
-																			? 'user.email'
-																			: 'username'}
-															error={hasError(
-																`hosts.${expandedHostIndex}.capture.${ruleIndex}.find`
-															)}
-														>
-															{#if rule.engine === 'regex'}
-																Regex Pattern
-															{:else if rule.engine === 'header'}
-																Header Name
-															{:else if rule.engine === 'cookie'}
-																Cookie Name
-															{:else if rule.engine === 'json'}
-																JSON Path
-															{:else}
-																Field Name
-															{/if}
-														</TextField>
-														{#if hasError(`hosts.${expandedHostIndex}.capture.${ruleIndex}.find`)}
-															<span class="field-error"
-																>{getError(
-																	`hosts.${expandedHostIndex}.capture.${ruleIndex}.find`
-																)}</span
-															>
-														{/if}
-													</div>
-													<div class="field-wrapper checkbox-wrapper">
-														<label class="checkbox-label">
-															<input
-																type="checkbox"
-																checked={rule.required}
-																on:change={(e) => {
-																	rule.required = e.currentTarget.checked;
-																	configData = configData;
-																}}
-																class="checkbox-input"
-															/>
-															<span class="checkbox-text">Required</span>
-														</label>
-														<span class="form-hint"
-															>Must be captured before session completes and campaign flow
-															progresses</span
-														>
-													</div>
-													<div class="field-wrapper">
-														<TextFieldSelect
-															id={`host-${expandedHostIndex}-capture-${ruleIndex}-event`}
-															bind:value={rule.event}
-															options={captureEventOptions}
-															size="normal"
-														>
-															Event Type
-														</TextFieldSelect>
-													</div>
-												</div>
-											</div>
-										{/each}
-										<button
-											type="button"
-											class="add-rule-btn"
-											on:click={() => addHostCaptureRule(expandedHostIndex)}
-										>
-											<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-												<path d="M12 4v16m8-8H4" />
-											</svg>
-											Add Capture Rule
-										</button>
-									</div>
-								{:else if currentHostTab === 'rewrite'}
-									<div class="rules-description">
-										<p>
-											Rewrite rules modify content passing through the proxy. Use <strong
-												>Regex</strong
-											>
-											for text replacement or <strong>DOM</strong> for HTML element manipulation.
-										</p>
-									</div>
-									<div class="rules-container">
-										{#each configData.hosts[expandedHostIndex].rewrite || [] as rule, ruleIndex (rule._id)}
-											<div class="rule-card">
-												<div class="rule-header">
-													<span class="rule-name">{rule.name || `Rule ${ruleIndex + 1}`}</span>
-													<button
-														type="button"
-														class="icon-btn small danger"
-														on:click={() => removeHostRewriteRule(expandedHostIndex, ruleIndex)}
-													>
-														<svg
-															viewBox="0 0 24 24"
-															fill="none"
-															stroke="currentColor"
-															stroke-width="2"
-														>
-															<path d="M6 18L18 6M6 6l12 12" />
-														</svg>
-													</button>
-												</div>
-												<div class="rule-grid">
-													<div class="field-wrapper">
-														<TextField
-															width="full"
-															bind:value={rule.name}
-															placeholder="replace_logo"
-														>
-															Name
-														</TextField>
-													</div>
-													<div class="field-wrapper">
-														<TextFieldSelect
-															id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-engine`}
-															bind:value={rule.engine}
-															options={engines}
-															size="normal"
-															on:change={() => handleRewriteEngineChange(rule, rule.engine)}
-														>
-															Engine
-														</TextFieldSelect>
-													</div>
-													<div class="field-wrapper">
-														<TextField width="full" bind:value={rule.path} placeholder="^/login">
-															Path (regex, optional)
-														</TextField>
-														<span class="form-hint"
-															>Only apply this rule when the request path matches</span
-														>
-													</div>
-													<div class="field-wrapper">
-														<TextFieldSelect
-															id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-method`}
-															bind:value={rule.method}
-															options={[
-																{ value: '', label: 'Any' },
-																...methods.map((m) => ({ value: m, label: m }))
-															]}
-															size="normal"
-														>
-															Method (optional)
-														</TextFieldSelect>
-													</div>
-													{#if rule.engine === 'dom'}
-														<div class="field-wrapper">
-															<TextFieldSelect
-																id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-action`}
-																bind:value={rule.action}
-																options={domActions}
-																size="normal"
-															>
-																Action
-															</TextFieldSelect>
-															{#if hasError(`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.action`)}
-																<span class="field-error"
-																	>{getError(
-																		`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.action`
-																	)}</span
-																>
-															{/if}
-														</div>
-														<div class="field-wrapper">
-															<TextFieldSelect
-																id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-target`}
-																bind:value={rule.target}
-																options={targets}
-																size="normal"
-															>
-																Target
-															</TextFieldSelect>
-															<span class="form-hint"
-																>Also supports numeric list (1,3,5) or range (2-4)</span
-															>
-														</div>
-													{:else if rule.engine === 'header'}
-														<div class="field-wrapper">
-															<TextFieldSelect
-																id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-action`}
-																bind:value={rule.action}
-																options={headerActions}
-																size="normal"
-															>
-																Action
-															</TextFieldSelect>
-														</div>
-													{/if}
-													<div class="field-wrapper">
-														<TextFieldSelect
-															id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-from`}
-															bind:value={rule.from}
-															options={getFromOptionsForRewriteEngine(rule.engine)}
-															size="normal"
-														>
-															From
-														</TextFieldSelect>
-													</div>
-													<div class="field-wrapper full">
-														<TextField
-															width="full"
-															bind:value={rule.find}
-															placeholder={rule.engine === 'dom'
-																? 'div.logo, #header img'
-																: rule.engine === 'header'
-																	? 'Server'
-																	: 'target\\.com'}
-															error={hasError(
-																`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.find`
-															)}
-														>
-															{#if rule.engine === 'dom'}
-																Selector (CSS)
-															{:else if rule.engine === 'header'}
-																Header Name
-															{:else}
-																Find (regex)
-															{/if}
-														</TextField>
-														{#if hasError(`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.find`)}
-															<span class="field-error"
-																>{getError(
-																	`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.find`
-																)}</span
-															>
-														{:else}
-															<span class="form-hint">
-																{#if rule.engine === 'dom'}
-																	CSS selector to find HTML elements
-																{:else if rule.engine === 'header'}
-																	Exact header name (e.g. Server, X-Powered-By)
-																{:else}
-																	Regex pattern to search for in content
-																{/if}
-															</span>
-														{/if}
-													</div>
-													{#if rule.engine !== 'header' || rule.action !== 'remove'}
-														<div class="field-wrapper full">
-															<TextareaField
-																fullWidth
-																bind:value={rule.replace}
-																placeholder={rule.engine === 'dom'
-																	? rule.action === 'setAttr'
-																		? 'href:https://example.com'
-																		: rule.action === 'remove'
-																			? ''
-																			: 'New content'
-																	: rule.engine === 'header'
-																		? 'new-value'
-																		: 'phishing.com'}
-																height="medium"
-															>
-																{#if rule.engine === 'dom' && rule.action === 'setAttr'}
-																	Value (attr:value)
-																{:else if rule.engine === 'dom' && rule.action === 'remove'}
-																	Value (not required)
-																{:else if rule.engine === 'header'}
-																	New Value
-																{:else}
-																	Replace
-																{/if}
-															</TextareaField>
-															{#if hasError(`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.replace`)}
-																<span class="field-error"
-																	>{getError(
-																		`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.replace`
-																	)}</span
-																>
-															{:else}
-																<span class="form-hint">
-																	{#if rule.engine === 'dom'}
-																		{#if rule.action === 'setAttr'}
-																			Format: attribute:value (e.g. href:https://example.com)
-																		{:else if rule.action === 'remove'}
-																			Not required for remove action
-																		{:else if rule.action === 'removeAttr'}
-																			Attribute name to remove
-																		{:else if rule.action === 'addClass' || rule.action === 'removeClass'}
-																			CSS class name
-																		{:else}
-																			New content for matched elements
-																		{/if}
-																	{:else if rule.engine === 'header'}
-																		New value for the header
-																	{:else}
-																		Replacement text (use $1, $2 for capture groups)
-																	{/if}
-																</span>
-															{/if}
-														</div>
-													{/if}
-												</div>
-											</div>
-										{/each}
-										<button
-											type="button"
-											class="add-rule-btn"
-											on:click={() => addHostRewriteRule(expandedHostIndex)}
-										>
-											<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-												<path d="M12 4v16m8-8H4" />
-											</svg>
-											Add Rewrite Rule
-										</button>
-									</div>
-								{:else if currentHostTab === 'response'}
-									<div class="rules-description">
-										<p>
-											Return custom responses for specific paths instead of proxying to the target.
-										</p>
-									</div>
-									<div class="rules-container">
-										{#each configData.hosts[expandedHostIndex].response || [] as rule, ruleIndex (rule._id)}
-											<div class="rule-card">
-												<div class="rule-header">
-													<span class="rule-name">{rule.path || `Rule ${ruleIndex + 1}`}</span>
-													<button
-														type="button"
-														class="icon-btn small danger"
-														on:click={() => removeHostResponseRule(expandedHostIndex, ruleIndex)}
-													>
-														<svg
-															viewBox="0 0 24 24"
-															fill="none"
-															stroke="currentColor"
-															stroke-width="2"
-														>
-															<path d="M6 18L18 6M6 6l12 12" />
-														</svg>
-													</button>
-												</div>
-												<div class="rule-grid">
-													<div class="field-wrapper">
-														<TextField
-															width="full"
-															bind:value={rule.path}
-															placeholder="/custom-page"
-															error={hasError(
-																`hosts.${expandedHostIndex}.response.${ruleIndex}.path`
-															)}
-														>
-															Path
-														</TextField>
-														{#if hasError(`hosts.${expandedHostIndex}.response.${ruleIndex}.path`)}
-															<span class="field-error"
-																>{getError(
-																	`hosts.${expandedHostIndex}.response.${ruleIndex}.path`
-																)}</span
-															>
-														{/if}
-													</div>
-													<div class="field-wrapper">
-														<TextField width="full" bind:value={rule.status} placeholder="200">
-															Status
-														</TextField>
-													</div>
-													<div class="field-wrapper full">
-														<TextareaField
-															fullWidth
-															bind:value={rule.body}
-															placeholder="<html>...</html>"
-															height="medium"
-														>
-															Body
-														</TextareaField>
-													</div>
-													<div class="field-wrapper full">
-														<div class="headers-section">
-															<div class="headers-label">
-																<span>Headers</span>
-																<button
-																	type="button"
-																	class="add-btn tiny"
-																	on:click={() => addResponseHeader(rule)}
-																	title="Add Header"
-																>
-																	<svg
-																		viewBox="0 0 24 24"
-																		fill="none"
-																		stroke="currentColor"
-																		stroke-width="2"
-																	>
-																		<path d="M12 4v16m8-8H4" />
-																	</svg>
-																</button>
-															</div>
-															{#if rule.headers && Object.keys(rule.headers).length > 0}
-																<div class="headers-list">
-																	{#each Object.entries(rule.headers) as [key, value]}
-																		<div class="header-row">
-																			<input
-																				type="text"
-																				value={key}
-																				on:blur={(e) =>
-																					updateResponseHeaderKey(rule, key, e.currentTarget.value)}
-																				placeholder="Header-Name"
-																				class="header-key-input"
-																			/>
-																			<input
-																				type="text"
-																				bind:value={rule.headers[key]}
-																				placeholder="Header value"
-																				class="header-value-input"
-																			/>
-																			<button
-																				type="button"
-																				class="icon-btn tiny danger"
-																				on:click={() => removeResponseHeader(rule, key)}
-																				title="Remove header"
-																			>
-																				<svg
-																					viewBox="0 0 24 24"
-																					fill="none"
-																					stroke="currentColor"
-																					stroke-width="2"
-																				>
-																					<path d="M6 18L18 6M6 6l12 12" />
-																				</svg>
-																			</button>
-																		</div>
-																	{/each}
-																</div>
-															{/if}
-															<span class="form-hint"
-																>Use <code>{'{{.Origin}}'}</code> to echo the request's Origin header</span
-															>
-														</div>
-													</div>
-													<div class="field-wrapper checkbox-wrapper">
-														<label class="checkbox-label">
-															<input
-																type="checkbox"
-																bind:checked={rule.forward}
-																class="checkbox-input"
-																on:change={(e) => {
-																	rule.forward = e.currentTarget.checked;
-																	configData = configData;
-																}}
-															/>
-															<span class="checkbox-text">Forward to target</span>
-														</label>
-													</div>
-												</div>
-											</div>
-										{/each}
-										<button
-											type="button"
-											class="add-rule-btn"
-											on:click={() => addHostResponseRule(expandedHostIndex)}
-										>
-											<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-												<path d="M12 4v16m8-8H4" />
-											</svg>
-											Add Response Rule
-										</button>
-									</div>
-								{:else if currentHostTab === 'urlrewrite'}
-									<div class="rules-description">
-										<p>Transform URL paths to evade detection by masking original target URLs.</p>
-									</div>
-									<div class="rules-container">
-										{#each configData.hosts[expandedHostIndex].rewrite_urls || [] as rule, ruleIndex (rule._id)}
-											<div class="rule-card">
-												<div class="rule-header">
-													<span class="rule-name">{rule.find || `Rule ${ruleIndex + 1}`}</span>
-													<button
-														type="button"
-														class="icon-btn small danger"
-														on:click={() => removeHostRewriteUrlRule(expandedHostIndex, ruleIndex)}
-													>
-														<svg
-															viewBox="0 0 24 24"
-															fill="none"
-															stroke="currentColor"
-															stroke-width="2"
-														>
-															<path d="M6 18L18 6M6 6l12 12" />
-														</svg>
-													</button>
-												</div>
-												<div class="rule-grid">
-													<div class="field-wrapper">
-														<TextField width="full" bind:value={rule.find} placeholder="/old-path">
-															Find
-														</TextField>
-													</div>
-													<div class="field-wrapper">
-														<TextField
-															width="full"
-															bind:value={rule.replace}
-															placeholder="/new-path"
-														>
-															Replace
-														</TextField>
-													</div>
-												</div>
-											</div>
-										{/each}
-										<button
-											type="button"
-											class="add-rule-btn"
-											on:click={() => addHostRewriteUrlRule(expandedHostIndex)}
-										>
-											<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-												<path d="M12 4v16m8-8H4" />
-											</svg>
-											Add URL Rewrite Rule
-										</button>
-									</div>
-								{/if}
+									</button>
+								{/each}
 							</div>
 						{:else}
-							<div class="empty-state">
-								<svg
-									class="empty-icon"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="1.5"
-								>
-									<path
-										d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
-									/>
-								</svg>
-								<p>Select a host or add a new one</p>
+							<div class="empty-state small">
+								<p>No hosts configured</p>
 								<button type="button" class="add-btn" on:click={addHost}>
 									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 										<path d="M12 4v16m8-8H4" />
 									</svg>
-									Add Host
+									Add First Host
 								</button>
 							</div>
 						{/if}
 					</div>
 				</div>
-			{:else if activeTab === 'global'}
-				<div class="global-panel">
-					<div class="global-grid">
-						<!-- TLS & Access -->
-						<div class="global-section">
-							<h3 class="section-title">
-								<svg
-									class="section-icon"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-								>
-									<path
-										d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-									/>
-								</svg>
-								Security
-							</h3>
-							<div class="section-content">
-								<div class="field-wrapper">
-									<TextFieldSelect
-										id="global-tls-mode"
-										bind:value={configData.global.tls.mode}
-										options={tlsModes}
-										size="normal"
-									>
-										TLS Mode
-									</TextFieldSelect>
-									<span class="form-hint"
-										>Controls certificate verification for upstream connections</span
-									>
-								</div>
-								<div class="field-wrapper">
-									<TextFieldSelect
-										id="global-access-mode"
-										bind:value={configData.global.access.mode}
-										options={accessModes}
-										size="normal"
-									>
-										Access Mode
-									</TextFieldSelect>
-									<span class="form-hint"
-										>Private requires visiting a lure URL first (recommended)</span
-									>
-								</div>
-								{#if configData.global.access?.mode === 'private'}
-									<div class="field-wrapper">
-										<TextField
-											width="full"
-											bind:value={configData.global.access.on_deny}
-											placeholder="404"
-										>
-											On Deny
-										</TextField>
-										<span class="form-hint"
-											>Status code (e.g. 404, 503) or redirect URL (e.g. https://example.com)</span
-										>
-									</div>
-								{/if}
-							</div>
-						</div>
 
-						<!-- Impersonation -->
-						<div class="global-section">
-							<h3 class="section-title">
-								<svg
-									class="section-icon"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
+				<!-- host detail panel -->
+				<div class="host-detail">
+					{#if expandedHostIndex >= 0 && configData.hosts[expandedHostIndex]}
+						<div class="detail-header">
+							<div class="detail-title">
+								<span class="domain-label"
+									>{configData.hosts[expandedHostIndex].to || 'New Host'}</span
 								>
-									<path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-								</svg>
-								Client Browser Impersonation
-							</h3>
-							<div class="section-content">
-								<label class="checkbox-label">
-									<input
-										type="checkbox"
-										checked={configData.global.impersonate.enabled}
-										on:change={(e) => {
-											configData.global.impersonate.enabled = e.currentTarget.checked;
-											configData = configData;
-										}}
-										class="checkbox-input"
-									/>
-									<span class="checkbox-text">Enable Impersonation</span>
-								</label>
-								<span class="form-hint"
-									>Detects client browser and uses a matching fingerprint profile (Chrome or Firefox
-									only, others default to Chrome)</span
+								<span class="arrow">→</span>
+								<span class="target-label"
+									>{configData.hosts[expandedHostIndex].domain || 'target'}</span
 								>
-								{#if configData.global.impersonate.enabled}
-									<label class="checkbox-label" style="margin-top: 0.5rem;">
-										<input
-											type="checkbox"
-											checked={configData.global.impersonate.retain_ua}
-											on:change={(e) => {
-												configData.global.impersonate.retain_ua = e.currentTarget.checked;
-												configData = configData;
-											}}
-											class="checkbox-input"
+							</div>
+							<div class="detail-actions">
+								<button
+									type="button"
+									class="icon-btn"
+									title="Duplicate"
+									on:click={() => duplicateHost(expandedHostIndex)}
+								>
+									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+										<path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+									</svg>
+								</button>
+								<button
+									type="button"
+									class="icon-btn danger"
+									title="Delete"
+									on:click={() => removeHost(expandedHostIndex)}
+								>
+									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path
+											d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
 										/>
-										<span class="checkbox-text">Retain User Agent</span>
-									</label>
-									<span class="form-hint"
-										>Use the client's User-Agent header instead of the impersonated browser's
-										default</span
+									</svg>
+								</button>
+							</div>
+						</div>
+
+						<!-- sub tabs -->
+						<div class="sub-tabs">
+							<button
+								type="button"
+								class="sub-tab"
+								class:active={currentHostTab === 'settings'}
+								on:click={() => setHostActiveTab(expandedHostIndex, 'settings')}
+							>
+								Settings
+							</button>
+							<button
+								type="button"
+								class="sub-tab"
+								class:active={currentHostTab === 'capture'}
+								on:click={() => setHostActiveTab(expandedHostIndex, 'capture')}
+							>
+								Capture
+								{#if configData.hosts[expandedHostIndex].capture?.length}
+									<span class="sub-badge">{configData.hosts[expandedHostIndex].capture.length}</span
 									>
 								{/if}
-							</div>
+							</button>
+							<button
+								type="button"
+								class="sub-tab"
+								class:active={currentHostTab === 'rewrite'}
+								on:click={() => setHostActiveTab(expandedHostIndex, 'rewrite')}
+							>
+								Rewrite
+								{#if configData.hosts[expandedHostIndex].rewrite?.length}
+									<span class="sub-badge">{configData.hosts[expandedHostIndex].rewrite.length}</span
+									>
+								{/if}
+							</button>
+							<button
+								type="button"
+								class="sub-tab"
+								class:active={currentHostTab === 'response'}
+								on:click={() => setHostActiveTab(expandedHostIndex, 'response')}
+							>
+								Response
+								{#if configData.hosts[expandedHostIndex].response?.length}
+									<span class="sub-badge"
+										>{configData.hosts[expandedHostIndex].response.length}</span
+									>
+								{/if}
+							</button>
+							<button
+								type="button"
+								class="sub-tab"
+								class:active={currentHostTab === 'urlrewrite'}
+								on:click={() => setHostActiveTab(expandedHostIndex, 'urlrewrite')}
+							>
+								URL Rewrite
+								{#if configData.hosts[expandedHostIndex].rewrite_urls?.length}
+									<span class="sub-badge"
+										>{configData.hosts[expandedHostIndex].rewrite_urls.length}</span
+									>
+								{/if}
+							</button>
 						</div>
 
-						<!-- Template Variables -->
-						<div class="global-section">
-							<h3 class="section-title">
-								<svg
-									class="section-icon"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-								>
-									<path
-										d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
-									/>
-								</svg>
-								Template Variables
-							</h3>
-							<div class="section-content">
-								<label class="checkbox-label">
-									<input
-										type="checkbox"
-										checked={configData.global.variables.enabled}
-										on:change={(e) => {
-											configData.global.variables.enabled = e.currentTarget.checked;
-											if (!e.currentTarget.checked) {
-												configData.global.variables.allowed = [];
-											}
-											configData = configData;
-										}}
-										class="checkbox-input"
-									/>
-									<span class="checkbox-text">Enable Variables</span>
-								</label>
-								<span class="form-hint"
-									>Allow template variables like <code>{'{{.Email}}'}</code> in rewrite rules to be replaced
-									with recipient data</span
-								>
-								{#if configData.global.variables.enabled}
-									<div class="field-wrapper" style="margin-top: 0.75rem;">
-										<label class="flex flex-col">
-											<span class="text-sm font-medium text-pc-darkblue dark:text-white mb-1.5"
-												>Allowed Variables (optional)</span
-											>
-											<div class="variables-selector">
-												{#each validProxyVariables as varName}
-													<label class="variable-chip">
-														<input
-															type="checkbox"
-															checked={configData.global.variables.allowed?.includes(varName)}
-															on:change={(e) => {
-																if (e.currentTarget.checked) {
-																	configData.global.variables.allowed = [
-																		...(configData.global.variables.allowed || []),
-																		varName
-																	];
-																} else {
-																	configData.global.variables.allowed =
-																		configData.global.variables.allowed?.filter(
-																			(v) => v !== varName
-																		) || [];
-																}
-																configData = configData;
-															}}
-															class="hidden"
-														/>
-														<span
-															class="chip-text"
-															class:selected={configData.global.variables.allowed?.includes(
-																varName
-															)}>{varName}</span
-														>
-													</label>
-												{/each}
-											</div>
-										</label>
-										<span class="form-hint"
-											>Leave empty to allow all variables, or select specific ones to restrict which
-											can be used</span
+						<div class="sub-content">
+							<div
+								class="settings-grid host-settings"
+								style={currentHostTab !== 'settings' ? 'display:none' : ''}
+							>
+								<div class="field-wrapper full">
+									<TextField
+										width="full"
+										bind:value={configData.hosts[expandedHostIndex].to}
+										placeholder="login.phish.test"
+										required
+										error={hasError(`hosts.${expandedHostIndex}.to`)}
+									>
+										Phishing Domain
+									</TextField>
+									{#if hasError(`hosts.${expandedHostIndex}.to`)}
+										<span class="field-error">{getError(`hosts.${expandedHostIndex}.to`)}</span>
+									{:else}
+										<span class="form-hint">Your phishing domain that will serve the content</span>
+									{/if}
+								</div>
+								<div class="field-wrapper full">
+									<TextField
+										width="full"
+										bind:value={configData.hosts[expandedHostIndex].domain}
+										placeholder="login.target.com"
+										required
+										error={hasError(`hosts.${expandedHostIndex}.domain`)}
+									>
+										Target Domain
+									</TextField>
+									{#if hasError(`hosts.${expandedHostIndex}.domain`)}
+										<span class="field-error">{getError(`hosts.${expandedHostIndex}.domain`)}</span>
+									{:else}
+										<span class="form-hint">The legitimate domain being impersonated</span>
+									{/if}
+								</div>
+								<div class="field-wrapper">
+									<TextFieldSelect
+										id={`host-${expandedHostIndex}-scheme`}
+										bind:value={configData.hosts[expandedHostIndex].scheme}
+										options={schemes}
+										size="normal"
+									>
+										Scheme
+									</TextFieldSelect>
+								</div>
+								{#if configData.hosts[expandedHostIndex].tls}
+									<div class="field-wrapper">
+										<TextFieldSelect
+											id={`host-${expandedHostIndex}-tls-mode`}
+											bind:value={configData.hosts[expandedHostIndex].tls.mode}
+											options={tlsModesWithEmpty}
+											size="normal"
+											optional
 										>
+											TLS Mode
+										</TextFieldSelect>
 									</div>
 								{/if}
+								{#if configData.hosts[expandedHostIndex].access}
+									<div class="field-wrapper">
+										<TextFieldSelect
+											id={`host-${expandedHostIndex}-access-mode`}
+											bind:value={configData.hosts[expandedHostIndex].access.mode}
+											options={accessModesWithEmpty}
+											size="normal"
+											optional
+										>
+											Access Mode
+										</TextFieldSelect>
+										<span class="form-hint"
+											>Private requires visiting a lure URL first (recommended)</span
+										>
+									</div>
+									{#if configData.hosts[expandedHostIndex].access?.mode === 'private'}
+										<div class="field-wrapper">
+											<TextField
+												width="full"
+												bind:value={configData.hosts[expandedHostIndex].access.on_deny}
+												placeholder="404"
+											>
+												On Deny
+											</TextField>
+											<span class="form-hint"
+												>Status code (e.g. 404, 503) or redirect URL (e.g. https://example.com)</span
+											>
+										</div>
+									{/if}
+								{/if}
 							</div>
-						</div>
-					</div>
-
-					<!-- Global Rules Tabs -->
-					<div class="global-rules">
-						<div class="rules-tabs">
-							<button
-								type="button"
-								class="rules-tab"
-								class:active={(activeTab === 'global' && !globalRulesTab) ||
-									globalRulesTab === 'capture'}
-								on:click={() => (globalRulesTab = 'capture')}
-							>
-								Capture Rules
-								{#if configData.global.capture?.length}
-									<span class="sub-badge">{configData.global.capture.length}</span>
-								{/if}
-							</button>
-							<button
-								type="button"
-								class="rules-tab"
-								class:active={globalRulesTab === 'rewrite'}
-								on:click={() => (globalRulesTab = 'rewrite')}
-							>
-								Rewrite Rules
-								{#if configData.global.rewrite?.length}
-									<span class="sub-badge">{configData.global.rewrite.length}</span>
-								{/if}
-							</button>
-							<button
-								type="button"
-								class="rules-tab"
-								class:active={globalRulesTab === 'response'}
-								on:click={() => (globalRulesTab = 'response')}
-							>
-								Response Rules
-								{#if configData.global.response?.length}
-									<span class="sub-badge">{configData.global.response.length}</span>
-								{/if}
-							</button>
-						</div>
-
-						<div class="rules-content">
-							{#if !globalRulesTab || globalRulesTab === 'capture'}
+							{#if currentHostTab === 'capture'}
 								<div class="rules-description">
 									<p>Extract credentials, tokens, and other data from requests and responses.</p>
 								</div>
 								<div class="rules-container">
-									{#each configData.global.capture || [] as rule, i (rule._id)}
+									{#each configData.hosts[expandedHostIndex].capture || [] as rule, ruleIndex (rule._id)}
 										<div class="rule-card">
 											<div class="rule-header">
-												<span class="rule-name">{rule.name || `Rule ${i + 1}`}</span>
+												<span class="rule-name">{rule.name || `Rule ${ruleIndex + 1}`}</span>
 												<button
 													type="button"
 													class="icon-btn small danger"
-													on:click={() => removeGlobalCaptureRule(i)}
+													on:click={() => removeHostCaptureRule(expandedHostIndex, ruleIndex)}
 												>
 													<svg
 														viewBox="0 0 24 24"
@@ -2657,17 +1827,21 @@
 														width="full"
 														bind:value={rule.name}
 														placeholder="username"
-														error={hasError(`global.capture.${i}.name`)}
+														error={hasError(`hosts.${expandedHostIndex}.capture.${ruleIndex}.name`)}
 													>
 														Name
 													</TextField>
-													{#if hasError(`global.capture.${i}.name`)}
-														<span class="field-error">{getError(`global.capture.${i}.name`)}</span>
+													{#if hasError(`hosts.${expandedHostIndex}.capture.${ruleIndex}.name`)}
+														<span class="field-error"
+															>{getError(
+																`hosts.${expandedHostIndex}.capture.${ruleIndex}.name`
+															)}</span
+														>
 													{/if}
 												</div>
 												<div class="field-wrapper">
 													<TextFieldSelect
-														id={`global-capture-${i}-method`}
+														id={`host-${expandedHostIndex}-capture-${ruleIndex}-method`}
 														bind:value={rule.method}
 														options={methods}
 														size="normal"
@@ -2680,17 +1854,21 @@
 														width="full"
 														bind:value={rule.path}
 														placeholder="/login"
-														error={hasError(`global.capture.${i}.path`)}
+														error={hasError(`hosts.${expandedHostIndex}.capture.${ruleIndex}.path`)}
 													>
 														Path (regex)
 													</TextField>
-													{#if hasError(`global.capture.${i}.path`)}
-														<span class="field-error">{getError(`global.capture.${i}.path`)}</span>
+													{#if hasError(`hosts.${expandedHostIndex}.capture.${ruleIndex}.path`)}
+														<span class="field-error"
+															>{getError(
+																`hosts.${expandedHostIndex}.capture.${ruleIndex}.path`
+															)}</span
+														>
 													{/if}
 												</div>
 												<div class="field-wrapper">
 													<TextFieldSelect
-														id={`global-capture-${i}-engine`}
+														id={`host-${expandedHostIndex}-capture-${ruleIndex}-engine`}
 														value={rule.engine}
 														options={captureEngines}
 														size="normal"
@@ -2702,7 +1880,7 @@
 												{#if rule.engine !== 'cookie'}
 													<div class="field-wrapper">
 														<TextFieldSelect
-															id={`global-capture-${i}-from`}
+															id={`host-${expandedHostIndex}-capture-${ruleIndex}-from`}
 															bind:value={rule.from}
 															options={getFromOptionsForEngine(rule.engine)}
 															size="normal"
@@ -2724,7 +1902,7 @@
 																	: rule.engine === 'json'
 																		? 'user.email'
 																		: 'username'}
-														error={hasError(`global.capture.${i}.find`)}
+														error={hasError(`hosts.${expandedHostIndex}.capture.${ruleIndex}.find`)}
 													>
 														{#if rule.engine === 'regex'}
 															Regex Pattern
@@ -2738,8 +1916,12 @@
 															Field Name
 														{/if}
 													</TextField>
-													{#if hasError(`global.capture.${i}.find`)}
-														<span class="field-error">{getError(`global.capture.${i}.find`)}</span>
+													{#if hasError(`hosts.${expandedHostIndex}.capture.${ruleIndex}.find`)}
+														<span class="field-error"
+															>{getError(
+																`hosts.${expandedHostIndex}.capture.${ruleIndex}.find`
+															)}</span
+														>
 													{/if}
 												</div>
 												<div class="field-wrapper checkbox-wrapper">
@@ -2761,7 +1943,7 @@
 												</div>
 												<div class="field-wrapper">
 													<TextFieldSelect
-														id={`global-capture-${i}-event`}
+														id={`host-${expandedHostIndex}-capture-${ruleIndex}-event`}
 														bind:value={rule.event}
 														options={captureEventOptions}
 														size="normal"
@@ -2772,14 +1954,18 @@
 											</div>
 										</div>
 									{/each}
-									<button type="button" class="add-rule-btn" on:click={addGlobalCaptureRule}>
+									<button
+										type="button"
+										class="add-rule-btn"
+										on:click={() => addHostCaptureRule(expandedHostIndex)}
+									>
 										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 											<path d="M12 4v16m8-8H4" />
 										</svg>
 										Add Capture Rule
 									</button>
 								</div>
-							{:else if globalRulesTab === 'rewrite'}
+							{:else if currentHostTab === 'rewrite'}
 								<div class="rules-description">
 									<p>
 										Rewrite rules modify content passing through the proxy. Use <strong
@@ -2789,14 +1975,14 @@
 									</p>
 								</div>
 								<div class="rules-container">
-									{#each configData.global.rewrite || [] as rule, i (rule._id)}
+									{#each configData.hosts[expandedHostIndex].rewrite || [] as rule, ruleIndex (rule._id)}
 										<div class="rule-card">
 											<div class="rule-header">
-												<span class="rule-name">{rule.name || `Rule ${i + 1}`}</span>
+												<span class="rule-name">{rule.name || `Rule ${ruleIndex + 1}`}</span>
 												<button
 													type="button"
 													class="icon-btn small danger"
-													on:click={() => removeGlobalRewriteRule(i)}
+													on:click={() => removeHostRewriteRule(expandedHostIndex, ruleIndex)}
 												>
 													<svg
 														viewBox="0 0 24 24"
@@ -2816,7 +2002,7 @@
 												</div>
 												<div class="field-wrapper">
 													<TextFieldSelect
-														id={`global-rewrite-${i}-engine`}
+														id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-engine`}
 														bind:value={rule.engine}
 														options={engines}
 														size="normal"
@@ -2835,7 +2021,7 @@
 												</div>
 												<div class="field-wrapper">
 													<TextFieldSelect
-														id={`global-rewrite-${i}-method`}
+														id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-method`}
 														bind:value={rule.method}
 														options={[
 															{ value: '', label: 'Any' },
@@ -2849,22 +2035,24 @@
 												{#if rule.engine === 'dom'}
 													<div class="field-wrapper">
 														<TextFieldSelect
-															id={`global-rewrite-${i}-action`}
+															id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-action`}
 															bind:value={rule.action}
 															options={domActions}
 															size="normal"
 														>
 															Action
 														</TextFieldSelect>
-														{#if hasError(`global.rewrite.${i}.action`)}
+														{#if hasError(`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.action`)}
 															<span class="field-error"
-																>{getError(`global.rewrite.${i}.action`)}</span
+																>{getError(
+																	`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.action`
+																)}</span
 															>
 														{/if}
 													</div>
 													<div class="field-wrapper">
 														<TextFieldSelect
-															id={`global-rewrite-${i}-target`}
+															id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-target`}
 															bind:value={rule.target}
 															options={targets}
 															size="normal"
@@ -2878,7 +2066,7 @@
 												{:else if rule.engine === 'header'}
 													<div class="field-wrapper">
 														<TextFieldSelect
-															id={`global-rewrite-${i}-action`}
+															id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-action`}
 															bind:value={rule.action}
 															options={headerActions}
 															size="normal"
@@ -2889,7 +2077,7 @@
 												{/if}
 												<div class="field-wrapper">
 													<TextFieldSelect
-														id={`global-rewrite-${i}-from`}
+														id={`host-${expandedHostIndex}-rewrite-${ruleIndex}-from`}
 														bind:value={rule.from}
 														options={getFromOptionsForRewriteEngine(rule.engine)}
 														size="normal"
@@ -2906,7 +2094,7 @@
 															: rule.engine === 'header'
 																? 'Server'
 																: 'target\\.com'}
-														error={hasError(`global.rewrite.${i}.find`)}
+														error={hasError(`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.find`)}
 													>
 														{#if rule.engine === 'dom'}
 															Selector (CSS)
@@ -2916,8 +2104,12 @@
 															Find (regex)
 														{/if}
 													</TextField>
-													{#if hasError(`global.rewrite.${i}.find`)}
-														<span class="field-error">{getError(`global.rewrite.${i}.find`)}</span>
+													{#if hasError(`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.find`)}
+														<span class="field-error"
+															>{getError(
+																`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.find`
+															)}</span
+														>
 													{:else}
 														<span class="form-hint">
 															{#if rule.engine === 'dom'}
@@ -2956,9 +2148,11 @@
 																Replace
 															{/if}
 														</TextareaField>
-														{#if hasError(`global.rewrite.${i}.replace`)}
+														{#if hasError(`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.replace`)}
 															<span class="field-error"
-																>{getError(`global.rewrite.${i}.replace`)}</span
+																>{getError(
+																	`hosts.${expandedHostIndex}.rewrite.${ruleIndex}.replace`
+																)}</span
 															>
 														{:else}
 															<span class="form-hint">
@@ -2986,28 +2180,32 @@
 											</div>
 										</div>
 									{/each}
-									<button type="button" class="add-rule-btn" on:click={addGlobalRewriteRule}>
+									<button
+										type="button"
+										class="add-rule-btn"
+										on:click={() => addHostRewriteRule(expandedHostIndex)}
+									>
 										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 											<path d="M12 4v16m8-8H4" />
 										</svg>
 										Add Rewrite Rule
 									</button>
 								</div>
-							{:else if globalRulesTab === 'response'}
+							{:else if currentHostTab === 'response'}
 								<div class="rules-description">
 									<p>
 										Return custom responses for specific paths instead of proxying to the target.
 									</p>
 								</div>
 								<div class="rules-container">
-									{#each configData.global.response || [] as rule, i (rule._id)}
+									{#each configData.hosts[expandedHostIndex].response || [] as rule, ruleIndex (rule._id)}
 										<div class="rule-card">
 											<div class="rule-header">
-												<span class="rule-name">{rule.path || `Rule ${i + 1}`}</span>
+												<span class="rule-name">{rule.path || `Rule ${ruleIndex + 1}`}</span>
 												<button
 													type="button"
 													class="icon-btn small danger"
-													on:click={() => removeGlobalResponseRule(i)}
+													on:click={() => removeHostResponseRule(expandedHostIndex, ruleIndex)}
 												>
 													<svg
 														viewBox="0 0 24 24"
@@ -3025,12 +2223,18 @@
 														width="full"
 														bind:value={rule.path}
 														placeholder="/custom-page"
-														error={hasError(`global.response.${i}.path`)}
+														error={hasError(
+															`hosts.${expandedHostIndex}.response.${ruleIndex}.path`
+														)}
 													>
 														Path
 													</TextField>
-													{#if hasError(`global.response.${i}.path`)}
-														<span class="field-error">{getError(`global.response.${i}.path`)}</span>
+													{#if hasError(`hosts.${expandedHostIndex}.response.${ruleIndex}.path`)}
+														<span class="field-error"
+															>{getError(
+																`hosts.${expandedHostIndex}.response.${ruleIndex}.path`
+															)}</span
+														>
 													{/if}
 												</div>
 												<div class="field-wrapper">
@@ -3115,11 +2319,11 @@
 														<input
 															type="checkbox"
 															bind:checked={rule.forward}
+															class="checkbox-input"
 															on:change={(e) => {
 																rule.forward = e.currentTarget.checked;
 																configData = configData;
 															}}
-															class="checkbox-input"
 														/>
 														<span class="checkbox-text">Forward to target</span>
 													</label>
@@ -3127,18 +2331,1124 @@
 											</div>
 										</div>
 									{/each}
-									<button type="button" class="add-rule-btn" on:click={addGlobalResponseRule}>
+									<button
+										type="button"
+										class="add-rule-btn"
+										on:click={() => addHostResponseRule(expandedHostIndex)}
+									>
 										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 											<path d="M12 4v16m8-8H4" />
 										</svg>
 										Add Response Rule
 									</button>
 								</div>
+							{:else if currentHostTab === 'urlrewrite'}
+								<div class="rules-description">
+									<p>Transform URL paths to evade detection by masking original target URLs.</p>
+								</div>
+								<div class="rules-container">
+									{#each configData.hosts[expandedHostIndex].rewrite_urls || [] as rule, ruleIndex (rule._id)}
+										<div class="rule-card">
+											<div class="rule-header">
+												<span class="rule-name">{rule.find || `Rule ${ruleIndex + 1}`}</span>
+												<button
+													type="button"
+													class="icon-btn small danger"
+													on:click={() => removeHostRewriteUrlRule(expandedHostIndex, ruleIndex)}
+												>
+													<svg
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="2"
+													>
+														<path d="M6 18L18 6M6 6l12 12" />
+													</svg>
+												</button>
+											</div>
+											<div class="rule-grid">
+												<div class="field-wrapper">
+													<TextField width="full" bind:value={rule.find} placeholder="/old-path">
+														Find
+													</TextField>
+												</div>
+												<div class="field-wrapper">
+													<TextField width="full" bind:value={rule.replace} placeholder="/new-path">
+														Replace
+													</TextField>
+												</div>
+												<div class="field-wrapper full">
+													<div class="headers-section">
+														<div class="headers-label">
+															<span>Query Parameter Renames</span>
+															<button
+																type="button"
+																class="add-btn tiny"
+																on:click={() => addURLRewriteQueryParam(rule)}
+																title="Add query parameter rename"
+															>
+																<svg
+																	viewBox="0 0 24 24"
+																	fill="none"
+																	stroke="currentColor"
+																	stroke-width="2"
+																>
+																	<path d="M12 4v16m8-8H4" />
+																</svg>
+															</button>
+														</div>
+														{#if rule.query && rule.query.length > 0}
+															<div class="headers-list">
+																{#each rule.query as qParam, qIndex}
+																	<div class="header-row">
+																		<input
+																			type="text"
+																			bind:value={qParam.find}
+																			placeholder="original_param"
+																			class="header-key-input"
+																		/>
+																		<input
+																			type="text"
+																			bind:value={qParam.replace}
+																			placeholder="renamed_param"
+																			class="header-value-input"
+																		/>
+																		<button
+																			type="button"
+																			class="icon-btn tiny danger"
+																			on:click={() => removeURLRewriteQueryParam(rule, qIndex)}
+																			title="Remove query param rename"
+																		>
+																			<svg
+																				viewBox="0 0 24 24"
+																				fill="none"
+																				stroke="currentColor"
+																				stroke-width="2"
+																			>
+																				<path d="M6 18L18 6M6 6l12 12" />
+																			</svg>
+																		</button>
+																	</div>
+																{/each}
+															</div>
+														{/if}
+														<span class="form-hint"
+															>rename query parameters when rewriting the URL (original → new name)</span
+														>
+													</div>
+												</div>
+												<div class="field-wrapper full">
+													<div class="headers-section">
+														<div class="headers-label">
+															<span>Query Parameter Filter</span>
+															<button
+																type="button"
+																class="add-btn tiny"
+																on:click={() => addURLRewriteFilter(rule)}
+																title="Add parameter to keep"
+															>
+																<svg
+																	viewBox="0 0 24 24"
+																	fill="none"
+																	stroke="currentColor"
+																	stroke-width="2"
+																>
+																	<path d="M12 4v16m8-8H4" />
+																</svg>
+															</button>
+														</div>
+														{#if rule.filter && rule.filter.length > 0}
+															<div class="headers-list">
+																{#each rule.filter as filterParam, fIndex}
+																	<div class="header-row">
+																		<input
+																			type="text"
+																			bind:value={rule.filter[fIndex]}
+																			placeholder="param_name"
+																			class="header-key-input"
+																			style="flex: 1;"
+																		/>
+																		<button
+																			type="button"
+																			class="icon-btn tiny danger"
+																			on:click={() => removeURLRewriteFilter(rule, fIndex)}
+																			title="Remove filter entry"
+																		>
+																			<svg
+																				viewBox="0 0 24 24"
+																				fill="none"
+																				stroke="currentColor"
+																				stroke-width="2"
+																			>
+																				<path d="M6 18L18 6M6 6l12 12" />
+																			</svg>
+																		</button>
+																	</div>
+																{/each}
+															</div>
+														{/if}
+														<span class="form-hint"
+															>allowlist of query parameters to keep — if empty, all parameters are
+															forwarded</span
+														>
+													</div>
+												</div>
+											</div>
+										</div>
+									{/each}
+									<button
+										type="button"
+										class="add-rule-btn"
+										on:click={() => addHostRewriteUrlRule(expandedHostIndex)}
+									>
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+											<path d="M12 4v16m8-8H4" />
+										</svg>
+										Add URL Rewrite Rule
+									</button>
+								</div>
+							{/if}
+						</div>
+					{:else}
+						<div class="empty-state">
+							<svg
+								class="empty-icon"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.5"
+							>
+								<path
+									d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+								/>
+							</svg>
+							<p>Select a host or add a new one</p>
+							<button type="button" class="add-btn" on:click={addHost}>
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+									<path d="M12 4v16m8-8H4" />
+								</svg>
+								Add Host
+							</button>
+						</div>
+					{/if}
+				</div>
+			</div>
+			<div class="global-panel" style={activeTab !== 'global' ? 'display:none' : ''}>
+				<div class="global-grid">
+					<!-- TLS & Access -->
+					<div class="global-section">
+						<h3 class="section-title">
+							<svg
+								class="section-icon"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
+								<path
+									d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+								/>
+							</svg>
+							Security
+						</h3>
+						<div class="section-content">
+							<div class="field-wrapper">
+								<TextFieldSelect
+									id="global-tls-mode"
+									bind:value={configData.global.tls.mode}
+									options={tlsModes}
+									size="normal"
+								>
+									TLS Mode
+								</TextFieldSelect>
+								<span class="form-hint"
+									>Controls certificate verification for upstream connections</span
+								>
+							</div>
+							{#if configData.global.tls.mode === 'custom'}
+								<div class="field-wrapper">
+									<FileField
+										name="globalCertKey"
+										accept=".key"
+										optional
+										on:change={(e) => onGlobalCertFile(e, 'globalTLSKey')}
+										>Private Key (.key)</FileField
+									>
+									<span class="form-hint">leave empty to keep existing certificate</span>
+								</div>
+								<div class="field-wrapper">
+									<FileField
+										name="globalCertPem"
+										accept=".pem,.crt"
+										optional
+										on:change={(e) => onGlobalCertFile(e, 'globalTLSPem')}
+										>Certificate (.pem, .crt)</FileField
+									>
+									<span class="form-hint">leave empty to keep existing certificate</span>
+								</div>
+							{/if}
+							<div class="field-wrapper">
+								<TextFieldSelect
+									id="global-access-mode"
+									bind:value={configData.global.access.mode}
+									options={accessModes}
+									size="normal"
+								>
+									Access Mode
+								</TextFieldSelect>
+								<span class="form-hint"
+									>Private requires visiting a lure URL first (recommended)</span
+								>
+							</div>
+							{#if configData.global.access?.mode === 'private'}
+								<div class="field-wrapper">
+									<TextField
+										width="full"
+										bind:value={configData.global.access.on_deny}
+										placeholder="404"
+									>
+										On Deny
+									</TextField>
+									<span class="form-hint"
+										>Status code (e.g. 404, 503) or redirect URL (e.g. https://example.com)</span
+									>
+								</div>
+							{/if}
+						</div>
+					</div>
+
+					<!-- Impersonation -->
+					<div class="global-section">
+						<h3 class="section-title">
+							<svg
+								class="section-icon"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
+								<path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+							</svg>
+							Client Browser Impersonation
+						</h3>
+						<div class="section-content">
+							<label class="checkbox-label">
+								<input
+									type="checkbox"
+									checked={configData.global.impersonate.enabled}
+									on:change={(e) => {
+										configData.global.impersonate.enabled = e.currentTarget.checked;
+										configData = configData;
+									}}
+									class="checkbox-input"
+								/>
+								<span class="checkbox-text">Enable Impersonation</span>
+							</label>
+							<span class="form-hint"
+								>Detects client browser and uses a matching fingerprint profile (Chrome or Firefox
+								only, others default to Chrome)</span
+							>
+							{#if configData.global.impersonate.enabled}
+								<label class="checkbox-label" style="margin-top: 0.5rem;">
+									<input
+										type="checkbox"
+										checked={configData.global.impersonate.retain_ua}
+										on:change={(e) => {
+											configData.global.impersonate.retain_ua = e.currentTarget.checked;
+											configData = configData;
+										}}
+										class="checkbox-input"
+									/>
+									<span class="checkbox-text">Retain User Agent</span>
+								</label>
+								<span class="form-hint"
+									>Use the client's User-Agent header instead of the impersonated browser's default</span
+								>
+							{/if}
+						</div>
+					</div>
+
+					<!-- Template Variables -->
+					<div class="global-section">
+						<h3 class="section-title">
+							<svg
+								class="section-icon"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+							>
+								<path
+									d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
+								/>
+							</svg>
+							Template Variables
+						</h3>
+						<div class="section-content">
+							<label class="checkbox-label">
+								<input
+									type="checkbox"
+									checked={configData.global.variables.enabled}
+									on:change={(e) => {
+										configData.global.variables.enabled = e.currentTarget.checked;
+										if (!e.currentTarget.checked) {
+											configData.global.variables.allowed = [];
+										}
+										configData = configData;
+									}}
+									class="checkbox-input"
+								/>
+								<span class="checkbox-text">Enable Variables</span>
+							</label>
+							<span class="form-hint"
+								>Allow template variables like <code>{'{{.Email}}'}</code> in rewrite rules to be replaced
+								with recipient data</span
+							>
+							{#if configData.global.variables.enabled}
+								<div class="field-wrapper" style="margin-top: 0.75rem;">
+									<label class="flex flex-col">
+										<span class="text-sm font-medium text-pc-darkblue dark:text-white mb-1.5"
+											>Allowed Variables (optional)</span
+										>
+										<div class="variables-selector">
+											{#each validProxyVariables as varName}
+												<label class="variable-chip">
+													<input
+														type="checkbox"
+														checked={configData.global.variables.allowed?.includes(varName)}
+														on:change={(e) => {
+															if (e.currentTarget.checked) {
+																configData.global.variables.allowed = [
+																	...(configData.global.variables.allowed || []),
+																	varName
+																];
+															} else {
+																configData.global.variables.allowed =
+																	configData.global.variables.allowed?.filter(
+																		(v) => v !== varName
+																	) || [];
+															}
+															configData = configData;
+														}}
+														class="hidden"
+													/>
+													<span
+														class="chip-text"
+														class:selected={configData.global.variables.allowed?.includes(varName)}
+														>{varName}</span
+													>
+												</label>
+											{/each}
+										</div>
+									</label>
+									<span class="form-hint"
+										>Leave empty to allow all variables, or select specific ones to restrict which
+										can be used</span
+									>
+								</div>
 							{/if}
 						</div>
 					</div>
 				</div>
-			{/if}
+
+				<!-- Global Rules Tabs -->
+				<div class="global-rules">
+					<div class="rules-tabs">
+						<button
+							type="button"
+							class="rules-tab"
+							class:active={(activeTab === 'global' && !globalRulesTab) ||
+								globalRulesTab === 'capture'}
+							on:click={() => (globalRulesTab = 'capture')}
+						>
+							Capture Rules
+							{#if configData.global.capture?.length}
+								<span class="sub-badge">{configData.global.capture.length}</span>
+							{/if}
+						</button>
+						<button
+							type="button"
+							class="rules-tab"
+							class:active={globalRulesTab === 'rewrite'}
+							on:click={() => (globalRulesTab = 'rewrite')}
+						>
+							Rewrite Rules
+							{#if configData.global.rewrite?.length}
+								<span class="sub-badge">{configData.global.rewrite.length}</span>
+							{/if}
+						</button>
+						<button
+							type="button"
+							class="rules-tab"
+							class:active={globalRulesTab === 'response'}
+							on:click={() => (globalRulesTab = 'response')}
+						>
+							Response Rules
+							{#if configData.global.response?.length}
+								<span class="sub-badge">{configData.global.response.length}</span>
+							{/if}
+						</button>
+						<button
+							type="button"
+							class="rules-tab"
+							class:active={globalRulesTab === 'urlrewrite'}
+							on:click={() => (globalRulesTab = 'urlrewrite')}
+						>
+							URL Rewrite Rules
+							{#if configData.global.rewrite_urls?.length}
+								<span class="sub-badge">{configData.global.rewrite_urls.length}</span>
+							{/if}
+						</button>
+					</div>
+
+					<div class="rules-content">
+						{#if !globalRulesTab || globalRulesTab === 'capture'}
+							<div class="rules-description">
+								<p>Extract credentials, tokens, and other data from requests and responses.</p>
+							</div>
+							<div class="rules-container">
+								{#each configData.global.capture || [] as rule, i (rule._id)}
+									<div class="rule-card">
+										<div class="rule-header">
+											<span class="rule-name">{rule.name || `Rule ${i + 1}`}</span>
+											<button
+												type="button"
+												class="icon-btn small danger"
+												on:click={() => removeGlobalCaptureRule(i)}
+											>
+												<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+													<path d="M6 18L18 6M6 6l12 12" />
+												</svg>
+											</button>
+										</div>
+										<div class="rule-grid">
+											<div class="field-wrapper">
+												<TextField
+													width="full"
+													bind:value={rule.name}
+													placeholder="username"
+													error={hasError(`global.capture.${i}.name`)}
+												>
+													Name
+												</TextField>
+												{#if hasError(`global.capture.${i}.name`)}
+													<span class="field-error">{getError(`global.capture.${i}.name`)}</span>
+												{/if}
+											</div>
+											<div class="field-wrapper">
+												<TextFieldSelect
+													id={`global-capture-${i}-method`}
+													bind:value={rule.method}
+													options={methods}
+													size="normal"
+												>
+													Method
+												</TextFieldSelect>
+											</div>
+											<div class="field-wrapper">
+												<TextField
+													width="full"
+													bind:value={rule.path}
+													placeholder="/login"
+													error={hasError(`global.capture.${i}.path`)}
+												>
+													Path (regex)
+												</TextField>
+												{#if hasError(`global.capture.${i}.path`)}
+													<span class="field-error">{getError(`global.capture.${i}.path`)}</span>
+												{/if}
+											</div>
+											<div class="field-wrapper">
+												<TextFieldSelect
+													id={`global-capture-${i}-engine`}
+													value={rule.engine}
+													options={captureEngines}
+													size="normal"
+													onSelect={(val) => handleCaptureEngineChange(rule, val)}
+												>
+													Engine
+												</TextFieldSelect>
+											</div>
+											{#if rule.engine !== 'cookie'}
+												<div class="field-wrapper">
+													<TextFieldSelect
+														id={`global-capture-${i}-from`}
+														bind:value={rule.from}
+														options={getFromOptionsForEngine(rule.engine)}
+														size="normal"
+													>
+														From
+													</TextFieldSelect>
+												</div>
+											{/if}
+											<div class="field-wrapper full">
+												<TextField
+													width="full"
+													bind:value={rule.find}
+													placeholder={rule.engine === 'regex'
+														? 'username=([^&]+)'
+														: rule.engine === 'header'
+															? 'Authorization'
+															: rule.engine === 'cookie'
+																? 'session_id'
+																: rule.engine === 'json'
+																	? 'user.email'
+																	: 'username'}
+													error={hasError(`global.capture.${i}.find`)}
+												>
+													{#if rule.engine === 'regex'}
+														Regex Pattern
+													{:else if rule.engine === 'header'}
+														Header Name
+													{:else if rule.engine === 'cookie'}
+														Cookie Name
+													{:else if rule.engine === 'json'}
+														JSON Path
+													{:else}
+														Field Name
+													{/if}
+												</TextField>
+												{#if hasError(`global.capture.${i}.find`)}
+													<span class="field-error">{getError(`global.capture.${i}.find`)}</span>
+												{/if}
+											</div>
+											<div class="field-wrapper checkbox-wrapper">
+												<label class="checkbox-label">
+													<input
+														type="checkbox"
+														checked={rule.required}
+														on:change={(e) => {
+															rule.required = e.currentTarget.checked;
+															configData = configData;
+														}}
+														class="checkbox-input"
+													/>
+													<span class="checkbox-text">Required</span>
+												</label>
+												<span class="form-hint"
+													>Must be captured before session completes and campaign flow progresses</span
+												>
+											</div>
+											<div class="field-wrapper">
+												<TextFieldSelect
+													id={`global-capture-${i}-event`}
+													bind:value={rule.event}
+													options={captureEventOptions}
+													size="normal"
+												>
+													Event Type
+												</TextFieldSelect>
+											</div>
+										</div>
+									</div>
+								{/each}
+								<button type="button" class="add-rule-btn" on:click={addGlobalCaptureRule}>
+									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path d="M12 4v16m8-8H4" />
+									</svg>
+									Add Capture Rule
+								</button>
+							</div>
+						{:else if globalRulesTab === 'rewrite'}
+							<div class="rules-description">
+								<p>
+									Rewrite rules modify content passing through the proxy. Use <strong>Regex</strong>
+									for text replacement or <strong>DOM</strong> for HTML element manipulation.
+								</p>
+							</div>
+							<div class="rules-container">
+								{#each configData.global.rewrite || [] as rule, i (rule._id)}
+									<div class="rule-card">
+										<div class="rule-header">
+											<span class="rule-name">{rule.name || `Rule ${i + 1}`}</span>
+											<button
+												type="button"
+												class="icon-btn small danger"
+												on:click={() => removeGlobalRewriteRule(i)}
+											>
+												<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+													<path d="M6 18L18 6M6 6l12 12" />
+												</svg>
+											</button>
+										</div>
+										<div class="rule-grid">
+											<div class="field-wrapper">
+												<TextField width="full" bind:value={rule.name} placeholder="replace_logo">
+													Name
+												</TextField>
+											</div>
+											<div class="field-wrapper">
+												<TextFieldSelect
+													id={`global-rewrite-${i}-engine`}
+													bind:value={rule.engine}
+													options={engines}
+													size="normal"
+													on:change={() => handleRewriteEngineChange(rule, rule.engine)}
+												>
+													Engine
+												</TextFieldSelect>
+											</div>
+											<div class="field-wrapper">
+												<TextField width="full" bind:value={rule.path} placeholder="^/login">
+													Path (regex, optional)
+												</TextField>
+												<span class="form-hint"
+													>Only apply this rule when the request path matches</span
+												>
+											</div>
+											<div class="field-wrapper">
+												<TextFieldSelect
+													id={`global-rewrite-${i}-method`}
+													bind:value={rule.method}
+													options={[
+														{ value: '', label: 'Any' },
+														...methods.map((m) => ({ value: m, label: m }))
+													]}
+													size="normal"
+												>
+													Method (optional)
+												</TextFieldSelect>
+											</div>
+											{#if rule.engine === 'dom'}
+												<div class="field-wrapper">
+													<TextFieldSelect
+														id={`global-rewrite-${i}-action`}
+														bind:value={rule.action}
+														options={domActions}
+														size="normal"
+													>
+														Action
+													</TextFieldSelect>
+													{#if hasError(`global.rewrite.${i}.action`)}
+														<span class="field-error">{getError(`global.rewrite.${i}.action`)}</span
+														>
+													{/if}
+												</div>
+												<div class="field-wrapper">
+													<TextFieldSelect
+														id={`global-rewrite-${i}-target`}
+														bind:value={rule.target}
+														options={targets}
+														size="normal"
+													>
+														Target
+													</TextFieldSelect>
+													<span class="form-hint"
+														>Also supports numeric list (1,3,5) or range (2-4)</span
+													>
+												</div>
+											{:else if rule.engine === 'header'}
+												<div class="field-wrapper">
+													<TextFieldSelect
+														id={`global-rewrite-${i}-action`}
+														bind:value={rule.action}
+														options={headerActions}
+														size="normal"
+													>
+														Action
+													</TextFieldSelect>
+												</div>
+											{/if}
+											<div class="field-wrapper">
+												<TextFieldSelect
+													id={`global-rewrite-${i}-from`}
+													bind:value={rule.from}
+													options={getFromOptionsForRewriteEngine(rule.engine)}
+													size="normal"
+												>
+													From
+												</TextFieldSelect>
+											</div>
+											<div class="field-wrapper full">
+												<TextField
+													width="full"
+													bind:value={rule.find}
+													placeholder={rule.engine === 'dom'
+														? 'div.logo, #header img'
+														: rule.engine === 'header'
+															? 'Server'
+															: 'target\\.com'}
+													error={hasError(`global.rewrite.${i}.find`)}
+												>
+													{#if rule.engine === 'dom'}
+														Selector (CSS)
+													{:else if rule.engine === 'header'}
+														Header Name
+													{:else}
+														Find (regex)
+													{/if}
+												</TextField>
+												{#if hasError(`global.rewrite.${i}.find`)}
+													<span class="field-error">{getError(`global.rewrite.${i}.find`)}</span>
+												{:else}
+													<span class="form-hint">
+														{#if rule.engine === 'dom'}
+															CSS selector to find HTML elements
+														{:else if rule.engine === 'header'}
+															Exact header name (e.g. Server, X-Powered-By)
+														{:else}
+															Regex pattern to search for in content
+														{/if}
+													</span>
+												{/if}
+											</div>
+											{#if rule.engine !== 'header' || rule.action !== 'remove'}
+												<div class="field-wrapper full">
+													<TextareaField
+														fullWidth
+														bind:value={rule.replace}
+														placeholder={rule.engine === 'dom'
+															? rule.action === 'setAttr'
+																? 'href:https://example.com'
+																: rule.action === 'remove'
+																	? ''
+																	: 'New content'
+															: rule.engine === 'header'
+																? 'new-value'
+																: 'phishing.com'}
+														height="medium"
+													>
+														{#if rule.engine === 'dom' && rule.action === 'setAttr'}
+															Value (attr:value)
+														{:else if rule.engine === 'dom' && rule.action === 'remove'}
+															Value (not required)
+														{:else if rule.engine === 'header'}
+															New Value
+														{:else}
+															Replace
+														{/if}
+													</TextareaField>
+													{#if hasError(`global.rewrite.${i}.replace`)}
+														<span class="field-error"
+															>{getError(`global.rewrite.${i}.replace`)}</span
+														>
+													{:else}
+														<span class="form-hint">
+															{#if rule.engine === 'dom'}
+																{#if rule.action === 'setAttr'}
+																	Format: attribute:value (e.g. href:https://example.com)
+																{:else if rule.action === 'remove'}
+																	Not required for remove action
+																{:else if rule.action === 'removeAttr'}
+																	Attribute name to remove
+																{:else if rule.action === 'addClass' || rule.action === 'removeClass'}
+																	CSS class name
+																{:else}
+																	New content for matched elements
+																{/if}
+															{:else if rule.engine === 'header'}
+																New value for the header
+															{:else}
+																Replacement text (use $1, $2 for capture groups)
+															{/if}
+														</span>
+													{/if}
+												</div>
+											{/if}
+										</div>
+									</div>
+								{/each}
+								<button type="button" class="add-rule-btn" on:click={addGlobalRewriteRule}>
+									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path d="M12 4v16m8-8H4" />
+									</svg>
+									Add Rewrite Rule
+								</button>
+							</div>
+						{:else if globalRulesTab === 'response'}
+							<div class="rules-description">
+								<p>Return custom responses for specific paths instead of proxying to the target.</p>
+							</div>
+							<div class="rules-container">
+								{#each configData.global.response || [] as rule, i (rule._id)}
+									<div class="rule-card">
+										<div class="rule-header">
+											<span class="rule-name">{rule.path || `Rule ${i + 1}`}</span>
+											<button
+												type="button"
+												class="icon-btn small danger"
+												on:click={() => removeGlobalResponseRule(i)}
+											>
+												<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+													<path d="M6 18L18 6M6 6l12 12" />
+												</svg>
+											</button>
+										</div>
+										<div class="rule-grid">
+											<div class="field-wrapper">
+												<TextField
+													width="full"
+													bind:value={rule.path}
+													placeholder="/custom-page"
+													error={hasError(`global.response.${i}.path`)}
+												>
+													Path
+												</TextField>
+												{#if hasError(`global.response.${i}.path`)}
+													<span class="field-error">{getError(`global.response.${i}.path`)}</span>
+												{/if}
+											</div>
+											<div class="field-wrapper">
+												<TextField width="full" bind:value={rule.status} placeholder="200">
+													Status
+												</TextField>
+											</div>
+											<div class="field-wrapper full">
+												<TextareaField
+													fullWidth
+													bind:value={rule.body}
+													placeholder="<html>...</html>"
+													height="medium"
+												>
+													Body
+												</TextareaField>
+											</div>
+											<div class="field-wrapper full">
+												<div class="headers-section">
+													<div class="headers-label">
+														<span>Headers</span>
+														<button
+															type="button"
+															class="add-btn tiny"
+															on:click={() => addResponseHeader(rule)}
+															title="Add Header"
+														>
+															<svg
+																viewBox="0 0 24 24"
+																fill="none"
+																stroke="currentColor"
+																stroke-width="2"
+															>
+																<path d="M12 4v16m8-8H4" />
+															</svg>
+														</button>
+													</div>
+													{#if rule.headers && Object.keys(rule.headers).length > 0}
+														<div class="headers-list">
+															{#each Object.entries(rule.headers) as [key, value]}
+																<div class="header-row">
+																	<input
+																		type="text"
+																		value={key}
+																		on:blur={(e) =>
+																			updateResponseHeaderKey(rule, key, e.currentTarget.value)}
+																		placeholder="Header-Name"
+																		class="header-key-input"
+																	/>
+																	<input
+																		type="text"
+																		bind:value={rule.headers[key]}
+																		placeholder="Header value"
+																		class="header-value-input"
+																	/>
+																	<button
+																		type="button"
+																		class="icon-btn tiny danger"
+																		on:click={() => removeResponseHeader(rule, key)}
+																		title="Remove header"
+																	>
+																		<svg
+																			viewBox="0 0 24 24"
+																			fill="none"
+																			stroke="currentColor"
+																			stroke-width="2"
+																		>
+																			<path d="M6 18L18 6M6 6l12 12" />
+																		</svg>
+																	</button>
+																</div>
+															{/each}
+														</div>
+													{/if}
+													<span class="form-hint"
+														>Use <code>{'{{.Origin}}'}</code> to echo the request's Origin header</span
+													>
+												</div>
+											</div>
+											<div class="field-wrapper checkbox-wrapper">
+												<label class="checkbox-label">
+													<input
+														type="checkbox"
+														bind:checked={rule.forward}
+														on:change={(e) => {
+															rule.forward = e.currentTarget.checked;
+															configData = configData;
+														}}
+														class="checkbox-input"
+													/>
+													<span class="checkbox-text">Forward to target</span>
+												</label>
+											</div>
+										</div>
+									</div>
+								{/each}
+								<button type="button" class="add-rule-btn" on:click={addGlobalResponseRule}>
+									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path d="M12 4v16m8-8H4" />
+									</svg>
+									Add Response Rule
+								</button>
+							</div>
+						{:else if globalRulesTab === 'urlrewrite'}
+							<div class="rules-description">
+								<p>Transform URL paths to evade detection by masking original target URLs.</p>
+							</div>
+							<div class="rules-container">
+								{#each configData.global.rewrite_urls || [] as rule, i (rule._id)}
+									<div class="rule-card">
+										<div class="rule-header">
+											<span class="rule-name">{rule.find || `Rule ${i + 1}`}</span>
+											<button
+												type="button"
+												class="icon-btn small danger"
+												on:click={() => removeGlobalRewriteUrlRule(i)}
+											>
+												<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+													<path d="M6 18L18 6M6 6l12 12" />
+												</svg>
+											</button>
+										</div>
+										<div class="rule-grid">
+											<div class="field-wrapper">
+												<TextField width="full" bind:value={rule.find} placeholder="/old-path">
+													Find
+												</TextField>
+											</div>
+											<div class="field-wrapper">
+												<TextField width="full" bind:value={rule.replace} placeholder="/new-path">
+													Replace
+												</TextField>
+											</div>
+											<div class="field-wrapper full">
+												<div class="headers-section">
+													<div class="headers-label">
+														<span>Query Parameter Renames</span>
+														<button
+															type="button"
+															class="add-btn tiny"
+															on:click={() => addURLRewriteQueryParam(rule)}
+															title="Add query parameter rename"
+														>
+															<svg
+																viewBox="0 0 24 24"
+																fill="none"
+																stroke="currentColor"
+																stroke-width="2"
+															>
+																<path d="M12 4v16m8-8H4" />
+															</svg>
+														</button>
+													</div>
+													{#if rule.query && rule.query.length > 0}
+														<div class="headers-list">
+															{#each rule.query as qParam, qIndex}
+																<div class="header-row">
+																	<input
+																		type="text"
+																		bind:value={qParam.find}
+																		placeholder="original_param"
+																		class="header-key-input"
+																	/>
+																	<input
+																		type="text"
+																		bind:value={qParam.replace}
+																		placeholder="renamed_param"
+																		class="header-value-input"
+																	/>
+																	<button
+																		type="button"
+																		class="icon-btn tiny danger"
+																		on:click={() => removeURLRewriteQueryParam(rule, qIndex)}
+																		title="Remove query param rename"
+																	>
+																		<svg
+																			viewBox="0 0 24 24"
+																			fill="none"
+																			stroke="currentColor"
+																			stroke-width="2"
+																		>
+																			<path d="M6 18L18 6M6 6l12 12" />
+																		</svg>
+																	</button>
+																</div>
+															{/each}
+														</div>
+													{/if}
+													<span class="form-hint"
+														>rename query parameters when rewriting the URL (original → new name)</span
+													>
+												</div>
+											</div>
+											<div class="field-wrapper full">
+												<div class="headers-section">
+													<div class="headers-label">
+														<span>Query Parameter Filter</span>
+														<button
+															type="button"
+															class="add-btn tiny"
+															on:click={() => addURLRewriteFilter(rule)}
+															title="Add parameter to keep"
+														>
+															<svg
+																viewBox="0 0 24 24"
+																fill="none"
+																stroke="currentColor"
+																stroke-width="2"
+															>
+																<path d="M12 4v16m8-8H4" />
+															</svg>
+														</button>
+													</div>
+													{#if rule.filter && rule.filter.length > 0}
+														<div class="headers-list">
+															{#each rule.filter as filterParam, fIndex}
+																<div class="header-row">
+																	<input
+																		type="text"
+																		bind:value={rule.filter[fIndex]}
+																		placeholder="param_name"
+																		class="header-key-input"
+																		style="flex: 1;"
+																	/>
+																	<button
+																		type="button"
+																		class="icon-btn tiny danger"
+																		on:click={() => removeURLRewriteFilter(rule, fIndex)}
+																		title="Remove filter entry"
+																	>
+																		<svg
+																			viewBox="0 0 24 24"
+																			fill="none"
+																			stroke="currentColor"
+																			stroke-width="2"
+																		>
+																			<path d="M6 18L18 6M6 6l12 12" />
+																		</svg>
+																	</button>
+																</div>
+															{/each}
+														</div>
+													{/if}
+													<span class="form-hint"
+														>allowlist of query parameters to keep — if empty, all parameters are
+														forwarded</span
+													>
+												</div>
+											</div>
+										</div>
+									</div>
+								{/each}
+								<button type="button" class="add-rule-btn" on:click={addGlobalRewriteUrlRule}>
+									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+										<path d="M12 4v16m8-8H4" />
+									</svg>
+									Add URL Rewrite Rule
+								</button>
+							</div>
+						{/if}
+					</div>
+				</div>
+			</div>
 		</div>
 	</div>
 </div>

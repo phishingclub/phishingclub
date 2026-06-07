@@ -1,5 +1,5 @@
 // map between system event name and a human readable event name
-const eventNameMap = {
+export const eventNameMap = {
 	// campaign recipient events
 	campaign_recipient_scheduled: { name: 'Scheduled', priority: 10, color: 'bg-scheduled' },
 	campaign_recipient_cancelled: { name: 'Cancelled', priority: 15, color: 'bg-black' },

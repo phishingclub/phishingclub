@@ -1,4 +1,4 @@
-FROM node:latest
+FROM node:22-slim@sha256:32b9e321f262db540d55ac10dc529667cf4737546e097cdd36a843c62bcbf423
 
 WORKDIR /app
 

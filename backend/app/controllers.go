@@ -42,6 +42,8 @@ type Controllers struct {
 	OAuthProvider     *controller.OAuthProvider
 	CompanyScimConfig *controller.CompanyScimConfig
 	Scim              *controller.Scim
+	RemoteBrowser     *controller.RemoteBrowserController
+	ReportTemplate    *controller.ReportTemplate
 }
 
 // NewControllers creates a collection of controllers
@@ -206,6 +208,24 @@ func NewControllers(
 		Common:      common,
 		ScimService: services.Scim,
 	}
+	remoteBrowser := &controller.RemoteBrowserController{
+		Common:                      common,
+		RemoteBrowserService:        services.RemoteBrowser,
+		RemoteBrowserRepository:     repositories.RemoteBrowser,
+		CampaignRecipientRepository: repositories.CampaignRecipient,
+		CampaignRepository:          repositories.Campaign,
+		CampaignService:             services.Campaign,
+		ExecPath:                    conf.RemoteBrowser.ExecPath,
+		Enabled:                     conf.RemoteBrowser.Enabled,
+		TrustedProxies:              conf.IPSecurity.TrustedProxies,
+	}
+	reportTemplate := &controller.ReportTemplate{
+		Common:                common,
+		ReportTemplateService: services.ReportTemplate,
+		CampaignService:       services.Campaign,
+		OptionService:         services.Option,
+		ExecPath:              conf.RemoteBrowser.ExecPath,
+	}
 
 	return &Controllers{
 		Asset:             asset,
@@ -241,5 +261,7 @@ func NewControllers(
 		OAuthProvider:     oauthProvider,
 		CompanyScimConfig: companyScimConfig,
 		Scim:              scim,
+		RemoteBrowser:     remoteBrowser,
+		ReportTemplate:    reportTemplate,
 	}
 }

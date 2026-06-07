@@ -285,7 +285,7 @@
 	{:else if loginStatus === AppStateService.LOGIN.LOGGED_OUT && $page.route.id === '/login'}
 		<slot />
 	{:else if loginStatus === AppStateService.LOGIN.LOGGED_IN && $page.route.id !== '/login'}
-		<Header bind:isProfileMenuVisible bind:isMobileMenuVisible {toggleChangeCompanyModal} />
+		<Header bind:isProfileMenuVisible bind:isMobileMenuVisible />
 		{#if installState === AppStateService.INSTALL.INSTALLED}
 			<DesktopMenu
 				bind:this={desktopMenuRef}
@@ -310,13 +310,16 @@
 </div>
 
 <style>
+	:global(body) {
+		min-width: 768px;
+		overflow-x: auto;
+	}
+
 	:global(body, table th) {
 		user-select: none;
 
 		/* font-family: "Phudu"; */
 		font-family: 'Titillium Web';
-		min-width: 768px;
-		overflow-x: auto;
 	}
 	:global(table) {
 		user-select: text;

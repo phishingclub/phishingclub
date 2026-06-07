@@ -1,8 +1,6 @@
 name: Test Build
 
 on:
-  #pull_request:
-  #  branches: [ main, develop ]
   push:
     branches: [test-build]
 
@@ -14,20 +12,20 @@ jobs:
       packages: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           fetch-depth: 1
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
         with:
           platforms: linux/amd64,linux/arm64
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -45,7 +43,7 @@ jobs:
           sudo docker run --rm \
           -v "$(pwd)":/app \
           -w /app \
-          node:alpine \
+          node@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920 `# node:22-alpine` \
           sh -c "npm ci && npm run build-production"
 
       - name: Move frontend build to backend
@@ -54,32 +52,37 @@ jobs:
           mkdir -p backend/frontend/build
           cp -r frontend/build/* backend/frontend/build/
 
+      - name: Cache Go build cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: /tmp/go-build-cache
+          key: go-build-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-
+
       - name: Build binaries for multiple architectures
         run: |
-          mkdir -p build/amd64 build/arm64
+          mkdir -p build/amd64 build/arm64 /tmp/go-build-cache
 
-          # build amd64 binary
+          # build amd64 binary — static musl so no glibc floor on target systems
           sudo docker run --rm \
           -v "$(pwd)":/app \
+          -v /tmp/go-build-cache:/root/.cache/go-build \
           -w /app/backend \
-          -e CGO_ENABLED=1 \
-          -e GOOS=linux \
-          -e GOARCH=amd64 \
-          golang:1.25.7 \
-          go build -trimpath \
-          -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }}' \
-          -tags production -o ../build/amd64/phishingclub main.go
+          golang@sha256:c4ea15b4a7912716eb362a022e2b12317762eca387423760bc59c0f9ae69423c `# golang:1.25.10-alpine linux/amd64` \
+          sh -c "apk add --no-cache gcc musl-dev && go build -trimpath \
+          -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }} -linkmode=external -extldflags=-static' \
+          -tags production -o ../build/amd64/phishingclub main.go"
 
-          # build arm64 binary
+          # build arm64 binary — run natively under QEMU (already set up above)
           sudo docker run --rm \
+          --platform linux/arm64 \
           -v "$(pwd)":/app \
+          -v /tmp/go-build-cache:/root/.cache/go-build \
           -w /app/backend \
-          -e CGO_ENABLED=1 \
-          -e GOOS=linux \
-          -e GOARCH=arm64 \
-          -e CC=aarch64-linux-gnu-gcc \
-          golang:1.25.7 \
-          bash -c "apt-get update && apt-get install -y gcc-aarch64-linux-gnu && go build -trimpath -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }}' -tags production -o ../build/arm64/phishingclub main.go"
+          golang@sha256:5331adf7f8a0803631d9dc28843e288874789c14b97a3d0b54ed13e59f9e0589 `# golang:1.25.10-alpine linux/arm64` \
+          sh -c "apk add --no-cache gcc musl-dev && go build -trimpath \
+          -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }} -linkmode=external -extldflags=-static' \
+          -tags production -o ../build/arm64/phishingclub main.go"
 
       - name: Fix build directory permissions
         run: |
@@ -164,23 +167,23 @@ jobs:
             echo "✅ Legacy package created without signature"
           fi
 
-      - name: Build and push test multi-arch Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.release
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ghcr.io/${{ github.repository }}:test-latest
-          labels: |
-            org.opencontainers.image.title=PhishingClub-Test ${{ steps.get_version.outputs.VERSION }}
-            org.opencontainers.image.description=PhishingClub test build image (linux/amd64, linux/arm64). Not for production deployment.
-            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.version=${{ steps.get_version.outputs.VERSION }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
-            org.opencontainers.image.revision=${{ github.sha }}
+      #      - name: Build and push test multi-arch Docker image
+      #        uses: docker/build-push-action@v5
+      #        with:
+      #          context: .
+      #          file: ./Dockerfile.release
+      #          push: true
+      #          platforms: linux/amd64,linux/arm64
+      #          tags: |
+      #            ghcr.io/${{ github.repository }}:test-latest
+      #          labels: |
+      #            org.opencontainers.image.title=PhishingClub-Test ${{ steps.get_version.outputs.VERSION }}
+      #            org.opencontainers.image.description=PhishingClub test build image (linux/amd64, linux/arm64). Not for production deployment.
+      #            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+      #            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+      #            org.opencontainers.image.version=${{ steps.get_version.outputs.VERSION }}
+      #            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+      #            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Verify build artifacts
         run: |
@@ -214,7 +217,7 @@ jobs:
           tar -tzf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz
 
       - name: Upload build artifacts (for review)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: phishingclub-test-build-${{ steps.get_version.outputs.HASH }}
           path: |

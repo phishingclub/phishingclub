@@ -27,6 +27,7 @@ import (
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/install"
+	"github.com/phishingclub/phishingclub/middleware"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/seed"
@@ -231,6 +232,7 @@ func main() {
 		certMagicConfig,
 		certMagicCache,
 		*flagFilePath,
+		conf.IPSecurity.TrustedProxies,
 	)
 	// get entra-id options and setup msal client
 	ssoOpt, err := services.SSO.GetSSOOptionWithoutAuth(context.Background())
@@ -321,6 +323,14 @@ func main() {
 			"trusted_ip_header", conf.IPSecurity.TrustedIPHeader,
 		)
 	}
+	adminRouter.Use(middlewares.IPLimiter)
+	adminRouter.Use(middleware.SecurityHeaders())
+
+	// read the seeded victim WS path for the remote browser endpoint
+	rbWSPath := "rbws" // fallback - real value is seeded at first startup
+	if opt, err := repositories.Option.GetByKey(context.Background(), data.OptionKeyRemoteBrowserWSPath); err == nil {
+		rbWSPath = opt.Value.String()
+	}
 
 	adminServer := app.NewAdministrationServer(
 		adminRouter,
@@ -363,6 +373,8 @@ func main() {
 		repositories,
 		logger,
 		certMagicConfig,
+		rbWSPath,
+		conf.IPSecurity.TrustedProxies,
 	)
 
 	var r *gin.Engine

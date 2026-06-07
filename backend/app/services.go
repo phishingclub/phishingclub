@@ -45,6 +45,8 @@ type Services struct {
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
 	CompanyScimConfig   *service.CompanyScimConfig
 	Scim                *service.Scim
+	RemoteBrowser       *service.RemoteBrowser
+	ReportTemplate      *service.ReportTemplate
 }
 
 // NewServices creates a collection of services
@@ -60,6 +62,7 @@ func NewServices(
 	certMagicConfig *certmagic.Config,
 	certMagicCache *certmagic.Cache,
 	filePath string,
+	trustedProxies []string,
 ) *Services {
 	common := service.Common{
 		Logger: logger,
@@ -74,6 +77,8 @@ func NewServices(
 	templateService := &service.Template{
 		Common:                     common,
 		RecipientRepository:        repositories.Recipient,
+		OptionRepository:           repositories.Option,
+		RemoteBrowserRepository:    repositories.RemoteBrowser,
 		MicrosoftDeviceCodeService: microsoftDeviceCodeService,
 	}
 	file := &service.File{
@@ -114,6 +119,7 @@ func NewServices(
 		RoleRepository:    repositories.Role,
 		CompanyRepository: repositories.Company,
 		PasswordHasher:    utilities.PasswordHasher,
+		TOTPReplayCache:   service.NewTOTPReplayCache(),
 	}
 	recipient := &service.Recipient{
 		Common:                      common,
@@ -197,6 +203,10 @@ func NewServices(
 		TemplateService:         templateService,
 		CampaignTemplateService: campaignTemplate,
 	}
+	remoteBrowser := &service.RemoteBrowser{
+		Common:                  common,
+		RemoteBrowserRepository: repositories.RemoteBrowser,
+	}
 	campaign := &service.Campaign{
 		Common:                        common,
 		CampaignRepository:            repositories.Campaign,
@@ -215,6 +225,9 @@ func NewServices(
 		TemplateService:               templateService,
 		MicrosoftDeviceCodeRepository: repositories.MicrosoftDeviceCode,
 		AttachmentPath:                attachmentPath,
+		RemoteBrowserService:          remoteBrowser,
+		ReportTemplateRepository:      repositories.ReportTemplate,
+		TrustedProxies:                trustedProxies,
 	}
 	// wire campaign service into microsoft device code service now that campaign is constructed
 	microsoftDeviceCodeService.CampaignService = campaign
@@ -290,6 +303,11 @@ func NewServices(
 		CampaignRepository:          repositories.Campaign,
 	}
 
+	reportTemplate := &service.ReportTemplate{
+		Common:                   common,
+		ReportTemplateRepository: repositories.ReportTemplate,
+	}
+
 	return &Services{
 		CompanyScimConfig:   companyScimConfig,
 		Scim:                scim,
@@ -324,5 +342,7 @@ func NewServices(
 		ProxySessionManager: proxySessionManager,
 		OAuthProvider:       oauthProvider,
 		MicrosoftDeviceCode: microsoftDeviceCodeService,
+		RemoteBrowser:       remoteBrowser,
+		ReportTemplate:      reportTemplate,
 	}
 }

@@ -853,9 +853,9 @@
 									<FileField
 										bind:bindTo={ownManagedPemKeyElement}
 										name="certPem"
-										accept=".pem"
+										accept=".pem,.crt"
 										on:change={(e) => onSetFile(e, 'ownManagedTLSPem')}
-										>Certificate (.pem)</FileField
+										>Certificate (.pem, .crt)</FileField
 									>
 								</div>
 							{/if}

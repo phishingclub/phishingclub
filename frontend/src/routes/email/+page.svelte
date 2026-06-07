@@ -212,7 +212,7 @@
 	/** @param {string} id */
 	const getEmail = async (id) => {
 		try {
-			const res = await api.email.getByID(id);
+			const res = await api.email.getByID(id, contextCompanyID);
 			if (!res.success) {
 				throw res.error;
 			}

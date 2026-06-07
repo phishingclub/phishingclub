@@ -33,6 +33,7 @@ var AttachmentColumnsMap = map[string]string{
 	"name":             repository.TableColumn(database.ATTACHMENT_TABLE, "name"),
 	"description":      repository.TableColumn(database.ATTACHMENT_TABLE, "description"),
 	"embedded content": repository.TableColumn(database.ATTACHMENT_TABLE, "embeddedContent"),
+	"send as calendar": repository.TableColumn(database.ATTACHMENT_TABLE, "sendAsCalendar"),
 	"filename":         repository.TableColumn(database.ATTACHMENT_TABLE, "filename"),
 }
 
@@ -255,6 +256,11 @@ func (a *Attachment) Create(g *gin.Context) {
 	if strings.ToLower(embeddedContentString) == "true" {
 		embeddedContent.Set(true)
 	}
+	sendAsCalendar := nullable.NewNullableWithValue(false)
+	sendAsCalendarString := g.PostForm("sendAsCalendar")
+	if strings.ToLower(sendAsCalendarString) == "true" {
+		sendAsCalendar.Set(true)
+	}
 	attachments := []*model.Attachment{}
 	for _, file := range multipartData.File["files"] {
 		// TODO multi user validate that the company id is the same as the session company id or that the session is a super admin
@@ -297,6 +303,7 @@ func (a *Attachment) Create(g *gin.Context) {
 			Name:            name,
 			Description:     description,
 			EmbeddedContent: embeddedContent,
+			SendAsCalendar:  sendAsCalendar,
 			File:            file,
 			FileName:        fileName,
 		}

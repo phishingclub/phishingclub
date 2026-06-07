@@ -506,9 +506,10 @@
 
 	<DeleteAlert
 		list={[
-			'All assets will be deleted',
-			'Templates using this domain will become unusable',
-			'Scheduled or active campaigns using this domain will be closed'
+			'All recipients in this group will become orphaned',
+			'Campaign data for recipients in this group will be anonymized',
+			'Active campaign sends for recipients in this group will be cancelled',
+			'This group will be removed from any campaigns it is assigned to'
 		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}

@@ -3,6 +3,9 @@
 # Exit on any error
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PHISHINGCLUB_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 echo "Generating licenses..."
 
 # Create temp directory if it doesn't exist
@@ -21,15 +24,14 @@ sudo docker compose cp frontend:/tmp/frontend-licenses.json /tmp/licenses/
 
 # Combine licenses
 echo "Combining licenses..."
-# Ensure the static directory exists
-mkdir -p frontend/static/
-cat /tmp/licenses/backend-licenses.md > frontend/static/licenses.txt
-echo -e "\n\n" >> frontend/static/licenses.txt
-cat /tmp/licenses/frontend-licenses.json >> frontend/static/licenses.txt
-echo -e "\n\n" >> frontend/static/licenses.txt
-cat THIRD_PARTY_LICENSES.md >> frontend/static/licenses.txt
+mkdir -p "$PHISHINGCLUB_DIR/frontend/static/"
+cat /tmp/licenses/backend-licenses.md > "$PHISHINGCLUB_DIR/frontend/static/licenses.txt"
+echo -e "\n\n" >> "$PHISHINGCLUB_DIR/frontend/static/licenses.txt"
+cat /tmp/licenses/frontend-licenses.json >> "$PHISHINGCLUB_DIR/frontend/static/licenses.txt"
+echo -e "\n\n" >> "$PHISHINGCLUB_DIR/frontend/static/licenses.txt"
+cat "$PHISHINGCLUB_DIR/THIRD_PARTY_LICENSES.md" >> "$PHISHINGCLUB_DIR/frontend/static/licenses.txt"
 
 # Cleanup
 rm -rf /tmp/licenses
 
-echo "License file generated at frontend/static/licenses.txt"
+echo "License file generated at $PHISHINGCLUB_DIR/frontend/static/licenses.txt"

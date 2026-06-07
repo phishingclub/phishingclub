@@ -97,6 +97,11 @@
 	  <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
 	</svg>`,
 
+		remote_browser: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0H3" />
+</svg>
+`,
+
 		tools: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
 	  <path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437 1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008Z" />
 	</svg>`,
@@ -128,6 +133,7 @@
 			'/smtp-configuration/': 'smtp_configurations',
 			'/api-sender/': 'api_senders',
 			'/oauth-provider/': 'oauth_providers',
+			'/remote-browser/': 'remote_browser',
 			'/profile/': 'profile',
 			'/sessions/': 'sessions',
 			'/user/': 'users',
@@ -247,6 +253,7 @@
 			<div class="space-y-1">
 				{#each menu as link}
 					{#if link.type === 'submenu'}
+						<ConditionalDisplay show={link.whitebox ? 'whitebox' : link.blackbox ? 'blackbox' : 'both'}>
 						<!-- section header -->
 						<div class="pt-4 pb-2 first:pt-0">
 							<div class="py-2 px-4 border-l-2 border-cta-blue/60 dark:border-highlight-blue/60">
@@ -284,6 +291,7 @@
 								</ConditionalDisplay>
 							{/each}
 						</div>
+						</ConditionalDisplay>
 					{:else}
 						<!-- standalone menu item -->
 						<div class="pt-4 pb-2 first:pt-0">

@@ -11,9 +11,10 @@ import (
 
 // Middlwares is a collection of middlewares
 type Middlewares struct {
-	IPLimiter        gin.HandlerFunc
-	LoginRateLimiter gin.HandlerFunc
-	SessionHandler   gin.HandlerFunc
+	IPLimiter          gin.HandlerFunc
+	LoginRateLimiter   gin.HandlerFunc
+	SessionHandler     gin.HandlerFunc
+	SoftSessionHandler gin.HandlerFunc
 }
 
 // NewMiddlewares creates a collection of middlewares
@@ -36,11 +37,17 @@ func NewMiddlewares(
 		utils.JSONResponseHandler,
 		logger,
 	)
+	softSessionHandler := middleware.NewSoftSessionHandler(
+		services.Session,
+		services.User,
+		logger,
+	)
 
 	return &Middlewares{
-		IPLimiter:        ipLimiter,
-		LoginRateLimiter: loginThrottle,
-		SessionHandler:   sessionHandler,
+		IPLimiter:          ipLimiter,
+		LoginRateLimiter:   loginThrottle,
+		SessionHandler:     sessionHandler,
+		SoftSessionHandler: softSessionHandler,
 	}
 }
 

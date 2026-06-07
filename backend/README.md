@@ -11,6 +11,19 @@ The program must be executable
 The program must have rights to serve on privliged ports
 `sudo setcap CAP_NET_BIND_SERVICE=+eip /path/to/binary`
 
+### Updating the systemd service unit (required for Remote Browser feature)
+
+The Remote Browser feature spawns a Chrome process as a subprocess. To support this, the systemd unit was updated to remove `MemoryDenyWriteExecute` (incompatible with Chrome's V8 JIT) and `RestrictNamespaces` (required for Chrome's sandbox to work).
+
+The in-app update replaces the binary but **does not** reload the service unit automatically. After updating from a version that did not have Remote Browser support, you must run:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart phishingclub
+```
+
+Without this the old unit stays active and Chrome will crash when a remote browser session is started.
+
 ### Known Issues
 
 #### Hot reloading not working / New files now working

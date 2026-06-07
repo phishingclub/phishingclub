@@ -678,14 +678,19 @@
 		webhookMap = BiMap.FromArrayOfObjects(webhooks);
 	};
 
+	// Parse a YYYY-MM-DD string as local midnight, not UTC midnight.
+	// new Date("2026-05-20") is UTC 00:00 which is the *previous* day in negative-offset timezones.
+	// Adding T00:00:00 (no offset) forces the spec to treat it as local time instead.
+	const parseLocalDate = (dateStr) => new Date(dateStr + 'T00:00:00');
+
 	const setScheduledAt = () => {
 		if (
 			formValues.scheduledStartAt &&
 			formValues.scheduledEndAt &&
 			formValues.constraintWeekDays.length > 0
 		) {
-			const startDateTime = new Date(formValues.scheduledStartAt);
-			const endDateTime = new Date(formValues.scheduledEndAt);
+			const startDateTime = parseLocalDate(formValues.scheduledStartAt);
+			const endDateTime = parseLocalDate(formValues.scheduledEndAt);
 			const startWeekday = startDateTime.getDay();
 			const firstWeekDay =
 				formValues.constraintWeekDays.find((d) => d >= startWeekday) ??
@@ -1325,8 +1330,8 @@
 	const weekDaysAvailableBetween = (start, end) => {
 		if (!start || !end) return [];
 
-		const startDate = new Date(start);
-		const endDate = new Date(end);
+		const startDate = parseLocalDate(start);
+		const endDate = parseLocalDate(end);
 		const daysInRange = new Set();
 
 		for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {

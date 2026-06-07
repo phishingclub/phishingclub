@@ -61,7 +61,9 @@ func setupCertMagic(
 			if conf.TLSAuto() && conf.TLSHost() == name {
 				return nil
 			}
-			// check phishing host with managed TLS
+			// allow on-demand ACME only for domains that use managed TLS (let's encrypt / acme).
+			// own_managed_tls and self_signed_tls domains must never trigger ACME acquisition —
+			// their certificates are provided manually or generated internally.
 			res := db.
 				Select("id").
 				Where("name = ?", name).

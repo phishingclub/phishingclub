@@ -42,7 +42,7 @@
 		if (!pagination && sortable?.length) {
 			console.warn('You need to pass a pagination object to make the column sortable');
 		}
-		columnsLength = columns.length + 2;
+		columnsLength = columns.length + (hasActions ? 2 : 0);
 	});
 
 	let currentPage = pagination && pagination.currentPage;
@@ -82,10 +82,12 @@
 									<GhostText />
 								</TableCell>
 							{/each}
-							<TableCellEmpty />
-							<TableCellAction>
-								<GhostText square center />
-							</TableCellAction>
+							{#if hasActions}
+								<TableCellEmpty />
+								<TableCellAction>
+									<GhostText square center />
+								</TableCellAction>
+							{/if}
 						</TableRow>
 					{/each}
 				{/if}

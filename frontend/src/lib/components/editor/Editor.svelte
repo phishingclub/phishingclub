@@ -76,7 +76,8 @@
 			{ label: 'Random alphanumeric', text: '{{randAlpha 8}}' },
 			{ label: 'Random number', text: '{{randInt 1 4}}' },
 			{ label: 'Date', text: '{{date "Y-m-d H:i:s" 0}}' },
-			{ label: 'Base64', text: '{{base64 "text"}}' }
+			{ label: 'Base64', text: '{{base64 "text"}}' },
+			{ label: 'Multiply', text: '{{mul 1.0 1.0}}' }
 		]
 	};
 
@@ -89,11 +90,35 @@
 
 	$: computedTemplates = (() => {
 		const result = { ...templates };
-		if ($displayMode === DISPLAY_MODE.BLACKBOX) {
+		if ($displayMode === DISPLAY_MODE.BLACKBOX && contentType !== 'report') {
 			result['Device Code'] = deviceCodeTemplates;
+		}
+		if ($displayMode === DISPLAY_MODE.BLACKBOX && contentType === 'page') {
+			result['Remote Browser'] = [{ label: 'Script', text: '{{RemoteBrowserScript "remote_browser_name"}}' }];
 		}
 		return result;
 	})();
+
+	const reportTemplates = [
+		{ label: 'Campaign Name', text: '{{.CampaignName}}' },
+		{ label: 'Company Name', text: '{{.CompanyName}}' },
+		{ label: 'Report Date', text: '{{.ReportDate}}' },
+		{ label: 'Start Date', text: '{{.CampaignStartDate}}' },
+		{ label: 'End Date', text: '{{.CampaignEndDate}}' },
+		{ label: 'Closed At', text: '{{.CampaignClosedAt}}' },
+		{ label: 'Total Targets', text: '{{.TotalTargets}}' },
+		{ label: 'Emails Sent', text: '{{.EmailsSent}}' },
+		{ label: 'Emails Opened', text: '{{.EmailsOpened}}' },
+		{ label: 'Clicked (count)', text: '{{.ResultClicked}}' },
+		{ label: 'Clicked (% of total)', text: '{{.ResultClickedPercent}}' },
+		{ label: 'Submitted (count)', text: '{{.ResultSubmitted}}' },
+		{ label: 'Submitted (% of total)', text: '{{.ResultSubmittedPercent}}' },
+		{ label: 'Reported (count)', text: '{{.ResultReported}}' },
+		{ label: 'Reported (% of total)', text: '{{.ResultReportedPercent}}' },
+		{ label: 'Opened of sent (%)', text: '{{.OpenedOfSent}}' },
+		{ label: 'Clicked of opened (%)', text: '{{.ClickedOfOpened}}' },
+		{ label: 'Submitted of clicked (%)', text: '{{.SubmittedOfClicked}}' }
+	];
 
 	switch (contentType) {
 		case 'domain': {
@@ -104,6 +129,13 @@
 		}
 		case 'email': {
 			templates['URLs & Tracking'] = [...templates['URLs & Tracking'], ...emailTemplates];
+			break;
+		}
+		case 'report': {
+			delete templates['Email'];
+			delete templates['Recipient'];
+			delete templates['URLs & Tracking'];
+			templates['Campaign'] = reportTemplates;
 			break;
 		}
 	}
@@ -435,6 +467,26 @@
 		}
 
 		switch (contentType) {
+			case 'report':
+				return text
+					.replaceAll('{{.CampaignName}}', 'Q1 Phishing Simulation')
+					.replaceAll('{{.CompanyName}}', 'World Corp')
+					.replaceAll('{{.ReportDate}}', new Date().toLocaleDateString())
+					.replaceAll('{{.CampaignStartDate}}', '2025-01-01')
+					.replaceAll('{{.CampaignEndDate}}', '2025-01-31')
+					.replaceAll('{{.CampaignClosedAt}}', '2025-02-01')
+					.replaceAll('{{.TotalTargets}}', '120')
+					.replaceAll('{{.EmailsSent}}', '118')
+					.replaceAll('{{.EmailsOpened}}', '74')
+					.replaceAll('{{.ResultClicked}}', '32')
+					.replaceAll('{{.ResultClickedPercent}}', '27.1')
+					.replaceAll('{{.ResultSubmitted}}', '14')
+					.replaceAll('{{.ResultSubmittedPercent}}', '11.9')
+					.replaceAll('{{.ResultReported}}', '8')
+					.replaceAll('{{.ResultReportedPercent}}', '6.8')
+					.replaceAll('{{.OpenedOfSent}}', '62.7')
+					.replaceAll('{{.ClickedOfOpened}}', '43.2')
+					.replaceAll('{{.SubmittedOfClicked}}', '43.8');
 			case 'domain':
 				return text.replaceAll('{{.BaseURL}}', _baseURL);
 			case 'page':
@@ -457,7 +509,8 @@
 					.replaceAll('{{.URL}}', _url)
 					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
 					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin')
-					.replaceAll('{{DeviceCodeCaptured}}', 'false');
+					.replaceAll('{{DeviceCodeCaptured}}', 'false')
+					.replace(/\{\{RemoteBrowserScript\s+"[^"]*"\}\}/g, '<!-- RemoteBrowserScript (injected at runtime) -->');
 			case 'email':
 				return text
 					.replaceAll('{{.FirstName}}', 'Alice')
@@ -533,6 +586,7 @@
 			fileInputRef.click();
 		}
 	};
+
 
 	// formatDate converts readable date format (YmdHis) to formatted date string
 	const formatDate = (date, format) => {
@@ -658,7 +712,7 @@
 					const t = /** @type {HTMLSelectElement} */ (e.target);
 					if (t.value) {
 						insertTemplate(t.value);
-						t.value = ''; // reset selection
+						t.value = '';
 					}
 				}}
 			>
@@ -672,22 +726,24 @@
 				{/each}
 			</select>
 
-			<!-- domain selector if available -->
-			<select
-				id="domain-select"
-				bind:value={selectedDomain}
-				on:change={selectPreviewDomain}
-				class="h-8 w-64 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200 text-ellipsis"
-			>
-				{#if domainMap.values().length}
-					<option value="" class="italic">Select preview domain...</option>
-					{#each domainMap.values() as domain}
-						<option value={domain}>{domain}</option>
-					{/each}
-				{:else}
-					<option value="" class="italic">No domains - Assets will not load</option>
-				{/if}
-			</select>
+			<!-- domain selector if available (not shown for report templates) -->
+			{#if contentType !== 'report'}
+				<select
+					id="domain-select"
+					bind:value={selectedDomain}
+					on:change={selectPreviewDomain}
+					class="h-8 w-64 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 bg-white dark:bg-gray-700 text-black dark:text-gray-200 cursor-pointer transition-colors duration-200 text-ellipsis"
+				>
+					{#if domainMap.values().length}
+						<option value="" class="italic">Select preview domain...</option>
+						{#each domainMap.values() as domain}
+							<option value={domain}>{domain}</option>
+						{/each}
+					{:else}
+						<option value="" class="italic">No domains - Assets will not load</option>
+					{/if}
+				</select>
+			{/if}
 
 			<!-- custom preview toggle button -->
 			<button

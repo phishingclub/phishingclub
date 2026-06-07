@@ -19,6 +19,7 @@ type Attachment struct {
 	Description     nullable.Nullable[vo.OptionalString255] `json:"description"`
 	FileName        nullable.Nullable[vo.FileName]          `json:"fileName"`
 	EmbeddedContent nullable.Nullable[bool]                 `json:"embeddedContent"`
+	SendAsCalendar  nullable.Nullable[bool]                 `json:"sendAsCalendar"`
 	// path is the calculated path to the file
 	Path nullable.Nullable[vo.RelativeFilePath] `json:"path"`
 	// used in the API to upload files
@@ -71,6 +72,9 @@ func (a *Attachment) ToDBMap() map[string]any {
 	}
 	if v, err := a.EmbeddedContent.Get(); err == nil {
 		m["embedded_content"] = v
+	}
+	if v, err := a.SendAsCalendar.Get(); err == nil {
+		m["send_as_calendar"] = v
 	}
 	return m
 }

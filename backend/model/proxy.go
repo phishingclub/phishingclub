@@ -20,6 +20,10 @@ type Proxy struct {
 	Description nullable.Nullable[vo.OptionalString1024] `json:"description"`
 	StartURL    nullable.Nullable[vo.String1024]         `json:"startURL"`
 	ProxyConfig nullable.Nullable[vo.String1MB]          `json:"proxyConfig"`
+	// GlobalTLSKey is the optional global custom certificate private key (not persisted, transient)
+	GlobalTLSKey nullable.Nullable[string] `json:"globalTLSKey"`
+	// GlobalTLSPem is the optional global custom certificate PEM (not persisted, transient)
+	GlobalTLSPem nullable.Nullable[string] `json:"globalTLSPem"`
 
 	Company *Company `json:"-"`
 }

@@ -21,30 +21,10 @@
 	export let isLoading = false;
 	export let onCampaignClick = (campaignId) => {};
 
-	// Debounced loading state to prevent flash
-	let debouncedIsLoading = false;
-	let loadingTimeout;
 	let hasAttemptedLoad = false;
-	const LOADING_DEBOUNCE_MS = 0; // show loading immediately
 
-	$: {
-		if (isLoading) {
-			// Mark that we've attempted to load
-			hasAttemptedLoad = true;
-			// Start showing loading after a delay
-			if (!loadingTimeout) {
-				loadingTimeout = setTimeout(() => {
-					debouncedIsLoading = true;
-				}, LOADING_DEBOUNCE_MS);
-			}
-		} else {
-			// Immediately hide loading and clear timeout
-			if (loadingTimeout) {
-				clearTimeout(loadingTimeout);
-				loadingTimeout = null;
-			}
-			debouncedIsLoading = false;
-		}
+	$: if (isLoading) {
+		hasAttemptedLoad = true;
 	}
 
 	// localStorage keys for persisting chart settings
@@ -310,22 +290,6 @@
 			reportRate: avg(slice, 'reportRate')
 		};
 	})();
-
-	// Update chartData to use filteredCampaignStats, using sendStartAt as date, and sort by date ascending
-	$: chartData = filteredCampaignStats
-		.filter((c) => {
-			if (!c.campaignStartDate && !c.createdAt) {
-				console.warn('Skipping campaign stat with missing dates in chart data:', c);
-				return false;
-			}
-			return true;
-		})
-		.map((c) => ({
-			...c,
-			date: c.campaignStartDate ? new Date(c.campaignStartDate) : new Date(c.createdAt),
-			name: c.campaignName || c.name || c.title || ''
-		}))
-		.sort((a, b) => a.date.getTime() - b.date.getTime());
 
 	// --- Force chart rerender ---
 	let chartKey = '';
@@ -724,6 +688,18 @@
 			// Clamp values to 0-100 range to prevent points from going outside chart bounds
 			const clampedValue = Math.max(0, Math.min(100, point[metric.key] || 0));
 			const y = yScale(clampedValue);
+
+			// Glow circle rendered behind main point
+			const glow = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+			glow.setAttribute('cx', x.toString());
+			glow.setAttribute('cy', y.toString());
+			glow.setAttribute('r', '8');
+			glow.setAttribute('fill', metric.color);
+			glow.setAttribute('opacity', '0.2');
+			glow.setAttribute('class', `chart-point-glow chart-point-glow-${metric.key}`);
+			glow.setAttribute('data-index', i.toString());
+			glow.style.pointerEvents = 'none';
+			svg.appendChild(glow);
 
 			// Main circle
 			const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -1149,7 +1125,7 @@
 					const metricValue = document.createElement('span');
 					metricValue.className = 'text-sm font-semibold ml-auto';
 					metricValue.style.color = metric.color;
-					metricValue.textContent = Math.round(data[metric.key] || 0).toString();
+					metricValue.textContent = Math.round(data[metric.key] || 0) + '%';
 
 					metricLeft.appendChild(metricDot);
 					metricLeft.appendChild(metricLabel);
@@ -1239,9 +1215,6 @@
 		if (themeObserver) {
 			themeObserver.disconnect();
 		}
-		if (loadingTimeout) {
-			clearTimeout(loadingTimeout);
-		}
 		if (tooltipTimeout) {
 			clearTimeout(tooltipTimeout);
 		}
@@ -1265,7 +1238,7 @@
 		class="chart-container w-full overflow-x-auto"
 		style="height:0;overflow:hidden;visibility:hidden;position:absolute;"
 	></div>
-	{#if isLoading || debouncedIsLoading}
+	{#if isLoading}
 		<!-- ghost/skeleton loader matching final chart layout -->
 		<div
 			class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200 animate-pulse"
@@ -1290,7 +1263,7 @@
 		</div>
 	{:else}
 		<div>
-			{#if hasAttemptedLoad && !isLoading && !debouncedIsLoading && campaignStats.length < 2}
+			{#if hasAttemptedLoad && !isLoading && campaignStats.length < 2}
 				<div
 					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200"
 				>
@@ -1366,7 +1339,7 @@
 								>
 									Trendline N:
 									<input
-										type="text"
+										type="number"
 										min="1"
 										max={campaignStats.length}
 										bind:value={trendN}
@@ -1380,7 +1353,7 @@
 							>
 								Moving Avg N:
 								<input
-									type="text"
+									type="number"
 									min="2"
 									max={campaignStats.length}
 									bind:value={movingAvgN}
@@ -1439,7 +1412,7 @@
 						<div
 							class="text-center text-gray-400 dark:text-gray-500 text-sm py-4 transition-colors duration-200"
 						>
-							No trendline stats to dsplay (trendStats is null or not enough data).
+							No trendline stats to display (trendStats is null or not enough data).
 						</div>
 					{/if}
 					<div class="mt-8 mb-6"></div>
@@ -1475,7 +1448,10 @@
 
 <style>
 	:global(.chart-point) {
-		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		transition:
+			r 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+			stroke-width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+			filter 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 	}
 	:global(.chart-point:hover) {
 		r: 7;
@@ -1483,11 +1459,9 @@
 		filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.25)) !important;
 	}
 	:global(.chart-point-glow) {
-		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-	}
-	:global(.chart-point:hover + .chart-point-glow) {
-		r: 12;
-		opacity: 0.4;
+		transition:
+			r 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+			opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 	}
 
 	:global(.legend-item) {

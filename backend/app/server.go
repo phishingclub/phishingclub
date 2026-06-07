@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	textTmpl "text/template"
@@ -61,6 +62,8 @@ type Server struct {
 	repositories          *Repositories
 	proxyServer           *proxy.ProxyHandler
 	ja4Middleware         *middleware.JA4Middleware
+	remoteBrowserWSPath   string
+	trustedProxies        []string
 }
 
 // NewServer returns a new server
@@ -73,6 +76,8 @@ func NewServer(
 	repositories *Repositories,
 	logger *zap.SugaredLogger,
 	certMagicConfig *certmagic.Config,
+	remoteBrowserWSPath string,
+	trustedProxies []string,
 ) *Server {
 	// setup ja4 middleware for tls fingerprinting
 	ja4Middleware := middleware.NewJA4Middleware(logger)
@@ -92,6 +97,7 @@ func NewServer(
 		services.IPAllowList,
 		repositories.Option,
 		services.Option,
+		trustedProxies,
 	)
 
 	// setup proxy session cleanup routine
@@ -117,6 +123,8 @@ func NewServer(
 		certMagicConfig:       certMagicConfig,
 		proxyServer:           proxyServer,
 		ja4Middleware:         ja4Middleware,
+		remoteBrowserWSPath:   remoteBrowserWSPath,
+		trustedProxies:        trustedProxies,
 	}
 }
 
@@ -341,6 +349,12 @@ func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
 // checks if the request should be redirected
 // checks if the request is for a static page or static not found page
 func (s *Server) Handler(c *gin.Context) {
+	// pass through to the explicit Gin route for the victim remote browser WS endpoint
+	if strings.HasPrefix(c.Request.URL.Path, "/"+s.remoteBrowserWSPath+"/") {
+		c.Next()
+		return
+	}
+
 	if cacheEntry, ok := s.ja4Middleware.ConnectionFingerprints.Load(c.Request.RemoteAddr); ok {
 		if entry, ok := cacheEntry.(*middleware.FingerprintEntry); ok {
 			fingerprint := entry.Fingerprint
@@ -702,7 +716,7 @@ func (s *Server) checkAndServePhishingPage(
 		return false, fmt.Errorf("failed to get campaign template: %s", err)
 	}
 	// check that the requesters IP is allow listed
-	ip := utils.ExtractClientIP(c.Request)
+	ip := utils.ExtractClientIP(c.Request, s.trustedProxies)
 	servedByIPFilter, err := s.checkIPFilter(c, ip, campaign, domain, &campaignID)
 	if err != nil {
 		return false, err
@@ -980,7 +994,7 @@ func (s *Server) checkAndServePhishingPage(
 		submitDataEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
 		newEventID := uuid.New()
 		campaignID := campaign.ID.MustGet()
-		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
+		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 		submittedData := vo.NewEmptyOptionalString1MB()
 
@@ -1240,10 +1254,9 @@ func (s *Server) checkAndServePhishingPage(
 			return true, fmt.Errorf("Proxy page has no configuration: %s", err)
 		}
 
-		// extract the phishing domain from Proxy configuration
-		var rawConfig map[string]interface{}
-		err = yaml.Unmarshal([]byte(proxyConfig.String()), &rawConfig)
-		if err != nil {
+		// parse proxy config as typed struct so rewrite_urls rules are accessible
+		var parsedConfig service.ProxyServiceConfigYAML
+		if err := yaml.Unmarshal([]byte(proxyConfig.String()), &parsedConfig); err != nil {
 			return true, fmt.Errorf("invalid Proxy configuration YAML: %s", err)
 		}
 
@@ -1256,19 +1269,13 @@ func (s *Server) checkAndServePhishingPage(
 
 		// find the phishing domain mapping for the start URL domain
 		phishingDomain := ""
-		for originalHost, domainData := range rawConfig {
-			if originalHost == "proxy" || originalHost == "global" {
+		for originalHost, hostCfg := range parsedConfig.Hosts {
+			if hostCfg == nil {
 				continue
 			}
 			if originalHost == startDomain {
-				if domainMap, ok := domainData.(map[string]interface{}); ok {
-					if to, exists := domainMap["to"]; exists {
-						if toStr, ok := to.(string); ok {
-							phishingDomain = toStr
-							break
-						}
-					}
-				}
+				phishingDomain = hostCfg.To
+				break
 			}
 		}
 
@@ -1303,7 +1310,7 @@ func (s *Server) checkAndServePhishingPage(
 			// only create synthetic event if no message_read event exists
 			if !hasMessageRead {
 				syntheticReadEventID := uuid.New()
-				clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
+				clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
 				userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 				syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
 
@@ -1373,7 +1380,7 @@ func (s *Server) checkAndServePhishingPage(
 			eventName = data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED
 		}
 		eventID := cache.EventIDByName[eventName]
-		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
+		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 		var visitEvent *model.CampaignEvent
 		if !campaign.IsAnonymous.MustGet() {
@@ -1485,29 +1492,87 @@ func (s *Server) checkAndServePhishingPage(
 			"phishingDomainType", phishingDomainRecord.Type,
 		)
 
-		// build the redirect URL to the phishing domain with campaign recipient ID
+		// build the redirect URL to the phishing domain with campaign recipient ID.
+		// apply rewrite_urls rules so the victim sees the friendly path, not the real
+		// start url path. query params from the start url are carried through but
+		// remapped according to rule.Query so they match what checkAndApplyURLRewrite
+		// expects when the request arrives at the proxy.
 		urlParam := cTemplate.URLIdentifier.Name.MustGet()
 
-		// construct the redirect URL properly
+		// collect rewrite_urls rules for the start domain — host-specific first, then global
+		var rewriteRules []service.ProxyServiceURLRewriteRule
+		if hostCfg, ok := parsedConfig.Hosts[startDomain]; ok && hostCfg != nil {
+			rewriteRules = append(rewriteRules, hostCfg.RewriteURLs...)
+		}
+		if parsedConfig.Global != nil {
+			rewriteRules = append(rewriteRules, parsedConfig.Global.RewriteURLs...)
+		}
+
+		// start from the start url path and query, then apply the first matching rule
+		redirectPath := parsedStartURL.Path
+		startQuery := url.Values{}
+		if parsedStartURL.RawQuery != "" {
+			startQuery, _ = url.ParseQuery(parsedStartURL.RawQuery)
+		}
+
+		for _, rule := range rewriteRules {
+			pattern := strings.TrimPrefix(rule.Find, "^")
+			pattern = strings.TrimSuffix(pattern, "$")
+			re, reErr := regexp.Compile("^" + pattern)
+			if reErr != nil {
+				continue
+			}
+			if !re.MatchString(parsedStartURL.Path) {
+				continue
+			}
+
+			// rewrite path to the friendly replacement
+			redirectPath = rule.Replace
+
+			// remap query param keys: find → replace
+			if len(rule.Query) > 0 {
+				remapped := url.Values{}
+				for k, v := range startQuery {
+					remapped[k] = v
+				}
+				for _, qRule := range rule.Query {
+					if vals, exists := remapped[qRule.Find]; exists {
+						delete(remapped, qRule.Find)
+						remapped[qRule.Replace] = vals
+					}
+				}
+				startQuery = remapped
+			}
+
+			// apply filter: keep only the listed query param names
+			if len(rule.Filter) > 0 {
+				allowed := make(map[string]struct{}, len(rule.Filter))
+				for _, name := range rule.Filter {
+					allowed[name] = struct{}{}
+				}
+				filtered := url.Values{}
+				for k, v := range startQuery {
+					if _, ok := allowed[k]; ok {
+						filtered[k] = v
+					}
+				}
+				startQuery = filtered
+			}
+
+			break
+		}
+
 		u := &url.URL{
 			Scheme: "https",
 			Host:   phishingDomain,
-			Path:   parsedStartURL.Path,
+			Path:   redirectPath,
 		}
 
-		q := u.Query()
+		// merge start url query params (rewritten) with campaign params
+		q := startQuery
 		q.Set(urlParam, campaignRecipientID.String())
 		if encryptedParam != "" {
 			q.Set(stateParamKey, encryptedParam)
-		}
-		// preserve any existing query params from start URL
-		if parsedStartURL.RawQuery != "" {
-			startQuery, _ := url.ParseQuery(parsedStartURL.RawQuery)
-			for key, values := range startQuery {
-				for _, value := range values {
-					q.Add(key, value)
-				}
-			}
 		}
 		u.RawQuery = q.Encode()
 
@@ -1608,7 +1673,7 @@ func (s *Server) checkAndServePhishingPage(
 		// only create synthetic event if no message_read event exists
 		if !hasMessageRead {
 			syntheticReadEventID := uuid.New()
-			clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
+			clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
 			userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 			syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
 
@@ -1677,7 +1742,7 @@ func (s *Server) checkAndServePhishingPage(
 
 	campaignEventID := cache.EventIDByName[eventName]
 	eventID := uuid.New()
-	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 	var event *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {
@@ -1880,7 +1945,7 @@ func (s *Server) renderDenyPage(
 	// log deny page visited event
 	denyPageVisitEventID := uuid.New()
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED]
-	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request))
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 	var event *model.CampaignEvent
 	if !campaign.IsAnonymous.MustGet() {
@@ -1971,6 +2036,11 @@ func (s *Server) renderDenyPage(
 
 // AssignRoutes assigns the routes to the server
 func (s *Server) AssignRoutes(r *gin.Engine) {
+	// victim-facing remote browser WS endpoint - lives on the phishing engine (r), not
+	// the admin engine, because it is served to the victim's browser. s.Handler has an
+	// explicit prefix check that calls c.Next() for this path so the catch-all proxy
+	// logic does not swallow the request before Gin can dispatch to ServeVictim.
+	r.GET("/"+s.remoteBrowserWSPath+"/:crID/:rbID", s.controllers.RemoteBrowser.ServeVictim)
 	r.Use(s.Handler)
 	r.NoRoute(s.handlerNotFound)
 }

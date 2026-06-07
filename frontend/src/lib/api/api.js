@@ -418,13 +418,15 @@ export class API {
 		 * @param {string} attachment.name
 		 * @param {string} attachment.description
 		 * @param {Boolean} attachment.embeddedContent
+		 * @param {Boolean} attachment.sendAsCalendar
 		 * @returns {Promise<ApiResponse>}
 		 */
-		update: async ({ id, name, description, embeddedContent }) => {
+		update: async ({ id, name, description, embeddedContent, sendAsCalendar }) => {
 			return await patchJSON(this.getPath(`/attachment/${id}`), {
 				name: name,
 				description: description,
-				embeddedContent: embeddedContent
+				embeddedContent: embeddedContent,
+				sendAsCalendar: sendAsCalendar
 			});
 		},
 
@@ -494,6 +496,14 @@ export class API {
 		 */
 		exportSubmissions: async (campaignID) => {
 			window.open(this.getPath(`/campaign/${campaignID}/export/submissions`), '_blank');
+		},
+
+		/**
+		 * Generate a PDF report for a campaign
+		 * @param {string} campaignID
+		 */
+		generateReport: async (campaignID) => {
+			window.open(this.getPath(`/campaign/${campaignID}/report`), '_blank');
 		},
 
 		/**
@@ -1081,7 +1091,8 @@ export class API {
 			urlIdentifierID,
 			stateIdentifierID,
 			afterLandingPageRedirectURL,
-			emailID: emailID
+			emailID: emailID,
+			urlPath: urlPath
 		}) => {
 			return await postJSON(this.getPath('/campaign/template'), {
 				name: name,
@@ -1098,7 +1109,8 @@ export class API {
 				afterLandingPageRedirectURL: afterLandingPageRedirectURL,
 				urlIdentifierID: urlIdentifierID,
 				stateIdentifierID: stateIdentifierID,
-				emailID: emailID
+				emailID: emailID,
+				urlPath: urlPath
 			});
 		},
 
@@ -1635,10 +1647,12 @@ export class API {
 		 * Get a email by ID.
 		 *
 		 * @param {string} id
+		 * @param {string|null} [companyID]
 		 * @returns {Promise<ApiResponse>}
 		 */
-		getByID: async (id) => {
-			return await getJSON(this.getPath(`/email/${id}`));
+		getByID: async (id, companyID = null) => {
+			const companyQuery = companyID ? `?${this.companyQuery(companyID)}` : '';
+			return await getJSON(this.getPath(`/email/${id}${companyQuery}`));
 		},
 
 		/**
@@ -2311,7 +2325,7 @@ export class API {
 		/**
 		 * Get setting by key.
 		 *
-		 * @param {'is_installed'|'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'|'obfuscation_template'} key
+		 * @param {'is_installed'|'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'|'obfuscation_template'|'report_pdf_enabled'} key
 		 * @returns {Promise<ApiResponse>}
 		 */
 		get: async (key) => {
@@ -2342,7 +2356,7 @@ export class API {
 		/**
 		 * Set setting by key and value.
 		 *
-		 * @param {'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'|'obfuscation_template'} key
+		 * @param {'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'|'obfuscation_template'|'report_pdf_enabled'} key
 		 * @param {string} value
 		 * @returns {Promise<ApiResponse>}
 		 */
@@ -3245,15 +3259,27 @@ export class API {
 		 * @param {string} proxy.startURL
 		 * @param {string} proxy.proxyConfig
 		 * @param {string} proxy.companyID
+		 * @param {string} [proxy.globalTLSKey]
+		 * @param {string} [proxy.globalTLSPem]
 		 * @returns {Promise<ApiResponse>}
 		 */
-		create: async ({ name, description, startURL, proxyConfig, companyID }) => {
+		create: async ({
+			name,
+			description,
+			startURL,
+			proxyConfig,
+			companyID,
+			globalTLSKey,
+			globalTLSPem
+		}) => {
 			return await postJSON(this.getPath('/proxy'), {
 				name: name,
 				description: description,
 				startURL: startURL,
 				proxyConfig: proxyConfig,
-				companyID: companyID
+				companyID: companyID,
+				...(globalTLSKey ? { globalTLSKey } : {}),
+				...(globalTLSPem ? { globalTLSPem } : {})
 			});
 		},
 
@@ -3266,6 +3292,8 @@ export class API {
 		 * @param {string} proxy.description
 		 * @param {string} proxy.startURL
 		 * @param {string} proxy.proxyConfig
+		 * @param {string} [proxy.globalTLSKey]
+		 * @param {string} [proxy.globalTLSPem]
 		 * @returns {Promise<ApiResponse>}
 		 */
 		update: async (id, proxy) => {
@@ -3280,6 +3308,93 @@ export class API {
 		 */
 		delete: async (id) => {
 			return await deleteJSON(this.getPath(`/proxy/${id}`));
+		}
+	};
+
+	/**
+	 * remoteBrowser is the API for Remote Browser script management and test runs.
+	 */
+	remoteBrowser = {
+		/**
+		 * Get a Remote Browser by ID.
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getByID: async (id) => {
+			return await getJSON(this.getPath(`/remote-browser/${id}`));
+		},
+
+		/**
+		 * Get all Remote Browsers with pagination.
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAll: async (options, companyID = null) => {
+			return await getJSON(
+				this.getPath(`/remote-browser?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`)
+			);
+		},
+
+		/**
+		 * Get lightweight overview list.
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAllSubset: async (options, companyID = null) => {
+			return await getJSON(
+				this.getPath(
+					`/remote-browser/overview?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`
+				)
+			);
+		},
+
+		/**
+		 * Create a new Remote Browser.
+		 * @param {object} rb
+		 * @returns {Promise<ApiResponse>}
+		 */
+		create: async (rb) => {
+			return await postJSON(this.getPath('/remote-browser'), rb);
+		},
+
+		/**
+		 * Update a Remote Browser.
+		 * @param {string} id
+		 * @param {object} rb
+		 * @returns {Promise<ApiResponse>}
+		 */
+		update: async (id, rb) => {
+			return await patchJSON(this.getPath(`/remote-browser/${id}`), rb);
+		},
+
+		/**
+		 * Delete a Remote Browser.
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		delete: async (id) => {
+			return await deleteJSON(this.getPath(`/remote-browser/${id}`));
+		},
+
+		/**
+		 * List active live sessions (optionally filter by campaignID).
+		 * @param {string|null} campaignID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getLiveSessions: async (campaignID = null) => {
+			const q = campaignID ? `?campaignID=${campaignID}` : '';
+			return await getJSON(this.getPath(`/remote-browser/live${q}`));
+		},
+
+		/**
+		 * Close (kill) an active live session.
+		 * @param {string} crID  Campaign-recipient ID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		closeLiveSession: async (crID) => {
+			return await deleteJSON(this.getPath(`/remote-browser/live/${crID}`));
 		}
 	};
 
@@ -3305,6 +3420,31 @@ export class API {
 		 */
 		clearForProxyConfig: async (proxyConfigID) => {
 			return await deleteJSON(this.getPath(`/ip-allow-list/clear-proxy-config/${proxyConfigID}`));
+		}
+	};
+
+	/**
+	 * reportTemplate manages global and per-company report templates
+	 */
+	reportTemplate = {
+		getAll: async (companyID) => {
+			const params = companyID ? `?companyID=${companyID}` : '';
+			return await getJSON(this.getPath(`/report-template${params}`));
+		},
+		getByID: async (id) => {
+			return await getJSON(this.getPath(`/report-template/${id}`));
+		},
+		create: async (data) => {
+			return await postJSON(this.getPath('/report-template'), data);
+		},
+		update: async (id, data) => {
+			return await patchJSON(this.getPath(`/report-template/${id}`), data);
+		},
+		delete: async (id) => {
+			return await deleteJSON(this.getPath(`/report-template/${id}`));
+		},
+		wipeBrowserCache: async () => {
+			return await deleteJSON(this.getPath('/report-pdf/browser-cache'));
 		}
 	};
 

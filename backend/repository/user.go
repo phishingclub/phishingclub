@@ -282,7 +282,7 @@ func (r *User) GetAllAPIKeys(
 	dbUsers := []database.User{}
 	result := r.DB.
 		Select("id, api_key").
-		First(&dbUsers)
+		Find(&dbUsers)
 
 	if result.Error != nil {
 		return apiKeys, result.Error

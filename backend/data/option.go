@@ -26,11 +26,18 @@ const (
 
 	OptionKeyProxyCookieName = "proxy_cookie_name"
 
+	// OptionKeyRemoteBrowserWSPath is the seeded random path segment used for the
+	// victim-facing remote browser WebSocket endpoint. Randomised at first startup
+	// so the endpoint is not fingerprinted by path alone.
+	OptionKeyRemoteBrowserWSPath = "remote_browser_ws_path"
+
 	OptionKeyDisplayMode           = "display_mode"
 	OptionValueDisplayModeWhitebox = "whitebox"
 	OptionValueDisplayModeBlackbox = "blackbox"
 
 	OptionKeyAutoPruneOrphanedRecipients = "auto_prune_orphaned_recipients"
+
+	OptionKeyReportPDFEnabled = "report_pdf_enabled"
 
 	OptionKeyObfuscationTemplate = "obfuscation_template"
 	// OptionValueObfuscationTemplateDefault is the default HTML template for obfuscation

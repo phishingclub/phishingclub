@@ -170,6 +170,11 @@ const (
 	ROUTE_V1_CAMPAIGN_STATS_DELETE       = "/api/v1/campaign/stats/:id"
 	ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED    = "/api/v1/campaign/:id/upload/reported"
 	ROUTE_V1_CAMPAIGN_DEVICE_CODES       = "/api/v1/campaign/:id/device-codes"
+	ROUTE_V1_CAMPAIGN_REPORT = "/api/v1/campaign/:id/report"
+	// report templates
+	ROUTE_V1_REPORT_TEMPLATE              = "/api/v1/report-template"
+	ROUTE_V1_REPORT_TEMPLATE_ID           = "/api/v1/report-template/:id"
+	ROUTE_V1_REPORT_PDF_BROWSER_CACHE     = "/api/v1/report-pdf/browser-cache"
 	// campaign-recipient
 	ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL      = "/api/v1/campaign/recipient/:id/email"
 	ROUTE_V1_CAMPAIGN_RECIPIENT_URL        = "/api/v1/campaign/recipient/:id/url"
@@ -220,16 +225,25 @@ const (
 	ROUTE_V1_VERSION = "/api/v1/version"
 	// import
 	ROUTE_V1_IMPORT = "/api/v1/import"
+	// remote browser
+	ROUTE_V1_REMOTE_BROWSER              = "/api/v1/remote-browser"
+	ROUTE_V1_REMOTE_BROWSER_OVERVIEW     = "/api/v1/remote-browser/overview"
+	ROUTE_V1_REMOTE_BROWSER_ID           = "/api/v1/remote-browser/:id"
+	ROUTE_V1_REMOTE_BROWSER_ID_RUN       = "/api/v1/remote-browser/:id/run"
+	ROUTE_V1_REMOTE_BROWSER_LIVE         = "/api/v1/remote-browser/live"
+	ROUTE_V1_REMOTE_BROWSER_LIVE_CRID    = "/api/v1/remote-browser/live/:crID"
+	ROUTE_V1_REMOTE_BROWSER_LIVE_STREAM  = "/api/v1/remote-browser/live/:crID/stream"
 )
 
 // administrationServer is the administrationServer app
 type administrationServer struct {
-	Server          *http.Server
-	router          *gin.Engine
-	logger          *zap.SugaredLogger
-	production      bool
-	embedBackendFS  *embed.FS
-	certMagicConfig *certmagic.Config
+	Server             *http.Server
+	router             *gin.Engine
+	logger             *zap.SugaredLogger
+	production         bool
+	embedBackendFS     *embed.FS
+	certMagicConfig    *certmagic.Config
+	softSessionHandler gin.HandlerFunc
 }
 
 // NewAdministrationServer creates a new administration app
@@ -244,10 +258,11 @@ func NewAdministrationServer(
 	router = setupRoutes(router, controllers, middlewares)
 
 	return &administrationServer{
-		router:          router,
-		logger:          logger,
-		production:      production,
-		certMagicConfig: certMagicConfig,
+		router:             router,
+		logger:             logger,
+		production:         production,
+		certMagicConfig:    certMagicConfig,
+		softSessionHandler: middlewares.SoftSessionHandler,
 	}
 }
 
@@ -486,6 +501,15 @@ func setupRoutes(
 		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE, middleware.SessionHandler, controllers.Campaign.AnonymizeByID).
 		DELETE(ROUTE_V1_CAMPAIGN_DEVICE_CODES, middleware.SessionHandler, controllers.Campaign.DeleteDeviceCodesByCampaignID).
 		DELETE(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.DeleteByID).
+		// campaign PDF report — ExtendedTimeout required for headless browser rendering
+		GET(ROUTE_V1_CAMPAIGN_REPORT, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.ReportTemplate.GeneratePDFByCampaignID).
+		// report templates
+		GET(ROUTE_V1_REPORT_TEMPLATE, middleware.SessionHandler, controllers.ReportTemplate.GetAll).
+		POST(ROUTE_V1_REPORT_TEMPLATE, middleware.SessionHandler, controllers.ReportTemplate.Create).
+		GET(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.GetByID).
+		PATCH(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.UpdateByID).
+		DELETE(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.DeleteByID).
+		DELETE(ROUTE_V1_REPORT_PDF_BROWSER_CACHE, middleware.SessionHandler, controllers.ReportTemplate.WipeBrowserCache).
 		// campaign-recipient
 		GET(ROUTE_V1_CAMPAIGN_RECIPIENTS, middleware.SessionHandler, controllers.Campaign.GetRecipientsByCampaignID).
 		GET(ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL, middleware.SessionHandler, controllers.Campaign.GetCampaignEmail).
@@ -544,7 +568,18 @@ func setupRoutes(
 		GET(ROUTE_V1_BACKUP_LIST, middleware.SessionHandler, controllers.Backup.ListBackups).
 		GET(ROUTE_V1_BACKUP_DOWNLOAD, middleware.SessionHandler, controllers.Backup.DownloadBackup).
 		// import
-		POST(ROUTE_V1_IMPORT, middleware.SessionHandler, controllers.Import.Import)
+		POST(ROUTE_V1_IMPORT, middleware.SessionHandler, controllers.Import.Import).
+		// remote browser
+		GET(ROUTE_V1_REMOTE_BROWSER, middleware.SessionHandler, controllers.RemoteBrowser.GetAll).
+		GET(ROUTE_V1_REMOTE_BROWSER_OVERVIEW, middleware.SessionHandler, controllers.RemoteBrowser.GetOverview).
+		GET(ROUTE_V1_REMOTE_BROWSER_ID, middleware.SessionHandler, controllers.RemoteBrowser.GetByID).
+		POST(ROUTE_V1_REMOTE_BROWSER, middleware.SessionHandler, controllers.RemoteBrowser.Create).
+		PATCH(ROUTE_V1_REMOTE_BROWSER_ID, middleware.SessionHandler, controllers.RemoteBrowser.UpdateByID).
+		DELETE(ROUTE_V1_REMOTE_BROWSER_ID, middleware.SessionHandler, controllers.RemoteBrowser.DeleteByID).
+		GET(ROUTE_V1_REMOTE_BROWSER_ID_RUN, middleware.SessionHandler, controllers.RemoteBrowser.RunByID).
+		GET(ROUTE_V1_REMOTE_BROWSER_LIVE, middleware.SessionHandler, controllers.RemoteBrowser.ListLiveSessions).
+		DELETE(ROUTE_V1_REMOTE_BROWSER_LIVE_CRID, middleware.SessionHandler, controllers.RemoteBrowser.CloseLiveSession).
+		GET(ROUTE_V1_REMOTE_BROWSER_LIVE_STREAM, middleware.SessionHandler, controllers.RemoteBrowser.StreamLiveSession)
 
 	return r
 }
@@ -738,6 +773,15 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 	embedFS := frontend.GetEmbededFS()
 	// make embedded .html work
 	frontend.LoadHTMLFromEmbedFS(a.router, *embedFS, "build/*.html")
+	// serve favicons only to authenticated users — unauthenticated requests get 404
+	// so the file is not indexable by scanners probing common paths
+	for _, faviconPath := range []string{"/favicon.ico", "/favicon.png"} {
+		fp := faviconPath
+		a.router.GET(fp, a.softSessionHandler, func(c *gin.Context) {
+			name := fp[1:] // strip leading /
+			c.FileFromFS("build/"+name, http.FS(*embedFS))
+		})
+	}
 	rootDir, err := embedFS.ReadDir("build")
 	if err != nil {
 		return errs.Wrap(err)
@@ -751,6 +795,10 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 				a.router.GET("/", func(c *gin.Context) {
 					c.HTML(http.StatusOK, "build/index.html", nil)
 				})
+				continue
+			}
+			// skip favicons — registered separately with session gating
+			if path == "favicon.png" || path == "favicon.ico" {
 				continue
 			}
 			// any file in the root folder gets server as a file

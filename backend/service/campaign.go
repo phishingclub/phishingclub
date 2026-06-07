@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+
 	"slices"
 	"sort"
 	"strings"
@@ -56,6 +57,9 @@ type Campaign struct {
 	WebhookService                *Webhook
 	MicrosoftDeviceCodeRepository *repository.MicrosoftDeviceCode
 	AttachmentPath                string
+	RemoteBrowserService          *RemoteBrowser
+	ReportTemplateRepository      *repository.ReportTemplate
+	TrustedProxies                []string
 }
 
 // Create creates a new campaign
@@ -1325,7 +1329,7 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 	} else {
-		ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request))
+		ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.TrustedProxies))
 		ua := ctx.Request.UserAgent()
 		if len(ua) > 255 {
 			ua = strings.TrimSpace(ua[:255])
@@ -1833,6 +1837,17 @@ func (c *Campaign) DeleteByID(
 		c.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
+	// delete all campaign-webhook junction records
+	err = c.CampaignRepository.RemoveWebhooksByCampaignID(ctx, id)
+	if err != nil {
+		c.Logger.Errorw("failed to delete campaign webhooks by campaign id", "error", err)
+		return errs.Wrap(err)
+	}
+	// delete all microsoft device codes for the campaign
+	if err = c.MicrosoftDeviceCodeRepository.DeleteByCampaignID(ctx, id); err != nil {
+		c.Logger.Errorw("failed to delete microsoft device codes by campaign id", "error", err)
+		return errs.Wrap(err)
+	}
 	// delete all campaign-allowDeny relations to the campaign
 	err = c.CampaignRepository.RemoveAllowDenyListsByCampaignID(ctx, id)
 	if err != nil {
@@ -1867,6 +1882,9 @@ func (c *Campaign) DeleteByID(
 	if err != nil {
 		c.Logger.Errorw("failed to delete campaign by id", "error", err)
 		return errs.Wrap(err)
+	}
+	if c.RemoteBrowserService != nil {
+		c.RemoteBrowserService.TerminateByCampaignID(*id)
 	}
 	c.AuditLogAuthorized(ae)
 	return nil
@@ -2032,6 +2050,21 @@ func (c *Campaign) SendNextBatch(
 	}
 
 	return errs.Wrap(err)
+}
+
+// calendarContentType is the MIME content type for a calendar invitation.
+// Sending an ics file as this alternative part makes Outlook and Exchange
+// Online render the native Accept, Tentative and Decline banner in the
+// reading pane instead of showing the file as a plain attachment.
+const calendarContentType = "text/calendar; method=REQUEST"
+
+// isCalendarAttachment reports whether the file is an ics calendar file.
+// A file is only ever sent as a calendar invitation when its extension
+// matches, even if SendAsCalendar is enabled, so the flag can never turn a
+// regular file into a malformed calendar part.
+func isCalendarAttachment(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".ics" || ext == ".ical"
 }
 
 func (c *Campaign) sendCampaignMessages(
@@ -2581,8 +2614,17 @@ func (c *Campaign) sendCampaignMessages(
 					)
 				}
 			} else if !attachment.EmbeddedContent.MustGet() {
-				// regular attachment - shows in attachment list
-				m.AttachFile(p.String())
+				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+					// calendar invitation parsed natively by Outlook, raw file content
+					icsContent, err := os.ReadFile(p.String())
+					if err != nil {
+						return fmt.Errorf("failed to read calendar file: %s", err)
+					}
+					m.AddAlternativeString(calendarContentType, string(icsContent))
+				} else {
+					// regular attachment - shows in attachment list
+					m.AttachFile(p.String())
+				}
 			} else {
 				// regular attachment with template processing
 				attachmentContent, err := os.ReadFile(p.String())
@@ -2631,10 +2673,15 @@ func (c *Campaign) sendCampaignMessages(
 				if err != nil {
 					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
 				}
-				m.AttachReadSeeker(
-					filepath.Base(p.String()),
-					strings.NewReader(attachmentStr),
-				)
+				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+					// calendar invitation parsed natively by Outlook, with rendered variables
+					m.AddAlternativeString(calendarContentType, attachmentStr)
+				} else {
+					m.AttachReadSeeker(
+						filepath.Base(p.String()),
+						strings.NewReader(attachmentStr),
+					)
+				}
 			}
 		}
 		messages = append(messages, m)
@@ -3178,6 +3225,9 @@ func (c *Campaign) closeCampaign(
 		c.Logger.Errorw("failed to cancel recipients", "error", err)
 		return errs.Wrap(err)
 	}
+	if c.RemoteBrowserService != nil {
+		c.RemoteBrowserService.TerminateByCampaignID(*id)
+	}
 	err = campaign.Closed()
 	if go_errors.Is(err, errs.ErrCampaignAlreadyClosed) {
 		c.Logger.Debugw("campaign already closed", "error", err)
@@ -3437,22 +3487,13 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 			firstPageProxy = nil
 		} else {
 			// use phishing domain directly
-			startURL, err := firstPageProxy.StartURL.Get()
-			if err != nil {
-				c.Logger.Errorw("failed to get start url from first page proxy", "error", err)
-				return "", errs.Wrap(err)
-			}
-			parsedStartURL, err := url.Parse(startURL.String())
-			if err != nil {
-				c.Logger.Errorw("failed to parse start url from first page proxy", "error", err)
-				return "", errs.Wrap(err)
-			}
 			baseURL = "https://" + phishingDomain
-			// use campaign template URLPath if available, otherwise fall back to proxy StartURL path
+			// use template url path if set, otherwise root — the real start url path is an
+			// internal proxy detail and must never appear in a lure url sent to a victim
 			if templateURLPath, err := cTemplate.URLPath.Get(); err == nil && templateURLPath.String() != "" {
 				urlPath = templateURLPath.String()
 			} else {
-				urlPath = parsedStartURL.Path
+				urlPath = "/"
 			}
 		}
 	}
@@ -3482,9 +3523,6 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 
 	// build final url
 	separator := "?"
-	if strings.Contains(baseURL, "?") {
-		separator = "&"
-	}
 	url := fmt.Sprintf("%s%s%s%s=%s", baseURL, urlPath, separator, idIdentifier, campaignRecipientID.String())
 	// no audit on read
 	return url, nil
@@ -4387,8 +4425,17 @@ func (c *Campaign) sendSingleEmailSMTP(
 				)
 			}
 		} else if !attachment.EmbeddedContent.MustGet() {
-			// regular attachment - shows in attachment list
-			m.AttachFile(p.String())
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+				// calendar invitation parsed natively by Outlook, raw file content
+				icsContent, err := os.ReadFile(p.String())
+				if err != nil {
+					return fmt.Errorf("failed to read calendar file: %s", err)
+				}
+				m.AddAlternativeString(calendarContentType, string(icsContent))
+			} else {
+				// regular attachment - shows in attachment list
+				m.AttachFile(p.String())
+			}
 		} else {
 			// regular attachment with template processing
 			attachmentContent, err := os.ReadFile(p.String())
@@ -4437,10 +4484,15 @@ func (c *Campaign) sendSingleEmailSMTP(
 			if err != nil {
 				return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
 			}
-			m.AttachReadSeeker(
-				filepath.Base(p.String()),
-				strings.NewReader(attachmentStr),
-			)
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+				// calendar invitation parsed natively by Outlook, with rendered variables
+				m.AddAlternativeString(calendarContentType, attachmentStr)
+			} else {
+				m.AttachReadSeeker(
+					filepath.Base(p.String()),
+					strings.NewReader(attachmentStr),
+				)
+			}
 		}
 	}
 
@@ -5140,4 +5192,156 @@ func (c *Campaign) saveReportedEvent(
 		return res.Error
 	}
 	return nil
+}
+
+// BuildReportHTML renders a report HTML string for a campaign using the resolved
+// report template (company-specific, then global, then built-in default).
+func (c *Campaign) BuildReportHTML(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+) (htmlContent string, campaignName string, err error) {
+	ae := NewAuditEvent("Campaign.BuildReportHTML", session)
+	ae.Details["campaignId"] = campaignID.String()
+	isAuthorized, authErr := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if authErr != nil && !errors.Is(authErr, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(authErr)
+		return "", "", errs.Wrap(authErr)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return "", "", errs.ErrAuthorizationFailed
+	}
+
+	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{WithCompany: true})
+	if err != nil {
+		return "", "", errs.Wrap(err)
+	}
+
+	stats, err := c.CampaignRepository.GetResultStats(ctx, campaignID)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign result stats for report", "error", err)
+		return "", "", errs.Wrap(err)
+	}
+
+	var companyID *uuid.UUID
+	if cid, cErr := campaign.CompanyID.Get(); cErr == nil {
+		companyID = &cid
+	}
+
+	reportTmpl, tmplErr := c.ReportTemplateRepository.GetForCampaign(ctx, companyID)
+	if tmplErr != nil {
+		c.Logger.Errorw("failed to fetch report template", "error", tmplErr)
+		return "", "", errs.Wrap(tmplErr)
+	}
+	templateContentVO, cErr := reportTmpl.Content.Get()
+	if cErr != nil {
+		return "", "", errs.Wrap(cErr)
+	}
+	templateContent := templateContentVO.String()
+
+	name := ""
+	if n, nErr := campaign.Name.Get(); nErr == nil {
+		name = n.String()
+	}
+	companyName := ""
+	if campaign.Company != nil {
+		if n, nErr := campaign.Company.Name.Get(); nErr == nil {
+			companyName = n.String()
+		}
+	}
+
+	// Only query per-recipient data for non-anonymous, non-anonymized campaigns
+	var recipients []model.ReportRecipient
+	isAnon, _ := campaign.IsAnonymous.Get()
+	isAnonymized := campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull()
+	if !isAnon && !isAnonymized {
+		recipients, err = c.CampaignRepository.GetReportRecipients(ctx, campaignID)
+		if err != nil {
+			c.Logger.Warnw("failed to get report recipients, continuing without detail table", "error", err)
+			recipients = nil
+		}
+	}
+
+	data := buildReportData(name, companyName, campaign, stats, recipients)
+
+	var buf bytes.Buffer
+	tmpl, err := template.New("report").Funcs(TemplateFuncs()).Parse(templateContent)
+	if err != nil {
+		c.Logger.Errorw("failed to parse report template", "error", err)
+		return "", "", errs.Wrap(err)
+	}
+	if err := tmpl.Execute(&buf, data); err != nil {
+		c.Logger.Errorw("failed to execute report template", "error", err)
+		return "", "", errs.Wrap(err)
+	}
+	// no audit on read
+	return buf.String(), name, nil
+}
+
+func buildReportData(
+	campaignName string,
+	companyName string,
+	campaign *model.Campaign,
+	stats *model.CampaignResultView,
+	recipients []model.ReportRecipient,
+) *model.ReportData {
+	total := stats.Recipients
+	rate := func(count int64) float64 {
+		if total == 0 {
+			return 0
+		}
+		return float64(count) / float64(total) * 100
+	}
+	pct := func(count int64) string {
+		return fmt.Sprintf("%.0f", rate(count))
+	}
+	relPct := func(numerator, denominator int64) string {
+		if denominator == 0 {
+			return "0"
+		}
+		return fmt.Sprintf("%.0f", float64(numerator)/float64(denominator)*100)
+	}
+	formatDate := func(t *time.Time) string {
+		if t == nil {
+			return ""
+		}
+		return t.Format("2006-01-02")
+	}
+	var startDate, endDate, closedAt string
+	if v, err := campaign.SendStartAt.Get(); err == nil {
+		startDate = formatDate(&v)
+	}
+	if v, err := campaign.SendEndAt.Get(); err == nil {
+		endDate = formatDate(&v)
+	}
+	if v, err := campaign.ClosedAt.Get(); err == nil {
+		closedAt = formatDate(&v)
+	}
+	return &model.ReportData{
+		CampaignName:           campaignName,
+		CompanyName:            companyName,
+		ReportDate:             time.Now().Format("January 2, 2006"),
+		CampaignStartDate:      startDate,
+		CampaignEndDate:        endDate,
+		CampaignClosedAt:       closedAt,
+		TotalTargets:           stats.Recipients,
+		EmailsSent:             stats.EmailsSent,
+		EmailsOpened:           stats.TrackingPixelLoaded,
+		ResultClicked:          stats.WebsiteLoaded,
+		ResultSubmitted:        stats.SubmittedData,
+		ResultReported:         stats.Reported,
+		ResultClickedPercent:   pct(stats.WebsiteLoaded),
+		ResultSubmittedPercent: pct(stats.SubmittedData),
+		ResultReportedPercent:  pct(stats.Reported),
+		SentRate:               rate(stats.EmailsSent),
+		OpenRate:               rate(stats.TrackingPixelLoaded),
+		ClickRate:              rate(stats.WebsiteLoaded),
+		SubmitRate:             rate(stats.SubmittedData),
+		ReportRate:             rate(stats.Reported),
+		OpenedOfSent:           relPct(stats.TrackingPixelLoaded, stats.EmailsSent),
+		ClickedOfOpened:        relPct(stats.WebsiteLoaded, stats.TrackingPixelLoaded),
+		SubmittedOfClicked:     relPct(stats.SubmittedData, stats.WebsiteLoaded),
+		Recipients:             recipients,
+	}
 }

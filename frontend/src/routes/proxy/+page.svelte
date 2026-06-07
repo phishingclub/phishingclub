@@ -30,6 +30,8 @@
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import ProxyConfigBuilder from '$lib/components/proxy/ProxyConfigBuilder.svelte';
+	import jsyaml, { dumpWithLiteralStrings } from '$lib/components/yaml/index.js';
+	import FileField from '$lib/components/FileField.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -45,6 +47,24 @@
 		proxyConfig: null
 	};
 	let isSubmitting = false;
+
+	// cert state for custom TLS mode — populated by certChange event (visual mode) or yaml cert upload fields
+	let globalTLSKey = '';
+	let globalTLSPem = '';
+
+	// detect if the current yaml config uses tls.mode: "custom" anywhere so we can show upload fields in yaml mode
+	$: yamlHasCustomTLS = (() => {
+		if (!formValues.proxyConfig || editorMode !== 'yaml') return false;
+		try {
+			// simple string check first to avoid parsing on every keystroke
+			if (!formValues.proxyConfig.includes('custom')) return false;
+			// dynamic import not available in reactive block — use a regex check on the yaml string
+			// matches: mode: "custom" or mode: 'custom' or mode: custom
+			return /mode\s*:\s*['"]?custom['"]?/.test(formValues.proxyConfig);
+		} catch {
+			return false;
+		}
+	})();
 
 	// data
 	const tableURLParams = newTableURLParams();
@@ -81,34 +101,30 @@
 		}
 
 		try {
-			// dynamically import js-yaml
-			import('$lib/components/yaml/index.js').then((jsyaml) => {
-				const parsed = jsyaml.default.load(yamlStr);
-				if (!parsed || typeof parsed !== 'object') {
-					console.warn('Invalid YAML: not an object');
-					return;
-				}
+			const parsed = jsyaml.load(yamlStr);
+			if (!parsed || typeof parsed !== 'object') {
+				console.warn('Invalid YAML: not an object');
+				return;
+			}
 
-				// extract and apply general section
-				if (parsed._general) {
-					if (parsed._general.name) {
-						formValues.name = parsed._general.name;
-					}
-					if (parsed._general.description) {
-						formValues.description = parsed._general.description;
-					}
-					if (parsed._general.start_url) {
-						formValues.startURL = parsed._general.start_url;
-					}
-					// remove _general from parsed object before serializing back
-					delete parsed._general;
+			// extract and apply general section
+			if (parsed._general) {
+				if (parsed._general.name) {
+					formValues.name = parsed._general.name;
 				}
+				if (parsed._general.description) {
+					formValues.description = parsed._general.description;
+				}
+				if (parsed._general.start_url) {
+					formValues.startURL = parsed._general.start_url;
+				}
+				// remove _general from parsed object before serializing back
+				delete parsed._general;
+			}
 
-				// serialize back to YAML without _meta for the config
-				// use dumpWithLiteralStrings to preserve literal block style for replace/body fields
-				const cleanYaml = jsyaml.dumpWithLiteralStrings(parsed);
-				formValues.proxyConfig = cleanYaml;
-			});
+			// serialize back to YAML without _meta for the config
+			// use dumpWithLiteralStrings to preserve literal block style for replace/body fields
+			formValues.proxyConfig = dumpWithLiteralStrings(parsed);
 		} catch (e) {
 			console.warn('Failed to parse imported YAML config:', e);
 		}
@@ -116,12 +132,11 @@
 
 	// export configuration to YAML file with metadata (for YAML mode)
 	function exportYamlConfig() {
-		import('$lib/components/yaml/index.js').then((yamlModule) => {
-			try {
-				// parse current config
-				const parsed = formValues.proxyConfig
-					? yamlModule.default.load(formValues.proxyConfig) || {}
-					: {};
+		try {
+			// parse current config
+			const parsed = formValues.proxyConfig
+				? jsyaml.load(formValues.proxyConfig) || {}
+				: {};
 
 				// build output with _general first
 				const output = {};
@@ -141,24 +156,23 @@
 				// merge rest of config
 				Object.assign(output, parsed);
 
-				// serialize to YAML with literal block style for replace/body fields
-				const yamlContent = yamlModule.dumpWithLiteralStrings(output);
+			// serialize to YAML with literal block style for replace/body fields
+			const yamlContent = dumpWithLiteralStrings(output);
 
-				// create blob and download
-				const blob = new Blob([yamlContent], { type: 'application/x-yaml' });
-				const url = URL.createObjectURL(blob);
-				const a = document.createElement('a');
-				a.href = url;
-				const safeName = (formValues.name || 'proxy-config').replace(/[^a-zA-Z0-9-_]/g, '_');
-				a.download = `${safeName}.yaml`;
-				document.body.appendChild(a);
-				a.click();
-				document.body.removeChild(a);
-				URL.revokeObjectURL(url);
-			} catch (e) {
-				console.warn('Failed to export YAML config:', e);
-			}
-		});
+			// create blob and download
+			const blob = new Blob([yamlContent], { type: 'application/x-yaml' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			const safeName = (formValues.name || 'proxy-config').replace(/[^a-zA-Z0-9-_]/g, '_');
+			a.download = `${safeName}.yaml`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+		} catch (e) {
+			console.warn('Failed to export YAML config:', e);
+		}
 	}
 
 	// trigger file input for YAML mode import
@@ -212,7 +226,7 @@
 # global configuration (applies to all hosts unless overridden)
 global:
   tls:
-    mode: "managed"  # "managed" (Let's Encrypt) or "self-signed"
+    mode: "managed"  # "managed" (Let's Encrypt), "self-signed", or "custom" (upload cert below)
   # template variables allow recipient data in rewrite rules
   # variables:
   #   enabled: true
@@ -225,7 +239,7 @@ portal.example.com:
   # scheme: "https"  # use https:// when connecting to target
   # optional: override global TLS config for this specific host
   # tls:
-  #   mode: "self-signed"
+  #   mode: "self-signed"   # or "custom" for a manually supplied certificate
   response:
     - path: "^/api/health$"
       headers:
@@ -393,8 +407,13 @@ portal.example.com:
 			};
 
 			const res = await api.proxy.create({
-				...proxyData,
-				companyID: contextCompanyID
+				name: proxyData.name,
+				description: proxyData.description,
+				startURL: proxyData.startURL,
+				proxyConfig: proxyData.proxyConfig,
+				companyID: contextCompanyID,
+				globalTLSKey: globalTLSKey || undefined,
+				globalTLSPem: globalTLSPem || undefined
 			});
 			if (!res.success) {
 				formError = res.error;
@@ -416,7 +435,9 @@ portal.example.com:
 				name: formValues.name,
 				description: formValues.description,
 				startURL: formValues.startURL,
-				proxyConfig: formValues.proxyConfig
+				proxyConfig: formValues.proxyConfig,
+				globalTLSKey: globalTLSKey || undefined,
+				globalTLSPem: globalTLSPem || undefined
 			};
 
 			const res = await api.proxy.update(formValues.id, updateData);
@@ -469,6 +490,26 @@ portal.example.com:
 		formValues.id = '';
 		form.reset();
 		formError = '';
+		globalTLSKey = '';
+		globalTLSPem = '';
+	};
+
+	/**
+	 * @param {Event} event
+	 * @param {'key'|'pem'} target
+	 */
+	const onYamlCertFile = (event, target) => {
+		const file = /** @type {HTMLInputElement} */ (event.target).files?.[0];
+		if (!file) return;
+		const reader = new FileReader();
+		reader.onload = (e) => {
+			if (target === 'key') {
+				globalTLSKey = e.target?.result?.toString() ?? '';
+			} else {
+				globalTLSPem = e.target?.result?.toString() ?? '';
+			}
+		};
+		reader.readAsText(file);
 	};
 
 	/** @param {string} id */
@@ -719,6 +760,22 @@ portal.example.com:
 								>
 							</div>
 						</div>
+						{#if yamlHasCustomTLS}
+							<div class="grid grid-cols-1 md:grid-cols-[1fr_1fr] gap-4 mt-2">
+								<FileField
+									name="yamlGlobalCertKey"
+									accept=".key"
+									optional
+									on:change={(e) => onYamlCertFile(e, 'key')}>Private Key (.key)</FileField
+								>
+								<FileField
+									name="yamlGlobalCertPem"
+									accept=".pem,.crt"
+									optional
+									on:change={(e) => onYamlCertFile(e, 'pem')}>Certificate (.pem, .crt)</FileField
+								>
+							</div>
+						{/if}
 					</div>
 				{/if}
 
@@ -830,6 +887,10 @@ portal.example.com:
 										on:nameChange={(e) => (formValues.name = e.detail)}
 										on:descriptionChange={(e) => (formValues.description = e.detail)}
 										on:startURLChange={(e) => (formValues.startURL = e.detail)}
+										on:certChange={(e) => {
+											globalTLSKey = e.detail.globalTLSKey || '';
+											globalTLSPem = e.detail.globalTLSPem || '';
+										}}
 									/>
 								{/key}
 							</div>

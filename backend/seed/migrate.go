@@ -59,6 +59,8 @@ func initialInstallAndSeed(
 		&database.OAuthState{},
 		&database.MicrosoftDeviceCode{},
 		&database.CompanyScimConfig{},
+		&database.RemoteBrowser{},
+		&database.ReportTemplate{},
 	}
 
 	// disable foreign key constraints temporarily for sqlite to allow table recreation
@@ -127,6 +129,13 @@ func initialInstallAndSeed(
 	if err != nil {
 		return errs.Wrap(
 			errors.Errorf("failed to seed identifiers: %w", err),
+		)
+	}
+	// seed default report template
+	err = SeedReportTemplate(db)
+	if err != nil {
+		return errs.Wrap(
+			errors.Errorf("failed to seed report template: %w", err),
 		)
 	}
 	// run data migrations (idempotent - safe to run on every startup)
@@ -379,6 +388,61 @@ func SeedSettings(
 				ID:    &id,
 				Key:   data.OptionKeyProxyCookieName,
 				Value: cookieName,
+			})
+			if res.Error != nil {
+				return errs.Wrap(res.Error)
+			}
+		}
+	}
+	{
+		// seed remote browser victim WS path - 12 random lowercase alphanumeric chars
+		id := uuid.New()
+		var c int64
+		res := db.
+			Model(&database.Option{}).
+			Where("key = ?", data.OptionKeyRemoteBrowserWSPath).
+			Count(&c)
+
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if c == 0 {
+			b := make([]byte, 12)
+			_, err := rand.Read(b)
+			if err != nil {
+				return errs.Wrap(err)
+			}
+			charset := "abcdefghijklmnopqrstuvwxyz0123456789"
+			wsPath := ""
+			for i := range b {
+				wsPath += string(charset[int(b[i])%len(charset)])
+			}
+			res = db.Create(&database.Option{
+				ID:    &id,
+				Key:   data.OptionKeyRemoteBrowserWSPath,
+				Value: wsPath,
+			})
+			if res.Error != nil {
+				return errs.Wrap(res.Error)
+			}
+		}
+	}
+	{
+		// seed report PDF enabled (disabled by default)
+		id := uuid.New()
+		var c int64
+		res := db.
+			Model(&database.Option{}).
+			Where("key = ?", data.OptionKeyReportPDFEnabled).
+			Count(&c)
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if c == 0 {
+			res = db.Create(&database.Option{
+				ID:    &id,
+				Key:   data.OptionKeyReportPDFEnabled,
+				Value: "false",
 			})
 			if res.Error != nil {
 				return errs.Wrap(res.Error)

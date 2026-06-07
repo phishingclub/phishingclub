@@ -49,6 +49,8 @@
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import { resourceContext } from '$lib/store/resourceContext';
+	import RemoteBrowserStream from '$lib/components/remote-browser/RemoteBrowserStream.svelte';
+	import LiveSessionBadgeDropdown from '$lib/components/remote-browser/LiveSessionBadgeDropdown.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -93,6 +95,7 @@
 		name: null,
 		id: null
 	};
+	let timelineEventsMap = new Map();
 	let timelineEvents = [];
 	let isTimelineGhost = true;
 	let recipientEvents = [];
@@ -146,6 +149,8 @@
 	let isTrackingPixelWarningVisible = false;
 	let isReportedCSVModalVisible = false;
 	let isReportedCSVSubmitting = false;
+	let isGenerateReportModalVisible = false;
+	let isReportPDFEnabled = false;
 	let reportedCSVFile = null;
 	let reportedCSVHeaders = [];
 	let reportedCSVPreview = [];
@@ -169,6 +174,17 @@
 	let setAsSentRecipient = null;
 	let lastPoll3399Nano = '';
 
+	// live remote browser sessions
+	/** @type {Map<string, {crID: string, campaignID: string, recipientID: string, createdAt: string, victimConnected: boolean, canStream: boolean}>} */
+	let liveSessions = new Map();
+	let liveSessionPollInterval = null;
+	let streamModalVisible = false;
+	let streamCRID = '';
+	let streamControlMode = false;
+	let streamEmail = '';
+	let isTerminateSessionAlertVisible = false;
+	let terminateSessionCRID = '';
+
 	// hooks
 	onMount(() => {
 		const context = appStateService.getContext();
@@ -177,6 +193,8 @@
 		}
 
 		(async () => {
+			const pdfOpt = await api.option.get('report_pdf_enabled');
+			isReportPDFEnabled = pdfOpt.success && pdfOpt.data?.value === 'true';
 			await refresh();
 			recipientTableUrlParams.onChange(refreshRecipients);
 			eventsTableURLParams.onChange(refreshEvents);
@@ -186,13 +204,54 @@
 			await refreshCampaignEventsSince();
 		})();
 
+		// poll live sessions every 5 seconds
+		liveSessionPollInterval = setInterval(refreshLiveSessions, 5000);
+		refreshLiveSessions();
+
 		// cleanup resource context when leaving page
 		return () => {
 			recipientTableUrlParams.unsubscribe();
 			eventsTableURLParams.unsubscribe();
 			resourceContext.clear();
+			clearInterval(liveSessionPollInterval);
 		};
 	});
+
+	const refreshLiveSessions = async () => {
+		try {
+			const campaignID = $page.params.id;
+			const res = await api.remoteBrowser.getLiveSessions(campaignID);
+			if (!res.success) return;
+			const map = new Map();
+			for (const s of res.data ?? []) {
+				map.set(s.crID, s);
+			}
+			liveSessions = map;
+		} catch {
+			// network error during poll — silently skip this tick
+		}
+	};
+
+	const openStreamModal = (crID, control, recipientEmail = '') => {
+		streamCRID = crID;
+		streamControlMode = control;
+		streamEmail = recipientEmail;
+		streamModalVisible = true;
+	};
+
+	const openTerminateAlert = (crID) => {
+		terminateSessionCRID = crID;
+		isTerminateSessionAlertVisible = true;
+	};
+
+	const doTerminateSession = async () => {
+		const res = await api.remoteBrowser.closeLiveSession(terminateSessionCRID);
+		if (!res.success) {
+			return { success: false, error: 'Failed to terminate session' };
+		}
+		await refreshLiveSessions();
+		return { success: true };
+	};
 
 	const refresh = async (showLoading = true) => {
 		if (showLoading) {
@@ -349,12 +408,22 @@
 			if (!res.success) {
 				throw res.error;
 			}
-			const events = (res.data?.rows ?? []).map((v) => ({
-				createdAt: v.sendAt,
-				eventName: 'campaign_recipient_scheduled',
-				recipient: v.recipient
-			}));
-			timelineEvents = [...timelineEvents, ...events.filter((v) => v.createdAt)];
+			const rawEvents = (res.data?.rows ?? [])
+				.filter((v) => v.sendAt)
+				.map((v) => ({
+					id: `sched_${v.id ?? (v.recipient?.email + '_' + v.sendAt)}`,
+					createdAt: v.sendAt,
+					eventName: 'campaign_recipient_scheduled',
+					recipient: v.recipient
+				}));
+			let schedChanged = false;
+			for (const e of rawEvents) {
+				if (!timelineEventsMap.has(e.id)) {
+					timelineEventsMap.set(e.id, e);
+					schedChanged = true;
+				}
+			}
+			if (schedChanged) timelineEvents = Array.from(timelineEventsMap.values());
 		} catch (e) {
 			addToast('failed to recipient schedule', 'Error');
 			console.error('failed to load recipient schedule', e);
@@ -387,8 +456,15 @@
 				eventName: campaign.eventTypesIDToNameMap[v.eventID]
 			}));
 
-			// Only update timelineEvents, not the main events table
-			timelineEvents = [...timelineEvents, ...rows];
+			let evChanged = false;
+			for (const row of rows) {
+				const key = `ev_${row.id}`;
+				if (!timelineEventsMap.has(key)) {
+					timelineEventsMap.set(key, row);
+					evChanged = true;
+				}
+			}
+			if (evChanged) timelineEvents = Array.from(timelineEventsMap.values());
 			isTimelineGhost = false;
 
 			// Don't update campaign.events here - that should only happen via getEvents()
@@ -735,6 +811,7 @@
 				await refreshRecipientsTimes();
 				await refreshCampaignRecipients();
 				// reset timeline and refetch all events (timeline only fetches new events incrementally)
+				timelineEventsMap = new Map();
 				timelineEvents = [];
 				lastPoll3399Nano = '';
 				await tick();
@@ -805,6 +882,7 @@
 			await getEvents();
 			await refreshCampaignRecipients();
 			// bug: have to clear ref and wait a tick or svelte does not re-render
+			timelineEventsMap = new Map();
 			timelineEvents = [];
 			await tick();
 			await refreshRecipientsTimes();
@@ -841,6 +919,26 @@
 			console.error('failed to export campaign submissions', e);
 		} finally {
 			hideIsLoading();
+		}
+	};
+
+	let isReportPDFDisabledModalVisible = false;
+
+	const onClickGenerateReport = () => {
+		if (!isReportPDFEnabled) {
+			isReportPDFDisabledModalVisible = true;
+			return;
+		}
+		isGenerateReportModalVisible = true;
+	};
+
+	const onConfirmGenerateReport = async () => {
+		try {
+			api.campaign.generateReport($page.params.id);
+			return { success: true };
+		} catch (e) {
+			console.error('failed to generate campaign report', e);
+			return { success: false, error: 'Failed to generate campaign report' };
 		}
 	};
 
@@ -1803,11 +1901,14 @@
 							Export
 						</p>
 						<div class="flex flex-wrap gap-2">
+							<IconButton variant="blue" icon="export" on:click={onClickGenerateReport}>
+								Report
+							</IconButton>
 							<IconButton variant="green" icon="export" on:click={onClickExportEvents}>
-								Export Events
+								Events
 							</IconButton>
 							<IconButton variant="green" icon="export" on:click={onClickExportSubmissions}>
-								Export Submitters
+								Submitters
 							</IconButton>
 						</div>
 					</div>
@@ -1947,6 +2048,7 @@
 			<SubHeadline>Recipients overview</SubHeadline>
 			<Table
 				columns={[
+					...(liveSessions.size > 0 ? [{ column: 'Remote', size: 'small' }] : []),
 					{ column: 'First name', size: 'small' },
 					{ column: 'Last name', size: 'small' },
 					{ column: 'Email', size: 'large' },
@@ -1972,6 +2074,29 @@
 			>
 				{#each campaignRecipients as recp (recp.id)}
 					<TableRow>
+						{#if liveSessions.size > 0}
+							<TableCell>
+								{#if liveSessions.has(recp.id)}
+									{@const ls = liveSessions.get(recp.id)}
+									<LiveSessionBadgeDropdown victimConnected={ls.victimConnected}>
+										{#if ls.canStream}
+											<TableDropDownButton
+												name="View"
+												on:click={() => openStreamModal(recp.id, false, recp.recipient?.email)}
+											/>
+											<TableDropDownButton
+												name="Control"
+												on:click={() => openStreamModal(recp.id, true, recp.recipient?.email)}
+											/>
+										{/if}
+										<TableDropDownButton
+											name="Terminate"
+											on:click={() => openTerminateAlert(recp.id)}
+										/>
+									</LiveSessionBadgeDropdown>
+								{/if}
+							</TableCell>
+						{/if}
 						{#if recp?.anonymizedID}
 							<TableCell value={'anonymized'} />
 							<TableCell value={'anonymized'} />
@@ -2104,6 +2229,23 @@
 														: ''}
 										on:click={() => onClickPreviewEmail(recp.id)}
 									/>
+									{#if liveSessions.has(recp.id)}
+										{@const ls = liveSessions.get(recp.id)}
+										{#if ls.canStream}
+											<TableViewButton
+												name="View remote session"
+												on:click={() => openStreamModal(recp.id, false, recp.recipient?.email)}
+											/>
+											<TableDropDownButton
+												name="Control remote session"
+												on:click={() => openStreamModal(recp.id, true, recp.recipient?.email)}
+											/>
+										{/if}
+										<TableDropDownButton
+											name="Terminate remote session"
+											on:click={() => openTerminateAlert(recp.id)}
+										/>
+									{/if}
 								</TableDropDownEllipsis>
 							</TableCellAction>
 						{/if}
@@ -2112,6 +2254,26 @@
 			</Table>
 		{/if}
 	{/if}
+	<RemoteBrowserStream
+		bind:visible={streamModalVisible}
+		crID={streamCRID}
+		controlMode={streamControlMode}
+		email={streamEmail}
+		on:closed={() => {
+			streamModalVisible = false;
+			refreshLiveSessions();
+		}}
+	/>
+
+	<Alert
+		headline="Terminate session"
+		bind:visible={isTerminateSessionAlertVisible}
+		onConfirm={doTerminateSession}
+		ok="Yes, terminate"
+	>
+		Are you sure you want to terminate this live session? The victim's browser will be closed.
+	</Alert>
+
 	<Modal headerText={'Events'} visible={isEventsModalVisible} onClose={closeEventsModal}>
 		<div class="mt-8"></div>
 		<Table
@@ -2754,4 +2916,29 @@
 		onClick={() => onClickDeleteEvent(deleteEventValues.id)}
 		bind:isVisible={isDeleteEventAlertVisible}
 	/>
+	<Alert
+		headline="generate report"
+		bind:visible={isGenerateReportModalVisible}
+		onConfirm={onConfirmGenerateReport}
+		ok="Generate"
+	>
+		<div class="mt-4 text-gray-700 dark:text-gray-200">
+			Generate a PDF report for <strong>{campaign?.name}</strong>. <br />The report will download
+			automatically.
+		</div>
+	</Alert>
+	<Alert
+		headline="PDF reports disabled"
+		bind:visible={isReportPDFDisabledModalVisible}
+		onConfirm={() => {
+			isReportPDFDisabledModalVisible = false;
+			return { success: true };
+		}}
+		noCancel={true}
+		ok="OK"
+	>
+		<div class="mt-4 text-gray-700 dark:text-gray-200">
+			PDF report generation is not enabled. <br />Enable it in <strong>Settings</strong> under PDF Reports.
+		</div>
+	</Alert>
 </main>
