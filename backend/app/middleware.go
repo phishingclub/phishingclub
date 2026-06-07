@@ -13,7 +13,6 @@ import (
 type Middlewares struct {
 	IPLimiter          gin.HandlerFunc
 	LoginRateLimiter   gin.HandlerFunc
-	ScimRateLimiter    gin.HandlerFunc
 	SessionHandler     gin.HandlerFunc
 	SoftSessionHandler gin.HandlerFunc
 }
@@ -32,12 +31,6 @@ func NewMiddlewares(
 		requestPerSecond, // requests per second
 		requestBurst,     // burst
 	)
-	// per-company SCIM limiter: each company gets its own bucket so cloud IdPs
-	// sharing source IPs across tenants do not throttle each other
-	scimThrottle := middleware.NewScimRateLimiterMiddleware(
-		20, // requests per second per company
-		40, // burst
-	)
 	sessionHandler := middleware.NewSessionHandler(
 		services.Session,
 		services.User,
@@ -53,7 +46,6 @@ func NewMiddlewares(
 	return &Middlewares{
 		IPLimiter:          ipLimiter,
 		LoginRateLimiter:   loginThrottle,
-		ScimRateLimiter:    scimThrottle,
 		SessionHandler:     sessionHandler,
 		SoftSessionHandler: softSessionHandler,
 	}

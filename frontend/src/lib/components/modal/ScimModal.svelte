@@ -11,6 +11,9 @@
 
 	// local state
 	let scimConfig = null;
+	// the global domain SCIM is served on; SCIM lives on the phishing server, not
+	// this admin origin, so the base URL must use the configured domain
+	let scimDomain = '';
 	let isLoading = false;
 	let isTogglingEnabled = false;
 	let isRotating = false;
@@ -50,9 +53,20 @@
 	const loadAll = async () => {
 		isLoading = true;
 		try {
-			await loadScimConfig();
+			await Promise.all([loadScimConfig(), loadScimDomain()]);
 		} finally {
 			isLoading = false;
+		}
+	};
+
+	const loadScimDomain = async () => {
+		try {
+			const res = await api.option.getScimDomain();
+			if (res.success) {
+				scimDomain = res.data.domain || '';
+			}
+		} catch (err) {
+			console.error('failed to load SCIM domain', err);
 		}
 	};
 
@@ -181,9 +195,7 @@
 		}
 	};
 
-	$: scimBaseURL = company
-		? `${typeof window !== 'undefined' ? window.location.origin : ''}/api/v1/scim/v2/${company.id}`
-		: '';
+	$: scimBaseURL = company && scimDomain ? `https://${scimDomain}/api/v1/scim/v2/${company.id}` : '';
 
 	$: isBusy = isSettingUp || isTogglingEnabled || isRotating || isDeleting;
 </script>
@@ -263,21 +275,28 @@
 					<p class="text-xs font-semibold text-gray-500 dark:text-gray-400">
 						SCIM Base URL - provide this to your identity provider
 					</p>
-					<div class="flex items-center gap-2">
-						<input
-							type="text"
-							readonly
-							value={scimBaseURL}
-							class="flex-1 px-3 py-2 text-xs rounded-md bg-gray-50 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700/60 text-gray-700 dark:text-gray-300 font-mono focus:outline-none transition-colors duration-200"
-						/>
-						<button
-							type="button"
-							on:click={() => copyToClipboard(scimBaseURL)}
-							class="px-3 py-2 text-sm bg-slate-500 hover:bg-slate-400 dark:bg-gray-700/80 dark:hover:bg-gray-600/80 text-white rounded-md transition-colors duration-200"
-						>
-							Copy
-						</button>
-					</div>
+					{#if scimDomain}
+						<div class="flex items-center gap-2">
+							<input
+								type="text"
+								readonly
+								value={scimBaseURL}
+								class="flex-1 px-3 py-2 text-xs rounded-md bg-gray-50 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700/60 text-gray-700 dark:text-gray-300 font-mono focus:outline-none transition-colors duration-200"
+							/>
+							<button
+								type="button"
+								on:click={() => copyToClipboard(scimBaseURL)}
+								class="px-3 py-2 text-sm bg-slate-500 hover:bg-slate-400 dark:bg-gray-700/80 dark:hover:bg-gray-600/80 text-white rounded-md transition-colors duration-200"
+							>
+								Copy
+							</button>
+						</div>
+					{:else}
+						<p class="text-xs text-amber-600 dark:text-amber-400">
+							No SCIM domain is configured. Set a global SCIM domain under Settings → System before
+							connecting an identity provider.
+						</p>
+					{/if}
 				</div>
 			</div>
 

@@ -14,6 +14,8 @@
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import PasswordField from '$lib/components/PasswordField.svelte';
+	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import Form from '$lib/components/Form.svelte';
 
 	let loaded = false;
 	let ssoForm = null;
@@ -29,16 +31,58 @@
 		clientSecret: null
 	};
 
+	// SCIM provisioning: single global domain that serves the SCIM endpoints
+	let scimDomain = '';
+	let scimDomainOptions = [{ value: '', label: '— Disabled —' }];
+
 	onMount(async () => {
 		try {
 			await refreshSSO();
 			if (!ssoSettingsFormValues.redirectURL) {
 				ssoSettingsFormValues.redirectURL = `${location.origin}/api/v1/sso/entra-id/auth`;
 			}
+			await refreshScimDomain();
 		} finally {
 			loaded = true;
 		}
 	});
+
+	async function refreshScimDomain() {
+		try {
+			// only normal global domains may serve SCIM — exclude AiTM proxy domains
+			const [current, domains] = await Promise.all([
+				api.option.getScimDomain(),
+				api.domain.getAllSubsetWithoutProxies({ perPage: 1000 }, null)
+			]);
+			if (current.success) {
+				scimDomain = current.data.domain || '';
+			}
+			if (domains.success) {
+				const names = (domains.data.rows || []).map((d) => d.name);
+				scimDomainOptions = [
+					{ value: '', label: '— Disabled —' },
+					...names.map((n) => ({ value: n, label: n }))
+				];
+			}
+		} catch (e) {
+			console.error('failed to load SCIM domain settings', e);
+		}
+	}
+
+	async function setScimDomain() {
+		try {
+			const res = await api.option.setScimDomain(scimDomain);
+			if (res.success) {
+				addToast(scimDomain ? 'SCIM domain updated' : 'SCIM serving disabled', 'Success');
+			} else {
+				addToast(res.error || 'Failed to update SCIM domain', 'Error');
+				await refreshScimDomain();
+			}
+		} catch (e) {
+			addToast('Failed to update SCIM domain', 'Error');
+			console.error(e);
+		}
+	}
 
 	async function refreshSSO() {
 		try {
@@ -141,6 +185,31 @@
 				<Button size={'large'} on:click={openSSOModal}>Configure SSO</Button>
 			{/if}
 		</svelte:fragment>
+	</SettingsCard>
+
+	<SettingsCard title="SCIM Provisioning">
+		<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+			Global domain that serves SCIM provisioning. Must be publicly reachable on 443 with a valid
+			certificate; prefer a dedicated domain not used for campaigns.
+		</p>
+		<Form>
+			<TextFieldSelect
+				id="scimDomain"
+				bind:value={scimDomain}
+				onSelect={setScimDomain}
+				options={scimDomainOptions}>SCIM domain</TextFieldSelect
+			>
+		</Form>
+		{#if scimDomain}
+			<p class="mt-3 text-xs text-gray-500 dark:text-gray-400 transition-colors duration-200">
+				Base URL (each company's full endpoint is shown in its SCIM settings):
+			</p>
+			<p
+				class="text-xs text-gray-600 dark:text-gray-300 font-mono break-all transition-colors duration-200"
+			>
+				https://{scimDomain}/api/v1/scim/v2/&lt;companyID&gt;
+			</p>
+		{/if}
 	</SettingsCard>
 </div>
 {/if}

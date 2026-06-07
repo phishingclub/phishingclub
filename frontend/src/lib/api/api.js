@@ -2354,6 +2354,26 @@ export class API {
 		},
 
 		/**
+		 * Get the global SCIM domain. Empty string means SCIM serving is disabled.
+		 *
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getScimDomain: async () => {
+			return await getJSON(this.getPath(`/option/scim-domain`));
+		},
+
+		/**
+		 * Set the global SCIM domain. Pass an empty string to disable SCIM serving.
+		 * The value must be an existing global domain.
+		 *
+		 * @param {string} domain
+		 * @returns {Promise<ApiResponse>}
+		 */
+		setScimDomain: async (domain) => {
+			return await postJSON(this.getPath(`/option/scim-domain`), { domain });
+		},
+
+		/**
 		 * Set setting by key and value.
 		 *
 		 * @param {'max_file_upload_size_mb'|'repeat_offender_months'|'sso_login'|'display_mode'|'obfuscation_template'|'report_pdf_enabled'} key

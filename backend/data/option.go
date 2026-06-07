@@ -39,6 +39,10 @@ const (
 
 	OptionKeyReportPDFEnabled = "report_pdf_enabled"
 
+	// OptionKeyScimDomain is the single global domain on which SCIM provisioning
+	// endpoints are served by the phishing server. Empty disables SCIM serving.
+	OptionKeyScimDomain = "scim_domain"
+
 	OptionKeyObfuscationTemplate = "obfuscation_template"
 	// OptionValueObfuscationTemplateDefault is the default HTML template for obfuscation
 	// the template receives {{.Script}} variable containing the obfuscated javascript

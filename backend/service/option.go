@@ -20,6 +20,7 @@ import (
 type Option struct {
 	Common
 	OptionRepository *repository.Option
+	DomainRepository *repository.Domain
 }
 
 // GetOption gets an option
@@ -397,4 +398,116 @@ func (o *Option) GetObfuscationTemplate(ctx context.Context) (string, error) {
 		return data.OptionValueObfuscationTemplateDefault, nil
 	}
 	return template, nil
+}
+
+// GetScimDomainInternal returns the configured global SCIM domain without any
+// authorization check. intended for the phishing-server host gate. returns an
+// empty string when SCIM serving is not configured.
+func (o *Option) GetScimDomainInternal(ctx context.Context) (string, error) {
+	opt, err := o.OptionRepository.GetByKey(ctx, data.OptionKeyScimDomain)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		o.Logger.Errorw("failed to get scim domain option", "error", err)
+		return "", errs.Wrap(err)
+	}
+	return opt.Value.String(), nil
+}
+
+// GetScimDomain returns the configured global SCIM domain (requires global auth).
+func (o *Option) GetScimDomain(
+	ctx context.Context,
+	session *model.Session,
+) (string, error) {
+	ae := NewAuditEvent("Option.GetScimDomain", session)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return "", errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return "", errs.ErrAuthorizationFailed
+	}
+	return o.GetScimDomainInternal(ctx)
+}
+
+// SetScimDomain persists the global SCIM domain (requires global auth). An empty
+// string disables SCIM serving. A non-empty value must be an existing global
+// domain (one not tied to a company).
+func (o *Option) SetScimDomain(
+	ctx context.Context,
+	session *model.Session,
+	domain string,
+) error {
+	ae := NewAuditEvent("Option.SetScimDomain", session)
+	ae.Details["domain"] = domain
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// a non-empty value must resolve to an existing global domain
+	if domain != "" {
+		nameVO, err := vo.NewString255(domain)
+		if err != nil {
+			return errs.NewValidationError(err)
+		}
+		d, err := o.DomainRepository.GetByName(ctx, nameVO, &repository.DomainOption{})
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errs.NewValidationError(errors.Errorf("domain %q does not exist", domain))
+			}
+			o.Logger.Errorw("failed to look up scim domain", "error", err)
+			return errs.Wrap(err)
+		}
+		// only global domains (not tied to a company) may be used for SCIM
+		if d.CompanyID.IsSpecified() && !d.CompanyID.IsNull() {
+			return errs.NewValidationError(errors.Errorf("domain %q is not a global domain", domain))
+		}
+		// AiTM proxy domains route traffic to a target site and must never serve
+		// the SCIM provisioning API
+		if d.ProxyID.IsSpecified() && !d.ProxyID.IsNull() {
+			return errs.NewValidationError(errors.Errorf("domain %q is a proxy domain and cannot be used for SCIM", domain))
+		}
+	}
+	if err := o.setScimDomainValue(ctx, domain); err != nil {
+		return err
+	}
+	o.AuditLogAuthorized(ae)
+	return nil
+}
+
+// setScimDomainValue inserts or updates the single SCIM domain option row.
+func (o *Option) setScimDomainValue(ctx context.Context, domain string) error {
+	valueVO, err := vo.NewOptionalString1MB(domain)
+	if err != nil {
+		return errs.NewValidationError(err)
+	}
+	opt := &model.Option{
+		Key:   *vo.NewString127Must(data.OptionKeyScimDomain),
+		Value: *valueVO,
+	}
+	_, getErr := o.OptionRepository.GetByKey(ctx, data.OptionKeyScimDomain)
+	if getErr != nil {
+		if !errors.Is(getErr, gorm.ErrRecordNotFound) {
+			o.Logger.Errorw("failed to check scim domain option existence", "error", getErr)
+			return errs.Wrap(getErr)
+		}
+		if _, insertErr := o.OptionRepository.Insert(ctx, opt); insertErr != nil {
+			o.Logger.Errorw("failed to insert scim domain option", "error", insertErr)
+			return errs.Wrap(insertErr)
+		}
+		return nil
+	}
+	if updateErr := o.OptionRepository.UpdateByKey(ctx, opt); updateErr != nil {
+		o.Logger.Errorw("failed to update scim domain option", "error", updateErr)
+		return errs.Wrap(updateErr)
+	}
+	return nil
 }

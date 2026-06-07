@@ -68,6 +68,40 @@ func (c *Option) Update(g *gin.Context) {
 	)
 }
 
+// GetScimDomain returns the configured global SCIM domain.
+func (c *Option) GetScimDomain(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	ctx := g.Request.Context()
+	domain, err := c.OptionService.GetScimDomain(ctx, session)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{"domain": domain})
+}
+
+// SetScimDomain sets the global SCIM domain. An empty value disables SCIM serving.
+func (c *Option) SetScimDomain(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	var req struct {
+		Domain string `json:"domain"`
+	}
+	if ok := c.handleParseRequest(g, &req); !ok {
+		return
+	}
+	ctx := g.Request.Context()
+	err := c.OptionService.SetScimDomain(ctx, session, req.Domain)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 // GetAutoPrune returns the full auto prune option (global flag + all per-company entries).
 func (c *Option) GetAutoPrune(g *gin.Context) {
 	session, _, ok := c.handleSession(g)

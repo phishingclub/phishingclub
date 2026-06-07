@@ -355,6 +355,14 @@ func (s *Server) Handler(c *gin.Context) {
 		return
 	}
 
+	// SCIM provisioning paths are handled by explicit Gin routes; anything under
+	// this prefix that did not match a route (wrong method or sub-path) falls
+	// through to the not-found handler instead of the phishing catch-all.
+	if strings.HasPrefix(c.Request.URL.Path, scimPathPrefix) {
+		c.Next()
+		return
+	}
+
 	if cacheEntry, ok := s.ja4Middleware.ConnectionFingerprints.Load(c.Request.RemoteAddr); ok {
 		if entry, ok := cacheEntry.(*middleware.FingerprintEntry); ok {
 			fingerprint := entry.Fingerprint
@@ -2041,8 +2049,58 @@ func (s *Server) AssignRoutes(r *gin.Engine) {
 	// explicit prefix check that calls c.Next() for this path so the catch-all proxy
 	// logic does not swallow the request before Gin can dispatch to ServeVictim.
 	r.GET("/"+s.remoteBrowserWSPath+"/:crID/:rbID", s.controllers.RemoteBrowser.ServeVictim)
+
+	// SCIM v2 provisioning endpoints. They live on the phishing engine (not the
+	// admin engine) so the admin port need not be publicly exposed. Each route is
+	// gated to the single configured global SCIM domain (scimHostGate) and rate
+	// limited per company (scimRateLimiter). Registered before r.Use(s.Handler)
+	// so the phishing catch-all does not swallow them; bearer-token auth happens
+	// in the controller.
+	scimRateLimiter := middleware.NewScimRateLimiterMiddleware(20, 40)
+	gate := s.scimHostGate
+	r.GET(ROUTE_SCIM_V2_SERVICE_PROVIDER_CONFIG, gate, scimRateLimiter, s.controllers.Scim.ServiceProviderConfig)
+	r.GET(ROUTE_SCIM_V2_RESOURCE_TYPES, gate, scimRateLimiter, s.controllers.Scim.ResourceTypes)
+	r.GET(ROUTE_SCIM_V2_SCHEMAS, gate, scimRateLimiter, s.controllers.Scim.Schemas)
+	r.GET(ROUTE_SCIM_V2_SCHEMA_ID, gate, scimRateLimiter, s.controllers.Scim.GetSchema)
+	r.GET(ROUTE_SCIM_V2_RESOURCE_TYPE_ID, gate, scimRateLimiter, s.controllers.Scim.GetResourceType)
+	r.GET(ROUTE_SCIM_V2_USERS, gate, scimRateLimiter, s.controllers.Scim.ListUsers)
+	r.POST(ROUTE_SCIM_V2_USERS, gate, scimRateLimiter, s.controllers.Scim.CreateUser)
+	r.GET(ROUTE_SCIM_V2_USER_ID, gate, scimRateLimiter, s.controllers.Scim.GetUser)
+	r.PUT(ROUTE_SCIM_V2_USER_ID, gate, scimRateLimiter, s.controllers.Scim.ReplaceUser)
+	r.PATCH(ROUTE_SCIM_V2_USER_ID, gate, scimRateLimiter, s.controllers.Scim.PatchUser)
+	r.DELETE(ROUTE_SCIM_V2_USER_ID, gate, scimRateLimiter, s.controllers.Scim.DeleteUser)
+	r.GET(ROUTE_SCIM_V2_GROUPS, gate, scimRateLimiter, s.controllers.Scim.ListGroups)
+	r.POST(ROUTE_SCIM_V2_GROUPS, gate, scimRateLimiter, s.controllers.Scim.CreateGroup)
+	r.GET(ROUTE_SCIM_V2_GROUP_ID, gate, scimRateLimiter, s.controllers.Scim.GetGroup)
+	r.PUT(ROUTE_SCIM_V2_GROUP_ID, gate, scimRateLimiter, s.controllers.Scim.ReplaceGroup)
+	r.PATCH(ROUTE_SCIM_V2_GROUP_ID, gate, scimRateLimiter, s.controllers.Scim.PatchGroup)
+	r.DELETE(ROUTE_SCIM_V2_GROUP_ID, gate, scimRateLimiter, s.controllers.Scim.DeleteGroup)
+
 	r.Use(s.Handler)
 	r.NoRoute(s.handlerNotFound)
+}
+
+// scimPathPrefix is the URL prefix for SCIM v2 provisioning endpoints.
+const scimPathPrefix = "/api/v1/scim/v2/"
+
+// scimHostGate allows a SCIM request through only when it arrives on the single
+// configured global SCIM domain. Any other host, or no configured domain, is
+// served the normal not-found response so the endpoint's existence is not
+// revealed. Bearer-token auth is enforced afterwards in the controller.
+func (s *Server) scimHostGate(c *gin.Context) {
+	configured, err := s.services.Option.GetScimDomainInternal(c.Request.Context())
+	if err != nil || configured == "" {
+		s.handlerNotFound(c)
+		c.Abort()
+		return
+	}
+	host, err := s.getHostOnly(c.Request.Host)
+	if err != nil || !strings.EqualFold(host, configured) {
+		s.handlerNotFound(c)
+		c.Abort()
+		return
+	}
+	c.Next()
 }
 
 // getProxyCookieValue extracts proxy cookie value from gin context

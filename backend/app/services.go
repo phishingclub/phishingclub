@@ -112,6 +112,7 @@ func NewServices(
 	optionService := &service.Option{
 		Common:           common,
 		OptionRepository: repositories.Option,
+		DomainRepository: repositories.Domain,
 	}
 	userService := &service.User{
 		Common:            common,
