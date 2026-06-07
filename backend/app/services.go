@@ -177,6 +177,7 @@ func NewServices(
 		CertMagicCache:            certMagicCache,
 		DomainRepository:          repositories.Domain,
 		CompanyRepository:         repositories.Company,
+		OptionRepository:          repositories.Option,
 		CampaignTemplateService:   campaignTemplate,
 		AssetService:              asset,
 		FileService:               file,
