@@ -200,16 +200,6 @@
 				options={scimDomainOptions}>SCIM domain</TextFieldSelect
 			>
 		</Form>
-		{#if scimDomain}
-			<p class="mt-3 text-xs text-gray-500 dark:text-gray-400 transition-colors duration-200">
-				Base URL (each company's full endpoint is shown in its SCIM settings):
-			</p>
-			<p
-				class="text-xs text-gray-600 dark:text-gray-300 font-mono break-all transition-colors duration-200"
-			>
-				https://{scimDomain}/api/v1/scim/v2/&lt;companyID&gt;
-			</p>
-		{/if}
 	</SettingsCard>
 </div>
 {/if}
