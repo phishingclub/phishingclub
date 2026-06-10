@@ -308,6 +308,7 @@ type Scim struct {
 	CompanyScimConfigService    *CompanyScimConfig
 	RecipientRepository         *repository.Recipient
 	RecipientGroupRepository    *repository.RecipientGroup
+	RecipientService            *Recipient
 	CampaignRepository          *repository.Campaign
 }
 
@@ -1243,10 +1244,8 @@ func (s *Scim) UpdateLastSync(ctx context.Context, config *model.CompanyScimConf
 // deprovisionRecipient removes a recipient from all groups and hard-deletes it.
 // shared by DELETE, PUT active=false and PATCH active=false.
 func (s *Scim) deprovisionRecipient(ctx context.Context, recipientID *uuid.UUID) error {
-	if err := s.RecipientGroupRepository.RemoveRecipientByIDFromAllGroups(ctx, recipientID); err != nil {
-		s.Logger.Warnw("scim deprovision: failed to remove recipient from groups", "error", err)
-	}
-	return s.RecipientRepository.DeleteByID(ctx, recipientID)
+	// use the recipient service deletion so deprovision behaves like a manual delete
+	return s.RecipientService.deleteRecipientByID(ctx, recipientID)
 }
 
 // auditScim emits an audit event for an externally driven SCIM mutation.

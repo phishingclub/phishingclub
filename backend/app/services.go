@@ -302,6 +302,7 @@ func NewServices(
 		CompanyScimConfigService:    companyScimConfig,
 		RecipientRepository:         repositories.Recipient,
 		RecipientGroupRepository:    repositories.RecipientGroup,
+		RecipientService:            recipient,
 		CampaignRepository:          repositories.Campaign,
 	}
 
