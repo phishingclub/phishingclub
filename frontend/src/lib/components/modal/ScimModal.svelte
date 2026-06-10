@@ -195,7 +195,8 @@
 		}
 	};
 
-	$: scimBaseURL = company && scimDomain ? `https://${scimDomain}/api/v1/scim/v2/${company.id}` : '';
+	$: scimBaseURL =
+		company && scimDomain ? `https://${scimDomain}/api/v1/scim/v2/${company.id}` : '';
 
 	$: isBusy = isSettingUp || isTogglingEnabled || isRotating || isDeleting;
 </script>
@@ -212,7 +213,7 @@
 				class="rounded-md border border-amber-400 dark:border-amber-500/60 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3 transition-colors duration-200"
 			>
 				<p class="text-sm font-semibold text-amber-700 dark:text-amber-400">
-					⚠ Copy this token now — it will not be shown again.
+					⚠ Copy this token now - it will not be shown again.
 				</p>
 				<div class="flex items-center gap-2">
 					<input

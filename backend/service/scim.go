@@ -43,6 +43,9 @@ type ScimUser struct {
 	Name *ScimName `json:"name,omitempty"`
 	// flat display name (used if name sub-object absent)
 	DisplayName string `json:"displayName,omitempty"`
+	// core title attribute — Microsoft Entra maps the directory jobTitle here by
+	// default (not the enterprise extension), so this is the primary source for Position
+	Title string `json:"title,omitempty"`
 	// emails list — we treat the first primary (or first) as canonical
 	Emails []ScimEmail `json:"emails,omitempty"`
 	// phone numbers list
@@ -1572,15 +1575,14 @@ func (s *Scim) applyScimUserToRecipient(
 	existing.LastName.Set(*vo.NewOptionalString127Must(truncate(lastNameFrom(scimUser), 127)))
 	// phone
 	existing.Phone.Set(*vo.NewOptionalString127Must(truncate(primaryPhoneFrom(scimUser), 127)))
-	// department and title from enterprise extension
+	// department from the enterprise extension; job title from the core title
+	// attribute (where Entra puts it by default) with the enterprise title as fallback
 	department := ""
-	title := ""
 	if scimUser.EnterpriseUser != nil {
 		department = scimUser.EnterpriseUser.Department
-		title = scimUser.EnterpriseUser.Title
 	}
 	existing.Department.Set(*vo.NewOptionalString127Must(truncate(department, 127)))
-	existing.Position.Set(*vo.NewOptionalString127Must(truncate(title, 127)))
+	existing.Position.Set(*vo.NewOptionalString127Must(truncate(jobTitleFrom(scimUser), 127)))
 	// addresses — city and country from primary/work address
 	city, country := primaryAddressFrom(scimUser)
 	existing.City.Set(*vo.NewOptionalString127Must(truncate(city, 127)))
@@ -1712,7 +1714,7 @@ func (s *Scim) applyPatchOperation(
 		existing.Phone.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
 	case "urn:ietf:params:scim:schemas:extension:enterprise:2.0:user:department":
 		existing.Department.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
-	case "urn:ietf:params:scim:schemas:extension:enterprise:2.0:user:title":
+	case "title", "urn:ietf:params:scim:schemas:extension:enterprise:2.0:user:title":
 		existing.Position.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
 	case "addresses[type eq \"work\"].locality", "addresses.locality":
 		existing.City.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
@@ -1768,7 +1770,7 @@ func (s *Scim) applyAttributeMap(
 			formattedName = strVal
 		case "urn:ietf:params:scim:schemas:extension:enterprise:2.0:user:department":
 			existing.Department.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
-		case "urn:ietf:params:scim:schemas:extension:enterprise:2.0:user:title":
+		case "title", "urn:ietf:params:scim:schemas:extension:enterprise:2.0:user:title":
 			existing.Position.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
 		case "urn:ietf:params:scim:schemas:extension:phishingclub:2.0:user:misc":
 			existing.Misc.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
@@ -1903,6 +1905,7 @@ func recipientToScimUser(r *model.Recipient, baseURL string) ScimUser {
 		ID:              id,
 		UserName:        userNameStr,
 		Name:            name,
+		Title:           pos,
 		Emails:          emails,
 		PhoneNumbers:    phones,
 		EnterpriseUser:  enterprise,
@@ -1918,6 +1921,19 @@ func recipientToScimUser(r *model.Recipient, baseURL string) ScimUser {
 		}
 	}
 	return u
+}
+
+// jobTitleFrom returns the user's job title. Microsoft Entra maps the directory
+// jobTitle to the core SCIM "title" attribute by default, so that is preferred;
+// the enterprise extension title is used as a fallback for IdPs that send it there.
+func jobTitleFrom(u *ScimUser) string {
+	if u.Title != "" {
+		return u.Title
+	}
+	if u.EnterpriseUser != nil {
+		return u.EnterpriseUser.Title
+	}
+	return ""
 }
 
 // scimUserToRecipient creates a new model.Recipient from a ScimUser
@@ -1944,13 +1960,12 @@ func scimUserToRecipient(scimUser *ScimUser, companyID *uuid.UUID) *model.Recipi
 		r.Phone = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(""))
 	}
 
+	department := ""
 	if scimUser.EnterpriseUser != nil {
-		r.Department = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(truncate(scimUser.EnterpriseUser.Department, 127)))
-		r.Position = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(truncate(scimUser.EnterpriseUser.Title, 127)))
-	} else {
-		r.Department = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(""))
-		r.Position = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(""))
+		department = scimUser.EnterpriseUser.Department
 	}
+	r.Department = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(truncate(department, 127)))
+	r.Position = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(truncate(jobTitleFrom(scimUser), 127)))
 
 	// addresses — prefer work, fall back to first entry
 	city, country := primaryAddressFrom(scimUser)
