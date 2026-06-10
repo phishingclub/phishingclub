@@ -1060,6 +1060,18 @@ func (s *Scim) CreateUser(
 	return &u, nil
 }
 
+// deprovisionedUserResponse builds the SCIM body returned after a user has been
+// deprovisioned via active=false. Microsoft Entra sends a soft-delete (PATCH
+// active=false) and expects a 200 response with the resource showing
+// active=false. Returning 404 makes Entra log the disable as a failure and retry
+// it every sync cycle, so the recipient is hard-deleted but a success body with
+// active=false is returned.
+func deprovisionedUserResponse(existing *model.Recipient, baseURL string) *ScimUser {
+	u := recipientToScimUser(existing, baseURL)
+	u.Active = false
+	return &u
+}
+
 // ReplaceUser performs a full replacement (PUT) of an existing recipient from
 // a SCIM User resource. group membership is replaced if a groups array is present.
 func (s *Scim) ReplaceUser(
@@ -1083,12 +1095,13 @@ func (s *Scim) ReplaceUser(
 		return nil, errs.Wrap(gorm.ErrRecordNotFound)
 	}
 	// a PUT with active=false is a deprovision request — hard-delete the recipient
+	// but return 200 with active=false so the IdP records the disable as a success
 	if !scimUser.Active {
 		if err := s.deprovisionRecipient(ctx, recipientID); err != nil {
 			return nil, errs.Wrap(err)
 		}
 		s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientID": recipientID.String(), "via": "replace"})
-		return nil, errs.Wrap(gorm.ErrRecordNotFound)
+		return deprovisionedUserResponse(existing, baseURL), nil
 	}
 	if err := s.applyScimUserToRecipient(ctx, existing, scimUser); err != nil {
 		return nil, err
@@ -1138,10 +1151,11 @@ func (s *Scim) PatchUser(
 			if err != nil {
 				return nil, err
 			}
-			// active=false triggers a hard-delete; nothing more to do
+			// active=false triggers a hard-delete; return 200 with active=false so
+			// the IdP records the soft-delete as a success instead of retrying
 			if deactivated {
 				s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientID": recipientID.String(), "via": "patch"})
-				return nil, errs.Wrap(gorm.ErrRecordNotFound)
+				return deprovisionedUserResponse(existing, baseURL), nil
 			}
 		case "remove":
 			// remove op on "active" means deactivate — hard-delete the recipient
@@ -1150,7 +1164,7 @@ func (s *Scim) PatchUser(
 					return nil, errs.Wrap(err)
 				}
 				s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientID": recipientID.String(), "via": "patch"})
-				return nil, errs.Wrap(gorm.ErrRecordNotFound)
+				return deprovisionedUserResponse(existing, baseURL), nil
 			}
 		}
 	}
