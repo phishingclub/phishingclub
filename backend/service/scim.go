@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
+	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
@@ -309,6 +311,7 @@ type Scim struct {
 	RecipientRepository         *repository.Recipient
 	RecipientGroupRepository    *repository.RecipientGroup
 	RecipientService            *Recipient
+	OptionService               *Option
 	CampaignRepository          *repository.Campaign
 }
 
@@ -1027,6 +1030,28 @@ func (s *Scim) CreateUser(
 		return nil, errs.Wrap(err)
 	}
 	if existingByEmail != nil {
+		// if the existing recipient was SCIM soft-deleted, the IdP is re-provisioning
+		// the same person — revive and update it instead of returning a conflict
+		if existingByEmail.ScimSoftDeletedAt != nil {
+			existingID := existingByEmail.ID.MustGet()
+			if err := s.RecipientRepository.ClearScimSoftDeleted(ctx, &existingID); err != nil {
+				return nil, errs.Wrap(err)
+			}
+			existingByEmail.ScimSoftDeletedAt = nil
+			if err := s.applyScimUserToRecipient(ctx, existingByEmail, scimUser); err != nil {
+				return nil, err
+			}
+			if err := s.syncUserGroupMembership(ctx, companyID, &existingID, scimUser.Groups); err != nil {
+				s.Logger.Warnw("scim create user (revive): failed to sync group membership", "error", err)
+			}
+			revived, err := s.RecipientRepository.GetByID(ctx, &existingID, &repository.RecipientOption{})
+			if err != nil {
+				return nil, errs.Wrap(err)
+			}
+			s.auditScim("Scim.CreateUser", config, map[string]any{"recipientID": existingID.String(), "revived": true})
+			u := recipientToScimUser(revived, baseURL)
+			return &u, nil
+		}
 		return nil, errs.NewConflictError(fmt.Errorf("a user with userName %q already exists", scimUserNameFrom(scimUser)))
 	}
 
@@ -1103,6 +1128,13 @@ func (s *Scim) ReplaceUser(
 		}
 		s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientID": recipientID.String(), "via": "replace"})
 		return deprovisionedUserResponse(existing, baseURL), nil
+	}
+	// active=true: revive a previously soft-deleted recipient
+	if existing.ScimSoftDeletedAt != nil {
+		if err := s.RecipientRepository.ClearScimSoftDeleted(ctx, recipientID); err != nil {
+			return nil, errs.Wrap(err)
+		}
+		existing.ScimSoftDeletedAt = nil
 	}
 	if err := s.applyScimUserToRecipient(ctx, existing, scimUser); err != nil {
 		return nil, err
@@ -1244,8 +1276,80 @@ func (s *Scim) UpdateLastSync(ctx context.Context, config *model.CompanyScimConf
 // deprovisionRecipient removes a recipient from all groups and hard-deletes it.
 // shared by DELETE, PUT active=false and PATCH active=false.
 func (s *Scim) deprovisionRecipient(ctx context.Context, recipientID *uuid.UUID) error {
-	// use the recipient service deletion so deprovision behaves like a manual delete
-	return s.RecipientService.deleteRecipientByID(ctx, recipientID)
+	// mark the recipient as SCIM soft-deleted; the anonymizing delete runs only
+	// after the retention grace period (scheduled job or on-demand prune)
+	return s.RecipientRepository.MarkScimSoftDeleted(ctx, recipientID, time.Now())
+}
+
+// reviveIfSoftDeleted clears the soft-delete mark when the IdP re-activates a
+// recipient. It is a no-op when the recipient is not soft-deleted.
+func (s *Scim) reviveIfSoftDeleted(ctx context.Context, existing *model.Recipient, recipientID *uuid.UUID) error {
+	if existing.ScimSoftDeletedAt == nil {
+		return nil
+	}
+	if err := s.RecipientRepository.ClearScimSoftDeleted(ctx, recipientID); err != nil {
+		return err
+	}
+	existing.ScimSoftDeletedAt = nil
+	return nil
+}
+
+// PruneSoftDeleted runs the anonymizing delete for SCIM-disabled recipients whose
+// retention window has elapsed. A nil companyID prunes across all companies.
+// No authorization check — callers (the scheduled job and the authorized wrapper)
+// are responsible for that. Returns the number pruned.
+func (s *Scim) PruneSoftDeleted(ctx context.Context, companyID *uuid.UUID) (int, error) {
+	days, err := s.OptionService.GetScimSoftDeleteRetentionDaysInternal(ctx)
+	if err != nil {
+		return 0, errs.Wrap(err)
+	}
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	recipients, err := s.RecipientRepository.GetScimSoftDeletedBefore(ctx, companyID, cutoff)
+	if err != nil {
+		return 0, errs.Wrap(err)
+	}
+	pruned := 0
+	for _, r := range recipients {
+		id, idErr := r.ID.Get()
+		if idErr != nil {
+			continue
+		}
+		if delErr := s.RecipientService.deleteRecipientByID(ctx, &id); delErr != nil {
+			s.Logger.Errorw("scim prune: failed to delete soft-deleted recipient", "error", delErr, "recipientID", id.String())
+			continue
+		}
+		pruned++
+	}
+	return pruned, nil
+}
+
+// PruneSoftDeletedAuthorized is the admin (session-authenticated) entry point for
+// the on-demand prune of a company's disabled recipients past the threshold.
+func (s *Scim) PruneSoftDeletedAuthorized(
+	ctx context.Context,
+	session *model.Session,
+	companyID *uuid.UUID,
+) (int, error) {
+	ae := NewAuditEvent("Scim.PruneSoftDeletedAuthorized", session)
+	if companyID != nil {
+		ae.Details["companyID"] = companyID.String()
+	}
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil {
+		s.LogAuthError(err)
+		return 0, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		s.AuditLogNotAuthorized(ae)
+		return 0, errs.ErrAuthorizationFailed
+	}
+	pruned, err := s.PruneSoftDeleted(ctx, companyID)
+	if err != nil {
+		return 0, err
+	}
+	ae.Details["pruned"] = pruned
+	s.AuditLogAuthorized(ae)
+	return pruned, nil
 }
 
 // auditScim emits an audit event for an externally driven SCIM mutation.
@@ -1664,8 +1768,8 @@ func (s *Scim) applyPatchOperation(
 		if !active {
 			return true, s.deprovisionRecipient(ctx, recipientID)
 		}
-		// active=true is a no-op; group assignment is managed via /Groups
-		return false, nil
+		// active=true revives a soft-deleted recipient; otherwise a no-op
+		return false, s.reviveIfSoftDeleted(ctx, existing, recipientID)
 	}
 
 	// for no path, value is expected to be a map of attribute → value
@@ -1674,6 +1778,12 @@ func (s *Scim) applyPatchOperation(
 			// check for active=false inside the map before applying other fields
 			if rawActive, ok := m["active"]; ok && !boolFromPatchValue(rawActive) {
 				return true, s.deprovisionRecipient(ctx, recipientID)
+			}
+			// active=true in the map revives a soft-deleted recipient
+			if rawActive, ok := m["active"]; ok && boolFromPatchValue(rawActive) {
+				if err := s.reviveIfSoftDeleted(ctx, existing, recipientID); err != nil {
+					return false, err
+				}
 			}
 			if err := s.applyAttributeMap(ctx, existing, config, recipientID, m); err != nil {
 				return false, err
@@ -1917,7 +2027,7 @@ func recipientToScimUser(r *model.Recipient, baseURL string) ScimUser {
 		PhoneNumbers:    phones,
 		EnterpriseUser:  enterprise,
 		Addresses:       addresses,
-		Active:          true,
+		Active:          r.ScimSoftDeletedAt == nil,
 		ExternalID:      externalID,
 		CustomExtension: custom,
 	}

@@ -511,3 +511,91 @@ func (o *Option) setScimDomainValue(ctx context.Context, domain string) error {
 	}
 	return nil
 }
+
+// upsertOptionValue inserts or updates a single option row by key.
+func (o *Option) upsertOptionValue(ctx context.Context, key string, value string) error {
+	valueVO, err := vo.NewOptionalString1MB(value)
+	if err != nil {
+		return errs.NewValidationError(err)
+	}
+	opt := &model.Option{
+		Key:   *vo.NewString127Must(key),
+		Value: *valueVO,
+	}
+	_, getErr := o.OptionRepository.GetByKey(ctx, key)
+	if getErr != nil {
+		if !errors.Is(getErr, gorm.ErrRecordNotFound) {
+			return errs.Wrap(getErr)
+		}
+		if _, insertErr := o.OptionRepository.Insert(ctx, opt); insertErr != nil {
+			return errs.Wrap(insertErr)
+		}
+		return nil
+	}
+	if updateErr := o.OptionRepository.UpdateByKey(ctx, opt); updateErr != nil {
+		return errs.Wrap(updateErr)
+	}
+	return nil
+}
+
+// GetScimSoftDeleteRetentionDaysInternal returns the retention window in days,
+// defaulting when unset or invalid. No authorization check.
+func (o *Option) GetScimSoftDeleteRetentionDaysInternal(ctx context.Context) (int, error) {
+	opt, err := o.OptionRepository.GetByKey(ctx, data.OptionKeyScimSoftDeleteRetentionDays)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return data.OptionValueScimSoftDeleteRetentionDaysDefault, nil
+		}
+		return 0, errs.Wrap(err)
+	}
+	days, convErr := strconv.Atoi(opt.Value.String())
+	if convErr != nil || days < 0 {
+		return data.OptionValueScimSoftDeleteRetentionDaysDefault, nil
+	}
+	return days, nil
+}
+
+// GetScimSoftDeleteRetentionDays returns the retention window (requires global auth).
+func (o *Option) GetScimSoftDeleteRetentionDays(
+	ctx context.Context,
+	session *model.Session,
+) (int, error) {
+	ae := NewAuditEvent("Option.GetScimSoftDeleteRetentionDays", session)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return 0, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return 0, errs.ErrAuthorizationFailed
+	}
+	return o.GetScimSoftDeleteRetentionDaysInternal(ctx)
+}
+
+// SetScimSoftDeleteRetentionDays persists the retention window (requires global auth).
+func (o *Option) SetScimSoftDeleteRetentionDays(
+	ctx context.Context,
+	session *model.Session,
+	days int,
+) error {
+	ae := NewAuditEvent("Option.SetScimSoftDeleteRetentionDays", session)
+	ae.Details["days"] = days
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	if days < 0 {
+		return errs.NewValidationError(errors.Errorf("retention days must be zero or positive"))
+	}
+	if err := o.upsertOptionValue(ctx, data.OptionKeyScimSoftDeleteRetentionDays, strconv.Itoa(days)); err != nil {
+		return err
+	}
+	o.AuditLogAuthorized(ae)
+	return nil
+}

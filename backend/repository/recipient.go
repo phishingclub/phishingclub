@@ -59,6 +59,9 @@ type RecipientOption struct {
 
 	WithCompany bool
 	WithGroups  bool
+	// ExcludeSoftDeleted filters out recipients that are SCIM soft-deleted
+	// (pending prune). Used when resolving campaign targets.
+	ExcludeSoftDeleted bool
 }
 
 // Recipient
@@ -408,7 +411,8 @@ func (r *Recipient) GetOrphaned(
 	// pagination and counts accurate.
 	orphanCondition := fmt.Sprintf(`
 		LEFT JOIN %s rgr ON %s.id = rgr.recipient_id
-		WHERE rgr.recipient_id IS NULL %s
+		WHERE rgr.recipient_id IS NULL
+		AND recipients.scim_soft_deleted_at IS NULL %s
 		AND %s.id NOT IN (
 			SELECT DISTINCT %s.id FROM %s
 			INNER JOIN %s rg
@@ -868,6 +872,73 @@ func (r *Recipient) DeleteByID(
 	return nil
 }
 
+// MarkScimSoftDeleted sets scim_soft_deleted_at, marking a SCIM-deprovisioned
+// recipient as pending prune without deleting it.
+func (r *Recipient) MarkScimSoftDeleted(
+	ctx context.Context,
+	id *uuid.UUID,
+	at time.Time,
+) error {
+	res := r.DB.
+		Model(&database.Recipient{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"scim_soft_deleted_at": at.UTC(),
+			"updated_at":           time.Now().UTC(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// ClearScimSoftDeleted clears scim_soft_deleted_at, reviving a recipient that the
+// IdP has re-provisioned.
+func (r *Recipient) ClearScimSoftDeleted(
+	ctx context.Context,
+	id *uuid.UUID,
+) error {
+	res := r.DB.
+		Model(&database.Recipient{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"scim_soft_deleted_at": nil,
+			"updated_at":           time.Now().UTC(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// GetScimSoftDeletedBefore returns recipients whose scim_soft_deleted_at is older
+// than the given cutoff. A nil companyID returns matches across all companies.
+func (r *Recipient) GetScimSoftDeletedBefore(
+	ctx context.Context,
+	companyID *uuid.UUID,
+	before time.Time,
+) ([]*model.Recipient, error) {
+	db := r.DB.
+		Model(&database.Recipient{}).
+		Where("scim_soft_deleted_at IS NOT NULL AND scim_soft_deleted_at < ?", before.UTC())
+	if companyID != nil {
+		db = db.Where("company_id = ?", companyID)
+	}
+	var rows []database.Recipient
+	if err := db.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*model.Recipient, 0, len(rows))
+	for i := range rows {
+		m, err := ToRecipient(&rows[i])
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
 func ToRecipient(row *database.Recipient) (*model.Recipient, error) {
 	id := nullable.NewNullableWithValue(*row.ID)
 	companyID := nullable.NewNullNullable[uuid.UUID]()
@@ -926,22 +997,23 @@ func ToRecipient(row *database.Recipient) (*model.Recipient, error) {
 	}
 
 	return &model.Recipient{
-		ID:              id,
-		CreatedAt:       row.CreatedAt,
-		UpdatedAt:       row.UpdatedAt,
-		CompanyID:       companyID,
-		FirstName:       firstName,
-		LastName:        lastName,
-		Email:           email,
-		Phone:           phone,
-		ExtraIdentifier: extraIdentifier,
-		Position:        position,
-		Department:      department,
-		City:            city,
-		Country:         country,
-		Misc:            misc,
-		ScimUserName:    scimUserName,
-		Company:         company,
-		Groups:          nullable.NewNullableWithValue(groups),
+		ID:                id,
+		CreatedAt:         row.CreatedAt,
+		UpdatedAt:         row.UpdatedAt,
+		CompanyID:         companyID,
+		FirstName:         firstName,
+		LastName:          lastName,
+		Email:             email,
+		Phone:             phone,
+		ExtraIdentifier:   extraIdentifier,
+		Position:          position,
+		Department:        department,
+		City:              city,
+		Country:           country,
+		Misc:              misc,
+		ScimUserName:      scimUserName,
+		ScimSoftDeletedAt: row.ScimSoftDeletedAt,
+		Company:           company,
+		Groups:            nullable.NewNullableWithValue(groups),
 	}, nil
 }

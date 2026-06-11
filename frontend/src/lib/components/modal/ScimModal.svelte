@@ -19,6 +19,7 @@
 	let isRotating = false;
 	let isSettingUp = false;
 	let isDeleting = false;
+	let isPruning = false;
 
 	// token reveal — only populated immediately after create or rotate
 	let revealedToken = '';
@@ -172,6 +173,23 @@
 		}
 	};
 
+	const onPrune = async () => {
+		isPruning = true;
+		try {
+			const res = await api.company.scim.prune(company.id);
+			if (res && res.success) {
+				addToast(`Pruned ${res.data?.pruned ?? 0} removed user(s)`, 'Success');
+			} else {
+				addToast(res?.error ?? 'Failed to prune removed users', 'Error');
+			}
+		} catch (e) {
+			console.error('failed to prune scim users', e);
+			addToast('Failed to prune removed users', 'Error');
+		} finally {
+			isPruning = false;
+		}
+	};
+
 	const copyToClipboard = async (text) => {
 		try {
 			await navigator.clipboard.writeText(text);
@@ -198,7 +216,7 @@
 	$: scimBaseURL =
 		company && scimDomain ? `https://${scimDomain}/api/v1/scim/v2/${company.id}` : '';
 
-	$: isBusy = isSettingUp || isTogglingEnabled || isRotating || isDeleting;
+	$: isBusy = isSettingUp || isTogglingEnabled || isRotating || isDeleting || isPruning;
 </script>
 
 <Modal headerText={`SCIM`} bind:visible>
@@ -331,6 +349,15 @@
 			<div
 				class="border-t border-gray-200 dark:border-gray-700/60 pt-4 flex gap-3 justify-end transition-colors duration-200"
 			>
+				<button
+					type="button"
+					disabled={isBusy}
+					on:click={onPrune}
+					title="Remove deprovisioned (disabled) recipients past the retention window"
+					class="bg-slate-400 dark:bg-gray-700/80 hover:bg-slate-300 dark:hover:bg-gray-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+				>
+					{isPruning ? 'Pruning...' : 'Prune Removed Users'}
+				</button>
 				<button
 					type="button"
 					disabled={isBusy}

@@ -102,6 +102,40 @@ func (c *Option) SetScimDomain(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
+// GetScimRetentionDays returns the SCIM soft-delete retention window in days.
+func (c *Option) GetScimRetentionDays(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	ctx := g.Request.Context()
+	days, err := c.OptionService.GetScimSoftDeleteRetentionDays(ctx, session)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{"days": days})
+}
+
+// SetScimRetentionDays sets the SCIM soft-delete retention window in days.
+func (c *Option) SetScimRetentionDays(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	var req struct {
+		Days int `json:"days"`
+	}
+	if ok := c.handleParseRequest(g, &req); !ok {
+		return
+	}
+	ctx := g.Request.Context()
+	err := c.OptionService.SetScimSoftDeleteRetentionDays(ctx, session, req.Days)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 // GetAutoPrune returns the full auto prune option (global flag + all per-company entries).
 func (c *Option) GetAutoPrune(g *gin.Context) {
 	session, _, ok := c.handleSession(g)

@@ -43,6 +43,12 @@ const (
 	// endpoints are served by the phishing server. Empty disables SCIM serving.
 	OptionKeyScimDomain = "scim_domain"
 
+	// OptionKeyScimSoftDeleteRetentionDays is how many days a SCIM-disabled
+	// (soft-deleted) recipient is kept before being pruned (anonymized + deleted).
+	OptionKeyScimSoftDeleteRetentionDays = "scim_soft_delete_retention_days"
+	// OptionValueScimSoftDeleteRetentionDaysDefault is the default retention window.
+	OptionValueScimSoftDeleteRetentionDaysDefault = 30
+
 	OptionKeyObfuscationTemplate = "obfuscation_template"
 	// OptionValueObfuscationTemplateDefault is the default HTML template for obfuscation
 	// the template receives {{.Script}} variable containing the obfuscated javascript

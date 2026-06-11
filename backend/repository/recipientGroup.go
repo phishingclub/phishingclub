@@ -315,6 +315,14 @@ func (rg *RecipientGroup) countStaticRecipients(
 	var count int64
 	result := rg.DB.
 		Model(&database.RecipientGroupRecipient{}).
+		// active-only count: SCIM-disabled (soft-deleted) members are not counted
+		Joins(fmt.Sprintf(
+			"JOIN %s ON %s.id = %s.recipient_id AND %s.scim_soft_deleted_at IS NULL",
+			database.RECIPIENT_TABLE,
+			database.RECIPIENT_TABLE,
+			database.RECIPIENT_GROUP_RECIPIENT_TABLE,
+			database.RECIPIENT_TABLE,
+		)).
 		Where(
 			fmt.Sprintf(
 				"%s = ?",
@@ -339,6 +347,7 @@ func (rg *RecipientGroup) countDynamicRecipients(
 	}
 	db := rg.DB.Model(&database.Recipient{}).
 		Where(fmt.Sprintf("`%s`.`deleted_at` IS NULL", database.RECIPIENT_TABLE)).
+		Where(fmt.Sprintf("`%s`.`scim_soft_deleted_at` IS NULL", database.RECIPIENT_TABLE)).
 		Where(fmt.Sprintf("`%s`.`%s` = ?", database.RECIPIENT_TABLE, group.FilterField), group.FilterValue)
 	db = whereCompany(db, database.RECIPIENT_TABLE, group.CompanyID)
 	var count int64
@@ -475,6 +484,9 @@ func (rg *RecipientGroup) GetRecipientsByGroupID(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
+	if options.ExcludeSoftDeleted {
+		db = db.Where(fmt.Sprintf("`%s`.`scim_soft_deleted_at` IS NULL", database.RECIPIENT_TABLE))
+	}
 	dbRes := db.
 		Model(&database.Recipient{}).
 		Joins("JOIN recipient_group_recipients ON recipient_group_recipients.recipient_id = recipients.id").
@@ -532,6 +544,9 @@ func (rg *RecipientGroup) getDynamicRecipientsByGroup(
 	db = db.Model(&database.Recipient{}).
 		Where(fmt.Sprintf("`%s`.`deleted_at` IS NULL", database.RECIPIENT_TABLE)).
 		Where(fmt.Sprintf("`%s`.`%s` = ?", database.RECIPIENT_TABLE, group.FilterField), group.FilterValue)
+	if options.ExcludeSoftDeleted {
+		db = db.Where(fmt.Sprintf("`%s`.`scim_soft_deleted_at` IS NULL", database.RECIPIENT_TABLE))
+	}
 	db = whereCompany(db, database.RECIPIENT_TABLE, group.CompanyID)
 
 	var recipients []database.Recipient

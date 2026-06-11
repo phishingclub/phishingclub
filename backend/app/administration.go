@@ -75,6 +75,7 @@ const (
 	ROUTE_V1_COMPANY_ID_EXPORT_SHARED = "/api/v1/company/shared/export"
 	ROUTE_V1_COMPANY_SCIM             = "/api/v1/company/scim/:companyID"
 	ROUTE_V1_COMPANY_SCIM_TOKEN       = "/api/v1/company/scim/:companyID/token"
+	ROUTE_V1_COMPANY_SCIM_PRUNE       = "/api/v1/company/scim/:companyID/prune"
 	// scim v2 provisioning endpoints (public — authenticated via bearer token)
 	ROUTE_SCIM_V2_SERVICE_PROVIDER_CONFIG = "/api/v1/scim/v2/:companyID/ServiceProviderConfig"
 	ROUTE_SCIM_V2_RESOURCE_TYPES          = "/api/v1/scim/v2/:companyID/ResourceTypes"
@@ -86,9 +87,10 @@ const (
 	ROUTE_SCIM_V2_GROUPS                  = "/api/v1/scim/v2/:companyID/Groups"
 	ROUTE_SCIM_V2_GROUP_ID                = "/api/v1/scim/v2/:companyID/Groups/:groupID"
 	// option
-	ROUTE_V1_OPTION             = "/api/v1/option"
-	ROUTE_V1_OPTION_GET         = "/api/v1/option/:key"
-	ROUTE_V1_OPTION_SCIM_DOMAIN = "/api/v1/option/scim-domain"
+	ROUTE_V1_OPTION                = "/api/v1/option"
+	ROUTE_V1_OPTION_GET            = "/api/v1/option/:key"
+	ROUTE_V1_OPTION_SCIM_DOMAIN    = "/api/v1/option/scim-domain"
+	ROUTE_V1_OPTION_SCIM_RETENTION = "/api/v1/option/scim-retention-days"
 	// auto-prune options
 	ROUTE_V1_OPTION_AUTO_PRUNE         = "/api/v1/option/auto-prune"
 	ROUTE_V1_COMPANY_OPTION_AUTO_PRUNE = "/api/v1/company/:id/option/auto-prune"
@@ -357,12 +359,16 @@ func setupRoutes(
 		POST(ROUTE_V1_COMPANY_SCIM, middleware.SessionHandler, controllers.CompanyScimConfig.Upsert).
 		DELETE(ROUTE_V1_COMPANY_SCIM, middleware.SessionHandler, controllers.CompanyScimConfig.Delete).
 		POST(ROUTE_V1_COMPANY_SCIM_TOKEN, middleware.SessionHandler, controllers.CompanyScimConfig.RotateToken).
+		POST(ROUTE_V1_COMPANY_SCIM_PRUNE, middleware.SessionHandler, controllers.CompanyScimConfig.Prune).
 		// options
 		GET(ROUTE_V1_OPTION_GET, middleware.SessionHandler, controllers.Option.Get).
 		POST(ROUTE_V1_OPTION, middleware.SessionHandler, middleware.SessionHandler, controllers.Option.Update).
 		// scim global domain setting
 		GET(ROUTE_V1_OPTION_SCIM_DOMAIN, middleware.SessionHandler, controllers.Option.GetScimDomain).
 		POST(ROUTE_V1_OPTION_SCIM_DOMAIN, middleware.SessionHandler, controllers.Option.SetScimDomain).
+		// scim soft-delete retention window
+		GET(ROUTE_V1_OPTION_SCIM_RETENTION, middleware.SessionHandler, controllers.Option.GetScimRetentionDays).
+		POST(ROUTE_V1_OPTION_SCIM_RETENTION, middleware.SessionHandler, controllers.Option.SetScimRetentionDays).
 		// auto-prune options
 		GET(ROUTE_V1_OPTION_AUTO_PRUNE, middleware.SessionHandler, controllers.Option.GetAutoPrune).
 		POST(ROUTE_V1_OPTION_AUTO_PRUNE, middleware.SessionHandler, controllers.Option.SetAutoPrune).

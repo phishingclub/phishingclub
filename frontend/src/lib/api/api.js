@@ -1280,6 +1280,10 @@ export class API {
 			// delete the scim config for a company
 			delete: async (companyID) => {
 				return await deleteJSON(this.getPath(`/company/scim/${companyID}`));
+			},
+			// prune the company's disabled (soft-deleted) recipients past the retention window
+			prune: async (companyID) => {
+				return await postJSON(this.getPath(`/company/scim/${companyID}/prune`), {});
 			}
 		},
 		/**
@@ -2371,6 +2375,26 @@ export class API {
 		 */
 		setScimDomain: async (domain) => {
 			return await postJSON(this.getPath(`/option/scim-domain`), { domain });
+		},
+
+		/**
+		 * Get the SCIM soft-delete retention window in days.
+		 *
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getScimRetentionDays: async () => {
+			return await getJSON(this.getPath(`/option/scim-retention-days`));
+		},
+
+		/**
+		 * Set the SCIM soft-delete retention window in days. Disabled recipients are
+		 * pruned (anonymized + deleted) after this many days.
+		 *
+		 * @param {number} days
+		 * @returns {Promise<ApiResponse>}
+		 */
+		setScimRetentionDays: async (days) => {
+			return await postJSON(this.getPath(`/option/scim-retention-days`), { days });
 		},
 
 		/**

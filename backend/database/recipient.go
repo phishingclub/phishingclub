@@ -30,6 +30,11 @@ type Recipient struct {
 	Misc         string `gorm:";"`
 	ScimUserName string `gorm:";"`
 
+	// ScimSoftDeletedAt marks a recipient that the IdP has deprovisioned via SCIM
+	// but is kept during the retention grace period before being pruned. Null
+	// means the recipient is active.
+	ScimSoftDeletedAt *time.Time `gorm:"index;"`
+
 	// can belong to
 	CompanyID *uuid.UUID `gorm:"type:uuid;index;"`
 	Company   *Company

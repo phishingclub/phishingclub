@@ -441,6 +441,7 @@ func main() {
 		MicrosoftDeviceCode: services.MicrosoftDeviceCode,
 		OptionService:       services.Option,
 		RecipientService:    services.Recipient,
+		ScimService:         services.Scim,
 		Logger:              logger,
 	}
 

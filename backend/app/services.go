@@ -303,6 +303,7 @@ func NewServices(
 		RecipientRepository:         repositories.Recipient,
 		RecipientGroupRepository:    repositories.RecipientGroup,
 		RecipientService:            recipient,
+		OptionService:               optionService,
 		CampaignRepository:          repositories.Campaign,
 	}
 

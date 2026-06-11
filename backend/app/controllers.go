@@ -203,6 +203,7 @@ func NewControllers(
 	companyScimConfig := &controller.CompanyScimConfig{
 		Common:                   common,
 		CompanyScimConfigService: services.CompanyScimConfig,
+		ScimService:              services.Scim,
 	}
 	scim := &controller.Scim{
 		Common:      common,

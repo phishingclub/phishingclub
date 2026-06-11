@@ -347,7 +347,7 @@ func (c *Campaign) schedule(
 				result, err := c.RecipientGroupRepository.GetRecipientsByGroupID(
 					ctx,
 					groupID,
-					&repository.RecipientOption{},
+					&repository.RecipientOption{ExcludeSoftDeleted: true},
 				)
 				if err != nil {
 					c.Logger.Errorw("failed to get dynamic group recipients", "error", err)
@@ -373,6 +373,16 @@ func (c *Campaign) schedule(
 					return errors.New("recipient group did not load recipients")
 				}
 			}
+
+			// exclude SCIM soft-deleted recipients (pending prune) from targeting
+			activeRecps := make([]*model.Recipient, 0, len(recps))
+			for _, recp := range recps {
+				if recp.ScimSoftDeletedAt != nil {
+					continue
+				}
+				activeRecps = append(activeRecps, recp)
+			}
+			recps = activeRecps
 
 			// collect all and remove duplicates
 			for _, recp := range recps {

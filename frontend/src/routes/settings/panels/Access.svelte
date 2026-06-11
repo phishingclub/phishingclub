@@ -34,6 +34,8 @@
 	// SCIM provisioning: single global domain that serves the SCIM endpoints
 	let scimDomain = '';
 	let scimDomainOptions = [{ value: '', label: '— Disabled —' }];
+	// retention window (days) before a SCIM-disabled recipient is pruned
+	let scimRetentionDays = 30;
 
 	onMount(async () => {
 		try {
@@ -42,10 +44,43 @@
 				ssoSettingsFormValues.redirectURL = `${location.origin}/api/v1/sso/entra-id/auth`;
 			}
 			await refreshScimDomain();
+			await refreshScimRetention();
 		} finally {
 			loaded = true;
 		}
 	});
+
+	async function refreshScimRetention() {
+		try {
+			const res = await api.option.getScimRetentionDays();
+			if (res.success) {
+				scimRetentionDays = res.data.days;
+			}
+		} catch (e) {
+			console.error('failed to load SCIM retention setting', e);
+		}
+	}
+
+	async function setScimRetention() {
+		try {
+			const days = parseInt(scimRetentionDays, 10);
+			if (isNaN(days) || days < 0) {
+				addToast('Retention days must be zero or positive', 'Error');
+				await refreshScimRetention();
+				return;
+			}
+			const res = await api.option.setScimRetentionDays(days);
+			if (res.success) {
+				addToast('SCIM retention updated', 'Success');
+			} else {
+				addToast(res.error || 'Failed to update SCIM retention', 'Error');
+				await refreshScimRetention();
+			}
+		} catch (e) {
+			addToast('Failed to update SCIM retention', 'Error');
+			console.error(e);
+		}
+	}
 
 	async function refreshScimDomain() {
 		try {
@@ -200,6 +235,21 @@
 				options={scimDomainOptions}>SCIM domain</TextFieldSelect
 			>
 		</Form>
+		<p class="mt-4 text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+			When a user is deprovisioned in your identity provider they are marked disabled and excluded
+			from campaigns. They are kept for this many days before being permanently removed (their
+			campaign history is anonymized). Set to 0 to remove on the next prune.
+		</p>
+		<div class="flex items-center gap-2">
+			<input
+				type="number"
+				min="0"
+				bind:value={scimRetentionDays}
+				on:change={setScimRetention}
+				class="w-28 px-3 py-2 text-sm rounded-md bg-gray-50 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700/60 text-gray-700 dark:text-gray-300 focus:outline-none transition-colors duration-200"
+			/>
+			<span class="text-sm text-gray-500 dark:text-gray-400">days retention</span>
+		</div>
 	</SettingsCard>
 </div>
 {/if}

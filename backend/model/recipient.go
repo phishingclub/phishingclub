@@ -27,6 +27,11 @@ type Recipient struct {
 	ScimUserName    nullable.Nullable[vo.OptionalString127] `json:"scimUserName"`
 	CompanyID       nullable.Nullable[uuid.UUID]            `json:"companyID"`
 
+	// ScimSoftDeletedAt is set while a SCIM-deprovisioned recipient waits out the
+	// retention grace period before being pruned; nil means active. It is managed
+	// by dedicated repository methods, not ToDBMap.
+	ScimSoftDeletedAt *time.Time `json:"scimSoftDeletedAt"`
+
 	Company *Company                             `json:"-"`
 	Groups  nullable.Nullable[[]*RecipientGroup] `json:"groups"`
 }

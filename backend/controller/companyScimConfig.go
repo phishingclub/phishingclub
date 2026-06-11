@@ -11,6 +11,30 @@ import (
 type CompanyScimConfig struct {
 	Common
 	CompanyScimConfigService *service.CompanyScimConfig
+	ScimService              *service.Scim
+}
+
+// Prune removes the company's SCIM-disabled recipients whose retention window has elapsed.
+func (c *CompanyScimConfig) Prune(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	companyID, err := uuid.Parse(g.Param("companyID"))
+	if err != nil {
+		c.Logger.Debugw("failed to parse companyID param", "error", err)
+		c.Response.BadRequestMessage(g, errs.MsgFailedToParseUUID)
+		return
+	}
+	pruned, err := c.ScimService.PruneSoftDeletedAuthorized(
+		g.Request.Context(),
+		session,
+		&companyID,
+	)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{"pruned": pruned})
 }
 
 // upsertScimRequest is the request body for the Upsert handler

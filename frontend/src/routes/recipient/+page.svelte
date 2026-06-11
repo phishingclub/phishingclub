@@ -467,6 +467,14 @@
 					{#if recipient.email}
 						{recipient.email}
 					{/if}
+					{#if recipient.scimSoftDeletedAt}
+						<span
+							class="ml-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase align-middle bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+							title="Deprovisioned in the identity provider; excluded from campaigns and pending removal"
+						>
+							Disabled
+						</span>
+					{/if}
 				</TableCellLink>
 				<TableCell>
 					{#if recipient.firstName}
