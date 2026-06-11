@@ -234,22 +234,20 @@
 				onSelect={setScimDomain}
 				options={scimDomainOptions}>SCIM domain</TextFieldSelect
 			>
-		</Form>
-		<p class="mt-4 text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-			When a user is deprovisioned in your identity provider they are marked disabled and excluded
-			from campaigns. They are kept for this many days before being permanently removed (their
-			campaign history is anonymized). Set to 0 to remove on the next prune.
-		</p>
-		<div class="flex items-center gap-2">
-			<input
+			<TextField
+				id="scimRetentionDays"
 				type="number"
 				min="0"
+				width="small"
 				bind:value={scimRetentionDays}
-				on:change={setScimRetention}
-				class="w-28 px-3 py-2 text-sm rounded-md bg-gray-50 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700/60 text-gray-700 dark:text-gray-300 focus:outline-none transition-colors duration-200"
-			/>
-			<span class="text-sm text-gray-500 dark:text-gray-400">days retention</span>
-		</div>
+				onBlur={setScimRetention}
+				toolTipText="Days a disabled recipient is kept before removal. 0 removes on the next prune."
+				>Retention (days)</TextField
+			>
+		</Form>
+		<p class="mt-2 text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+			How long deprovisioned recipients are kept (disabled) before being permanently removed.
+		</p>
 	</SettingsCard>
 </div>
 {/if}
