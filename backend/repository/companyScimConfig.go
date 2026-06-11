@@ -183,30 +183,6 @@ func (r *CompanyScimConfig) UpdateLastSyncAt(
 	return nil
 }
 
-// GetTokenHashByCompanyID fetches only the token hash for the given company,
-// used during bearer-token verification so the hash never leaks into the model layer
-func (r *CompanyScimConfig) GetTokenHashByCompanyID(
-	ctx context.Context,
-	companyID *uuid.UUID,
-) (string, error) {
-	var row database.CompanyScimConfig
-	res := r.DB.
-		Select("token_hash").
-		Where(
-			fmt.Sprintf(
-				"%s = ?",
-				TableColumn(database.COMPANY_SCIM_CONFIG_TABLE, "company_id"),
-			),
-			companyID.String(),
-		).
-		First(&row)
-
-	if res.Error != nil {
-		return "", errs.Wrap(res.Error)
-	}
-	return row.TokenHash, nil
-}
-
 // GetWithTokenHashByCompanyID fetches the full config row and the token hash in a
 // single query, used during bearer-token verification.
 func (r *CompanyScimConfig) GetWithTokenHashByCompanyID(

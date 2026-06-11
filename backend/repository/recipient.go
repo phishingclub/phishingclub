@@ -877,7 +877,9 @@ func (r *Recipient) DeleteByID(
 }
 
 // MarkScimSoftDeleted sets scim_soft_deleted_at, marking a SCIM-deprovisioned
-// recipient as pending prune without deleting it.
+// recipient as pending prune without deleting it. The scim_soft_deleted_at IS NULL
+// guard preserves the original disable time when an IdP re-sends active=false for
+// an already-disabled recipient, so the retention window is not reset each sync.
 func (r *Recipient) MarkScimSoftDeleted(
 	ctx context.Context,
 	id *uuid.UUID,
@@ -885,7 +887,7 @@ func (r *Recipient) MarkScimSoftDeleted(
 ) error {
 	res := r.DB.
 		Model(&database.Recipient{}).
-		Where("id = ?", id).
+		Where("id = ? AND scim_soft_deleted_at IS NULL", id).
 		Updates(map[string]any{
 			"scim_soft_deleted_at": at.UTC(),
 			"updated_at":           time.Now().UTC(),

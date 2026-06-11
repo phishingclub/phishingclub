@@ -64,8 +64,10 @@ func (c *Scim) authenticate(g *gin.Context, companyID *uuid.UUID) (*service.Scim
 
 	config, authed, err := c.ScimService.VerifyAndLoadConfig(g.Request.Context(), companyID, token)
 	if err != nil {
+		// a missing config is reported with the same generic 401 as a bad token so
+		// the response does not reveal whether a company has SCIM configured
 		if isNotFound(err) {
-			scimError(g, http.StatusUnauthorized, "no SCIM configuration found for this company")
+			scimError(g, http.StatusUnauthorized, "invalid bearer token or SCIM provisioning is disabled")
 			return nil, false
 		}
 		c.Logger.Errorw("scim auth: error verifying token", "error", err)

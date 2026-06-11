@@ -1088,11 +1088,11 @@ func (s *Scim) CreateUser(
 }
 
 // deprovisionedUserResponse builds the SCIM body returned after a user has been
-// deprovisioned via active=false. Microsoft Entra sends a soft-delete (PATCH
+// deprovisioned via active=false. Microsoft Entra sends a disable (PATCH
 // active=false) and expects a 200 response with the resource showing
 // active=false. Returning 404 makes Entra log the disable as a failure and retry
-// it every sync cycle, so the recipient is hard-deleted but a success body with
-// active=false is returned.
+// it every sync cycle, so the recipient is marked disabled (soft-deleted) and a
+// success body with active=false is returned.
 func deprovisionedUserResponse(existing *model.Recipient, baseURL string) *ScimUser {
 	u := recipientToScimUser(existing, baseURL)
 	u.Active = false
@@ -1121,7 +1121,7 @@ func (s *Scim) ReplaceUser(
 	if compErr != nil || rCompanyID != *companyID {
 		return nil, errs.Wrap(gorm.ErrRecordNotFound)
 	}
-	// a PUT with active=false is a deprovision request — hard-delete the recipient
+	// a PUT with active=false is a deprovision request — mark the recipient disabled
 	// but return 200 with active=false so the IdP records the disable as a success
 	if !scimUser.Active {
 		if err := s.deprovisionRecipient(ctx, recipientID); err != nil {
@@ -1185,14 +1185,14 @@ func (s *Scim) PatchUser(
 			if err != nil {
 				return nil, err
 			}
-			// active=false triggers a hard-delete; return 200 with active=false so
-			// the IdP records the soft-delete as a success instead of retrying
+			// active=false marks the recipient disabled; return 200 with active=false
+			// so the IdP records the disable as a success instead of retrying
 			if deactivated {
 				s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientID": recipientID.String(), "via": "patch"})
 				return deprovisionedUserResponse(existing, baseURL), nil
 			}
 		case "remove":
-			// remove op on "active" means deactivate — hard-delete the recipient
+			// remove op on "active" means deactivate — mark the recipient disabled
 			if strings.EqualFold(op.Path, "active") {
 				if err := s.deprovisionRecipient(ctx, recipientID); err != nil {
 					return nil, errs.Wrap(err)
@@ -1212,9 +1212,10 @@ func (s *Scim) PatchUser(
 	return &u, nil
 }
 
-// DeprovisionUser hard-deletes a recipient provisioned via SCIM.
-// a subsequent GET returns 404, satisfying the validator expectation that
-// a deleted user is no longer accessible.
+// DeprovisionUser marks a SCIM-provisioned recipient as disabled (soft-deleted)
+// during the retention grace period rather than deleting it outright. The
+// recipient is excluded from sending and targeting but stays retrievable; a
+// subsequent GET returns 200 with active=false until the prune window elapses.
 func (s *Scim) DeprovisionUser(
 	ctx context.Context,
 	companyID *uuid.UUID,
@@ -1274,8 +1275,8 @@ func (s *Scim) UpdateLastSync(ctx context.Context, config *model.CompanyScimConf
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// deprovisionRecipient removes a recipient from all groups and hard-deletes it.
-// shared by DELETE, PUT active=false and PATCH active=false.
+// deprovisionRecipient marks a recipient disabled (soft-deleted) and cancels its
+// pending sends. shared by DELETE, PUT active=false and PATCH active=false.
 func (s *Scim) deprovisionRecipient(ctx context.Context, recipientID *uuid.UUID) error {
 	// mark the recipient as SCIM soft-deleted; the anonymizing delete runs only
 	// after the retention grace period (scheduled job or on-demand prune)
