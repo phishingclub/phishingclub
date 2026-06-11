@@ -255,6 +255,14 @@
 	let lateScheduleEnabled = false;
 	let showAdvancedOptionsStep3 = false;
 	let showAdvancedOptionsStep4 = false;
+	// true when the company context provisions recipients via SCIM
+	let companyHasScim = false;
+	// true while the current late schedule checkbox state came from the SCIM default
+	// (drives the explanatory tooltip)
+	let lateScheduleAutoSelected = false;
+	// tracks the previous "eligible for the SCIM default" state so the default is
+	// applied only on the transition into eligibility (an edge), never continuously
+	let prevLateScheduleEligible = false;
 
 	// reactive: true when at least one selected recipient group is dynamic
 	$: hasDynamicGroup = formValues.recipientGroups.some((label) => {
@@ -286,6 +294,37 @@
 		if (!sendStartAt) return false;
 		return new Date(sendStartAt).getTime() - Date.now() > 24 * 60 * 60 * 1000;
 	};
+
+	// when the company provisions recipients via SCIM, default the scheduling step to
+	// late scheduling so the recipient group is resolved at send time (picking up
+	// people added or moved in the identity provider after creation) instead of being
+	// frozen at creation. Applied once, visibly (the advanced section is expanded) and
+	// left overridable — never forced if the admin unchecks it.
+	$: {
+		const eligible =
+			companyHasScim &&
+			(modalMode === 'create' || modalMode === 'copy') &&
+			scheduleType !== 'self-managed' &&
+			lateScheduleAvailable(formValues.sendStartAt);
+		// apply the default only when eligibility flips from false to true (e.g. a valid
+		// send start is first chosen, or chosen again after dipping under 24h). Because
+		// it fires on the edge and not continuously, a manual uncheck while still
+		// eligible is respected instead of being immediately reasserted.
+		if (eligible && !prevLateScheduleEligible && !lateScheduleEnabled) {
+			showAdvancedOptionsStep3 = true;
+			lateScheduleEnabled = true;
+			lateScheduleAutoSelected = true;
+		}
+		prevLateScheduleEligible = eligible;
+	}
+
+	// tooltip for the late schedule checkbox — explains the SCIM auto-selection while
+	// it is in effect, otherwise the normal availability/behavior hint
+	$: lateScheduleToolTip = !lateScheduleAvailable(formValues.sendStartAt)
+		? 'Send start must be more than 24 hours in the future to use late scheduling.'
+		: lateScheduleAutoSelected && lateScheduleEnabled
+			? 'Auto-selected: this company uses SCIM, so recipients are resolved at send time. Uncheck to use the group as it is now.'
+			: 'When enabled, recipients are resolved and the campaign is scheduled 24 hours before send start, not at creation.';
 
 	// reactive statement to enable security options when deny page is set
 	$: if (formValues.denyPageValue && formValues.denyPageValue.trim() !== '') {
@@ -470,6 +509,20 @@
 		const context = appStateService.getContext();
 		if (context) {
 			contextCompanyID = context.companyID;
+		}
+
+		// detect whether the company context provisions recipients via SCIM so the
+		// scheduling step can default to late scheduling. A missing config (404) just
+		// means SCIM is off; the response handler does not toast on this.
+		if (contextCompanyID) {
+			(async () => {
+				try {
+					const res = await api.company.scim.getByCompanyID(contextCompanyID);
+					companyHasScim = !!(res && res.success && res.data && res.data.enabled);
+				} catch (e) {
+					companyHasScim = false;
+				}
+			})();
 		}
 
 		(async () => {
@@ -1064,6 +1117,8 @@
 		modalError = '';
 		showAdvancedOptionsStep3 = false;
 		showAdvancedOptionsStep4 = false;
+		lateScheduleAutoSelected = false;
+		prevLateScheduleEligible = false;
 	};
 
 	const onChangeScheduleType = () => {
@@ -1076,6 +1131,9 @@
 		formValues.sendEndAt = null;
 		lateScheduleEnabled = false;
 		formValues.scheduleAt = null;
+		// allow the SCIM default to re-apply for the newly chosen schedule type
+		lateScheduleAutoSelected = false;
+		prevLateScheduleEligible = false;
 	};
 
 	const onChangeAllowDenyType = () => {
@@ -1974,11 +2032,14 @@
 									<CheckboxField
 										bind:value={lateScheduleEnabled}
 										disabled={!lateScheduleAvailable(formValues.sendStartAt)}
-										toolTipText={!lateScheduleAvailable(formValues.sendStartAt)
-											? 'Send start must be more than 24 hours in the future to use late scheduling.'
-											: 'When enabled, recipients are resolved and the campaign is scheduled 24 hours before send start, not at creation.'}
-										on:change={() => {
-											if (lateScheduleEnabled && formValues.sendStartAt) {
+										toolTipText={lateScheduleToolTip}
+										on:change={(e) => {
+											// read the new state from the event target — the component binding to
+											// lateScheduleEnabled has not propagated yet when this handler runs
+											const checked = e.target?.checked ?? lateScheduleEnabled;
+											// a manual toggle is an explicit choice; it is no longer SCIM-driven
+											lateScheduleAutoSelected = false;
+											if (checked && formValues.sendStartAt) {
 												formValues.scheduleAt = new Date(
 													new Date(formValues.sendStartAt).getTime() - 24 * 60 * 60 * 1000
 												).toISOString();
