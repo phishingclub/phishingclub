@@ -339,10 +339,10 @@ func (r *CampaignRecipient) GetUnsendRecipientsForSending(
 	}
 	var dbCampaignRecipients []database.CampaignRecipient
 	q := db.
-		// do not deliver to SCIM-disabled (soft-deleted) recipients; their rows are
-		// left unsent (not cancelled) so they resume on revival and are cleaned up
-		// when the recipient is pruned. A subquery is used instead of a join so the
-		// campaign_recipients SELECT is never widened with ambiguous recipient columns.
+		// authoritative guard: never deliver to a SCIM-disabled recipient, even if
+		// their row was not cancelled (e.g. disabled while the campaign was not yet
+		// active). A subquery is used instead of a join so the campaign_recipients
+		// SELECT is never widened with ambiguous recipient columns.
 		Where(fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM %s sd WHERE sd.id = %s.recipient_id AND sd.scim_soft_deleted_at IS NOT NULL)",
 			database.RECIPIENT_TABLE,

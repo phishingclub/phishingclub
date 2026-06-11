@@ -313,6 +313,7 @@ type Scim struct {
 	RecipientService            *Recipient
 	OptionService               *Option
 	CampaignRepository          *repository.Campaign
+	CampaignRecipientRepository *repository.CampaignRecipient
 }
 
 // ServiceProviderConfig returns the static service provider configuration
@@ -1278,7 +1279,13 @@ func (s *Scim) UpdateLastSync(ctx context.Context, config *model.CompanyScimConf
 func (s *Scim) deprovisionRecipient(ctx context.Context, recipientID *uuid.UUID) error {
 	// mark the recipient as SCIM soft-deleted; the anonymizing delete runs only
 	// after the retention grace period (scheduled job or on-demand prune)
-	return s.RecipientRepository.MarkScimSoftDeleted(ctx, recipientID, time.Now())
+	if err := s.RecipientRepository.MarkScimSoftDeleted(ctx, recipientID, time.Now()); err != nil {
+		return err
+	}
+	// cancel pending sends in active campaigns so no email reaches the disabled
+	// recipient; the rows are kept (cancelled, not deleted) so stats and any
+	// already-sent tracking links stay consistent
+	return s.CampaignRecipientRepository.CancelInActiveCampaigns(ctx, recipientID)
 }
 
 // reviveIfSoftDeleted clears the soft-delete mark when the IdP re-activates a

@@ -305,6 +305,7 @@ func NewServices(
 		RecipientService:            recipient,
 		OptionService:               optionService,
 		CampaignRepository:          repositories.Campaign,
+		CampaignRecipientRepository: repositories.CampaignRecipient,
 	}
 
 	reportTemplate := &service.ReportTemplate{

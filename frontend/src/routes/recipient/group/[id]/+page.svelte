@@ -462,8 +462,24 @@
 		isGhost={isTableLoading}
 	>
 		{#each recipients as recipient}
-			<TableRow>
-				<TableCell value={recipient.email} />
+			<TableRow
+				dimmed={!!recipient.scimSoftDeletedAt}
+				title={recipient.scimSoftDeletedAt
+					? 'Disabled: deprovisioned in the identity provider. Excluded from campaigns and email delivery, pending removal.'
+					: ''}
+			>
+				<TableCell>
+					<span class="inline-flex items-center gap-2">
+						<span class="truncate">{recipient.email ?? ''}</span>
+						{#if recipient.scimSoftDeletedAt}
+							<span
+								class="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+							>
+								Disabled
+							</span>
+						{/if}
+					</span>
+				</TableCell>
 				<TableCellLink href="/recipient/{recipient.id}" title={recipient.firstName}>
 					{recipient.firstName}
 				</TableCellLink>
