@@ -1301,17 +1301,11 @@ func (s *Scim) reviveIfSoftDeleted(ctx context.Context, existing *model.Recipien
 	return nil
 }
 
-// PruneSoftDeleted runs the anonymizing delete for SCIM-disabled recipients whose
-// retention window has elapsed. A nil companyID prunes across all companies.
-// No authorization check — callers (the scheduled job and the authorized wrapper)
-// are responsible for that. Returns the number pruned.
-func (s *Scim) PruneSoftDeleted(ctx context.Context, companyID *uuid.UUID) (int, error) {
-	days, err := s.OptionService.GetScimSoftDeleteRetentionDaysInternal(ctx)
-	if err != nil {
-		return 0, errs.Wrap(err)
-	}
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-	recipients, err := s.RecipientRepository.GetScimSoftDeletedBefore(ctx, companyID, cutoff)
+// pruneSoftDeleted runs the anonymizing delete for SCIM-disabled recipients whose
+// scim_soft_deleted_at is before the given cutoff. A nil companyID covers all
+// companies. No authorization check — callers are responsible for that.
+func (s *Scim) pruneSoftDeleted(ctx context.Context, companyID *uuid.UUID, before time.Time) (int, error) {
+	recipients, err := s.RecipientRepository.GetScimSoftDeletedBefore(ctx, companyID, before)
 	if err != nil {
 		return 0, errs.Wrap(err)
 	}
@@ -1330,8 +1324,38 @@ func (s *Scim) PruneSoftDeleted(ctx context.Context, companyID *uuid.UUID) (int,
 	return pruned, nil
 }
 
-// PruneSoftDeletedAuthorized is the admin (session-authenticated) entry point for
-// the on-demand prune of a company's disabled recipients past the threshold.
+// PruneExpiredSoftDeleted prunes disabled recipients across all companies whose
+// retention window has elapsed. Used by the scheduled system task.
+func (s *Scim) PruneExpiredSoftDeleted(ctx context.Context, session *model.Session) (int, error) {
+	ae := NewAuditEvent("Scim.PruneExpiredSoftDeleted", session)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil {
+		s.LogAuthError(err)
+		return 0, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		s.AuditLogNotAuthorized(ae)
+		return 0, errs.ErrAuthorizationFailed
+	}
+	days, err := s.OptionService.GetScimSoftDeleteRetentionDaysInternal(ctx)
+	if err != nil {
+		return 0, errs.Wrap(err)
+	}
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	pruned, err := s.pruneSoftDeleted(ctx, nil, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	if pruned > 0 {
+		ae.Details["pruned"] = pruned
+		s.AuditLogAuthorized(ae)
+	}
+	return pruned, nil
+}
+
+// PruneSoftDeletedAuthorized is the admin (session-authenticated) on-demand prune
+// for a company. Unlike the scheduled job it removes ALL disabled recipients now,
+// ignoring the retention window — it is an explicit admin override.
 func (s *Scim) PruneSoftDeletedAuthorized(
 	ctx context.Context,
 	session *model.Session,
@@ -1350,7 +1374,7 @@ func (s *Scim) PruneSoftDeletedAuthorized(
 		s.AuditLogNotAuthorized(ae)
 		return 0, errs.ErrAuthorizationFailed
 	}
-	pruned, err := s.PruneSoftDeleted(ctx, companyID)
+	pruned, err := s.pruneSoftDeleted(ctx, companyID, time.Now())
 	if err != nil {
 		return 0, err
 	}

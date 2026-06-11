@@ -28,6 +28,7 @@
 	// confirmation dialogs
 	let isRotateAlertVisible = false;
 	let isDeleteAlertVisible = false;
+	let isPruneAlertVisible = false;
 
 	// reactive: reload when modal opens
 	$: {
@@ -49,6 +50,7 @@
 		showTokenReveal = false;
 		isRotateAlertVisible = false;
 		isDeleteAlertVisible = false;
+		isPruneAlertVisible = false;
 	};
 
 	const loadAll = async () => {
@@ -173,18 +175,21 @@
 		}
 	};
 
-	const onPrune = async () => {
+	const onConfirmPrune = async () => {
 		isPruning = true;
 		try {
 			const res = await api.company.scim.prune(company.id);
 			if (res && res.success) {
-				addToast(`Pruned ${res.data?.pruned ?? 0} removed user(s)`, 'Success');
-			} else {
-				addToast(res?.error ?? 'Failed to prune removed users', 'Error');
+				const n = res.data?.pruned ?? 0;
+				addToast(`Removed ${n} disabled ${n === 1 ? 'recipient' : 'recipients'}`, 'Success');
+				return { success: true };
 			}
+			addToast(res?.error ?? 'Failed to prune disabled recipients', 'Error');
+			return { success: false };
 		} catch (e) {
 			console.error('failed to prune scim users', e);
-			addToast('Failed to prune removed users', 'Error');
+			addToast('Failed to prune disabled recipients', 'Error');
+			return { success: false };
 		} finally {
 			isPruning = false;
 		}
@@ -352,8 +357,8 @@
 				<button
 					type="button"
 					disabled={isBusy}
-					on:click={onPrune}
-					title="Remove deprovisioned (disabled) recipients past the retention window"
+					on:click={() => (isPruneAlertVisible = true)}
+					title="Permanently remove this company's disabled recipients now"
 					class="bg-slate-400 dark:bg-gray-700/80 hover:bg-slate-300 dark:hover:bg-gray-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 				>
 					{isPruning ? 'Pruning...' : 'Prune Removed Users'}
@@ -392,6 +397,18 @@
 	<p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
 		the existing token will be immediately invalidated. your identity provider must be updated with
 		the new token before provisioning can resume.
+	</p>
+</Alert>
+
+<!-- prune disabled recipients confirmation -->
+<Alert headline="Remove disabled recipients" bind:visible={isPruneAlertVisible} onConfirm={onConfirmPrune}>
+	<p>
+		Permanently remove all <strong>disabled</strong> recipients for
+		<strong>{company?.name}</strong> now?
+	</p>
+	<p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+		this removes them immediately, before their retention window ends. their identity is deleted and
+		cannot be recovered; historical campaign results are kept in anonymized form.
 	</p>
 </Alert>
 

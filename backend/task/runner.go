@@ -197,7 +197,7 @@ func (d *Runner) ProcessSystemTasks(
 		return d.PruneOrphanedRecipients(ctx, session)
 	})
 	d.runTask("system - prune scim disabled recipients", func() error {
-		_, err := d.ScimService.PruneSoftDeletedAuthorized(ctx, session, nil)
+		_, err := d.ScimService.PruneExpiredSoftDeleted(ctx, session)
 		return err
 	})
 	d.runTask("system - late schedule campaigns", func() error {
