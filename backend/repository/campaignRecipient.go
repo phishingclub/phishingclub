@@ -339,6 +339,15 @@ func (r *CampaignRecipient) GetUnsendRecipientsForSending(
 	}
 	var dbCampaignRecipients []database.CampaignRecipient
 	q := db.
+		// authoritative guard: never deliver to a SCIM-disabled recipient, even if
+		// their row was not cancelled (e.g. disabled while the campaign was not yet
+		// active). A subquery is used instead of a join so the campaign_recipients
+		// SELECT is never widened with ambiguous recipient columns.
+		Where(fmt.Sprintf(
+			"NOT EXISTS (SELECT 1 FROM %s sd WHERE sd.id = %s.recipient_id AND sd.scim_soft_deleted_at IS NOT NULL)",
+			database.RECIPIENT_TABLE,
+			database.CAMPAIGN_RECIPIENT_TABLE_NAME,
+		)).
 		Where(
 			fmt.Sprintf(
 				"%s IS NULL"+
@@ -486,6 +495,35 @@ func (r *CampaignRecipient) CancelInActiveCampaigns(
 		Model(&database.CampaignRecipient{}).
 		Where("campaign_id IN (?)", subSelect).
 		Where("recipient_id = ?", recipientID).
+		Updates(row)
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// CancelUnsentInOpenCampaigns cancels a recipient's not-yet-sent rows in any
+// campaign that is not closed, regardless of whether it has started. Used when a
+// recipient is deleted/anonymized so no uncancelled pending row is left behind in
+// a future-scheduled campaign. Already-sent rows are left untouched as history.
+func (r *CampaignRecipient) CancelUnsentInOpenCampaigns(
+	ctx context.Context,
+	recipientID *uuid.UUID,
+) error {
+	row := map[string]any{
+		"cancelled_at": utils.NowRFC3339UTC(),
+	}
+	AddUpdatedAt(row)
+	openCampaigns := r.DB.Table(database.CAMPAIGN_TABLE).
+		Select("id").
+		Where(fmt.Sprintf("%s IS NULL", TableColumn(database.CAMPAIGN_TABLE, "closed_at")))
+
+	res := r.DB.
+		Model(&database.CampaignRecipient{}).
+		Where("campaign_id IN (?)", openCampaigns).
+		Where("recipient_id = ?", recipientID).
+		Where(fmt.Sprintf("%s IS NULL", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "sent_at"))).
+		Where(fmt.Sprintf("%s IS NULL", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "cancelled_at"))).
 		Updates(row)
 	if res.Error != nil {
 		return res.Error

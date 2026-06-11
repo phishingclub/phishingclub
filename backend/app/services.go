@@ -43,6 +43,8 @@ type Services struct {
 	ProxySessionManager *service.ProxySessionManager
 	OAuthProvider       *service.OAuthProvider
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
+	CompanyScimConfig   *service.CompanyScimConfig
+	Scim                *service.Scim
 	RemoteBrowser       *service.RemoteBrowser
 	ReportTemplate      *service.ReportTemplate
 }
@@ -110,6 +112,7 @@ func NewServices(
 	optionService := &service.Option{
 		Common:           common,
 		OptionRepository: repositories.Option,
+		DomainRepository: repositories.Domain,
 	}
 	userService := &service.User{
 		Common:            common,
@@ -174,6 +177,7 @@ func NewServices(
 		CertMagicCache:            certMagicCache,
 		DomainRepository:          repositories.Domain,
 		CompanyRepository:         repositories.Company,
+		OptionRepository:          repositories.Option,
 		CampaignTemplateService:   campaignTemplate,
 		AssetService:              asset,
 		FileService:               file,
@@ -288,6 +292,21 @@ func NewServices(
 
 	// inject oauth provider service into api sender
 	apiSender.OAuthProviderService = oauthProvider
+	companyScimConfig := &service.CompanyScimConfig{
+		Common:                      common,
+		CompanyScimConfigRepository: repositories.CompanyScimConfig,
+	}
+	scim := &service.Scim{
+		Common:                      common,
+		CompanyScimConfigRepository: repositories.CompanyScimConfig,
+		CompanyScimConfigService:    companyScimConfig,
+		RecipientRepository:         repositories.Recipient,
+		RecipientGroupRepository:    repositories.RecipientGroup,
+		RecipientService:            recipient,
+		OptionService:               optionService,
+		CampaignRepository:          repositories.Campaign,
+		CampaignRecipientRepository: repositories.CampaignRecipient,
+	}
 
 	reportTemplate := &service.ReportTemplate{
 		Common:                   common,
@@ -295,6 +314,8 @@ func NewServices(
 	}
 
 	return &Services{
+		CompanyScimConfig:   companyScimConfig,
+		Scim:                scim,
 		Asset:               asset,
 		Attachment:          attachment,
 		Company:             companyService,

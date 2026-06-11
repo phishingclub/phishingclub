@@ -2073,7 +2073,12 @@
 				isGhost={isRecipientTableLoading}
 			>
 				{#each campaignRecipients as recp (recp.id)}
-					<TableRow>
+					<TableRow
+						dimmed={!!recp.recipient?.scimSoftDeletedAt}
+						title={recp.recipient?.scimSoftDeletedAt
+							? 'Disabled: deprovisioned in the identity provider. Pending sends were cancelled; the row is kept for history until the recipient is pruned.'
+							: ''}
+					>
 						{#if liveSessions.size > 0}
 							<TableCell>
 								{#if liveSessions.has(recp.id)}
@@ -2124,7 +2129,16 @@
 										on:click={() => openEventsModal(recp.recipientID)}
 										class="block w-full py-1 text-left"
 									>
-										{recp.recipient.email}
+										<span class="inline-flex items-center gap-2">
+											<span class="truncate">{recp.recipient.email}</span>
+											{#if recp.recipient.scimSoftDeletedAt}
+												<span
+													class="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+												>
+													Disabled
+												</span>
+											{/if}
+										</span>
 									</button>
 								{/if}
 							</TableCell>
@@ -2151,15 +2165,20 @@
 											? campaign.companyID
 												? 'Switch to company view to perform this action'
 												: 'Switch to global view to perform this action'
-											: recp.closedAt
-												? 'Campaign is closed'
-												: recp.cancelledAt
-													? 'Recipient cancelled'
-													: recp.sentAt
-														? `Send message again (last sent: ${new Date(recp.sentAt).toLocaleDateString()})`
-														: `Send message to recipient`}
+											: recp.recipient?.scimSoftDeletedAt
+												? 'Recipient is disabled in the identity provider and cannot be sent to'
+												: recp.closedAt
+													? 'Campaign is closed'
+													: recp.cancelledAt
+														? 'Recipient cancelled'
+														: recp.sentAt
+															? `Send message again (last sent: ${new Date(recp.sentAt).toLocaleDateString()})`
+															: `Send message to recipient`}
 										on:click={() => showSendMessageModal(recp.id, recp.recipient)}
-										disabled={!!campaign.closedAt || recp.cancelledAt || isContextMismatch()}
+										disabled={!!campaign.closedAt ||
+											recp.cancelledAt ||
+											!!recp.recipient?.scimSoftDeletedAt ||
+											isContextMismatch()}
 									/>
 									<TableUpdateButton
 										name="Copy lure URL"

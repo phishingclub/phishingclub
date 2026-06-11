@@ -94,6 +94,40 @@ func (e ValidationError) Error() string {
 	return e.Err.Error()
 }
 
+// SyntaxError is returned when a request is structurally invalid (scim invalidSyntax)
+type SyntaxError struct {
+	Err error
+}
+
+// NewSyntaxError creates a new syntax error
+func NewSyntaxError(err error) error {
+	return SyntaxError{
+		Err: err,
+	}
+}
+
+// Error returns the syntax error
+func (e SyntaxError) Error() string {
+	return e.Err.Error()
+}
+
+// ConflictError is returned when a resource already exists (scim uniqueness conflict)
+type ConflictError struct {
+	Err error
+}
+
+// NewConflictError creates a new conflict error
+func NewConflictError(err error) error {
+	return ConflictError{
+		Err: err,
+	}
+}
+
+// Error returns the conflict error
+func (e ConflictError) Error() string {
+	return e.Err.Error()
+}
+
 // CustomError is a custom error
 type CustomError struct {
 	Err error

@@ -2784,12 +2784,24 @@
 									<div class="space-y-1">
 										{#each recipients as recipient}
 											<div
-												class="flex items-center justify-between py-2 px-3 rounded hover:bg-white dark:hover:bg-gray-700/50 transition-colors"
+												class="flex items-center justify-between py-2 px-3 rounded hover:bg-white dark:hover:bg-gray-700/50 transition-colors {recipient.scimSoftDeletedAt
+													? 'opacity-50'
+													: ''}"
+												title={recipient.scimSoftDeletedAt
+													? 'Disabled in the identity provider; excluded from this campaign'
+													: ''}
 											>
 												<span
 													class="text-sm text-gray-900 dark:text-gray-100 font-medium truncate flex-1"
 												>
 													{recipient.email}
+													{#if recipient.scimSoftDeletedAt}
+														<span
+															class="ml-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+														>
+															Disabled
+														</span>
+													{/if}
 												</span>
 												{#if recipient.firstName || recipient.lastName}
 													<span

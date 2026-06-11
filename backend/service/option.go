@@ -20,6 +20,7 @@ import (
 type Option struct {
 	Common
 	OptionRepository *repository.Option
+	DomainRepository *repository.Domain
 }
 
 // GetOption gets an option
@@ -397,4 +398,204 @@ func (o *Option) GetObfuscationTemplate(ctx context.Context) (string, error) {
 		return data.OptionValueObfuscationTemplateDefault, nil
 	}
 	return template, nil
+}
+
+// GetScimDomainInternal returns the configured global SCIM domain without any
+// authorization check. intended for the phishing-server host gate. returns an
+// empty string when SCIM serving is not configured.
+func (o *Option) GetScimDomainInternal(ctx context.Context) (string, error) {
+	opt, err := o.OptionRepository.GetByKey(ctx, data.OptionKeyScimDomain)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+		o.Logger.Errorw("failed to get scim domain option", "error", err)
+		return "", errs.Wrap(err)
+	}
+	return opt.Value.String(), nil
+}
+
+// GetScimDomain returns the configured global SCIM domain (requires global auth).
+func (o *Option) GetScimDomain(
+	ctx context.Context,
+	session *model.Session,
+) (string, error) {
+	ae := NewAuditEvent("Option.GetScimDomain", session)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return "", errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return "", errs.ErrAuthorizationFailed
+	}
+	return o.GetScimDomainInternal(ctx)
+}
+
+// SetScimDomain persists the global SCIM domain (requires global auth). An empty
+// string disables SCIM serving. A non-empty value must be an existing global
+// domain (one not tied to a company).
+func (o *Option) SetScimDomain(
+	ctx context.Context,
+	session *model.Session,
+	domain string,
+) error {
+	ae := NewAuditEvent("Option.SetScimDomain", session)
+	ae.Details["domain"] = domain
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// a non-empty value must resolve to an existing global domain
+	if domain != "" {
+		nameVO, err := vo.NewString255(domain)
+		if err != nil {
+			return errs.NewValidationError(err)
+		}
+		d, err := o.DomainRepository.GetByName(ctx, nameVO, &repository.DomainOption{})
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errs.NewValidationError(errors.Errorf("domain %q does not exist", domain))
+			}
+			o.Logger.Errorw("failed to look up scim domain", "error", err)
+			return errs.Wrap(err)
+		}
+		// only global domains (not tied to a company) may be used for SCIM
+		if d.CompanyID.IsSpecified() && !d.CompanyID.IsNull() {
+			return errs.NewValidationError(errors.Errorf("domain %q is not a global domain", domain))
+		}
+		// AiTM proxy domains route traffic to a target site and must never serve
+		// the SCIM provisioning API
+		if d.ProxyID.IsSpecified() && !d.ProxyID.IsNull() {
+			return errs.NewValidationError(errors.Errorf("domain %q is a proxy domain and cannot be used for SCIM", domain))
+		}
+	}
+	if err := o.setScimDomainValue(ctx, domain); err != nil {
+		return err
+	}
+	o.AuditLogAuthorized(ae)
+	return nil
+}
+
+// setScimDomainValue inserts or updates the single SCIM domain option row.
+func (o *Option) setScimDomainValue(ctx context.Context, domain string) error {
+	valueVO, err := vo.NewOptionalString1MB(domain)
+	if err != nil {
+		return errs.NewValidationError(err)
+	}
+	opt := &model.Option{
+		Key:   *vo.NewString127Must(data.OptionKeyScimDomain),
+		Value: *valueVO,
+	}
+	_, getErr := o.OptionRepository.GetByKey(ctx, data.OptionKeyScimDomain)
+	if getErr != nil {
+		if !errors.Is(getErr, gorm.ErrRecordNotFound) {
+			o.Logger.Errorw("failed to check scim domain option existence", "error", getErr)
+			return errs.Wrap(getErr)
+		}
+		if _, insertErr := o.OptionRepository.Insert(ctx, opt); insertErr != nil {
+			o.Logger.Errorw("failed to insert scim domain option", "error", insertErr)
+			return errs.Wrap(insertErr)
+		}
+		return nil
+	}
+	if updateErr := o.OptionRepository.UpdateByKey(ctx, opt); updateErr != nil {
+		o.Logger.Errorw("failed to update scim domain option", "error", updateErr)
+		return errs.Wrap(updateErr)
+	}
+	return nil
+}
+
+// upsertOptionValue inserts or updates a single option row by key.
+func (o *Option) upsertOptionValue(ctx context.Context, key string, value string) error {
+	valueVO, err := vo.NewOptionalString1MB(value)
+	if err != nil {
+		return errs.NewValidationError(err)
+	}
+	opt := &model.Option{
+		Key:   *vo.NewString127Must(key),
+		Value: *valueVO,
+	}
+	_, getErr := o.OptionRepository.GetByKey(ctx, key)
+	if getErr != nil {
+		if !errors.Is(getErr, gorm.ErrRecordNotFound) {
+			return errs.Wrap(getErr)
+		}
+		if _, insertErr := o.OptionRepository.Insert(ctx, opt); insertErr != nil {
+			return errs.Wrap(insertErr)
+		}
+		return nil
+	}
+	if updateErr := o.OptionRepository.UpdateByKey(ctx, opt); updateErr != nil {
+		return errs.Wrap(updateErr)
+	}
+	return nil
+}
+
+// GetScimSoftDeleteRetentionDaysInternal returns the retention window in days,
+// defaulting when unset or invalid. No authorization check.
+func (o *Option) GetScimSoftDeleteRetentionDaysInternal(ctx context.Context) (int, error) {
+	opt, err := o.OptionRepository.GetByKey(ctx, data.OptionKeyScimSoftDeleteRetentionDays)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return data.OptionValueScimSoftDeleteRetentionDaysDefault, nil
+		}
+		return 0, errs.Wrap(err)
+	}
+	days, convErr := strconv.Atoi(opt.Value.String())
+	if convErr != nil || days < 0 {
+		return data.OptionValueScimSoftDeleteRetentionDaysDefault, nil
+	}
+	return days, nil
+}
+
+// GetScimSoftDeleteRetentionDays returns the retention window (requires global auth).
+func (o *Option) GetScimSoftDeleteRetentionDays(
+	ctx context.Context,
+	session *model.Session,
+) (int, error) {
+	ae := NewAuditEvent("Option.GetScimSoftDeleteRetentionDays", session)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return 0, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return 0, errs.ErrAuthorizationFailed
+	}
+	return o.GetScimSoftDeleteRetentionDaysInternal(ctx)
+}
+
+// SetScimSoftDeleteRetentionDays persists the retention window (requires global auth).
+func (o *Option) SetScimSoftDeleteRetentionDays(
+	ctx context.Context,
+	session *model.Session,
+	days int,
+) error {
+	ae := NewAuditEvent("Option.SetScimSoftDeleteRetentionDays", session)
+	ae.Details["days"] = days
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	if days < 0 {
+		return errs.NewValidationError(errors.Errorf("retention days must be zero or positive"))
+	}
+	if err := o.upsertOptionValue(ctx, data.OptionKeyScimSoftDeleteRetentionDays, strconv.Itoa(days)); err != nil {
+		return err
+	}
+	o.AuditLogAuthorized(ae)
+	return nil
 }

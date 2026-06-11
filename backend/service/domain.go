@@ -37,6 +37,7 @@ type Domain struct {
 	CertMagicCache            *certmagic.Cache
 	DomainRepository          *repository.Domain
 	CompanyRepository         *repository.Company
+	OptionRepository          *repository.Option
 	CampaignTemplateService   *CampaignTemplate
 	AssetService              *Asset
 	FileService               *File
@@ -737,6 +738,23 @@ func (d *Domain) deleteDomain(
 	if !allowProxyDeletion {
 		if domainType, err := current.Type.Get(); err == nil && domainType.String() == "proxy" {
 			return validate.WrapErrorWithField(errors.New("proxy domains can only be deleted by deleting the associated proxy configuration"), "domain")
+		}
+	}
+
+	// prevent deletion of the domain currently serving SCIM provisioning.
+	// a missing option means SCIM is not configured; any other read error fails
+	// closed so a transient fault cannot let the SCIM domain be deleted.
+	scimOpt, scimErr := d.OptionRepository.GetByKey(ctx, data.OptionKeyScimDomain)
+	if scimErr != nil && !errors.Is(scimErr, gorm.ErrRecordNotFound) {
+		d.Logger.Errorw("failed to check scim domain before deletion", "error", scimErr)
+		return scimErr
+	}
+	if scimErr == nil {
+		configuredScimDomain := scimOpt.Value.String()
+		if configuredScimDomain != "" {
+			if name, nameErr := current.Name.Get(); nameErr == nil && strings.EqualFold(name.String(), configuredScimDomain) {
+				return validate.WrapErrorWithField(errors.New("this domain is set as the SCIM provisioning domain; change the SCIM domain in settings before deleting it"), "domain")
+			}
 		}
 	}
 	// get the domain

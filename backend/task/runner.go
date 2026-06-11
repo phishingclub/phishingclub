@@ -28,6 +28,7 @@ type Runner struct {
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
 	OptionService       *service.Option
 	RecipientService    *service.Recipient
+	ScimService         *service.Scim
 	Logger              *zap.SugaredLogger
 }
 
@@ -194,6 +195,10 @@ func (d *Runner) ProcessSystemTasks(
 	})
 	d.runTask("system - prune orphaned recipients", func() error {
 		return d.PruneOrphanedRecipients(ctx, session)
+	})
+	d.runTask("system - prune scim disabled recipients", func() error {
+		_, err := d.ScimService.PruneExpiredSoftDeleted(ctx, session)
+		return err
 	})
 	d.runTask("system - late schedule campaigns", func() error {
 		return d.CampaignService.SchedulePendingCampaigns(ctx, session)

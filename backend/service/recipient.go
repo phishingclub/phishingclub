@@ -714,10 +714,12 @@ func (r *Recipient) deleteRecipientByID(
 		)
 		return err
 	}
-	// if the recipient is in any active campaign, cancel the recipient sending
-	err = r.CampaignRecipientRepository.CancelInActiveCampaigns(ctx, id)
+	// cancel the recipient's not-yet-sent rows in any open (non-closed) campaign,
+	// including future-scheduled ones, so anonymization never leaves an uncancelled
+	// pending row behind
+	err = r.CampaignRecipientRepository.CancelUnsentInOpenCampaigns(ctx, id)
 	if err != nil {
-		r.Logger.Errorw("failed to cancel campaign recipient in active campaigns", "error", err)
+		r.Logger.Errorw("failed to cancel campaign recipient sends before deletion", "error", err)
 		return err
 	}
 	// anonymize all recipient data

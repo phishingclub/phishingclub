@@ -73,9 +73,24 @@ const (
 	ROUTE_V1_COMPANY_ID               = "/api/v1/company/:id"
 	ROUTE_V1_COMPANY_ID_EXPORT        = "/api/v1/company/:id/export"
 	ROUTE_V1_COMPANY_ID_EXPORT_SHARED = "/api/v1/company/shared/export"
+	ROUTE_V1_COMPANY_SCIM             = "/api/v1/company/scim/:companyID"
+	ROUTE_V1_COMPANY_SCIM_TOKEN       = "/api/v1/company/scim/:companyID/token"
+	ROUTE_V1_COMPANY_SCIM_PRUNE       = "/api/v1/company/scim/:companyID/prune"
+	// scim v2 provisioning endpoints (public — authenticated via bearer token)
+	ROUTE_SCIM_V2_SERVICE_PROVIDER_CONFIG = "/api/v1/scim/v2/:companyID/ServiceProviderConfig"
+	ROUTE_SCIM_V2_RESOURCE_TYPES          = "/api/v1/scim/v2/:companyID/ResourceTypes"
+	ROUTE_SCIM_V2_SCHEMAS                 = "/api/v1/scim/v2/:companyID/Schemas"
+	ROUTE_SCIM_V2_SCHEMA_ID               = "/api/v1/scim/v2/:companyID/Schemas/:schemaID"
+	ROUTE_SCIM_V2_RESOURCE_TYPE_ID        = "/api/v1/scim/v2/:companyID/ResourceTypes/:resourceTypeID"
+	ROUTE_SCIM_V2_USERS                   = "/api/v1/scim/v2/:companyID/Users"
+	ROUTE_SCIM_V2_USER_ID                 = "/api/v1/scim/v2/:companyID/Users/:userID"
+	ROUTE_SCIM_V2_GROUPS                  = "/api/v1/scim/v2/:companyID/Groups"
+	ROUTE_SCIM_V2_GROUP_ID                = "/api/v1/scim/v2/:companyID/Groups/:groupID"
 	// option
-	ROUTE_V1_OPTION     = "/api/v1/option"
-	ROUTE_V1_OPTION_GET = "/api/v1/option/:key"
+	ROUTE_V1_OPTION                = "/api/v1/option"
+	ROUTE_V1_OPTION_GET            = "/api/v1/option/:key"
+	ROUTE_V1_OPTION_SCIM_DOMAIN    = "/api/v1/option/scim-domain"
+	ROUTE_V1_OPTION_SCIM_RETENTION = "/api/v1/option/scim-retention-days"
 	// auto-prune options
 	ROUTE_V1_OPTION_AUTO_PRUNE         = "/api/v1/option/auto-prune"
 	ROUTE_V1_COMPANY_OPTION_AUTO_PRUNE = "/api/v1/company/:id/option/auto-prune"
@@ -158,11 +173,11 @@ const (
 	ROUTE_V1_CAMPAIGN_STATS_DELETE       = "/api/v1/campaign/stats/:id"
 	ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED    = "/api/v1/campaign/:id/upload/reported"
 	ROUTE_V1_CAMPAIGN_DEVICE_CODES       = "/api/v1/campaign/:id/device-codes"
-	ROUTE_V1_CAMPAIGN_REPORT = "/api/v1/campaign/:id/report"
+	ROUTE_V1_CAMPAIGN_REPORT             = "/api/v1/campaign/:id/report"
 	// report templates
-	ROUTE_V1_REPORT_TEMPLATE              = "/api/v1/report-template"
-	ROUTE_V1_REPORT_TEMPLATE_ID           = "/api/v1/report-template/:id"
-	ROUTE_V1_REPORT_PDF_BROWSER_CACHE     = "/api/v1/report-pdf/browser-cache"
+	ROUTE_V1_REPORT_TEMPLATE          = "/api/v1/report-template"
+	ROUTE_V1_REPORT_TEMPLATE_ID       = "/api/v1/report-template/:id"
+	ROUTE_V1_REPORT_PDF_BROWSER_CACHE = "/api/v1/report-pdf/browser-cache"
 	// campaign-recipient
 	ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL      = "/api/v1/campaign/recipient/:id/email"
 	ROUTE_V1_CAMPAIGN_RECIPIENT_URL        = "/api/v1/campaign/recipient/:id/url"
@@ -214,13 +229,13 @@ const (
 	// import
 	ROUTE_V1_IMPORT = "/api/v1/import"
 	// remote browser
-	ROUTE_V1_REMOTE_BROWSER              = "/api/v1/remote-browser"
-	ROUTE_V1_REMOTE_BROWSER_OVERVIEW     = "/api/v1/remote-browser/overview"
-	ROUTE_V1_REMOTE_BROWSER_ID           = "/api/v1/remote-browser/:id"
-	ROUTE_V1_REMOTE_BROWSER_ID_RUN       = "/api/v1/remote-browser/:id/run"
-	ROUTE_V1_REMOTE_BROWSER_LIVE         = "/api/v1/remote-browser/live"
-	ROUTE_V1_REMOTE_BROWSER_LIVE_CRID    = "/api/v1/remote-browser/live/:crID"
-	ROUTE_V1_REMOTE_BROWSER_LIVE_STREAM  = "/api/v1/remote-browser/live/:crID/stream"
+	ROUTE_V1_REMOTE_BROWSER             = "/api/v1/remote-browser"
+	ROUTE_V1_REMOTE_BROWSER_OVERVIEW    = "/api/v1/remote-browser/overview"
+	ROUTE_V1_REMOTE_BROWSER_ID          = "/api/v1/remote-browser/:id"
+	ROUTE_V1_REMOTE_BROWSER_ID_RUN      = "/api/v1/remote-browser/:id/run"
+	ROUTE_V1_REMOTE_BROWSER_LIVE        = "/api/v1/remote-browser/live"
+	ROUTE_V1_REMOTE_BROWSER_LIVE_CRID   = "/api/v1/remote-browser/live/:crID"
+	ROUTE_V1_REMOTE_BROWSER_LIVE_STREAM = "/api/v1/remote-browser/live/:crID/stream"
 )
 
 // administrationServer is the administrationServer app
@@ -258,20 +273,31 @@ func (a *administrationServer) Router() *gin.Engine {
 	return a.router
 }
 
-// setupRoutes sets up the routes for the administration app
+// setupRoutes sets up the routes for the administration app.
+// ip-protected admin routes are registered under a group that applies the
+// IPLimiter middleware. scim v2 provisioning routes are registered directly on
+// the engine so that external identity providers are never blocked by the
+// admin ip allowlist.
 func setupRoutes(
 	r *gin.Engine,
 	controllers *Controllers,
 	middleware *Middlewares,
 ) *gin.Engine {
+	// SCIM v2 provisioning endpoints are NOT served here — they live on the
+	// phishing server (app/server.go AssignRoutes), gated to a single global
+	// domain, so the admin port does not need public exposure for SCIM.
+
+	// all other admin routes are protected by the ip allowlist middleware
+	admin := r.Group("/", middleware.IPLimiter)
+	_ = admin
 
 	if !build.Flags.Production {
-		r.
+		admin.
 			GET("/api/v1/_debug/panic", middleware.SessionHandler, controllers.Log.Panic).
 			GET("/api/v1/_debug/slow", middleware.SessionHandler, controllers.Log.Slow)
 	}
 
-	r.
+	admin.
 		// log
 		GET(ROUTE_V1_LOG, middleware.SessionHandler, controllers.Log.GetLevel).
 		POST(ROUTE_V1_LOG, middleware.SessionHandler, controllers.Log.SetLevel).
@@ -328,9 +354,21 @@ func setupRoutes(
 		GET(ROUTE_V1_COMPANY_ID_EXPORT_SHARED, middleware.SessionHandler, controllers.Company.ExportShared).
 		GET(ROUTE_V1_COMPANY_ID, middleware.SessionHandler, controllers.Company.GetByID).
 		DELETE(ROUTE_V1_COMPANY_ID, middleware.SessionHandler, controllers.Company.DeleteByID).
+		// company scim
+		GET(ROUTE_V1_COMPANY_SCIM, middleware.SessionHandler, controllers.CompanyScimConfig.GetByCompanyID).
+		POST(ROUTE_V1_COMPANY_SCIM, middleware.SessionHandler, controllers.CompanyScimConfig.Upsert).
+		DELETE(ROUTE_V1_COMPANY_SCIM, middleware.SessionHandler, controllers.CompanyScimConfig.Delete).
+		POST(ROUTE_V1_COMPANY_SCIM_TOKEN, middleware.SessionHandler, controllers.CompanyScimConfig.RotateToken).
+		POST(ROUTE_V1_COMPANY_SCIM_PRUNE, middleware.SessionHandler, controllers.CompanyScimConfig.Prune).
 		// options
 		GET(ROUTE_V1_OPTION_GET, middleware.SessionHandler, controllers.Option.Get).
 		POST(ROUTE_V1_OPTION, middleware.SessionHandler, middleware.SessionHandler, controllers.Option.Update).
+		// scim global domain setting
+		GET(ROUTE_V1_OPTION_SCIM_DOMAIN, middleware.SessionHandler, controllers.Option.GetScimDomain).
+		POST(ROUTE_V1_OPTION_SCIM_DOMAIN, middleware.SessionHandler, controllers.Option.SetScimDomain).
+		// scim soft-delete retention window
+		GET(ROUTE_V1_OPTION_SCIM_RETENTION, middleware.SessionHandler, controllers.Option.GetScimRetentionDays).
+		POST(ROUTE_V1_OPTION_SCIM_RETENTION, middleware.SessionHandler, controllers.Option.SetScimRetentionDays).
 		// auto-prune options
 		GET(ROUTE_V1_OPTION_AUTO_PRUNE, middleware.SessionHandler, controllers.Option.GetAutoPrune).
 		POST(ROUTE_V1_OPTION_AUTO_PRUNE, middleware.SessionHandler, controllers.Option.SetAutoPrune).

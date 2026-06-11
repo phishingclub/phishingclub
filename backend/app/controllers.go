@@ -40,6 +40,8 @@ type Controllers struct {
 	Backup            *controller.Backup
 	IPAllowList       *controller.IPAllowList
 	OAuthProvider     *controller.OAuthProvider
+	CompanyScimConfig *controller.CompanyScimConfig
+	Scim              *controller.Scim
 	RemoteBrowser     *controller.RemoteBrowserController
 	ReportTemplate    *controller.ReportTemplate
 }
@@ -198,6 +200,15 @@ func NewControllers(
 		OAuthProviderService: services.OAuthProvider,
 		Config:               conf,
 	}
+	companyScimConfig := &controller.CompanyScimConfig{
+		Common:                   common,
+		CompanyScimConfigService: services.CompanyScimConfig,
+		ScimService:              services.Scim,
+	}
+	scim := &controller.Scim{
+		Common:      common,
+		ScimService: services.Scim,
+	}
 	remoteBrowser := &controller.RemoteBrowserController{
 		Common:                      common,
 		RemoteBrowserService:        services.RemoteBrowser,
@@ -249,6 +260,8 @@ func NewControllers(
 		Backup:            backup,
 		IPAllowList:       ipAllowList,
 		OAuthProvider:     oauthProvider,
+		CompanyScimConfig: companyScimConfig,
+		Scim:              scim,
 		RemoteBrowser:     remoteBrowser,
 		ReportTemplate:    reportTemplate,
 	}

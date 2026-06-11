@@ -462,10 +462,22 @@
 		pagination={tableURLParams}
 	>
 		{#each recipients as recipient}
-			<TableRow>
+			<TableRow
+				dimmed={!!recipient.scimSoftDeletedAt}
+				title={recipient.scimSoftDeletedAt
+					? 'Disabled: deprovisioned in the identity provider. Excluded from campaigns and email delivery, pending removal.'
+					: ''}
+			>
 				<TableCellLink href={`/recipient/${recipient.id}`} title={recipient.email}>
 					{#if recipient.email}
 						{recipient.email}
+					{/if}
+					{#if recipient.scimSoftDeletedAt}
+						<span
+							class="ml-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase align-middle bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+						>
+							Disabled
+						</span>
 					{/if}
 				</TableCellLink>
 				<TableCell>

@@ -1261,6 +1261,31 @@ export class API {
 			return await deleteJSON(this.getPath(`/company/${id}`));
 		},
 
+		scim: {
+			// get the scim config for a company
+			getByCompanyID: async (companyID) => {
+				return await getJSON(this.getPath(`/company/scim/${companyID}`));
+			},
+			// upsert the scim config for a company
+			upsert: async (companyID, { linkedGroupID, enabled }) => {
+				return await postJSON(this.getPath(`/company/scim/${companyID}`), {
+					linkedGroupID: linkedGroupID ?? null,
+					enabled: enabled
+				});
+			},
+			// rotate the scim bearer token for a company
+			rotateToken: async (companyID) => {
+				return await postJSON(this.getPath(`/company/scim/${companyID}/token`), {});
+			},
+			// delete the scim config for a company
+			delete: async (companyID) => {
+				return await deleteJSON(this.getPath(`/company/scim/${companyID}`));
+			},
+			// prune the company's disabled (soft-deleted) recipients past the retention window
+			prune: async (companyID) => {
+				return await postJSON(this.getPath(`/company/scim/${companyID}/prune`), {});
+			}
+		},
 		/**
 		 * Get the auto-prune orphaned recipients setting for a company.
 		 * Returns only the per-company enabled flag.
@@ -2330,6 +2355,46 @@ export class API {
 		 */
 		setAutoPrune: async (option) => {
 			return await postJSON(this.getPath(`/option/auto-prune`), option);
+		},
+
+		/**
+		 * Get the global SCIM domain. Empty string means SCIM serving is disabled.
+		 *
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getScimDomain: async () => {
+			return await getJSON(this.getPath(`/option/scim-domain`));
+		},
+
+		/**
+		 * Set the global SCIM domain. Pass an empty string to disable SCIM serving.
+		 * The value must be an existing global domain.
+		 *
+		 * @param {string} domain
+		 * @returns {Promise<ApiResponse>}
+		 */
+		setScimDomain: async (domain) => {
+			return await postJSON(this.getPath(`/option/scim-domain`), { domain });
+		},
+
+		/**
+		 * Get the SCIM soft-delete retention window in days.
+		 *
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getScimRetentionDays: async () => {
+			return await getJSON(this.getPath(`/option/scim-retention-days`));
+		},
+
+		/**
+		 * Set the SCIM soft-delete retention window in days. Disabled recipients are
+		 * pruned (anonymized + deleted) after this many days.
+		 *
+		 * @param {number} days
+		 * @returns {Promise<ApiResponse>}
+		 */
+		setScimRetentionDays: async (days) => {
+			return await postJSON(this.getPath(`/option/scim-retention-days`), { days });
 		},
 
 		/**

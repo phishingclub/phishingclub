@@ -362,6 +362,13 @@
 						<DynamicLabel />
 					{/if}
 					{group.name}
+					{#if group.scimEnabled}
+						<span
+							class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+						>
+							SCIM
+						</span>
+					{/if}
 				</TableCellLink>
 
 				<TableCellLink href={`/recipient/group/${group.id}`} title={group.recipientCount}>

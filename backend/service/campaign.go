@@ -347,7 +347,7 @@ func (c *Campaign) schedule(
 				result, err := c.RecipientGroupRepository.GetRecipientsByGroupID(
 					ctx,
 					groupID,
-					&repository.RecipientOption{},
+					&repository.RecipientOption{ExcludeSoftDeleted: true},
 				)
 				if err != nil {
 					c.Logger.Errorw("failed to get dynamic group recipients", "error", err)
@@ -373,6 +373,16 @@ func (c *Campaign) schedule(
 					return errors.New("recipient group did not load recipients")
 				}
 			}
+
+			// exclude SCIM soft-deleted recipients (pending prune) from targeting
+			activeRecps := make([]*model.Recipient, 0, len(recps))
+			for _, recp := range recps {
+				if recp.ScimSoftDeletedAt != nil {
+					continue
+				}
+				activeRecps = append(activeRecps, recp)
+			}
+			recps = activeRecps
 
 			// collect all and remove duplicates
 			for _, recp := range recps {
@@ -1298,6 +1308,12 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 	}
 	recipientID := campaignRecipient.RecipientID.MustGet()
 	campaignID := campaignRecipient.CampaignID.MustGet()
+
+	// do not record events for SCIM-disabled (deprovisioned) recipients
+	if recipient, rErr := c.RecipientRepository.GetByID(ctx.Request.Context(), &recipientID, &repository.RecipientOption{}); rErr == nil && recipient.ScimSoftDeletedAt != nil {
+		c.Logger.Debugw("skipping tracking pixel event: recipient is scim-disabled", "campaignRecipientID", campaignRecipientID.String())
+		return nil
+	}
 
 	campaign, err := c.CampaignRepository.GetByID(
 		ctx,
@@ -3998,6 +4014,11 @@ func (c *Campaign) SendEmailByCampaignRecipientID(
 	// check if recipient exists (not anonymized)
 	if campaignRecipient.Recipient == nil {
 		return errors.New("recipient is anonymized or deleted")
+	}
+
+	// do not send to a SCIM-disabled (deprovisioned) recipient, even manually
+	if campaignRecipient.Recipient.ScimSoftDeletedAt != nil {
+		return errors.New("recipient is disabled in the identity provider and cannot be sent to")
 	}
 
 	// check if cancelled
