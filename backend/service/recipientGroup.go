@@ -518,35 +518,12 @@ func (r *RecipientGroup) RemoveRecipients(
 	if existingGroup.IsDynamic.IsSpecified() && !existingGroup.IsDynamic.IsNull() && existingGroup.IsDynamic.MustGet() {
 		return validate.WrapErrorWithField(errors.New("cannot remove recipients from a dynamic group"), "group")
 	}
-	// anonymize recipients in any recipient-campaign data
+	// cancel any pending sends for these recipients in active campaigns; the
+	// recipients are kept and their campaign history is left intact
 	for _, recpID := range recipientIDs {
-		// if the recipient is in any active campaign, cancel the recipient sending
 		err = r.CampaignRecipientRepository.CancelInActiveCampaigns(ctx, recpID)
 		if err != nil {
 			r.Logger.Errorw("failed to cancel campaign recipient", "error", err)
-			return err
-		}
-		anonymizedID := uuid.New()
-		err = r.RecipientService.CampaignRecipientRepository.Anonymize(
-			ctx,
-			nil, // nil campaignID means anonymize across all campaigns
-			recpID,
-			&anonymizedID,
-		)
-		if err != nil {
-			r.Logger.Errorw(
-				"failed to remove recipient - failed to anonymized recipiet campaign data",
-				"error", err,
-			)
-			return err
-		}
-		err = r.CampaignRepository.AnonymizeCampaignEventsByRecipientID(
-			ctx,
-			recpID,
-			&anonymizedID,
-		)
-		if err != nil {
-			r.Logger.Errorw("failed to anonymize campaign event", "error", err)
 			return err
 		}
 	}
@@ -616,37 +593,13 @@ func (r *RecipientGroup) DeleteByID(
 	}
 
 	if len(recipients) > 0 {
-		// anonymize recipients in any recipient-campaign data
+		// cancel any pending sends for these recipients in active campaigns; the
+		// recipients are kept and their campaign history is left intact
 		for _, recipient := range recipients {
-			anonymizedID := uuid.New()
 			recpID := recipient.ID.MustGet()
-
-			// if the recipient is in any active campaign, cancel the recipient sending
 			err = r.CampaignRecipientRepository.CancelInActiveCampaigns(ctx, &recpID)
 			if err != nil {
 				r.Logger.Errorw("failed to cancel campaign recipient", "error", err)
-				return err
-			}
-			err = r.RecipientService.CampaignRecipientRepository.Anonymize(
-				ctx,
-				nil, // nil campaignID means anonymize across all campaigns
-				&recpID,
-				&anonymizedID,
-			)
-			if err != nil {
-				r.Logger.Errorw(
-					"failed to remove recipient - failed to anonymized recipiet campaign data",
-					"error", err,
-				)
-				return err
-			}
-			err = r.CampaignRepository.AnonymizeCampaignEventsByRecipientID(
-				ctx,
-				&recpID,
-				&anonymizedID,
-			)
-			if err != nil {
-				r.Logger.Errorw("failed to anonymize campaign event", "error", err)
 				return err
 			}
 		}

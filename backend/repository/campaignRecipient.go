@@ -273,8 +273,11 @@ func (r *CampaignRecipient) GetByCampaignRecipientID(
 	return ToCampaignRecipient(&dbCampaignRecipient)
 }
 
-// GetUnsendRecipients gets all campaign recipients that are not sent
-// and have been attempted or been cancelled
+// GetUnsendRecipients gets campaign recipients that were never attempted and are
+// not already cancelled (cancelled_at IS NULL AND last_attempt_at IS NULL). Used
+// at campaign close to cancel only sends that never started; recipients that were
+// attempted (sent, failed, or still in flight) are left untouched so their
+// existing state is not overwritten.
 // if limit is larger than 0 it will limit the number of results
 // if campaignID is not nil, it will filter by that campaign
 func (r *CampaignRecipient) GetUnsendRecipients(

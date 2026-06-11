@@ -506,10 +506,10 @@
 
 	<DeleteAlert
 		list={[
-			'All recipients in this group will become orphaned',
-			'Campaign data for recipients in this group will be anonymized',
+			'Recipients not in any other group will become orphaned',
 			'Active campaign sends for recipients in this group will be cancelled',
-			'This group will be removed from any campaigns it is assigned to'
+			'This group will be removed from any campaigns it is assigned to',
+			'Recipients are kept and their campaign history is left intact'
 		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
