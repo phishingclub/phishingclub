@@ -1658,14 +1658,11 @@ func (s *Scim) applyPatchOperation(
 ) (bool, error) {
 	path := strings.ToLower(op.Path)
 
-	// handle active flag — false means hard-delete the recipient
+	// handle active flag — false means deprovision the recipient
 	if path == "active" {
 		active := boolFromPatchValue(op.Value)
 		if !active {
-			if err := s.RecipientGroupRepository.RemoveRecipientByIDFromAllGroups(ctx, recipientID); err != nil {
-				s.Logger.Warnw("scim patch active=false: failed to remove from groups", "error", err)
-			}
-			return true, s.RecipientRepository.DeleteByID(ctx, recipientID)
+			return true, s.deprovisionRecipient(ctx, recipientID)
 		}
 		// active=true is a no-op; group assignment is managed via /Groups
 		return false, nil
@@ -1676,10 +1673,7 @@ func (s *Scim) applyPatchOperation(
 		if m, ok := op.Value.(map[string]any); ok {
 			// check for active=false inside the map before applying other fields
 			if rawActive, ok := m["active"]; ok && !boolFromPatchValue(rawActive) {
-				if err := s.RecipientGroupRepository.RemoveRecipientByIDFromAllGroups(ctx, recipientID); err != nil {
-					s.Logger.Warnw("scim patch active=false (map): failed to remove from groups", "error", err)
-				}
-				return true, s.RecipientRepository.DeleteByID(ctx, recipientID)
+				return true, s.deprovisionRecipient(ctx, recipientID)
 			}
 			if err := s.applyAttributeMap(ctx, existing, config, recipientID, m); err != nil {
 				return false, err
