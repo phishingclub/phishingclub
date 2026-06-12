@@ -7,7 +7,10 @@
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
 	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import Alert from '$lib/components/Alert.svelte';
 	import Form from '$lib/components/Form.svelte';
+	import FormButton from '$lib/components/FormButton.svelte';
+	import FormError from '$lib/components/FormError.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 
 	const logLevels = ['debug', 'info', 'warn', 'error'];
@@ -16,12 +19,15 @@
 	let loaded = false;
 	let logLevel = '';
 	let dbLogLevel = '';
+	let logError = '';
+	let isSavingLog = false;
 
 	let version = '';
 	let updateAvailable = false;
 	let isCheckingUpdate = false;
 
 	let isWipingBrowserCache = false;
+	let isWipeAlertVisible = false;
 
 	onMount(async () => {
 		try {
@@ -47,14 +53,22 @@
 		}
 	}
 
-	async function setLogLevel() {
+	// save both log levels together, only applied when the user clicks Save
+	async function saveLogLevel() {
+		logError = '';
+		isSavingLog = true;
 		try {
 			const res = await api.log.setLevel(logLevel, dbLogLevel);
 			if (!res.success) {
-				console.error(res);
+				logError = res.error || 'Failed to update logging';
+				return;
 			}
+			addToast('Logging updated', 'Success');
 		} catch (err) {
+			logError = 'Failed to update logging';
 			console.error(err);
+		} finally {
+			isSavingLog = false;
 		}
 	}
 
@@ -109,11 +123,13 @@
 			const response = await api.reportTemplate.wipeBrowserCache();
 			if (response.success) {
 				addToast('Browser cache wiped', 'Success');
-			} else {
-				addToast(response.error || 'Failed to wipe browser cache', 'Error');
+				return { success: true };
 			}
+			addToast(response.error || 'Failed to wipe browser cache', 'Error');
+			return { success: false };
 		} catch (e) {
 			addToast('Failed to wipe browser cache', 'Error');
+			return { success: false };
 		} finally {
 			isWipingBrowserCache = false;
 		}
@@ -125,12 +141,11 @@
 {:else}
 <div class="flex flex-wrap gap-6">
 	<SettingsCard title="Logging">
-		<Form>
+		<Form on:submit={saveLogLevel} fullWidth>
 			<TextFieldSelect
 				id="appLogLevel"
 				required
 				bind:value={logLevel}
-				onSelect={setLogLevel}
 				options={logLevels}>Application log level</TextFieldSelect
 			>
 
@@ -138,9 +153,12 @@
 				id="dbLogLevel"
 				required
 				bind:value={dbLogLevel}
-				onSelect={setLogLevel}
 				options={dbLogLevels}>Database log level</TextFieldSelect
 			>
+			<FormError message={logError} />
+			<div class="mt-6 flex justify-end">
+				<FormButton size={'medium'} isSubmitting={isSavingLog}>Save Changes</FormButton>
+			</div>
 		</Form>
 	</SettingsCard>
 
@@ -154,7 +172,7 @@
 				size={'large'}
 				backgroundColor="bg-red-600"
 				disabled={isWipingBrowserCache}
-				on:click={onWipeBrowserCache}
+				on:click={() => (isWipeAlertVisible = true)}
 			>
 				{isWipingBrowserCache ? 'Wiping...' : 'Wipe Browser Cache'}
 			</Button>
@@ -203,3 +221,15 @@
 	</SettingsCard>
 </div>
 {/if}
+
+<Alert
+	headline="Wipe browser cache"
+	bind:visible={isWipeAlertVisible}
+	onConfirm={onWipeBrowserCache}
+	ok="Wipe cache"
+>
+	<p>
+		Chromium will be deleted and downloaded again on the next PDF report or remote browser session,
+		which can take a few minutes.
+	</p>
+</Alert>

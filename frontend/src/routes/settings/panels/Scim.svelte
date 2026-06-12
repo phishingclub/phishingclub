@@ -5,14 +5,18 @@
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
 	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
 	import Form from '$lib/components/Form.svelte';
+	import FormButton from '$lib/components/FormButton.svelte';
+	import FormError from '$lib/components/FormError.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 
 	let loaded = false;
+	let scimError = '';
+	let isSaving = false;
 
 	// SCIM provisioning: single global domain that serves the SCIM endpoints
 	let scimDomain = '';
-	let scimDomainOptions = [{ value: '', label: '— Disabled —' }];
+	let scimDomainOptions = [{ value: '', label: '- Disabled -' }];
 	// retention window (days) before a SCIM-disabled recipient is pruned
 	let scimRetentionDays = 30;
 
@@ -36,24 +40,35 @@
 		}
 	}
 
-	async function setScimRetention() {
+	// save both SCIM settings together, like the other settings panels, so a
+	// change is only applied when the user explicitly clicks Save
+	async function saveScim() {
+		scimError = '';
+		const days = parseInt(scimRetentionDays, 10);
+		if (isNaN(days) || days < 0) {
+			scimError = 'Retention days must be zero or positive';
+			return;
+		}
+		isSaving = true;
 		try {
-			const days = parseInt(scimRetentionDays, 10);
-			if (isNaN(days) || days < 0) {
-				addToast('Retention days must be zero or positive', 'Error');
+			const domainRes = await api.option.setScimDomain(scimDomain);
+			if (!domainRes.success) {
+				scimError = domainRes.error || 'Failed to update SCIM domain';
+				await refreshScimDomain();
+				return;
+			}
+			const retentionRes = await api.option.setScimRetentionDays(days);
+			if (!retentionRes.success) {
+				scimError = retentionRes.error || 'Failed to update SCIM retention';
 				await refreshScimRetention();
 				return;
 			}
-			const res = await api.option.setScimRetentionDays(days);
-			if (res.success) {
-				addToast('SCIM retention updated', 'Success');
-			} else {
-				addToast(res.error || 'Failed to update SCIM retention', 'Error');
-				await refreshScimRetention();
-			}
+			addToast('SCIM settings updated', 'Success');
 		} catch (e) {
-			addToast('Failed to update SCIM retention', 'Error');
-			console.error(e);
+			scimError = 'Failed to update SCIM settings';
+			console.error('failed to update SCIM settings', e);
+		} finally {
+			isSaving = false;
 		}
 	}
 
@@ -70,7 +85,7 @@
 			if (domains.success) {
 				const names = (domains.data.rows || []).map((d) => d.name);
 				scimDomainOptions = [
-					{ value: '', label: '— Disabled —' },
+					{ value: '', label: '- Disabled -' },
 					...names.map((n) => ({ value: n, label: n }))
 				];
 			}
@@ -79,20 +94,6 @@
 		}
 	}
 
-	async function setScimDomain() {
-		try {
-			const res = await api.option.setScimDomain(scimDomain);
-			if (res.success) {
-				addToast(scimDomain ? 'SCIM domain updated' : 'SCIM serving disabled', 'Success');
-			} else {
-				addToast(res.error || 'Failed to update SCIM domain', 'Error');
-				await refreshScimDomain();
-			}
-		} catch (e) {
-			addToast('Failed to update SCIM domain', 'Error');
-			console.error(e);
-		}
-	}
 </script>
 
 {#if !loaded}
@@ -104,11 +105,10 @@
 				Global domain that serves SCIM provisioning. Must be publicly reachable on 443 with a valid
 				certificate; prefer a dedicated domain not used for campaigns.
 			</p>
-			<Form>
+			<Form on:submit={saveScim} fullWidth>
 				<TextFieldSelect
 					id="scimDomain"
 					bind:value={scimDomain}
-					onSelect={setScimDomain}
 					options={scimDomainOptions}>SCIM domain</TextFieldSelect
 				>
 				<TextField
@@ -117,14 +117,17 @@
 					min="0"
 					width="small"
 					bind:value={scimRetentionDays}
-					onBlur={setScimRetention}
 					toolTipText="Days a disabled recipient is kept before removal. 0 removes on the next prune."
 					>Retention (days)</TextField
 				>
+				<p class="mt-2 text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+					How long deprovisioned recipients are kept (disabled) before being permanently removed.
+				</p>
+				<FormError message={scimError} />
+				<div class="mt-6 flex justify-end">
+					<FormButton size={'medium'} isSubmitting={isSaving}>Save Changes</FormButton>
+				</div>
 			</Form>
-			<p class="mt-2 text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-				How long deprovisioned recipients are kept (disabled) before being permanently removed.
-			</p>
 		</SettingsCard>
 	</div>
 {/if}

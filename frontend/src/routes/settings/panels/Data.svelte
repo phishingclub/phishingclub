@@ -22,6 +22,7 @@
 	let autoPruneOption = { enabled: false, companies: [] };
 	let autoPruneEnabled = false;
 	let autoPruneError = '';
+	let isSavingAutoPrune = false;
 
 	// backup
 	let isBackupModalVisible = false;
@@ -74,10 +75,12 @@
 		}
 	}
 
-	async function setAutoPruneValue(enabled) {
+	// save the auto-prune setting, only applied when the user clicks Save
+	async function saveAutoPrune() {
 		autoPruneError = '';
+		isSavingAutoPrune = true;
 		// read-modify-write: preserve per-company entries
-		const updated = { ...autoPruneOption, enabled };
+		const updated = { ...autoPruneOption, enabled: autoPruneEnabled };
 		try {
 			const res = await api.option.setAutoPrune(updated);
 			if (!res.success) {
@@ -85,11 +88,12 @@
 				return;
 			}
 			autoPruneOption = updated;
-			autoPruneEnabled = enabled;
 			addToast('Auto-prune setting saved', 'Success');
 		} catch (e) {
 			autoPruneError = 'Failed to save auto-prune setting';
 			console.error('failed to set auto-prune setting', e);
+		} finally {
+			isSavingAutoPrune = false;
 		}
 	}
 
@@ -319,16 +323,21 @@
 					checked={autoPruneEnabled}
 					label="Enabled"
 					description="Orphaned recipients are deleted automatically each hour"
-					on:change={() => setAutoPruneValue(true)}
+					on:change={() => (autoPruneEnabled = true)}
 				/>
 				<RadioOption
 					checked={!autoPruneEnabled}
 					label="Disabled"
 					description="Orphaned recipients are kept until manually deleted"
-					on:change={() => setAutoPruneValue(false)}
+					on:change={() => (autoPruneEnabled = false)}
 				/>
 			</div>
 			<FormError message={autoPruneError} />
+			<div class="mt-2 flex justify-end">
+				<FormButton size={'medium'} isSubmitting={isSavingAutoPrune} on:click={saveAutoPrune}
+					>Save Changes</FormButton
+				>
+			</div>
 		</div>
 	</SettingsCard>
 </div>
