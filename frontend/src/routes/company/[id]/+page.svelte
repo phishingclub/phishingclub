@@ -66,7 +66,10 @@
 
 	const selectTab = (id) => {
 		active = id;
-		window.location.hash = id;
+		// replace the current history entry instead of pushing a new one, so
+		// switching tabs does not stack up history and the back button leaves
+		// the page rather than walking back through each visited tab
+		history.replaceState(history.state, '', `#${id}`);
 	};
 
 	const load = async () => {
