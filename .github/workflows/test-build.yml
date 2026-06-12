@@ -56,22 +56,26 @@ jobs:
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/go-build-cache
-          key: go-build-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}
-          restore-keys: go-build-${{ runner.os }}-
+          key: go-build-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            go-build-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}-
+            go-build-${{ runner.os }}-
 
       - name: Build binaries for multiple architectures
         run: |
-          mkdir -p build/amd64 build/arm64 /tmp/go-build-cache
+          mkdir -p build/arm64 /tmp/go-build-cache
 
-          # build amd64 binary — static musl so no glibc floor on target systems
-          sudo docker run --rm \
-          -v "$(pwd)":/app \
-          -v /tmp/go-build-cache:/root/.cache/go-build \
-          -w /app/backend \
-          golang@sha256:c4ea15b4a7912716eb362a022e2b12317762eca387423760bc59c0f9ae69423c `# golang:1.25.10-alpine linux/amd64` \
-          sh -c "apk add --no-cache gcc musl-dev && go build -trimpath \
-          -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }} -linkmode=external -extldflags=-static' \
-          -tags production -o ../build/amd64/phishingclub main.go"
+          # amd64 build disabled for test builds — rarely used, arm64 only below
+          # mkdir -p build/amd64
+          # # build amd64 binary — static musl so no glibc floor on target systems
+          # sudo docker run --rm \
+          # -v "$(pwd)":/app \
+          # -v /tmp/go-build-cache:/root/.cache/go-build \
+          # -w /app/backend \
+          # golang@sha256:c4ea15b4a7912716eb362a022e2b12317762eca387423760bc59c0f9ae69423c `# golang:1.25.10-alpine linux/amd64` \
+          # sh -c "apk add --no-cache gcc musl-dev && go build -trimpath \
+          # -ldflags='-X github.com/phishingclub/phishingclub/version.hash=ph${{ steps.get_version.outputs.HASH }} -X github.com/phishingclub/phishingclub/version.version=${{ steps.get_version.outputs.VERSION }} -linkmode=external -extldflags=-static' \
+          # -tags production -o ../build/amd64/phishingclub main.go"
 
           # build arm64 binary — run natively under QEMU (already set up above)
           sudo docker run --rm \
@@ -103,11 +107,7 @@ jobs:
             echo "${{ secrets.SIGNKEY_1 }}" > /tmp/keys/private1.pem
             chmod 600 /tmp/keys/private1.pem
 
-            # sign amd64 binary with primary key
-            openssl pkeyutl -sign -inkey /tmp/keys/private1.pem \
-                -rawin -in build/amd64/phishingclub \
-                -out build/amd64/phishingclub.sig
-
+            # amd64 signing disabled for test builds (amd64 build is off)
             # sign arm64 binary with primary key
             openssl pkeyutl -sign -inkey /tmp/keys/private1.pem \
                 -rawin -in build/arm64/phishingclub \
@@ -125,19 +125,7 @@ jobs:
         run: |
           mkdir -p packages
 
-          # test packaging for amd64
-          if [ -f build/amd64/phishingclub.sig ]; then
-            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz \
-                -C build/amd64 \
-                phishingclub \
-                phishingclub.sig
-            echo "✅ AMD64 package created with signature"
-          else
-            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz \
-                -C build/amd64 \
-                phishingclub
-            echo "✅ AMD64 package created without signature"
-          fi
+          # amd64 packaging disabled for test builds (amd64 build is off)
 
           # test packaging for arm64
           if [ -f build/arm64/phishingclub.sig ]; then
@@ -153,19 +141,7 @@ jobs:
             echo "✅ ARM64 package created without signature"
           fi
 
-          # create legacy-named package (amd64) for backward compatibility with pre-arm versions
-          if [ -f build/amd64/phishingclub.sig ]; then
-            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
-                -C build/amd64 \
-                phishingclub \
-                phishingclub.sig
-            echo "✅ Legacy package created with signature"
-          else
-            tar -czf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz \
-                -C build/amd64 \
-                phishingclub
-            echo "✅ Legacy package created without signature"
-          fi
+          # legacy amd64 package disabled for test builds (amd64 build is off)
 
       #      - name: Build and push test multi-arch Docker image
       #        uses: docker/build-push-action@v5
@@ -189,15 +165,7 @@ jobs:
         run: |
           echo "=== Build Summary ==="
           echo ""
-          echo "AMD64 Binary size: $(du -h build/amd64/phishingclub | cut -f1)"
-          echo "AMD64 Binary info:"
-          file build/amd64/phishingclub
-
-          if [ -f build/amd64/phishingclub.sig ]; then
-            echo "AMD64 Signature size: $(du -h build/amd64/phishingclub.sig | cut -f1)"
-          fi
-
-          echo ""
+          # amd64 verification disabled for test builds (amd64 build is off)
           echo "ARM64 Binary size: $(du -h build/arm64/phishingclub | cut -f1)"
           echo "ARM64 Binary info:"
           file build/arm64/phishingclub
@@ -205,11 +173,6 @@ jobs:
           if [ -f build/arm64/phishingclub.sig ]; then
             echo "ARM64 Signature size: $(du -h build/arm64/phishingclub.sig | cut -f1)"
           fi
-
-          echo ""
-          echo "AMD64 Package size: $(du -h packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz | cut -f1)"
-          echo "AMD64 Package contents:"
-          tar -tzf packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz
 
           echo ""
           echo "ARM64 Package size: $(du -h packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz | cut -f1)"
@@ -221,11 +184,7 @@ jobs:
         with:
           name: phishingclub-test-build-${{ steps.get_version.outputs.HASH }}
           path: |
-            build/amd64/phishingclub
-            build/amd64/phishingclub.sig
             build/arm64/phishingclub
             build/arm64/phishingclub.sig
-            packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_amd64.tar.gz
             packages/phishingclub_${{ steps.get_version.outputs.VERSION }}_linux_arm64.tar.gz
-            packages/phishingclub_${{ steps.get_version.outputs.VERSION }}.tar.gz
           retention-days: 2

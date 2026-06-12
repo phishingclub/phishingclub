@@ -54,12 +54,9 @@ jobs:
           mkdir -p backend/frontend/build
           cp -r frontend/build/* backend/frontend/build/
 
-      - name: Cache Go build cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: /tmp/go-build-cache
-          key: go-build-${{ runner.os }}-${{ hashFiles('backend/go.sum') }}
-          restore-keys: go-build-${{ runner.os }}-
+      # no Go build cache here on purpose: release builds are infrequent and
+      # produce signed, published binaries. a clean from-scratch compile keeps
+      # attacker-influenceable cached objects out of the signing path.
 
       - name: Build binaries for multiple architectures
         run: |
