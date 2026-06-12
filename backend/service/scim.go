@@ -1384,6 +1384,58 @@ func (s *Scim) PruneSoftDeletedAuthorized(
 	return pruned, nil
 }
 
+// RestoreSoftDeletedAuthorized is the admin (session-authenticated) on-demand
+// restore for a company. It clears the SCIM-disabled mark from all currently
+// disabled recipients, returning them to active without re-provisioning.
+func (s *Scim) RestoreSoftDeletedAuthorized(
+	ctx context.Context,
+	session *model.Session,
+	companyID *uuid.UUID,
+) (int, error) {
+	ae := NewAuditEvent("Scim.RestoreSoftDeletedAuthorized", session)
+	if companyID != nil {
+		ae.Details["companyID"] = companyID.String()
+	}
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil {
+		s.LogAuthError(err)
+		return 0, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		s.AuditLogNotAuthorized(ae)
+		return 0, errs.ErrAuthorizationFailed
+	}
+	restored, err := s.restoreSoftDeleted(ctx, companyID, time.Now())
+	if err != nil {
+		return 0, err
+	}
+	ae.Details["restored"] = restored
+	s.AuditLogAuthorized(ae)
+	return restored, nil
+}
+
+// restoreSoftDeleted clears the disabled mark for every recipient of the company
+// whose scim_soft_deleted_at is set before the given time.
+func (s *Scim) restoreSoftDeleted(ctx context.Context, companyID *uuid.UUID, before time.Time) (int, error) {
+	recipients, err := s.RecipientRepository.GetScimSoftDeletedBefore(ctx, companyID, before)
+	if err != nil {
+		return 0, errs.Wrap(err)
+	}
+	restored := 0
+	for _, r := range recipients {
+		id, idErr := r.ID.Get()
+		if idErr != nil {
+			continue
+		}
+		if clearErr := s.RecipientRepository.ClearScimSoftDeleted(ctx, &id); clearErr != nil {
+			s.Logger.Errorw("scim restore: failed to clear soft-deleted recipient", "error", clearErr, "recipientID", id.String())
+			continue
+		}
+		restored++
+	}
+	return restored, nil
+}
+
 // auditScim emits an audit event for an externally driven SCIM mutation.
 // SCIM has no admin session, so the actor is identified by the company and the
 // token prefix instead of a user id.

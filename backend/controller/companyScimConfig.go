@@ -37,6 +37,29 @@ func (c *CompanyScimConfig) Prune(g *gin.Context) {
 	c.Response.OK(g, gin.H{"pruned": pruned})
 }
 
+// Restore clears the SCIM-disabled mark from the company's deprovisioned recipients.
+func (c *CompanyScimConfig) Restore(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	companyID, err := uuid.Parse(g.Param("companyID"))
+	if err != nil {
+		c.Logger.Debugw("failed to parse companyID param", "error", err)
+		c.Response.BadRequestMessage(g, errs.MsgFailedToParseUUID)
+		return
+	}
+	restored, err := c.ScimService.RestoreSoftDeletedAuthorized(
+		g.Request.Context(),
+		session,
+		&companyID,
+	)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{"restored": restored})
+}
+
 // upsertScimRequest is the request body for the Upsert handler
 type upsertScimRequest struct {
 	Enabled bool `json:"enabled"`

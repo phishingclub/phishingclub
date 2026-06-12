@@ -20,6 +20,7 @@
 	let isSettingUp = false;
 	let isDeleting = false;
 	let isPruning = false;
+	let isRestoring = false;
 
 	// token reveal — only populated immediately after create or rotate
 	let revealedToken = '';
@@ -29,6 +30,7 @@
 	let isRotateAlertVisible = false;
 	let isDeleteAlertVisible = false;
 	let isPruneAlertVisible = false;
+	let isRestoreAlertVisible = false;
 
 	// reactive: reload when modal opens
 	$: {
@@ -51,6 +53,7 @@
 		isRotateAlertVisible = false;
 		isDeleteAlertVisible = false;
 		isPruneAlertVisible = false;
+		isRestoreAlertVisible = false;
 	};
 
 	const loadAll = async () => {
@@ -195,6 +198,29 @@
 		}
 	};
 
+	const onConfirmRestore = async () => {
+		isRestoring = true;
+		try {
+			const res = await api.company.scim.restore(company.id);
+			if (res && res.success) {
+				const n = res.data?.restored ?? 0;
+				addToast(
+					`Removed disabled mark from ${n} ${n === 1 ? 'recipient' : 'recipients'}`,
+					'Success'
+				);
+				return { success: true };
+			}
+			addToast(res?.error ?? 'Failed to remove disabled mark', 'Error');
+			return { success: false };
+		} catch (e) {
+			console.error('failed to remove disabled mark', e);
+			addToast('Failed to remove disabled mark', 'Error');
+			return { success: false };
+		} finally {
+			isRestoring = false;
+		}
+	};
+
 	const copyToClipboard = async (text) => {
 		try {
 			await navigator.clipboard.writeText(text);
@@ -221,11 +247,12 @@
 	$: scimBaseURL =
 		company && scimDomain ? `https://${scimDomain}/api/v1/scim/v2/${company.id}` : '';
 
-	$: isBusy = isSettingUp || isTogglingEnabled || isRotating || isDeleting || isPruning;
+	$: isBusy =
+		isSettingUp || isTogglingEnabled || isRotating || isDeleting || isPruning || isRestoring;
 </script>
 
 <Modal headerText={`SCIM`} bind:visible>
-	<div class="w-[600px] p-6 space-y-6">
+	<div class="w-[780px] p-6 space-y-6">
 		{#if isLoading}
 			<div class="flex items-center justify-center py-10">
 				<p class="text-gray-500 dark:text-gray-400 transition-colors duration-200">Loading...</p>
@@ -357,17 +384,26 @@
 				<button
 					type="button"
 					disabled={isBusy}
-					on:click={() => (isPruneAlertVisible = true)}
-					title="Permanently remove this company's disabled recipients now"
-					class="bg-slate-400 dark:bg-gray-700/80 hover:bg-slate-300 dark:hover:bg-gray-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+					on:click={() => (isRestoreAlertVisible = true)}
+					title="Clear the disabled mark from this company's disabled recipients"
+					class="bg-slate-400 dark:bg-gray-700/80 hover:bg-slate-300 dark:hover:bg-gray-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 				>
-					{isPruning ? 'Pruning...' : 'Prune Removed Users'}
+					{isRestoring ? 'Removing...' : 'Remove Disabled Mark'}
+				</button>
+				<button
+					type="button"
+					disabled={isBusy}
+					on:click={() => (isPruneAlertVisible = true)}
+					title="Permanently delete this company's disabled users"
+					class="bg-slate-400 dark:bg-gray-700/80 hover:bg-slate-300 dark:hover:bg-gray-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+				>
+					{isPruning ? 'Pruning...' : 'Prune Disabled Users'}
 				</button>
 				<button
 					type="button"
 					disabled={isBusy}
 					on:click={() => (isRotateAlertVisible = true)}
-					class="bg-slate-400 dark:bg-gray-700/80 hover:bg-slate-300 dark:hover:bg-gray-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+					class="bg-slate-400 dark:bg-gray-700/80 hover:bg-slate-300 dark:hover:bg-gray-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 				>
 					Rotate Token
 				</button>
@@ -375,7 +411,7 @@
 					type="button"
 					disabled={isBusy}
 					on:click={() => (isDeleteAlertVisible = true)}
-					class="bg-red-600 dark:bg-red-700/80 hover:bg-red-500 dark:hover:bg-red-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+					class="bg-red-600 dark:bg-red-700/80 hover:bg-red-500 dark:hover:bg-red-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 				>
 					Delete
 				</button>
@@ -401,20 +437,34 @@
 	</p>
 </Alert>
 
+<!-- remove disabled mark confirmation -->
+<Alert
+	headline="Remove disabled mark"
+	bind:visible={isRestoreAlertVisible}
+	onConfirm={onConfirmRestore}
+>
+	<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded mb-4">
+		<p class="font-medium">{company?.name}</p>
+	</div>
+	<p class="text-sm text-gray-500 dark:text-gray-400">
+		Clears the disabled mark from all disabled recipients, making them active again and cancelling
+		any pending prune.
+	</p>
+</Alert>
+
 <!-- prune disabled recipients confirmation -->
 <Alert
-	headline="Remove disabled recipients"
+	headline="Prune disabled users"
 	bind:visible={isPruneAlertVisible}
 	onConfirm={onConfirmPrune}
 	verification="purge"
 >
-	<p>
-		Permanently remove all <strong>disabled</strong> recipients for
-		<strong>{company?.name}</strong> now?
-	</p>
-	<p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
-		this removes them immediately, before their retention window ends. their identity is deleted and
-		cannot be recovered; historical campaign results are kept in anonymized form.
+	<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded mb-4">
+		<p class="font-medium">{company?.name}</p>
+	</div>
+	<p class="text-sm text-gray-500 dark:text-gray-400">
+		Permanently deletes all disabled recipients. Their identity cannot be recovered; campaign
+		results are kept anonymized.
 	</p>
 </Alert>
 

@@ -76,6 +76,7 @@ const (
 	ROUTE_V1_COMPANY_SCIM             = "/api/v1/company/scim/:companyID"
 	ROUTE_V1_COMPANY_SCIM_TOKEN       = "/api/v1/company/scim/:companyID/token"
 	ROUTE_V1_COMPANY_SCIM_PRUNE       = "/api/v1/company/scim/:companyID/prune"
+	ROUTE_V1_COMPANY_SCIM_RESTORE     = "/api/v1/company/scim/:companyID/restore"
 	// scim v2 provisioning endpoints (public — authenticated via bearer token)
 	ROUTE_SCIM_V2_SERVICE_PROVIDER_CONFIG = "/api/v1/scim/v2/:companyID/ServiceProviderConfig"
 	ROUTE_SCIM_V2_RESOURCE_TYPES          = "/api/v1/scim/v2/:companyID/ResourceTypes"
@@ -360,6 +361,7 @@ func setupRoutes(
 		DELETE(ROUTE_V1_COMPANY_SCIM, middleware.SessionHandler, controllers.CompanyScimConfig.Delete).
 		POST(ROUTE_V1_COMPANY_SCIM_TOKEN, middleware.SessionHandler, controllers.CompanyScimConfig.RotateToken).
 		POST(ROUTE_V1_COMPANY_SCIM_PRUNE, middleware.SessionHandler, controllers.CompanyScimConfig.Prune).
+		POST(ROUTE_V1_COMPANY_SCIM_RESTORE, middleware.SessionHandler, controllers.CompanyScimConfig.Restore).
 		// options
 		GET(ROUTE_V1_OPTION_GET, middleware.SessionHandler, controllers.Option.Get).
 		POST(ROUTE_V1_OPTION, middleware.SessionHandler, middleware.SessionHandler, controllers.Option.Update).

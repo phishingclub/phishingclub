@@ -1284,6 +1284,10 @@ export class API {
 			// prune the company's disabled (soft-deleted) recipients past the retention window
 			prune: async (companyID) => {
 				return await postJSON(this.getPath(`/company/scim/${companyID}/prune`), {});
+			},
+			// clear the disabled mark from the company's deprovisioned recipients
+			restore: async (companyID) => {
+				return await postJSON(this.getPath(`/company/scim/${companyID}/restore`), {});
 			}
 		},
 		/**
