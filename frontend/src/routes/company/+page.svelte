@@ -5,11 +5,8 @@
 	import Headline from '$lib/components/Headline.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
-	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import FormError from '$lib/components/FormError.svelte';
 	import { addToast } from '$lib/store/toast';
-	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
-	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import Modal from '$lib/components/Modal.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
@@ -17,8 +14,6 @@
 	import Table from '$lib/components/table/Table.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
-	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
-	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import Alert from '$lib/components/Alert.svelte';
 
 	// bindings
@@ -35,12 +30,6 @@
 	let isModalVisible = false;
 	let isSubmitting = false;
 	let isTableLoading = true;
-
-	let isDeleteAlertVisible = false;
-	let deleteValues = {
-		id: null,
-		name: null
-	};
 
 	let isExportSharedModalVisible = false;
 
@@ -108,31 +97,6 @@
 		refreshCompanies();
 	};
 
-	const openDeleteAlert = async (company) => {
-		isDeleteAlertVisible = true;
-		deleteValues.id = company.id;
-		deleteValues.name = company.name;
-	};
-
-	/**
-	 * Deletes a company
-	 * @param {number} id
-	 */
-	const onClickDelete = async (id) => {
-		const action = api.company.delete(id);
-		action
-			.then((res) => {
-				if (!res.success) {
-					throw res.error;
-				}
-				refreshCompanies();
-			})
-			.catch((e) => {
-				console.error('failed to delete company:', e);
-			});
-		return action;
-	};
-
 	const openCreateModal = () => {
 		modalError = '';
 		formValues.name = null;
@@ -180,6 +144,7 @@
 		hasNextPage={companiesHasNextPage}
 		plural="companies"
 		pagination={tableURLParams}
+		hasActions={false}
 		isGhost={isTableLoading}
 	>
 		{#each companies as company}
@@ -192,12 +157,6 @@
 						{company.name}
 					</button>
 				</TableCell>
-				<TableCellEmpty />
-				<TableCellAction>
-					<TableDropDownEllipsis>
-						<TableDeleteButton on:click={() => openDeleteAlert(company)} />
-					</TableDropDownEllipsis>
-				</TableCellAction>
 			</TableRow>
 		{/each}
 	</Table>
@@ -257,13 +216,6 @@
 			</form>
 		</div>
 	</Modal>
-
-	<DeleteAlert
-		list={['All data related to the company such as domains, campaign, recipients will be lost']}
-		name={deleteValues.name}
-		onClick={() => onClickDelete(deleteValues.id)}
-		bind:isVisible={isDeleteAlertVisible}
-	></DeleteAlert>
 
 	<Alert
 		headline="Export Shared Data"
