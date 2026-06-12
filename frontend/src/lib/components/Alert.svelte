@@ -17,6 +17,8 @@
 
 	let isLoading = false;
 	let error = '';
+	// typed value when verification is required before confirming
+	let verificationText = '';
 	let alertElement;
 	let previousActiveElement;
 	let focusableElements = [];
@@ -183,6 +185,8 @@
 	};
 
 	const handleAlertClose = () => {
+		// reset the typed confirmation so it is empty next time the alert opens
+		verificationText = '';
 		// Restore focus to the previously focused element
 		if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
 			previousActiveElement.focus();
@@ -214,6 +218,16 @@
 
 	const onClickConfirm = async (e) => {
 		e.preventDefault();
+		// require the user to type the verification word before proceeding
+		if (verification) {
+			const ele = /** @type {HTMLInputElement} */ (document.querySelector('#confirmVerification'));
+			if (verificationText !== verification) {
+				ele?.setCustomValidity(`Enter '${verification}' to confirm`);
+				ele?.reportValidity();
+				return;
+			}
+			ele?.setCustomValidity('');
+		}
 		isLoading = true;
 		try {
 			const res = await onConfirm();
@@ -306,7 +320,17 @@
 
 				{#if verification}
 					<div class="mt-4">
-						<TextField>Enter '{verification}' to confirm the action</TextField>
+						<TextField
+							bind:value={verificationText}
+							required
+							id="confirmVerification"
+							on:keydown={(e) => {
+								const ele = /** @type {HTMLInputElement} */ (e.target);
+								ele.setCustomValidity('');
+							}}
+						>
+							Enter '{verification}' to confirm the action
+						</TextField>
 					</div>
 				{/if}
 

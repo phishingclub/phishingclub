@@ -359,6 +359,7 @@
 		list={['All data related to the company such as domains, campaign, recipients will be lost']}
 		name={company?.name}
 		onClick={onConfirmDelete}
+		confirm
 		bind:isVisible={isDeleteAlertVisible}
 	/>
 </main>

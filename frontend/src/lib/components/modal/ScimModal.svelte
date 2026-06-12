@@ -389,6 +389,7 @@
 	headline="Rotate SCIM Token"
 	bind:visible={isRotateAlertVisible}
 	onConfirm={onConfirmRotateToken}
+	verification="rotate"
 >
 	<p>
 		Are you sure you want to rotate the SCIM bearer token for
@@ -401,7 +402,12 @@
 </Alert>
 
 <!-- prune disabled recipients confirmation -->
-<Alert headline="Remove disabled recipients" bind:visible={isPruneAlertVisible} onConfirm={onConfirmPrune}>
+<Alert
+	headline="Remove disabled recipients"
+	bind:visible={isPruneAlertVisible}
+	onConfirm={onConfirmPrune}
+	verification="purge"
+>
 	<p>
 		Permanently remove all <strong>disabled</strong> recipients for
 		<strong>{company?.name}</strong> now?
@@ -417,6 +423,7 @@
 	headline="Delete SCIM Config"
 	bind:visible={isDeleteAlertVisible}
 	onConfirm={onConfirmDelete}
+	verification="delete"
 >
 	<p>
 		Are you sure you want to delete the SCIM configuration for
