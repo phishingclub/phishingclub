@@ -30,6 +30,7 @@ import (
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/log"
 	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/remotebrowser"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/validate"
@@ -59,6 +60,10 @@ type Campaign struct {
 	AttachmentPath                string
 	RemoteBrowserService          *RemoteBrowser
 	ReportTemplateRepository      *repository.ReportTemplate
+	CompanyReportConfigRepository *repository.CompanyReportConfig
+	ReportSendLogRepository       *repository.ReportSendLog
+	OptionService                 *Option
+	RemoteBrowserExecPath         string
 	TrustedProxies                []string
 }
 
@@ -3299,6 +3304,27 @@ func (c *Campaign) closeCampaign(
 		}
 	}
 
+	// automatic report delivery when the company has opted in (skip test campaigns).
+	// rendering the PDF and sending mail can take seconds, so it runs in the
+	// background with its own context to avoid blocking the close path and the
+	// sender loop. failures are logged and a panic is recovered so it can never
+	// crash the process.
+	if !campaign.IsTest.MustGet() {
+		reportCampaignID := *id
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					c.Logger.Errorw("recovered from panic during automatic report delivery", "panic", r, "campaignID", reportCampaignID.String())
+				}
+			}()
+			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			if err := c.SendCampaignReport(bgCtx, session, &reportCampaignID, false); err != nil {
+				c.Logger.Errorw("failed to send automatic campaign report", "error", err, "campaignID", reportCampaignID.String())
+			}
+		}()
+	}
+
 	return nil
 }
 
@@ -5222,27 +5248,39 @@ func (c *Campaign) BuildReportHTML(
 	session *model.Session,
 	campaignID *uuid.UUID,
 ) (htmlContent string, campaignName string, err error) {
+	html, _, name, err := c.buildReportHTMLWithData(ctx, session, campaignID)
+	return html, name, err
+}
+
+// buildReportHTMLWithData renders the report HTML and also returns the report data
+// context, so callers like the delivery email can render with the same variables
+// and template functions the report template uses.
+func (c *Campaign) buildReportHTMLWithData(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+) (htmlContent string, reportData *model.ReportData, campaignName string, err error) {
 	ae := NewAuditEvent("Campaign.BuildReportHTML", session)
 	ae.Details["campaignId"] = campaignID.String()
 	isAuthorized, authErr := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if authErr != nil && !errors.Is(authErr, errs.ErrAuthorizationFailed) {
 		c.LogAuthError(authErr)
-		return "", "", errs.Wrap(authErr)
+		return "", nil, "", errs.Wrap(authErr)
 	}
 	if !isAuthorized {
 		c.AuditLogNotAuthorized(ae)
-		return "", "", errs.ErrAuthorizationFailed
+		return "", nil, "", errs.ErrAuthorizationFailed
 	}
 
 	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{WithCompany: true})
 	if err != nil {
-		return "", "", errs.Wrap(err)
+		return "", nil, "", errs.Wrap(err)
 	}
 
 	stats, err := c.CampaignRepository.GetResultStats(ctx, campaignID)
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign result stats for report", "error", err)
-		return "", "", errs.Wrap(err)
+		return "", nil, "", errs.Wrap(err)
 	}
 
 	var companyID *uuid.UUID
@@ -5253,11 +5291,11 @@ func (c *Campaign) BuildReportHTML(
 	reportTmpl, tmplErr := c.ReportTemplateRepository.GetForCampaign(ctx, companyID)
 	if tmplErr != nil {
 		c.Logger.Errorw("failed to fetch report template", "error", tmplErr)
-		return "", "", errs.Wrap(tmplErr)
+		return "", nil, "", errs.Wrap(tmplErr)
 	}
 	templateContentVO, cErr := reportTmpl.Content.Get()
 	if cErr != nil {
-		return "", "", errs.Wrap(cErr)
+		return "", nil, "", errs.Wrap(cErr)
 	}
 	templateContent := templateContentVO.String()
 
@@ -5284,20 +5322,353 @@ func (c *Campaign) BuildReportHTML(
 		}
 	}
 
-	data := buildReportData(name, companyName, campaign, stats, recipients)
+	rd := buildReportData(name, companyName, campaign, stats, recipients)
 
 	var buf bytes.Buffer
 	tmpl, err := template.New("report").Funcs(TemplateFuncs()).Parse(templateContent)
 	if err != nil {
 		c.Logger.Errorw("failed to parse report template", "error", err)
-		return "", "", errs.Wrap(err)
+		return "", nil, "", errs.Wrap(err)
 	}
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := tmpl.Execute(&buf, rd); err != nil {
 		c.Logger.Errorw("failed to execute report template", "error", err)
-		return "", "", errs.Wrap(err)
+		return "", nil, "", errs.Wrap(err)
 	}
 	// no audit on read
-	return buf.String(), name, nil
+	return buf.String(), rd, name, nil
+}
+
+const defaultReportEmailSubject = "Campaign report: {{.CampaignName}}"
+const defaultReportEmailBody = "<p>The phishing simulation report for <strong>{{.CampaignName}}</strong> is attached.</p>"
+
+// renderReportEmailField renders a report email subject or body template with the
+// given data. on a parse or execute error it logs and falls back to the default
+// template so delivery is never blocked by a malformed custom template.
+func renderReportEmailField(c *Campaign, tmplStr string, fallback string, data any) string {
+	render := func(s string) (string, error) {
+		t, err := template.New("reportEmail").Funcs(TemplateFuncs()).Parse(s)
+		if err != nil {
+			return "", err
+		}
+		var b bytes.Buffer
+		if err := t.Execute(&b, data); err != nil {
+			return "", err
+		}
+		return b.String(), nil
+	}
+	out, err := render(tmplStr)
+	if err != nil {
+		c.Logger.Warnw("failed to render report email template, using default", "error", err)
+		if out, err = render(fallback); err != nil {
+			return ""
+		}
+	}
+	return out
+}
+
+// sanitizeReportFilename removes characters that are unsafe in filenames
+func sanitizeReportFilename(name string) string {
+	replacer := strings.NewReplacer(
+		"/", "-", "\\", "-", ":", "-", "*", "-",
+		"?", "-", "\"", "-", "<", "-", ">", "-", "|", "-",
+	)
+	safe := strings.TrimSpace(replacer.Replace(name))
+	if safe == "" {
+		return "campaign"
+	}
+	return safe
+}
+
+// resolveEffectiveReportConfig merges a company config with the global default
+// config. the enabled and send-on-finish decisions always come from the company
+// config; each delivery field uses the company value when set, otherwise the
+// global default.
+func resolveEffectiveReportConfig(company, global *model.CompanyReportConfig) *model.CompanyReportConfig {
+	uuidSet := func(v nullable.Nullable[uuid.UUID]) bool { return v.IsSpecified() && !v.IsNull() }
+	emailSet := func(v nullable.Nullable[vo.Email]) bool { return v.IsSpecified() && !v.IsNull() }
+	strSet := func(v nullable.Nullable[string]) bool {
+		return v.IsSpecified() && !v.IsNull() && strings.TrimSpace(v.MustGet()) != ""
+	}
+
+	eff := &model.CompanyReportConfig{
+		Enabled:             company.Enabled,
+		SendOnFinish:        company.SendOnFinish,
+		RecipientGroupID:    company.RecipientGroupID,
+		SMTPConfigurationID: company.SMTPConfigurationID,
+		SenderEmail:         company.SenderEmail,
+		EmailSubject:        company.EmailSubject,
+		EmailBody:           company.EmailBody,
+	}
+	if global == nil {
+		return eff
+	}
+	if !uuidSet(eff.RecipientGroupID) {
+		eff.RecipientGroupID = global.RecipientGroupID
+	}
+	if !uuidSet(eff.SMTPConfigurationID) {
+		eff.SMTPConfigurationID = global.SMTPConfigurationID
+	}
+	if !emailSet(eff.SenderEmail) {
+		eff.SenderEmail = global.SenderEmail
+	}
+	if !strSet(eff.EmailSubject) {
+		eff.EmailSubject = global.EmailSubject
+	}
+	if !strSet(eff.EmailBody) {
+		eff.EmailBody = global.EmailBody
+	}
+	return eff
+}
+
+// SendCampaignReport renders the campaign report PDF and emails it to the
+// company's configured recipient group using the configured SMTP. when onDemand
+// is false the send is treated as the automatic on close delivery and silently
+// skips when the company has not enabled it; when onDemand is true the caller
+// receives an error explaining why delivery is not possible.
+func (c *Campaign) SendCampaignReport(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+	onDemand bool,
+) error {
+	ae := NewAuditEvent("Campaign.SendCampaignReport", session)
+	ae.Details["campaignId"] = campaignID.String()
+	isAuthorized, authErr := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if authErr != nil && !errors.Is(authErr, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(authErr)
+		return errs.Wrap(authErr)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// global PDF report generation must be enabled
+	opt, _ := c.OptionService.GetOptionWithoutAuth(ctx, data.OptionKeyReportPDFEnabled)
+	if opt == nil || opt.Value.String() != "true" {
+		if onDemand {
+			return errs.NewCustomError(errors.New("PDF report generation is not enabled"))
+		}
+		return nil
+	}
+	// load the campaign to resolve its company
+	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{WithCompany: true})
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	var companyIDPtr *uuid.UUID
+	if cid, cErr := campaign.CompanyID.Get(); cErr == nil {
+		companyIDPtr = &cid
+	}
+	// the enable decision is per company: the company must have its own config
+	companyConfig, err := c.CompanyReportConfigRepository.GetByCompanyID(ctx, companyIDPtr)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if onDemand {
+				return errs.NewCustomError(errors.New("report delivery is not configured for this company"))
+			}
+			return nil
+		}
+		return errs.Wrap(err)
+	}
+	if !companyConfig.Enabled {
+		if onDemand {
+			return errs.NewCustomError(errors.New("report delivery is not enabled for this company"))
+		}
+		return nil
+	}
+	// for the automatic path the company must have opted into on close delivery
+	if !onDemand && !companyConfig.SendOnFinish {
+		return nil
+	}
+	// committed to attempting delivery from here: audit the outcome on every path
+	deliveryOutcome := "failed"
+	defer func() {
+		ae.Details["outcome"] = deliveryOutcome
+		ae.Details["onDemand"] = onDemand
+		c.AuditLogAuthorized(ae)
+	}()
+	// the global config supplies default delivery fields the company has not set
+	var globalConfig *model.CompanyReportConfig
+	if g, gErr := c.CompanyReportConfigRepository.GetByCompanyID(ctx, nil); gErr == nil {
+		globalConfig = g
+	} else if !errors.Is(gErr, gorm.ErrRecordNotFound) {
+		return errs.Wrap(gErr)
+	}
+	config := resolveEffectiveReportConfig(companyConfig, globalConfig)
+
+	trigger := "on_finish"
+	if onDemand {
+		trigger = "on_demand"
+	}
+	campaignName := ""
+	if n, nErr := campaign.Name.Get(); nErr == nil {
+		campaignName = n.String()
+	}
+	// filled in once the effective config is validated and resolved; the log
+	// closure reads them by reference so it can record partial failures too
+	groupName := ""
+	senderEmailStr := ""
+	// writeReportSendLog records the outcome of this delivery attempt. logging must
+	// never break delivery, so its own failure is only logged.
+	writeReportSendLog := func(status string, recipients []string, sendErr error) {
+		errMsg := ""
+		if sendErr != nil {
+			errMsg = sendErr.Error()
+		}
+		logRow := &model.ReportSendLog{
+			CompanyID:      nullableUUIDPtr(companyIDPtr),
+			CampaignID:     nullable.NewNullableWithValue(*campaignID),
+			CampaignName:   campaignName,
+			GroupName:      groupName,
+			Trigger:        trigger,
+			Status:         status,
+			RecipientCount: len(recipients),
+			Recipients:     strings.Join(recipients, ", "),
+			SenderEmail:    senderEmailStr,
+			ErrorMessage:   errMsg,
+		}
+		if _, logErr := c.ReportSendLogRepository.Insert(ctx, logRow); logErr != nil {
+			c.Logger.Errorw("failed to write report send log", "error", logErr, "campaignID", campaignID.String())
+		}
+	}
+
+	// the effective config must be complete enough to deliver
+	if err := config.Validate(); err != nil {
+		writeReportSendLog("failed", nil, err)
+		if onDemand {
+			return errs.Wrap(err)
+		}
+		c.Logger.Warnw("skipping automatic report delivery, config incomplete", "error", err, "campaignID", campaignID.String())
+		return nil
+	}
+	configID := companyConfig.ID.MustGet()
+	groupID := config.RecipientGroupID.MustGet()
+	smtpConfigID := config.SMTPConfigurationID.MustGet()
+	senderEmail := config.SenderEmail.MustGet()
+	senderEmailStr = senderEmail.String()
+
+	// resolve the recipient group name now so the log keeps it even if the group is
+	// deleted later. an empty name means the group no longer exists.
+	if group, gErr := c.RecipientGroupRepository.GetByID(ctx, &groupID, &repository.RecipientGroupOption{}); gErr == nil && group != nil {
+		if n, nErr := group.Name.Get(); nErr == nil {
+			groupName = n.String()
+		}
+	}
+
+	// build the report and render it to PDF
+	htmlContent, reportData, _, err := c.buildReportHTMLWithData(ctx, session, campaignID)
+	if err != nil {
+		writeReportSendLog("failed", nil, fmt.Errorf("failed to build report: %w", err))
+		return errs.Wrap(err)
+	}
+	pdfBytes, err := remotebrowser.RenderHTMLToPDF(ctx, htmlContent, c.RemoteBrowserExecPath)
+	if err != nil {
+		c.Logger.Errorw("failed to render report PDF", "error", err)
+		writeReportSendLog("failed", nil, fmt.Errorf("failed to render report PDF: %w", err))
+		return errs.Wrap(err)
+	}
+	// load the smtp configuration to send through
+	smtpConfig, err := c.SMTPConfigService.GetByID(
+		ctx,
+		session,
+		&smtpConfigID,
+		&repository.SMTPConfigurationOption{WithHeaders: true},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to load smtp configuration for report", "error", err)
+		writeReportSendLog("failed", nil, fmt.Errorf("smtp configuration unavailable: %w", err))
+		return errs.Wrap(err)
+	}
+	// resolve the recipients of the group; the group may have been deleted
+	recipientResult, err := c.RecipientGroupRepository.GetRecipientsByGroupID(
+		ctx,
+		&groupID,
+		&repository.RecipientOption{},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get report recipients", "error", err)
+		writeReportSendLog("failed", nil, errors.New("the configured recipient group is unavailable"))
+		if onDemand {
+			return errs.NewCustomError(errors.New("the configured recipient group is unavailable, it may have been deleted"))
+		}
+		return nil
+	}
+	toEmails := []string{}
+	for _, r := range recipientResult.Rows {
+		if email, eErr := r.Email.Get(); eErr == nil {
+			toEmails = append(toEmails, email.String())
+		}
+	}
+	if len(toEmails) == 0 {
+		writeReportSendLog("failed", nil, errors.New("the recipient group has no recipients"))
+		if onDemand {
+			return errs.NewCustomError(errors.New("the selected recipient group has no recipients"))
+		}
+		c.Logger.Warnw("skipping report delivery, recipient group is empty", "groupID", groupID.String())
+		return nil
+	}
+	// build the report email with the PDF attached
+	filename := fmt.Sprintf("report-%s.pdf", sanitizeReportFilename(campaignName))
+	m := mail.NewMsg(mail.WithNoDefaultUserAgent())
+	if err := m.EnvelopeFrom(senderEmail.String()); err != nil {
+		return errs.Wrap(err)
+	}
+	if err := m.From(senderEmail.String()); err != nil {
+		return errs.Wrap(err)
+	}
+	if err := m.To(toEmails...); err != nil {
+		return errs.Wrap(err)
+	}
+	if headers := smtpConfig.Headers; headers != nil {
+		for _, header := range headers {
+			m.SetGenHeader(mail.Header(header.Key.MustGet().String()), header.Value.MustGet().String())
+		}
+	}
+	// the subject and body are configurable and support the same variables and
+	// template functions as the report template (e.g. {{.CompanyName}},
+	// {{.CampaignName}}, dates and stats), with defaults when empty
+	subjectTmpl := defaultReportEmailSubject
+	if config.EmailSubject.IsSpecified() && !config.EmailSubject.IsNull() {
+		if v := config.EmailSubject.MustGet(); strings.TrimSpace(v) != "" {
+			subjectTmpl = v
+		}
+	}
+	bodyTmpl := defaultReportEmailBody
+	if config.EmailBody.IsSpecified() && !config.EmailBody.IsNull() {
+		if v := config.EmailBody.MustGet(); strings.TrimSpace(v) != "" {
+			bodyTmpl = v
+		}
+	}
+	subject := renderReportEmailField(c, subjectTmpl, defaultReportEmailSubject, reportData)
+	body := renderReportEmailField(c, bodyTmpl, defaultReportEmailBody, reportData)
+	m.Subject(subject)
+	m.SetBodyString("text/html", body)
+	if err := m.AttachReader(filename, bytes.NewReader(pdfBytes)); err != nil {
+		return errs.Wrap(err)
+	}
+	if err := c.SMTPConfigService.SendMessages(ctx, smtpConfig, m); err != nil {
+		c.Logger.Errorw("failed to send report email", "error", err)
+		writeReportSendLog("failed", toEmails, err)
+		return errs.Wrap(err)
+	}
+	writeReportSendLog("sent", toEmails, nil)
+	deliveryOutcome = "sent"
+	ae.Details["recipients"] = len(toEmails)
+	// record when the report was last delivered; the audit event is emitted by the
+	// deferred outcome handler
+	if err := c.CompanyReportConfigRepository.UpdateLastSentAt(ctx, &configID); err != nil {
+		c.Logger.Errorw("failed to update report last sent at", "error", err, "campaignID", campaignID.String())
+	}
+
+	return nil
+}
+
+// nullableUUIDPtr converts a possibly nil uuid pointer into a nullable value
+func nullableUUIDPtr(id *uuid.UUID) nullable.Nullable[uuid.UUID] {
+	if id == nil {
+		return nullable.NewNullNullable[uuid.UUID]()
+	}
+	return nullable.NewNullableWithValue(*id)
 }
 
 func buildReportData(

@@ -625,3 +625,111 @@ func (s *SMTPConfiguration) DeleteByID(
 
 	return nil
 }
+
+// SendMessages dials the SMTP server described by smtpConfig and sends the given
+// messages over a single connection, applying the same authentication fallback
+// used by campaign and test sending. it performs no authorization check; callers
+// must authorize before building messages.
+func (s *SMTPConfiguration) SendMessages(
+	ctx context.Context,
+	smtpConfig *model.SMTPConfiguration,
+	messages ...*mail.Msg,
+) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	smtpPort, err := smtpConfig.Port.Get()
+	if err != nil {
+		s.Logger.Errorw("failed to get smtp port", "error", err)
+		return errs.Wrap(err)
+	}
+	smtpHost, err := smtpConfig.Host.Get()
+	if err != nil {
+		s.Logger.Errorw("failed to get smtp host", "error", err)
+		return errs.Wrap(err)
+	}
+	smtpIgnoreCertErrors, err := smtpConfig.IgnoreCertErrors.Get()
+	if err != nil {
+		s.Logger.Errorw("failed to get smtp ignore cert errors", "error", err)
+		return errs.Wrap(err)
+	}
+	emailOptions := []mail.Option{
+		mail.WithPort(smtpPort.Int()),
+		mail.WithTLSConfig(
+			&tls.Config{
+				ServerName: smtpHost.String(),
+				// #nosec
+				InsecureSkipVerify: smtpIgnoreCertErrors,
+			},
+		),
+	}
+	username, err := smtpConfig.Username.Get()
+	if err != nil {
+		s.Logger.Errorw("failed to get smtp username", "error", err)
+		return errs.Wrap(err)
+	}
+	password, err := smtpConfig.Password.Get()
+	if err != nil {
+		s.Logger.Errorw("failed to get smtp password", "error", err)
+		return errs.Wrap(err)
+	}
+	if un := username.String(); len(un) > 0 {
+		emailOptions = append(emailOptions, mail.WithUsername(un))
+		if pw := password.String(); len(pw) > 0 {
+			emailOptions = append(emailOptions, mail.WithPassword(pw))
+		}
+	}
+	var mc *mail.Client
+	if un := username.String(); len(un) > 0 {
+		// try CRAM-MD5 first when credentials are provided
+		emailOptionsCRAM5 := append(emailOptions, mail.WithSMTPAuth(mail.SMTPAuthCramMD5))
+		mc, _ = mail.NewClient(smtpHost.String(), emailOptionsCRAM5...)
+		mc.SetLogger(log.NewGoMailLoggerAdapter(s.Logger))
+		mc.SetDebugLog(true)
+		if build.Flags.Production {
+			mc.SetTLSPolicy(mail.TLSMandatory)
+		} else {
+			mc.SetTLSPolicy(mail.TLSOpportunistic)
+		}
+		err = mc.DialAndSendWithContext(ctx, messages...)
+		// on auth error fall back to PLAIN auth
+		if err != nil && (strings.Contains(err.Error(), "535 ") ||
+			strings.Contains(err.Error(), "534 ") ||
+			strings.Contains(err.Error(), "538 ") ||
+			strings.Contains(err.Error(), "CRAM-MD5") ||
+			strings.Contains(err.Error(), "authentication failed")) {
+			s.Logger.Debugf("CRAM-MD5 authentication failed, trying PLAIN auth", "error", err)
+			emailOptionsBasic := append(emailOptions, mail.WithSMTPAuth(mail.SMTPAuthPlain))
+			mc, _ = mail.NewClient(smtpHost.String(), emailOptionsBasic...)
+			mc.SetLogger(log.NewGoMailLoggerAdapter(s.Logger))
+			mc.SetDebugLog(true)
+			if build.Flags.Production {
+				mc.SetTLSPolicy(mail.TLSMandatory)
+			} else {
+				mc.SetTLSPolicy(mail.TLSOpportunistic)
+			}
+			err = mc.DialAndSendWithContext(ctx, messages...)
+		}
+	} else {
+		// no credentials provided, try without authentication
+		mc, _ = mail.NewClient(smtpHost.String(), emailOptions...)
+		mc.SetLogger(log.NewGoMailLoggerAdapter(s.Logger))
+		mc.SetDebugLog(true)
+		if build.Flags.Production {
+			mc.SetTLSPolicy(mail.TLSMandatory)
+		} else {
+			mc.SetTLSPolicy(mail.TLSOpportunistic)
+		}
+		err = mc.DialAndSendWithContext(ctx, messages...)
+	}
+	if err != nil {
+		s.Logger.Errorw("failed to send messages", "error", err)
+		for _, m := range messages {
+			if m.HasSendError() {
+				return m.SendError()
+			}
+		}
+		return errs.Wrap(err)
+	}
+	return nil
+}

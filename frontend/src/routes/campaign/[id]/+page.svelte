@@ -196,6 +196,9 @@
 			const pdfOpt = await api.option.get('report_pdf_enabled');
 			isReportPDFEnabled = pdfOpt.success && pdfOpt.data?.value === 'true';
 			await refresh();
+			if (isReportPDFEnabled) {
+				await loadReportDeliveryConfig();
+			}
 			recipientTableUrlParams.onChange(refreshRecipients);
 			eventsTableURLParams.onChange(refreshEvents);
 			initialPageLoadComplete = true;
@@ -939,6 +942,47 @@
 		} catch (e) {
 			console.error('failed to generate campaign report', e);
 			return { success: false, error: 'Failed to generate campaign report' };
+		}
+	};
+
+	let isSendReportModalVisible = false;
+	// whether a usable report delivery config exists (company or global fallback)
+	let canSendReport = false;
+
+	const loadReportDeliveryConfig = async () => {
+		try {
+			canSendReport = false;
+			// enabling delivery is a per company decision; the global config holds
+			// only default fields, so only the company config gates the action
+			if (campaign?.companyID) {
+				const res = await api.company.reportConfig.getByCompanyID(campaign.companyID);
+				canSendReport = !!(res.success && res.data && res.data.enabled);
+			}
+		} catch (_) {
+			canSendReport = false;
+		}
+	};
+
+	const onClickSendReport = () => {
+		if (!isReportPDFEnabled) {
+			isReportPDFDisabledModalVisible = true;
+			return;
+		}
+		isSendReportModalVisible = true;
+	};
+
+	const onConfirmSendReport = async () => {
+		try {
+			const res = await api.company.reportConfig.sendNow($page.params.id);
+			if (res && res.success) {
+				addToast('Report sent to the configured group', 'Success');
+				return { success: true };
+			}
+			addToast(res?.error ?? 'Failed to send report', 'Error');
+			return { success: false, error: res?.error ?? 'Failed to send report' };
+		} catch (e) {
+			console.error('failed to send report', e);
+			return { success: false, error: 'Failed to send report' };
 		}
 	};
 
@@ -1904,6 +1948,11 @@
 							<IconButton variant="blue" icon="export" on:click={onClickGenerateReport}>
 								Report
 							</IconButton>
+							{#if canSendReport}
+								<IconButton variant="blue" icon="export" on:click={onClickSendReport}>
+									Send Report
+								</IconButton>
+							{/if}
 							<IconButton variant="green" icon="export" on:click={onClickExportEvents}>
 								Events
 							</IconButton>
@@ -2944,6 +2993,17 @@
 		<div class="mt-4 text-gray-700 dark:text-gray-200">
 			Generate a PDF report for <strong>{campaign?.name}</strong>. <br />The report will download
 			automatically.
+		</div>
+	</Alert>
+	<Alert
+		headline="send report"
+		bind:visible={isSendReportModalVisible}
+		onConfirm={onConfirmSendReport}
+		ok="Send"
+	>
+		<div class="mt-4 text-gray-700 dark:text-gray-200">
+			Send the PDF report for <strong>{campaign?.name}</strong> to the recipient group configured for
+			this company. <br />Configure recipients and SMTP under the company's Reports settings.
 		</div>
 	</Alert>
 	<Alert

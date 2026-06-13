@@ -1290,6 +1290,53 @@ export class API {
 				return await postJSON(this.getPath(`/company/scim/${companyID}/restore`), {});
 			}
 		},
+
+		reportConfig: {
+			// path for a scope: a company id, or the global default when companyID is null
+			scopePath: (companyID) =>
+				companyID ? `/company/report-config/${companyID}` : `/report-config`,
+			// get the report delivery config for a company, or the global default when companyID is null
+			getByCompanyID: async (companyID) => {
+				return await getJSON(this.getPath(this.company.reportConfig.scopePath(companyID)));
+			},
+			// create or update the report delivery config for a company or the global default
+			upsert: async (
+				companyID,
+				{
+					enabled,
+					sendOnFinish,
+					recipientGroupID,
+					smtpConfigurationID,
+					senderEmail,
+					emailSubject,
+					emailBody
+				}
+			) => {
+				return await postJSON(this.getPath(this.company.reportConfig.scopePath(companyID)), {
+					enabled: enabled,
+					sendOnFinish: sendOnFinish,
+					recipientGroupID: recipientGroupID ?? null,
+					smtpConfigurationID: smtpConfigurationID ?? null,
+					senderEmail: senderEmail ?? null,
+					emailSubject: emailSubject ?? '',
+					emailBody: emailBody ?? ''
+				});
+			},
+			// delete the report delivery config for a company or the global default
+			delete: async (companyID) => {
+				return await deleteJSON(this.getPath(this.company.reportConfig.scopePath(companyID)));
+			},
+			// get the report delivery log for a company using pagination
+			getLog: async (companyID, options) => {
+				return await getJSON(
+					this.getPath(`/company/report-config/${companyID}/log?${appendQuery(options)}`)
+				);
+			},
+			// generate the report for a campaign and email it to the configured group now
+			sendNow: async (campaignID) => {
+				return await postJSON(this.getPath(`/report-config/send/${campaignID}`), {});
+			}
+		},
 		/**
 		 * Get the auto-prune orphaned recipients setting for a company.
 		 * Returns only the per-company enabled flag.

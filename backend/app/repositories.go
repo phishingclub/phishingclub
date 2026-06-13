@@ -32,6 +32,8 @@ type Repositories struct {
 	OAuthState          *repository.OAuthState
 	MicrosoftDeviceCode *repository.MicrosoftDeviceCode
 	CompanyScimConfig   *repository.CompanyScimConfig
+	CompanyReportConfig *repository.CompanyReportConfig
+	ReportSendLog       *repository.ReportSendLog
 	RemoteBrowser       *repository.RemoteBrowser
 	ReportTemplate      *repository.ReportTemplate
 }
@@ -67,6 +69,8 @@ func NewRepositories(
 		OAuthState:          &repository.OAuthState{DB: db},
 		MicrosoftDeviceCode: &repository.MicrosoftDeviceCode{DB: db},
 		CompanyScimConfig:   &repository.CompanyScimConfig{DB: db},
+		CompanyReportConfig: &repository.CompanyReportConfig{DB: db},
+		ReportSendLog:       &repository.ReportSendLog{DB: db},
 		RemoteBrowser:       &repository.RemoteBrowser{DB: db},
 		ReportTemplate:      &repository.ReportTemplate{DB: db},
 	}

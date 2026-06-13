@@ -44,6 +44,7 @@ type Services struct {
 	OAuthProvider       *service.OAuthProvider
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
 	CompanyScimConfig   *service.CompanyScimConfig
+	CompanyReportConfig *service.CompanyReportConfig
 	Scim                *service.Scim
 	RemoteBrowser       *service.RemoteBrowser
 	ReportTemplate      *service.ReportTemplate
@@ -63,6 +64,7 @@ func NewServices(
 	certMagicCache *certmagic.Cache,
 	filePath string,
 	trustedProxies []string,
+	remoteBrowserExecPath string,
 ) *Services {
 	common := service.Common{
 		Logger: logger,
@@ -229,6 +231,10 @@ func NewServices(
 		AttachmentPath:                attachmentPath,
 		RemoteBrowserService:          remoteBrowser,
 		ReportTemplateRepository:      repositories.ReportTemplate,
+		CompanyReportConfigRepository: repositories.CompanyReportConfig,
+		ReportSendLogRepository:       repositories.ReportSendLog,
+		OptionService:                 optionService,
+		RemoteBrowserExecPath:         remoteBrowserExecPath,
 		TrustedProxies:                trustedProxies,
 	}
 	// wire campaign service into microsoft device code service now that campaign is constructed
@@ -313,8 +319,15 @@ func NewServices(
 		ReportTemplateRepository: repositories.ReportTemplate,
 	}
 
+	companyReportConfig := &service.CompanyReportConfig{
+		Common:                        common,
+		CompanyReportConfigRepository: repositories.CompanyReportConfig,
+		ReportSendLogRepository:       repositories.ReportSendLog,
+	}
+
 	return &Services{
 		CompanyScimConfig:   companyScimConfig,
+		CompanyReportConfig: companyReportConfig,
 		Scim:                scim,
 		Asset:               asset,
 		Attachment:          attachment,

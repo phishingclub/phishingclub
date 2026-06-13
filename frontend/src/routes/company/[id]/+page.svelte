@@ -16,6 +16,8 @@
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import ScimModal from '$lib/components/modal/ScimModal.svelte';
 	import CompanyReportTemplateModal from '$lib/components/modal/CompanyReportTemplateModal.svelte';
+	import CompanyReportDeliveryModal from '$lib/components/modal/CompanyReportDeliveryModal.svelte';
+	import CompanyReportDeliveryLog from '$lib/components/company/CompanyReportDeliveryLog.svelte';
 	import CompanyCustomStats from '$lib/components/company/CompanyCustomStats.svelte';
 
 	$: companyId = $page.params.id;
@@ -38,9 +40,13 @@
 	// SCIM status shown in the Integrations tab
 	let scimStatus = 'none'; // 'none' | 'disabled' | 'enabled'
 
+	// whether PDF report generation is enabled globally; gates the Reports tab
+	let reportPDFEnabled = false;
+
 	// modals
 	let isScimModalVisible = false;
 	let isReportTemplateModalVisible = false;
+	let isReportDeliveryModalVisible = false;
 	let isExportAlertVisible = false;
 	let isDeleteAlertVisible = false;
 
@@ -73,7 +79,16 @@
 	};
 
 	const load = async () => {
-		await Promise.all([loadCompany(), loadAutoPrune(), loadScimStatus()]);
+		await Promise.all([loadCompany(), loadAutoPrune(), loadScimStatus(), loadReportPDFEnabled()]);
+	};
+
+	const loadReportPDFEnabled = async () => {
+		try {
+			const res = await api.option.get('report_pdf_enabled');
+			reportPDFEnabled = res.success && res.data?.value === 'true';
+		} catch (_) {
+			reportPDFEnabled = false;
+		}
 	};
 
 	const loadCompany = async () => {
@@ -292,6 +307,16 @@
 					</SettingsCard>
 				</div>
 			{:else if active === 'reports'}
+				{#if !reportPDFEnabled}
+					<div
+						class="rounded-md border border-amber-400 dark:border-amber-500/60 bg-amber-50 dark:bg-amber-900/20 p-4 max-w-xl"
+					>
+						<p class="text-sm text-amber-700 dark:text-amber-400">
+							PDF report generation is disabled. Enable it under Settings → Reports to configure
+							report templates and delivery.
+						</p>
+					</div>
+				{:else}
 				<div class="flex flex-wrap gap-6">
 					<SettingsCard title="Report Template">
 						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
@@ -303,7 +328,29 @@
 							>
 						</div>
 					</SettingsCard>
+
+					<SettingsCard title="Report Delivery">
+						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
+							Email the campaign report PDF to a recipient group, on demand or when a campaign is
+							closed.
+						</p>
+						<div class="mt-auto flex justify-end">
+							<FormButton size="medium" on:click={() => (isReportDeliveryModalVisible = true)}
+								>Configure</FormButton
+							>
+						</div>
+					</SettingsCard>
+
 				</div>
+
+					<div class="mt-8">
+						<h3 class="text-lg font-semibold text-gray-700 dark:text-gray-200">Delivery Log</h3>
+						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
+							Reports sent for this company, including automatic and on demand deliveries.
+						</p>
+						<CompanyReportDeliveryLog companyId={companyId} />
+					</div>
+				{/if}
 			{:else if active === 'data'}
 				<div class="flex flex-wrap gap-6">
 					<SettingsCard title="Export">
@@ -341,6 +388,7 @@
 
 	<ScimModal bind:visible={isScimModalVisible} {company} />
 	<CompanyReportTemplateModal bind:visible={isReportTemplateModalVisible} {company} />
+	<CompanyReportDeliveryModal bind:visible={isReportDeliveryModalVisible} {company} />
 
 	<Alert
 		headline="Export Company Data"

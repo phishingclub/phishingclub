@@ -1,12 +1,24 @@
 <script>
 	import { page } from '$app/stores';
+	import { onDestroy } from 'svelte';
 	import { fade } from 'svelte/transition';
 	import { topMenu } from '$lib/consts/navigation';
 	import { shouldHideMenuItem } from '$lib/utils/common';
+	import { AppStateService } from '$lib/service/appState';
 	import ConditionalDisplay from '../ConditionalDisplay.svelte';
 	export let logout;
 	export let visible = false;
 	export let toggleChangeCompanyModal;
+
+	// show a link to the current company's settings when in company view mode
+	const appState = AppStateService.instance;
+	let isCompanyContext = false;
+	let companyID = null;
+	const unsubscribeContext = appState.subscribe((s) => {
+		isCompanyContext = s.context.current === AppStateService.CONTEXT.COMPANY;
+		companyID = s.context.companyID;
+	});
+	onDestroy(unsubscribeContext);
 
 	const icons = {
 		profile: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
@@ -133,6 +145,24 @@
 						<span>{item.label}</span>
 					</a>
 				</ConditionalDisplay>
+				{#if item.label === 'Settings' && isCompanyContext && companyID}
+					<a
+						class="flex items-center pl-5 py-2 text-white transition-colors duration-200 {$page.url
+							.pathname === `/company/${companyID}`
+							? 'bg-active-blue shadow-md dark:bg-active-blue'
+							: 'hover:shadow-md hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20'}"
+						draggable="false"
+						on:click={() => {
+							visible = false;
+						}}
+						href={`/company/${companyID}`}
+					>
+						<div class="flex-shrink-0 mr-3 text-white dark:text-highlight-blue">
+							{@html getTopMenuIcon('Settings')}
+						</div>
+						<span>Company Settings</span>
+					</a>
+				{/if}
 			{/each}
 			<button
 				on:click={logout}

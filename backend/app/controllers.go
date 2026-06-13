@@ -40,10 +40,11 @@ type Controllers struct {
 	Backup            *controller.Backup
 	IPAllowList       *controller.IPAllowList
 	OAuthProvider     *controller.OAuthProvider
-	CompanyScimConfig *controller.CompanyScimConfig
-	Scim              *controller.Scim
-	RemoteBrowser     *controller.RemoteBrowserController
-	ReportTemplate    *controller.ReportTemplate
+	CompanyScimConfig   *controller.CompanyScimConfig
+	CompanyReportConfig *controller.CompanyReportConfig
+	Scim                *controller.Scim
+	RemoteBrowser       *controller.RemoteBrowserController
+	ReportTemplate      *controller.ReportTemplate
 }
 
 // NewControllers creates a collection of controllers
@@ -205,6 +206,11 @@ func NewControllers(
 		CompanyScimConfigService: services.CompanyScimConfig,
 		ScimService:              services.Scim,
 	}
+	companyReportConfig := &controller.CompanyReportConfig{
+		Common:                     common,
+		CompanyReportConfigService: services.CompanyReportConfig,
+		CampaignService:            services.Campaign,
+	}
 	scim := &controller.Scim{
 		Common:      common,
 		ScimService: services.Scim,
@@ -260,9 +266,10 @@ func NewControllers(
 		Backup:            backup,
 		IPAllowList:       ipAllowList,
 		OAuthProvider:     oauthProvider,
-		CompanyScimConfig: companyScimConfig,
-		Scim:              scim,
-		RemoteBrowser:     remoteBrowser,
-		ReportTemplate:    reportTemplate,
+		CompanyScimConfig:   companyScimConfig,
+		CompanyReportConfig: companyReportConfig,
+		Scim:                scim,
+		RemoteBrowser:       remoteBrowser,
+		ReportTemplate:      reportTemplate,
 	}
 }

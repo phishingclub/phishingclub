@@ -13,6 +13,7 @@
 	import FormError from '$lib/components/FormError.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Editor from '$lib/components/editor/Editor.svelte';
+	import CompanyReportDeliveryModal from '$lib/components/modal/CompanyReportDeliveryModal.svelte';
 
 	const appState = AppStateService.instance;
 	$: isCompanyContext = appState.isCompanyContext();
@@ -23,6 +24,9 @@
 	let isReportPDFEnabled = false;
 	let isReportPDFEnableModalVisible = false;
 	let isTogglingReportPDF = false;
+
+	// global default report delivery
+	let isReportDeliveryModalVisible = false;
 
 	// report template
 	let isReportTemplateModalVisible = false;
@@ -177,7 +181,7 @@
 		</svelte:fragment>
 	</SettingsCard>
 
-	{#if !isCompanyContext}
+	{#if !isCompanyContext && isReportPDFEnabled}
 		<SettingsCard title="Report Template">
 			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
 				Default HTML template used when generating campaign PDF reports. Companies without their own
@@ -187,9 +191,23 @@
 				<Button size={'large'} on:click={openReportTemplateModal}>Edit Template</Button>
 			</svelte:fragment>
 		</SettingsCard>
+
+		<SettingsCard title="Report Delivery">
+			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+				Default delivery settings used to email campaign reports. Companies without their own
+				configuration fall back to this.
+			</p>
+			<svelte:fragment slot="footer">
+				<Button size={'large'} on:click={() => (isReportDeliveryModalVisible = true)}
+					>Configure</Button
+				>
+			</svelte:fragment>
+		</SettingsCard>
 	{/if}
 </div>
 {/if}
+
+<CompanyReportDeliveryModal bind:visible={isReportDeliveryModalVisible} isGlobal={true} />
 
 {#if isReportTemplateModalVisible}
 	<Modal

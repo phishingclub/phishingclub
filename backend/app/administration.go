@@ -77,6 +77,10 @@ const (
 	ROUTE_V1_COMPANY_SCIM_TOKEN       = "/api/v1/company/scim/:companyID/token"
 	ROUTE_V1_COMPANY_SCIM_PRUNE       = "/api/v1/company/scim/:companyID/prune"
 	ROUTE_V1_COMPANY_SCIM_RESTORE     = "/api/v1/company/scim/:companyID/restore"
+	ROUTE_V1_COMPANY_REPORT_CONFIG     = "/api/v1/company/report-config/:companyID"
+	ROUTE_V1_COMPANY_REPORT_CONFIG_LOG = "/api/v1/company/report-config/:companyID/log"
+	ROUTE_V1_REPORT_CONFIG_GLOBAL      = "/api/v1/report-config"
+	ROUTE_V1_REPORT_CONFIG_SEND        = "/api/v1/report-config/send/:id"
 	// scim v2 provisioning endpoints (public — authenticated via bearer token)
 	ROUTE_SCIM_V2_SERVICE_PROVIDER_CONFIG = "/api/v1/scim/v2/:companyID/ServiceProviderConfig"
 	ROUTE_SCIM_V2_RESOURCE_TYPES          = "/api/v1/scim/v2/:companyID/ResourceTypes"
@@ -362,6 +366,16 @@ func setupRoutes(
 		POST(ROUTE_V1_COMPANY_SCIM_TOKEN, middleware.SessionHandler, controllers.CompanyScimConfig.RotateToken).
 		POST(ROUTE_V1_COMPANY_SCIM_PRUNE, middleware.SessionHandler, controllers.CompanyScimConfig.Prune).
 		POST(ROUTE_V1_COMPANY_SCIM_RESTORE, middleware.SessionHandler, controllers.CompanyScimConfig.Restore).
+		// company report delivery
+		GET(ROUTE_V1_COMPANY_REPORT_CONFIG, middleware.SessionHandler, controllers.CompanyReportConfig.GetByCompanyID).
+		POST(ROUTE_V1_COMPANY_REPORT_CONFIG, middleware.SessionHandler, controllers.CompanyReportConfig.Upsert).
+		DELETE(ROUTE_V1_COMPANY_REPORT_CONFIG, middleware.SessionHandler, controllers.CompanyReportConfig.Delete).
+		GET(ROUTE_V1_COMPANY_REPORT_CONFIG_LOG, middleware.SessionHandler, controllers.CompanyReportConfig.GetLogByCompanyID).
+		// global default report delivery
+		GET(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.GetGlobal).
+		POST(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.UpsertGlobal).
+		DELETE(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.DeleteGlobal).
+		POST(ROUTE_V1_REPORT_CONFIG_SEND, middleware.SessionHandler, controllers.CompanyReportConfig.SendNow).
 		// options
 		GET(ROUTE_V1_OPTION_GET, middleware.SessionHandler, controllers.Option.Get).
 		POST(ROUTE_V1_OPTION, middleware.SessionHandler, middleware.SessionHandler, controllers.Option.Update).

@@ -233,6 +233,7 @@ func main() {
 		certMagicCache,
 		*flagFilePath,
 		conf.IPSecurity.TrustedProxies,
+		conf.RemoteBrowser.ExecPath,
 	)
 	// get entra-id options and setup msal client
 	ssoOpt, err := services.SSO.GetSSOOptionWithoutAuth(context.Background())

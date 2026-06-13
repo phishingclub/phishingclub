@@ -59,6 +59,8 @@ func initialInstallAndSeed(
 		&database.OAuthState{},
 		&database.MicrosoftDeviceCode{},
 		&database.CompanyScimConfig{},
+		&database.CompanyReportConfig{},
+		&database.ReportSendLog{},
 		&database.RemoteBrowser{},
 		&database.ReportTemplate{},
 	}
