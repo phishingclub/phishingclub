@@ -12,8 +12,8 @@
 		destroyVimClipboardIntegration
 	} from '$lib/utils/vimClipboard.js';
 	import { displayMode, DISPLAY_MODE } from '$lib/store/displayMode';
-	/** @type {'domain'|'page'|'email'} */
 
+	/** @type {'domain'|'page'|'email'|'report'} */
 	export let contentType;
 	export let value;
 	export let baseURL = 'example.test';
@@ -94,7 +94,9 @@
 			result['Device Code'] = deviceCodeTemplates;
 		}
 		if ($displayMode === DISPLAY_MODE.BLACKBOX && contentType === 'page') {
-			result['Remote Browser'] = [{ label: 'Script', text: '{{RemoteBrowserScript "remote_browser_name"}}' }];
+			result['Remote Browser'] = [
+				{ label: 'Script', text: '{{RemoteBrowserScript "remote_browser_name"}}' }
+			];
 		}
 		return result;
 	})();
@@ -510,7 +512,10 @@
 					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
 					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin')
 					.replaceAll('{{DeviceCodeCaptured}}', 'false')
-					.replace(/\{\{RemoteBrowserScript\s+"[^"]*"\}\}/g, '<!-- RemoteBrowserScript (injected at runtime) -->');
+					.replace(
+						/\{\{RemoteBrowserScript\s+"[^"]*"\}\}/g,
+						'<!-- RemoteBrowserScript (injected at runtime) -->'
+					);
 			case 'email':
 				return text
 					.replaceAll('{{.FirstName}}', 'Alice')
@@ -586,7 +591,6 @@
 			fileInputRef.click();
 		}
 	};
-
 
 	// formatDate converts readable date format (YmdHis) to formatted date string
 	const formatDate = (date, format) => {

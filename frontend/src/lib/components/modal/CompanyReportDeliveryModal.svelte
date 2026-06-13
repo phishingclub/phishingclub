@@ -216,8 +216,6 @@
 		}
 	};
 
-	$: selectedSmtp = form.smtpConfigurationID ? smtpByID[form.smtpConfigurationID] : null;
-
 	$: isBusy = isSaving || isDeleting;
 </script>
 
@@ -322,22 +320,6 @@
 				bind:value={form.smtpConfigurationID}
 				options={smtpOptions}>SMTP configuration</TextFieldSelect
 			>
-			{#if selectedSmtp}
-				<div
-					class="-mt-2 rounded-md bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700/60 px-3 py-2 text-xs text-gray-500 dark:text-gray-400 space-y-0.5"
-				>
-					<p>
-						Host <span class="text-gray-700 dark:text-gray-300 font-mono">{selectedSmtp.host}</span>
-					</p>
-					{#if selectedSmtp.username}
-						<p>
-							Username
-							<span class="text-gray-700 dark:text-gray-300 font-mono">{selectedSmtp.username}</span>
-						</p>
-					{/if}
-				</div>
-			{/if}
-
 			<!-- sender email (the From address) -->
 			<TextField
 				width="full"
