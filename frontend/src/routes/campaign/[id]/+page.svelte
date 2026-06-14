@@ -414,7 +414,7 @@
 			const rawEvents = (res.data?.rows ?? [])
 				.filter((v) => v.sendAt)
 				.map((v) => ({
-					id: `sched_${v.id ?? (v.recipient?.email + '_' + v.sendAt)}`,
+					id: `sched_${v.id ?? v.recipient?.email + '_' + v.sendAt}`,
 					createdAt: v.sendAt,
 					eventName: 'campaign_recipient_scheduled',
 					recipient: v.recipient
@@ -3002,8 +3002,7 @@
 		ok="Send"
 	>
 		<div class="mt-4 text-gray-700 dark:text-gray-200">
-			Send the PDF report for <strong>{campaign?.name}</strong> to the recipient group configured for
-			this company. <br />Configure recipients and SMTP under the company's Reports settings.
+			Send the campaign PDF report to the recipient group configured for this company.
 		</div>
 	</Alert>
 	<Alert

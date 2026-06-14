@@ -23,9 +23,9 @@
 	// defaults used by the server when no subject or body is set; mirrored here so
 	// the editor shows what will actually be sent. keep in sync with the backend
 	// defaultReportEmailSubject and defaultReportEmailBody constants.
-	const DEFAULT_EMAIL_SUBJECT = 'Campaign report: {{.CampaignName}}';
+	const DEFAULT_EMAIL_SUBJECT = 'Campaign report: {{.CompanyName}} - {{.CampaignName}}';
 	const DEFAULT_EMAIL_BODY =
-		'<p>The phishing simulation report for <strong>{{.CampaignName}}</strong> is attached.</p>';
+		'<p>Hi,</p><p>The report for <strong>{{.CampaignName}}</strong> is ready and attached.</p>';
 
 	// local state
 	let config = null;

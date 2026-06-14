@@ -3,7 +3,6 @@
 	import { api } from '$lib/api/apiProxy.js';
 	import { addToast } from '$lib/store/toast';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
-	import { AppStateService } from '$lib/service/appState';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
 	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -14,9 +13,6 @@
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import CompanyReportDeliveryModal from '$lib/components/modal/CompanyReportDeliveryModal.svelte';
-
-	const appState = AppStateService.instance;
-	$: isCompanyContext = appState.isCompanyContext();
 
 	let loaded = false;
 
@@ -181,7 +177,7 @@
 		</svelte:fragment>
 	</SettingsCard>
 
-	{#if !isCompanyContext && isReportPDFEnabled}
+	{#if isReportPDFEnabled}
 		<SettingsCard title="Report Template">
 			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
 				Default HTML template used when generating campaign PDF reports. Companies without their own
