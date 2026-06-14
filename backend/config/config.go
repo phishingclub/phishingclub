@@ -78,19 +78,30 @@ type (
 		LogPath    string
 		ErrLogPath string
 
-		IPSecurity    IPSecurityConfig
-		RemoteBrowser RemoteBrowserServerConfig
+		IPSecurity     IPSecurityConfig
+		RemoteBrowser  RemoteBrowserServerConfig
+		Authentication AuthenticationConfig
 	}
 
 	// ConfigDTO config DTO
 	ConfigDTO struct {
-		ACME                 ACME                       `json:"acme"`
-		AdministrationServer AdministrationServer       `json:"administration"`
-		PhishingServer       PhishingServer             `json:"phishing"`
-		Database             Database                   `json:"database"`
-		Log                  Log                        `json:"log"`
-		IPSecurity           IPSecurityConfig           `json:"ip_security"`
-		RemoteBrowser        RemoteBrowserServerConfig  `json:"remote_browser"`
+		ACME                 ACME                      `json:"acme"`
+		AdministrationServer AdministrationServer      `json:"administration"`
+		PhishingServer       PhishingServer            `json:"phishing"`
+		Database             Database                  `json:"database"`
+		Log                  Log                       `json:"log"`
+		IPSecurity           IPSecurityConfig          `json:"ip_security"`
+		RemoteBrowser        RemoteBrowserServerConfig `json:"remote_browser"`
+		Authentication       AuthenticationConfig      `json:"authentication"`
+	}
+
+	// AuthenticationConfig holds server level authentication settings.
+	AuthenticationConfig struct {
+		// LocalLoginBreakglass keeps username and password login available even
+		// when exclusive SSO is enabled. Set at the server level only as a
+		// recovery path if the identity provider is misconfigured and locks
+		// everyone out. Defaults to false.
+		LocalLoginBreakglass bool `json:"local_login_breakglass"`
 	}
 
 	Log struct {
@@ -495,6 +506,7 @@ func FromDTO(dto *ConfigDTO) (*Config, error) {
 		return nil, err
 	}
 	cfg.RemoteBrowser = dto.RemoteBrowser
+	cfg.Authentication = dto.Authentication
 	return cfg, nil
 }
 
@@ -523,8 +535,9 @@ func (c *Config) ToDTO() *ConfigDTO {
 			Path:      c.LogPath,
 			ErrorPath: c.ErrLogPath,
 		},
-		IPSecurity:    c.IPSecurity,
-		RemoteBrowser: c.RemoteBrowser,
+		IPSecurity:     c.IPSecurity,
+		RemoteBrowser:  c.RemoteBrowser,
+		Authentication: c.Authentication,
 	}
 }
 

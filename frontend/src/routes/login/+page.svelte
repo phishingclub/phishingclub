@@ -40,6 +40,8 @@
 	let inputType = 'password';
 	let isPasswordVisible = true;
 	let isSSOEnabled = false;
+	let ssoProviderType = 'entra';
+	let exclusiveLogin = false;
 
 	let isSubmitting = false;
 
@@ -65,8 +67,10 @@
 		showIsLoading();
 		try {
 			const res = await api.sso.isEnabled();
-			if (res.data) {
+			if (res.data && res.data.enabled) {
 				isSSOEnabled = true;
+				ssoProviderType = res.data.providerType || 'entra';
+				exclusiveLogin = !!res.data.exclusiveLogin;
 			}
 		} catch (e) {
 			addToast('failed to check sso status', 'Error');
@@ -252,6 +256,7 @@
 					on:submit={(e) => onSubmitLogin('password', e)}
 					class="flex flex-col items-center justify-center w-full md:p-px lg:p-4"
 				>
+					{#if !exclusiveLogin}
 					<div class="flex flex-col w-full p-4 h-24">
 						<label
 							for="Username"
@@ -326,7 +331,10 @@
 							/>
 						</div>
 					</div>
-					<CTAbutton disabled={isSubmitting} />
+					{/if}
+					{#if !exclusiveLogin}
+						<CTAbutton disabled={isSubmitting} />
+					{/if}
 					{#if isSSOEnabled}
 						<div class="absolute bottom-12">
 							<div
@@ -334,9 +342,18 @@
 							>
 								SSO
 							</div>
-							<a href="/api/v1/sso/entra-id/login">
-								<img src="/ms-login-light.svg" alt="Login with Microsoft" />
-							</a>
+							{#if ssoProviderType === 'oidc'}
+								<a
+									href="/api/v1/sso/oidc/login"
+									class="block px-6 py-3 text-center font-semibold text-white bg-cta-blue dark:bg-highlight-blue rounded hover:opacity-90 transition-opacity duration-200"
+								>
+									Sign in with SSO
+								</a>
+							{:else}
+								<a href="/api/v1/sso/entra-id/login">
+									<img src="/ms-login-light.svg" alt="Login with Microsoft" />
+								</a>
+							{/if}
 						</div>
 					{/if}
 				</form>

@@ -242,12 +242,21 @@ func main() {
 		return
 	}
 	if ssoOpt.Enabled {
-		services.SSO.MSALClient, err = sso.NewEntreIDClient(ssoOpt)
-		if err != nil && !errors.Is(err, errs.ErrSSODisabled) {
-			logger.Errorw("failed to setup msal client", "error", err)
-			return
+		switch ssoOpt.Provider() {
+		case data.SSOProviderOIDC:
+			services.SSO.OIDCClient, err = sso.NewOIDCClient(context.Background(), ssoOpt)
+			if err != nil && !errors.Is(err, errs.ErrSSODisabled) {
+				// discovery can fail if the provider is unreachable at startup,
+				// log and continue so the rest of the server still comes up
+				logger.Errorw("failed to setup OIDC client", "error", err)
+			}
+		default:
+			services.SSO.MSALClient, err = sso.NewEntreIDClient(ssoOpt)
+			if err != nil && !errors.Is(err, errs.ErrSSODisabled) {
+				logger.Errorw("failed to setup msal client", "error", err)
+				return
+			}
 		}
-
 	}
 	middlewares := app.NewMiddlewares(
 		1,

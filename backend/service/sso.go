@@ -26,6 +26,7 @@ type SSO struct {
 	UserService    *User
 	SessionService *Session
 	MSALClient     *confidential.Client
+	OIDCClient     *sso.OIDCClient
 }
 
 type MsGraphUserInfo struct {
@@ -73,9 +74,16 @@ func (s *SSO) Upsert(
 		s.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	ssoOpt.Enabled = len(ssoOpt.ClientID.String()) > 0 &&
-		len(ssoOpt.TenantID.String()) > 0 &&
-		len(ssoOpt.ClientSecret.String()) > 0
+	switch ssoOpt.Provider() {
+	case data.SSOProviderOIDC:
+		// PKCE is always used, so a public client without a secret is valid
+		ssoOpt.Enabled = len(ssoOpt.IssuerURL.String()) > 0 &&
+			len(ssoOpt.ClientID.String()) > 0
+	default:
+		ssoOpt.Enabled = len(ssoOpt.ClientID.String()) > 0 &&
+			len(ssoOpt.TenantID.String()) > 0 &&
+			len(ssoOpt.ClientSecret.String()) > 0
+	}
 
 	// if the config is incomplete, we clear it
 	if !ssoOpt.Enabled {
@@ -83,6 +91,12 @@ func (s *SSO) Upsert(
 		ssoOpt.TenantID = *vo.NewEmptyOptionalString64()
 		ssoOpt.ClientSecret = *vo.NewEmptyOptionalString1024()
 		ssoOpt.RedirectURL = *vo.NewEmptyOptionalString1024()
+		ssoOpt.IssuerURL = *vo.NewEmptyOptionalString1024()
+		ssoOpt.Scopes = *vo.NewEmptyOptionalString1024()
+		ssoOpt.ACRValues = *vo.NewEmptyOptionalString1024()
+		// never leave exclusive login on without a working SSO, it would lock
+		// everyone out of the local login as well
+		ssoOpt.ExclusiveLogin = false
 	}
 	opt, err := ssoOpt.ToOption()
 	if err != nil {
@@ -94,14 +108,22 @@ func (s *SSO) Upsert(
 		return errs.Wrap(err)
 	}
 	s.AuditLogAuthorized(ae)
-	// replace the in memory msal client
+	// replace the in memory clients for both providers
+	s.MSALClient = nil
+	s.OIDCClient = nil
 	if ssoOpt.Enabled {
-		s.MSALClient, err = sso.NewEntreIDClient(ssoOpt)
-		if err != nil {
-			return errs.Wrap(err)
+		switch ssoOpt.Provider() {
+		case data.SSOProviderOIDC:
+			s.OIDCClient, err = sso.NewOIDCClient(ctx, ssoOpt)
+			if err != nil {
+				return errs.Wrap(err)
+			}
+		default:
+			s.MSALClient, err = sso.NewEntreIDClient(ssoOpt)
+			if err != nil {
+				return errs.Wrap(err)
+			}
 		}
-	} else {
-		s.MSALClient = nil
 	}
 
 	return nil
@@ -261,4 +283,125 @@ func (s *SSO) getMsGraphMe(ctx context.Context, accessToken string) (*MsGraphUse
 	)
 
 	return &userInfo, nil
+}
+
+// SSOLoginStatus is returned to the login page so it can render the correct
+// provider button and hide local login when exclusive SSO is on.
+type SSOLoginStatus struct {
+	Enabled        bool   `json:"enabled"`
+	ProviderType   string `json:"providerType"`
+	ExclusiveLogin bool   `json:"exclusiveLogin"`
+}
+
+// LoginStatus reports whether SSO is active, which provider is configured and
+// whether local login is exclusive.
+func (s *SSO) LoginStatus(ctx context.Context) (*SSOLoginStatus, error) {
+	ssoOpt, err := s.GetSSOOptionWithoutAuth(ctx)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	enabled := s.MSALClient != nil || s.OIDCClient != nil
+	return &SSOLoginStatus{
+		Enabled:        enabled,
+		ProviderType:   ssoOpt.Provider(),
+		ExclusiveLogin: enabled && ssoOpt.ExclusiveLogin,
+	}, nil
+}
+
+// IsExclusiveLoginEnabled reports whether local username and password login is
+// disabled. It is only true when SSO is actually active in memory, so a broken
+// or unconfigured SSO never locks out local login.
+func (s *SSO) IsExclusiveLoginEnabled(ctx context.Context) (bool, error) {
+	ssoOpt, err := s.GetSSOOptionWithoutAuth(ctx)
+	if err != nil {
+		return false, errs.Wrap(err)
+	}
+	enabled := s.MSALClient != nil || s.OIDCClient != nil
+	return enabled && ssoOpt.ExclusiveLogin, nil
+}
+
+// IsLocalLoginBlocked reports whether a username and password login must be
+// refused because exclusive SSO is enabled. The breakglass argument comes from
+// the server config and keeps local login available for recovery. A blocked
+// attempt is audited.
+func (s *SSO) IsLocalLoginBlocked(ctx context.Context, breakglass bool, ip string) (bool, error) {
+	exclusive, err := s.IsExclusiveLoginEnabled(ctx)
+	if err != nil {
+		return false, errs.Wrap(err)
+	}
+	if !exclusive || breakglass {
+		return false, nil
+	}
+	ae := NewAuditEvent("User.LocalLoginDenied", nil)
+	ae.Details["ip"] = ip
+	s.AuditLogNotAuthorized(ae)
+	return true, nil
+}
+
+// OIDCAuthCodeURL builds the OIDC authorization request URL. The caller supplies
+// the state, nonce and PKCE verifier so it can store them for the callback.
+func (s *SSO) OIDCAuthCodeURL(
+	ctx context.Context,
+	state string,
+	nonce string,
+	verifier string,
+) (string, error) {
+	ssoOpt, err := s.GetSSOOptionWithoutAuth(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !ssoOpt.Enabled || ssoOpt.Provider() != data.SSOProviderOIDC {
+		return "", errs.Wrap(errs.ErrSSODisabled)
+	}
+	if s.OIDCClient == nil {
+		return "", errs.Wrap(errors.New("no OIDC client"))
+	}
+	return s.OIDCClient.AuthCodeURL(state, nonce, verifier), nil
+}
+
+// HandleOIDCCallback verifies the OIDC callback, resolves the pre provisioned
+// user by their verified email and creates a session.
+func (s *SSO) HandleOIDCCallback(
+	g *gin.Context,
+	code string,
+	nonce string,
+	verifier string,
+) (*model.Session, error) {
+	ssoOpt, err := s.GetSSOOptionWithoutAuth(g)
+	if err != nil {
+		return nil, err
+	}
+	if !ssoOpt.Enabled || ssoOpt.Provider() != data.SSOProviderOIDC {
+		return nil, errs.Wrap(errs.ErrSSODisabled)
+	}
+	if s.OIDCClient == nil {
+		return nil, errors.New("no OIDC client in memory")
+	}
+	userInfo, err := s.OIDCClient.Exchange(g, code, nonce, verifier)
+	if err != nil {
+		s.Logger.Debugw("OIDC code exchange failed", "error", err)
+		return nil, err
+	}
+	name := userInfo.Name
+	if name == "" {
+		name = strings.Split(userInfo.Email, "@")[0]
+	}
+	userID, err := s.UserService.CreateFromSSO(g, name, userInfo.Email, userInfo.Subject)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	if userID == nil {
+		return nil, errs.Wrap(errors.New("user ID is unexpectedly nil"))
+	}
+	user, err := s.UserService.GetByIDWithoutAuth(g, userID)
+	if err != nil {
+		s.Logger.Debugw("failed to get SSO user", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	session, err := s.SessionService.Create(g, user, g.ClientIP())
+	if err != nil {
+		s.Logger.Debugw("failed to create session from SSO", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	return session, nil
 }

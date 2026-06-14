@@ -24,6 +24,15 @@ const (
 
 	OptionKeyAdminSSOLogin = "sso_login"
 
+	// SSOProviderEntra is the Microsoft Entra ID provider, also the default when
+	// the stored provider type is empty so existing configurations keep working
+	SSOProviderEntra = "entra"
+	// SSOProviderOIDC is a generic OpenID Connect provider such as Keycloak
+	SSOProviderOIDC = "oidc"
+
+	// SSODefaultScopes are the OIDC scopes requested when none are configured
+	SSODefaultScopes = "openid profile email"
+
 	OptionKeyProxyCookieName = "proxy_cookie_name"
 
 	// OptionKeyRemoteBrowserWSPath is the seeded random path segment used for the

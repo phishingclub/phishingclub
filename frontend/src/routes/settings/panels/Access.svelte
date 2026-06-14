@@ -14,6 +14,8 @@
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import PasswordField from '$lib/components/PasswordField.svelte';
+	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import CheckboxField from '$lib/components/CheckboxField.svelte';
 
 	let loaded = false;
 	let ssoForm = null;
@@ -22,18 +24,42 @@
 	let updateSSOError = '';
 	let isSubmitting = false;
 	let isSSOEnabled = false;
-	let ssoSettingsFormValues = {
+
+	const providerOptions = [
+		{ value: 'entra', label: 'Microsoft Entra ID' },
+		{ value: 'oidc', label: 'Generic OpenID Connect' }
+	];
+
+	const defaultSSOFormValues = () => ({
+		providerType: 'entra',
 		clientID: null,
 		tenantID: null,
 		redirectURL: null,
-		clientSecret: null
+		clientSecret: null,
+		issuerURL: null,
+		scopes: null,
+		acrValues: null,
+		exclusiveLogin: false
+	});
+
+	let ssoSettingsFormValues = defaultSSOFormValues();
+
+	const ssoAuthPath = (providerType) =>
+		providerType === 'oidc' ? '/api/v1/sso/oidc/auth' : '/api/v1/sso/entra-id/auth';
+
+	const onProviderChange = (value) => {
+		const providerType = value || ssoSettingsFormValues.providerType;
+		ssoSettingsFormValues.providerType = providerType;
+		ssoSettingsFormValues.redirectURL = `${location.origin}${ssoAuthPath(providerType)}`;
 	};
 
 	onMount(async () => {
 		try {
 			await refreshSSO();
 			if (!ssoSettingsFormValues.redirectURL) {
-				ssoSettingsFormValues.redirectURL = `${location.origin}/api/v1/sso/entra-id/auth`;
+				ssoSettingsFormValues.redirectURL = `${location.origin}${ssoAuthPath(
+					ssoSettingsFormValues.providerType
+				)}`;
 			}
 		} finally {
 			loaded = true;
@@ -48,7 +74,10 @@
 			}
 			const sso = JSON.parse(res.data.value);
 			sso.clientSecret = '';
-			ssoSettingsFormValues = sso;
+			ssoSettingsFormValues = { ...defaultSSOFormValues(), ...sso };
+			if (!ssoSettingsFormValues.providerType) {
+				ssoSettingsFormValues.providerType = 'entra';
+			}
 			isSSOEnabled = sso.enabled;
 		} catch (e) {
 			console.error('failed to get SSO configuration', e);
@@ -81,12 +110,7 @@
 
 	const closeSSOModal = () => {
 		updateSSOError = '';
-		ssoSettingsFormValues = {
-			clientID: null,
-			tenantID: null,
-			redirectURL: null,
-			clientSecret: null
-		};
+		ssoSettingsFormValues = defaultSSOFormValues();
 		isSSOModalVisible = false;
 	};
 
@@ -147,34 +171,45 @@
 
 {#if isSSOModalVisible}
 	<Modal bind:visible={isSSOModalVisible} headerText="SSO configuration" onClose={closeSSOModal}>
-		<div class="mt-4">
-			<div>
-				<h3 class="text-xl font-semibold text-gray-700 dark:text-white">Microsoft SSO Setup</h3>
-				<p class="text-gray-600 dark:text-gray-300 mb-4">
-					Configure Single Sign-On with Microsoft Azure AD.
-				</p>
-			</div>
-
-			<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
-				<p class="font-semibold text-gray-900 dark:text-white mb-2">Important:</p>
-				<p class="text-sm text-gray-700 dark:text-gray-300">
-					Accounts that login with SSO will no longer be able to use password login.
-				</p>
-			</div>
-		</div>
 		<FormGrid on:submit={onSubmitSSO} bind:bindTo={ssoForm} {isSubmitting}>
 			<FormColumns>
 				<FormColumn>
-					<TextField
+					<TextFieldSelect
+						id="ssoProvider"
 						required
-						bind:value={ssoSettingsFormValues.clientID}
-						placeholder="e.g., 8adf8e7c-d3ef-4a1b-b6c5-12345678abcd">Client ID</TextField
+						options={providerOptions}
+						bind:value={ssoSettingsFormValues.providerType}
+						onSelect={onProviderChange}>Provider</TextFieldSelect
 					>
-					<TextField
-						required
-						bind:value={ssoSettingsFormValues.tenantID}
-						placeholder="e.g., contoso.onmicrosoft.com">Tenant ID</TextField
-					>
+					{#if ssoSettingsFormValues.providerType === 'oidc'}
+						<TextField
+							required
+							type="url"
+							bind:value={ssoSettingsFormValues.issuerURL}
+							placeholder="https://keycloak.example.com/realms/myrealm">Issuer URL</TextField
+						>
+						<TextField
+							required
+							bind:value={ssoSettingsFormValues.clientID}
+							placeholder="e.g., phishingclub">Client ID</TextField
+						>
+						<TextField
+							optional
+							bind:value={ssoSettingsFormValues.scopes}
+							placeholder="openid profile email">Scopes</TextField
+						>
+					{:else}
+						<TextField
+							required
+							bind:value={ssoSettingsFormValues.clientID}
+							placeholder="e.g., 8adf8e7c-d3ef-4a1b-b6c5-12345678abcd">Client ID</TextField
+						>
+						<TextField
+							required
+							bind:value={ssoSettingsFormValues.tenantID}
+							placeholder="e.g., contoso.onmicrosoft.com">Tenant ID</TextField
+						>
+					{/if}
 				</FormColumn>
 				<FormColumn>
 					<TextField
@@ -185,9 +220,20 @@
 					>
 
 					<PasswordField
-						required
+						required={ssoSettingsFormValues.providerType !== 'oidc'}
+						optional={ssoSettingsFormValues.providerType === 'oidc'}
 						bind:value={ssoSettingsFormValues.clientSecret}
 						placeholder="Enter your client secret">Client Secret</PasswordField
+					>
+					{#if ssoSettingsFormValues.providerType === 'oidc'}
+						<TextField optional bind:value={ssoSettingsFormValues.acrValues} placeholder="e.g., mfa"
+							>ACR Values</TextField
+						>
+					{/if}
+					<CheckboxField
+						inline
+						bind:value={ssoSettingsFormValues.exclusiveLogin}
+						toolTipText="Disable password login while SSO is enabled.">Exclusive SSO</CheckboxField
 					>
 				</FormColumn>
 				<FormError message={updateSSOError} />
