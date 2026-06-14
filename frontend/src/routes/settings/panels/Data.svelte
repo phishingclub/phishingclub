@@ -318,6 +318,10 @@
 			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
 				Automatically delete orphaned recipients (not in any group) on a hourly schedule.
 			</p>
+			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
+				Applies to shared recipients that do not belong to any company. Each company controls its
+				own pruning from its company settings.
+			</p>
 			<div class="space-y-3">
 				<RadioOption
 					checked={autoPruneEnabled}
@@ -333,12 +337,12 @@
 				/>
 			</div>
 			<FormError message={autoPruneError} />
-			<div class="mt-2 flex justify-end">
-				<FormButton size={'medium'} isSubmitting={isSavingAutoPrune} on:click={saveAutoPrune}
-					>Save Changes</FormButton
-				>
-			</div>
 		</div>
+		<svelte:fragment slot="footer">
+			<FormButton size={'medium'} isSubmitting={isSavingAutoPrune} on:click={saveAutoPrune}
+				>Save Changes</FormButton
+			>
+		</svelte:fragment>
 	</SettingsCard>
 </div>
 {/if}
