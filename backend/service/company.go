@@ -230,6 +230,9 @@ func (s *Company) UpdateByID(
 	if v, err := company.Comment.Get(); err == nil {
 		current.Comment.Set(v)
 	}
+	if company.Color.IsSpecified() {
+		current.Color = company.Color
+	}
 	// validate
 	if err := company.Validate(); err != nil {
 		s.Logger.Errorw("failed to validate company", "error", err)

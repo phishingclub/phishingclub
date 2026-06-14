@@ -1,10 +1,11 @@
 <script>
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { addToast } from '$lib/store/toast';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
+	import { companyColorOverride } from '$lib/store/companyColor';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
 	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
@@ -25,13 +26,34 @@
 	let loaded = false;
 	let company = null;
 
+	// default banner color used when a company has no custom color
+	const DEFAULT_COMPANY_COLOR = '#1e3fa8';
+
 	// general form
 	let formValues = {
 		name: '',
-		comment: ''
+		comment: '',
+		color: ''
 	};
 	let generalError = '';
 	let isSaving = false;
+	// the persisted color, used to revert an unsaved live preview on leave
+	let savedColor = '';
+
+	// push the chosen color to the banner store for a live preview while editing
+	// only once loaded so the banner keeps its own value until we have the form
+	$: if (loaded) {
+		companyColorOverride.set({ companyID: companyId, color: formValues.color });
+	}
+
+	onDestroy(() => {
+		// drop any unsaved preview, leaving the banner on the persisted color
+		if (loaded) {
+			companyColorOverride.set({ companyID: companyId, color: savedColor });
+		} else {
+			companyColorOverride.set(null);
+		}
+	});
 
 	// auto-prune (saved on change, like display mode in settings)
 	let autoPruneEnabled = false;
@@ -100,6 +122,8 @@
 			company = res.data;
 			formValues.name = company.name || '';
 			formValues.comment = company.comment || '';
+			formValues.color = company.color || '';
+			savedColor = formValues.color;
 		} catch (e) {
 			addToast('Failed to get company', 'Error');
 			console.error('failed to get company', e);
@@ -132,7 +156,12 @@
 		generalError = '';
 		isSaving = true;
 		try {
-			const res = await api.company.update(companyId, formValues.name, formValues.comment);
+			const res = await api.company.update(
+				companyId,
+				formValues.name,
+				formValues.comment,
+				formValues.color
+			);
 			if (!res.success) {
 				generalError = res.error;
 				return;
@@ -246,6 +275,38 @@
 									placeholder="Add notes about this company..."
 									class="w-full p-3 rounded-md text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 focus:outline-none focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 resize-y transition-colors duration-200"
 								/>
+							</div>
+							<div class="flex flex-col py-2">
+								<p class="font-semibold text-slate-600 dark:text-gray-400 py-2">Banner Color</p>
+								<p class="text-gray-600 dark:text-gray-300 text-sm mb-3">
+									Tints the banner and frame shown while viewing as this company, making it easier to
+									recognize which company you are working in.
+								</p>
+								<div class="flex items-center gap-3">
+									<input
+										type="color"
+										aria-label="Company banner color"
+										value={formValues.color || DEFAULT_COMPANY_COLOR}
+										on:input={(e) => (formValues.color = e.currentTarget.value)}
+										class="h-9 w-12 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent cursor-pointer"
+									/>
+									<input
+										type="text"
+										bind:value={formValues.color}
+										placeholder={DEFAULT_COMPANY_COLOR}
+										maxlength="7"
+										class="w-32 p-2 rounded-md text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 focus:outline-none focus:border-slate-400 dark:focus:border-highlight-blue/80 transition-colors duration-200"
+									/>
+									{#if formValues.color}
+										<button
+											type="button"
+											on:click={() => (formValues.color = '')}
+											class="text-sm text-gray-500 dark:text-gray-400 hover:text-cta-blue dark:hover:text-highlight-blue transition-colors"
+										>
+											Reset to default
+										</button>
+									{/if}
+								</div>
 							</div>
 							<FormError message={generalError} />
 							<div class="mt-6 flex justify-end">

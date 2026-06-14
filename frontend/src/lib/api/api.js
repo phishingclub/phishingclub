@@ -1243,13 +1243,18 @@ export class API {
 		 * @param {string} id
 		 * @param {string} name
 		 * @param {string} comment
+		 * @param {string} [color]   #RGB or #RRGGBB, empty string clears it
 		 * @returns {Promise<ApiResponse>}
 		 */
-		update: async (id, name, comment) => {
-			return await postJSON(this.getPath(`/company/${id}`), {
+		update: async (id, name, comment, color) => {
+			const body = {
 				name: name,
 				comment: comment
-			});
+			};
+			if (color !== undefined) {
+				body.color = color;
+			}
+			return await postJSON(this.getPath(`/company/${id}`), body);
 		},
 
 		/**

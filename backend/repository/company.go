@@ -152,11 +152,18 @@ func ToCompany(row *database.Company) *model.Company {
 	if row.Comment != nil {
 		comment = nullable.NewNullableWithValue(*vo.NewUnsafeOptionalString1MB(*row.Comment))
 	}
+	var color nullable.Nullable[vo.OptionalHexColor]
+	if row.Color != nil {
+		if c, err := vo.NewOptionalHexColor(*row.Color); err == nil {
+			color = nullable.NewNullableWithValue(*c)
+		}
+	}
 	return &model.Company{
 		ID:        id,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
 		Name:      name,
 		Comment:   comment,
+		Color:     color,
 	}
 }

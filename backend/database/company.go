@@ -16,6 +16,8 @@ type Company struct {
 	UpdatedAt *time.Time `gorm:"not null;index"`
 	Name      string     `gorm:"not null;unique;index"`
 	Comment   *string    `gorm:"type:text"`
+	// Color is an optional #RGB or #RRGGBB used to tint the company view banner and frame
+	Color *string `gorm:"type:text"`
 
 	// backref: many-to-one
 	Users           []*User           //`gorm:"foreignKey:CompanyID;"`

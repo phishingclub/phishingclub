@@ -16,6 +16,7 @@ type Company struct {
 	UpdatedAt *time.Time                              `json:"updatedAt"`
 	Name      nullable.Nullable[vo.String64]          `json:"name"`
 	Comment   nullable.Nullable[vo.OptionalString1MB] `json:"comment"`
+	Color     nullable.Nullable[vo.OptionalHexColor]  `json:"color"`
 }
 
 // Validate checks if the Company configuration with a valid state
@@ -41,6 +42,12 @@ func (c *Company) ToDBMap() map[string]any {
 		m["comment"] = nil
 		if comment, err := c.Comment.Get(); err == nil {
 			m["comment"] = comment.String()
+		}
+	}
+	if c.Color.IsSpecified() {
+		m["color"] = nil
+		if color, err := c.Color.Get(); err == nil {
+			m["color"] = color.String()
 		}
 	}
 	return m

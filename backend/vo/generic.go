@@ -3,6 +3,7 @@ package vo
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -170,6 +171,66 @@ func (s *OptionalString64) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	ss, err := NewOptionalString64(str)
+	if err != nil {
+		return unwrapError(err)
+	}
+	s.inner = ss.inner
+	return nil
+}
+
+// hexColorPattern matches a #RGB or #RRGGBB color
+var hexColorPattern = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
+
+// OptionalHexColor is an empty string or a #RGB / #RRGGBB hex color.
+// it is constrained so the value is safe to render into a style attribute
+type OptionalHexColor struct {
+	inner string
+}
+
+// NewOptionalHexColor creates a new optional hex color
+func NewOptionalHexColor(s string) (*OptionalHexColor, error) {
+	s = strings.TrimSpace(s)
+	if s != "" && !hexColorPattern.MatchString(s) {
+		return nil, errors.New("invalid hex color")
+	}
+	return &OptionalHexColor{
+		inner: strings.ToLower(s),
+	}, nil
+}
+
+// NewOptionalHexColorMust creates a new optional hex color and panics if it fails
+func NewOptionalHexColorMust(s string) *OptionalHexColor {
+	a, err := NewOptionalHexColor(s)
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+// NewEmptyOptionalHexColor creates a new empty optional hex color
+func NewEmptyOptionalHexColor() *OptionalHexColor {
+	return &OptionalHexColor{
+		inner: "",
+	}
+}
+
+// String returns the string representation of the hex color
+func (s OptionalHexColor) String() string {
+	return s.inner
+}
+
+// MarshalJSON implements the json.Marshaler interface
+func (s OptionalHexColor) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.inner)
+}
+
+// UnmarshalJSON unmarshals the json into a hex color
+func (s *OptionalHexColor) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+	ss, err := NewOptionalHexColor(str)
 	if err != nil {
 		return unwrapError(err)
 	}
