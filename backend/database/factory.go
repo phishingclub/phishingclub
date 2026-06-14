@@ -2,6 +2,8 @@ package database
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/phishingclub/phishingclub/config"
@@ -17,6 +19,14 @@ func FromConfig(conf config.Config) (*gorm.DB, error) {
 	switch conf.Database().Engine {
 	case config.DefaultAdministrationUseSqlite:
 		var err error
+		// ensure the directory holding the sqlite file exists, sqlite creates
+		// the database file but not its parent directory, so a fresh checkout
+		// where the data directory is absent fails with "unable to open database file"
+		if dir := sqliteDir(conf.Database().DSN); dir != "" {
+			if err := os.MkdirAll(dir, 0o750); err != nil {
+				return nil, errs.Wrap(err)
+			}
+		}
 		// determine the correct separator for additional parameters
 		// use & if user already has query params, otherwise use ?
 		separator := "?"
@@ -48,4 +58,23 @@ func FromConfig(conf config.Config) (*gorm.DB, error) {
 		return nil, config.ErrInvalidDatabase
 	}
 	return db, nil
+}
+
+// sqliteDir returns the directory that must exist for the sqlite DSN.
+// it returns an empty string for in memory databases or when the path has no
+// directory component, in which case no directory needs to be created.
+func sqliteDir(dsn string) string {
+	path := strings.TrimPrefix(dsn, "file:")
+	// drop any query parameters
+	if i := strings.Index(path, "?"); i != -1 {
+		path = path[:i]
+	}
+	if path == "" || strings.Contains(path, ":memory:") {
+		return ""
+	}
+	dir := filepath.Dir(path)
+	if dir == "." || dir == "/" {
+		return ""
+	}
+	return dir
 }

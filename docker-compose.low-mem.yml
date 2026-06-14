@@ -1,0 +1,26 @@
+# Overrides for machines with limited memory.
+# Use together with the base file, or run `make up-low-mem`:
+#   docker compose -f docker-compose.yml -f docker-compose.low-mem.yml up -d
+#
+# The first start runs two memory heavy steps, the backend Go build and the frontend
+# install. Running them at the same time can be killed by the OOM killer (shows up as
+# "signal: killed" on the backend and "vite: not found" on the frontend). These
+# overrides serialize them: the frontend waits until the backend build has produced
+# its binary, and the backend build parallelism is capped to lower its peak memory.
+# The base file is unchanged, so the normal `make up` keeps full build parallelism.
+services:
+  backend:
+    environment:
+      - GOMAXPROCS=2
+    # healthy once air has produced the compiled binary, meaning the Go build finished
+    healthcheck:
+      test: ["CMD-SHELL", "test -x /app/.dev-air/platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 600s
+
+  frontend:
+    depends_on:
+      backend:
+        condition: service_healthy

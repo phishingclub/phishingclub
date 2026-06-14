@@ -13,7 +13,7 @@ services:
       dockerfile: ./Dockerfile
     # the acme certs are deleted because the acme server does not store the account
     # and mouting them again would cause it to error because the account is not found
-    command: /bin/bash -c 'rm -rf /app/.dev/certs/acme/* && air -c /app/.air.docker.toml'
+    command: /bin/bash -c 'mkdir -p /app/.dev/certs/acme && rm -rf /app/.dev/certs/acme/* && air -c /app/.air.docker.toml'
     volumes:
       - ./backend:/app
     environment:

@@ -101,6 +101,13 @@ Speed up your template development with our template workbench tool:
 - Docker and Docker Compose
 - Git
 - Make (recommended, the development workflow is built around make)
+- Enough memory for the first build. The first start compiles the whole backend
+  dependency graph and installs the frontend, which is memory heavy. On a machine
+  with limited memory these two steps running at once can be killed by the OOM
+  killer, showing up as `signal: killed` on the backend and `vite: not found` on the
+  frontend. On such machines start with `make up-low-mem`, which builds the backend
+  before starting the frontend so the heavy steps do not overlap. Otherwise use the
+  normal `make up`, which builds everything in parallel for the fastest startup.
 
 ### Quick Start
 

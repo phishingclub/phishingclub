@@ -1,4 +1,4 @@
-.PHONY: build down up fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up geoip-fetch govulncheck
+.PHONY: build down up up-low-mem fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up geoip-fetch govulncheck
 up:
 	sudo docker compose up -d backend frontend api-test-server pebble dbgate mailer dozzle stats dns test mitmproxy; \
 	sudo docker compose logs -f --tail 1000 backend frontend;
@@ -6,6 +6,11 @@ down:
 	-sudo docker compose down --remove-orphans
 up-build:
 	sudo docker compose up --build --force
+# same as up but for machines with limited memory, the frontend waits for the backend
+# build to finish so the two heavy first build steps do not run at the same time
+up-low-mem:
+	sudo docker compose -f docker-compose.yml -f docker-compose.low-mem.yml up -d backend frontend api-test-server pebble dbgate mailer dozzle stats dns test mitmproxy; \
+	sudo docker compose -f docker-compose.yml -f docker-compose.low-mem.yml logs -f --tail 1000 backend frontend;
 up-reset: down purge up
 restart: down up
 prune:
