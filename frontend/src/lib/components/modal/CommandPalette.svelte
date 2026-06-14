@@ -5,6 +5,9 @@
 	import { goto } from '$app/navigation';
 	import { menu, topMenu } from '$lib/consts/navigation';
 	import { shouldHideMenuItem } from '$lib/utils/common';
+	import { AppStateService } from '$lib/service/appState';
+
+	const appState = AppStateService.instance;
 	// external
 	export let visible = false;
 	export let toggleChangeCompanyModal = () => {};
@@ -72,6 +75,16 @@
 			route: '/settings/update/',
 			category: 'Settings'
 		});
+
+		// add the settings for the company currently being viewed
+		const context = appState.getContext();
+		if (appState.isCompanyContext() && context.companyID) {
+			items.push({
+				label: 'Company Settings',
+				route: `/company/${context.companyID}`,
+				category: context.companyName || 'Company'
+			});
+		}
 
 		// add actions (not navigation)
 		items.push({
