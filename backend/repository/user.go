@@ -419,7 +419,10 @@ func (r *User) GetByUsername(
 	return ToUser(dbUser)
 }
 
-// GetByEmail gets a user by email
+// GetByEmail gets a user by a case insensitive email match. the address is
+// compared with LOWER() on both sides so differently cased addresses such as
+// Alice@corp.com and alice@corp.com resolve to the same user. this keeps SSO
+// login matching and the email uniqueness checks robust to casing.
 func (r *User) GetByEmail(
 	ctx context.Context,
 	email *vo.Email,
@@ -429,7 +432,7 @@ func (r *User) GetByEmail(
 	result := r.with(options, r.DB).
 		Where(
 			fmt.Sprintf(
-				"%s = ?",
+				"LOWER(%s) = LOWER(?)",
 				TableColumn(database.USER_TABLE, "email"),
 			),
 			email.String(),
