@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
-	"fmt"
 	"strings"
 
 	"github.com/go-errors/errors"
@@ -130,19 +129,24 @@ func (u *User) Create(
 	return id, nil
 }
 
-// CreateFromSSO create a users from SSO login flow
-// if the user already exists it returns the ID
+// CreateFromSSO resolves an existing user for an SSO login.
+// Users are never auto provisioned, an administrator must create the user
+// first, so an unknown identity is rejected. Matching is done on the email
+// reported by the identity provider, which in a managed directory is an admin
+// controlled attribute the user cannot change to impersonate someone else.
+// Email is also portable across providers, so switching SSO method does not
+// lock accounts out.
 func (u *User) CreateFromSSO(
 	ctx context.Context,
 	name string,
 	email string,
 	externalID string,
 ) (*uuid.UUID, error) {
-	ae := NewAuditEvent("User.SSOCreate", nil) // TODO could be a system session
-	// check if user already exists by email
+	ae := NewAuditEvent("User.SSOLogin", nil)
+	ae.Details["email"] = email
 	emailVO, err := vo.NewEmail(email)
 	if err != nil {
-		u.Logger.Debugw("failed to setup SSO user", "error", err)
+		u.Logger.Debugw("failed SSO login: invalid email", "error", err)
 		return nil, errs.Wrap(err)
 	}
 	existingUser, err := u.UserRepository.GetByEmail(
@@ -151,118 +155,25 @@ func (u *User) CreateFromSSO(
 		&repository.UserOption{},
 	)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		u.Logger.Debugw("failed to setup SSO user: DB error", "error", err)
+		u.Logger.Debugw("failed SSO login: DB error", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	if existingUser != nil {
-		// update the user to SSO by removing the password hash
-		// if they dont have a SSO id
-		ssoID, err := existingUser.SSOID.Get()
-		if err != nil {
-			u.Logger.Errorf("failed to update user to SSO", "error", err)
-		}
-		if len(ssoID) == 0 {
-			uid := existingUser.ID.MustGet()
-			err := u.UserRepository.UpdateUserToSSO(ctx, &uid, externalID)
-			if err != nil {
-				u.Logger.Errorf("failed to update user to SSO", "error", err)
-				return nil, errs.Wrap(err)
-			}
-		}
-		// User exists, return their ID
-		id := existingUser.ID.MustGet()
-		return &id, nil
+	// users are not auto provisioned, an admin must create the user first
+	if existingUser == nil {
+		u.Logger.Infow("rejected SSO login for unprovisioned user", "email", email)
+		u.AuditLogNotAuthorized(ae)
+		return nil, errs.Wrap(errs.ErrSSOUserNotProvisioned)
 	}
-	// create username from email (part before @)
-	username := strings.Split(email, "@")[0]
-	// trim the username for non alpha numeric
-	// trim username for non alpha numeric characters
-	username = strings.Map(
-		func(r rune) rune {
-			if r >= 'a' && r <= 'z' ||
-				r >= 'A' && r <= 'Z' ||
-				r >= '0' && r <= '9' {
-				return r
-			}
-			return -1
-		},
-		username,
-	)
-	usernameVO, err := vo.NewUsername(username)
-	if err != nil {
-		u.Logger.Debugw("failed to setup SSO user: username error", "error", err)
-		return nil, errs.Wrap(err)
-	}
-	// check if username exists, append a random string
-	count := 1
-	baseUsername := username
-	for {
-		_, err := u.UserRepository.GetByUsername(
-			ctx,
-			usernameVO,
-			&repository.UserOption{},
-		)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			break
-		}
-		ri, err := random.RandomIntN(4)
-		if err != nil {
-			u.Logger.Debugw("failed to setup SSO user: rand gen error", "error", err)
-			return nil, errs.Wrap(err)
-		}
-		usernameVO, err = vo.NewUsername(fmt.Sprintf("%s%d", baseUsername, ri))
-		if err != nil {
-			return nil, errs.Wrap(err)
-		}
-		if count > 3 {
-			err := errors.New("too many attempts at creating username")
-			u.Logger.Debugw("failed to setup SSO user: username error", "error", err)
-			return nil, errs.Wrap(err)
-		}
-		count++
-	}
-	nameVO, err := vo.NewUserFullname(name)
-	if err != nil {
-		return nil, errs.Wrap(err)
-	}
-	// generate a random password
-	/*
-		passwd, err := vo.NewReasonableLengthPasswordGenerated()
-		if err != nil {
-			u.Logger.Debugw("failed to setup SSO user: password generation", "error", err)
-			return nil, errs.Wrap(err)
-		}
-		hash, err := u.PasswordHasher.Hash(passwd.String())
-	*/
-	// get role
-	adminRole, err := u.RoleRepository.GetByName(
-		ctx,
-		data.RoleSuperAdministrator,
-	)
-	if err != nil {
-		return nil, errs.Wrap(err)
-	}
-	// create new user
-	user := model.User{
-		Username: nullable.NewNullableWithValue(*usernameVO),
-		Email:    nullable.NewNullableWithValue(*emailVO),
-		Name:     nullable.NewNullableWithValue(*nameVO),
-		// Set default role - you might want to configure this
-		RoleID: nullable.NewNullableWithValue(adminRole.ID),
-	}
-	// insert user
-	id, err := u.UserRepository.Insert(
-		ctx,
-		&user,
-		"", //empty hash for MFA users
-		externalID,
-	)
-	if err != nil {
+	uid := existingUser.ID.MustGet()
+	// make the account SSO only by removing the password hash and store the
+	// current provider subject id for reference, overwriting any previous value
+	// so a change of SSO method does not lock the account out
+	if err := u.UserRepository.UpdateUserToSSO(ctx, &uid, externalID); err != nil {
+		u.Logger.Errorw("failed to update user to SSO", "error", err)
 		return nil, errs.Wrap(err)
 	}
 	u.AuditLogAuthorized(ae)
-
-	return id, nil
+	return &uid, nil
 }
 
 // GetMaskedAPIKey gets a masked API user key

@@ -53,6 +53,9 @@ var (
 
 	// sso
 	ErrSSODisabled = goerrors.New("SSO disabled")
+	// ErrSSOUserNotProvisioned is returned when an SSO login matches no existing
+	// user, users are never auto provisioned and must be created by an admin first
+	ErrSSOUserNotProvisioned = goerrors.New("SSO user not provisioned")
 )
 
 // format messages
