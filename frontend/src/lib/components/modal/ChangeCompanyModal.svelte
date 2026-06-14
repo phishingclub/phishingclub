@@ -88,9 +88,15 @@
 	};
 
 	const onClickSwitch = async () => {
+		// selectedCompany is free text from the combobox, so it may not match a
+		// company when the user types without picking from the list
+		const c = companies.find((c) => c.name === selectedCompany);
+		if (!c) {
+			addToast('Select a company from the list', 'Error');
+			return;
+		}
 		showIsLoading();
 		visible = false;
-		const c = companies.find((c) => c.name === selectedCompany);
 		appState.setCompanyContext(c.id, c.name);
 		localStorage.setItem('context', JSON.stringify({ id: c.id, name: c.name }));
 		location.reload();
