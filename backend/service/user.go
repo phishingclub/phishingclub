@@ -165,11 +165,12 @@ func (u *User) CreateFromSSO(
 		return nil, errs.Wrap(errs.ErrSSOUserNotProvisioned)
 	}
 	uid := existingUser.ID.MustGet()
-	// make the account SSO only by removing the password hash and store the
-	// current provider subject id for reference, overwriting any previous value
-	// so a change of SSO method does not lock the account out
-	if err := u.UserRepository.UpdateUserToSSO(ctx, &uid, externalID); err != nil {
-		u.Logger.Errorw("failed to update user to SSO", "error", err)
+	// store the current provider subject id for reference, overwriting any
+	// previous value so a change of SSO method does not lock the account out.
+	// the password is left intact, whether password login is allowed is
+	// governed by the exclusive SSO mode, not by destroying the password here
+	if err := u.UserRepository.SetSSOID(ctx, &uid, externalID); err != nil {
+		u.Logger.Errorw("failed to set SSO id on user", "error", err)
 		return nil, errs.Wrap(err)
 	}
 	u.AuditLogAuthorized(ae)

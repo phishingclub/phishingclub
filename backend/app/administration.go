@@ -54,10 +54,14 @@ const (
 	ROUTE_V1_USER_SESSIONS_INVALIDATE = "/api/v1/user/sessions/invalidate"
 	ROUTE_V1_USER_API                 = "/api/v1/user/api"
 	// sso
-	ROUTE_V1_SSO_ENTRA_ID          = "/api/v1/sso/entra-id"
-	ROUTE_V1_SSO_ENTRA_ID_ENABLED  = "/api/v1/sso/entra-id/enabled"
+	// the config upsert and the enabled status are provider neutral, they serve
+	// both Entra ID and generic OIDC
+	ROUTE_V1_SSO                   = "/api/v1/sso"
+	ROUTE_V1_SSO_ENABLED           = "/api/v1/sso/enabled"
 	ROUTE_V1_SSO_ENTRA_ID_LOGIN    = "/api/v1/sso/entra-id/login"
 	ROUTE_V1_SSO_ENTRA_ID_CALLBACK = "/api/v1/sso/entra-id/auth"
+	ROUTE_V1_SSO_OIDC_LOGIN        = "/api/v1/sso/oidc/login"
+	ROUTE_V1_SSO_OIDC_CALLBACK     = "/api/v1/sso/oidc/auth"
 	// mfa
 	ROUTE_V1_USER_MFA_TOTP_SETUP        = "/api/v1/user/mfa/totp/setup"
 	ROUTE_V1_USER_MFA_TOTP_SETUP_VERIFY = "/api/v1/user/mfa/totp/setup/verify"
@@ -338,10 +342,12 @@ func setupRoutes(
 		POST(ROUTE_V1_USER_API, middleware.SessionHandler, controllers.User.UpsertAPIKey).
 		DELETE(ROUTE_V1_USER_API, middleware.SessionHandler, controllers.User.RemoveAPIKey).
 		// sso
-		GET(ROUTE_V1_SSO_ENTRA_ID_ENABLED, controllers.SSO.IsEnabled).
-		POST(ROUTE_V1_SSO_ENTRA_ID, middleware.SessionHandler, controllers.SSO.Upsert).
+		GET(ROUTE_V1_SSO_ENABLED, controllers.SSO.IsEnabled).
+		POST(ROUTE_V1_SSO, middleware.SessionHandler, controllers.SSO.Upsert).
 		GET(ROUTE_V1_SSO_ENTRA_ID_LOGIN, controllers.SSO.EntreIDLogin).
 		GET(ROUTE_V1_SSO_ENTRA_ID_CALLBACK, controllers.SSO.EntreIDCallBack).
+		GET(ROUTE_V1_SSO_OIDC_LOGIN, controllers.SSO.OIDCLogin).
+		GET(ROUTE_V1_SSO_OIDC_CALLBACK, controllers.SSO.OIDCCallback).
 		// user mfa
 		GET(ROUTE_V1_USER_MFA_TOTP, middleware.SessionHandler, controllers.User.IsTOTPEnabled).
 		POST(ROUTE_V1_USER_MFA_TOTP_SETUP, middleware.LoginRateLimiter, middleware.SessionHandler, controllers.User.SetupTOTP).

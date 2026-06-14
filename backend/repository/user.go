@@ -507,8 +507,10 @@ func (r *User) updateUsernameByID(
 	return nil
 }
 
-// UpdateUserToSSO removes the password hash and sets a sso id
-func (r *User) UpdateUserToSSO(
+// SetSSOID stores the SSO subject id on the user. The password hash is left
+// intact so whether password login is allowed is governed by the SSO mode and
+// not destroyed as a side effect of an SSO login.
+func (r *User) SetSSOID(
 	ctx context.Context,
 	id *uuid.UUID,
 	ssoID string,
@@ -517,8 +519,7 @@ func (r *User) UpdateUserToSSO(
 		Table(database.USER_TABLE).
 		Where("id = ?", id.String()).
 		Updates(map[string]interface{}{
-			"password_hash": "",
-			"sso_id":        ssoID,
+			"sso_id": ssoID,
 		})
 
 	if result.Error != nil {
@@ -758,5 +759,6 @@ func ToUser(row *database.User) (*model.User, error) {
 		CompanyID:            companyID,
 		Company:              company,
 		SSOID:                ssoID,
+		HasPassword:          len(row.PasswordHash) > 0,
 	}, nil
 }

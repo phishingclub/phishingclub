@@ -3271,18 +3271,23 @@ export class API {
 	sso = {
 		/**
 		 * @param {object} sso
+		 * @param {string} [sso.providerType] - "entra" or "oidc"
 		 * @param {string} sso.clientID
-		 * @param {string} sso.tenantID
+		 * @param {string} [sso.tenantID]
 		 * @param {string} sso.clientSecret
 		 * @param {string} sso.redirectURL
+		 * @param {string} [sso.issuerURL]
+		 * @param {string} [sso.scopes]
+		 * @param {string} [sso.acrValues]
+		 * @param {boolean} [sso.exclusiveLogin]
 		 * @returns {Promise<ApiResponse>}
 		 */
 		upsert: async (sso) => {
-			return await postJSON(this.getPath(`/sso/entra-id`), sso);
+			return await postJSON(this.getPath(`/sso`), sso);
 		},
 
 		isEnabled: async () => {
-			return await getJSON(this.getPath(`/sso/entra-id/enabled`));
+			return await getJSON(this.getPath(`/sso/enabled`));
 		}
 	};
 

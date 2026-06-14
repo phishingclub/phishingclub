@@ -40,6 +40,8 @@
 	let inputType = 'password';
 	let isPasswordVisible = true;
 	let isSSOEnabled = false;
+	let ssoProviderType = 'entra';
+	let exclusiveLogin = false;
 
 	let isSubmitting = false;
 
@@ -57,16 +59,34 @@
 		}
 		refreshIsSSOEnabled();
 		if ($page.url.searchParams.get('ssoAuthError')) {
-			addToast('SSO login failed', 'Error');
+			addToast(ssoErrorMessage($page.url.searchParams.get('reason')), 'Error');
 		}
 	});
+
+	// maps the reason code from the SSO callback to a message shown to the user
+	const ssoErrorMessage = (reason) => {
+		switch (reason) {
+			case 'not_provisioned':
+				return 'SSO login failed: this account does not exist in Phishing Club. An administrator must create it first.';
+			case 'email_not_verified':
+				return 'SSO login failed: your email is not verified by the identity provider.';
+			case 'no_email':
+				return 'SSO login failed: the identity provider did not return an email address.';
+			case 'mfa_required':
+				return 'SSO login failed: multi factor authentication is required by the configured authentication context.';
+			default:
+				return 'SSO login failed';
+		}
+	};
 
 	const refreshIsSSOEnabled = async () => {
 		showIsLoading();
 		try {
 			const res = await api.sso.isEnabled();
-			if (res.data) {
+			if (res.data && res.data.enabled) {
 				isSSOEnabled = true;
+				ssoProviderType = res.data.providerType || 'entra';
+				exclusiveLogin = !!res.data.exclusiveLogin;
 			}
 		} catch (e) {
 			addToast('failed to check sso status', 'Error');
@@ -252,6 +272,7 @@
 					on:submit={(e) => onSubmitLogin('password', e)}
 					class="flex flex-col items-center justify-center w-full md:p-px lg:p-4"
 				>
+					{#if !exclusiveLogin}
 					<div class="flex flex-col w-full p-4 h-24">
 						<label
 							for="Username"
@@ -326,16 +347,19 @@
 							/>
 						</div>
 					</div>
-					<CTAbutton disabled={isSubmitting} />
+					{/if}
+					{#if !exclusiveLogin}
+						<CTAbutton disabled={isSubmitting} />
+					{/if}
 					{#if isSSOEnabled}
-						<div class="absolute bottom-12">
-							<div
-								class="text-center font-bold text-gray-900 dark:text-white transition-colors duration-200"
+						<div class="flex justify-center w-full p-4 {exclusiveLogin ? 'mt-8' : 'mt-2'}">
+							<a
+								href={ssoProviderType === 'oidc'
+									? '/api/v1/sso/oidc/login'
+									: '/api/v1/sso/entra-id/login'}
+								class="font-titilium font-semibold text-cta-blue dark:text-highlight-blue hover:underline transition-colors duration-200"
 							>
-								SSO
-							</div>
-							<a href="/api/v1/sso/entra-id/login">
-								<img src="/ms-login-light.svg" alt="Login with Microsoft" />
+								Sign in with SSO
 							</a>
 						</div>
 					{/if}

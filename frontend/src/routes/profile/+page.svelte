@@ -74,7 +74,7 @@
 		totpRecoveryCode: ''
 	};
 
-	let isSSOUser = false;
+	let hasPassword = false;
 
 	// component logic
 	const resetMFAValues = () => {
@@ -110,9 +110,7 @@
 			}
 			changeUsernameFormValues.username = res2.data.username;
 			changeNameFormValues.fullname = res2.data.name;
-			if (res2.data.ssoID) {
-				isSSOUser = true;
-			}
+			hasPassword = !!res2.data.hasPassword;
 			return;
 		} catch (e) {
 			addToast('Failed to load user', 'Error');
@@ -413,7 +411,7 @@
 					>
 						Password Settings
 					</h2>
-					{#if !isSSOUser}
+					{#if hasPassword}
 						<Form on:submit={onClickChangePassword}>
 							<div class="flex flex-col h-full">
 								<div>
@@ -448,7 +446,7 @@
 						<div
 							class="bg-gray-50 dark:bg-gray-800 p-4 rounded-md text-gray-600 dark:text-gray-300"
 						>
-							Password changes are disabled for SSO users.
+							This account has no password set and signs in via SSO.
 						</div>
 					{/if}
 				</div>
@@ -461,7 +459,7 @@
 					>
 						Multi-Factor Authentication
 					</h2>
-					{#if !isSSOUser}
+					{#if hasPassword}
 						{#if isMFAEnabled}
 							<div class="flex flex-col h-full pt-5 w-60">
 								<div class="flex items-center justify-between bg-green-50 p-4 rounded-md">

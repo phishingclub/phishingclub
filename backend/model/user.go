@@ -26,6 +26,9 @@ type User struct {
 	RoleID               nullable.Nullable[uuid.UUID]       `json:"roleID"`
 	Role                 *Role                              `json:"role"`
 	SSOID                nullable.Nullable[string]          `json:"ssoID"`
+	// HasPassword reports whether a password is set on the account, so the
+	// profile can offer a change or a set password flow. The hash is never output
+	HasPassword bool `json:"hasPassword"`
 	// apiKey is only get/set externally from this and never output except when created
 }
 

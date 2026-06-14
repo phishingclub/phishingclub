@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/phishingclub/phishingclub/config"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
@@ -65,6 +66,8 @@ type UserLoginWithMFARecoveryCodeRequest struct {
 type User struct {
 	Common
 	UserService *service.User
+	SSOService  *service.SSO
+	Config      *config.Config
 }
 
 // Create creates a new user
@@ -469,6 +472,19 @@ func (c *User) GetSessionsOnLoggedInUser(g *gin.Context) {
 
 // Login logs in a user
 func (c *User) Login(g *gin.Context) {
+	// when exclusive SSO is enabled local login is disabled, unless the server
+	// level break glass in config.json keeps it available for recovery
+	breakglass := c.Config.Authentication.LocalLoginBreakglass
+	blocked, err := c.SSOService.IsLocalLoginBlocked(g.Request.Context(), breakglass, g.ClientIP())
+	if err != nil {
+		c.Logger.Errorw("failed to check exclusive SSO login", "error", err)
+		c.Response.ServerError(g)
+		return
+	}
+	if blocked {
+		c.Response.Forbidden(g)
+		return
+	}
 	// parse req
 	var req UserLoginRequest
 	if ok := c.handleParseRequest(g, &req); !ok {

@@ -56,6 +56,14 @@ var (
 	// ErrSSOUserNotProvisioned is returned when an SSO login matches no existing
 	// user, users are never auto provisioned and must be created by an admin first
 	ErrSSOUserNotProvisioned = goerrors.New("SSO user not provisioned")
+	// ErrSSOEmailNotVerified is returned when the provider has not verified the
+	// email claim, an unverified email is not trusted for account matching
+	ErrSSOEmailNotVerified = goerrors.New("SSO email not verified by provider")
+	// ErrSSONoEmail is returned when the provider returns no email claim
+	ErrSSONoEmail = goerrors.New("SSO provider returned no email")
+	// ErrSSOMFARequired is returned when the authentication context returned by
+	// the provider does not satisfy the required acr values
+	ErrSSOMFARequired = goerrors.New("SSO authentication context requirement not met")
 )
 
 // format messages

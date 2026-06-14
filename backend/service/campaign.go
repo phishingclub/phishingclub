@@ -5565,6 +5565,9 @@ func (c *Campaign) SendCampaignReport(
 	if err != nil {
 		c.Logger.Errorw("failed to render report PDF", "error", err)
 		writeReportSendLog("failed", nil, fmt.Errorf("failed to render report PDF: %w", err))
+		if onDemand {
+			return errs.NewCustomError(fmt.Errorf("could not generate the report PDF: %w", err))
+		}
 		return errs.Wrap(err)
 	}
 	// load the smtp configuration to send through
@@ -5611,12 +5614,21 @@ func (c *Campaign) SendCampaignReport(
 	filename := fmt.Sprintf("report-%s.pdf", sanitizeReportFilename(campaignName))
 	m := mail.NewMsg(mail.WithNoDefaultUserAgent())
 	if err := m.EnvelopeFrom(senderEmail.String()); err != nil {
+		if onDemand {
+			return errs.NewCustomError(fmt.Errorf("the report sender email address is invalid: %w", err))
+		}
 		return errs.Wrap(err)
 	}
 	if err := m.From(senderEmail.String()); err != nil {
+		if onDemand {
+			return errs.NewCustomError(fmt.Errorf("the report sender email address is invalid: %w", err))
+		}
 		return errs.Wrap(err)
 	}
 	if err := m.To(toEmails...); err != nil {
+		if onDemand {
+			return errs.NewCustomError(fmt.Errorf("a report recipient email address is invalid: %w", err))
+		}
 		return errs.Wrap(err)
 	}
 	if headers := smtpConfig.Headers; headers != nil {
@@ -5649,6 +5661,9 @@ func (c *Campaign) SendCampaignReport(
 	if err := c.SMTPConfigService.SendMessages(ctx, smtpConfig, m); err != nil {
 		c.Logger.Errorw("failed to send report email", "error", err)
 		writeReportSendLog("failed", toEmails, err)
+		if onDemand {
+			return errs.NewCustomError(fmt.Errorf("could not send the report email, check the SMTP configuration: %w", err))
+		}
 		return errs.Wrap(err)
 	}
 	writeReportSendLog("sent", toEmails, nil)

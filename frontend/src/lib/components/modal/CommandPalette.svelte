@@ -129,6 +129,13 @@
 				category: 'Development',
 				external: true
 			});
+
+			items.push({
+				label: 'Keycloak',
+				url: 'http://keycloak.test:8108',
+				category: 'Development',
+				external: true
+			});
 		}
 
 		return items;

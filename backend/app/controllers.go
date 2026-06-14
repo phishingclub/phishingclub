@@ -124,6 +124,8 @@ func NewControllers(
 	user := &controller.User{
 		Common:      common,
 		UserService: services.User,
+		SSOService:  services.SSO,
+		Config:      conf,
 	}
 	domain := &controller.Domain{
 		Common:        common,
