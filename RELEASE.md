@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.38.0] - 2026-06-18
+- Added support company recipient and group sync via. SCIM
+- Added OIDC provider support
+- Added SSO exclusive mode
+- Added automated report delivery
+- Added company page for settings
+- Added company color setting
+- Added company level shared asset folder
+- Improved setting UI with tabs
+- Minor UI improvements
+- Fixed SSO can nolonger create new users
+- Fixed SSO match normalize email on import
+- Fixed minor match when using quick navigation to switch company
+- Fixed back navigation to settings page
+- Fixed modals with sensitive action should use text confirmation
+- Fixed deleting group anonymization sideeffect on active recipients
+- Fixed wrong recipient count on anonymized campaigns
+- Fixed asset with no preview icon not centered 
+
 ## [1.37.1] - 2026-06-07
 - Fix disable CSP giving issue when previews
 - Fix preview for report template
