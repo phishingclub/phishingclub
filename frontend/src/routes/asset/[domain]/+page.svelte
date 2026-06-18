@@ -469,18 +469,20 @@
 								</button>
 							{:else}
 								<div
-									class="w-12 h-12 rounded flex items-center justify-center text-xs text-gray-600"
+									class="w-12 h-12 rounded !flex items-center justify-center text-xs text-gray-600"
 								>
 									No preview
 								</div>
 							{/if}
 						{:catch}
-							<div class="w-12 h-12 rounded flex items-center justify-center text-xs text-red-600">
+							<div class="w-12 h-12 rounded !flex items-center justify-center text-xs text-red-600">
 								Error
 							</div>
 						{/await}
 					{:else}
-						<div class="w-12 h-12 rounded flex items-center justify-center text-xs text-gray-500">
+						<div
+							class="w-12 h-12 rounded !flex items-center justify-center text-2xl leading-none text-gray-500"
+						>
 							📄
 						</div>
 					{/if}
