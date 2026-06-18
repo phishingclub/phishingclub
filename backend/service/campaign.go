@@ -2088,6 +2088,24 @@ func isCalendarAttachment(path string) bool {
 	return ext == ".ics" || ext == ".ical"
 }
 
+// applySenderOverride applies the campaign template's optional sender overrides
+// onto the in-memory email so all downstream send logic uses the effective values.
+// an unset override leaves the email's own value unchanged.
+func applySenderOverride(cTemplate *model.CampaignTemplate, email *model.Email) {
+	if cTemplate == nil || email == nil {
+		return
+	}
+	if v, err := cTemplate.OverrideMailEnvelopeFrom.Get(); err == nil {
+		email.MailEnvelopeFrom = nullable.NewNullableWithValue(v)
+	}
+	if v, err := cTemplate.OverrideMailHeaderFrom.Get(); err == nil {
+		email.MailHeaderFrom = nullable.NewNullableWithValue(v)
+	}
+	if v, err := cTemplate.OverrideSubject.Get(); err == nil {
+		email.MailHeaderSubject = nullable.NewNullableWithValue(v)
+	}
+}
+
 func (c *Campaign) sendCampaignMessages(
 	ctx context.Context,
 	session *model.Session,
@@ -2208,6 +2226,7 @@ func (c *Campaign) sendCampaignMessages(
 		)
 		return errs.Wrap(errors.Join(err, closeErr))
 	}
+	applySenderOverride(cTemplate, email)
 	content, err := email.Content.Get()
 	if err != nil {
 		// if mail templates fails to parse, close the campaign
@@ -3413,6 +3432,7 @@ func (c *Campaign) GetCampaignEmailBody(
 		c.Logger.Errorw("failed to get message by id", "error", err)
 		return "", errs.Wrap(err)
 	}
+	applySenderOverride(cTemplate, email)
 	urlIdentifier := cTemplate.URLIdentifier
 	if urlIdentifier == nil {
 		return "", errors.New("url identifier is nil")
@@ -4139,6 +4159,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 		c.Logger.Errorw("failed to get email by id", "error", err)
 		return errs.Wrap(err)
 	}
+	applySenderOverride(cTemplate, email)
 
 	// update last attempt timestamp
 	campaignRecipientID := campaignRecipient.ID.MustGet()

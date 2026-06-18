@@ -55,6 +55,9 @@
 		afterLandingPage: null,
 		afterLandingPageRedirectURL: '',
 		email: null,
+		overrideMailHeaderFrom: '',
+		overrideMailEnvelopeFrom: '',
+		overrideSubject: '',
 		smtpConfiguration: null,
 		apiSender: null,
 		urlIdentifier: 'id',
@@ -306,6 +309,9 @@
 				name: formValues.name,
 				domainID: domainMap.byValue(formValues.domain),
 				emailID: emailMap.byValueOrNull(formValues.email),
+				overrideMailHeaderFrom: formValues.overrideMailHeaderFrom || null,
+				overrideMailEnvelopeFrom: formValues.overrideMailEnvelopeFrom || null,
+				overrideSubject: formValues.overrideSubject || null,
 				smtpConfigurationID: smtpConfigurationMap.byValueOrNull(formValues.smtpConfiguration),
 				apiSenderID: apiSenderMap.byValueOrNull(formValues.apiSender),
 				landingPageID:
@@ -346,6 +352,9 @@
 				name: formValues.name,
 				domainID: domainMap.byValueOrNull(formValues.domain),
 				emailID: emailMap.byValueOrNull(formValues.email),
+				overrideMailHeaderFrom: formValues.overrideMailHeaderFrom || null,
+				overrideMailEnvelopeFrom: formValues.overrideMailEnvelopeFrom || null,
+				overrideSubject: formValues.overrideSubject || null,
 				smtpConfigurationID: smtpConfigurationMap.byValueOrNull(formValues.smtpConfiguration),
 				apiSenderID: apiSenderMap.byValueOrNull(formValues.apiSender),
 				landingPageID:
@@ -418,6 +427,9 @@
 			afterLandingPage: null,
 			afterLandingPageRedirectURL: '',
 			email: null,
+			overrideMailHeaderFrom: '',
+			overrideMailEnvelopeFrom: '',
+			overrideSubject: '',
 			smtpConfiguration: null,
 			apiSender: null,
 			urlIdentifier: 'id',
@@ -511,6 +523,9 @@
 		}
 		formValues.domain = domainMap.byKey(template.domainID);
 		formValues.email = emailMap.byKey(template.emailID);
+		formValues.overrideMailHeaderFrom = template.overrideMailHeaderFrom || '';
+		formValues.overrideMailEnvelopeFrom = template.overrideMailEnvelopeFrom || '';
+		formValues.overrideSubject = template.overrideSubject || '';
 
 		// handle landing page (page or proxy)
 		if (template.landingPageID) {
@@ -544,6 +559,9 @@
 				(template.urlIdentifierID && identifierMap.byKey(template.urlIdentifierID) !== 'id') ||
 				(template.stateIdentifierID &&
 					identifierMap.byKey(template.stateIdentifierID) !== 'session') ||
+				template.overrideMailHeaderFrom ||
+				template.overrideMailEnvelopeFrom ||
+				template.overrideSubject ||
 				template.apiSenderID
 			) // Show advanced if using External API
 		);
@@ -643,6 +661,12 @@
 						>
 							{emailMap.byKey(template.emailID)}
 						</a>
+						{#if template.overrideMailHeaderFrom || template.overrideMailEnvelopeFrom || template.overrideSubject}
+							<span
+								class="text-xs text-gray-500 dark:text-gray-400"
+								title="This template overrides the email's sender">sender overridden</span
+							>
+						{/if}
 					{/if}
 				</TableCell>
 				<TableCell>
@@ -1142,6 +1166,42 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 									minLength={1}
 									maxLength={255}
 									placeholder="https://example.com/u-been-phished">POST redirect URL</TextField
+								>
+							</div>
+						</div>
+						<h4 class="text-sm font-medium text-pc-darkblue dark:text-white mt-6 mb-3">
+							Sender override
+						</h4>
+						<p class="text-sm text-gray-500 dark:text-gray-400 mb-3">
+							Reuse the same email with a different sender. Leave a field blank to use the email's
+							own value.
+						</p>
+						<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+							<div>
+								<TextField
+									toolTipText="Overrides the email's header From. Display name is allowed, e.g. Support <support@acme.com>."
+									optional
+									maxLength={255}
+									bind:value={formValues.overrideMailHeaderFrom}
+									placeholder="Support <support@acme.com>">From override</TextField
+								>
+							</div>
+							<div>
+								<TextField
+									toolTipText="Overrides the email's envelope from / Return-Path."
+									optional
+									maxLength={255}
+									bind:value={formValues.overrideMailEnvelopeFrom}
+									placeholder="bounce@acme.com">Envelope from override</TextField
+								>
+							</div>
+							<div>
+								<TextField
+									toolTipText="Overrides the email's subject line."
+									optional
+									maxLength={255}
+									bind:value={formValues.overrideSubject}
+									placeholder="Action required: verify your account">Subject override</TextField
 								>
 							</div>
 						</div>

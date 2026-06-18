@@ -655,6 +655,27 @@ func (c *CampaignTemplate) UpdateByID(
 			incoming.EmailID.SetNull()
 		}
 	}
+	if campaignTemplate.OverrideMailEnvelopeFrom.IsSpecified() {
+		if v, err := campaignTemplate.OverrideMailEnvelopeFrom.Get(); err == nil {
+			incoming.OverrideMailEnvelopeFrom.Set(v)
+		} else {
+			incoming.OverrideMailEnvelopeFrom.SetNull()
+		}
+	}
+	if campaignTemplate.OverrideMailHeaderFrom.IsSpecified() {
+		if v, err := campaignTemplate.OverrideMailHeaderFrom.Get(); err == nil {
+			incoming.OverrideMailHeaderFrom.Set(v)
+		} else {
+			incoming.OverrideMailHeaderFrom.SetNull()
+		}
+	}
+	if campaignTemplate.OverrideSubject.IsSpecified() {
+		if v, err := campaignTemplate.OverrideSubject.Get(); err == nil {
+			incoming.OverrideSubject.Set(v)
+		} else {
+			incoming.OverrideSubject.SetNull()
+		}
+	}
 	if campaignTemplate.BeforeLandingPageID.IsSpecified() {
 		if v, err := campaignTemplate.BeforeLandingPageID.Get(); err == nil {
 			incoming.BeforeLandingPageID.Set(v)

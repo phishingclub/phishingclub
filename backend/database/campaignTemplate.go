@@ -62,6 +62,12 @@ type CampaignTemplate struct {
 	EmailID *uuid.UUID `gorm:"type:uuid;index;"`
 	Email   *Email     `gorm:"foreignKey:EmailID;references:ID;"`
 
+	// optional sender overrides applied at send time
+	// an empty value means inherit the value from the email
+	OverrideMailEnvelopeFrom string `gorm:"not null;default:''"`
+	OverrideMailHeaderFrom   string `gorm:"not null;default:''"`
+	OverrideSubject          string `gorm:"not null;default:''"`
+
 	SMTPConfigurationID *uuid.UUID         `gorm:"type:uuid;index;"`
 	SMTPConfiguration   *SMTPConfiguration `gorm:"foreignKey:SMTPConfigurationID"`
 

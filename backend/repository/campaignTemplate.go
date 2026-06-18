@@ -889,6 +889,18 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 	if row.Email != nil {
 		email = ToEmail(row.Email)
 	}
+	overrideMailEnvelopeFrom := nullable.NewNullNullable[vo.MailEnvelopeFrom]()
+	if row.OverrideMailEnvelopeFrom != "" {
+		overrideMailEnvelopeFrom.Set(*vo.NewMailEnvelopeFromMust(row.OverrideMailEnvelopeFrom))
+	}
+	overrideMailHeaderFrom := nullable.NewNullNullable[vo.Email]()
+	if row.OverrideMailHeaderFrom != "" {
+		overrideMailHeaderFrom.Set(*vo.NewEmailMust(row.OverrideMailHeaderFrom))
+	}
+	overrideSubject := nullable.NewNullNullable[vo.OptionalString255]()
+	if row.OverrideSubject != "" {
+		overrideSubject.Set(*vo.NewOptionalString255Must(row.OverrideSubject))
+	}
 	smtpConfigurationID := nullable.NewNullNullable[uuid.UUID]()
 	if row.SMTPConfigurationID != nil {
 		smtpConfigurationID.Set(*row.SMTPConfigurationID)
@@ -944,6 +956,9 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 		AfterLandingPageRedirectURL: redirectURL,
 		EmailID:                     emailID,
 		Email:                       email,
+		OverrideMailEnvelopeFrom:    overrideMailEnvelopeFrom,
+		OverrideMailHeaderFrom:      overrideMailHeaderFrom,
+		OverrideSubject:             overrideSubject,
 		SMTPConfigurationID:         smtpConfigurationID,
 		SMTPConfiguration:           smtpConfiguration,
 		APISenderID:                 apiSenderID,

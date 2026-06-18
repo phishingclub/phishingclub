@@ -1074,6 +1074,9 @@ export class API {
 		 * @param {string} template.stateIdentifierID
 		 * @param {string} template.urlPath
 		 * @param {string} template.emailID
+		 * @param {string|null} template.overrideMailHeaderFrom
+		 * @param {string|null} template.overrideMailEnvelopeFrom
+		 * @param {string|null} template.overrideSubject
 		 * @returns {Promise<ApiResponse>}
 		 */
 		create: async ({
@@ -1092,6 +1095,9 @@ export class API {
 			stateIdentifierID,
 			afterLandingPageRedirectURL,
 			emailID: emailID,
+			overrideMailHeaderFrom = null,
+			overrideMailEnvelopeFrom = null,
+			overrideSubject = null,
 			urlPath: urlPath
 		}) => {
 			return await postJSON(this.getPath('/campaign/template'), {
@@ -1110,6 +1116,9 @@ export class API {
 				urlIdentifierID: urlIdentifierID,
 				stateIdentifierID: stateIdentifierID,
 				emailID: emailID,
+				overrideMailHeaderFrom: overrideMailHeaderFrom,
+				overrideMailEnvelopeFrom: overrideMailEnvelopeFrom,
+				overrideSubject: overrideSubject,
 				urlPath: urlPath
 			});
 		},
@@ -1132,6 +1141,9 @@ export class API {
 		 * @param {string} template.apiSenderID
 		 * @param {string} template.afterLandingPageRedirectURL
 		 * @param {string} template.emailID
+		 * @param {string|null} template.overrideMailHeaderFrom
+		 * @param {string|null} template.overrideMailEnvelopeFrom
+		 * @param {string|null} template.overrideSubject
 		 * @param {string} template.urlIdentifierID
 		 * @param {string} template.stateIdentifierID
 		 * @param {string} template.urlPath
@@ -1152,6 +1164,9 @@ export class API {
 			apiSenderID,
 			afterLandingPageRedirectURL,
 			emailID: emailID,
+			overrideMailHeaderFrom = null,
+			overrideMailEnvelopeFrom = null,
+			overrideSubject = null,
 			urlIdentifierID: urlIdentifierID,
 			stateIdentifierID: stateIdentifierID,
 			urlPath: urlPath
@@ -1170,6 +1185,9 @@ export class API {
 				apiSenderID: apiSenderID,
 				afterLandingPageRedirectURL: afterLandingPageRedirectURL,
 				emailID: emailID,
+				overrideMailHeaderFrom: overrideMailHeaderFrom,
+				overrideMailEnvelopeFrom: overrideMailEnvelopeFrom,
+				overrideSubject: overrideSubject,
 				urlIdentifierID: urlIdentifierID,
 				stateIdentifierID: stateIdentifierID,
 				urlPath: urlPath

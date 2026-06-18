@@ -57,6 +57,11 @@ type CampaignTemplate struct {
 	EmailID nullable.Nullable[uuid.UUID] `json:"emailID"`
 	Email   *Email                       `json:"email"`
 
+	// optional sender overrides; an empty value means inherit from the email
+	OverrideMailEnvelopeFrom nullable.Nullable[vo.MailEnvelopeFrom]  `json:"overrideMailEnvelopeFrom"`
+	OverrideMailHeaderFrom   nullable.Nullable[vo.Email]             `json:"overrideMailHeaderFrom"`
+	OverrideSubject          nullable.Nullable[vo.OptionalString255] `json:"overrideSubject"`
+
 	SMTPConfigurationID nullable.Nullable[uuid.UUID] `json:"smtpConfigurationID"`
 	SMTPConfiguration   *SMTPConfiguration           `json:"smtpConfiguration"`
 
@@ -220,6 +225,24 @@ func (c *CampaignTemplate) ToDBMap() map[string]any {
 			m["email_id"] = nil
 		} else {
 			m["email_id"] = c.EmailID.MustGet()
+		}
+	}
+	if c.OverrideMailEnvelopeFrom.IsSpecified() {
+		m["override_mail_envelope_from"] = ""
+		if v, err := c.OverrideMailEnvelopeFrom.Get(); err == nil {
+			m["override_mail_envelope_from"] = v.String()
+		}
+	}
+	if c.OverrideMailHeaderFrom.IsSpecified() {
+		m["override_mail_header_from"] = ""
+		if v, err := c.OverrideMailHeaderFrom.Get(); err == nil {
+			m["override_mail_header_from"] = v.String()
+		}
+	}
+	if c.OverrideSubject.IsSpecified() {
+		m["override_subject"] = ""
+		if v, err := c.OverrideSubject.Get(); err == nil {
+			m["override_subject"] = v.String()
 		}
 	}
 	if c.SMTPConfigurationID.IsSpecified() {
