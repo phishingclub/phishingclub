@@ -133,30 +133,6 @@ services:
     networks:
       - default
 
-  # Dozzle - container log viewer in the browser
-  dozzle:
-    image: amir20/dozzle@sha256:9477f50189e583c7c118233619b08dbe724cb98dfdfe17be042b5c472807de37
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    ports:
-      - 8103:8080
-    environment:
-      - DOZZLE_NO_ANALYTICS=true
-    networks:
-      - default
-
-  # Container Statistics
-  stats:
-    image: virtualzone/docker-container-stats@sha256:270105722ce8ff9c75409f4d8a701b8406cb8007d420a53ea22b85625893113e
-    ports:
-      - "8104:8080"
-    environment:
-      STATS_UPDATE_INTERVAL: 10
-    volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"
-    networks:
-      - default
-
   # mitmproxy - HTTP/HTTPS proxy for security research and debugging
   # Web interface: http://localhost:8105 (check logs for auto-generated token) - Proxy available at 172.20.0.138:8080
   # Use this IP in your Proxy configs: proxy: '172.20.0.138:8080'
