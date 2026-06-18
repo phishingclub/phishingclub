@@ -121,6 +121,38 @@ func (r *Asset) GetAllByGlobalContext(
 	return result, nil
 }
 
+// GetAllByCompanyContext gets all assets in a company folder
+// these are assets owned by a company but not attached to a domain
+func (r *Asset) GetAllByCompanyContext(
+	ctx context.Context,
+	companyID *uuid.UUID,
+	queryArgs *vo.QueryArgs,
+) (*model.Result[model.Asset], error) {
+	result := model.NewEmptyResult[model.Asset]()
+	db, err := useQuery(r.DB, database.ASSET_TABLE, queryArgs, assetAllowedColumns...)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	var dbModels []*database.Asset
+	dbRes := db.
+		Where("company_id = ? AND domain_id IS NULL", companyID).
+		Find(&dbModels)
+
+	if dbRes.Error != nil {
+		return nil, dbRes.Error
+	}
+
+	hasNextPage, err := useHasNextPage(db, database.ASSET_TABLE, queryArgs, assetAllowedColumns...)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	result.HasNextPage = hasNextPage
+	for _, dbModel := range dbModels {
+		result.Rows = append(result.Rows, ToAsset(dbModel))
+	}
+	return result, nil
+}
+
 // GetByPath gets an asset by file path
 func (r *Asset) GetByPath(
 	ctx context.Context,

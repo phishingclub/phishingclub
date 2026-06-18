@@ -27,16 +27,26 @@
 	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
+	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import FileField from '$lib/components/FileField.svelte';
+	import { onClickCopy } from '$lib/utils/common.js';
 
 	// services
 	const appStateService = AppStateService.instance;
 
 	// data
-	let domainContext = $page.params.domain === 'shared' ? '' : $page.params.domain;
+	// the 'company' route shows the company asset folder, which is stored under
+	// the shared directory keyed by the company assets slug
+	const isCompanyFolder = $page.params.domain === 'company';
+	let domainContext =
+		$page.params.domain === 'shared' || isCompanyFolder ? '' : $page.params.domain;
+	// the company assets slug, fetched on mount for company folder view
+	let companyAssetsKey = '';
 	let pathTooltip = 'Web root relative path to the file(s).';
-	if (!domainContext) {
+	if (isCompanyFolder) {
+		pathTooltip = 'Reference as {{.BaseURL}}/<key>/<path> in templates and emails.';
+	} else if (!domainContext) {
 		pathTooltip = 'Web root relative path to the file(s) on any domain.';
 	}
 	let contextCompanyID = '';
@@ -79,6 +89,11 @@
 		if (context) {
 			contextCompanyID = context.companyID ?? '';
 		}
+		// the company folder only exists within a company context
+		if (isCompanyFolder && !contextCompanyID) {
+			goto('/asset');
+			return;
+		}
 		// if were have a domain context but are in
 		refreshAssets();
 		redirectIfWrongContext();
@@ -87,6 +102,27 @@
 			tableURLParams.unsubscribe();
 		};
 	});
+
+	const loadCompanyAssetsKey = async () => {
+		try {
+			const res = await api.company.getByID(contextCompanyID);
+			if (!res.success) {
+				throw res.error;
+			}
+			companyAssetsKey = res.data.assetsKey ?? '';
+		} catch (e) {
+			addToast('Failed to load company asset folder', 'Error');
+			console.error('failed to load company assets key', e);
+		}
+	};
+
+	/**
+	 * Copy the template reference for a company folder asset
+	 * @param {string} path
+	 */
+	const onClickCopyPath = (path) => {
+		onClickCopy(`{{.BaseURL}}/${companyAssetsKey}/${path}`);
+	};
 
 	const redirectIfWrongContext = async () => {
 		if (!domainContext || domainContext === 'shared') {
@@ -114,6 +150,11 @@
 	const refreshAssets = async () => {
 		try {
 			isTableLoading = true;
+			// load the company asset slug before assets render so the company
+			// folder previews and copy paths resolve correctly
+			if (isCompanyFolder && !companyAssetsKey) {
+				await loadCompanyAssetsKey();
+			}
 			const res = await api.asset.getByDomain(domainContext, contextCompanyID, tableURLParams);
 			if (!res.success) {
 				throw res.error;
@@ -260,8 +301,9 @@
 	};
 
 	const onClickPreview = async (path) => {
-		if ($page.params.domain === 'shared') {
-			const res = await api.asset.getRaw('shared', path);
+		if ($page.params.domain === 'shared' || isCompanyFolder) {
+			const viewPath = isCompanyFolder ? `${companyAssetsKey}/${path}` : path;
+			const res = await api.asset.getRaw('shared', viewPath);
 			if (!res.success) {
 				addToast('Failed to get asset', 'Error');
 				console.error('failed to get asset', res.error);
@@ -295,9 +337,10 @@
 	 * @param {string} path
 	 */
 	const getImagePreviewUrl = async (path) => {
-		if ($page.params.domain === 'shared') {
+		if ($page.params.domain === 'shared' || isCompanyFolder) {
 			try {
-				const res = await api.asset.getRaw('shared', path);
+				const viewPath = isCompanyFolder ? `${companyAssetsKey}/${path}` : path;
+				const res = await api.asset.getRaw('shared', viewPath);
 				if (!res.success) {
 					return null;
 				}
@@ -378,10 +421,14 @@
 	};
 </script>
 
-<HeadTitle title="Assets ({$page.params.domain})" />
+<HeadTitle title="Assets ({isCompanyFolder ? 'company' : $page.params.domain})" />
 <main>
 	<Headline>
-		Assets: <span class="select-all">{$page.params.domain}</span>
+		{#if isCompanyFolder}
+			Company assets
+		{:else}
+			Assets: <span class="select-all">{$page.params.domain}</span>
+		{/if}
 	</Headline>
 	<BigButton on:click={openCreateModal}>New asset</BigButton>
 	<Table
@@ -455,6 +502,13 @@
 				<TableCellAction>
 					<TableDropDownEllipsis>
 						<TableViewButton on:click={() => onClickPreview(asset.path)} />
+						{#if isCompanyFolder}
+							<TableDropDownButton
+								name="Copy path"
+								title="Copy template reference"
+								on:click={() => onClickCopyPath(asset.path)}
+							/>
+						{/if}
 						<TableUpdateButton
 							on:click={() => onClickEdit(asset.id)}
 							{...globalButtonDisabledAttributes(asset, contextCompanyID)}

@@ -9,6 +9,7 @@ import (
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/random"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
 )
@@ -33,6 +34,11 @@ func (r *Company) Insert(
 	id := uuid.New()
 	row := company.ToDBMap()
 	row["id"] = id
+	assetsKey, err := random.GenerateRandomURLBase64Encoded(32)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	row["assets_key"] = assetsKey
 	AddTimestamps(row)
 
 	res := r.DB.
@@ -158,6 +164,12 @@ func ToCompany(row *database.Company) *model.Company {
 			color = nullable.NewNullableWithValue(*c)
 		}
 	}
+	var assetsKey nullable.Nullable[vo.String64]
+	if row.AssetsKey != "" {
+		if k, err := vo.NewString64(row.AssetsKey); err == nil {
+			assetsKey = nullable.NewNullableWithValue(*k)
+		}
+	}
 	return &model.Company{
 		ID:        id,
 		CreatedAt: row.CreatedAt,
@@ -165,5 +177,6 @@ func ToCompany(row *database.Company) *model.Company {
 		Name:      name,
 		Comment:   comment,
 		Color:     color,
+		AssetsKey: assetsKey,
 	}
 }

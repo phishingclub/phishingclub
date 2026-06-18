@@ -25,10 +25,11 @@ import (
 // Asset is a Asset service
 type Asset struct {
 	Common
-	RootFolder       string
-	FileService      *File
-	AssetRepository  *repository.Asset
-	DomainRepository *repository.Domain
+	RootFolder        string
+	FileService       *File
+	AssetRepository   *repository.Asset
+	DomainRepository  *repository.Domain
+	CompanyRepository *repository.Company
 }
 
 // Create creates and stores a new assets
@@ -66,11 +67,10 @@ func (a *Asset) Create(
 	files := []*RootFileUpload{}
 	for _, asset := range assets {
 		domainNameProvided := asset.DomainName.IsSpecified() && !asset.DomainName.IsNull()
+		companyProvided := asset.CompanyID.IsSpecified() && !asset.CompanyID.IsNull()
 		// ensure context is the same across all files
-		if !domainNameProvided && (!asset.CompanyID.IsSpecified() || asset.CompanyID.IsNull()) {
-			contextFolder = data.ASSET_GLOBAL_FOLDER
-		} else {
-			// set the context folder
+		if domainNameProvided {
+			// domain context
 			dn, err := asset.DomainName.Get()
 			if err != nil {
 				a.Logger.Debugw("failed to get domain name", "error", err)
@@ -83,6 +83,30 @@ func (a *Asset) Create(
 				a.Logger.Error(differentContextError)
 				return ids, differentContextError
 			}
+		} else if companyProvided {
+			// company folder lives under the shared directory keyed by the
+			// company assets slug, so it resolves on any domain via the
+			// existing shared asset fallback
+			companyID := asset.CompanyID.MustGet()
+			company, err := a.CompanyRepository.GetByID(g, &companyID)
+			if err != nil {
+				a.Logger.Debugw("failed to get company for asset", "error", err)
+				return ids, errs.Wrap(err)
+			}
+			slug, err := company.AssetsKey.Get()
+			if err != nil || slug.String() == "" {
+				a.Logger.Errorw("company has no assets key", "companyID", companyID.String())
+				return ids, errs.NewCustomError(errors.New("company has no asset folder"))
+			}
+			companyFolder := filepath.Join(data.ASSET_GLOBAL_FOLDER, slug.String())
+			if contextFolder == "" {
+				contextFolder = companyFolder
+			} else if contextFolder != companyFolder {
+				a.Logger.Error(differentContextError)
+				return ids, differentContextError
+			}
+		} else {
+			contextFolder = data.ASSET_GLOBAL_FOLDER
 		}
 
 		// map assets to files
@@ -280,8 +304,12 @@ func (a *Asset) GetAll(
 		a.AuditLogNotAuthorized(ae)
 		return result, errs.ErrAuthorizationFailed
 	}
-	// if there is no companyID or domainID then the scope is 'shared'
-	if companyID == nil && domainID == nil {
+	// scope selection:
+	// - no company, no domain -> global shared assets
+	// - company, no domain     -> company folder assets (stored under shared/<slug>)
+	// - domain                 -> domain assets (incl. shared assets for that domain)
+	switch {
+	case companyID == nil && domainID == nil:
 		result, err = a.AssetRepository.GetAllByGlobalContext(
 			ctx,
 			queryArgs,
@@ -290,11 +318,17 @@ func (a *Asset) GetAll(
 			a.Logger.Errorw("failed to get global asset", "error", err)
 			return nil, errs.Wrap(err)
 		}
-	} else {
-		if domainID == nil {
-			a.Logger.Errorw("domain id required", "error", errors.New("domainID is nil"))
-			return nil, fmt.Errorf("domain id is required")
+	case domainID == nil:
+		result, err = a.AssetRepository.GetAllByCompanyContext(
+			ctx,
+			companyID,
+			queryArgs,
+		)
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			a.Logger.Errorw("failed to get company assets", "error", err)
+			return nil, errs.Wrap(err)
 		}
+	default:
 		result, err = a.AssetRepository.GetAllByDomainAndContext(
 			ctx,
 			domainID,

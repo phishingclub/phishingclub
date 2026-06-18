@@ -18,6 +18,9 @@ type Company struct {
 	Comment   *string    `gorm:"type:text"`
 	// Color is an optional #RGB or #RRGGBB used to tint the company view banner and frame
 	Color *string `gorm:"type:text"`
+	// AssetsKey is a random slug naming the company asset folder stored under the
+	// shared asset directory, so company assets resolve on any domain via {{.BaseURL}}/<AssetsKey>/file
+	AssetsKey string `gorm:"unique;index"`
 
 	// backref: many-to-one
 	Users           []*User           //`gorm:"foreignKey:CompanyID;"`

@@ -17,6 +17,9 @@ type Company struct {
 	Name      nullable.Nullable[vo.String64]          `json:"name"`
 	Comment   nullable.Nullable[vo.OptionalString1MB] `json:"comment"`
 	Color     nullable.Nullable[vo.OptionalHexColor]  `json:"color"`
+	// AssetsKey is a read only slug naming the company asset folder. It is
+	// generated server side and never written from client input.
+	AssetsKey nullable.Nullable[vo.String64] `json:"assetsKey"`
 }
 
 // Validate checks if the Company configuration with a valid state

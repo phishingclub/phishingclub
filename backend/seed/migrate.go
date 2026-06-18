@@ -12,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/random"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -513,6 +514,27 @@ func migrate(db *gorm.DB) error {
 		ON CONFLICT DO NOTHING
 	`).Error; err != nil {
 		return errs.Wrap(err)
+	}
+
+	// backfill companies.assets_key for rows created before the column existed
+	// the column and its unique index are created by AutoMigrate; here we give
+	// each existing company an unguessable slug for its asset folder
+	var companiesWithoutKey []database.Company
+	if err := db.Model(&database.Company{}).
+		Where("assets_key IS NULL OR assets_key = ''").
+		Find(&companiesWithoutKey).Error; err != nil {
+		return errs.Wrap(err)
+	}
+	for _, c := range companiesWithoutKey {
+		slug, err := random.GenerateRandomURLBase64Encoded(32)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		if err := db.Model(&database.Company{}).
+			Where("id = ?", c.ID).
+			Update("assets_key", slug).Error; err != nil {
+			return errs.Wrap(err)
+		}
 	}
 
 	return nil

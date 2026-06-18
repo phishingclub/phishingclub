@@ -60,6 +60,12 @@
 				goto('/asset/shared/');
 			}}>Open shared assets</BigButton
 		>
+	{:else}
+		<BigButton
+			on:click={() => {
+				goto('/asset/company/');
+			}}>Open company assets</BigButton
+		>
 	{/if}
 	<Table
 		columns={[{ column: 'Name', size: 'large' }]}

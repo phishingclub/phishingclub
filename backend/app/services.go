@@ -87,11 +87,12 @@ func NewServices(
 		Common: common,
 	}
 	asset := &service.Asset{
-		Common:           common,
-		RootFolder:       assetPath,
-		FileService:      file,
-		AssetRepository:  repositories.Asset,
-		DomainRepository: repositories.Domain,
+		Common:            common,
+		RootFolder:        assetPath,
+		FileService:       file,
+		AssetRepository:   repositories.Asset,
+		DomainRepository:  repositories.Domain,
+		CompanyRepository: repositories.Company,
 	}
 	attachment := &service.Attachment{
 		Common:               common,
