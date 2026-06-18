@@ -6,6 +6,10 @@ down:
 	-sudo docker compose down --remove-orphans
 up-build:
 	sudo docker compose up --build --force
+# build a single, self contained binary with the frontend embedded -> build/phishingclub
+# override arch: make build BIN_ARCH=arm64 ; override version: make build VERSION=1.2.3
+build:
+	BIN_ARCH=$(BIN_ARCH) VERSION=$(VERSION) ./backend/build_scripts/build.sh
 # same as up but for machines with limited memory, the frontend waits for the backend
 # build to finish so the two heavy first build steps do not run at the same time
 up-low-mem:
