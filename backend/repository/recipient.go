@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -754,6 +755,31 @@ func (r *Recipient) GetByEmail(
 	return ToRecipient(&dbRecipient)
 }
 
+// GetByEmailLower looks up a recipient by a case insensitive email match.
+// the supplied email is compared with LOWER() on both sides so that the same
+// address in a different casing (e.g. Foo@bar.tld vs foo@bar.tld) is treated as
+// the same recipient. used to reject a new recipient that duplicates an
+// existing one apart from casing. for resolving a specific recipient use the
+// exact match GetByEmail instead.
+func (r *Recipient) GetByEmailLower(
+	ctx context.Context,
+	email *vo.Email,
+	fields ...string,
+) (*model.Recipient, error) {
+	var dbRecipient database.Recipient
+	fields = assignTableToColumns(database.RECIPIENT_TABLE, fields)
+	res := useSelect(r.DB, fields).
+		Where(
+			fmt.Sprintf("LOWER(%s) = LOWER(?)", TableColumn(database.RECIPIENT_TABLE, "email")),
+			email.String(),
+		).
+		First(&dbRecipient)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return ToRecipient(&dbRecipient)
+}
+
 // GetByEmailLowerAndCompanyID looks up a recipient by a case-insensitive email
 // match within a company. the supplied email is compared with LOWER() on both
 // sides so that differently cased addresses (e.g. John@X.com vs john@x.com) are
@@ -832,6 +858,12 @@ func (r *Recipient) Insert(
 ) (*uuid.UUID, error) {
 	id := uuid.New()
 	row := recp.ToDBMap()
+	// the email is the recipient identity and is stored lowercased so the same
+	// address in a different casing is one recipient. only applied on create so
+	// an existing stored casing is never rewritten on update
+	if email, ok := row["email"].(string); ok {
+		row["email"] = strings.ToLower(email)
+	}
 	row["id"] = id
 	AddTimestamps(row)
 	res := r.DB.Model(&database.Recipient{}).Create(row)

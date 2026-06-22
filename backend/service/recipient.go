@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-errors/errors"
 	"github.com/oapi-codegen/nullable"
@@ -51,7 +50,8 @@ func (r *Recipient) Create(
 	email := recipient.Email.MustGet()
 	// check if recipient already exists to avoid a unique constraint error
 	// and gorm does not return a unique constraint error but a string error depending on DB
-	_, err = r.RecipientRepository.GetByEmail(
+	// the match is case insensitive so the same address in a different casing is rejected
+	_, err = r.RecipientRepository.GetByEmailLower(
 		ctx,
 		&email,
 	)
@@ -112,32 +112,8 @@ func (r *Recipient) UpdateByID(
 	}
 	// update config - if a field is present and not null, update it
 
-	// if the email is changed, check that another recipient is not using this email already
-	if v, err := incoming.Email.Get(); err != nil {
-		if v.String() != current.Email.MustGet().String() {
-			var companyID *uuid.UUID
-			if current.CompanyID != nil {
-				if cid, err := current.CompanyID.Get(); err != nil {
-					companyID = &cid
-				}
-			}
-			_, err := r.RecipientRepository.GetByEmailAndCompanyID(
-				ctx,
-				&v,
-				companyID,
-			)
-			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-				r.Logger.Errorw("failed check existing recipient email", "error", err)
-				return err
-			}
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				r.Logger.Debugw("email is already taken", "email", v.String())
-				s := fmt.Sprintf("email '%s' is already used by another recipient", v.String())
-				return validate.WrapErrorWithField(errors.New("not unique"), s)
-			}
-		}
-		current.Email.Set(v)
-	}
+	// the email is the recipient identity and is immutable, so any incoming
+	// email is ignored and the stored one is preserved
 	if v, err := incoming.Phone.Get(); err == nil {
 		current.Phone.Set(v)
 	}
@@ -589,9 +565,11 @@ func (r *Recipient) Import(
 			continue
 		}
 
-		// check if the recipient exists
+		// check if the recipient exists, case insensitively so the same address
+		// in a different casing updates the existing recipient instead of creating
+		// a duplicate
 		email := incoming.Email.MustGet()
-		current, err := r.RecipientRepository.GetByEmail(
+		current, err := r.RecipientRepository.GetByEmailLower(
 			ctx,
 			&email,
 			"id", "email", "company_id",
