@@ -59,6 +59,8 @@ var (
 	flagRecovery                = flag.Bool("recover", false, "Used for interactive recovery of an account")
 	flagConfigOnly              = flag.Bool("config-only", false, "Run interactive installer and save config without installing")
 	flagDebug                   = flag.Bool("debug", false, "Force debug logging on db and app logger, ignores db settings on startup")
+	flagMigrate                 = flag.String("migrate", "", "Run a named one-off data migration then exit (available: lowercase-recipient-emails)")
+	flagDryRun                  = flag.Bool("dry-run", false, "With --migrate, report what would change without writing any changes")
 )
 
 func main() {
@@ -200,6 +202,19 @@ func main() {
 	err = seed.InitialInstallAndSeed(db, repositories, logger, usingSystemd)
 	if err != nil {
 		logger.Fatalw("Failed to run migrations and seeding", "error", err)
+	}
+	// run a one-off opt in data migration and exit, the schema is guaranteed
+	// by the seeding above
+	if *flagMigrate != "" {
+		switch *flagMigrate {
+		case "lowercase-recipient-emails":
+			if _, err := seed.LowercaseRecipientEmails(db, logger, *flagDryRun); err != nil {
+				logger.Fatalw("migration failed", "migration", *flagMigrate, "error", err)
+			}
+		default:
+			logger.Fatalf("unknown migration: %s", *flagMigrate)
+		}
+		return
 	}
 	// setup logging again so it is according to the database
 	err = setLogLevels(db, atomicLogger, *flagDebug)
