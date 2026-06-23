@@ -30,6 +30,13 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -46,6 +53,21 @@
 	};
 	let webhooks = [];
 	let webhooksHasNextPage = true;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (w) => globalButtonDisabledAttributes(w, contextCompanyID).disabled;
+	$: selectablePageIds = webhooks
+		.filter((w) => !globalButtonDisabledAttributes(w, contextCompanyID).disabled)
+		.map((w) => w.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({ ids: [...$selection], deleteFn: api.webhook.delete, noun: 'webhook' });
+		await refreshWebhooks();
+		return { success: true };
+	};
 	let modalError = '';
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
@@ -96,6 +118,7 @@
 	const refreshWebhooks = async () => {
 		try {
 			isTableLoading = true;
+			selection.clear();
 			const result = await getWebhooks();
 			webhooks = result.rows;
 			webhooksHasNextPage = result.hasNextPage;
@@ -285,7 +308,16 @@
 <main>
 	<Headline>Webhooks</Headline>
 	<BigButton on:click={openCreateModal}>New webhook</BigButton>
+	<BulkActionBar
+		count={$selection.size}
+		noun="webhook"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
@@ -299,6 +331,13 @@
 	>
 		{#each webhooks as webhook}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(webhook.id)}
+						disabled={isRowDisabled(webhook)}
+						on:change={() => selection.toggle(webhook.id)}
+					/>
+				{/if}
 				<TableCell>
 					<button
 						on:click={() => {
@@ -404,5 +443,12 @@
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete webhooks"
+		name={`${$selection.size} webhook${$selection.size === 1 ? '' : 's'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 </main>

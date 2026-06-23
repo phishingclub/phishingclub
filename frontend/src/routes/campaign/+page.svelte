@@ -46,6 +46,13 @@
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TestLabel from '$lib/components/TestLabel.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import ToIcon from '$lib/components/ToIcon.svelte';
 	import Datetime from '$lib/components/Datetime.svelte';
@@ -238,6 +245,21 @@
 		await refreshCampaigns();
 	};
 	let campaignsHasNextPage = false;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (c) => globalButtonDisabledAttributes(c, contextCompanyID).disabled;
+	$: selectablePageIds = (campaigns ?? [])
+		.filter((c) => !globalButtonDisabledAttributes(c, contextCompanyID).disabled)
+		.map((c) => c.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({ ids: [...$selection], deleteFn: api.campaign.delete, noun: 'campaign' });
+		await refreshCampaigns();
+		return { success: true };
+	};
 	let templateMap = new BiMap({});
 	let recipientGroupsByID = {};
 	let recipientGroupMap = new BiMap({});
@@ -780,6 +802,7 @@
 			if (useTableLoading) {
 				isTableLoading = true;
 			}
+			selection.clear();
 			campaigns = await getCampaigns();
 			await refreshCampaignDependencyData();
 		} catch (e) {
@@ -1541,7 +1564,16 @@
 		</div>
 	</div>
 	<BigButton on:click={openCreateModal}>New Campaign</BigButton>
+	<BulkActionBar
+		count={$selection.size}
+		noun="campaign"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
 			{ column: 'Status', size: 'small' },
@@ -1559,6 +1591,13 @@
 	>
 		{#each campaigns as campaign}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(campaign.id)}
+						disabled={isRowDisabled(campaign)}
+						on:change={() => selection.toggle(campaign.id)}
+					/>
+				{/if}
 				<TableCellLink href={`/campaign/${campaign.id}`} title={campaign.name}>
 					{#if campaign.isTest}
 						<TestLabel />
@@ -2894,6 +2933,14 @@
 		onClick={() => onClickDelete(deleteValues.id)}
 		confirm
 		bind:isVisible={isDeleteAlertVisible}
+	/>
+	<DeleteAlert
+		title="Delete campaigns"
+		list={['This will remove statistics related to the campaigns and recipients']}
+		name={`${$selection.size} campaign${$selection.size === 1 ? '' : 's'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	/>
 	<DeleteAlert
 		title="Clear device codes"

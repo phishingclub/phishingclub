@@ -30,6 +30,13 @@
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import FileField from '$lib/components/FileField.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 	import { onClickCopy } from '$lib/utils/common.js';
 
 	// services
@@ -52,6 +59,21 @@
 	let contextCompanyID = '';
 	let assets = [];
 	let assetsHasNextPage = true;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (a) => globalButtonDisabledAttributes(a, contextCompanyID).disabled;
+	$: selectablePageIds = assets
+		.filter((a) => !globalButtonDisabledAttributes(a, contextCompanyID).disabled)
+		.map((a) => a.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({ ids: [...$selection], deleteFn: api.asset.delete, noun: 'asset' });
+		await refreshAssets();
+		return { success: true };
+	};
 
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
@@ -150,6 +172,7 @@
 	const refreshAssets = async () => {
 		try {
 			isTableLoading = true;
+			selection.clear();
 			// load the company asset slug before assets render so the company
 			// folder previews and copy paths resolve correctly
 			if (isCompanyFolder && !companyAssetsKey) {
@@ -431,7 +454,16 @@
 		{/if}
 	</Headline>
 	<BigButton on:click={openCreateModal}>New asset</BigButton>
+	<BulkActionBar
+		count={$selection.size}
+		noun="asset"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Preview', size: 'small' },
 			{ column: 'Name', size: 'large' },
@@ -447,6 +479,13 @@
 	>
 		{#each assets as asset}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(asset.id)}
+						disabled={isRowDisabled(asset)}
+						on:change={() => selection.toggle(asset.id)}
+					/>
+				{/if}
 				<TableCell>
 					{#if isImageFile(asset.path)}
 						{#await getImagePreviewUrl(asset.path)}
@@ -565,6 +604,13 @@
 		name={deleteValues.name || deleteValues.path || 'Unnamed asset'}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete assets"
+		name={`${$selection.size} asset${$selection.size === 1 ? '' : 's'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 
 	<!-- Image Preview Popover -->

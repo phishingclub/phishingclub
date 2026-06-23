@@ -32,6 +32,13 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import { page } from '$app/stores';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import CopyCell from '$lib/components/table/CopyCell.svelte';
@@ -77,6 +84,25 @@
 	let identifierMap = new BiMap({});
 	let templates = [];
 	let templatesHasNextPage = true;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (t) => globalButtonDisabledAttributes(t, contextCompanyID).disabled;
+	$: selectablePageIds = templates
+		.filter((t) => !globalButtonDisabledAttributes(t, contextCompanyID).disabled)
+		.map((t) => t.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({
+			ids: [...$selection],
+			deleteFn: api.campaignTemplate.delete,
+			noun: 'template'
+		});
+		await refreshCampaignTemplates();
+		return { success: true };
+	};
 	let modalError = '';
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
@@ -241,6 +267,7 @@
 	const refreshCampaignTemplates = async () => {
 		try {
 			isTableLoading = true;
+			selection.clear();
 			await getCampaignTemplates();
 		} finally {
 			isTableLoading = false;
@@ -556,7 +583,16 @@
 	<Headline>Campaigns templates</Headline>
 	<BigButton on:click={openCreateModal}>New template</BigButton>
 
+	<BulkActionBar
+		count={$selection.size}
+		noun="template"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
 			{ column: 'Domain', size: 'small' },
@@ -591,6 +627,13 @@
 	>
 		{#each templates as template}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(template.id)}
+						disabled={isRowDisabled(template)}
+						on:change={() => selection.toggle(template.id)}
+					/>
+				{/if}
 				<TableCell>
 					<button
 						on:click={() => openUpdateModal(template.id)}
@@ -1158,5 +1201,13 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 		onClick={() => onClickDelete(deleteValues.id)}
 		confirm
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete templates"
+		list={['Scheduled or active campaigns using these templates will be closed']}
+		name={`${$selection.size} template${$selection.size === 1 ? '' : 's'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 </main>

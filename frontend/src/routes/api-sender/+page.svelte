@@ -28,6 +28,13 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TextareaField from '$lib/components/TextareaField.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
 	import { addToast } from '$lib/store/toast';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
@@ -64,6 +71,25 @@
 	};
 	let apiSenders = [];
 	let apiSendersHasNextPage = true;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (s) => globalButtonDisabledAttributes(s, contextCompanyID).disabled;
+	$: selectablePageIds = apiSenders
+		.filter((s) => !globalButtonDisabledAttributes(s, contextCompanyID).disabled)
+		.map((s) => s.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({
+			ids: [...$selection],
+			deleteFn: api.apiSender.delete,
+			noun: 'API sender'
+		});
+		await refreshConfigurations();
+		return { success: true };
+	};
 	let modalError = '';
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
@@ -119,6 +145,7 @@
 	const refreshConfigurations = async () => {
 		try {
 			isTableLoading = true;
+			selection.clear();
 			const data = await getAPISenders();
 			apiSenders = data.rows;
 			apiSendersHasNextPage = data.hasNextPage;
@@ -339,7 +366,16 @@
 <main>
 	<Headline>API Senders</Headline>
 	<BigButton on:click={openCreateModal}>New API sender</BigButton>
+	<BulkActionBar
+		count={$selection.size}
+		noun="API sender"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
@@ -353,6 +389,13 @@
 	>
 		{#each apiSenders as apiSender}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(apiSender.id)}
+						disabled={isRowDisabled(apiSender)}
+						on:change={() => selection.toggle(apiSender.id)}
+					/>
+				{/if}
 				<TableCell>
 					<button
 						on:click={() => {
@@ -800,5 +843,16 @@ X-Custom-Header: Hello Friend"
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete API senders"
+		list={[
+			'Templates using these api senders will become unusable',
+			'Scheduled or active campaigns using these api senders will be closed'
+		]}
+		name={`${$selection.size} API sender${$selection.size === 1 ? '' : 's'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 </main>

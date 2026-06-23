@@ -30,6 +30,13 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import FileField from '$lib/components/FileField.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -63,6 +70,25 @@
 
 	let attachments = [];
 	let attachmentsHasNextPage = false;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (a) => globalButtonDisabledAttributes(a, contextCompanyID).disabled;
+	$: selectablePageIds = attachments
+		.filter((a) => !globalButtonDisabledAttributes(a, contextCompanyID).disabled)
+		.map((a) => a.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({
+			ids: [...$selection],
+			deleteFn: api.attachment.delete,
+			noun: 'attachment'
+		});
+		await refreshAttachments();
+		return { success: true };
+	};
 	let isModalVisible = false;
 	let isSubmitting = false;
 	const tableURLParams = newTableURLParams();
@@ -99,6 +125,7 @@
 	const refreshAttachments = async () => {
 		try {
 			showIsLoading();
+			selection.clear();
 			const res = await api.attachment.getByContext(contextCompanyID, tableURLParams);
 			attachments = res.data.rows ?? [];
 			attachmentsHasNextPage = res.data.hasNextPage;
@@ -269,7 +296,16 @@
 <main>
 	<Headline>Attachments</Headline>
 	<BigButton on:click={openCreateModal}>New attachment</BigButton>
+	<BulkActionBar
+		count={$selection.size}
+		noun="attachment"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			'Name',
 			'Description',
@@ -293,6 +329,13 @@
 	>
 		{#each attachments as attachment}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(attachment.id)}
+						disabled={isRowDisabled(attachment)}
+						on:change={() => selection.toggle(attachment.id)}
+					/>
+				{/if}
 				<TableCell>
 					{#if attachment.name}
 						<button
@@ -402,5 +445,12 @@
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete attachments"
+		name={`${$selection.size} attachment${$selection.size === 1 ? '' : 's'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 </main>

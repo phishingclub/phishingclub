@@ -38,6 +38,13 @@
 	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -87,6 +94,18 @@
 		email: null
 	};
 
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	// a row cannot be selected when its delete action is disabled in shared view
+	const isRowDisabled = (recipient) =>
+		globalButtonDisabledAttributes(recipient, contextCompanyID).disabled;
+	$: selectablePageIds = recipients
+		.filter((r) => !globalButtonDisabledAttributes(r, contextCompanyID).disabled)
+		.map((r) => r.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+
 	let isRecipientsTableLoading = false;
 
 	$: {
@@ -111,6 +130,8 @@
 	// component logic
 	const refreshRecipients = async () => {
 		isRecipientsTableLoading = true;
+		// selection is current page only, drop it on every reload
+		selection.clear();
 		try {
 			const res = await api.recipient.getAll(tableURLParams, contextCompanyID);
 			if (res.success) {
@@ -349,6 +370,16 @@
 		return action;
 	};
 
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({
+			ids: [...$selection],
+			deleteFn: api.recipient.delete,
+			noun: 'recipient'
+		});
+		await refreshRecipients();
+		return { success: true };
+	};
+
 	const openCreateModal = () => {
 		modalMode = 'create';
 		isModalVisible = true;
@@ -426,8 +457,17 @@
 		<BigButton on:click={openImportModal}>Import from CSV</BigButton>
 		<BigButton on:click={() => goto('/recipient/orphaned/')}>View Orphaned</BigButton>
 	</div>
+	<BulkActionBar
+		count={$selection.size}
+		noun="recipient"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
 		isGhost={isRecipientsTableLoading}
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Email', size: 'large' },
 			{ column: 'First name', size: 'small' },
@@ -468,6 +508,13 @@
 					? 'Disabled: deprovisioned in the identity provider. Excluded from campaigns and email delivery, pending removal.'
 					: ''}
 			>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(recipient.id)}
+						disabled={isRowDisabled(recipient)}
+						on:change={() => selection.toggle(recipient.id)}
+					/>
+				{/if}
 				<TableCellLink href={`/recipient/${recipient.id}`} title={recipient.email}>
 					{#if recipient.email}
 						{recipient.email}
@@ -722,6 +769,14 @@
 		name={deleteValues.email}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete recipients"
+		name={`${$selection.size} recipient${$selection.size === 1 ? '' : 's'}`}
+		list={['Any associated data will be anonymized']}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 
 	{#if isImportResultModalVisible && importResult}

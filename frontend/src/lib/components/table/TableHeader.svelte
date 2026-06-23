@@ -6,6 +6,7 @@
 	import TableHeadCellEmpty from './TableHeadCellEmpty.svelte';
 	import TableRow from './TableRow.svelte';
 	import TableRowEmpty from './TableRowEmpty.svelte';
+	import TableHeadCellCheckbox from './TableHeadCellCheckbox.svelte';
 	import GhostText from '../GhostText.svelte';
 
 	export let columns = [];
@@ -14,6 +15,9 @@
 	export let hasActions = true;
 	/** @type {*|null} */
 	export let pagination = null;
+	export let selectable = false;
+	/** @type {'none'|'some'|'all'} */
+	export let headerState = 'none';
 
 	$: sortableMap = {};
 
@@ -26,6 +30,13 @@
 
 <TableHead>
 	<TableRow>
+		{#if selectable}
+			{#if !isGhost}
+				<TableHeadCellCheckbox state={headerState} on:toggleAll />
+			{:else}
+				<TableHeadCellEmpty />
+			{/if}
+		{/if}
 		{#each columns as column, i (typeof column === 'object' ? column.column : column)}
 			{#if typeof column === 'object'}
 				<TableHeadCell

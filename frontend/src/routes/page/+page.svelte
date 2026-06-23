@@ -29,6 +29,13 @@
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import Editor from '$lib/components/editor/Editor.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 	import { fetchAllRows } from '$lib/utils/api-utils';
 	import { BiMap } from '$lib/utils/maps';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
@@ -50,6 +57,21 @@
 	let contextCompanyID = null;
 	let pages = [];
 	let pagesHasNextPage = true;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (p) => globalButtonDisabledAttributes(p, contextCompanyID).disabled;
+	$: selectablePageIds = pages
+		.filter((p) => !globalButtonDisabledAttributes(p, contextCompanyID).disabled)
+		.map((p) => p.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({ ids: [...$selection], deleteFn: api.page.delete, noun: 'page' });
+		await refreshPages();
+		return { success: true };
+	};
 	let domainMap = new BiMap({});
 	let formError = '';
 	let isModalVisible = false;
@@ -92,6 +114,7 @@
 			if (showLoading) {
 				isPageTableLoading = true;
 			}
+			selection.clear();
 			const res = await getPages();
 			pages = res.rows;
 			pagesHasNextPage = res.hasNextPage;
@@ -324,7 +347,16 @@
 		/>
 	</div>
 	<BigButton on:click={openCreateModal}>New Page</BigButton>
+	<BulkActionBar
+		count={$selection.size}
+		noun="page"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
@@ -338,6 +370,13 @@
 	>
 		{#each pages as page}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(page.id)}
+						disabled={isRowDisabled(page)}
+						on:change={() => selection.toggle(page.id)}
+					/>
+				{/if}
 				<TableCell>
 					<button
 						on:click={() => {
@@ -395,5 +434,16 @@
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete pages"
+		list={[
+			'Templates using these pages will become unusable',
+			'Scheduled or active campaigns using these pages will be cancelled'
+		]}
+		name={`${$selection.size} page${$selection.size === 1 ? '' : 's'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 </main>

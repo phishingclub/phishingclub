@@ -27,6 +27,13 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import ProxyConfigBuilder from '$lib/components/proxy/ProxyConfigBuilder.svelte';
@@ -71,6 +78,26 @@
 	let contextCompanyID = null;
 	let proxies = [];
 	let proxiesHasNextPage = true;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (p) => globalButtonDisabledAttributes(p, contextCompanyID).disabled;
+	$: selectablePageIds = proxies
+		.filter((p) => !globalButtonDisabledAttributes(p, contextCompanyID).disabled)
+		.map((p) => p.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({
+			ids: [...$selection],
+			deleteFn: api.proxy.delete,
+			noun: 'proxy',
+			nounPlural: 'proxies'
+		});
+		await refreshProxies();
+		return { success: true };
+	};
 	let formError = '';
 	let isModalVisible = false;
 	let isProxyTableLoading = false;
@@ -330,6 +357,7 @@ portal.example.com:
 			if (showLoading) {
 				isProxyTableLoading = true;
 			}
+			selection.clear();
 			const res = await getProxies();
 			proxies = res.rows;
 			proxiesHasNextPage = res.hasNextPage;
@@ -650,7 +678,17 @@ portal.example.com:
 		/>
 	</div>
 	<BigButton on:click={openCreateModal}>New Proxy</BigButton>
+	<BulkActionBar
+		count={$selection.size}
+		noun="proxy"
+		nounPlural="proxies"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
 			{ column: 'Start URL', size: 'medium' },
@@ -665,6 +703,13 @@ portal.example.com:
 	>
 		{#each proxies as proxy}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(proxy.id)}
+						disabled={isRowDisabled(proxy)}
+						on:change={() => selection.toggle(proxy.id)}
+					/>
+				{/if}
 				<TableCell>
 					<button
 						on:click={() => {
@@ -913,6 +958,18 @@ portal.example.com:
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete proxies"
+		list={[
+			'All associated domains will be deleted',
+			'Templates using these proxies will become unusable',
+			'Scheduled or active campaigns using these proxies will be cancelled'
+		]}
+		name={`${$selection.size} ${$selection.size === 1 ? 'proxy' : 'proxies'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 
 	<!-- IP Allow List Modal -->

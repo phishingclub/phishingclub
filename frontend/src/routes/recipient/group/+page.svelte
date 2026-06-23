@@ -31,6 +31,13 @@
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -72,6 +79,18 @@
 		id: null,
 		name: null
 	};
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	// a row cannot be selected when its delete action is disabled in shared view
+	const isRowDisabled = (group) =>
+		globalButtonDisabledAttributes(group, contextCompanyID).disabled;
+	$: selectablePageIds = groups
+		.filter((g) => !globalButtonDisabledAttributes(g, contextCompanyID).disabled)
+		.map((g) => g.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
 
 	// dynamic update modal state
 	let isDynamicUpdateModalVisible = false;
@@ -120,6 +139,8 @@
 	const refreshGroups = async () => {
 		try {
 			isTableLoading = true;
+			// selection is current page only, drop it on every reload
+			selection.clear();
 			const res = await api.recipient.getAllGroups(tableURLParams, contextCompanyID);
 			if (!res.success) {
 				throw res.error;
@@ -260,6 +281,16 @@
 		return action;
 	};
 
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({
+			ids: [...$selection],
+			deleteFn: api.recipient.deleteGroup,
+			noun: 'group'
+		});
+		await refreshGroups();
+		return { success: true };
+	};
+
 	/** @param {string} id */
 	const gotoEditGroupRecipients = async (id) => {
 		goto(`/recipient/group/${id}`, { invalidateAll: true });
@@ -342,7 +373,16 @@
 		<BigButton on:click={openCreateModal}>New group</BigButton>
 		<BigButton on:click={openDynamicCreateModal}>New dynamic group</BigButton>
 	</div>
+	<BulkActionBar
+		count={$selection.size}
+		noun="group"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
 			{ column: 'Count', size: 'small' },
@@ -357,6 +397,13 @@
 	>
 		{#each groups as group}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(group.id)}
+						disabled={isRowDisabled(group)}
+						on:change={() => selection.toggle(group.id)}
+					/>
+				{/if}
 				<TableCellLink href={`/recipient/group/${group.id}`} title={group.name}>
 					{#if group.isDynamic}
 						<DynamicLabel />
@@ -514,5 +561,18 @@
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete groups"
+		list={[
+			'Recipients not in any other group will become orphaned',
+			'Active campaign sends for recipients in these groups will be cancelled',
+			'These groups will be removed from any campaigns they are assigned to',
+			'Recipients are kept and their campaign history is left intact'
+		]}
+		name={`${$selection.size} group${$selection.size === 1 ? '' : 's'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 </main>

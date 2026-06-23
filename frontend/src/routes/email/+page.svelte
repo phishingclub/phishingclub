@@ -38,6 +38,13 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -73,6 +80,21 @@
 	let sendTestModalError = '';
 	let emails = [];
 	let emailsHasNextPage = true;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (e) => globalButtonDisabledAttributes(e, contextCompanyID).disabled;
+	$: selectablePageIds = emails
+		.filter((e) => !globalButtonDisabledAttributes(e, contextCompanyID).disabled)
+		.map((e) => e.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({ ids: [...$selection], deleteFn: api.email.delete, noun: 'email' });
+		await refreshEmails();
+		return { success: true };
+	};
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
 	let isSendTestModalVisible = false;
@@ -110,6 +132,7 @@
 	const refreshEmails = async () => {
 		try {
 			isTableLoading = true;
+			selection.clear();
 			const res = await getEmails();
 			emails = res.rows;
 			emailsHasNextPage = res.hasNextPage;
@@ -384,7 +407,16 @@
 <main>
 	<Headline>Emails</Headline>
 	<BigButton on:click={async () => await openCreateModal()}>New Email</BigButton>
+	<BulkActionBar
+		count={$selection.size}
+		noun="email"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
 			{ column: 'From', size: 'medium' },
@@ -401,6 +433,13 @@
 	>
 		{#each emails as email}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(email.id)}
+						disabled={isRowDisabled(email)}
+						on:change={() => selection.toggle(email.id)}
+					/>
+				{/if}
 				<TableCell>
 					<button
 						on:click={() => {
@@ -544,5 +583,12 @@
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete emails"
+		name={`${$selection.size} email${$selection.size === 1 ? '' : 's'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 </main>

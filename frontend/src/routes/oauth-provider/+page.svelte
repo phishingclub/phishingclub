@@ -30,6 +30,13 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import TextareaField from '$lib/components/TextareaField.svelte';
 
@@ -50,6 +57,25 @@
 	};
 	let providers = [];
 	let providersHasNextPage = false;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (p) => globalButtonDisabledAttributes(p, contextCompanyID).disabled;
+	$: selectablePageIds = providers
+		.filter((p) => !globalButtonDisabledAttributes(p, contextCompanyID).disabled)
+		.map((p) => p.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({
+			ids: [...$selection],
+			deleteFn: api.oauthProvider.delete,
+			noun: 'OAuth provider'
+		});
+		await refreshProviders();
+		return { success: true };
+	};
 	let formError = '';
 	let contextCompanyID = null;
 	const tableURLParams = newTableURLParams();
@@ -131,6 +157,7 @@
 	const refreshProviders = async () => {
 		try {
 			isProviderTableLoading = true;
+			selection.clear();
 			const data = await getProviders();
 			providers = data.rows;
 			providersHasNextPage = data.hasNextPage;
@@ -496,7 +523,16 @@
 		<BigButton on:click={openCreateModal}>New OAuth</BigButton>
 		<BigButton on:click={openImportModal}>Import Token</BigButton>
 	</div>
+	<BulkActionBar
+		count={$selection.size}
+		noun="OAuth provider"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={['Name', 'Status']}
 		sortable={['name', 'is_authorized']}
 		pagination={tableURLParams}
@@ -508,6 +544,13 @@
 	>
 		{#each providers as provider}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(provider.id)}
+						disabled={isRowDisabled(provider)}
+						on:change={() => selection.toggle(provider.id)}
+					/>
+				{/if}
 				<TableCell>
 					<button
 						on:click={() => {
@@ -828,6 +871,13 @@
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	/>
+	<DeleteAlert
+		title="Delete OAuth providers"
+		name={`${$selection.size} OAuth provider${$selection.size === 1 ? '' : 's'}`}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	/>
 
 	<DeleteAlert

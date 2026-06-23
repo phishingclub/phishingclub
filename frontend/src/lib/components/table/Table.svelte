@@ -27,6 +27,10 @@
 	// if there is more data to paginate
 	export let hasNextPage = true;
 	export let noSearch = false;
+	// adds a leading checkbox column for multi select
+	export let selectable = false;
+	/** @type {'none'|'some'|'all'} */
+	export let headerState = 'none';
 
 	let tableWrapper = null;
 	let columnsLength = columns.length;
@@ -42,7 +46,7 @@
 		if (!pagination && sortable?.length) {
 			console.warn('You need to pass a pagination object to make the column sortable');
 		}
-		columnsLength = columns.length + (hasActions ? 2 : 0);
+		columnsLength = columns.length + (hasActions ? 2 : 0) + (selectable ? 1 : 0);
 	});
 
 	let currentPage = pagination && pagination.currentPage;
@@ -68,7 +72,16 @@
 				class="w-full table-fixed bg-white dark:bg-gray-900/80 transition-colors duration-200"
 				class:animate-pulse={isGhost}
 			>
-				<TableHeader {isGhost} {columns} {sortable} {hasActions} {pagination} />
+				<TableHeader
+					{isGhost}
+					{columns}
+					{sortable}
+					{hasActions}
+					{pagination}
+					{selectable}
+					{headerState}
+					on:toggleAll
+				/>
 				{#if !hasData && !isGhost}
 					<EmptyTableResult page={currentPage} {plural} colspan={columnsLength} />
 				{/if}
@@ -77,6 +90,9 @@
 				{:else}
 					{#each Array(rowsLength || pagination?.perPage) as _, row}
 						<TableRow>
+							{#if selectable}
+								<TableCellEmpty />
+							{/if}
 							{#each columns as column}
 								<TableCell>
 									<GhostText />

@@ -31,6 +31,13 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
+	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
+	import {
+		createTableSelection,
+		headerSelectionState,
+		runBulkDelete
+	} from '$lib/service/tableSelection.js';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 
 	// services
@@ -60,6 +67,25 @@
 	};
 	let configurations = [];
 	let configurationsHasNextPage = false;
+
+	// multi select
+	const selection = createTableSelection();
+	let isBulkDeleteAlertVisible = false;
+	const isRowDisabled = (c) => globalButtonDisabledAttributes(c, contextCompanyID).disabled;
+	$: selectablePageIds = configurations
+		.filter((c) => !globalButtonDisabledAttributes(c, contextCompanyID).disabled)
+		.map((c) => c.id);
+	$: headerState = headerSelectionState($selection, selectablePageIds);
+	$: showMultiSelect = selectablePageIds.length > 1;
+	const onClickBulkDelete = async () => {
+		await runBulkDelete({
+			ids: [...$selection],
+			deleteFn: api.smtpConfiguration.delete,
+			noun: 'configuration'
+		});
+		await refreshConfigurations();
+		return { success: true };
+	};
 	let headers = [];
 	let formError = '';
 	let headerError = '';
@@ -107,6 +133,7 @@
 	const refreshConfigurations = async () => {
 		try {
 			isConfigTableLoading = true;
+			selection.clear();
 			const data = await getConfigurations();
 			configurations = data.rows;
 			configurationsHasNextPage = data.hasNextPage;
@@ -422,7 +449,16 @@
 <main>
 	<Headline>SMTP Configurations</Headline>
 	<BigButton on:click={openCreateModal}>New configuration</BigButton>
+	<BulkActionBar
+		count={$selection.size}
+		noun="configuration"
+		on:delete={() => (isBulkDeleteAlertVisible = true)}
+		on:clear={() => selection.clear()}
+	/>
 	<Table
+		selectable={showMultiSelect}
+		{headerState}
+		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
 			{ column: 'Host', size: 'small' },
@@ -439,6 +475,13 @@
 	>
 		{#each configurations as conf}
 			<TableRow>
+				{#if showMultiSelect}
+					<TableCellCheckbox
+						checked={$selection.has(conf.id)}
+						disabled={isRowDisabled(conf)}
+						on:change={() => selection.toggle(conf.id)}
+					/>
+				{/if}
 				<TableCell>
 					<button
 						on:click={() => {
@@ -596,6 +639,17 @@
 		]}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
+	></DeleteAlert>
+	<DeleteAlert
+		title="Delete configurations"
+		name={`${$selection.size} configuration${$selection.size === 1 ? '' : 's'}`}
+		list={[
+			'Templates using these SMTP configurations will become unusable',
+			'Scheduled or active campaigns using these SMTP configurations will be closed'
+		]}
+		onClick={onClickBulkDelete}
+		confirm
+		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 	<!-- HEADER MODAL -->
 	<Modal
