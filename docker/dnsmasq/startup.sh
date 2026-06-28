@@ -4,6 +4,8 @@ BACKEND_IP=$(getent hosts backend | awk '{ print $1 }')
 
 # Update the dnsmasq configuration file
 echo "address=/.test/$BACKEND_IP" > /etc/dnsmasq.conf
+# labs can use *.training.test
+echo "address=/training.test/172.20.0.150" >> /etc/dnsmasq.conf
 echo "BACKEND_IP=$BACKEND_IP"
 echo "Loaded configuration (/etc/dnsmasq.conf):"
 cat /etc/dnsmasq.conf
