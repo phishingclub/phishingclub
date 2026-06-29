@@ -5227,8 +5227,8 @@ func (c *Campaign) saveReportedEvent(
 		"ip_address":  campaignEvent.IP.String(),
 		"user_agent":  campaignEvent.UserAgent.String(),
 		"data":        campaignEvent.Data.String(),
-		"created_at":  customTime,
-		"updated_at":  time.Now(),
+		"created_at":  utils.RFC3339UTC(customTime),
+		"updated_at":  utils.NowRFC3339UTC(),
 	}
 	if campaignEvent.RecipientID != nil {
 		row["recipient_id"] = campaignEvent.RecipientID.String()
