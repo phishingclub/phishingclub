@@ -62,6 +62,8 @@
 		sendStartAt: null,
 		sendEndAt: null,
 		anonymizedAt: null,
+		dataAnonymizeAt: null,
+		dataAnonymizedAt: null,
 		closeAt: null,
 		closedAt: null,
 		template: null,
@@ -143,6 +145,7 @@
 	let isRecipientTableLoading = false;
 	let isCloseModalVisible = false;
 	let isAnonymizeModalVisible = false;
+	let isAnonymizeDataModalVisible = false;
 	let isSendMessageModalVisible = false;
 	let isSetAsSentModalVisible = false;
 	let isSessionSushiModalVisible = false;
@@ -301,6 +304,8 @@
 			campaign.sendEndAt = t.sendEndAt;
 			campaign.anonymizedAt = t.anonymizedAt;
 			campaign.anonymizeAt = t.anonymizeAt;
+			campaign.dataAnonymizedAt = t.dataAnonymizedAt;
+			campaign.dataAnonymizeAt = t.dataAnonymizeAt;
 			campaign.closeAt = t.closeAt;
 			campaign.closedAt = t.closedAt;
 			campaign.isTest = t.isTest;
@@ -731,6 +736,14 @@
 		isAnonymizeModalVisible = false;
 	};
 
+	const showAnonymizeDataModal = () => {
+		isAnonymizeDataModalVisible = true;
+	};
+
+	const closeAnonymizeDataModal = () => {
+		isAnonymizeDataModalVisible = false;
+	};
+
 	const closeSessionSushiModal = () => {
 		isSessionSushiModalVisible = false;
 		storedCookieData = '';
@@ -884,9 +897,10 @@
 			await setCampaign();
 			await getEvents();
 			await refreshCampaignRecipients();
-			// bug: have to clear ref and wait a tick or svelte does not re-render
+			// reset timeline and refetch all events (timeline only fetches new events incrementally)
 			timelineEventsMap = new Map();
 			timelineEvents = [];
+			lastPoll3399Nano = '';
 			await tick();
 			await refreshRecipientsTimes();
 			await refreshCampaignEventsSince();
@@ -895,6 +909,35 @@
 		} catch (e) {
 			addToast('Failed to anonymize campaign', 'Error');
 			console.error('failed to anonymize campaign', e);
+		} finally {
+			hideIsLoading();
+		}
+		return res;
+	};
+
+	const onConfirmAnonymizeData = async () => {
+		let res;
+		try {
+			showIsLoading();
+			res = await api.campaign.anonymizeData($page.params.id);
+			if (!res.success) {
+				throw res.error;
+			}
+			await setCampaign();
+			await getEvents();
+			await refreshCampaignRecipients();
+			// reset timeline and refetch all events (timeline only fetches new events incrementally)
+			timelineEventsMap = new Map();
+			timelineEvents = [];
+			lastPoll3399Nano = '';
+			await tick();
+			await refreshRecipientsTimes();
+			await refreshCampaignEventsSince();
+			closeAnonymizeDataModal();
+			addToast('Data anonymized', 'Success');
+		} catch (e) {
+			addToast('Failed to anonymize data', 'Error');
+			console.error('failed to anonymize data', e);
 		} finally {
 			hideIsLoading();
 		}
@@ -1817,6 +1860,20 @@
 							><Datetime value={campaign.anonymizedAt} /></span
 						>
 					</div>
+
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Anonymize Data At:</span>
+						<span class="text-pc-darkblue dark:text-white text-right"
+							><Datetime value={campaign.dataAnonymizeAt} /></span
+						>
+					</div>
+
+					<div class="flex justify-between">
+						<span class="text-gray-600 dark:text-gray-400">Data Anonymized:</span>
+						<span class="text-pc-darkblue dark:text-white text-right"
+							><Datetime value={campaign.dataAnonymizedAt} /></span
+						>
+					</div>
 				</div>
 
 				{#if campaign.constraintWeekDays}
@@ -1933,7 +1990,29 @@
 									disabled={!!campaign.anonymizedAt || isContextMismatch()}
 									on:click={showAnonymizeModal}
 								>
-									Anonymize
+									Anonymize All
+								</IconButton>
+							</div>
+							<div
+								title={isContextMismatch()
+									? campaign.companyID
+										? 'Switch to company view to perform this action'
+										: 'Switch to global view to perform this action'
+									: campaign.anonymizedAt
+										? 'Campaign is already anonymized'
+										: campaign.dataAnonymizedAt && campaign.closedAt
+											? 'Data is already anonymized'
+											: ''}
+							>
+								<IconButton
+									variant="red"
+									icon="anonymize"
+									disabled={!!campaign.anonymizedAt ||
+										(!!campaign.dataAnonymizedAt && !!campaign.closedAt) ||
+										isContextMismatch()}
+									on:click={showAnonymizeDataModal}
+								>
+									Anonymize Data
 								</IconButton>
 							</div>
 						</div>
@@ -2737,6 +2816,28 @@
 				<li class="list-tem">Links in e-mails and landing pages will stop working</li>
 				<li class="list-tem">Anonymization is permanent and not reversable</li>
 				<li class="list-tem">Campaign will be set as completed</li>
+			</ul>
+		</div>
+	</Alert>
+
+	<Alert
+		headline="anonymize data"
+		bind:visible={isAnonymizeDataModalVisible}
+		onConfirm={onConfirmAnonymizeData}
+		verification="confirm"
+	>
+		<div>
+			<ul
+				class="list-disc ml-8 mt-4 mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+			>
+				<li class="list-tem">
+					Submitted data, user agent, ip and browser metadata will be anonymized
+				</li>
+				<li class="list-tem">The recipient relation is kept</li>
+				<li class="list-tem">Anonymization is permanent and not reversable</li>
+				{#if !campaign.closedAt}
+					<li class="list-tem">The campaign stays open and keeps tracking events</li>
+				{/if}
 			</ul>
 		</div>
 	</Alert>

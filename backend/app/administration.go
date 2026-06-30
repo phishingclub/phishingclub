@@ -73,14 +73,14 @@ const (
 	ROUTE_V1_SESSION_ID   = "/api/v1/session/:id"
 	ROUTE_V1_SESSION_PING = "/api/v1/session/ping"
 	// company
-	ROUTE_V1_COMPANY                  = "/api/v1/company"
-	ROUTE_V1_COMPANY_ID               = "/api/v1/company/:id"
-	ROUTE_V1_COMPANY_ID_EXPORT        = "/api/v1/company/:id/export"
-	ROUTE_V1_COMPANY_ID_EXPORT_SHARED = "/api/v1/company/shared/export"
-	ROUTE_V1_COMPANY_SCIM             = "/api/v1/company/scim/:companyID"
-	ROUTE_V1_COMPANY_SCIM_TOKEN       = "/api/v1/company/scim/:companyID/token"
-	ROUTE_V1_COMPANY_SCIM_PRUNE       = "/api/v1/company/scim/:companyID/prune"
-	ROUTE_V1_COMPANY_SCIM_RESTORE     = "/api/v1/company/scim/:companyID/restore"
+	ROUTE_V1_COMPANY                   = "/api/v1/company"
+	ROUTE_V1_COMPANY_ID                = "/api/v1/company/:id"
+	ROUTE_V1_COMPANY_ID_EXPORT         = "/api/v1/company/:id/export"
+	ROUTE_V1_COMPANY_ID_EXPORT_SHARED  = "/api/v1/company/shared/export"
+	ROUTE_V1_COMPANY_SCIM              = "/api/v1/company/scim/:companyID"
+	ROUTE_V1_COMPANY_SCIM_TOKEN        = "/api/v1/company/scim/:companyID/token"
+	ROUTE_V1_COMPANY_SCIM_PRUNE        = "/api/v1/company/scim/:companyID/prune"
+	ROUTE_V1_COMPANY_SCIM_RESTORE      = "/api/v1/company/scim/:companyID/restore"
 	ROUTE_V1_COMPANY_REPORT_CONFIG     = "/api/v1/company/report-config/:companyID"
 	ROUTE_V1_COMPANY_REPORT_CONFIG_LOG = "/api/v1/company/report-config/:companyID/log"
 	ROUTE_V1_REPORT_CONFIG_GLOBAL      = "/api/v1/report-config"
@@ -165,6 +165,7 @@ const (
 	ROUTE_V1_CAMPAIGN_EXPORT_EVENTS      = "/api/v1/campaign/:id/export/events"
 	ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS = "/api/v1/campaign/:id/export/submissions"
 	ROUTE_V1_CAMPAIGN_ANONYMIZE          = "/api/v1/campaign/:id/anonymize"
+	ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA     = "/api/v1/campaign/:id/anonymize-data"
 	ROUTE_V1_CAMPAIGN_ID                 = "/api/v1/campaign/:id"
 	ROUTE_V1_CAMPAIGN_NAME               = "/api/v1/campaign/name/:name"
 	ROUTE_V1_CAMPAIGN_RECIPIENTS         = "/api/v1/campaign/:id/recipients"
@@ -515,6 +516,7 @@ func setupRoutes(
 		GET(ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS, middleware.SessionHandler, controllers.Campaign.ExportSubmissionsAsCSV).
 		POST(ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED, middleware.SessionHandler, controllers.Campaign.UploadReportedCSV).
 		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE, middleware.SessionHandler, controllers.Campaign.AnonymizeByID).
+		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA, middleware.SessionHandler, controllers.Campaign.AnonymizeDataByID).
 		DELETE(ROUTE_V1_CAMPAIGN_DEVICE_CODES, middleware.SessionHandler, controllers.Campaign.DeleteDeviceCodesByCampaignID).
 		DELETE(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.DeleteByID).
 		// campaign PDF report — ExtendedTimeout required for headless browser rendering

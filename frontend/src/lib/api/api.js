@@ -477,6 +477,14 @@ export class API {
 		 * @param {string} campaignID
 		 * @returns {Promise<ApiResponse>}
 		 */
+		anonymizeData: async (campaignID) => {
+			return postJSON(this.getPath(`/campaign/${campaignID}/anonymize-data`));
+		},
+
+		/**
+		 * @param {string} campaignID
+		 * @returns {Promise<ApiResponse>}
+		 */
 		close: async (campaignID) => {
 			return postJSON(this.getPath(`/campaign/${campaignID}/close`));
 		},
@@ -523,6 +531,7 @@ export class API {
 		 * @param {string} campaign.sendEndAt
 		 * @param {string} [campaign.closeAt]
 		 * @param {string} [campaign.anonymizeAt]
+		 * @param {string} [campaign.dataAnonymizeAt]
 		 * @param {string} [campaign.scheduleAt]
 		 * @param {string[]} campaign.recipientGroupIDs []uuid
 		 * @param {string[]} campaign.allowDenyIDs []uuid
@@ -551,6 +560,7 @@ export class API {
 			sendEndAt,
 			closeAt,
 			anonymizeAt,
+			dataAnonymizeAt,
 			scheduleAt,
 			recipientGroupIDs,
 			allowDenyIDs,
@@ -578,6 +588,7 @@ export class API {
 				sendEndAt,
 				closeAt,
 				anonymizeAt,
+				dataAnonymizeAt,
 				scheduleAt,
 				recipientGroupIDs,
 				allowDenyIDs,
@@ -607,6 +618,7 @@ export class API {
 		 * @param {string} campaign.sendEndAt
 		 * @param {string} [campaign.closeAt]
 		 * @param {string} [campaign.anonymizeAt]
+		 * @param {string} [campaign.dataAnonymizeAt]
 		 * @param {string} [campaign.scheduleAt]
 		 * @param {string} campaign.templateID uuid
 		 * @param {string[]} campaign.recipientGroupIDs []uuid
@@ -636,6 +648,7 @@ export class API {
 			sendEndAt,
 			closeAt,
 			anonymizeAt,
+			dataAnonymizeAt,
 			scheduleAt,
 			recipientGroupIDs,
 			allowDenyIDs,
@@ -662,6 +675,7 @@ export class API {
 				sendEndAt,
 				closeAt,
 				anonymizeAt,
+				dataAnonymizeAt,
 				scheduleAt,
 				recipientGroupIDs,
 				allowDenyIDs,

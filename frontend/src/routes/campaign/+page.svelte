@@ -465,6 +465,7 @@
 		scheduledEndAt: null,
 		closeAt: null,
 		anonymizeAt: null,
+		dataAnonymizeAt: null,
 		template: null,
 		sortField: defaultSendField,
 		sortOrder: defaultSendOrder,
@@ -867,6 +868,9 @@
 			const anonymizeAtUTC = formValues.anonymizeAt
 				? new Date(formValues.anonymizeAt).toISOString()
 				: null;
+			const dataAnonymizeAtUTC = formValues.dataAnonymizeAt
+				? new Date(formValues.dataAnonymizeAt).toISOString()
+				: null;
 			const contraintStartTimeUTC = formValues.contraintStartTime
 				? localTimeToUTC(formValues.contraintStartTime)
 				: null;
@@ -887,6 +891,7 @@
 				sortOrder: sortOrder.byKey(formValues.sortOrder),
 				closeAt: closeAtUTC,
 				anonymizeAt: anonymizeAtUTC,
+				dataAnonymizeAt: dataAnonymizeAtUTC,
 				saveSubmittedData: formValues.saveSubmittedData,
 				saveBrowserMetadata: formValues.saveBrowserMetadata,
 				isAnonymous: formValues.isAnonymous,
@@ -942,6 +947,9 @@
 			const anonymizeAtUTC = formValues.anonymizeAt
 				? new Date(formValues.anonymizeAt).toISOString()
 				: null;
+			const dataAnonymizeAtUTC = formValues.dataAnonymizeAt
+				? new Date(formValues.dataAnonymizeAt).toISOString()
+				: null;
 			const contraintStartTimeUTC = formValues.contraintStartTime
 				? localTimeToUTC(formValues.contraintStartTime)
 				: null;
@@ -970,6 +978,7 @@
 				sendEndAt: sendEndAtUTC,
 				closeAt: closeAtUTC,
 				anonymizeAt: anonymizeAtUTC,
+				dataAnonymizeAt: dataAnonymizeAtUTC,
 				recipientGroupIDs: recipientGroupIDs,
 				allowDenyIDs: allowDenyIDs,
 				denyPageID: denyPageMap.byValueOrNull(formValues.denyPageValue),
@@ -1114,6 +1123,7 @@
 			scheduledEndAt: null,
 			closeAt: null,
 			anonymizeAt: null,
+			dataAnonymizeAt: null,
 			template: null,
 			sortField: defaultSendField,
 			sortOrder: defaultSendOrder,
@@ -1240,6 +1250,7 @@
 			contraintEndTime: copyMode ? null : utcTimeToLocal(campaign.constraintEndTime),
 			closeAt: copyMode ? null : campaign.closeAt,
 			anonymizeAt: copyMode ? null : campaign.anonymizeAt,
+			dataAnonymizeAt: copyMode ? null : campaign.dataAnonymizeAt,
 			saveSubmittedData: campaign.saveSubmittedData,
 			saveBrowserMetadata: campaign.saveBrowserMetadata ?? false,
 			isAnonymous: campaign.isAnonymous,
@@ -2132,7 +2143,19 @@
 												? new Date(formValues.sendEndAt)
 												: new Date()}
 										optional
-										toolTipText="When reached, the campaign will close and a"
+										toolTipText="When reached, the campaign closes and all data is anonymized, including the recipient relation."
+										>Anonymize All Data</DateTimeField
+									>
+
+									<DateTimeField
+										bind:value={formValues.dataAnonymizeAt}
+										min={formValues.closeAt
+											? new Date(formValues.closeAt)
+											: formValues.sendEndAt
+												? new Date(formValues.sendEndAt)
+												: new Date()}
+										optional
+										toolTipText="When reached, only the submitted data, user agent, ip and browser metadata are anonymized. The recipient relation is kept."
 										>Anonymize Data</DateTimeField
 									>
 								{/if}
@@ -2739,10 +2762,20 @@
 										{/if}
 
 										{#if formValues.anonymizeAt}
-											<span class="text-grayblue-dark font-medium">Anonymize at:</span>
+											<span class="text-grayblue-dark font-medium">Anonymize all data at:</span>
 											<span class="text-pc-darkblue dark:text-white">
 												<Datetime value={formValues.anonymizeAt} />
 												<RelativeTime value={formValues.anonymizeAt} />
+											</span>
+										{/if}
+
+										{#if formValues.dataAnonymizeAt}
+											<span class="text-grayblue-dark font-medium"
+												>Anonymize data at:</span
+											>
+											<span class="text-pc-darkblue dark:text-white">
+												<Datetime value={formValues.dataAnonymizeAt} />
+												<RelativeTime value={formValues.dataAnonymizeAt} />
 											</span>
 										{/if}
 									</div>

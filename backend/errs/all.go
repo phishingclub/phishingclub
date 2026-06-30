@@ -33,9 +33,10 @@ var (
 	ErrSessionCookieNotFound = goerrors.New("session cookie not found")
 
 	// campaign
-	ErrCampaignAlreadySetToClose = goerrors.New("campaign already set to closed")
-	ErrCampaignAlreadyClosed     = goerrors.New("campaign already closed")
-	ErrCampaignAlreadyAnonymized = goerrors.New("campaign already anonymized")
+	ErrCampaignAlreadySetToClose     = goerrors.New("campaign already set to closed")
+	ErrCampaignAlreadyClosed         = goerrors.New("campaign already closed")
+	ErrCampaignAlreadyAnonymized     = goerrors.New("campaign already anonymized")
+	ErrCampaignDataAlreadyAnonymized = goerrors.New("campaign data already anonymized")
 
 	// validation err
 	ErrValidationFailed = goerrors.New("validation error")

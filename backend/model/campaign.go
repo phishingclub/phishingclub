@@ -24,6 +24,8 @@ type Campaign struct {
 	ClosedAt            nullable.Nullable[time.Time]                 `json:"closedAt"`
 	AnonymizeAt         nullable.Nullable[time.Time]                 `json:"anonymizeAt"`
 	AnonymizedAt        nullable.Nullable[time.Time]                 `json:"anonymizedAt"`
+	DataAnonymizeAt     nullable.Nullable[time.Time]                 `json:"dataAnonymizeAt"`
+	DataAnonymizedAt    nullable.Nullable[time.Time]                 `json:"dataAnonymizedAt"`
 	SortField           nullable.Nullable[vo.CampaignSortField]      `json:"sortField"`
 	SortOrder           nullable.Nullable[vo.CampaignSendingOrder]   `json:"sortOrder"`
 	SendStartAt         nullable.Nullable[time.Time]                 `json:"sendStartAt"`
@@ -224,6 +226,24 @@ func (c *Campaign) Validate() error {
 		if v, err := c.SendStartAt.Get(); err == nil {
 			if anonymizeAt.Before(v) {
 				return validate.WrapErrorWithField(errors.New("anonymize at must be after start date"), "AnonymizeAt")
+			}
+		}
+	}
+	if c.DataAnonymizeAt.IsSpecified() && !c.DataAnonymizeAt.IsNull() {
+		dataAnonymizeAt := c.DataAnonymizeAt.MustGet()
+		if v, err := c.CloseAt.Get(); err == nil {
+			if dataAnonymizeAt.Before(v) {
+				return validate.WrapErrorWithField(errors.New("anonymize submitted data at must be after close date"), "DataAnonymizeAt")
+			}
+		}
+		if v, err := c.SendEndAt.Get(); err == nil {
+			if dataAnonymizeAt.Before(v) {
+				return validate.WrapErrorWithField(errors.New("anonymize submitted data at must be after end date"), "DataAnonymizeAt")
+			}
+		}
+		if v, err := c.SendStartAt.Get(); err == nil {
+			if dataAnonymizeAt.Before(v) {
+				return validate.WrapErrorWithField(errors.New("anonymize submitted data at must be after start date"), "DataAnonymizeAt")
 			}
 		}
 	}
@@ -435,6 +455,12 @@ func (c *Campaign) ToDBMap() map[string]any {
 		m["anonymize_at"] = nil
 		if v, err := c.AnonymizeAt.Get(); err == nil {
 			m["anonymize_at"] = utils.RFC3339UTC(v)
+		}
+	}
+	if c.DataAnonymizeAt.IsSpecified() {
+		m["data_anonymize_at"] = nil
+		if v, err := c.DataAnonymizeAt.Get(); err == nil {
+			m["data_anonymize_at"] = utils.RFC3339UTC(v)
 		}
 	}
 	if c.SaveSubmittedData.IsSpecified() {

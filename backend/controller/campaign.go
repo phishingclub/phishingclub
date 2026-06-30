@@ -29,16 +29,17 @@ import (
 // to the database schema
 // this is tied to a slice in the repository package
 var allowedCampaignColumns = map[string]string{
-	"created_at":    repository.TableColumn(database.CAMPAIGN_TABLE, "created_at"),
-	"updated_at":    repository.TableColumn(database.CAMPAIGN_TABLE, "updated_at"),
-	"closed_at":     repository.TableColumn(database.CAMPAIGN_TABLE, "closed_at"),
-	"close_at":      repository.TableColumn(database.CAMPAIGN_TABLE, "close_at"),
-	"anonymized_at": repository.TableColumn(database.CAMPAIGN_TABLE, "anonymized_at"),
-	"is_test":       repository.TableColumn(database.CAMPAIGN_TABLE, "is_test"),
-	"send_start_at": repository.TableColumn(database.CAMPAIGN_TABLE, "send_start_at"),
-	"send_end_at":   repository.TableColumn(database.CAMPAIGN_TABLE, "send_end_at"),
-	"template":      repository.TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "name"),
-	"name":          repository.TableColumn(database.CAMPAIGN_TABLE, "name"),
+	"created_at":         repository.TableColumn(database.CAMPAIGN_TABLE, "created_at"),
+	"updated_at":         repository.TableColumn(database.CAMPAIGN_TABLE, "updated_at"),
+	"closed_at":          repository.TableColumn(database.CAMPAIGN_TABLE, "closed_at"),
+	"close_at":           repository.TableColumn(database.CAMPAIGN_TABLE, "close_at"),
+	"anonymized_at":      repository.TableColumn(database.CAMPAIGN_TABLE, "anonymized_at"),
+	"data_anonymized_at": repository.TableColumn(database.CAMPAIGN_TABLE, "data_anonymized_at"),
+	"is_test":            repository.TableColumn(database.CAMPAIGN_TABLE, "is_test"),
+	"send_start_at":      repository.TableColumn(database.CAMPAIGN_TABLE, "send_start_at"),
+	"send_end_at":        repository.TableColumn(database.CAMPAIGN_TABLE, "send_end_at"),
+	"template":           repository.TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "name"),
+	"name":               repository.TableColumn(database.CAMPAIGN_TABLE, "name"),
 }
 
 // campaignEventColumns is a map between the frontend and the backend
@@ -1001,6 +1002,26 @@ func (c *Campaign) AnonymizeByID(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
+// AnonymizeDataByID anonymizes the submitted data of a campaign by its id
+func (c *Campaign) AnonymizeDataByID(g *gin.Context) {
+	// handle session
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	// anonymize submitted data
+	err := c.CampaignService.AnonymizeDataByID(g, session, id)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 // GetCampaignStats gets campaign statistics by campaign ID
 func (c *Campaign) GetCampaignStats(g *gin.Context) {
 	// handle session
@@ -1228,4 +1249,3 @@ func (c *Campaign) UploadReportedCSV(g *gin.Context) {
 		"message":   "CSV processed successfully",
 	})
 }
-

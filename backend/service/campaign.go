@@ -1540,11 +1540,17 @@ func (c *Campaign) UpdateByID(
 	if v, err := incoming.AnonymizeAt.Get(); err == nil {
 		current.AnonymizeAt.Set(v.Truncate(time.Minute))
 	}
+	if v, err := incoming.DataAnonymizeAt.Get(); err == nil {
+		current.DataAnonymizeAt.Set(v.Truncate(time.Minute))
+	}
 	if v, err := incoming.ClosedAt.Get(); err == nil {
 		current.ClosedAt.Set(v.Truncate(time.Minute))
 	}
 	if v, err := incoming.AnonymizedAt.Get(); err == nil {
 		current.AnonymizedAt.Set(v.Truncate(time.Minute))
+	}
+	if v, err := incoming.DataAnonymizedAt.Get(); err == nil {
+		current.DataAnonymizedAt.Set(v.Truncate(time.Minute))
 	}
 	if v, err := incoming.ScheduleAt.Get(); err == nil {
 		current.ScheduleAt.Set(v)
@@ -3077,6 +3083,56 @@ func (c *Campaign) HandleAnonymizeCampaigns(
 	return nil
 }
 
+// HandleDataAnonymizeCampaigns anonymizes the submitted data of campaigns that
+// are ready for data anonymization
+func (c *Campaign) HandleDataAnonymizeCampaigns(
+	ctx context.Context,
+	session *model.Session,
+) error {
+	ae := NewAuditEvent("Campaign.HandleDataAnonymizeCampaigns", session)
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// get all campaigns that are ready to have their submitted data anonymized
+	campaigns, err := c.CampaignRepository.GetReadyToDataAnonymize(
+		ctx,
+		&repository.CampaignOption{},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get ready to data anonymize campaigns", "error", err)
+		return errs.Wrap(err)
+	}
+	// anonymize the submitted data of the campaigns
+	affectedIds := []string{}
+	for _, campaign := range campaigns.Rows {
+		campaignID := campaign.ID.MustGet()
+		affectedIds = append(affectedIds, campaignID.String())
+		c.Logger.Debugw("anonymizing campaign data with id", "campaignID", campaignID)
+		err = c.AnonymizeDataByID(ctx, session, &campaignID)
+		if errors.Is(err, errs.ErrCampaignDataAlreadyAnonymized) {
+			c.Logger.Debugw("campaign data already anonymized", "error", err)
+			continue
+		}
+		if err != nil {
+			c.Logger.Errorw("failed to anonymize campaign data by id", "error", err)
+			continue
+		}
+		c.Logger.Debugw("anonymized campaign data with id", "campaignID", campaignID)
+	}
+	if len(affectedIds) > 0 {
+		ae.Details["dataAnonymizedCampaignIds"] = affectedIds
+		c.AuditLogAuthorized(ae)
+	}
+	return nil
+}
+
 // SchedulePendingCampaigns is called by the task runner. It finds all campaigns
 // whose schedule_at time has passed and triggers schedule() for each.
 func (c *Campaign) SchedulePendingCampaigns(
@@ -3988,6 +4044,64 @@ func (c *Campaign) AnonymizeByID(
 	}
 	// finally add a timestamp to the campaign to indicate when it was anonymized
 	err = c.CampaignRepository.AddAnonymizedAt(ctx, id)
+	c.AuditLogAuthorized(ae)
+
+	return nil
+}
+
+// AnonymizeDataByID anonymizes the submitted data, user agent, ip address and
+// browser metadata of a campaign while keeping the recipient relation intact
+func (c *Campaign) AnonymizeDataByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+) error {
+	ae := NewAuditEvent("Campaign.AnonymizeDataByID", session)
+	ae.Details["id"] = id.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// get campaign to check it exists and its anonymization state
+	campaign, err := c.CampaignRepository.GetByID(
+		ctx,
+		id,
+		&repository.CampaignOption{},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return errs.Wrap(err)
+	}
+	// a fully anonymized campaign has already had its data scrubbed
+	if campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull() {
+		return errs.Wrap(errs.ErrCampaignAlreadyAnonymized)
+	}
+	// once the campaign is closed and its data is anonymized there is no new
+	// data to scrub, while it is open it can be re-run to scrub newer events
+	isClosed := campaign.ClosedAt.IsSpecified() && !campaign.ClosedAt.IsNull()
+	isDataAnonymized := campaign.DataAnonymizedAt.IsSpecified() && !campaign.DataAnonymizedAt.IsNull()
+	if isClosed && isDataAnonymized {
+		return errs.Wrap(errs.ErrCampaignDataAlreadyAnonymized)
+	}
+	// scrub the submitted data, user agent, ip and browser metadata of all events
+	// while keeping the recipient relation intact
+	err = c.CampaignRepository.AnonymizeCampaignEventData(ctx, id)
+	if err != nil {
+		c.Logger.Errorw("failed to anonymize campaign event data", "error", err)
+		return errs.Wrap(err)
+	}
+	// add a timestamp to the campaign to indicate when the data was anonymized
+	err = c.CampaignRepository.AddDataAnonymizedAt(ctx, id)
+	if err != nil {
+		c.Logger.Errorw("failed to add data anonymized at to campaign", "error", err)
+		return errs.Wrap(err)
+	}
 	c.AuditLogAuthorized(ae)
 
 	return nil

@@ -25,6 +25,8 @@ var allowedCampaignColumns = []string{
 	TableColumn(database.CAMPAIGN_TABLE, "closed_at"),
 	TableColumn(database.CAMPAIGN_TABLE, "anonymize_at"),
 	TableColumn(database.CAMPAIGN_TABLE, "anonymized_at"),
+	TableColumn(database.CAMPAIGN_TABLE, "data_anonymize_at"),
+	TableColumn(database.CAMPAIGN_TABLE, "data_anonymized_at"),
 	TableColumn(database.CAMPAIGN_TABLE, "send_start_at"),
 	TableColumn(database.CAMPAIGN_TABLE, "send_end_at"),
 	TableColumn(database.CAMPAIGN_TABLE, "notable_event_id"),
@@ -1366,6 +1368,43 @@ func (r *Campaign) GetReadyToAnonymize(
 	return result, nil
 }
 
+// GetReadyToDataAnonymize gets all campaigns that are ready to have their
+// submitted data anonymized while keeping the recipient relation intact.
+// Fully anonymized campaigns are excluded as their data is already scrubbed.
+func (r *Campaign) GetReadyToDataAnonymize(
+	ctx context.Context,
+	options *CampaignOption,
+) (*model.Result[model.Campaign], error) {
+	result := model.NewEmptyResult[model.Campaign]()
+	db := r.load(r.DB, options)
+	db, err := useQuery(db, database.CAMPAIGN_TABLE, options.QueryArgs)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	var dbCampaigns []database.Campaign
+	res := db.
+		Where("data_anonymize_at <= ? AND data_anonymized_at IS NULL AND anonymized_at IS NULL", utils.NowRFC3339UTC()).
+		Find(&dbCampaigns)
+	if res.Error != nil {
+		return result, res.Error
+	}
+
+	hasNextPage, err := useHasNextPage(db, database.CAMPAIGN_TABLE, options.QueryArgs)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	result.HasNextPage = hasNextPage
+
+	for _, dbCampaign := range dbCampaigns {
+		campaign, err := ToCampaign(&dbCampaign)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		result.Rows = append(result.Rows, campaign)
+	}
+	return result, nil
+}
+
 // GetReadyToLateSchedule returns campaigns where schedule_at <= now and
 // the campaign has not yet been scheduled (notable event is still pending_schedule).
 func (r *Campaign) GetReadyToLateSchedule(
@@ -1413,7 +1452,12 @@ func (r *Campaign) SaveEvent(
 		"ip_address":  campaignEvent.IP.String(),
 		"user_agent":  campaignEvent.UserAgent.String(),
 		"data":        campaignEvent.Data.String(),
-		"metadata":    func() string { if campaignEvent.Metadata == nil { return "" }; return campaignEvent.Metadata.String() }(),
+		"metadata": func() string {
+			if campaignEvent.Metadata == nil {
+				return ""
+			}
+			return campaignEvent.Metadata.String()
+		}(),
 	}
 	if campaignEvent.RecipientID != nil {
 		row["recipient_id"] = campaignEvent.RecipientID.String()
@@ -1654,6 +1698,51 @@ func (r *Campaign) AddAnonymizedAt(
 	res := r.DB.
 		Model(&database.Campaign{}).
 		Where("id = ?", id).
+		Updates(row)
+
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// AddDataAnonymizedAt adds a data anonymized at time to a campaign
+func (r *Campaign) AddDataAnonymizedAt(
+	ctx context.Context,
+	id *uuid.UUID,
+) error {
+	row := map[string]interface{}{
+		"data_anonymized_at": utils.NowRFC3339UTC(),
+	}
+	AddUpdatedAt(row)
+	res := r.DB.
+		Model(&database.Campaign{}).
+		Where("id = ?", id).
+		Updates(row)
+
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// AnonymizeCampaignEventData anonymizes the submitted data, user agent, ip
+// address and browser metadata of all events in a campaign while keeping the
+// recipient relation intact
+func (r *Campaign) AnonymizeCampaignEventData(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) error {
+	row := map[string]any{
+		"user_agent": "anonymized",
+		"ip_address": nil,
+		"data":       "anonymized",
+		"metadata":   "",
+	}
+	AddUpdatedAt(row)
+	res := r.DB.
+		Model(&database.CampaignEvent{}).
+		Where("campaign_id = ?", campaignID).
 		Updates(row)
 
 	if res.Error != nil {
@@ -1956,6 +2045,14 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	if row.AnonymizedAt != nil {
 		anonymizedAt.Set(*row.AnonymizedAt)
 	}
+	dataAnonymizeAt := nullable.NewNullNullable[time.Time]()
+	if row.DataAnonymizeAt != nil {
+		dataAnonymizeAt.Set(*row.DataAnonymizeAt)
+	}
+	dataAnonymizedAt := nullable.NewNullNullable[time.Time]()
+	if row.DataAnonymizedAt != nil {
+		dataAnonymizedAt.Set(*row.DataAnonymizedAt)
+	}
 
 	var notableEventName string
 	var notableEventID nullable.Nullable[uuid.UUID]
@@ -1976,6 +2073,8 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		ClosedAt:            closedAt,
 		AnonymizeAt:         anonymizeAt,
 		AnonymizedAt:        anonymizedAt,
+		DataAnonymizeAt:     dataAnonymizeAt,
+		DataAnonymizedAt:    dataAnonymizedAt,
 		SortField:           sortField,
 		SortOrder:           sortOrder,
 		SendStartAt:         sendStartAt,

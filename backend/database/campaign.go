@@ -21,10 +21,15 @@ type Campaign struct {
 	ClosedAt     *time.Time `gorm:"index;"`
 	AnonymizeAt  *time.Time `gorm:"index;"`
 	AnonymizedAt *time.Time `gorm:"index;"`
-	SortField    string     `gorm:";"`
-	SortOrder    string     `gorm:";"` // 'asc,desc,random'
-	SendStartAt  *time.Time `gorm:"index;"`
-	SendEndAt    *time.Time `gorm:"index;"`
+	// DataAnonymizeAt schedules anonymization of submitted data, user agent, ip
+	// and browser metadata while keeping the recipient relation intact.
+	DataAnonymizeAt *time.Time `gorm:"index;"`
+	// DataAnonymizedAt is set when submitted data has been anonymized.
+	DataAnonymizedAt *time.Time `gorm:"index;"`
+	SortField        string     `gorm:";"`
+	SortOrder        string     `gorm:";"` // 'asc,desc,random'
+	SendStartAt      *time.Time `gorm:"index;"`
+	SendEndAt        *time.Time `gorm:"index;"`
 	// ScheduleAt is set when the campaign uses late-scheduling.
 	// the task runner will call schedule() when now >= ScheduleAt.
 	// null means the campaign was scheduled immediately at creation.

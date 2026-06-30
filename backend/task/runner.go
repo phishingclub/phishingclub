@@ -150,6 +150,13 @@ func (d *Runner) Process(
 			session,
 		)
 	})
+	// anonymize submitted data of campaigns that are ready for data anonymization
+	d.runTask("anonymize campaign data", func() error {
+		return d.CampaignService.HandleDataAnonymizeCampaigns(
+			ctx,
+			session,
+		)
+	})
 	// send the next batch of messages
 	d.runTask("send messages", func() error {
 		err := d.CampaignService.SendNextBatch(
