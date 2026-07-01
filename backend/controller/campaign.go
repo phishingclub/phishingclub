@@ -606,7 +606,8 @@ func (c *Campaign) ExportEventsAsCSV(g *gin.Context) {
 
 	headers := []string{
 		"Created at",
-		"Recipient name",
+		"Recipient first name",
+		"Recipient last name",
 		"Recipient email",
 		"Event name",
 		"Event Details",
@@ -623,6 +624,7 @@ func (c *Campaign) ExportEventsAsCSV(g *gin.Context) {
 		if event.Recipient == nil {
 			row = []string{
 				utils.CSVFromDate(event.CreatedAt),
+				"anonymized",
 				"anonymized",
 				"anonymized",
 				utils.CSVRemoveFormulaStart(cache.EventNameByID[event.EventID.String()]),
