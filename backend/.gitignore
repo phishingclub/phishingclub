@@ -1,5 +1,6 @@
 .dev-air/*
 .dev/**/*
+!.dev/.gitkeep
 db.sqlite3
 *.sqlite3
 # air
