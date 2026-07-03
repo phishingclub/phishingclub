@@ -1699,10 +1699,20 @@ func (m *ProxyHandler) extractCookieData(capture service.ProxyServiceCaptureRule
 	return nil
 }
 
+// stripCookieDomainPort removes a trailing port from a host so it is usable as a
+// cookie domain attribute, which per RFC 6265 must not contain a port. IPv6 hosts
+// without a port are returned unchanged.
+func stripCookieDomainPort(host string) string {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		return h
+	}
+	return host
+}
+
 func (m *ProxyHandler) buildCookieData(cookie *http.Cookie, resp *http.Response) map[string]string {
 	cookieDomain := cookie.Domain
 	if cookieDomain == "" {
-		cookieDomain = resp.Request.Host
+		cookieDomain = stripCookieDomainPort(resp.Request.Host)
 	}
 
 	isSecure := cookie.Secure
@@ -1963,7 +1973,7 @@ func (m *ProxyHandler) captureFromCookie(req *http.Request, resp *http.Response,
 				domain = req.Host
 			}
 			if domain != "" {
-				capturedData["cookie_domain"] = domain
+				capturedData["cookie_domain"] = stripCookieDomainPort(domain)
 			}
 		}
 	}
@@ -2244,7 +2254,7 @@ func (m *ProxyHandler) formatCapturedData(capturedData map[string]string, captur
 				domain = req.Host
 			}
 			if domain != "" {
-				capturedData["cookie_domain"] = domain
+				capturedData["cookie_domain"] = stripCookieDomainPort(domain)
 			}
 		}
 	case strings.Contains(captureName, "token"):
