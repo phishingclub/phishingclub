@@ -1,4 +1,11 @@
 # Changelog
+## [1.39.0] - 2026-07-03
+- Add campaign data anonymization
+- Add table multi select and delete
+- Fix recipient could be mixed cased and added optional normalization migration
+- Fix cookie captured contained host port
+- Fix export campaign events had incorrect CSV header
+- Fix import campaign reporters wrong date format
 
 ## [1.38.0] - 2026-06-18
 - Added support company recipient and group sync via. SCIM
