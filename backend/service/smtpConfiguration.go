@@ -223,16 +223,9 @@ func (s *SMTPConfiguration) SendTestEmail(
 		s.Logger.Errorw("failed to set mail header 'To'", "error", err)
 		return err
 	}
-	if headers := smtpConfig.Headers; headers != nil {
-		for _, header := range headers {
-			key := header.Key.MustGet()
-			value := header.Value.MustGet()
-			m.SetGenHeader(
-				mail.Header(key.String()),
-				value.String(),
-			)
-		}
-	}
+	// no recipient context on a connectivity test, so values are sent verbatim
+	// but still sanitized against header injection
+	applyCustomSMTPHeaders(m, smtpConfig.Headers, nil, nil, s.Logger)
 	m.Subject("Configuration Test")
 	m.SetBodyString("text/html",
 		`<i>This is a test email to verify the SMTP configuration.</i>`,

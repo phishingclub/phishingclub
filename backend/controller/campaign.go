@@ -869,6 +869,39 @@ func (c *Campaign) TrackingPixel(g *gin.Context) {
 	}
 }
 
+// Report marks a recipient as having reported the phishing message. It is served on
+// a randomised, unguessable path and identifies the recipient from the same per
+// recipient token used by the tracking pixel, so a report button or add-in can mark
+// a recipient by scraping that token from the delivered mail.
+func (c *Campaign) Report(g *gin.Context) {
+	// get the campaign recipient id from the query
+	campaignRecipientID := g.Query("rid")
+	if campaignRecipientID == "" {
+		c.Response.NotFound(g)
+		return
+	}
+	campaignRecipientUUID, err := uuid.Parse(campaignRecipientID)
+	if err != nil {
+		c.Logger.Debugw(errs.MsgFailedToParseRequest,
+			"error", err,
+		)
+		c.Response.NotFound(g)
+		return
+	}
+	err = c.CampaignService.SaveRecipientReported(
+		g,
+		&campaignRecipientUUID,
+	)
+	if err != nil {
+		c.Logger.Debugw("failed to save reported event",
+			"error", err,
+		)
+		c.Response.NotFound(g)
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 // UpdateByID updates a campaign by its id
 func (c *Campaign) UpdateByID(g *gin.Context) {
 	session, _, ok := c.handleSession(g)

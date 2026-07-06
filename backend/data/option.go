@@ -40,6 +40,13 @@ const (
 	// so the endpoint is not fingerprinted by path alone.
 	OptionKeyRemoteBrowserWSPath = "remote_browser_ws_path"
 
+	// OptionKeyReportPath is the seeded random path segment used for the recipient
+	// facing report endpoint. A report button or add-in scrapes the per recipient
+	// token from the delivered mail and calls this endpoint to mark the recipient as
+	// having reported the phishing. Randomised at first startup so it can not be
+	// predicted or fingerprinted per instance.
+	OptionKeyReportPath = "report_path"
+
 	OptionKeyDisplayMode           = "display_mode"
 	OptionValueDisplayModeWhitebox = "whitebox"
 	OptionValueDisplayModeBlackbox = "blackbox"

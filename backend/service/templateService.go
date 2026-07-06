@@ -86,6 +86,10 @@ func (t *Template) CreateMail(
 	// add random recipient data to template context (excluding current recipient)
 	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, &rid)
 
+	// full report endpoint URL for this recipient on the campaign domain, so a report
+	// header can carry a ready-to-call link instead of just the token
+	(*data)["ReportURL"] = fmt.Sprintf("%s/%s/report?rid=%s", baseURL, t.reportPath(ctx), ridStr)
+
 	return data
 }
 
@@ -609,6 +613,9 @@ func (t *Template) newTemplateDataMap(
 		// general fields
 		"BaseURL": baseURL,
 		"URL":     url,
+		// default so {{.ReportURL}} never renders <no value>; CreateMail sets the
+		// real per recipient report endpoint URL
+		"ReportURL": "",
 
 		"APIKey":       "",
 		"CustomField1": "",
@@ -659,6 +666,19 @@ func (t *Template) remoteBrowserWSPath(ctx context.Context) string {
 		return opt.Value.String()
 	}
 	return "rbws"
+}
+
+// reportPath returns the seeded random path segment used for the recipient facing
+// report endpoint. Falls back to "report" if the option is not yet seeded (e.g.
+// during tests or first startup).
+func (t *Template) reportPath(ctx context.Context) string {
+	if t.OptionRepository == nil {
+		return "report"
+	}
+	if opt, err := t.OptionRepository.GetByKey(ctx, data.OptionKeyReportPath); err == nil {
+		return opt.Value.String()
+	}
+	return "report"
 }
 
 // TemplateFuncs returns template functions for templates

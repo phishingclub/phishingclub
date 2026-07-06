@@ -431,6 +431,33 @@ func SeedSettings(
 		}
 	}
 	{
+		// seed report endpoint path
+		id := uuid.New()
+		var c int64
+		res := db.
+			Model(&database.Option{}).
+			Where("key = ?", data.OptionKeyReportPath).
+			Count(&c)
+
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if c == 0 {
+			reportPath, err := random.GenerateRandomURLBase64Encoded(12)
+			if err != nil {
+				return errs.Wrap(err)
+			}
+			res = db.Create(&database.Option{
+				ID:    &id,
+				Key:   data.OptionKeyReportPath,
+				Value: reportPath,
+			})
+			if res.Error != nil {
+				return errs.Wrap(res.Error)
+			}
+		}
+	}
+	{
 		// seed report PDF enabled (disabled by default)
 		id := uuid.New()
 		var c int64

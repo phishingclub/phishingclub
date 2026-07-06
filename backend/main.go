@@ -359,6 +359,12 @@ func main() {
 		rbWSPath = opt.Value.String()
 	}
 
+	// read the seeded path for the recipient report endpoint
+	reportPath := "report" // fallback - real value is seeded at first startup
+	if opt, err := repositories.Option.GetByKey(context.Background(), data.OptionKeyReportPath); err == nil {
+		reportPath = opt.Value.String()
+	}
+
 	adminServer := app.NewAdministrationServer(
 		adminRouter,
 		controllers,
@@ -401,6 +407,7 @@ func main() {
 		logger,
 		certMagicConfig,
 		rbWSPath,
+		reportPath,
 		conf.IPSecurity.TrustedProxies,
 	)
 

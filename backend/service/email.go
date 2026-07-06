@@ -581,17 +581,6 @@ func (m *Email) SendTestEmail(
 		m.Logger.Errorw("failed to set mail header 'To'", "error", err)
 		return errs.Wrap(err)
 	}
-	// custom headers
-	if headers := smtp.Headers; headers != nil {
-		for _, header := range headers {
-			key := header.Key.MustGet()
-			value := header.Value.MustGet()
-			msg.SetGenHeader(
-				mail.Header(key.String()),
-				value.String(),
-			)
-		}
-	}
 	domainName, err := testDomain.Name.Get()
 	if err != nil {
 		m.Logger.Errorw("failed to get domain name", "error", err)
@@ -624,6 +613,9 @@ func (m *Email) SendTestEmail(
 		nil,
 		companyID,
 	)
+
+	// custom headers support the same per recipient variables as the subject and body
+	applyCustomSMTPHeaders(msg, smtp.Headers, t, m.TemplateService.TemplateFuncsWithCompany(ctx, companyID), m.Logger)
 
 	// process subject through template
 	subjectTemplate, err := template.New("subject").Funcs(m.TemplateService.TemplateFuncsWithCompany(ctx, companyID)).Parse(email.MailHeaderSubject.MustGet().String())

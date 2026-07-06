@@ -1398,6 +1398,130 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 	return nil
 }
 
+// SaveRecipientReported records that a recipient reported the phishing message for
+// their campaign. It resolves the campaign recipient from the same token used by the
+// tracking pixel, ignores closed campaigns and SCIM-disabled recipients, and
+// de-duplicates so repeated reports do not create multiple events. The reported
+// count is unauthenticated on purpose: it is served on an unguessable path and only
+// ever marks a positive outcome for a recipient that is already part of the campaign.
+func (c *Campaign) SaveRecipientReported(
+	ctx *gin.Context,
+	campaignRecipientID *uuid.UUID,
+) error {
+	// resolve the campaign recipient from the token
+	campaignRecipient, err := c.CampaignRecipientRepository.GetByCampaignRecipientID(
+		ctx.Request.Context(),
+		campaignRecipientID,
+	)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.Logger.Debugw("campaign recipient not found for report", "campaign_recipient_id", campaignRecipientID.String())
+			return err
+		}
+		c.Logger.Errorw("failed to get campaign recipient by id", "error", err)
+		return errs.Wrap(err)
+	}
+	recipientID := campaignRecipient.RecipientID.MustGet()
+	campaignID := campaignRecipient.CampaignID.MustGet()
+
+	// do not record events for SCIM-disabled (deprovisioned) recipients
+	if recipient, rErr := c.RecipientRepository.GetByID(ctx.Request.Context(), &recipientID, &repository.RecipientOption{}); rErr == nil && recipient.ScimSoftDeletedAt != nil {
+		c.Logger.Debugw("skipping report event: recipient is scim-disabled", "campaignRecipientID", campaignRecipientID.String())
+		return nil
+	}
+
+	campaign, err := c.CampaignRepository.GetByID(
+		ctx,
+		&campaignID,
+		&repository.CampaignOption{},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return errs.Wrap(err)
+	}
+	// do not record events for closed campaigns
+	if !campaign.IsActive() {
+		c.Logger.Debugw("skipping report event: campaign is closed", "campaignID", campaignID.String())
+		return nil
+	}
+
+	reportedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
+
+	// de-duplicate: a recipient that already reported is not recorded again so a
+	// button that fires more than once does not spam the timeline
+	if !campaign.IsAnonymous.MustGet() {
+		alreadyReported, err := c.CampaignRepository.HasEvent(ctx.Request.Context(), &campaignID, &recipientID, reportedEventID)
+		if err != nil {
+			c.Logger.Errorw("failed to check existing reported event", "error", err)
+			return errs.Wrap(err)
+		}
+		if alreadyReported {
+			c.Logger.Debugw("recipient already reported", "campaignRecipientID", campaignRecipientID.String())
+			return nil
+		}
+	}
+
+	newEventID := uuid.New()
+	var campaignEvent *model.CampaignEvent
+	if campaign.IsAnonymous.MustGet() {
+		campaignEvent = &model.CampaignEvent{
+			ID:          &newEventID,
+			CampaignID:  &campaignID,
+			RecipientID: nil,
+			IP:          vo.NewEmptyOptionalString64(),
+			UserAgent:   vo.NewEmptyOptionalString255(),
+			EventID:     reportedEventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
+		}
+	} else {
+		ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.TrustedProxies))
+		ua := ctx.Request.UserAgent()
+		if len(ua) > 255 {
+			ua = strings.TrimSpace(ua[:255])
+		}
+		userAgent := vo.NewOptionalString255Must(ua)
+		metadata := model.ExtractCampaignEventMetadata(ctx, campaign)
+		campaignEvent = &model.CampaignEvent{
+			ID:          &newEventID,
+			CampaignID:  &campaignID,
+			RecipientID: &recipientID,
+			IP:          ip,
+			UserAgent:   userAgent,
+			EventID:     reportedEventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    metadata,
+		}
+	}
+	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
+	if err != nil {
+		c.Logger.Errorw("failed to save reported event", "error", err)
+		return errs.Wrap(err)
+	}
+	// handle most notable event
+	err = c.SetNotableCampaignRecipientEvent(
+		ctx,
+		campaignRecipient,
+		data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
+	)
+	if err != nil {
+		// logging was done in the previous call
+		return errs.Wrap(err)
+	}
+	// handle webhooks
+	err = c.HandleWebhooks(
+		ctx,
+		&campaignID,
+		&recipientID,
+		data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
+		nil,
+	)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	return nil
+}
+
 // UpdateByID updates a campaign by id
 func (c *Campaign) UpdateByID(
 	ctx context.Context,
@@ -2484,17 +2608,6 @@ func (c *Campaign) sendCampaignMessages(
 		// store a map between recipient email and message
 		// so we can later save the sending result
 		mailToCampaignRecipient[m.GetToString()[0]] = campaignRecipient
-		// custom headers
-		if headers := smtpConfig.Headers; headers != nil {
-			for _, header := range headers {
-				key := header.Key.MustGet()
-				value := header.Value.MustGet()
-				m.SetGenHeader(
-					mail.Header(key.String()),
-					value.String(),
-				)
-			}
-		}
 
 		urlIdentifier := cTemplate.URLIdentifier
 		if urlIdentifier == nil {
@@ -2541,6 +2654,9 @@ func (c *Campaign) sendCampaignMessages(
 		// lookup key matches what the landing page path uses.
 		actualRecipientID := campaignRecipient.RecipientID.MustGet()
 		recipientDeviceFuncs := c.TemplateService.TemplateFuncsWithDeviceCode(ctx, &campaignID, &actualRecipientID)
+
+		// custom headers support the same per recipient variables as the subject and body
+		applyCustomSMTPHeaders(m, smtpConfig.Headers, t, recipientDeviceFuncs, c.Logger)
 
 		// process subject through template
 		subjectTemplate, err := template.New("subject").Funcs(recipientDeviceFuncs).Parse(email.MailHeaderSubject.MustGet().String())
@@ -4431,18 +4547,6 @@ func (c *Campaign) sendSingleEmailSMTP(
 		return errs.Wrap(err)
 	}
 
-	// custom headers
-	if headers := smtpConfig.Headers; headers != nil {
-		for _, header := range headers {
-			key := header.Key.MustGet()
-			value := header.Value.MustGet()
-			m.SetGenHeader(
-				mail.Header(key.String()),
-				value.String(),
-			)
-		}
-	}
-
 	// build per-recipient template funcs so that {{MicrosoftDeviceCode}} resolves correctly.
 	// use the actual recipient id (not the campaign recipient row id) so the
 	// lookup key matches what the landing page path uses.
@@ -4486,6 +4590,9 @@ func (c *Campaign) sendSingleEmailSMTP(
 	if customCampaignURL != templateURL {
 		(*t)["URL"] = customCampaignURL
 	}
+
+	// custom headers support the same per recipient variables as the subject and body
+	applyCustomSMTPHeaders(m, smtpConfig.Headers, t, recipientDeviceFuncs, c.Logger)
 
 	// process subject through template
 	subjectTemplate, err := template.New("subject").Funcs(recipientDeviceFuncs).Parse(email.MailHeaderSubject.MustGet().String())
@@ -5745,11 +5852,9 @@ func (c *Campaign) SendCampaignReport(
 		}
 		return errs.Wrap(err)
 	}
-	if headers := smtpConfig.Headers; headers != nil {
-		for _, header := range headers {
-			m.SetGenHeader(mail.Header(header.Key.MustGet().String()), header.Value.MustGet().String())
-		}
-	}
+	// report delivery has no phishing recipient context, so custom headers are sent
+	// verbatim but still sanitized against header injection
+	applyCustomSMTPHeaders(m, smtpConfig.Headers, nil, nil, c.Logger)
 	// the subject and body are configurable and support the same variables and
 	// template functions as the report template (e.g. {{.CompanyName}},
 	// {{.CampaignName}}, dates and stats), with defaults when empty

@@ -63,6 +63,7 @@ type Server struct {
 	proxyServer           *proxy.ProxyHandler
 	ja4Middleware         *middleware.JA4Middleware
 	remoteBrowserWSPath   string
+	reportPath            string
 	trustedProxies        []string
 }
 
@@ -77,6 +78,7 @@ func NewServer(
 	logger *zap.SugaredLogger,
 	certMagicConfig *certmagic.Config,
 	remoteBrowserWSPath string,
+	reportPath string,
 	trustedProxies []string,
 ) *Server {
 	// setup ja4 middleware for tls fingerprinting
@@ -124,6 +126,7 @@ func NewServer(
 		proxyServer:           proxyServer,
 		ja4Middleware:         ja4Middleware,
 		remoteBrowserWSPath:   remoteBrowserWSPath,
+		reportPath:            reportPath,
 		trustedProxies:        trustedProxies,
 	}
 }
@@ -444,6 +447,15 @@ func (s *Server) Handler(c *gin.Context) {
 	// check if the request is for a tacking pixel
 	if c.Request.URL.Path == "/wf/open" {
 		s.controllers.Campaign.TrackingPixel(c)
+		c.Abort()
+		return
+	}
+
+	// check if the request is for the recipient report endpoint. the leading path
+	// segment is randomised per instance (seeded at first startup) so it can not be
+	// predicted, followed by a literal /report marker
+	if c.Request.URL.Path == "/"+s.reportPath+"/report" {
+		s.controllers.Campaign.Report(c)
 		c.Abort()
 		return
 	}

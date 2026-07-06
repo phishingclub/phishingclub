@@ -1495,6 +1495,31 @@ func (r *Campaign) HasMessageReadEvent(
 	return count > 0, nil
 }
 
+// HasEvent reports whether an event of the given type exists for the campaign,
+// optionally scoped to a single recipient.
+func (r *Campaign) HasEvent(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+	eventID *uuid.UUID,
+) (bool, error) {
+	var count int64
+
+	query := r.DB.Model(&database.CampaignEvent{}).
+		Where("campaign_id = ? AND event_id = ?", campaignID, eventID)
+
+	if recipientID != nil {
+		query = query.Where("recipient_id = ?", recipientID)
+	}
+
+	res := query.Count(&count)
+	if res.Error != nil {
+		return false, res.Error
+	}
+
+	return count > 0, nil
+}
+
 // UpdateByID updates a campaign by id
 // does not update the campaign recipient groups and campaign recipients
 func (r *Campaign) UpdateByID(
