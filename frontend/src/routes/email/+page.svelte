@@ -485,57 +485,51 @@
 				bind:value={formValues.content}
 				attachments={formValues.attachments}
 			>
-				<div class="flex flex-col lg:flex-row w-full pl-4">
-					<div class="flex flex-col lg:flex-row justify-between w-1/3">
-						<TextField
-							minLength={1}
-							maxLength={64}
-							required
-							bind:value={formValues.name}
-							placeholder="Verify login information"
-						>
-							Name
-						</TextField>
-						<TextField
-							minLength={5}
-							maxLength={254}
-							type="email"
-							required
-							bind:value={formValues.mailEnvelopeFrom}
-							placeholder="alice@example.test"
-							toolTipText="Envelope From. ex. 'a@example.test"
-						>
-							Envelope From
-						</TextField>
-					</div>
-					<div class="flex flex-col lg:flex-row justify-between w-1/3 lg:ml-8">
-						<TextField
-							minLength={5}
-							maxLength={254}
-							required
-							bind:value={formValues.mailHeaderFrom}
-							placeholder="Alice <a@example.test>"
-							toolTipText="Header From. ex. '<a@example.test>'"
-						>
-							From
-						</TextField>
-						<TextField
-							required
-							minLength={1}
-							maxLength={255}
-							bind:value={formValues.mailHeaderSubject}
-							placeholder="Important: Verification required"
-						>
-							Subject
-						</TextField>
-					</div>
-					<div class="lg:px-8">
-						<CheckboxField
-							bind:value={formValues.addTrackingPixel}
-							defaultValue={true}
-							toolTipText="Adds a tracking pixel to the email">Add tracking pixel</CheckboxField
-						>
-					</div>
+				<div class="flex flex-row flex-wrap items-start gap-x-6 gap-y-2 w-full pl-4">
+					<TextField
+						minLength={1}
+						maxLength={64}
+						required
+						bind:value={formValues.name}
+						placeholder="Verify login information"
+					>
+						Name
+					</TextField>
+					<TextField
+						minLength={5}
+						maxLength={254}
+						type="email"
+						required
+						bind:value={formValues.mailEnvelopeFrom}
+						placeholder="alice@example.test"
+						toolTipText="Envelope From. ex. 'a@example.test"
+					>
+						Envelope From
+					</TextField>
+					<TextField
+						minLength={5}
+						maxLength={254}
+						required
+						bind:value={formValues.mailHeaderFrom}
+						placeholder="Alice <a@example.test>"
+						toolTipText="Header From. ex. '<a@example.test>'"
+					>
+						From
+					</TextField>
+					<TextField
+						required
+						minLength={1}
+						maxLength={255}
+						bind:value={formValues.mailHeaderSubject}
+						placeholder="Important: Verification required"
+					>
+						Subject
+					</TextField>
+					<CheckboxField
+						bind:value={formValues.addTrackingPixel}
+						defaultValue={true}
+						toolTipText="Adds a tracking pixel to the email">Add tracking pixel</CheckboxField
+					>
 				</div>
 			</Editor>
 			<FormError message={modalError} />
