@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/phishingclub/phishingclub/service"
@@ -106,5 +107,131 @@ func TestNormalizeRequestHeaders_ReverseMapsOriginAndReferer(t *testing.T) {
 	}
 	if got, want := req.Header.Get("Referer"), "https://"+testOriginalHost+"/foo"; got != want {
 		t.Fatalf("Referer not reverse mapped\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// --- multi host upstream cookie rewriting ---
+
+// multiHostConfig maps two upstream hosts to two phishing hosts, mirroring an
+// AiTM flow that spans more than one upstream login server.
+func multiHostConfig() map[string]service.ProxyServiceDomainConfig {
+	return map[string]service.ProxyServiceDomainConfig{
+		"login.microsoftonline.com": {To: "login.phish.example.com"},
+		"login.live.com":            {To: "live.phish.example.com"},
+	}
+}
+
+func newCookieResponse(t *testing.T, setCookies ...string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, "https://login.phish.example.com/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := &http.Response{Header: make(http.Header), Request: req}
+	for _, sc := range setCookies {
+		resp.Header.Add("Set-Cookie", sc)
+	}
+	return resp
+}
+
+// cookieDomain returns the Domain of the named cookie without a leading dot.
+func cookieDomain(t *testing.T, resp *http.Response, name string) string {
+	t.Helper()
+	for _, ck := range resp.Cookies() {
+		if ck.Name == name {
+			return strings.TrimPrefix(ck.Domain, ".")
+		}
+	}
+	t.Fatalf("cookie %q not found in response", name)
+	return ""
+}
+
+// A Set-Cookie from a secondary upstream host must be rewritten to that host's
+// phishing counterpart using the full host mapping. This fails while the cookie
+// path only knows the primary target to phish pair, so the secondary cookie
+// keeps its upstream domain and the browser on the phishing domain drops it.
+func TestProcessCookies_SecondaryHostRewrittenToPhish(t *testing.T) {
+	m := &ProxyHandler{}
+	reqCtx := &RequestContext{
+		TargetDomain: "login.microsoftonline.com",
+		PhishDomain:  "login.phish.example.com",
+		ConfigMap:    multiHostConfig(),
+	}
+	resp := newCookieResponse(t, "ESTSAUTH=abc; Domain=login.live.com; Path=/; Secure")
+
+	m.processCookiesForPhishingDomainWithContext(resp, reqCtx)
+
+	if got, want := cookieDomain(t, resp, "ESTSAUTH"), "live.phish.example.com"; got != want {
+		t.Fatalf("secondary host cookie domain\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// The primary host cookie must keep being rewritten when the full mapping is
+// present. Regression guard, expected to pass before and after the fix.
+func TestProcessCookies_PrimaryHostRewritten(t *testing.T) {
+	m := &ProxyHandler{}
+	reqCtx := &RequestContext{
+		TargetDomain: "login.microsoftonline.com",
+		PhishDomain:  "login.phish.example.com",
+		ConfigMap:    multiHostConfig(),
+	}
+	resp := newCookieResponse(t, "ESTSAUTHPERSISTENT=xyz; Domain=login.microsoftonline.com; Path=/; Secure")
+
+	m.processCookiesForPhishingDomainWithContext(resp, reqCtx)
+
+	if got, want := cookieDomain(t, resp, "ESTSAUTHPERSISTENT"), "login.phish.example.com"; got != want {
+		t.Fatalf("primary host cookie domain\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// With no full mapping available the path must fall back to the primary target
+// to phish pair, so the primary cookie is still rewritten. Regression guard,
+// expected to pass before and after the fix.
+func TestProcessCookies_FallbackWhenConfigMapEmpty(t *testing.T) {
+	m := &ProxyHandler{}
+	reqCtx := &RequestContext{
+		TargetDomain: "login.microsoftonline.com",
+		PhishDomain:  "login.phish.example.com",
+	}
+	resp := newCookieResponse(t, "ESTSAUTHPERSISTENT=xyz; Domain=login.microsoftonline.com; Path=/; Secure")
+
+	m.processCookiesForPhishingDomainWithContext(resp, reqCtx)
+
+	if got, want := cookieDomain(t, resp, "ESTSAUTHPERSISTENT"), "login.phish.example.com"; got != want {
+		t.Fatalf("fallback primary cookie domain\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// --- registrable domain for the session cookie ---
+
+// extractTopLevelDomain must return the registrable domain so the session
+// cookie is scoped correctly. The naive last two labels approach breaks for
+// multi label public suffixes such as co.uk, for IP hosts and for hosts that
+// carry a port.
+func TestExtractTopLevelDomain(t *testing.T) {
+	m := &ProxyHandler{}
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"simple com", "login.evilcorp.com", "evilcorp.com"},
+		{"two label", "evilcorp.com", "evilcorp.com"},
+		{"deep subdomain com", "a.b.c.evilcorp.com", "evilcorp.com"},
+		{"dev test tld", "login.proxysaurous.test", "proxysaurous.test"},
+		{"single label", "localhost", "localhost"},
+		{"multi label suffix", "login.evilcorp.co.uk", "evilcorp.co.uk"},
+		{"deep multi label suffix", "a.b.evilcorp.co.uk", "evilcorp.co.uk"},
+		{"ip address", "127.0.0.1", "127.0.0.1"},
+		{"host with port", "login.evilcorp.com:8443", "evilcorp.com"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := m.extractTopLevelDomain(tc.in); got != tc.want {
+				t.Fatalf("extractTopLevelDomain(%q)\n got: %s\nwant: %s", tc.in, got, tc.want)
+			}
+		})
 	}
 }

