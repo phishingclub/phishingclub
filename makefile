@@ -1,4 +1,4 @@
-.PHONY: build down up up-low-mem fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up geoip-fetch govulncheck
+.PHONY: build down up up-low-mem fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up geoip-fetch govulncheck test-proxy test-proxy-fast
 up:
 	sudo docker compose up -d backend frontend api-test-server pebble dbgate mailer dns test mitmproxy; \
 	sudo docker compose logs -f --tail 1000 backend frontend;
@@ -169,6 +169,26 @@ mitmproxy-purge:
 geoip-fetch:
 	@echo "Fetching GeoIP data from ipverse/rir-ip..."; \
 	cd backend/scripts && go run fetch-geoip-data.go
+
+# tests
+# run the proxy package tests in a standalone go container using the vendored
+# dependencies, so it works without the dev stack running. the named volume
+# keeps the go build cache between runs so only the first run does a full
+# compile. the first run also pulls golang:1.25.10 and can take a few minutes;
+# go test prints nothing until the build finishes, so silence is expected.
+test-proxy:
+	sudo docker run --rm \
+		-e GOCACHE=/gocache \
+		-v $(CURDIR)/backend:/app \
+		-v phishingclub_gocache:/gocache \
+		-w /app \
+		golang:1.25.10 \
+		go test ./proxy/... -v
+
+# same tests but inside the already running backend container, which has a warm
+# build cache. much faster, but requires the dev stack to be up (make up)
+test-proxy-fast:
+	sudo docker compose exec -w /app backend go test ./proxy/... -v
 
 # security
 govulncheck:

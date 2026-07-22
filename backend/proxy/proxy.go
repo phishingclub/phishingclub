@@ -515,17 +515,20 @@ func (m *ProxyHandler) prepareRequestWithoutSession(req *http.Request, reqCtx *R
 	req.URL.Host = reqCtx.TargetDomain
 	req.URL.Scheme = reqCtx.TargetScheme
 
-	// create a dummy session for header normalization (no campaign/session data)
+	// build the phish to target host mapping the same way the response path
+	// does (createMinimalConfig) so it includes the primary target to phish
+	// entry, not only the statically declared hosts. this mapping reverses
+	// phishing hosts back to the upstream hosts before the request leaves the
+	// proxy, both in query parameters and in the Origin and Referer headers.
+	config := m.createMinimalConfig(reqCtx.PhishDomain, reqCtx.TargetDomain)
+	reqCtx.ConfigMap = config
+
+	// dummy session carries the same mapping for header normalization
 	dummySession := &service.ProxySession{
 		Config: sync.Map{},
 	}
-	// populate dummy config for normalization - need to map phishing domains to target domains
-	if reqCtx.ProxyConfig != nil && reqCtx.ProxyConfig.Hosts != nil {
-		for targetDomain, hostConfig := range reqCtx.ProxyConfig.Hosts {
-			if hostConfig != nil {
-				dummySession.Config.Store(targetDomain, *hostConfig)
-			}
-		}
+	for host, hostConfig := range config {
+		dummySession.Config.Store(host, hostConfig)
 	}
 
 	// normalize headers
