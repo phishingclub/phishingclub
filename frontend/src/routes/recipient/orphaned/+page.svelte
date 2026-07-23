@@ -121,7 +121,7 @@
 	<Headline>Orphaned Recipients</Headline>
 
 	<div class="flex gap-4 mb-4">
-		<BigButton on:click={() => goto('/recipient/group/')}>Back to Groups</BigButton>
+		<BigButton on:click={() => goto('/recipient/')}>View recipients</BigButton>
 		{#if recipients.length > 0}
 			<button
 				on:click={openDeleteAllAlert}
