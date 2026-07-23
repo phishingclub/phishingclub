@@ -963,7 +963,9 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 	}
 
 	// Shared across tab switches; all feed into the write loop below.
-	frameCh := make(chan *proto.PageScreencastFrame, 8)
+	// Buffered to 1 so only the newest frame is ever queued: a slow client drops
+	// intermediate frames instead of rendering a growing backlog of stale ones.
+	frameCh := make(chan *proto.PageScreencastFrame, 1)
 	urlCh := make(chan string, 4)
 	switchCh := make(chan *rod.Page, 1)
 	// notifyCh routes pre-encoded JSON from background goroutines to the write
@@ -1026,9 +1028,22 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 		streamPage := p.Context(pageCtx)
 		wait := streamPage.EachEvent(
 			func(e *proto.PageScreencastFrame) (stop bool) {
+				// Ack immediately so Chrome keeps producing at full rate regardless
+				// of how fast the client drains. Then keep only the newest frame so a
+				// slow client never renders a backlog of stale frames.
+				proto.PageScreencastFrameAck{SessionID: e.SessionID}.Call(streamPage) //nolint:errcheck
 				select {
 				case frameCh <- e:
 				default:
+					// Buffer full: discard the queued stale frame, replace with this one.
+					select {
+					case <-frameCh:
+					default:
+					}
+					select {
+					case frameCh <- e:
+					default:
+					}
 				}
 				return
 			},
@@ -1291,6 +1306,11 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 		}
 	}()
 
+	// lastFrameW/H track the last CSS viewport dimensions sent to the client so the
+	// frame_meta control message is only emitted when they change. -1 forces an
+	// initial send on the first frame.
+	lastFrameW, lastFrameH := float64(-1), float64(-1)
+
 	for {
 		select {
 		case <-page.GetContext().Done():
@@ -1333,22 +1353,30 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 			if !ok {
 				return
 			}
-			proto.PageScreencastFrameAck{SessionID: frame.SessionID}.Call(getActivePage()) //nolint:errcheck
+			// Ack is done by the screencast producer, so this write path never gates
+			// Chrome's frame production.
 			var frameW, frameH float64
 			if frame.Metadata != nil {
 				frameW = frame.Metadata.DeviceWidth
 				frameH = frame.Metadata.DeviceHeight
 			}
-			payload, err := json.Marshal(map[string]any{
-				"type":   "frame",
-				"data":   base64.StdEncoding.EncodeToString(frame.Data),
-				"width":  frameW,
-				"height": frameH,
-			})
-			if err != nil {
-				continue
+			// The CSS viewport dimensions (used client side for input coordinate
+			// mapping) change rarely, so send them as a small control message only on
+			// change instead of wrapping every frame. The JPEG itself goes as a raw
+			// binary message with no base64 or JSON overhead.
+			if frameW != lastFrameW || frameH != lastFrameH {
+				lastFrameW, lastFrameH = frameW, frameH
+				if payload, err := json.Marshal(map[string]any{
+					"type":   "frame_meta",
+					"width":  frameW,
+					"height": frameH,
+				}); err == nil {
+					if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+						return
+					}
+				}
 			}
-			if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+			if err := conn.WriteMessage(websocket.BinaryMessage, frame.Data); err != nil {
 				return
 			}
 		}

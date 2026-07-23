@@ -149,13 +149,17 @@
 		};
 
 		ws.onmessage = (ev) => {
+			// Binary messages are raw JPEG screencast frames.
+			if (typeof ev.data !== 'string') {
+				renderFrame(ev.data);
+				return;
+			}
 			try {
-				const msg = JSON.parse(typeof ev.data === 'string' ? ev.data : new TextDecoder().decode(ev.data));
-				if (msg.type === 'frame') {
+				const msg = JSON.parse(ev.data);
+				if (msg.type === 'frame_meta') {
+					// CSS viewport dimensions used to scale input coordinates.
 					if (msg.width) remoteWidth = msg.width;
 					if (msg.height) remoteHeight = msg.height;
-					renderFrame(msg.data);
-					frameCount++;
 				} else if (msg.type === 'url') {
 					currentURL = msg.value;
 					if (!urlBarFocused) urlBarValue = msg.value;
@@ -186,18 +190,38 @@
 		};
 	}
 
-	function renderFrame(base64jpeg) {
-		if (!canvas) return;
-		const img = new Image();
-		img.onload = () => {
-			const ctx = canvas.getContext('2d');
-			// Only resize when dimensions change — resizing always clears the canvas
-			// and flushes the GPU texture even when the value is identical.
-			if (canvas.width !== img.naturalWidth) canvas.width = img.naturalWidth;
-			if (canvas.height !== img.naturalHeight) canvas.height = img.naturalHeight;
-			ctx.drawImage(img, 0, 0);
-		};
-		img.src = 'data:image/jpeg;base64,' + base64jpeg;
+	// Most recent undecoded frame waiting for the decoder, plus a flag so only one
+	// decode runs at a time. createImageBitmap decodes off the main thread, so
+	// under load we drop intermediate frames and always draw the newest one.
+	let pendingFrame = null;
+	let decoding = false;
+
+	function renderFrame(buf) {
+		pendingFrame = buf;
+		if (decoding) return;
+		decoding = true;
+		(async () => {
+			while (pendingFrame) {
+				const bytes = pendingFrame;
+				pendingFrame = null;
+				try {
+					const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+					if (canvas) {
+						const ctx = canvas.getContext('2d');
+						// Only resize when dimensions change — resizing always clears the
+						// canvas and flushes the GPU texture even when the value is identical.
+						if (canvas.width !== bmp.width) canvas.width = bmp.width;
+						if (canvas.height !== bmp.height) canvas.height = bmp.height;
+						ctx.drawImage(bmp, 0, 0);
+					}
+					bmp.close();
+					frameCount++;
+				} catch {
+					// ignore decode errors (partial or corrupt frame)
+				}
+			}
+			decoding = false;
+		})();
 	}
 
 	function closeStream() {
