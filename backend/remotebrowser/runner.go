@@ -13,7 +13,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"go.uber.org/zap"
@@ -208,6 +210,94 @@ func resolveBrowserRootDir() (string, error) {
 		return "", fmt.Errorf("cannot locate browser cache dir: %w", err)
 	}
 	return filepath.Join(filepath.Dir(execPath), "data", "browser"), nil
+}
+
+// xvfbScreen is the geometry of a session's private display. The recipient's real
+// viewport and screen metrics are applied over CDP after the page opens, so this
+// only has to be large enough to hold the browser window.
+const xvfbScreen = "1920x1080x24"
+
+// x11SocketDir is where X servers place their per display sockets. Xvfb does not
+// create it, so a bare container image where nothing else has made it would leave
+// the server unable to open a socket. Creating it here keeps headful working
+// without adding a step to every Dockerfile.
+const x11SocketDir = "/tmp/.X11-unix"
+
+// startPrivateDisplay launches an Xvfb dedicated to a single browser session and
+// returns its display name together with a stop function.
+//
+// Sessions get a display each instead of sharing one for two reasons. A dedicated
+// display means the browser window is the only window on it, so no two sessions
+// can compete for the foreground, which is what previously froze every session but
+// the most recent one. It also stops the accidental crossover a shared display
+// allows, where any client can read the windows and input of every other client
+// on it. This is not a boundary against a hostile escaped renderer: every browser
+// runs as the same user, so such code could reach a sibling display regardless.
+// That case is the already accepted remote browser RCE risk; guarding it would
+// need separate users or namespaces, not an X cookie, which the same user can read.
+//
+// Xvfb chooses the display number itself and reports it back on the descriptor
+// passed with -displayfd, so concurrent sessions never race for the same number.
+func startPrivateDisplay() (string, func(), error) {
+	// Best effort: usually already present. If creating it was actually needed
+	// and failed, the read below surfaces the concrete failure.
+	_ = os.MkdirAll(x11SocketDir, 0o777)
+
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return "", nil, err
+	}
+	cmd := exec.Command("Xvfb", "-displayfd", "3", "-screen", "0", xvfbScreen, "-nolisten", "tcp", "-noreset")
+	cmd.ExtraFiles = []*os.File{pw} // the child sees this as descriptor 3
+	if err := cmd.Start(); err != nil {
+		pr.Close() //nolint:errcheck
+		pw.Close() //nolint:errcheck
+		return "", nil, fmt.Errorf("xvfb start failed: %w", err)
+	}
+	// Xvfb owns the write end now. Dropping ours means a read returns instead of
+	// blocking if the server dies before reporting a display.
+	pw.Close() //nolint:errcheck
+
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() {
+			if cmd.Process != nil {
+				// SIGTERM first so Xvfb removes its own lock file and socket;
+				// SIGKILL would strand both and slowly litter /tmp.
+				cmd.Process.Signal(syscall.SIGTERM) //nolint:errcheck
+				select {
+				case <-exited:
+				case <-time.After(3 * time.Second):
+					cmd.Process.Kill() //nolint:errcheck
+					<-exited
+				}
+			}
+			pr.Close() //nolint:errcheck
+		})
+	}
+
+	pr.SetReadDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
+	var out []byte
+	chunk := make([]byte, 16)
+	for !bytes.ContainsRune(out, '\n') && len(out) < 32 {
+		n, readErr := pr.Read(chunk)
+		if n > 0 {
+			out = append(out, chunk[:n]...)
+		}
+		if readErr != nil {
+			stop()
+			return "", nil, fmt.Errorf("xvfb did not report a display: %w", readErr)
+		}
+	}
+	num := strings.TrimSpace(string(out))
+	if num == "" {
+		stop()
+		return "", nil, errors.New("xvfb reported an empty display")
+	}
+	return ":" + num, stop, nil
 }
 
 // chromeSterrWriter is an io.Writer that fans Chrome stdout/stderr lines out to
@@ -664,6 +754,33 @@ func (r *Runner) Run(ctx context.Context) error {
 				emitter.errorf(fmt.Sprintf("browser connect failed: %v", connectErr))
 				return goja.Undefined()
 			}
+			// Every session runs in its own browser context. All sessions share one
+			// remote browser, so on the default context they would also share one
+			// cookie jar, one localStorage and one cache: a session captured for one
+			// recipient would be readable from the page of any other recipient
+			// running at the same time. A browser context keeps that storage separate
+			// and discards all of it when the context is disposed.
+			//
+			// DisposeOnDetach makes the browser drop the context when this control
+			// connection goes away, which covers the paths where the session ends
+			// without running its own cleanup: victim disconnect, script timeout,
+			// operator cancel, and a server crash.
+			ctxRes, ctxErr := (proto.TargetCreateBrowserContext{DisposeOnDetach: true}).Call(browser)
+			if ctxErr != nil {
+				// Do not close the browser here. It is shared with every other
+				// session and closing it would end all of them.
+				emitter.errorf(fmt.Sprintf("browser context create failed: %v", ctxErr))
+				return goja.Undefined()
+			}
+			// Rebind to the new context. rod carries BrowserContextID into every
+			// target it creates, and its Close disposes the context instead of the
+			// whole browser once the field is set, so from here on the shared remote
+			// browser is never closed by this session.
+			isolated := *browser
+			isolated.BrowserContextID = ctxRes.BrowserContextID
+			browser = &isolated
+			emitter.log(fmt.Sprintf("[session] isolated browser context %s", ctxRes.BrowserContextID))
+
 			var pageErr error
 			page, pageErr = browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
 			if pageErr != nil {
@@ -699,6 +816,34 @@ func (r *Runner) Run(ctx context.Context) error {
 				}
 				chromeLogger = cw
 			}
+			chromeVars := []string{
+				"XDG_CONFIG_HOME=" + filepath.Join(rootDir, "config"),
+				"XDG_CACHE_HOME=" + filepath.Join(rootDir, "cache"),
+			}
+			// Headful needs a display, and it has to be one this session alone owns.
+			if !opts.Headless {
+				display, stopDisplay, dispErr := startPrivateDisplay()
+				switch {
+				case dispErr == nil:
+					emitter.log(fmt.Sprintf("[session] private display %s", display))
+					go func() {
+						<-outerCtx.Done()
+						stopDisplay()
+					}()
+					// Appended last so it beats any DISPLAY inherited from the
+					// server process: the last value wins once the environment is
+					// deduplicated on the way to the browser.
+					chromeVars = append(chromeVars, "DISPLAY="+display)
+				case os.Getenv("DISPLAY") != "":
+					// A desktop session already has a display. Use it rather than
+					// failing, and say so, because it is shared with everything
+					// else drawing on that desktop.
+					emitter.log(fmt.Sprintf("[session] warning: no private display (%v), falling back to the shared %s", dispErr, os.Getenv("DISPLAY")))
+				default:
+					emitter.errorf(fmt.Sprintf("headful browser needs a display: %v", dispErr))
+					return goja.Undefined()
+				}
+			}
 			l := launcher.New().
 				Headless(opts.Headless).
 				Logger(chromeLogger).
@@ -706,10 +851,7 @@ func (r *Runner) Run(ctx context.Context) error {
 				Set("crash-dumps-dir", crashDir).
 				Set("disable-blink-features", "AutomationControlled").
 				Delete("enable-automation").
-				Env(chromeEnv(
-					"XDG_CONFIG_HOME="+filepath.Join(rootDir, "config"),
-					"XDG_CACHE_HOME="+filepath.Join(rootDir, "cache"),
-				)...)
+				Env(chromeEnv(chromeVars...)...)
 
 			var binPath string
 			if r.ExecPath != "" {
@@ -834,6 +976,18 @@ func (r *Runner) Run(ctx context.Context) error {
 			applyRemoteIdentity(page, opts.UserAgent, emitter)
 		}
 
+		// Headful Chrome ties a page's focus and render pipeline to the state of its
+		// operating system window, and one browser or one display can only ever have
+		// a single foreground window. Concurrent sessions would then fight over it:
+		// whichever page was raised last keeps rendering while the rest are treated
+		// as background, stop producing screencast frames, and report
+		// document.hasFocus() false. Focus emulation detaches the page from that
+		// window state, so every session renders and reads as focused at the same
+		// time. It also removes the unfocused window tell in headful mode.
+		if err := (proto.EmulationSetFocusEmulationEnabled{Enabled: true}).Call(page); err != nil {
+			emitter.log(fmt.Sprintf("[session] warning: focus emulation failed: %v", err))
+		}
+
 		// Timezone override keeps the navigator/Intl timezone aligned with the exit
 		// network's geolocation. Left to the operator because only they know the
 		// proxy/exit location; an unset value keeps the host timezone.
@@ -887,11 +1041,10 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		session.Set("close", func(call goja.FunctionCall) goja.Value {
 			emitter.log("[session] closing")
-			if opts.Remote != "" {
-				page.Close() //nolint:errcheck
-			} else {
-				browser.Close() //nolint:errcheck
-			}
+			// Both branches call Close on the browser handle, and in remote mode
+			// that handle is bound to this session's browser context, so it
+			// disposes the context and its storage rather than the shared browser.
+			browser.Close() //nolint:errcheck
 			return goja.Undefined()
 		})
 
@@ -974,11 +1127,7 @@ func (r *Runner) Run(ctx context.Context) error {
 					return goja.Undefined()
 				case <-idleCh:
 					emitter.log(fmt.Sprintf("[session] idle timeout (%dms), closing", opts.IdleTimeout))
-					if opts.Remote != "" {
-						page.Close() //nolint:errcheck
-					} else {
-						browser.Close() //nolint:errcheck
-					}
+					browser.Close() //nolint:errcheck
 					return goja.Undefined()
 				case msg := <-r.Incoming:
 					resetIdle()

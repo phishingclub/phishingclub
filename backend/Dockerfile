@@ -34,6 +34,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
+# headful chrome support. xvfb provides the display, one per browser session so
+# sessions cannot read each other through X, and chrome draws its window with gtk
+# and uses the screensaver, xtest and input extensions
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb \
+    libgtk-3-0 \
+    libxss1 \
+    libxtst6 \
+    libxi6 \
+    libxcursor1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # install deps
 #RUN go install github.com/cosmtrek/air@latest \
 #RUN go install github.com/go-delve/delve/cmd/dlv@1.9.1

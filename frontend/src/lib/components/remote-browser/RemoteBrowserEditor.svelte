@@ -1112,7 +1112,7 @@ declare var Infinity: number;
 								{#if cfgMode === 'local'}
 									Spawns an isolated Chrome process per session.
 								{:else}
-									Connect to a Chrome you launched yourself — real OS fingerprint, GPU, profile, and extensions. Best for bypassing bot detection.
+									Connect to a Chrome you launched yourself - real OS fingerprint, GPU, profile, and extensions. Best for bypassing bot detection.
 								{/if}
 							</p>
 						</div>

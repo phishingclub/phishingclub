@@ -191,9 +191,28 @@
         }, { passive: false });
       }
 
+      // isPasteCombo reports the paste shortcut. Its default action must run so the
+      // browser fires a paste event, and the key itself must not be forwarded: the
+      // remote browser would paste from its own clipboard, which lives on the
+      // server and holds nothing the person in front of this page copied.
+      // Shift+Insert pastes on Linux and Windows just like Ctrl+V.
+      function isPasteCombo(e) {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'v' || e.key === 'V')) return true;
+        return e.shiftKey && !e.ctrlKey && !e.metaKey && e.key === 'Insert';
+      }
+
+      // Releasing the modifier before the letter leaves a keyup whose modifier
+      // flags no longer say paste. Forwarding it would send the remote page a
+      // keyup with no matching keydown, so remember which keys were held back.
+      var suppressedKeys = {};
+
       // Arrow keys: always preventDefault (prevent page scroll when canvas is focused),
       // but only forwarded to the remote browser when { arrowKeys: true }.
       canvas.addEventListener('keydown', function (e) {
+        if (isPasteCombo(e)) {
+          suppressedKeys[e.code || e.key] = true;
+          return;
+        }
         var isArrow = !!ARROW_KEYS[e.key];
         e.preventDefault();
         if (isArrow && !allowArrows) return;
@@ -204,12 +223,30 @@
       });
 
       canvas.addEventListener('keyup', function (e) {
+        var held = e.code || e.key;
+        if (isPasteCombo(e) || suppressedKeys[held]) {
+          delete suppressedKeys[held];
+          return;
+        }
         var isArrow = !!ARROW_KEYS[e.key];
         e.preventDefault();
         if (isArrow && !allowArrows) return;
         snd({ type: 'stream_input', name: name, action: 'keyup',
               key: e.key, code: e.code, keyCode: e.keyCode,
               modifiers: (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0) });
+      });
+
+      // Paste carries its text on the event itself, so filling a form from a
+      // password manager or from a copied address works without asking for
+      // clipboard permission, which would put a browser prompt in front of the
+      // page. Only what is pasted into this canvas is read, never the clipboard
+      // on its own. The server turns it into Input.insertText on the remote page.
+      canvas.addEventListener('paste', function (e) {
+        e.preventDefault();
+        var data = e.clipboardData || window.clipboardData;
+        var text = data ? data.getData('text') : '';
+        if (!text) return;
+        snd({ type: 'stream_input', name: name, action: 'paste', text: text });
       });
 
       canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
