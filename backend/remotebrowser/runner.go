@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -32,13 +33,124 @@ type Config struct {
 	Headless   bool     `json:"headless"`   // run Chrome in headless mode (mode=local)
 	Timeout    int      `json:"timeout"`    // ms, 0 = use DefaultTimeout
 	Lang       string   `json:"lang"`       // BCP 47 locale e.g. "en-US" (mode=local)
+	Timezone   string   `json:"timezone"`   // IANA timezone e.g. "Europe/Copenhagen" to match the exit network
 	ExtraFlags []string `json:"extraFlags"` // additional Chrome CLI flags e.g. ["--use-gl=egl"] (mode=local)
 }
 
 const DefaultTimeout = 60_000 // ms
 
-// DefaultChromiumUA default user-agent
-const DefaultChromiumUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+// DefaultChromiumUA is the fallback user-agent used when the real browser version
+// cannot be probed. It presents a Linux Chrome identity matching the host OS so
+// navigator.platform, the client hints, and every worker context stay consistent.
+// A Windows disguise cannot: navigator.platform is not overridable in worker and
+// service-worker contexts, so it always contradicts a Windows UA there. The major
+// version tracks the bundled Chromium (rod RevisionDefault); prefer the real,
+// probed version via detectChromeMajor at runtime.
+const DefaultChromiumUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
+// chromeVersionRe matches a full Chromium version like "128.0.6568.0".
+var chromeVersionRe = regexp.MustCompile(`(\d+)\.\d+\.\d+\.\d+`)
+
+// uaChromeMajorRe extracts the major version from a UA string ("Chrome/128...").
+var uaChromeMajorRe = regexp.MustCompile(`Chrome/(\d+)`)
+
+// detectChromeMajor runs `<bin> --version` and returns the major version, e.g.
+// "128" from "Chromium 128.0.6568.0". Returns "" when the binary cannot be probed;
+// the caller falls back to DefaultChromiumUA. Probing the real binary keeps the
+// spoofed UA version in lockstep with the engine, so a version cross-check cannot
+// catch a UA that claims a version the engine does not support.
+func detectChromeMajor(ctx context.Context, bin string) string {
+	c, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(c, bin, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	if m := chromeVersionRe.FindStringSubmatch(string(out)); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// linuxChromeUA builds a reduced Linux Chrome user-agent for the given major
+// version, matching Chrome's UA-reduction format (minor, build, and patch zeroed).
+func linuxChromeUA(major string) string {
+	return fmt.Sprintf(
+		"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s.0.0.0 Safari/537.36",
+		major)
+}
+
+// cleanHeadlessUA strips the "HeadlessChrome" token from a real user-agent so a
+// remote headless browser reports as ordinary Chrome. Used only in remote mode,
+// where a launch flag is not available.
+func cleanHeadlessUA(ua string) string {
+	return strings.ReplaceAll(ua, "HeadlessChrome", "Chrome")
+}
+
+// uaPlatform returns the navigator.platform value that matches ua's OS token.
+func uaPlatform(ua string) string {
+	switch {
+	case strings.Contains(ua, "Windows"):
+		return "Win32"
+	case strings.Contains(ua, "Macintosh"), strings.Contains(ua, "Mac OS"):
+		return "MacIntel"
+	default:
+		return "Linux x86_64"
+	}
+}
+
+// uaMetadata builds client-hint metadata (Sec-CH-UA / navigator.userAgentData)
+// consistent with ua's version and OS. Setting this alongside the UA string avoids
+// the empty-client-hints tell that a string-only override produces.
+func uaMetadata(ua string) *proto.EmulationUserAgentMetadata {
+	major := "128"
+	if m := uaChromeMajorRe.FindStringSubmatch(ua); m != nil {
+		major = m[1]
+	}
+	platform := "Linux"
+	switch {
+	case strings.Contains(ua, "Windows"):
+		platform = "Windows"
+	case strings.Contains(ua, "Macintosh"), strings.Contains(ua, "Mac OS"):
+		platform = "macOS"
+	}
+	return &proto.EmulationUserAgentMetadata{
+		Brands: []*proto.EmulationUserAgentBrandVersion{
+			{Brand: "Not;A=Brand", Version: "24"},
+			{Brand: "Chromium", Version: major},
+			{Brand: "Google Chrome", Version: major},
+		},
+		Platform:     platform,
+		Architecture: "x86",
+		Bitness:      "64",
+		Mobile:       false,
+	}
+}
+
+// applyRemoteIdentity aligns a remote browser's main-frame identity via CDP.
+// Remote mode cannot take a launch flag, so this strips any "HeadlessChrome" token
+// from the real UA and sets a matching platform and client-hint metadata. Worker
+// contexts of a remote browser inherit the remote's own process UA and are out of
+// our control here; operators should run a non-headless remote browser.
+func applyRemoteIdentity(page *rod.Page, customUA string, emitter *channelEmitter) {
+	ua := customUA
+	if ua == "" {
+		if ver, err := (proto.BrowserGetVersion{}).Call(page); err == nil {
+			ua = cleanHeadlessUA(ver.UserAgent)
+		}
+		if ua == "" {
+			ua = DefaultChromiumUA
+		}
+	}
+	override := &proto.NetworkSetUserAgentOverride{
+		UserAgent:         ua,
+		Platform:          uaPlatform(ua),
+		UserAgentMetadata: uaMetadata(ua),
+	}
+	if err := page.SetUserAgent(override); err != nil {
+		emitter.log(fmt.Sprintf("[session] warning: failed to set user-agent: %v", err))
+	}
+}
 
 // DefaultConfig returns a default config.
 func DefaultConfig() Config {
@@ -462,11 +574,13 @@ func (r *Runner) Run(ctx context.Context) error {
 			QueryTimeout int // ms; 0 = no timeout on read ops
 			UserAgent    string
 			Lang         string   // BCP 47 locale, e.g. "en-US" - sets --lang flag (local mode only)
+			Timezone     string   // IANA timezone, e.g. "Europe/Copenhagen" - overrides browser timezone
 			ExtraFlags   []string // additional Chrome CLI flags e.g. ["--use-gl=egl"] (local mode only)
 		}
 		opts := sessionOpts{
 			Headless:   r.Config.Headless,
 			Lang:       r.Config.Lang,
+			Timezone:   r.Config.Timezone,
 			ExtraFlags: r.Config.ExtraFlags,
 		}
 		if r.Config.Proxy != "" {
@@ -506,6 +620,9 @@ func (r *Runner) Run(ctx context.Context) error {
 				if v := obj.Get("lang"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
 					opts.Lang = v.String()
 				}
+				if v := obj.Get("timezone"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+					opts.Timezone = v.String()
+				}
 				if v := obj.Get("extraFlags"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
 					if arr, ok := v.Export().([]interface{}); ok {
 						for _, item := range arr {
@@ -520,6 +637,9 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		var browser *rod.Browser
 		var page *rod.Page
+		// launchUA is the identity applied in local mode via the --user-agent launch
+		// flag; it also drives the OS-appropriate WebGL renderer choice below.
+		var launchUA string
 
 		if opts.Remote != "" {
 			if opts.Proxy != "" {
@@ -534,7 +654,12 @@ func (r *Runner) Run(ctx context.Context) error {
 				return goja.Undefined()
 			}
 			emitter.log(fmt.Sprintf("[session] connecting to remote browser at %s", wsURL))
-			browser = rod.New().ControlURL(wsURL).Context(outerCtx)
+			// NoDefaultDevice disables rod's default LaptopWithMDPIScreen emulation,
+			// which otherwise overrides every new page with a macOS Chrome 114 UA, an
+			// "en" Accept-Language, and a 1280x800 device-metrics override. Those
+			// contradict the real Linux platform, blank the client hints, and make the
+			// viewport exceed the screen. We manage identity ourselves instead.
+			browser = rod.New().ControlURL(wsURL).Context(outerCtx).NoDefaultDevice()
 			if connectErr := browser.Connect(); connectErr != nil {
 				emitter.errorf(fmt.Sprintf("browser connect failed: %v", connectErr))
 				return goja.Undefined()
@@ -586,13 +711,15 @@ func (r *Runner) Run(ctx context.Context) error {
 					"XDG_CACHE_HOME="+filepath.Join(rootDir, "cache"),
 				)...)
 
+			var binPath string
 			if r.ExecPath != "" {
-				emitter.log(fmt.Sprintf("[session] using browser: %s", r.ExecPath))
-				l = l.Bin(r.ExecPath)
+				binPath = r.ExecPath
+				emitter.log(fmt.Sprintf("[session] using browser: %s", binPath))
+				l = l.Bin(binPath)
 			} else {
 				b := launcher.NewBrowser()
 				b.RootDir = rootDir
-				binPath := b.BinPath()
+				binPath = b.BinPath()
 				if _, err := os.Stat(binPath); os.IsNotExist(err) {
 					if err := b.Download(); err != nil {
 						emitter.errorf(fmt.Sprintf("browser download failed: %v", err))
@@ -602,6 +729,25 @@ func (r *Runner) Run(ctx context.Context) error {
 				emitter.log(fmt.Sprintf("[session] using browser: %s", binPath))
 				l = l.Bin(binPath)
 			}
+
+			// Set the user-agent at the process level via the launch flag so every
+			// context (main frame, web workers, and service workers) reports the same
+			// identity. A page-level CDP override does not reach service workers, which
+			// then leak the real "HeadlessChrome" UA and the true OS and version. When
+			// no custom UA is given we present a Linux Chrome identity matching the host
+			// OS and the real engine version, so navigator.platform, the client hints,
+			// and the version stay consistent across every context.
+			launchUA = opts.UserAgent
+			if launchUA == "" {
+				if major := detectChromeMajor(outerCtx, binPath); major != "" {
+					launchUA = linuxChromeUA(major)
+				} else {
+					launchUA = DefaultChromiumUA
+				}
+			}
+			emitter.log(fmt.Sprintf("[session] using user-agent: %s", launchUA))
+			l = l.Set("user-agent", launchUA)
+
 			if opts.Proxy != "" {
 				emitter.log(fmt.Sprintf("[session] using proxy: %s", opts.Proxy))
 				l = l.Proxy(opts.Proxy).Set("proxy-bypass-list", "")
@@ -648,7 +794,11 @@ func (r *Runner) Run(ctx context.Context) error {
 				l.Kill()
 				l.Cleanup()
 			}()
-			browser = rod.New().ControlURL(u).Context(outerCtx)
+			// NoDefaultDevice disables rod's default LaptopWithMDPIScreen emulation
+			// (macOS Chrome 114 UA, "en" Accept-Language, 1280x800 device metrics),
+			// which would override the launch-flag identity on the window and make the
+			// viewport exceed the screen. We manage identity ourselves instead.
+			browser = rod.New().ControlURL(u).Context(outerCtx).NoDefaultDevice()
 			if err := browser.Connect(); err != nil {
 				emitter.errorf(fmt.Sprintf("browser connect failed: %v", err))
 				return goja.Undefined()
@@ -666,35 +816,42 @@ func (r *Runner) Run(ctx context.Context) error {
 				browser.Close() //nolint:errcheck
 				return goja.Undefined()
 			}
-			// patch console Log
-			_, err = page.EvalOnNewDocument(`() => {
-						const noop = () => {};
+			// Note: console.* are deliberately left native. Replacing them with noop
+			// functions (to suppress page logging) makes console.log.toString() non-native,
+			// which trips TamperedFunctions. The console is not captured anyway — we never
+			// enable the Runtime domain (see the opsec note in browser.go), so no page
+			// console output reaches the server regardless.
+		}
 
-						console.log = noop;
-						console.table = noop;
-						console.clear = noop;
-						console.debug = noop;
-						console.info = noop;
-						console.warn = noop;
-				}`)
-			if err != nil {
-				emitter.errorf(fmt.Sprintf("console patch failed: %v", err))
-				browser.Close() //nolint:errcheck
-				return goja.Undefined()
+		// Identity handling differs by mode:
+		//   local  — the UA is already set via the --user-agent launch flag above,
+		//            which keeps every context (including service workers) consistent
+		//            and preserves Chrome's native client hints. No CDP override here.
+		//   remote — no launch flag is possible, so align the main frame via CDP:
+		//            fetch the real UA, strip any "HeadlessChrome" token, and set a
+		//            matching platform and client-hint metadata.
+		if opts.Remote != "" {
+			applyRemoteIdentity(page, opts.UserAgent, emitter)
+		}
+
+		// Timezone override keeps the navigator/Intl timezone aligned with the exit
+		// network's geolocation. Left to the operator because only they know the
+		// proxy/exit location; an unset value keeps the host timezone.
+		if opts.Timezone != "" {
+			if err := (proto.EmulationSetTimezoneOverride{TimezoneID: opts.Timezone}).Call(page); err != nil {
+				emitter.log(fmt.Sprintf("[session] warning: failed to set timezone %q: %v", opts.Timezone, err))
+			} else {
+				emitter.log(fmt.Sprintf("[session] using timezone: %s", opts.Timezone))
 			}
 		}
 
-		// Apply user-agent override. When headless and no explicit UA is set we use
-		// DefaultChromiumUA to strip "HeadlessChrome" from the header
-		ua := opts.UserAgent
-		if ua == "" && opts.Headless {
-			ua = DefaultChromiumUA
-		}
-		if ua != "" {
-			if err := page.SetUserAgent(&proto.NetworkSetUserAgentOverride{UserAgent: ua}); err != nil {
-				emitter.log(fmt.Sprintf("[session] warning: failed to set user-agent: %v", err))
-			}
-		}
+		// Note: the software WebGL renderer (SwiftShader, from headless Chrome without a
+		// GPU) is intentionally NOT masked in JS. Overriding getParameter plus
+		// Function.prototype.toString to hide it trips TamperedFunctions, and a
+		// document-script override does not reach worker OffscreenCanvas contexts, so the
+		// window and workers report different renderers (hasInconsistentWorkerValues).
+		// Both are far stronger bot signals than SwiftShader itself. The correct fix is a
+		// real GPU at the browser level (headful + GPU, or an ANGLE GL backend), not JS.
 
 		// Signal the controller that a page is ready for streaming.
 		select {

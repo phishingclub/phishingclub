@@ -7,7 +7,7 @@
   var streamLastStart = {} // name → last stream_start message, so mountStream called late still sizes correctly
 
   ws.onopen = function () {
-    ws.send(JSON.stringify({ type: 'viewport', width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1 }));
+    ws.send(JSON.stringify({ type: 'viewport', width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1, screenWidth: screen.width, screenHeight: screen.height }));
   };
 
   // Apply stream_start sizing to an already-mounted stream entry.

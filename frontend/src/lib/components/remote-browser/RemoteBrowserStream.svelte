@@ -89,6 +89,22 @@
 		ws.send(JSON.stringify({ type: 'close_tab', targetID }));
 	}
 
+	// sendViewport reports the admin's resolution so a test run renders at their size.
+	// Mirrors the recipient viewport message; the backend ignores it for live sessions.
+	function sendViewport() {
+		if (!ws || ws.readyState !== WebSocket.OPEN) return;
+		ws.send(
+			JSON.stringify({
+				type: 'viewport',
+				width: window.innerWidth,
+				height: window.innerHeight,
+				dpr: window.devicePixelRatio || 1,
+				screenWidth: window.screen.width,
+				screenHeight: window.screen.height
+			})
+		);
+	}
+
 	function tabLabel(url) {
 		if (!url || url === 'about:blank') return 'New tab';
 		try {
@@ -117,10 +133,18 @@
 
 	let keyListenersAttached = false;
 
+	/** @type {ReturnType<typeof setTimeout> | undefined} */
+	let resizeDebounce;
+	function onResize() {
+		clearTimeout(resizeDebounce);
+		resizeDebounce = setTimeout(sendViewport, 200);
+	}
+
 	function addKeyListeners() {
 		if (keyListenersAttached) return;
 		window.addEventListener('keydown', onKeyDown, true);
 		window.addEventListener('keyup', onKeyUp, true);
+		window.addEventListener('resize', onResize);
 		keyListenersAttached = true;
 	}
 
@@ -128,6 +152,8 @@
 		if (!keyListenersAttached) return;
 		window.removeEventListener('keydown', onKeyDown, true);
 		window.removeEventListener('keyup', onKeyUp, true);
+		window.removeEventListener('resize', onResize);
+		clearTimeout(resizeDebounce);
 		keyListenersAttached = false;
 	}
 
@@ -142,6 +168,11 @@
 
 		ws.onopen = () => {
 			status = 'Connected';
+			// In control mode, tell the backend our resolution so an editor test run
+			// renders at the admin's own size instead of the headless 800x600 default.
+			// The backend applies this only for test sessions; a live recipient's
+			// viewport is left untouched.
+			if (controlMode) sendViewport();
 			fpsInterval = setInterval(() => {
 				fps = frameCount;
 				frameCount = 0;

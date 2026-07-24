@@ -803,12 +803,12 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		}.Call(page) //nolint:errcheck
 	}
 
-	// humanMoveTo moves the CDP cursor from the last tracked position to
-	// (targetX, targetY) along a cubic Bezier curve with ease-in-out timing
-	// and optional micro-jitter, mimicking natural hand movement.
-	// durationMs <= 0 picks a random value in [200, 400].
-	// jitterPx < 0 uses the default amplitude of 1.5 px.
-	humanMoveTo := func(targetX, targetY, durationMs, jitterPx float64) {
+	// bezierMoveTo moves the CDP cursor from the last tracked position to
+	// (targetX, targetY) along a cubic Bezier curve with ease-in-out timing and
+	// micro-jitter. Per-step timing is varied (and occasionally paused) so the
+	// inter-event intervals are not uniform, which a constant tick rate would be.
+	// durationMs <= 0 picks a random value in [200, 400]; jitterPx < 0 uses 1.5 px.
+	bezierMoveTo := func(targetX, targetY, durationMs, jitterPx float64) {
 		if durationMs <= 0 {
 			durationMs = 200 + rand.Float64()*200
 		}
@@ -832,12 +832,14 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		c2x := startX + dx*0.67 + perpX*(rand.Float64()*2-1)*maxDev
 		c2y := startY + dy*0.67 + perpY*(rand.Float64()*2-1)*maxDev
 
-		steps := int(durationMs / 10)
-		if steps < 5 {
-			steps = 5
+		// Roughly one sample every 8-14 ms, scaled by distance so short hops still
+		// emit several points and long sweeps stay smooth.
+		steps := int(durationMs / (8 + rand.Float64()*6))
+		if steps < 6 {
+			steps = 6
 		}
-		if steps > 60 {
-			steps = 60
+		if steps > 80 {
+			steps = 80
 		}
 		stepDur := time.Duration(float64(time.Millisecond) * durationMs / float64(steps))
 
@@ -860,11 +862,46 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 			}
 			cdpMouseMove(bx, by)
 			if i < steps {
-				time.Sleep(stepDur)
+				// Vary each interval by +/-30% so speed is not machine-constant, and
+				// occasionally hesitate the way a real hand does mid-motion.
+				d := time.Duration(float64(stepDur) * (0.7 + rand.Float64()*0.6))
+				if rand.Float64() < 0.08 {
+					d += time.Duration(20+rand.Intn(45)) * time.Millisecond
+				}
+				time.Sleep(d)
 			}
 		}
 		cdpMouseMove(targetX, targetY)
 		mouseX, mouseY = targetX, targetY
+	}
+
+	// humanMoveTo wraps bezierMoveTo, adding overshoot-and-correct for longer
+	// moves: a real pointer tends to shoot slightly past a distant target and then
+	// make a short corrective motion back onto it, rather than landing dead center.
+	humanMoveTo := func(targetX, targetY, durationMs, jitterPx float64) {
+		dx, dy := targetX-mouseX, targetY-mouseY
+		dist := math.Sqrt(dx*dx + dy*dy)
+		if dist > 300 {
+			mainDur := durationMs
+			if mainDur <= 0 {
+				mainDur = 260 + rand.Float64()*220
+			}
+			over := 0.04 + rand.Float64()*0.06 // land 4-10% past the target
+			bezierMoveTo(targetX+dx*over, targetY+dy*over, mainDur*0.85, jitterPx)
+			// Brief settle, then correct back onto the target.
+			select {
+			case <-page.GetContext().Done():
+				return
+			case <-time.After(time.Duration(40+rand.Intn(50)) * time.Millisecond):
+			}
+			corr := jitterPx
+			if corr > 0 {
+				corr *= 0.6
+			}
+			bezierMoveTo(targetX, targetY, 90+rand.Float64()*70, corr)
+			return
+		}
+		bezierMoveTo(targetX, targetY, durationMs, jitterPx)
 	}
 
 	pc.Set("moveMouse", func(call goja.FunctionCall) goja.Value {
@@ -923,6 +960,83 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		// (e.g. el.Click) see the correct cursor location.
 		page.Mouse.MoveTo(proto.Point{X: x, Y: y}) //nolint:errcheck
 		dbg(fmt.Sprintf("✓ clickXY %.0f,%.0f", x, y))
+		return goja.Undefined()
+	})
+
+	// humanScroll scrolls the page by deltaY CSS pixels (positive = down) using
+	// eased mouse-wheel events with jittered step sizes and intervals, instead of a
+	// single instant jump. An options object may set { duration } in ms.
+	pc.Set("humanScroll", func(call goja.FunctionCall) goja.Value {
+		totalY := call.Argument(0).ToFloat()
+		durationMs := 350.0 + rand.Float64()*350
+		if len(call.Arguments) > 1 {
+			if obj := call.Argument(1).ToObject(vm); obj != nil {
+				if v := obj.Get("duration"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+					durationMs = v.ToFloat()
+				}
+			}
+		}
+		dbg(fmt.Sprintf("→ humanScroll %.0f", totalY))
+		steps := int(math.Abs(totalY)/90) + 4
+		if steps > 40 {
+			steps = 40
+		}
+		stepDur := time.Duration(float64(time.Millisecond) * durationMs / float64(steps))
+		var done float64
+		for i := 1; i <= steps; i++ {
+			select {
+			case <-page.GetContext().Done():
+				return goja.Undefined()
+			default:
+			}
+			t := float64(i) / float64(steps)
+			te := t * t * (3 - 2*t) // ease-in-out
+			target := totalY * te
+			delta := target - done
+			done = target
+			// Jitter each wheel notch so deltas are not perfectly smooth.
+			delta += (rand.Float64()*2 - 1) * math.Abs(delta) * 0.15
+			proto.InputDispatchMouseEvent{
+				Type:        proto.InputDispatchMouseEventTypeMouseWheel,
+				X:           math.Round(mouseX),
+				Y:           math.Round(mouseY),
+				DeltaX:      0,
+				DeltaY:      delta,
+				Timestamp:   proto.TimeSinceEpoch(float64(time.Now().UnixNano()) / 1e9),
+				PointerType: proto.InputDispatchMouseEventPointerTypeMouse,
+			}.Call(page) //nolint:errcheck
+			if i < steps {
+				d := time.Duration(float64(stepDur) * (0.7 + rand.Float64()*0.6))
+				time.Sleep(d)
+			}
+		}
+		dbg(fmt.Sprintf("✓ humanScroll %.0f", totalY))
+		return goja.Undefined()
+	})
+
+	// humanIdle spends about ms milliseconds producing low-amplitude pointer drift
+	// interleaved with pauses, the way a person rests a hand on the mouse. Use it to
+	// accumulate natural behavioural signal on pages that classify inactivity as bot.
+	pc.Set("humanIdle", func(call goja.FunctionCall) goja.Value {
+		ms := call.Argument(0).ToInteger()
+		dbg(fmt.Sprintf("→ humanIdle %dms", ms))
+		deadline := time.Now().Add(time.Duration(ms) * time.Millisecond)
+		for time.Now().Before(deadline) {
+			select {
+			case <-page.GetContext().Done():
+				return goja.Undefined()
+			default:
+			}
+			nx := mouseX + (rand.Float64()*2-1)*40
+			ny := mouseY + (rand.Float64()*2-1)*30
+			humanMoveTo(nx, ny, 120+rand.Float64()*180, -1)
+			select {
+			case <-page.GetContext().Done():
+				return goja.Undefined()
+			case <-time.After(time.Duration(200+rand.Intn(600)) * time.Millisecond):
+			}
+		}
+		dbg(fmt.Sprintf("✓ humanIdle %dms", ms))
 		return goja.Undefined()
 	})
 
@@ -1372,8 +1486,13 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		w := call.Argument(0).ToInteger()
 		h := call.Argument(1).ToInteger()
 		dbg(fmt.Sprintf("→ setViewport %dx%d", w, h))
+		// Override the screen dimensions to match the viewport. Otherwise screen.*
+		// stays at the headless window default (800x600) while innerWidth/Height take
+		// the new size, which detectors flag as an impossible viewport-exceeds-screen.
+		sw, sh := int(w), int(h)
 		must(proto.EmulationSetDeviceMetricsOverride{
 			Width: int(w), Height: int(h), DeviceScaleFactor: 1,
+			ScreenWidth: &sw, ScreenHeight: &sh,
 		}.Call(page))
 		dbg(fmt.Sprintf("✓ setViewport %dx%d", w, h))
 		return goja.Undefined()
@@ -1383,9 +1502,11 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		w := call.Argument(0).ToInteger()
 		h := call.Argument(1).ToInteger()
 		dbg(fmt.Sprintf("→ setViewportMobile %dx%d", w, h))
+		sw, sh := int(w), int(h)
 		must(proto.EmulationSetDeviceMetricsOverride{
 			Width: int(w), Height: int(h), DeviceScaleFactor: 1,
-			Mobile: true,
+			Mobile:      true,
+			ScreenWidth: &sw, ScreenHeight: &sh,
 		}.Call(page))
 		must(proto.EmulationSetTouchEmulationEnabled{Enabled: true}.Call(page))
 		dbg(fmt.Sprintf("✓ setViewportMobile %dx%d", w, h))
@@ -1402,7 +1523,20 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 	pc.Set("setUserAgent", func(call goja.FunctionCall) goja.Value {
 		ua := argStr(call.Argument(0))
 		dbg("→ setUserAgent " + ua)
-		must(proto.EmulationSetUserAgentOverride{UserAgent: ua}.Call(page))
+		// Set platform and client-hint metadata alongside the UA string. A string-only
+		// override leaves navigator.platform and Sec-CH-UA untouched, so they contradict
+		// the UA. Two limits remain, both unavoidable at the page level:
+		//   - This override is page scoped and does not reach the service worker, which
+		//     keeps the process (launch-flag) identity. For an identity consistent across
+		//     every context, pass userAgent to newSession() instead of calling this.
+		//   - navigator.platform in worker contexts follows the host OS and cannot be
+		//     overridden, so a cross-OS UA (e.g. macOS on a Linux host) still mismatches
+		//     there. Prefer a UA whose OS matches the host.
+		must(proto.EmulationSetUserAgentOverride{
+			UserAgent:         ua,
+			Platform:          uaPlatform(ua),
+			UserAgentMetadata: uaMetadata(ua),
+		}.Call(page))
 		dbg("✓ setUserAgent")
 		return goja.Undefined()
 	})
