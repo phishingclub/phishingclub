@@ -1,4 +1,14 @@
 # Changelog
+
+## [1.40.0] - 2026-07-24
+- Added recipient report endpoint and ReportURL variable 
+- Added proxy target port support and cross origin captures
+- Added better support for remote browser handling headfull locally and remote
+- Fix various bugs related to remote browser CDP fingerprinting
+- Fix various proxy bugs related to cookie scoping
+- Fix various proxy bugs related to sessionless requests
+- Minor UI improvements
+
 ## [1.39.0] - 2026-07-03
 - Add campaign data anonymization
 - Add table multi select and delete
