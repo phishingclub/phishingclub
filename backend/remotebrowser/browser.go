@@ -79,10 +79,12 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 	}
 
 	// frameCtxs tracks execution contexts for same-process sub-frames, keyed by context ID.
-	// Value is [3]string{frameId, origin, name} from the executionContextCreated event.
-	// Same-origin iframes share the main page's CDP session and appear here.
-	var frameCtxs sync.Map // proto.RuntimeExecutionContextID → [3]string{frameId, origin, name}
-	mainFrameID := string(page.FrameID)
+	// Value is [3]string{frameId, origin, name}. Populated on demand by resolveSameOriginFrames
+	// via Page.createIsolatedWorld (not Runtime execution-context events, which would enable
+	// the Runtime domain — a CDP tell). frameWorlds caches which frame already has a world so
+	// we don't recreate one every scan; navigation invalidates the entry.
+	var frameCtxs sync.Map   // proto.RuntimeExecutionContextID → [3]string{frameId, origin, name}
+	var frameWorlds sync.Map // frameId string → proto.RuntimeExecutionContextID
 
 	// framePages tracks OOPIF (cross-origin, out-of-process) iframe sessions.
 	// Chrome auto-attaches them via Target.setAutoAttach{flatten:true} and sends
@@ -90,30 +92,12 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 	// route proto.RuntimeEvaluate calls to each OOPIF's CDP session.
 	var framePages sync.Map // proto.TargetSessionID → *rod.Page
 
-	// Subscribe before calling RuntimeEnable/setAutoAttach so events for
-	// already-existing contexts are captured after the listener is registered.
+	// IMPORTANT (opsec): do NOT subscribe to any Runtime.* events here. rod auto-enables
+	// a domain for every event type passed to EachEvent, and enabling the Runtime domain
+	// is a detectable CDP tell — the console/Error.stack serialization leak that trips
+	// isAutomatedWithCDP. We only track OOPIF targets (Target.*, no such leak); same-origin
+	// sub-frame contexts are resolved on demand via Page.createIsolatedWorld instead.
 	waitFrameEvt := page.EachEvent(
-		// Same-process iframe contexts.
-		func(e *proto.RuntimeExecutionContextCreated) bool {
-			if e.Context == nil {
-				return false
-			}
-			isDefault := e.Context.AuxData["isDefault"].Str()
-			fid := e.Context.AuxData["frameId"].Str()
-			if isDefault != "true" || fid == "" || fid == mainFrameID {
-				return false
-			}
-			frameCtxs.Store(e.Context.ID, [3]string{fid, e.Context.Origin, e.Context.Name})
-			return false
-		},
-		func(e *proto.RuntimeExecutionContextDestroyed) bool {
-			frameCtxs.Delete(e.ExecutionContextID)
-			return false
-		},
-		func(e *proto.RuntimeExecutionContextsCleared) bool {
-			frameCtxs.Range(func(k, _ any) bool { frameCtxs.Delete(k); return true })
-			return false
-		},
 		// OOPIF iframe targets auto-attached via Target.setAutoAttach{flatten:true}.
 		func(e *proto.TargetAttachedToTarget) bool {
 			if e.TargetInfo == nil || string(e.TargetInfo.Type) != "iframe" {
@@ -127,9 +111,19 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 			framePages.Delete(e.SessionID)
 			return false
 		},
+		// Page.* is safe to subscribe to (no Runtime-enable tell). On navigation a frame's
+		// isolated world is destroyed, so drop the cache entry — resolveSameOriginFrames
+		// recreates it on the next scan.
+		func(e *proto.PageFrameNavigated) bool {
+			if e.Frame == nil {
+				return false
+			}
+			if v, ok := frameWorlds.LoadAndDelete(string(e.Frame.ID)); ok {
+				frameCtxs.Delete(v.(proto.RuntimeExecutionContextID))
+			}
+			return false
+		},
 	)
-	// RuntimeEnable triggers executionContextCreated for all already-existing contexts.
-	_ = proto.RuntimeEnable{}.Call(page) //nolint:errcheck
 	// setAutoAttach auto-attaches all current and future OOPIF child targets to
 	// this page's session. Existing OOPIFs emit attachedToTarget immediately.
 	_ = proto.TargetSetAutoAttach{AutoAttach: true, WaitForDebuggerOnStart: false, Flatten: true}.Call(page) //nolint:errcheck
@@ -138,6 +132,55 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		defer func() { recover() }() //nolint:errcheck
 		waitFrameEvt()
 	}()
+
+	// resolveSameOriginFrames refreshes frameCtxs by creating an isolated world in each
+	// same-process child frame (Page.createIsolatedWorld). This replaces the old Runtime
+	// execution-context event tracking, which enabled the Runtime domain (a CDP tell).
+	// OOPIF frames live in another process, so createIsolatedWorld fails for them and they
+	// are skipped — those are scanned separately via framePages. Worlds are cached per
+	// frame (frameWorlds) and invalidated on navigation, so scanning does not churn worlds.
+	// Throttled so a tight poll loop issues at most one getFrameTree per interval.
+	var lastFrameResolve time.Time
+	resolveSameOriginFrames := func() {
+		if time.Since(lastFrameResolve) < 250*time.Millisecond {
+			return
+		}
+		lastFrameResolve = time.Now()
+		tree, err := proto.PageGetFrameTree{}.Call(page)
+		if err != nil || tree.FrameTree == nil {
+			return
+		}
+		seen := map[proto.PageFrameID]bool{}
+		var walk func(node *proto.PageFrameTree)
+		walk = func(node *proto.PageFrameTree) {
+			if node == nil {
+				return
+			}
+			for _, child := range node.ChildFrames {
+				if child.Frame != nil {
+					fid := child.Frame.ID
+					seen[fid] = true
+					if _, ok := frameWorlds.Load(string(fid)); !ok {
+						res, cErr := proto.PageCreateIsolatedWorld{FrameID: fid, WorldName: "pc"}.Call(page)
+						if cErr == nil && res.ExecutionContextID != 0 {
+							frameWorlds.Store(string(fid), res.ExecutionContextID)
+							frameCtxs.Store(res.ExecutionContextID, [3]string{string(fid), child.Frame.URL, child.Frame.Name})
+						}
+					}
+				}
+				walk(child)
+			}
+		}
+		walk(tree.FrameTree)
+		// Drop frames no longer present in the tree.
+		frameWorlds.Range(func(k, v any) bool {
+			if !seen[proto.PageFrameID(k.(string))] {
+				frameWorlds.Delete(k)
+				frameCtxs.Delete(v.(proto.RuntimeExecutionContextID))
+			}
+			return true
+		})
+	}
 
 	// extractWaitOpts parses the optional last-argument options object.
 	// Returns searchFrames=true if frame search is enabled (default true),
@@ -285,6 +328,8 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		if !searchFrames && specificFrame == "" {
 			return "", nil
 		}
+		// Refresh same-process frame contexts before scanning them (throttled internally).
+		resolveSameOriginFrames()
 
 		if specificFrame != "" {
 			el, err := page.Element(specificFrame)

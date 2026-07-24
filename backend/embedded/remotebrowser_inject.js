@@ -1,12 +1,13 @@
 (function () {
   var wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   var ws = new WebSocket(wsProto + '//' + window.location.host + '/__WS_PATH__/__CR_ID__/__RB_ID__');
+  ws.binaryType = 'arraybuffer'; // stream frames arrive as raw binary JPEG messages
   var h = {};              // event handlers keyed as "e:eventName" or "stream_start:name" etc.
   var streams = {};        // name → {canvas, w, h, cssW, cssH, autoSize, el}
   var streamLastStart = {} // name → last stream_start message, so mountStream called late still sizes correctly
 
   ws.onopen = function () {
-    ws.send(JSON.stringify({ type: 'viewport', width: window.innerWidth, height: window.innerHeight }));
+    ws.send(JSON.stringify({ type: 'viewport', width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1 }));
   };
 
   // Apply stream_start sizing to an already-mounted stream entry.
@@ -28,7 +29,40 @@
     }
   }
 
+  // handleStreamFrame draws a binary frame message: [type=1][uint16 nameLen][name][jpeg].
+  // Decoding runs off the main thread via createImageBitmap; if newer frames arrive
+  // while one is decoding they replace the pending one so only the latest is drawn.
+  function handleStreamFrame(buf) {
+    var dv = new DataView(buf);
+    if (dv.getUint8(0) !== 1) return;
+    var nameLen = dv.getUint16(1);
+    var name = new TextDecoder().decode(new Uint8Array(buf, 3, nameLen));
+    var st = streams[name];
+    if (!st) return;
+    st.pending = new Uint8Array(buf, 3 + nameLen);
+    if (st.decoding) return;
+    st.decoding = true;
+    (function drain() {
+      var bytes = st.pending;
+      st.pending = null;
+      createImageBitmap(new Blob([bytes])).then(function (bmp) {
+        if (st.canvas.width !== bmp.width) { st.canvas.width = bmp.width; st.w = bmp.width; }
+        if (st.canvas.height !== bmp.height) { st.canvas.height = bmp.height; st.h = bmp.height; }
+        st.canvas.getContext('2d').drawImage(bmp, 0, 0);
+        bmp.close();
+        if (st.pending) { drain(); } else { st.decoding = false; }
+      }).catch(function () {
+        if (st.pending) { drain(); } else { st.decoding = false; }
+      });
+    })();
+  }
+
   ws.onmessage = function (e) {
+    // Binary messages are raw JPEG stream frames.
+    if (typeof e.data !== 'string') {
+      handleStreamFrame(e.data);
+      return;
+    }
     try {
       var m = JSON.parse(e.data);
 
@@ -55,17 +89,6 @@
             applyStreamStart(streams[m.name], m);
           }
         }
-
-      } else if (m.type === 'stream_frame' && m.name) {
-        var st = streams[m.name];
-        if (!st) return;
-        var img = new Image();
-        img.onload = function () {
-          if (st.canvas.width  !== img.naturalWidth)  { st.canvas.width  = img.naturalWidth;  st.w = img.naturalWidth; }
-          if (st.canvas.height !== img.naturalHeight) { st.canvas.height = img.naturalHeight; st.h = img.naturalHeight; }
-          st.canvas.getContext('2d').drawImage(img, 0, 0);
-        };
-        img.src = 'data:image/jpeg;base64,' + m.frame;
 
       } else if (m.type === 'done') {
         (h['e:done'] || []).forEach(function (f) { f(); });
