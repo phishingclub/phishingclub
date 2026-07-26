@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.40.0] - 2026-07-26
+- fix broken arm64 image 
+
 ## [1.40.0] - 2026-07-24
 - Added recipient report endpoint and ReportURL variable 
 - Added proxy target port support and cross origin captures
