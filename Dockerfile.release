@@ -1,4 +1,4 @@
-FROM debian:12-slim@sha256:b29f74a267526ae6ea104eed6c46133b0ca70ce812525df8cd5817698f0a624a
+FROM debian:12-slim@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
 
 # install ca-certificates, tzdata, and Chromium runtime dependencies.
 # The Chromium binary is auto-downloaded by rod at first use; these shared
