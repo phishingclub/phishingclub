@@ -68,7 +68,10 @@
 		],
 		'URLs & Tracking': [
 			{ label: 'Base URL', text: '{{.BaseURL}}' },
-			{ label: 'URL', text: '{{.URL}}' }
+			{ label: 'URL', text: '{{.URL}}' },
+			{ label: 'Before Landing Page URL', text: '{{.BeforeLandingPageURL}}' },
+			{ label: 'Landing Page URL', text: '{{.LandingPageURL}}' },
+			{ label: 'After Landing Page URL', text: '{{.AfterLandingPageURL}}' }
 		],
 		Functions: [
 			{ label: 'URL as QR HTML', text: '{{qr .URL 4}}' },
@@ -389,6 +392,10 @@
 		let param = '?id=905f286e-486b-434b-8ecc-d82456a07f7b';
 		let _baseURL = `https://${baseURL}`;
 		let _url = `https://${baseURL}${param}`;
+		// mock direct stage links for preview; the real ones carry an encrypted state param
+		let _beforeLandingPageURL = `${_url}&state=before`;
+		let _landingPageURL = `${_url}&state=landing`;
+		let _afterLandingPageURL = `${_url}&state=after`;
 		let _qrURL = _url;
 
 		if (text.includes('{{qr')) {
@@ -509,6 +516,9 @@
 					.replaceAll('{{.From}}', '')
 					.replaceAll('{{.BaseURL}}', _baseURL)
 					.replaceAll('{{.URL}}', _url)
+					.replaceAll('{{.BeforeLandingPageURL}}', _beforeLandingPageURL)
+					.replaceAll('{{.LandingPageURL}}', _landingPageURL)
+					.replaceAll('{{.AfterLandingPageURL}}', _afterLandingPageURL)
 					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
 					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin')
 					.replaceAll('{{DeviceCodeCaptured}}', 'false')
@@ -540,6 +550,9 @@
 					.replaceAll('{{.From}}', 'sender@new-order.test')
 					.replaceAll('{{.BaseURL}}', _baseURL)
 					.replaceAll('{{.URL}}', _url)
+					.replaceAll('{{.BeforeLandingPageURL}}', _beforeLandingPageURL)
+					.replaceAll('{{.LandingPageURL}}', _landingPageURL)
+					.replaceAll('{{.AfterLandingPageURL}}', _afterLandingPageURL)
 					.replaceAll('{{MicrosoftDeviceCode}}', 'ABCD-1234')
 					.replaceAll('{{MicrosoftDeviceCodeURL}}', 'https://microsoft.com/devicelogin')
 					.replaceAll('{{DeviceCodeCaptured}}', 'false');

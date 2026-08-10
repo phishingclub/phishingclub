@@ -513,6 +513,7 @@ func (a *APISender) SendTest(
 		nil,      // no company context for test
 		uuid.Nil, // no campaign context for test
 		uuid.Nil, // no recipient context for test
+		nil,      // no campaign flow context for test
 	)
 	if err != nil {
 		a.Logger.Errorw("failed to build test request", "error", err)
@@ -644,6 +645,7 @@ func (a *APISender) SendWithCustomURL(
 		companyID,
 		campaignID,
 		recipientID,
+		NewFlowContext(cTemplate, campaignID),
 	)
 	if err != nil {
 		a.Logger.Errorw("failed to build api sender request", "error", err)
@@ -833,8 +835,9 @@ func (a *APISender) buildRequest(
 	companyID *uuid.UUID,
 	campaignID uuid.UUID,
 	recipientID uuid.UUID,
+	flowCtx *FlowContext, // nil when no campaign flow context is available
 ) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
-	return a.buildRequestWithCustomURL(ctx, apiSender, domainName, urlKey, urlPath, campaignRecipient, email, "", "", companyID, campaignID, recipientID)
+	return a.buildRequestWithCustomURL(ctx, apiSender, domainName, urlKey, urlPath, campaignRecipient, email, "", "", companyID, campaignID, recipientID, flowCtx)
 }
 
 // buildRequestWithCustomURL builds an API request with optional custom campaign URL
@@ -851,6 +854,7 @@ func (a *APISender) buildRequestWithCustomURL(
 	companyID *uuid.UUID,
 	campaignID uuid.UUID,
 	recipientID uuid.UUID,
+	flowCtx *FlowContext, // nil when no campaign flow context is available
 ) (*apiRequestURL, []*model.HTTPHeader, *apiRequestBody, error) {
 	// create template data first so it can be used in headers, url, and body
 	t := a.TemplateService.CreateMail(
@@ -862,6 +866,7 @@ func (a *APISender) buildRequestWithCustomURL(
 		email,
 		apiSender,
 		companyID,
+		flowCtx,
 	)
 
 	// add oauth access token to template data if available

@@ -2890,6 +2890,7 @@ func (c *Campaign) sendCampaignMessages(
 			email,
 			nil,
 			campaignCompanyID,
+			NewFlowContext(cTemplate, campaignID),
 		)
 
 		// the only builder that knows about proxy first pages and path mode codes
@@ -2992,6 +2993,7 @@ func (c *Campaign) sendCampaignMessages(
 						campaignCompanyID,
 						&campaignID,
 						&actualRecipientID,
+						NewFlowContext(cTemplate, campaignID),
 					)
 					if err != nil {
 						return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
@@ -3059,6 +3061,7 @@ func (c *Campaign) sendCampaignMessages(
 					campaignCompanyID,
 					&campaignID,
 					&actualRecipientID,
+					NewFlowContext(cTemplate, campaignID),
 				)
 				if err != nil {
 					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
@@ -4988,6 +4991,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 		email,
 		nil,
 		campaignCompanyID,
+		NewFlowContext(cTemplate, campaignID),
 	)
 
 	// the only builder that knows about proxy first pages and path mode codes
@@ -5083,6 +5087,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 					campaignCompanyID,
 					&campaignID,
 					&actualRecipientID,
+					NewFlowContext(cTemplate, campaignID),
 				)
 				if err != nil {
 					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
@@ -5150,6 +5155,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 				campaignCompanyID,
 				&campaignID,
 				&actualRecipientID,
+				NewFlowContext(cTemplate, campaignID),
 			)
 			if err != nil {
 				return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))

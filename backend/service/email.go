@@ -612,6 +612,7 @@ func (m *Email) SendTestEmail(
 		email,
 		nil,
 		companyID,
+		nil, // test send has no campaign flow context
 	)
 
 	// custom headers support the same per recipient variables as the subject and body

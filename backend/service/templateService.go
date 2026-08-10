@@ -50,6 +50,7 @@ func (t *Template) CreateMail(
 	email *model.Email,
 	apiSender *model.APISender,
 	companyID *uuid.UUID,
+	flowCtx *FlowContext, // nil in preview, test and validation contexts
 ) *map[string]any {
 	rid := campaignRecipient.ID.MustGet()
 	ridStr := rid.String()
@@ -83,6 +84,22 @@ func (t *Template) CreateMail(
 	// full report endpoint URL for this recipient on the campaign domain, so a report
 	// header can carry a ready-to-call link instead of just the token
 	(*data)["ReportURL"] = fmt.Sprintf("%s/%s/report?rid=%s", baseURL, t.reportPath(ctx), ridStr)
+
+	// direct URLs to each stage of the flow, set only when a campaign flow context is
+	// available. before and after stay empty when the flow has no such stage.
+	if flowCtx != nil {
+		before, landing, after := BuildFlowPageURLs(FlowPageURLParams{
+			BaseURL:             baseURL,
+			URLPath:             urlPath,
+			URLIdentifier:       idKey,
+			StateIdentifier:     flowCtx.StateIdentifier,
+			CampaignRecipientID: ridStr,
+			CampaignID:          flowCtx.CampaignID,
+			HasBeforePage:       flowCtx.HasBeforePage,
+			HasAfterPage:        flowCtx.HasAfterPage,
+		})
+		setFlowPageURLs(data, before, landing, after)
+	}
 
 	return data
 }
@@ -270,6 +287,7 @@ func (t *Template) CreateMailBodyWithCustomURL(
 		companyID,
 		nil,
 		nil,
+		nil,
 	)
 }
 
@@ -289,6 +307,7 @@ func (t *Template) CreateMailBodyWithCustomURLAndRecipient(
 	companyID *uuid.UUID,
 	campaignID *uuid.UUID, // if non-nil, device code funcs are wired
 	recipientID *uuid.UUID, // if non-nil, device code funcs are wired
+	flowCtx *FlowContext, // nil when no campaign flow context is available
 ) (string, error) {
 	mailData := t.CreateMail(
 		ctx,
@@ -299,6 +318,7 @@ func (t *Template) CreateMailBodyWithCustomURLAndRecipient(
 		email,
 		apiSender,
 		companyID,
+		flowCtx,
 	)
 
 	// override campaign URL if custom one is provided
@@ -511,6 +531,26 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 	}
 	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, excludeRecipientID)
 
+	// direct URLs to each stage of the flow, available when this page is served as part
+	// of a real campaign. before and after stay empty when the flow has no such stage.
+	if campaign != nil {
+		campaignID := campaign.ID.MustGet()
+		flowCtx := NewFlowContext(campaignTemplate, campaignID)
+		if flowCtx != nil {
+			before, landing, after := BuildFlowPageURLs(FlowPageURLParams{
+				BaseURL:             baseURL,
+				URLPath:             urlPath,
+				URLIdentifier:       urlIdentifier,
+				StateIdentifier:     stateIdentifier,
+				CampaignRecipientID: id,
+				CampaignID:          flowCtx.CampaignID,
+				HasBeforePage:       flowCtx.HasBeforePage,
+				HasAfterPage:        flowCtx.HasAfterPage,
+			})
+			setFlowPageURLs(data, before, landing, after)
+		}
+	}
+
 	err = tmpl.Execute(w, data)
 	if err != nil {
 		return w, fmt.Errorf("failed to execute page template: %s", utils.RedactCredentialsFromString(err.Error()))
@@ -614,6 +654,13 @@ func (t *Template) newTemplateDataMap(
 		// real per recipient report endpoint URL
 		"ReportURL": "",
 
+		// defaults so the direct page flow URLs never render <no value>; they are set
+		// to real links when a campaign flow context is available. before and after stay
+		// empty when the campaign template has no such stage configured.
+		"BeforeLandingPageURL": "",
+		"LandingPageURL":       "",
+		"AfterLandingPageURL":  "",
+
 		"APIKey":       "",
 		"CustomField1": "",
 		"CustomField2": "",
@@ -650,6 +697,93 @@ func (t *Template) newTemplateDataMapWithDenyURL(
 	(*data)["DenyURL"] = denyURL
 
 	return data
+}
+
+// FlowContext carries the campaign flow details needed to build the direct page URL
+// template variables. It is nil in preview, test and validation contexts, where the
+// direct page URLs render as empty strings.
+type FlowContext struct {
+	CampaignID      uuid.UUID
+	StateIdentifier string
+	HasBeforePage   bool
+	HasAfterPage    bool
+}
+
+// NewFlowContext builds a FlowContext from a campaign template and campaign id. A stage
+// counts as present when it has either a page or a proxy configured. Returns nil when no
+// template is available so callers can pass the result straight through.
+func NewFlowContext(cTemplate *model.CampaignTemplate, campaignID uuid.UUID) *FlowContext {
+	if cTemplate == nil {
+		return nil
+	}
+	stateIdentifier := ""
+	if cTemplate.StateIdentifier != nil {
+		if v, err := cTemplate.StateIdentifier.Name.Get(); err == nil {
+			stateIdentifier = v
+		}
+	}
+	_, errBeforePage := cTemplate.BeforeLandingPageID.Get()
+	_, errBeforeProxy := cTemplate.BeforeLandingProxyID.Get()
+	_, errAfterPage := cTemplate.AfterLandingPageID.Get()
+	_, errAfterProxy := cTemplate.AfterLandingProxyID.Get()
+	return &FlowContext{
+		CampaignID:      campaignID,
+		StateIdentifier: stateIdentifier,
+		HasBeforePage:   errBeforePage == nil || errBeforeProxy == nil,
+		HasAfterPage:    errAfterPage == nil || errAfterProxy == nil,
+	}
+}
+
+// FlowPageURLParams carries what is needed to build direct URLs to each stage of a
+// campaign flow.
+type FlowPageURLParams struct {
+	BaseURL             string
+	URLPath             string
+	URLIdentifier       string
+	StateIdentifier     string
+	CampaignRecipientID string
+	CampaignID          uuid.UUID
+	HasBeforePage       bool
+	HasAfterPage        bool
+}
+
+// BuildFlowPageURLs builds direct URLs to the before, landing and after pages of a
+// campaign flow. Every stage is served from the same url path and is selected by the
+// encrypted state parameter, so a direct URL is the flow url carrying that stage's
+// encrypted page type in the query form. before and after are empty when that stage is
+// not configured; landing is always set because a flow always has a landing page.
+func BuildFlowPageURLs(p FlowPageURLParams) (before string, landing string, after string) {
+	secret := utils.UUIDToSecret(&p.CampaignID)
+	build := func(pageType string) string {
+		parsedURL, err := url.Parse(p.BaseURL + p.URLPath)
+		if err != nil {
+			return ""
+		}
+		encryptedState, err := utils.Encrypt(pageType, secret)
+		if err != nil {
+			return ""
+		}
+		queryParams := parsedURL.Query()
+		queryParams.Set(p.URLIdentifier, p.CampaignRecipientID)
+		queryParams.Set(p.StateIdentifier, encryptedState)
+		parsedURL.RawQuery = queryParams.Encode()
+		return parsedURL.String()
+	}
+	landing = build(data.PAGE_TYPE_LANDING)
+	if p.HasBeforePage {
+		before = build(data.PAGE_TYPE_BEFORE)
+	}
+	if p.HasAfterPage {
+		after = build(data.PAGE_TYPE_AFTER)
+	}
+	return before, landing, after
+}
+
+// setFlowPageURLs writes the direct page flow URL variables into a template data map.
+func setFlowPageURLs(data *map[string]any, before string, landing string, after string) {
+	(*data)["BeforeLandingPageURL"] = before
+	(*data)["LandingPageURL"] = landing
+	(*data)["AfterLandingPageURL"] = after
 }
 
 // remoteBrowserWSPath returns the seeded random path segment used for the
