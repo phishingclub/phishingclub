@@ -927,6 +927,49 @@ func (c *Campaign) UpdateByID(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
+// setLureCodeRequest is the body for assigning an operator chosen lure code.
+type setLureCodeRequest struct {
+	Code string `json:"code"`
+	// Reclaim releases the code from whichever recipient holds it. Set only
+	// after the caller has been shown which campaign that is.
+	Reclaim bool `json:"reclaim"`
+}
+
+// SetLureCode assigns an operator chosen lure code to a single campaign recipient
+func (c *Campaign) SetLureCode(g *gin.Context) {
+	// handle session
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	var req setLureCodeRequest
+	if ok := c.handleParseRequest(g, &req); !ok {
+		return
+	}
+	conflict, err := c.CampaignService.SetLureCodeByCampaignRecipientID(
+		g.Request.Context(),
+		session,
+		id,
+		req.Code,
+		req.Reclaim,
+	)
+	// an expected outcome the operator can resolve, so it carries the owner
+	// rather than reporting a plain failure
+	if errors.Is(err, service.ErrLureCodeTaken) {
+		c.Response.Conflict(g, "Lure code is already in use", conflict)
+		return
+	}
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 // SetSentAtByCampaignRecipientID sets the sent at time for a campaign recipient
 func (c *Campaign) SetSentAtByCampaignRecipientID(g *gin.Context) {
 	// handle session

@@ -66,7 +66,65 @@
 		apiSender: null,
 		urlIdentifier: 'id',
 		stateIdentifier: 'session',
-		urlPath: ''
+		urlPath: '',
+		lureURLMode: 'query',
+		lureCodeAlgo: 'crockford32',
+		lureCodeLength: 12
+	};
+
+	// codes are matched exactly, so the choice is about which glyphs appear and
+	// how many characters are needed, not about how forgiving matching is
+	const LURE_CODE_ALGOS = {
+		crockford32: {
+			label: 'Crockford base32',
+			symbols: 32,
+			sample: '4H7K9QM2XR3T',
+			note: 'Upper case only, without I L O U.'
+		},
+		base58: {
+			label: 'Base58',
+			symbols: 58,
+			sample: 'zQ8fRt2mKp9x',
+			note: 'Mixed case, without 0 O I l.'
+		}
+	};
+
+	const LURE_CODE_MIN_LENGTH = 6;
+	const LURE_CODE_MAX_LENGTH = 16;
+
+	// the backend rejects anything outside these bounds, so correct it here
+	// rather than bouncing the whole form back with a validation error
+	/** @param {string|number} value */
+	const clampLureCodeLength = (value) => {
+		const n = Number(value);
+		if (!Number.isFinite(n)) {
+			return 12;
+		}
+		return Math.min(LURE_CODE_MAX_LENGTH, Math.max(LURE_CODE_MIN_LENGTH, Math.round(n)));
+	};
+
+	/** @param {string} algo @param {number} length */
+	const lureCodeKeyspace = (algo, length) => {
+		const spec = LURE_CODE_ALGOS[algo];
+		if (!spec || !length || length < LURE_CODE_MIN_LENGTH || length > LURE_CODE_MAX_LENGTH) {
+			return '';
+		}
+		return `${(spec.symbols ** length).toLocaleString('en-US', { maximumFractionDigits: 0 })} combinations`;
+	};
+
+	// mirrors the server, which stores the path with the slash added
+	/** @param {string} path */
+	const withLeadingSlash = (path) => (path && !path.startsWith('/') ? `/${path}` : path);
+
+	// shows the delivered link so the choice is concrete
+	/** @param {Object} values */
+	const lureURLExample = (values) => {
+		const path = withLeadingSlash(values.urlPath || '');
+		if (values.lureURLMode === 'path') {
+			const sample = LURE_CODE_ALGOS[values.lureCodeAlgo]?.sample ?? '4H7K9QM2XR3T';
+			return `https://domain${path.replace(/\/$/, '')}/${sample}`;
+		}
+		return `https://domain${path}?${values.urlIdentifier || 'id'}=6ba7b810-9dad-11d1-80b4-00c04fd430c8`;
 	};
 
 	let contextCompanyID = null;
@@ -351,6 +409,9 @@
 				urlIdentifierID: identifierMap.byValueOrNull(formValues.urlIdentifier),
 				stateIdentifierID: identifierMap.byValueOrNull(formValues.stateIdentifier),
 				urlPath: formValues.urlPath || '',
+				lureURLMode: formValues.lureURLMode,
+				lureCodeAlgo: formValues.lureCodeAlgo,
+				lureCodeLength: clampLureCodeLength(formValues.lureCodeLength),
 				companyID: contextCompanyID
 			});
 			if (!res.success) {
@@ -390,7 +451,10 @@
 				afterLandingPageRedirectURL: formValues.afterLandingPageRedirectURL || '',
 				urlIdentifierID: identifierMap.byValueOrNull(formValues.urlIdentifier),
 				stateIdentifierID: identifierMap.byValueOrNull(formValues.stateIdentifier),
-				urlPath: formValues.urlPath || ''
+				urlPath: formValues.urlPath || '',
+				lureURLMode: formValues.lureURLMode,
+				lureCodeAlgo: formValues.lureCodeAlgo,
+				lureCodeLength: clampLureCodeLength(formValues.lureCodeLength)
 			});
 			if (!res.success) {
 				modalError = res.error;
@@ -449,7 +513,10 @@
 			apiSender: null,
 			urlIdentifier: 'id',
 			stateIdentifier: 'session',
-			urlPath: ''
+			urlPath: '',
+			lureURLMode: 'query',
+			lureCodeAlgo: 'crockford32',
+			lureCodeLength: 12
 		};
 		modalError = '';
 		showAdvancedOptions = false;
@@ -562,6 +629,9 @@
 		formValues.urlIdentifier = identifierMap.byKey(template.urlIdentifierID);
 		formValues.stateIdentifier = identifierMap.byKey(template.stateIdentifierID);
 		formValues.urlPath = template.urlPath || '';
+		formValues.lureURLMode = template.lureURLMode || 'query';
+		formValues.lureCodeAlgo = template.lureCodeAlgo || 'crockford32';
+		formValues.lureCodeLength = template.lureCodeLength || 12;
 
 		// set advanced options visibility based on template configuration
 		showAdvancedOptions = !!(
@@ -571,6 +641,7 @@
 				(template.urlIdentifierID && identifierMap.byKey(template.urlIdentifierID) !== 'id') ||
 				(template.stateIdentifierID &&
 					identifierMap.byKey(template.stateIdentifierID) !== 'session') ||
+				(template.lureURLMode && template.lureURLMode !== 'query') ||
 				template.apiSenderID
 			) // Show advanced if using External API
 		);
@@ -1161,9 +1232,61 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 								>
 							</div>
 							<div>
+								<SelectSquare
+									label="Lure URL format"
+									width="small"
+									center={false}
+									options={[
+										{ value: 'query', label: 'Query parameter' },
+										{ value: 'path', label: 'Path code' }
+									]}
+									bind:value={formValues.lureURLMode}
+								/>
+								<p class="mt-2 text-sm text-gray-600 dark:text-gray-300 break-all">
+									{lureURLExample(formValues)}
+								</p>
+							</div>
+							{#if formValues.lureURLMode === 'path'}
+								<div>
+									<TextFieldSelect
+										id="lureCodeAlgo"
+										toolTipText="Symbol set the generated code is drawn from."
+										required
+										bind:value={formValues.lureCodeAlgo}
+										options={Object.entries(LURE_CODE_ALGOS).map(([value, spec]) => ({
+											value,
+											label: spec.label
+										}))}>Code format</TextFieldSelect
+									>
+									{#if LURE_CODE_ALGOS[formValues.lureCodeAlgo]}
+										<p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
+											{LURE_CODE_ALGOS[formValues.lureCodeAlgo].note}
+										</p>
+									{/if}
+								</div>
+								<div>
+									<TextField
+										type="number"
+										min={6}
+										max={16}
+										toolTipText="Number of characters in the generated code, between 6 and 16."
+										bind:value={formValues.lureCodeLength}
+										placeholder="12">Code length (6 to 16)</TextField
+									>
+									{#if lureCodeKeyspace(formValues.lureCodeAlgo, Number(formValues.lureCodeLength))}
+										<p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
+											{lureCodeKeyspace(
+												formValues.lureCodeAlgo,
+												Number(formValues.lureCodeLength)
+											)}
+										</p>
+									{/if}
+								</div>
+							{/if}
+							<div>
 								<TextFieldSelect
 									id="urlIdentifier"
-									toolTipText="This is the query param key used in the phishing URL."
+									toolTipText="Query param key carrying the recipient. With the path code format the delivered link does not use it, but the pages after the first click still do."
 									required
 									bind:value={formValues.urlIdentifier}
 									options={identifierMap.values()}>Query param key</TextFieldSelect
@@ -1172,7 +1295,7 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 							<div>
 								<TextFieldSelect
 									id="stateIdentifier"
-									toolTipText="This is the query param key used for state."
+									toolTipText="Query param key carrying page flow state. Always a query param, including with the path code format."
 									required
 									bind:value={formValues.stateIdentifier}
 									options={identifierMap.values()}>State param key</TextFieldSelect

@@ -870,11 +870,9 @@ func (a *APISender) buildRequestWithCustomURL(
 	}
 
 	// override campaign URL if custom one is provided
+	// the only builder that knows about proxy first pages and path mode codes
 	if customCampaignURL != "" {
-		templateURL := fmt.Sprintf("https://%s%s?%s=%s", domainName, urlPath, urlKey, campaignRecipient.ID.MustGet().String())
-		if customCampaignURL != templateURL {
-			(*t)["URL"] = customCampaignURL
-		}
+		(*t)["URL"] = customCampaignURL
 	}
 
 	// setup headers

@@ -119,6 +119,13 @@ func (r *CampaignRecipient) Insert(
 	row := campaignRecipient.ToDBMap()
 	row["id"] = id
 	AddTimestamps(row)
+	// ToDBMap omits the lure code, so it is carried here
+	if code, err := campaignRecipient.LureCode.Get(); err == nil && code != "" {
+		row["lure_code"] = code
+	}
+	if custom, err := campaignRecipient.LureCodeCustom.Get(); err == nil {
+		row["lure_code_custom"] = custom
+	}
 
 	res := r.DB.
 		Model(&database.CampaignRecipient{}).
@@ -128,6 +135,30 @@ func (r *CampaignRecipient) Insert(
 		return nil, res.Error
 	}
 	return &id, nil
+}
+
+// SetLureCodeByID assigns an operator chosen code to one recipient. The only
+// path that writes a code after insert, and it touches nothing else, so a caller
+// holding a stale recipient model cannot restate a code through it.
+func (r *CampaignRecipient) SetLureCodeByID(
+	ctx context.Context,
+	id *uuid.UUID,
+	code string,
+) error {
+	row := map[string]any{
+		"lure_code":        code,
+		"lure_code_custom": true,
+	}
+	AddUpdatedAt(row)
+	res := r.DB.
+		Model(&database.CampaignRecipient{}).
+		Where(
+			fmt.Sprintf("%s = ?", TableColumnID(database.CAMPAIGN_RECIPIENT_TABLE_NAME)),
+			id.String(),
+		).
+		Updates(row)
+
+	return res.Error
 }
 
 // DeleteRecipientsNotIn deletes recipients in campaign that are
@@ -271,6 +302,235 @@ func (r *CampaignRecipient) GetByCampaignRecipientID(
 		return nil, res.Error
 	}
 	return ToCampaignRecipient(&dbCampaignRecipient)
+}
+
+// GetByLureCodeOnDomain gets a campaign recipient by the code carried in a
+// request, but only when the code belongs to a campaign reachable on the domain
+// serving it.
+//
+// The match is case sensitive, keeping Special-42 distinct from special-42 as
+// base58 requires. A released code is null and so drops out without a separate
+// predicate, which is also what stops an anonymized recipient's link working.
+//
+// The domain predicate keeps a guessed code from reaching across the instance.
+// Codes are unique instance wide and short enough to guess, so without it a
+// guess on any domain would resolve a recipient of any campaign, including
+// another company's. A campaign is reachable on its template's own domain and on
+// a proxy domain whose proxy the template uses for one of its pages.
+func (r *CampaignRecipient) GetByLureCodeOnDomain(
+	ctx context.Context,
+	code string,
+	domain *database.Domain,
+) (*model.CampaignRecipient, error) {
+	if code == "" || domain == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var dbCampaignRecipient database.CampaignRecipient
+	query := r.DB.
+		Model(&database.CampaignRecipient{}).
+		Joins(fmt.Sprintf(
+			"JOIN `%s` ON %s = %s",
+			database.CAMPAIGN_TABLE,
+			TableColumnID(database.CAMPAIGN_TABLE),
+			TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "campaign_id"),
+		)).
+		Joins(fmt.Sprintf(
+			"JOIN `%s` ON %s = %s",
+			database.CAMPAIGN_TEMPLATE_TABLE,
+			TableColumnID(database.CAMPAIGN_TEMPLATE_TABLE),
+			TableColumn(database.CAMPAIGN_TABLE, "campaign_template_id"),
+		)).
+		Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "lure_code")),
+			code,
+		).
+		// restating the index predicate. equality already excludes nulls, so no
+		// result changes, but the planner matches the partial unique index without
+		// deriving it. this sits on the request path, where a scan is paid on
+		// every visit.
+		Where(
+			fmt.Sprintf("%s IS NOT NULL", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "lure_code")),
+		)
+
+	if domain.ProxyID != nil {
+		// a proxy domain serves whichever template routes a page through that
+		// proxy, while the template's own domain still serves evasion and deny.
+		// the parentheses are written here rather than left to the builder:
+		// unparenthesised this would widen to match any campaign using the proxy
+		// regardless of the rest of the clause, and it is what confines a guessed
+		// code to one domain.
+		query = query.Where(
+			fmt.Sprintf(
+				"(%s = ? OR %s = ? OR %s = ? OR %s = ?)",
+				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "domain_id"),
+				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "before_landing_proxy_id"),
+				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "landing_proxy_id"),
+				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "after_landing_proxy_id"),
+			),
+			domain.ID,
+			domain.ProxyID,
+			domain.ProxyID,
+			domain.ProxyID,
+		)
+	} else {
+		query = query.Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "domain_id")),
+			domain.ID,
+		)
+	}
+
+	res := query.
+		Select(TableColumnAll(database.CAMPAIGN_RECIPIENT_TABLE_NAME)).
+		First(&dbCampaignRecipient)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return ToCampaignRecipient(&dbCampaignRecipient)
+}
+
+// findTakenLureCodesChunkSize keeps each IN clause inside the sqlite bound
+// variable limit, 999 on the most restrictive builds.
+const findTakenLureCodesChunkSize = 500
+
+// FindTakenLureCodes returns the subset of codes already claimed by a recipient
+// whose code has not been released.
+//
+// Querying lure_code, the column carrying the uniqueness constraint, catches a
+// collision with an operator written code here rather than through a failed
+// insert part way through scheduling. Probing a whole batch costs a handful of
+// queries instead of one insert and retry per recipient.
+func (r *CampaignRecipient) FindTakenLureCodes(
+	ctx context.Context,
+	codes []string,
+) ([]string, error) {
+	taken := []string{}
+	for start := 0; start < len(codes); start += findTakenLureCodesChunkSize {
+		end := start + findTakenLureCodesChunkSize
+		if end > len(codes) {
+			end = len(codes)
+		}
+		chunk := []string{}
+		res := r.DB.
+			Model(&database.CampaignRecipient{}).
+			Where(
+				fmt.Sprintf("%s IN ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "lure_code")),
+				codes[start:end],
+			).
+			Where(
+				fmt.Sprintf("%s IS NOT NULL", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "lure_code")),
+			).
+			Pluck("lure_code", &chunk)
+
+		if res.Error != nil {
+			return nil, res.Error
+		}
+		taken = append(taken, chunk...)
+	}
+	return taken, nil
+}
+
+// GetActiveByLureCode returns the recipient holding a code, so the owning
+// campaign can be named when an operator tries to reuse it.
+func (r *CampaignRecipient) GetActiveByLureCode(
+	ctx context.Context,
+	code string,
+) (*model.CampaignRecipient, error) {
+	var dbCampaignRecipient database.CampaignRecipient
+	res := r.DB.
+		Preload("Campaign").
+		Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "lure_code")),
+			code,
+		).
+		Where(
+			fmt.Sprintf("%s IS NOT NULL", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "lure_code")),
+		).
+		First(&dbCampaignRecipient)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return ToCampaignRecipient(&dbCampaignRecipient)
+}
+
+// ReleaseLureCodeByID frees a recipient's code for reuse. Nulling rather than
+// flagging takes it out of the unique index and stops it showing against a
+// recipient who no longer owns it. The row and its events are untouched.
+func (r *CampaignRecipient) ReleaseLureCodeByID(
+	ctx context.Context,
+	id *uuid.UUID,
+) error {
+	row := map[string]any{
+		"lure_code": nil,
+	}
+	AddUpdatedAt(row)
+	res := r.DB.
+		Model(&database.CampaignRecipient{}).
+		Where(
+			fmt.Sprintf("%s = ?", TableColumnID(database.CAMPAIGN_RECIPIENT_TABLE_NAME)),
+			id.String(),
+		).
+		Updates(row)
+
+	return res.Error
+}
+
+// HasRecipientsByCampaignID reports whether the campaign still holds any
+// recipient row. Scheduling reads it to decide whether the lure settings are
+// settled: a campaign holding recipients has links out resolving through those
+// rows. A non self managed reschedule deletes them first, which is what lets it
+// pick up a template change, its old links being dead either way.
+func (r *CampaignRecipient) HasRecipientsByCampaignID(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) (bool, error) {
+	// campaign_id leads the campaign and recipient unique index, so this stops at
+	// the first entry rather than counting the campaign
+	ids := []string{}
+	res := r.DB.
+		Model(&database.CampaignRecipient{}).
+		Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "campaign_id")),
+			campaignID,
+		).
+		Limit(1).
+		Pluck("id", &ids)
+
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return len(ids) > 0, nil
+}
+
+// HasCustomLureCodesByCampaignID reports whether any recipient in the campaign
+// carries an operator set code. The recipient table is paginated, so this cannot
+// be derived from one page of rows.
+func (r *CampaignRecipient) HasCustomLureCodesByCampaignID(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) (bool, error) {
+	// the flag is a literal because sqlite chooses the partial index at prepare
+	// time, where a bound value is unknown. keep it in step with the predicate
+	// in database.CampaignRecipient.Migrate. campaign_id is plucked so the
+	// answer comes from the index without reading the row.
+	ids := []string{}
+	res := r.DB.
+		Model(&database.CampaignRecipient{}).
+		Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "campaign_id")),
+			campaignID,
+		).
+		Where(
+			fmt.Sprintf("%s = 1", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "lure_code_custom")),
+		).
+		Limit(1).
+		Pluck("campaign_id", &ids)
+
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return len(ids) > 0, nil
 }
 
 // GetUnsendRecipients gets campaign recipients that were never attempted and are
@@ -461,8 +721,11 @@ func (r *CampaignRecipient) Anonymize(
 	recipientID *uuid.UUID,
 	anonymizedID *uuid.UUID,
 ) error {
+	// releasing here stops the recipient's lure link resolving and hands the code
+	// back for reuse
 	row := map[string]interface{}{
 		"anonymized_id": anonymizedID.String(),
+		"lure_code":     nil,
 	}
 	AddUpdatedAt(row)
 	db := r.DB.Model(&database.CampaignRecipient{})
@@ -627,6 +890,11 @@ func ToCampaignRecipient(row *database.CampaignRecipient) (*model.CampaignRecipi
 		notableEventID = nullable.NewNullableWithValue(*row.NotableEventID)
 		notableEventName = cache.EventNameByID[row.NotableEventID.String()]
 	}
+	var lureCode nullable.Nullable[string]
+	lureCode.SetNull()
+	if row.LureCode != nil {
+		lureCode = nullable.NewNullableWithValue(*row.LureCode)
+	}
 	return &model.CampaignRecipient{
 		ID:               id,
 		CancelledAt:      cancelledAt,
@@ -641,5 +909,7 @@ func ToCampaignRecipient(row *database.CampaignRecipient) (*model.CampaignRecipi
 		Recipient:        recipient,
 		NotableEventID:   notableEventID,
 		NotableEventName: notableEventName,
+		LureCode:         lureCode,
+		LureCodeCustom:   nullable.NewNullableWithValue(row.LureCodeCustom),
 	}, nil
 }

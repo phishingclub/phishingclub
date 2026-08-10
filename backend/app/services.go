@@ -212,8 +212,13 @@ func NewServices(
 		Common:                  common,
 		RemoteBrowserRepository: repositories.RemoteBrowser,
 	}
+	lureCode := &service.LureCode{
+		CampaignRecipientRepository: repositories.CampaignRecipient,
+		Logger:                      common.Logger,
+	}
 	campaign := &service.Campaign{
 		Common:                        common,
+		LureCodeService:               lureCode,
 		CampaignRepository:            repositories.Campaign,
 		CampaignRecipientRepository:   repositories.CampaignRecipient,
 		RecipientRepository:           repositories.Recipient,

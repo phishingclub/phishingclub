@@ -30,6 +30,11 @@ type CampaignRecipient struct {
 	Recipient        *Recipient                   `json:"recipient"`
 	NotableEventID   nullable.Nullable[uuid.UUID] `json:"notableEventID"`
 	NotableEventName string                       `json:"notableEventName"`
+	// LureCode is the identifier in the lure URL, stored and matched byte for
+	// byte. Null releases it for reuse.
+	LureCode nullable.Nullable[string] `json:"lureCode"`
+	// LureCodeCustom marks a code set by the operator rather than generated.
+	LureCodeCustom nullable.Nullable[bool] `json:"lureCodeCustom"`
 }
 
 // Validate validates the campaign recipient
@@ -104,6 +109,10 @@ func (c *CampaignRecipient) ToDBMap() map[string]any {
 			m["notable_event_id"] = v
 		}
 	}
+	// the lure code is left out. callers load a whole recipient, change one
+	// field and write it back, so a code carried here would be restated on every
+	// such write and collide with the unique index once another recipient holds
+	// it. written only by Insert, SetLureCodeByID and ReleaseLureCodeByID.
 
 	return m
 }

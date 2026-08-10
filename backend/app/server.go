@@ -676,6 +676,8 @@ func (s *Server) checkAndServePhishingPage(
 		c.Request,
 		s.repositories.Identifier,
 		s.repositories.CampaignRecipient,
+		domain,
+		true,
 	)
 	if err != nil {
 		s.logger.Debugw("failed to get campaign recipient from URL parameters",
@@ -1870,6 +1872,8 @@ func (s *Server) renderDenyPage(
 		c.Request,
 		s.repositories.Identifier,
 		s.repositories.CampaignRecipient,
+		domain,
+		true,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to get campaign recipient for deny page: %s", err)

@@ -29,6 +29,7 @@ import (
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/log"
+	"github.com/phishingclub/phishingclub/lure"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/remotebrowser"
 	"github.com/phishingclub/phishingclub/repository"
@@ -42,6 +43,7 @@ import (
 // Campaign is the Campaign service
 type Campaign struct {
 	Common
+	LureCodeService               *LureCode
 	CampaignRepository            *repository.Campaign
 	CampaignRecipientRepository   *repository.CampaignRecipient
 	RecipientRepository           *repository.Recipient
@@ -315,6 +317,214 @@ func applyJitter(baseTime time.Time, jitterMin, jitterMax int, startBound, endBo
 	return jitteredTime
 }
 
+// lureCodeAllocator hands out codes drawn up front for one schedule run. A
+// campaign not using codes gets an empty allocator, so its recipients keep
+// resolving by campaign recipient UUID alone.
+type lureCodeAllocator struct {
+	codes []lure.Code
+	next  int
+	state lureCodeAllocatorState
+}
+
+// lureCodeAllocatorState carries what a redraw needs.
+type lureCodeAllocatorState struct {
+	// false for a query mode campaign, which separates wanting no codes from a
+	// batch that ran short
+	enabled   bool
+	algorithm lure.Algorithm
+	length    int
+}
+
+// applyTo sets the next unused code on a recipient.
+//
+// Over drawing is harmless, an uninserted code is never claimed. Running short
+// is not: the recipient would fall back to a query URL in a campaign whose point
+// is the path form. The batch covers the worst case, so a shortfall is a bug.
+func (a *lureCodeAllocator) applyTo(campaignRecipient *model.CampaignRecipient) error {
+	var display nullable.Nullable[string]
+	display.SetNull()
+	if a != nil && a.state.enabled {
+		if a.next >= len(a.codes) {
+			return errs.Wrap(errors.New(
+				"ran out of allocated lure codes while scheduling this campaign",
+			))
+		}
+		display = nullable.NewNullableWithValue(a.codes[a.next].Display)
+		a.next++
+	}
+	campaignRecipient.LureCode = display
+	return nil
+}
+
+// newLureCodeAllocator draws every code a schedule run needs in one batch.
+func (c *Campaign) newLureCodeAllocator(
+	ctx context.Context,
+	campaign *model.Campaign,
+	count int,
+) (*lureCodeAllocator, error) {
+	if !campaign.UsesLureCodePath() || count <= 0 || c.LureCodeService == nil {
+		return &lureCodeAllocator{}, nil
+	}
+	_, algorithm, length := campaign.LureSettings()
+	codes, err := c.LureCodeService.AllocateBatch(ctx, algorithm, length, count)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	return &lureCodeAllocator{
+		codes: codes,
+		state: lureCodeAllocatorState{
+			enabled:   true,
+			algorithm: algorithm,
+			length:    length,
+		},
+	}, nil
+}
+
+// lureCodeInsertRetries bounds the redraws on insert. Allocation checks a code
+// is free, but the insert lands later, so a concurrent schedule run or an
+// operator setting a custom code can claim it in between.
+const lureCodeInsertRetries = 3
+
+// isLureCodeConflict reports whether an insert failed because the code was taken
+// between allocation and insert.
+//
+// Error translation is off on the gorm session, so a duplicate key does not
+// surface as gorm.ErrDuplicatedKey. Matching the message instead is narrowed to
+// this column so an unrelated constraint is never swallowed and retried.
+func isLureCodeConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	message := err.Error()
+	return strings.Contains(message, "UNIQUE constraint failed") &&
+		strings.Contains(message, "campaign_recipients.lure_code")
+}
+
+// insertScheduledRecipient inserts one scheduled recipient, redrawing its code if
+// it was claimed between allocation and insert. The loop has no transaction to
+// roll back, so a losing race would otherwise abort a half written schedule.
+func (c *Campaign) insertScheduledRecipient(
+	ctx context.Context,
+	allocator *lureCodeAllocator,
+	campaignRecipient *model.CampaignRecipient,
+) error {
+	for attempt := 0; ; attempt++ {
+		_, err := c.CampaignRecipientRepository.Insert(ctx, campaignRecipient)
+		if err == nil {
+			return nil
+		}
+		if attempt >= lureCodeInsertRetries ||
+			!isLureCodeConflict(err) ||
+			allocator == nil ||
+			!allocator.state.enabled ||
+			c.LureCodeService == nil {
+			return errs.Wrap(err)
+		}
+		c.Logger.Infow("lure code was claimed between allocation and insert, redrawing",
+			"attempt", attempt+1,
+		)
+		codes, drawErr := c.LureCodeService.AllocateBatch(
+			ctx,
+			allocator.state.algorithm,
+			allocator.state.length,
+			1,
+		)
+		if drawErr != nil || len(codes) == 0 {
+			return errs.Wrap(err)
+		}
+		campaignRecipient.LureCode = nullable.NewNullableWithValue(codes[0].Display)
+	}
+}
+
+// snapshotLureSettings copies the template's lure URL settings onto the campaign
+// while it still holds no recipients.
+//
+// A campaign holding recipients has links out that resolve through those rows,
+// so reading the template again could hand a new recipient a different URL form
+// than the ones already delivered. That is the self managed case, where a
+// reschedule keeps existing recipients. A non self managed reschedule deletes
+// them all first and so does read the template again, which is safe because its
+// recipients are recreated with new IDs and the old links die either way.
+//
+// Nothing here is fatal, so a lure setting cannot stop a campaign scheduling. A
+// template that could not be read leaves the snapshot unwritten rather than
+// settling on the defaults, because the write closes the question for good and a
+// transient error would otherwise mark a path mode campaign as query mode with
+// no way back while it holds recipients.
+func (c *Campaign) snapshotLureSettings(
+	ctx context.Context,
+	session *model.Session,
+	campaign *model.Campaign,
+) {
+	campaignID, err := campaign.ID.Get()
+	if err != nil {
+		return
+	}
+	hasRecipients, err := c.CampaignRecipientRepository.HasRecipientsByCampaignID(
+		ctx,
+		&campaignID,
+	)
+	if err != nil {
+		// leaving the settings alone keeps the campaign consistent with whatever
+		// its recipients already resolve through
+		c.Logger.Errorw("failed to check for existing recipients, keeping lure settings",
+			"error", err,
+		)
+		return
+	}
+	if hasRecipients {
+		return
+	}
+
+	mode := data.LureURLModeQuery
+	algorithm := string(lure.DefaultAlgorithm)
+	length := lure.DefaultLength
+
+	if templateID, err := campaign.TemplateID.Get(); err == nil {
+		cTemplate, err := c.CampaignTemplateService.GetByID(
+			ctx,
+			session,
+			&templateID,
+			&repository.CampaignTemplateOption{},
+		)
+		if err != nil || cTemplate == nil {
+			c.Logger.Errorw("could not read lure settings from template, leaving the snapshot unwritten",
+				"campaignID", campaignID.String(),
+				"templateID", templateID.String(),
+				"error", err,
+			)
+			return
+		}
+		if v, err := cTemplate.LureURLMode.Get(); err == nil && data.IsValidLureURLMode(v) {
+			mode = v
+		}
+		if v, err := cTemplate.LureCodeAlgo.Get(); err == nil && lure.IsValidAlgorithm(lure.Algorithm(v)) {
+			algorithm = v
+		}
+		if v, err := cTemplate.LureCodeLength.Get(); err == nil && v >= lure.MinLength && v <= lure.MaxLength {
+			length = v
+		}
+	}
+	campaign.LureURLMode = nullable.NewNullableWithValue(mode)
+	campaign.LureCodeAlgo = nullable.NewNullableWithValue(algorithm)
+	campaign.LureCodeLength = nullable.NewNullableWithValue(length)
+
+	if err := c.CampaignRepository.SetLureSettingsByID(
+		ctx,
+		&campaignID,
+		mode,
+		algorithm,
+		length,
+	); err != nil {
+		// the in memory campaign still carries them, so this run allocates
+		// correctly even unpersisted
+		c.Logger.Errorw("failed to persist lure settings snapshot", "error", err)
+	}
+}
+
 func (c *Campaign) schedule(
 	ctx context.Context,
 	session *model.Session,
@@ -329,6 +539,9 @@ func (c *Campaign) schedule(
 	if !isAuthorized {
 		return errs.ErrAuthorizationFailed
 	}
+	// settle the lure settings before any row is written, so every recipient in
+	// this run is allocated under the same rules
+	c.snapshotLureSettings(ctx, session, campaign)
 
 	// get all recipients and remove duplicates
 	recipients := []*model.Recipient{}
@@ -425,8 +638,15 @@ func (c *Campaign) schedule(
 			rid := recp.ID.MustGet()
 			recipientIDs[i] = &rid
 		}
+		// enough for the worst case where every supplied recipient is new, unused
+		// draws are discarded. before the delete below, so an exhausted code space
+		// leaves the schedule untouched rather than half applied.
+		allocator, err := c.newLureCodeAllocator(ctx, campaign, len(recipients))
+		if err != nil {
+			return errs.Wrap(err)
+		}
 		// c.Logger.Debugw("keeping recpient IDs", recipientIDs)
-		err := c.CampaignRecipientRepository.DeleteRecipientsNotIn(
+		err = c.CampaignRecipientRepository.DeleteRecipientsNotIn(
 			ctx,
 			&campaignID,
 			recipientIDs,
@@ -462,8 +682,12 @@ func (c *Campaign) schedule(
 				CampaignID:  nullable.NewNullableWithValue(campaignID),
 				SelfManaged: nullable.NewNullableWithValue(true),
 			}
+			if err := allocator.applyTo(campaignRecipients[i]); err != nil {
+				c.Logger.Errorw("failed to allocate lure code", "error", err)
+				return err
+			}
 			// save campaign-recipient
-			_, err = c.CampaignRecipientRepository.Insert(ctx, campaignRecipients[i])
+			err = c.insertScheduledRecipient(ctx, allocator, campaignRecipients[i])
 			if err != nil {
 				c.Logger.Errorw("failed to create campaign", "error", err)
 				return errs.Wrap(err)
@@ -503,6 +727,13 @@ func (c *Campaign) schedule(
 	}
 	scheduledEvent := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SCHEDULED]
 
+	// before any row is written, so an exhausted code space fails before the
+	// campaign is half scheduled
+	allocator, err := c.newLureCodeAllocator(ctx, campaign, recipientsCount)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
 	// get jitter values if specified
 	jitterMin := 0
 	jitterMax := 0
@@ -529,7 +760,11 @@ func (c *Campaign) schedule(
 			SendAt:         nullable.NewNullableWithValue(jitteredStartAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 		}
-		_, err := c.CampaignRecipientRepository.Insert(ctx, campaignRecipient)
+		if err := allocator.applyTo(campaignRecipient); err != nil {
+			c.Logger.Errorw("failed to allocate lure code", "error", err)
+			return err
+		}
+		err := c.insertScheduledRecipient(ctx, allocator, campaignRecipient)
 		if err != nil {
 			c.Logger.Errorw("failed to create campaign", "error", err)
 			return errs.Wrap(err)
@@ -606,7 +841,11 @@ func (c *Campaign) schedule(
 						SendAt:         nullable.NewNullableWithValue(jitteredTime),
 						NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 					}
-					_, err := c.CampaignRecipientRepository.Insert(ctx, campaignRecipient)
+					if err := allocator.applyTo(campaignRecipient); err != nil {
+						c.Logger.Errorw("failed to allocate lure code", "error", err)
+						return err
+					}
+					err := c.insertScheduledRecipient(ctx, allocator, campaignRecipient)
 					if err != nil {
 						c.Logger.Errorw("failed to create campaign", "error", err)
 						return errs.Wrap(err)
@@ -652,8 +891,12 @@ func (c *Campaign) schedule(
 			SendAt:         nullable.NewNullableWithValue(jitteredSentAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 		}
+		if err := allocator.applyTo(campaignRecipients[i]); err != nil {
+			c.Logger.Errorw("failed to allocate lure code", "error", err)
+			return err
+		}
 		// save
-		_, err = c.CampaignRecipientRepository.Insert(ctx, campaignRecipients[i])
+		err = c.insertScheduledRecipient(ctx, allocator, campaignRecipients[i])
 		if err != nil {
 			c.Logger.Errorw("failed to create campaign", "error", err)
 			return errs.Wrap(err)
@@ -862,6 +1105,13 @@ func (c *Campaign) GetByID(
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return nil, errs.Wrap(err)
+	}
+	// the recipient table is paginated, so this cannot be derived from one page
+	hasCustom, err := c.CampaignRecipientRepository.HasCustomLureCodesByCampaignID(ctx, id)
+	if err != nil {
+		c.Logger.Errorw("failed to check for custom lure codes", "error", err)
+	} else {
+		campaign.HasCustomLureCodes = hasCustom
 	}
 	// no audit on read
 	return campaign, nil
@@ -2642,11 +2892,8 @@ func (c *Campaign) sendCampaignMessages(
 			campaignCompanyID,
 		)
 
-		// override campaign URL if it's different from template domain URL
-		templateURL := fmt.Sprintf("https://%s%s?%s=%s", domainName.String(), urlPath, urlIdentifier.Name.MustGet(), recipientID.String())
-		if customCampaignURL != templateURL {
-			(*t)["URL"] = customCampaignURL
-		}
+		// the only builder that knows about proxy first pages and path mode codes
+		(*t)["URL"] = customCampaignURL
 
 		// build per-recipient template funcs so that {{MicrosoftDeviceCode}} resolves
 		// to a real device code for this campaign recipient.
@@ -3736,10 +3983,32 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 	}
 
 	// build final url
-	separator := "?"
-	url := fmt.Sprintf("%s%s%s%s=%s", baseURL, urlPath, separator, idIdentifier, campaignRecipientID.String())
 	// no audit on read
-	return url, nil
+	return BuildLureURL(baseURL, urlPath, idIdentifier, campaignRecipient), nil
+}
+
+// BuildLureURL assembles the URL delivered to a recipient.
+//
+// Holding a code is signal enough for the path form without consulting the
+// campaign: a generated code exists only for a path mode campaign, and an
+// operator set code is a deliberate request for that exact link. A recipient
+// with no code gets the query form carrying the campaign recipient UUID.
+func BuildLureURL(
+	baseURL string,
+	urlPath string,
+	urlIdentifier string,
+	campaignRecipient *model.CampaignRecipient,
+) string {
+	if code, err := campaignRecipient.LureCode.Get(); err == nil && code != "" {
+		return strings.TrimSuffix(baseURL+urlPath, "/") + "/" + code
+	}
+	return fmt.Sprintf(
+		"%s%s?%s=%s",
+		baseURL,
+		urlPath,
+		urlIdentifier,
+		campaignRecipient.ID.MustGet().String(),
+	)
 }
 
 // getFirstPageProxy returns the proxy for the first page in the campaign flow
@@ -3812,6 +4081,142 @@ func (c *Campaign) getPhishingDomainForProxy(ctx context.Context, proxy *model.P
 }
 
 // SetSentAtByCampaignRecipientID sets the sent at time for a recipient
+// ErrLureCodeTaken is returned when the code is already claimed by a recipient
+// whose code has not been released.
+var ErrLureCodeTaken = errors.New("lure code is already in use")
+
+// companyIDsEqual reports whether two optional company references point at the
+// same company, treating both unset as the global scope.
+func companyIDsEqual(a nullable.Nullable[uuid.UUID], b nullable.Nullable[uuid.UUID]) bool {
+	aID, aErr := a.Get()
+	bID, bErr := b.Get()
+	if aErr != nil && bErr != nil {
+		return true
+	}
+	if aErr != nil || bErr != nil {
+		return false
+	}
+	return aID == bID
+}
+
+// LureCodeConflict describes who currently holds a requested code, so the
+// operator can decide whether to reclaim it.
+type LureCodeConflict struct {
+	CampaignID   string `json:"campaignID"`
+	CampaignName string `json:"campaignName"`
+	IsClosed     bool   `json:"isClosed"`
+}
+
+// SetLureCodeByCampaignRecipientID assigns an operator chosen code to a single
+// recipient.
+//
+// A custom code has close to no entropy, so anyone guessing it reaches the
+// landing page rendered for that recipient. That is the trade for a link that
+// has to be read aloud or typed, and why this is a per recipient action rather
+// than a campaign wide setting.
+//
+// A code held by another recipient fails with a conflict describing the owner.
+// Passing reclaim releases that older code first, so anyone still holding the
+// old link resolves into this campaign instead.
+func (c *Campaign) SetLureCodeByCampaignRecipientID(
+	ctx context.Context,
+	session *model.Session,
+	campaignRecipientID *uuid.UUID,
+	code string,
+	reclaim bool,
+) (*LureCodeConflict, error) {
+	ae := NewAuditEvent("Campaign.SetLureCodeByCampaignRecipientID", session)
+	ae.Details["campaignRecipientId"] = campaignRecipientID.String()
+	ae.Details["lureCode"] = code
+	ae.Details["reclaim"] = fmt.Sprintf("%t", reclaim)
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+	if !lure.IsValidCustom(code) {
+		return nil, errs.NewValidationError(
+			go_errors.Errorf(
+				"lure URL must be 1 to %d characters, cannot be . or contain .. and cannot contain spaces or %s",
+				lure.MaxCustomLength,
+				lure.DisallowedCustomCharacters,
+			),
+		)
+	}
+	campaignRecipient, err := c.CampaignRecipientRepository.GetByID(
+		ctx,
+		campaignRecipientID,
+		&repository.CampaignRecipientOption{
+			WithCampaign: true,
+		},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign recipient by id", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	campaign := campaignRecipient.Campaign
+	if campaign == nil || !campaign.IsActive() {
+		return nil, errs.NewValidationError(errors.New("campaign is closed"))
+	}
+	if _, err := campaignRecipient.RecipientID.Get(); err != nil {
+		return nil, errs.NewValidationError(errors.New("recipient is not available"))
+	}
+
+	newCode := lure.NewCustomCode(code)
+	// the same code again is a no op rather than a self conflict
+	if current, err := campaignRecipient.LureCode.Get(); err == nil && current == newCode.Display {
+		c.AuditLogAuthorized(ae)
+		return nil, nil
+	}
+
+	holder, err := c.CampaignRecipientRepository.GetActiveByLureCode(ctx, newCode.Display)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.Logger.Errorw("failed to check lure code owner", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	if holder != nil {
+		conflict := &LureCodeConflict{}
+		if holder.Campaign != nil {
+			// codes are unique instance wide, so the holder may belong to another
+			// company. naming it would disclose that company's campaign to someone
+			// who only guessed a code, so only a shared company gets details.
+			if companyIDsEqual(campaign.CompanyID, holder.Campaign.CompanyID) {
+				holderCampaignID := holder.Campaign.ID.MustGet()
+				conflict.CampaignID = holderCampaignID.String()
+				if name, err := holder.Campaign.Name.Get(); err == nil {
+					conflict.CampaignName = name.String()
+				}
+				conflict.IsClosed = !holder.Campaign.IsActive()
+			}
+		}
+		if !reclaim {
+			return conflict, ErrLureCodeTaken
+		}
+		holderID := holder.ID.MustGet()
+		if err := c.CampaignRecipientRepository.ReleaseLureCodeByID(ctx, &holderID); err != nil {
+			c.Logger.Errorw("failed to release lure code from previous owner", "error", err)
+			return nil, errs.Wrap(err)
+		}
+		ae.Details["reclaimedFromCampaignRecipientId"] = holderID.String()
+	}
+
+	if err := c.CampaignRecipientRepository.SetLureCodeByID(
+		ctx,
+		campaignRecipientID,
+		newCode.Display,
+	); err != nil {
+		c.Logger.Errorw("failed to set lure code", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	c.AuditLogAuthorized(ae)
+	return nil, nil
+}
+
 func (c *Campaign) SetSentAtByCampaignRecipientID(
 	ctx context.Context,
 	session *model.Session,
@@ -4585,11 +4990,8 @@ func (c *Campaign) sendSingleEmailSMTP(
 		campaignCompanyID,
 	)
 
-	// override campaign URL if it's different from template domain URL
-	templateURL := fmt.Sprintf("https://%s%s?%s=%s", domainName.String(), urlPath, urlIdentifier.Name.MustGet(), recipientID.String())
-	if customCampaignURL != templateURL {
-		(*t)["URL"] = customCampaignURL
-	}
+	// the only builder that knows about proxy first pages and path mode codes
+	(*t)["URL"] = customCampaignURL
 
 	// custom headers support the same per recipient variables as the subject and body
 	applyCustomSMTPHeaders(m, smtpConfig.Headers, t, recipientDeviceFuncs, c.Logger)

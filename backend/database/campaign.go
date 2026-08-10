@@ -64,6 +64,14 @@ type Campaign struct {
 	WebhookIncludeData string `gorm:"not null;default:'full'"`
 	WebhookEvents      int    `gorm:"not null;default:0"`
 
+	// Snapshotted from the campaign template while the campaign holds no
+	// recipients. Read from here rather than the template so a later addition to
+	// a self managed campaign matches the recipients already scheduled, and a
+	// template edit cannot change the form of URLs already delivered.
+	LureURLMode    string `gorm:"not null;default:'query'"`
+	LureCodeAlgo   string `gorm:"not null;default:'crockford32'"`
+	LureCodeLength int    `gorm:"not null;default:12"`
+
 	// has one
 	CampaignTemplateID *uuid.UUID `gorm:"index;type:uuid;"`
 	CampaignTemplate   *CampaignTemplate

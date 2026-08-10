@@ -133,7 +133,11 @@ type URLPath struct {
 	inner string
 }
 
-// NewURLPath creates a new URL path
+// NewURLPath creates a new URL path.
+//
+// The leading slash is added because callers write the path straight after the
+// domain, where hello would give https://example.comhello. Stored rows are read
+// back through here and normalised too. An empty path already joins correctly.
 func NewURLPath(s string) (*URLPath, error) {
 	s = strings.TrimSpace(s)
 	p, err := url.Parse(s)
@@ -143,8 +147,12 @@ func NewURLPath(s string) (*URLPath, error) {
 			"URLPath",
 		)
 	}
+	path := p.Path
+	if path != "" && !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
 	return &URLPath{
-		inner: p.Path,
+		inner: path,
 	}, nil
 }
 

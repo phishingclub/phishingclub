@@ -54,13 +54,7 @@ func (t *Template) CreateMail(
 	rid := campaignRecipient.ID.MustGet()
 	ridStr := rid.String()
 	baseURL := "https://" + domainName
-	url := fmt.Sprintf(
-		"%s%s?%s=%s",
-		baseURL,
-		urlPath,
-		idKey,
-		ridStr,
-	)
+	url := BuildLureURL(baseURL, urlPath, idKey, campaignRecipient)
 	// set body
 	trackingPixelPath := fmt.Sprintf(
 		"%s/wf/open?upn=%s",
@@ -416,6 +410,9 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 
 	queryParams := parsedURL.Query()
 
+	// the page flow url keeps the query form even in path mode, because the
+	// encrypted state param driving the next page travels in the query string
+	// regardless. path mode covers the delivered link, the one a recipient reads.
 	// only add campaign parameters if they don't already exist
 	if !queryParams.Has(urlIdentifier) {
 		queryParams.Set(urlIdentifier, id)

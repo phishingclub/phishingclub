@@ -1,13 +1,16 @@
 package model
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/go-errors/errors"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
+	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
+	"github.com/phishingclub/phishingclub/lure"
 	"github.com/phishingclub/phishingclub/validate"
 	"github.com/phishingclub/phishingclub/vo"
 )
@@ -54,6 +57,12 @@ type CampaignTemplate struct {
 
 	URLPath nullable.Nullable[vo.URLPath] `json:"urlPath"`
 
+	// defaults, snapshotted onto a campaign when it is scheduled, so editing them
+	// here never changes a campaign already running.
+	LureURLMode    nullable.Nullable[string] `json:"lureURLMode"`
+	LureCodeAlgo   nullable.Nullable[string] `json:"lureCodeAlgo"`
+	LureCodeLength nullable.Nullable[int]    `json:"lureCodeLength"`
+
 	EmailID nullable.Nullable[uuid.UUID] `json:"emailID"`
 	Email   *Email                       `json:"email"`
 
@@ -90,6 +99,22 @@ func (c *CampaignTemplate) Validate() error {
 		}
 	}
 	// URLPath is optional, no validation needed
+
+	if v, err := c.LureURLMode.Get(); err == nil && !data.IsValidLureURLMode(v) {
+		return errs.NewValidationError(
+			errors.New("lure URL mode must be query or path"),
+		)
+	}
+	if v, err := c.LureCodeAlgo.Get(); err == nil && !lure.IsValidAlgorithm(lure.Algorithm(v)) {
+		return errs.NewValidationError(
+			errors.New("unknown lure code algorithm"),
+		)
+	}
+	if v, err := c.LureCodeLength.Get(); err == nil && (v < lure.MinLength || v > lure.MaxLength) {
+		return errs.NewValidationError(
+			fmt.Errorf("lure code length must be between %d and %d", lure.MinLength, lure.MaxLength),
+		)
+	}
 
 	// validate that only one type is set per stage
 	// before landing page: can have neither (optional), or one type, but not both
@@ -259,6 +284,24 @@ func (c *CampaignTemplate) ToDBMap() map[string]any {
 			} else {
 				m["url_path"] = ""
 			}
+		}
+	}
+	if c.LureURLMode.IsSpecified() {
+		m["lure_url_mode"] = data.LureURLModeQuery
+		if v, err := c.LureURLMode.Get(); err == nil && data.IsValidLureURLMode(v) {
+			m["lure_url_mode"] = v
+		}
+	}
+	if c.LureCodeAlgo.IsSpecified() {
+		m["lure_code_algo"] = string(lure.DefaultAlgorithm)
+		if v, err := c.LureCodeAlgo.Get(); err == nil && lure.IsValidAlgorithm(lure.Algorithm(v)) {
+			m["lure_code_algo"] = v
+		}
+	}
+	if c.LureCodeLength.IsSpecified() {
+		m["lure_code_length"] = lure.DefaultLength
+		if v, err := c.LureCodeLength.Get(); err == nil && v >= lure.MinLength && v <= lure.MaxLength {
+			m["lure_code_length"] = v
 		}
 	}
 

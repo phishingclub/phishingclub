@@ -9,6 +9,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
+	"github.com/phishingclub/phishingclub/lure"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/validate"
@@ -84,6 +85,17 @@ func (c *CampaignTemplate) Create(
 	// if no path set to ''
 	if !campaignTemplate.URLPath.IsSpecified() || campaignTemplate.URLPath.IsNull() {
 		campaignTemplate.URLPath = nullable.NewNullableWithValue(*vo.NewURLPathMust(""))
+	}
+	// default to the query parameter behaviour, so a template created without
+	// them keeps producing the URLs it always did
+	if !campaignTemplate.LureURLMode.IsSpecified() || campaignTemplate.LureURLMode.IsNull() {
+		campaignTemplate.LureURLMode = nullable.NewNullableWithValue(data.LureURLModeQuery)
+	}
+	if !campaignTemplate.LureCodeAlgo.IsSpecified() || campaignTemplate.LureCodeAlgo.IsNull() {
+		campaignTemplate.LureCodeAlgo = nullable.NewNullableWithValue(string(lure.DefaultAlgorithm))
+	}
+	if !campaignTemplate.LureCodeLength.IsSpecified() || campaignTemplate.LureCodeLength.IsNull() {
+		campaignTemplate.LureCodeLength = nullable.NewNullableWithValue(lure.DefaultLength)
 	}
 	// if no afterLandingPageRedirectURL set to ''
 	if !campaignTemplate.AfterLandingPageRedirectURL.IsSpecified() || campaignTemplate.AfterLandingPageRedirectURL.IsNull() {
@@ -724,6 +736,15 @@ func (c *CampaignTemplate) UpdateByID(
 			// if URLPath is null, set to empty string
 			incoming.URLPath.Set(*vo.NewURLPathMust(""))
 		}
+	}
+	if v, err := campaignTemplate.LureURLMode.Get(); err == nil {
+		incoming.LureURLMode.Set(v)
+	}
+	if v, err := campaignTemplate.LureCodeAlgo.Get(); err == nil {
+		incoming.LureCodeAlgo.Set(v)
+	}
+	if v, err := campaignTemplate.LureCodeLength.Get(); err == nil {
+		incoming.LureCodeLength.Set(v)
 	}
 	// validate
 	if err := incoming.Validate(); err != nil {

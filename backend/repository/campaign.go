@@ -1520,6 +1520,31 @@ func (r *Campaign) HasEvent(
 	return count > 0, nil
 }
 
+// SetLureSettingsByID writes the lure URL settings taken from the campaign
+// template. The only path that writes them, because a create or update request
+// carries whatever a caller put in those fields and they must come from the
+// template instead.
+func (r *Campaign) SetLureSettingsByID(
+	ctx context.Context,
+	id *uuid.UUID,
+	mode string,
+	algorithm string,
+	length int,
+) error {
+	row := map[string]any{
+		"lure_url_mode":    mode,
+		"lure_code_algo":   algorithm,
+		"lure_code_length": length,
+	}
+	AddUpdatedAt(row)
+	res := r.DB.
+		Model(&database.Campaign{}).
+		Where("id = ?", id).
+		Updates(row)
+
+	return res.Error
+}
+
 // UpdateByID updates a campaign by id
 // does not update the campaign recipient groups and campaign recipients
 func (r *Campaign) UpdateByID(
@@ -2131,6 +2156,9 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		Webhooks:            webhooks,
 		NotableEventID:      notableEventID,
 		NotableEventName:    notableEventName,
+		LureURLMode:         nullable.NewNullableWithValue(row.LureURLMode),
+		LureCodeAlgo:        nullable.NewNullableWithValue(row.LureCodeAlgo),
+		LureCodeLength:      nullable.NewNullableWithValue(row.LureCodeLength),
 	}, nil
 }
 

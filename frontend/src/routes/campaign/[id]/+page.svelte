@@ -47,6 +47,8 @@
 	import IconButton from '$lib/components/IconButton.svelte';
 	import papaparse from 'papaparse';
 	import FormFooter from '$lib/components/FormFooter.svelte';
+	import TextField from '$lib/components/TextField.svelte';
+	import FormError from '$lib/components/FormError.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import { resourceContext } from '$lib/store/resourceContext';
 	import RemoteBrowserStream from '$lib/components/remote-browser/RemoteBrowserStream.svelte';
@@ -68,6 +70,8 @@
 		closedAt: null,
 		template: null,
 		isTest: false,
+		hasCustomLureCodes: false,
+		lureURLMode: 'query',
 		constraintWeekDays: null,
 		constraintStartTime: null,
 		constraintEndTime: null,
@@ -148,6 +152,7 @@
 	let isAnonymizeDataModalVisible = false;
 	let isSendMessageModalVisible = false;
 	let isSetAsSentModalVisible = false;
+	let isLureCodeModalVisible = false;
 	let isSessionSushiModalVisible = false;
 	let isTrackingPixelWarningVisible = false;
 	let isReportedCSVModalVisible = false;
@@ -175,6 +180,12 @@
 	}
 	let sendMessageRecipient = null;
 	let setAsSentRecipient = null;
+	let lureCodeRecipient = null;
+	let lureCodeValue = '';
+	let lureCodeError = '';
+	/** set when the requested code is held by another recipient */
+	let lureCodeConflict = null;
+	let lureCodeSubmitting = false;
 	let lastPoll3399Nano = '';
 
 	// live remote browser sessions
@@ -355,6 +366,10 @@
 			campaign.recipientGroups = t.recipientGroupIDs.map((id) => recipientGroupMap.byKey(id));
 			campaign.notableEventName = t.notableEventName;
 			campaign.scheduleAt = t.scheduleAt ?? null;
+			// whether any recipient carries an operator set code. the recipient
+			// table is paginated, so it cannot be derived from the rows on screen
+			campaign.hasCustomLureCodes = !!t.hasCustomLureCodes;
+			campaign.lureURLMode = t.lureURLMode ?? 'query';
 			if (t.sendStartAt === null && t.sendEndAt === null) {
 				isSelfManaged = true;
 			}
@@ -669,6 +684,114 @@
 	const closeSendMessageModal = () => {
 		isSendMessageModalVisible = false;
 		sendMessageRecipient = null;
+	};
+
+	const LURE_CODE_MAX_LENGTH = 64;
+
+	const LURE_CODE_DISALLOWED = `/ \\ % ? # " ' < >`;
+
+	// mirrors lure.IsCandidate on the server. names the character that failed
+	// rather than restating every rule, which sits under the field.
+	/** @param {string} value @returns {string} empty when the value can be used */
+	const validateLureCode = (value) => {
+		if (!value) {
+			return 'Enter a lure URL.';
+		}
+		if (value.length > LURE_CODE_MAX_LENGTH) {
+			return `Too long: ${value.length} characters, the maximum is ${LURE_CODE_MAX_LENGTH}.`;
+		}
+		// a lone dot names a directory, which the browser resolves away before
+		// the request is sent, so it could never arrive back
+		if (value === '.') {
+			return 'Cannot be . on its own, a browser resolves that away.';
+		}
+		// a doubled dot anywhere makes the whole path unresolvable, so a code
+		// carrying one would be delivered and never work
+		if (value.includes('..')) {
+			return 'Cannot contain .. anywhere, the link would never resolve.';
+		}
+		const disallowed = value.match(/[/%?#\\"'<>]/);
+		if (disallowed) {
+			return `Cannot contain: ${disallowed[0]}`;
+		}
+		for (const character of value) {
+			const code = character.codePointAt(0) ?? 0;
+			if (code === 0x20) {
+				return 'Cannot contain spaces.';
+			}
+			if (code <= 0x20 || code === 0x7f) {
+				return 'Cannot contain tabs, line breaks or other control characters.';
+			}
+		}
+		return '';
+	};
+
+	// path the template puts in front of the code, used for the preview
+	$: campaignURLPath = (campaign?.template?.urlPath || '').replace(/\/$/, '');
+
+	// a path mode campaign gives every recipient a code, so the column is worth
+	// showing even before anyone sets one by hand
+	$: showLureCodeColumn = campaign.hasCustomLureCodes || campaign.lureURLMode === 'path';
+
+	/** @param {Object} recp */
+	const showLureCodeModal = (recp) => {
+		lureCodeRecipient = {
+			id: recp.id,
+			name: `${recp.recipient?.firstName || ''} ${recp.recipient?.lastName || ''}`.trim(),
+			email: recp.recipient?.email,
+			sentAt: recp.sentAt,
+			current: recp.lureCode || ''
+		};
+		lureCodeValue = recp.lureCode || '';
+		lureCodeError = '';
+		lureCodeConflict = null;
+		isLureCodeModalVisible = true;
+	};
+
+	const closeLureCodeModal = () => {
+		isLureCodeModalVisible = false;
+		lureCodeRecipient = null;
+		lureCodeValue = '';
+		lureCodeError = '';
+		lureCodeConflict = null;
+	};
+
+	/** @param {boolean} reclaim */
+	const submitLureCode = async (reclaim = false) => {
+		if (!lureCodeRecipient) {
+			return;
+		}
+		const invalid = validateLureCode(lureCodeValue);
+		if (invalid) {
+			lureCodeError = invalid;
+			return;
+		}
+		lureCodeSubmitting = true;
+		lureCodeError = '';
+		try {
+			const res = await api.campaign.setLureCode(lureCodeRecipient.id, lureCodeValue, reclaim);
+			if (!res.success) {
+				// 409 carries the campaign currently holding the code so the
+				// operator can decide whether to take it over
+				if (res.statusCode === 409) {
+					lureCodeConflict = res.data || {};
+					lureCodeError = res.error || 'Lure code is already in use';
+					return;
+				}
+				lureCodeError = res.error || 'Failed to set lure URL';
+				return;
+			}
+			addToast('Lure URL updated', 'Success');
+			closeLureCodeModal();
+			// the campaign carries what decides the lure URL column, so it reloads
+			// alongside the rows
+			await Promise.all([setCampaign(), refreshCampaignRecipients()]);
+		} catch (e) {
+			lureCodeError = 'Failed to set lure URL';
+			console.error('failed to set lure code', e);
+		} finally {
+			lureCodeSubmitting = false;
+		}
 	};
 
 	/** @param {string} campaignRecipientID @param {Object} recipient */
@@ -2183,7 +2306,8 @@
 					{ column: 'Status', size: 'small' },
 					{ column: 'Send at', title: 'Scheduled', size: 'small' },
 					{ column: 'Sent at', title: 'Delivered', size: 'small' },
-					{ column: 'Cancelled at', size: 'small' }
+					{ column: 'Cancelled at', size: 'small' },
+					...(showLureCodeColumn ? [{ column: 'Lure URL', size: 'small' }] : [])
 				]}
 				sortable={[
 					'First name',
@@ -2277,6 +2401,9 @@
 						<TableCell value={recp?.sendAt} isDate />
 						<TableCell value={recp?.sentAt} isDate />
 						<TableCell value={recp?.cancelledAt} isDate />
+						{#if showLureCodeColumn}
+							<TableCell value={recp?.lureCode || ''} />
+						{/if}
 						{#if !campaign.sentAt}
 							<TableCellEmpty />
 							<TableCellAction>
@@ -2326,6 +2453,27 @@
 														? 'Recipient not available'
 														: ''}
 										on:click={() => onClickCopyURL(recp.id)}
+									/>
+									<TableUpdateButton
+										name="Set custom lure URL"
+										disabled={!!campaign.closedAt ||
+											!!campaign.anonymizedAt ||
+											!recp.recipient ||
+											isContextMismatch()}
+										title={isContextMismatch()
+											? campaign.companyID
+												? 'Switch to company view to perform this action'
+												: 'Switch to global view to perform this action'
+											: campaign.closedAt
+												? 'Campaign is closed'
+												: campaign.anonymizedAt
+													? 'Campaign is anonymized'
+													: !recp.recipient
+														? 'Recipient not available'
+														: recp.sentAt
+															? 'Changing this will break the link already sent to this recipient'
+															: 'Choose the identifier used in this recipient lure URL'}
+										on:click={() => showLureCodeModal(recp)}
 									/>
 									<TableUpdateButton
 										name="Copy email content"
@@ -2883,6 +3031,103 @@
 			{/if}
 		</div>
 	</Alert>
+
+	<Modal
+		headerText="Set custom lure URL"
+		visible={isLureCodeModalVisible}
+		onClose={closeLureCodeModal}
+	>
+		{#if lureCodeRecipient}
+			<div class="py-6 w-full max-w-xl">
+				<div class="pb-4 mb-6 border-b border-gray-200 dark:border-gray-700">
+					<p class="font-medium text-gray-900 dark:text-gray-100">{lureCodeRecipient.name}</p>
+					<p class="text-sm text-gray-600 dark:text-gray-300">{lureCodeRecipient.email}</p>
+				</div>
+
+				<TextField
+					bind:value={lureCodeValue}
+					maxLength={LURE_CODE_MAX_LENGTH}
+					placeholder="special-42">Lure URL</TextField
+				>
+
+				<p class="mt-2 text-sm text-gray-600 dark:text-gray-300 break-all">
+					{lureCodeValue
+						? `https://${campaign.template?.domain?.name ?? 'domain'}${campaignURLPath}/${lureCodeValue}`
+						: 'Matched exactly as written, so case and separators are kept.'}
+				</p>
+
+				<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+					Up to {LURE_CODE_MAX_LENGTH} characters. Cannot contain spaces,
+					<span class="font-mono">..</span>
+					or
+					<span class="font-mono">{LURE_CODE_DISALLOWED}</span>
+				</p>
+
+				{#if lureCodeRecipient.sentAt}
+					<p class="mt-4 text-sm text-amber-600 dark:text-amber-500">
+						Already sent on {new Date(lureCodeRecipient.sentAt).toLocaleString()}. Changing this
+						stops the link the recipient is holding from working.
+					</p>
+				{/if}
+
+				{#if lureCodeError}
+					<div class="mt-4">
+						<FormError message={lureCodeError} />
+					</div>
+				{/if}
+
+				{#if lureCodeConflict}
+					<div
+						class="mt-4 rounded-md border border-amber-400 dark:border-amber-600 p-4 text-sm space-y-3"
+					>
+						<p class="text-gray-800 dark:text-gray-100">
+							{#if lureCodeConflict.campaignName}
+								Already used by campaign <span class="font-medium"
+									>{lureCodeConflict.campaignName}</span
+								>{lureCodeConflict.isClosed ? ' (closed)' : ' (still running)'}.
+							{:else}
+								<!-- a holder outside this company is not described, so nothing
+								     about that campaign is disclosed to a guessed code -->
+								Already used by a campaign outside this company.
+							{/if}
+						</p>
+						<p class="text-gray-600 dark:text-gray-300">
+							Reclaiming frees it for this recipient. Anyone still holding the old link will land
+							in this campaign instead.
+						</p>
+						<button
+							type="button"
+							disabled={lureCodeSubmitting}
+							on:click={() => submitLureCode(true)}
+							class="rounded-md border border-amber-500 px-4 py-2 font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 disabled:opacity-50 transition-colors duration-200"
+						>
+							Reclaim
+						</button>
+					</div>
+				{/if}
+
+				<div
+					class="mt-8 pt-4 flex justify-end gap-3 border-t border-gray-200 dark:border-gray-700"
+				>
+					<button
+						type="button"
+						on:click={closeLureCodeModal}
+						class="rounded-md px-4 py-2 font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+					>
+						Cancel
+					</button>
+					<button
+						type="button"
+						disabled={lureCodeSubmitting}
+						on:click={() => submitLureCode(false)}
+						class="rounded-md bg-cta-blue dark:bg-blue-700 px-6 py-2 font-medium text-white hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 transition-colors duration-200"
+					>
+						Save
+					</button>
+				</div>
+			</div>
+		{/if}
+	</Modal>
 
 	<Alert
 		headline="Set as Message Sent"

@@ -192,6 +192,7 @@ const (
 	ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL      = "/api/v1/campaign/recipient/:id/email"
 	ROUTE_V1_CAMPAIGN_RECIPIENT_URL        = "/api/v1/campaign/recipient/:id/url"
 	ROUTE_V1_CAMPAIGN_RECIPIENT_SET_SENT   = "/api/v1/campaign/recipient/:id/sent"
+	ROUTE_V1_CAMPAIGN_RECIPIENT_LURE_CODE  = "/api/v1/campaign/recipient/:id/lure-code"
 	ROUTE_V1_CAMPAIGN_RECIPIENT_SEND_EMAIL = "/api/v1/campaign/recipient/:id/send"
 	// asset
 	ROUTE_V1_ASSET                = "/api/v1/asset"
@@ -533,6 +534,7 @@ func setupRoutes(
 		GET(ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL, middleware.SessionHandler, controllers.Campaign.GetCampaignEmail).
 		GET(ROUTE_V1_CAMPAIGN_RECIPIENT_URL, middleware.SessionHandler, controllers.Campaign.GetCampaignURL).
 		POST(ROUTE_V1_CAMPAIGN_RECIPIENT_SET_SENT, middleware.SessionHandler, controllers.Campaign.SetSentAtByCampaignRecipientID).
+		PUT(ROUTE_V1_CAMPAIGN_RECIPIENT_LURE_CODE, middleware.SessionHandler, controllers.Campaign.SetLureCode).
 		POST(ROUTE_V1_CAMPAIGN_RECIPIENT_SEND_EMAIL, middleware.SessionHandler, controllers.Campaign.SendEmailByCampaignRecipientID).
 		// asset
 		GET(ROUTE_V1_ASSET_DOMAIN_VIEW, middleware.SessionHandler, controllers.Asset.GetContentByID).

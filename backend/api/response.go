@@ -42,6 +42,7 @@ type JSONResponseHandler interface {
 	Forbidden(g *gin.Context)
 	BadRequest(g *gin.Context)
 	BadRequestMessage(g *gin.Context, message string)
+	Conflict(g *gin.Context, message string, data any)
 	ValidationFailed(g *gin.Context, field string, err error)
 	ServerError(g *gin.Context)
 	ServerErrorMessage(g *gin.Context, message string)
@@ -126,6 +127,17 @@ func (r *jsonResponseHandler) BadRequestMessage(g *gin.Context, message string) 
 	g.JSON(
 		http.StatusBadRequest,
 		r.newError(message),
+	)
+	g.Abort()
+}
+
+// Conflict responds 409 with enough detail for the caller to offer a
+// resolution, such as naming the campaign already holding a requested lure
+// code.
+func (r *jsonResponseHandler) Conflict(g *gin.Context, message string, data any) {
+	g.JSON(
+		http.StatusConflict,
+		r.newResponse(false, data, message),
 	)
 	g.Abort()
 }

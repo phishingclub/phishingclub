@@ -953,6 +953,9 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 		StateIdentifierID:           stateIdentifierID,
 		StateIdentifier:             stateIdentifier,
 		URLPath:                     urlPath,
+		LureURLMode:                 nullable.NewNullableWithValue(row.LureURLMode),
+		LureCodeAlgo:                nullable.NewNullableWithValue(row.LureCodeAlgo),
+		LureCodeLength:              nullable.NewNullableWithValue(row.LureCodeLength),
 		IsUsable:                    isUsable,
 	}, nil
 }

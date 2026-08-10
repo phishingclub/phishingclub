@@ -10,6 +10,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
+	"github.com/phishingclub/phishingclub/lure"
 	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/validate"
 	"github.com/phishingclub/phishingclub/vo"
@@ -68,6 +69,16 @@ type Campaign struct {
 
 	// webhooks configuration with per-webhook settings
 	Webhooks nullable.Nullable[[]*CampaignWebhook] `json:"webhooks,omitempty"`
+
+	// snapshotted from the campaign template while the campaign holds no
+	// recipients. read only, see ToDBMap.
+	LureURLMode    nullable.Nullable[string] `json:"lureURLMode"`
+	LureCodeAlgo   nullable.Nullable[string] `json:"lureCodeAlgo"`
+	LureCodeLength nullable.Nullable[int]    `json:"lureCodeLength"`
+
+	// HasCustomLureCodes decides whether the recipient table shows the code
+	// column, which pagination makes impossible to derive from one page.
+	HasCustomLureCodes bool `json:"hasCustomLureCodes"`
 
 	// must not be set by a user
 	NotableEventID   nullable.Nullable[uuid.UUID] `json:"notableEventID"`
@@ -551,8 +562,39 @@ func (c *Campaign) ToDBMap() map[string]any {
 			m["jitter_max"] = v
 		}
 	}
+	// the lure settings are left out. a create or update request carries whatever
+	// a caller put in those fields, so the snapshot is written only by
+	// SetLureSettingsByID, from the template, at the first schedule.
 
 	return m
+}
+
+// LureSettings returns the snapshotted lure URL settings, falling back to the
+// defaults for campaigns created before the columns existed.
+//
+// Each value is rechecked rather than trusted, so anything unusable becomes a
+// default here instead of failing the schedule during allocation.
+func (c *Campaign) LureSettings() (mode string, algorithm lure.Algorithm, length int) {
+	mode = data.LureURLModeQuery
+	algorithm = lure.DefaultAlgorithm
+	length = lure.DefaultLength
+	if v, err := c.LureURLMode.Get(); err == nil && data.IsValidLureURLMode(v) {
+		mode = v
+	}
+	if v, err := c.LureCodeAlgo.Get(); err == nil && lure.IsValidAlgorithm(lure.Algorithm(v)) {
+		algorithm = lure.Algorithm(v)
+	}
+	if v, err := c.LureCodeLength.Get(); err == nil && v >= lure.MinLength && v <= lure.MaxLength {
+		length = v
+	}
+	return mode, algorithm, length
+}
+
+// UsesLureCodePath reports whether this campaign's lure URLs carry the recipient
+// as a path segment.
+func (c *Campaign) UsesLureCodePath() bool {
+	mode, _, _ := c.LureSettings()
+	return mode == data.LureURLModePath
 }
 
 // Close sets the close at timestamp to now

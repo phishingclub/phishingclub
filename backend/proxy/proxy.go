@@ -325,7 +325,7 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 	}
 
 	// check for campaign recipient id
-	campaignRecipientID, paramName := m.getCampaignRecipientIDFromURLParams(req)
+	campaignRecipientID, paramName := m.getCampaignRecipientIDFromURLParams(req, domain)
 
 	reqCtx := &RequestContext{
 		PhishDomain:         req.Host,
@@ -3038,14 +3038,27 @@ func (m *ProxyHandler) sameSiteToString(sameSite http.SameSite) string {
 	}
 }
 
-func (m *ProxyHandler) getCampaignRecipientIDFromURLParams(req *http.Request) (*uuid.UUID, string) {
+func (m *ProxyHandler) getCampaignRecipientIDFromURLParams(
+	req *http.Request,
+	domain *database.Domain,
+) (*uuid.UUID, string) {
 	ctx := req.Context()
 
-	campaignRecipient, paramName, err := server.GetCampaignRecipientFromURLParams(
+	// every path and query here mirrors the target site, so a code shaped segment
+	// or value could belong to the target rather than a recipient. once a session
+	// cookie exists the recipient is known, so both code forms go off: that ends
+	// the misattribution risk, which here also means an established session being
+	// torn down mid flow, and spares every subresource an extra lookup. a UUID
+	// cannot collide with target content by accident, so it stays on.
+	allowLureCodeLookup := !m.hasValidSessionCookie(req)
+
+	campaignRecipient, match, err := server.GetCampaignRecipientFromURLParams(
 		ctx,
 		req,
 		m.IdentifierRepository,
 		m.CampaignRecipientRepository,
+		domain,
+		allowLureCodeLookup,
 	)
 	if err != nil {
 		m.logger.Errorw("failed to get identifiers for URL param extraction", "error", err)
@@ -3056,8 +3069,15 @@ func (m *ProxyHandler) getCampaignRecipientIDFromURLParams(req *http.Request) (*
 		return nil, ""
 	}
 
+	// take a consumed code out of the path before anything downstream sees the
+	// URL. rewrite rules compare the path exactly and whatever is left is
+	// forwarded to the target. the query form is stripped later via ParamName.
+	if match.PathSegment != "" {
+		req.URL.Path = server.TrimLastPathSegment(req.URL.Path)
+	}
+
 	campaignRecipientID := campaignRecipient.ID.MustGet()
-	return &campaignRecipientID, paramName
+	return &campaignRecipientID, match.ParamName
 }
 
 // applyEarlyRequestHeaderReplacements applies request header replacements before client creation
@@ -3876,6 +3896,16 @@ func (m *ProxyHandler) GetCookieName() string {
 
 func (m *ProxyHandler) IsValidProxyCookie(cookie string) bool {
 	return m.isValidSessionCookie(cookie)
+}
+
+// hasValidSessionCookie reports whether the request carries a live proxy
+// session, meaning the recipient behind it is already established.
+func (m *ProxyHandler) hasValidSessionCookie(req *http.Request) bool {
+	sessionCookie, err := req.Cookie(m.cookieName)
+	if err != nil {
+		return false
+	}
+	return m.isValidSessionCookie(sessionCookie.Value)
 }
 
 // checkResponseRules checks if any response rules match the current request

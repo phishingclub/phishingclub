@@ -1,4 +1,4 @@
-.PHONY: build down up up-low-mem fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up geoip-fetch govulncheck test-proxy test-proxy-fast
+.PHONY: build down up up-low-mem fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up geoip-fetch govulncheck test-proxy test-proxy-fast test-lure test-lure-fast
 up:
 	sudo docker compose up -d backend frontend api-test-server pebble dbgate mailer dns test mitmproxy; \
 	sudo docker compose logs -f --tail 1000 backend frontend;
@@ -189,6 +189,21 @@ test-proxy:
 # build cache. much faster, but requires the dev stack to be up (make up)
 test-proxy-fast:
 	sudo docker compose exec -w /app backend go test ./proxy/... -v
+
+# lure URL code generation and the path segment helpers the request resolver
+# uses. same standalone container approach as test-proxy above.
+test-lure:
+	sudo docker run --rm \
+		-e GOCACHE=/gocache \
+		-v $(CURDIR)/backend:/app \
+		-v phishingclub_gocache:/gocache \
+		-w /app \
+		golang:1.25.10 \
+		go test ./lure/... ./server/... -v
+
+# same tests inside the already running backend container
+test-lure-fast:
+	sudo docker compose exec -w /app backend go test ./lure/... ./server/... -v
 
 # security
 govulncheck:

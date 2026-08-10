@@ -912,6 +912,24 @@ export class API {
 		},
 
 		/**
+		 * Set an operator chosen lure code for a single campaign recipient.
+		 *
+		 * Responds 409 with the owning campaign when the code is already in use.
+		 * Repeat the call with reclaim true to take it over.
+		 *
+		 * @param {string} campaignRecipientID
+		 * @param {string} code
+		 * @param {boolean} [reclaim]
+		 * @return {Promise<ApiResponse>}
+		 */
+		setLureCode: async (campaignRecipientID, code, reclaim = false) => {
+			return await putJSON(this.getPath(`/campaign/recipient/${campaignRecipientID}/lure-code`), {
+				code,
+				reclaim
+			});
+		},
+
+		/**
 		 * Delete all device codes for a campaign so every recipient gets a fresh
 		 * code (and picks up any proxy change) on their next page visit.
 		 *
@@ -1088,6 +1106,9 @@ export class API {
 		 * @param {string} template.stateIdentifierID
 		 * @param {string} template.urlPath
 		 * @param {string} template.emailID
+		 * @param {string} template.lureURLMode
+		 * @param {string} template.lureCodeAlgo
+		 * @param {number} template.lureCodeLength
 		 * @returns {Promise<ApiResponse>}
 		 */
 		create: async ({
@@ -1106,7 +1127,10 @@ export class API {
 			stateIdentifierID,
 			afterLandingPageRedirectURL,
 			emailID: emailID,
-			urlPath: urlPath
+			urlPath: urlPath,
+			lureURLMode,
+			lureCodeAlgo,
+			lureCodeLength
 		}) => {
 			return await postJSON(this.getPath('/campaign/template'), {
 				name: name,
@@ -1124,7 +1148,10 @@ export class API {
 				urlIdentifierID: urlIdentifierID,
 				stateIdentifierID: stateIdentifierID,
 				emailID: emailID,
-				urlPath: urlPath
+				urlPath: urlPath,
+				lureURLMode: lureURLMode,
+				lureCodeAlgo: lureCodeAlgo,
+				lureCodeLength: lureCodeLength
 			});
 		},
 
@@ -1149,6 +1176,9 @@ export class API {
 		 * @param {string} template.urlIdentifierID
 		 * @param {string} template.stateIdentifierID
 		 * @param {string} template.urlPath
+		 * @param {string} template.lureURLMode
+		 * @param {string} template.lureCodeAlgo
+		 * @param {number} template.lureCodeLength
 		 * @returns {Promise<ApiResponse>}
 		 */
 		update: async ({
@@ -1168,7 +1198,10 @@ export class API {
 			emailID: emailID,
 			urlIdentifierID: urlIdentifierID,
 			stateIdentifierID: stateIdentifierID,
-			urlPath: urlPath
+			urlPath: urlPath,
+			lureURLMode,
+			lureCodeAlgo,
+			lureCodeLength
 		}) => {
 			return await postJSON(this.getPath(`/campaign/template/${id}`), {
 				name: name,
@@ -1186,7 +1219,10 @@ export class API {
 				emailID: emailID,
 				urlIdentifierID: urlIdentifierID,
 				stateIdentifierID: stateIdentifierID,
-				urlPath: urlPath
+				urlPath: urlPath,
+				lureURLMode: lureURLMode,
+				lureCodeAlgo: lureCodeAlgo,
+				lureCodeLength: lureCodeLength
 			});
 		},
 

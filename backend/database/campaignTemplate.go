@@ -21,6 +21,17 @@ type CampaignTemplate struct {
 
 	URLPath string `gorm:"not null;default:'';index"`
 
+	// LureURLMode selects how a delivered lure URL carries the recipient.
+	// "query" appends ?id=<uuid>, "path" appends /<code> after URLPath. The
+	// resolver accepts both whatever this says, so changing it never breaks a
+	// link already delivered.
+	LureURLMode string `gorm:"not null;default:'query'"`
+	// LureCodeAlgo names the generator used for campaigns from this template.
+	LureCodeAlgo string `gorm:"not null;default:'crockford32'"`
+	// LureCodeLength is the character count of a generated code. Shorter is
+	// easier to read aloud and easier to guess.
+	LureCodeLength int `gorm:"not null;default:12"`
+
 	// IsUsable indicates if a template is usable based on if it has all the required
 	// data such as domainID, landingPage and etc to be used in a campaign
 	IsUsable bool `gorm:"not null;default:false;index"`
