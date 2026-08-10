@@ -247,6 +247,7 @@
 				See <a
 					href="https://phishing.club/guide/settings/#pdf-reports"
 					target="_blank"
+					rel="noopener noreferrer"
 					class="underline">the setup guide</a
 				> for dependency installation and AppArmor configuration.
 			</p>

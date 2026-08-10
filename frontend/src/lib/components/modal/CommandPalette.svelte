@@ -211,7 +211,7 @@
 			toggleChangeCompanyModal();
 			close();
 		} else if (item.external && item.url) {
-			window.open(item.url, '_blank');
+			window.open(item.url, '_blank', 'noopener,noreferrer');
 			close();
 		}
 	};

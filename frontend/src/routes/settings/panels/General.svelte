@@ -131,7 +131,8 @@
 					Read about the difference between <a
 						class="white underline"
 						href="https://phishing.club/blog/phishing-simulation-vs-red-team-phishing/"
-						target="_blank">phishing simulation and red team phishing</a
+						target="_blank"
+						rel="noopener noreferrer">phishing simulation and red team phishing</a
 					>
 				</p>
 			</div>
