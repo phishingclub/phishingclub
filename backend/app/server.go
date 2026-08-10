@@ -936,9 +936,19 @@ func (s *Server) checkAndServePhishingPage(
 				s.logger.Debugw("serving before landing page from state",
 					"pageID", pageID.String(),
 				)
-			} else {
+			} else if beforeProxyID != nil {
 				proxyID = beforeProxyID
 				s.logger.Debugw("serving before landing Proxy from state",
+					"proxyID", proxyID.String(),
+				)
+			} else if landingPageID != nil {
+				pageID = landingPageID
+				s.logger.Debugw("before stage no longer configured, falling back to landing page for before state",
+					"pageID", pageID.String(),
+				)
+			} else {
+				proxyID = landingProxyID
+				s.logger.Debugw("before stage no longer configured, falling back to landing Proxy for before state",
 					"proxyID", proxyID.String(),
 				)
 			}
