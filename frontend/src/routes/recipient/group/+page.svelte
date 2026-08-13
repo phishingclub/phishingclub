@@ -90,7 +90,7 @@
 		.filter((g) => !globalButtonDisabledAttributes(g, contextCompanyID).disabled)
 		.map((g) => g.id);
 	$: headerState = headerSelectionState($selection, selectablePageIds);
-	$: showMultiSelect = selectablePageIds.length > 1;
+	$: showMultiSelect = groups.length > 0;
 
 	// dynamic update modal state
 	let isDynamicUpdateModalVisible = false;
@@ -380,7 +380,7 @@
 		on:clear={() => selection.clear()}
 	/>
 	<Table
-		selectable={showMultiSelect}
+		selectable
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[

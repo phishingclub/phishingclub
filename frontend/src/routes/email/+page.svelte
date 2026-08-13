@@ -89,7 +89,7 @@
 		.filter((e) => !globalButtonDisabledAttributes(e, contextCompanyID).disabled)
 		.map((e) => e.id);
 	$: headerState = headerSelectionState($selection, selectablePageIds);
-	$: showMultiSelect = selectablePageIds.length > 1;
+	$: showMultiSelect = emails.length > 0;
 	const onClickBulkDelete = async () => {
 		await runBulkDelete({ ids: [...$selection], deleteFn: api.email.delete, noun: 'email' });
 		await refreshEmails();
@@ -414,7 +414,7 @@
 		on:clear={() => selection.clear()}
 	/>
 	<Table
-		selectable={showMultiSelect}
+		selectable
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[

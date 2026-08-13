@@ -62,7 +62,7 @@
 		.filter((w) => !globalButtonDisabledAttributes(w, contextCompanyID).disabled)
 		.map((w) => w.id);
 	$: headerState = headerSelectionState($selection, selectablePageIds);
-	$: showMultiSelect = selectablePageIds.length > 1;
+	$: showMultiSelect = webhooks.length > 0;
 	const onClickBulkDelete = async () => {
 		await runBulkDelete({ ids: [...$selection], deleteFn: api.webhook.delete, noun: 'webhook' });
 		await refreshWebhooks();
@@ -315,7 +315,7 @@
 		on:clear={() => selection.clear()}
 	/>
 	<Table
-		selectable={showMultiSelect}
+		selectable
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[

@@ -87,7 +87,7 @@
 		.filter((p) => !globalButtonDisabledAttributes(p, contextCompanyID).disabled)
 		.map((p) => p.id);
 	$: headerState = headerSelectionState($selection, selectablePageIds);
-	$: showMultiSelect = selectablePageIds.length > 1;
+	$: showMultiSelect = proxies.length > 0;
 	const onClickBulkDelete = async () => {
 		await runBulkDelete({
 			ids: [...$selection],
@@ -686,7 +686,7 @@ portal.example.com:
 		on:clear={() => selection.clear()}
 	/>
 	<Table
-		selectable={showMultiSelect}
+		selectable
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[

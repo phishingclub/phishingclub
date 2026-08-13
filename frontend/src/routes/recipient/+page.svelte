@@ -104,7 +104,7 @@
 		.filter((r) => !globalButtonDisabledAttributes(r, contextCompanyID).disabled)
 		.map((r) => r.id);
 	$: headerState = headerSelectionState($selection, selectablePageIds);
-	$: showMultiSelect = selectablePageIds.length > 1;
+	$: showMultiSelect = recipients.length > 0;
 
 	let isRecipientsTableLoading = false;
 
@@ -465,7 +465,7 @@
 	/>
 	<Table
 		isGhost={isRecipientsTableLoading}
-		selectable={showMultiSelect}
+		selectable
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[

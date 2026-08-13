@@ -151,7 +151,7 @@
 		.filter((t) => !globalButtonDisabledAttributes(t, contextCompanyID).disabled)
 		.map((t) => t.id);
 	$: headerState = headerSelectionState($selection, selectablePageIds);
-	$: showMultiSelect = selectablePageIds.length > 1;
+	$: showMultiSelect = templates.length > 0;
 	const onClickBulkDelete = async () => {
 		await runBulkDelete({
 			ids: [...$selection],
@@ -661,7 +661,7 @@
 		on:clear={() => selection.clear()}
 	/>
 	<Table
-		selectable={showMultiSelect}
+		selectable
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[

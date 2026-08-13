@@ -18,6 +18,10 @@
 	export let selectable = false;
 	/** @type {'none'|'some'|'all'} */
 	export let headerState = 'none';
+	// the checkbox column keeps its width whenever selectable is set; showSelect
+	// controls whether the select all control is actually shown, so an empty or
+	// loading table reserves the gutter without a dangling control
+	export let showSelect = false;
 
 	$: sortableMap = {};
 
@@ -31,11 +35,7 @@
 <TableHead>
 	<TableRow>
 		{#if selectable}
-			{#if !isGhost}
-				<TableHeadCellCheckbox state={headerState} on:toggleAll />
-			{:else}
-				<TableHeadCellEmpty />
-			{/if}
+			<TableHeadCellCheckbox state={headerState} disabled={isGhost || !showSelect} on:toggleAll />
 		{/if}
 		{#each columns as column, i (typeof column === 'object' ? column.column : column)}
 			{#if typeof column === 'object'}

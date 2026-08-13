@@ -3,11 +3,17 @@
 
 	/** @type {'none'|'some'|'all'} */
 	export let state = 'none';
+	// non-interactive placeholder used while the table skeleton is showing, so
+	// the checkbox column keeps its width and the columns do not shift on load
+	export let disabled = false;
 
 	const dispatch = createEventDispatcher();
 
 	// clicking selects every page row unless they are all selected already
 	const onToggle = () => {
+		if (disabled) {
+			return;
+		}
 		dispatch('toggleAll', state !== 'all');
 	};
 </script>
@@ -15,13 +21,18 @@
 <th
 	class="pl-4 w-12 bg-grayblue-light dark:bg-gray-800/60 py-4 border-hidden rounded-tl-lg rounded-bl-lg transition-colors duration-200"
 >
-	<label class="relative inline-flex items-center cursor-pointer">
+	<label
+		class="relative inline-flex items-center"
+		class:cursor-pointer={!disabled}
+		class:opacity-0={disabled}
+	>
 		<input
 			type="checkbox"
 			class="peer sr-only"
 			checked={state === 'all'}
+			{disabled}
 			on:change={onToggle}
-			tabindex="0"
+			tabindex={disabled ? -1 : 0}
 		/>
 		<div
 			class="w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
