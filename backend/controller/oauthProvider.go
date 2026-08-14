@@ -73,9 +73,7 @@ func (c *OAuthProvider) GetAll(g *gin.Context) {
 		session,
 		companyID,
 		repository.OAuthProviderOption{
-			Limit:  &queryArgs.Limit,
-			Offset: &queryArgs.Offset,
-			Search: &queryArgs.Search,
+			QueryArgs: queryArgs,
 		},
 	)
 	// handle response
