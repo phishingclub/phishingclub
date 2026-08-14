@@ -114,12 +114,13 @@
 		visibleMetrics = { ...defaultVisibleMetrics };
 	}
 
-	// whenever metrics change, merge into visibleMetrics but preserve user choices.
-	// reassign the object to ensure svelte reactivity fires.
-	$: if (metrics && Array.isArray(metrics)) {
+	// merge the known metrics into visibleMetrics but preserve user choices. both
+	// chart modes are merged at once so switching mode keeps the toggles of the
+	// mode that is not shown. reassign the object to ensure svelte reactivity fires.
+	$: if (allMetrics.length > 0) {
 		const merged = { ...visibleMetrics };
 		// add any newly introduced metrics (default visible)
-		for (const metric of metrics) {
+		for (const metric of allMetrics) {
 			if (!(metric.key in merged)) {
 				merged[metric.key] = true;
 			}
@@ -129,15 +130,15 @@
 				merged[mavgKey] = merged[mavgKey] ?? false;
 			}
 		}
-		// remove keys that no longer correspond to current metrics
+		// remove keys that no longer correspond to a known metric
 		for (const key of Object.keys(merged)) {
 			if (key.startsWith('mavg-')) {
 				const base = key.slice(5);
-				if (!metrics.find((m) => m.key === base)) {
+				if (!allMetrics.find((m) => m.key === base)) {
 					delete merged[key];
 				}
 			} else {
-				if (!metrics.find((m) => m.key === key)) {
+				if (!allMetrics.find((m) => m.key === key)) {
 					delete merged[key];
 				}
 			}
@@ -326,6 +327,7 @@
 			mavg: { color: '#69e1ab', label: 'Completed MA' }
 		}
 	];
+	const allMetrics = [...phishingMetrics, ...trainingMetrics];
 	$: metrics = chartMode === 'training' ? trainingMetrics : phishingMetrics;
 
 	// toggle metric visibility (reassign to trigger svelte reactivity and persist)

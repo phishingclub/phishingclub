@@ -160,7 +160,7 @@
 	{/if}
 	<BigButton on:click={onClickExport}>Export events</BigButton>
 	<div>
-		<div class="grid grid-cols-1 lg:grid-cols-7 gap-6 mb-8 mt-4">
+		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-6 mb-8 mt-4">
 			<!-- Campaigns card -->
 			<StatsCard
 				title="Campaigns"
