@@ -922,6 +922,7 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 	urlPath := nullable.NewNullableWithValue(*vo.NewURLPathMust(row.URLPath))
 
 	isUsable := nullable.NewNullableWithValue(row.IsUsable)
+	isTraining := nullable.NewNullableWithValue(row.IsTraining)
 
 	return &model.CampaignTemplate{
 		ID:                          id,
@@ -957,6 +958,7 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 		LureCodeAlgo:                nullable.NewNullableWithValue(row.LureCodeAlgo),
 		LureCodeLength:              nullable.NewNullableWithValue(row.LureCodeLength),
 		IsUsable:                    isUsable,
+		IsTraining:                  isTraining,
 	}, nil
 }
 

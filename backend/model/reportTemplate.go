@@ -14,8 +14,9 @@ type ReportTemplate struct {
 	ID        nullable.Nullable[uuid.UUID]            `json:"id"`
 	CreatedAt *time.Time                              `json:"createdAt"`
 	UpdatedAt *time.Time                              `json:"updatedAt"`
-	CompanyID nullable.Nullable[uuid.UUID]            `json:"companyID"`
-	Content   nullable.Nullable[vo.OptionalString1MB] `json:"content"`
+	CompanyID  nullable.Nullable[uuid.UUID]            `json:"companyID"`
+	Content    nullable.Nullable[vo.OptionalString1MB] `json:"content"`
+	IsTraining nullable.Nullable[bool]                  `json:"isTraining"`
 
 	Company *Company `json:"-"`
 }
@@ -42,6 +43,11 @@ func (r *ReportTemplate) ToDBMap() map[string]any {
 			m["company_id"] = nil
 		} else {
 			m["company_id"] = r.CompanyID.MustGet()
+		}
+	}
+	if r.IsTraining.IsSpecified() {
+		if v, err := r.IsTraining.Get(); err == nil {
+			m["is_training"] = v
 		}
 	}
 	return m
@@ -85,18 +91,32 @@ type ReportData struct {
 	ClickedOfOpened    string // ResultClicked / EmailsOpened
 	SubmittedOfClicked string // ResultSubmitted / ResultClicked
 
+	// Awareness training funnel — populated for training campaigns, zero otherwise.
+	// The training report template renders these in place of the phishing outcomes.
+	IsTraining               bool
+	TrainingStarted          int64
+	TrainingCompleted        int64
+	TrainingStartedPercent   string  // of recipients
+	TrainingCompletedPercent string  // of recipients
+	TrainingStartedRate      float64 // of recipients
+	TrainingCompletedRate    float64 // of recipients
+	StartedOfOpened          string  // TrainingStarted / EmailsOpened
+	CompletedOfStarted       string  // TrainingCompleted / TrainingStarted
+
 	// Per-recipient detail — empty for anonymous or anonymized campaigns
 	Recipients []ReportRecipient
 }
 
 // ReportRecipient holds per-recipient result data for the recipient detail table
 type ReportRecipient struct {
-	FirstName     string
-	LastName      string
-	Email         string
-	Department    string
-	Position      string
-	ClickedLink   bool
-	SubmittedData bool
-	Reported      bool
+	FirstName         string
+	LastName          string
+	Email             string
+	Department        string
+	Position          string
+	ClickedLink       bool
+	SubmittedData     bool
+	Reported          bool
+	TrainingStarted   bool
+	TrainingCompleted bool
 }

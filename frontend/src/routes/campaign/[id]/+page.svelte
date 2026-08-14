@@ -78,6 +78,7 @@
 		saveSubmittedData: false,
 		saveBrowserMetadata: false,
 		isAnonymous: false,
+		isTraining: false,
 		scheduleAt: null,
 
 		allowDenyIDs: [],
@@ -113,7 +114,9 @@
 		trackingPixelLoaded: 0,
 		websiteLoaded: 0,
 		submittedData: 0,
-		reported: 0
+		reported: 0,
+		trainingStarted: 0,
+		trainingCompleted: 0
 	};
 	// @ts-ignore
 	const recipientTableUrlParams = newTableURLParams({
@@ -320,6 +323,7 @@
 			campaign.closeAt = t.closeAt;
 			campaign.closedAt = t.closedAt;
 			campaign.isTest = t.isTest;
+			campaign.isTraining = t.isTraining;
 			campaign.constraintWeekDays = t.constraintWeekDays;
 			campaign.constraintStartTime = t.constraintStartTime;
 			campaign.constraintEndTime = t.constraintEndTime;
@@ -509,6 +513,8 @@
 			result.websiteLoaded = res.data.clickedLink;
 			result.submittedData = res.data.submittedData;
 			result.reported = res.data.reported;
+			result.trainingStarted = res.data.trainingStarted;
+			result.trainingCompleted = res.data.trainingCompleted;
 		} catch (e) {
 			addToast('Failed to load campaign result stats', 'Error');
 			console.error('failed to load campaign result stats', e);
@@ -1640,29 +1646,70 @@
 				</svg>
 			</StatsCard>
 
-			<StatsCard
-				title="Website Visits"
-				value={result.websiteLoaded}
-				borderColor="border-page-visited"
-				iconColor="text-page-visited"
-				percentages={[
-					{
-						value: Math.round((result.websiteLoaded / result.recipients) * 100),
-						relativeTo: 'of recipients',
-						baseValue: result.recipients
-					},
-					{
-						value: Math.round((result.websiteLoaded / result.emailsSent) * 100),
-						relativeTo: 'of sent',
-						baseValue: result.emailsSent
-					},
-					{
-						value: Math.round((result.websiteLoaded / result.trackingPixelLoaded) * 100),
-						relativeTo: 'of reads',
-						baseValue: result.trackingPixelLoaded
-					}
-				]}
-			>
+			{#if campaign.isTraining}
+				<StatsCard
+					title="Training Started"
+					value={result.trainingStarted}
+					borderColor="border-training-started"
+					iconColor="text-training-started"
+					percentages={[
+						{
+							value: Math.round((result.trainingStarted / result.recipients) * 100),
+							relativeTo: 'of recipients',
+							baseValue: result.recipients
+						},
+						{
+							value: Math.round((result.trainingStarted / result.emailsSent) * 100),
+							relativeTo: 'of sent',
+							baseValue: result.emailsSent
+						},
+						{
+							value: Math.round((result.trainingStarted / result.trackingPixelLoaded) * 100),
+							relativeTo: 'of reads',
+							baseValue: result.trackingPixelLoaded
+						}
+					]}
+				>
+					<svg
+						slot="icon"
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-5 w-5 ml-2"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+						stroke-width="1.5"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5"
+						/>
+					</svg>
+				</StatsCard>
+			{:else}
+				<StatsCard
+					title="Website Visits"
+					value={result.websiteLoaded}
+					borderColor="border-page-visited"
+					iconColor="text-page-visited"
+					percentages={[
+						{
+							value: Math.round((result.websiteLoaded / result.recipients) * 100),
+							relativeTo: 'of recipients',
+							baseValue: result.recipients
+						},
+						{
+							value: Math.round((result.websiteLoaded / result.emailsSent) * 100),
+							relativeTo: 'of sent',
+							baseValue: result.emailsSent
+						},
+						{
+							value: Math.round((result.websiteLoaded / result.trackingPixelLoaded) * 100),
+							relativeTo: 'of reads',
+							baseValue: result.trackingPixelLoaded
+						}
+					]}
+				>
 				<svg
 					slot="icon"
 					xmlns="http://www.w3.org/2000/svg"
@@ -1680,11 +1727,47 @@
 				</svg>
 			</StatsCard>
 
-			<StatsCard
-				title="Data Submitted"
-				value={result.submittedData}
-				borderColor="border-submitted-data"
-				iconColor="text-submitted-data"
+			{/if}
+
+			{#if campaign.isTraining}
+				<StatsCard
+					title="In progress"
+					value={Math.max(result.trainingStarted - result.trainingCompleted, 0)}
+					borderColor="border-training-started"
+					iconColor="text-training-started"
+					percentages={[
+						{
+							value: Math.round(
+								((result.trainingStarted - result.trainingCompleted) / result.trainingStarted) *
+									100
+							),
+							relativeTo: 'of started',
+							baseValue: result.trainingStarted
+						}
+					]}
+				>
+					<svg
+						slot="icon"
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-5 w-5 ml-2"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+						stroke-width="1.5"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+						/>
+					</svg>
+				</StatsCard>
+			{:else}
+				<StatsCard
+					title="Data Submitted"
+					value={result.submittedData}
+					borderColor="border-submitted-data"
+					iconColor="text-submitted-data"
 				percentages={[
 					{
 						value: Math.round((result.submittedData / result.recipients) * 100),
@@ -1725,11 +1808,59 @@
 				</svg>
 			</StatsCard>
 
-			<StatsCard
-				title="Reported"
-				value={result.reported}
-				borderColor="border-reported"
-				iconColor="text-reported"
+			{/if}
+
+			{#if campaign.isTraining}
+				<StatsCard
+					title="Training Completed"
+					value={result.trainingCompleted}
+					borderColor="border-training-completed"
+					iconColor="text-training-completed"
+					percentages={[
+						{
+							value: Math.round((result.trainingCompleted / result.recipients) * 100),
+							relativeTo: 'of recipients',
+							baseValue: result.recipients
+						},
+						{
+							value: Math.round((result.trainingCompleted / result.emailsSent) * 100),
+							relativeTo: 'of sent',
+							baseValue: result.emailsSent
+						},
+						{
+							value: Math.round((result.trainingCompleted / result.trackingPixelLoaded) * 100),
+							relativeTo: 'of reads',
+							baseValue: result.trackingPixelLoaded
+						},
+						{
+							value: Math.round((result.trainingCompleted / result.trainingStarted) * 100),
+							relativeTo: 'of started',
+							baseValue: result.trainingStarted
+						}
+					]}
+				>
+					<svg
+						slot="icon"
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-5 w-5 ml-2"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+						stroke-width="1.5"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+						/>
+					</svg>
+				</StatsCard>
+			{:else}
+				<StatsCard
+					title="Reported"
+					value={result.reported}
+					borderColor="border-reported"
+					iconColor="text-reported"
 				percentages={[
 					{
 						value: Math.round((result.reported / result.recipients) * 100),
@@ -1769,6 +1900,7 @@
 					/>
 				</svg>
 			</StatsCard>
+			{/if}
 		</div>
 		<div class=" mb-6">
 			<SubHeadline>Event Timeline</SubHeadline>

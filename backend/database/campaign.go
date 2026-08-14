@@ -72,6 +72,10 @@ type Campaign struct {
 	LureCodeAlgo   string `gorm:"not null;default:'crockford32'"`
 	LureCodeLength int    `gorm:"not null;default:12"`
 
+	// IsTraining marks the campaign as an awareness training campaign. Snapshotted
+	// from the template at create time so stats and risk queries filter on it here.
+	IsTraining bool `gorm:"not null;default:false;index"`
+
 	// has one
 	CampaignTemplateID *uuid.UUID `gorm:"index;type:uuid;"`
 	CampaignTemplate   *CampaignTemplate

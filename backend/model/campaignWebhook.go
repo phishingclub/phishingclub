@@ -38,7 +38,7 @@ func (cw *CampaignWebhook) Validate() error {
 	// validate webhookevents is a valid binary value
 	if cw.WebhookEvents.IsSpecified() && !cw.WebhookEvents.IsNull() {
 		events := cw.WebhookEvents.MustGet()
-		// check if any invalid bits are set (only bits 0-9 are valid)
+		// check if any invalid bits are set, the valid ones are the mapped events
 		maxValidBits := 0
 		for _, bit := range data.WebhookEventToBit {
 			maxValidBits |= bit

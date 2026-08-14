@@ -26,6 +26,8 @@
 		campaign_recipient_deny_page_visited: '#ff6b35',
 		campaign_recipient_submitted_data: '#f42e41',
 		campaign_recipient_reported: '#2c3e50',
+		campaign_recipient_training_started: '#5b93e6',
+		campaign_recipient_training_completed: '#2fa968',
 		campaign_recipient_info: '#94cae6'
 	});
 
@@ -62,6 +64,10 @@
 			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
 		campaign_recipient_reported:
 			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>',
+		campaign_recipient_training_started:
+			'<svg fill="currentColor" viewBox="0 0 24 24"><path d="M11.7 2.805a.75.75 0 0 1 .6 0A60.65 60.65 0 0 1 22.83 8.72a.75.75 0 0 1-.231 1.337 49.949 49.949 0 0 0-9.902 3.912l-.003.002a48.9 48.9 0 0 0-.34.18.75.75 0 0 1-.707 0A50.88 50.88 0 0 0 7.5 12.173v-.224c0-.131.067-.248.172-.311a54.615 54.615 0 0 1 4.653-2.52.75.75 0 0 0-.65-1.352 56.123 56.123 0 0 0-4.78 2.589 1.858 1.858 0 0 0-.859 1.228 49.803 49.803 0 0 0-4.634-1.527.75.75 0 0 1-.231-1.337A60.653 60.653 0 0 1 11.7 2.805Z"/></svg>',
+		campaign_recipient_training_completed:
+			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
 		campaign_recipient_info:
 			'<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>'
 	});
@@ -130,6 +136,8 @@
 		campaign_recipient_deny_page_visited: true,
 		campaign_recipient_submitted_data: true,
 		campaign_recipient_reported: true,
+		campaign_recipient_training_started: true,
+		campaign_recipient_training_completed: true,
 		campaign_recipient_info: true
 	};
 

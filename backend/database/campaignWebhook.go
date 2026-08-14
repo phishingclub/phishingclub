@@ -18,7 +18,7 @@ type CampaignWebhook struct {
 	// values: "none", "basic", "full"
 	WebhookIncludeData string `gorm:"not null;default:'full'"`
 
-	// webhookevents is a binary format storing selected events as bits (10 events)
+	// webhookevents is a binary format storing selected events as bits (12 events)
 	// 0 = all events (default, backward compatible)
 	// non-zero = only selected events trigger webhooks
 	// bit 0 (1): campaign_closed
@@ -31,6 +31,8 @@ type CampaignWebhook struct {
 	// bit 7 (128): campaign_recipient_page_visited
 	// bit 8 (256): campaign_recipient_after_page_visited
 	// bit 9 (512): campaign_recipient_deny_page_visited
+	// bit 10 (1024): campaign_recipient_training_started
+	// bit 11 (2048): campaign_recipient_training_completed
 	WebhookEvents int `gorm:"not null;default:0"`
 }
 

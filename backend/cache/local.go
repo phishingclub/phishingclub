@@ -38,6 +38,10 @@ func IsUpdateAvailable() bool {
 var CampaignEventPriority = map[string]int{
 	// campaign recipient events
 	data.EVENT_CAMPAIGN_RECIPIENT_INFO:                 5,
+	// training milestones outrank the raw page visits they accompany so a training
+	// campaign shows the milestone as the recipient's notable event
+	data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED:   66,
+	data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED:     62,
 	data.EVENT_CAMPAIGN_RECIPIENT_REPORTED:             90,
 	data.EVENT_CAMPAIGN_RECIPIENT_CANCELLED:            80,
 	data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA:       70,

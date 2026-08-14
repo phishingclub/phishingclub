@@ -7,4 +7,7 @@ type CampaignResultView struct {
 	WebsiteLoaded       int64 `json:"clickedLink"`
 	SubmittedData       int64 `json:"submittedData"`
 	Reported            int64 `json:"reported"`
+	// training campaign funnel, zero for phishing campaigns
+	TrainingStarted   int64 `json:"trainingStarted"`
+	TrainingCompleted int64 `json:"trainingCompleted"`
 }

@@ -34,6 +34,7 @@
 	const MOVING_AVG_N_KEY = 'campaignTrend.movingAvgN';
 	const LOG_SCALE_KEY = 'campaignTrend.useLogScale';
 	const RELATIVE_METRICS_KEY = 'campaignTrend.useRelativeMetrics';
+	const CHART_MODE_KEY = 'campaignTrend.chartMode';
 
 	let chartContainer;
 	let sizingContainer;
@@ -204,6 +205,9 @@
 	let xScale, yScale;
 	let useLogScale = false;
 	let useRelativeMetrics = false;
+	// 'phishing' shows the read/click/submission/report funnel, 'training' shows the
+	// awareness training funnel. Only offered when training campaigns exist.
+	let chartMode = 'phishing';
 
 	// load saved settings from localStorage
 	try {
@@ -220,6 +224,26 @@
 		if (storedRelativeMetrics !== null) {
 			useRelativeMetrics = storedRelativeMetrics === 'true';
 		}
+	} catch (e) {
+		// ignore errors
+	}
+
+	try {
+		const storedChartMode = localStorage.getItem(CHART_MODE_KEY);
+		if (storedChartMode === 'training' || storedChartMode === 'phishing') {
+			chartMode = storedChartMode;
+		}
+	} catch (e) {
+		// ignore errors
+	}
+
+	// the training mode is only meaningful when there are training campaigns
+	$: hasTraining = (campaignStats || []).some((s) => s.isTraining);
+	$: if (!hasTraining && chartMode !== 'phishing') {
+		chartMode = 'phishing';
+	}
+	$: try {
+		localStorage.setItem(CHART_MODE_KEY, chartMode);
 	} catch (e) {
 		// ignore errors
 	}
@@ -261,12 +285,48 @@
 		});
 	})();
 
-	const metrics = [
+	// a metric with a `mavg` also renders a dashed moving-average line and legend toggle
+	const phishingMetrics = [
 		{ key: 'openRate', label: 'Read Rate', color: '#4cb5b5', suffix: '%' },
-		{ key: 'clickRate', label: 'Click Rate', color: '#f96dcf', suffix: '%' },
-		{ key: 'submissionRate', label: 'Submission Rate', color: '#f42e41', suffix: '%' },
-		{ key: 'reportRate', label: 'Report Rate', color: '#1e40af', suffix: '%' }
+		{
+			key: 'clickRate',
+			label: 'Click Rate',
+			color: '#f96dcf',
+			suffix: '%',
+			mavg: { color: '#eea5fa', label: 'Click MA' }
+		},
+		{
+			key: 'submissionRate',
+			label: 'Submission Rate',
+			color: '#f42e41',
+			suffix: '%',
+			mavg: { color: '#ff6a91', label: 'Submit MA' }
+		},
+		{
+			key: 'reportRate',
+			label: 'Report Rate',
+			color: '#1e40af',
+			suffix: '%',
+			mavg: { color: '#60a5fa', label: 'Report MA' }
+		}
 	];
+	const trainingMetrics = [
+		{
+			key: 'startedRate',
+			label: 'Started Rate',
+			color: '#5b93e6',
+			suffix: '%',
+			mavg: { color: '#93c5fd', label: 'Started MA' }
+		},
+		{
+			key: 'completionRate',
+			label: 'Completion Rate',
+			color: '#2fa968',
+			suffix: '%',
+			mavg: { color: '#69e1ab', label: 'Completed MA' }
+		}
+	];
+	$: metrics = chartMode === 'training' ? trainingMetrics : phishingMetrics;
 
 	// toggle metric visibility (reassign to trigger svelte reactivity and persist)
 	function toggleMetric(metricKey) {
@@ -281,14 +341,12 @@
 		const n = Math.min(trendN, chartData.length);
 		if (n === 0) return null;
 		const slice = chartData.slice(-n);
-		const avg = (arr, key) => arr.reduce((sum, d) => sum + (d[key] || 0), 0) / n;
-		return {
-			n,
-			openRate: avg(slice, 'openRate'),
-			clickRate: avg(slice, 'clickRate'),
-			submissionRate: avg(slice, 'submissionRate'),
-			reportRate: avg(slice, 'reportRate')
-		};
+		const avg = (key) => slice.reduce((sum, d) => sum + (d[key] || 0), 0) / n;
+		const out = { n };
+		for (const m of metrics) {
+			out[m.key] = avg(m.key);
+		}
+		return out;
 	})();
 
 	// --- Force chart rerender ---
@@ -298,9 +356,12 @@
 		.join('-');
 
 	// --- Data processing ---
-	function processData(stats, useRelativeMetrics) {
+	function processData(stats, useRelativeMetrics, mode) {
+		// phishing and training campaigns are different sets with different funnels,
+		// so the chart shows one at a time based on the selected mode
+		const wantTraining = mode === 'training';
 		const sortedStats = [...(stats || [])]
-			.filter((stat) => stat.campaignClosedAt)
+			.filter((stat) => stat.campaignClosedAt && !!stat.isTraining === wantTraining)
 			.sort(
 				(a, b) => new Date(a.campaignClosedAt).getTime() - new Date(b.campaignClosedAt).getTime()
 			);
@@ -310,25 +371,39 @@
 			return d > 0 ? Math.round((n / d) * 1000) / 10 : 0;
 		}
 
-		return sortedStats.map((stat, index) => ({
-			index: index + 1,
-			date: stat.campaignClosedAt ? new Date(stat.campaignClosedAt) : null,
-			name: stat.campaignName || `Campaign ${index + 1}`,
-			campaignId: stat.campaignId,
-			openRate: pct(stat.trackingPixelLoaded, stat.totalRecipients),
-			clickRate: useRelativeMetrics
-				? pct(stat.websiteVisits, stat.trackingPixelLoaded)
-				: pct(stat.websiteVisits, stat.totalRecipients),
-			submissionRate: useRelativeMetrics
-				? pct(stat.dataSubmissions, stat.websiteVisits)
-				: pct(stat.dataSubmissions, stat.totalRecipients),
-			reportRate: pct(stat.reported, stat.totalRecipients),
-			totalRecipients: stat.totalRecipients
-		}));
+		return sortedStats.map((stat, index) => {
+			const base = {
+				index: index + 1,
+				date: stat.campaignClosedAt ? new Date(stat.campaignClosedAt) : null,
+				name: stat.campaignName || `Campaign ${index + 1}`,
+				campaignId: stat.campaignId,
+				totalRecipients: stat.totalRecipients
+			};
+			if (wantTraining) {
+				return {
+					...base,
+					startedRate: pct(stat.trainingStarted, stat.totalRecipients),
+					completionRate: useRelativeMetrics
+						? pct(stat.trainingCompleted, stat.trainingStarted)
+						: pct(stat.trainingCompleted, stat.totalRecipients)
+				};
+			}
+			return {
+				...base,
+				openRate: pct(stat.trackingPixelLoaded, stat.totalRecipients),
+				clickRate: useRelativeMetrics
+					? pct(stat.websiteVisits, stat.trackingPixelLoaded)
+					: pct(stat.websiteVisits, stat.totalRecipients),
+				submissionRate: useRelativeMetrics
+					? pct(stat.dataSubmissions, stat.websiteVisits)
+					: pct(stat.dataSubmissions, stat.totalRecipients),
+				reportRate: pct(stat.reported, stat.totalRecipients)
+			};
+		});
 	}
 
-	// Use filtered campaign stats based on selected time range and relative metrics toggle
-	$: chartData = processData(filteredCampaignStats, useRelativeMetrics);
+	// Use filtered campaign stats based on selected time range, relative metrics and mode
+	$: chartData = processData(filteredCampaignStats, useRelativeMetrics, chartMode);
 
 	function createChart() {
 		if (!chartContainer || chartData.length < 2) return;
@@ -385,10 +460,9 @@
 				});
 			}
 		});
-		// Only draw moving average for clickRate, submissionRate, and reportRate that are visible
-		['clickRate', 'submissionRate', 'reportRate'].forEach((metricKey) => {
-			const metric = metrics.find((m) => m.key === metricKey);
-			if (metric && visibleMetrics[`mavg-${metricKey}`]) {
+		// draw the moving average for any metric that supports one and is toggled on
+		metrics.forEach((metric) => {
+			if (metric.mavg && visibleMetrics[`mavg-${metric.key}`]) {
 				createMovingAverageLine(svg, metric, movingAvgN);
 			}
 		});
@@ -456,15 +530,8 @@
 		if (started) {
 			path.setAttribute('d', pathData);
 			path.setAttribute('fill', 'none');
-			// Use a lighter shade of the metric color for moving average
-			let avgColor = metric.color;
-			if (metric.key === 'openRate') {
-				avgColor = '#93c5fd'; // light blue
-			} else if (metric.key === 'submissionRate') {
-				avgColor = '#ff6a91'; // lighter red, closer to #f42e41
-			} else if (metric.key === 'reportRate') {
-				avgColor = '#60a5fa'; // lighter blue for report rate
-			}
+			// lighter shade defined on the metric, falling back to the metric color
+			const avgColor = (metric.mavg && metric.mavg.color) || metric.color;
 			path.setAttribute('stroke', avgColor);
 			path.setAttribute('stroke-width', '1.2');
 			path.setAttribute('stroke-dasharray', '6,4');
@@ -822,29 +889,12 @@
 				strokeDasharray: null,
 				opacity: 1
 			});
-			if (
-				metric.key === 'clickRate' ||
-				metric.key === 'submissionRate' ||
-				metric.key === 'reportRate'
-			) {
-				// Use a lighter version of the main color for moving averages
-				let avgColor = metric.color;
-				let avgLabel = '';
-				if (metric.key === 'clickRate') {
-					avgColor = '#eea5fa'; // before-page-visited, lighter pink
-					avgLabel = 'Click MA';
-				} else if (metric.key === 'submissionRate') {
-					avgColor = '#ff6a91'; // lighter red, closer to #f42e41
-					avgLabel = 'Submit MA';
-				} else if (metric.key === 'reportRate') {
-					avgColor = '#60a5fa'; // lighter blue for report rate
-					avgLabel = 'Report MA';
-				}
+			if (metric.mavg) {
 				legendItems.push({
 					type: 'mavg',
 					key: metric.key,
-					label: avgLabel,
-					color: avgColor,
+					label: metric.mavg.label,
+					color: metric.mavg.color,
 					class: `legend-line legend-mavg legend-mavg-${metric.key}`,
 					labelClass: `legend-label legend-mavg legend-mavg-${metric.key}`,
 					dataMetric: `mavg-${metric.key}`,
@@ -1226,6 +1276,7 @@
 			// reference toggles so Svelte tracks them for reactivity
 			useLogScale;
 			useRelativeMetrics;
+			chartMode;
 			createChart();
 		}
 	}
@@ -1319,6 +1370,30 @@
 							Trendline: Last {trendStats ? trendStats.n : campaignStats.length} Campaigns (average)
 						</h4>
 						<div class="flex flex-wrap items-center gap-2 mb-0">
+							{#if hasTraining}
+								<div
+									class="flex items-center rounded overflow-hidden border border-gray-300 dark:border-gray-600 text-xs"
+								>
+									<button
+										type="button"
+										class="px-2 py-0.5 transition-colors duration-200 {chartMode === 'phishing'
+											? 'bg-cta-blue text-white'
+											: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}"
+										on:click={() => (chartMode = 'phishing')}
+									>
+										Phishing
+									</button>
+									<button
+										type="button"
+										class="px-2 py-0.5 transition-colors duration-200 {chartMode === 'training'
+											? 'bg-training-completed text-white'
+											: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}"
+										on:click={() => (chartMode = 'training')}
+									>
+										Training
+									</button>
+								</div>
+							{/if}
 							<label
 								class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
 							>
@@ -1383,7 +1458,10 @@
 					</div>
 					<div class="mb-8"></div>
 					{#if campaignStats.length > 0}
-						<div class="grid grid-cols-4 gap-2 sm:gap-4">
+						<div
+							class="grid gap-2 sm:gap-4"
+							style="grid-template-columns: repeat({metrics.length}, minmax(0, 1fr));"
+						>
 							{#each metrics as metric}
 								<div class="text-center">
 									<div class="flex items-center justify-center">

@@ -663,6 +663,117 @@ func (s *Server) handlerNotFound(c *gin.Context) {
 	)
 }
 
+// pageVisitEventName maps a page type to the campaign event recorded for a visit.
+func pageVisitEventName(pageType string) string {
+	switch pageType {
+	case data.PAGE_TYPE_EVASION:
+		return data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED
+	case data.PAGE_TYPE_BEFORE:
+		return data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED
+	case data.PAGE_TYPE_AFTER:
+		return data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED
+	default:
+		return data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED
+	}
+}
+
+// trainingMilestoneEventName maps a page type to the training milestone recorded
+// on top of the raw page visit for a training campaign. A lesson visit
+// (before/landing) is training_started, the after page is training_completed. An
+// empty string means the page type has no milestone.
+func trainingMilestoneEventName(pageType string) string {
+	switch pageType {
+	case data.PAGE_TYPE_BEFORE, data.PAGE_TYPE_LANDING:
+		return data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED
+	case data.PAGE_TYPE_AFTER:
+		return data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED
+	default:
+		return ""
+	}
+}
+
+// emitTrainingMilestoneIfNeeded records a training_started or training_completed
+// event for a training campaign, at most once per recipient. The raw page visit
+// event is still recorded separately, so this adds a deduplicated milestone on
+// top of it rather than replacing it.
+func (s *Server) emitTrainingMilestoneIfNeeded(
+	c *gin.Context,
+	campaign *model.Campaign,
+	campaignRecipient *model.CampaignRecipient,
+	campaignRecipientIDPtr *uuid.UUID,
+	campaignID uuid.UUID,
+	recipientID uuid.UUID,
+	pageType string,
+) error {
+	isTraining := false
+	if v, err := campaign.IsTraining.Get(); err == nil {
+		isTraining = v
+	}
+	if !isTraining {
+		return nil
+	}
+	// an anonymous campaign stores its events without a recipient, so a milestone
+	// cannot be deduplicated per recipient and would be recorded again on every
+	// visit
+	if campaign.IsAnonymous.MustGet() {
+		return nil
+	}
+	milestoneName := trainingMilestoneEventName(pageType)
+	if milestoneName == "" {
+		return nil
+	}
+	milestoneEventID := cache.EventIDByName[milestoneName]
+	if milestoneEventID == nil {
+		return nil
+	}
+	// a milestone is recorded once per recipient per campaign
+	has, err := s.repositories.Campaign.HasEvent(c, &campaignID, &recipientID, milestoneEventID)
+	if err != nil {
+		s.logger.Errorw("failed to check for existing training milestone event", "error", err)
+		// continue and attempt to create it
+	}
+	if has {
+		return nil
+	}
+	eventID := uuid.New()
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
+	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
+	event := &model.CampaignEvent{
+		ID:          &eventID,
+		CampaignID:  &campaignID,
+		RecipientID: &recipientID,
+		IP:          clientIP,
+		UserAgent:   userAgent,
+		EventID:     milestoneEventID,
+		Data:        vo.NewEmptyOptionalString1MB(),
+		Metadata:    model.ExtractCampaignEventMetadata(c, campaign),
+	}
+	if err := s.repositories.Campaign.SaveEvent(c, event); err != nil {
+		return fmt.Errorf("failed to save training milestone event: %s", err)
+	}
+	// let the milestone become the notable event so completion outranks the raw
+	// page visit for this recipient
+	if campaignRecipient != nil && campaignRecipientIDPtr != nil {
+		currentNotableEventID, _ := campaignRecipient.NotableEventID.Get()
+		if cache.IsMoreNotableCampaignRecipientEventID(&currentNotableEventID, milestoneEventID) {
+			campaignRecipient.NotableEventID.Set(*milestoneEventID)
+			if err := s.repositories.CampaignRecipient.UpdateByID(c, campaignRecipientIDPtr, campaignRecipient); err != nil {
+				s.logger.Errorw("failed to update notable event for training milestone", "error", err)
+			}
+		}
+	}
+	if err := s.services.Campaign.HandleWebhooks(
+		context.TODO(),
+		&campaignID,
+		&recipientID,
+		milestoneName,
+		nil,
+	); err != nil {
+		return fmt.Errorf("failed to handle webhooks for training milestone: %s", err)
+	}
+	return nil
+}
+
 // checkAndServePhishingPage serves a phishing page
 // returns a bool if the request was for a phishing page
 // and an error if there was an error
@@ -1407,19 +1518,7 @@ func (s *Server) checkAndServePhishingPage(
 
 		// save the event of Proxy page being accessed
 		visitEventID := uuid.New()
-		eventName := ""
-		switch currentPageType {
-		case data.PAGE_TYPE_EVASION:
-			eventName = data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED
-		case data.PAGE_TYPE_BEFORE:
-			eventName = data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED
-		case data.PAGE_TYPE_LANDING:
-			eventName = data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED
-		case data.PAGE_TYPE_AFTER:
-			eventName = data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED
-		default:
-			eventName = data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED
-		}
+		eventName := pageVisitEventName(currentPageType)
 		eventID := cache.EventIDByName[eventName]
 		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
@@ -1503,6 +1602,19 @@ func (s *Server) checkAndServePhishingPage(
 				)
 				return true, errs.Wrap(err)
 			}
+		}
+
+		// record the training milestone once, on top of the raw page visit
+		if err := s.emitTrainingMilestoneIfNeeded(
+			c,
+			campaign,
+			campaignRecipient,
+			campaignRecipientIDPtr,
+			campaignID,
+			recipientID,
+			currentPageType,
+		); err != nil {
+			return true, errs.Wrap(err)
 		}
 
 		// validate phishing domain format
@@ -1769,17 +1881,7 @@ func (s *Server) checkAndServePhishingPage(
 	}
 
 	// save the event of page has been visited
-	eventName := ""
-	switch currentPageType {
-	case data.PAGE_TYPE_EVASION:
-		eventName = data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED
-	case data.PAGE_TYPE_BEFORE:
-		eventName = data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED
-	case data.PAGE_TYPE_LANDING:
-		eventName = data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED
-	case data.PAGE_TYPE_AFTER:
-		eventName = data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED
-	}
+	eventName := pageVisitEventName(currentPageType)
 
 	campaignEventID := cache.EventIDByName[eventName]
 	eventID := uuid.New()
@@ -1856,6 +1958,19 @@ func (s *Server) checkAndServePhishingPage(
 		if err != nil {
 			return true, fmt.Errorf("failed to handle webhooks: %s", err)
 		}
+	}
+
+	// record the training milestone once, on top of the raw page visit
+	if err := s.emitTrainingMilestoneIfNeeded(
+		c,
+		campaign,
+		campaignRecipient,
+		campaignRecipientIDPtr,
+		campaignID,
+		recipientID,
+		currentPageType,
+	); err != nil {
+		return true, errs.Wrap(err)
 	}
 
 	return true, nil

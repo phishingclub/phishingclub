@@ -1052,6 +1052,75 @@ func (r *Campaign) GetResultStats(
 		return nil, res.Error
 	}
 
+	// the training funnel exists for training campaigns only, a phishing campaign
+	// emits no training events so the counts below would scan for rows that
+	// cannot be there
+	var isTraining bool
+	res = r.DB.Raw(`
+    SELECT is_training
+    FROM campaigns
+    WHERE id = ?
+`,
+		campaignID,
+	).Scan(&isTraining)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if !isTraining {
+		return stats, nil
+	}
+
+	res = r.DB.Raw(`
+    SELECT COUNT(*) FROM (
+        SELECT DISTINCT recipient_id
+        FROM campaign_events
+        WHERE campaign_id = ?
+        AND event_id = ?
+        AND recipient_id IS NOT NULL
+        UNION
+        SELECT DISTINCT anonymized_id
+        FROM campaign_events
+        WHERE campaign_id = ?
+        AND event_id = ?
+        AND anonymized_id IS NOT NULL
+    ) as unique_ids
+`,
+		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED],
+		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED],
+	).Scan(&stats.TrainingStarted)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+
+	res = r.DB.Raw(`
+    SELECT COUNT(*) FROM (
+        SELECT DISTINCT recipient_id
+        FROM campaign_events
+        WHERE campaign_id = ?
+        AND event_id = ?
+        AND recipient_id IS NOT NULL
+        UNION
+        SELECT DISTINCT anonymized_id
+        FROM campaign_events
+        WHERE campaign_id = ?
+        AND event_id = ?
+        AND anonymized_id IS NOT NULL
+    ) as unique_ids
+`,
+		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED],
+		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED],
+	).Scan(&stats.TrainingCompleted)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+
 	return stats, nil
 }
 
@@ -1530,11 +1599,13 @@ func (r *Campaign) SetLureSettingsByID(
 	mode string,
 	algorithm string,
 	length int,
+	isTraining bool,
 ) error {
 	row := map[string]any{
 		"lure_url_mode":    mode,
 		"lure_code_algo":   algorithm,
 		"lure_code_length": length,
+		"is_training":      isTraining,
 	}
 	AddUpdatedAt(row)
 	res := r.DB.
@@ -1989,6 +2060,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	saveBrowserMetadata := nullable.NewNullableWithValue(row.SaveBrowserMetadata)
 	isAnonymous := nullable.NewNullableWithValue(row.IsAnonymous)
 	isTest := nullable.NewNullableWithValue(row.IsTest)
+	isTraining := nullable.NewNullableWithValue(row.IsTraining)
 	obfuscate := nullable.NewNullableWithValue(row.Obfuscate)
 	// deprecated fields - kept for backward compatibility
 	webhookIncludeData := nullable.NewNullableWithValue(row.WebhookIncludeData)
@@ -2138,6 +2210,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		SaveSubmittedData:   saveSubmittedData,
 		SaveBrowserMetadata: saveBrowserMetadata,
 		IsAnonymous:         isAnonymous,
+		IsTraining:          isTraining,
 		IsTest:              isTest,
 		Obfuscate:           obfuscate,
 		WebhookIncludeData:  webhookIncludeData,
@@ -2330,9 +2403,11 @@ type reportRecipientRow struct {
 	Email         string `gorm:"column:email"`
 	Department    string `gorm:"column:department"`
 	Position      string `gorm:"column:position"`
-	ClickedLink   bool   `gorm:"column:clicked_link"`
-	SubmittedData bool   `gorm:"column:submitted_data"`
-	Reported      bool   `gorm:"column:reported"`
+	ClickedLink       bool `gorm:"column:clicked_link"`
+	SubmittedData     bool `gorm:"column:submitted_data"`
+	Reported          bool `gorm:"column:reported"`
+	TrainingStarted   bool `gorm:"column:training_started"`
+	TrainingCompleted bool `gorm:"column:training_completed"`
 }
 
 // GetReportRecipients returns per-recipient click/submit/reported results for a campaign.
@@ -2352,7 +2427,9 @@ func (r *Campaign) GetReportRecipients(
 			rec.position,
 			CASE WHEN clicked.recipient_id IS NOT NULL THEN 1 ELSE 0 END AS clicked_link,
 			CASE WHEN submitted.recipient_id IS NOT NULL THEN 1 ELSE 0 END AS submitted_data,
-			CASE WHEN reported.recipient_id IS NOT NULL THEN 1 ELSE 0 END AS reported
+			CASE WHEN reported.recipient_id IS NOT NULL THEN 1 ELSE 0 END AS reported,
+			CASE WHEN started.recipient_id IS NOT NULL THEN 1 ELSE 0 END AS training_started,
+			CASE WHEN completed.recipient_id IS NOT NULL THEN 1 ELSE 0 END AS training_completed
 		FROM campaign_recipients cr
 		JOIN recipients rec ON rec.id = cr.recipient_id
 		LEFT JOIN (
@@ -2373,6 +2450,18 @@ func (r *Campaign) GetReportRecipients(
 			WHERE campaign_id = ? AND recipient_id IS NOT NULL
 			AND event_id = ?
 		) AS reported ON reported.recipient_id = cr.recipient_id
+		LEFT JOIN (
+			SELECT DISTINCT recipient_id
+			FROM campaign_events
+			WHERE campaign_id = ? AND recipient_id IS NOT NULL
+			AND event_id = ?
+		) AS started ON started.recipient_id = cr.recipient_id
+		LEFT JOIN (
+			SELECT DISTINCT recipient_id
+			FROM campaign_events
+			WHERE campaign_id = ? AND recipient_id IS NOT NULL
+			AND event_id = ?
+		) AS completed ON completed.recipient_id = cr.recipient_id
 		WHERE cr.campaign_id = ? AND cr.recipient_id IS NOT NULL
 		ORDER BY rec.last_name, rec.first_name
 	`,
@@ -2385,6 +2474,10 @@ func (r *Campaign) GetReportRecipients(
 		campaignID,
 		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED],
 		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED],
+		campaignID,
+		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED],
+		campaignID,
 	).Scan(&rows)
 
 	if res.Error != nil {
@@ -2394,14 +2487,16 @@ func (r *Campaign) GetReportRecipients(
 	result := make([]model.ReportRecipient, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, model.ReportRecipient{
-			FirstName:     row.FirstName,
-			LastName:      row.LastName,
-			Email:         row.Email,
-			Department:    row.Department,
-			Position:      row.Position,
-			ClickedLink:   row.ClickedLink,
-			SubmittedData: row.SubmittedData,
-			Reported:      row.Reported,
+			FirstName:         row.FirstName,
+			LastName:          row.LastName,
+			Email:             row.Email,
+			Department:        row.Department,
+			Position:          row.Position,
+			ClickedLink:       row.ClickedLink,
+			SubmittedData:     row.SubmittedData,
+			Reported:          row.Reported,
+			TrainingStarted:   row.TrainingStarted,
+			TrainingCompleted: row.TrainingCompleted,
 		})
 	}
 	return result, nil

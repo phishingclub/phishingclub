@@ -746,6 +746,9 @@ func (c *CampaignTemplate) UpdateByID(
 	if v, err := campaignTemplate.LureCodeLength.Get(); err == nil {
 		incoming.LureCodeLength.Set(v)
 	}
+	if v, err := campaignTemplate.IsTraining.Get(); err == nil {
+		incoming.IsTraining.Set(v)
+	}
 	// validate
 	if err := incoming.Validate(); err != nil {
 		c.Logger.Errorw("failed to validate campaign template", "error", err)

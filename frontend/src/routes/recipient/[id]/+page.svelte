@@ -39,7 +39,9 @@
 		campaignsTrackingPixelLoaded: 0,
 		campaignsPhishingPageLoaded: 0,
 		campaignsDataSubmitted: 0,
-		campaignsReported: 0
+		campaignsReported: 0,
+		trainingsAssigned: 0,
+		trainingsCompleted: 0
 	};
 	let isGroupsLoading = false;
 	let isEventsLoading = false;
@@ -158,7 +160,7 @@
 	{/if}
 	<BigButton on:click={onClickExport}>Export events</BigButton>
 	<div>
-		<div class="grid mr-1/12 md:grid-cols-2 lg:grid-cols-7 gap-6 mb-8 mt-4">
+		<div class="grid grid-cols-1 lg:grid-cols-7 gap-6 mb-8 mt-4">
 			<!-- Campaigns card -->
 			<StatsCard
 				title="Campaigns"
@@ -333,6 +335,14 @@
 				</svg>
 			</StatsCard>
 		</div>
+
+		{#if stats.trainingsAssigned > 0}
+			<div class="flex flex-wrap items-center gap-x-6 gap-y-2 mb-8 text-sm">
+				<span class="font-semibold text-grayblue-dark dark:text-gray-400">Training</span>
+				<span class="text-grayblue-dark dark:text-gray-400">Assigned <span class="font-semibold text-pc-darkblue dark:text-gray-200">{stats.trainingsAssigned}</span></span>
+				<span class="text-grayblue-dark dark:text-gray-400">Completed <span class="font-semibold text-training-completed">{stats.trainingsCompleted}</span></span>
+			</div>
+		{/if}
 		<SubHeadline>Groups</SubHeadline>
 		<Table
 			columns={['Name']}

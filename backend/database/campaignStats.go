@@ -37,9 +37,16 @@ type CampaignStats struct {
 	DataSubmissions     int `gorm:"not null;default:0" json:"dataSubmissions"`     // Form submissions
 	Reported            int `gorm:"not null;default:0" json:"reported"`            // Reported phishing
 
+	// Training funnel, populated for training campaigns only
+	TrainingStarted   int `gorm:"not null;default:0" json:"trainingStarted"`
+	TrainingCompleted int `gorm:"not null;default:0" json:"trainingCompleted"`
+
 	// Campaign metadata
 	TemplateName string `gorm:"" json:"templateName"`
 	CampaignType string `gorm:"" json:"campaignType"` // 'scheduled', 'self-managed'
+	// IsTraining marks the snapshot as an awareness training campaign so phishing
+	// trend charts can exclude it from failure rate calculations.
+	IsTraining bool `gorm:"not null;default:false" json:"isTraining"`
 }
 
 func (CampaignStats) TableName() string {

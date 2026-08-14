@@ -176,6 +176,14 @@ func (c *Campaign) Create(
 	if cTemplate == nil {
 		return nil, errors.New("attempted to create campaign with unusable template")
 	}
+	// the training nature is owned by the template, never the client. Set it from
+	// the template so the campaign row carries it from creation, before any
+	// schedule snapshot, and a crafted request cannot flip it.
+	isTrainingTemplate := false
+	if v, err := cTemplate.IsTraining.Get(); err == nil {
+		isTrainingTemplate = v
+	}
+	campaign.IsTraining = nullable.NewNullableWithValue(isTrainingTemplate)
 	// check uniqueness
 	var companyID *uuid.UUID
 	if cid, err := campaign.CompanyID.Get(); err == nil {
@@ -439,8 +447,8 @@ func (c *Campaign) insertScheduledRecipient(
 	}
 }
 
-// snapshotLureSettings copies the template's lure URL settings onto the campaign
-// while it still holds no recipients.
+// snapshotLureSettings copies the template's lure URL settings and training flag
+// onto the campaign while it still holds no recipients.
 //
 // A campaign holding recipients has links out that resolve through those rows,
 // so reading the template again could hand a new recipient a different URL form
@@ -482,35 +490,47 @@ func (c *Campaign) snapshotLureSettings(
 	mode := data.LureURLModeQuery
 	algorithm := string(lure.DefaultAlgorithm)
 	length := lure.DefaultLength
+	isTraining := false
 
-	if templateID, err := campaign.TemplateID.Get(); err == nil {
-		cTemplate, err := c.CampaignTemplateService.GetByID(
-			ctx,
-			session,
-			&templateID,
-			&repository.CampaignTemplateOption{},
+	templateID, err := campaign.TemplateID.Get()
+	if err != nil {
+		// the template is gone, so the defaults below would be a guess that
+		// overwrites a snapshot taken while the template still existed
+		c.Logger.Errorw("campaign has no template, leaving the snapshot unwritten",
+			"campaignID", campaignID.String(),
 		)
-		if err != nil || cTemplate == nil {
-			c.Logger.Errorw("could not read lure settings from template, leaving the snapshot unwritten",
-				"campaignID", campaignID.String(),
-				"templateID", templateID.String(),
-				"error", err,
-			)
-			return
-		}
-		if v, err := cTemplate.LureURLMode.Get(); err == nil && data.IsValidLureURLMode(v) {
-			mode = v
-		}
-		if v, err := cTemplate.LureCodeAlgo.Get(); err == nil && lure.IsValidAlgorithm(lure.Algorithm(v)) {
-			algorithm = v
-		}
-		if v, err := cTemplate.LureCodeLength.Get(); err == nil && v >= lure.MinLength && v <= lure.MaxLength {
-			length = v
-		}
+		return
+	}
+	cTemplate, err := c.CampaignTemplateService.GetByID(
+		ctx,
+		session,
+		&templateID,
+		&repository.CampaignTemplateOption{},
+	)
+	if err != nil || cTemplate == nil {
+		c.Logger.Errorw("could not read lure settings from template, leaving the snapshot unwritten",
+			"campaignID", campaignID.String(),
+			"templateID", templateID.String(),
+			"error", err,
+		)
+		return
+	}
+	if v, err := cTemplate.LureURLMode.Get(); err == nil && data.IsValidLureURLMode(v) {
+		mode = v
+	}
+	if v, err := cTemplate.LureCodeAlgo.Get(); err == nil && lure.IsValidAlgorithm(lure.Algorithm(v)) {
+		algorithm = v
+	}
+	if v, err := cTemplate.LureCodeLength.Get(); err == nil && v >= lure.MinLength && v <= lure.MaxLength {
+		length = v
+	}
+	if v, err := cTemplate.IsTraining.Get(); err == nil {
+		isTraining = v
 	}
 	campaign.LureURLMode = nullable.NewNullableWithValue(mode)
 	campaign.LureCodeAlgo = nullable.NewNullableWithValue(algorithm)
 	campaign.LureCodeLength = nullable.NewNullableWithValue(length)
+	campaign.IsTraining = nullable.NewNullableWithValue(isTraining)
 
 	if err := c.CampaignRepository.SetLureSettingsByID(
 		ctx,
@@ -518,6 +538,7 @@ func (c *Campaign) snapshotLureSettings(
 		mode,
 		algorithm,
 		length,
+		isTraining,
 	); err != nil {
 		// the in memory campaign still carries them, so this run allocates
 		// correctly even unpersisted
@@ -5328,6 +5349,11 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 		campaignType = "self-managed"
 	}
 
+	isTrainingCampaign := false
+	if v, err := campaign.IsTraining.Get(); err == nil {
+		isTrainingCampaign = v
+	}
+
 	// Get template name with proper session
 	templateName := ""
 	templateID := campaign.TemplateID.MustGet()
@@ -5381,9 +5407,12 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 		WebsiteVisits:       int(resultStats.WebsiteLoaded),
 		DataSubmissions:     int(resultStats.SubmittedData),
 		Reported:            int(resultStats.Reported),
+		TrainingStarted:     int(resultStats.TrainingStarted),
+		TrainingCompleted:   int(resultStats.TrainingCompleted),
 
 		TemplateName: templateName,
 		CampaignType: campaignType,
+		IsTraining:   isTrainingCampaign,
 		CreatedAt:    &now,
 		UpdatedAt:    &now,
 	}
@@ -5917,7 +5946,12 @@ func (c *Campaign) buildReportHTMLWithData(
 		companyID = &cid
 	}
 
-	reportTmpl, tmplErr := c.ReportTemplateRepository.GetForCampaign(ctx, companyID)
+	isTrainingCampaign := false
+	if v, err := campaign.IsTraining.Get(); err == nil {
+		isTrainingCampaign = v
+	}
+
+	reportTmpl, tmplErr := c.ReportTemplateRepository.GetForCampaign(ctx, companyID, isTrainingCampaign)
 	if tmplErr != nil {
 		c.Logger.Errorw("failed to fetch report template", "error", tmplErr)
 		return "", nil, "", errs.Wrap(tmplErr)
@@ -5968,7 +6002,7 @@ func (c *Campaign) buildReportHTMLWithData(
 }
 
 const defaultReportEmailSubject = "Campaign report: {{.CampaignName}}"
-const defaultReportEmailBody = "<p>The phishing simulation report for <strong>{{.CampaignName}}</strong> is attached.</p>"
+const defaultReportEmailBody = "<p>The {{if .IsTraining}}awareness training{{else}}phishing simulation{{end}} report for <strong>{{.CampaignName}}</strong> is attached.</p>"
 
 // renderReportEmailField renders a report email subject or body template with the
 // given data. on a parse or execute error it logs and falls back to the default
@@ -6320,6 +6354,10 @@ func buildReportData(
 	stats *model.CampaignResultView,
 	recipients []model.ReportRecipient,
 ) *model.ReportData {
+	isTrainingReport := false
+	if v, err := campaign.IsTraining.Get(); err == nil {
+		isTrainingReport = v
+	}
 	total := stats.Recipients
 	rate := func(count int64) float64 {
 		if total == 0 {
@@ -6376,6 +6414,17 @@ func buildReportData(
 		OpenedOfSent:           relPct(stats.TrackingPixelLoaded, stats.EmailsSent),
 		ClickedOfOpened:        relPct(stats.WebsiteLoaded, stats.TrackingPixelLoaded),
 		SubmittedOfClicked:     relPct(stats.SubmittedData, stats.WebsiteLoaded),
-		Recipients:             recipients,
+
+		IsTraining:               isTrainingReport,
+		TrainingStarted:          stats.TrainingStarted,
+		TrainingCompleted:        stats.TrainingCompleted,
+		TrainingStartedPercent:   pct(stats.TrainingStarted),
+		TrainingCompletedPercent: pct(stats.TrainingCompleted),
+		TrainingStartedRate:      rate(stats.TrainingStarted),
+		TrainingCompletedRate:    rate(stats.TrainingCompleted),
+		StartedOfOpened:          relPct(stats.TrainingStarted, stats.TrackingPixelLoaded),
+		CompletedOfStarted:       relPct(stats.TrainingCompleted, stats.TrainingStarted),
+
+		Recipients: recipients,
 	}
 }

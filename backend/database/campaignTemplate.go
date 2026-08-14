@@ -36,6 +36,10 @@ type CampaignTemplate struct {
 	// data such as domainID, landingPage and etc to be used in a campaign
 	IsUsable bool `gorm:"not null;default:false;index"`
 
+	// IsTraining marks the template as an awareness training template. Campaigns
+	// built from it emit training events instead of phishing page visit events.
+	IsTraining bool `gorm:"not null;default:false;index"`
+
 	// has-a
 	LandingPageID *uuid.UUID `gorm:"type:uuid;index;"`
 	LandingPage   *Page      `gorm:"references:LandingPage;foreignKey:LandingPageID;references:ID;"`

@@ -22,3 +22,6 @@ var SigningKey2 []byte
 
 //go:embed default_report.html
 var DefaultReportHTML string
+
+//go:embed default_training_report.html
+var DefaultTrainingReportHTML string

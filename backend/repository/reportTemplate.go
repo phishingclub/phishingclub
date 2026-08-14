@@ -110,11 +110,13 @@ func (r *ReportTemplate) GetByID(
 func (r *ReportTemplate) GetForCampaign(
 	ctx context.Context,
 	companyID *uuid.UUID,
+	isTraining bool,
 ) (*model.ReportTemplate, error) {
+	trainingCol := TableColumn(database.REPORT_TEMPLATE_TABLE, "is_training")
 	var row database.ReportTemplate
 	if companyID != nil {
 		res := r.DB.
-			Where(TableColumn(database.REPORT_TEMPLATE_TABLE, "company_id")+" = ?", companyID).
+			Where(TableColumn(database.REPORT_TEMPLATE_TABLE, "company_id")+" = ? AND "+trainingCol+" = ?", companyID, isTraining).
 			First(&row)
 		if res.Error == nil {
 			return ToReportTemplate(&row)
@@ -124,6 +126,7 @@ func (r *ReportTemplate) GetForCampaign(
 		}
 	}
 	res := whereCompanyIsNull(r.DB, database.REPORT_TEMPLATE_TABLE).
+		Where(trainingCol+" = ?", isTraining).
 		First(&row)
 	if res.Error != nil {
 		return nil, res.Error
@@ -174,10 +177,11 @@ func ToReportTemplate(row *database.ReportTemplate) (*model.ReportTemplate, erro
 	}
 	content := nullable.NewNullableWithValue(*c)
 	return &model.ReportTemplate{
-		ID:        id,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		CompanyID: companyID,
-		Content:   content,
+		ID:         id,
+		CreatedAt:  row.CreatedAt,
+		UpdatedAt:  row.UpdatedAt,
+		CompanyID:  companyID,
+		Content:    content,
+		IsTraining: nullable.NewNullableWithValue(row.IsTraining),
 	}, nil
 }

@@ -41,6 +41,18 @@ export const eventNameMap = {
 		priority: 95,
 		color: 'bg-reported'
 	},
+	// the milestones outrank the raw page visits they are recorded on top of, as
+	// they do in the backend priorities
+	campaign_recipient_training_started: {
+		name: 'Training Started',
+		priority: 72,
+		color: 'bg-training-started'
+	},
+	campaign_recipient_training_completed: {
+		name: 'Training Completed',
+		priority: 75,
+		color: 'bg-training-completed'
+	},
 	campaign_recipient_info: {
 		name: 'Info',
 		priority: 25,

@@ -42,6 +42,14 @@
 
 	let calendarCampaigns = [];
 	let campaignStats = [];
+
+	// training completion rate across closed training campaigns, derived from the
+	// campaign stats snapshots already loaded for the trend chart
+	$: trainingStats = (campaignStats || []).filter((s) => s.isTraining);
+	$: trainingStarted = trainingStats.reduce((sum, s) => sum + (s.trainingStarted || 0), 0);
+	$: trainingCompleted = trainingStats.reduce((sum, s) => sum + (s.trainingCompleted || 0), 0);
+	$: trainingCompletionRate =
+		trainingStarted > 0 ? Math.round((trainingCompleted / trainingStarted) * 100) : 0;
 	let isCampaignStatsLoading = true; // start as true to show ghost on initial load
 
 	let calendarStartDate = null;
@@ -252,8 +260,8 @@
 		<SubHeadline>{contextCompanyName}</SubHeadline>
 	{/if}
 
-	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 mt-4">
-		<a href="/dashboard/campaigns">
+	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8 mt-4">
+		<a href="/dashboard/campaigns" class="block h-full">
 			<StatsCard
 				title="Active campaigns"
 				value={active}
@@ -278,7 +286,7 @@
 			</StatsCard>
 		</a>
 
-		<a href="/dashboard/campaigns">
+		<a href="/dashboard/campaigns" class="block h-full">
 			<StatsCard
 				title="Upcoming campaigns"
 				value={scheduled}
@@ -303,7 +311,7 @@
 			</StatsCard>
 		</a>
 
-		<a href="/dashboard/campaigns">
+		<a href="/dashboard/campaigns" class="block h-full">
 			<StatsCard
 				title="Completed campaigns"
 				value={finished}
@@ -328,7 +336,7 @@
 			</StatsCard>
 		</a>
 
-		<a href="/recipient">
+		<a href="/recipient" class="block h-full">
 			<StatsCard
 				title="Repeat offenders"
 				value={repeatOffenders}
@@ -348,6 +356,31 @@
 						stroke-linejoin="round"
 						stroke-width="2"
 						d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+					/>
+				</svg>
+			</StatsCard>
+		</a>
+
+		<a href="/campaign" class="block h-full">
+			<StatsCard
+				title="Trainings completed"
+				value={trainingCompleted}
+				borderColor="border-training-completed"
+				iconColor="text-training-completed"
+			>
+				<svg
+					slot="icon"
+					xmlns="http://www.w3.org/2000/svg"
+					class="h-8 w-8"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					stroke-width="1.5"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5"
 					/>
 				</svg>
 			</StatsCard>

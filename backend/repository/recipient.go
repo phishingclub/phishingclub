@@ -110,6 +110,7 @@ func (r *Recipient) GetRepeatOffenderCount(
                 WHERE ce.recipient_id = %s.id
                 AND ce.created_at >= ?
                 AND c.is_test = false
+                AND c.is_training = false
                 GROUP BY ce.recipient_id
                 HAVING COUNT(DISTINCT CASE
                     WHEN ce.event_id IN (?, ?, ?) THEN ce.campaign_id
@@ -180,6 +181,7 @@ func (r *Recipient) GetAll(
             WHERE ce.recipient_id = %s.id
             AND ce.created_at >= ?
             AND c.is_test = false
+            AND c.is_training = false
             GROUP BY ce.recipient_id
             HAVING COUNT(DISTINCT CASE
                 WHEN ce.event_id IN (?, ?, ?) THEN ce.campaign_id
@@ -549,20 +551,41 @@ func (r *Recipient) GetStatsByID(
 	}
 	repeatOffenderTimeThreshold := time.Now().AddDate(0, -months, 0)
 
-	// get campaign count
+	// get phishing campaign count, training campaigns are counted separately below
 	r.DB.Model(&database.CampaignRecipient{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_recipients.campaign_id").
-		Where("campaign_recipients.recipient_id = ? AND campaigns.is_test = ?", id, false).
+		Where("campaign_recipients.recipient_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?", id, false, false).
 		Distinct("campaign_recipients.campaign_id").
 		Count(&stats.CampaignsParticiated)
+
+	// get training campaigns the recipient was scheduled in
+	r.DB.Model(&database.CampaignRecipient{}).
+		Joins("JOIN campaigns ON campaigns.id = campaign_recipients.campaign_id").
+		Where("campaign_recipients.recipient_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?", id, false, true).
+		Distinct("campaign_recipients.campaign_id").
+		Count(&stats.TrainingsAssigned)
+
+	// get training campaigns the recipient completed
+	r.DB.Model(&database.CampaignEvent{}).
+		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
+		Where(
+			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
+			id,
+			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED],
+			false,
+			true,
+		).
+		Distinct("campaign_events.campaign_id").
+		Count(&stats.TrainingsCompleted)
 
 	// get unique tracking pixels loaded
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
 		Where(
-			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ?",
+			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
 			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ],
+			false,
 			false,
 		).
 		Distinct("campaign_events.campaign_id").
@@ -572,11 +595,12 @@ func (r *Recipient) GetStatsByID(
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
 		Where(
-			"campaign_events.recipient_id = ? AND campaign_events.event_id IN (?,?,?) AND campaigns.is_test = ?",
+			"campaign_events.recipient_id = ? AND campaign_events.event_id IN (?,?,?) AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
 			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED],
 			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED],
 			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED],
+			false,
 			false,
 		).
 		Distinct("campaign_events.campaign_id").
@@ -586,9 +610,10 @@ func (r *Recipient) GetStatsByID(
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
 		Where(
-			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ?",
+			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
 			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA],
+			false,
 			false,
 		).
 		Distinct("campaign_events.campaign_id").
@@ -598,9 +623,10 @@ func (r *Recipient) GetStatsByID(
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
 		Where(
-			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ?",
+			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
 			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED],
+			false,
 			false,
 		).
 		Distinct("campaign_events.campaign_id").
@@ -612,12 +638,13 @@ func (r *Recipient) GetStatsByID(
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
 		Select("COUNT(DISTINCT campaign_events.campaign_id)").
 		Where(
-			"campaign_events.recipient_id = ? AND campaign_events.event_id IN (?,?,?) AND campaign_events.created_at >= ? AND campaigns.is_test = ?",
+			"campaign_events.recipient_id = ? AND campaign_events.event_id IN (?,?,?) AND campaign_events.created_at >= ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
 			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED],
 			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED],
 			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED],
 			repeatOffenderTimeThreshold,
+			false,
 			false,
 		).
 		Scan(&linkClickCount)
@@ -635,10 +662,11 @@ func (r *Recipient) GetStatsByID(
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
 		Select("COUNT(DISTINCT campaign_events.campaign_id)").
 		Where(
-			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaign_events.created_at >= ? AND campaigns.is_test = ?",
+			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaign_events.created_at >= ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
 			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA],
 			repeatOffenderTimeThreshold,
+			false,
 			false,
 		).
 		Scan(&submitCount)

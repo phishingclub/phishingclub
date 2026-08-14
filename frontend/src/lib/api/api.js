@@ -1130,7 +1130,8 @@ export class API {
 			urlPath: urlPath,
 			lureURLMode,
 			lureCodeAlgo,
-			lureCodeLength
+			lureCodeLength,
+			isTraining
 		}) => {
 			return await postJSON(this.getPath('/campaign/template'), {
 				name: name,
@@ -1151,7 +1152,8 @@ export class API {
 				urlPath: urlPath,
 				lureURLMode: lureURLMode,
 				lureCodeAlgo: lureCodeAlgo,
-				lureCodeLength: lureCodeLength
+				lureCodeLength: lureCodeLength,
+				isTraining: isTraining
 			});
 		},
 
@@ -1201,7 +1203,8 @@ export class API {
 			urlPath: urlPath,
 			lureURLMode,
 			lureCodeAlgo,
-			lureCodeLength
+			lureCodeLength,
+			isTraining
 		}) => {
 			return await postJSON(this.getPath(`/campaign/template/${id}`), {
 				name: name,
@@ -1222,7 +1225,8 @@ export class API {
 				urlPath: urlPath,
 				lureURLMode: lureURLMode,
 				lureCodeAlgo: lureCodeAlgo,
-				lureCodeLength: lureCodeLength
+				lureCodeLength: lureCodeLength,
+				isTraining: isTraining
 			});
 		},
 

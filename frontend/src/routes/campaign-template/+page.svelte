@@ -33,6 +33,8 @@
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import { page } from '$app/stores';
 	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
+	import CheckboxField from '$lib/components/CheckboxField.svelte';
+	import TrainingLabel from '$lib/components/TrainingLabel.svelte';
 	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
 	import {
 		createTableSelection,
@@ -69,7 +71,8 @@
 		urlPath: '',
 		lureURLMode: 'query',
 		lureCodeAlgo: 'crockford32',
-		lureCodeLength: 12
+		lureCodeLength: 12,
+		isTraining: false
 	};
 
 	// codes are matched exactly, so the choice is about which glyphs appear and
@@ -412,6 +415,7 @@
 				lureURLMode: formValues.lureURLMode,
 				lureCodeAlgo: formValues.lureCodeAlgo,
 				lureCodeLength: clampLureCodeLength(formValues.lureCodeLength),
+				isTraining: formValues.isTraining,
 				companyID: contextCompanyID
 			});
 			if (!res.success) {
@@ -454,7 +458,8 @@
 				urlPath: formValues.urlPath || '',
 				lureURLMode: formValues.lureURLMode,
 				lureCodeAlgo: formValues.lureCodeAlgo,
-				lureCodeLength: clampLureCodeLength(formValues.lureCodeLength)
+				lureCodeLength: clampLureCodeLength(formValues.lureCodeLength),
+				isTraining: formValues.isTraining
 			});
 			if (!res.success) {
 				modalError = res.error;
@@ -516,7 +521,8 @@
 			urlPath: '',
 			lureURLMode: 'query',
 			lureCodeAlgo: 'crockford32',
-			lureCodeLength: 12
+			lureCodeLength: 12,
+			isTraining: false
 		};
 		modalError = '';
 		showAdvancedOptions = false;
@@ -632,6 +638,7 @@
 		formValues.lureURLMode = template.lureURLMode || 'query';
 		formValues.lureCodeAlgo = template.lureCodeAlgo || 'crockford32';
 		formValues.lureCodeLength = template.lureCodeLength || 12;
+		formValues.isTraining = !!template.isTraining;
 
 		// set advanced options visibility based on template configuration
 		showAdvancedOptions = !!(
@@ -712,7 +719,12 @@
 						title={template.name}
 						class="block w-full py-1 text-left"
 					>
-						{template.name}
+						<span class="flex items-center gap-2">
+							{#if template.isTraining}
+								<TrainingLabel />
+							{/if}
+							{template.name}
+						</span>
 					</button>
 				</TableCell>
 				<TableCell>
@@ -980,6 +992,14 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 							>
 						</div>
 					</div>
+					<CheckboxField
+						id="isTraining"
+						inline
+						bind:value={formValues.isTraining}
+						toolTipText="Tracks training events instead of phishing events."
+					>
+						Awareness training
+					</CheckboxField>
 				</div>
 
 				<!-- Delivery Configuration Section -->

@@ -43,7 +43,7 @@
 </script>
 
 <div
-	class="bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none border-l-[12px] {borderColor} hover:shadow-lg dark:hover:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
+	class="h-full bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none border-l-[12px] {borderColor} hover:shadow-lg dark:hover:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
 >
 	<div
 		class="text-grayblue-dark dark:text-gray-500 text-sm font-semibold transition-colors duration-200"

@@ -49,6 +49,8 @@ type Campaign struct {
 	IsAnonymous         nullable.Nullable[bool] `json:"isAnonymous"`
 	IsTest              nullable.Nullable[bool] `json:"isTest"`
 	Obfuscate           nullable.Nullable[bool] `json:"obfuscate"`
+	// IsTraining is snapshotted from the template; read-only in campaign requests.
+	IsTraining nullable.Nullable[bool] `json:"isTraining"`
 	// deprecated: use Webhooks array instead for multiple webhooks with per-webhook settings
 	WebhookIncludeData nullable.Nullable[string]    `json:"webhookIncludeData,omitempty"`
 	WebhookEvents      nullable.Nullable[int]       `json:"webhookEvents,omitempty"`
@@ -472,6 +474,12 @@ func (c *Campaign) ToDBMap() map[string]any {
 		m["data_anonymize_at"] = nil
 		if v, err := c.DataAnonymizeAt.Get(); err == nil {
 			m["data_anonymize_at"] = utils.RFC3339UTC(v)
+		}
+	}
+	if c.IsTraining.IsSpecified() {
+		m["is_training"] = false
+		if v, err := c.IsTraining.Get(); err == nil {
+			m["is_training"] = v
 		}
 	}
 	if c.SaveSubmittedData.IsSpecified() {

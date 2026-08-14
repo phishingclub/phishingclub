@@ -46,6 +46,7 @@
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TestLabel from '$lib/components/TestLabel.svelte';
+	import TrainingLabel from '$lib/components/TrainingLabel.svelte';
 	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
 	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
 	import {
@@ -169,6 +170,8 @@
 		'campaign_recipient_after_page_visited',
 		'campaign_recipient_evasion_page_visited',
 		'campaign_recipient_deny_page_visited',
+		'campaign_recipient_training_started',
+		'campaign_recipient_training_completed',
 		'campaign_closed'
 	];
 
@@ -183,7 +186,9 @@
 		campaign_recipient_before_page_visited: 'Before Page Visited',
 		campaign_recipient_page_visited: 'Page Visited',
 		campaign_recipient_after_page_visited: 'After Page Visited',
-		campaign_recipient_deny_page_visited: 'Deny Page Visited'
+		campaign_recipient_deny_page_visited: 'Deny Page Visited',
+		campaign_recipient_training_started: 'Training Started',
+		campaign_recipient_training_completed: 'Training Completed'
 	};
 
 	// create display options array with nice names
@@ -203,10 +208,12 @@
 		campaign_recipient_before_page_visited: 1 << 6, // 64
 		campaign_recipient_page_visited: 1 << 7, // 128
 		campaign_recipient_after_page_visited: 1 << 8, // 256
-		campaign_recipient_deny_page_visited: 1 << 9 // 512
+		campaign_recipient_deny_page_visited: 1 << 9, // 512
+		campaign_recipient_training_started: 1 << 10, // 1024
+		campaign_recipient_training_completed: 1 << 11 // 2048
 	};
 
-	const WEBHOOK_EVENT_ALL_BITS = 1023; // 2^10 - 1, all 10 events selected
+	const WEBHOOK_EVENT_ALL_BITS = 4095; // 2^12 - 1, all 12 events selected
 
 	// convert array of event names to bitwise int
 	// if all events are selected, return 0 to preserve the "all events" semantic
@@ -1612,6 +1619,9 @@
 				<TableCellLink href={`/campaign/${campaign.id}`} title={campaign.name}>
 					{#if campaign.isTest}
 						<TestLabel />
+					{/if}
+					{#if campaign.isTraining}
+						<TrainingLabel />
 					{/if}
 					{campaign.name}
 				</TableCellLink>

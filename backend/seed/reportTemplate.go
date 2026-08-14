@@ -10,14 +10,22 @@ import (
 	"gorm.io/gorm"
 )
 
-// SeedReportTemplate inserts the default global report template if none exists.
-// The seeded template can be freely edited through the UI; this only runs when
-// no global template (company_id IS NULL) is present in the database.
+// SeedReportTemplate inserts the default global report templates if they are
+// missing. There is one global template per kind (phishing and awareness
+// training); each is seeded independently and only when absent, so a template
+// already edited through the UI is never overwritten.
 func SeedReportTemplate(db *gorm.DB) error {
+	if err := seedGlobalReportTemplate(db, false, embedded.DefaultReportHTML); err != nil {
+		return err
+	}
+	return seedGlobalReportTemplate(db, true, embedded.DefaultTrainingReportHTML)
+}
+
+func seedGlobalReportTemplate(db *gorm.DB, isTraining bool, content string) error {
 	var count int64
 	res := db.
 		Model(&database.ReportTemplate{}).
-		Where("company_id IS NULL").
+		Where("company_id IS NULL AND is_training = ?", isTraining).
 		Count(&count)
 	if res.Error != nil {
 		return errs.Wrap(res.Error)
@@ -29,10 +37,11 @@ func SeedReportTemplate(db *gorm.DB) error {
 	id := uuid.New()
 	now := time.Now().UTC()
 	row := &database.ReportTemplate{
-		ID:        &id,
-		CreatedAt: &now,
-		UpdatedAt: &now,
-		Content:   embedded.DefaultReportHTML,
+		ID:         &id,
+		CreatedAt:  &now,
+		UpdatedAt:  &now,
+		Content:    content,
+		IsTraining: isTraining,
 		// CompanyID intentionally nil → global template
 	}
 	res = db.Create(row)

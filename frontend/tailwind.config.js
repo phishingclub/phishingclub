@@ -44,6 +44,8 @@ export default {
 				'deny-page-visited': '#ff6b35',
 				'submitted-data': '#f42e41',
 				reported: '#2c3e50',
+				'training-started': '#5b93e6',
+				'training-completed': '#2fa968',
 				'completed-campaign': '#48bb78',
 				'repeat-offenders': '#ff6768',
 				'emails-read': '#e8e810',

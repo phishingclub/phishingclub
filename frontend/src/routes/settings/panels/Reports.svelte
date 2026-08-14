@@ -30,6 +30,9 @@
 	let reportTemplateID = null;
 	let reportTemplateError = '';
 	let isReportTemplateSubmitting = false;
+	// the phishing and training reports are separate templates; edit one at a time
+	let reportRows = [];
+	let reportKind = 'phishing'; // 'phishing' | 'training'
 
 	onMount(async () => {
 		try {
@@ -90,21 +93,36 @@
 	const openReportTemplateModal = async () => {
 		try {
 			showIsLoading();
-			reportTemplateContent = '';
-			reportTemplateID = null;
 			reportTemplateError = '';
+			reportKind = 'phishing';
 			const response = await api.reportTemplate.getAll(null);
-			if (response.success && response.data?.rows?.length > 0) {
-				const tmpl = response.data.rows[0];
-				reportTemplateContent = tmpl.content || '';
-				reportTemplateID = tmpl.id || null;
-			}
+			reportRows = response.success ? response.data?.rows || [] : [];
+			selectReportKind('phishing');
 		} catch (error) {
 			console.error('Failed to load report template:', error);
 			reportTemplateError = 'Failed to load template';
 		} finally {
 			hideIsLoading();
 			isReportTemplateModalVisible = true;
+		}
+	};
+
+	// loads the cached template row for the selected kind into the editor
+	const selectReportKind = (kind) => {
+		reportKind = kind;
+		reportTemplateError = '';
+		const row = reportRows.find((r) => !!r.isTraining === (kind === 'training'));
+		reportTemplateContent = row?.content || '';
+		reportTemplateID = row?.id || null;
+	};
+
+	// re-fetch the templates after a save so the active kind keeps its id
+	const refreshReportRows = async () => {
+		const response = await api.reportTemplate.getAll(null);
+		reportRows = response.success ? response.data?.rows || [] : [];
+		const row = reportRows.find((r) => !!r.isTraining === (reportKind === 'training'));
+		if (row?.id) {
+			reportTemplateID = row.id;
 		}
 	};
 
@@ -124,12 +142,16 @@
 					content: reportTemplateContent
 				});
 			} else {
-				response = await api.reportTemplate.create({ content: reportTemplateContent });
+				response = await api.reportTemplate.create({
+					content: reportTemplateContent,
+					isTraining: reportKind === 'training'
+				});
 				if (response.success && response.data?.id) {
 					reportTemplateID = response.data.id;
 				}
 			}
 			if (response.success) {
+				await refreshReportRows();
 				addToast('Report template saved', 'Success');
 				if (!saveOnly) {
 					isReportTemplateModalVisible = false;
@@ -219,6 +241,31 @@
 			<div
 				class="w-80vw col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 			>
+				<div class="flex items-center gap-2 mb-4">
+					<span class="text-sm font-semibold text-gray-600 dark:text-gray-300">Report for</span>
+					<div
+						class="flex items-center rounded overflow-hidden border border-gray-300 dark:border-gray-600 text-sm"
+					>
+						<button
+							type="button"
+							class="px-3 py-1 transition-colors duration-200 {reportKind === 'phishing'
+								? 'bg-cta-blue text-white'
+								: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+							on:click={() => selectReportKind('phishing')}
+						>
+							Phishing
+						</button>
+						<button
+							type="button"
+							class="px-3 py-1 transition-colors duration-200 {reportKind === 'training'
+								? 'bg-training-completed text-white'
+								: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+							on:click={() => selectReportKind('training')}
+						>
+							Training
+						</button>
+					</div>
+				</div>
 				<Editor contentType="report" bind:value={reportTemplateContent} />
 				<FormError message={reportTemplateError} />
 			</div>

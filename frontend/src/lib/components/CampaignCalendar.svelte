@@ -497,7 +497,8 @@
 			? `${formatDateString(new Date(campaign.createdAt))} - ?`
 			: `${formatDateString(campaign.start)} - ${formatDateString(campaign.end)}`;
 
-		let tooltip = `${campaign.name} - ${status}, ${dateRange}`;
+		const kind = campaign.isTraining ? 'Training - ' : '';
+		let tooltip = `${campaign.name} - ${kind}${status}, ${dateRange}`;
 
 		if (showCompany && campaign.company?.name) {
 			tooltip = `[${campaign.company.name}] ${tooltip}`;
@@ -685,6 +686,19 @@
 							</span>
 						</button>
 					{/each}
+					<span class="flex items-center text-xs text-gray-700 dark:text-gray-300">
+						<svg
+							class="h-3.5 w-3.5 mr-1 text-training-completed"
+							xmlns="http://www.w3.org/2000/svg"
+							viewBox="0 0 24 24"
+							fill="currentColor"
+						>
+							<path
+								d="M11.7 2.805a.75.75 0 0 1 .6 0A60.65 60.65 0 0 1 22.83 8.72a.75.75 0 0 1-.231 1.337 49.948 49.948 0 0 0-9.902 3.912l-.003.002c-.114.06-.227.119-.34.18a.75.75 0 0 1-.707 0A50.88 50.88 0 0 0 7.5 12.173v-.224c0-.131.067-.248.172-.311a54.6 54.6 0 0 1 4.653-2.52.75.75 0 0 0-.65-1.352 56.1 56.1 0 0 0-4.78 2.589 1.858 1.858 0 0 0-.859 1.228 49.8 49.8 0 0 0-4.634-1.527.75.75 0 0 1-.231-1.337A60.65 60.65 0 0 1 11.7 2.805Z"
+							/>
+						</svg>
+						Training
+					</span>
 				</div>
 			</div>
 
@@ -832,9 +846,22 @@
 													</div>
 												{/if}
 												<div
-													class="campaign-name truncate text-[10px] sm:text-xs leading-snug font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100"
+													class="campaign-name flex items-center gap-1 truncate text-[10px] sm:text-xs leading-snug font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100"
 												>
-													{truncateText(campaign.name, 24)}
+													{#if campaign.isTraining}
+														<svg
+															class="flex-shrink-0 h-3 w-3 text-training-completed"
+															xmlns="http://www.w3.org/2000/svg"
+															viewBox="0 0 24 24"
+															fill="currentColor"
+															aria-label="Training"
+														>
+															<path
+																d="M11.7 2.805a.75.75 0 0 1 .6 0A60.65 60.65 0 0 1 22.83 8.72a.75.75 0 0 1-.231 1.337 49.948 49.948 0 0 0-9.902 3.912l-.003.002c-.114.06-.227.119-.34.18a.75.75 0 0 1-.707 0A50.88 50.88 0 0 0 7.5 12.173v-.224c0-.131.067-.248.172-.311a54.6 54.6 0 0 1 4.653-2.52.75.75 0 0 0-.65-1.352 56.1 56.1 0 0 0-4.78 2.589 1.858 1.858 0 0 0-.859 1.228 49.8 49.8 0 0 0-4.634-1.527.75.75 0 0 1-.231-1.337A60.65 60.65 0 0 1 11.7 2.805Z"
+															/>
+														</svg>
+													{/if}
+													<span class="truncate">{truncateText(campaign.name, 24)}</span>
 												</div>
 											</div>
 										</a>

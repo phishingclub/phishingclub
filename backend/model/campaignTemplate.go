@@ -76,6 +76,8 @@ type CampaignTemplate struct {
 	Company   *Company                     `json:"company"`
 
 	IsUsable nullable.Nullable[bool] `json:"isUsable"`
+
+	IsTraining nullable.Nullable[bool] `json:"isTraining"`
 }
 
 // Validate checks if the campaign template has a valid state
@@ -148,6 +150,15 @@ func (c *CampaignTemplate) Validate() error {
 		return errs.NewValidationError(
 			errors.New("after landing page cannot be both a page and a proxy"),
 		)
+	}
+	// the after landing page is what marks a training as completed, without it
+	// there is nothing to record completion on
+	if v, err := c.IsTraining.Get(); err == nil && v {
+		if errAfterPage != nil && errAfterProxy != nil {
+			return errs.NewValidationError(
+				errors.New("after landing page is required for awareness training"),
+			)
+		}
 	}
 
 	// validate that smtp configuration and api sender are mutually exclusive
@@ -302,6 +313,13 @@ func (c *CampaignTemplate) ToDBMap() map[string]any {
 		m["lure_code_length"] = lure.DefaultLength
 		if v, err := c.LureCodeLength.Get(); err == nil && v >= lure.MinLength && v <= lure.MaxLength {
 			m["lure_code_length"] = v
+		}
+	}
+
+	if c.IsTraining.IsSpecified() {
+		m["is_training"] = false
+		if v, err := c.IsTraining.Get(); err == nil {
+			m["is_training"] = v
 		}
 	}
 
