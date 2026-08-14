@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/database"
+	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
@@ -17,11 +18,18 @@ type OAuthProvider struct {
 	DB *gorm.DB
 }
 
+// oauthProviderAllowedColumns are the columns allowed for ordering and searching,
+// tied to OAuthProviderColumnsMap in the controller package
+var oauthProviderAllowedColumns = assignTableToColumns(database.OAUTH_PROVIDER_TABLE, []string{
+	"created_at",
+	"updated_at",
+	"name",
+	"is_authorized",
+})
+
 // OAuthProviderOption is the option for getting oauth providers
 type OAuthProviderOption struct {
-	Limit  *int
-	Offset *int
-	Search *string
+	*vo.QueryArgs
 }
 
 // Insert inserts a new oauth provider
@@ -46,55 +54,38 @@ func (o *OAuthProvider) GetAll(
 	companyID *uuid.UUID,
 	option *OAuthProviderOption,
 ) (*model.Result[model.OAuthProvider], error) {
-	var dbProviders []database.OAuthProvider
-	var totalCount int64
-
-	query := o.DB.WithContext(ctx).Table("oauth_providers")
-
-	if companyID != nil {
-		query = query.Where("company_id = ? OR company_id IS NULL", companyID)
-	} else {
-		query = query.Where("company_id IS NULL")
+	result := model.NewEmptyResult[model.OAuthProvider]()
+	db := o.DB.WithContext(ctx).Table(database.OAUTH_PROVIDER_TABLE)
+	db = withCompanyIncludingNullContext(db, companyID, database.OAUTH_PROVIDER_TABLE)
+	db, err := useQuery(
+		db,
+		database.OAUTH_PROVIDER_TABLE,
+		option.QueryArgs,
+		oauthProviderAllowedColumns...,
+	)
+	if err != nil {
+		return result, errs.Wrap(err)
+	}
+	dbProviders := []database.OAuthProvider{}
+	if err := db.Find(&dbProviders).Error; err != nil {
+		return result, err
 	}
 
-	if option.Search != nil && *option.Search != "" {
-		search := "%" + *option.Search + "%"
-		query = query.Where("name ILIKE ?", search)
+	hasNextPage, err := useHasNextPage(
+		db,
+		database.OAUTH_PROVIDER_TABLE,
+		option.QueryArgs,
+		oauthProviderAllowedColumns...,
+	)
+	if err != nil {
+		return result, errs.Wrap(err)
 	}
+	result.HasNextPage = hasNextPage
 
-	if err := query.Count(&totalCount).Error; err != nil {
-		return nil, err
-	}
-
-	query = query.Order("created_at DESC")
-
-	if option.Limit != nil {
-		query = query.Limit(*option.Limit)
-	}
-
-	if option.Offset != nil {
-		query = query.Offset(*option.Offset)
-	}
-
-	if err := query.Find(&dbProviders).Error; err != nil {
-		return nil, err
-	}
-
-	// convert database types to model types
-	providers := make([]*model.OAuthProvider, len(dbProviders))
 	for i := range dbProviders {
-		providers[i] = ToOAuthProvider(&dbProviders[i])
+		result.Rows = append(result.Rows, ToOAuthProvider(&dbProviders[i]))
 	}
-
-	hasNextPage := false
-	if option.Limit != nil && option.Offset != nil {
-		hasNextPage = int64(*option.Offset+*option.Limit) < totalCount
-	}
-
-	return &model.Result[model.OAuthProvider]{
-		Rows:        providers,
-		HasNextPage: hasNextPage,
-	}, nil
+	return result, nil
 }
 
 // GetByID gets an oauth provider by id
