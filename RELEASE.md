@@ -1,7 +1,16 @@
 # Changelog
 
+## [1.41.0] - 2026-08-16
+- Added awareness training campaigns with completion tracking and dedicated reports
+- Added URL path identifier support for campaigns
+- Added set custom lure for recipient
+- Added variable support for specific landing pages
+- Improved table loading UX
+- Update internal GEO ip database
+- Fix referrer leak in links to phishing.club
+
 ## [1.40.1] - 2026-07-26
-- fix broken arm64 image 
+- Fix broken arm64 image 
 
 ## [1.40.0] - 2026-07-24
 - Added recipient report endpoint and ReportURL variable 
