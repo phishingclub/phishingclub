@@ -130,12 +130,6 @@ mailer-logs:
 mailer-restart:
 	sudo docker compose restart mailer
 
-# stats
-stats-logs:
-	sudo docker compose logs -f --tail 1000 stats
-stats-restart:
-	sudo docker compose restart stats
-
 # mitmproxy
 mitmproxy-logs:
 	sudo docker compose logs -f --tail 1000 mitmproxy
