@@ -1,11 +1,16 @@
+# sudo only if docker needs it on this host
+NEEDS_SUDO := $(shell docker info >/dev/null 2>&1 || { [ "$$(uname)" = "Linux" ] && echo sudo; })
+DOCKER := $(NEEDS_SUDO) docker
+SUDO := $(NEEDS_SUDO)
+
 .PHONY: build down up up-low-mem fix-tls backend-purge backend-down purge logs backend-password dbgate-down dbgate-up geoip-fetch govulncheck test-proxy test-proxy-fast test-lure test-lure-fast
 up:
-	sudo docker compose up -d backend frontend api-test-server pebble dbgate mailer dns test mitmproxy; \
-	sudo docker compose logs -f --tail 1000 backend frontend;
+	$(DOCKER) compose up -d backend frontend api-test-server pebble dbgate mailer dns test mitmproxy; \
+	$(DOCKER) compose logs -f --tail 1000 backend frontend;
 down:
-	-sudo docker compose down --remove-orphans
+	-$(DOCKER) compose down --remove-orphans
 up-build:
-	sudo docker compose up --build --force
+	$(DOCKER) compose up --build --force
 # build a single, self contained binary with the frontend embedded -> build/phishingclub
 # override arch: make build BIN_ARCH=arm64 ; override version: make build VERSION=1.2.3
 build:
@@ -13,151 +18,151 @@ build:
 # same as up but for machines with limited memory, the frontend waits for the backend
 # build to finish so the two heavy first build steps do not run at the same time
 up-low-mem:
-	sudo docker compose -f docker-compose.yml -f docker-compose.low-mem.yml up -d backend frontend api-test-server pebble dbgate mailer dns test mitmproxy; \
-	sudo docker compose -f docker-compose.yml -f docker-compose.low-mem.yml logs -f --tail 1000 backend frontend;
+	$(DOCKER) compose -f docker-compose.yml -f docker-compose.low-mem.yml up -d backend frontend api-test-server pebble dbgate mailer dns test mitmproxy; \
+	$(DOCKER) compose -f docker-compose.yml -f docker-compose.low-mem.yml logs -f --tail 1000 backend frontend;
 up-reset: down purge up
 restart: down up
 prune:
-	sudo docker system prune -a
+	$(DOCKER) system prune -a
 docker-reset: down up
 ps:
-	sudo docker compose ps
+	$(DOCKER) compose ps
 logs:
-	sudo docker compose logs -f --tail 1000 backend frontend
+	$(DOCKER) compose logs -f --tail 1000 backend frontend
 logs-all:
-	sudo docker compose logs -f
+	$(DOCKER) compose logs -f
 purge:
-	sudo rm -rf ./backend/.dev/*
+	$(SUDO) rm -rf ./backend/.dev/*
 fix-tls:
-	sudo docker compose exec backend bash -c "rm -rf /app/certs/acme/*"
-	sudo rm -rf ./backend/certs/acme/*
+	$(DOCKER) compose exec backend bash -c "rm -rf /app/certs/acme/*"
+	$(SUDO) rm -rf ./backend/certs/acme/*
 
 # backend
 backend-restart:
-	sudo docker compose stop backend; \
-	sudo docker compose up -d backend; \
-	sudo docker compose logs -f --tail 1000 backend;
+	$(DOCKER) compose stop backend; \
+	$(DOCKER) compose up -d backend; \
+	$(DOCKER) compose logs -f --tail 1000 backend;
 backend:
-	sudo docker compose up -d; \
-	sudo docker compose logs -f --tail 1000 backend;
+	$(DOCKER) compose up -d; \
+	$(DOCKER) compose logs -f --tail 1000 backend;
 backend-clear-certs:
-	sudo docker compose exec backend rm -rf /app/certs/acme
+	$(DOCKER) compose exec backend rm -rf /app/certs/acme
 backend-attach:
-	sudo docker compose exec backend bash
+	$(DOCKER) compose exec backend bash
 backend-logs:
-	sudo docker compose logs -f --tail 1000 backend
+	$(DOCKER) compose logs -f --tail 1000 backend
 backend-build:
-	sudo docker compose build backend
+	$(DOCKER) compose build backend
 backend-down:
-	sudo docker compose down backend;
+	$(DOCKER) compose down backend;
 backend-up:
-	sudo docker compose up backend -d;
+	$(DOCKER) compose up backend -d;
 backend-reset:
-	-sudo docker compose stop backend; \
-	sudo docker compose rm -force -v backend; \
-	sudo docker compose up -d backend; \
-	sudo docker compose logs -f --tail 1000 backend;
+	-$(DOCKER) compose stop backend; \
+	$(DOCKER) compose rm -force -v backend; \
+	$(DOCKER) compose up -d backend; \
+	$(DOCKER) compose logs -f --tail 1000 backend;
 backend-db-reset:
-	sudo docker compose stop dbgate; \
-	sudo rm -f ./backend/.dev/db.sqlite3; \
-	sudo docker compose exec backend bash -c "rm -rf /app/.dev/db.sqlite3";
-	sudo docker compose stop backend; \
-	sudo rm -rf ./backend/.dev/*
+	$(DOCKER) compose stop dbgate; \
+	$(SUDO) rm -f ./backend/.dev/db.sqlite3; \
+	$(DOCKER) compose exec backend bash -c "rm -rf /app/.dev/db.sqlite3";
+	$(DOCKER) compose stop backend; \
+	$(SUDO) rm -rf ./backend/.dev/*
 	touch -c ./backend/.dev/db.sqlite3; \
-	sudo docker compose start dbgate; \
-	sudo docker compose up -d backend;
+	$(DOCKER) compose start dbgate; \
+	$(DOCKER) compose up -d backend;
 backend-password:
-	@echo "Finding password"; sudo docker compose logs backend | grep -F "Password:" | tail -n 1
+	@echo "Finding password"; $(DOCKER) compose logs backend | grep -F "Password:" | tail -n 1
 backend-recover-password:
-	sudo docker compose exec -it backend sh -c "cd /app/.dev-air; ./phishingclub -files /app/.dev -config /app/config.docker.json -recover"
+	$(DOCKER) compose exec -it backend sh -c "cd /app/.dev-air; ./phishingclub -files /app/.dev -config /app/config.docker.json -recover"
 
 # frontend
 frontend:
-	sudo docker compose up -d; \
-	sudo docker compose logs -f --tail 1000 frontend;
+	$(DOCKER) compose up -d; \
+	$(DOCKER) compose logs -f --tail 1000 frontend;
 frontend-build:
-	-sudo docker compose stop frontend; \
-	sudo docker compose rm --force -v frontend; \
-	sudo docker compose up -d frontend;
+	-$(DOCKER) compose stop frontend; \
+	$(DOCKER) compose rm --force -v frontend; \
+	$(DOCKER) compose up -d frontend;
 frontend-restart:
-	sudo docker compose restart frontend
+	$(DOCKER) compose restart frontend
 frontend-attach:
-	sudo docker compose exec frontend bash
+	$(DOCKER) compose exec frontend bash
 frontend-logs:
-	sudo docker compose logs -f --tail 1000 frontend
+	$(DOCKER) compose logs -f --tail 1000 frontend
 
 # dbgate
 dbgate-restart:
-	sudo docker compose restart dbgate;
+	$(DOCKER) compose restart dbgate;
 dbgate-up:
-	sudo docker compose start dbgate;
+	$(DOCKER) compose start dbgate;
 dbgate-down:
-	sudo docker compose stopdbgate;
+	$(DOCKER) compose stopdbgate;
 
 # pebble
 pebble-attach:
-	sudo docker compose exec pebble sh
+	$(DOCKER) compose exec pebble sh
 
 # dns
 dns-attach:
-	sudo docker compose exec dns sh
+	$(DOCKER) compose exec dns sh
 dns-logs:
-	sudo docker compose logs -f --tail 1000 dns
+	$(DOCKER) compose logs -f --tail 1000 dns
 dns-restart:
-	sudo docker compose restart dns
+	$(DOCKER) compose restart dns
 dns-rebuild:
-	sudo docker compose stop dns; \
-	sudo docker compose rm -force -v dns; \
-	sudo docker compose up -d dns; \
-	sudo docker compose logs -f --tail 1000 dns;
+	$(DOCKER) compose stop dns; \
+	$(DOCKER) compose rm -force -v dns; \
+	$(DOCKER) compose up -d dns; \
+	$(DOCKER) compose logs -f --tail 1000 dns;
 
 # api-test-server
 api-test-server-build:
-	sudo docker compose build api-test-server
-	sudo docker compose up -d api-test-server
+	$(DOCKER) compose build api-test-server
+	$(DOCKER) compose up -d api-test-server
 api-test-server-logs:
-	sudo docker compose logs -f --tail 1000 api-test-server
+	$(DOCKER) compose logs -f --tail 1000 api-test-server
 api-test-server-restart:
-	sudo docker compose restart api-test-server
+	$(DOCKER) compose restart api-test-server
 
 # utils
 utils-attach:
-	sudo docker compose exec test /bin/bash
+	$(DOCKER) compose exec test /bin/bash
 
 # mailer
 mailer-logs:
-	sudo docker compose logs -f --tail 1000 mailer
+	$(DOCKER) compose logs -f --tail 1000 mailer
 mailer-restart:
-	sudo docker compose restart mailer
+	$(DOCKER) compose restart mailer
 
 # mitmproxy
 mitmproxy-logs:
-	sudo docker compose logs -f --tail 1000 mitmproxy
+	$(DOCKER) compose logs -f --tail 1000 mitmproxy
 mitmproxy-restart:
-	sudo docker compose restart mitmproxy
+	$(DOCKER) compose restart mitmproxy
 mitmproxy-up:
-	sudo docker compose up -d mitmproxy
+	$(DOCKER) compose up -d mitmproxy
 mitmproxy-down:
-	sudo docker compose stop mitmproxy
+	$(DOCKER) compose stop mitmproxy
 mitmproxy-attach:
-	sudo docker compose exec mitmproxy sh
+	$(DOCKER) compose exec mitmproxy sh
 mitmproxy-reset:
-	sudo docker compose stop mitmproxy; \
-	sudo docker compose rm -f mitmproxy; \
-	sudo docker compose up -d mitmproxy; \
-	sudo docker compose logs -f --tail 1000 mitmproxy;
+	$(DOCKER) compose stop mitmproxy; \
+	$(DOCKER) compose rm -f mitmproxy; \
+	$(DOCKER) compose up -d mitmproxy; \
+	$(DOCKER) compose logs -f --tail 1000 mitmproxy;
 mitmproxy-token:
-	sudo docker compose logs mitmproxy | grep -i "web server listening" | tail -1 || echo "Token not found - try: make mitmproxy-logs"
+	$(DOCKER) compose logs mitmproxy | grep -i "web server listening" | tail -1 || echo "Token not found - try: make mitmproxy-logs"
 mitmproxy-password:
-	@echo "Latest mitmproxy password/token:"; sudo docker compose logs mitmproxy | grep -oE "token=[a-zA-Z0-9]+" | tail -1 | cut -d= -f2 || echo "Password not found - make sure mitmproxy is running"
+	@echo "Latest mitmproxy password/token:"; $(DOCKER) compose logs mitmproxy | grep -oE "token=[a-zA-Z0-9]+" | tail -1 | cut -d= -f2 || echo "Password not found - make sure mitmproxy is running"
 mitmproxy-url:
-	@echo "mitmproxy web interface URL:"; sudo docker compose logs mitmproxy | grep -oE "http://0\.0\.0\.0:8080/\?token=[a-zA-Z0-9]+" | tail -1 | sed 's/0\.0\.0\.0:8080/localhost:8105/' || echo "URL not found - make sure mitmproxy is running"
+	@echo "mitmproxy web interface URL:"; $(DOCKER) compose logs mitmproxy | grep -oE "http://0\.0\.0\.0:8080/\?token=[a-zA-Z0-9]+" | tail -1 | sed 's/0\.0\.0\.0:8080/localhost:8105/' || echo "URL not found - make sure mitmproxy is running"
 mitmproxy-purge:
-	sudo docker compose stop mitmproxy; \
-	sudo docker compose rm -f mitmproxy; \
-	sudo docker volume rm -f phishingclub_mitmproxy_data; \
-	sudo docker compose up -d mitmproxy; \
-	sudo docker compose logs -f --tail 1000 mitmproxy;
+	$(DOCKER) compose stop mitmproxy; \
+	$(DOCKER) compose rm -f mitmproxy; \
+	$(DOCKER) volume rm -f phishingclub_mitmproxy_data; \
+	$(DOCKER) compose up -d mitmproxy; \
+	$(DOCKER) compose logs -f --tail 1000 mitmproxy;
 
 # geoip
 geoip-fetch:
@@ -171,7 +176,7 @@ geoip-fetch:
 # compile. the first run also pulls golang:1.25.10 and can take a few minutes;
 # go test prints nothing until the build finishes, so silence is expected.
 test-proxy:
-	sudo docker run --rm \
+	$(DOCKER) run --rm \
 		-e GOCACHE=/gocache \
 		-v $(CURDIR)/backend:/app \
 		-v phishingclub_gocache:/gocache \
@@ -182,12 +187,12 @@ test-proxy:
 # same tests but inside the already running backend container, which has a warm
 # build cache. much faster, but requires the dev stack to be up (make up)
 test-proxy-fast:
-	sudo docker compose exec -w /app backend go test ./proxy/... -v
+	$(DOCKER) compose exec -w /app backend go test ./proxy/... -v
 
 # lure URL code generation and the path segment helpers the request resolver
 # uses. same standalone container approach as test-proxy above.
 test-lure:
-	sudo docker run --rm \
+	$(DOCKER) run --rm \
 		-e GOCACHE=/gocache \
 		-v $(CURDIR)/backend:/app \
 		-v phishingclub_gocache:/gocache \
@@ -197,11 +202,11 @@ test-lure:
 
 # same tests inside the already running backend container
 test-lure-fast:
-	sudo docker compose exec -w /app backend go test ./lure/... ./server/... -v
+	$(DOCKER) compose exec -w /app backend go test ./lure/... ./server/... -v
 
 # security
 govulncheck:
-	sudo docker run --rm \
+	$(DOCKER) run --rm \
 		-v $(CURDIR)/backend:/app \
 		-w /app \
 		golang:1.25.10 \
