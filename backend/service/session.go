@@ -204,6 +204,13 @@ func (s *Session) Create(
 		s.Logger.Errorw("failed to get session after creating it", "error", err)
 		return nil, errs.Wrap(err)
 	}
+	// a session is only created after all login checks have passed,
+	// including MFA and SSO, so this event marks a fully completed login
+	ae := NewAuditEvent("User.Login", createdSession)
+	if username, err := user.Username.Get(); err == nil {
+		ae.Details["username"] = username.String()
+	}
+	s.AuditLogAuthorized(ae)
 	return createdSession, nil
 }
 
