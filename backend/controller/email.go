@@ -18,7 +18,7 @@ import (
 // this is tied to a slice in the repository package
 var EmailOrderByMap = map[string]string{
 	"created_at":     repository.TableColumn(database.EMAIL_TABLE, "created_at"),
-	"updated_at":     repository.TableColumn(database.EMAIL_TABLE, "created_at"),
+	"updated_at":     repository.TableColumn(database.EMAIL_TABLE, "updated_at"),
 	"name":           repository.TableColumn(database.EMAIL_TABLE, "name"),
 	"mail_from":      repository.TableColumn(database.EMAIL_TABLE, "mail_from"),
 	"from":           repository.TableColumn(database.EMAIL_TABLE, "from"),
