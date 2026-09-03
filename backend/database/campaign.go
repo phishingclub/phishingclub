@@ -55,9 +55,11 @@ type Campaign struct {
 	ConstraintEndTime   *string `gorm:"index;"`
 	SaveSubmittedData   bool    `gorm:"not null;default:false"`
 	SaveBrowserMetadata bool    `gorm:"not null;default:false"`
-	IsAnonymous         bool    `gorm:"not null;default:false"`
-	IsTest              bool    `gorm:"not null;default:false"`
-	Obfuscate           bool    `gorm:"not null;default:false"`
+	// IsAnonymous is reserved for a campaign mode that records events without
+	// a recipient relation. nothing reads it and the model rejects true.
+	IsAnonymous bool `gorm:"not null;default:false"`
+	IsTest      bool `gorm:"not null;default:false"`
+	Obfuscate   bool `gorm:"not null;default:false"`
 
 	// deprecated: webhook settings moved to campaign_webhooks junction table
 	// kept for backward compatibility during migration

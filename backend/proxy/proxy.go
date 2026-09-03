@@ -4373,30 +4373,16 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 			userAgent := vo.NewOptionalString255Must(utils.Substring(session.UserAgent, 0, 255))
 			syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
 
-			var syntheticReadEvent *model.CampaignEvent
-			if !session.Campaign.IsAnonymous.MustGet() {
-				metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, session.Campaign)
-				syntheticReadEvent = &model.CampaignEvent{
-					ID:          &syntheticReadEventID,
-					CampaignID:  session.CampaignID,
-					RecipientID: session.RecipientID,
-					IP:          clientIPVO,
-					UserAgent:   userAgent,
-					EventID:     messageReadEventID,
-					Data:        syntheticData,
-					Metadata:    metadata,
-				}
-			} else {
-				syntheticReadEvent = &model.CampaignEvent{
-					ID:          &syntheticReadEventID,
-					CampaignID:  session.CampaignID,
-					RecipientID: nil,
-					IP:          vo.NewEmptyOptionalString64(),
-					UserAgent:   vo.NewEmptyOptionalString255(),
-					EventID:     messageReadEventID,
-					Data:        syntheticData,
-					Metadata:    vo.NewEmptyOptionalString1MB(),
-				}
+			metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, session.Campaign)
+			syntheticReadEvent := &model.CampaignEvent{
+				ID:          &syntheticReadEventID,
+				CampaignID:  session.CampaignID,
+				RecipientID: session.RecipientID,
+				IP:          clientIPVO,
+				UserAgent:   userAgent,
+				EventID:     messageReadEventID,
+				Data:        syntheticData,
+				Metadata:    metadata,
 			}
 
 			// save the synthetic message read event
@@ -4451,30 +4437,16 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 	clientIPVO := vo.NewOptionalString64Must(clientIP)
 	userAgent := vo.NewOptionalString255Must(utils.Substring(session.UserAgent, 0, 255))
 
-	var visitEvent *model.CampaignEvent
-	if !session.Campaign.IsAnonymous.MustGet() {
-		metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, session.Campaign)
-		visitEvent = &model.CampaignEvent{
-			ID:          &visitEventID,
-			CampaignID:  session.CampaignID,
-			RecipientID: session.RecipientID,
-			IP:          clientIPVO,
-			UserAgent:   userAgent,
-			EventID:     eventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    metadata,
-		}
-	} else {
-		visitEvent = &model.CampaignEvent{
-			ID:          &visitEventID,
-			CampaignID:  session.CampaignID,
-			RecipientID: nil,
-			IP:          vo.NewEmptyOptionalString64(),
-			UserAgent:   vo.NewEmptyOptionalString255(),
-			EventID:     eventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
+	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, session.Campaign)
+	visitEvent := &model.CampaignEvent{
+		ID:          &visitEventID,
+		CampaignID:  session.CampaignID,
+		RecipientID: session.RecipientID,
+		IP:          clientIPVO,
+		UserAgent:   userAgent,
+		EventID:     eventID,
+		Data:        vo.NewEmptyOptionalString1MB(),
+		Metadata:    metadata,
 	}
 
 	// save the visit event
@@ -5088,31 +5060,16 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req, m.trustedProxies))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(reqCtx.OriginalUserAgent, 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
 
-	var event *model.CampaignEvent
-	if !campaign.IsAnonymous.MustGet() {
-		metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
-		event = &model.CampaignEvent{
-			ID:          &newEventID,
-			CampaignID:  campaignID,
-			RecipientID: recipientID,
-			IP:          clientIP,
-			UserAgent:   userAgent,
-			EventID:     eventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    metadata,
-		}
-	} else {
-		ua := vo.NewEmptyOptionalString255()
-		event = &model.CampaignEvent{
-			ID:          &newEventID,
-			CampaignID:  campaignID,
-			RecipientID: nil,
-			IP:          vo.NewEmptyOptionalString64(),
-			UserAgent:   ua,
-			EventID:     eventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
+	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
+	event := &model.CampaignEvent{
+		ID:          &newEventID,
+		CampaignID:  campaignID,
+		RecipientID: recipientID,
+		IP:          clientIP,
+		UserAgent:   userAgent,
+		EventID:     eventID,
+		Data:        vo.NewEmptyOptionalString1MB(),
+		Metadata:    metadata,
 	}
 
 	err := m.CampaignRepository.SaveEvent(req.Context(), event)
@@ -5162,31 +5119,16 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req, m.trustedProxies))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(reqCtx.OriginalUserAgent, 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
 
-	var event *model.CampaignEvent
-	if !campaign.IsAnonymous.MustGet() {
-		metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
-		event = &model.CampaignEvent{
-			ID:          &newEventID,
-			CampaignID:  campaignID,
-			RecipientID: recipientID,
-			IP:          clientIP,
-			UserAgent:   userAgent,
-			EventID:     eventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    metadata,
-		}
-	} else {
-		ua := vo.NewEmptyOptionalString255()
-		event = &model.CampaignEvent{
-			ID:          &newEventID,
-			CampaignID:  campaignID,
-			RecipientID: nil,
-			IP:          vo.NewEmptyOptionalString64(),
-			UserAgent:   ua,
-			EventID:     eventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
+	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
+	event := &model.CampaignEvent{
+		ID:          &newEventID,
+		CampaignID:  campaignID,
+		RecipientID: recipientID,
+		IP:          clientIP,
+		UserAgent:   userAgent,
+		EventID:     eventID,
+		Data:        vo.NewEmptyOptionalString1MB(),
+		Metadata:    metadata,
 	}
 
 	err := m.CampaignRepository.SaveEvent(req.Context(), event)

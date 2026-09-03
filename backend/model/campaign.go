@@ -46,9 +46,11 @@ type Campaign struct {
 
 	SaveSubmittedData   nullable.Nullable[bool] `json:"saveSubmittedData"`
 	SaveBrowserMetadata nullable.Nullable[bool] `json:"saveBrowserMetadata"`
-	IsAnonymous         nullable.Nullable[bool] `json:"isAnonymous"`
-	IsTest              nullable.Nullable[bool] `json:"isTest"`
-	Obfuscate           nullable.Nullable[bool] `json:"obfuscate"`
+	// IsAnonymous is reserved for a campaign mode that records events without
+	// a recipient relation. no code acts on it and Validate rejects true.
+	IsAnonymous nullable.Nullable[bool] `json:"isAnonymous"`
+	IsTest      nullable.Nullable[bool] `json:"isTest"`
+	Obfuscate   nullable.Nullable[bool] `json:"obfuscate"`
 	// IsTraining is snapshotted from the template; read-only in campaign requests.
 	IsTraining nullable.Nullable[bool] `json:"isTraining"`
 	// deprecated: use Webhooks array instead for multiple webhooks with per-webhook settings
@@ -144,6 +146,9 @@ func (c *Campaign) Validate() error {
 	}
 	if err := validate.NullableFieldRequired("sortOrder", c.SortOrder); err != nil {
 		return err
+	}
+	if v, err := c.IsAnonymous.Get(); err == nil && v {
+		return validate.WrapErrorWithField(errors.New("anonymous campaigns are not supported"), "isAnonymous")
 	}
 	// if a start or end is set, then end must be equal or after the start
 	if c.SendStartAt.IsSpecified() && !c.SendStartAt.IsNull() || (c.SendEndAt.IsSpecified() && !c.SendEndAt.IsNull()) {

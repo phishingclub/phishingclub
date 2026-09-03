@@ -712,12 +712,6 @@ func (s *Server) emitTrainingMilestoneIfNeeded(
 	if !isTraining {
 		return nil
 	}
-	// an anonymous campaign stores its events without a recipient, so a milestone
-	// cannot be deduplicated per recipient and would be recorded again on every
-	// visit
-	if campaign.IsAnonymous.MustGet() {
-		return nil
-	}
 	milestoneName := trainingMilestoneEventName(pageType)
 	if milestoneName == "" {
 		return nil
@@ -1303,33 +1297,16 @@ func (s *Server) checkAndServePhishingPage(
 				return true, fmt.Errorf("user submitted phishing data too large: %s", err)
 			}
 		}
-		var event *model.CampaignEvent
-		// only save data if red team flag is set
-		if !campaign.IsAnonymous.MustGet() {
-			metadata := model.ExtractCampaignEventMetadata(c, campaign)
-			event = &model.CampaignEvent{
-				ID:          &newEventID,
-				CampaignID:  &campaignID,
-				RecipientID: &recipientID,
-				IP:          clientIP,
-				UserAgent:   userAgent,
-				EventID:     submitDataEventID,
-				Data:        submittedData,
-				Metadata:    metadata,
-			}
-		} else {
-			ua := vo.NewEmptyOptionalString255()
-			data := vo.NewEmptyOptionalString1MB()
-			event = &model.CampaignEvent{
-				ID:          &newEventID,
-				CampaignID:  &campaignID,
-				RecipientID: nil,
-				IP:          vo.NewEmptyOptionalString64(),
-				UserAgent:   ua,
-				EventID:     submitDataEventID,
-				Data:        data,
-				Metadata:    vo.NewEmptyOptionalString1MB(),
-			}
+		metadata := model.ExtractCampaignEventMetadata(c, campaign)
+		event := &model.CampaignEvent{
+			ID:          &newEventID,
+			CampaignID:  &campaignID,
+			RecipientID: &recipientID,
+			IP:          clientIP,
+			UserAgent:   userAgent,
+			EventID:     submitDataEventID,
+			Data:        submittedData,
+			Metadata:    metadata,
 		}
 		err = s.repositories.Campaign.SaveEvent(c, event)
 		if err != nil {
@@ -1466,31 +1443,16 @@ func (s *Server) checkAndServePhishingPage(
 				userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 				syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
 
-				var syntheticReadEvent *model.CampaignEvent
-				if !campaign.IsAnonymous.MustGet() {
-					metadata := model.ExtractCampaignEventMetadata(c, campaign)
-					syntheticReadEvent = &model.CampaignEvent{
-						ID:          &syntheticReadEventID,
-						CampaignID:  &campaignID,
-						RecipientID: &recipientID,
-						IP:          clientIP,
-						UserAgent:   userAgent,
-						EventID:     messageReadEventID,
-						Data:        syntheticData,
-						Metadata:    metadata,
-					}
-				} else {
-					ua := vo.NewEmptyOptionalString255()
-					syntheticReadEvent = &model.CampaignEvent{
-						ID:          &syntheticReadEventID,
-						CampaignID:  &campaignID,
-						RecipientID: nil,
-						IP:          vo.NewEmptyOptionalString64(),
-						UserAgent:   ua,
-						EventID:     messageReadEventID,
-						Data:        syntheticData,
-						Metadata:    vo.NewEmptyOptionalString1MB(),
-					}
+				metadata := model.ExtractCampaignEventMetadata(c, campaign)
+				syntheticReadEvent := &model.CampaignEvent{
+					ID:          &syntheticReadEventID,
+					CampaignID:  &campaignID,
+					RecipientID: &recipientID,
+					IP:          clientIP,
+					UserAgent:   userAgent,
+					EventID:     messageReadEventID,
+					Data:        syntheticData,
+					Metadata:    metadata,
 				}
 
 				// save the synthetic message read event
@@ -1522,31 +1484,16 @@ func (s *Server) checkAndServePhishingPage(
 		eventID := cache.EventIDByName[eventName]
 		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
-		var visitEvent *model.CampaignEvent
-		if !campaign.IsAnonymous.MustGet() {
-			metadata := model.ExtractCampaignEventMetadata(c, campaign)
-			visitEvent = &model.CampaignEvent{
-				ID:          &visitEventID,
-				CampaignID:  &campaignID,
-				RecipientID: &recipientID,
-				IP:          clientIP,
-				UserAgent:   userAgent,
-				EventID:     eventID,
-				Data:        vo.NewEmptyOptionalString1MB(),
-				Metadata:    metadata,
-			}
-		} else {
-			ua := vo.NewEmptyOptionalString255()
-			visitEvent = &model.CampaignEvent{
-				ID:          &visitEventID,
-				CampaignID:  &campaignID,
-				RecipientID: nil,
-				IP:          vo.NewEmptyOptionalString64(),
-				UserAgent:   ua,
-				EventID:     eventID,
-				Data:        vo.NewEmptyOptionalString1MB(),
-				Metadata:    vo.NewEmptyOptionalString1MB(),
-			}
+		metadata := model.ExtractCampaignEventMetadata(c, campaign)
+		visitEvent := &model.CampaignEvent{
+			ID:          &visitEventID,
+			CampaignID:  &campaignID,
+			RecipientID: &recipientID,
+			IP:          clientIP,
+			UserAgent:   userAgent,
+			EventID:     eventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    metadata,
 		}
 
 		// save the visit event unless it's the final page repeat
@@ -1830,31 +1777,16 @@ func (s *Server) checkAndServePhishingPage(
 			userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 			syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
 
-			var syntheticReadEvent *model.CampaignEvent
-			if !campaign.IsAnonymous.MustGet() {
-				metadata := model.ExtractCampaignEventMetadata(c, campaign)
-				syntheticReadEvent = &model.CampaignEvent{
-					ID:          &syntheticReadEventID,
-					CampaignID:  &campaignID,
-					RecipientID: &recipientID,
-					IP:          clientIP,
-					UserAgent:   userAgent,
-					EventID:     messageReadEventID,
-					Data:        syntheticData,
-					Metadata:    metadata,
-				}
-			} else {
-				ua := vo.NewEmptyOptionalString255()
-				syntheticReadEvent = &model.CampaignEvent{
-					ID:          &syntheticReadEventID,
-					CampaignID:  &campaignID,
-					RecipientID: nil,
-					IP:          vo.NewEmptyOptionalString64(),
-					UserAgent:   ua,
-					EventID:     messageReadEventID,
-					Data:        syntheticData,
-					Metadata:    vo.NewEmptyOptionalString1MB(),
-				}
+			metadata := model.ExtractCampaignEventMetadata(c, campaign)
+			syntheticReadEvent := &model.CampaignEvent{
+				ID:          &syntheticReadEventID,
+				CampaignID:  &campaignID,
+				RecipientID: &recipientID,
+				IP:          clientIP,
+				UserAgent:   userAgent,
+				EventID:     messageReadEventID,
+				Data:        syntheticData,
+				Metadata:    metadata,
 			}
 
 			// save the synthetic message read event
@@ -1887,31 +1819,16 @@ func (s *Server) checkAndServePhishingPage(
 	eventID := uuid.New()
 	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
-	var event *model.CampaignEvent
-	if !campaign.IsAnonymous.MustGet() {
-		metadata := model.ExtractCampaignEventMetadata(c, campaign)
-		event = &model.CampaignEvent{
-			ID:          &eventID,
-			CampaignID:  &campaignID,
-			RecipientID: &recipientID,
-			IP:          clientIP,
-			UserAgent:   userAgent,
-			EventID:     campaignEventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    metadata,
-		}
-	} else {
-		ua := vo.NewEmptyOptionalString255()
-		event = &model.CampaignEvent{
-			ID:          &eventID,
-			CampaignID:  &campaignID,
-			RecipientID: nil,
-			IP:          vo.NewEmptyOptionalString64(),
-			UserAgent:   ua,
-			EventID:     campaignEventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
+	metadata := model.ExtractCampaignEventMetadata(c, campaign)
+	event := &model.CampaignEvent{
+		ID:          &eventID,
+		CampaignID:  &campaignID,
+		RecipientID: &recipientID,
+		IP:          clientIP,
+		UserAgent:   userAgent,
+		EventID:     campaignEventID,
+		Data:        vo.NewEmptyOptionalString1MB(),
+		Metadata:    metadata,
 	}
 	// only log the page visit if it is not after the final page
 	if currentPageType != data.PAGE_TYPE_DONE {
@@ -2105,31 +2022,16 @@ func (s *Server) renderDenyPage(
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED]
 	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
-	var event *model.CampaignEvent
-	if !campaign.IsAnonymous.MustGet() {
-		metadata := model.ExtractCampaignEventMetadata(c, campaign)
-		event = &model.CampaignEvent{
-			ID:          &denyPageVisitEventID,
-			CampaignID:  &campaignID,
-			RecipientID: &recipientID,
-			IP:          clientIP,
-			UserAgent:   userAgent,
-			EventID:     eventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    metadata,
-		}
-	} else {
-		ua := vo.NewEmptyOptionalString255()
-		event = &model.CampaignEvent{
-			ID:          &denyPageVisitEventID,
-			CampaignID:  &campaignID,
-			RecipientID: nil,
-			IP:          vo.NewEmptyOptionalString64(),
-			UserAgent:   ua,
-			EventID:     eventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
+	metadata := model.ExtractCampaignEventMetadata(c, campaign)
+	event := &model.CampaignEvent{
+		ID:          &denyPageVisitEventID,
+		CampaignID:  &campaignID,
+		RecipientID: &recipientID,
+		IP:          clientIP,
+		UserAgent:   userAgent,
+		EventID:     eventID,
+		Data:        vo.NewEmptyOptionalString1MB(),
+		Metadata:    metadata,
 	}
 
 	err = s.repositories.Campaign.SaveEvent(c, event)

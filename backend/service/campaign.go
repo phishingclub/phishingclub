@@ -1607,38 +1607,23 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 	}
 	trackingPixelLoadedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ]
 	newEventID := uuid.New()
-	var campaignEvent *model.CampaignEvent
-	if campaign.IsAnonymous.MustGet() {
-		userAgent := vo.NewEmptyOptionalString255()
-		campaignEvent = &model.CampaignEvent{
-			ID:          &newEventID,
-			CampaignID:  &campaignID,
-			RecipientID: nil,
-			IP:          vo.NewEmptyOptionalString64(),
-			UserAgent:   userAgent,
-			EventID:     trackingPixelLoadedEventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
-	} else {
-		ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.TrustedProxies))
-		ua := ctx.Request.UserAgent()
-		if len(ua) > 255 {
-			ua = strings.TrimSpace(ua[:255])
-		}
-		userAgent := vo.NewOptionalString255Must(ua)
-		// extract metadata (ja4, platform, accept-language)
-		metadata := model.ExtractCampaignEventMetadata(ctx, campaign)
-		campaignEvent = &model.CampaignEvent{
-			ID:          &newEventID,
-			CampaignID:  &campaignID,
-			RecipientID: &recipientID,
-			IP:          ip,
-			UserAgent:   userAgent,
-			EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ],
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    metadata,
-		}
+	ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.TrustedProxies))
+	ua := ctx.Request.UserAgent()
+	if len(ua) > 255 {
+		ua = strings.TrimSpace(ua[:255])
+	}
+	userAgent := vo.NewOptionalString255Must(ua)
+	// extract metadata (ja4, platform, accept-language)
+	metadata := model.ExtractCampaignEventMetadata(ctx, campaign)
+	campaignEvent := &model.CampaignEvent{
+		ID:          &newEventID,
+		CampaignID:  &campaignID,
+		RecipientID: &recipientID,
+		IP:          ip,
+		UserAgent:   userAgent,
+		EventID:     trackingPixelLoadedEventID,
+		Data:        vo.NewEmptyOptionalString1MB(),
+		Metadata:    metadata,
 	}
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
 	if err != nil {
@@ -1720,49 +1705,33 @@ func (c *Campaign) SaveRecipientReported(
 
 	// de-duplicate: a recipient that already reported is not recorded again so a
 	// button that fires more than once does not spam the timeline
-	if !campaign.IsAnonymous.MustGet() {
-		alreadyReported, err := c.CampaignRepository.HasEvent(ctx.Request.Context(), &campaignID, &recipientID, reportedEventID)
-		if err != nil {
-			c.Logger.Errorw("failed to check existing reported event", "error", err)
-			return errs.Wrap(err)
-		}
-		if alreadyReported {
-			c.Logger.Debugw("recipient already reported", "campaignRecipientID", campaignRecipientID.String())
-			return nil
-		}
+	alreadyReported, err := c.CampaignRepository.HasEvent(ctx.Request.Context(), &campaignID, &recipientID, reportedEventID)
+	if err != nil {
+		c.Logger.Errorw("failed to check existing reported event", "error", err)
+		return errs.Wrap(err)
+	}
+	if alreadyReported {
+		c.Logger.Debugw("recipient already reported", "campaignRecipientID", campaignRecipientID.String())
+		return nil
 	}
 
 	newEventID := uuid.New()
-	var campaignEvent *model.CampaignEvent
-	if campaign.IsAnonymous.MustGet() {
-		campaignEvent = &model.CampaignEvent{
-			ID:          &newEventID,
-			CampaignID:  &campaignID,
-			RecipientID: nil,
-			IP:          vo.NewEmptyOptionalString64(),
-			UserAgent:   vo.NewEmptyOptionalString255(),
-			EventID:     reportedEventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
-	} else {
-		ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.TrustedProxies))
-		ua := ctx.Request.UserAgent()
-		if len(ua) > 255 {
-			ua = strings.TrimSpace(ua[:255])
-		}
-		userAgent := vo.NewOptionalString255Must(ua)
-		metadata := model.ExtractCampaignEventMetadata(ctx, campaign)
-		campaignEvent = &model.CampaignEvent{
-			ID:          &newEventID,
-			CampaignID:  &campaignID,
-			RecipientID: &recipientID,
-			IP:          ip,
-			UserAgent:   userAgent,
-			EventID:     reportedEventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    metadata,
-		}
+	ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.TrustedProxies))
+	ua := ctx.Request.UserAgent()
+	if len(ua) > 255 {
+		ua = strings.TrimSpace(ua[:255])
+	}
+	userAgent := vo.NewOptionalString255Must(ua)
+	metadata := model.ExtractCampaignEventMetadata(ctx, campaign)
+	campaignEvent := &model.CampaignEvent{
+		ID:          &newEventID,
+		CampaignID:  &campaignID,
+		RecipientID: &recipientID,
+		IP:          ip,
+		UserAgent:   userAgent,
+		EventID:     reportedEventID,
+		Data:        vo.NewEmptyOptionalString1MB(),
+		Metadata:    metadata,
 	}
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
 	if err != nil {
@@ -3228,37 +3197,15 @@ func (c *Campaign) saveSendingResult(
 	}
 	campaignID := campaignRecipient.CampaignID.MustGet()
 	recipientID := campaignRecipient.RecipientID.MustGet()
-	campaign, err := c.CampaignRepository.GetByID(
-		ctx,
-		&campaignID,
-		&repository.CampaignOption{},
-	)
-	if err != nil {
-		return errs.Wrap(err)
-	}
-	var campaignEvent *model.CampaignEvent
-	if !campaign.IsAnonymous.MustGet() {
-		campaignEvent = &model.CampaignEvent{
-			ID:          &id,
-			CampaignID:  &campaignID,
-			RecipientID: &recipientID,
-			IP:          vo.NewOptionalString64Must(""),
-			UserAgent:   vo.NewOptionalString255Must(""),
-			EventID:     eventID,
-			Data:        data,
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
-	} else {
-		campaignEvent = &model.CampaignEvent{
-			ID:          &id,
-			CampaignID:  &campaignID,
-			RecipientID: nil,
-			IP:          vo.NewOptionalString64Must(""),
-			UserAgent:   vo.NewOptionalString255Must(""),
-			EventID:     eventID,
-			Data:        data,
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
+	campaignEvent := &model.CampaignEvent{
+		ID:          &id,
+		CampaignID:  &campaignID,
+		RecipientID: &recipientID,
+		IP:          vo.NewOptionalString64Must(""),
+		UserAgent:   vo.NewOptionalString255Must(""),
+		EventID:     eventID,
+		Data:        data,
+		Metadata:    vo.NewEmptyOptionalString1MB(),
 	}
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
 	if err != nil {
@@ -4301,31 +4248,16 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 	campaignID := campaignRecipient.CampaignID.MustGet()
 	recipientID := campaignRecipient.RecipientID.MustGet()
 
-	var campaignEvent *model.CampaignEvent
-
 	details := vo.NewOptionalString1MBMust("manually set as sent")
-	if campaign.IsAnonymous.MustGet() {
-		campaignEvent = &model.CampaignEvent{
-			ID:          &id,
-			CampaignID:  &campaignID,
-			RecipientID: nil,
-			IP:          vo.NewOptionalString64Must(""),
-			UserAgent:   vo.NewOptionalString255Must(""),
-			EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT],
-			Data:        details,
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
-	} else {
-		campaignEvent = &model.CampaignEvent{
-			ID:          &id,
-			CampaignID:  &campaignID,
-			RecipientID: &recipientID,
-			IP:          vo.NewOptionalString64Must(""),
-			UserAgent:   vo.NewOptionalString255Must(""),
-			EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT],
-			Data:        details,
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
+	campaignEvent := &model.CampaignEvent{
+		ID:          &id,
+		CampaignID:  &campaignID,
+		RecipientID: &recipientID,
+		IP:          vo.NewOptionalString64Must(""),
+		UserAgent:   vo.NewOptionalString255Must(""),
+		EventID:     cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT],
+		Data:        details,
+		Metadata:    vo.NewEmptyOptionalString1MB(),
 	}
 
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
@@ -5820,29 +5752,15 @@ func (c *Campaign) ProcessReportedCSV(
 		// create campaign event for reported
 		eventID := uuid.New()
 
-		var campaignEvent *model.CampaignEvent
-		if campaign.IsAnonymous.MustGet() {
-			campaignEvent = &model.CampaignEvent{
-				ID:          &eventID,
-				CampaignID:  campaignID,
-				RecipientID: nil,
-				IP:          vo.NewEmptyOptionalString64(),
-				UserAgent:   vo.NewEmptyOptionalString255(),
-				EventID:     reportedEventID,
-				Data:        vo.NewEmptyOptionalString1MB(),
-				Metadata:    vo.NewEmptyOptionalString1MB(),
-			}
-		} else {
-			campaignEvent = &model.CampaignEvent{
-				ID:          &eventID,
-				CampaignID:  campaignID,
-				RecipientID: &recipientID,
-				IP:          vo.NewEmptyOptionalString64(),
-				UserAgent:   vo.NewEmptyOptionalString255(),
-				EventID:     reportedEventID,
-				Data:        vo.NewEmptyOptionalString1MB(),
-				Metadata:    vo.NewEmptyOptionalString1MB(),
-			}
+		campaignEvent := &model.CampaignEvent{
+			ID:          &eventID,
+			CampaignID:  campaignID,
+			RecipientID: &recipientID,
+			IP:          vo.NewEmptyOptionalString64(),
+			UserAgent:   vo.NewEmptyOptionalString255(),
+			EventID:     reportedEventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
 
 		// save the event with custom timestamp
@@ -5973,11 +5891,10 @@ func (c *Campaign) buildReportHTMLWithData(
 		}
 	}
 
-	// Only query per-recipient data for non-anonymous, non-anonymized campaigns
+	// the per recipient table is only available while the recipient relation exists
 	var recipients []model.ReportRecipient
-	isAnon, _ := campaign.IsAnonymous.Get()
 	isAnonymized := campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull()
-	if !isAnon && !isAnonymized {
+	if !isAnonymized {
 		recipients, err = c.CampaignRepository.GetReportRecipients(ctx, campaignID)
 		if err != nil {
 			c.Logger.Warnw("failed to get report recipients, continuing without detail table", "error", err)

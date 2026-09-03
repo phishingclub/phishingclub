@@ -2729,13 +2729,6 @@
 											>
 										</ConditionalDisplay>
 
-										<!--
-										<span class="text-grayblue-dark font-medium">Anonymization:</span>
-										<span class="text-pc-darkblue"
-											>{formValues.isAnonymous ? 'Enabled' : 'Disabled'}</span
-										>
-										 -->
-
 										{#if formValues.webhooks.length > 0}
 											<span class="text-grayblue-dark font-medium">Webhooks:</span>
 											<div class="text-pc-darkblue dark:text-white space-y-2">
