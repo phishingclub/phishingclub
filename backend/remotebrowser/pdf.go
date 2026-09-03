@@ -13,7 +13,7 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
-// WipeBrowserCache removes the auto-downloaded Chromium directory.
+// WipeBrowserCache removes the automatically downloaded Chromium directory.
 // The next call to RenderHTMLToPDF will trigger a fresh download.
 func WipeBrowserCache() error {
 	dir, err := resolveBrowserRootDir()
@@ -23,8 +23,32 @@ func WipeBrowserCache() error {
 	return os.RemoveAll(dir)
 }
 
+// applyGuardFlags points the launcher at the egress guard and removes the
+// browser's own ways to leave the box around it: it routes all requests through
+// the proxy, removes the implicit loopback and link local proxy bypass (without
+// which 127.0.0.1 and 169.254.169.254 are reached directly), blocks the WebRTC
+// and QUIC UDP paths, and disables the browser's background network calls. It is
+// the single definition used by both the renderer and its tests so the guard
+// configuration cannot silently drift out of the real render path.
+func applyGuardFlags(l *launcher.Launcher, proxyAddr string) *launcher.Launcher {
+	return l.
+		Set("proxy-server", proxyAddr).
+		Set("proxy-bypass-list", "<-loopback>").
+		Set("disable-background-networking").
+		Set("disable-component-update").
+		Set("disable-domain-reliability").
+		Set("disable-sync").
+		Set("disable-client-side-phishing-detection").
+		Set("safebrowsing-disable-auto-update").
+		Set("no-pings").
+		Set("no-first-run").
+		Set("no-default-browser-check").
+		Set("force-webrtc-ip-handling-policy", "disable_non_proxied_udp").
+		Set("disable-quic")
+}
+
 // RenderHTMLToPDF renders an HTML string to PDF bytes using a headless Chromium instance.
-// If execPath is empty the browser binary is auto-resolved using the same path as the runner.
+// If execPath is empty the browser binary is resolved automatically using the same path as the runner.
 func RenderHTMLToPDF(ctx context.Context, htmlContent string, execPath string) ([]byte, error) {
 	rootDir, err := resolveBrowserRootDir()
 	if err != nil {
@@ -36,6 +60,14 @@ func RenderHTMLToPDF(ctx context.Context, htmlContent string, execPath string) (
 	_ = os.MkdirAll(filepath.Join(rootDir, "config"), 0755)
 	_ = os.MkdirAll(filepath.Join(rootDir, "cache"), 0755)
 
+	// force browser egress through the loopback guard so an embedded report
+	// resource cannot be used for request forgery (see guardedProxy).
+	proxy, err := startGuardedProxy()
+	if err != nil {
+		return nil, fmt.Errorf("reportpdf: egress guard: %w", err)
+	}
+	defer proxy.close()
+
 	l := launcher.New().
 		Headless(true).
 		Set("disable-crash-reporter").
@@ -44,6 +76,7 @@ func RenderHTMLToPDF(ctx context.Context, htmlContent string, execPath string) (
 			"XDG_CONFIG_HOME="+filepath.Join(rootDir, "config"),
 			"XDG_CACHE_HOME="+filepath.Join(rootDir, "cache"),
 		)...)
+	applyGuardFlags(l, proxy.addr())
 
 	if execPath != "" {
 		l = l.Bin(execPath)
@@ -61,6 +94,10 @@ func RenderHTMLToPDF(ctx context.Context, htmlContent string, execPath string) (
 
 	u, err := l.Launch()
 	if err != nil {
+		// Kill does nothing when no process started; Cleanup is skipped here because
+		// on an early launch failure it blocks forever waiting on the exit channel.
+		// Kill still removes a process that did start.
+		l.Kill()
 		return nil, fmt.Errorf("reportpdf: browser launch failed: %w", err)
 	}
 	defer func() { l.Kill(); l.Cleanup() }()
@@ -92,7 +129,7 @@ func RenderHTMLToPDF(ctx context.Context, htmlContent string, execPath string) (
 		return nil, fmt.Errorf("reportpdf: set content failed: %w", err)
 	}
 
-	// non-fatal: lets inline resources settle before printing
+	// not fatal: lets inline resources settle before printing
 	_ = page.WaitIdle(3 * time.Second)
 
 	a4Width := 8.27

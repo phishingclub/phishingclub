@@ -5993,7 +5993,9 @@ func (c *Campaign) buildReportHTMLWithData(
 		c.Logger.Errorw("failed to parse report template", "error", err)
 		return "", nil, "", errs.Wrap(err)
 	}
-	if err := tmpl.Execute(&buf, rd); err != nil {
+	// the report HTML is rendered by a browser, so escape untrusted strings; the
+	// raw rd is returned for plain text consumers such as the email subject.
+	if err := tmpl.Execute(&buf, htmlEscapeReportData(rd)); err != nil {
 		c.Logger.Errorw("failed to execute report template", "error", err)
 		return "", nil, "", errs.Wrap(err)
 	}
@@ -6312,8 +6314,10 @@ func (c *Campaign) SendCampaignReport(
 			bodyTmpl = v
 		}
 	}
+	// the subject is a plain text mail header, so it uses the raw data; the body is
+	// text/html, so it uses the escaped data like the report itself.
 	subject := renderReportEmailField(c, subjectTmpl, defaultReportEmailSubject, reportData)
-	body := renderReportEmailField(c, bodyTmpl, defaultReportEmailBody, reportData)
+	body := renderReportEmailField(c, bodyTmpl, defaultReportEmailBody, htmlEscapeReportData(reportData))
 	m.Subject(subject)
 	m.SetBodyString("text/html", body)
 	if err := m.AttachReader(filename, bytes.NewReader(pdfBytes)); err != nil {
@@ -6427,4 +6431,29 @@ func buildReportData(
 
 		Recipients: recipients,
 	}
+}
+
+// htmlEscapeReportData returns a copy of the report data with the externally
+// supplied strings HTML escaped, for the HTML contexts (the rendered report and
+// the html email body). text/template does not escape values, so this stops
+// untrusted recipient fields (CSV, manual, or SCIM) and operator entered names
+// from being interpreted as markup by the browser. The original is returned
+// unescaped for plain text contexts such as the email subject header.
+func htmlEscapeReportData(rd *model.ReportData) *model.ReportData {
+	if rd == nil {
+		return nil
+	}
+	cp := *rd
+	cp.CampaignName = template.HTMLEscapeString(rd.CampaignName)
+	cp.CompanyName = template.HTMLEscapeString(rd.CompanyName)
+	cp.Recipients = make([]model.ReportRecipient, len(rd.Recipients))
+	for i, r := range rd.Recipients {
+		r.FirstName = template.HTMLEscapeString(r.FirstName)
+		r.LastName = template.HTMLEscapeString(r.LastName)
+		r.Email = template.HTMLEscapeString(r.Email)
+		r.Department = template.HTMLEscapeString(r.Department)
+		r.Position = template.HTMLEscapeString(r.Position)
+		cp.Recipients[i] = r
+	}
+	return &cp
 }
