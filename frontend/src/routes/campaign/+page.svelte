@@ -720,11 +720,17 @@
 		return checkCurrentStepValidity();
 	};
 
-	const refreshCampaignDependencyData = async () => {
+	// the campaigns table shows each campaign's template name, so templates are loaded
+	// on every table refresh; the heavier group counts and allow/deny lists are not
+	const refreshTemplates = async () => {
 		const templates = await fetchAllRows((options) => {
 			return api.campaignTemplate.getAll(options, contextCompanyID, true);
 		});
 		templateMap = BiMap.FromArrayOfObjects(templates);
+	};
+
+	const refreshCampaignDependencyData = async () => {
+		await refreshTemplates();
 
 		let recipientGroups = await fetchAllRows((options) => {
 			return api.recipient.getAllGroups(options, contextCompanyID);
@@ -815,7 +821,10 @@
 			}
 			selection.clear();
 			campaigns = await getCampaigns();
-			await refreshCampaignDependencyData();
+			// the table needs template names; the heavier recipient-group counts and
+			// allow/deny lists are only needed by the create/update/copy modals, which
+			// load them via refreshCampaignDependencyData when opened
+			await refreshTemplates();
 		} catch (e) {
 			addToast('Failed to load campaigns', 'Error');
 			console.error('Failed to load campaigns', e);
