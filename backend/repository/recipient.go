@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -744,19 +745,31 @@ func (r *Recipient) GetRandomByCompanyID(
 ) (*model.Recipient, error) {
 	var dbRecipient database.Recipient
 
-	db := r.DB.Table(database.RECIPIENT_TABLE)
-
-	// apply company filter
-	db = whereCompany(db, database.RECIPIENT_TABLE, companyID)
-
-	// exclude specific recipient if provided
-	if excludeRecipientID != nil {
-		db = db.Where(fmt.Sprintf("%s != ?", TableColumnID(database.RECIPIENT_TABLE)), excludeRecipientID)
+	// build the company (and optional exclude) filter into a fresh query each call
+	filtered := func() *gorm.DB {
+		q := r.DB.Table(database.RECIPIENT_TABLE)
+		q = whereCompany(q, database.RECIPIENT_TABLE, companyID)
+		if excludeRecipientID != nil {
+			q = q.Where(fmt.Sprintf("%s != ?", TableColumnID(database.RECIPIENT_TABLE)), excludeRecipientID)
+		}
+		return q
 	}
 
-	// order randomly and get one
-	res := db.Order("RANDOM()").Limit(1).First(&dbRecipient)
-
+	// pick a random rowid threshold and take the first matching row at or after it.
+	// this rides the rowid index; ORDER BY RANDOM instead sorts the whole table on
+	// every call, which gets slower as the recipients table grows. if the threshold
+	// lands past the last match, wrap to the first matching row.
+	res := filtered().
+		Where(fmt.Sprintf(
+			"%[1]s.rowid >= (abs(random()) %% (SELECT max(rowid) + 1 FROM %[1]s))",
+			database.RECIPIENT_TABLE,
+		)).
+		Order(database.RECIPIENT_TABLE + ".rowid").
+		Limit(1).
+		First(&dbRecipient)
+	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
+		res = filtered().Order(database.RECIPIENT_TABLE + ".rowid").Limit(1).First(&dbRecipient)
+	}
 	if res.Error != nil {
 		return nil, res.Error
 	}

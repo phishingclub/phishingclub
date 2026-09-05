@@ -78,8 +78,21 @@ func (t *Template) CreateMail(
 		apiSender,
 	)
 
-	// add random recipient data to template context (excluding current recipient)
-	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, &rid)
+	// add random recipient data only when the email actually uses it (the lookup is
+	// costly), excluding the current recipient
+	if email != nil {
+		subject := ""
+		if v, err := email.MailHeaderSubject.Get(); err == nil {
+			subject = v.String()
+		}
+		content := ""
+		if v, err := email.Content.Get(); err == nil {
+			content = v.String()
+		}
+		if usesRandomRecipient(subject, content) {
+			(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, &rid)
+		}
+	}
 
 	// full report endpoint URL for this recipient on the campaign domain, so a report
 	// header can carry a ready-to-call link instead of just the token
@@ -524,12 +537,15 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 		nil, // apiSender
 	)
 
-	// add random recipient data to template context (excluding current recipient)
-	var excludeRecipientID *uuid.UUID
-	if rid, err := recipient.ID.Get(); err == nil {
-		excludeRecipientID = &rid
+	// add random recipient data only when the page template uses it (the lookup is
+	// costly), excluding the current recipient
+	if usesRandomRecipient(contentToRender) {
+		var excludeRecipientID *uuid.UUID
+		if rid, err := recipient.ID.Get(); err == nil {
+			excludeRecipientID = &rid
+		}
+		(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, excludeRecipientID)
 	}
-	(*data)["RandomRecipient"] = t.getRandomRecipientData(ctx, companyID, excludeRecipientID)
 
 	// direct URLs to each stage of the flow, available when this page is served as part
 	// of a real campaign. before and after stay empty when the flow has no such stage.
@@ -951,6 +967,18 @@ func (t *Template) TemplateFuncsWithDeviceCode(
 	}
 
 	return funcs
+}
+
+// usesRandomRecipient reports whether any of the template texts reference the
+// RandomRecipient variable. The random recipient lookup is costly, so it is only
+// done when a template actually uses it.
+func usesRandomRecipient(texts ...string) bool {
+	for _, s := range texts {
+		if strings.Contains(s, "RandomRecipient") {
+			return true
+		}
+	}
+	return false
 }
 
 // getRandomRecipientData gets a random recipient from a company and returns a map of their data
