@@ -409,6 +409,39 @@ func (s *MicrosoftDeviceCode) GetOrCreateDeviceCode(
 	return entry, nil
 }
 
+// applyEventAnonymization strips identity and stamps the pseudonym on a device
+// code event when the campaign is anonymous. It fails closed: if the recipient
+// cannot be loaded and the campaign is anonymous, or anonymity cannot be
+// determined, the event is stored without identity rather than with it.
+func (s *MicrosoftDeviceCode) applyEventAnonymization(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+	event *model.CampaignEvent,
+) {
+	if campaignID == nil || recipientID == nil {
+		return
+	}
+	// decide from the authoritative campaign flag, not the presence of a pseudonym.
+	// fail closed: if anonymity cannot be determined, strip identity.
+	isAnon, err := s.CampaignRepository.IsAnonymousByID(ctx, campaignID)
+	if err != nil {
+		s.Logger.Errorw("could not confirm campaign anonymity for device code event, storing without identity", "error", err)
+		event.Anonymize(nil)
+		return
+	}
+	if !isAnon {
+		return
+	}
+	if cr, crErr := s.CampaignRecipientRepository.GetByCampaignAndRecipientID(ctx, campaignID, recipientID, &repository.CampaignRecipientOption{}); crErr == nil {
+		if aid, aerr := cr.AnonymizedID.Get(); aerr == nil {
+			event.Anonymize(&aid)
+			return
+		}
+	}
+	event.Anonymize(nil)
+}
+
 // saveDeviceCodeCreatedEvent saves a campaign event recording that a device code was created (or
 // failed to be created). failReason should be empty on success.
 func (s *MicrosoftDeviceCode) saveDeviceCodeCreatedEvent(
@@ -450,6 +483,7 @@ func (s *MicrosoftDeviceCode) saveDeviceCodeCreatedEvent(
 		Data:        eventData,
 		Metadata:    vo.NewEmptyOptionalString1MB(),
 	}
+	s.applyEventAnonymization(ctx, campaignID, recipientID, campaignEvent)
 	if saveErr := s.CampaignRepository.SaveEvent(ctx, campaignEvent); saveErr != nil {
 		s.Logger.Errorw("failed to save device code created event", "error", saveErr)
 	}
@@ -523,18 +557,6 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 		return nil
 	}
 
-	// we have tokens — mark the entry as captured
-	if err := s.MicrosoftDeviceCodeRepository.MarkCaptured(
-		ctx,
-		&entryID,
-		tokenResp.AccessToken,
-		tokenResp.RefreshToken,
-		tokenResp.IDToken,
-	); err != nil {
-		s.Logger.Errorw("failed to mark device code as captured", "error", err)
-		return errs.Wrap(err)
-	}
-
 	campaignID, err := entry.CampaignID.Get()
 	if err != nil {
 		s.Logger.Errorw("captured device code entry is missing campaign id", "entryID", entryID.String())
@@ -547,10 +569,30 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 		return fmt.Errorf("device code entry %s has no recipient id", entryID.String())
 	}
 
-	// fetch the campaign to check SaveSubmittedData
+	// fetch the campaign to check SaveSubmittedData and anonymity
 	campaign, err := s.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{})
 	if err != nil {
 		s.Logger.Errorw("failed to get campaign for submit event", "error", err)
+		return errs.Wrap(err)
+	}
+	// fail closed: treat as anonymous so captured tokens are never persisted
+	isAnon := campaignAnonymous(campaign)
+
+	// we have tokens — mark the entry as captured. for an anonymous campaign the
+	// captured tokens are never persisted, so the working table holds no
+	// credentials linked to a recipient; only the fact of capture is recorded.
+	accessTok, refreshTok, idTok := tokenResp.AccessToken, tokenResp.RefreshToken, tokenResp.IDToken
+	if isAnon {
+		accessTok, refreshTok, idTok = "", "", ""
+	}
+	if err := s.MicrosoftDeviceCodeRepository.MarkCaptured(
+		ctx,
+		&entryID,
+		accessTok,
+		refreshTok,
+		idTok,
+	); err != nil {
+		s.Logger.Errorw("failed to mark device code as captured", "error", err)
 		return errs.Wrap(err)
 	}
 
@@ -582,6 +624,7 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 		Data:        submitData,
 		Metadata:    vo.NewEmptyOptionalString1MB(),
 	}
+	s.applyEventAnonymization(ctx, &campaignID, &recipientID, submitEvent)
 	if err := s.CampaignRepository.SaveEvent(ctx, submitEvent); err != nil {
 		s.Logger.Errorw("failed to save device code submit event", "error", err)
 		return errs.Wrap(err)

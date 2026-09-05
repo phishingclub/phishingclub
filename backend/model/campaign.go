@@ -46,8 +46,10 @@ type Campaign struct {
 
 	SaveSubmittedData   nullable.Nullable[bool] `json:"saveSubmittedData"`
 	SaveBrowserMetadata nullable.Nullable[bool] `json:"saveBrowserMetadata"`
-	// IsAnonymous is reserved for a campaign mode that records events without
-	// a recipient relation. no code acts on it and Validate rejects true.
+	// IsAnonymous marks a campaign that records events against a stable pseudonym
+	// instead of the recipient, never storing identity or submitted data. Validate
+	// forbids enabling data collection alongside it, and it cannot be changed once
+	// recipients exist.
 	IsAnonymous nullable.Nullable[bool] `json:"isAnonymous"`
 	IsTest      nullable.Nullable[bool] `json:"isTest"`
 	Obfuscate   nullable.Nullable[bool] `json:"obfuscate"`
@@ -147,8 +149,16 @@ func (c *Campaign) Validate() error {
 	if err := validate.NullableFieldRequired("sortOrder", c.SortOrder); err != nil {
 		return err
 	}
+	// an anonymous campaign must never capture identifying data. enforce it here
+	// so a crafted request cannot enable collection on an anonymous campaign,
+	// independent of what the UI sends.
 	if v, err := c.IsAnonymous.Get(); err == nil && v {
-		return validate.WrapErrorWithField(errors.New("anonymous campaigns are not supported"), "isAnonymous")
+		if sd, err := c.SaveSubmittedData.Get(); err == nil && sd {
+			return validate.WrapErrorWithField(errors.New("submitted data cannot be saved on an anonymous campaign"), "saveSubmittedData")
+		}
+		if bm, err := c.SaveBrowserMetadata.Get(); err == nil && bm {
+			return validate.WrapErrorWithField(errors.New("browser metadata cannot be saved on an anonymous campaign"), "saveBrowserMetadata")
+		}
 	}
 	// if a start or end is set, then end must be equal or after the start
 	if c.SendStartAt.IsSpecified() && !c.SendStartAt.IsNull() || (c.SendEndAt.IsSpecified() && !c.SendEndAt.IsNull()) {

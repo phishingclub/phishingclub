@@ -714,33 +714,42 @@ func (c *CampaignRecipient) UpdateNotableEventByID(
 	return res.Error
 }
 
-// Anonymize adds an anonymized id to a campaign recipient
+// Anonymize ensures a campaign recipient carries a pseudonym and releases its
+// lure code. An existing pseudonym is never overwritten: an anonymous campaign
+// assigns a stable one at materialization and its events already carry it, so a
+// later anonymize (at close, or when the recipient is deleted) must keep it or the
+// events would be orphaned from the recipient row.
 func (r *CampaignRecipient) Anonymize(
 	ctx context.Context,
 	campaignID *uuid.UUID,
 	recipientID *uuid.UUID,
 	anonymizedID *uuid.UUID,
 ) error {
-	// releasing here stops the recipient's lure link resolving and hands the code
-	// back for reuse
-	row := map[string]interface{}{
-		"anonymized_id": anonymizedID.String(),
-		"lure_code":     nil,
-	}
-	AddUpdatedAt(row)
-	db := r.DB.Model(&database.CampaignRecipient{})
-
-	// if campaignID is nil, anonymize across all campaigns (e.g., when deleting recipient)
-	// otherwise, only anonymize for the specific campaign
-	if campaignID != nil {
-		db = db.Where("campaign_id = ? AND recipient_id = ?", campaignID, recipientID)
-	} else {
-		db = db.Where("recipient_id = ?", recipientID)
+	// where clause: a specific campaign, or all campaigns for the recipient (used
+	// when deleting the recipient).
+	scope := func(db *gorm.DB) *gorm.DB {
+		if campaignID != nil {
+			return db.Where("campaign_id = ? AND recipient_id = ?", campaignID, recipientID)
+		}
+		return db.Where("recipient_id = ?", recipientID)
 	}
 
-	res := db.Updates(row)
+	// release the lure code so the link stops resolving and the code can be reused.
+	lureRow := map[string]interface{}{"lure_code": nil}
+	AddUpdatedAt(lureRow)
+	if res := scope(r.DB.Model(&database.CampaignRecipient{})).Updates(lureRow); res.Error != nil {
+		return res.Error
+	}
 
-	if res.Error != nil {
+	// assign the pseudonym only where none exists yet. an anonymous campaign already
+	// has a stable one whose events reference it, so overwriting would orphan them.
+	// a plain assignment (not COALESCE) keeps the uuid column type unambiguous on
+	// both sqlite and postgres.
+	idRow := map[string]interface{}{"anonymized_id": anonymizedID.String()}
+	AddUpdatedAt(idRow)
+	if res := scope(r.DB.Model(&database.CampaignRecipient{})).
+		Where("anonymized_id IS NULL").
+		Updates(idRow); res.Error != nil {
 		return res.Error
 	}
 	return nil
@@ -895,6 +904,8 @@ func ToCampaignRecipient(row *database.CampaignRecipient) (*model.CampaignRecipi
 	if row.LureCode != nil {
 		lureCode = nullable.NewNullableWithValue(*row.LureCode)
 	}
+	position := nullable.NewNullableWithValue(row.Position)
+	department := nullable.NewNullableWithValue(row.Department)
 	return &model.CampaignRecipient{
 		ID:               id,
 		CancelledAt:      cancelledAt,
@@ -907,6 +918,8 @@ func ToCampaignRecipient(row *database.CampaignRecipient) (*model.CampaignRecipi
 		AnonymizedID:     anonymizedID,
 		RecipientID:      recipientID,
 		Recipient:        recipient,
+		Position:         position,
+		Department:       department,
 		NotableEventID:   notableEventID,
 		NotableEventName: notableEventName,
 		LureCode:         lureCode,

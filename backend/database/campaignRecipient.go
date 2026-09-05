@@ -40,11 +40,20 @@ type CampaignRecipient struct {
 	// self-managed
 	SelfManaged bool `gorm:"not null;default:false;"`
 
-	// AnonymizedID is set when the recipient has been anonymized
+	// AnonymizedID is the stable pseudonym for this recipient in this campaign.
+	// For an anonymous campaign it is assigned at materialization and stamped on
+	// every event so events carry no identity. For a normal campaign it is
+	// assigned at close by the anonymization sweep.
 	AnonymizedID *uuid.UUID `gorm:"type:uuid;"`
 	Recipient    *Recipient
 	// A null recipientID means that the data has been anonymized
 	RecipientID *uuid.UUID `gorm:"type:uuid;index;uniqueIndex:idx_campaign_recipients_campaign_id_recipient_id;"`
+
+	// Position and Department are snapshotted from the recipient at
+	// materialization so grouped statistics survive after the recipient relation
+	// is severed at anonymization. Populated only for anonymous campaigns.
+	Position   string `gorm:";"`
+	Department string `gorm:";"`
 
 	// NotableEventID is the most notable event for this recipient
 	NotableEvent   *Event     `gorm:"foreignKey:NotableEventID;references:ID"`

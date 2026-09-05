@@ -862,6 +862,27 @@ export class API {
 		},
 
 		/**
+		 * Get campaign outcome stats grouped by a recipient attribute.
+		 * @param {string} campaignID
+		 * @param {'position'|'department'} by
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getGroupedResultStats: async (campaignID, by = 'position') => {
+			return await getJSON(
+				this.getPath(`/campaign/${campaignID}/grouped-statistics?by=${by}`)
+			);
+		},
+
+		/**
+		 * Whether the campaign has any position/department data to group on.
+		 * @param {string} campaignID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getHasGroupData: async (campaignID) => {
+			return await getJSON(this.getPath(`/campaign/${campaignID}/has-group-data`));
+		},
+
+		/**
 		 * Get campaign recipient email.
 		 *
 		 * @param {string} campaignRecipientID

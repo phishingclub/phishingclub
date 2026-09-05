@@ -8,6 +8,7 @@
 	export let optional = false;
 	export let toolTipText = '';
 	export let width = 'medium';
+	export let disabled = false;
 	/** @type {*} */
 	export let onChange = () => {};
 </script>
@@ -37,16 +38,19 @@
 		{#each options as option}
 			<button
 				type="button"
+				{disabled}
 				class:h32={option.icon && option.description}
 				class:h16={!option.icon && !option.description}
 				class:w-28={width === 'small'}
 				class:w-40={width === 'medium'}
 				class:w-64={width === 'large'}
+				class:opacity-50={disabled}
+				class:cursor-not-allowed={disabled}
 				class={`
           p-3 rounded-lg border-2 transition-all duration-200
           flex flex-col items-center justify-center text-center
           w-40
-          hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20
+          ${disabled ? '' : 'hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}
           ${
 						value === option.value
 							? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-800/40 text-green-700 dark:text-green-300'
@@ -54,6 +58,7 @@
 					}
         `}
 				on:click={() => {
+					if (disabled) return;
 					value = option.value;
 					onChange();
 				}}

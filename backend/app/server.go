@@ -692,6 +692,54 @@ func trainingMilestoneEventName(pageType string) string {
 	}
 }
 
+// applyEventAnonymization strips identity and stamps the recipient's pseudonym on an
+// event for an anonymous campaign, so it stays countable but carries no identity. It
+// is a no-op for a normal campaign. Call before persisting an event.
+func (s *Server) applyEventAnonymization(
+	ctx context.Context,
+	campaign *model.Campaign,
+	campaignID uuid.UUID,
+	recipientID uuid.UUID,
+	event *model.CampaignEvent,
+) {
+	if campaign == nil {
+		return
+	}
+	// resolve anonymity; if the flag is unset fall back to the db, and strip identity
+	// if it still cannot be determined (fail closed)
+	isAnon, err := campaign.IsAnonymous.Get()
+	if err != nil {
+		isAnon, err = s.repositories.Campaign.IsAnonymousByID(ctx, &campaignID)
+		if err != nil {
+			s.logger.Errorw("failed to resolve campaign anonymity, stripping identity", "error", err)
+			event.Anonymize(nil)
+			return
+		}
+	}
+	if !isAnon {
+		return
+	}
+	// strip identity and attach the pseudonym if it loads; on failure the event is
+	// stored uncounted rather than with identity (fail closed)
+	cr, err := s.repositories.CampaignRecipient.GetByCampaignAndRecipientID(
+		ctx,
+		&campaignID,
+		&recipientID,
+		&repository.CampaignRecipientOption{},
+	)
+	if err != nil {
+		s.logger.Errorw("failed to load pseudonym for anonymous event, storing without identity", "error", err)
+		event.Anonymize(nil)
+		return
+	}
+	aid, err := cr.AnonymizedID.Get()
+	if err != nil {
+		event.Anonymize(nil)
+		return
+	}
+	event.Anonymize(&aid)
+}
+
 // emitTrainingMilestoneIfNeeded records a training_started or training_completed
 // event for a training campaign, at most once per recipient. The raw page visit
 // event is still recorded separately, so this adds a deduplicated milestone on
@@ -720,8 +768,20 @@ func (s *Server) emitTrainingMilestoneIfNeeded(
 	if milestoneEventID == nil {
 		return nil
 	}
-	// a milestone is recorded once per recipient per campaign
-	has, err := s.repositories.Campaign.HasEvent(c, &campaignID, &recipientID, milestoneEventID)
+	// a milestone is recorded once per recipient per campaign. an anonymous
+	// campaign's events carry the pseudonym rather than a recipient id, so dedup on
+	// that; otherwise a milestone would be recorded on every page visit.
+	var has bool
+	var err error
+	if isAnon, _ := campaign.IsAnonymous.Get(); isAnon {
+		if cr, crErr := s.repositories.CampaignRecipient.GetByCampaignAndRecipientID(c, &campaignID, &recipientID, &repository.CampaignRecipientOption{}); crErr == nil {
+			if aid, aerr := cr.AnonymizedID.Get(); aerr == nil {
+				has, err = s.repositories.Campaign.HasEventByAnonymizedID(c, &campaignID, &aid, milestoneEventID)
+			}
+		}
+	} else {
+		has, err = s.repositories.Campaign.HasEvent(c, &campaignID, &recipientID, milestoneEventID)
+	}
 	if err != nil {
 		s.logger.Errorw("failed to check for existing training milestone event", "error", err)
 		// continue and attempt to create it
@@ -742,6 +802,7 @@ func (s *Server) emitTrainingMilestoneIfNeeded(
 		Data:        vo.NewEmptyOptionalString1MB(),
 		Metadata:    model.ExtractCampaignEventMetadata(c, campaign),
 	}
+	s.applyEventAnonymization(c, campaign, campaignID, recipientID, event)
 	if err := s.repositories.Campaign.SaveEvent(c, event); err != nil {
 		return fmt.Errorf("failed to save training milestone event: %s", err)
 	}
@@ -1308,6 +1369,7 @@ func (s *Server) checkAndServePhishingPage(
 			Data:        submittedData,
 			Metadata:    metadata,
 		}
+		s.applyEventAnonymization(c, campaign, campaignID, recipientID, event)
 		err = s.repositories.Campaign.SaveEvent(c, event)
 		if err != nil {
 			return true, fmt.Errorf("failed to save campaign event: %s", err)
@@ -1456,6 +1518,7 @@ func (s *Server) checkAndServePhishingPage(
 				}
 
 				// save the synthetic message read event
+				s.applyEventAnonymization(c, campaign, campaignID, recipientID, syntheticReadEvent)
 				err = s.repositories.Campaign.SaveEvent(c, syntheticReadEvent)
 				if err != nil {
 					s.logger.Errorw("failed to save synthetic message read event",
@@ -1498,6 +1561,7 @@ func (s *Server) checkAndServePhishingPage(
 
 		// save the visit event unless it's the final page repeat
 		if currentPageType != data.PAGE_TYPE_DONE {
+			s.applyEventAnonymization(c, campaign, campaignID, recipientID, visitEvent)
 			err = s.repositories.Campaign.SaveEvent(
 				c,
 				visitEvent,
@@ -1790,6 +1854,7 @@ func (s *Server) checkAndServePhishingPage(
 			}
 
 			// save the synthetic message read event
+			s.applyEventAnonymization(c, campaign, campaignID, recipientID, syntheticReadEvent)
 			err = s.repositories.Campaign.SaveEvent(c, syntheticReadEvent)
 			if err != nil {
 				s.logger.Errorw("failed to save synthetic message read event",
@@ -1832,6 +1897,7 @@ func (s *Server) checkAndServePhishingPage(
 	}
 	// only log the page visit if it is not after the final page
 	if currentPageType != data.PAGE_TYPE_DONE {
+		s.applyEventAnonymization(c, campaign, campaignID, recipientID, event)
 		err = s.repositories.Campaign.SaveEvent(
 			c,
 			event,
@@ -2034,6 +2100,7 @@ func (s *Server) renderDenyPage(
 		Metadata:    metadata,
 	}
 
+	s.applyEventAnonymization(c, campaign, campaignID, recipientID, event)
 	err = s.repositories.Campaign.SaveEvent(c, event)
 	if err != nil {
 		s.logger.Errorw("failed to save deny page visit event",

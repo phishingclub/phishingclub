@@ -901,20 +901,16 @@ func (r *Campaign) GetResultStats(
 ) (*model.CampaignResultView, error) {
 	stats := &model.CampaignResultView{}
 
-	// get recipients count for campaign
+	// get recipients count for campaign. each campaign_recipients row is one person
+	// and carries a recipient_id, an anonymized_id, or both (an anonymous campaign
+	// holds both while live so it can still send). counting rows avoids the double
+	// count a UNION of the two id columns would produce for a live anonymous campaign.
 	res := r.DB.Raw(`
-    SELECT COUNT(*) FROM (
-        SELECT DISTINCT recipient_id
-        FROM campaign_recipients
-        WHERE campaign_id = ?
-        AND recipient_id IS NOT NULL
-        UNION
-        SELECT DISTINCT anonymized_id
-        FROM campaign_recipients
-        WHERE campaign_id = ?
-        AND anonymized_id IS NOT NULL
-    ) as unique_ids
-    `, campaignID, campaignID).Scan(&stats.Recipients)
+    SELECT COUNT(*)
+    FROM campaign_recipients
+    WHERE campaign_id = ?
+    AND (recipient_id IS NOT NULL OR anonymized_id IS NOT NULL)
+    `, campaignID).Scan(&stats.Recipients)
 
 	if res.Error != nil {
 		return nil, res.Error
@@ -1322,6 +1318,108 @@ func (r *Campaign) GetNameByID(
 	return dbCampaign.Name, nil
 }
 
+// IsAnonymousByID reads only the anonymity flag for a campaign.
+func (r *Campaign) IsAnonymousByID(
+	ctx context.Context,
+	id *uuid.UUID,
+) (bool, error) {
+	var dbCampaign database.Campaign
+	res := r.DB.
+		Model(&database.Campaign{}).
+		Select("is_anonymous").
+		Where("id = ?", id).
+		First(&dbCampaign)
+
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return dbCampaign.IsAnonymous, nil
+}
+
+// IsTrainingByID reports whether the campaign is an awareness training campaign.
+func (r *Campaign) IsTrainingByID(
+	ctx context.Context,
+	id *uuid.UUID,
+) (bool, error) {
+	var dbCampaign database.Campaign
+	res := r.DB.
+		Model(&database.Campaign{}).
+		Select("is_training").
+		Where("id = ?", id).
+		First(&dbCampaign)
+
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return dbCampaign.IsTraining, nil
+}
+
+// IsAnonymizedByID reports whether the campaign has been anonymized after the fact,
+// i.e. its AnonymizedAt timestamp is set.
+func (r *Campaign) IsAnonymizedByID(
+	ctx context.Context,
+	id *uuid.UUID,
+) (bool, error) {
+	var dbCampaign database.Campaign
+	res := r.DB.
+		Model(&database.Campaign{}).
+		Select("anonymized_at").
+		Where("id = ?", id).
+		First(&dbCampaign)
+
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return dbCampaign.AnonymizedAt != nil, nil
+}
+
+// IsAnonymousByCampaignRecipientID reports whether the campaign owning a campaign
+// recipient is anonymous. found is false when the id matches no campaign recipient.
+func (r *Campaign) IsAnonymousByCampaignRecipientID(
+	ctx context.Context,
+	campaignRecipientID *uuid.UUID,
+) (isAnon bool, found bool, err error) {
+	var out []bool
+	res := r.DB.WithContext(ctx).Raw(`
+		SELECT c.is_anonymous
+		FROM campaign_recipients cr
+		JOIN campaigns c ON c.id = cr.campaign_id
+		WHERE cr.id = ?
+		LIMIT 1`, campaignRecipientID).Scan(&out)
+	if res.Error != nil {
+		return false, false, res.Error
+	}
+	if len(out) == 0 {
+		return false, false, nil
+	}
+	return out[0], true, nil
+}
+
+// HasGroupDataByCampaignID reports whether any recipient carries a position or
+// department, i.e. whether a grouped breakdown has anything to show.
+func (r *Campaign) HasGroupDataByCampaignID(
+	ctx context.Context,
+	id *uuid.UUID,
+) (bool, error) {
+	// check the snapshot columns and, since they are set only for anonymous
+	// campaigns, the recipient's own position/department too
+	var count int64
+	res := r.DB.WithContext(ctx).Raw(`
+		SELECT COUNT(*) FROM (
+			SELECT 1 FROM campaign_recipients cr
+			LEFT JOIN recipients r ON r.id = cr.recipient_id
+			WHERE cr.campaign_id = ? AND (
+				cr.position <> '' OR cr.department <> ''
+				OR COALESCE(r.position, '') <> '' OR COALESCE(r.department, '') <> ''
+			)
+			LIMIT 1
+		) AS x`, id).Scan(&count)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return count > 0, nil
+}
+
 // GetByNameAndCompanyID gets a campaign by name and company id
 func (r *Campaign) GetByNameAndCompanyID(
 	ctx context.Context,
@@ -1413,9 +1511,16 @@ func (r *Campaign) GetReadyToAnonymize(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
+	// a campaign is ready to anonymize when its scheduled anonymize_at has passed,
+	// or when it is anonymous and closed: an anonymous campaign always severs its
+	// recipient relation at close, and this is the fallback that guarantees it even
+	// if the inline anonymize at close time failed. either way anonymized_at must be
+	// unset so an already-anonymized campaign is never reprocessed.
 	var dbCampaigns []database.Campaign
+	now := utils.NowRFC3339UTC()
 	res := db.
-		Where("anonymize_at <= ? AND anonymized_at IS NULL", utils.NowRFC3339UTC()).
+		Where("anonymized_at IS NULL").
+		Where("(anonymize_at <= ?) OR (is_anonymous = ? AND closed_at IS NOT NULL)", now, true).
 		Find(&dbCampaigns)
 	if res.Error != nil {
 		return result, res.Error
@@ -1531,6 +1636,9 @@ func (r *Campaign) SaveEvent(
 	if campaignEvent.RecipientID != nil {
 		row["recipient_id"] = campaignEvent.RecipientID.String()
 	}
+	if campaignEvent.AnonymizedID != nil {
+		row["anonymized_id"] = campaignEvent.AnonymizedID.String()
+	}
 	AddTimestamps(row)
 	res := r.DB.Model(&database.CampaignEvent{}).Create(row)
 	if res.Error != nil {
@@ -1586,6 +1694,25 @@ func (r *Campaign) HasEvent(
 		return false, res.Error
 	}
 
+	return count > 0, nil
+}
+
+// HasEventByAnonymizedID reports whether an event of the given type already exists
+// for a pseudonym in a campaign. Used to deduplicate events on anonymous campaigns,
+// whose events carry no recipient id.
+func (r *Campaign) HasEventByAnonymizedID(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	anonymizedID *uuid.UUID,
+	eventID *uuid.UUID,
+) (bool, error) {
+	var count int64
+	res := r.DB.Model(&database.CampaignEvent{}).
+		Where("campaign_id = ? AND event_id = ? AND anonymized_id = ?", campaignID, eventID, anonymizedID).
+		Count(&count)
+	if res.Error != nil {
+		return false, res.Error
+	}
 	return count > 0, nil
 }
 
@@ -2398,19 +2525,19 @@ func (r *Campaign) DeleteCampaignStatsByID(ctx context.Context, statsID *uuid.UU
 
 // reportRecipientRow is the scan target for GetReportRecipients
 type reportRecipientRow struct {
-	FirstName     string `gorm:"column:first_name"`
-	LastName      string `gorm:"column:last_name"`
-	Email         string `gorm:"column:email"`
-	Department    string `gorm:"column:department"`
-	Position      string `gorm:"column:position"`
-	ClickedLink       bool `gorm:"column:clicked_link"`
-	SubmittedData     bool `gorm:"column:submitted_data"`
-	Reported          bool `gorm:"column:reported"`
-	TrainingStarted   bool `gorm:"column:training_started"`
-	TrainingCompleted bool `gorm:"column:training_completed"`
+	FirstName         string `gorm:"column:first_name"`
+	LastName          string `gorm:"column:last_name"`
+	Email             string `gorm:"column:email"`
+	Department        string `gorm:"column:department"`
+	Position          string `gorm:"column:position"`
+	ClickedLink       bool   `gorm:"column:clicked_link"`
+	SubmittedData     bool   `gorm:"column:submitted_data"`
+	Reported          bool   `gorm:"column:reported"`
+	TrainingStarted   bool   `gorm:"column:training_started"`
+	TrainingCompleted bool   `gorm:"column:training_completed"`
 }
 
-// GetReportRecipients returns per-recipient click/submit/reported results for a campaign.
+// GetReportRecipients returns per recipient click/submit/reported results for a campaign.
 // Only non-anonymized recipients (recipient_id IS NOT NULL) are included.
 func (r *Campaign) GetReportRecipients(
 	ctx context.Context,
@@ -2494,6 +2621,115 @@ func (r *Campaign) GetReportRecipients(
 			Position:          row.Position,
 			ClickedLink:       row.ClickedLink,
 			SubmittedData:     row.SubmittedData,
+			Reported:          row.Reported,
+			TrainingStarted:   row.TrainingStarted,
+			TrainingCompleted: row.TrainingCompleted,
+		})
+	}
+	return result, nil
+}
+
+// groupedStatColumns is the fixed allowlist of snapshot columns a grouped stats
+// query may group on. Never group on a raw column taken from user input.
+var groupedStatColumns = map[string]bool{
+	"position":   true,
+	"department": true,
+}
+
+// GetGroupedResultStats returns outcome counts grouped by a recipient attribute
+// snapshotted on the campaign recipient, joining events to recipients by the
+// stable pseudonym so it works for an anonymous campaign both while live and after
+// the recipient relation is severed. Each unique pseudonym is counted once per
+// outcome. Only anonymous campaigns snapshot the grouping columns, so this returns
+// empty for a campaign that has none.
+func (r *Campaign) GetGroupedResultStats(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	groupColumn string,
+) ([]model.CampaignGroupStat, error) {
+	if !groupedStatColumns[groupColumn] {
+		return nil, fmt.Errorf("invalid group column: %s", groupColumn)
+	}
+	beforeID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED]
+	pageID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED]
+	afterID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED]
+	submitID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
+	reportID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
+	startedID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED]
+	completedID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED]
+
+	type groupRow struct {
+		Grp               string
+		Total             int
+		Clicked           int
+		Submitted         int
+		Reported          int
+		TrainingStarted   int
+		TrainingCompleted int
+	}
+	var rows []groupRow
+	// the person key is the pseudonym when present, else the recipient id, so counts
+	// work for normal, anonymous and anonymized campaigns; the group value is the
+	// snapshot, falling back to the recipient's attribute. groupColumn is allowlisted
+	// above, so its interpolation is safe.
+	query := fmt.Sprintf(`
+	SELECT
+		COALESCE(NULLIF(cr.%[1]s, ''), r.%[1]s) AS grp,
+		COUNT(DISTINCT COALESCE(cr.anonymized_id, cr.recipient_id)) AS total,
+		COUNT(DISTINCT CASE WHEN clicked.pk IS NOT NULL THEN COALESCE(cr.anonymized_id, cr.recipient_id) END) AS clicked,
+		COUNT(DISTINCT CASE WHEN submitted.pk IS NOT NULL THEN COALESCE(cr.anonymized_id, cr.recipient_id) END) AS submitted,
+		COUNT(DISTINCT CASE WHEN reported.pk IS NOT NULL THEN COALESCE(cr.anonymized_id, cr.recipient_id) END) AS reported,
+		COUNT(DISTINCT CASE WHEN started.pk IS NOT NULL THEN COALESCE(cr.anonymized_id, cr.recipient_id) END) AS training_started,
+		COUNT(DISTINCT CASE WHEN completed.pk IS NOT NULL THEN COALESCE(cr.anonymized_id, cr.recipient_id) END) AS training_completed
+	FROM campaign_recipients cr
+	LEFT JOIN recipients r ON r.id = cr.recipient_id
+	LEFT JOIN (
+		SELECT DISTINCT COALESCE(anonymized_id, recipient_id) AS pk FROM campaign_events
+		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL AND event_id IN (?, ?, ?)
+	) AS clicked ON clicked.pk = COALESCE(cr.anonymized_id, cr.recipient_id)
+	LEFT JOIN (
+		SELECT DISTINCT COALESCE(anonymized_id, recipient_id) AS pk FROM campaign_events
+		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL AND event_id = ?
+	) AS submitted ON submitted.pk = COALESCE(cr.anonymized_id, cr.recipient_id)
+	LEFT JOIN (
+		SELECT DISTINCT COALESCE(anonymized_id, recipient_id) AS pk FROM campaign_events
+		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL AND event_id = ?
+	) AS reported ON reported.pk = COALESCE(cr.anonymized_id, cr.recipient_id)
+	LEFT JOIN (
+		SELECT DISTINCT COALESCE(anonymized_id, recipient_id) AS pk FROM campaign_events
+		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL AND event_id = ?
+	) AS started ON started.pk = COALESCE(cr.anonymized_id, cr.recipient_id)
+	LEFT JOIN (
+		SELECT DISTINCT COALESCE(anonymized_id, recipient_id) AS pk FROM campaign_events
+		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL AND event_id = ?
+	) AS completed ON completed.pk = COALESCE(cr.anonymized_id, cr.recipient_id)
+	WHERE cr.campaign_id = ? AND COALESCE(cr.anonymized_id, cr.recipient_id) IS NOT NULL
+	GROUP BY COALESCE(NULLIF(cr.%[1]s, ''), r.%[1]s)
+	ORDER BY total DESC
+	`, groupColumn)
+
+	res := r.DB.WithContext(ctx).Raw(query,
+		campaignID, beforeID, pageID, afterID,
+		campaignID, submitID,
+		campaignID, reportID,
+		campaignID, startedID,
+		campaignID, completedID,
+		campaignID,
+	).Scan(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	result := make([]model.CampaignGroupStat, 0, len(rows))
+	for _, row := range rows {
+		grp := row.Grp
+		if grp == "" {
+			grp = "(unspecified)"
+		}
+		result = append(result, model.CampaignGroupStat{
+			Group:             grp,
+			Total:             row.Total,
+			Clicked:           row.Clicked,
+			Submitted:         row.Submitted,
 			Reported:          row.Reported,
 			TrainingStarted:   row.TrainingStarted,
 			TrainingCompleted: row.TrainingCompleted,

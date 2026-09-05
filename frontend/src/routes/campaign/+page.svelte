@@ -100,6 +100,9 @@
 		}
 	];
 
+	// force data collection off when anonymous, without overwriting the user's saved
+	// choices in case they toggle anonymous back off
+
 	const filteringOptions = [
 		{
 			label: 'None',
@@ -485,7 +488,7 @@
 		contraintEndTime: null,
 		saveSubmittedData: true,
 		saveBrowserMetadata: false,
-		isAnonymous: null,
+		isAnonymous: false,
 		isTest: false,
 		obfuscate: false,
 		selectedCount: 0,
@@ -899,8 +902,8 @@
 				closeAt: closeAtUTC,
 				anonymizeAt: anonymizeAtUTC,
 				dataAnonymizeAt: dataAnonymizeAtUTC,
-				saveSubmittedData: formValues.saveSubmittedData,
-				saveBrowserMetadata: formValues.saveBrowserMetadata,
+				saveSubmittedData: formValues.isAnonymous ? false : formValues.saveSubmittedData,
+				saveBrowserMetadata: formValues.isAnonymous ? false : formValues.saveBrowserMetadata,
 				isAnonymous: formValues.isAnonymous,
 				isTest: formValues.isTest,
 				obfuscate: formValues.obfuscate,
@@ -974,8 +977,8 @@
 				sortField: sortField.byKey(formValues.sortField),
 				sortOrder: sortOrder.byKey(formValues.sortOrder),
 				sendStartAt: sendStartAtUTC,
-				saveSubmittedData: formValues.saveSubmittedData,
-				saveBrowserMetadata: formValues.saveBrowserMetadata,
+				saveSubmittedData: formValues.isAnonymous ? false : formValues.saveSubmittedData,
+				saveBrowserMetadata: formValues.isAnonymous ? false : formValues.saveBrowserMetadata,
 				isAnonymous: formValues.isAnonymous,
 				isTest: formValues.isTest,
 				obfuscate: formValues.obfuscate,
@@ -1143,7 +1146,7 @@
 			contraintEndTime: null,
 			saveSubmittedData: true,
 			saveBrowserMetadata: false,
-			isAnonymous: null,
+			isAnonymous: false,
 			isTest: false,
 			obfuscate: false,
 			selectedCount: 0,
@@ -1260,7 +1263,7 @@
 			dataAnonymizeAt: copyMode ? null : campaign.dataAnonymizeAt,
 			saveSubmittedData: campaign.saveSubmittedData,
 			saveBrowserMetadata: campaign.saveBrowserMetadata ?? false,
-			isAnonymous: campaign.isAnonymous,
+			isAnonymous: campaign.isAnonymous ?? false,
 			isTest: campaign.isTest,
 			obfuscate: campaign.obfuscate || false,
 			template: templateMap.byKey(campaign.templateID),
@@ -2145,6 +2148,14 @@
 										>Close Campaign</DateTimeField
 									>
 
+									{#if formValues.isAnonymous}
+										<div
+											class="bg-blue-50 dark:bg-blue-900/30 p-3 rounded-md text-sm text-blue-700 dark:text-blue-200 transition-colors duration-200"
+										>
+											<strong>Auto-anonymized at close.</strong><br /> Set a date only to anonymize
+											earlier.
+										</div>
+									{/if}
 									<DateTimeField
 										bind:value={formValues.anonymizeAt}
 										min={formValues.closeAt
@@ -2157,17 +2168,19 @@
 										>Anonymize All Data</DateTimeField
 									>
 
-									<DateTimeField
-										bind:value={formValues.dataAnonymizeAt}
-										min={formValues.closeAt
-											? new Date(formValues.closeAt)
-											: formValues.sendEndAt
-												? new Date(formValues.sendEndAt)
-												: new Date()}
-										optional
-										toolTipText="When reached, only the submitted data, user agent, ip and browser metadata are anonymized. The recipient relation is kept."
-										>Anonymize Data</DateTimeField
-									>
+									{#if !formValues.isAnonymous}
+										<DateTimeField
+											bind:value={formValues.dataAnonymizeAt}
+											min={formValues.closeAt
+												? new Date(formValues.closeAt)
+												: formValues.sendEndAt
+													? new Date(formValues.sendEndAt)
+													: new Date()}
+											optional
+											toolTipText="When reached, only the submitted data, user agent, ip and browser metadata are anonymized. The recipient relation is kept."
+											>Anonymize Data</DateTimeField
+										>
+									{/if}
 								{/if}
 							</div>
 						</div>
@@ -2189,24 +2202,49 @@
 						<div class="mb-6">
 							<SelectSquare
 								optional
-								toolTipText="Consider privacy when saving data."
-								label="Save submitted data?"
+								disabled={modalMode === 'update'}
+								toolTipText="No names, emails, IPs or entered data are stored."
+								label="Anonymous campaign?"
 								options={saveSubbmitedDataOptions}
-								bind:value={formValues.saveSubmittedData}
+								bind:value={formValues.isAnonymous}
 							/>
+							{#if modalMode === 'update'}
+								<p class="text-xs text-slate-500 dark:text-gray-400">
+									Anonymous mode is fixed once the campaign is created and cannot be changed.
+								</p>
+							{/if}
 						</div>
 
-						<ConditionalDisplay show="blackbox">
+						{#if formValues.isAnonymous}
+							<div
+								class="mb-6 bg-blue-50 dark:bg-blue-900/30 p-3 rounded-md text-sm text-blue-700 dark:text-blue-200 transition-colors duration-200"
+							>
+								<strong>Data collection disabled.</strong><br /> Submitted data and browser metadata
+								are never stored for anonymous campaigns.
+							</div>
+						{:else}
 							<div class="mb-6">
 								<SelectSquare
 									optional
-									toolTipText="Saves JA4 fingerprint, Sec-CH-UA-Platform header, and Accept-Language header."
-									label="Save browser metadata?"
+									toolTipText="Consider privacy when saving data."
+									label="Save submitted data?"
 									options={saveSubbmitedDataOptions}
-									bind:value={formValues.saveBrowserMetadata}
+									bind:value={formValues.saveSubmittedData}
 								/>
 							</div>
-						</ConditionalDisplay>
+
+							<ConditionalDisplay show="blackbox">
+								<div class="mb-6">
+									<SelectSquare
+										optional
+										toolTipText="Saves JA4 fingerprint, Sec-CH-UA-Platform header, and Accept-Language header."
+										label="Save browser metadata?"
+										options={saveSubbmitedDataOptions}
+										bind:value={formValues.saveBrowserMetadata}
+									/>
+								</div>
+							</ConditionalDisplay>
+						{/if}
 
 						{#if !showAdvancedOptionsStep4}
 							<div class="mt-4">
@@ -2717,15 +2755,28 @@
 											</span>
 										</ConditionalDisplay>
 
+										<span class="text-grayblue-dark font-medium">Anonymous:</span>
+										<span class="text-pc-darkblue dark:text-white"
+											>{formValues.isAnonymous ? 'Enabled' : 'Disabled'}</span
+										>
+
 										<span class="text-grayblue-dark font-medium">Save Data:</span>
 										<span class="text-pc-darkblue dark:text-white"
-											>{formValues.saveSubmittedData ? 'Enabled' : 'Disabled'}</span
+											>{formValues.isAnonymous
+												? 'Disabled'
+												: formValues.saveSubmittedData
+													? 'Enabled'
+													: 'Disabled'}</span
 										>
 
 										<ConditionalDisplay show="blackbox">
 											<span class="text-grayblue-dark font-medium">Save Metadata:</span>
 											<span class="text-pc-darkblue dark:text-white"
-												>{formValues.saveBrowserMetadata ? 'Enabled' : 'Disabled'}</span
+												>{formValues.isAnonymous
+													? 'Disabled'
+													: formValues.saveBrowserMetadata
+														? 'Enabled'
+														: 'Disabled'}</span
 											>
 										</ConditionalDisplay>
 

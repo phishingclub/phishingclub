@@ -170,6 +170,8 @@ const (
 	ROUTE_V1_CAMPAIGN_NAME               = "/api/v1/campaign/name/:name"
 	ROUTE_V1_CAMPAIGN_RECIPIENTS         = "/api/v1/campaign/:id/recipients"
 	ROUTE_V1_CAMPAIGN_RESULT_STATS       = "/api/v1/campaign/:id/statistics"
+	ROUTE_V1_CAMPAIGN_GROUPED_STATS      = "/api/v1/campaign/:id/grouped-statistics"
+	ROUTE_V1_CAMPAIGN_HAS_GROUP_DATA     = "/api/v1/campaign/:id/has-group-data"
 	ROUTE_V1_CAMPAIGN_EVENTS             = "/api/v1/campaign/:id/events"
 	ROUTE_V1_CAMPAIGN_ALL_EVENTS         = "/api/v1/campaign/events"
 	ROUTE_V1_CAMPAIGN_EVENT_ID           = "/api/v1/campaign/event/:id"
@@ -501,6 +503,8 @@ func setupRoutes(
 		DELETE(ROUTE_V1_CAMPAIGN_EVENT_ID, middleware.SessionHandler, controllers.Campaign.DeleteEventByID).
 		GET(ROUTE_V1_CAMPAIGN_STATS, middleware.SessionHandler, controllers.Campaign.GetStats).
 		GET(ROUTE_V1_CAMPAIGN_RESULT_STATS, middleware.SessionHandler, controllers.Campaign.GetResultStats).
+		GET(ROUTE_V1_CAMPAIGN_GROUPED_STATS, middleware.SessionHandler, controllers.Campaign.GetGroupedResultStats).
+		GET(ROUTE_V1_CAMPAIGN_HAS_GROUP_DATA, middleware.SessionHandler, controllers.Campaign.GetHasGroupData).
 		GET(ROUTE_V1_CAMPAIGN_STATS_ID, middleware.SessionHandler, controllers.Campaign.GetCampaignStats).
 		GET(ROUTE_V1_CAMPAIGN_STATS_ALL, middleware.SessionHandler, controllers.Campaign.GetAllCampaignStats).
 		POST(ROUTE_V1_CAMPAIGN_STATS_CREATE, middleware.SessionHandler, controllers.Campaign.CreateCampaignStats).

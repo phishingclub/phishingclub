@@ -118,6 +118,41 @@
 		trainingStarted: 0,
 		trainingCompleted: 0
 	};
+	// grouped outcome stats by position or department
+	let groupedStats = [];
+	let groupedBy = 'position';
+	// results by group is hidden by default and loaded on demand
+	let showGroupedStats = false;
+	let groupedStatsLoading = false;
+	// only offer results by group when recipients actually carry a position or
+	// department to group on; determined server-side so pagination cannot hide it
+	let hasGroupData = false;
+
+	// the outcomes shown for a group depend on whether it is a training campaign
+	const groupOutcomeMetrics = (r) =>
+		campaign.isTraining
+			? [r.clicked, r.trainingStarted, r.trainingCompleted]
+			: [r.clicked, r.submitted, r.reported];
+	// a withheld outcome comes back as a negative sentinel, and a group merged for
+	// being too small is flagged suppressed. track whether any row hides an outcome
+	// so the panel can explain the dashes rather than leaving them unexplained
+	$: groupedAnyRedacted = groupedStats.some(
+		(r) => r.suppressed || groupOutcomeMetrics(r).some((v) => v < 0)
+	);
+
+	const setHasGroupData = async () => {
+		if (!campaign.isAnonymous && !campaign.isTraining) {
+			hasGroupData = false;
+			return;
+		}
+		try {
+			const res = await api.campaign.getHasGroupData($page.params.id);
+			hasGroupData = !!res.data?.hasGroupData;
+		} catch (e) {
+			console.error('failed to check group data', e);
+			hasGroupData = false;
+		}
+	};
 	// @ts-ignore
 	const recipientTableUrlParams = newTableURLParams({
 		prefix: 'recipient',
@@ -285,6 +320,12 @@
 		await setResults();
 		await setEventType();
 		await setCampaign();
+		// after setCampaign so campaign.isAnonymous is known; a cheap flag, not the table
+		await setHasGroupData();
+		// results by group is loaded on demand, not here; keep it fresh only if already open
+		if (showGroupedStats) {
+			await setGroupedStats();
+		}
 		await refreshCampaignRecipients();
 		await getEvents();
 		await refreshCampaignEventsSince();
@@ -521,6 +562,42 @@
 		}
 	};
 
+	const setGroupedStats = async () => {
+		if (!campaign.isAnonymous && !campaign.isTraining) {
+			groupedStats = [];
+			return;
+		}
+		groupedStatsLoading = true;
+		try {
+			const res = await api.campaign.getGroupedResultStats($page.params.id, groupedBy);
+			if (!res.success) {
+				throw res.error;
+			}
+			groupedStats = res.data ?? [];
+		} catch (e) {
+			console.error('failed to load grouped stats', e);
+			// clear so a failed dimension switch cannot leave stale rows under the new header
+			groupedStats = [];
+		} finally {
+			groupedStatsLoading = false;
+		}
+	};
+
+	// reveal the results-by-group section and load it on demand
+	const showGroupedResults = async () => {
+		showGroupedStats = true;
+		await setGroupedStats();
+	};
+
+	/** @param {'position'|'department'} by */
+	const onChangeGroupedBy = async (by) => {
+		if (by === groupedBy) {
+			return;
+		}
+		groupedBy = by;
+		await setGroupedStats();
+	};
+
 	/** @param {string} campaignRecipientID */
 	const onClickCopyEmailContent = async (campaignRecipientID) => {
 		try {
@@ -679,6 +756,10 @@
 
 	/** @param {string} campaignRecipientID @param {Object} recipient */
 	const showSendMessageModal = (campaignRecipientID, recipient) => {
+		// recipient is null for anonymous campaigns, where identity is stripped
+		if (!recipient) {
+			return;
+		}
 		sendMessageRecipient = {
 			id: campaignRecipientID,
 			name: `${recipient.firstName || ''} ${recipient.lastName || ''}`.trim(),
@@ -802,6 +883,10 @@
 
 	/** @param {string} campaignRecipientID @param {Object} recipient */
 	const showSetAsSentModal = (campaignRecipientID, recipient) => {
+		// recipient is null for anonymous campaigns, where identity is stripped
+		if (!recipient) {
+			return;
+		}
 		setAsSentRecipient = {
 			id: campaignRecipientID,
 			name: `${recipient.firstName || ''} ${recipient.lastName || ''}`.trim(),
@@ -818,8 +903,10 @@
 	const onConfirmSendMessage = async () => {
 		try {
 			showIsLoading();
-			// Check if this is a resend before sending
-			const isResend = campaignRecipients.find((r) => r.id === sendMessageRecipient.id)?.sentAt;
+			// Check if this is a resend before sending (sentAt is withheld for anonymous
+			// campaigns, which expose only the coarse `sent` flag)
+			const sendMessageRow = campaignRecipients.find((r) => r.id === sendMessageRecipient.id);
+			const isResend = sendMessageRow?.sentAt || sendMessageRow?.sent;
 			const res = await api.campaign.sendMessage(sendMessageRecipient.id);
 			if (!res.success) {
 				throw res.error;
@@ -1526,6 +1613,10 @@
 					try {
 						await setResults();
 						await setCampaign();
+						// results by group is on demand; only refresh it if the user opened it
+						if (showGroupedStats) {
+							await setGroupedStats();
+						}
 						// await refreshCampaignRecipients();
 
 						const res = await api.campaign.getAllCampaignRecipients(
@@ -1902,6 +1993,104 @@
 			</StatsCard>
 			{/if}
 		</div>
+
+		{#if (campaign.isAnonymous || campaign.isTraining) && hasGroupData}
+			<div class="mb-6">
+				<div class="mb-3 flex items-center gap-3">
+					<SubHeadline>Results by group</SubHeadline>
+					<button
+						type="button"
+						class="text-sm font-medium text-cta-blue hover:text-blue-700 dark:text-highlight-blue dark:hover:text-blue-300 transition-colors duration-200"
+						on:click={() => (showGroupedStats ? (showGroupedStats = false) : showGroupedResults())}
+						>{showGroupedStats ? 'Hide' : 'Show'}</button
+					>
+				</div>
+
+				{#if showGroupedStats}
+					<div class="mb-4 flex gap-2">
+						<button
+							type="button"
+							class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 {groupedBy ===
+							'position'
+								? 'bg-cta-blue text-white'
+								: 'bg-grayblue-light dark:bg-gray-800/60 text-slate-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700/60'}"
+							on:click={() => onChangeGroupedBy('position')}>Position</button
+						>
+						<button
+							type="button"
+							class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 {groupedBy ===
+							'department'
+								? 'bg-cta-blue text-white'
+								: 'bg-grayblue-light dark:bg-gray-800/60 text-slate-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700/60'}"
+							on:click={() => onChangeGroupedBy('department')}>Department</button
+						>
+					</div>
+
+					{#if campaign.isAnonymous}
+						<div
+							class="mb-4 rounded-md bg-grayblue-light dark:bg-gray-800/60 px-4 py-3 text-sm text-slate-600 dark:text-gray-300"
+						>
+							Per group outcomes are not shown for anonymous campaigns, so no individual can be
+							singled out. Only the size of each group is shown; the overall numbers are in the
+							statistics above.
+						</div>
+					{:else if groupedAnyRedacted}
+						<div
+							class="mb-4 rounded-md bg-grayblue-light dark:bg-gray-800/60 px-4 py-3 text-sm text-slate-600 dark:text-gray-300"
+						>
+							Results shown as a dash (—) are hidden so no individual can be singled out, because
+							the group is too small to show on its own.
+						</div>
+					{/if}
+
+					<Table
+						columns={[
+							{ column: groupedBy === 'position' ? 'Position' : 'Department', size: 'large' },
+							{ column: 'Targets', size: 'small' },
+							{ column: campaign.isTraining ? 'Visited' : 'Clicked', size: 'small' },
+							{ column: campaign.isTraining ? 'Started' : 'Submitted', size: 'small' },
+							{ column: campaign.isTraining ? 'Completed' : 'Reported', size: 'small' }
+						]}
+						pagination={null}
+						noSearch
+						hasActions={false}
+						plural="groups"
+						hasData={groupedStats.length > 0}
+						hasNextPage={false}
+						isGhost={groupedStatsLoading && groupedStats.length === 0}
+					>
+						{#each groupedStats as row}
+							{@const metrics = campaign.isTraining
+								? [row.clicked, row.trainingStarted, row.trainingCompleted]
+								: [row.clicked, row.submitted, row.reported]}
+							<TableRow title={row.suppressed ? 'Group too small to show outcomes' : ''}>
+								<TableCell value={row.group} />
+								<TableCell value={String(row.total)} />
+								{#if row.suppressed}
+									<TableCell><span class="text-gray-400 dark:text-gray-500">—</span></TableCell>
+									<TableCell><span class="text-gray-400 dark:text-gray-500">—</span></TableCell>
+									<TableCell><span class="text-gray-400 dark:text-gray-500">—</span></TableCell>
+								{:else}
+									{#each metrics as val}
+										<TableCell>
+											{#if val < 0}
+												<span class="text-gray-400 dark:text-gray-500">—</span>
+											{:else}
+												{val}
+												<span class="text-gray-400 dark:text-gray-500"
+													>({row.total ? Math.round((val / row.total) * 100) : 0}%)</span
+												>
+											{/if}
+										</TableCell>
+									{/each}
+								{/if}
+							</TableRow>
+						{/each}
+					</Table>
+				{/if}
+			</div>
+		{/if}
+
 		<div class=" mb-6">
 			<SubHeadline>Event Timeline</SubHeadline>
 			<EventTimeline
@@ -2486,7 +2675,7 @@
 								{/if}
 							</TableCell>
 						{/if}
-						{#if recp?.anonymizedID}
+						{#if !recp?.recipient}
 							<TableCell value={'anonymized'} />
 							<TableCell value={'anonymized'} />
 							<TableCell value={'anonymized'} />
@@ -2496,7 +2685,7 @@
 									on:click={() => openEventsModal(recp.recipientID)}
 									class="block w-full py-1 text-left"
 								>
-									{recp.recipient.firstName}
+									{recp.recipient?.firstName ?? ''}
 								</button>
 							</TableCell>
 							<TableCell>
@@ -2504,7 +2693,7 @@
 									on:click={() => openEventsModal(recp.recipientID)}
 									class="block w-full py-1 text-left"
 								>
-									{recp.recipient.lastName}
+									{recp.recipient?.lastName ?? ''}
 								</button>
 							</TableCell>
 							<TableCell>
@@ -2528,11 +2717,35 @@
 							</TableCell>
 						{/if}
 						<TableCell>
-							<EventName eventName={recp?.notableEventName} />
+							{#if campaign.isAnonymous}
+								<span
+									class="text-sm italic text-gray-400 dark:text-gray-500"
+									title="Per-recipient outcomes are hidden for anonymous campaigns. See Results by group."
+									>Hidden</span
+								>
+							{:else}
+								<EventName eventName={recp?.notableEventName} />
+							{/if}
 						</TableCell>
-						<TableCell value={recp?.sendAt} isDate />
-						<TableCell value={recp?.sentAt} isDate />
-						<TableCell value={recp?.cancelledAt} isDate />
+						{#if campaign.isAnonymous}
+							<!-- exact per recipient timing is withheld so it cannot be matched against
+							the anonymized event stream; a coarse sent indicator keeps self-managed usable -->
+							<TableCell>
+								<span class="text-sm italic text-gray-400 dark:text-gray-500">Hidden</span>
+							</TableCell>
+							<TableCell>
+								<span
+									class="text-sm {recp?.sent
+										? 'text-slate-600 dark:text-gray-200'
+										: 'text-gray-400 dark:text-gray-500'}">{recp?.sent ? 'Sent' : '—'}</span
+								>
+							</TableCell>
+							<TableCell value={recp?.cancelledAt} isDate />
+						{:else}
+							<TableCell value={recp?.sendAt} isDate />
+							<TableCell value={recp?.sentAt} isDate />
+							<TableCell value={recp?.cancelledAt} isDate />
+						{/if}
 						{#if showLureCodeColumn}
 							<TableCell value={recp?.lureCode || ''} />
 						{/if}
@@ -2547,7 +2760,7 @@
 									/>
 
 									<TableDropDownButton
-										name={recp.sentAt ? `Send message again` : `Send message`}
+										name={recp.sentAt || recp.sent ? `Send message again` : `Send message`}
 										title={isContextMismatch()
 											? campaign.companyID
 												? 'Switch to company view to perform this action'
@@ -2560,10 +2773,13 @@
 														? 'Recipient cancelled'
 														: recp.sentAt
 															? `Send message again (last sent: ${new Date(recp.sentAt).toLocaleDateString()})`
-															: `Send message to recipient`}
+															: recp.sent
+																? `Send message again`
+																: `Send message to recipient`}
 										on:click={() => showSendMessageModal(recp.id, recp.recipient)}
 										disabled={!!campaign.closedAt ||
 											recp.cancelledAt ||
+											!recp.recipient ||
 											!!recp.recipient?.scimSoftDeletedAt ||
 											isContextMismatch()}
 									/>
@@ -2602,14 +2818,17 @@
 													? 'Campaign is anonymized'
 													: !recp.recipient
 														? 'Recipient not available'
-														: recp.sentAt
+														: recp.sentAt || recp.sent
 															? 'Changing this will break the link already sent to this recipient'
 															: 'Choose the identifier used in this recipient lure URL'}
 										on:click={() => showLureCodeModal(recp)}
 									/>
 									<TableUpdateButton
 										name="Copy email content"
-										disabled={!!campaign.closedAt || !!campaign.anonymizedAt || isContextMismatch()}
+										disabled={!!campaign.closedAt ||
+											!!campaign.anonymizedAt ||
+											!recp.recipient ||
+											isContextMismatch()}
 										title={isContextMismatch()
 											? campaign.companyID
 												? 'Switch to company view to perform this action'
@@ -2634,7 +2853,10 @@
 													? 'Campaign is closed'
 													: ''}
 											on:click={() => onClickSetEmailSent(recp.id, recp.recipient)}
-											disabled={!!campaign.closedAt || recp.cancelledAt || isContextMismatch()}
+											disabled={!!campaign.closedAt ||
+												recp.cancelledAt ||
+												!recp.recipient ||
+												isContextMismatch()}
 										/>
 									{/if}
 									<TableViewButton

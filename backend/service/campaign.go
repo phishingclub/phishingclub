@@ -414,6 +414,61 @@ func isLureCodeConflict(err error) bool {
 // insertScheduledRecipient inserts one scheduled recipient, redrawing its code if
 // it was claimed between allocation and insert. The loop has no transaction to
 // roll back, so a losing race would otherwise abort a half written schedule.
+// campaignAnonymous reports whether a campaign is anonymous, failing closed: if the
+// flag cannot be read it returns true so identity is protected rather than exposed.
+func campaignAnonymous(campaign *model.Campaign) bool {
+	if campaign == nil {
+		return true
+	}
+	isAnon, err := campaign.IsAnonymous.Get()
+	if err != nil {
+		return true
+	}
+	return isAnon
+}
+
+// applyAnonymousSnapshot assigns the stable random pseudonym and snapshots the
+// grouping attributes onto a campaign recipient for an anonymous campaign; it is a
+// no-op for a normal campaign.
+func (c *Campaign) applyAnonymousSnapshot(
+	campaign *model.Campaign,
+	campaignRecipient *model.CampaignRecipient,
+	recipient *model.Recipient,
+) {
+	if !campaignAnonymous(campaign) {
+		return
+	}
+	campaignRecipient.AnonymizedID = nullable.NewNullableWithValue(uuid.New())
+	position := ""
+	if v, err := recipient.Position.Get(); err == nil {
+		position = v.String()
+	}
+	department := ""
+	if v, err := recipient.Department.Get(); err == nil {
+		department = v.String()
+	}
+	campaignRecipient.Position = nullable.NewNullableWithValue(position)
+	campaignRecipient.Department = nullable.NewNullableWithValue(department)
+}
+
+// anonymizeEventForRecipient strips identity from an event and stamps the recipient's
+// pseudonym. It fails closed: with a pseudonym it always strips and stamps it;
+// without one it strips (uncounted) only for an anonymous campaign, and is a no-op
+// for a normal campaign.
+func anonymizeEventForRecipient(isAnonymous bool, campaignRecipient *model.CampaignRecipient, event *model.CampaignEvent) {
+	// a pseudonym is present only on anonymous campaigns: strip identity and stamp it
+	if campaignRecipient != nil {
+		if aid, err := campaignRecipient.AnonymizedID.Get(); err == nil {
+			event.Anonymize(&aid)
+			return
+		}
+	}
+	// no pseudonym: strip (uncounted) only when the campaign is anonymous
+	if isAnonymous {
+		event.Anonymize(nil)
+	}
+}
+
 func (c *Campaign) insertScheduledRecipient(
 	ctx context.Context,
 	allocator *lureCodeAllocator,
@@ -703,6 +758,7 @@ func (c *Campaign) schedule(
 				CampaignID:  nullable.NewNullableWithValue(campaignID),
 				SelfManaged: nullable.NewNullableWithValue(true),
 			}
+			c.applyAnonymousSnapshot(campaign, campaignRecipients[i], recipient)
 			if err := allocator.applyTo(campaignRecipients[i]); err != nil {
 				c.Logger.Errorw("failed to allocate lure code", "error", err)
 				return err
@@ -781,6 +837,7 @@ func (c *Campaign) schedule(
 			SendAt:         nullable.NewNullableWithValue(jitteredStartAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 		}
+		c.applyAnonymousSnapshot(campaign, campaignRecipient, recipients[0])
 		if err := allocator.applyTo(campaignRecipient); err != nil {
 			c.Logger.Errorw("failed to allocate lure code", "error", err)
 			return err
@@ -862,6 +919,7 @@ func (c *Campaign) schedule(
 						SendAt:         nullable.NewNullableWithValue(jitteredTime),
 						NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 					}
+					c.applyAnonymousSnapshot(campaign, campaignRecipient, recipient)
 					if err := allocator.applyTo(campaignRecipient); err != nil {
 						c.Logger.Errorw("failed to allocate lure code", "error", err)
 						return err
@@ -912,6 +970,7 @@ func (c *Campaign) schedule(
 			SendAt:         nullable.NewNullableWithValue(jitteredSentAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 		}
+		c.applyAnonymousSnapshot(campaign, campaignRecipients[i], recipient)
 		if err := allocator.applyTo(campaignRecipients[i]); err != nil {
 			c.Logger.Errorw("failed to allocate lure code", "error", err)
 			return err
@@ -1268,6 +1327,158 @@ func (c *Campaign) GetResultStats(
 	return stats, nil
 }
 
+// anonymityGroupFloor is the smallest group whose outcome counts are shown; groups
+// below it are merged so a lone recipient's outcome cannot be read.
+const anonymityGroupFloor = 3
+
+// OTHER_GROUP_LABEL is the bucket name for merged small groups.
+const OTHER_GROUP_LABEL = "Other (small groups)"
+
+// GetGroupedResultStats returns outcome counts grouped by a recipient attribute,
+// suppressing any group smaller than the anonymity floor. Only anonymous campaigns
+// snapshot the grouping attributes, so a normal campaign returns an empty result.
+func (c *Campaign) GetGroupedResultStats(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+	groupColumn string,
+) ([]model.CampaignGroupStat, error) {
+	ae := NewAuditEvent("Campaign.GetGroupedResultStats", session)
+	ae.Details["campaignId"] = campaignID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+	// grouping attributes are snapshotted only for anonymous campaigns. a closed
+	// normal campaign has pseudonyms but no snapshot, which would surface as a single
+	// unlabeled group, so restrict this to anonymous campaigns.
+	// shown for anonymous campaigns (in place of hidden per recipient outcomes) and
+	// for training campaigns (the started/completed breakdown).
+	isAnon, err := c.CampaignRepository.IsAnonymousByID(ctx, campaignID)
+	if err != nil {
+		c.Logger.Errorw("failed to check campaign anonymity for grouped stats", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	isTraining, err := c.CampaignRepository.IsTrainingByID(ctx, campaignID)
+	if err != nil {
+		c.Logger.Errorw("failed to check campaign training flag for grouped stats", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAnon && !isTraining {
+		return []model.CampaignGroupStat{}, nil
+	}
+	// hide per group outcomes for a campaign anonymized after the fact too, so this
+	// matches the report path and stays safe if snapshotting ever changes
+	isAnonymized, err := c.CampaignRepository.IsAnonymizedByID(ctx, campaignID)
+	if err != nil {
+		c.Logger.Errorw("failed to check campaign anonymized flag for grouped stats", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	stats, err := c.CampaignRepository.GetGroupedResultStats(ctx, campaignID, groupColumn)
+	if err != nil {
+		c.Logger.Errorw("failed to get grouped result stats", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	// no audit on read
+	return suppressSmallGroups(stats, isAnon || isAnonymized), nil
+}
+
+// HasGroupData reports whether the campaign's recipients carry any position or
+// department, so the UI can decide whether to offer the grouped breakdown.
+func (c *Campaign) HasGroupData(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+) (bool, error) {
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return false, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		return false, errs.ErrAuthorizationFailed
+	}
+	return c.CampaignRepository.HasGroupDataByCampaignID(ctx, campaignID)
+}
+
+// hasNamedGroups reports whether any group has a real attribute value rather than
+// the "(unspecified)" or Other placeholder.
+func hasNamedGroups(stats []model.CampaignGroupStat) bool {
+	for _, g := range stats {
+		if g.Group != "(unspecified)" && g.Group != OTHER_GROUP_LABEL {
+			return true
+		}
+	}
+	return false
+}
+
+// suppressSmallGroups merges groups below the floor into an "Other" bucket, then
+// absorbs the smallest shown groups until that bucket also reaches the floor, so a
+// small group cannot be recovered by subtracting the shown groups from the total.
+// When hideOutcomes is set (anonymized campaigns) every per group outcome is withheld
+// and only the group sizes are shown: publishing per group outcomes alongside the
+// campaign wide totals lets a shown or dashed column be back solved to an
+// individual's result, so anonymized campaigns expose group sizes only. Normal and
+// training campaigns keep exact counts.
+func suppressSmallGroups(stats []model.CampaignGroupStat, hideOutcomes bool) []model.CampaignGroupStat {
+	shown := []model.CampaignGroupStat{}
+	var other model.CampaignGroupStat
+	other.Group = OTHER_GROUP_LABEL
+	addToOther := func(g model.CampaignGroupStat) {
+		other.Total += g.Total
+		other.Clicked += g.Clicked
+		other.Submitted += g.Submitted
+		other.Reported += g.Reported
+		other.TrainingStarted += g.TrainingStarted
+		other.TrainingCompleted += g.TrainingCompleted
+	}
+	for _, g := range stats {
+		if g.Total >= anonymityGroupFloor {
+			shown = append(shown, g)
+		} else {
+			addToOther(g)
+		}
+	}
+	// smallest shown first, so absorbing to reach the floor sacrifices the least detail
+	sort.Slice(shown, func(i, j int) bool { return shown[i].Total < shown[j].Total })
+	for other.Total > 0 && other.Total < anonymityGroupFloor && len(shown) > 0 {
+		addToOther(shown[0])
+		shown = shown[1:]
+	}
+	if other.Total > 0 {
+		// only possible when the whole campaign has fewer than `floor` people, where
+		// the campaign-wide aggregate is unavoidable anyway; withhold the breakdown.
+		if other.Total < anonymityGroupFloor {
+			other.Clicked = 0
+			other.Submitted = 0
+			other.Reported = 0
+			other.TrainingStarted = 0
+			other.TrainingCompleted = 0
+			other.Suppressed = true
+		}
+		shown = append(shown, other)
+	}
+	if hideOutcomes {
+		// anonymized campaigns show group sizes only; -1 renders as a dash
+		for i := range shown {
+			if !shown[i].Suppressed {
+				shown[i].Clicked = -1
+				shown[i].Submitted = -1
+				shown[i].Reported = -1
+				shown[i].TrainingStarted = -1
+				shown[i].TrainingCompleted = -1
+			}
+		}
+	}
+	return shown
+}
+
 // GetRecipientsByCampaignID gets all recipients for a campaign
 func (c *Campaign) GetRecipientsByCampaignID(
 	ctx context.Context,
@@ -1288,8 +1499,22 @@ func (c *Campaign) GetRecipientsByCampaignID(
 		c.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
-	// get all recipients
-	if options.OrderBy == "" {
+	// an anonymous campaign keeps identity but withholds each outcome and timing
+	// (below). force an identity neutral order first so those withheld values cannot
+	// be read back from the row order. fail closed: on error, treat as anonymous.
+	isAnon, err := c.CampaignRepository.IsAnonymousByID(ctx, campaignID)
+	if err != nil {
+		c.Logger.Errorw("failed to check campaign anonymity before returning recipients", "error", err)
+		isAnon = true
+	}
+	if isAnon {
+		options.OrderBy = "recipients.first_name"
+		// search matches every allowed column, including the outcome and timing
+		// columns withheld from the response, so it could filter the named list by
+		// who clicked or when. clear it so only the sort is available, on a neutral
+		// column.
+		options.Search = ""
+	} else if options.OrderBy == "" {
 		options.OrderBy = "campaign_recipients.sent_at"
 	}
 	result, err = c.CampaignRecipientRepository.GetByCampaignID(
@@ -1300,6 +1525,18 @@ func (c *Campaign) GetRecipientsByCampaignID(
 	if err != nil {
 		c.Logger.Errorw("failed to get recipients by campaign id", "error", err)
 		return result, errs.Wrap(err)
+	}
+	if isAnon {
+		for _, row := range result.Rows {
+			row.NotableEventID.SetNull()
+			row.NotableEventName = ""
+			// replace exact timing with a coarse sent indicator
+			row.Sent = row.SentAt.IsSpecified() && !row.SentAt.IsNull()
+			row.SendAt.SetNull()
+			row.SentAt.SetNull()
+			row.LastAttemptAt.SetNull()
+			row.CancelledAt.SetNull()
+		}
 	}
 	// no audit on read
 	return result, nil
@@ -1582,6 +1819,14 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 		c.Logger.Errorw("failed to get campaign recipient by id", "error", err)
 		return errs.Wrap(err)
 	}
+	// an anonymized campaign recipient has no recipient id, which happens for a
+	// closed anonymous campaign whose link was severed. these public endpoints can
+	// be hit long after close from a token in a delivered email, so return quietly
+	// rather than dereferencing a null id.
+	if campaignRecipient.RecipientID.IsNull() {
+		c.Logger.Debugw("skipping tracking pixel event: recipient is anonymized", "campaignRecipientID", campaignRecipientID.String())
+		return nil
+	}
 	recipientID := campaignRecipient.RecipientID.MustGet()
 	campaignID := campaignRecipient.CampaignID.MustGet()
 
@@ -1625,6 +1870,7 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 		Data:        vo.NewEmptyOptionalString1MB(),
 		Metadata:    metadata,
 	}
+	anonymizeEventForRecipient(campaignAnonymous(campaign), campaignRecipient, campaignEvent)
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
 	if err != nil {
 		c.Logger.Errorw("failed to save tracking pixel loaded event", "error", err)
@@ -1677,6 +1923,14 @@ func (c *Campaign) SaveRecipientReported(
 		c.Logger.Errorw("failed to get campaign recipient by id", "error", err)
 		return errs.Wrap(err)
 	}
+	// an anonymized campaign recipient has no recipient id, which happens for a
+	// closed anonymous campaign whose link was severed. this public endpoint can be
+	// hit long after close from a token in a delivered email, so return quietly
+	// rather than dereferencing a null id.
+	if campaignRecipient.RecipientID.IsNull() {
+		c.Logger.Debugw("skipping report event: recipient is anonymized", "campaignRecipientID", campaignRecipientID.String())
+		return nil
+	}
 	recipientID := campaignRecipient.RecipientID.MustGet()
 	campaignID := campaignRecipient.CampaignID.MustGet()
 
@@ -1704,8 +1958,15 @@ func (c *Campaign) SaveRecipientReported(
 	reportedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
 
 	// de-duplicate: a recipient that already reported is not recorded again so a
-	// button that fires more than once does not spam the timeline
-	alreadyReported, err := c.CampaignRepository.HasEvent(ctx.Request.Context(), &campaignID, &recipientID, reportedEventID)
+	// button that fires more than once does not spam the timeline. an anonymous
+	// campaign's events carry the pseudonym rather than a recipient id, so dedup on
+	// that instead.
+	var alreadyReported bool
+	if aid, aErr := campaignRecipient.AnonymizedID.Get(); aErr == nil {
+		alreadyReported, err = c.CampaignRepository.HasEventByAnonymizedID(ctx.Request.Context(), &campaignID, &aid, reportedEventID)
+	} else {
+		alreadyReported, err = c.CampaignRepository.HasEvent(ctx.Request.Context(), &campaignID, &recipientID, reportedEventID)
+	}
 	if err != nil {
 		c.Logger.Errorw("failed to check existing reported event", "error", err)
 		return errs.Wrap(err)
@@ -1733,6 +1994,7 @@ func (c *Campaign) SaveRecipientReported(
 		Data:        vo.NewEmptyOptionalString1MB(),
 		Metadata:    metadata,
 	}
+	anonymizeEventForRecipient(campaignAnonymous(campaign), campaignRecipient, campaignEvent)
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
 	if err != nil {
 		c.Logger.Errorw("failed to save reported event", "error", err)
@@ -1863,6 +2125,24 @@ func (c *Campaign) UpdateByID(
 		current.SaveBrowserMetadata.Set(v)
 	}
 	if v, err := incoming.IsAnonymous.Get(); err == nil {
+		// anonymity cannot change once recipients are materialized: pseudonyms are
+		// assigned at materialization, and a self managed campaign is not otherwise
+		// edit locked, so a late flip to anonymous would leave already recorded events
+		// carrying identity. block the change once any recipient exists.
+		currentAnon := campaignAnonymous(current)
+		if v != currentAnon {
+			hasRecipients, hErr := c.CampaignRecipientRepository.HasRecipientsByCampaignID(ctx, id)
+			if hErr != nil {
+				c.Logger.Errorw("failed to check recipients before changing anonymity", "error", hErr)
+				return errs.Wrap(hErr)
+			}
+			if hasRecipients {
+				return validate.WrapErrorWithField(
+					errors.New("anonymous mode cannot be changed after recipients are added"),
+					"isAnonymous",
+				)
+			}
+		}
 		current.IsAnonymous.Set(v)
 	}
 	if v, err := incoming.IsTest.Get(); err == nil {
@@ -2590,8 +2870,8 @@ func (c *Campaign) sendCampaignMessages(
 		)
 		return errs.Wrap(errors.Join(err, closeErr))
 	}
-	// validate the template is parseable before entering the per-recipient loop.
-	// the actual per-recipient execution uses TemplateFuncsWithDeviceCode so that
+	// validate the template is parseable before entering the per recipient loop.
+	// the actual per recipient execution uses TemplateFuncsWithDeviceCode so that
 	// {{MicrosoftDeviceCode}} / {{MicrosoftDeviceCodeURL}} resolve correctly.
 	t := template.New("email")
 	t = t.Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID))
@@ -2886,7 +3166,7 @@ func (c *Campaign) sendCampaignMessages(
 		// the only builder that knows about proxy first pages and path mode codes
 		(*t)["URL"] = customCampaignURL
 
-		// build per-recipient template funcs so that {{MicrosoftDeviceCode}} resolves
+		// build per recipient template funcs so that {{MicrosoftDeviceCode}} resolves
 		// to a real device code for this campaign recipient.
 		// use the actual recipient id (not the campaign recipient row id) so the
 		// lookup key matches what the landing page path uses.
@@ -2914,7 +3194,7 @@ func (c *Campaign) sendCampaignMessages(
 		// to the correct recipient id
 		recipientMailTmpl, err := template.New("email").Funcs(recipientDeviceFuncs).Parse(content.String())
 		if err != nil {
-			c.Logger.Errorw("failed to parse per-recipient mail template", "error", err)
+			c.Logger.Errorw("failed to parse per recipient mail template", "error", err)
 			return errs.Wrap(err)
 		}
 		var bodyBuffer bytes.Buffer
@@ -3207,6 +3487,18 @@ func (c *Campaign) saveSendingResult(
 		Data:        data,
 		Metadata:    vo.NewEmptyOptionalString1MB(),
 	}
+	// a send failure reason can contain the recipient address, so an anonymous
+	// campaign must not keep it. Anonymize blanks the data along with identity. a real
+	// anonymous recipient always carries a pseudonym here (assigned at materialization),
+	// and the helper strips on that regardless of the flag; the flag only covers the
+	// should-not-happen no-pseudonym case, so on a lookup error default to not
+	// anonymous to avoid stripping a normal campaign's send event.
+	sendIsAnon, anonErr := c.CampaignRepository.IsAnonymousByID(ctx, &campaignID)
+	if anonErr != nil {
+		c.Logger.Errorw("failed to check campaign anonymity for send result event", "error", anonErr)
+		sendIsAnon = false
+	}
+	anonymizeEventForRecipient(sendIsAnon, campaignRecipient, campaignEvent)
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
 	if err != nil {
 		return fmt.Errorf("failed to save event: %s", err)
@@ -3691,6 +3983,19 @@ func (c *Campaign) closeCampaign(
 		if err := c.MicrosoftDeviceCodeRepository.DeleteByCampaignID(ctx, id); err != nil {
 			c.Logger.Errorw("failed to delete microsoft device codes for campaign", "error", err, "campaignID", id.String())
 			// non-fatal — continue
+		}
+	}
+
+	// an anonymous campaign severs its recipient relation at close so no identity is
+	// retained after it ends. best effort here; the anonymize sweep (GetReadyToAnonymize)
+	// is the fallback that retries if this fails. skip if already anonymized, e.g. when
+	// AnonymizeByID drove this close.
+	if campaignAnonymous(campaign) {
+		alreadyAnonymized := campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull()
+		if !alreadyAnonymized {
+			if err := c.anonymizeCampaignRecipients(ctx, id); err != nil {
+				c.Logger.Errorw("failed to anonymize recipients at close, sweep will retry", "error", err, "campaignID", id.String())
+			}
 		}
 	}
 
@@ -4259,6 +4564,7 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 		Data:        details,
 		Metadata:    vo.NewEmptyOptionalString1MB(),
 	}
+	anonymizeEventForRecipient(campaignAnonymous(campaign), campaignRecipient, campaignEvent)
 
 	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
 	if err != nil {
@@ -4330,9 +4636,26 @@ func (c *Campaign) HandleWebhooks(
 		return errs.Wrap(err)
 	}
 
+	// an anonymous campaign must never send identity or captured data off box, so
+	// the effective webhook level is capped and email and data are withheld
+	// regardless of each webhook's configured level.
+	isAnon, err := c.CampaignRepository.IsAnonymousByID(ctx, campaignID)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	// an anonymous campaign must not push per recipient events to a webhook: even
+	// without identity, one delivery per recipient action at its exact instant
+	// reinstates the timing the recipient view deliberately coarsens, which in a
+	// small campaign can single out who acted. campaign-level events (recipientID
+	// nil, e.g. campaign closed) still fire.
+	if isAnon && recipientID != nil {
+		return nil
+	}
+
 	// get email once for all webhooks
 	var email *vo.Email
-	if recipientID != nil {
+	if recipientID != nil && !isAnon {
 		email, err = c.RecipientRepository.GetEmailByID(ctx, recipientID)
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return errs.Wrap(err)
@@ -4361,6 +4684,11 @@ func (c *Campaign) HandleWebhooks(
 		webhookID := webhookConfig.WebhookID.MustGet()
 		webhookEvents := webhookConfig.GetWebhookEventsOrDefault()
 		dataLevel := webhookConfig.GetWebhookIncludeDataOrDefault()
+		// cap the level for an anonymous campaign: basic still names the campaign
+		// but carries no email and no captured data; full would leak both.
+		if isAnon && dataLevel == model.WebhookDataLevelFull {
+			dataLevel = model.WebhookDataLevelBasic
+		}
 
 		// check if this event should trigger this webhook
 		if !model.IsWebhookEventEnabled(webhookEvents, eventName) {
@@ -4423,6 +4751,86 @@ func (c *Campaign) HandleWebhook(
 	return c.HandleWebhooks(ctx, campaignID, recipientID, eventName, capturedData)
 }
 
+// anonymizeCampaignRecipients severs the recipient relation for a campaign and
+// finalizes anonymization. Each recipient keeps its existing pseudonym (an
+// anonymous campaign assigned one at materialization) or is given a fresh one and
+// has its events rewritten (a normal campaign anonymized at close). Lure codes are
+// released, recipient group links dropped, recipient ids removed, and anonymized_at
+// stamped. The campaign must already be closed. Safe to run more than once: a
+// second run finds recipient ids already null and skips them.
+func (c *Campaign) anonymizeCampaignRecipients(ctx context.Context, id *uuid.UUID) error {
+	campaignRecipientsResult, err := c.CampaignRecipientRepository.GetByCampaignID(
+		ctx,
+		id,
+		&repository.CampaignRecipientOption{},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign recipients by campaign id", "error", err)
+		return errs.Wrap(err)
+	}
+	for _, cr := range campaignRecipientsResult.Rows {
+		if cr.RecipientID.IsNull() {
+			c.Logger.Debug("skipping anonymization of campaign recipient without recipient")
+			continue
+		}
+		recipientID := cr.RecipientID.MustGet()
+		campaignID, err := cr.CampaignID.Get()
+		if err != nil {
+			c.Logger.Debug("Recipient removed or anonymized, skipping in anonymization")
+			continue
+		}
+		// an anonymous campaign already assigned a stable pseudonym at
+		// materialization and its events already carry it. keep that id, only
+		// release the lure code and sever the recipient link below. rewriting
+		// events would fail to match, since they hold no recipient id, and
+		// regenerating the id would orphan the events already written.
+		if existing, err := cr.AnonymizedID.Get(); err == nil {
+			if err := c.CampaignRecipientRepository.Anonymize(ctx, &campaignID, &recipientID, &existing); err != nil {
+				c.Logger.Errorw("failed to finalize anonymous campaign recipient", "error", err)
+				return errs.Wrap(err)
+			}
+			continue
+		}
+		// add anonymized ID to each campaign recipient
+		anonymizedID := uuid.New()
+		cr.AnonymizedID = nullable.NewNullableWithValue(anonymizedID)
+		err = c.CampaignRecipientRepository.Anonymize(ctx, &campaignID, &recipientID, &anonymizedID)
+		if err != nil {
+			c.Logger.Errorw("failed to add anonymized ID to campaign recipient", "error", err)
+			return errs.Wrap(err)
+		}
+		// anonymize events and assign each anonymized ID so the events can still be tracked
+		err = c.CampaignRepository.AnonymizeCampaignEvent(
+			ctx,
+			&campaignID,
+			&recipientID,
+			&anonymizedID,
+		)
+		if err != nil {
+			c.Logger.Errorw("failed to anonymize campaign event", "error", err)
+			return errs.Wrap(err)
+		}
+	}
+	// delete the relation between the campaign and the recipient groups
+	err = c.CampaignRepository.RemoveCampaignRecipientGroups(ctx, id)
+	if err != nil {
+		c.Logger.Errorw("failed to delete campaign recipient groups by campaign id", "error", err)
+		return errs.Wrap(err)
+	}
+	// remove the recipient ID from the campaign recipient so only the anomymized ID is left
+	err = c.CampaignRecipientRepository.RemoveRecipientIDByCampaignID(ctx, id)
+	if err != nil {
+		c.Logger.Errorw("failed to remove recipient ID from campaign recipients", "error", err)
+		return errs.Wrap(err)
+	}
+	// finally add a timestamp to the campaign to indicate when it was anonymized
+	if err := c.CampaignRepository.AddAnonymizedAt(ctx, id); err != nil {
+		c.Logger.Errorw("failed to add anonymized at to campaign", "error", err)
+		return errs.Wrap(err)
+	}
+	return nil
+}
+
 // AnonymizeByID anonymizes a campaign including the events
 func (c *Campaign) AnonymizeByID(
 	ctx context.Context,
@@ -4464,63 +4872,9 @@ func (c *Campaign) AnonymizeByID(
 		c.Logger.Errorw("failed to close campaign by id before anonymization", "error", err)
 		return errs.Wrap(err)
 	}
-	// assign a anonymized ID to each campaign recipient and make a map between
-	// their ID and the anonymized ID, this is a itermidiate step to anonymize the events
-	// where campaign receipients have both a anonymized ID and the recipient ID
-	campaignRecipientsResult, err := c.CampaignRecipientRepository.GetByCampaignID(
-		ctx,
-		id,
-		&repository.CampaignRecipientOption{},
-	)
-	if err != nil {
-		c.Logger.Errorw("failed to get campaign recipients by campaign id", "error", err)
+	if err := c.anonymizeCampaignRecipients(ctx, id); err != nil {
 		return errs.Wrap(err)
 	}
-	for _, cr := range campaignRecipientsResult.Rows {
-		if cr.RecipientID.IsNull() {
-			c.Logger.Debug("skipping anonymization of campaign recipient without recipient")
-			continue
-		}
-		// add anonymized ID to each campaign recipient
-		anonymizedID := uuid.New()
-		cr.AnonymizedID = nullable.NewNullableWithValue(anonymizedID)
-		recipientID := cr.RecipientID.MustGet()
-		campaignID, err := cr.CampaignID.Get()
-		if err != nil {
-			c.Logger.Debug("Recipient removed or anonymized, skipping in anonymization")
-			continue
-		}
-		err = c.CampaignRecipientRepository.Anonymize(ctx, &campaignID, &recipientID, &anonymizedID)
-		if err != nil {
-			c.Logger.Errorw("failed to add anonymized ID to campaign recipient", "error", err)
-			return errs.Wrap(err)
-		}
-		// anonymize events and assign each anonymized ID so the events can still be tracked
-		err = c.CampaignRepository.AnonymizeCampaignEvent(
-			ctx,
-			&campaignID,
-			&recipientID,
-			&anonymizedID,
-		)
-		if err != nil {
-			c.Logger.Errorw("failed to anonymize campaign event", "error", err)
-			return errs.Wrap(err)
-		}
-	}
-	// delete the relation between the campaign and the recipient groups
-	err = c.CampaignRepository.RemoveCampaignRecipientGroups(ctx, id)
-	if err != nil {
-		c.Logger.Errorw("failed to delete campaign recipient groups by campaign id", "error", err)
-		return errs.Wrap(err)
-	}
-	// remove the recipient ID from the campaign recipient so only the anomymized ID is left
-	err = c.CampaignRecipientRepository.RemoveRecipientIDByCampaignID(ctx, id)
-	if err != nil {
-		c.Logger.Errorw("failed to remove recipient ID from campaign recipients", "error", err)
-		return errs.Wrap(err)
-	}
-	// finally add a timestamp to the campaign to indicate when it was anonymized
-	err = c.CampaignRepository.AddAnonymizedAt(ctx, id)
 	c.AuditLogAuthorized(ae)
 
 	return nil
@@ -4746,7 +5100,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 		return errors.New("failed to get email content")
 	}
 
-	// validate parseability with company funcs; execution uses per-recipient device code funcs
+	// validate parseability with company funcs; execution uses per recipient device code funcs
 	t := template.New("email")
 	t = t.Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID))
 	_, err = t.Parse(content.String())
@@ -4908,7 +5262,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 		return errs.Wrap(err)
 	}
 
-	// build per-recipient template funcs so that {{MicrosoftDeviceCode}} resolves correctly.
+	// build per recipient template funcs so that {{MicrosoftDeviceCode}} resolves correctly.
 	// use the actual recipient id (not the campaign recipient row id) so the
 	// lookup key matches what the landing page path uses.
 	recipientID := campaignRecipient.ID.MustGet()
@@ -4967,10 +5321,10 @@ func (c *Campaign) sendSingleEmailSMTP(
 	}
 	m.Subject(subjectBuffer.String())
 
-	// parse and execute body with per-recipient device code funcs
+	// parse and execute body with per recipient device code funcs
 	recipientMailTmpl, err := template.New("email").Funcs(recipientDeviceFuncs).Parse(emailContent)
 	if err != nil {
-		c.Logger.Errorw("failed to parse per-recipient mail template", "error", err)
+		c.Logger.Errorw("failed to parse per recipient mail template", "error", err)
 		return errs.Wrap(err)
 	}
 	var bodyBuffer bytes.Buffer
@@ -5720,25 +6074,34 @@ func (c *Campaign) ProcessReportedCSV(
 			continue
 		}
 
-		// check if already reported (to avoid duplicates)
-		existingEvent, err := c.CampaignRepository.GetEventsByCampaignID(
-			ctx,
-			campaignID,
-			&repository.CampaignEventOption{
-				QueryArgs: &vo.QueryArgs{
-					Limit: 1,
-				},
-				EventTypeIDs: []string{reportedEventID.String()},
-			},
-			nil,
-		)
-
+		// check if already reported (to avoid duplicates). an anonymous campaign's
+		// events carry the pseudonym rather than a recipient id, so dedup on that.
 		alreadyReported := false
-		if err == nil && existingEvent != nil {
-			for _, event := range existingEvent.Rows {
-				if event.RecipientID != nil && *event.RecipientID == recipientID {
-					alreadyReported = true
-					break
+		if aid, aErr := campaignRecipient.AnonymizedID.Get(); aErr == nil {
+			alreadyReported, err = c.CampaignRepository.HasEventByAnonymizedID(ctx, campaignID, &aid, reportedEventID)
+			if err != nil {
+				c.Logger.Errorw("failed to check existing reported event", "error", err)
+				skipped++
+				continue
+			}
+		} else {
+			existingEvent, gErr := c.CampaignRepository.GetEventsByCampaignID(
+				ctx,
+				campaignID,
+				&repository.CampaignEventOption{
+					QueryArgs: &vo.QueryArgs{
+						Limit: 1,
+					},
+					EventTypeIDs: []string{reportedEventID.String()},
+				},
+				nil,
+			)
+			if gErr == nil && existingEvent != nil {
+				for _, event := range existingEvent.Rows {
+					if event.RecipientID != nil && *event.RecipientID == recipientID {
+						alreadyReported = true
+						break
+					}
 				}
 			}
 		}
@@ -5762,6 +6125,7 @@ func (c *Campaign) ProcessReportedCSV(
 			Data:        vo.NewEmptyOptionalString1MB(),
 			Metadata:    vo.NewEmptyOptionalString1MB(),
 		}
+		anonymizeEventForRecipient(campaignAnonymous(campaign), campaignRecipient, campaignEvent)
 
 		// save the event with custom timestamp
 		err = c.saveReportedEvent(campaignEvent, parsedDate)
@@ -5808,6 +6172,9 @@ func (c *Campaign) saveReportedEvent(
 	}
 	if campaignEvent.RecipientID != nil {
 		row["recipient_id"] = campaignEvent.RecipientID.String()
+	}
+	if campaignEvent.AnonymizedID != nil {
+		row["anonymized_id"] = campaignEvent.AnonymizedID.String()
 	}
 
 	res := c.CampaignRepository.DB.Model(&database.CampaignEvent{}).Create(row)
@@ -5891,10 +6258,13 @@ func (c *Campaign) buildReportHTMLWithData(
 		}
 	}
 
-	// the per recipient table is only available while the recipient relation exists
+	// the per recipient table exposes identity, so it is omitted for an anonymous
+	// campaign (even while live, before the anonymization sweep sets AnonymizedAt)
+	// and for any campaign that has already been anonymized.
 	var recipients []model.ReportRecipient
+	isAnon := campaignAnonymous(campaign)
 	isAnonymized := campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull()
-	if !isAnonymized {
+	if !isAnon && !isAnonymized {
 		recipients, err = c.CampaignRepository.GetReportRecipients(ctx, campaignID)
 		if err != nil {
 			c.Logger.Warnw("failed to get report recipients, continuing without detail table", "error", err)
@@ -5902,7 +6272,32 @@ func (c *Campaign) buildReportHTMLWithData(
 		}
 	}
 
-	rd := buildReportData(name, companyName, campaign, stats, recipients)
+	// breakdown for every campaign. default to department when present, else
+	// position; both dimensions are exposed so a template can render either.
+	var groups, departmentGroups, positionGroups []model.CampaignGroupStat
+	groupsBy := "Department"
+	if raw, gErr := c.CampaignRepository.GetGroupedResultStats(ctx, campaignID, "department"); gErr != nil {
+		c.Logger.Warnw("failed to get department grouped stats for report", "error", gErr)
+	} else {
+		departmentGroups = suppressSmallGroups(raw, isAnon || isAnonymized)
+	}
+	if raw, gErr := c.CampaignRepository.GetGroupedResultStats(ctx, campaignID, "position"); gErr != nil {
+		c.Logger.Warnw("failed to get position grouped stats for report", "error", gErr)
+	} else {
+		positionGroups = suppressSmallGroups(raw, isAnon || isAnonymized)
+	}
+	if hasNamedGroups(departmentGroups) {
+		groups, groupsBy = departmentGroups, "Department"
+	} else if hasNamedGroups(positionGroups) {
+		groups, groupsBy = positionGroups, "Position"
+	} else {
+		// the recipients carry no department or position, so there is nothing to
+		// group by. leave the default breakdown empty so the report omits the group
+		// page rather than showing a single unlabeled bucket.
+		groups = nil
+	}
+
+	rd := buildReportData(name, companyName, campaign, stats, recipients, groups, groupsBy, departmentGroups, positionGroups)
 
 	var buf bytes.Buffer
 	tmpl, err := template.New("report").Funcs(TemplateFuncs()).Parse(templateContent)
@@ -6274,6 +6669,10 @@ func buildReportData(
 	campaign *model.Campaign,
 	stats *model.CampaignResultView,
 	recipients []model.ReportRecipient,
+	groups []model.CampaignGroupStat,
+	groupsBy string,
+	departmentGroups []model.CampaignGroupStat,
+	positionGroups []model.CampaignGroupStat,
 ) *model.ReportData {
 	isTrainingReport := false
 	if v, err := campaign.IsTraining.Get(); err == nil {
@@ -6346,8 +6745,42 @@ func buildReportData(
 		StartedOfOpened:          relPct(stats.TrainingStarted, stats.TrackingPixelLoaded),
 		CompletedOfStarted:       relPct(stats.TrainingCompleted, stats.TrainingStarted),
 
-		Recipients: recipients,
+		Recipients:       recipients,
+		GroupsBy:         groupsBy,
+		Groups:           toReportGroupStats(groups),
+		DepartmentGroups: toReportGroupStats(departmentGroups),
+		PositionGroups:   toReportGroupStats(positionGroups),
 	}
+}
+
+// toReportGroupStats converts raw grouped counts to report rows with the
+// percentage of each group that clicked, submitted and reported pre-formatted.
+func toReportGroupStats(groups []model.CampaignGroupStat) []model.ReportGroupStat {
+	groupPct := func(count, total int) string {
+		if count < 0 || total == 0 {
+			return "" // withheld (homogeneous) or n/a
+		}
+		return fmt.Sprintf("%.0f", float64(count)/float64(total)*100)
+	}
+	out := make([]model.ReportGroupStat, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, model.ReportGroupStat{
+			Group:                    g.Group,
+			Total:                    g.Total,
+			Clicked:                  g.Clicked,
+			ClickedPercent:           groupPct(g.Clicked, g.Total),
+			Submitted:                g.Submitted,
+			SubmittedPercent:         groupPct(g.Submitted, g.Total),
+			Reported:                 g.Reported,
+			ReportedPercent:          groupPct(g.Reported, g.Total),
+			TrainingStarted:          g.TrainingStarted,
+			TrainingStartedPercent:   groupPct(g.TrainingStarted, g.Total),
+			TrainingCompleted:        g.TrainingCompleted,
+			TrainingCompletedPercent: groupPct(g.TrainingCompleted, g.Total),
+			Suppressed:               g.Suppressed,
+		})
+	}
+	return out
 }
 
 // htmlEscapeReportData returns a copy of the report data with the externally
@@ -6372,5 +6805,17 @@ func htmlEscapeReportData(rd *model.ReportData) *model.ReportData {
 		r.Position = template.HTMLEscapeString(r.Position)
 		cp.Recipients[i] = r
 	}
+	cp.GroupsBy = template.HTMLEscapeString(rd.GroupsBy)
+	escapeGroups := func(in []model.ReportGroupStat) []model.ReportGroupStat {
+		out := make([]model.ReportGroupStat, len(in))
+		for i, g := range in {
+			g.Group = template.HTMLEscapeString(g.Group)
+			out[i] = g
+		}
+		return out
+	}
+	cp.Groups = escapeGroups(rd.Groups)
+	cp.DepartmentGroups = escapeGroups(rd.DepartmentGroups)
+	cp.PositionGroups = escapeGroups(rd.PositionGroups)
 	return &cp
 }

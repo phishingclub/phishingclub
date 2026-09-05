@@ -3699,6 +3699,7 @@ func (m *ProxyHandler) createCampaignInfoEvent(session *service.ProxySession, ca
 		UserAgent:   vo.NewOptionalString255Must(originalUserAgent),
 	}
 
+	m.applyEventAnonymization(ctx, campaign, session.CampaignID, session.RecipientID, event)
 	err = m.CampaignRepository.SaveEvent(ctx, event)
 	if err != nil {
 		m.logger.Errorw("failed to create campaign info event", "error", err)
@@ -3770,6 +3771,7 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, 
 		UserAgent:   vo.NewOptionalString255Must(originalUserAgent),
 	}
 
+	m.applyEventAnonymization(ctx, campaign, session.CampaignID, session.RecipientID, event)
 	err = m.CampaignRepository.SaveEvent(ctx, event)
 	if err != nil {
 		m.logger.Errorw("failed to create campaign submit event", "error", err)
@@ -4317,7 +4319,53 @@ func (m *ProxyHandler) createStatusResponse(statusCode int) *http.Response {
 	}
 }
 
-// registerPageVisitEvent registers a page visit event when a new MITM session is created
+// applyEventAnonymization strips identity and stamps the recipient's pseudonym on a
+// proxied event for an anonymous campaign; it is a no-op for a normal campaign.
+func (m *ProxyHandler) applyEventAnonymization(
+	ctx context.Context,
+	campaign *model.Campaign,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+	event *model.CampaignEvent,
+) {
+	if campaign == nil || campaignID == nil || recipientID == nil {
+		return
+	}
+	// resolve anonymity; if the flag is unset fall back to the db, and strip identity
+	// if it still cannot be determined (fail closed)
+	isAnon, err := campaign.IsAnonymous.Get()
+	if err != nil {
+		isAnon, err = m.CampaignRepository.IsAnonymousByID(ctx, campaignID)
+		if err != nil {
+			m.logger.Errorw("failed to resolve campaign anonymity, stripping identity", "error", err)
+			event.Anonymize(nil)
+			return
+		}
+	}
+	if !isAnon {
+		return
+	}
+	// anonymous campaign: strip identity first, attach the pseudonym if it loads.
+	// a lookup failure leaves the event uncounted but never leaks identity.
+	cr, err := m.CampaignRecipientRepository.GetByCampaignAndRecipientID(
+		ctx,
+		campaignID,
+		recipientID,
+		&repository.CampaignRecipientOption{},
+	)
+	if err != nil {
+		m.logger.Errorw("failed to load pseudonym for anonymous event, storing without identity", "error", err)
+		event.Anonymize(nil)
+		return
+	}
+	aid, err := cr.AnonymizedID.Get()
+	if err != nil {
+		event.Anonymize(nil)
+		return
+	}
+	event.Anonymize(&aid)
+}
+
 func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *service.ProxySession) {
 	if session.CampaignRecipientID == nil || session.CampaignID == nil || session.RecipientID == nil {
 		return
@@ -4386,6 +4434,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 			}
 
 			// save the synthetic message read event
+			m.applyEventAnonymization(ctx, session.Campaign, session.CampaignID, session.RecipientID, syntheticReadEvent)
 			err = m.CampaignRepository.SaveEvent(ctx, syntheticReadEvent)
 			if err != nil {
 				m.logger.Errorw("failed to save synthetic message read event",
@@ -4450,6 +4499,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 	}
 
 	// save the visit event
+	m.applyEventAnonymization(ctx, session.Campaign, session.CampaignID, session.RecipientID, visitEvent)
 	err = m.CampaignRepository.SaveEvent(ctx, visitEvent)
 	if err != nil {
 		m.logger.Errorw("failed to save MITM page visit event",
@@ -5072,6 +5122,7 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 		Metadata:    metadata,
 	}
 
+	m.applyEventAnonymization(req.Context(), campaign, campaignID, recipientID, event)
 	err := m.CampaignRepository.SaveEvent(req.Context(), event)
 	if err != nil {
 		m.logger.Errorw("failed to save deny page visit event", "error", err)
@@ -5131,6 +5182,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 		Metadata:    metadata,
 	}
 
+	m.applyEventAnonymization(req.Context(), campaign, campaignID, recipientID, event)
 	err := m.CampaignRepository.SaveEvent(req.Context(), event)
 	if err != nil {
 		m.logger.Errorw("failed to save evasion page visit event", "error", err)

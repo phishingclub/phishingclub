@@ -528,5 +528,50 @@
 </div>
 {{end}}
 
+{{if .Groups}}
+<!-- RESULTS BY GROUP (anonymous campaigns) -->
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Results by {{.GroupsBy}}</span>
+    {{if .CompanyName}}<span class="company">{{.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Results by {{.GroupsBy}}</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>{{.GroupsBy}}</th>
+        <th style="width:70px;text-align:right">Targets</th>
+        <th style="width:96px;text-align:right">Visited</th>
+        <th style="width:96px;text-align:right">Submitted</th>
+        <th style="width:96px;text-align:right">Reported</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Groups}}
+      <tr>
+        <td>{{.Group}}</td>
+        <td style="text-align:right">{{.Total}}</td>
+        {{if .Suppressed}}
+        <td colspan="3" style="text-align:center;color:rgba(249,250,251,0.35)">Hidden (group too small)</td>
+        {{else}}
+        <td style="text-align:right">{{if lt .Clicked 0}}<span style="color:rgba(249,250,251,0.35)">—</span>{{else}}<span style="color:#f59e0b;font-weight:600">{{.Clicked}}</span> <span style="color:rgba(249,250,251,0.45)">({{.ClickedPercent}}%)</span>{{end}}</td>
+        <td style="text-align:right">{{if lt .Submitted 0}}<span style="color:rgba(249,250,251,0.35)">—</span>{{else}}<span style="color:#ef4444;font-weight:600">{{.Submitted}}</span> <span style="color:rgba(249,250,251,0.45)">({{.SubmittedPercent}}%)</span>{{end}}</td>
+        <td style="text-align:right">{{if lt .Reported 0}}<span style="color:rgba(249,250,251,0.35)">—</span>{{else}}<span style="color:#10b981;font-weight:600">{{.Reported}}</span> <span style="color:rgba(249,250,251,0.45)">({{.ReportedPercent}}%)</span>{{end}}</td>
+        {{end}}
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  <p style="margin-top:12px;font-size:11px;color:rgba(249,250,251,0.45)">A dash means the result is not shown, to keep individuals anonymous. Anonymous campaigns show group sizes only; on other campaigns a group too small to show on its own is folded into Other.</p>
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+
 </body>
 </html>

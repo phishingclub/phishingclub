@@ -22,12 +22,25 @@ type CampaignRecipient struct {
 	LastAttemptAt nullable.Nullable[time.Time] `json:"lastAttemptAt"`
 	SentAt        nullable.Nullable[time.Time] `json:"sentAt"`
 	SelfManaged   nullable.Nullable[bool]      `json:"selfManaged"`
-	AnonymizedID  nullable.Nullable[uuid.UUID] `json:"anonymizedID"`
-	CampaignID    nullable.Nullable[uuid.UUID] `json:"campaignID"`
-	Campaign      *Campaign                    `json:"campaign"`
+	// AnonymizedID is the stable pseudonym. It is an internal join key that ties the
+	// pseudonym to identity while the recipient row still carries a name, so it must
+	// never be serialized: a reader with it could group a pseudonym's events into a
+	// per-person journey and re-identify them. Anonymization reads it server-side.
+	AnonymizedID nullable.Nullable[uuid.UUID] `json:"-"`
+	// Sent is a coarse, timing-free send indicator used in place of the exact
+	// SendAt/SentAt for anonymous campaigns, which are withheld so per-recipient
+	// timing cannot be matched against the anonymized event stream.
+	Sent       bool                         `json:"sent"`
+	CampaignID nullable.Nullable[uuid.UUID] `json:"campaignID"`
+	Campaign   *Campaign                    `json:"campaign"`
 	// null recipientID means that the data has been anonymized
-	RecipientID      nullable.Nullable[uuid.UUID] `json:"recipientID"`
-	Recipient        *Recipient                   `json:"recipient"`
+	RecipientID nullable.Nullable[uuid.UUID] `json:"recipientID"`
+	Recipient   *Recipient                   `json:"recipient"`
+	// Position and Department are snapshotted from the recipient at
+	// materialization for anonymous campaigns so grouped statistics survive after
+	// the recipient relation is severed.
+	Position         nullable.Nullable[string]    `json:"position"`
+	Department       nullable.Nullable[string]    `json:"department"`
 	NotableEventID   nullable.Nullable[uuid.UUID] `json:"notableEventID"`
 	NotableEventName string                       `json:"notableEventName"`
 	// LureCode is the identifier in the lure URL, stored and matched byte for
@@ -37,19 +50,21 @@ type CampaignRecipient struct {
 	LureCodeCustom nullable.Nullable[bool] `json:"lureCodeCustom"`
 }
 
-// Validate validates the campaign recipient
+// Validate validates the campaign recipient.
+//
+// A row must carry a campaign and at least one of a recipient id or a pseudonym.
+// Both may be set at once: an anonymous campaign holds a recipient id to send and
+// resolve the lure while the pseudonym is stamped on its events, and the recipient
+// id is severed only at anonymization.
 func (c *CampaignRecipient) Validate() error {
 	if err := validate.NullableFieldRequired("campaignID", c.CampaignID); err != nil {
 		return err
 	}
-	anonymizedAtErr := validate.NullableFieldRequired("anonymizedID", c.AnonymizedID)
+	anonymizedIDErr := validate.NullableFieldRequired("anonymizedID", c.AnonymizedID)
 	recipientIDErr := validate.NullableFieldRequired("recipientID", c.RecipientID)
-	if anonymizedAtErr == nil && recipientIDErr == nil {
-		return recipientIDErr
-	}
-	if anonymizedAtErr != nil && recipientIDErr != nil {
+	if anonymizedIDErr != nil && recipientIDErr != nil {
 		return validate.WrapErrorWithField(
-			errors.New("AnonymizedID can not be set with recipientID"),
+			errors.New("a campaign recipient must have a recipientID or an anonymizedID"),
 			"recipientID",
 		)
 	}
@@ -101,6 +116,24 @@ func (c *CampaignRecipient) ToDBMap() map[string]any {
 		m["recipient_id"] = nil
 		if v, err := c.RecipientID.Get(); err == nil {
 			m["recipient_id"] = v
+		}
+	}
+	if c.AnonymizedID.IsSpecified() {
+		m["anonymized_id"] = nil
+		if v, err := c.AnonymizedID.Get(); err == nil {
+			m["anonymized_id"] = v
+		}
+	}
+	if c.Position.IsSpecified() {
+		m["position"] = nil
+		if v, err := c.Position.Get(); err == nil {
+			m["position"] = v
+		}
+	}
+	if c.Department.IsSpecified() {
+		m["department"] = nil
+		if v, err := c.Department.Get(); err == nil {
+			m["department"] = v
 		}
 	}
 	if c.NotableEventID.IsSpecified() {

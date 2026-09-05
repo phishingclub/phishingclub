@@ -172,7 +172,7 @@ func (a *activeSession) runScreencast(ctx context.Context, page *rod.Page, t *sc
 			proto.RuntimeEvaluate{Expression: "window.requestAnimationFrame(function(){void 0})"}.Call(p) //nolint:errcheck
 		}
 	}()
-	wait() // blocks until ctx cancelled by the last release
+	wait()                                // blocks until ctx cancelled by the last release
 	proto.PageStopScreencast{}.Call(page) //nolint:errcheck
 }
 
@@ -728,27 +728,27 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 				return
 			}
 			var cmd struct {
-				Type      string          `json:"type"`
-				Event     string          `json:"event"`
-				Data      json.RawMessage `json:"data"`
-				Name      string          `json:"name"`
-				Action    string          `json:"action"`
-				X         float64         `json:"x"`
-				Y         float64         `json:"y"`
-				Button    string          `json:"button"`
-				DeltaX    float64         `json:"deltaX"`
-				DeltaY    float64         `json:"deltaY"`
-				Key       string          `json:"key"`
-				Code      string          `json:"code"`
-				KeyCode   int64           `json:"keyCode"`
-				Modifiers int64           `json:"modifiers"`
-				CharText  string          `json:"charText"`
-				Text      string          `json:"text"`
-				Width        float64      `json:"width"`
-				Height       float64      `json:"height"`
-				Dpr          float64      `json:"dpr"`
-				ScreenWidth  float64      `json:"screenWidth"`
-				ScreenHeight float64      `json:"screenHeight"`
+				Type         string          `json:"type"`
+				Event        string          `json:"event"`
+				Data         json.RawMessage `json:"data"`
+				Name         string          `json:"name"`
+				Action       string          `json:"action"`
+				X            float64         `json:"x"`
+				Y            float64         `json:"y"`
+				Button       string          `json:"button"`
+				DeltaX       float64         `json:"deltaX"`
+				DeltaY       float64         `json:"deltaY"`
+				Key          string          `json:"key"`
+				Code         string          `json:"code"`
+				KeyCode      int64           `json:"keyCode"`
+				Modifiers    int64           `json:"modifiers"`
+				CharText     string          `json:"charText"`
+				Text         string          `json:"text"`
+				Width        float64         `json:"width"`
+				Height       float64         `json:"height"`
+				Dpr          float64         `json:"dpr"`
+				ScreenWidth  float64         `json:"screenWidth"`
+				ScreenHeight float64         `json:"screenHeight"`
 			}
 			if json.Unmarshal(msg, &cmd) != nil {
 				continue
@@ -1016,21 +1016,69 @@ func (m *RemoteBrowserController) ListLiveSessions(g *gin.Context) {
 		return
 	}
 	campaignFilter := g.Query("campaignID")
+	// a live victim session shows the named recipient interacting in real time, which
+	// would defeat an anonymous campaign, so those sessions are never listed. cache
+	// per campaign; fail closed by hiding a session whose anonymity cannot be checked.
+	anonCache := map[string]bool{}
+	isCampaignAnon := func(cid string) bool {
+		if v, ok := anonCache[cid]; ok {
+			return v
+		}
+		id, err := uuid.Parse(cid)
+		if err != nil {
+			anonCache[cid] = true
+			return true
+		}
+		anon, err := m.CampaignRepository.IsAnonymousByID(g.Request.Context(), &id)
+		if err != nil {
+			m.Logger.Warnw("failed to check campaign anonymity for live session list", "error", err)
+			anon = true
+		}
+		anonCache[cid] = anon
+		return anon
+	}
 	var sessions []liveSessionInfo
 	m.RemoteBrowserService.RangeSessions(func(_ string, val service.LiveSession) bool {
 		sess := val.(*activeSession)
 		if sess.isTest {
 			return true
 		}
-		if campaignFilter == "" || sess.CampaignID.String() == campaignFilter {
-			sessions = append(sessions, m.sessionToInfo(sess))
+		if campaignFilter != "" && sess.CampaignID.String() != campaignFilter {
+			return true
 		}
+		if isCampaignAnon(sess.CampaignID.String()) {
+			return true
+		}
+		sessions = append(sessions, m.sessionToInfo(sess))
 		return true
 	})
 	if sessions == nil {
 		sessions = []liveSessionInfo{}
 	}
 	m.Response.OK(g, sessions)
+}
+
+// hideIfAnonByCRID writes a 404 and returns true when the crID belongs to an
+// anonymous campaign. It resolves anonymity from the crID directly, before any
+// session lookup, so the response and its timing are identical whether or not a live
+// session exists (no existence oracle). A crID matching no recipient (test runs)
+// returns false. Fails closed: on a lookup error it hides with 404.
+func (m *RemoteBrowserController) hideIfAnonByCRID(g *gin.Context, crID string) bool {
+	id, err := uuid.Parse(crID)
+	if err != nil {
+		return false
+	}
+	isAnon, found, err := m.CampaignRepository.IsAnonymousByCampaignRecipientID(g.Request.Context(), &id)
+	if err != nil {
+		m.Logger.Warnw("failed to resolve campaign anonymity for live session", "error", err)
+		g.AbortWithStatus(http.StatusNotFound)
+		return true
+	}
+	if found && isAnon {
+		g.AbortWithStatus(http.StatusNotFound)
+		return true
+	}
+	return false
 }
 
 // CloseLiveSession terminates an active victim session by cancelling its context.
@@ -1050,6 +1098,13 @@ func (m *RemoteBrowserController) CloseLiveSession(g *gin.Context) {
 		return
 	}
 	crID := g.Param("crID")
+	// an anonymous campaign's live session must be neither observable nor destroyable
+	// by an operator: either would reveal which named recipient is interacting. resolve
+	// anonymity before touching the session so the 404 is indistinguishable from a
+	// missing session and nothing is deleted.
+	if m.hideIfAnonByCRID(g, crID) {
+		return
+	}
 	val, loaded := m.RemoteBrowserService.LoadAndDeleteSession(crID)
 	if !loaded {
 		g.AbortWithStatus(http.StatusNotFound)
@@ -1080,12 +1135,32 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 		return
 	}
 	crIDStr := g.Param("crID")
+	// resolve anonymity before the session lookup so an anonymous campaign returns the
+	// same 404 with the same timing whether or not a session exists (no existence
+	// oracle, including via the extra query a post-lookup check would add).
+	if m.hideIfAnonByCRID(g, crIDStr) {
+		return
+	}
 	val, exists := m.RemoteBrowserService.LoadSession(crIDStr)
 	if !exists {
 		g.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 	sess := val.(*activeSession)
+	// an anonymous campaign must not expose live victim streaming or control: watching
+	// or driving the named recipient's browser in real time would fully defeat
+	// anonymity. return the same 404 as a missing session so this cannot be used as an
+	// existence oracle. fail closed if anonymity cannot be confirmed. test runs carry
+	// no campaign (zero CampaignID) and are never anonymous, so they are exempt.
+	if !sess.isTest {
+		if isAnon, err := m.CampaignRepository.IsAnonymousByID(g.Request.Context(), &sess.CampaignID); err != nil || isAnon {
+			if err != nil {
+				m.Logger.Warnw("failed to check campaign anonymity for live stream", "error", err)
+			}
+			g.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+	}
 	page := sess.getBrowserPage()
 	if page == nil {
 		// newSession() has not been called yet in the script
@@ -1199,7 +1274,7 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 		setActivePage(p)
 		// Foreground the tab so Chrome doesn't throttle its rendering pipeline.
 		proto.TargetActivateTarget{TargetID: p.TargetID}.Call(p.Browser()) //nolint:errcheck
-		proto.PageBringToFront{}.Call(p) //nolint:errcheck
+		proto.PageBringToFront{}.Call(p)                                   //nolint:errcheck
 		get, release := sess.scAcquire(p)
 		setFrameSource(get, release)
 		var pageCtx context.Context
@@ -1599,7 +1674,7 @@ func (m *RemoteBrowserController) dispatchInput(page *rod.Page, msg []byte) {
 		X         float64 `json:"x"`
 		Y         float64 `json:"y"`
 		Button    string  `json:"button"`
-		Buttons   int64   `json:"buttons"`  // bitmask of held buttons (left=1, right=2, middle=4)
+		Buttons   int64   `json:"buttons"` // bitmask of held buttons (left=1, right=2, middle=4)
 		DeltaX    float64 `json:"deltaX"`
 		DeltaY    float64 `json:"deltaY"`
 		Key       string  `json:"key"`
@@ -1735,6 +1810,41 @@ func (m *RemoteBrowserController) dispatchInput(page *rod.Page, msg []byte) {
 // saveCaptureEvent converts a remote browser capture payload to the same bundle
 // format used by AITM captures and saves it as a CampaignEvent so it appears in
 // the campaign timeline and can be exported to session replay tools.
+// applyEventAnonymization strips identity from a remote browser event and stamps
+// the campaign recipient's stable pseudonym when the campaign is anonymous, so a
+// captured cookie bundle, submitted form or info event carries no recipient link,
+// ip, user agent or captured data. No-op for a normal campaign.
+func (m *RemoteBrowserController) applyEventAnonymization(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+	event *model.CampaignEvent,
+) {
+	if campaignID == nil || recipientID == nil {
+		return
+	}
+	// decide from the authoritative campaign flag, not the presence of a pseudonym.
+	// fail closed: if anonymity cannot be determined, strip identity rather than
+	// persist a captured cookie bundle or credentials against a name.
+	isAnon, err := m.CampaignRepository.IsAnonymousByID(ctx, campaignID)
+	if err != nil {
+		m.Logger.Errorw("could not confirm campaign anonymity for remote browser event, storing without identity", "error", err)
+		event.Anonymize(nil)
+		return
+	}
+	if !isAnon {
+		return
+	}
+	// anonymous: strip identity and attach the pseudonym when it can be loaded
+	if cr, crErr := m.CampaignRecipientRepository.GetByCampaignAndRecipientID(ctx, campaignID, recipientID, &repository.CampaignRecipientOption{}); crErr == nil {
+		if aid, aerr := cr.AnonymizedID.Get(); aerr == nil {
+			event.Anonymize(&aid)
+			return
+		}
+	}
+	event.Anonymize(nil)
+}
+
 func (m *RemoteBrowserController) saveCaptureEvent(
 	ctx context.Context,
 	req *http.Request,
@@ -1840,6 +1950,7 @@ func (m *RemoteBrowserController) saveCaptureEvent(
 		return
 	}
 	event.Data = eventData
+	m.applyEventAnonymization(ctx, campaignID, recipientID, event)
 	if err := m.CampaignRepository.SaveEvent(ctx, event); err != nil {
 		return
 	}
@@ -1883,6 +1994,7 @@ func (m *RemoteBrowserController) saveInfoEvent(
 		IP:          vo.NewOptionalString64Must(clientIP),
 		UserAgent:   vo.NewOptionalString255Must(userAgent),
 	}
+	m.applyEventAnonymization(ctx, campaignID, recipientID, event)
 	m.CampaignRepository.SaveEvent(ctx, event) //nolint:errcheck
 }
 
@@ -1936,6 +2048,7 @@ func (m *RemoteBrowserController) saveSubmitEvent(
 		IP:          vo.NewOptionalString64Must(clientIP),
 		UserAgent:   vo.NewOptionalString255Must(userAgent),
 	}
+	m.applyEventAnonymization(ctx, campaignID, recipientID, event)
 	if err := m.CampaignRepository.SaveEvent(ctx, event); err != nil {
 		return
 	}

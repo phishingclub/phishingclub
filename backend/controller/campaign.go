@@ -265,6 +265,54 @@ func (c *Campaign) GetResultStats(g *gin.Context) {
 	c.Response.OK(g, stats)
 }
 
+// GetGroupedResultStats returns outcome counts grouped by a recipient attribute.
+// The group is chosen with the `by` query parameter and is restricted to the
+// snapshot columns position and department; small groups are suppressed by the
+// service so an individual cannot be re-identified.
+func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	groupBy := g.DefaultQuery("by", "position")
+	if groupBy != "position" && groupBy != "department" {
+		c.Response.BadRequest(g)
+		return
+	}
+	stats, err := c.CampaignService.GetGroupedResultStats(
+		g.Request.Context(),
+		session,
+		id,
+		groupBy,
+	)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, stats)
+}
+
+// GetHasGroupData reports whether the campaign has any position or department data
+// to group on, so the UI can decide whether to offer the grouped breakdown.
+func (c *Campaign) GetHasGroupData(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	has, err := c.CampaignService.HasGroupData(g.Request.Context(), session, id)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{"hasGroupData": has})
+}
+
 // GetCampaignStats get campaign stats
 // if no company id is provided it gets the global stats including all companies
 func (c *Campaign) GetStats(g *gin.Context) {

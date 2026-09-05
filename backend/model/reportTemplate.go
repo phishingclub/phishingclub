@@ -11,12 +11,12 @@ import (
 
 // ReportTemplate is a report template
 type ReportTemplate struct {
-	ID        nullable.Nullable[uuid.UUID]            `json:"id"`
-	CreatedAt *time.Time                              `json:"createdAt"`
-	UpdatedAt *time.Time                              `json:"updatedAt"`
+	ID         nullable.Nullable[uuid.UUID]            `json:"id"`
+	CreatedAt  *time.Time                              `json:"createdAt"`
+	UpdatedAt  *time.Time                              `json:"updatedAt"`
 	CompanyID  nullable.Nullable[uuid.UUID]            `json:"companyID"`
 	Content    nullable.Nullable[vo.OptionalString1MB] `json:"content"`
-	IsTraining nullable.Nullable[bool]                  `json:"isTraining"`
+	IsTraining nullable.Nullable[bool]                 `json:"isTraining"`
 
 	Company *Company `json:"-"`
 }
@@ -74,24 +74,24 @@ type ReportData struct {
 	ResultSubmitted int64
 	ResultReported  int64
 
-	// Formatted percentages (e.g. "45.2") — ready to use directly in templates
+	// Formatted percentages (e.g. "45.2"), ready to use directly in templates
 	ResultClickedPercent   string
 	ResultSubmittedPercent string
 	ResultReportedPercent  string
 
 	// Float percentages for custom formatting with {{printf "%.1f" .ClickRate}}
-	SentRate    float64
-	OpenRate    float64
-	ClickRate   float64
-	SubmitRate  float64
-	ReportRate  float64
+	SentRate   float64
+	OpenRate   float64
+	ClickRate  float64
+	SubmitRate float64
+	ReportRate float64
 
-	// Relative conversion rates — funnel step-to-step (formatted strings like "45.2")
+	// Relative conversion rates, funnel step to step (formatted strings like "45.2")
 	OpenedOfSent       string // EmailsOpened / EmailsSent
 	ClickedOfOpened    string // ResultClicked / EmailsOpened
 	SubmittedOfClicked string // ResultSubmitted / ResultClicked
 
-	// Awareness training funnel — populated for training campaigns, zero otherwise.
+	// Awareness training funnel, populated for training campaigns, zero otherwise.
 	// The training report template renders these in place of the phishing outcomes.
 	IsTraining               bool
 	TrainingStarted          int64
@@ -103,8 +103,35 @@ type ReportData struct {
 	StartedOfOpened          string  // TrainingStarted / EmailsOpened
 	CompletedOfStarted       string  // TrainingCompleted / TrainingStarted
 
-	// Per-recipient detail — empty for anonymous or anonymized campaigns
+	// Per recipient detail, empty for anonymous or anonymized campaigns
 	Recipients []ReportRecipient
+
+	// Grouped outcome breakdown. Groups is the default dimension (Department when
+	// present, else Position), named by GroupsBy; DepartmentGroups and PositionGroups
+	// expose each dimension explicitly.
+	GroupsBy         string
+	Groups           []ReportGroupStat
+	DepartmentGroups []ReportGroupStat
+	PositionGroups   []ReportGroupStat
+}
+
+// ReportGroupStat is one row of the report's grouped outcome breakdown, with
+// percentages pre-formatted as "45" strings ready for the template. Suppressed
+// hides the outcome counts for a group below the anonymity floor.
+type ReportGroupStat struct {
+	Group                    string
+	Total                    int
+	Clicked                  int
+	ClickedPercent           string
+	Submitted                int
+	SubmittedPercent         string
+	Reported                 int
+	ReportedPercent          string
+	TrainingStarted          int
+	TrainingStartedPercent   string
+	TrainingCompleted        int
+	TrainingCompletedPercent string
+	Suppressed               bool
 }
 
 // ReportRecipient holds per-recipient result data for the recipient detail table
@@ -119,4 +146,19 @@ type ReportRecipient struct {
 	Reported          bool
 	TrainingStarted   bool
 	TrainingCompleted bool
+}
+
+// CampaignGroupStat holds an aggregate outcome count for one group value, such
+// as one position or one department. It carries no identity, only counts, so it
+// is safe to show for an anonymous campaign. Suppressed is true when the group is
+// smaller than the anonymity floor and its counts are withheld.
+type CampaignGroupStat struct {
+	Group             string `json:"group"`
+	Total             int    `json:"total"`
+	Clicked           int    `json:"clicked"`
+	Submitted         int    `json:"submitted"`
+	Reported          int    `json:"reported"`
+	TrainingStarted   int    `json:"trainingStarted"`
+	TrainingCompleted int    `json:"trainingCompleted"`
+	Suppressed        bool   `json:"suppressed"`
 }

@@ -104,26 +104,314 @@
 		return result;
 	})();
 
-	const reportTemplates = [
-		{ label: 'Campaign Name', text: '{{.CampaignName}}' },
-		{ label: 'Company Name', text: '{{.CompanyName}}' },
-		{ label: 'Report Date', text: '{{.ReportDate}}' },
-		{ label: 'Start Date', text: '{{.CampaignStartDate}}' },
-		{ label: 'End Date', text: '{{.CampaignEndDate}}' },
-		{ label: 'Closed At', text: '{{.CampaignClosedAt}}' },
-		{ label: 'Total Targets', text: '{{.TotalTargets}}' },
-		{ label: 'Emails Sent', text: '{{.EmailsSent}}' },
-		{ label: 'Emails Opened', text: '{{.EmailsOpened}}' },
-		{ label: 'Clicked (count)', text: '{{.ResultClicked}}' },
-		{ label: 'Clicked (% of total)', text: '{{.ResultClickedPercent}}' },
-		{ label: 'Submitted (count)', text: '{{.ResultSubmitted}}' },
-		{ label: 'Submitted (% of total)', text: '{{.ResultSubmittedPercent}}' },
-		{ label: 'Reported (count)', text: '{{.ResultReported}}' },
-		{ label: 'Reported (% of total)', text: '{{.ResultReportedPercent}}' },
-		{ label: 'Opened of sent (%)', text: '{{.OpenedOfSent}}' },
-		{ label: 'Clicked of opened (%)', text: '{{.ClickedOfOpened}}' },
-		{ label: 'Submitted of clicked (%)', text: '{{.SubmittedOfClicked}}' }
+	const reportCategories = {
+		'Campaign Info': [
+			{ label: 'Campaign Name', text: '{{.CampaignName}}' },
+			{ label: 'Company Name', text: '{{.CompanyName}}' },
+			{ label: 'Report Date', text: '{{.ReportDate}}' },
+			{ label: 'Start Date', text: '{{.CampaignStartDate}}' },
+			{ label: 'End Date', text: '{{.CampaignEndDate}}' },
+			{ label: 'Closed At', text: '{{.CampaignClosedAt}}' },
+			{ label: 'Total Targets', text: '{{.TotalTargets}}' }
+		],
+		Results: [
+			{ label: 'Emails Sent', text: '{{.EmailsSent}}' },
+			{ label: 'Emails Opened', text: '{{.EmailsOpened}}' },
+			{ label: 'Clicked (count)', text: '{{.ResultClicked}}' },
+			{ label: 'Clicked (% of total)', text: '{{.ResultClickedPercent}}' },
+			{ label: 'Submitted (count)', text: '{{.ResultSubmitted}}' },
+			{ label: 'Submitted (% of total)', text: '{{.ResultSubmittedPercent}}' },
+			{ label: 'Reported (count)', text: '{{.ResultReported}}' },
+			{ label: 'Reported (% of total)', text: '{{.ResultReportedPercent}}' }
+		],
+		'Conversion & Rates': [
+			{ label: 'Opened of sent (%)', text: '{{.OpenedOfSent}}' },
+			{ label: 'Clicked of opened (%)', text: '{{.ClickedOfOpened}}' },
+			{ label: 'Submitted of clicked (%)', text: '{{.SubmittedOfClicked}}' },
+			{ label: 'Sent rate (0-100)', text: '{{.SentRate}}' },
+			{ label: 'Open rate (0-100)', text: '{{.OpenRate}}' },
+			{ label: 'Click rate (0-100)', text: '{{.ClickRate}}' },
+			{ label: 'Submit rate (0-100)', text: '{{.SubmitRate}}' },
+			{ label: 'Report rate (0-100)', text: '{{.ReportRate}}' }
+		],
+		'Awareness Training': [
+			{ label: 'Is training campaign', text: '{{.IsTraining}}' },
+			{ label: 'Training Started (count)', text: '{{.TrainingStarted}}' },
+			{ label: 'Training Started (% of total)', text: '{{.TrainingStartedPercent}}' },
+			{ label: 'Training Started rate (0-100)', text: '{{.TrainingStartedRate}}' },
+			{ label: 'Training Completed (count)', text: '{{.TrainingCompleted}}' },
+			{ label: 'Training Completed (% of total)', text: '{{.TrainingCompletedPercent}}' },
+			{ label: 'Training Completed rate (0-100)', text: '{{.TrainingCompletedRate}}' },
+			{ label: 'Started of opened (%)', text: '{{.StartedOfOpened}}' },
+			{ label: 'Completed of started (%)', text: '{{.CompletedOfStarted}}' }
+		],
+		'Group Breakdown': [
+			{ label: 'Grouped By (default dimension name)', text: '{{.GroupsBy}}' },
+			{
+				label: 'Group rows — default dimension (loop)',
+				text: `{{range .Groups}}
+<tr>
+  <td>{{.Group}}</td>
+  <td>{{.Total}}</td>
+  {{if .Suppressed}}
+  <td colspan="3">Hidden (group too small)</td>
+  {{else}}
+  <td>{{if lt .Clicked 0}}—{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
+  <td>{{if lt .Submitted 0}}—{{else}}{{.Submitted}} ({{.SubmittedPercent}}%){{end}}</td>
+  <td>{{if lt .Reported 0}}—{{else}}{{.Reported}} ({{.ReportedPercent}}%){{end}}</td>
+  {{end}}
+</tr>
+{{end}}`
+			},
+			{
+				label: 'Group rows — by department (loop)',
+				text: `{{range .DepartmentGroups}}
+<tr>
+  <td>{{.Group}}</td>
+  <td>{{.Total}}</td>
+  {{if .Suppressed}}
+  <td colspan="3">Hidden (group too small)</td>
+  {{else}}
+  <td>{{if lt .Clicked 0}}—{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
+  <td>{{if lt .Submitted 0}}—{{else}}{{.Submitted}} ({{.SubmittedPercent}}%){{end}}</td>
+  <td>{{if lt .Reported 0}}—{{else}}{{.Reported}} ({{.ReportedPercent}}%){{end}}</td>
+  {{end}}
+</tr>
+{{end}}`
+			},
+			{
+				label: 'Group rows — by position (loop)',
+				text: `{{range .PositionGroups}}
+<tr>
+  <td>{{.Group}}</td>
+  <td>{{.Total}}</td>
+  {{if .Suppressed}}
+  <td colspan="3">Hidden (group too small)</td>
+  {{else}}
+  <td>{{if lt .Clicked 0}}—{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
+  <td>{{if lt .Submitted 0}}—{{else}}{{.Submitted}} ({{.SubmittedPercent}}%){{end}}</td>
+  <td>{{if lt .Reported 0}}—{{else}}{{.Reported}} ({{.ReportedPercent}}%){{end}}</td>
+  {{end}}
+</tr>
+{{end}}`
+			},
+			{
+				label: 'Group rows — training (loop)',
+				text: `{{range .Groups}}
+<tr>
+  <td>{{.Group}}</td>
+  <td>{{.Total}}</td>
+  {{if .Suppressed}}
+  <td colspan="3">Hidden (group too small)</td>
+  {{else}}
+  <td>{{if lt .Clicked 0}}—{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
+  <td>{{if lt .TrainingStarted 0}}—{{else}}{{.TrainingStarted}} ({{.TrainingStartedPercent}}%){{end}}</td>
+  <td>{{if lt .TrainingCompleted 0}}—{{else}}{{.TrainingCompleted}} ({{.TrainingCompletedPercent}}%){{end}}</td>
+  {{end}}
+</tr>
+{{end}}`
+			}
+		],
+		Recipients: [
+			{
+				label: 'Recipient rows (loop)',
+				text: `{{range .Recipients}}
+<tr>
+  <td>{{.FirstName}} {{.LastName}}</td>
+  <td>{{.Email}}</td>
+  <td>{{.Department}}</td>
+  <td>{{.Position}}</td>
+  <td>{{if .ClickedLink}}Yes{{else}}No{{end}}</td>
+  <td>{{if .SubmittedData}}Yes{{else}}No{{end}}</td>
+  <td>{{if .Reported}}Yes{{else}}No{{end}}</td>
+</tr>
+{{end}}`
+			}
+		]
+	};
+
+	// sample data for the live preview only. the real report is rendered by Go's
+	// html/template on the server; this approximates the subset it uses (printf, if
+	// blocks, range loops) so the preview shows values, not raw tags.
+	const sampleDepartmentGroups = [
+		{ Group: 'Engineering', Total: 70, Clicked: 21, ClickedPercent: '30', Submitted: 9, SubmittedPercent: '13', Reported: 11, ReportedPercent: '16', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false },
+		{ Group: 'Sales', Total: 49, Clicked: 20, ClickedPercent: '41', Submitted: 10, SubmittedPercent: '20', Reported: 4, ReportedPercent: '8', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false },
+		{ Group: 'Other (small groups)', Total: 1, Clicked: 0, ClickedPercent: '0', Submitted: 0, SubmittedPercent: '0', Reported: 0, ReportedPercent: '0', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: true }
 	];
+	const samplePositionGroups = [
+		{ Group: 'Head of operations', Total: 40, Clicked: 12, ClickedPercent: '30', Submitted: 5, SubmittedPercent: '13', Reported: 6, ReportedPercent: '15', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false },
+		{ Group: 'Account Executive', Total: 35, Clicked: 14, ClickedPercent: '40', Submitted: 7, SubmittedPercent: '20', Reported: 3, ReportedPercent: '9', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false },
+		{ Group: 'Other (small groups)', Total: 1, Clicked: 0, ClickedPercent: '0', Submitted: 0, SubmittedPercent: '0', Reported: 0, ReportedPercent: '0', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: true }
+	];
+	const reportSampleData = {
+		CampaignName: 'Q1 Phishing Simulation',
+		CompanyName: 'World Corp',
+		ReportDate: new Date().toLocaleDateString(),
+		CampaignStartDate: '2025-01-01',
+		CampaignEndDate: '2025-01-31',
+		CampaignClosedAt: '2025-02-01',
+		TotalTargets: 120,
+		EmailsSent: 118,
+		EmailsOpened: 74,
+		ResultClicked: 32,
+		ResultClickedPercent: '27.1',
+		ResultSubmitted: 14,
+		ResultSubmittedPercent: '11.9',
+		ResultReported: 8,
+		ResultReportedPercent: '6.8',
+		OpenedOfSent: '62.7',
+		ClickedOfOpened: '43.2',
+		SubmittedOfClicked: '43.8',
+		SentRate: 98.3,
+		OpenRate: 61.7,
+		ClickRate: 26.7,
+		SubmitRate: 11.7,
+		ReportRate: 6.7,
+		IsTraining: false,
+		TrainingStarted: 0,
+		TrainingCompleted: 0,
+		TrainingStartedPercent: '0',
+		TrainingCompletedPercent: '0',
+		TrainingStartedRate: 0,
+		TrainingCompletedRate: 0,
+		StartedOfOpened: '0',
+		CompletedOfStarted: '0',
+		GroupsBy: 'Department',
+		Groups: sampleDepartmentGroups,
+		DepartmentGroups: sampleDepartmentGroups,
+		PositionGroups: samplePositionGroups,
+		Recipients: [
+			{ FirstName: 'Alice', LastName: 'Andersen', Email: 'alice@worldcorp.test', Department: 'Research and Development', Position: 'Head of operations', ClickedLink: true, SubmittedData: true, Reported: false },
+			{ FirstName: 'Bob', LastName: 'Berg', Email: 'bob@worldcorp.test', Department: 'Sales', Position: 'Account Executive', ClickedLink: true, SubmittedData: false, Reported: false },
+			{ FirstName: 'Carol', LastName: 'Chan', Email: 'carol@worldcorp.test', Department: 'Finance', Position: 'Analyst', ClickedLink: false, SubmittedData: false, Reported: true }
+		]
+	};
+
+	// format a value the way Go's printf "%.Nf" would, for the preview only
+	function goFormatFloat(fmt, val) {
+		const m = /%\.(\d+)f/.exec(fmt);
+		if (m) return (Number(val) || 0).toFixed(Number(m[1]));
+		return String(val ?? '');
+	}
+
+	// test one template condition against the preview data: a bare field ".X"
+	// (truthiness) or a comparison "lt/gt/eq .X N" as used by the report group cells.
+	// pure string and number matching, no code execution
+	function matchReportCondition(expr, ctx) {
+		const cmp = /^(lt|gt|eq)\s+\.(\w+)\s+(-?[\d.]+)$/.exec(expr.trim());
+		if (cmp) {
+			const left = Number(ctx[cmp[2]]) || 0;
+			const right = Number(cmp[3]);
+			if (cmp[1] === 'lt') return left < right;
+			if (cmp[1] === 'gt') return left > right;
+			return left === right;
+		}
+		const bare = /^\.(\w+)$/.exec(expr.trim());
+		return bare ? !!ctx[bare[1]] : false;
+	}
+
+	// resolve {{if .X}} / {{else if .Y}} / {{else}} / {{end}} chains against a
+	// scope, honouring nested blocks so the matching {{end}} is found correctly
+	function resolveReportConditionals(text, ctx) {
+		for (;;) {
+			const start = text.indexOf('{{if ');
+			if (start === -1) break;
+			const head = /^\{\{if\s+([^}]+?)\}\}/.exec(text.slice(start));
+			if (!head) break;
+			const tokenRe = /\{\{if\b[^}]*\}\}|\{\{range\b[^}]*\}\}|\{\{else if\s+([^}]+?)\}\}|\{\{else\}\}|\{\{end\}\}/g;
+			tokenRe.lastIndex = start + head[0].length;
+			let depth = 1;
+			let endStop = -1;
+			const parts = [{ cond: head[1], from: start + head[0].length, to: -1 }];
+			let m;
+			while ((m = tokenRe.exec(text)) !== null) {
+				const tok = m[0];
+				if (tok.startsWith('{{if') || tok.startsWith('{{range')) {
+					depth += 1;
+				} else if (tok === '{{end}}') {
+					depth -= 1;
+					if (depth === 0) {
+						parts[parts.length - 1].to = m.index;
+						endStop = m.index + tok.length;
+						break;
+					}
+				} else if (depth === 1) {
+					parts[parts.length - 1].to = m.index;
+					parts.push({ cond: tok === '{{else}}' ? null : m[1], from: m.index + tok.length, to: -1 });
+				}
+			}
+			if (endStop === -1) break; // unbalanced, stop to avoid a loop
+			let chosen = '';
+			for (const p of parts) {
+				if (p.cond === null || matchReportCondition(p.cond, ctx)) {
+					chosen = text.slice(p.from, p.to);
+					break;
+				}
+			}
+			text = text.slice(0, start) + chosen + text.slice(endStop);
+		}
+		return text;
+	}
+
+	// resolve if blocks, printf, mul and bare fields against one scope (the root
+	// report data, or one row inside a range loop)
+	function renderReportScope(text, ctx) {
+		text = resolveReportConditionals(text, ctx);
+		text = text.replace(
+			/\{\{printf\s+"([^"]+)"\s+\(mul\s+\.(\w+)\s+([\d.]+)\)\}\}/g,
+			(_m, fmt, key, n) => goFormatFloat(fmt, (Number(ctx[key]) || 0) * Number(n))
+		);
+		text = text.replace(
+			/\{\{printf\s+"([^"]+)"\s+\.(\w+)\}\}/g,
+			(_m, fmt, key) => goFormatFloat(fmt, ctx[key])
+		);
+		text = text.replace(/\{\{\.(\w+)\}\}/g, (_m, key) =>
+			ctx[key] !== undefined && typeof ctx[key] !== 'object' ? String(ctx[key]) : ''
+		);
+		return text;
+	}
+
+	// expand a range loop by its balanced end, so a nested if inside the loop
+	// body does not cut the match short at the wrong {{end}}
+	function expandReportRange(text, name, items) {
+		const open = '{{range .' + name + '}}';
+		let idx;
+		while ((idx = text.indexOf(open)) !== -1) {
+			const innerStart = idx + open.length;
+			const tokenRe = /\{\{range\b[^}]*\}\}|\{\{if\b[^}]*\}\}|\{\{end\}\}/g;
+			tokenRe.lastIndex = innerStart;
+			let depth = 1;
+			let innerEnd = -1;
+			let endStop = -1;
+			let m;
+			while ((m = tokenRe.exec(text)) !== null) {
+				if (m[0] === '{{end}}') {
+					depth -= 1;
+					if (depth === 0) {
+						innerEnd = m.index;
+						endStop = m.index + m[0].length;
+						break;
+					}
+				} else {
+					depth += 1;
+				}
+			}
+			if (endStop === -1) break; // unbalanced, leave as is
+			const inner = text.slice(innerStart, innerEnd);
+			const rendered = items.map((it) => renderReportScope(inner, it)).join('');
+			text = text.slice(0, idx) + rendered + text.slice(endStop);
+		}
+		return text;
+	}
+
+	// expand the range loops, then render the top level scope
+	function renderReportPreview(text) {
+		text = expandReportRange(text, 'Recipients', reportSampleData.Recipients);
+		text = expandReportRange(text, 'DepartmentGroups', reportSampleData.DepartmentGroups);
+		text = expandReportRange(text, 'PositionGroups', reportSampleData.PositionGroups);
+		text = expandReportRange(text, 'Groups', reportSampleData.Groups);
+		return renderReportScope(text, reportSampleData);
+	}
 
 	switch (contentType) {
 		case 'domain': {
@@ -140,7 +428,11 @@
 			delete templates['Email'];
 			delete templates['Recipient'];
 			delete templates['URLs & Tracking'];
-			templates['Campaign'] = reportTemplates;
+			// report variables grouped into meaningful categories; keep Functions last
+			const reportFunctions = templates['Functions'];
+			delete templates['Functions'];
+			Object.assign(templates, reportCategories);
+			templates['Functions'] = reportFunctions;
 			break;
 		}
 	}
@@ -477,25 +769,7 @@
 
 		switch (contentType) {
 			case 'report':
-				return text
-					.replaceAll('{{.CampaignName}}', 'Q1 Phishing Simulation')
-					.replaceAll('{{.CompanyName}}', 'World Corp')
-					.replaceAll('{{.ReportDate}}', new Date().toLocaleDateString())
-					.replaceAll('{{.CampaignStartDate}}', '2025-01-01')
-					.replaceAll('{{.CampaignEndDate}}', '2025-01-31')
-					.replaceAll('{{.CampaignClosedAt}}', '2025-02-01')
-					.replaceAll('{{.TotalTargets}}', '120')
-					.replaceAll('{{.EmailsSent}}', '118')
-					.replaceAll('{{.EmailsOpened}}', '74')
-					.replaceAll('{{.ResultClicked}}', '32')
-					.replaceAll('{{.ResultClickedPercent}}', '27.1')
-					.replaceAll('{{.ResultSubmitted}}', '14')
-					.replaceAll('{{.ResultSubmittedPercent}}', '11.9')
-					.replaceAll('{{.ResultReported}}', '8')
-					.replaceAll('{{.ResultReportedPercent}}', '6.8')
-					.replaceAll('{{.OpenedOfSent}}', '62.7')
-					.replaceAll('{{.ClickedOfOpened}}', '43.2')
-					.replaceAll('{{.SubmittedOfClicked}}', '43.8');
+				return renderReportPreview(text);
 			case 'domain':
 				return text.replaceAll('{{.BaseURL}}', _baseURL);
 			case 'page':
