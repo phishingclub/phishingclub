@@ -502,6 +502,36 @@ func (c *Campaign) insertScheduledRecipient(
 	}
 }
 
+// insertScheduledRecipients writes the materialized campaign recipients. With no
+// lure codes it inserts them in one transaction so the rows share a single fsync;
+// per row autocommit is fsync bound and made a large campaign exceed the server
+// write timeout during create. Lure code campaigns keep the per row path, because a
+// code redraw on a conflict runs on a second connection and would block on the
+// transaction's own write lock.
+func (c *Campaign) insertScheduledRecipients(
+	ctx context.Context,
+	allocator *lureCodeAllocator,
+	campaignRecipients []*model.CampaignRecipient,
+) error {
+	if allocator != nil && allocator.state.enabled {
+		for _, cr := range campaignRecipients {
+			if err := c.insertScheduledRecipient(ctx, allocator, cr); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return c.CampaignRecipientRepository.DB.Transaction(func(tx *gorm.DB) error {
+		txRepo := &repository.CampaignRecipient{DB: tx}
+		for _, cr := range campaignRecipients {
+			if _, err := txRepo.Insert(ctx, cr); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // snapshotLureSettings copies the template's lure URL settings and training flag
 // onto the campaign while it still holds no recipients.
 //
@@ -975,12 +1005,12 @@ func (c *Campaign) schedule(
 			c.Logger.Errorw("failed to allocate lure code", "error", err)
 			return err
 		}
-		// save
-		err = c.insertScheduledRecipient(ctx, allocator, campaignRecipients[i])
-		if err != nil {
-			c.Logger.Errorw("failed to create campaign", "error", err)
-			return errs.Wrap(err)
-		}
+	}
+	// insert all rows in one transaction so a large campaign does not exceed the
+	// server write timeout from per row fsyncs
+	if err = c.insertScheduledRecipients(ctx, allocator, campaignRecipients); err != nil {
+		c.Logger.Errorw("failed to create campaign", "error", err)
+		return errs.Wrap(err)
 	}
 	err = c.setMostNotableCampaignEvent(
 		ctx,
