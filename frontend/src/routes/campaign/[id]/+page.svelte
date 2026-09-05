@@ -105,6 +105,12 @@
 	let timelineEventsMap = new Map();
 	let timelineEvents = [];
 	let isTimelineGhost = true;
+	// the event timeline plots one point per scheduled send and per event; past a few
+	// thousand it has no value and loading them all is slow, so above this the graph is
+	// skipped and a message is shown. the recipient count is the cheap upfront signal;
+	// the event loader also caps as a secondary guard
+	const MAX_TIMELINE_POINTS = 5000;
+	let timelineTooLarge = false;
 	let recipientEvents = [];
 
 	// local state
@@ -465,6 +471,15 @@
 	};
 
 	const refreshRecipientsTimes = async () => {
+		// skip the timeline for large campaigns: the scheduled sends alone would exceed
+		// what the graph can usefully show
+		if (timelineTooLarge) {
+			return;
+		}
+		if ((result.recipients ?? 0) > MAX_TIMELINE_POINTS) {
+			timelineTooLarge = true;
+			return;
+		}
 		try {
 			/* does not implement the Result<T>
 			let rows = await fetchAllRows(
@@ -499,21 +514,49 @@
 	};
 
 	const refreshCampaignEventsSince = async () => {
+		// skip the timeline for large campaigns (recipient count is the cheap signal)
+		if (timelineTooLarge) {
+			return;
+		}
+		if ((result.recipients ?? 0) > MAX_TIMELINE_POINTS) {
+			timelineTooLarge = true;
+			return;
+		}
 		try {
 			if (!lastPoll3399Nano?.length) {
 				lastPoll3399Nano = campaign.createdAt; // must be loaded before method is called
 			}
-			let rows = await fetchAllRows(
-				(options) =>
-					api.campaign.getAllEventsByCampaignID($page.params.id, options, lastPoll3399Nano),
-				{
-					currentPage: 1,
-					perPage: 200,
-					sortBy: 'created_at',
-					sortOrder: 'asc',
-					search: ''
+			// bounded fetch: stop once the timeline would exceed the cap and disable the
+			// graph, rather than paging through tens of thousands of events
+			let rows = [];
+			const options = {
+				currentPage: 1,
+				perPage: 200,
+				sortBy: 'created_at',
+				sortOrder: 'asc',
+				search: ''
+			};
+			for (;;) {
+				const res = await api.campaign.getAllEventsByCampaignID(
+					$page.params.id,
+					options,
+					lastPoll3399Nano
+				);
+				if (res.data?.rows) {
+					rows = rows.concat(res.data.rows);
 				}
-			);
+				if (timelineEventsMap.size + rows.length > MAX_TIMELINE_POINTS) {
+					timelineTooLarge = true;
+					timelineEventsMap = new Map();
+					timelineEvents = [];
+					isTimelineGhost = false;
+					return;
+				}
+				if (!res.data?.hasNextPage) {
+					break;
+				}
+				options.currentPage += 1;
+			}
 			rows.forEach((v) => {
 				if (v.createdAt > lastPoll3399Nano) {
 					lastPoll3399Nano = v.createdAt;
@@ -2093,11 +2136,20 @@
 
 		<div class=" mb-6">
 			<SubHeadline>Event Timeline</SubHeadline>
-			<EventTimeline
-				events={timelineEvents}
-				isGhost={isTimelineGhost}
-				refreshInterval={$autoRefreshStore.interval}
-			/>
+			{#if timelineTooLarge}
+				<div
+					class="rounded-md bg-grayblue-light dark:bg-gray-800/60 px-4 py-3 text-sm text-slate-600 dark:text-gray-300"
+				>
+					This campaign has too many events to chart, so the timeline is not shown. Use the
+					statistics above and the events table below.
+				</div>
+			{:else}
+				<EventTimeline
+					events={timelineEvents}
+					isGhost={isTimelineGhost}
+					refreshInterval={$autoRefreshStore.interval}
+				/>
+			{/if}
 		</div>
 
 		<!-- details and actions section -->
