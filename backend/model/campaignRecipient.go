@@ -22,10 +22,10 @@ type CampaignRecipient struct {
 	LastAttemptAt nullable.Nullable[time.Time] `json:"lastAttemptAt"`
 	SentAt        nullable.Nullable[time.Time] `json:"sentAt"`
 	SelfManaged   nullable.Nullable[bool]      `json:"selfManaged"`
-	// AnonymizedID is the stable pseudonym. It is an internal join key that ties the
-	// pseudonym to identity while the recipient row still carries a name, so it must
-	// never be serialized: a reader with it could group a pseudonym's events into a
-	// per-person journey and re-identify them. Anonymization reads it server-side.
+	// AnonymizedID is the pseudonym stamped on a recipient's events. It ties those
+	// events back to identity while the recipient row still has a name, so it must
+	// never be sent to a client: a reader with it could group one person's events
+	// together and work out who they are. Only the server reads it.
 	AnonymizedID nullable.Nullable[uuid.UUID] `json:"-"`
 	// Sent is a coarse, timing-free send indicator used in place of the exact
 	// SendAt/SentAt for anonymous campaigns, which are withheld so per-recipient
@@ -36,9 +36,9 @@ type CampaignRecipient struct {
 	// null recipientID means that the data has been anonymized
 	RecipientID nullable.Nullable[uuid.UUID] `json:"recipientID"`
 	Recipient   *Recipient                   `json:"recipient"`
-	// Position and Department are snapshotted from the recipient at
-	// materialization for anonymous campaigns so grouped statistics survive after
-	// the recipient relation is severed.
+	// Position and Department are copied from the recipient when an anonymous
+	// campaign's recipient list is built, so the grouped statistics still work after
+	// the link back to the recipient is removed.
 	Position         nullable.Nullable[string]    `json:"position"`
 	Department       nullable.Nullable[string]    `json:"department"`
 	NotableEventID   nullable.Nullable[uuid.UUID] `json:"notableEventID"`

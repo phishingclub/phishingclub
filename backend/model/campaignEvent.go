@@ -16,11 +16,10 @@ type CampaignEvent struct {
 	UserAgent  *vo.OptionalString255 `json:"userAgent"`
 	Data       *vo.OptionalString1MB `json:"data"`
 	Metadata   *vo.OptionalString1MB `json:"metadata"`
-	// AnonymizedID is the pseudonym that links an anonymous campaign's events to one
-	// another and to the recipient row. It is an internal join key and must never be
-	// serialized: exposing it would let a reader group a pseudonym's events into a
-	// per-person journey and re-identify it by matching the send event to a
-	// recipient. Stats and grouping read it server-side, off the database.
+	// AnonymizedID is the pseudonym that links an anonymous campaign's events to each
+	// other and to the recipient row. It must never be sent to a client: a reader with
+	// it could group one person's events together and work out who they are by matching
+	// the send event to a recipient. Stats and grouping read it on the server.
 	AnonymizedID *uuid.UUID `json:"-"`
 	// if null the recipient has been anonymized
 	RecipientID *uuid.UUID `json:"recipientID"`

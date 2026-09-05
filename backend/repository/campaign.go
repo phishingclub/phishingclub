@@ -2670,50 +2670,51 @@ func (r *Campaign) GetGroupedResultStats(
 	var rows []groupRow
 	// the person key is the pseudonym when present, else the recipient id, so counts
 	// work for normal, anonymous and anonymized campaigns; the group value is the
-	// snapshot, falling back to the recipient's attribute. groupColumn is allowlisted
-	// above, so its interpolation is safe.
+	// snapshot, falling back to the recipient's attribute. Events are aggregated to
+	// one row per person first, then joined once to the recipients so the join key is
+	// a plain column the database can index; joining the raw event rows on the
+	// COALESCE expression scans every recipient against every event and is quadratic.
+	// groupColumn is allowlisted above, so its interpolation is safe.
 	query := fmt.Sprintf(`
 	SELECT
-		COALESCE(NULLIF(cr.%[1]s, ''), r.%[1]s) AS grp,
-		COUNT(DISTINCT COALESCE(cr.anonymized_id, cr.recipient_id)) AS total,
-		COUNT(DISTINCT CASE WHEN clicked.pk IS NOT NULL THEN COALESCE(cr.anonymized_id, cr.recipient_id) END) AS clicked,
-		COUNT(DISTINCT CASE WHEN submitted.pk IS NOT NULL THEN COALESCE(cr.anonymized_id, cr.recipient_id) END) AS submitted,
-		COUNT(DISTINCT CASE WHEN reported.pk IS NOT NULL THEN COALESCE(cr.anonymized_id, cr.recipient_id) END) AS reported,
-		COUNT(DISTINCT CASE WHEN started.pk IS NOT NULL THEN COALESCE(cr.anonymized_id, cr.recipient_id) END) AS training_started,
-		COUNT(DISTINCT CASE WHEN completed.pk IS NOT NULL THEN COALESCE(cr.anonymized_id, cr.recipient_id) END) AS training_completed
-	FROM campaign_recipients cr
-	LEFT JOIN recipients r ON r.id = cr.recipient_id
+		p.grp AS grp,
+		COUNT(DISTINCT p.person) AS total,
+		COUNT(DISTINCT CASE WHEN ev.clicked = 1 THEN p.person END) AS clicked,
+		COUNT(DISTINCT CASE WHEN ev.submitted = 1 THEN p.person END) AS submitted,
+		COUNT(DISTINCT CASE WHEN ev.reported = 1 THEN p.person END) AS reported,
+		COUNT(DISTINCT CASE WHEN ev.training_started = 1 THEN p.person END) AS training_started,
+		COUNT(DISTINCT CASE WHEN ev.training_completed = 1 THEN p.person END) AS training_completed
+	FROM (
+		SELECT
+			COALESCE(cr.anonymized_id, cr.recipient_id) AS person,
+			COALESCE(NULLIF(cr.%[1]s, ''), r.%[1]s) AS grp
+		FROM campaign_recipients cr
+		LEFT JOIN recipients r ON r.id = cr.recipient_id
+		WHERE cr.campaign_id = ? AND COALESCE(cr.anonymized_id, cr.recipient_id) IS NOT NULL
+	) AS p
 	LEFT JOIN (
-		SELECT DISTINCT COALESCE(anonymized_id, recipient_id) AS pk FROM campaign_events
-		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL AND event_id IN (?, ?, ?)
-	) AS clicked ON clicked.pk = COALESCE(cr.anonymized_id, cr.recipient_id)
-	LEFT JOIN (
-		SELECT DISTINCT COALESCE(anonymized_id, recipient_id) AS pk FROM campaign_events
-		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL AND event_id = ?
-	) AS submitted ON submitted.pk = COALESCE(cr.anonymized_id, cr.recipient_id)
-	LEFT JOIN (
-		SELECT DISTINCT COALESCE(anonymized_id, recipient_id) AS pk FROM campaign_events
-		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL AND event_id = ?
-	) AS reported ON reported.pk = COALESCE(cr.anonymized_id, cr.recipient_id)
-	LEFT JOIN (
-		SELECT DISTINCT COALESCE(anonymized_id, recipient_id) AS pk FROM campaign_events
-		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL AND event_id = ?
-	) AS started ON started.pk = COALESCE(cr.anonymized_id, cr.recipient_id)
-	LEFT JOIN (
-		SELECT DISTINCT COALESCE(anonymized_id, recipient_id) AS pk FROM campaign_events
-		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL AND event_id = ?
-	) AS completed ON completed.pk = COALESCE(cr.anonymized_id, cr.recipient_id)
-	WHERE cr.campaign_id = ? AND COALESCE(cr.anonymized_id, cr.recipient_id) IS NOT NULL
-	GROUP BY COALESCE(NULLIF(cr.%[1]s, ''), r.%[1]s)
+		SELECT
+			COALESCE(anonymized_id, recipient_id) AS person,
+			MAX(CASE WHEN event_id IN (?, ?, ?) THEN 1 ELSE 0 END) AS clicked,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS submitted,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS reported,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS training_started,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS training_completed
+		FROM campaign_events
+		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL
+		GROUP BY COALESCE(anonymized_id, recipient_id)
+	) AS ev ON ev.person = p.person
+	GROUP BY p.grp
 	ORDER BY total DESC
 	`, groupColumn)
 
 	res := r.DB.WithContext(ctx).Raw(query,
-		campaignID, beforeID, pageID, afterID,
-		campaignID, submitID,
-		campaignID, reportID,
-		campaignID, startedID,
-		campaignID, completedID,
+		campaignID,
+		beforeID, pageID, afterID,
+		submitID,
+		reportID,
+		startedID,
+		completedID,
 		campaignID,
 	).Scan(&rows)
 	if res.Error != nil {
