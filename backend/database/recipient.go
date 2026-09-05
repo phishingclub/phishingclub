@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const (
@@ -45,4 +46,12 @@ type Recipient struct {
 
 func (Recipient) TableName() string {
 	return RECIPIENT_TABLE
+}
+
+// Migrate adds an index on LOWER(email). The case insensitive lookup used by
+// import and upsert (WHERE LOWER(email) = LOWER(?)) cannot use the plain email
+// index because the LOWER() call wraps the column, so without this it scans the
+// whole table on every recipient and a large import becomes quadratic.
+func (Recipient) Migrate(db *gorm.DB) error {
+	return db.Exec(`CREATE INDEX IF NOT EXISTS idx_recipients_email_lower ON recipients (LOWER(email))`).Error
 }
