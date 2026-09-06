@@ -27,7 +27,7 @@ Remember to copy the admin URL and password
 
 ## Features
 
-Phishing Club provides a lot of features for simulation and red teaming, here are some highlights.
+Phishing Club provides a lot of features for simulation and red teaming, such as:
 
 - **Multi-stage phishing flows** - Put together multiple phishing pages
 - **Domain proxying** - Configure domains to proxy and mirror content from target sites
