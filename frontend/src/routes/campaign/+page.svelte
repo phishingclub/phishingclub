@@ -821,7 +821,7 @@
 			}
 			selection.clear();
 			campaigns = await getCampaigns();
-			// the table needs template names; the heavier recipient-group counts and
+			// the table needs template names; the heavier recipient group counts and
 			// allow/deny lists are only needed by the create/update/copy modals, which
 			// load them via refreshCampaignDependencyData when opened
 			await refreshTemplates();

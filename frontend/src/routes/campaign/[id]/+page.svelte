@@ -131,7 +131,7 @@
 	let showGroupedStats = false;
 	let groupedStatsLoading = false;
 	// only offer results by group when recipients actually carry a position or
-	// department to group on; determined server-side so pagination cannot hide it
+	// department to group on; determined on the server so pagination cannot hide it
 	let hasGroupData = false;
 
 	// the outcomes shown for a group depend on whether it is a training campaign
@@ -626,7 +626,7 @@
 		}
 	};
 
-	// reveal the results-by-group section and load it on demand
+	// reveal the results by group section and load it on demand
 	const showGroupedResults = async () => {
 		showGroupedStats = true;
 		await setGroupedStats();
@@ -2081,7 +2081,7 @@
 						<div
 							class="mb-4 rounded-md bg-grayblue-light dark:bg-gray-800/60 px-4 py-3 text-sm text-slate-600 dark:text-gray-300"
 						>
-							Results shown as a dash (—) are hidden so no individual can be singled out, because
+							Results shown as a dash (-) are hidden so no individual can be singled out, because
 							the group is too small to show on its own.
 						</div>
 					{/if}
@@ -2110,14 +2110,14 @@
 								<TableCell value={row.group} />
 								<TableCell value={String(row.total)} />
 								{#if row.suppressed}
-									<TableCell><span class="text-gray-400 dark:text-gray-500">—</span></TableCell>
-									<TableCell><span class="text-gray-400 dark:text-gray-500">—</span></TableCell>
-									<TableCell><span class="text-gray-400 dark:text-gray-500">—</span></TableCell>
+									<TableCell><span class="text-gray-400 dark:text-gray-500">-</span></TableCell>
+									<TableCell><span class="text-gray-400 dark:text-gray-500">-</span></TableCell>
+									<TableCell><span class="text-gray-400 dark:text-gray-500">-</span></TableCell>
 								{:else}
 									{#each metrics as val}
 										<TableCell>
 											{#if val < 0}
-												<span class="text-gray-400 dark:text-gray-500">—</span>
+												<span class="text-gray-400 dark:text-gray-500">-</span>
 											{:else}
 												{val}
 												<span class="text-gray-400 dark:text-gray-500"
@@ -2789,7 +2789,7 @@
 								<span
 									class="text-sm {recp?.sent
 										? 'text-slate-600 dark:text-gray-200'
-										: 'text-gray-400 dark:text-gray-500'}">{recp?.sent ? 'Sent' : '—'}</span
+										: 'text-gray-400 dark:text-gray-500'}">{recp?.sent ? 'Sent' : '-'}</span
 								>
 							</TableCell>
 							<TableCell value={recp?.cancelledAt} isDate />

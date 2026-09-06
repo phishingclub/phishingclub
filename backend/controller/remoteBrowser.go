@@ -1137,7 +1137,7 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 	crIDStr := g.Param("crID")
 	// resolve anonymity before the session lookup so an anonymous campaign returns the
 	// same 404 with the same timing whether or not a session exists (no existence
-	// oracle, including via the extra query a post-lookup check would add).
+	// oracle, including via the extra query a check after the lookup would add).
 	if m.hideIfAnonByCRID(g, crIDStr) {
 		return
 	}
@@ -1813,7 +1813,7 @@ func (m *RemoteBrowserController) dispatchInput(page *rod.Page, msg []byte) {
 // applyEventAnonymization strips identity from a remote browser event and stamps
 // the campaign recipient's stable pseudonym when the campaign is anonymous, so a
 // captured cookie bundle, submitted form or info event carries no recipient link,
-// ip, user agent or captured data. No-op for a normal campaign.
+// ip, user agent or captured data. It does nothing for a normal campaign.
 func (m *RemoteBrowserController) applyEventAnonymization(
 	ctx context.Context,
 	campaignID *uuid.UUID,

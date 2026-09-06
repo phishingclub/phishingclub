@@ -116,7 +116,7 @@ type ReportData struct {
 }
 
 // ReportGroupStat is one row of the report's grouped outcome breakdown, with
-// percentages pre-formatted as "45" strings ready for the template. Suppressed
+// percentages already formatted as "45" strings ready for the template. Suppressed
 // hides the outcome counts for a group below the anonymity floor.
 type ReportGroupStat struct {
 	Group                    string

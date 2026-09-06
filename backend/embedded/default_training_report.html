@@ -156,7 +156,7 @@
   }
   .section-title:first-child { margin-top: 0; }
 
-  /* Metric cards — 3-column */
+  /* Metric cards, 3 column */
   .mcards {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -537,9 +537,9 @@
         {{if .Suppressed}}
         <td colspan="3" style="text-align:center;color:rgba(249,250,251,0.35)">Hidden (group too small)</td>
         {{else}}
-        <td style="text-align:right">{{if lt .Clicked 0}}<span style="color:rgba(249,250,251,0.35)">—</span>{{else}}<span style="color:#f59e0b;font-weight:600">{{.Clicked}}</span> <span style="color:rgba(249,250,251,0.45)">({{.ClickedPercent}}%)</span>{{end}}</td>
-        <td style="text-align:right">{{if lt .TrainingStarted 0}}<span style="color:rgba(249,250,251,0.35)">—</span>{{else}}<span style="color:#5b93e6;font-weight:600">{{.TrainingStarted}}</span> <span style="color:rgba(249,250,251,0.45)">({{.TrainingStartedPercent}}%)</span>{{end}}</td>
-        <td style="text-align:right">{{if lt .TrainingCompleted 0}}<span style="color:rgba(249,250,251,0.35)">—</span>{{else}}<span style="color:#10b981;font-weight:600">{{.TrainingCompleted}}</span> <span style="color:rgba(249,250,251,0.45)">({{.TrainingCompletedPercent}}%)</span>{{end}}</td>
+        <td style="text-align:right">{{if lt .Clicked 0}}<span style="color:rgba(249,250,251,0.35)">-</span>{{else}}<span style="color:#f59e0b;font-weight:600">{{.Clicked}}</span> <span style="color:rgba(249,250,251,0.45)">({{.ClickedPercent}}%)</span>{{end}}</td>
+        <td style="text-align:right">{{if lt .TrainingStarted 0}}<span style="color:rgba(249,250,251,0.35)">-</span>{{else}}<span style="color:#5b93e6;font-weight:600">{{.TrainingStarted}}</span> <span style="color:rgba(249,250,251,0.45)">({{.TrainingStartedPercent}}%)</span>{{end}}</td>
+        <td style="text-align:right">{{if lt .TrainingCompleted 0}}<span style="color:rgba(249,250,251,0.35)">-</span>{{else}}<span style="color:#10b981;font-weight:600">{{.TrainingCompleted}}</span> <span style="color:rgba(249,250,251,0.45)">({{.TrainingCompletedPercent}}%)</span>{{end}}</td>
         {{end}}
       </tr>
       {{end}}

@@ -428,8 +428,8 @@ func campaignAnonymous(campaign *model.Campaign) bool {
 }
 
 // applyAnonymousSnapshot assigns the stable random pseudonym and snapshots the
-// grouping attributes onto a campaign recipient for an anonymous campaign; it is a
-// no-op for a normal campaign.
+// grouping attributes onto a campaign recipient for an anonymous campaign; it does
+// nothing for a normal campaign.
 func (c *Campaign) applyAnonymousSnapshot(
 	campaign *model.Campaign,
 	campaignRecipient *model.CampaignRecipient,
@@ -453,8 +453,8 @@ func (c *Campaign) applyAnonymousSnapshot(
 
 // anonymizeEventForRecipient strips identity from an event and stamps the recipient's
 // pseudonym. It fails closed: with a pseudonym it always strips and stamps it;
-// without one it strips (uncounted) only for an anonymous campaign, and is a no-op
-// for a normal campaign.
+// without one it strips (uncounted) only for an anonymous campaign, and does
+// nothing for a normal campaign.
 func anonymizeEventForRecipient(isAnonymous bool, campaignRecipient *model.CampaignRecipient, event *model.CampaignEvent) {
 	// a pseudonym is present only on anonymous campaigns: strip identity and stamp it
 	if campaignRecipient != nil {
@@ -1483,7 +1483,7 @@ func suppressSmallGroups(stats []model.CampaignGroupStat, hideOutcomes bool) []m
 	}
 	if other.Total > 0 {
 		// only possible when the whole campaign has fewer than `floor` people, where
-		// the campaign-wide aggregate is unavoidable anyway; withhold the breakdown.
+		// the campaign wide aggregate is unavoidable anyway; withhold the breakdown.
 		if other.Total < anonymityGroupFloor {
 			other.Clicked = 0
 			other.Submitted = 0
@@ -3521,7 +3521,7 @@ func (c *Campaign) saveSendingResult(
 	// campaign must not keep it. Anonymize blanks the data along with identity. a real
 	// anonymous recipient always carries a pseudonym here (assigned at materialization),
 	// and the helper strips on that regardless of the flag; the flag only covers the
-	// should-not-happen no-pseudonym case, so on a lookup error default to not
+	// unexpected case where a pseudonym is missing, so on a lookup error default to not
 	// anonymous to avoid stripping a normal campaign's send event.
 	sendIsAnon, anonErr := c.CampaignRepository.IsAnonymousByID(ctx, &campaignID)
 	if anonErr != nil {
@@ -4677,7 +4677,7 @@ func (c *Campaign) HandleWebhooks(
 	// an anonymous campaign must not push per recipient events to a webhook: even
 	// without identity, one delivery per recipient action at its exact instant
 	// reinstates the timing the recipient view deliberately coarsens, which in a
-	// small campaign can single out who acted. campaign-level events (recipientID
+	// small campaign can single out who acted. campaign level events (recipientID
 	// nil, e.g. campaign closed) still fire.
 	if isAnon && recipientID != nil {
 		return nil
@@ -6784,7 +6784,7 @@ func buildReportData(
 }
 
 // toReportGroupStats converts raw grouped counts to report rows with the
-// percentage of each group that clicked, submitted and reported pre-formatted.
+// percentage of each group that clicked, submitted and reported, already formatted.
 func toReportGroupStats(groups []model.CampaignGroupStat) []model.ReportGroupStat {
 	groupPct := func(count, total int) string {
 		if count < 0 || total == 0 {

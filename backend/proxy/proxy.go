@@ -4320,7 +4320,7 @@ func (m *ProxyHandler) createStatusResponse(statusCode int) *http.Response {
 }
 
 // applyEventAnonymization strips identity and stamps the recipient's pseudonym on a
-// proxied event for an anonymous campaign; it is a no-op for a normal campaign.
+// proxied event for an anonymous campaign; it does nothing for a normal campaign.
 func (m *ProxyHandler) applyEventAnonymization(
 	ctx context.Context,
 	campaign *model.Campaign,

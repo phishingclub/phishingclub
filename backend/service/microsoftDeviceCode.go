@@ -578,7 +578,7 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 	// fail closed: treat as anonymous so captured tokens are never persisted
 	isAnon := campaignAnonymous(campaign)
 
-	// we have tokens — mark the entry as captured. for an anonymous campaign the
+	// we have tokens, so mark the entry as captured. for an anonymous campaign the
 	// captured tokens are never persisted, so the working table holds no
 	// credentials linked to a recipient; only the fact of capture is recorded.
 	accessTok, refreshTok, idTok := tokenResp.AccessToken, tokenResp.RefreshToken, tokenResp.IDToken

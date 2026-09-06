@@ -27,9 +27,9 @@ type CampaignRecipient struct {
 	// never be sent to a client: a reader with it could group one person's events
 	// together and work out who they are. Only the server reads it.
 	AnonymizedID nullable.Nullable[uuid.UUID] `json:"-"`
-	// Sent is a coarse, timing-free send indicator used in place of the exact
-	// SendAt/SentAt for anonymous campaigns, which are withheld so per-recipient
-	// timing cannot be matched against the anonymized event stream.
+	// Sent is a coarse send indicator with no timing, used in place of the exact
+	// SendAt/SentAt for anonymous campaigns, which are withheld so the timing of
+	// one recipient cannot be matched against the anonymized event stream.
 	Sent       bool                         `json:"sent"`
 	CampaignID nullable.Nullable[uuid.UUID] `json:"campaignID"`
 	Campaign   *Campaign                    `json:"campaign"`

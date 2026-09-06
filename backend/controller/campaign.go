@@ -268,7 +268,7 @@ func (c *Campaign) GetResultStats(g *gin.Context) {
 // GetGroupedResultStats returns outcome counts grouped by a recipient attribute.
 // The group is chosen with the `by` query parameter and is restricted to the
 // snapshot columns position and department; small groups are suppressed by the
-// service so an individual cannot be re-identified.
+// service so an individual cannot be identified.
 func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {

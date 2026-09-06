@@ -148,7 +148,7 @@
 		'Group Breakdown': [
 			{ label: 'Grouped By (default dimension name)', text: '{{.GroupsBy}}' },
 			{
-				label: 'Group rows — default dimension (loop)',
+				label: 'Group rows: default dimension (loop)',
 				text: `{{range .Groups}}
 <tr>
   <td>{{.Group}}</td>
@@ -156,15 +156,15 @@
   {{if .Suppressed}}
   <td colspan="3">Hidden (group too small)</td>
   {{else}}
-  <td>{{if lt .Clicked 0}}—{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
-  <td>{{if lt .Submitted 0}}—{{else}}{{.Submitted}} ({{.SubmittedPercent}}%){{end}}</td>
-  <td>{{if lt .Reported 0}}—{{else}}{{.Reported}} ({{.ReportedPercent}}%){{end}}</td>
+  <td>{{if lt .Clicked 0}}-{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
+  <td>{{if lt .Submitted 0}}-{{else}}{{.Submitted}} ({{.SubmittedPercent}}%){{end}}</td>
+  <td>{{if lt .Reported 0}}-{{else}}{{.Reported}} ({{.ReportedPercent}}%){{end}}</td>
   {{end}}
 </tr>
 {{end}}`
 			},
 			{
-				label: 'Group rows — by department (loop)',
+				label: 'Group rows: by department (loop)',
 				text: `{{range .DepartmentGroups}}
 <tr>
   <td>{{.Group}}</td>
@@ -172,15 +172,15 @@
   {{if .Suppressed}}
   <td colspan="3">Hidden (group too small)</td>
   {{else}}
-  <td>{{if lt .Clicked 0}}—{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
-  <td>{{if lt .Submitted 0}}—{{else}}{{.Submitted}} ({{.SubmittedPercent}}%){{end}}</td>
-  <td>{{if lt .Reported 0}}—{{else}}{{.Reported}} ({{.ReportedPercent}}%){{end}}</td>
+  <td>{{if lt .Clicked 0}}-{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
+  <td>{{if lt .Submitted 0}}-{{else}}{{.Submitted}} ({{.SubmittedPercent}}%){{end}}</td>
+  <td>{{if lt .Reported 0}}-{{else}}{{.Reported}} ({{.ReportedPercent}}%){{end}}</td>
   {{end}}
 </tr>
 {{end}}`
 			},
 			{
-				label: 'Group rows — by position (loop)',
+				label: 'Group rows: by position (loop)',
 				text: `{{range .PositionGroups}}
 <tr>
   <td>{{.Group}}</td>
@@ -188,15 +188,15 @@
   {{if .Suppressed}}
   <td colspan="3">Hidden (group too small)</td>
   {{else}}
-  <td>{{if lt .Clicked 0}}—{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
-  <td>{{if lt .Submitted 0}}—{{else}}{{.Submitted}} ({{.SubmittedPercent}}%){{end}}</td>
-  <td>{{if lt .Reported 0}}—{{else}}{{.Reported}} ({{.ReportedPercent}}%){{end}}</td>
+  <td>{{if lt .Clicked 0}}-{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
+  <td>{{if lt .Submitted 0}}-{{else}}{{.Submitted}} ({{.SubmittedPercent}}%){{end}}</td>
+  <td>{{if lt .Reported 0}}-{{else}}{{.Reported}} ({{.ReportedPercent}}%){{end}}</td>
   {{end}}
 </tr>
 {{end}}`
 			},
 			{
-				label: 'Group rows — training (loop)',
+				label: 'Group rows: training (loop)',
 				text: `{{range .Groups}}
 <tr>
   <td>{{.Group}}</td>
@@ -204,9 +204,9 @@
   {{if .Suppressed}}
   <td colspan="3">Hidden (group too small)</td>
   {{else}}
-  <td>{{if lt .Clicked 0}}—{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
-  <td>{{if lt .TrainingStarted 0}}—{{else}}{{.TrainingStarted}} ({{.TrainingStartedPercent}}%){{end}}</td>
-  <td>{{if lt .TrainingCompleted 0}}—{{else}}{{.TrainingCompleted}} ({{.TrainingCompletedPercent}}%){{end}}</td>
+  <td>{{if lt .Clicked 0}}-{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
+  <td>{{if lt .TrainingStarted 0}}-{{else}}{{.TrainingStarted}} ({{.TrainingStartedPercent}}%){{end}}</td>
+  <td>{{if lt .TrainingCompleted 0}}-{{else}}{{.TrainingCompleted}} ({{.TrainingCompletedPercent}}%){{end}}</td>
   {{end}}
 </tr>
 {{end}}`

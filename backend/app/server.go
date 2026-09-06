@@ -694,7 +694,7 @@ func trainingMilestoneEventName(pageType string) string {
 
 // applyEventAnonymization strips identity and stamps the recipient's pseudonym on an
 // event for an anonymous campaign, so it stays countable but carries no identity. It
-// is a no-op for a normal campaign. Call before persisting an event.
+// does nothing for a normal campaign. Call before persisting an event.
 func (s *Server) applyEventAnonymization(
 	ctx context.Context,
 	campaign *model.Campaign,

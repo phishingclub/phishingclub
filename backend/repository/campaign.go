@@ -1515,7 +1515,7 @@ func (r *Campaign) GetReadyToAnonymize(
 	// or when it is anonymous and closed: an anonymous campaign always severs its
 	// recipient relation at close, and this is the fallback that guarantees it even
 	// if the inline anonymize at close time failed. either way anonymized_at must be
-	// unset so an already-anonymized campaign is never reprocessed.
+	// unset so a campaign that is already anonymized is never reprocessed.
 	var dbCampaigns []database.Campaign
 	now := utils.NowRFC3339UTC()
 	res := db.
