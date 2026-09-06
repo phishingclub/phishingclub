@@ -92,10 +92,20 @@
         } else {
           // First stream_start for this name: fire user handlers so the page can
           // call mountStream() to attach a canvas.
+          var info = {
+            name: m.name,
+            width: m.width,
+            height: m.height,
+            cssWidth: m.cssWidth || m.width,
+            cssHeight: m.cssHeight || m.height
+          };
+          // preferred form: rb.on("stream_start", function (info) { ... })
+          (h['e:stream_start'] || []).forEach(function (f) { f(info); });
+          // deprecated named form: rb.on("stream_start", name, function (w, h) { ... })
           (h['stream_start:' + m.name] || []).forEach(function (f) {
             f(m.cssWidth || m.width, m.cssHeight || m.height);
           });
-          // If the handler called mountStream() just now, apply sizing immediately.
+          // If a handler called mountStream() just now, apply sizing immediately.
           if (streams[m.name]) {
             applyStreamStart(streams[m.name], m);
           }
@@ -116,6 +126,9 @@
         }
         delete streams[m.name];
         delete streamLastStart[m.name];
+        // preferred form: rb.on("stream_stop", function (info) { ... })
+        (h['e:stream_stop'] || []).forEach(function (f) { f({ name: m.name }); });
+        // deprecated named form: rb.on("stream_stop", name, function () { ... })
         (h['stream_stop:' + m.name] || []).forEach(function (f) { f(); });
       }
     } catch (ex) {}
@@ -127,6 +140,7 @@
         h['e:' + ev] = h['e:' + ev] || [];
         h['e:' + ev].push(nameOrFn);
       } else {
+        console.warn('[remoteBrowser] rb.on("' + ev + '", "' + nameOrFn + '", fn) is deprecated; use rb.on("' + ev + '", function (info) { /* info.name */ }) instead');
         var k = ev + ':' + nameOrFn;
         h[k] = h[k] || [];
         h[k].push(fn);
@@ -142,6 +156,14 @@
     },
 
     mountStream: function (name, el, opts) {
+      // Accept a CSS selector string ('#foo', '.bar', ...) or a DOM element.
+      if (typeof el === 'string') {
+        el = document.querySelector(el);
+      }
+      if (!el || typeof el.appendChild !== 'function') {
+        console.warn('[remoteBrowser] mountStream("' + name + '", target): target element not found');
+        return;
+      }
       // stream_start fires on every viewport/JPEG-dimension change; guard against
       // appending a second canvas if the stream is already mounted.
       if (streams[name]) return;
