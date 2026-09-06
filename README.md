@@ -4,7 +4,7 @@
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289da?style=flat&logo=discord&logoColor=white)](https://discord.gg/Zssps7U8gX)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-**Phishing Club** is a phishing simulation and red team phishing framework.
+**Phishing Club** is a phishing simulation, training and red team phishing framework.
 
 ![Phishing Club Dashboard](https://phishing.club/img/animated.gif)
 
