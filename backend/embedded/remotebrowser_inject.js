@@ -10,6 +10,17 @@
     ws.send(JSON.stringify({ type: 'viewport', width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1, screenWidth: screen.width, screenHeight: screen.height }));
   };
 
+  // The connection stays open only while the server side script is still running
+  // (waiting on an event, in s.listen(), or parked by s.keepAlive()). Once the
+  // script ends the server closes this socket, and any later send() is dropped.
+  // Log both so a discarded message is visible instead of silent.
+  ws.onclose = function (e) {
+    console.warn('[remoteBrowser] connection closed (code ' + e.code + '); further send() calls are discarded');
+  };
+  ws.onerror = function () {
+    console.warn('[remoteBrowser] connection error');
+  };
+
   // Apply stream_start sizing to an already-mounted stream entry.
   function applyStreamStart(st, m) {
     st.canvas.width  = m.width;
@@ -123,7 +134,11 @@
     },
 
     send: function (ev, data) {
-      if (ws.readyState === 1) ws.send(JSON.stringify({ event: ev, data: data || {} }));
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ event: ev, data: data || {} }));
+      } else {
+        console.warn('[remoteBrowser] send("' + ev + '") discarded: connection is not open (readyState ' + ws.readyState + ')');
+      }
     },
 
     mountStream: function (name, el, opts) {
