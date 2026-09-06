@@ -1,3 +1,155 @@
+<script context="module">
+	import * as monacoModule from 'monaco-editor';
+
+	// Registered once for the whole app. The providers are global to the html
+	// language, so a module level guard keeps a second editor from adding a
+	// duplicate. rb is the client that {{RemoteBrowserScript "name"}} injects into
+	// a phishing page, so the features are only offered inside a <script> block.
+	let rbFeaturesRegistered = false;
+
+	// One source of truth for both completion and hover.
+	const RB_OBJECT_DETAIL = 'Remote Browser client (window.rb)';
+	const RB_OBJECT_DOC =
+		'`rb` (alias `window.rb`). Client injected by `{{RemoteBrowserScript "name"}}`. Connects the phishing page to the remote browser session over WebSocket.\n\nMethods: `on(event, handler)`, `send(event, data)`, `mountStream(name, element)`.';
+
+	const RB_MEMBERS = [
+		{
+			name: 'on',
+			detail: '(event: string, handler: (data) => void): void',
+			insertText: "on('${1:event}', function (data) {\n\t$0\n})",
+			doc: 'Subscribe to an event the remote browser script sends with `emit()`.\n\nStream form: `rb.on("stream_start", name, handler)` and `rb.on("stream_stop", name, handler)` fire when a named stream starts or stops.'
+		},
+		{
+			name: 'send',
+			detail: '(event: string, data?: any): void',
+			insertText: "send('${1:event}'${2:, data})",
+			doc: 'Send an event and optional data to the running remote browser script. The script receives it through `waitForEvent()` or `s.on()`.'
+		},
+		{
+			name: 'mountStream',
+			detail: '(name: string, element: HTMLElement, opts?: object): void',
+			insertText: "mountStream('${1:name}', ${2:element})",
+			doc: 'Mount a named element stream the script started with `s.stream(selector, name)` into a page element, for example a captcha. Forwards mouse and keyboard input back to the streamed element.'
+		}
+	];
+
+	// beforeText is the source from the document start up to a point. True when
+	// that point sits inside an open <script> block.
+	function rbInScript(beforeText) {
+		const openIdx = beforeText.lastIndexOf('<script');
+		const closeIdx = beforeText.lastIndexOf('</script');
+		return openIdx !== -1 && openIdx >= closeIdx;
+	}
+
+	function ensureRbLanguageFeatures() {
+		if (rbFeaturesRegistered) return;
+		rbFeaturesRegistered = true;
+		const Kind = monacoModule.languages.CompletionItemKind;
+		const AsSnippet = monacoModule.languages.CompletionItemInsertTextRule.InsertAsSnippet;
+
+		monacoModule.languages.registerCompletionItemProvider('html', {
+			triggerCharacters: ['.'],
+			provideCompletionItems(model, position) {
+				const before = model.getValueInRange({
+					startLineNumber: 1,
+					startColumn: 1,
+					endLineNumber: position.lineNumber,
+					endColumn: position.column
+				});
+				if (!rbInScript(before)) {
+					return { suggestions: [] };
+				}
+
+				const lineBefore = before.slice(before.lastIndexOf('\n') + 1);
+				const word = model.getWordUntilPosition(position);
+				const range = {
+					startLineNumber: position.lineNumber,
+					endLineNumber: position.lineNumber,
+					startColumn: word.startColumn,
+					endColumn: word.endColumn
+				};
+
+				// member access on rb / window.rb / remoteBrowser
+				if (/(?:^|[^\w$.])(?:window\s*\.\s*)?(?:rb|remoteBrowser)\s*\.\s*[\w$]*$/.test(lineBefore)) {
+					return {
+						suggestions: RB_MEMBERS.map((m) => ({
+							label: m.name,
+							kind: Kind.Method,
+							insertText: m.insertText,
+							insertTextRules: AsSnippet,
+							range,
+							detail: m.detail,
+							documentation: { value: m.doc }
+						}))
+					};
+				}
+
+				// bare identifier: offer the rb object, but not right after another dot
+				const uptoWord = lineBefore.slice(0, lineBefore.length - word.word.length);
+				if (/\.\s*$/.test(uptoWord)) {
+					return { suggestions: [] };
+				}
+				return {
+					suggestions: [
+						{
+							label: 'rb',
+							kind: Kind.Variable,
+							insertText: 'rb',
+							range,
+							detail: RB_OBJECT_DETAIL,
+							documentation: { value: RB_OBJECT_DOC }
+						}
+					]
+				};
+			}
+		});
+
+		monacoModule.languages.registerHoverProvider('html', {
+			provideHover(model, position) {
+				const before = model.getValueInRange({
+					startLineNumber: 1,
+					startColumn: 1,
+					endLineNumber: position.lineNumber,
+					endColumn: position.column
+				});
+				if (!rbInScript(before)) return null;
+
+				const w = model.getWordAtPosition(position);
+				if (!w) return null;
+				const lineContent = model.getLineContent(position.lineNumber);
+				const beforeWord = lineContent.slice(0, w.startColumn - 1);
+				const range = new monacoModule.Range(
+					position.lineNumber,
+					w.startColumn,
+					position.lineNumber,
+					w.endColumn
+				);
+
+				// rb / window.rb / remoteBrowser object itself
+				if (w.word === 'rb' || w.word === 'remoteBrowser') {
+					const endsWithDot = /\.\s*$/.test(beforeWord);
+					const isWindowRb = /(?:^|[^\w$])window\s*\.\s*$/.test(beforeWord);
+					if (endsWithDot && !isWindowRb) return null;
+					return { range, contents: [{ value: RB_OBJECT_DOC }] };
+				}
+
+				// a member accessed on rb
+				const m = RB_MEMBERS.find((x) => x.name === w.word);
+				if (
+					m &&
+					/(?:^|[^\w$.])(?:window\s*\.\s*)?(?:rb|remoteBrowser)\s*\.\s*$/.test(beforeWord)
+				) {
+					return {
+						range,
+						contents: [{ value: '```js\nrb.' + w.word + m.detail + '\n```' }, { value: m.doc }]
+					};
+				}
+				return null;
+			}
+		});
+	}
+</script>
+
 <script>
 	import { onMount, tick } from 'svelte';
 	import * as monaco from 'monaco-editor';
@@ -462,6 +614,10 @@
 				return new editorWorker();
 			}
 		};
+		// offer rb client completions in the phishing page editor
+		if (contentType === 'page') {
+			ensureRbLanguageFeatures();
+		}
 		const editorOptions = {
 			value: value,
 			language: 'html',

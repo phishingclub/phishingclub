@@ -16,6 +16,9 @@
 	export let runLog = [];
 	/** @type {boolean} Whether the script is currently running */
 	export let isRunning = false;
+	/** @type {boolean} Show the script log overlay. Only the editor test runner
+	 * feeds runLog; the live campaign view has no script log to show. */
+	export let showLog = false;
 
 	let canvas;
 	let ws = null;
@@ -473,22 +476,24 @@
 				{#if status === 'Connected'}
 					<span class="text-sm text-gray-500 dark:text-gray-400">{fps} fps</span>
 				{/if}
-				<button
-					type="button"
-					on:click={() => (logPanelOpen = !logPanelOpen)}
-					class="ml-auto flex items-center gap-1.5 px-2 py-0.5 text-xs rounded border transition-colors {logPanelOpen
-						? 'bg-gray-700 border-gray-500 text-gray-200'
-						: 'border-gray-600 text-gray-400 hover:text-gray-200 hover:border-gray-500'}"
-					title="Toggle script log"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3">
-						<path fill-rule="evenodd" d="M2 4a1 1 0 0 1 1-1h10a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1ZM2 8a1 1 0 0 1 1-1h10a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1ZM3 11a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2H3Z" clip-rule="evenodd" />
-					</svg>
-					Logs
-					{#if isRunning}
-						<span class="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
-					{/if}
-				</button>
+				{#if showLog}
+					<button
+						type="button"
+						on:click={() => (logPanelOpen = !logPanelOpen)}
+						class="ml-auto flex items-center gap-1.5 px-2 py-0.5 text-xs rounded border transition-colors {logPanelOpen
+							? 'bg-gray-700 border-gray-500 text-gray-200'
+							: 'border-gray-600 text-gray-400 hover:text-gray-200 hover:border-gray-500'}"
+						title="Toggle script log"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-3 h-3">
+							<path fill-rule="evenodd" d="M2 4a1 1 0 0 1 1-1h10a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1ZM2 8a1 1 0 0 1 1-1h10a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1ZM3 11a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2H3Z" clip-rule="evenodd" />
+						</svg>
+						Logs
+						{#if isRunning}
+							<span class="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
+						{/if}
+					</button>
+				{/if}
 			</div>
 			<!-- Tab bar (only shown when multiple tabs exist) -->
 			{#if tabs.length > 1}
@@ -607,7 +612,7 @@
 				</div>
 			{/if}
 
-			{#if logPanelOpen}
+			{#if showLog && logPanelOpen}
 				<div
 					class="absolute bottom-0 left-0 right-0 flex flex-col bg-gray-950/95 border-t border-gray-700 rounded-b"
 					style="height: 13rem; max-height: 50%;"

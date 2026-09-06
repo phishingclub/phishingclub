@@ -440,10 +440,17 @@ interface Session {
   /** Evaluate a JS expression in the page context and return the result */
   evaluate(expression: string): any;
 
-  // ── Screenshots ───────────────────────────────────────────────────────────
-  /** Take a full-page screenshot, visible in the test runner log */
+  // ── Screenshots (test/debug only) ─────────────────────────────────────────
+  /** Test/debug only. Full page screenshot shown in the editor runner panel.
+   *  Discarded in live campaign sessions and never saved as a recipient event. */
   screenshot(name: string): void;
+  /** Test/debug only. Screenshot of one element, shown in the editor runner
+   *  panel. Discarded in live campaign sessions. */
   screenshotElement(selector: string, name: string): void;
+  /** Test/debug only. Captures the full page HTML and emits it as a named
+   *  dom_dump event in the editor runner panel. Discarded in live campaign
+   *  sessions and never saved as a recipient event. */
+  domDump(name: string): void;
 
   // ── Viewport & emulation ─────────────────────────────────────────────────
   setViewport(width: number, height: number): void;
@@ -592,10 +599,16 @@ interface FrameSession {
   // ── JavaScript evaluation ─────────────────────────────────────────────────
   evaluate(expression: string): any;
 
-  // ── Screenshots & DOM capture ────────────────────────────────────────────
+  // ── Screenshots & DOM capture (test/debug only) ───────────────────────────
+  /** Test/debug only. Full page screenshot shown in the editor runner panel.
+   *  Discarded in live campaign sessions and never saved as a recipient event. */
   screenshot(name: string): void;
+  /** Test/debug only. Screenshot of one element, shown in the editor runner
+   *  panel. Discarded in live campaign sessions. */
   screenshotElement(selector: string, name: string): void;
-  /** Capture the full page HTML and emit it as a named dom_dump event for debugging */
+  /** Test/debug only. Captures the full page HTML and emits it as a named
+   *  dom_dump event in the editor runner panel. Discarded in live campaign
+   *  sessions and never saved as a recipient event. */
   domDump(name: string): void;
 
   // ── Viewport & emulation ─────────────────────────────────────────────────
@@ -1439,6 +1452,7 @@ declare var Infinity: number;
 	controlMode={streamControlMode}
 	{runLog}
 	{isRunning}
+	showLog={true}
 	on:inject={(e) => {
 		if (!ws || ws.readyState !== WebSocket.OPEN) return;
 		const { event, data } = e.detail;
