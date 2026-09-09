@@ -724,13 +724,14 @@ func (a *APISender) SendWithCustomURL(
 func (a *APISender) buildHeader(
 	apiSender *model.APISender,
 	templateData *map[string]any,
+	funcs template.FuncMap,
 ) ([]*model.HTTPHeader, error) {
 	// setup headers
 	apiReqHeaders := []*model.HTTPHeader{}
 	requestHeaders := apiSender.RequestHeaders
 	if requestHeaders.IsSpecified() && !requestHeaders.IsNull() {
 		for _, header := range requestHeaders.MustGet().Headers {
-			keyTemplate := template.New("key").Funcs(TemplateFuncs())
+			keyTemplate := template.New("key").Funcs(funcs)
 			keyTemplate, err := keyTemplate.Parse(header.Key)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse header key: %s", err)
@@ -739,7 +740,7 @@ func (a *APISender) buildHeader(
 			if err := keyTemplate.Execute(&key, templateData); err != nil {
 				return nil, errs.Wrap(err)
 			}
-			valueTemplate := template.New("value").Funcs(TemplateFuncs())
+			valueTemplate := template.New("value").Funcs(funcs)
 			valueTemplate, err = valueTemplate.Parse(header.Value)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse header value: %s", err)
@@ -878,13 +879,14 @@ func (a *APISender) buildRequestWithCustomURL(
 		(*t)["URL"] = customCampaignURL
 	}
 
+	// build per-recipient template funcs so {{MicrosoftDeviceCode}} resolves correctly
+	recipientDeviceFuncs := a.TemplateService.TemplateFuncsWithDeviceCode(ctx, &campaignID, &recipientID)
+
 	// setup headers
-	apiReqHeaders, err := a.buildHeader(apiSender, t)
+	apiReqHeaders, err := a.buildHeader(apiSender, t, recipientDeviceFuncs)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to build headers: %s", err)
 	}
-	// build per-recipient template funcs so {{MicrosoftDeviceCode}} resolves correctly
-	recipientDeviceFuncs := a.TemplateService.TemplateFuncsWithDeviceCode(ctx, &campaignID, &recipientID)
 
 	// setup URL
 	requestURL := apiSender.RequestURL.MustGet()
