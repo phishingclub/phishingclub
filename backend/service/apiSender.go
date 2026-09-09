@@ -730,22 +730,20 @@ func (a *APISender) buildHeader(
 	requestHeaders := apiSender.RequestHeaders
 	if requestHeaders.IsSpecified() && !requestHeaders.IsNull() {
 		for _, header := range requestHeaders.MustGet().Headers {
-			keyTemplate := template.New("key")
+			keyTemplate := template.New("key").Funcs(TemplateFuncs())
 			keyTemplate, err := keyTemplate.Parse(header.Key)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse header key: %s", err)
 			}
-			keyTemplate = keyTemplate.Funcs(TemplateFuncs())
 			var key bytes.Buffer
 			if err := keyTemplate.Execute(&key, templateData); err != nil {
 				return nil, errs.Wrap(err)
 			}
-			valueTemplate := template.New("value")
+			valueTemplate := template.New("value").Funcs(TemplateFuncs())
 			valueTemplate, err = valueTemplate.Parse(header.Value)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse header value: %s", err)
 			}
-			valueTemplate = valueTemplate.Funcs(TemplateFuncs())
 			var value bytes.Buffer
 			if err := valueTemplate.Execute(&value, templateData); err != nil {
 				return nil, fmt.Errorf("failed to execute value template: %s", err)
