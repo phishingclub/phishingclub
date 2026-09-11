@@ -759,12 +759,29 @@ func (r *Recipient) GetRandomByCompanyID(
 	// this rides the rowid index; ORDER BY RANDOM instead sorts the whole table on
 	// every call, which gets slower as the recipients table grows. if the threshold
 	// lands past the last match, wrap to the first matching row.
+	//
+	// the threshold is drawn from this company's own rowid range (min..max). a
+	// threshold taken from the whole table landed past a company's last row for
+	// every company except the one owning the highest rowids, so the fallback
+	// kept returning that company's lowest rowid recipient far too often.
+	table := database.RECIPIENT_TABLE
+	companyPredicate := "company_id IS NULL"
+	var predicateArgs []any
+	if companyID != nil {
+		companyPredicate = "company_id = ?"
+		predicateArgs = []any{companyID, companyID, companyID}
+	}
+	thresholdExpr := fmt.Sprintf(
+		"%[1]s.rowid >= ("+
+			"(SELECT min(rowid) FROM %[1]s WHERE %[2]s) + "+
+			"abs(random()) %% ("+
+			"(SELECT max(rowid) FROM %[1]s WHERE %[2]s) - "+
+			"(SELECT min(rowid) FROM %[1]s WHERE %[2]s) + 1))",
+		table, companyPredicate,
+	)
 	res := filtered().
-		Where(fmt.Sprintf(
-			"%[1]s.rowid >= (abs(random()) %% (SELECT max(rowid) + 1 FROM %[1]s))",
-			database.RECIPIENT_TABLE,
-		)).
-		Order(database.RECIPIENT_TABLE + ".rowid").
+		Where(thresholdExpr, predicateArgs...).
+		Order(table + ".rowid").
 		Limit(1).
 		First(&dbRecipient)
 	if errors.Is(res.Error, gorm.ErrRecordNotFound) {
