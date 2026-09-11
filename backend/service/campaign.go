@@ -1362,7 +1362,7 @@ func (c *Campaign) GetResultStats(
 const anonymityGroupFloor = 3
 
 // OTHER_GROUP_LABEL is the bucket name for merged small groups.
-const OTHER_GROUP_LABEL = "Other (small groups)"
+const OTHER_GROUP_LABEL = "Other (small)"
 
 // GetGroupedResultStats returns outcome counts grouped by a recipient attribute,
 // suppressing any group smaller than the anonymity floor. Only anonymous campaigns

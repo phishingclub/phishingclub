@@ -2032,7 +2032,7 @@
 		{#if hasGroupData}
 			<div class="mb-6">
 				<div class="mb-3 flex items-center gap-3">
-					<SubHeadline>Results by group</SubHeadline>
+					<SubHeadline>Results by position or department</SubHeadline>
 					<button
 						type="button"
 						class="text-sm font-medium text-cta-blue hover:text-blue-700 dark:text-highlight-blue dark:hover:text-blue-300 transition-colors duration-200"
@@ -2764,7 +2764,7 @@
 							{#if campaign.isAnonymous}
 								<span
 									class="text-sm italic text-gray-400 dark:text-gray-500"
-									title="Per-recipient outcomes are hidden for anonymous campaigns. See Results by group."
+									title="Per-recipient outcomes are hidden for anonymous campaigns. See Results by position or department."
 									>Hidden</span
 								>
 							{:else}
