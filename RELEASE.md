@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.42.0] - 2026-09-11
+- Added position and department statistics to campaigns
+- Added anonymous campaign mode
+- Added unified login audit event
+- Added remote browser log event as campaign recipient info event 
+- Added page editor auto complete for remote browser, 'rb'
+- Fix API sender not supporting template functions in request headers
+- Fix API sender not supporting Device code in request headers
+- Fix restrict report generation browser egress 
+- Fix disable report generation browser telemetry
+- Fix escape recipient data in report generation
+- Fix email sort by updated at
+- Fix deprecated .on overloading in 'rb' API
+- Various performance and maintenance fixes 
+
 ## [1.41.0] - 2026-08-16
 - Added awareness training campaigns with completion tracking and dedicated reports
 - Added URL path identifier support for campaigns
