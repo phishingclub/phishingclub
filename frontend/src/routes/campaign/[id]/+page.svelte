@@ -147,10 +147,6 @@
 	);
 
 	const setHasGroupData = async () => {
-		if (!campaign.isAnonymous && !campaign.isTraining) {
-			hasGroupData = false;
-			return;
-		}
 		try {
 			const res = await api.campaign.getHasGroupData($page.params.id);
 			hasGroupData = !!res.data?.hasGroupData;
@@ -606,10 +602,6 @@
 	};
 
 	const setGroupedStats = async () => {
-		if (!campaign.isAnonymous && !campaign.isTraining) {
-			groupedStats = [];
-			return;
-		}
 		groupedStatsLoading = true;
 		try {
 			const res = await api.campaign.getGroupedResultStats($page.params.id, groupedBy);
@@ -2037,7 +2029,7 @@
 			{/if}
 		</div>
 
-		{#if (campaign.isAnonymous || campaign.isTraining) && hasGroupData}
+		{#if hasGroupData}
 			<div class="mb-6">
 				<div class="mb-3 flex items-center gap-3">
 					<SubHeadline>Results by group</SubHeadline>

@@ -1385,26 +1385,17 @@ func (c *Campaign) GetGroupedResultStats(
 		c.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
-	// grouping attributes are snapshotted only for anonymous campaigns. a closed
-	// normal campaign has pseudonyms but no snapshot, which would surface as a single
-	// unlabeled group, so restrict this to anonymous campaigns.
-	// shown for anonymous campaigns (in place of hidden per recipient outcomes) and
-	// for training campaigns (the started/completed breakdown).
+	// the position/department breakdown is available for every campaign that has
+	// the data, matching the report. the grouping value falls back to the
+	// recipient's live attribute when there is no snapshot, so a normal campaign
+	// groups by the recipient's position/department.
 	isAnon, err := c.CampaignRepository.IsAnonymousByID(ctx, campaignID)
 	if err != nil {
 		c.Logger.Errorw("failed to check campaign anonymity for grouped stats", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	isTraining, err := c.CampaignRepository.IsTrainingByID(ctx, campaignID)
-	if err != nil {
-		c.Logger.Errorw("failed to check campaign training flag for grouped stats", "error", err)
-		return nil, errs.Wrap(err)
-	}
-	if !isAnon && !isTraining {
-		return []model.CampaignGroupStat{}, nil
-	}
-	// hide per group outcomes for a campaign anonymized after the fact too, so this
-	// matches the report path and stays safe if snapshotting ever changes
+	// anonymous and anonymized campaigns show group sizes only, with per group
+	// outcomes withheld; normal and training campaigns show the outcomes.
 	isAnonymized, err := c.CampaignRepository.IsAnonymizedByID(ctx, campaignID)
 	if err != nil {
 		c.Logger.Errorw("failed to check campaign anonymized flag for grouped stats", "error", err)
