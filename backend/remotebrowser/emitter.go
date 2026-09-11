@@ -15,6 +15,13 @@ type RunEvent struct {
 	Message string `json:"message,omitempty"` // for type=log/error/info
 	Data    any    `json:"data,omitempty"`    // for type=log: optional second arg from log(msg, data)
 	Time    string `json:"time"`
+	// Internal marks a runner diagnostic (session, chrome, capture, frame, ...)
+	// as opposed to a line the script author wrote with log(). Only script logs
+	// are recorded on the recipient timeline; internal logs stay in the editor
+	// panel. This is set by the runner, never derived from the message text, so
+	// a log line whose text happens to start with a reserved word is classified
+	// by where it came from, not by what it says.
+	Internal bool `json:"internal,omitempty"`
 }
 
 // channelEmitter sends events to a buffered channel. All methods are safe to
@@ -36,11 +43,24 @@ func (e *channelEmitter) emit(key string, value any) {
 	})
 }
 
+// log emits a runner diagnostic. These show in the editor panel but are kept
+// off the recipient timeline. Every non script caller in the runner uses this.
 func (e *channelEmitter) log(msg string, data ...any) {
+	e.sendLog(msg, true, data...)
+}
+
+// scriptLog emits a line the automation script author wrote with log(). These
+// are recorded on the recipient timeline. Only the goja log() binding uses this.
+func (e *channelEmitter) scriptLog(msg string, data ...any) {
+	e.sendLog(msg, false, data...)
+}
+
+func (e *channelEmitter) sendLog(msg string, internal bool, data ...any) {
 	evt := RunEvent{
-		Type:    "log",
-		Message: msg,
-		Time:    time.Now().UTC().Format(time.RFC3339Nano),
+		Type:     "log",
+		Message:  msg,
+		Internal: internal,
+		Time:     time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if len(data) > 0 {
 		evt.Data = data[0]

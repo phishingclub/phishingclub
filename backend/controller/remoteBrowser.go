@@ -14,7 +14,6 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -927,8 +926,10 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 			m.Logger.Debugw(evt.Message, "campaign_id", campaignID, "recipient_id", recipientID)
 			// persist the script log line as a recipient event so it shows in
 			// the campaign timeline for this recipient. runner diagnostics are
-			// only for the editor panel and are kept out of the timeline.
-			if !isInternalRunnerLog(evt.Message) {
+			// only for the editor panel and are kept out of the timeline. the
+			// runner marks its own diagnostics Internal, so classification does
+			// not depend on the message text.
+			if !evt.Internal {
 				logMsg := evt.Message
 				if evt.Data != nil {
 					if b, mErr := json.Marshal(evt.Data); mErr == nil {
@@ -1971,30 +1972,6 @@ func (m *RemoteBrowserController) saveCaptureEvent(
 	if m.CampaignService != nil {
 		m.CampaignService.HandleWebhooks(ctx, campaignID, recipientID, data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA, bundle) //nolint:errcheck
 	}
-}
-
-// internalRunnerLogPrefixes tag the log lines the runner emits about its own
-// operation. They help while testing a script in the editor but are noise in a
-// recipient timeline, so they are not saved as recipient events.
-var internalRunnerLogPrefixes = []string{
-	"[session]",
-	"[chrome]",
-	"[dbg]",
-	"[screenshot]",
-	"[domDump]",
-	"[waitForEvent]",
-	"[stream]",
-}
-
-// isInternalRunnerLog reports whether msg is a runner diagnostic rather than a
-// line the script author wrote with log().
-func isInternalRunnerLog(msg string) bool {
-	for _, p := range internalRunnerLogPrefixes {
-		if strings.HasPrefix(msg, p) {
-			return true
-		}
-	}
-	return false
 }
 
 func (m *RemoteBrowserController) saveInfoEvent(

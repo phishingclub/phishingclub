@@ -486,9 +486,9 @@ func (r *Runner) Run(ctx context.Context) error {
 	vm.Set("log", func(call goja.FunctionCall) goja.Value {
 		msg := vmArgStr(call.Argument(0))
 		if len(call.Arguments) > 1 && !goja.IsUndefined(call.Argument(1)) && !goja.IsNull(call.Argument(1)) {
-			emitter.log(msg, call.Argument(1).Export())
+			emitter.scriptLog(msg, call.Argument(1).Export())
 		} else {
-			emitter.log(msg)
+			emitter.scriptLog(msg)
 		}
 		return goja.Undefined()
 	})
