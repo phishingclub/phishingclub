@@ -1136,7 +1136,8 @@ declare var Infinity: number;
 				<span class="text-xs font-mono text-gray-500 dark:text-gray-400">JavaScript</span>
 				<button
 					type="button"
-					on:click={() => vimModeEnabled.update((v) => !v)}
+					title="Toggle vim mode (Ctrl+Alt+V)"
+						on:click={() => vimModeEnabled.update((v) => !v)}
 					class="h-8 border-2 rounded-md w-20 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
 					class:font-bold={localVimMode}
 					class:bg-blue-600={localVimMode}

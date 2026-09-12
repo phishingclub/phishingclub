@@ -20,6 +20,7 @@
 	import Header from '$lib/components/header/Header.svelte';
 	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
 	import { displayMode } from '$lib/store/displayMode';
+	import { toggleVimMode } from '$lib/store/vimMode.js';
 
 	// services
 	const session = Session.instance;
@@ -78,6 +79,17 @@
 
 		const pinned = getCookie('menuPinned');
 		isMenuPinned = pinned === 'true';
+
+		// Ctrl+Alt+V (Cmd+Alt+V on macOS) toggles vim mode in every editor at once.
+		// Uses e.code so it works regardless of keyboard layout, and the capture
+		// phase so an editor with vim active does not swallow it first.
+		const handleVimShortcut = (e) => {
+			if ((e.ctrlKey || e.metaKey) && e.altKey && e.code === 'KeyV') {
+				e.preventDefault();
+				toggleVimMode();
+			}
+		};
+		window.addEventListener('keydown', handleVimShortcut, true);
 
 		(async () => {
 			// handle session
@@ -194,6 +206,7 @@
 		// on unmount
 		return () => {
 			console.log('layout: unmounting');
+			window.removeEventListener('keydown', handleVimShortcut, true);
 			// stop listening for sessions
 			try {
 				session.stop();

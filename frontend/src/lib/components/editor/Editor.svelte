@@ -1124,6 +1124,7 @@
 			<!-- vim mode toggle button -->
 			<button
 				type="button"
+				title="Toggle vim mode (Ctrl+Alt+V)"
 				on:click={() => {
 					vimModeEnabled.update((v) => !v);
 				}}
