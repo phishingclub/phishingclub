@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dop251/goja"
@@ -92,19 +93,57 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 	// route proto.RuntimeEvaluate calls to each OOPIF's CDP session.
 	var framePages sync.Map // proto.TargetSessionID → *rod.Page
 
+	// failFidoOn records that the script wants passkey logins to fail fast. The
+	// WebAuthn environment is set per target, so the attach handler reads this
+	// flag and applies the same setup to each child target that attaches. It is
+	// read from the event goroutine and written from the script thread, so it is
+	// atomic.
+	var failFidoOn atomic.Bool
+
+	// failFidoOnTarget puts one target into the WebAuthn virtual authenticator
+	// environment with the UI off and adds an authenticator that holds no
+	// credentials. A passkey get() on that target then fails at once with no
+	// matching credential, instead of staying pending. A pending get() keeps the
+	// login page on its waiting overlay, which the screencast shows as a greyed
+	// page the operator cannot use. Failing the get() lets the page offer another
+	// sign in method and keeps the DOM reachable.
+	failFidoOnTarget := func(p *rod.Page) {
+		if err := (proto.WebAuthnEnable{}).Call(p); err != nil {
+			return
+		}
+		_, _ = proto.WebAuthnAddVirtualAuthenticator{
+			Options: &proto.WebAuthnVirtualAuthenticatorOptions{
+				Protocol:                    proto.WebAuthnAuthenticatorProtocolCtap2,
+				Transport:                   proto.WebAuthnAuthenticatorTransportInternal,
+				HasResidentKey:              true,
+				HasUserVerification:         true,
+				IsUserVerified:              true,
+				AutomaticPresenceSimulation: true,
+			},
+		}.Call(p) //nolint:errcheck
+	}
+
 	// IMPORTANT (opsec): do NOT subscribe to any Runtime.* events here. rod auto-enables
 	// a domain for every event type passed to EachEvent, and enabling the Runtime domain
 	// is a detectable CDP tell — the console/Error.stack serialization leak that trips
 	// isAutomatedWithCDP. We only track OOPIF targets (Target.*, no such leak); same-origin
 	// sub-frame contexts are resolved on demand via Page.createIsolatedWorld instead.
 	waitFrameEvt := page.EachEvent(
-		// OOPIF iframe targets auto-attached via Target.setAutoAttach{flatten:true}.
+		// Child targets auto-attached via Target.setAutoAttach{flatten:true}:
+		// OOPIF iframes and popup windows.
 		func(e *proto.TargetAttachedToTarget) bool {
-			if e.TargetInfo == nil || string(e.TargetInfo.Type) != "iframe" {
+			if e.TargetInfo == nil {
 				return false
 			}
-			fp := page.Browser().PageFromSession(e.SessionID)
-			framePages.Store(e.SessionID, fp)
+			tp := page.Browser().PageFromSession(e.SessionID)
+			// Track OOPIF iframe sessions so reads route to the right frame.
+			if string(e.TargetInfo.Type) == "iframe" {
+				framePages.Store(e.SessionID, tp)
+			}
+			// Apply the fail fast passkey setup to this new target.
+			if failFidoOn.Load() {
+				failFidoOnTarget(tp)
+			}
 			return false
 		},
 		func(e *proto.TargetDetachedFromTarget) bool {
@@ -1574,15 +1613,34 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		return goja.Undefined()
 	})
 
-	// disableFidoUI enables the CDP WebAuthn virtual authenticator environment.
-	// In this mode Chrome intercepts WebAuthn/FIDO requests via CDP instead of
-	// showing the native "Passkeys & Security Keys" browser dialog, so DOM
-	// interactions remain possible while on the FIDO page.
-	pc.Set("disableFidoUI", func(call goja.FunctionCall) goja.Value {
-		dbg("→ disableFidoUI")
-		must(proto.WebAuthnEnable{}.Call(page))
-		dbg("✓ disableFidoUI")
+	// failFido makes passkey logins fail fast so the page moves on to another
+	// sign in method. A login page starts a passkey get() and shows a waiting
+	// overlay. Without help the get() stays pending, so the overlay stays up, the
+	// streamed page looks greyed, and the script cannot act. failFidoOnTarget
+	// gives the target an authenticator with no credentials, so the get() fails
+	// at once and the page offers another method. The WebAuthn environment is per
+	// target, so this covers the main page and every child target that exists
+	// now, and sets a flag the attach handler uses to cover child targets that
+	// attach later.
+	failFido := func(call goja.FunctionCall) goja.Value {
+		dbg("→ failFido")
+		failFidoOn.Store(true)
+		failFidoOnTarget(page)
+		framePages.Range(func(_, v any) bool {
+			failFidoOnTarget(v.(*rod.Page))
+			return true
+		})
+		dbg("✓ failFido")
 		return goja.Undefined()
+	}
+	pc.Set("failFido", failFido)
+	// deprecated: use failFido. Kept so existing scripts keep working; logs a
+	// warning to the script log when called.
+	pc.Set("disableFidoUI", func(call goja.FunctionCall) goja.Value {
+		if emitter != nil {
+			emitter.log("[remoteBrowser] disableFidoUI() is deprecated; use failFido() instead")
+		}
+		return failFido(call)
 	})
 
 	// injectScript registers a JS snippet that runs before any page scripts on

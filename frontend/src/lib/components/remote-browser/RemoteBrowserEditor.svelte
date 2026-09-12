@@ -471,7 +471,9 @@ interface Session {
   // ── Utility ───────────────────────────────────────────────────────────────
   /** Pause execution for the given number of milliseconds */
   wait(ms: number): void;
-  /** Enable CDP WebAuthn virtual authenticator — suppresses FIDO browser dialogs */
+  /** Make passkey logins fail fast so the page offers another sign in method and stays usable */
+  failFido(): void;
+  /** @deprecated use failFido(); kept for existing scripts */
   disableFidoUI(): void;
   /**
    * Register a JS snippet that runs before any page scripts on every subsequent navigation.
@@ -621,6 +623,8 @@ interface FrameSession {
 
   // ── Utility ───────────────────────────────────────────────────────────────
   wait(ms: number): void;
+  failFido(): void;
+  /** @deprecated use failFido() */
   disableFidoUI(): void;
   /** Register a JS snippet that runs before any page scripts on every subsequent navigation within this frame. */
   injectScript(js: string): void;
