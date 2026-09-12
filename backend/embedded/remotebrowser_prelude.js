@@ -56,7 +56,9 @@
   }
 
   newSession = function (opts) {
-    var s = baseNewSession(opts);
+    // Default to {} so a no-argument newSession() call does not forward
+    // undefined, which the native binding would reject when it parses options.
+    var s = baseNewSession(opts || {});
 
     // present is true when the selector matches at least one node.
     s.present = function (sel) { return s.getNodeCount(sel) > 0; };

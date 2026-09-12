@@ -19,7 +19,16 @@ func TestPreludeStateMachine(t *testing.T) {
 	// 0 password, 1 totp, 2 done.
 	stage := 0
 
-	newSession := func(goja.FunctionCall) goja.Value {
+	// badArg records the regression where the prelude wrapper forwards undefined
+	// to the native newSession for a no-argument call.
+	badArg := false
+	newSession := func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 {
+			a := call.Argument(0)
+			if goja.IsUndefined(a) || goja.IsNull(a) {
+				badArg = true
+			}
+		}
 		s := vm.NewObject()
 		_ = s.Set("location", func(goja.FunctionCall) goja.Value {
 			if stage >= 2 {
@@ -60,7 +69,7 @@ func TestPreludeStateMachine(t *testing.T) {
 	  var visited = [];
 	  var beforeSeen = [];
 	  var afterSeen = [];
-	  var s = newSession({});
+	  var s = newSession();
 	  if (typeof s.states !== "function") { throw new Error("s.states missing"); }
 	  if (typeof s.waitForState !== "function") { throw new Error("s.waitForState missing"); }
 	  if (typeof s.present !== "function") { throw new Error("s.present missing"); }
@@ -97,6 +106,9 @@ func TestPreludeStateMachine(t *testing.T) {
 	v, err := vm.RunString(script)
 	if err != nil {
 		t.Fatalf("script failed: %v", err)
+	}
+	if badArg {
+		t.Fatalf("newSession wrapper forwarded undefined/null opts for a no-argument call")
 	}
 	got := v.String()
 	want := "password,totp,done|password,totp,done|password,totp,done"
