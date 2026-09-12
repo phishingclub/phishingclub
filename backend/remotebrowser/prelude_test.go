@@ -8,9 +8,10 @@ import (
 )
 
 // TestPreludeStateMachine runs the real prelude JS in a goja VM against a
-// stubbed session and asserts states(), run(), and the loop control work. It
-// checks the two mechanics the prelude relies on: reassigning the newSession
-// global and adding methods to the session object from JS.
+// stubbed session and asserts states() returns a machine whose before/after
+// hooks and run loop work, and that present/visible/query were added to the
+// session. It checks the mechanic the prelude relies on: reassigning the
+// newSession global and augmenting the returned session from JS.
 func TestPreludeStateMachine(t *testing.T) {
 	vm := goja.New()
 
@@ -57,24 +58,34 @@ func TestPreludeStateMachine(t *testing.T) {
 
 	script := `
 	  var visited = [];
+	  var beforeSeen = [];
+	  var afterSeen = [];
 	  var s = newSession({});
 	  if (typeof s.states !== "function") { throw new Error("s.states missing"); }
-	  if (typeof s.run !== "function") { throw new Error("s.run missing"); }
 	  if (typeof s.waitForState !== "function") { throw new Error("s.waitForState missing"); }
+	  if (typeof s.present !== "function") { throw new Error("s.present missing"); }
+	  if (typeof s.visible !== "function") { throw new Error("s.visible missing"); }
+	  if (typeof s.query !== "function") { throw new Error("s.query missing"); }
 
-	  s.states({
-	    password: function (p) { return p.present("input[type=password]"); },
-	    totp:     function (p) { return p.present("input[name=otc]"); },
-	    done:     function (p) { return !p.url.includes("microsoftonline.com"); },
+	  var machine = s.states({
+	    password: function () { return s.present("input[type=password]"); },
+	    totp:     function () { return s.present("input[name=otc]"); },
+	    done:     function () { return !s.location().includes("microsoftonline.com"); },
 	  });
+	  if (typeof machine.run !== "function") { throw new Error("machine.run missing"); }
+	  if (typeof machine.before !== "function") { throw new Error("machine.before missing"); }
+	  if (typeof machine.after !== "function") { throw new Error("machine.after missing"); }
 
-	  s.run({
-	    password: function (p, loop) { visited.push("password"); advance(); },
-	    totp:     function (p, loop) { visited.push("totp"); advance(); },
-	    done:     function (p, loop) { visited.push("done"); loop.stop(); },
-	  }, { detectTimeout: 1000 });
+	  machine
+	    .before(function (state) { beforeSeen.push(state); })
+	    .after(function (state) { afterSeen.push(state); })
+	    .run({
+	      password: function (loop) { visited.push("password"); advance(); },
+	      totp:     function (loop) { visited.push("totp"); advance(); },
+	      done:     function (loop) { visited.push("done"); loop.stop(); },
+	    }, { detectTimeout: 1000 });
 
-	  visited.join(",");
+	  visited.join(",") + "|" + beforeSeen.join(",") + "|" + afterSeen.join(",");
 	`
 
 	// advance() bumps the Go stage counter so the stub page moves forward.
@@ -88,7 +99,7 @@ func TestPreludeStateMachine(t *testing.T) {
 		t.Fatalf("script failed: %v", err)
 	}
 	got := v.String()
-	want := "password,totp,done"
+	want := "password,totp,done|password,totp,done|password,totp,done"
 	if got != want {
 		t.Fatalf("state walk = %q, want %q (logs: %v)", got, want, logs)
 	}

@@ -326,23 +326,7 @@ interface RaceCondition {
   after?: number;
 }
 
-/** Reads the current page. Passed to state matchers and run actions as p. */
-interface PageInspector {
-  /** Current URL as a plain string */
-  url: string;
-  /** The selector matches at least one node */
-  present(selector: string): boolean;
-  /** How many nodes match the selector */
-  count(selector: string): number;
-  /** Text of the first match */
-  text(selector: string): string;
-  /** The first match is rendered and not hidden */
-  visible(selector: string): boolean;
-  /** Value of a URL query parameter, decoded, or null */
-  query(name: string): string | null;
-}
-
-/** Controls the loop started by run(). Passed to each action as the 2nd argument. */
+/** Controls the loop started by run(). Passed to each action. */
 interface RunLoop {
   /** Name of the state currently being handled */
   state: string;
@@ -351,10 +335,25 @@ interface RunLoop {
 }
 
 interface RunOptions {
-  /** Milliseconds to wait for a state to match each cycle (default 10000) */
+  /** Milliseconds to wait each cycle for the state to change (default 10000) */
   detectTimeout?: number;
   /** Overall budget in milliseconds for the whole loop (0 = no limit) */
   timeout?: number;
+}
+
+/** A state machine built by s.states(rules). Add before()/after() hooks, then run(). */
+interface StateMachine {
+  /** Register a callback run just before each detected step's action. Receives the state name. */
+  before(fn: (state: string) => void): StateMachine;
+  /** Register a callback run just after each step's action. Receives the state name. */
+  after(fn: (state: string) => void): StateMachine;
+  /**
+   * Run the loop: detect the state, run its action, then wait for the state to
+   * change and run the next action. Each action receives the loop control. An
+   * action ends the loop by returning false or calling loop.stop(). The built
+   * in "timeout" state fires when the state does not change within detectTimeout.
+   */
+  run(actions: { [state: string]: (loop: RunLoop) => any }, options?: RunOptions): string;
 }
 
 interface Session {
@@ -434,6 +433,17 @@ interface Session {
    */
   moveMouse(x: number, y: number, opts?: { duration?: number; jitter?: number }): void;
   scrollIntoView(selector: string): void;
+  /**
+   * Scroll the page by deltaY CSS pixels (positive = down) using eased,
+   * jittered mouse-wheel steps instead of an instant jump.
+   */
+  humanScroll(deltaY: number, options?: { duration?: number }): void;
+  /**
+   * Spend about ms milliseconds producing low-amplitude pointer drift and
+   * pauses, the way a person rests a hand on the mouse. Builds natural
+   * behavioural signal on pages that treat inactivity as a bot tell.
+   */
+  humanIdle(ms: number): void;
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
   /** Focus the element and type text character by character */
@@ -466,6 +476,12 @@ interface Session {
   setJSAttribute(selector: string, prop: string, value: string): void;
   /** Count elements matching selector */
   getNodeCount(selector: string): number;
+  /** True when the selector matches at least one node */
+  present(selector: string): boolean;
+  /** True when the first match is rendered and not hidden (instant, unlike waitVisible) */
+  visible(selector: string): boolean;
+  /** Value of a URL query parameter from the current page, decoded, or null */
+  query(name: string): string | null;
 
   // ── JavaScript evaluation ─────────────────────────────────────────────────
   /** Evaluate a JS expression in the page context and return the result */
@@ -523,6 +539,18 @@ interface Session {
    */
   withTimeout(ms: number, fn: (s: Session) => void): boolean;
   close(): void;
+
+  // ── State machine ─────────────────────────────────────────────────────────
+  /**
+   * Build a state machine from detection rules (state name -> matcher).
+   * Returns the machine; add before()/after() hooks and call run() on it.
+   */
+  states(rules: { [state: string]: () => boolean }): StateMachine;
+  /**
+   * Return the current page state name for the given rules, or "timeout" if none
+   * match within timeoutMs (default 10000). Use it to run your own loop.
+   */
+  waitForState(rules: { [state: string]: () => boolean }, timeoutMs?: number): string;
 
   // ── Event-driven API ─────────────────────────────────────────────────────
   /**
@@ -603,6 +631,17 @@ interface FrameSession {
   clickXY(x: number, y: number): void;
   moveMouse(x: number, y: number, opts?: { duration?: number; jitter?: number }): void;
   scrollIntoView(selector: string): void;
+  /**
+   * Scroll the page by deltaY CSS pixels (positive = down) using eased,
+   * jittered mouse-wheel steps instead of an instant jump.
+   */
+  humanScroll(deltaY: number, options?: { duration?: number }): void;
+  /**
+   * Spend about ms milliseconds producing low-amplitude pointer drift and
+   * pauses, the way a person rests a hand on the mouse. Builds natural
+   * behavioural signal on pages that treat inactivity as a bot tell.
+   */
+  humanIdle(ms: number): void;
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
   sendKeys(selector: string, text: string): void;
@@ -665,22 +704,6 @@ interface FrameSession {
    */
   withTimeout(ms: number, fn: (s: FrameSession) => void): boolean;
 
-  // ── State machine ─────────────────────────────────────────────────────────
-  /** Declare how to recognize each page: state name -> matcher. Call before run(). */
-  states(rules: { [state: string]: (p: PageInspector) => boolean }): Session;
-  /**
-   * Return the current page state name, or "timeout" if none match within
-   * timeoutMs (default 10000). Uses the given rules, or those set with states().
-   */
-  waitForState(rules?: { [state: string]: (p: PageInspector) => boolean }, timeoutMs?: number): string;
-  /**
-   * Run the state loop: detect the current state, run its action, repeat.
-   * An action ends the loop by returning false or calling loop.stop(); any
-   * other return re-detects. The built in "timeout" state fires when nothing
-   * matched within detectTimeout.
-   */
-  run(actions: { [state: string]: (p: PageInspector, loop: RunLoop) => any }, options?: RunOptions): string;
-
   // ── Nested iframes ────────────────────────────────────────────────────────
   /** Scope a sub-session to a nested iframe within this frame. Returns null if not found. */
   frame(selector: string): FrameSession | null;
@@ -705,6 +728,7 @@ declare function waitForEvent(event: string): any;
  */
 declare function stop(): never;
 /** Block until any of the listed victim events arrive; returns { event, data } */
+declare function waitForAny(events: string[]): { event: string; data: any };
 declare function waitForAny(...events: string[]): { event: string; data: any };
 
 interface RetryContext {
@@ -727,6 +751,42 @@ declare function retry(options: { max: number; wait?: number }, fn: (ctx: RetryC
 
 // ECMAScript built-ins available in the goja runtime (ES2015+).
 // (No DOM, no Node.js — those are not available in scripts.)
+// Instance methods for the string, number and boolean primitives. The String,
+// Number and Boolean call forms are declared further down; these interfaces are
+// what give a string value methods like indexOf, includes and split.
+interface String {
+  readonly length: number;
+  charAt(index: number): string;
+  charCodeAt(index: number): number;
+  indexOf(searchValue: string, fromIndex?: number): number;
+  lastIndexOf(searchValue: string, fromIndex?: number): number;
+  includes(searchValue: string, fromIndex?: number): boolean;
+  startsWith(searchValue: string, fromIndex?: number): boolean;
+  endsWith(searchValue: string, endPosition?: number): boolean;
+  slice(start?: number, end?: number): string;
+  substring(start: number, end?: number): string;
+  toLowerCase(): string;
+  toUpperCase(): string;
+  trim(): string;
+  padStart(targetLength: number, padString?: string): string;
+  padEnd(targetLength: number, padString?: string): string;
+  repeat(count: number): string;
+  split(separator: string | RegExp, limit?: number): string[];
+  replace(searchValue: string | RegExp, replaceValue: string): string;
+  replaceAll(searchValue: string | RegExp, replaceValue: string): string;
+  match(regexp: string | RegExp): string[] | null;
+  concat(...strings: string[]): string;
+  [index: number]: string;
+}
+interface Number {
+  toFixed(digits?: number): string;
+  toString(radix?: number): string;
+  valueOf(): number;
+}
+interface Boolean {
+  valueOf(): boolean;
+  toString(): string;
+}
 declare var JSON: {
   parse(text: string): any;
   stringify(value: any, replacer?: any, space?: string | number): string;
