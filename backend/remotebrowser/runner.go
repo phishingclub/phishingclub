@@ -25,6 +25,8 @@ import (
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/launcher/flags"
 	"github.com/go-rod/rod/lib/proto"
+
+	"github.com/phishingclub/phishingclub/embedded"
 )
 
 // Config holds browser connection and execution settings configurable by platform admins.
@@ -1553,6 +1555,12 @@ func (r *Runner) Run(ctx context.Context) error {
 
 		return session
 	})
+
+	// Load the script prelude (state machine helpers) before the user script so
+	// its helpers are ready when the script calls newSession().
+	if _, perr := vm.RunString(embedded.RemoteBrowserPreludeJS); perr != nil {
+		emitter.log("[prelude] " + perr.Error())
+	}
 
 	_, err := vm.RunString("(function(){\n" + r.Script + "\n})()")
 	if err != nil {

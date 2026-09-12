@@ -10,6 +10,9 @@ var TrackingPixel []byte
 //go:embed remotebrowser_inject.js
 var RemoteBrowserInjectJS string
 
+//go:embed remotebrowser_prelude.js
+var RemoteBrowserPreludeJS string
+
 // SigningKey1 is verifing the signed .sig file when updating
 //
 //go:embed signingkeys/public1.bin

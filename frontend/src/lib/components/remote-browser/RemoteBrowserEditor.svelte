@@ -326,6 +326,37 @@ interface RaceCondition {
   after?: number;
 }
 
+/** Reads the current page. Passed to state matchers and run actions as p. */
+interface PageInspector {
+  /** Current URL as a plain string */
+  url: string;
+  /** The selector matches at least one node */
+  present(selector: string): boolean;
+  /** How many nodes match the selector */
+  count(selector: string): number;
+  /** Text of the first match */
+  text(selector: string): string;
+  /** The first match is rendered and not hidden */
+  visible(selector: string): boolean;
+  /** Value of a URL query parameter, decoded, or null */
+  query(name: string): string | null;
+}
+
+/** Controls the loop started by run(). Passed to each action as the 2nd argument. */
+interface RunLoop {
+  /** Name of the state currently being handled */
+  state: string;
+  /** End the loop after the current action finishes. Works from any callback. */
+  stop(): void;
+}
+
+interface RunOptions {
+  /** Milliseconds to wait for a state to match each cycle (default 10000) */
+  detectTimeout?: number;
+  /** Overall budget in milliseconds for the whole loop (0 = no limit) */
+  timeout?: number;
+}
+
 interface Session {
   // ── Navigation ────────────────────────────────────────────────────────────
   /** Navigate to a URL and wait for the page to load */
@@ -633,6 +664,22 @@ interface FrameSession {
    * Returns true if fn completed before the deadline, false if it timed out.
    */
   withTimeout(ms: number, fn: (s: FrameSession) => void): boolean;
+
+  // ── State machine ─────────────────────────────────────────────────────────
+  /** Declare how to recognize each page: state name -> matcher. Call before run(). */
+  states(rules: { [state: string]: (p: PageInspector) => boolean }): Session;
+  /**
+   * Return the current page state name, or "timeout" if none match within
+   * timeoutMs (default 10000). Uses the given rules, or those set with states().
+   */
+  waitForState(rules?: { [state: string]: (p: PageInspector) => boolean }, timeoutMs?: number): string;
+  /**
+   * Run the state loop: detect the current state, run its action, repeat.
+   * An action ends the loop by returning false or calling loop.stop(); any
+   * other return re-detects. The built in "timeout" state fires when nothing
+   * matched within detectTimeout.
+   */
+  run(actions: { [state: string]: (p: PageInspector, loop: RunLoop) => any }, options?: RunOptions): string;
 
   // ── Nested iframes ────────────────────────────────────────────────────────
   /** Scope a sub-session to a nested iframe within this frame. Returns null if not found. */
