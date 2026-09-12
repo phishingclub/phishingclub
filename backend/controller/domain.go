@@ -75,7 +75,7 @@ func (d *Domain) GetAll(g *gin.Context) {
 		g.Request.Context(),
 		session,
 		queryArgs,
-		true, // TODO there might not be any reason to retrieve the full relation here - optimize by removing it (false)
+		false, // list response does not use the company relation
 	)
 	if ok := d.handleErrors(g, err); !ok {
 		return
