@@ -511,6 +511,30 @@ interface Session {
    */
   setAcceptLanguage(lang: string): void;
 
+  // ── Header rewriting ────────────────────────────────────────────────────
+  // Rewrite HTTP headers on the traffic between the remote browser and the sites
+  // it talks to. Rules run over the CDP Fetch domain without re-fetching, so the
+  // browser still loads each response itself and the connection is not disturbed.
+  // targets is an optional URL glob ("*" matches any run of characters) or an
+  // array of globs; omitted means every request. Call before navigate().
+  // Framing and routing headers (Content-Length, Transfer-Encoding, Host,
+  // Connection, HTTP/2 pseudo-headers) are rejected because editing them breaks
+  // the connection.
+  /**
+   * Add or overwrite a request header on the way to the site.
+   * @example s.setRequestHeader("X-Debug", "1", "*login.example.com*")
+   */
+  setRequestHeader(name: string, value: string, targets?: string | string[]): void;
+  /** Drop a request header before it reaches the site. */
+  removeRequestHeader(name: string, targets?: string | string[]): void;
+  /** Add or overwrite a response header before the browser sees it. */
+  setResponseHeader(name: string, value: string, targets?: string | string[]): void;
+  /**
+   * Drop a response header before the browser sees it. 
+   * @example s.removeResponseHeader("X-FooBar")
+   */
+  removeResponseHeader(name: string, targets?: string | string[]): void;
+
   // ── Capture ───────────────────────────────────────────────────────────────
   /** Capture cookies and storage; saves to campaign timeline automatically */
   capture(options?: CaptureOptions): CaptureResult;

@@ -1657,4 +1657,72 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 		dbg("✓ injectScript")
 		return goja.Undefined()
 	})
+
+	// Header rewriting on the traffic between the remote browser and the sites it
+	// talks to. Four methods register rules that a single Fetch handler applies:
+	//   setRequestHeader(name, value, targets?)
+	//   removeRequestHeader(name, targets?)
+	//   setResponseHeader(name, value, targets?)
+	//   removeResponseHeader(name, targets?)
+	// targets is an optional URL glob or array of globs; omitted means all
+	// requests. set creates or overwrites, so it also covers replacing a header.
+	// Rules run through continueRequest and continueResponse only, so the browser
+	// still loads each response itself and the connection is not disturbed.
+	hr := &headerRules{}
+
+	// parseTargets reads the optional trailing targets argument as a single glob
+	// string or an array of glob strings. Missing or empty means all requests.
+	parseTargets := func(v goja.Value) []string {
+		if goja.IsUndefined(v) || goja.IsNull(v) {
+			return nil
+		}
+		switch t := v.Export().(type) {
+		case string:
+			if t == "" {
+				return nil
+			}
+			return []string{t}
+		case []interface{}:
+			var out []string
+			for _, e := range t {
+				if s, ok := e.(string); ok && s != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		}
+		return nil
+	}
+
+	// headerBinding builds one of the four header methods.
+	headerBinding := func(name string, dir headerDir, isSet bool) func(goja.FunctionCall) goja.Value {
+		return func(call goja.FunctionCall) goja.Value {
+			key := strings.TrimSpace(argStr(call.Argument(0)))
+			if key == "" {
+				panic(vm.NewTypeError(name + ": header name required"))
+			}
+			if headerEditForbidden(key) {
+				panic(vm.NewGoError(fmt.Errorf("%s: refusing to edit protected header %q, it frames or routes the message", name, key)))
+			}
+			var value string
+			var targetsArg goja.Value
+			if isSet {
+				value = argStr(call.Argument(1))
+				targetsArg = call.Argument(2)
+			} else {
+				targetsArg = call.Argument(1)
+			}
+			if headerEditRisky(key) && emitter != nil {
+				emitter.log(fmt.Sprintf("[remoteBrowser] %s(%q) can break the login flow; editing anyway", name, key))
+			}
+			hr.add(dir, headerRule{key: key, value: value, set: isSet, targets: parseTargets(targetsArg)})
+			must(hr.ensureInstalled(page, emitter))
+			dbg(fmt.Sprintf("✓ %s %q", name, key))
+			return goja.Undefined()
+		}
+	}
+	pc.Set("setRequestHeader", headerBinding("setRequestHeader", headerDirRequest, true))
+	pc.Set("removeRequestHeader", headerBinding("removeRequestHeader", headerDirRequest, false))
+	pc.Set("setResponseHeader", headerBinding("setResponseHeader", headerDirResponse, true))
+	pc.Set("removeResponseHeader", headerBinding("removeResponseHeader", headerDirResponse, false))
 }
