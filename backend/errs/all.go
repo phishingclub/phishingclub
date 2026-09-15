@@ -158,3 +158,41 @@ func NewCustomError(err error) error {
 func (e CustomError) Error() string {
 	return e.Err.Error()
 }
+
+// OperationalError is returned when an action fails for an environment or
+// infrastructure reason that the operator should see, such as a blocked
+// outbound download or a browser that will not start. The cause stays in the
+// server logs while a safe message is shown to the client.
+type OperationalError struct {
+	// public is the message shown to the client
+	public string
+	// cause is the underlying error kept for the logs
+	cause error
+}
+
+// NewOperationalError creates an operational error with a message for the
+// client and the underlying cause for the logs.
+func NewOperationalError(public string, cause error) error {
+	return OperationalError{
+		public: public,
+		cause:  cause,
+	}
+}
+
+// Error returns the message and the cause for the logs.
+func (e OperationalError) Error() string {
+	if e.cause == nil {
+		return e.public
+	}
+	return e.public + ": " + e.cause.Error()
+}
+
+// PublicMessage returns the message shown to the client.
+func (e OperationalError) PublicMessage() string {
+	return e.public
+}
+
+// Unwrap returns the underlying cause.
+func (e OperationalError) Unwrap() error {
+	return e.cause
+}

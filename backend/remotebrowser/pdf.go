@@ -11,6 +11,7 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/phishingclub/phishingclub/errs"
 )
 
 // WipeBrowserCache removes the automatically downloaded Chromium directory.
@@ -86,7 +87,10 @@ func RenderHTMLToPDF(ctx context.Context, htmlContent string, execPath string) (
 		binPath := b.BinPath()
 		if _, err := os.Stat(binPath); os.IsNotExist(err) {
 			if err := b.Download(); err != nil {
-				return nil, fmt.Errorf("reportpdf: browser download failed: %w", err)
+				return nil, errs.NewOperationalError(
+					"The report browser could not be downloaded. Check the server logs for details.",
+					err,
+				)
 			}
 		}
 		l = l.Bin(binPath)
@@ -98,13 +102,19 @@ func RenderHTMLToPDF(ctx context.Context, htmlContent string, execPath string) (
 		// on an early launch failure it blocks forever waiting on the exit channel.
 		// Kill still removes a process that did start.
 		l.Kill()
-		return nil, fmt.Errorf("reportpdf: browser launch failed: %w", err)
+		return nil, errs.NewOperationalError(
+			"The report browser failed to start. Check the server logs for details.",
+			err,
+		)
 	}
 	defer func() { l.Kill(); l.Cleanup() }()
 
 	browser := rod.New().ControlURL(u).Context(ctx)
 	if err := browser.Connect(); err != nil {
-		return nil, fmt.Errorf("reportpdf: browser connect failed: %w", err)
+		return nil, errs.NewOperationalError(
+			"The report browser failed to start. Check the server logs for details.",
+			err,
+		)
 	}
 	defer browser.Close() //nolint:errcheck
 

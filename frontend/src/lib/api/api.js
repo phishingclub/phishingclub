@@ -511,7 +511,35 @@ export class API {
 		 * @param {string} campaignID
 		 */
 		generateReport: async (campaignID) => {
-			window.open(this.getPath(`/campaign/${campaignID}/report`), '_blank');
+			const response = await fetch(this.getPath(`/campaign/${campaignID}/report`), {
+				method: 'GET',
+				credentials: 'same-origin'
+			});
+			if (!response.ok) {
+				let error = 'Failed to generate campaign report';
+				try {
+					const body = await response.json();
+					if (body?.error) {
+						error = body.error;
+					}
+				} catch (_) {
+					// the error body was not JSON, keep the default message
+				}
+				return { success: false, error };
+			}
+			const blob = await response.blob();
+			const disposition = response.headers.get('Content-Disposition') || '';
+			const match = disposition.match(/filename="?([^"]+)"?/);
+			const filename = match ? match[1] : 'report.pdf';
+			const url = URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = filename;
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+			URL.revokeObjectURL(url);
+			return { success: true };
 		},
 
 		/**

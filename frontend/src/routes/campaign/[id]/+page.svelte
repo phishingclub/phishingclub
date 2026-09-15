@@ -1231,8 +1231,7 @@
 
 	const onConfirmGenerateReport = async () => {
 		try {
-			api.campaign.generateReport($page.params.id);
-			return { success: true };
+			return await api.campaign.generateReport($page.params.id);
 		} catch (e) {
 			console.error('failed to generate campaign report', e);
 			return { success: false, error: 'Failed to generate campaign report' };

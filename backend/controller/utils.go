@@ -156,6 +156,12 @@ func (c *Common) handleErrors(
 			)
 			return false
 		}
+		if ok := handleOperationalError(g, c.Response, err); !ok {
+			c.Logger.Errorw("operational error",
+				"error", err,
+			)
+			return false
+		}
 		if ok := handleDBRowNotFound(g, c.Response, err); !ok {
 			c.Logger.Debugw("DB row not found error",
 				"error", err,
@@ -303,6 +309,23 @@ func handleCustomError(
 		// error is logged in service
 		_ = err
 		responseHandler.BadRequestMessage(g, err.Error())
+		return false
+	}
+	return true
+}
+
+// handleOperationalError responds with a 500 that carries the safe message
+// from an OperationalError. The full cause is logged by the caller. It is used
+// for environment failures such as a blocked download or a browser that will
+// not start, so the operator sees what went wrong instead of a generic error.
+func handleOperationalError(
+	g *gin.Context,
+	responseHandler api.JSONResponseHandler,
+	err error,
+) bool {
+	var opErr errs.OperationalError
+	if errors.As(err, &opErr) {
+		responseHandler.ServerErrorMessage(g, opErr.PublicMessage())
 		return false
 	}
 	return true
