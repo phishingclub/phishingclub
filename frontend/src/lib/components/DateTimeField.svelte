@@ -2,6 +2,7 @@
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
 	import ToolTip from './ToolTip.svelte';
 	import { addToast } from '$lib/store/toast';
+	import { local_yyyy_mm_dd } from '$lib/utils/api-utils';
 
 	// bind a element to this component input field
 	// use like <DateTimeField bind:bindToDate={varYouWantToBindTheInputFieldTo} />
@@ -37,12 +38,9 @@
 	$: {
 		if (!!value) {
 			let x = new Date(value);
-			const mm = (x.getMonth() + 1).toString().padStart(2, '0');
-			const dd = x.getDate().toString().padStart(2, '0');
-			const yyyy = x.getFullYear();
 			const hours = x.getHours().toString().padStart(2, '0');
 			const minutes = x.getMinutes().toString().padStart(2, '0');
-			const timeString = (dateValue = `${yyyy}-${mm}-${dd}`);
+			dateValue = local_yyyy_mm_dd(x);
 			timeValue = `${hours}:${minutes}`;
 			value = x.toString();
 		} else {
@@ -53,15 +51,14 @@
 	}
 	$: {
 		if (!!min) {
-			minDate = `${min.getFullYear()}-${(min.getMonth() + 1).toString().padStart(2, '0')}-${min
-				.getDate()
-				.toString()
-				.padStart(2, '0')}`;
+			minDate = local_yyyy_mm_dd(min);
 			const hours = min.getHours().toString().padStart(2, '0');
 			const minutes = min.getMinutes().toString().padStart(2, '0');
 			minTime = `${hours}:${minutes}`;
-			// if there selected value is a different date then remove the min time
-			if (dateValue && new Date(dateValue).toDateString() !== min.toDateString()) {
+			// only keep the minimum time when the selected day is the min day.
+			// both are local date strings. parsing a date only string with new Date
+			// reads it as UTC and shifts the day for timezones behind UTC.
+			if (dateValue && dateValue !== minDate) {
 				minTime = '';
 			}
 		}
