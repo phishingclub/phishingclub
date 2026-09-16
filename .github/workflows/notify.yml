@@ -6,23 +6,41 @@ on:
   issues:
     types: [opened]
 
-permissions: {}
+permissions:
+  actions: write
+
+concurrency:
+  group: notify-${{ github.event_name }}
+  cancel-in-progress: true
 
 jobs:
   notify:
     runs-on: ubuntu-latest
-    env:
-      NOTIFY_URL: ${{ secrets.NOTIFY_URL }}
     steps:
       - name: Star
         if: github.event_name == 'watch'
+        env:
+          NOTIFY_URL: ${{ secrets.NOTIFY_URL }}
         run: |
-          curl -H "Title: New star" -H "Tags: star" \
+          curl -s -H "Title: New star" -H "Tags: star" \
                -d "new star" \
                "$NOTIFY_URL"
       - name: Issue
         if: github.event_name == 'issues'
+        env:
+          NOTIFY_URL: ${{ secrets.NOTIFY_URL }}
         run: |
-          curl -H "Title: New issue" -H "Tags: bug" \
+          curl -s -H "Title: New issue" -H "Tags: bug" \
                -d "new issue created" \
                "$NOTIFY_URL"
+      - name: Prune previous notify runs
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api "/repos/$REPO/actions/workflows/notify.yml/runs?status=completed&per_page=100" \
+            --jq '.workflow_runs[].id' \
+          | while read -r id; do
+              gh api --method DELETE "/repos/$REPO/actions/runs/$id" || true
+            done
