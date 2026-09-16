@@ -460,6 +460,35 @@ func (a *Asset) UpdateByID(
 	return nil
 }
 
+// assetContextFolder returns the folder an asset is stored in, relative to the
+// asset root. A domain asset lives under the domain folder. A company asset
+// with no domain lives under the shared folder in a subfolder named by the
+// company assets key. Everything else lives directly in the shared folder.
+// This mirrors the folder resolution in Create.
+func (a *Asset) assetContextFolder(
+	ctx context.Context,
+	asset *model.Asset,
+) (string, error) {
+	if domainName, err := asset.DomainName.Get(); err == nil {
+		return domainName.String(), nil
+	}
+	if asset.CompanyID.IsSpecified() && !asset.CompanyID.IsNull() {
+		companyID := asset.CompanyID.MustGet()
+		company, err := a.CompanyRepository.GetByID(ctx, &companyID)
+		if err != nil {
+			a.Logger.Debugw("failed to get company for asset", "error", err)
+			return "", err
+		}
+		slug, err := company.AssetsKey.Get()
+		if err != nil || slug.String() == "" {
+			a.Logger.Errorw("company has no assets key", "companyID", companyID.String())
+			return "", errs.NewCustomError(errors.New("company has no asset folder"))
+		}
+		return filepath.Join(data.ASSET_GLOBAL_FOLDER, slug.String()), nil
+	}
+	return data.ASSET_GLOBAL_FOLDER, nil
+}
+
 // DeleteByID deletes an asset by id
 func (a *Asset) DeleteByID(
 	ctx context.Context,
@@ -491,9 +520,9 @@ func (a *Asset) DeleteByID(
 		return err
 	}
 	// delete the file
-	domainContext := data.ASSET_GLOBAL_FOLDER
-	if domainName, err := asset.DomainName.Get(); err == nil {
-		domainContext = domainName.String()
+	domainContext, err := a.assetContextFolder(ctx, asset)
+	if err != nil {
+		return err
 	}
 	p, err := asset.Path.Get()
 	if err != nil {
@@ -596,9 +625,9 @@ func (a *Asset) DeleteAllByCompanyID(
 	}
 	for _, asset := range assets {
 		// delete the file
-		domainContext := data.ASSET_GLOBAL_FOLDER
-		if domainName, err := asset.DomainName.Get(); err == nil {
-			domainContext = domainName.String()
+		domainContext, err := a.assetContextFolder(ctx, asset)
+		if err != nil {
+			return err
 		}
 		p, err := asset.Path.Get()
 		if err != nil {
@@ -652,9 +681,10 @@ func (a *Asset) DeleteAllByCompanyID(
 			return err
 		}
 		// delete the asset from the database
+		assetID := asset.ID.MustGet()
 		err = a.AssetRepository.DeleteByID(
 			ctx,
-			companyID,
+			&assetID,
 		)
 		if err != nil {
 			a.Logger.Errorw("failed to delete asset from database but the file is deleted",
@@ -704,9 +734,9 @@ func (a *Asset) DeleteAllByDomainID(
 	for _, asset := range assets {
 
 		// delete the file
-		domainContext := data.ASSET_GLOBAL_FOLDER
-		if domainName, err := asset.DomainName.Get(); err == nil {
-			domainContext = domainName.String()
+		domainContext, err := a.assetContextFolder(ctx, asset)
+		if err != nil {
+			return err
 		}
 		p, err := asset.Path.Get()
 		if err != nil {
@@ -763,9 +793,10 @@ func (a *Asset) DeleteAllByDomainID(
 			return err
 		}
 		// delete the asset from the database
+		assetID := asset.ID.MustGet()
 		err = a.AssetRepository.DeleteByID(
 			ctx,
-			domainID,
+			&assetID,
 		)
 		if err != nil {
 			a.Logger.Errorw("failed to delete asset from database but the file is deleted",

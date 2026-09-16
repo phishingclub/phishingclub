@@ -30,6 +30,7 @@ type Company struct {
 	CampaignTemplate         *CampaignTemplate
 	AllowDenyService         *AllowDeny
 	WebhookService           *Webhook
+	AssetService             *Asset
 	CompanyRepository        *repository.Company
 }
 
@@ -298,6 +299,17 @@ func (s *Company) DeleteByID(
 			s.Logger.Errorw("failed to delete domains related to company", "error", err)
 			return 0, errs.Wrap(err)
 		}
+	}
+	// delete the company shared assets, these have no domain so the domain
+	// deletion above does not cover them
+	err = s.AssetService.DeleteAllByCompanyID(
+		g,
+		session,
+		companyID,
+	)
+	if err != nil {
+		s.Logger.Errorw("failed to delete shared assets related to company", "error", err)
+		return 0, errs.Wrap(err)
 	}
 	// delete pages, this also cancels campaings and remove relations that use them
 	affectedPages, err := s.PageService.GetByCompanyID(

@@ -267,6 +267,7 @@ func NewServices(
 		CampaignTemplate:         campaignTemplate,
 		AllowDenyService:         allowDeny,
 		WebhookService:           webhook,
+		AssetService:             asset,
 		CompanyRepository:        repositories.Company,
 	}
 	versionService := &service.Version{Common: common}
