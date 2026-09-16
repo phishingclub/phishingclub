@@ -200,4 +200,6 @@ jobs:
 
       - name: Notify about release
         run: |
-          curl -d "phishingclub version ${{ steps.get_version.outputs.VERSION }} has been released on GitHub" https://ntfy.sh/phishing_club_released
+          curl -H "Title: New release" -H "Tags: rocket" \
+               -d "phishingclub version ${{ steps.get_version.outputs.VERSION }} has been released on GitHub" \
+               "${{ secrets.NOTIFY_URL }}"

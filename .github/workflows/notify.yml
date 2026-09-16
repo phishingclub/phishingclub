@@ -1,0 +1,28 @@
+name: notify
+
+on:
+  watch:
+    types: [started]
+  issues:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    env:
+      NOTIFY_URL: ${{ secrets.NOTIFY_URL }}
+    steps:
+      - name: Star
+        if: github.event_name == 'watch'
+        run: |
+          curl -H "Title: New star" -H "Tags: star" \
+               -d "new star" \
+               "$NOTIFY_URL"
+      - name: Issue
+        if: github.event_name == 'issues'
+        run: |
+          curl -H "Title: New issue" -H "Tags: bug" \
+               -d "new issue created" \
+               "$NOTIFY_URL"
