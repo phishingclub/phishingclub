@@ -1,14 +1,11 @@
 // Copyright 2018 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
 
 // Package filelock provides a platform-independent API for advisory file
 // locking. Calls to functions in this package on platforms that do not support
-// advisory locks will return errors for which IsNotSupported returns true.
+// advisory locks will return errors that wrap errors.ErrUnsupported.
 package filelock
 
 import (
-	"errors"
 	"io/fs"
 )
 
@@ -73,11 +70,4 @@ func (lt lockType) String() string {
 	default:
 		return "Unlock"
 	}
-}
-
-// IsNotSupported returns a boolean indicating whether the error is known to
-// report that a function is not supported (possibly for a specific input).
-// It is satisfied by errors.ErrUnsupported as well as some syscall errors.
-func IsNotSupported(err error) bool {
-	return errors.Is(err, errors.ErrUnsupported)
 }

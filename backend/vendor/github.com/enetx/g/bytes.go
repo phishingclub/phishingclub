@@ -2,9 +2,11 @@ package g
 
 import (
 	"bytes"
+	"database/sql/driver"
 	"encoding/binary"
 	"fmt"
 	"math"
+	"math/big"
 	"unicode"
 	"unicode/utf8"
 	"unsafe"
@@ -15,33 +17,30 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// Bytes is a wrapper around the []byte type.
+type Bytes []byte
+
 var (
 	lower = cases.Lower(language.Und)
 	upper = cases.Upper(language.Und)
 	title = cases.Title(language.Und)
 )
 
-// NewBytes creates a new Bytes value.
-func NewBytes(size ...Int) Bytes {
-	var (
-		length   Int
-		capacity Int
-	)
-
-	switch {
-	case len(size) > 1:
-		length, capacity = size[0], size[1]
-	case len(size) == 1:
-		length, capacity = size[0], size[0]
-	}
-
-	return make([]byte, length, capacity)
-}
+// NewBytes creates a Bytes from the provided string or byte slice, mirroring
+// NewString. For an empty pre-sized buffer use make(Bytes, n) or
+// make(Bytes, n, cap) directly.
+func NewBytes[T ~string | ~[]byte](b T) Bytes { return Bytes(b) }
 
 // Transform applies a transformation function to the Bytes and returns the result.
-func (bs Bytes) Transform(fn func(Bytes) Bytes) Bytes { return fn(bs) }
+func (bs Bytes) Transform[U any](fn func(Bytes) U) U { return fn(bs) }
 
-// Reverse reverses bytes for ASCII or invalid UTF-8 for valid UTF-8 it reverses by runes.
+// Min returns the minimum of Bytes.
+func (bs Bytes) Min(b ...Bytes) Bytes { return cmp.MinBy(Bytes.Cmp, append(b, bs)...) }
+
+// Max returns the maximum of Bytes.
+func (bs Bytes) Max(b ...Bytes) Bytes { return cmp.MaxBy(Bytes.Cmp, append(b, bs)...) }
+
+// Reverse reverses bytes for ASCII or invalid UTF-8; for valid UTF-8 it reverses by runes.
 func (bs Bytes) Reverse() Bytes {
 	n := len(bs)
 	out := make(Bytes, n)
@@ -134,12 +133,14 @@ func intFromBytes(bs Bytes, order binary.ByteOrder) Int {
 }
 
 // IntBE interprets the Bytes as a signed 64-bit integer in BigEndian order.
-// If the Bytes length is less than 8, it is padded with leading zeros.
+// If the Bytes length is less than 8, the value is sign-extended to 64 bits
+// (the most-significant byte's high bit determines the sign).
 // If the Bytes length is greater than 8, only the last 8 bytes are used.
 func (bs Bytes) IntBE() Int { return intFromBytes(bs, binary.BigEndian) }
 
 // IntLE interprets the Bytes as a signed 64-bit integer in LittleEndian order.
-// If the Bytes length is less than 8, it is padded with trailing zeros.
+// If the Bytes length is less than 8, the value is sign-extended to 64 bits
+// (the most-significant byte's high bit determines the sign).
 // If the Bytes length is greater than 8, only the first 8 bytes are used.
 func (bs Bytes) IntLE() Int { return intFromBytes(bs, binary.LittleEndian) }
 
@@ -173,31 +174,102 @@ func (bs Bytes) StripPrefix(cutset Bytes) Bytes { return bytes.TrimPrefix(bs, cu
 // StripSuffix trims the specified Bytes suffix from the Bytes.
 func (bs Bytes) StripSuffix(cutset Bytes) Bytes { return bytes.TrimSuffix(bs, cutset) }
 
-// Split splits the Bytes by the specified separator and returns the iterator.
-func (bs Bytes) Split(sep ...Bytes) SeqSlice[Bytes] {
-	return transformSeq(
-		bytes.SplitSeq(bs, Slice[Bytes](sep).Get(0).UnwrapOrDefault()),
-		func(b []byte) Bytes { return Bytes(b) },
-	)
+// StartsWith checks if the Bytes starts with the specified prefix.
+func (bs Bytes) StartsWith(prefix Bytes) bool { return bytes.HasPrefix(bs, prefix) }
+
+// StartsWithAny checks if the Bytes starts with any of the provided prefixes.
+// The method accepts a variable number of arguments, allowing for checking against multiple
+// prefixes at once. It iterates over the provided prefixes and uses the HasPrefix function from
+// the bytes package to check if the Bytes starts with each prefix.
+// The function returns true if the Bytes starts with any of the prefixes, and false otherwise.
+func (bs Bytes) StartsWithAny(prefixes ...Bytes) bool {
+	for _, prefix := range prefixes {
+		if bytes.HasPrefix(bs, prefix) {
+			return true
+		}
+	}
+
+	return false
 }
 
-// SplitAfter splits the Bytes after each instance of the specified separator and returns the iterator.
-func (bs Bytes) SplitAfter(sep Bytes) SeqSlice[Bytes] {
-	return transformSeq(bytes.SplitAfterSeq(bs, sep), func(b []byte) Bytes { return Bytes(b) })
+// EndsWith checks if the Bytes ends with the specified suffix.
+func (bs Bytes) EndsWith(suffix Bytes) bool { return bytes.HasSuffix(bs, suffix) }
+
+// EndsWithAny checks if the Bytes ends with any of the provided suffixes.
+// The method accepts a variable number of arguments, allowing for checking against multiple
+// suffixes at once. It iterates over the provided suffixes and uses the HasSuffix function from
+// the bytes package to check if the Bytes ends with each suffix.
+// The function returns true if the Bytes ends with any of the suffixes, and false otherwise.
+func (bs Bytes) EndsWithAny(suffixes ...Bytes) bool {
+	for _, suffix := range suffixes {
+		if bytes.HasSuffix(bs, suffix) {
+			return true
+		}
+	}
+
+	return false
 }
 
-// Fields splits the Bytes into a slice of substrings, removing any whitespace, and returns the iterator.
-func (bs Bytes) Fields() SeqSlice[Bytes] {
-	return transformSeq(bytes.FieldsSeq(bs), func(b []byte) Bytes { return Bytes(b) })
+// Split splits the Bytes by the specified separator. If sep is empty, the
+// Bytes are split after each UTF-8 rune. See [String.Lines] for why the return
+// type is a plain slice.
+func (bs Bytes) Split(sep Bytes) []Bytes {
+	return castBytesSlices(bytes.Split(bs, sep))
 }
 
-// FieldsBy splits the Bytes into a slice of substrings using a custom function to determine the field boundaries,
-// and returns the iterator.
-func (bs Bytes) FieldsBy(fn func(r rune) bool) SeqSlice[Bytes] {
-	return transformSeq(bytes.FieldsFuncSeq(bs, fn), func(b []byte) Bytes { return Bytes(b) })
+// SplitAfter splits the Bytes after each instance of the specified separator.
+// See [String.Lines] for why the return type is a plain slice.
+func (bs Bytes) SplitAfter(sep Bytes) []Bytes {
+	return castBytesSlices(bytes.SplitAfter(bs, sep))
+}
+
+// SplitN splits the Bytes into subslices using the provided separator and
+// returns a plain []Bytes of the results (convert with Slice[Bytes] for
+// chaining). The n parameter controls the number of subslices to return:
+// - If n is negative, there is no limit on the number of subslices returned.
+// - If n is zero, an empty slice is returned.
+// - If n is positive, at most n subslices are returned.
+func (bs Bytes) SplitN(sep Bytes, n Int) []Bytes {
+	parts := bytes.SplitN(bs, sep, n.Std())
+
+	result := make([]Bytes, len(parts))
+	for i, p := range parts {
+		result[i] = Bytes(p)
+	}
+
+	return result
+}
+
+// Lines splits the Bytes by lines, with trailing whitespace trimmed per line.
+// See [String.Lines] for why the return type is a plain slice.
+func (bs Bytes) Lines() []Bytes {
+	var result []Bytes
+
+	for line := range bytes.Lines(bs) {
+		result = append(result, Bytes(line).TrimEnd())
+	}
+
+	return result
+}
+
+// Fields splits the Bytes around whitespace. See [String.Lines] for why the
+// return type is a plain slice.
+func (bs Bytes) Fields() []Bytes {
+	return castBytesSlices(bytes.Fields(bs))
+}
+
+// FieldsBy splits the Bytes using a custom function to determine the field
+// boundaries. See [String.Lines] for why the return type is a plain slice.
+func (bs Bytes) FieldsBy(fn func(r rune) bool) []Bytes {
+	return castBytesSlices(bytes.FieldsFunc(bs, fn))
 }
 
 // Append appends the given Bytes to the current Bytes.
+//
+// Warning: like the builtin append, this may reuse and mutate the receiver's
+// backing array when it has spare capacity, so the returned Bytes can alias bs.
+// This is asymmetric with Prepend (which always copies) and with the immutable
+// String.Append. Clone the receiver first if it must remain unchanged.
 func (bs Bytes) Append(obs Bytes) Bytes { return append(bs, obs...) }
 
 // Prepend prepends the given Bytes to the current Bytes.
@@ -260,8 +332,8 @@ func (bs Bytes) ContainsRune(r rune) bool { return bytes.ContainsRune(bs, r) }
 // Count counts the number of occurrences of the specified Bytes in the Bytes.
 func (bs Bytes) Count(obs Bytes) Int { return Int(bytes.Count(bs, obs)) }
 
-// Empty checks if the Bytes is empty.
-func (bs Bytes) Empty() bool { return len(bs) == 0 }
+// IsEmpty checks if the Bytes is empty.
+func (bs Bytes) IsEmpty() bool { return len(bs) == 0 }
 
 // Eq checks if the Bytes is equal to another Bytes.
 func (bs Bytes) Eq(obs Bytes) bool { return bs.Cmp(obs).IsEq() }
@@ -272,15 +344,36 @@ func (bs Bytes) EqFold(obs Bytes) bool { return bytes.EqualFold(bs, obs) }
 // Gt checks if the Bytes is greater than another Bytes.
 func (bs Bytes) Gt(obs Bytes) bool { return bs.Cmp(obs).IsGt() }
 
+// Gte checks if the Bytes is greater than or equal to another Bytes.
+func (bs Bytes) Gte(obs Bytes) bool { return !bs.Cmp(obs).IsLt() }
+
 // String returns the Bytes as an String.
 func (bs Bytes) String() String { return String(bs) }
 
 // StringUnsafe converts the Bytes into a String without copying memory.
 // Warning: the resulting String shares the same underlying memory as the original Bytes.
 // If the Bytes is modified later, the String will reflect those changes and may cause undefined behavior.
-func (bs Bytes) StringUnsafe() String { return String(*(*string)(unsafe.Pointer(&bs))) }
+func (bs Bytes) StringUnsafe() String { return String(unsafe.String(unsafe.SliceData(bs), len(bs))) }
 
-// Index returns the index of the first instance of obs in bs, or -1 if bs is not present in obs.
+// TryInt parses the Bytes as an integer, mirroring String.TryInt.
+func (bs Bytes) TryInt() Result[Int] { return bs.StringUnsafe().TryInt() }
+
+// TryUint parses the Bytes as an unsigned integer, mirroring String.TryUint.
+func (bs Bytes) TryUint() Result[uint] { return bs.StringUnsafe().TryUint() }
+
+// TryFloat parses the Bytes as a float, mirroring String.TryFloat.
+func (bs Bytes) TryFloat() Result[Float] { return bs.StringUnsafe().TryFloat() }
+
+// TryBool parses the Bytes as a bool, mirroring String.TryBool.
+func (bs Bytes) TryBool() Result[bool] { return bs.StringUnsafe().TryBool() }
+
+// TryComplex parses the Bytes as a complex number, mirroring String.TryComplex.
+func (bs Bytes) TryComplex() Result[complex128] { return bs.StringUnsafe().TryComplex() }
+
+// TryBigInt parses the Bytes as a *big.Int, mirroring String.TryBigInt.
+func (bs Bytes) TryBigInt() Result[*big.Int] { return bs.StringUnsafe().TryBigInt() }
+
+// Index returns the index of the first instance of obs in bs, or -1 if obs is not present in bs.
 func (bs Bytes) Index(obs Bytes) Int { return Int(bytes.Index(bs, obs)) }
 
 // LastIndex returns the index of the last instance of obs in bs, or -1 if obs is not present in bs.
@@ -307,17 +400,14 @@ func (bs Bytes) LenRunes() Int { return Int(utf8.RuneCount(bs)) }
 // Lt checks if the Bytes is less than another Bytes.
 func (bs Bytes) Lt(obs Bytes) bool { return bs.Cmp(obs).IsLt() }
 
+// Lte checks if the Bytes is less than or equal to another Bytes.
+func (bs Bytes) Lte(obs Bytes) bool { return !bs.Cmp(obs).IsGt() }
+
 // Map applies a function to each rune in the Bytes and returns the modified Bytes.
 func (bs Bytes) Map(fn func(rune) rune) Bytes { return bytes.Map(fn, bs) }
 
-// NormalizeNFC returns a new Bytes with its Unicode characters normalized using the NFC form.
-func (bs Bytes) NormalizeNFC() Bytes { return norm.NFC.Bytes(bs) }
-
 // Ne checks if the Bytes is not equal to another Bytes.
 func (bs Bytes) Ne(obs Bytes) bool { return !bs.Eq(obs) }
-
-// NotEmpty checks if the Bytes is not empty.
-func (bs Bytes) NotEmpty() bool { return !bs.Empty() }
 
 // Reader returns a *bytes.Reader initialized with the content of Bytes.
 func (bs Bytes) Reader() *bytes.Reader { return bytes.NewReader(bs) }
@@ -325,81 +415,182 @@ func (bs Bytes) Reader() *bytes.Reader { return bytes.NewReader(bs) }
 // Repeat returns a new Bytes consisting of the current Bytes repeated 'count' times.
 func (bs Bytes) Repeat(count Int) Bytes { return bytes.Repeat(bs, count.Std()) }
 
-// Reset resets the length of the Bytes slice to zero, preserving its capacity.
-func (bs *Bytes) Reset() { *bs = (*bs)[:0] }
-
-// Runes returns the Bytes as a slice of runes.
-func (bs Bytes) Runes() []rune { return bytes.Runes(bs) }
-
 // Title converts the Bytes to title case.
 func (bs Bytes) Title() Bytes { return title.Bytes(bs) }
 
-// Lower converts the Bytes to lowercase.
-func (bs Bytes) Lower() Bytes {
-	for _, b := range bs {
-		if b >= utf8.RuneSelf {
-			return lower.Bytes(bs)
-		}
-	}
+// NormalizeNFC returns a new Bytes with its Unicode characters normalized using the NFC form.
+func (bs Bytes) NormalizeNFC() Bytes { return norm.NFC.Bytes(bs) }
 
-	needs := false
+// Reset resets the length of the Bytes slice to zero, preserving its capacity.
+func (bs *Bytes) Reset() { *bs = (*bs)[:0] }
 
-	for _, b := range bs {
-		if 'A' <= b && b <= 'Z' {
-			needs = true
-			break
-		}
-	}
+// Runes returns the Bytes as a plain slice of runes.
+func (bs Bytes) Runes() []rune { return bytes.Runes(bs) }
 
-	if !needs {
-		return bs
-	}
+// Chars splits the Bytes into individual UTF-8 characters, equivalent to
+// bs.Split(Bytes("")) and mirroring String.Chars.
+func (bs Bytes) Chars() []Bytes { return bs.Split(Bytes("")) }
 
-	out := make(Bytes, len(bs))
-
+func convertCase(bs Bytes, from byte, diff int8, ucFn func([]byte) []byte) Bytes {
 	for i, b := range bs {
-		if 'A' <= b && b <= 'Z' {
-			out[i] = b + ('a' - 'A')
-		} else {
-			out[i] = b
+		if b >= utf8.RuneSelf {
+			return ucFn(bs)
+		}
+
+		if from <= b && b <= from+25 {
+			for _, c := range bs[i+1:] {
+				if c >= utf8.RuneSelf {
+					return ucFn(bs)
+				}
+			}
+
+			out := make(Bytes, len(bs))
+			copy(out, bs[:i])
+			out[i] = byte(int8(b) + diff)
+
+			for j, c := range bs[i+1:] {
+				if from <= c && c <= from+25 {
+					out[i+1+j] = byte(int8(c) + diff)
+				} else {
+					out[i+1+j] = c
+				}
+			}
+
+			return out
 		}
 	}
 
-	return out
+	return bs
 }
 
+// Lower converts the Bytes to lowercase.
+func (bs Bytes) Lower() Bytes { return convertCase(bs, 'A', 'a'-'A', lower.Bytes) }
+
 // Upper converts the Bytes to uppercase.
-func (bs Bytes) Upper() Bytes {
-	for _, b := range bs {
-		if b >= utf8.RuneSelf {
-			return upper.Bytes(bs)
-		}
-	}
+func (bs Bytes) Upper() Bytes { return convertCase(bs, 'a', 'A'-'a', upper.Bytes) }
 
-	needs := false
-
-	for _, b := range bs {
-		if 'a' <= b && b <= 'z' {
-			needs = true
-			break
-		}
-	}
-
-	if !needs {
-		return bs
-	}
-
-	out := make(Bytes, len(bs))
+// IsLower reports whether bs contains at least one letter and no uppercase letters.
+func (bs Bytes) IsLower() bool {
+	letter := false
 
 	for i, b := range bs {
+		if b >= utf8.RuneSelf {
+			rest := bs[i:]
+			for len(rest) > 0 {
+				r, size := utf8.DecodeRune(rest)
+				rest = rest[size:]
+				if r == utf8.RuneError && size == 1 {
+					continue
+				}
+
+				if unicode.IsLetter(r) {
+					letter = true
+					if unicode.IsUpper(r) {
+						return false
+					}
+				}
+			}
+
+			return letter
+		}
+
+		if 'A' <= b && b <= 'Z' {
+			return false
+		}
+
 		if 'a' <= b && b <= 'z' {
-			out[i] = b - ('a' - 'A')
-		} else {
-			out[i] = b
+			letter = true
 		}
 	}
 
-	return out
+	return letter
+}
+
+// IsUpper reports whether bs contains at least one letter and no lowercase letters.
+func (bs Bytes) IsUpper() bool {
+	letter := false
+
+	for i, b := range bs {
+		if b >= utf8.RuneSelf {
+			rest := bs[i:]
+			for len(rest) > 0 {
+				r, size := utf8.DecodeRune(rest)
+				rest = rest[size:]
+				if r == utf8.RuneError && size == 1 {
+					continue
+				}
+
+				if unicode.IsLetter(r) {
+					letter = true
+					if unicode.IsLower(r) {
+						return false
+					}
+				}
+			}
+
+			return letter
+		}
+
+		if 'a' <= b && b <= 'z' {
+			return false
+		}
+
+		if 'A' <= b && b <= 'Z' {
+			letter = true
+		}
+	}
+
+	return letter
+}
+
+// IsTitle reports whether bs is in title case: the first letter of each word
+// is uppercase (or titlecase), the remaining letters are lowercase.
+// Non-letter characters act as word separators. Returns false if bs has no letters.
+func (bs Bytes) IsTitle() bool {
+	letter := false
+	prevLetter := false
+
+	for i, b := range bs {
+		if b >= utf8.RuneSelf {
+			rest := bs[i:]
+			for len(rest) > 0 {
+				r, size := utf8.DecodeRune(rest)
+				rest = rest[size:]
+
+				if r == utf8.RuneError && size == 1 {
+					prevLetter = false
+					continue
+				}
+
+				if unicode.IsLetter(r) {
+					letter = true
+					if prevLetter && !unicode.IsLower(r) {
+						return false
+					}
+					if !prevLetter && !unicode.IsUpper(r) && !unicode.IsTitle(r) {
+						return false
+					}
+					prevLetter = true
+				} else {
+					prevLetter = false
+				}
+			}
+
+			return letter
+		}
+
+		if ('a' <= b && b <= 'z') || ('A' <= b && b <= 'Z') {
+			letter = true
+			if prevLetter == (b <= 'Z') {
+				return false
+			}
+			prevLetter = true
+		} else {
+			prevLetter = false
+		}
+	}
+
+	return letter
 }
 
 // Print writes the content of the Bytes to the standard output (console)
@@ -409,3 +600,44 @@ func (bs Bytes) Print() Bytes { fmt.Print(bs); return bs }
 // Println writes the content of the Bytes to the standard output (console) with a newline
 // and returns the Bytes unchanged.
 func (bs Bytes) Println() Bytes { fmt.Println(bs); return bs }
+
+// Scan implements the database/sql.Scanner interface for g.Bytes.
+//
+// Behavior:
+//   - If src is nil, the Bytes slice is set to nil (SQL NULL).
+//   - If src is a []byte, a copy is stored (database/sql may reuse the driver's
+//     buffer on the next row, so the bytes must not be retained by reference).
+//   - Otherwise, an error is returned.
+//
+// Supported SQL types (common):
+//   - BLOB / BYTEA → []byte
+//
+// Notes:
+//   - This allows g.Bytes to be used directly with database/sql and compatible drivers.
+func (bs *Bytes) Scan(src any) error {
+	if src == nil {
+		*bs = nil
+		return nil
+	}
+
+	if b, ok := src.([]byte); ok {
+		*bs = append(Bytes(nil), b...)
+		return nil
+	}
+
+	return fmt.Errorf("g.Bytes.Scan: cannot scan %T into g.Bytes", src)
+}
+
+// Value implements the database/sql/driver.Valuer interface for g.Bytes.
+//
+// Behavior:
+//   - Returns the underlying byte slice, ready for database insertion.
+//   - Always returns a value compatible with SQL BLOB / BYTEA types.
+func (bs Bytes) Value() (driver.Value, error) { return []byte(bs), nil }
+
+// castBytesSlices reinterprets a [][]byte as []Bytes without copying: Bytes is
+// defined as `type Bytes []byte`, so the two slice types share one memory
+// layout.
+func castBytesSlices(bss [][]byte) []Bytes {
+	return unsafe.Slice((*Bytes)(unsafe.SliceData(bss)), len(bss))
+}

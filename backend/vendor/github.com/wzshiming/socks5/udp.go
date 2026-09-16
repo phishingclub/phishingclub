@@ -15,17 +15,55 @@ var (
 type UDPConn struct {
 	bufRead       [maxUdpPacket]byte
 	bufWrite      [maxUdpPacket]byte
-	proxyAddress  net.Addr
-	defaultTarget net.Addr
+	proxyAddress  *net.UDPAddr
+	defaultTarget *net.UDPAddr
 	prefix        []byte
 	net.PacketConn
 }
 
+func conventToUDPAddr(addr net.Addr) (*net.UDPAddr, error) {
+	udpAddr, ok := addr.(*net.UDPAddr)
+	if ok {
+		return udpAddr, nil
+	}
+
+	host, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return nil, err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		ips, err := net.LookupIP(host)
+		if err != nil {
+			return nil, err
+		}
+		ip = ips[0]
+	}
+
+	portInt, err := net.LookupPort("udp", port)
+	if err != nil {
+		return nil, err
+	}
+	return &net.UDPAddr{
+		IP:   ip,
+		Port: portInt,
+	}, nil
+}
+
 func NewUDPConn(raw net.PacketConn, proxyAddress net.Addr, defaultTarget net.Addr) (*UDPConn, error) {
+	proxyAddr, err := conventToUDPAddr(proxyAddress)
+	if err != nil {
+		return nil, err
+	}
+	defaultTargetAddr, err := conventToUDPAddr(defaultTarget)
+	if err != nil {
+		return nil, err
+	}
+
 	conn := &UDPConn{
 		PacketConn:    raw,
-		proxyAddress:  proxyAddress,
-		defaultTarget: defaultTarget,
+		proxyAddress:  proxyAddr,
+		defaultTarget: defaultTargetAddr,
 		prefix:        []byte{0, 0, 0},
 	}
 	return conn, nil
@@ -49,6 +87,31 @@ func (c *UDPConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 	return n, a, nil
 }
 
+// ReadFromUDP implements the net.UDPConn ReadFromUDP method.
+func (c *UDPConn) ReadFromUDP(p []byte) (n int, addr *net.UDPAddr, err error) {
+	udpConn, ok := c.PacketConn.(*net.UDPConn)
+	if !ok {
+		return 0, nil, errUnsupportedMethod
+	}
+	n, addr, err = udpConn.ReadFromUDP(c.bufRead[:])
+	if err != nil {
+		return 0, nil, err
+	}
+	if n < len(c.prefix) || addr.String() != c.proxyAddress.String() {
+		return 0, nil, errBadHeader
+	}
+	buf := bytes.NewBuffer(c.bufRead[len(c.prefix):n])
+	a, err := readAddr(buf)
+	if err != nil {
+		return 0, nil, err
+	}
+	n = copy(p, buf.Bytes())
+	return n, &net.UDPAddr{
+		IP:   a.IP,
+		Port: a.Port,
+	}, nil
+}
+
 // WriteTo implements the net.PacketConn WriteTo method.
 func (c *UDPConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	buf := bytes.NewBuffer(c.bufWrite[:0])
@@ -64,6 +127,31 @@ func (c *UDPConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 
 	data := buf.Bytes()
 	_, err = c.PacketConn.WriteTo(data, c.proxyAddress)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// WriteToUDP implements the net.UDPConn WriteToUDP method.
+func (c *UDPConn) WriteToUDP(p []byte, addr *net.UDPAddr) (n int, err error) {
+	udpConn, ok := c.PacketConn.(*net.UDPConn)
+	if !ok {
+		return 0, errUnsupportedMethod
+	}
+	buf := bytes.NewBuffer(c.bufWrite[:0])
+	buf.Write(c.prefix)
+	err = writeAddrWithStr(buf, addr.String())
+	if err != nil {
+		return 0, err
+	}
+	n, err = buf.Write(p)
+	if err != nil {
+		return 0, err
+	}
+
+	data := buf.Bytes()
+	_, err = udpConn.WriteToUDP(data, c.proxyAddress)
 	if err != nil {
 		return 0, err
 	}
@@ -137,31 +225,30 @@ func (c *UDPConn) SetWriteDeadline(t time.Time) error {
 	return udpConn.SetWriteDeadline(t)
 }
 
-// ReadFromUDP implements the net.UDPConn ReadFromUDP method.
-func (c *UDPConn) ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err error) {
-	udpConn, ok := c.PacketConn.(*net.UDPConn)
-	if !ok {
-		return 0, nil, errUnsupportedMethod
-	}
-	return udpConn.ReadFromUDP(b)
-}
-
 // ReadMsgUDP implements the net.UDPConn ReadMsgUDP method.
 func (c *UDPConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error) {
 	udpConn, ok := c.PacketConn.(*net.UDPConn)
 	if !ok {
 		return 0, 0, 0, nil, errUnsupportedMethod
 	}
-	return udpConn.ReadMsgUDP(b, oob)
-}
 
-// WriteToUDP implements the net.UDPConn WriteToUDP method.
-func (c *UDPConn) WriteToUDP(b []byte, addr *net.UDPAddr) (int, error) {
-	udpConn, ok := c.PacketConn.(*net.UDPConn)
-	if !ok {
-		return 0, errUnsupportedMethod
+	n, oobn, flags, addr, err = udpConn.ReadMsgUDP(c.bufRead[:], oob)
+	if err != nil {
+		return 0, 0, 0, nil, err
 	}
-	return udpConn.WriteToUDP(b, addr)
+	if n < len(c.prefix) || addr.String() != c.proxyAddress.String() {
+		return 0, 0, 0, nil, errBadHeader
+	}
+	buf := bytes.NewBuffer(c.bufRead[len(c.prefix):n])
+	a, err := readAddr(buf)
+	if err != nil {
+		return 0, 0, 0, nil, err
+	}
+	n = copy(b, buf.Bytes())
+	return n, oobn, flags, &net.UDPAddr{
+		IP:   a.IP,
+		Port: a.Port,
+	}, nil
 }
 
 // WriteMsgUDP implements the net.UDPConn WriteMsgUDP method.
@@ -170,5 +257,21 @@ func (c *UDPConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, er
 	if !ok {
 		return 0, 0, errUnsupportedMethod
 	}
-	return udpConn.WriteMsgUDP(b, oob, addr)
+
+	buf := bytes.NewBuffer(c.bufWrite[:0])
+	buf.Write(c.prefix)
+	err = writeAddrWithStr(buf, addr.String())
+	if err != nil {
+		return 0, 0, err
+	}
+	_, err = buf.Write(b)
+	if err != nil {
+		return 0, 0, err
+	}
+	data := buf.Bytes()
+	_, _, err = udpConn.WriteMsgUDP(data, oob, c.proxyAddress)
+	if err != nil {
+		return 0, 0, err
+	}
+	return len(b), len(oob), nil
 }

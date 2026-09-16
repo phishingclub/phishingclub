@@ -1,70 +1,49 @@
 package g
 
-import (
-	"fmt"
-)
+import "fmt"
+
+// Set is a generic alias for a set implemented using a map.
+type Set[T comparable] map[T]Unit
 
 // NewSet creates a new Set of the specified size or an empty Set if no size is provided.
 func NewSet[T comparable](size ...Int) Set[T] {
-	return make(Set[T], Slice[Int](size).Get(0).UnwrapOrDefault())
-}
-
-// TransformSet applies the given function to each element of a Set and returns a new Set
-// containing the transformed values.
-//
-// Parameters:
-//
-// - s: The input Set.
-// - fn: The function to apply to each element of the input Set.
-//
-// Returns:
-//
-// A new Set containing the results of applying the function to each element of the input Set.
-func TransformSet[T, U comparable](s Set[T], fn func(T) U) Set[U] {
-	if len(s) == 0 {
-		return NewSet[U]()
+	if len(size) > 0 {
+		return make(Set[T], size[0])
 	}
 
-	result := make(Set[U], len(s))
-	for v := range s {
-		result[fn(v)] = struct{}{}
-	}
-
-	return result
+	return make(Set[T])
 }
 
 // SetOf creates a new generic set containing the provided elements.
 func SetOf[T comparable](values ...T) Set[T] {
 	set := make(Set[T], len(values))
 	for _, v := range values {
-		set[v] = struct{}{}
+		set[v] = Unit{}
 	}
 
 	return set
 }
 
 // Transform applies a transformation function to the Set and returns the result.
-func (s Set[T]) Transform(fn func(Set[T]) Set[T]) Set[T] { return fn(s) }
+func (s Set[T]) Transform[U any](fn func(Set[T]) U) U { return fn(s) }
 
-// Iter returns an iterator (SeqSet[T]) for the Set, allowing for sequential iteration
+// Iter returns an iterator (Seq[T]) for the Set, allowing for sequential iteration
 // over its elements. It is commonly used in combination with higher-order functions,
-// such as 'ForEach' or 'SetMap', to perform operations on each element of the Set.
+// such as 'ForEach' or 'Map', to perform operations on each element of the Set.
 //
 // Returns:
 //
-// A SeqSet[T], which can be used for sequential iteration over the elements of the Set.
+// A Seq[T], which can be used for sequential iteration over the elements of the Set.
 //
 // Example usage:
 //
-//	iter := g.SetOf(1, 2, 3).Iter()
-//	iter.ForEach(func(val T) {
+//	g.SetOf(1, 2, 3).Iter().ForEach(func(val int) {
 //	    fmt.Println(val) // Replace this with the function logic you need.
 //	})
 //
 // The 'Iter' method provides a convenient way to traverse the elements of a Set
 // in a functional style, enabling operations like mapping or filtering.
-// func (s Set[T]) Iter() SeqSet[T] { return seqSet(s) }
-func (s Set[T]) Iter() SeqSet[T] {
+func (s Set[T]) Iter() Seq[T] {
 	return func(yield func(T) bool) {
 		for v := range s {
 			if !yield(v) {
@@ -74,20 +53,21 @@ func (s Set[T]) Iter() SeqSet[T] {
 	}
 }
 
-// func (s Set[T]) Iter() SeqSet[T] { return seqSet(s) }
-
 // Insert adds the provided elements to the set.
 func (s Set[T]) Insert(values ...T) {
 	for _, v := range values {
-		s[v] = struct{}{}
+		s[v] = Unit{}
 	}
 }
 
-// Remove removes the specified values from the Set.
-func (s Set[T]) Remove(values ...T) {
-	for _, v := range values {
+// Remove removes the specified value from the Set and returns true if it was present.
+func (s Set[T]) Remove(v T) bool {
+	if _, ok := s[v]; ok {
 		delete(s, v)
+		return true
 	}
+
+	return false
 }
 
 // Len returns the number of values in the Set.
@@ -99,36 +79,22 @@ func (s Set[T]) Contains(v T) bool {
 	return ok
 }
 
-// ContainsAny checks if the Set contains any element from another Set.
-func (s Set[T]) ContainsAny(other Set[T]) bool {
-	if s.Empty() || other.Empty() {
-		return false
-	}
-
-	if len(s) <= len(other) {
-		for v := range s {
-			if _, ok := other[v]; ok {
-				return true
-			}
-		}
-	} else {
-		for v := range other {
-			if _, ok := s[v]; ok {
-				return true
-			}
+// ContainsAny checks if the Set contains any of the provided values, matching
+// the variadic shape of Slice.ContainsAny and String.ContainsAny.
+func (s Set[T]) ContainsAny(values ...T) bool {
+	for _, v := range values {
+		if _, ok := s[v]; ok {
+			return true
 		}
 	}
 
 	return false
 }
 
-// ContainsAll checks if the Set contains all elements from another Set.
-func (s Set[T]) ContainsAll(other Set[T]) bool {
-	if len(s) < len(other) {
-		return false
-	}
-
-	for v := range other {
+// ContainsAll checks if the Set contains all of the provided values, matching
+// the variadic shape of Slice.ContainsAll and String.ContainsAll.
+func (s Set[T]) ContainsAll(values ...T) bool {
+	for _, v := range values {
 		if _, ok := s[v]; !ok {
 			return false
 		}
@@ -139,30 +105,16 @@ func (s Set[T]) ContainsAll(other Set[T]) bool {
 
 // Clone creates a new Set that is a copy of the original Set.
 func (s Set[T]) Clone() Set[T] {
-	if s.Empty() {
+	if s.IsEmpty() {
 		return NewSet[T]()
 	}
 
 	clone := make(Set[T], len(s))
 	for k := range s {
-		clone[k] = struct{}{}
+		clone[k] = Unit{}
 	}
 
 	return clone
-}
-
-// ToSlice returns a new Slice with the same elements as the Set[T].
-func (s Set[T]) ToSlice() Slice[T] {
-	if s.Empty() {
-		return NewSlice[T]()
-	}
-
-	sl := make(Slice[T], 0, len(s))
-	for v := range s {
-		sl = append(sl, v)
-	}
-
-	return sl
 }
 
 // Intersection returns the intersection of the current set and another set, i.e., elements
@@ -183,12 +135,21 @@ func (s Set[T]) ToSlice() Slice[T] {
 //	intersection := s1.Intersection(s2)
 //
 // The resulting intersection will be: [4, 5].
-func (s Set[T]) Intersection(other Set[T]) SeqSet[T] {
-	if len(s) <= len(other) {
-		return intersection(s.Iter(), other)
+func (s Set[T]) Intersection(other Set[T]) Set[T] {
+	small, big := s, other
+	if len(big) < len(small) {
+		small, big = big, small
 	}
 
-	return intersection(other.Iter(), s)
+	result := make(Set[T], len(small))
+
+	for v := range small {
+		if big.Contains(v) {
+			result[v] = Unit{}
+		}
+	}
+
+	return result
 }
 
 // Difference returns the difference between the current set and another set,
@@ -209,7 +170,17 @@ func (s Set[T]) Intersection(other Set[T]) SeqSet[T] {
 //	diff := s1.Difference(s2)
 //
 // The resulting diff will be: [1, 2, 3].
-func (s Set[T]) Difference(other Set[T]) SeqSet[T] { return difference(s.Iter(), other) }
+func (s Set[T]) Difference(other Set[T]) Set[T] {
+	result := make(Set[T], len(s))
+
+	for v := range s {
+		if !other.Contains(v) {
+			result[v] = Unit{}
+		}
+	}
+
+	return result
+}
 
 // Union returns a new set containing the unique elements of the current set and the provided
 // other set.
@@ -230,12 +201,18 @@ func (s Set[T]) Difference(other Set[T]) SeqSet[T] { return difference(s.Iter(),
 //	union := s1.Union(s2)
 //
 // The resulting union set will be: [1, 2, 3, 4, 5].
-func (s Set[T]) Union(other Set[T]) SeqSet[T] {
-	if len(s) > len(other) {
-		return s.Iter().Chain(other.Difference(s))
+func (s Set[T]) Union(other Set[T]) Set[T] {
+	result := make(Set[T], len(s)+len(other))
+
+	for v := range s {
+		result[v] = Unit{}
 	}
 
-	return other.Iter().Chain(s.Difference(other))
+	for v := range other {
+		result[v] = Unit{}
+	}
+
+	return result
 }
 
 // SymmetricDifference returns the symmetric difference between the current set and another
@@ -256,8 +233,22 @@ func (s Set[T]) Union(other Set[T]) SeqSet[T] {
 //	symDiff := s1.SymmetricDifference(s2)
 //
 // The resulting symDiff will be: [1, 2, 3, 6, 7, 8].
-func (s Set[T]) SymmetricDifference(other Set[T]) SeqSet[T] {
-	return s.Difference(other).Chain(other.Difference(s))
+func (s Set[T]) SymmetricDifference(other Set[T]) Set[T] {
+	result := make(Set[T])
+
+	for v := range s {
+		if !other.Contains(v) {
+			result[v] = Unit{}
+		}
+	}
+
+	for v := range other {
+		if !s.Contains(v) {
+			result[v] = Unit{}
+		}
+	}
+
+	return result
 }
 
 // Subset checks if the current set 's' is a subset of the provided 'other' set.
@@ -276,7 +267,19 @@ func (s Set[T]) SymmetricDifference(other Set[T]) SeqSet[T] {
 //	s1 := g.SetOf(1, 2, 3)
 //	s2 := g.SetOf(1, 2, 3, 4, 5)
 //	isSubset := s1.Subset(s2) // Returns true
-func (s Set[T]) Subset(other Set[T]) bool { return other.ContainsAll(s) }
+func (s Set[T]) Subset(other Set[T]) bool {
+	if len(s) > len(other) {
+		return false
+	}
+
+	for v := range s {
+		if _, ok := other[v]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
 
 // Superset checks if the current set 's' is a superset of the provided 'other' set.
 // A set 's' is a superset of 'other' if all elements of 'other' are also elements of 's'.
@@ -294,7 +297,7 @@ func (s Set[T]) Subset(other Set[T]) bool { return other.ContainsAll(s) }
 //	s1 := g.SetOf(1, 2, 3, 4, 5)
 //	s2 := g.SetOf(1, 2, 3)
 //	isSuperset := s1.Superset(s2) // Returns true
-func (s Set[T]) Superset(other Set[T]) bool { return s.ContainsAll(other) }
+func (s Set[T]) Superset(other Set[T]) bool { return other.Subset(s) }
 
 // Eq checks if two Sets are equal.
 func (s Set[T]) Eq(other Set[T]) bool {
@@ -315,25 +318,19 @@ func (s Set[T]) Eq(other Set[T]) bool {
 func (s Set[T]) Ne(other Set[T]) bool { return !s.Eq(other) }
 
 // Clear removes all values from the Set.
-func (s Set[T]) Clear() {
-	for k := range s {
-		delete(s, k)
-	}
-}
+func (s Set[T]) Clear() { clear(s) }
 
-// Empty checks if the Set is empty.
-func (s Set[T]) Empty() bool { return len(s) == 0 }
-
-// NotEmpty checks if the Set is not empty.
-func (s Set[T]) NotEmpty() bool { return !s.Empty() }
+// IsEmpty checks if the Set is empty.
+func (s Set[T]) IsEmpty() bool { return len(s) == 0 }
 
 // String returns a string representation of the Set.
 func (s Set[T]) String() string {
-	if s.Empty() {
+	if s.IsEmpty() {
 		return "Set{}"
 	}
 
 	var b Builder
+	b.Grow(Int(len(s)) * 8)
 	b.WriteString("Set{")
 
 	first := true
@@ -343,12 +340,29 @@ func (s Set[T]) String() string {
 		}
 
 		first = false
-		b.WriteString(Format("{}", v))
+		fmt.Fprint(&b, v)
 	}
 
 	b.WriteString("}")
 
 	return b.String().Std()
+}
+
+// Disjoint reports whether the set has no elements in common with other.
+// It is the complement of ContainsAny.
+func (s Set[T]) Disjoint(other Set[T]) bool {
+	small, big := s, other
+	if len(big) < len(small) {
+		small, big = big, small
+	}
+
+	for v := range small {
+		if _, ok := big[v]; ok {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Print writes the elements of the Set to the standard output (console)

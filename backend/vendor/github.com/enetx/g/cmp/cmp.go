@@ -1,3 +1,5 @@
+// Package cmp provides three-way comparison primitives (Ordering, Cmp, Reverse)
+// used by the sorting, heap and min/max APIs of the g library.
 package cmp
 
 import "cmp"

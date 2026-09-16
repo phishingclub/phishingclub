@@ -148,7 +148,6 @@ func DumpRequestOut(req *http.Request, body bool) ([]byte, error) {
 
 	req.Body = save
 	if err != nil {
-		pw.Close()
 		dr.err = err
 		close(quitReadCh)
 		return nil, err
@@ -260,7 +259,7 @@ func DumpRequest(req *http.Request, body bool) ([]byte, error) {
 		fmt.Fprintf(&b, "Transfer-Encoding: %s\r\n", strings.Join(req.TransferEncoding, ","))
 	}
 
-	err = req.Header.WriteSubset(&b, reqWriteExcludeHeaderDump)
+	err = req.Header.WriteSubset(&b, reqWriteExcludeHeaderDump, -1)
 	if err != nil {
 		return nil, err
 	}

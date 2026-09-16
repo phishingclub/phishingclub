@@ -59,16 +59,27 @@ const (
 )
 
 var (
-	errBlankCookie           = errors.New("http: blank cookie")
-	errEqualNotFoundInCookie = errors.New("http: '=' not found in cookie")
-	errInvalidCookieName     = errors.New("http: invalid cookie name")
-	errInvalidCookieValue    = errors.New("http: invalid cookie value")
+	errBlankCookie            = errors.New("http: blank cookie")
+	errEqualNotFoundInCookie  = errors.New("http: '=' not found in cookie")
+	errInvalidCookieName      = errors.New("http: invalid cookie name")
+	errInvalidCookieValue     = errors.New("http: invalid cookie value")
+	errCookieNumLimitExceeded = errors.New("http: number of cookies exceeded limit")
 )
+
+const defaultCookieMaxNum = 3000
+
+func cookieNumWithinMax(cookieNum int) bool {
+	withinDefaultMax := cookieNum <= defaultCookieMaxNum
+	return withinDefaultMax
+}
 
 // ParseCookie parses a Cookie header value and returns all the cookies
 // which were set in it. Since the same cookie name can appear multiple times
 // the returned Values can contain more than one value for a given key.
 func ParseCookie(line string) ([]*Cookie, error) {
+	if !cookieNumWithinMax(strings.Count(line, ";") + 1) {
+		return nil, errCookieNumLimitExceeded
+	}
 	parts := strings.Split(textproto.TrimString(line), ";")
 	if len(parts) == 1 && parts[0] == "" {
 		return nil, errBlankCookie
@@ -198,9 +209,19 @@ func ParseSetCookie(line string) (*Cookie, error) {
 
 // readSetCookies parses all "Set-Cookie" values from
 // the header h and returns the successfully parsed Cookies.
+//
+// If the amount of cookies exceeds CookieNumLimit, and httpcookielimitnum
+// GODEBUG option is not explicitly turned off, this function will silently
+// fail and return an empty slice.
 func readSetCookies(h Header) []*Cookie {
 	cookieCount := len(h["Set-Cookie"])
 	if cookieCount == 0 {
+		return []*Cookie{}
+	}
+	// Cookie limit was unfortunately introduced at a later point in time.
+	// As such, we can only fail by returning an empty slice rather than
+	// explicit error.
+	if !cookieNumWithinMax(cookieCount) {
 		return []*Cookie{}
 	}
 	cookies := make([]*Cookie, 0, cookieCount)
@@ -330,10 +351,25 @@ func (c *Cookie) Valid() error {
 // readCookies parses all "Cookie" values from the header h and
 // returns the successfully parsed Cookies.
 //
-// if filter isn't empty, only cookies of that name are returned.
+// If filter isn't empty, only cookies of that name are returned.
+//
+// If the amount of cookies exceeds CookieNumLimit, and httpcookielimitnum
+// GODEBUG option is not explicitly turned off, this function will silently
+// fail and return an empty slice.
 func readCookies(h Header, filter string) []*Cookie {
 	lines := h["Cookie"]
 	if len(lines) == 0 {
+		return []*Cookie{}
+	}
+
+	// Cookie limit was unfortunately introduced at a later point in time.
+	// As such, we can only fail by returning an empty slice rather than
+	// explicit error.
+	cookieCount := 0
+	for _, line := range lines {
+		cookieCount += strings.Count(line, ";") + 1
+	}
+	if !cookieNumWithinMax(cookieCount) {
 		return []*Cookie{}
 	}
 
@@ -395,7 +431,8 @@ func isCookieDomainName(s string) bool {
 	}
 
 	if s[0] == '.' {
-		// A cookie a domain attribute may start with a leading dot.
+		// A cookie domain attribute may start with a leading dot.
+		// Per RFC 6265 section 5.2.3, a leading dot is ignored.
 		s = s[1:]
 	}
 	last := byte('.')
@@ -460,9 +497,6 @@ func sanitizeCookieName(n string) string {
 // See https://golang.org/issue/7243 for the discussion.
 func sanitizeCookieValue(v string, quoted bool) string {
 	v = sanitizeOrWarn("Cookie.Value", validCookieValueByte, v)
-	if len(v) == 0 {
-		return v
-	}
 	if strings.ContainsAny(v, " ,") || quoted {
 		return `"` + v + `"`
 	}
@@ -470,7 +504,8 @@ func sanitizeCookieValue(v string, quoted bool) string {
 }
 
 func validCookieValueByte(b byte) bool {
-	return 0x20 <= b && b < 0x7f && b != '"' && b != ';' && b != '\\'
+	// allow double quotes in cookie value
+	return 0x20 <= b && b < 0x7f && /* b != '"' && */ b != ';' && b != '\\'
 }
 
 // path-av           = "Path=" path-value

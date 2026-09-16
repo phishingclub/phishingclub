@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/textproto"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -101,12 +102,12 @@ func (h Header) Del(key string) {
 }
 
 // Write writes a header in wire format.
-func (h Header) Write(w io.Writer) error {
-	return h.write(w, nil)
+func (h Header) Write(w io.Writer, cl int64) error {
+	return h.write(w, nil, cl)
 }
 
-func (h Header) write(w io.Writer, trace *httptrace.ClientTrace) error {
-	return h.writeSubset(w, nil, trace)
+func (h Header) write(w io.Writer, trace *httptrace.ClientTrace, cl int64) error {
+	return h.writeSubset(w, nil, trace, cl)
 }
 
 // Clone returns a copy of h or nil if h is nil.
@@ -255,13 +256,13 @@ func (h Header) SortedKeyValuesBy(order map[string]int, exclude map[string]bool)
 // WriteSubset writes a header in wire format.
 // If exclude is not nil, keys where exclude[key] == true are not written.
 // Keys are not canonicalized before checking the exclude map.
-func (h Header) WriteSubset(w io.Writer, exclude map[string]bool) error {
-	return h.writeSubset(w, exclude, nil)
+func (h Header) WriteSubset(w io.Writer, exclude map[string]bool, cl int64) error {
+	return h.writeSubset(w, exclude, nil, cl)
 }
 
 // WriteSubset writes a header in wire format.
 // If exclude is not nil, keys where exclude[key] == true are not written.
-func (h Header) writeSubset(w io.Writer, exclude map[string]bool, trace *httptrace.ClientTrace) error {
+func (h Header) writeSubset(w io.Writer, exclude map[string]bool, trace *httptrace.ClientTrace, cl int64) error {
 	ws, ok := w.(io.StringWriter)
 	if !ok {
 		ws = stringWriter{w}
@@ -275,6 +276,12 @@ func (h Header) writeSubset(w io.Writer, exclude map[string]bool, trace *httptra
 		order := make(map[string]int)
 		for i, v := range headerOrder {
 			order[v] = i
+
+			// If content-length is set in the header order,
+			// we should add the value so it gets sorted
+			if v == "content-length" && cl >= 0 {
+				h[v] = []string{strconv.FormatInt(cl, 10)}
+			}
 		}
 
 		if exclude == nil {
@@ -303,7 +310,7 @@ func (h Header) writeSubset(w io.Writer, exclude map[string]bool, trace *httptra
 		for _, v := range kv.Values {
 			v = headerNewlineToSpace.Replace(v)
 			v = textproto.TrimString(v)
-			for _, s := range []string{kv.Key, ": ", v, "\r\n"} {
+			for _, s := range []string{CanonicalHeaderKey(kv.Key), ": ", v, "\r\n"} {
 				if _, err := ws.WriteString(s); err != nil {
 					headerSorterPool.Put(sorter)
 					return err

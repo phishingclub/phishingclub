@@ -8,17 +8,25 @@ import (
 // HTTP2Settings represents HTTP/2 settings.
 // https://lwthiker.com/networks/2022/06/17/http2-fingerprinting.html
 type HTTP2Settings struct {
-	builder              *Builder
 	priorityFrames       []http2.PriorityFrame
 	priorityParam        http2.PriorityParam
+	builder              *Builder
 	headerTableSize      uint32
-	enablePush           uint32
 	maxConcurrentStreams uint32
 	initialWindowSize    uint32
 	maxFrameSize         uint32
 	maxHeaderListSize    uint32
 	connectionFlow       uint32
+	initialStreamID      uint32
+	noRFC7540Priorities  uint32
+	enablePush           uint32
 	usePush              bool
+}
+
+// InitialStreamID sets the initial stream id for HTTP/2 streams.
+func (h *HTTP2Settings) InitialStreamID(id uint32) *HTTP2Settings {
+	h.initialStreamID = id
+	return h
 }
 
 // HeaderTableSize sets the header table size for HTTP/2 settings.
@@ -55,6 +63,12 @@ func (h *HTTP2Settings) MaxFrameSize(size uint32) *HTTP2Settings {
 // MaxHeaderListSize sets the maximum size of the header list in HTTP/2.
 func (h *HTTP2Settings) MaxHeaderListSize(size uint32) *HTTP2Settings {
 	h.maxHeaderListSize = size
+	return h
+}
+
+// NoRFC7540Priorities disables RFC 7540 priority signaling in HTTP/2.
+func (h *HTTP2Settings) NoRFC7540Priorities(size uint32) *HTTP2Settings {
+	h.noRFC7540Priorities = size
 	return h
 }
 
@@ -95,26 +109,24 @@ func (h *HTTP2Settings) Set() *Builder {
 			return err
 		}
 
+		t2.Settings = make([]http2.Setting, 0, 7)
+
 		appendSetting := func(id http2.SettingID, val uint32) {
 			if val != 0 || (id == http2.SettingEnablePush && h.usePush) {
 				t2.Settings = append(t2.Settings, http2.Setting{ID: id, Val: val})
 			}
 		}
 
-		settings := [...]struct {
-			id  http2.SettingID
-			val uint32
-		}{
-			{http2.SettingHeaderTableSize, h.headerTableSize},
-			{http2.SettingEnablePush, h.enablePush},
-			{http2.SettingMaxConcurrentStreams, h.maxConcurrentStreams},
-			{http2.SettingInitialWindowSize, h.initialWindowSize},
-			{http2.SettingMaxFrameSize, h.maxFrameSize},
-			{http2.SettingMaxHeaderListSize, h.maxHeaderListSize},
-		}
+		appendSetting(http2.SettingHeaderTableSize, h.headerTableSize)
+		appendSetting(http2.SettingEnablePush, h.enablePush)
+		appendSetting(http2.SettingMaxConcurrentStreams, h.maxConcurrentStreams)
+		appendSetting(http2.SettingInitialWindowSize, h.initialWindowSize)
+		appendSetting(http2.SettingMaxFrameSize, h.maxFrameSize)
+		appendSetting(http2.SettingMaxHeaderListSize, h.maxHeaderListSize)
+		appendSetting(http2.SettingNoRFC7540Priorities, h.noRFC7540Priorities)
 
-		for _, s := range settings {
-			appendSetting(s.id, s.val)
+		if h.initialStreamID != 0 {
+			t2.StreamID = h.initialStreamID
 		}
 
 		if h.connectionFlow != 0 {

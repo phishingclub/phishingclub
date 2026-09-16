@@ -10,8 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/textproto"
-    "maps"
 	"reflect"
 	"slices"
 	"strconv"
@@ -289,21 +289,33 @@ func (t *transferWriter) writeHeader(w io.Writer, trace *httptrace.ClientTrace) 
 	// function of the sanitized field triple (Body, ContentLength,
 	// TransferEncoding)
 	if t.shouldSendContentLength() {
-		if _, err := io.WriteString(w, "Content-Length: "); err != nil {
-			return err
-		}
-		if _, err := io.WriteString(w, strconv.FormatInt(t.ContentLength, 10)+"\r\n"); err != nil {
-			return err
-		}
-		if trace != nil && trace.WroteHeaderField != nil {
-			trace.WroteHeaderField("Content-Length", []string{strconv.FormatInt(t.ContentLength, 10)})
+		headers, hoexist := t.Header[HeaderOrderKey]
+		clexist := slices.Contains(headers, "content-length")
+
+		if !hoexist || !clexist {
+			if _, err := io.WriteString(w, "Content-Length: "); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, strconv.FormatInt(t.ContentLength, 10)+"\r\n"); err != nil {
+				return err
+			}
+			if trace != nil && trace.WroteHeaderField != nil {
+				trace.WroteHeaderField("Content-Length", []string{strconv.FormatInt(t.ContentLength, 10)})
+			}
 		}
 	} else if chunked(t.TransferEncoding) {
-		if _, err := io.WriteString(w, "Transfer-Encoding: chunked\r\n"); err != nil {
-			return err
-		}
-		if trace != nil && trace.WroteHeaderField != nil {
-			trace.WroteHeaderField("Transfer-Encoding", []string{"chunked"})
+		headers, hoexist := t.Header[HeaderOrderKey]
+		texist := slices.Contains(headers, "transfer-encoding")
+
+		if !hoexist || !texist {
+			if _, err := io.WriteString(w, "Transfer-Encoding: chunked\r\n"); err != nil {
+				return err
+			}
+			if trace != nil && trace.WroteHeaderField != nil {
+				trace.WroteHeaderField("Transfer-Encoding", []string{"chunked"})
+			}
+		} else {
+			t.Header["transfer-encoding"] = []string{"chunked"}
 		}
 	}
 
@@ -396,7 +408,7 @@ func (t *transferWriter) writeBody(w io.Writer) (err error) {
 	if !t.ResponseToHEAD && chunked(t.TransferEncoding) {
 		// Write Trailer header
 		if t.Trailer != nil {
-			if err := t.Trailer.Write(w); err != nil {
+			if err := t.Trailer.Write(w, t.ContentLength); err != nil {
 				return err
 			}
 		}
@@ -1086,9 +1098,9 @@ func (fr finishAsyncByteRead) Read(p []byte) (n int, err error) {
 
 var nopCloserType = reflect.TypeOf(io.NopCloser(nil))
 var nopCloserWriterToType = reflect.TypeOf(io.NopCloser(struct {
-	io.Reader
-	io.WriterTo
-}{}))
+		io.Reader
+		io.WriterTo
+	}{}))
 
 // unwrapNopCloser return the underlying reader and true if r is a NopCloser
 // else it return false.

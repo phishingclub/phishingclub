@@ -22,6 +22,7 @@ import (
 	"net/url"
 	urlpkg "net/url"
 	"strconv"
+	"slices"
 	"strings"
 	"sync"
 	_ "unsafe" // for linkname
@@ -677,12 +678,18 @@ func (r *Request) write(w io.Writer, usingProxy bool, extraHeaders Header, waitF
 	}
 
 	// Header lines
-	_, err = fmt.Fprintf(w, "Host: %s\r\n", host)
-	if err != nil {
-		return err
-	}
-	if trace != nil && trace.WroteHeaderField != nil {
-		trace.WroteHeaderField("Host", []string{host})
+	// Write Host immediately unless it's in HeaderOrder (will be written in sorted order by writeSubset)
+	headerOrder, hoexist := r.Header[HeaderOrderKey]
+	hostInOrder := hoexist && slices.Contains(headerOrder, "host")
+
+	if !hostInOrder {
+		_, err = fmt.Fprintf(w, "Host: %s\r\n", host)
+		if err != nil {
+			return err
+		}
+		if trace != nil && trace.WroteHeaderField != nil {
+			trace.WroteHeaderField("Host", []string{host})
+		}
 	}
 
 	// Use the defaultUserAgent unless the Header contains one, which
@@ -710,13 +717,18 @@ func (r *Request) write(w io.Writer, usingProxy bool, extraHeaders Header, waitF
 		return err
 	}
 
-	err = r.Header.writeSubset(w, reqWriteExcludeHeader, trace)
+	// If host is in HeaderOrder, add its value to headers so writeSubset can write it in order
+	if hostInOrder {
+		r.Header["host"] = []string{host}
+	}
+
+	err = r.Header.writeSubset(w, reqWriteExcludeHeader, trace, tw.ContentLength)
 	if err != nil {
 		return err
 	}
 
 	if extraHeaders != nil {
-		err = extraHeaders.write(w, trace)
+		err = extraHeaders.write(w, trace, tw.ContentLength)
 		if err != nil {
 			return err
 		}
@@ -1261,7 +1273,7 @@ func copyValues(dst, src url.Values) {
 func parsePostForm(r *Request) (vs url.Values, err error) {
 	if r.Body == nil {
 		err = errors.New("missing form body")
-		return
+		return vs, err
 	}
 	ct := r.Header.Get("Content-Type")
 	// RFC 7231, section 3.1.1.5 - empty type
@@ -1287,7 +1299,7 @@ func parsePostForm(r *Request) (vs url.Values, err error) {
 		}
 		if int64(len(b)) > maxFormSize {
 			err = errors.New("http: POST too large")
-			return
+			return vs, err
 		}
 		vs, e = url.ParseQuery(string(b))
 		if err == nil {
@@ -1301,7 +1313,7 @@ func parsePostForm(r *Request) (vs url.Values, err error) {
 		// request_test.go contains the start of this,
 		// in TestParseMultipartFormOrder and others.
 	}
-	return
+	return vs, err
 }
 
 // ParseForm populates r.Form and r.PostForm.

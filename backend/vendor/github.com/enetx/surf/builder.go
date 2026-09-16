@@ -2,69 +2,48 @@ package surf
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"time"
 
 	"github.com/enetx/g"
 	"github.com/enetx/http"
-)
-
-// browser represents the browser type being impersonated for fingerprinting.
-type browser int
-
-const (
-	unknownBrowser browser = iota // No specific browser fingerprinting
-	chromeBrowser                 // Chrome browser fingerprinting
-	firefoxBrowser                // Firefox browser fingerprinting
+	"github.com/enetx/surf/profiles"
 )
 
 // Builder provides a fluent interface for configuring HTTP clients with various advanced features
 // including proxy settings, TLS fingerprinting, HTTP/2 and HTTP/3 support, retry logic,
 // redirect handling, and browser impersonation capabilities.
 type Builder struct {
+	retryCodes               g.Slice[int]                               // HTTP status codes that trigger retries
+	proxy                    g.String                                   // Proxy URL for client connections
 	cli                      *Client                                    // The client being configured
-	proxy                    any                                        // Proxy configuration (static string/slice or dynamic function)
 	checkRedirect            func(*http.Request, []*http.Request) error // Custom redirect policy function
 	http2settings            *HTTP2Settings                             // HTTP/2 specific settings
 	http3settings            *HTTP3Settings                             // HTTP/3 specific settings
-	retryCodes               g.Slice[int]                               // HTTP status codes that trigger retries
 	cliMWs                   *middleware[*Client]                       // Priority-ordered client middlewares
+	headersApplier           profiles.HeadersApplier                    // Profile-specific request header pipeline (set by Impersonate)
 	retryWait                time.Duration                              // Wait duration between retry attempts
 	retryMax                 int                                        // Maximum number of retry attempts
 	maxRedirects             int                                        // Maximum number of redirects to follow
 	forceHTTP1               bool                                       // Force HTTP/1.1 protocol usage
+	forceHTTP2               bool                                       // Force HTTP/2 protocol usage
+	forceHTTP3               bool                                       // Force HTTP/3 protocol usage
 	cacheBody                bool                                       // Enable response body caching
 	followOnlyHostRedirects  bool                                       // Only follow redirects within same host
 	forwardHeadersOnRedirect bool                                       // Preserve headers during redirects
 	ja                       bool                                       // Enable JA3 TLS fingerprinting
-	singleton                bool                                       // Use singleton pattern for connection reuse
-	browser                  browser                                    // Browser type for fingerprinting
-	http3                    bool                                       // Enable HTTP/3 with automatic browser detection
+	disableCompression       bool                                       // Disable automatic response body decompression
 }
 
-// Build sets the provided settings for the client and returns the updated client.
-// It configures various settings like HTTP2, sessions, keep-alive, dial TLS, resolver,
-// interface address, timeout, and redirect policy.
-func (b *Builder) Build() *Client {
-	// Apply HTTP/3 settings lazily if enabled
-	if b.http3 {
-		http3s := b.HTTP3Settings()
-
-		switch b.browser {
-		case chromeBrowser:
-			http3s.Chrome().Set()
-		case firefoxBrowser:
-			http3s.Firefox().Set()
-		default:
-			// Default to Chrome if no browser was detected
-			http3s.Chrome().Set()
-		}
+// Build applies all configured settings and returns the client.
+// Returns g.Result with error if any middleware fails.
+func (b *Builder) Build() g.Result[*Client] {
+	if err := b.cliMWs.run(b.cli); err != nil {
+		return g.Err[*Client](err)
 	}
 
-	// apply each middleware to the Client
-	b.cliMWs.run(b.cli)
-
-	return b.cli
+	return g.Ok(b.cli)
 }
 
 // With registers middleware into the client builder with optional priority.
@@ -141,19 +120,22 @@ func (b *Builder) Boundary(boundary func() g.String) *Builder {
 	return b.addCliMW(func(client *Client) error { return boundaryMW(client, boundary) }, 999)
 }
 
-// Singleton configures the client to use a singleton instance, ensuring there's only one client instance.
-// This is needed specifically for JA or Impersonate functionalities.
-//
-//	cli := surf.NewClient().
-//		Builder().
-//		Singleton(). // for reuse client
-//		Impersonate().
-//		FireFox().
-//		Build()
-//
-//	defer cli.CloseIdleConnections()
-func (b *Builder) Singleton() *Builder {
-	b.singleton = true
+// SecureTLS enables TLS certificate verification.
+// By default surf skips certificate verification (InsecureSkipVerify=true).
+// Call this for production use where certificate validation is required.
+func (b *Builder) SecureTLS() *Builder {
+	b.cli.tlsConfig.InsecureSkipVerify = false
+	return b
+}
+
+// WebSocketGuard enables middleware that blocks WebSocket upgrade responses (HTTP 101).
+// Without this, surf allows 101 Switching Protocols to pass through — compatible with
+// websocket.Dial and other WebSocket libraries that use surf.Std() as HTTPClient.
+// Enable this only if you want to explicitly reject unexpected WebSocket upgrades.
+func (b *Builder) WebSocketGuard() *Builder {
+	b.addReqMW(got101ResponseMW, 0)
+	b.addRespMW(webSocketUpgradeErrorMW, 0)
+
 	return b
 }
 
@@ -172,16 +154,13 @@ func (b *Builder) HTTP2Settings() *HTTP2Settings {
 func (b *Builder) HTTP3Settings() *HTTP3Settings {
 	h3 := &HTTP3Settings{builder: b}
 	b.http3settings = h3
-	b.http3 = false
 
 	return h3
 }
 
-// HTTP3 enables HTTP/3 with automatic browser detection.
-// Settings are applied lazily in Build() based on the impersonated browser.
-// Usage: surf.NewClient().Builder().Impersonate().Chrome().HTTP3().Build()
-func (b *Builder) HTTP3() *Builder {
-	b.http3 = true
+// ForceHTTP3 configures the client to use HTTP/3 forcefully.
+func (b *Builder) ForceHTTP3() *Builder {
+	b.forceHTTP3 = true
 	return b
 }
 
@@ -214,26 +193,19 @@ func (b *Builder) Timeout(timeout time.Duration) *Builder {
 	return b.addCliMW(func(client *Client) error { return timeoutMW(client, timeout) }, 0)
 }
 
-// InterfaceAddr sets the network interface address for the client.
+// TLSConfig sets a custom TLS configuration for the client.
+func (b *Builder) TLSConfig(config *tls.Config) *Builder {
+	return b.addCliMW(func(client *Client) error { return tlsConfigMW(client, config) }, 0)
+}
+
+// InterfaceAddr sets the local network interface for outbound connections.
+// Accepts either an IP address (e.g., "192.168.1.100", "::1") or an interface name (e.g., "eth0", "en0").
 func (b *Builder) InterfaceAddr(address g.String) *Builder {
 	return b.addCliMW(func(client *Client) error { return interfaceAddrMW(client, address) }, 0)
 }
 
-// Proxy sets the proxy settings for the client.
-// Supports both static proxy configurations and dynamic proxy provider functions.
-//
-// Static proxy examples:
-//
-//	.Proxy("socks5://127.0.0.1:9050")
-//	.Proxy([]string{"socks5://proxy1", "http://proxy2"})
-//
-// Dynamic proxy example:
-//
-//	.Proxy(func() g.String {
-//	  // Your proxy rotation logic here
-//	  return "socks5://127.0.0.1:9050"
-//	})
-func (b *Builder) Proxy(proxy any) *Builder {
+// Proxy sets the proxy URL for the client.
+func (b *Builder) Proxy(proxy g.String) *Builder {
 	b.proxy = proxy
 	return b.addCliMW(func(client *Client) error { return proxyMW(client, proxy) }, 0)
 }
@@ -302,18 +274,34 @@ func (b *Builder) GetRemoteAddress() *Builder { return b.addReqMW(remoteAddrMW, 
 // DisableKeepAlive disable keep-alive connections.
 func (b *Builder) DisableKeepAlive() *Builder { return b.addCliMW(disableKeepAliveMW, 0) }
 
-// DisableCompression disables compression for the HTTP client.
-func (b *Builder) DisableCompression() *Builder { return b.addCliMW(disableCompressionMW, 0) }
+// DisableCompression disables automatic response body decompression.
+func (b *Builder) DisableCompression() *Builder {
+	b.disableCompression = true
+	return b
+}
 
 // Retry configures the retry behavior of the client.
 //
 // Parameters:
 //
-//	retryMax: Maximum number of retries to be attempted.
-//	retryWait: Duration to wait between retries.
-//	codes: Optional list of HTTP status codes that trigger retries.
-//	       If no codes are provided, default codes will be used
-//	       (500, 429, 503 - Internal Server Error, Too Many Requests, Service Unavailable).
+//	retryMax:  Maximum number of retry attempts. If zero or negative the
+//	           retry loop is disabled.
+//	retryWait: Minimum wait between retries. If the server responds with a
+//	           Retry-After header on a retryable status, the actual pause
+//	           becomes max(retryWait, Retry-After). Both legal forms are
+//	           honoured: integer delay-seconds and HTTP-date (IMF-fixdate,
+//	           RFC 850, ANSI C asctime). Absent or malformed values fall
+//	           back to retryWait.
+//	codes:     Optional list of HTTP status codes that trigger retries.
+//	           If no codes are provided, the defaults are used
+//	           (500 Internal Server Error, 429 Too Many Requests,
+//	           503 Service Unavailable).
+//
+// Upper bound for the entire retry cycle, including a long Retry-After
+// sleep, is the request context deadline — set it with
+// Request.WithContext(ctxWithDeadline). Builder.Timeout only bounds a
+// single cli.Do invocation (connect + transmission + body read); it does
+// not interrupt the sleep between retries.
 func (b *Builder) Retry(retryMax int, retryWait time.Duration, codes ...int) *Builder {
 	b.retryMax = retryMax
 	b.retryWait = retryWait
@@ -331,10 +319,16 @@ func (b *Builder) Retry(retryMax int, retryWait time.Duration, codes ...int) *Bu
 	return b
 }
 
-// ForceHTTP1MW configures the client to use HTTP/1.1 forcefully.
+// ForceHTTP1 configures the client to use HTTP/1.1 forcefully.
 func (b *Builder) ForceHTTP1() *Builder {
 	b.forceHTTP1 = true
-	return b.addCliMW(forseHTTP1MW, 0)
+	return b.addCliMW(forceHTTP1MW, 0)
+}
+
+// ForceHTTP2 configures the client to use HTTP/2 forcefully.
+func (b *Builder) ForceHTTP2() *Builder {
+	b.forceHTTP2 = true
+	return b.addCliMW(forceHTTP2MW, 0)
 }
 
 // Session configures whether the client should maintain a session.

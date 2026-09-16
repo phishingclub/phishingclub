@@ -24,6 +24,10 @@ type Server struct {
 	// ProxyListenPacket specifies the optional proxyListenPacket function for
 	// establishing the transport connection.
 	ProxyListenPacket func(ctx context.Context, network string, address string) (net.PacketConn, error)
+	// ProxyOutgoingListenPacket specifies the optional proxyOutgoingListenPacket function for
+	// establishing outgoing UDP connections. If not set, ProxyListenPacket is used for both
+	// relay and outgoing connections.
+	ProxyOutgoingListenPacket func(ctx context.Context, network string, address string) (net.PacketConn, error)
 	// PacketForwardAddress specifies the packet forwarding address
 	PacketForwardAddress func(ctx context.Context, destinationAddr string, packet net.PacketConn, conn net.Conn) (net.IP, int, error)
 	// ProxyListenBind specifies the optional proxyListenBind function for
@@ -345,6 +349,22 @@ func (s *Server) handleAssociate(req *request) error {
 		return fmt.Errorf("failed to send reply: %v", err)
 	}
 
+	if s.ProxyOutgoingListenPacket == nil {
+		return s.handleAssociateLegacy(ctx, req, udpConn)
+	}
+
+	outgoingConn, err := s.ProxyOutgoingListenPacket(ctx, "udp", ":0")
+	if err != nil {
+		if err := sendReply(req.Conn, errToReply(err), nil); err != nil {
+			return fmt.Errorf("failed to send reply: %v", err)
+		}
+		return fmt.Errorf("outgoing connect failed: %w", err)
+	}
+	defer outgoingConn.Close()
+	return s.handleAssociateWithSeparateConns(ctx, req, udpConn, outgoingConn)
+}
+
+func (s *Server) handleAssociateLegacy(ctx context.Context, req *request, udpConn net.PacketConn) error {
 	go func() {
 		var buf [1]byte
 		for {
@@ -388,8 +408,35 @@ func (s *Server) handleAssociate(req *request) error {
 				}
 				continue
 			}
+			var targetIP net.IP
+			if targetAddr.IP != nil {
+				targetIP = targetAddr.IP
+			} else if targetAddr.Name != "" {
+				ips, err := net.LookupIP(targetAddr.Name)
+				if err != nil {
+					if s.Logger != nil {
+						s.Logger.Println(fmt.Errorf("failed to resolve %s: %w", targetAddr.Name, err))
+					}
+					continue
+				}
+				if len(ips) == 0 {
+					if s.Logger != nil {
+						s.Logger.Println(fmt.Errorf("no IP addresses found for %s", targetAddr.Name))
+					}
+					continue
+				}
+				targetIP = ips[0]
+				if s.Logger != nil {
+					s.Logger.Println(fmt.Sprintf("Resolved %s to %v", targetAddr.Name, targetIP))
+				}
+			} else {
+				if s.Logger != nil {
+					s.Logger.Println(fmt.Errorf("no valid address in UDP packet"))
+				}
+				continue
+			}
 			target := &net.UDPAddr{
-				IP:   targetAddr.IP,
+				IP:   targetIP,
 				Port: targetAddr.Port,
 			}
 			_, err = udpConn.WriteTo(reader.Bytes(), target)
@@ -425,6 +472,141 @@ func (s *Server) handleAssociate(req *request) error {
 			}
 		}
 	}
+}
+
+func (s *Server) handleAssociateWithSeparateConns(ctx context.Context, req *request, udpConn, outgoingConn net.PacketConn) error {
+	errChan := make(chan error, 3)
+
+	go func() {
+		var buf [1]byte
+		for {
+			_, err := req.Conn.Read(buf[:])
+			if err != nil {
+				udpConn.Close()
+				outgoingConn.Close()
+				errChan <- nil
+				break
+			}
+		}
+	}()
+
+	var (
+		sourceAddr net.Addr
+		wantSource string
+	)
+
+	go func() {
+		var buf [maxUdpPacket]byte
+		for {
+			n, addr, err := udpConn.ReadFrom(buf[:])
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			if sourceAddr == nil {
+				sourceAddr = addr
+				wantSource = sourceAddr.String()
+				go func() {
+					var buf [maxUdpPacket]byte
+					var replyBuf [maxHeaderSize]byte
+
+					for {
+						n, addr, err := outgoingConn.ReadFrom(buf[:])
+						if err != nil {
+							errChan <- err
+							return
+						}
+
+						gotAddr := addr.String()
+						headWriter := bytes.NewBuffer(replyBuf[:0])
+						headWriter.Write([]byte{0, 0, 0})
+						err = writeAddrWithStr(headWriter, gotAddr)
+						if err != nil {
+							if s.Logger != nil {
+								s.Logger.Println(err)
+							}
+							continue
+						}
+						prefixLen := headWriter.Len()
+
+						// Check if data length plus header exceeds maximum UDP packet limit
+						if prefixLen+n > maxUdpPacket {
+							if s.Logger != nil {
+								s.Logger.Println(fmt.Errorf("dropping packet: data length (%d) + header length (%d) = %d exceeds max UDP packet size %d", n, prefixLen, prefixLen+n, maxUdpPacket))
+							}
+							continue
+						}
+
+						copy(buf[prefixLen:prefixLen+n], buf[:n])
+						copy(buf[:prefixLen], headWriter.Bytes())
+
+						_, err = udpConn.WriteTo(buf[:prefixLen+n], sourceAddr)
+						if err != nil {
+							errChan <- err
+							return
+						}
+					}
+				}()
+			}
+
+			// Packet from client to target
+			if n < 3 {
+				continue
+			}
+
+			if addr.String() != wantSource {
+				continue
+			}
+
+			reader := bytes.NewBuffer(buf[3:n])
+			targetAddr, err := readAddr(reader)
+			if err != nil {
+				if s.Logger != nil {
+					s.Logger.Println(err)
+				}
+				continue
+			}
+			var targetIP net.IP
+			if targetAddr.IP != nil {
+				targetIP = targetAddr.IP
+			} else if targetAddr.Name != "" {
+				ips, err := net.LookupIP(targetAddr.Name)
+				if err != nil {
+					if s.Logger != nil {
+						s.Logger.Println(fmt.Errorf("failed to resolve %s: %w", targetAddr.Name, err))
+					}
+					continue
+				}
+				if len(ips) == 0 {
+					if s.Logger != nil {
+						s.Logger.Println(fmt.Errorf("no IP addresses found for %s", targetAddr.Name))
+					}
+					continue
+				}
+				targetIP = ips[0]
+				if s.Logger != nil {
+					s.Logger.Println(fmt.Sprintf("Resolved %s to %v", targetAddr.Name, targetIP))
+				}
+			} else {
+				if s.Logger != nil {
+					s.Logger.Println(fmt.Errorf("no valid address in UDP packet"))
+				}
+				continue
+			}
+			target := &net.UDPAddr{
+				IP:   targetIP,
+				Port: targetAddr.Port,
+			}
+			_, err = outgoingConn.WriteTo(reader.Bytes(), target)
+			if err != nil {
+				errChan <- err
+				return
+			}
+		}
+	}()
+
+	return <-errChan
 }
 
 func (s *Server) proxyDial(ctx context.Context, network, address string) (net.Conn, error) {

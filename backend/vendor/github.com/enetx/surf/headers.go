@@ -29,20 +29,22 @@ func (h Headers) Contains(header g.String, patterns any) bool {
 					return true
 				}
 			case []string:
-				if v.ContainsAny(g.TransformSlice(ps, g.NewString).Iter().Map(g.String.Lower).Collect()...) {
+				if v.ContainsAny(g.SliceOf(ps...).Iter().Map(g.NewString).Map(g.String.Lower).Collect().Slice()...) {
 					return true
 				}
 			case g.Slice[string]:
-				if v.ContainsAny(g.TransformSlice(ps, g.NewString).Iter().Map(g.String.Lower).Collect()...) {
+				if v.ContainsAny(ps.Iter().Map(g.NewString).Map(g.String.Lower).Collect().Slice()...) {
 					return true
 				}
 			case g.Slice[g.String]:
-				if v.ContainsAny(ps.Iter().Map(g.String.Lower).Collect()...) {
+				if v.ContainsAny(ps.Iter().Map(g.String.Lower).Collect().Slice()...) {
 					return true
 				}
 			case []*regexp.Regexp:
-				if v.Regexp().MatchAny(ps...) {
-					return true
+				for _, re := range ps {
+					if re.MatchString(v.Std()) {
+						return true
+					}
 				}
 			}
 		}
@@ -54,12 +56,16 @@ func (h Headers) Contains(header g.String, patterns any) bool {
 // Values returns the values associated with a specified header key.
 // It wraps the Values method from the textproto.MIMEHeader type.
 func (h Headers) Values(key g.String) g.Slice[g.String] {
-	return g.TransformSlice(textproto.MIMEHeader(h).Values(key.Std()), g.NewString)
+	return g.SliceOf(textproto.MIMEHeader(h).Values(key.Std())...).Iter().Map(g.NewString).Collect().Slice()
 }
 
 // Get returns the first value associated with a specified header key.
 // It wraps the Get method from the textproto.MIMEHeader type.
 func (h Headers) Get(key g.String) g.String { return g.String(textproto.MIMEHeader(h).Get(key.Std())) }
+
+// Del deletes the values associated with a specified header key.
+// It wraps the Del method from the textproto.MIMEHeader type.
+func (h Headers) Del(key g.String) { textproto.MIMEHeader(h).Del(key.Std()) }
 
 // Clone returns a copy of Headers or nil if Headers is nil.
 func (h Headers) Clone() Headers { return Headers(http.Header(h).Clone()) }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/enetx/g"
 	"github.com/enetx/surf"
 	"github.com/phishingclub/phishingclub/service"
 )
@@ -103,7 +104,7 @@ func (m *ProxyHandler) createSurfClient(userAgent string, proxyConfig *service.P
 			m.logger.Debugw("applying chrome browser impersonation")
 		case profile.isFirefox:
 			// firefox impersonation
-			builder = impersonate.FireFox()
+			builder = impersonate.Firefox()
 			m.logger.Debugw("applying firefox browser impersonation")
 		case profile.isSafari:
 			// safari uses webkit - default to chrome for now as surf doesn't have safari profile
@@ -141,17 +142,20 @@ func (m *ProxyHandler) createSurfClient(userAgent string, proxyConfig *service.P
 		if err != nil {
 			return nil, err
 		}
-		builder = builder.Proxy(proxyURL.String())
+		builder = builder.Proxy(g.String(proxyURL.String()))
 		m.logger.Debugw("configured surf client with proxy",
 			"proxy", proxyURL.String(),
 		)
 	}
 
 	// build the client
-	client := builder.Build()
+	result := builder.Build()
+	if result.IsErr() {
+		return nil, result.Err()
+	}
 
 	// convert surf client to standard http.Client for compatibility
-	return client.Std(), nil
+	return result.Ok().Std(), nil
 }
 
 // createHTTPClientWithImpersonation creates surf http client with optional impersonation

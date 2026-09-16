@@ -2,12 +2,35 @@ package g
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 
 	"github.com/enetx/g/cmp"
-	"github.com/enetx/g/f"
-	"github.com/enetx/g/rand"
 )
+
+// Pair is a key-value pair yielded by the key-value sequences.
+//
+// It is a defined struct rather than an alias so that g's iterator core owns
+// it outright and carries no non-stdlib dependency.
+type Pair[K, V any] struct {
+	Key   K
+	Value V
+}
+
+// Unpack returns the pair's key and value, enabling tuple-style destructuring.
+//
+//	k, v := p.Unpack()
+//
+// The two-value result can also feed a (K, V) call site directly:
+//
+//	yield(p.Unpack())
+func (p Pair[K, V]) Unpack() (K, V) { return p.Key, p.Value }
+
+// MapOrd is an ordered map that maintains insertion order using a slice of
+// key-value pairs. Key lookups (Get, Insert, Contains, Remove, Entry) scan the
+// slice linearly and are therefore O(n); use Map for O(1) lookups when order is
+// not required.
+type MapOrd[K comparable, V any] []Pair[K, V] // ordered key-value pairs
 
 // NewMapOrd creates a new ordered Map with the specified size (if provided).
 // An ordered Map is an Map that maintains the order of its key-value pairs based on the
@@ -15,7 +38,7 @@ import (
 //
 // Parameters:
 //
-// - size ...int: (Optional) The initial size of the ordered Map. If not provided, a default size
+// - size ...Int: (Optional) The initial size of the ordered Map. If not provided, a default size
 // will be used.
 //
 // Returns:
@@ -29,42 +52,39 @@ import (
 //
 // Creates a new ordered Map with an initial size of 10.
 func NewMapOrd[K comparable, V any](size ...Int) MapOrd[K, V] {
-	return make(MapOrd[K, V], 0, Slice[Int](size).Get(0).UnwrapOrDefault())
+	if len(size) > 0 {
+		return make(MapOrd[K, V], 0, size[0])
+	}
+
+	return make(MapOrd[K, V], 0)
 }
 
 // Transform applies a transformation function to the MapOrd and returns the result.
-func (mo MapOrd[K, V]) Transform(fn func(MapOrd[K, V]) MapOrd[K, V]) MapOrd[K, V] { return fn(mo) }
+func (mo MapOrd[K, V]) Transform[U any](fn func(MapOrd[K, V]) U) U { return fn(mo) }
 
-// Entry returns a MapOrdEntry object for the given key, providing fine-grained
-// control over insertion, mutation, and deletion of its value in the ordered Map,
-// while preserving the insertion order.
-//
-// Example:
-//
-//	mo := g.NewMapOrd[string, int]()
-//	// Insert 1 if "foo" is absent, then increment it
-//	e := mo.Entry("foo")
-//	e.OrSet(1).
-//	e.Transform(func(v int) int { return v + 1 })
-//
-// The entire operation requires only a single key lookup and works without
-// additional allocations.
-func (mo *MapOrd[K, V]) Entry(key K) MapOrdEntry[K, V] { return MapOrdEntry[K, V]{mo, key} }
+// Entry returns an OrdEntry for the given key.
+func (mo *MapOrd[K, V]) Entry(key K) OrdEntry[K, V] {
+	if i := mo.index(key); i != -1 {
+		return OccupiedOrdEntry[K, V]{mo: mo, key: key, idx: i}
+	}
 
-// Iter returns an iterator (SeqMapOrd[K, V]) for the ordered Map, allowing for sequential iteration
+	return VacantOrdEntry[K, V]{mo: mo, key: key}
+}
+
+// Iter returns an iterator (Seq2[K, V]) for the ordered Map, allowing for sequential iteration
 // over its key-value pairs. It is commonly used in combination with higher-order functions,
 // such as 'ForEach', to perform operations on each key-value pair of the ordered Map.
 //
 // Returns:
 //
-// A SeqMapOrd[K, V], which can be used for sequential iteration over the key-value pairs of the ordered Map.
+// A Seq2[K, V], which can be used for sequential iteration over the key-value pairs of the ordered Map.
 //
 // Example usage:
 //
 //	m := g.NewMapOrd[int, int]()
-//	m.Set(1, 1)
-//	m.Set(2, 2)
-//	m.Set(3, 3).
+//	m.Insert(1, 1)
+//	m.Insert(2, 2)
+//	m.Insert(3, 3)
 //
 //	m.Iter().ForEach(func(k, v int) {
 //	    // Process key-value pair
@@ -72,30 +92,30 @@ func (mo *MapOrd[K, V]) Entry(key K) MapOrdEntry[K, V] { return MapOrdEntry[K, V
 //
 // The 'Iter' method provides a convenient way to traverse the key-value pairs of an ordered Map
 // in a functional style, enabling operations like mapping or filtering.
-func (mo MapOrd[K, V]) Iter() SeqMapOrd[K, V] {
+func (mo MapOrd[K, V]) Iter() Seq2[K, V] {
 	return func(yield func(K, V) bool) {
 		for _, v := range mo {
-			if !yield(v.Key, v.Value) {
+			if !yield(v.Unpack()) {
 				return
 			}
 		}
 	}
 }
 
-// IterReverse returns an iterator (SeqMapOrd[K, V]) for the ordered Map that allows for sequential iteration
+// IterReverse returns an iterator (Seq2[K, V]) for the ordered Map that allows for sequential iteration
 // over its key-value pairs in reverse order. This method is useful when you need to process the elements
 // from the last to the first.
 //
 // Returns:
 //
-// A SeqMapOrd[K, V], which can be used for sequential iteration over the key-value pairs of the ordered Map in reverse order.
+// A Seq2[K, V], which can be used for sequential iteration over the key-value pairs of the ordered Map in reverse order.
 //
 // Example usage:
 //
 //	m := g.NewMapOrd[int, int]()
-//	m.Set(1, 1)
-//	m.Set(2, 2)
-//	m.Set(3, 3)
+//	m.Insert(1, 1)
+//	m.Insert(2, 2)
+//	m.Insert(3, 3)
 //
 //	m.IterReverse().ForEach(func(k, v int) {
 //	    // Process key-value pair in reverse order
@@ -104,37 +124,16 @@ func (mo MapOrd[K, V]) Iter() SeqMapOrd[K, V] {
 //
 // The 'IterReverse' method complements the 'Iter' method by providing a way to access the elements
 // in a reverse sequence, offering additional flexibility in data processing scenarios.
-func (mo MapOrd[K, V]) IterReverse() SeqMapOrd[K, V] {
+func (mo MapOrd[K, V]) IterReverse() Seq2[K, V] {
 	return func(yield func(K, V) bool) {
 		for i := len(mo) - 1; i >= 0; i-- {
 			v := mo[i]
-			if !yield(v.Key, v.Value) {
+			if !yield(v.Unpack()) {
 				return
 			}
 		}
 	}
 }
-
-// MapOrdFromStd converts a standard Go map to an ordered Map.
-// The resulting ordered Map will maintain the order of its key-value pairs based on the order of
-// insertion.
-// This function is useful when you want to create an ordered Map from an existing Go map.
-//
-// Parameters:
-//
-// - m map[K]V: The input Go map to be converted to an ordered Map.
-//
-// Returns:
-//
-// - MapOrd[K, V]: New ordered Map containing the same key-value pairs as the
-// input Go map.
-//
-// Example usage:
-//
-//	mapOrd := g.MapOrdFromStd[string, int](goMap)
-//
-// Converts the standard Go map 'map[K]V' to an ordered Map.
-func MapOrdFromStd[K comparable, V any](m map[K]V) MapOrd[K, V] { return Map[K, V](m).ToMapOrd() }
 
 // SortBy sorts the ordered Map by a custom comparison function.
 //
@@ -279,25 +278,9 @@ func (mo *MapOrd[K, V]) Copy(src MapOrd[K, V]) {
 	}
 }
 
-// ToMap converts the ordered Map to a standard Map.
-func (mo MapOrd[K, V]) ToMap() Map[K, V] {
-	m := NewMap[K, V](mo.Len())
-	mo.Iter().ForEach(func(k K, v V) { m[k] = v })
-
-	return m
-}
-
-// ToMapSafe converts a ordered Map to a thread-safe Map.
-func (mo MapOrd[K, V]) ToMapSafe() *MapSafe[K, V] {
-	ms := NewMapSafe[K, V]()
-	mo.Iter().ForEach(func(k K, v V) { ms.Set(k, v) })
-
-	return ms
-}
-
-// Set sets the value for the specified key in the ordered Map,
+// Insert sets the value for the specified key in the ordered Map,
 // and returns the previous value if it existed.
-func (mo *MapOrd[K, V]) Set(key K, value V) Option[V] {
+func (mo *MapOrd[K, V]) Insert(key K, value V) Option[V] {
 	if i := mo.index(key); i != -1 {
 		prev := (*mo)[i].Value
 		(*mo)[i].Value = value
@@ -321,33 +304,6 @@ func (mo MapOrd[K, V]) Get(key K) Option[V] {
 
 	return None[V]()
 }
-
-// Shuffle randomly reorders the elements of the ordered Map.
-// It operates in place and affects the original order of the map's entries.
-//
-// The function uses the crypto/rand package to generate random indices.
-func (mo MapOrd[K, V]) Shuffle() {
-	for i := mo.Len() - 1; i > 0; i-- {
-		j := rand.N(i + 1)
-		mo[i], mo[j] = mo[j], mo[i]
-	}
-}
-
-// Invert inverts the key-value pairs in the ordered Map, creating a new ordered Map with the
-// values as keys and the original keys as values.
-func (mo MapOrd[K, V]) Invert() MapOrd[any, K] {
-	if mo.Empty() {
-		return NewMapOrd[any, K]()
-	}
-
-	result := make(MapOrd[any, K], 0, len(mo))
-	for _, pair := range mo {
-		result = append(result, Pair[any, K]{Key: pair.Value, Value: pair.Key})
-	}
-
-	return result
-}
-
 func (mo MapOrd[K, V]) index(key K) int {
 	for i, mp := range mo {
 		if mp.Key == key {
@@ -359,40 +315,47 @@ func (mo MapOrd[K, V]) index(key K) int {
 }
 
 // Keys returns an Slice containing all the keys in the ordered Map.
-func (mo MapOrd[K, V]) Keys() Slice[K] { return mo.Iter().Keys().Collect() }
-
-// Values returns an Slice containing all the values in the ordered Map.
-func (mo MapOrd[K, V]) Values() Slice[V] { return mo.Iter().Values().Collect() }
-
-// Delete removes the specified keys from the ordered Map.
-//
-// It preserves the original insertion order of the remaining elements
-// and performs the deletion in a single pass with O(n) complexity.
-//
-// Internally, it builds a set of keys to delete and reconstructs the map
-// without the removed entries. Key lookup is optimized via a map[K]int index.
-//
-// Example:
-//
-//	mo.Delete("a", "b", "c")
-func (mo *MapOrd[K, V]) Delete(keys ...K) {
-	if len(keys) == 0 || mo.Empty() {
-		return
+func (mo MapOrd[K, V]) Keys() Slice[K] {
+	if len(mo) == 0 {
+		return NewSlice[K]()
 	}
 
-	idx := mo.indexMap()
-	seen := SetOf(keys...)
-	nmo := make(MapOrd[K, V], 0, len(*mo)-len(keys))
+	keys := make(Slice[K], len(mo))
+	for i, p := range mo {
+		keys[i] = p.Key
+	}
 
-	for _, p := range *mo {
-		if !seen.Contains(p.Key) {
-			nmo = append(nmo, p)
-		} else {
-			delete(idx, p.Key)
+	return keys
+}
+
+// Values returns an Slice containing all the values in the ordered Map.
+func (mo MapOrd[K, V]) Values() Slice[V] {
+	if len(mo) == 0 {
+		return NewSlice[V]()
+	}
+
+	values := make(Slice[V], len(mo))
+	for i, p := range mo {
+		values[i] = p.Value
+	}
+
+	return values
+}
+
+// Remove removes the specified key from the ordered Map and returns the removed value.
+func (mo *MapOrd[K, V]) Remove(key K) Option[V] {
+	if mo.IsEmpty() {
+		return None[V]()
+	}
+
+	for i, p := range *mo {
+		if p.Key == key {
+			*mo = slices.Delete(*mo, i, i+1)
+			return Some(p.Value)
 		}
 	}
 
-	*mo = nmo
+	return None[V]()
 }
 
 // Eq compares the current ordered Map to another ordered Map and returns true if they are equal.
@@ -406,19 +369,22 @@ func (mo MapOrd[K, V]) Eq(other MapOrd[K, V]) bool {
 
 	idx := other.indexMap()
 
-	var zero V
-	comparable := f.IsComparable(zero)
-
+	comparable := isValueComparable[V]()
 	for i, mp := range mo {
 		j, ok := idx[mp.Key]
+
 		if !ok || j != i {
 			return false
 		}
 
-		value := other[j].Value
-
-		if comparable && !f.Eq[any](value)(mp.Value) || !comparable && !f.Eqd(value)(mp.Value) {
-			return false
+		if comparable {
+			if any(other[j].Value) != any(mp.Value) {
+				return false
+			}
+		} else {
+			if !reflect.DeepEqual(other[j].Value, mp.Value) {
+				return false
+			}
 		}
 	}
 
@@ -432,6 +398,7 @@ func (mo MapOrd[K, V]) String() string {
 	}
 
 	var b Builder
+	b.Grow(Int(len(mo)) * 16)
 	b.WriteString("MapOrd{")
 
 	first := true
@@ -441,7 +408,9 @@ func (mo MapOrd[K, V]) String() string {
 		}
 
 		first = false
-		b.WriteString(Format("{}:{}", pair.Key, pair.Value))
+		fmt.Fprint(&b, pair.Key)
+		b.WriteByte(':')
+		fmt.Fprint(&b, pair.Value)
 	}
 
 	b.WriteString("}")
@@ -450,22 +419,22 @@ func (mo MapOrd[K, V]) String() string {
 }
 
 // Clear removes all key-value pairs from the ordered Map.
-func (mo *MapOrd[K, V]) Clear() { *mo = (*mo)[:0] }
+func (mo *MapOrd[K, V]) Clear() {
+	clear(*mo)
+	*mo = (*mo)[:0]
+}
 
 // Contains checks if the ordered Map contains the specified key.
 func (mo MapOrd[K, V]) Contains(key K) bool { return mo.index(key) != -1 }
 
-// Empty checks if the ordered Map is empty.
-func (mo MapOrd[K, V]) Empty() bool { return len(mo) == 0 }
+// IsEmpty checks if the ordered Map is empty.
+func (mo MapOrd[K, V]) IsEmpty() bool { return len(mo) == 0 }
 
 // Len returns the number of key-value pairs in the ordered Map.
 func (mo MapOrd[K, V]) Len() Int { return Int(len(mo)) }
 
 // Ne compares the current ordered Map to another ordered Map and returns true if they are not equal.
 func (mo MapOrd[K, V]) Ne(other MapOrd[K, V]) bool { return !mo.Eq(other) }
-
-// NotEmpty checks if the ordered Map is not empty.
-func (mo MapOrd[K, V]) NotEmpty() bool { return !mo.Empty() }
 
 // Print writes the key-value pairs of the MapOrd to the standard output (console)
 // and returns the MapOrd unchanged.
@@ -479,7 +448,8 @@ func (mo MapOrd[K, V]) Println() MapOrd[K, V] { fmt.Println(mo); return mo }
 //
 // This function is used to create a temporary indexMap that maps each key in the
 // ordered map to its position (insertion order) within the slice. It is useful
-// for optimizing lookup operations such as Set, Delete, Copy, or Eq.
+// for amortizing the cost of repeated lookups within a single bulk operation
+// such as Copy or Eq, where the per-key linear scan would otherwise be O(n^2).
 //
 // Time complexity: O(n), where n is the number of key-value pairs in the MapOrd.
 func (mo MapOrd[K, V]) indexMap() map[K]int {
@@ -490,4 +460,36 @@ func (mo MapOrd[K, V]) indexMap() map[K]int {
 	}
 
 	return idx
+}
+
+// PairOf creates a Pair from the provided key and value.
+//
+// Example:
+//
+//	p := g.PairOf("answer", 42) // Pair[string, int]
+func PairOf[K, V any](key K, value V) Pair[K, V] { return Pair[K, V]{Key: key, Value: value} }
+
+// MapOrdOf creates a MapOrd from the provided key-value pairs, preserving their order.
+//
+// Duplicate keys keep their first-seen position, while the value is updated
+// to the most recent one (last-write-wins).
+//
+// Example:
+//
+//	mo := g.MapOrdOf(g.PairOf("a", 1), g.PairOf("b", 2))
+func MapOrdOf[K comparable, V any](pairs ...Pair[K, V]) MapOrd[K, V] {
+	mo := NewMapOrd[K, V](Int(len(pairs)))
+	idx := make(map[K]int, len(pairs))
+
+	for _, p := range pairs {
+		if i, ok := idx[p.Key]; ok {
+			mo[i].Value = p.Value
+			continue
+		}
+
+		idx[p.Key] = len(mo)
+		mo = append(mo, p)
+	}
+
+	return mo
 }

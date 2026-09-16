@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -12,9 +13,11 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/enetx/http"
 	"github.com/enetx/http2"
+	_ "github.com/enetx/surf/pkg/socks4"
 	"golang.org/x/net/proxy"
 )
 
@@ -37,20 +40,45 @@ type proxyDialer struct {
 	// overridden dialer allow to control establishment of TCP connection
 	Dialer net.Dialer
 
-	// overridden DialTLS allows user to control establishment of TLS connection
-	// MUST return connection with completed Handshake, and NegotiatedProtocol
-	DialTLS func(network, address string) (net.Conn, string, error)
+	// DialTLSContext allows user to control establishment of TLS connection.
+	// MUST return connection with completed Handshake, and NegotiatedProtocol.
+	DialTLSContext func(ctx context.Context, network, address string) (net.Conn, string, error)
 
 	h2Mu   sync.Mutex
 	h2Conn *http2.ClientConn
 	conn   net.Conn
 
-	tr2 *http2.Transport
+	tr2Once sync.Once
+	tr2     *http2.Transport
+}
+
+// SetResolver sets a custom DNS resolver for the proxy dialer.
+// This resolver will be used for all DNS lookups including proxy server address
+// and target host resolution. When set, target hostnames are pre-resolved locally
+// before being sent to the proxy, ensuring DNS queries bypass the proxy.
+func (c *proxyDialer) SetResolver(r *net.Resolver) {
+	c.Dialer.Resolver = r
+}
+
+// dialerProxy is an adapter that implements proxy.Dialer interface
+// using net.Dialer to support custom DNS resolver with proxies.
+type dialerProxy struct {
+	dialer *net.Dialer
+}
+
+func (d *dialerProxy) Dial(network, addr string) (net.Conn, error) {
+	return d.dialer.Dial(network, addr)
+}
+
+func (d *dialerProxy) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return d.dialer.DialContext(ctx, network, addr)
 }
 
 const (
 	schemeHTTP  = "http"
 	schemeHTTPS = "https"
+	socks4      = "socks4"
+	socks4A     = "socks4a"
 	socks5      = "socks5"
 	socks5H     = "socks5h"
 )
@@ -76,7 +104,7 @@ func NewDialer(proxy string) (*proxyDialer, error) {
 		if parsed.Port() == "" {
 			parsed.Host = net.JoinHostPort(parsed.Host, "443")
 		}
-	case socks5, socks5H:
+	case socks4, socks4A, socks5, socks5H:
 		if parsed.Port() == "" {
 			parsed.Host = net.JoinHostPort(parsed.Host, "1080")
 		}
@@ -116,8 +144,21 @@ func (c *proxyDialer) connectHTTP1(req *http.Request, conn net.Conn) error {
 	req.ProtoMajor = 1
 	req.ProtoMinor = 1
 
-	err := req.Write(conn)
-	if err != nil {
+	ctx := req.Context()
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			conn.SetDeadline(time.Now().Add(-time.Second))
+		case <-done:
+			conn.SetDeadline(time.Time{})
+		}
+	}()
+
+	if err := req.Write(conn); err != nil {
 		_ = conn.Close()
 		return err
 	}
@@ -136,7 +177,12 @@ func (c *proxyDialer) connectHTTP1(req *http.Request, conn net.Conn) error {
 	return nil
 }
 
-func (c *proxyDialer) connectHTTP2(req *http.Request, conn net.Conn, h2clientConn *http2.ClientConn) (net.Conn, error) {
+func (c *proxyDialer) connectHTTP2(
+	req *http.Request,
+	conn net.Conn,
+	h2clientConn *http2.ClientConn,
+	closeOnError bool,
+) (net.Conn, error) {
 	req.Proto = "HTTP/2.0"
 	req.ProtoMajor = 2
 	req.ProtoMinor = 0
@@ -145,12 +191,25 @@ func (c *proxyDialer) connectHTTP2(req *http.Request, conn net.Conn, h2clientCon
 
 	resp, err := h2clientConn.RoundTrip(req)
 	if err != nil {
-		_ = conn.Close()
+		_ = pw.Close()
+		_ = pr.Close()
+
+		if closeOnError {
+			_ = conn.Close()
+		}
+
 		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		_ = conn.Close()
+		_ = pw.Close()
+		_ = pr.Close()
+		_ = resp.Body.Close()
+
+		if closeOnError {
+			_ = conn.Close()
+		}
+
 		return nil, &ErrProxyStatus{resp.Status}
 	}
 
@@ -162,8 +221,23 @@ func (c *proxyDialer) DialContext(ctx context.Context, network, address string) 
 		return nil, &ErrProxyEmpty{}
 	}
 
+	// Pre-resolve DNS locally if custom resolver is configured.
+	if c.Dialer.Resolver != nil {
+		host, port, err := net.SplitHostPort(address)
+		if err == nil {
+			if net.ParseIP(host) == nil {
+				ips, err := c.Dialer.Resolver.LookupIPAddr(ctx, host)
+				if err == nil && len(ips) > 0 {
+					address = net.JoinHostPort(ips[0].IP.String(), port)
+				}
+			}
+		}
+	}
+
 	if strings.HasPrefix(c.ProxyURL.Scheme, "socks") {
-		dial, err := proxy.FromURL(c.ProxyURL, proxy.Direct)
+		forward := proxy.Dialer(&dialerProxy{dialer: &c.Dialer})
+
+		dial, err := proxy.FromURL(c.ProxyURL, forward)
 		if err != nil {
 			return nil, err
 		}
@@ -187,17 +261,25 @@ func (c *proxyDialer) DialContext(ctx context.Context, network, address string) 
 	c.h2Mu.Lock()
 	unlocked := false
 
-	if c.h2Conn != nil && c.conn != nil {
-		if c.h2Conn.CanTakeNewRequest() {
-			rc := c.conn
-			cc := c.h2Conn
-			c.h2Mu.Unlock()
-			unlocked = true
-			proxyConn, err := c.connectHTTP2(req, rc, cc)
-			if err == nil {
-				return proxyConn, nil
-			}
+	if c.h2Conn != nil && c.conn != nil && c.h2Conn.CanTakeNewRequest() {
+		rc := c.conn
+		cc := c.h2Conn
+		c.h2Mu.Unlock()
+		unlocked = true
+		proxyConn, err := c.connectHTTP2(req, rc, cc, false)
+		if err == nil {
+			return proxyConn, nil
 		}
+
+		c.h2Mu.Lock()
+
+		if c.conn == rc && c.h2Conn == cc {
+			_ = rc.Close()
+			c.conn = nil
+			c.h2Conn = nil
+		}
+
+		c.h2Mu.Unlock()
 	}
 
 	if !unlocked {
@@ -225,28 +307,28 @@ func (c *proxyDialer) initProxyConn(ctx context.Context, network string) (net.Co
 		if err != nil {
 			return nil, "", err
 		}
-
 	case schemeHTTPS:
-		if c.DialTLS != nil {
-			rawConn, negotiatedProtocol, err = c.DialTLS(network, c.ProxyURL.Host)
+		if c.DialTLSContext != nil {
+			rawConn, negotiatedProtocol, err = c.DialTLSContext(ctx, network, c.ProxyURL.Host)
 			if err != nil {
 				return nil, "", err
 			}
 		} else {
+			tcpConn, err := c.Dialer.DialContext(ctx, network, c.ProxyURL.Host)
+			if err != nil {
+				return nil, "", err
+			}
+
 			tlsConf := tls.Config{
 				NextProtos:         []string{"h2", "http/1.1"},
 				ServerName:         c.ProxyURL.Hostname(),
 				InsecureSkipVerify: true,
 			}
 
-			var tlsConn *tls.Conn
-			tlsConn, err = tls.Dial(network, c.ProxyURL.Host, &tlsConf)
-			if err != nil {
-				return nil, "", err
-			}
+			tlsConn := tls.Client(tcpConn, &tlsConf)
 
-			err = tlsConn.Handshake()
-			if err != nil {
+			if err = tlsConn.HandshakeContext(ctx); err != nil {
+				_ = tcpConn.Close()
 				return nil, "", err
 			}
 
@@ -262,27 +344,52 @@ func (c *proxyDialer) initProxyConn(ctx context.Context, network string) (net.Co
 
 func (c *proxyDialer) connect(req *http.Request, conn net.Conn, negotiatedProtocol string) (net.Conn, error) {
 	if negotiatedProtocol == http2.NextProtoTLS {
-		if c.tr2 == nil {
-			c.tr2 = new(http2.Transport)
+		c.tr2Once.Do(func() { c.tr2 = new(http2.Transport) })
+
+		h2clientConn, err := c.tr2.NewClientConn(conn)
+		if err != nil {
+			_ = conn.Close()
+			return nil, err
 		}
 
-		if h2clientConn, err := c.tr2.NewClientConn(conn); err == nil {
-			if proxyConn, err := c.connectHTTP2(req, conn, h2clientConn); err == nil {
-				c.h2Mu.Lock()
-				c.h2Conn = h2clientConn
-				c.conn = conn
-				c.h2Mu.Unlock()
-				return proxyConn, err
-			}
+		proxyConn, err := c.connectHTTP2(req, conn, h2clientConn, true)
+		if err != nil {
+			return nil, err
 		}
+
+		c.h2Mu.Lock()
+
+		if c.conn == nil {
+			c.h2Conn = h2clientConn
+			c.conn = conn
+		} else {
+			proxyConn.(*http2Conn).ownsConn = true
+		}
+
+		c.h2Mu.Unlock()
+
+		return proxyConn, nil
 	}
 
 	if err := c.connectHTTP1(req, conn); err != nil {
-		_ = conn.Close()
 		return nil, err
 	}
 
 	return conn, nil
+}
+
+func (c *proxyDialer) Close() error {
+	c.h2Mu.Lock()
+	defer c.h2Mu.Unlock()
+
+	if c.conn != nil {
+		err := c.conn.Close()
+		c.conn = nil
+		c.h2Conn = nil
+		return err
+	}
+
+	return nil
 }
 
 func newHTTP2Conn(c net.Conn, pipedReqBody *io.PipeWriter, respBody io.ReadCloser) net.Conn {
@@ -291,21 +398,19 @@ func newHTTP2Conn(c net.Conn, pipedReqBody *io.PipeWriter, respBody io.ReadClose
 
 type http2Conn struct {
 	net.Conn
-	in  *io.PipeWriter
-	out io.ReadCloser
+	in       *io.PipeWriter
+	out      io.ReadCloser
+	ownsConn bool
 }
 
 func (h *http2Conn) Close() error {
-	var retErr error
-
-	if err := h.in.Close(); err != nil {
-		retErr = err
-	}
-	if err := h.out.Close(); err != nil {
-		retErr = err
+	err1 := h.in.Close()
+	err2 := h.out.Close()
+	if h.ownsConn {
+		return errors.Join(err1, err2, h.Conn.Close())
 	}
 
-	return retErr
+	return errors.Join(err1, err2)
 }
 
 func (h *http2Conn) Read(p []byte) (n int, err error)  { return h.out.Read(p) }

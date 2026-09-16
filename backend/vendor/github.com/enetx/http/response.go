@@ -304,7 +304,7 @@ func (r *Response) Write(w io.Writer) error {
 	}
 
 	// Rest of header
-	err = r.Header.WriteSubset(w, respExcludeHeader)
+	err = r.Header.WriteSubset(w, respExcludeHeader, r1.ContentLength)
 	if err != nil {
 		return err
 	}
@@ -313,6 +313,7 @@ func (r *Response) Write(w io.Writer) error {
 	// POST/PUT requests, even if zero length. See Issue 8180.
 	contentLengthAlreadySent := tw.shouldSendContentLength()
 	if r1.ContentLength == 0 && !chunked(r1.TransferEncoding) && !contentLengthAlreadySent && bodyAllowedForStatus(r.StatusCode) {
+		// TODO: ??? _, ok := t.Header[HeaderOrderKey]
 		if _, err := io.WriteString(w, "Content-Length: 0\r\n"); err != nil {
 			return err
 		}

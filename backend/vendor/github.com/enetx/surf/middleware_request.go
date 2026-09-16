@@ -3,10 +3,10 @@ package surf
 import (
 	"errors"
 	"fmt"
-	"math/rand"
 	"net/textproto"
 
 	"github.com/enetx/g"
+	"github.com/enetx/g/rand"
 	"github.com/enetx/http/httptrace"
 	"github.com/enetx/surf/header"
 )
@@ -30,33 +30,29 @@ func defaultUserAgentMW(req *Request) error {
 // - g.Slice[g.String]: Randomly selects from g.String slice
 // Returns an error for unsupported types or empty slices.
 func userAgentMW(req *Request, userAgent any) error {
-	var ua string
+	var pool []g.String
 
 	switch v := userAgent.(type) {
 	case string:
-		ua = v
+		pool = []g.String{g.String(v)}
 	case g.String:
-		ua = v.Std()
+		pool = []g.String{v}
 	case []string:
-		if len(v) == 0 {
-			return &ErrUserAgentType{"cannot select a random user agent from an empty slice"}
-		}
-		ua = v[rand.Intn(len(v))]
+		pool = g.TransformSlice(v, g.NewString)
 	case g.Slice[string]:
-		if v.Empty() {
-			return &ErrUserAgentType{"cannot select a random user agent from an empty slice"}
-		}
-		ua = v.Random()
+		pool = g.TransformSlice(v, g.NewString)
 	case g.Slice[g.String]:
-		if v.Empty() {
-			return &ErrUserAgentType{"cannot select a random user agent from an empty slice"}
-		}
-		ua = v.Random().Std()
+		pool = v
 	default:
 		return &ErrUserAgentType{fmt.Sprintf("'%T' %v", v, v)}
 	}
 
-	req.GetRequest().Header.Set(header.USER_AGENT, ua)
+	ua := rand.Choice(pool)
+	if ua.IsNone() {
+		return &ErrUserAgentType{"cannot select a random user agent from an empty slice"}
+	}
+
+	req.GetRequest().Header.Set(header.USER_AGENT, ua.Some().Std())
 
 	return nil
 }
@@ -101,7 +97,7 @@ func remoteAddrMW(req *Request) error {
 // Adds an Authorization header with the Bearer token format if a token is provided.
 // Only sets the header if the token is not empty, allowing conditional authentication.
 func bearerAuthMW(req *Request, token g.String) error {
-	if token.NotEmpty() {
+	if !token.IsEmpty() {
 		req.AddHeaders(g.Map[g.String, g.String]{header.AUTHORIZATION: "Bearer " + token})
 	}
 
@@ -119,7 +115,10 @@ func basicAuthMW(req *Request, authentication g.String) error {
 
 	var username, password g.String
 
-	authentication.Split(":").Collect().Unpack(&username, &password)
+	if idx := authentication.Index(":"); idx != -1 {
+		username = authentication[:idx]
+		password = authentication[idx+1:]
+	}
 
 	if username == "" || password == "" {
 		return errors.New("basic authorization fields cannot be empty")
@@ -134,7 +133,7 @@ func basicAuthMW(req *Request, authentication g.String) error {
 // Sets the MIME type of the request body content to inform the server
 // how to interpret the request data. Returns an error if contentType is empty.
 func contentTypeMW(req *Request, contentType g.String) error {
-	if contentType.Empty() {
+	if contentType.IsEmpty() {
 		return fmt.Errorf("Content-Type is empty")
 	}
 

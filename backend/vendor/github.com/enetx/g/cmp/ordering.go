@@ -11,7 +11,8 @@ const (
 	Greater                     // Greater represents an ordered value where a compared value is greater than another.
 )
 
-// Then returns the receiver if it's equal to Equal, otherwise returns the receiver.
+// Then returns other if the receiver is Equal, otherwise returns the receiver.
+// It is useful for chaining comparisons, where the first non-Equal result wins.
 func (o Ordering) Then(other Ordering) Ordering {
 	if o.IsEq() {
 		return other

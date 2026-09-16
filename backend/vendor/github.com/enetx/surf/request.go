@@ -1,6 +1,7 @@
 package surf
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -11,25 +12,64 @@ import (
 	"github.com/enetx/http"
 	"github.com/enetx/surf/header"
 	"github.com/enetx/surf/internal/drainbody"
-	"github.com/enetx/surf/profiles/chrome"
-	"github.com/enetx/surf/profiles/firefox"
+	"github.com/enetx/surf/internal/retryafter"
 )
 
 // Request represents an HTTP request with additional surf-specific functionality.
 // It wraps the standard http.Request and provides enhanced features like middleware support,
 // retry capabilities, remote address tracking, and structured error handling.
 type Request struct {
-	request    *http.Request // The underlying standard HTTP request
-	cli        *Client       // The associated surf client for this request
-	werr       *error        // Pointer to error encountered during request writing/preparation
 	err        error         // General error associated with the request (validation, setup, etc.)
 	remoteAddr net.Addr      // Remote server address captured during connection
-	body       io.ReadCloser // Request body reader (for retry support and body preservation)
+	bodyBytes  []byte        // Cached body bytes for retry support
+	request    *http.Request // The underlying standard HTTP request
+	cli        *Client       // The associated surf client for this request
+	multipart  *Multipart    // Multipart form data for file uploads and form submissions
 }
 
 // GetRequest returns the underlying standard http.Request.
 // Provides access to the wrapped HTTP request for advanced use cases.
 func (req *Request) GetRequest() *http.Request { return req.request }
+
+// Multipart sets multipart form data for the request.
+// The provided Multipart object contains form fields and files to be sent.
+// Returns the request for method chaining. If m is nil, an error is set on the request.
+func (req *Request) Multipart(m *Multipart) *Request {
+	if req.err != nil {
+		return req
+	}
+
+	if m == nil {
+		req.err = fmt.Errorf("multipart is nil")
+		return req
+	}
+
+	req.multipart = m
+	return req
+}
+
+// prepareMultipart prepares the multipart body for the request.
+// It sets up the request body with a pipe reader and configures the Content-Type header.
+// Returns an error if both Body() and Multipart() were called, as they are mutually exclusive.
+func (req *Request) prepareMultipart() {
+	if req.multipart == nil {
+		return
+	}
+
+	if req.request.Body != nil {
+		req.err = fmt.Errorf("cannot use both Body() and Multipart() - they are mutually exclusive")
+		return
+	}
+
+	pr, contentType, err := req.multipart.prepareWriter(req.cli.boundary)
+	if err != nil {
+		req.err = err
+		return
+	}
+
+	req.request.Body = pr
+	req.request.Header.Set(header.CONTENT_TYPE, contentType)
+}
 
 // Do executes the HTTP request and returns a Response wrapped in a Result type.
 // This is the main method that performs the actual HTTP request with full surf functionality:
@@ -44,16 +84,21 @@ func (req *Request) Do() g.Result[*Response] {
 		return g.Err[*Response](req.err)
 	}
 
-	// Apply all configured request middleware
+	req.prepareMultipart()
+	if req.err != nil {
+		return g.Err[*Response](req.err)
+	}
+
 	if err := req.cli.applyReqMW(req); err != nil {
 		return g.Err[*Response](err)
 	}
 
-	// Preserve request body for retries (except HEAD requests which have no body)
 	if req.request.Method != http.MethodHead {
-		req.body, req.request.Body, req.err = drainbody.DrainBody(req.request.Body)
-		if req.err != nil {
-			return g.Err[*Response](req.err)
+		if req.multipart == nil || req.multipart.retry {
+			req.bodyBytes, req.request.Body, req.err = drainbody.DrainBody(req.request.Body)
+			if req.err != nil {
+				return g.Err[*Response](req.err)
+			}
 		}
 	}
 
@@ -68,25 +113,40 @@ func (req *Request) Do() g.Result[*Response] {
 
 	builder := req.cli.builder
 
-	// Execute request with retry logic
 retry:
+	// Restore body from saved bytes for retry attempts
+	if attempts > 0 && req.bodyBytes != nil {
+		req.request.Body = io.NopCloser(bytes.NewReader(req.bodyBytes))
+	}
+
 	resp, err = cli.Do(req.request)
 	if err != nil {
 		return g.Err[*Response](err)
 	}
 
 	// Check if retry is needed based on status code and retry configuration
-	if builder != nil && builder.retryMax != 0 && attempts < builder.retryMax && builder.retryCodes.NotEmpty() &&
+	if builder != nil && builder.retryMax != 0 && attempts < builder.retryMax && !builder.retryCodes.IsEmpty() &&
 		builder.retryCodes.Contains(resp.StatusCode) {
+		retryAfter, _ := retryafter.Parse(resp.Header.Get(header.RETRY_AFTER), time.Now())
+
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
 		attempts++
 
-		time.Sleep(builder.retryWait)
-		goto retry
-	}
+		delay := max(builder.retryWait, retryAfter)
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-req.request.Context().Done():
+				timer.Stop()
+				return g.Err[*Response](req.request.Context().Err())
+			}
+		} else if ctx := req.request.Context(); ctx.Err() != nil {
+			return g.Err[*Response](ctx.Err())
+		}
 
-	// Check for write errors that occurred during request preparation
-	if req.werr != nil && *req.werr != nil {
-		return g.Err[*Response](*req.werr)
+		goto retry
 	}
 
 	response := &Response{
@@ -106,11 +166,14 @@ retry:
 	}
 
 	if req.request.Method != http.MethodHead {
-		response.Body = new(Body)
-		response.Body.Reader = resp.Body
-		response.Body.cache = builder != nil && builder.cacheBody
-		response.Body.contentType = resp.Header.Get(header.CONTENT_TYPE)
-		response.Body.limit = -1
+		response.Body = &Body{
+			Reader:        resp.Body,
+			cache:         builder != nil && builder.cacheBody,
+			contentType:   resp.Header.Get(header.CONTENT_TYPE),
+			contentLength: resp.ContentLength,
+			limit:         -1,
+			ctx:           req.request.Context(),
+		}
 	}
 
 	if err := req.cli.applyRespMW(response); err != nil {
@@ -241,7 +304,12 @@ func (req *Request) applyHeaders(
 		updated := updateRequestHeaderOrder(req, h)
 		updated.Iter().ForEach(func(key, value g.String) { setOrAdd(r.Header, key.Std(), value.Std()) })
 	default:
-		panic(fmt.Sprintf("unsupported headers type: expected 'http.Header', 'surf.Headers', 'map[~string]~string', 'Map[~string, ~string]', or 'MapOrd[~string, ~string]', got %T", rawHeaders[0]))
+		panic(
+			fmt.Sprintf(
+				"unsupported headers type: expected 'http.Header', 'surf.Headers', 'map[~string]~string', 'Map[~string, ~string]', or 'MapOrd[~string, ~string]', got %T",
+				rawHeaders[0],
+			),
+		)
 	}
 }
 
@@ -251,33 +319,33 @@ func (req *Request) applyHeaders(
 // header order keys for the transport layer to use. Returns a filtered map containing only
 // non-pseudo headers with non-empty values.
 func updateRequestHeaderOrder[T ~string](r *Request, h g.MapOrd[T, T]) g.MapOrd[T, T] {
-	hclone := h.Clone()
+	h = h.Clone()
 
 	if r.cli.builder != nil {
-		switch r.cli.builder.browser {
-		case chromeBrowser:
-			chrome.Headers(&hclone, r.request.Method)
-		case firefoxBrowser:
-			firefox.Headers(&hclone, r.request.Method)
+		method := r.request.Method
+		if r.cli.builder.forceHTTP3 {
+			method += "http3"
+		}
+
+		if r.cli.builder.headersApplier != nil {
+			r.cli.builder.headersApplier(&h, method)
 		}
 	}
 
-	headersKeys := g.TransformSlice(hclone.Iter().
+	headers, pheaders := h.Iter().
 		Keys().
-		Map(func(s T) T { return T(g.String(s).Lower()) }).
-		Collect(), func(t T) string { return string(t) })
+		Map(func(s T) string { return string(g.String(s).Lower()) }).
+		Partition(func(v string) bool { return v[0] != ':' })
 
-	headers, pheaders := headersKeys.Iter().Partition(func(v string) bool { return v[0] != ':' })
-
-	if headers.NotEmpty() {
+	if !headers.IsEmpty() {
 		r.request.Header[http.HeaderOrderKey] = headers
 	}
 
-	if pheaders.NotEmpty() {
+	if !pheaders.IsEmpty() {
 		r.request.Header[http.PHeaderOrderKey] = pheaders
 	}
 
-	return hclone.Iter().
+	return h.Iter().
 		Filter(func(header, data T) bool { return header[0] != ':' && len(data) != 0 }).
-		Collect()
+		Collect().MapOrd[T, T]()
 }

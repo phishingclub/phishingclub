@@ -11,14 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net"
 	"net/url"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/enetx/g"
 	"github.com/enetx/http"
@@ -37,7 +33,6 @@ type Client struct {
 	reqMWs    *middleware[*Request]  // Priority-ordered request middlewares
 	respMWs   *middleware[*Response] // Priority-ordered response middlewares
 	boundary  func() g.String        // Custom boundary generator for multipart requests
-	mwMutex   sync.Mutex             // Mutex for thread-safe middleware operations
 }
 
 // NewClient creates a new Client with sensible default settings including
@@ -55,9 +50,7 @@ func NewClient() *Client {
 	redirectPolicyMW(cli)
 
 	cli.reqMWs.add(0, defaultUserAgentMW)
-	cli.reqMWs.add(0, got101ResponseMW)
 
-	cli.respMWs.add(0, webSocketUpgradeErrorMW)
 	cli.respMWs.add(0, decodeBodyMW)
 
 	return cli
@@ -66,29 +59,28 @@ func NewClient() *Client {
 // applyReqMW applies all registered request middlewares to the given request in priority order.
 // Middlewares are sorted by priority before execution, and processing stops on first error.
 func (c *Client) applyReqMW(req *Request) error {
-	c.mwMutex.Lock()
-	defer c.mwMutex.Unlock()
-
 	return c.reqMWs.run(req)
 }
 
 // applyRespMW applies all registered response middlewares to the given response in priority order.
 // Middlewares are sorted by priority before execution, and processing stops on first error.
 func (c *Client) applyRespMW(resp *Response) error {
-	c.mwMutex.Lock()
-	defer c.mwMutex.Unlock()
-
 	return c.respMWs.run(resp)
 }
 
-// CloseIdleConnections removes all entries from the cached transports.
-// Specifically used when Singleton is enabled for JA3 or Impersonate functionalities.
-func (c *Client) CloseIdleConnections() {
-	if c.builder == nil || !c.builder.singleton {
-		return
+// CloseIdleConnections closes idle connections while keeping the client usable.
+// Safe to call periodically to free resources during long-running operations.
+func (c *Client) CloseIdleConnections() { c.cli.CloseIdleConnections() }
+
+// Close completely shuts down the client and releases all resources.
+// After calling Close, the client should not be used.
+func (c *Client) Close() error {
+	if closer, ok := c.transport.(interface{ Close() error }); ok {
+		return closer.Close()
 	}
 
-	c.cli.CloseIdleConnections()
+	c.CloseIdleConnections()
+	return nil
 }
 
 // GetClient returns http.Client used by the Client.
@@ -130,230 +122,44 @@ func (c *Client) Raw(raw, scheme g.String) *Request {
 	return request
 }
 
-// Get creates a new HTTP GET request with the specified URL.
-// Optional data parameter can be provided for query parameters.
-func (c *Client) Get(rawURL g.String, data ...any) *Request {
-	if len(data) != 0 {
-		return c.buildRequest(rawURL, http.MethodGet, data[0])
-	}
+// Get creates a new HTTP GET request for the specified URL.
+// GET requests are used to retrieve data from a server.
+func (c *Client) Get(rawURL g.String) *Request { return c.newRequest(http.MethodGet, rawURL) }
 
-	return c.buildRequest(rawURL, http.MethodGet, nil)
-}
+// Delete creates a new HTTP DELETE request for the specified URL.
+// DELETE requests are used to remove a resource from a server.
+func (c *Client) Delete(rawURL g.String) *Request { return c.newRequest(http.MethodDelete, rawURL) }
 
-// Delete creates a new HTTP DELETE request with the specified URL.
-// Optional data parameter can be provided for request body.
-func (c *Client) Delete(rawURL g.String, data ...any) *Request {
-	if len(data) != 0 {
-		return c.buildRequest(rawURL, http.MethodDelete, data[0])
-	}
+// Head creates a new HTTP HEAD request for the specified URL.
+// HEAD requests are identical to GET but without the response body.
+func (c *Client) Head(rawURL g.String) *Request { return c.newRequest(http.MethodHead, rawURL) }
 
-	return c.buildRequest(rawURL, http.MethodDelete, nil)
-}
+// Post creates a new HTTP POST request for the specified URL.
+// POST requests are used to submit data to a server.
+func (c *Client) Post(rawURL g.String) *Request { return c.newRequest(http.MethodPost, rawURL) }
 
-// Head creates a new HTTP HEAD request with the specified URL.
-// HEAD requests are identical to GET but only return response headers.
-func (c *Client) Head(rawURL g.String) *Request {
-	return c.buildRequest(rawURL, http.MethodHead, nil)
-}
+// Put creates a new HTTP PUT request for the specified URL.
+// PUT requests are used to replace a resource on a server.
+func (c *Client) Put(rawURL g.String) *Request { return c.newRequest(http.MethodPut, rawURL) }
 
-// Post creates a new HTTP POST request with the specified URL and data.
-// Data can be of various types (string, map, struct) and will be encoded appropriately.
-func (c *Client) Post(rawURL g.String, data any) *Request {
-	return c.buildRequest(rawURL, http.MethodPost, data)
-}
+// Patch creates a new HTTP PATCH request for the specified URL.
+// PATCH requests are used to apply partial modifications to a resource.
+func (c *Client) Patch(rawURL g.String) *Request { return c.newRequest(http.MethodPatch, rawURL) }
 
-// Put creates a new HTTP PUT request with the specified URL and data.
-// PUT requests typically replace the entire resource at the specified URL.
-func (c *Client) Put(rawURL g.String, data any) *Request {
-	return c.buildRequest(rawURL, http.MethodPut, data)
-}
+// Options creates a new HTTP OPTIONS request for the specified URL.
+// OPTIONS requests are used to describe the communication options for a resource.
+func (c *Client) Options(rawURL g.String) *Request { return c.newRequest(http.MethodOptions, rawURL) }
 
-// Patch creates a new HTTP PATCH request with the specified URL and data.
-// PATCH requests typically apply partial modifications to a resource.
-func (c *Client) Patch(rawURL g.String, data any) *Request {
-	return c.buildRequest(rawURL, http.MethodPatch, data)
-}
+// Connect creates a new HTTP CONNECT request for the specified URL.
+// CONNECT requests are used to establish a tunnel to the server.
+func (c *Client) Connect(rawURL g.String) *Request { return c.newRequest(http.MethodConnect, rawURL) }
 
-// FileUpload creates a new multipart file upload request.
-// It uploads a file from filePath using the specified fieldName in the form.
-// Optional data can include additional form fields (g.MapOrd) or custom reader (io.Reader).
-func (c *Client) FileUpload(rawURL, fieldName, filePath g.String, data ...any) *Request {
-	sanitizedURL := sanitizeURL(rawURL)
-
-	var (
-		multipartData g.MapOrd[string, string]
-		reader        io.Reader
-		file          *os.File
-		err           error
-	)
-
-	const maxDataLen = 2
-
-	if len(data) > maxDataLen {
-		data = data[:2]
-	}
-
-	for _, v := range data {
-		switch i := v.(type) {
-		case g.MapOrd[g.String, g.String]:
-			mo := g.NewMapOrd[string, string](i.Len())
-			i.Iter().ForEach(func(k, v g.String) { mo.Set(k.Std(), v.Std()) })
-			multipartData = mo
-		case g.MapOrd[string, string]:
-			multipartData = i
-		case string:
-			reader = strings.NewReader(i)
-		case g.String:
-			reader = i.Reader()
-		case io.Reader:
-			reader = i
-		}
-	}
-
-	request := new(Request)
-
-	if reader == nil {
-		file, err = os.Open(filePath.Std())
-		if err != nil {
-			request.err = err
-			return request
-		}
-
-		reader = bufio.NewReader(file)
-	}
-
-	bodyReader, bodyWriter := io.Pipe()
-	formWriter := multipart.NewWriter(bodyWriter)
-
-	if c.boundary != nil {
-		if err = formWriter.SetBoundary(c.boundary().Std()); err != nil {
-			request.err = err
-			return request
-		}
-	}
-
-	var (
-		errOnce  sync.Once
-		writeErr error
-	)
-
-	setWriteErr := func(err error) {
-		if err != nil {
-			errOnce.Do(func() { writeErr = err })
-		}
-	}
-
-	go func() {
-		defer func() {
-			if formWriter != nil {
-				setWriteErr(formWriter.Close())
-			}
-
-			if bodyWriter != nil {
-				setWriteErr(bodyWriter.Close())
-			}
-
-			if file != nil {
-				setWriteErr(file.Close())
-			}
-		}()
-
-		partWriter, err := formWriter.CreateFormFile(fieldName.Std(), filepath.Base(filePath.Std()))
-		if err != nil {
-			setWriteErr(err)
-			return
-		}
-
-		if _, err = io.Copy(partWriter, reader); err != nil {
-			setWriteErr(err)
-			return
-		}
-
-		multipartData.Iter().
-			Range(func(fieldname, value string) bool {
-				if err = formWriter.WriteField(fieldname, value); err != nil {
-					setWriteErr(err)
-					return false
-				}
-
-				return true
-			})
-	}()
-
-	req, err := http.NewRequest(http.MethodPost, sanitizedURL, bodyReader)
-	if err != nil {
-		request.err = err
-		return request
-	}
-
-	req.Header.Set(header.CONTENT_TYPE, formWriter.FormDataContentType())
-
-	request.request = req
-	request.cli = c
-	request.werr = &writeErr
-
-	return request
-}
-
-// Multipart creates a new multipart form data request with the specified form fields.
-// The multipartData map contains field names and their corresponding values.
-func (c *Client) Multipart(rawURL g.String, multipartData g.MapOrd[g.String, g.String]) *Request {
-	sanitizedURL := sanitizeURL(rawURL)
-
-	body := new(bytes.Buffer)
-	writer := multipart.NewWriter(body)
-
-	if c.boundary != nil {
-		if err := writer.SetBoundary(c.boundary().Std()); err != nil {
-			request := new(Request)
-			request.err = err
-			return request
-		}
-	}
-
-	request := new(Request)
-
-	multipartData.Iter().
-		Range(func(fieldname, value g.String) bool {
-			formWriter, err := writer.CreateFormField(fieldname.Std())
-			if err != nil {
-				request.err = err
-				return false
-			}
-
-			if _, err := io.Copy(formWriter, value.Reader()); err != nil {
-				request.err = err
-				return false
-			}
-
-			return true
-		})
-
-	if request.err != nil {
-		return request
-	}
-
-	if err := writer.Close(); err != nil {
-		request.err = err
-		return request
-	}
-
-	req, err := http.NewRequest(http.MethodPost, sanitizedURL, body)
-	if err != nil {
-		request.err = err
-		return request
-	}
-
-	req.Header.Set(header.CONTENT_TYPE, writer.FormDataContentType())
-
-	request.request = req
-	request.cli = c
-
-	return request
-}
+// Trace creates a new HTTP TRACE request for the specified URL.
+// TRACE requests are used to perform a message loop-back test along the path to the target resource.
+func (c *Client) Trace(rawURL g.String) *Request { return c.newRequest(http.MethodTrace, rawURL) }
 
 // getCookies returns cookies for the specified URL.
-func (c Client) getCookies(rawURL g.String) []*http.Cookie {
+func (c *Client) getCookies(rawURL g.String) []*http.Cookie {
 	if c.cli.Jar == nil {
 		return nil
 	}
@@ -382,35 +188,70 @@ func (c *Client) setCookies(rawURL g.String, cookies []*http.Cookie) error {
 	return nil
 }
 
-// buildRequest accepts a raw URL, a method type (like GET or POST), and data of any type.
-// It formats the URL, builds the request body, and creates a new HTTP request with the specified
-// method type and body.
-// If there is an error, it returns a Request object with the error set.
-func (c *Client) buildRequest(rawURL g.String, methodType string, data any) *Request {
-	sanitizedURL := sanitizeURL(rawURL)
-
+// newRequest creates a new Request with the specified HTTP method and URL.
+// It initializes the underlying http.Request and associates it with this client.
+func (c *Client) newRequest(method string, rawURL g.String) *Request {
 	request := new(Request)
 
-	body, contentType, err := buildBody(data)
+	req, err := http.NewRequest(method, rawURL.Std(), nil)
 	if err != nil {
 		request.err = err
 		return request
-	}
-
-	req, err := http.NewRequest(methodType, sanitizedURL, body)
-	if err != nil {
-		request.err = err
-		return request
-	}
-
-	if contentType != "" {
-		req.Header.Add(header.CONTENT_TYPE, contentType)
 	}
 
 	request.request = req
 	request.cli = c
-
 	return request
+}
+
+// Body sets the request body from various data types.
+// Supported types include: []byte, string, g.String, g.Bytes, map[string]string,
+// g.Map, g.MapOrd, and structs with json/xml tags.
+// The Content-Type header is automatically detected and set based on the data.
+// Returns the request for method chaining.
+func (req *Request) Body(data any) *Request {
+	if req.err != nil {
+		return req
+	}
+
+	if data == nil {
+		return req
+	}
+
+	body, contentType, err := buildBody(data)
+	if err != nil {
+		req.err = err
+		return req
+	}
+
+	n := int64(-1)
+
+	switch v := body.(type) {
+	case *bytes.Reader:
+		n = int64(v.Len())
+	case *strings.Reader:
+		n = int64(v.Len())
+	case *bytes.Buffer:
+		n = int64(v.Len())
+	}
+
+	req.request.ContentLength = n
+
+	if n == 0 {
+		req.request.Body = http.NoBody
+	} else {
+		if rc, ok := body.(io.ReadCloser); ok {
+			req.request.Body = rc
+		} else {
+			req.request.Body = io.NopCloser(body)
+		}
+	}
+
+	if contentType != "" {
+		req.request.Header.Set(header.CONTENT_TYPE, contentType)
+	}
+
+	return req
 }
 
 // buildBody takes data of any type and, depending on its type, calls the appropriate method to
@@ -419,6 +260,10 @@ func (c *Client) buildRequest(rawURL g.String, methodType string, data any) *Req
 func buildBody(data any) (io.Reader, string, error) {
 	if data == nil {
 		return nil, "", nil
+	}
+
+	if r, ok := data.(io.Reader); ok {
+		return r, "", nil
 	}
 
 	switch d := data.(type) {
@@ -464,12 +309,39 @@ func buildStringBody[T ~string](data T) (io.Reader, string, error) {
 
 	contentType := detectContentType(s.Bytes())
 
-	// if post encoded data aaa=bbb&ddd=ccc
-	if contentType == "text/plain; charset=utf-8" && s.ContainsAnyChars("=&") {
+	if contentType == "text/plain; charset=utf-8" && isFormEncoded(s) {
 		contentType = "application/x-www-form-urlencoded"
 	}
 
 	return s.Reader(), contentType, nil
+}
+
+// isFormEncoded checks if a string looks like valid URL-encoded form data.
+// It verifies that the string consists of key=value pairs separated by &,
+// where keys and values are non-empty and contain no whitespace.
+func isFormEncoded(s g.String) bool {
+	if s.IsEmpty() || !s.Contains("=") {
+		return false
+	}
+
+	pairs := s.Split("&")
+
+	for _, pair := range pairs {
+		if pair.IsEmpty() {
+			return false
+		}
+
+		eq := pair.IndexRune('=')
+		if eq.Lte(0) {
+			return false
+		}
+
+		if pair.ContainsAny(" \t\n\r") {
+			return false
+		}
+	}
+
+	return true
 }
 
 // detectContentType takes a string and returns the content type of the data by checking if it's a
@@ -557,7 +429,7 @@ func detectAnnotatedDataType(data any) string {
 		return ""
 	}
 
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
@@ -580,22 +452,10 @@ func detectAnnotatedDataType(data any) string {
 	return ""
 }
 
-// sanitizeURL accepts a raw URL string and formats it to ensure it has an "http://" or "https://"
-// prefix.
-func sanitizeURL(rawURL g.String) string {
-	rawURL = rawURL.TrimSet(".")
-
-	if !rawURL.StartsWithAny("http://", "https://") {
-		rawURL = rawURL.Prepend("http://")
-	}
-
-	return rawURL.Std()
-}
-
 // parseURL attempts to parse any supported rawURL type into a *url.URL.
 // Returns an error if the type is unsupported or if parsing fails.
 func parseURL(rawURL g.String) g.Result[*url.URL] {
-	if rawURL.Empty() {
+	if rawURL.IsEmpty() {
 		return g.Err[*url.URL](errors.New("URL is empty"))
 	}
 

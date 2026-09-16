@@ -191,6 +191,12 @@ func EncodeHeaders(
 			order := make(map[string]int)
 			for i, v := range headerOrder {
 				order[v] = i
+
+				// If content-length is set in the header order,
+				// we should add the value so it gets sorted
+				if v == "content-length" && shouldSendReqContentLength(req.Method, req.ActualContentLength) {
+					hdrs[v] = []string{strconv.FormatInt(req.ActualContentLength, 10)}
+				}
 			}
 			kvs, _ = hdrs.SortedKeyValuesBy(order, make(map[string]bool))
 		} else {
@@ -198,14 +204,18 @@ func EncodeHeaders(
 		}
 
 		var didUA bool
+		var didCL bool
 		for _, kv := range kvs {
 			k := kv.Key
 			vv := kv.Values
 
-			if asciiEqualFold(k, "host") || asciiEqualFold(k, "content-length") {
+			if asciiEqualFold(k, "host") {
 				// Host is :authority, already sent.
 				// Content-Length is automatic, set below.
 				continue
+			} else if asciiEqualFold(k, "content-length") {
+				// Respect header order for Content-Length
+				didCL = true
 			} else if asciiEqualFold(k, "connection") ||
 				asciiEqualFold(k, "proxy-connection") ||
 				asciiEqualFold(k, "transfer-encoding") ||
@@ -261,7 +271,7 @@ func EncodeHeaders(
 				f(k, v)
 			}
 		}
-		if shouldSendReqContentLength(req.Method, req.ActualContentLength) {
+		if !didCL && shouldSendReqContentLength(req.Method, req.ActualContentLength) {
 			f("content-length", strconv.FormatInt(req.ActualContentLength, 10))
 		}
 		if param.AddGzipHeader {

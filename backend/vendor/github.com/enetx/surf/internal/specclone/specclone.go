@@ -39,7 +39,7 @@ import (
 	"reflect"
 	"unsafe"
 
-	utls "github.com/enetx/utls"
+	utls "github.com/refraction-networking/utls"
 )
 
 // Clone creates a deep copy of a utls.ClientHelloSpec.
@@ -73,20 +73,14 @@ func Clone(c *utls.ClientHelloSpec) *utls.ClientHelloSpec {
 	}
 
 	clone := &utls.ClientHelloSpec{
-		TLSVersMin:   c.TLSVersMin,
-		TLSVersMax:   c.TLSVersMax,
-		GetSessionID: c.GetSessionID,
+		TLSVersMin:         c.TLSVersMin,
+		TLSVersMax:         c.TLSVersMax,
+		GetSessionID:       c.GetSessionID,
+		CipherSuites:       append([]uint16(nil), c.CipherSuites...),
+		CompressionMethods: append([]uint8(nil), c.CompressionMethods...),
 	}
 
-	if c.CipherSuites != nil {
-		clone.CipherSuites = append([]uint16{}, c.CipherSuites...)
-	}
-
-	if c.CompressionMethods != nil {
-		clone.CompressionMethods = append([]uint8{}, c.CompressionMethods...)
-	}
-
-	if c.Extensions != nil {
+	if len(c.Extensions) > 0 {
 		clone.Extensions = make([]utls.TLSExtension, len(c.Extensions))
 		for i, ext := range c.Extensions {
 			if ext != nil {
@@ -137,11 +131,11 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 		return &utls.StatusRequestExtension{}
 	case *utls.SupportedCurvesExtension:
 		return &utls.SupportedCurvesExtension{
-			Curves: append([]utls.CurveID{}, e.Curves...),
+			Curves: append([]utls.CurveID(nil), e.Curves...),
 		}
 	case *utls.SupportedPointsExtension:
 		return &utls.SupportedPointsExtension{
-			SupportedPoints: append([]uint8{}, e.SupportedPoints...),
+			SupportedPoints: append([]uint8(nil), e.SupportedPoints...),
 		}
 	case *utls.SignatureAlgorithmsExtension:
 		return &utls.SignatureAlgorithmsExtension{
@@ -164,10 +158,15 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 	case *utls.ExtendedMasterSecretExtension:
 		return &utls.ExtendedMasterSecretExtension{}
 	case *utls.FakeTokenBindingExtension:
+		var params []uint8
+		if e.KeyParameters != nil {
+			params = append([]uint8(nil), e.KeyParameters...)
+		}
+
 		return &utls.FakeTokenBindingExtension{
 			MajorVersion:  e.MajorVersion,
 			MinorVersion:  e.MinorVersion,
-			KeyParameters: append([]uint8{}, e.KeyParameters...),
+			KeyParameters: params,
 		}
 	case *utls.UtlsCompressCertExtension:
 		return &utls.UtlsCompressCertExtension{
@@ -187,7 +186,7 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 			extra := make([][]byte, len(e.Session.Extra))
 			for i, b := range e.Session.Extra {
 				if b != nil {
-					extra[i] = append([]byte{}, b...)
+					extra[i] = append([]byte(nil), b...)
 				}
 			}
 
@@ -197,16 +196,26 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 			}
 		}
 
+		var ticket []byte
+		if e.Ticket != nil {
+			ticket = append([]byte(nil), e.Ticket...)
+		}
+
 		return &utls.SessionTicketExtension{
 			Session:     session,
-			Ticket:      append([]byte{}, e.Ticket...),
+			Ticket:      ticket,
 			Initialized: e.Initialized,
 		}
 	case *utls.FakePreSharedKeyExtension:
 		clonedIdentities := make([]utls.PskIdentity, len(e.Identities))
 		for i, id := range e.Identities {
+			var label []byte
+			if id.Label != nil {
+				label = append([]byte(nil), id.Label...)
+			}
+
 			clonedIdentities[i] = utls.PskIdentity{
-				Label:               append([]byte{}, id.Label...),
+				Label:               label,
 				ObfuscatedTicketAge: id.ObfuscatedTicketAge,
 			}
 		}
@@ -214,7 +223,7 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 		clonedBinders := make([][]byte, len(e.Binders))
 		for i, b := range e.Binders {
 			if b != nil {
-				clonedBinders[i] = append([]byte{}, b...)
+				clonedBinders[i] = append([]byte(nil), b...)
 			}
 		}
 
@@ -225,8 +234,13 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 	case *utls.UtlsPreSharedKeyExtension:
 		clonedIdentities := make([]utls.PskIdentity, len(e.Identities))
 		for i, id := range e.Identities {
+			var label []byte
+			if id.Label != nil {
+				label = append([]byte(nil), id.Label...)
+			}
+
 			clonedIdentities[i] = utls.PskIdentity{
-				Label:               append([]byte{}, id.Label...),
+				Label:               label,
 				ObfuscatedTicketAge: id.ObfuscatedTicketAge,
 			}
 		}
@@ -234,7 +248,7 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 		clonedBinders := make([][]byte, len(e.Binders))
 		for i, b := range e.Binders {
 			if b != nil {
-				clonedBinders[i] = append([]byte{}, b...)
+				clonedBinders[i] = append([]byte(nil), b...)
 			}
 		}
 
@@ -252,12 +266,22 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 			}
 		}
 
+		var binderKey []byte
+		if e.BinderKey != nil {
+			binderKey = append([]byte(nil), e.BinderKey...)
+		}
+
+		var earlySecret []byte
+		if e.EarlySecret != nil {
+			earlySecret = append([]byte(nil), e.EarlySecret...)
+		}
+
 		return &utls.UtlsPreSharedKeyExtension{
 			PreSharedKeyCommon: utls.PreSharedKeyCommon{
 				Identities:  clonedIdentities,
 				Binders:     clonedBinders,
-				BinderKey:   append([]byte{}, e.BinderKey...),
-				EarlySecret: append([]byte{}, e.EarlySecret...),
+				BinderKey:   binderKey,
+				EarlySecret: earlySecret,
 				Session:     clonedSession,
 			},
 			OmitEmptyPsk: e.OmitEmptyPsk,
@@ -267,9 +291,11 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 			Versions: append([]uint16{}, e.Versions...),
 		}
 	case *utls.CookieExtension:
-		return &utls.CookieExtension{
-			Cookie: append([]byte{}, e.Cookie...),
+		var cookie []byte
+		if e.Cookie != nil {
+			cookie = append([]byte(nil), e.Cookie...)
 		}
+		return &utls.CookieExtension{Cookie: cookie}
 	case *utls.PSKKeyExchangeModesExtension:
 		return &utls.PSKKeyExchangeModesExtension{
 			Modes: append([]uint8{}, e.Modes...),
@@ -278,29 +304,18 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 		return &utls.SignatureAlgorithmsCertExtension{
 			SupportedSignatureAlgorithms: append([]utls.SignatureScheme{}, e.SupportedSignatureAlgorithms...),
 		}
-	case *utls.KeyShareExtensionExtended:
-		var keyShares []utls.KeyShare
-		if e.KeyShareExtension != nil {
-			keyShares = make([]utls.KeyShare, len(e.KeyShares))
-			for i, ks := range e.KeyShares {
-				keyShares[i] = utls.KeyShare{
-					Group: ks.Group,
-					Data:  append([]byte{}, ks.Data...),
-				}
-			}
-		}
-		return &utls.KeyShareExtensionExtended{
-			KeyShareExtension: &utls.KeyShareExtension{
-				KeyShares: keyShares,
-			},
-			HybridReuseKey: e.HybridReuseKey,
-		}
 	case *utls.KeyShareExtension:
 		keyShares := make([]utls.KeyShare, len(e.KeyShares))
+
 		for i, ks := range e.KeyShares {
+			var data []byte
+			if ks.Data != nil {
+				data = append([]byte(nil), ks.Data...)
+			}
+
 			keyShares[i] = utls.KeyShare{
 				Group: ks.Group,
-				Data:  append([]byte{}, ks.Data...),
+				Data:  data,
 			}
 		}
 		return &utls.KeyShareExtension{KeyShares: keyShares}
@@ -327,22 +342,37 @@ func deepCloneExtension(ext utls.TLSExtension) utls.TLSExtension {
 	case *utls.GREASEEncryptedClientHelloExtension:
 		return &utls.GREASEEncryptedClientHelloExtension{
 			CandidateCipherSuites: append([]utls.HPKESymmetricCipherSuite{}, e.CandidateCipherSuites...),
-			CandidatePayloadLens:  append([]uint16{}, e.CandidatePayloadLens...),
+			CandidatePayloadLens:  append([]uint16(nil), e.CandidatePayloadLens...),
 		}
 	case *utls.RenegotiationInfoExtension:
+		var reneg []byte
+		if e.RenegotiatedConnection != nil {
+			reneg = append([]byte(nil), e.RenegotiatedConnection...)
+		}
+
 		return &utls.RenegotiationInfoExtension{
 			Renegotiation:          e.Renegotiation,
-			RenegotiatedConnection: append([]byte{}, e.RenegotiatedConnection...),
+			RenegotiatedConnection: reneg,
 		}
 	case *utls.UtlsGREASEExtension:
+		var body []byte
+		if e.Body != nil {
+			body = append([]byte(nil), e.Body...)
+		}
+
 		return &utls.UtlsGREASEExtension{
 			Value: e.Value,
-			Body:  append([]byte{}, e.Body...),
+			Body:  body,
 		}
 	case *utls.GenericExtension:
+		var data []byte
+		if e.Data != nil {
+			data = append([]byte(nil), e.Data...)
+		}
+
 		return &utls.GenericExtension{
 			Id:   e.Id,
-			Data: append([]byte{}, e.Data...),
+			Data: data,
 		}
 	case utls.PreSharedKeyExtension:
 		switch psk := e.(type) {

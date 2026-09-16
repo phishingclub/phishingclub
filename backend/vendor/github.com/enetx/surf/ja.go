@@ -1,20 +1,15 @@
 package surf
 
 import (
-	"context"
-	"fmt"
+	"crypto/rand"
 	"math"
-	"math/rand"
-	"net"
+	"math/big"
 
 	"github.com/enetx/g"
-	"github.com/enetx/http"
 	"github.com/enetx/surf/internal/specclone"
-	"github.com/enetx/surf/pkg/connectproxy"
 	"github.com/enetx/surf/profiles/chrome"
-	"github.com/enetx/surf/profiles/firefox"
 
-	utls "github.com/enetx/utls"
+	utls "github.com/refraction-networking/utls"
 )
 
 // JA provides JA3/4 TLS fingerprinting capabilities for HTTP clients.
@@ -27,6 +22,7 @@ type JA struct {
 	spec    utls.ClientHelloSpec // Custom TLS ClientHello specification
 	id      utls.ClientHelloID   // Predefined TLS ClientHello identifier
 	builder *Builder             // Reference to the parent builder for method chaining
+	shuffle bool                 // Re-shuffle the spec's extension order on every connection (Chrome behaviour)
 }
 
 // SetHelloID sets a ClientHelloID for the TLS connection.
@@ -61,14 +57,33 @@ func (j *JA) SetHelloSpec(spec utls.ClientHelloSpec) *Builder {
 	return j.build()
 }
 
+// ShuffleExtensions enables Chromium's per-connection ClientHello extension shuffle: the
+// extension order is randomized on every TLS handshake instead of staying fixed for the
+// lifetime of the client. GREASE, padding and pre_shared_key keep their positions, as they
+// are positionally invariant on the wire.
+//
+// Chromium shuffles since v110, so a custom Chrome-derived spec needs this to stay
+// consistent with the User-Agent it claims. Firefox keeps a fixed order — do not enable it
+// there.
+//
+// Unlike SetHelloID / SetHelloSpec this method is not terminal: it returns the JA struct, so
+// it has to be chained before the spec is set.
+//
+// Example usage:
+//
+//	JA().ShuffleExtensions().SetHelloSpec(spec)
+func (j *JA) ShuffleExtensions() *JA {
+	j.shuffle = true
+	return j
+}
+
 // build applies JA3/4 TLS fingerprinting configuration to the HTTP client.
 // This method configures the client with custom TLS settings and proxy support for JA3/4 fingerprinting.
 //
 // The method performs several key operations:
 // 1. Skips configuration if HTTP/3 is being used (JA3/4 only works with HTTP/1.1 and HTTP/2)
 // 2. Adds connection cleanup middleware if not using singleton pattern
-// 3. Configures proxy settings for both static and dynamic proxy configurations
-// 4. Wraps the transport with a custom round tripper that implements JA3/4 fingerprinting
+// 3. Wraps the transport with a custom round tripper that implements JA3/4 fingerprinting
 //
 // Returns the builder instance for method chaining.
 func (j *JA) build() *Builder {
@@ -76,63 +91,6 @@ func (j *JA) build() *Builder {
 		// JA3 fingerprinting is not compatible with HTTP/3 - skip if HTTP/3 is used
 		if _, ok := c.GetTransport().(*uquicTransport); ok {
 			return nil
-		}
-
-		if !j.builder.singleton {
-			j.builder.addRespMW(closeIdleConnectionsMW, 0)
-		}
-
-		if j.builder.proxy != nil {
-			var proxy string
-
-			// Handle static proxy configurations
-			switch v := j.builder.proxy.(type) {
-			case string:
-				proxy = v
-			case g.String:
-				proxy = v.Std()
-			}
-
-			if proxy != "" {
-				// Static proxy configuration
-				dialer, err := connectproxy.NewDialer(proxy)
-				if err != nil {
-					c.GetTransport().(*http.Transport).DialContext = func(context.Context, string, string) (net.Conn, error) {
-						return nil, fmt.Errorf("proxy dialer init failed: %w", err)
-					}
-				} else {
-					c.GetTransport().(*http.Transport).DialContext = dialer.DialContext
-				}
-			} else {
-				// Dynamic proxy configuration - evaluate proxy per connection
-				c.GetTransport().(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-					var proxy string
-
-					switch v := j.builder.proxy.(type) {
-					case func() g.String:
-						proxy = v().Std()
-					case []string:
-						if len(v) > 0 {
-							proxy = v[rand.Intn(len(v))]
-						}
-					case g.Slice[string]:
-						proxy = v.Random()
-					case g.Slice[g.String]:
-						proxy = v.Random().Std()
-					}
-
-					if proxy == "" {
-						return c.GetDialer().DialContext(ctx, network, addr)
-					}
-
-					dialer, err := connectproxy.NewDialer(proxy)
-					if err != nil {
-						return nil, fmt.Errorf("create proxy dialer for %s: %w", proxy, err)
-					}
-
-					return dialer.DialContext(ctx, network, addr)
-				}
-			}
 		}
 
 		// Wrap the transport with JA3/4 fingerprinting round tripper
@@ -148,15 +106,63 @@ func (j *JA) build() *Builder {
 // 1. If a custom ClientHelloID is set (via SetHelloID), it attempts to convert this ID to a ClientHelloSpec.
 // 2. If none of the above conditions are met, it returns the currently set ClientHelloSpec.
 //
+// The result is always a private copy, never the source spec, so the per-connection mutations
+// below are safe under concurrent dials: the extension order is re-shuffled when
+// ShuffleExtensions is enabled, and GREASE placeholders in signature_algorithms are replaced
+// with fresh random values.
+//
 // This method returns the selected ClientHelloSpec along with an error value. If an error occurs
 // during conversion, it returns the error.
 func (j *JA) getSpec() g.Result[utls.ClientHelloSpec] {
+	var spec *utls.ClientHelloSpec
+
 	if !j.id.IsSet() {
-		return g.ResultOf(utls.UTLSIdToSpec(j.id))
+		r := g.ResultOf(utls.UTLSIdToSpec(j.id))
+		if r.IsErr() {
+			return r
+		}
+
+		id := r.Ok()
+		spec = &id
+	} else {
+		spec = specclone.Clone(&j.spec)
 	}
 
-	spec := specclone.Clone(&j.spec)
+	if j.shuffle {
+		spec.Extensions = utls.ShuffleChromeTLSExtensions(spec.Extensions)
+	}
+
+	greaseSignatureAlgorithms(spec)
+
 	return g.Ok(*spec)
+}
+
+// greaseSignatureAlgorithms replaces every GREASE placeholder in the spec's
+// signature_algorithms list with a fresh random GREASE value. Chrome sends a GREASE
+// signature scheme at the head of that list and picks a new value per connection; uTLS
+// substitutes GREASE placeholders for cipher suites, groups, key shares, versions and
+// extension IDs but leaves signature schemes untouched, so it is done here.
+func greaseSignatureAlgorithms(spec *utls.ClientHelloSpec) {
+	for _, ext := range spec.Extensions {
+		sigalgs, ok := ext.(*utls.SignatureAlgorithmsExtension)
+		if !ok {
+			continue
+		}
+		for i, scheme := range sigalgs.SupportedSignatureAlgorithms {
+			if scheme == utls.GREASE_PLACEHOLDER {
+				sigalgs.SupportedSignatureAlgorithms[i] = utls.SignatureScheme(randomGREASE())
+			}
+		}
+	}
+}
+
+// randomGREASE returns one of the 16 GREASE code points (0x0a0a, 0x1a1a, … 0xfafa).
+func randomGREASE() uint16 {
+	n, err := rand.Int(rand.Reader, big.NewInt(16))
+	if err != nil {
+		return utls.GREASE_PLACEHOLDER
+	}
+	return uint16(0x0a0a + 0x1010*n.Int64())
 }
 
 // Browser and application fingerprinting methods.
@@ -205,8 +211,12 @@ func (j *JA) Chrome120() *Builder { return j.SetHelloID(utls.HelloChrome_120) }
 // Chrome120PQ sets the JA3/4 fingerprint to mimic Chrome version 120 with post-quantum cryptography support.
 func (j *JA) Chrome120PQ() *Builder { return j.SetHelloID(utls.HelloChrome_120_PQ) }
 
-// Chrome142 sets the JA3/4 fingerprint to mimic Chrome version 142.
-func (j *JA) Chrome142() *Builder { return j.SetHelloSpec(chrome.HelloChrome_142) }
+// Chrome152 sets the JA3/4 fingerprint to mimic Chrome version 152: ML-DSA and a GREASE
+// value in signature_algorithms, the trust_anchors extension, and Chrome's per-connection
+// extension-order shuffle.
+func (j *JA) Chrome152() *Builder {
+	return j.ShuffleExtensions().SetHelloSpec(chrome.HelloChrome_152)
+}
 
 // Edge sets the JA3/4 fingerprint to mimic Microsoft Edge version 85.
 func (j *JA) Edge() *Builder { return j.SetHelloID(utls.HelloEdge_85) }
@@ -244,20 +254,8 @@ func (j *JA) Firefox105() *Builder { return j.SetHelloID(utls.HelloFirefox_105) 
 // Firefox120 sets the JA3/4 fingerprint to mimic Firefox version 120.
 func (j *JA) Firefox120() *Builder { return j.SetHelloID(utls.HelloFirefox_120) }
 
-// Firefox141 sets the JA3/4 fingerprint to mimic Firefox version 141.
-func (j *JA) Firefox141() *Builder { return j.SetHelloID(utls.HelloFirefox_141) }
-
-// Firefox144 sets the JA3/4 fingerprint to mimic Firefox version 144.
-func (j *JA) Firefox144() *Builder { return j.SetHelloSpec(firefox.HelloFirefox_144) }
-
-// FirefoxPrivate144 sets the JA3/4 fingerprint to mimic Firefox private version 144.
-func (j *JA) FirefoxPrivate144() *Builder { return j.SetHelloSpec(firefox.HelloFirefoxPrivate_144) }
-
-// Tor sets the JA3/4 fingerprint to mimic Tor Browser version 14.5.6.
-func (j *JA) Tor() *Builder { return j.SetHelloSpec(firefox.Tor) }
-
-// TorPrivate sets the JA3/4 fingerprint to mimic Tor Browser private version 14.5.6.
-func (j *JA) TorPrivate() *Builder { return j.SetHelloSpec(firefox.TorPrivate) }
+// Firefox148 sets the JA3/4 fingerprint to mimic Firefox version 148.
+func (j *JA) Firefox148() *Builder { return j.SetHelloID(utls.HelloFirefox_148) }
 
 // IOS sets the JA3/4 fingerprint to mimic the latest iOS Safari browser (auto-detection).
 func (j *JA) IOS() *Builder { return j.SetHelloID(utls.HelloIOS_Auto) }

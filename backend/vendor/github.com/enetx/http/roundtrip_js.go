@@ -196,6 +196,13 @@ func (t *Transport) RoundTrip(req *Request) (*Response, error) {
 			uncompressed = true
 		}
 
+		if result.Get("redirected").Bool() {
+			u, err := url.Parse(result.Get("url").String())
+			if err == nil {
+				req = req.Clone(req.ctx)
+				req.URL = u
+			}
+		}
 		respCh <- &Response{
 			Status:        fmt.Sprintf("%d %s", code, StatusText(code)),
 			StatusCode:    code,

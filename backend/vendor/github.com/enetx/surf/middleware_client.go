@@ -3,17 +3,18 @@ package surf
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"maps"
-	"math/rand"
 	"net"
-	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/enetx/g"
 	"github.com/enetx/http"
 	"github.com/enetx/http/cookiejar"
 	"github.com/enetx/http2"
+	"github.com/enetx/surf/pkg/connectproxy"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -25,7 +26,8 @@ func defaultDialerMW(client *Client) error {
 }
 
 // defaultTLSConfigMW initializes the default TLS configuration for the surf client.
-// Configures TLS settings with insecure skip verify enabled by default for flexibility.
+// InsecureSkipVerify is true by default for compatibility with test servers and proxies.
+// Use Builder.SecureTLS() to enable certificate verification for production.
 func defaultTLSConfigMW(client *Client) error {
 	client.tlsConfig = &tls.Config{InsecureSkipVerify: true}
 	return nil
@@ -34,14 +36,20 @@ func defaultTLSConfigMW(client *Client) error {
 // defaultTransportMW initializes the default HTTP transport for the surf client.
 // Configures connection pooling, timeouts, and enables HTTP/2 support by default.
 func defaultTransportMW(client *Client) error {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DialContext = client.dialer.DialContext
-	transport.TLSClientConfig = client.tlsConfig
-	transport.MaxIdleConns = _maxIdleConns
-	transport.MaxConnsPerHost = _maxConnsPerHost
-	transport.MaxIdleConnsPerHost = _maxIdleConnsPerHost
-	transport.IdleConnTimeout = _idleConnTimeout
-	transport.ForceAttemptHTTP2 = true
+	transport := &http.Transport{
+		DialContext:           client.dialer.DialContext,
+		DisableCompression:    true,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+		IdleConnTimeout:       _idleConnTimeout,
+		MaxConnsPerHost:       _maxConnsPerHost,
+		MaxIdleConns:          _maxIdleConns,
+		MaxIdleConnsPerHost:   _maxIdleConnsPerHost,
+		Proxy:                 http.ProxyFromEnvironment,
+		ResponseHeaderTimeout: _responseHeaderTimeout,
+		TLSClientConfig:       client.tlsConfig,
+		TLSHandshakeTimeout:   _tlsHandshakeTimeout,
+	}
 
 	client.transport = transport
 
@@ -62,12 +70,21 @@ func boundaryMW(client *Client, boundary func() g.String) error {
 	return nil
 }
 
-// forseHTTP1MW configures the client to use HTTP/1.1 forcefully.
+// forceHTTP1MW configures the client to use HTTP/1.1 forcefully.
 // Disables HTTP/2 and forces the client to use only HTTP/1.1 protocol.
-func forseHTTP1MW(client *Client) error {
+func forceHTTP1MW(client *Client) error {
 	transport := client.GetTransport().(*http.Transport)
 	transport.Protocols = new(http.Protocols)
 	transport.Protocols.SetHTTP1(true)
+	return nil
+}
+
+// forceHTTP2MW configures the client to use HTTP/2 forcefully.
+// Disables HTTP/1.1 and forces the client to use only HTTP/2 protocol.
+func forceHTTP2MW(client *Client) error {
+	transport := client.GetTransport().(*http.Transport)
+	transport.Protocols = new(http.Protocols)
+	transport.Protocols.SetHTTP2(true)
 	return nil
 }
 
@@ -86,26 +103,48 @@ func disableKeepAliveMW(client *Client) error {
 	return nil
 }
 
-// disableCompressionMW disables compression for the client's transport.
-func disableCompressionMW(client *Client) error {
-	client.GetTransport().(*http.Transport).DisableCompression = true
-	return nil
-}
-
 // interfaceAddrMW configures the client's local network interface address for outbound connections.
-// This allows binding the client to a specific network interface or IP address for dialing.
-// Useful for systems with multiple network interfaces or for controlling which IP address to use.
+// Accepts either an IP address (e.g., "192.168.1.100", "::1") or an interface name (e.g., "eth0").
 func interfaceAddrMW(client *Client, address g.String) error {
-	if address != "" {
-		ip, err := net.ResolveTCPAddr("tcp", address.Std()+":0")
-		if err != nil {
-			return err
-		}
-
-		client.GetDialer().LocalAddr = ip
+	if address.IsEmpty() {
+		return errors.New("interface address is empty")
 	}
 
-	return nil
+	addr := address.Std()
+
+	// Try to parse as IP first
+	if ip := net.ParseIP(addr); ip != nil {
+		client.GetDialer().LocalAddr = &net.TCPAddr{IP: ip}
+		return nil
+	}
+
+	iface, err := net.InterfaceByName(addr)
+	if err != nil {
+		return fmt.Errorf("invalid interface %q: not an IP or interface name", address)
+	}
+
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return fmt.Errorf("get addresses for interface %q: %w", address, err)
+	}
+
+	if len(addrs) == 0 {
+		return fmt.Errorf("interface %q has no addresses", address)
+	}
+
+	for _, a := range addrs {
+		if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP.To4() != nil {
+			client.GetDialer().LocalAddr = &net.TCPAddr{IP: ipnet.IP}
+			return nil
+		}
+	}
+
+	if ipnet, ok := addrs[0].(*net.IPNet); ok {
+		client.GetDialer().LocalAddr = &net.TCPAddr{IP: ipnet.IP}
+		return nil
+	}
+
+	return fmt.Errorf("no usable address for interface %q", address)
 }
 
 // timeoutMW configures the client's overall request timeout.
@@ -113,6 +152,22 @@ func interfaceAddrMW(client *Client, address g.String) error {
 // request transmission, and response reading.
 func timeoutMW(client *Client, timeout time.Duration) error {
 	client.GetClient().Timeout = timeout
+	return nil
+}
+
+// tlsConfigMW configures a custom TLS configuration for the client.
+// This allows setting custom certificates, cipher suites, TLS versions, and other TLS parameters.
+func tlsConfigMW(client *Client, config *tls.Config) error {
+	if config == nil {
+		return errors.New("TLS config is nil")
+	}
+
+	client.tlsConfig = config
+
+	if transport, ok := client.GetTransport().(*http.Transport); ok {
+		transport.TLSClientConfig = config
+	}
+
 	return nil
 }
 
@@ -174,8 +229,30 @@ func redirectPolicyMW(client *Client) error {
 // Sets up the client to use the specified DNS server address for hostname resolution
 // instead of the system's default DNS configuration.
 func dnsMW(client *Client, dns g.String) error {
-	if dns.Empty() {
-		return nil
+	if dns.IsEmpty() {
+		return errors.New("DNS address is empty")
+	}
+
+	host, port, err := net.SplitHostPort(dns.Std())
+	if err != nil {
+		return fmt.Errorf("invalid DNS address %q: %w", dns, err)
+	}
+
+	if host == "" {
+		return fmt.Errorf("invalid DNS address %q: empty host", dns)
+	}
+
+	if port == "" {
+		return fmt.Errorf("invalid DNS address %q: empty port", dns)
+	}
+
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		return fmt.Errorf("invalid DNS address %q: invalid port", dns)
+	}
+
+	if portNum < 1 || portNum > 65535 {
+		return fmt.Errorf("invalid DNS address %q: port out of range", dns)
 	}
 
 	client.GetDialer().Resolver = &net.Resolver{
@@ -201,11 +278,16 @@ func dnsTLSMW(client *Client, resolver *net.Resolver) error {
 // Replaces the standard TCP connection with Unix socket communication,
 // useful for connecting to local services that expose Unix socket interfaces.
 func unixSocketMW(client *Client, address g.String) error {
-	if address.Empty() {
-		return nil
+	if address.IsEmpty() {
+		return errors.New("unix socket address is empty")
 	}
 
-	client.GetTransport().(*http.Transport).DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+	transport, ok := client.GetTransport().(*http.Transport)
+	if !ok {
+		return errors.New("transport is not *http.Transport")
+	}
+
+	transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", address.Std())
 	}
 
@@ -213,16 +295,7 @@ func unixSocketMW(client *Client, address g.String) error {
 }
 
 // proxyMW configures HTTP proxy settings for the client transport.
-// Supports both static proxy configurations (string URLs) and dynamic proxy providers
-// (functions that return proxy URLs for rotation). Handles various proxy types including
-// HTTP, HTTPS, and SOCKS proxies. Skips configuration for JA3 and HTTP/3 transports
-// which handle proxies differently.
-func proxyMW(client *Client, proxys any) error {
-	// Skip proxy configuration for JA3 transport (handled separately)
-	if client.builder.ja {
-		return nil
-	}
-
+func proxyMW(client *Client, proxy g.String) error {
 	// Skip if HTTP/3 transport is being used (handled separately)
 	if _, ok := client.GetTransport().(*uquicTransport); ok {
 		return nil
@@ -230,64 +303,27 @@ func proxyMW(client *Client, proxys any) error {
 
 	transport, ok := client.GetTransport().(*http.Transport)
 	if !ok {
-		return fmt.Errorf("transport is not *http.Transport")
+		return errors.New("transport is not *http.Transport")
 	}
 
-	// Clear proxy if nil provided
-	if proxys == nil {
+	if proxy.IsEmpty() {
 		transport.Proxy = nil
 		return nil
 	}
 
-	// Helper function to set static proxy
-	setProxy := func(proxy string) {
-		if proxy == "" {
-			return
-		}
-		if proxyURL, err := url.Parse(proxy); err == nil {
-			transport.Proxy = http.ProxyURL(proxyURL)
-		} else {
-			transport.Proxy = func(*http.Request) (*url.URL, error) {
-				return nil, fmt.Errorf("invalid proxy URL %q: %w", proxy, err)
-			}
-		}
+	dialer, err := connectproxy.NewDialer(proxy.Std())
+	if err != nil {
+		return fmt.Errorf("create proxy dialer: %w", err)
 	}
 
-	// Handle static proxy configurations
-	switch v := proxys.(type) {
-	case string:
-		setProxy(v)
-		return nil
-	case g.String:
-		setProxy(v.Std())
-		return nil
+	// Pass custom DNS resolver to proxy dialer if configured.
+	// This ensures DNS queries go through the custom DNS server, not through the proxy.
+	// Target hostnames are pre-resolved locally before being sent to the proxy.
+	if client.dialer != nil && client.dialer.Resolver != nil {
+		dialer.SetResolver(client.dialer.Resolver)
 	}
 
-	// Handle dynamic proxy configurations - evaluate proxy per request
-	transport.Proxy = func(*http.Request) (*url.URL, error) {
-		var proxy string
-
-		switch v := proxys.(type) {
-		case func() g.String:
-			proxy = v().Std()
-		case []string:
-			if len(v) > 0 {
-				proxy = v[rand.Intn(len(v))]
-			}
-		case g.Slice[string]:
-			proxy = v.Random()
-		case g.Slice[g.String]:
-			proxy = v.Random().Std()
-		default:
-			return nil, fmt.Errorf("unsupported proxy type: %T", proxys)
-		}
-
-		if proxy == "" {
-			return nil, nil
-		}
-
-		return url.Parse(proxy)
-	}
+	transport.DialContext = dialer.DialContext
 
 	return nil
 }
@@ -310,13 +346,16 @@ func h2cMW(client *Client) error {
 	t2.IdleConnTimeout = client.transport.(*http.Transport).IdleConnTimeout
 
 	// Override TLS dial to use plain text connections
-	t2.DialTLSContext = func(_ context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-		return net.Dial(network, addr)
+	t2.DialTLSContext = func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, addr)
 	}
 
 	// Apply HTTP/2 settings if configured
 	if client.builder.http2settings != nil {
 		h := client.builder.http2settings
+
+		// Pre-allocate settings slice to avoid multiple allocations
+		t2.Settings = make([]http2.Setting, 0, 7)
 
 		// Helper function to append non-zero settings
 		appendSetting := func(id http2.SettingID, val uint32) {
@@ -325,29 +364,22 @@ func h2cMW(client *Client) error {
 			}
 		}
 
-		// Apply all configured HTTP/2 settings
-		settings := [...]struct {
-			id  http2.SettingID
-			val uint32
-		}{
-			{http2.SettingHeaderTableSize, h.headerTableSize},
-			{http2.SettingEnablePush, h.enablePush},
-			{http2.SettingMaxConcurrentStreams, h.maxConcurrentStreams},
-			{http2.SettingInitialWindowSize, h.initialWindowSize},
-			{http2.SettingMaxFrameSize, h.maxFrameSize},
-			{http2.SettingMaxHeaderListSize, h.maxHeaderListSize},
+		appendSetting(http2.SettingHeaderTableSize, h.headerTableSize)
+		appendSetting(http2.SettingEnablePush, h.enablePush)
+		appendSetting(http2.SettingMaxConcurrentStreams, h.maxConcurrentStreams)
+		appendSetting(http2.SettingInitialWindowSize, h.initialWindowSize)
+		appendSetting(http2.SettingMaxFrameSize, h.maxFrameSize)
+		appendSetting(http2.SettingMaxHeaderListSize, h.maxHeaderListSize)
+		appendSetting(http2.SettingNoRFC7540Priorities, h.noRFC7540Priorities)
+
+		if h.initialStreamID != 0 {
+			t2.StreamID = h.initialStreamID
 		}
 
-		for _, s := range settings {
-			appendSetting(s.id, s.val)
-		}
-
-		// Apply flow control settings if configured
 		if h.connectionFlow != 0 {
 			t2.ConnectionFlow = h.connectionFlow
 		}
 
-		// Apply priority settings if configured
 		if !h.priorityParam.IsZero() {
 			t2.PriorityParam = h.priorityParam
 		}

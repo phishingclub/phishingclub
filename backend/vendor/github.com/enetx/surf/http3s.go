@@ -1,605 +1,460 @@
-// Package surf provides HTTP/3 support with full uQUIC fingerprinting for advanced web scraping and automation.
-// This file implements HTTP/3 transport with complete QUIC Initial Packet + TLS ClientHello fingerprinting,
-// SOCKS5 proxy support, and automatic fallback to HTTP/2 for non-SOCKS5 proxies.
 package surf
 
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/url"
-	"strconv"
-	"time"
+	"syscall"
 
 	"github.com/enetx/g"
-	"github.com/enetx/g/ref"
 	"github.com/enetx/http"
+	"github.com/enetx/http3"
 	"github.com/enetx/surf/pkg/quicconn"
-	uquic "github.com/enetx/uquic"
-	"github.com/enetx/uquic/http3"
-	utls "github.com/enetx/utls"
+	"github.com/quic-go/quic-go"
 	"github.com/wzshiming/socks5"
 )
 
-// HTTP3Settings represents HTTP/3 settings with uQUIC fingerprinting support.
+// HTTP/3 SETTINGS frame parameter identifiers as defined in RFC 9114.
+const (
+	SETTINGS_QPACK_MAX_TABLE_CAPACITY = 0x01
+	SETTINGS_MAX_FIELD_SECTION_SIZE   = 0x06
+	SETTINGS_QPACK_BLOCKED_STREAMS    = 0x07
+	SETTINGS_ENABLE_CONNECT_PROTOCOL  = 0x08
+	SETTINGS_H3_DATAGRAM              = 0x33
+	H3_DATAGRAM                       = 0xFFD277
+	SETTINGS_ENABLE_WEBTRANSPORT      = 0x2B603742
+)
+
+// HTTP3Settings provides a fluent interface for configuring HTTP/3 SETTINGS parameters.
+// These settings are sent to the server during connection establishment.
 type HTTP3Settings struct {
 	builder  *Builder
-	quicID   *uquic.QUICID
-	quicSpec *uquic.QUICSpec
+	settings g.MapOrd[uint64, uint64]
 }
 
-// Chrome configures HTTP/3 settings to mimic Chrome browser.
-func (h *HTTP3Settings) Chrome() *HTTP3Settings {
-	h.quicID = &uquic.QUICChrome_115
+// QpackMaxTableCapacity sets the maximum dynamic table capacity for QPACK.
+func (h *HTTP3Settings) QpackMaxTableCapacity(num uint64) *HTTP3Settings {
+	h.settings.Insert(SETTINGS_QPACK_MAX_TABLE_CAPACITY, num)
 	return h
 }
 
-// Firefox configures HTTP/3 settings to mimic Firefox browser.
-func (h *HTTP3Settings) Firefox() *HTTP3Settings {
-	h.quicID = &uquic.QUICFirefox_116
+// MaxFieldSectionSize sets the maximum size of a field section the peer is willing to accept.
+func (h *HTTP3Settings) MaxFieldSectionSize(num uint64) *HTTP3Settings {
+	h.settings.Insert(SETTINGS_MAX_FIELD_SECTION_SIZE, num)
 	return h
 }
 
-// SetQUICID sets a custom QUIC ID for fingerprinting.
-func (h *HTTP3Settings) SetQUICID(quicID uquic.QUICID) *HTTP3Settings {
-	h.quicID = &quicID
+// QpackBlockedStreams sets the maximum number of streams that can be blocked on QPACK.
+func (h *HTTP3Settings) QpackBlockedStreams(num uint64) *HTTP3Settings {
+	h.settings.Insert(SETTINGS_QPACK_BLOCKED_STREAMS, num)
 	return h
 }
 
-// SetQUICSpec sets a custom QUIC spec for advanced fingerprinting.
-func (h *HTTP3Settings) SetQUICSpec(quicSpec uquic.QUICSpec) *HTTP3Settings {
-	h.quicSpec = &quicSpec
+// EnableConnectProtocol enables the extended CONNECT protocol (RFC 9220).
+func (h *HTTP3Settings) EnableConnectProtocol(num uint64) *HTTP3Settings {
+	h.settings.Insert(SETTINGS_ENABLE_CONNECT_PROTOCOL, num)
 	return h
 }
 
-// getQUICSpec returns the QUIC spec either from custom spec or by converting QUICID.
-// Returns None if neither custom spec nor QUICID is configured or conversion fails.
-func (h *HTTP3Settings) getQUICSpec() g.Option[uquic.QUICSpec] {
-	if h.quicSpec != nil {
-		return g.Some(*h.quicSpec)
-	}
-
-	if h.quicID != nil {
-		if spec, err := uquic.QUICID2Spec(*h.quicID); err == nil {
-			return g.Some(spec)
-		}
-	}
-
-	return g.None[uquic.QUICSpec]()
+// SettingsH3Datagram sets the H3_DATAGRAM setting value.
+func (h *HTTP3Settings) SettingsH3Datagram(num uint64) *HTTP3Settings {
+	h.settings.Insert(SETTINGS_H3_DATAGRAM, num)
+	return h
 }
 
-// Set applies the accumulated HTTP/3 settings.
-// It configures the uQUIC transport for the surf client.
+// H3Datagram sets a custom H3_DATAGRAM value for datagram support.
+func (h *HTTP3Settings) H3Datagram(num uint64) *HTTP3Settings {
+	h.settings.Insert(H3_DATAGRAM, num)
+	return h
+}
+
+// EnableWebtransport enables WebTransport support over HTTP/3.
+func (h *HTTP3Settings) EnableWebtransport(num uint64) *HTTP3Settings {
+	h.settings.Insert(SETTINGS_ENABLE_WEBTRANSPORT, num)
+	return h
+}
+
+// Grease adds a GREASE parameter with random ID and value to prevent protocol ossification.
+func (h *HTTP3Settings) Grease() *HTTP3Settings {
+	maxn := (uint64(1<<62) - 1 - 0x21) / 0x1F
+	n := uint64(rand.Uint32()) % maxn
+	h.settings.Insert(0x1F*n+0x21, uint64(rand.Uint32()))
+
+	return h
+}
+
+// Set applies the configured HTTP/3 settings to the client's transport.
 func (h *HTTP3Settings) Set() *Builder {
-	if h.builder.forceHTTP1 {
-		return h.builder
-	}
-
 	return h.builder.addCliMW(func(c *Client) error {
-		if !h.builder.singleton {
-			h.builder.addRespMW(closeIdleConnectionsMW, 0)
-		}
-
-		quicSpec := h.getQUICSpec()
-		if quicSpec.IsNone() {
+		if h.builder.forceHTTP1 || h.builder.forceHTTP2 || !h.builder.forceHTTP3 {
 			return nil
 		}
 
-		tlsConfig := c.tlsConfig.Clone()
-
-		transport := &uquicTransport{
-			quicSpec:          ref.Of(quicSpec.Some()),
-			tlsConfig:         tlsConfig,
-			dialer:            c.GetDialer(),
-			proxy:             h.builder.proxy,
-			fallbackTransport: c.GetTransport(),
-			cachedConnections: g.NewMapSafe[string, *connection](),
-			cachedTransports:  g.NewMapSafe[string, http.RoundTripper](),
-		}
-
-		switch v := h.builder.proxy.(type) {
-		case string:
-			transport.staticProxy = v
-			transport.isDynamic = false
-		case g.String:
-			transport.staticProxy = v.Std()
-			transport.isDynamic = false
-		default:
-			transport.isDynamic = true
+		transport, err := newUQUICTransport(h.settings, c, h.builder)
+		if err != nil {
+			return err
 		}
 
 		c.GetClient().Transport = transport
 		c.transport = transport
 
 		return nil
-	}, math.MaxInt)
+	}, math.MaxInt-1)
 }
 
-type connection struct {
-	packetConn net.PacketConn
-	quicConn   uquic.Connection
-}
-
-// uquicTransport implements http.RoundTripper using uQUIC fingerprinting for HTTP/3.
-// It provides full QUIC Initial Packet + TLS ClientHello fingerprinting capabilities,
-// SOCKS5 proxy compatibility, and automatic fallback to HTTP/2 for non-SOCKS5 proxies.
-// The transport supports both static and dynamic proxy configurations with connection caching.
+// uquicTransport implements http.RoundTripper with HTTP/3 support.
+// It provides SOCKS5 proxy compatibility and automatic fallback to HTTP/2
+// when HTTP/3 is unavailable or for non-SOCKS5 proxies.
 type uquicTransport struct {
-	quicSpec          *uquic.QUICSpec // QUIC specification for fingerprinting
-	tlsConfig         *tls.Config     // TLS configuration for QUIC connections
-	dialer            *net.Dialer     // Network dialer (may contain custom DNS resolver)
-	proxy             any             // Proxy configuration (static or dynamic function)
-	staticProxy       string          // Cached static proxy URL for performance
-	isDynamic         bool            // Flag indicating if proxy is dynamic (disables caching)
-	cachedConnections *g.MapSafe[string, *connection]
-	cachedTransports  *g.MapSafe[string, http.RoundTripper] // Per-address HTTP/3 transport cache
-	fallbackTransport http.RoundTripper                     // HTTP/2 transport for non-SOCKS5 proxy fallback
+	http3tr           *http3.Transport
+	quictr            *quic.Transport
+	pconn             net.PacketConn
+	fallbackTransport http.RoundTripper
+	tlsConfig         *tls.Config
+	dialer            *net.Dialer
+	settings          g.MapOrd[uint64, uint64]
+	proxy             string
 }
 
-// CloseIdleConnections closes all cached HTTP/3 connections and clears the cache.
-// It also attempts to close idle connections on the fallback transport if available.
-func (ut *uquicTransport) CloseIdleConnections() {
-	for k, transport := range ut.cachedTransports.Iter() {
-		// Check if transport implements CloseIdleConnections
-		switch t := transport.(type) {
-		case *http3.RoundTripper:
-			t.CloseIdleConnections()
-		case *http3.URoundTripper:
-			t.CloseIdleConnections()
-		}
-
-		ut.cachedTransports.Delete(k)
+// newUQUICTransport creates a new HTTP/3 transport with the given settings.
+func newUQUICTransport(settings g.MapOrd[uint64, uint64], c *Client, builder *Builder) (*uquicTransport, error) {
+	ut := &uquicTransport{
+		tlsConfig: c.tlsConfig.Clone(),
+		dialer:    c.GetDialer(),
+		settings:  settings,
+		proxy:     builder.proxy.Std(),
 	}
 
-	for id, c := range ut.cachedConnections.Iter() {
-		if c.quicConn != nil {
-			_ = c.quicConn.CloseWithError(0, "idle close")
-		}
+	ut.fallbackTransport = c.GetTransport()
 
-		if c.packetConn != nil {
-			_ = c.packetConn.Close()
+	if ut.proxy != "" && !isSOCKS5Proxy(ut.proxy) {
+		if ut.fallbackTransport == nil {
+			return nil, errors.New("HTTP/3 requires SOCKS5 proxy for UDP relay")
 		}
-
-		ut.cachedConnections.Delete(id)
+		return ut, nil
 	}
 
-	if ut.fallbackTransport != nil {
-		if closer, ok := ut.fallbackTransport.(interface{ CloseIdleConnections() }); ok {
-			closer.CloseIdleConnections()
-		}
+	if err := ut.initTransport(); err != nil {
+		return nil, err
 	}
+
+	return ut, nil
 }
 
-func (ut *uquicTransport) address(req *http.Request) string {
-	host, port, err := net.SplitHostPort(req.URL.Host)
-	if err == nil {
-		return net.JoinHostPort(host, port)
-	}
-
-	var defaultPort string
-
-	switch g.String(req.URL.Scheme).Lower() {
-	case "http":
-		defaultPort = defaultHTTPPort
-	case "https":
-		defaultPort = defaultHTTPSPort
-	default:
-		defaultPort = defaultHTTPSPort
-	}
-
-	return net.JoinHostPort(req.URL.Host, defaultPort)
-}
-
-// createH3 returns per-address cached http3.Transport with proper Dial & SNI configuration.
-// Caching is disabled for dynamic proxy configurations to ensure proper proxy rotation.
-func (ut *uquicTransport) createH3(req *http.Request, addr, proxy string) http.RoundTripper {
-	key := addr
-	if proxy != "" {
-		key = proxy + "|" + addr
-	}
-
-	// Skip cache for dynamic proxy providers to ensure proxy rotation works correctly
-	if !ut.isDynamic {
-		if tr := ut.cachedTransports.Get(key); tr.IsSome() {
-			return tr.Some()
-		}
-	}
-
-	// Create uquic/http3 RoundTripper (with or without full QUIC fingerprinting)
-	base := &http3.RoundTripper{
-		TLSClientConfig: tlsToUTLS(ut.tlsConfig),
-		QuicConfig:      &uquic.Config{},
-	}
-
-	var h3 http.RoundTripper
-	if ut.quicSpec != nil {
-		h3 = http3.GetURoundTripper(base, ut.quicSpec, nil)
-	} else {
-		h3 = base
-	}
-
-	if (ut.dialer != nil && ut.dialer.Resolver != nil) || proxy != "" {
-		hostname := req.URL.Hostname()
-
-		// Create common dial function
-		dialFunc := func(ctx context.Context, quicAddr string, tlsCfg *utls.Config, cfg *uquic.Config) (uquic.EarlyConnection, error) {
-			if tlsCfg == nil {
-				tlsCfg = &utls.Config{}
-			}
-
-			if tlsCfg.ServerName == "" {
-				if hn := hostname; hn != "" && net.ParseIP(hn) == nil {
-					clone := tlsCfg.Clone()
-					clone.ServerName = hn
-					tlsCfg = clone
-				}
-			}
-
-			if proxy != "" {
-				return ut.dialSOCKS5(ctx, quicAddr, tlsCfg, cfg, proxy)
-			}
-			return ut.dialDNS(ctx, quicAddr, tlsCfg, cfg)
+// initTransport initializes the underlying QUIC and HTTP/3 transports.
+func (ut *uquicTransport) initTransport() error {
+	if ut.proxy == "" {
+		var err error
+		ut.pconn, err = ut.createUDPPacketConn()
+		if err != nil {
+			return fmt.Errorf("create packet conn: %w", err)
 		}
 
-		// Configure custom dial function for uquic/http3
-		switch rt := h3.(type) {
-		case *http3.URoundTripper:
-			if rt.RoundTripper != nil {
-				rt.RoundTripper.Dial = dialFunc
-			}
-			rt.Dial = dialFunc
-		case *http3.RoundTripper:
-			rt.Dial = dialFunc
-		}
+		ut.quictr = &quic.Transport{Conn: ut.pconn}
 	}
 
-	// Only cache transport if not using dynamic proxy provider
-	if !ut.isDynamic {
-		ut.cachedTransports.Set(key, h3)
+	ut.http3tr = &http3.Transport{
+		TLSClientConfig: ut.tlsConfig,
+		QUICConfig: &quic.Config{
+			Versions:             []quic.Version{quic.Version1},
+			EnableDatagrams:      true,
+			HandshakeIdleTimeout: _quicHandshakeTimeout,
+			MaxIdleTimeout:       _quicMaxIdleTimeout,
+			KeepAlivePeriod:      _quicKeepAlivePeriod,
+			// InitialStreamReceiveWindow:     6291456,  // initial_max_stream_data_bidi_remote, initial_max_stream_data_bidi_local, initial_max_stream_data_uni
+			// InitialConnectionReceiveWindow: 15728640, // initial_max_data
+			// MaxIncomingStreams:             100,      // initial_max_streams_bidi
+			// MaxIncomingUniStreams:          103,      // initial_max_streams_uni
+		},
+		AdditionalSettings:     ut.settings,
+		MaxResponseHeaderBytes: _maxResponseHeaderBytes,
+		Dial:                   ut.dial,
 	}
 
-	return h3
+	return nil
 }
 
-// resolve always resolves host:port to ip:port.
-// Uses custom resolver when provided, otherwise the system resolver.
-func (ut *uquicTransport) resolve(ctx context.Context, address string) (string, error) {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return "", fmt.Errorf("invalid address format: %w", err)
-	}
-
-	// Skip resolution for IP addresses
-	if ip := net.ParseIP(host); ip != nil {
-		return address, nil
-	}
-
-	r := net.DefaultResolver
-	if ut.dialer != nil && ut.dialer.Resolver != nil {
-		r = ut.dialer.Resolver
-	}
-
-	ips, err := r.LookupIPAddr(ctx, host)
-	if err != nil {
-		return "", fmt.Errorf("lookup failed for %q: %w", host, err)
-	}
-
-	if len(ips) == 0 {
-		return "", &net.DNSError{Err: "no IP addresses found", Name: host}
-	}
-
-	// Prefer IPv4 addresses for better compatibility
-	for _, ipa := range ips {
-		if v4 := ipa.IP.To4(); v4 != nil {
-			return net.JoinHostPort(v4.String(), port), nil
-		}
-	}
-
-	// Fallback to first IPv6 address
-	return net.JoinHostPort(ips[0].IP.String(), port), nil
-}
-
-const (
-	minPort = 1
-	maxPort = 65535
-)
-
-// parsedAddr represents validated network address components
-type parsedAddr struct {
-	IP   net.IP
-	Port int
-}
-
-// parseResolvedAddress validates and parses a resolved address
-func parseResolvedAddress(resolved string) (*parsedAddr, error) {
-	host, portStr, err := net.SplitHostPort(resolved)
-	if err != nil {
-		return nil, fmt.Errorf("split host/port: %w", err)
-	}
-
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return nil, fmt.Errorf("parse port %q: %w", portStr, err)
-	}
-
-	if port < minPort || port > maxPort {
-		return nil, fmt.Errorf("port %d out of valid range [%d-%d]", port, minPort, maxPort)
-	}
-
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return nil, fmt.Errorf("invalid IP address: %q", host)
-	}
-
-	return &parsedAddr{
-		IP:   ip,
-		Port: port,
-	}, nil
-}
-
-// createUDPListener creates a UDP listener with fallback support
-func createUDPListener(preferredNetwork string) (*net.UDPConn, error) {
-	// Try preferred network first
-	conn, err := net.ListenUDP(preferredNetwork, nil)
-	if err == nil {
+// createUDPPacketConn creates a UDP listener, preferring IPv4.
+func (ut *uquicTransport) createUDPPacketConn() (net.PacketConn, error) {
+	if conn, err := net.ListenUDP("udp4", nil); err == nil {
 		return conn, nil
 	}
 
-	// If specific version failed, try generic UDP
-	if preferredNetwork != "udp" {
-		conn, err = net.ListenUDP("udp", nil)
-		if err == nil {
-			return conn, nil
-		}
-	}
-
-	return nil, fmt.Errorf("failed to create UDP listener on %s: %w", preferredNetwork, err)
+	return net.ListenUDP("udp6", nil)
 }
 
-// RoundTrip implements the http.RoundTripper interface with HTTP/3 support and automatic proxy fallback.
-// For non-SOCKS5 proxies, it automatically falls back to the HTTP/2 transport.
-// Dynamic proxy configurations are evaluated on each request for proper rotation.
-func (ut *uquicTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	var proxy string
-
-	if ut.isDynamic {
-		if p := ut.getProxy(); p.IsSome() {
-			proxy = p.Some()
-		}
-	} else {
-		proxy = ut.staticProxy
+// dial establishes a QUIC connection, routing through SOCKS5 proxy if configured.
+func (ut *uquicTransport) dial(
+	ctx context.Context,
+	addr string,
+	tlsCfg *tls.Config,
+	cfg *quic.Config,
+) (*quic.Conn, error) {
+	resolved, err := ut.resolve(ctx, addr)
+	if err != nil {
+		return nil, fmt.Errorf("DNS resolution: %w", err)
 	}
 
-	if proxy != "" && !isSOCKS5(proxy) && ut.fallbackTransport != nil {
-		return ut.fallbackTransport.RoundTrip(req)
+	host, _, _ := net.SplitHostPort(addr)
+	if tlsCfg.ServerName == "" && host != "" && net.ParseIP(host) == nil {
+		tlsCfg = tlsCfg.Clone()
+		tlsCfg.ServerName = host
 	}
 
-	if req.URL.Scheme == "" {
-		clone := *req.URL
-		clone.Scheme = "https"
-		req.URL = &clone
+	if ut.proxy != "" {
+		return ut.dialSOCKS5(ctx, resolved, tlsCfg, cfg)
 	}
 
-	addr := ut.address(req)
-	h3 := ut.createH3(req, addr, proxy)
-
-	return h3.RoundTrip(req)
+	return ut.dialDirect(ctx, resolved, tlsCfg, cfg)
 }
 
-// getProxy extracts proxy URL from configured proxy source.
-// Supports static (string, []string) and dynamic (func() g.String) configurations.
-// Returns g.Option[string] - Some(proxy_url) if proxy is available, None if no proxy is configured.
-func (ut *uquicTransport) getProxy() g.Option[string] {
-	var p string
-
-	switch v := ut.proxy.(type) {
-	case func() g.String:
-		p = v().Std()
-	case string:
-		p = v
-	case g.String:
-		p = v.Std()
-	case []string:
-		if len(v) > 0 {
-			p = v[rand.Intn(len(v))]
-		}
-	case g.Slice[string]:
-		p = v.Random()
-	case g.Slice[g.String]:
-		p = v.Random().Std()
-	}
-
-	if p != "" {
-		return g.Some(p)
-	}
-
-	return g.None[string]()
-}
-
-// tlsToUTLS converts standard tls.Config to utls.Config with minimal compatibility
-func tlsToUTLS(tlsConf *tls.Config) *utls.Config {
-	if tlsConf == nil {
-		return &utls.Config{}
-	}
-
-	return &utls.Config{
-		ServerName:         tlsConf.ServerName,
-		InsecureSkipVerify: tlsConf.InsecureSkipVerify,
-		NextProtos:         tlsConf.NextProtos,
-		RootCAs:            tlsConf.RootCAs,
-		MinVersion:         tlsConf.MinVersion,
-		MaxVersion:         tlsConf.MaxVersion,
-		CipherSuites:       tlsConf.CipherSuites,
-	}
-}
-
-// dialSOCKS5 establishes a QUIC connection through a SOCKS5 proxy (for uquic)
+// dialSOCKS5 establishes a QUIC connection through a SOCKS5 proxy using UDP ASSOCIATE.
 func (ut *uquicTransport) dialSOCKS5(
 	ctx context.Context,
-	address string,
-	tlsConfig *utls.Config,
-	cfg *uquic.Config,
-	proxy string,
-) (uquic.EarlyConnection, error) {
-	// Validate proxy URL
-	proxyURL, err := url.Parse(proxy)
-	if err != nil {
-		return nil, fmt.Errorf("parse proxy URL: %w", err)
-	}
-
-	// Create SOCKS5 dialer
-	dialer, err := socks5.NewDialer(proxyURL.String())
+	resolved string,
+	tlsCfg *tls.Config,
+	cfg *quic.Config,
+) (*quic.Conn, error) {
+	dialer, err := socks5.NewDialer(ut.proxy)
 	if err != nil {
 		return nil, fmt.Errorf("create SOCKS5 dialer: %w", err)
 	}
 
-	// Resolve target address
-	resolved, err := ut.resolve(ctx, address)
-	if err != nil {
-		return nil, fmt.Errorf("resolve address: %w", err)
-	}
-
-	// Establish SOCKS5 UDP associate
 	conn, err := dialer.DialContext(ctx, "udp", resolved)
 	if err != nil {
-		return nil, fmt.Errorf("SOCKS5 UDP associate: %w", err)
+		return nil, fmt.Errorf("SOCKS5 UDP ASSOCIATE: %w", err)
 	}
 
-	// Ensure cleanup on error
 	success := false
-
 	defer func() {
 		if !success {
-			_ = conn.Close()
+			conn.Close()
 		}
 	}()
 
 	proxyUDP, err := net.ResolveUDPAddr("udp", conn.RemoteAddr().String())
 	if err != nil {
-		return nil, fmt.Errorf("socks5 get proxy UDP addr: %w", err)
+		return nil, fmt.Errorf("resolve proxy UDP addr: %w", err)
 	}
 
-	// Create packet connection wrapper
+	targetUDP, err := net.ResolveUDPAddr("udp", resolved)
+	if err != nil {
+		return nil, fmt.Errorf("resolve target UDP addr: %w", err)
+	}
+
 	packetConn := quicconn.New(conn, proxyUDP, quicconn.EncapRaw)
 
-	// Ensure QUIC config exists
-	if cfg == nil {
-		cfg = &uquic.Config{}
-	}
-
-	// Establish QUIC connection with uquic
-	quicConn, err := uquic.DialEarly(ctx, packetConn, proxyUDP, tlsConfig, cfg)
+	quicConn, err := quic.DialEarly(ctx, packetConn, targetUDP, tlsCfg, cfg)
 	if err != nil {
-		_ = packetConn.Close()
-		return nil, fmt.Errorf("QUIC dial failed: %w", err)
+		packetConn.Close()
+		return nil, fmt.Errorf("QUIC dial: %w", err)
 	}
 
 	success = true
 
-	// Cache connection for reuse
-	if ut.cachedConnections != nil {
-		key := quicconn.ConnKey(packetConn)
-		ut.cachedConnections.Set(key, &connection{
-			packetConn: packetConn,
-			quicConn:   quicConn,
-		})
-	}
-
 	return quicConn, nil
 }
 
-// dialDNS establishes a QUIC connection using custom DNS resolver (for uquic)
-func (ut *uquicTransport) dialDNS(
+// dialDirect establishes a direct QUIC connection without proxy.
+func (ut *uquicTransport) dialDirect(
 	ctx context.Context,
-	address string,
-	tlsConfig *utls.Config,
-	cfg *uquic.Config,
-) (uquic.EarlyConnection, error) {
-	// Resolve address using custom DNS
-	resolved, err := ut.resolve(ctx, address)
+	resolved string,
+	tlsCfg *tls.Config,
+	cfg *quic.Config,
+) (*quic.Conn, error) {
+	udpAddr, err := net.ResolveUDPAddr("udp", resolved)
 	if err != nil {
-		return nil, fmt.Errorf("DNS resolution failed: %w", err)
+		return nil, fmt.Errorf("resolve UDP addr: %w", err)
 	}
 
-	// Parse and validate resolved address
-	addr, err := parseResolvedAddress(resolved)
+	return ut.quictr.Dial(ctx, udpAddr, tlsCfg, cfg)
+}
+
+// resolve resolves a hostname to an IP address, preferring IPv4.
+func (ut *uquicTransport) resolve(ctx context.Context, addr string) (string, error) {
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
+		return "", fmt.Errorf("split host/port: %w", err)
+	}
+
+	if net.ParseIP(host) != nil {
+		return addr, nil
+	}
+
+	resolver := net.DefaultResolver
+	if ut.dialer != nil && ut.dialer.Resolver != nil {
+		resolver = ut.dialer.Resolver
+	}
+
+	ips, err := resolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return "", fmt.Errorf("DNS lookup: %w", err)
+	}
+
+	if len(ips) == 0 {
+		return "", fmt.Errorf("no IP addresses found for %s", host)
+	}
+
+	for _, ip := range ips {
+		if ip.IP.To4() != nil {
+			return net.JoinHostPort(ip.IP.String(), port), nil
+		}
+	}
+
+	return net.JoinHostPort(ips[0].IP.String(), port), nil
+}
+
+// RoundTrip executes an HTTP/3 request with automatic fallback to HTTP/2.
+func (ut *uquicTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if ut.proxy != "" && !isSOCKS5Proxy(ut.proxy) {
+		if ut.fallbackTransport != nil {
+			return ut.fallbackTransport.RoundTrip(req)
+		}
+
+		return nil, errors.New("non-SOCKS5 proxy requires HTTP/2 fallback")
+	}
+
+	if ut.http3tr == nil {
+		if ut.fallbackTransport != nil {
+			return ut.fallbackTransport.RoundTrip(req)
+		}
+
+		return nil, errors.New("no transport available")
+	}
+
+	if req.URL.Scheme == "" {
+		req = cloneRequestWithScheme(req, "https")
+	}
+
+	resp, err := ut.http3tr.RoundTrip(req)
+	if err != nil {
+		return ut.handleError(req, err)
+	}
+
+	return resp, nil
+}
+
+// handleError attempts HTTP/2 fallback for recoverable HTTP/3 errors.
+func (ut *uquicTransport) handleError(req *http.Request, err error) (*http.Response, error) {
+	if req.Context().Err() != nil {
 		return nil, err
 	}
 
-	// Determine optimal network type
-	network := "udp"
-	if addr.IP.To4() != nil {
-		network = "udp4"
-	} else if addr.IP.To16() != nil {
-		network = "udp6"
+	if !isHTTP3UnsupportedError(err) || ut.fallbackTransport == nil {
+		return nil, err
 	}
 
-	// Create UDP listener with fallback
-	udpConn, err := createUDPListener(network)
-	if err != nil {
-		return nil, fmt.Errorf("create UDP listener: %w", err)
-	}
-
-	// Ensure cleanup on error
-	success := false
-
-	defer func() {
-		if !success {
-			_ = udpConn.Close()
-		}
-	}()
-
-	// Create target address
-	targetAddr := &net.UDPAddr{
-		IP:   addr.IP,
-		Port: addr.Port,
-	}
-
-	// Set deadline for dial operation only
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := udpConn.SetDeadline(deadline); err != nil {
-			return nil, fmt.Errorf("set dial deadline: %w", err)
+	if req.Body != nil && req.Body != http.NoBody {
+		if req.GetBody == nil {
+			return nil, fmt.Errorf("HTTP/3 failed, cannot retry (GetBody is nil): %w", err)
 		}
 
-		defer func() {
-			if success {
-				_ = udpConn.SetDeadline(time.Time{})
-			}
-		}()
+		body, bodyErr := req.GetBody()
+		if bodyErr != nil {
+			return nil, fmt.Errorf("failed to restore body: %w", bodyErr)
+		}
+
+		req.Body = body
 	}
 
-	// Ensure QUIC config exists
-	if cfg == nil {
-		cfg = &uquic.Config{}
-	}
-
-	// Establish QUIC connection with uquic
-	quicConn, err := uquic.DialEarly(ctx, udpConn, targetAddr, tlsConfig, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("QUIC dial failed: %w", err)
-	}
-
-	success = true
-
-	// Cache connection for reuse
-	if ut.cachedConnections != nil {
-		key := quicconn.ConnKey(udpConn)
-		ut.cachedConnections.Set(key, &connection{
-			packetConn: udpConn,
-			quicConn:   quicConn,
-		})
-	}
-
-	return quicConn, nil
+	return ut.fallbackTransport.RoundTrip(req)
 }
 
-// isSOCKS5 checks if the given proxy URL is a SOCKS5 proxy supporting UDP.
-// Only SOCKS5 proxies are compatible with QUIC/HTTP3 due to UDP requirements.
-func isSOCKS5(proxyURL string) bool {
+// CloseIdleConnections closes idle connections while keeping the transport usable.
+func (ut *uquicTransport) CloseIdleConnections() {
+	if ut.http3tr != nil {
+		ut.http3tr.CloseIdleConnections()
+	}
+
+	if ut.fallbackTransport != nil {
+		if c, ok := ut.fallbackTransport.(interface{ CloseIdleConnections() }); ok {
+			c.CloseIdleConnections()
+		}
+	}
+}
+
+// Close shuts down the transport and releases all resources.
+func (ut *uquicTransport) Close() error {
+	if ut.http3tr != nil {
+		ut.http3tr.Close()
+	}
+
+	if ut.quictr != nil {
+		ut.quictr.Close()
+	}
+
+	if ut.pconn != nil {
+		ut.pconn.Close()
+	}
+
+	if ut.fallbackTransport != nil {
+		if c, ok := ut.fallbackTransport.(interface{ Close() error }); ok {
+			c.Close()
+		}
+	}
+
+	return nil
+}
+
+func cloneRequestWithScheme(req *http.Request, scheme string) *http.Request {
+	clone := *req
+	urlClone := *req.URL
+	urlClone.Scheme = scheme
+	clone.URL = &urlClone
+
+	return &clone
+}
+
+func isHTTP3UnsupportedError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+
+	var appErr *quic.ApplicationError
+	if errors.As(err, &appErr) {
+		return true
+	}
+
+	var handshakeErr *quic.HandshakeTimeoutError
+	var idleErr *quic.IdleTimeoutError
+	var versionErr *quic.VersionNegotiationError
+	var resetErr *quic.StatelessResetError
+
+	if errors.As(err, &handshakeErr) ||
+		errors.As(err, &idleErr) ||
+		errors.As(err, &versionErr) ||
+		errors.As(err, &resetErr) {
+		return true
+	}
+
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		if opErr.Op == "dial" || opErr.Op == "write" || opErr.Op == "read" {
+			return true
+		}
+
+		var errno syscall.Errno
+		if errors.As(opErr.Err, &errno) {
+			switch errno {
+			case syscall.ECONNREFUSED, syscall.ENETUNREACH, syscall.EHOSTUNREACH, syscall.ECONNRESET:
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func isSOCKS5Proxy(proxyURL string) bool {
 	if proxyURL == "" {
 		return false
 	}
@@ -609,7 +464,5 @@ func isSOCKS5(proxyURL string) bool {
 		return false
 	}
 
-	scheme := u.Scheme
-
-	return scheme == "socks5" || scheme == "socks5h"
+	return u.Scheme == "socks5" || u.Scheme == "socks5h"
 }
