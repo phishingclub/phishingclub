@@ -1212,3 +1212,76 @@ func TestUpdateResponseBody_NotCompressedStripsEncoding(t *testing.T) {
 		t.Error("stale content-encoding must be stripped for an uncompressed body")
 	}
 }
+
+// TestCollectCookieCaptures_IncludesOptional verifies that an optional cookie
+// capture is still gathered into the bundle once it has stored data, and that
+// only required cookie captures are tracked for gating.
+func TestCollectCookieCaptures_IncludesOptional(t *testing.T) {
+	m := &ProxyHandler{}
+	required := true
+	optional := false
+	session := &service.ProxySession{}
+	session.Config.Store("phish.example", service.ProxyServiceDomainConfig{
+		Capture: []service.ProxyServiceCaptureRule{
+			{Name: "req_cookie", Engine: "cookie", Find: "SESSIONID", Required: &required},
+			{Name: "opt_cookie", Engine: "cookie", Find: "TRUSTID", Required: &optional},
+		},
+	})
+	// only required captures are registered in RequiredCaptures
+	session.RequiredCaptures.Store("req_cookie", true)
+	// both cookies were actually captured into the session
+	session.CapturedData.Store("req_cookie", map[string]string{"name": "SESSIONID", "value": "a"})
+	session.CapturedData.Store("opt_cookie", map[string]string{"name": "TRUSTID", "value": "b"})
+
+	cookieCaptures, requiredCookieCaptures := m.collectCookieCaptures(session)
+
+	if _, ok := cookieCaptures["opt_cookie"]; !ok {
+		t.Error("optional cookie with data must be included in the bundle")
+	}
+	if _, ok := cookieCaptures["req_cookie"]; !ok {
+		t.Error("required cookie with data must be included in the bundle")
+	}
+	if len(requiredCookieCaptures) != 1 {
+		t.Errorf("only required cookie captures must gate the bundle, got %d", len(requiredCookieCaptures))
+	}
+	if _, ok := requiredCookieCaptures["req_cookie"]; !ok {
+		t.Error("required cookie capture must be tracked for gating")
+	}
+}
+
+// TestCollectCookieCaptures_OptionalWithoutData verifies an optional cookie that
+// was never captured is not added to the bundle.
+func TestCollectCookieCaptures_OptionalWithoutData(t *testing.T) {
+	m := &ProxyHandler{}
+	optional := false
+	session := &service.ProxySession{}
+	session.Config.Store("phish.example", service.ProxyServiceDomainConfig{
+		Capture: []service.ProxyServiceCaptureRule{
+			{Name: "opt_cookie", Engine: "cookie", Find: "TRUSTID", Required: &optional},
+		},
+	})
+
+	cookieCaptures, requiredCookieCaptures := m.collectCookieCaptures(session)
+
+	if len(cookieCaptures) != 0 {
+		t.Errorf("optional cookie without data must not be bundled, got %d", len(cookieCaptures))
+	}
+	if len(requiredCookieCaptures) != 0 {
+		t.Errorf("no required cookie captures expected, got %d", len(requiredCookieCaptures))
+	}
+}
+
+// TestAreAllCookieCapturesComplete_EmptyIsComplete verifies a bundle of only
+// optional cookies is allowed to ship once the outer required gate has passed.
+func TestAreAllCookieCapturesComplete_EmptyIsComplete(t *testing.T) {
+	m := &ProxyHandler{}
+	if !m.areAllCookieCapturesComplete(map[string]bool{}) {
+		t.Error("empty required cookie set must be considered complete")
+	}
+	if m.areAllCookieCapturesComplete(map[string]bool{"a": false}) {
+		t.Error("an incomplete required cookie capture must block completion")
+	}
+	if !m.areAllCookieCapturesComplete(map[string]bool{"a": true}) {
+		t.Error("all required cookie captures complete must report complete")
+	}
+}

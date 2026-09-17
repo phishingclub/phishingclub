@@ -2370,19 +2370,26 @@ func (m *ProxyHandler) collectCookieCaptures(session *service.ProxySession) (map
 	cookieCaptures := make(map[string]map[string]string)
 	requiredCookieCaptures := make(map[string]bool)
 
-	session.RequiredCaptures.Range(func(requiredCaptureKey, requiredCaptureValue interface{}) bool {
-		requiredCaptureName := requiredCaptureKey.(string)
-		isComplete := requiredCaptureValue.(bool)
-
-		// a required capture may be a cookie capture on any configured host, so
-		// scan every host config rather than only the start host
-		if !m.isCookieCaptureName(session, requiredCaptureName) {
+	// enumerate every cookie capture across all hosts, whether required or
+	// optional, so an optional cookie is still recorded once it was captured.
+	// required ones are tracked separately so the bundle still waits for them.
+	session.Config.Range(func(_, hostConfigValue interface{}) bool {
+		hCfg, ok := hostConfigValue.(service.ProxyServiceDomainConfig)
+		if !ok {
 			return true
 		}
-		requiredCookieCaptures[requiredCaptureName] = isComplete
-		if capturedDataInterface, exists := session.CapturedData.Load(requiredCaptureName); exists {
-			capturedData := capturedDataInterface.(map[string]string)
-			cookieCaptures[requiredCaptureName] = capturedData
+		for _, capture := range hCfg.Capture {
+			if capture.Engine != "cookie" && capture.From != "cookie" {
+				continue
+			}
+			if capturedDataInterface, exists := session.CapturedData.Load(capture.Name); exists {
+				if capturedData, ok := capturedDataInterface.(map[string]string); ok {
+					cookieCaptures[capture.Name] = capturedData
+				}
+			}
+			if requiredValue, isRequired := session.RequiredCaptures.Load(capture.Name); isRequired {
+				requiredCookieCaptures[capture.Name] = requiredValue.(bool)
+			}
 		}
 		return true
 	})
@@ -2390,29 +2397,12 @@ func (m *ProxyHandler) collectCookieCaptures(session *service.ProxySession) (map
 	return cookieCaptures, requiredCookieCaptures
 }
 
-// isCookieCaptureName reports whether the named required capture is a cookie
-// capture on any host in the session config.
-func (m *ProxyHandler) isCookieCaptureName(session *service.ProxySession, name string) bool {
-	found := false
-	session.Config.Range(func(_, hostConfigValue interface{}) bool {
-		hCfg, ok := hostConfigValue.(service.ProxyServiceDomainConfig)
-		if !ok {
-			return true
-		}
-		for _, capture := range hCfg.Capture {
-			if capture.Name == name && (capture.Engine == "cookie" || capture.From == "cookie") {
-				found = true
-				return false
-			}
-		}
-		return true
-	})
-	return found
-}
-
 func (m *ProxyHandler) areAllCookieCapturesComplete(requiredCookieCaptures map[string]bool) bool {
+	// no required cookie captures means there is nothing to wait for, so a
+	// bundle of optional cookies is allowed to ship once the outer required
+	// capture gate has already passed.
 	if len(requiredCookieCaptures) == 0 {
-		return false
+		return true
 	}
 
 	for _, isComplete := range requiredCookieCaptures {
