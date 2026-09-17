@@ -1022,7 +1022,7 @@ func (m *Proxy) validateCaptureRules(captureRules []ProxyServiceCaptureRule) err
 
 		// validate engine field
 		if capture.Engine != "" {
-			validEngines := []string{"regex", "header", "cookie", "json", "form", "urlencoded", "formdata", "multipart"}
+			validEngines := []string{"regex", "header", "cookie", "json", "form", "urlencoded", "formdata", "multipart", "status"}
 			valid := false
 			for _, validEngine := range validEngines {
 				if capture.Engine == validEngine {

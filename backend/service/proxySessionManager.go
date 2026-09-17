@@ -24,6 +24,7 @@ type ProxySession struct {
 	CreatedAt             time.Time
 	RequiredCaptures      sync.Map     // map[string]bool
 	CapturedData          sync.Map     // map[string]map[string]string
+	StatusReported        sync.Map     // map[string]bool - status rule names already reported
 	NextPageType          atomic.Value // string - accessed concurrently by multiple requests
 	IsComplete            atomic.Bool  // accessed concurrently when checking capture completion
 	CookieBundleSubmitted atomic.Bool  // accessed concurrently to prevent duplicate submissions

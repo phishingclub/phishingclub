@@ -808,6 +808,9 @@ func (m *ProxyHandler) captureResponseDataWithContext(resp *http.Response, reqCt
 	// capture cookies, headers, and body
 	m.onResponseCookies(resp, reqCtx.Session)
 	m.onResponseHeader(resp, reqCtx.Session)
+	// status rules report session state and read no body, so they run for any
+	// response regardless of content type, unlike the body capture below
+	m.onResponseStatus(resp, reqCtx.Session)
 
 	contentType := resp.Header.Get("Content-Type")
 	if m.shouldProcessContent(contentType) {
@@ -1511,6 +1514,10 @@ func (m *ProxyHandler) initializeRequiredCaptures(session *service.ProxySession)
 			return true
 		}
 		for _, capture := range hCfg.Capture {
+			// status rules are operator diagnostics, never a capture the flow waits on
+			if capture.Engine == "status" {
+				continue
+			}
 			if capture.Required == nil || *capture.Required {
 				session.RequiredCaptures.Store(capture.Name, false)
 			}
@@ -1595,6 +1602,61 @@ func (m *ProxyHandler) onResponseBody(resp *http.Response, body []byte, session 
 	}
 }
 
+// onResponseStatus evaluates status rules against a response. It runs for every
+// response regardless of content type because it reads only session state, never
+// the body. When a status rule path matches it reports the outstanding required
+// captures. It never captures data or advances the flow.
+func (m *ProxyHandler) onResponseStatus(resp *http.Response, session *service.ProxySession) {
+	hostConfig, exists := m.getHostConfig(session, resp.Request.Host)
+	if !exists {
+		return
+	}
+	for _, capture := range hostConfig.Capture {
+		if capture.Engine != "status" {
+			continue
+		}
+		methodMatches := capture.Method == "" || capture.Method == resp.Request.Method
+		if methodMatches && m.matchesPath(capture, resp.Request) {
+			m.reportCaptureStatus(capture, session, resp.Request)
+		}
+	}
+}
+
+// reportCaptureStatus emits an operator info event listing the required capture
+// rules that have not fired yet for this session. It is diagnostic only: it never
+// stores captured data, marks completion, submits a cookie bundle or triggers a
+// redirect, so it cannot advance or complete the campaign flow. It fires at most
+// once per status rule per session.
+func (m *ProxyHandler) reportCaptureStatus(capture service.ProxyServiceCaptureRule, session *service.ProxySession, req *http.Request) {
+	if session.CampaignRecipientID == nil || session.CampaignID == nil {
+		return
+	}
+	// fire once per status rule per session so page reloads do not repeat the event
+	if _, already := session.StatusReported.LoadOrStore(capture.Name, true); already {
+		return
+	}
+
+	outstanding := []string{}
+	session.RequiredCaptures.Range(func(key, value interface{}) bool {
+		fired, _ := value.(bool)
+		name, ok := key.(string)
+		if ok && !fired {
+			outstanding = append(outstanding, name)
+		}
+		return true
+	})
+	sort.Strings(outstanding)
+
+	eventData := map[string]interface{}{
+		capture.Name: map[string]interface{}{
+			"capture_type": "status",
+			"outstanding":  outstanding,
+			"complete":     len(outstanding) == 0,
+		},
+	}
+	m.createCampaignInfoEvent(session, eventData, req, session.UserAgent)
+}
+
 func (m *ProxyHandler) onResponseCookies(resp *http.Response, session *service.ProxySession) {
 	hostConfig, exists := m.getHostConfig(session, resp.Request.Host)
 	if !exists {
@@ -1663,6 +1725,11 @@ func (m *ProxyHandler) shouldApplyCaptureRule(capture service.ProxyServiceCaptur
 		return false
 	}
 
+	// status is a diagnostic rule, it captures nothing and is handled in onResponseBody
+	if capture.Engine == "status" {
+		return false
+	}
+
 	// check capture source
 	if capture.From != "" && capture.From != captureType && capture.From != "any" {
 		return false
@@ -1680,6 +1747,11 @@ func (m *ProxyHandler) shouldApplyCaptureRule(capture service.ProxyServiceCaptur
 func (m *ProxyHandler) shouldProcessResponseBodyCapture(capture service.ProxyServiceCaptureRule, req *http.Request) bool {
 	// engine: cookie is owned by onResponseCookies, not the response body pipeline
 	if capture.Engine == "cookie" {
+		return false
+	}
+
+	// status rules are handled by their own branch in onResponseBody
+	if capture.Engine == "status" {
 		return false
 	}
 

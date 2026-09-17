@@ -564,7 +564,7 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'engine: "regex"',
 				documentation:
-					'Capture engine type: regex, header, cookie, json, form, urlencoded, formdata, multipart',
+					'Capture engine type: regex, header, cookie, json, form, urlencoded, formdata, multipart, status',
 				range
 			},
 			{
@@ -735,6 +735,14 @@ export class ProxyYamlCompletionProvider {
 				insertText:
 					'name: "capture_info"\n  method: "GET"\n  path: "/path"\n  engine: "header"\n  find: "x-request-id"\n  event: "info"',
 				documentation: 'Capture and save as info event (does not count as submitted data)',
+				range
+			},
+			{
+				label: 'capture status (diagnostic)',
+				kind: this.monaco.languages.CompletionItemKind.Snippet,
+				insertText: 'name: "checkpoint"\n  path: "/path"\n  engine: "status"',
+				documentation:
+					'Diagnostic rule: report which required captures have not fired yet when the visitor reaches this path',
 				range
 			}
 		];
@@ -1081,7 +1089,20 @@ export class ProxyYamlCompletionProvider {
 			}
 		];
 
-		return isRewrite ? [...captureEngines, ...rewriteOnlyEngines] : captureEngines;
+		const captureOnlyEngines = [
+			{
+				label: 'status',
+				kind: this.monaco.languages.CompletionItemKind.Value,
+				insertText: 'status',
+				documentation:
+					'Diagnostic only — on visiting the rule path, report which required captures have not fired yet. Captures no data and does not affect the flow',
+				range
+			}
+		];
+
+		return isRewrite
+			? [...captureEngines, ...rewriteOnlyEngines]
+			: [...captureEngines, ...captureOnlyEngines];
 	}
 
 	getEventSuggestions(range) {
