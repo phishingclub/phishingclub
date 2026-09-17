@@ -251,7 +251,6 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	// prepare request for target server
 	m.prepareRequestForTarget(modifiedReq, client, reqCtx.UsedImpersonation)
 
-	// execute request</parameter>
 	// execute request
 	targetResp, err := client.Do(modifiedReq)
 	if err != nil {
@@ -741,6 +740,13 @@ func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.C
 	// keep accept-encoding headers for browser fingerprinting
 	// note: usedImpersonation tracks if impersonation features are enabled, not if surf is used
 	req.Header.Del(HEADER_JA4)
+
+	// remove the Content-Length header so the client transport sets the length
+	// once from req.ContentLength, which the request pipeline already derived
+	// from the buffered body. with impersonation the transport writes request
+	// headers as given and also frames the body length itself, so a leftover
+	// header sends the length twice and produces a malformed request.
+	req.Header.Del("Content-Length")
 
 	// setup cookie jar for redirect handling
 	jar, _ := cookiejar.New(nil)
@@ -3254,12 +3260,6 @@ func (m *ProxyHandler) normalizeRequestHeaders(req *http.Request, session *servi
 
 	if secFetchDest := req.Header.Get("Sec-Fetch-Dest"); secFetchDest == "iframe" {
 		req.Header.Set("Sec-Fetch-Dest", "document")
-	}
-
-	if req.Body != nil && (req.Method == "POST" || req.Method == "PUT" || req.Method == "PATCH") {
-		if req.Header.Get("Content-Length") == "" && req.ContentLength > 0 {
-			req.Header.Set("Content-Length", fmt.Sprintf("%d", req.ContentLength))
-		}
 	}
 }
 
