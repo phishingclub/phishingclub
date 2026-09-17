@@ -5,7 +5,7 @@
 	import { addToast } from '$lib/store/toast';
 	import { onClickCopy } from '$lib/utils/common';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
-	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
+	import { showIsLoading, hideIsLoading } from '$lib/store/loading';
 	import Button from '$lib/components/Button.svelte';
 	import Alert from '$lib/components/Alert.svelte';
 	import Form from '$lib/components/Form.svelte';
@@ -30,12 +30,14 @@
 	let isWipeAlertVisible = false;
 
 	onMount(async () => {
+		showIsLoading();
 		try {
 			await refreshLogLevel();
 			await refreshVersion();
 			await refreshUpdateCached();
 		} finally {
 			loaded = true;
+			hideIsLoading();
 		}
 	});
 
@@ -136,9 +138,7 @@
 	};
 </script>
 
-{#if !loaded}
-	<SettingsLoading />
-{:else}
+{#if loaded}
 <div class="flex flex-wrap gap-6">
 	<SettingsCard title="Logging">
 		<Form on:submit={saveLogLevel} fullWidth>
@@ -233,3 +233,4 @@
 		which can take a few minutes.
 	</p>
 </Alert>
+

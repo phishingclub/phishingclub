@@ -4,7 +4,6 @@
 	import { addToast } from '$lib/store/toast';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
-	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Alert from '$lib/components/Alert.svelte';
@@ -35,10 +34,12 @@
 	let reportKind = 'phishing'; // 'phishing' | 'training'
 
 	onMount(async () => {
+		showIsLoading();
 		try {
 			await refreshReportPDFEnabled();
 		} finally {
 			loaded = true;
+			hideIsLoading();
 		}
 	});
 
@@ -168,9 +169,7 @@
 	};
 </script>
 
-{#if !loaded}
-	<SettingsLoading />
-{:else}
+{#if loaded}
 <div class="flex flex-wrap gap-6">
 	<SettingsCard title="PDF Reports">
 		<div class="space-y-4">

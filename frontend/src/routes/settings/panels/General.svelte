@@ -6,7 +6,6 @@
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import { displayMode, DISPLAY_MODE } from '$lib/store/displayMode';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
-	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
 	import RadioOption from '$lib/components/RadioOption.svelte';
 	import Form from '$lib/components/Form.svelte';
 	import FormButton from '$lib/components/FormButton.svelte';
@@ -24,11 +23,13 @@
 	let updateSettingsError = '';
 
 	onMount(async () => {
+		showIsLoading();
 		try {
 			await refreshDisplayMode();
 			await refreshSettings();
 		} finally {
 			loaded = true;
+			hideIsLoading();
 		}
 	});
 
@@ -107,9 +108,7 @@
 	};
 </script>
 
-{#if !loaded}
-	<SettingsLoading />
-{:else}
+{#if loaded}
 <div class="flex flex-wrap gap-6">
 	<SettingsCard title="Display Mode">
 		<div class="space-y-4">

@@ -4,7 +4,7 @@
 	import { addToast } from '$lib/store/toast';
 	import { AppStateService } from '$lib/service/appState';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
-	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
+	import { showIsLoading, hideIsLoading } from '$lib/store/loading';
 	import RadioOption from '$lib/components/RadioOption.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import FileField from '$lib/components/FileField.svelte';
@@ -55,11 +55,13 @@
 	}
 
 	onMount(async () => {
+		showIsLoading();
 		try {
 			await refreshAutoPrune();
 			await refreshBackupList();
 		} finally {
 			loaded = true;
+			hideIsLoading();
 		}
 	});
 
@@ -216,9 +218,7 @@
 	};
 </script>
 
-{#if !loaded}
-	<SettingsLoading />
-{:else}
+{#if loaded}
 <div class="flex flex-wrap gap-6">
 	<SettingsCard title="Import">
 		<div class="space-y-4">

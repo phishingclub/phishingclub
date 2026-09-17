@@ -3,7 +3,7 @@
 	import { api } from '$lib/api/apiProxy.js';
 	import { addToast } from '$lib/store/toast';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
-	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
+	import { showIsLoading, hideIsLoading } from '$lib/store/loading';
 	import Form from '$lib/components/Form.svelte';
 	import FormButton from '$lib/components/FormButton.svelte';
 	import FormError from '$lib/components/FormError.svelte';
@@ -21,11 +21,13 @@
 	let scimRetentionDays = 30;
 
 	onMount(async () => {
+		showIsLoading();
 		try {
 			await refreshScimDomain();
 			await refreshScimRetention();
 		} finally {
 			loaded = true;
+			hideIsLoading();
 		}
 	});
 
@@ -96,9 +98,7 @@
 
 </script>
 
-{#if !loaded}
-	<SettingsLoading />
-{:else}
+{#if loaded}
 	<div class="flex flex-wrap gap-6">
 		<SettingsCard title="SCIM Provisioning">
 			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">

@@ -3,7 +3,7 @@
 	import { api } from '$lib/api/apiProxy.js';
 	import { addToast } from '$lib/store/toast';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
-	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
+	import { showIsLoading, hideIsLoading } from '$lib/store/loading';
 	import Button from '$lib/components/Button.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
@@ -58,10 +58,12 @@
 	};
 
 	onMount(async () => {
+		showIsLoading();
 		try {
 			await refreshSSO();
 		} finally {
 			loaded = true;
+			hideIsLoading();
 		}
 	});
 
@@ -155,9 +157,7 @@
 	};
 </script>
 
-{#if !loaded}
-	<SettingsLoading />
-{:else}
+{#if loaded}
 	<div class="flex flex-wrap gap-6">
 		<SettingsCard title="Single Sign-On">
 			<div class="bg-gray-50 rounded-md p-3">

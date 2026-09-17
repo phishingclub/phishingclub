@@ -13,7 +13,7 @@
 		BRANDING_DEFAULT_DISPLAY
 	} from '$lib/store/branding';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
-	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
+	import { showIsLoading, hideIsLoading } from '$lib/store/loading';
 	import Button from '$lib/components/Button.svelte';
 	import FileField from '$lib/components/FileField.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
@@ -40,9 +40,14 @@
 	}
 
 	onMount(async () => {
-		await loadBranding();
-		syncForms();
-		loaded = true;
+		showIsLoading();
+		try {
+			await loadBranding();
+			syncForms();
+		} finally {
+			loaded = true;
+			hideIsLoading();
+		}
 	});
 
 	// preview resolves the image shown in a card for a slot
@@ -169,9 +174,7 @@
 	}
 </script>
 
-{#if !loaded}
-	<SettingsLoading />
-{:else}
+{#if loaded}
 	<div class="flex flex-wrap gap-6">
 		<SettingsCard title="Header logo">
 			<p class="text-gray-600 dark:text-gray-300 text-sm mb-4 transition-colors duration-200">
