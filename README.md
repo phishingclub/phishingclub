@@ -23,7 +23,7 @@ Remember to copy the admin URL and password
 
 [GHCR Images](https://github.com/phishingclub/phishingclub/pkgs/container/phishingclub)
 
-[production docker compose example](https://github.com/phishingclub/phishingclub/blob/develop/docker-compose.production.yml)
+[Production Docker Compose example](https://github.com/phishingclub/phishingclub/blob/develop/docker-compose.production.yml)
 
 ## Features
 
@@ -40,12 +40,14 @@ Phishing Club provides a lot of features for simulation and red teaming, such as
 - **Analytics** - Timelines, dashboards, per-user event history
 - **Automation** - HMAC-signed webhooks, REST API, import/export
 - **Multi-tenancy** - Segregated client handling and statistics for service providers
+- **Anonymization** - Pseudonymized campaigns, automatic anonymization on close and retention windows for compliance
+- **Branding** - Replace logos and login image with your own
 - **Security features** - MFA, SSO (Entra ID and OIDC), session management, IP filtering
 - **Operational tools** - In-app updates, CLI installer, config management
 
 ## AiTM and Red Team Features
 
-- **Reverse proxy phishing** - Capture sessions to bypass weak MFA
+- **Reverse proxy phishing** - Capture sessions to bypass weak MFA, import captured cookies with the Session Sushi extension
 - **Remote browser phishing** - Stream and interact with a victim's live browser session
 - **Full control** - Modify and capture requests and responses independently
 - **DOM rewriting** - Modify content using CSS/jQuery-like selectors or regex
@@ -59,7 +61,7 @@ Phishing Club provides a lot of features for simulation and red teaming, such as
 - **Response overwriting** - Shortcut proxying with custom responses
 - **Forward proxying** - Use HTTP and SOCKS5 proxies to ensure requests originate from the right location
 - **Visual Editor** - Use the visual editor to easily setup a proxy
-- **Import compromised oauth token** - Use compromised tokens to send more phishing via OAuth enabled endpoints
+- **Import compromised OAuth token** - Use compromised tokens to send more phishing via OAuth enabled endpoints
 - **Device Code phishing** - Device code phishing is as simple as adding a single line to a email or landing page
 
 ### Blogs & Resources
