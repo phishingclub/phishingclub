@@ -3419,6 +3419,65 @@ export class API {
 	};
 
 	/**
+	 * branding is the API for install wide UI branding. The state and image
+	 * reads are public so the login screen can render a custom logo and side
+	 * image before the user is authenticated.
+	 */
+	branding = {
+		/**
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getState: async () => {
+			return await getJSON(this.getPath(`/branding`));
+		},
+		/**
+		 * imageURL returns the public URL for a branding slot image. An optional
+		 * version keeps the header and login screen in sync right after an upload
+		 * by busting the browser cache.
+		 * @param {string} slot
+		 * @param {number|string} [version]
+		 * @returns {string}
+		 */
+		imageURL: (slot, version) => {
+			const path = this.getPath(`/branding/image/${slot}`);
+			return version ? `${path}?v=${version}` : path;
+		},
+		/**
+		 * @param {string} slot
+		 * @param {File} file
+		 * @returns {Promise<ApiResponse>}
+		 */
+		upload: async (slot, file) => {
+			const formData = new FormData();
+			formData.append('file', file);
+			return await postMultipart(this.getPath(`/branding/image/${slot}`), formData);
+		},
+		/**
+		 * @param {string} slot
+		 * @returns {Promise<ApiResponse>}
+		 */
+		reset: async (slot) => {
+			return await deleteReq(this.getPath(`/branding/image/${slot}`));
+		},
+		/**
+		 * @param {boolean} hidden
+		 * @returns {Promise<ApiResponse>}
+		 */
+		setSideImageHidden: async (hidden) => {
+			return await postJSON(this.getPath(`/branding/login-side-image/visibility`), { hidden });
+		},
+		/**
+		 * setDisplay stores how an image is fitted within its area.
+		 * @param {string} slot
+		 * @param {{fit:string, scale:number, background:string, positionX:string, positionY:string}} display
+		 * @returns {Promise<ApiResponse>}
+		 */
+		setDisplay: async (slot, display) => {
+			return await postJSON(this.getPath(`/branding/display/${slot}`), display);
+		}
+	};
+
+	/**
 	 * proxy is the API for Proxy related operations.
 	 */
 	proxy = {

@@ -42,23 +42,27 @@
 </script>
 
 <label class="flex flex-col py-2 w-56">
-	<div class="flex items-center">
-		<p class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200">
-			<slot />
-		</p>
-		{#if toolTipText.length > 0}
-			<ToolTip>
-				{toolTipText}
-			</ToolTip>
-		{/if}
-		{#if optional === true}
-			<div
-				class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+	{#if $$slots.default || toolTipText.length > 0 || optional === true}
+		<div class="flex items-center">
+			<p
+				class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200"
 			>
-				<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
-			</div>
-		{/if}
-	</div>
+				<slot />
+			</p>
+			{#if toolTipText.length > 0}
+				<ToolTip>
+					{toolTipText}
+				</ToolTip>
+			{/if}
+			{#if optional === true}
+				<div
+					class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+				>
+					<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
+				</div>
+			{/if}
+		</div>
+	{/if}
 	<input
 		id="files"
 		type="file"

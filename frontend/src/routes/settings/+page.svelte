@@ -11,6 +11,7 @@
 	import Reports from './panels/Reports.svelte';
 	import RedTeam from './panels/RedTeam.svelte';
 	import System from './panels/System.svelte';
+	import Branding from './panels/Branding.svelte';
 
 	// Red Team panel is only relevant in red team phishing (blackbox) mode
 	$: tabs = [
@@ -22,6 +23,7 @@
 		...($displayMode === DISPLAY_MODE.BLACKBOX
 			? [{ id: 'redteam', label: 'Red Team', component: RedTeam }]
 			: []),
+		{ id: 'branding', label: 'Branding', component: Branding },
 		{ id: 'system', label: 'System', component: System }
 	];
 

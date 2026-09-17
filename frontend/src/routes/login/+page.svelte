@@ -18,6 +18,31 @@
 	import { page } from '$app/stores';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { setupTheme, setupOSThemeListener, theme } from '$lib/theme.js';
+	import {
+		branding,
+		loadBranding,
+		brandingImageURL,
+		brandingDisplayFor,
+		BRANDING_SLOT,
+		BRANDING_DEFAULTS
+	} from '$lib/store/branding';
+	import BrandingImage from '$lib/components/BrandingImage.svelte';
+
+	// branding resolves the login logo and side image, falling back to the
+	// bundled defaults when no custom image is uploaded
+	$: loginLogoSrc =
+		$branding.loginLogo === 'custom'
+			? brandingImageURL(BRANDING_SLOT.loginLogo, $branding.version)
+			: $theme === 'dark'
+				? BRANDING_DEFAULTS.loginLogoDark
+				: BRANDING_DEFAULTS.loginLogoLight;
+	$: loginLogoDisplay = brandingDisplayFor($branding, BRANDING_SLOT.loginLogo);
+	$: sideImageRemoved = $branding.loginSideImageHidden;
+	$: sideImageSrc =
+		$branding.loginSideImage === 'custom'
+			? brandingImageURL(BRANDING_SLOT.loginSideImage, $branding.version)
+			: BRANDING_DEFAULTS.loginSideImage;
+	$: sideImageDisplay = brandingDisplayFor($branding, BRANDING_SLOT.loginSideImage);
 
 	// services
 	const appState = AppStateService.instance;
@@ -50,6 +75,8 @@
 		// initialize theme system
 		setupTheme();
 		setupOSThemeListener();
+		// load branding so a custom logo and side image show before login
+		loadBranding();
 
 		// if the user is already logged in, we want to redirect to the dashboard
 		if (appState.isLoggedIn()) {
@@ -234,7 +261,9 @@
 
 <HeadTitle title="Sign in" />
 <main
-	class="h-screen grid-cols-1 grid md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-2 bg-white dark:bg-gray-900 transition-colors duration-200"
+	class="h-screen grid grid-cols-1 {sideImageRemoved
+		? ''
+		: 'lg:grid-cols-2 xl:grid-cols-2 2xl:grid-cols-2'} bg-white dark:bg-gray-900 transition-colors duration-200"
 >
 	<!-- theme toggle -->
 	<div class="fixed top-3 right-6 z-50">
@@ -242,13 +271,16 @@
 	</div>
 
 	<div class="flex items-center justify-center h-full">
-		<img
-			class="fixed center top-6 w-1/4 md:w-1/4 lg:w-1/6 xl:w-1/6 2xl:w-1/6 lg:top-6 lg:left-4 xl:top-6 xl:left-4 2xl:top-6 2xl:left-4"
-			src={$theme === 'dark' ? '/logo-white.svg' : '/logo-blue.svg'}
+		<BrandingImage
+			src={loginLogoSrc}
 			alt="phishing club logo"
+			display={loginLogoDisplay}
+			boxClass="fixed top-6 left-4 z-40 w-1/4 md:w-1/4 lg:w-1/6 h-24"
 		/>
 		<div
-			class="flex flex-col items-center justify-center p-4 w-full sm:w-full md:w-3/4 lg:w-2/3 xl:w-2/3 2xl:w-2/3"
+			class="flex flex-col items-center justify-center p-4 w-full sm:w-full md:w-3/4 lg:w-2/3 xl:w-2/3 2xl:w-2/3 {sideImageRemoved
+				? 'lg:max-w-xl'
+				: ''}"
 		>
 			<div class="flex flex-col items-center justify-center w-full p-4">
 				<h1
@@ -439,10 +471,14 @@
 			</div>
 		</div>
 	</div>
-	<div class="flex">
-		<div
-			class="overflow-hidden hidden sm:hidden md:hidden lg:flex xl:flex 2xl:flex min-w-0 w-full h-full bg-right bg-cover"
-			style="background-image: url('/login-graphics.svg'); background-repeat: no-repeat; background-position: right center; background-size: cover;"
-		></div>
-	</div>
+	{#if !sideImageRemoved}
+		<div class="hidden lg:block h-full">
+			<BrandingImage
+				src={sideImageSrc}
+				alt="login side image"
+				display={sideImageDisplay}
+				boxClass="w-full h-full"
+			/>
+		</div>
+	{/if}
 </main>

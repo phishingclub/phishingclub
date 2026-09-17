@@ -131,6 +131,7 @@ func main() {
 	ownManagedTLSPath := fmt.Sprintf("%scerts/own-managed", *flagFilePath)
 	assetPath := fmt.Sprintf("%sassets", *flagFilePath)
 	attachmentsPath := fmt.Sprintf("%sattachments", *flagFilePath)
+	brandingPath := fmt.Sprintf("%sbranding", *flagFilePath)
 
 	// print banner and version
 	cli.PrintBanner()
@@ -249,6 +250,7 @@ func main() {
 		*flagFilePath,
 		conf.IPSecurity.TrustedProxies,
 		conf.RemoteBrowser.ExecPath,
+		brandingPath,
 	)
 	// get entra-id options and setup msal client
 	ssoOpt, err := services.SSO.GetSSOOptionWithoutAuth(context.Background())

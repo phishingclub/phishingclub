@@ -1,9 +1,16 @@
 <script>
+	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { menu, mobileTopMenu } from '$lib/consts/navigation';
 	import { shouldHideMenuItem } from '$lib/utils/common';
 	import ConditionalDisplay from '../ConditionalDisplay.svelte';
 	import ThemeToggle from '../ThemeToggle.svelte';
+	import { branding, loadBranding, headerLogoSrc, brandingDisplayFor, BRANDING_SLOT } from '$lib/store/branding';
+	import BrandingImage from '$lib/components/BrandingImage.svelte';
+
+	onMount(() => loadBranding());
+	$: logoSrc = headerLogoSrc($branding);
+	$: logoDisplay = brandingDisplayFor($branding, BRANDING_SLOT.headerLogo);
 
 	export let visible = false;
 	export let onClickLogout;
@@ -177,7 +184,7 @@
 		<div
 			class="mobile-menu-header flex justify-between h-20 items-center bg-pc-darkblue/90 dark:bg-gray-900/90 px-6 border-b border-white/10 dark:border-gray-700/50"
 		>
-			<img class="w-40 h-auto" src="/logo-white.svg" alt="logo" />
+			<BrandingImage src={logoSrc} alt="logo" display={logoDisplay} boxClass="h-12 w-40" />
 			<div class="flex items-center gap-2">
 				<div
 					class="flex items-center justify-center w-12 h-12 rounded-lg hover:bg-white/10 dark:hover:bg-gray-600/30 transition-all duration-200"

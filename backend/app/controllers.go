@@ -45,6 +45,7 @@ type Controllers struct {
 	Scim                *controller.Scim
 	RemoteBrowser       *controller.RemoteBrowserController
 	ReportTemplate      *controller.ReportTemplate
+	Branding            *controller.Branding
 }
 
 // NewControllers creates a collection of controllers
@@ -235,6 +236,10 @@ func NewControllers(
 		OptionService:         services.Option,
 		ExecPath:              conf.RemoteBrowser.ExecPath,
 	}
+	branding := &controller.Branding{
+		Common:          common,
+		BrandingService: services.Branding,
+	}
 
 	return &Controllers{
 		Asset:             asset,
@@ -273,5 +278,6 @@ func NewControllers(
 		Scim:                scim,
 		RemoteBrowser:       remoteBrowser,
 		ReportTemplate:      reportTemplate,
+		Branding:            branding,
 	}
 }

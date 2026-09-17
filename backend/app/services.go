@@ -48,6 +48,7 @@ type Services struct {
 	Scim                *service.Scim
 	RemoteBrowser       *service.RemoteBrowser
 	ReportTemplate      *service.ReportTemplate
+	Branding            *service.Branding
 }
 
 // NewServices creates a collection of services
@@ -65,6 +66,7 @@ func NewServices(
 	filePath string,
 	trustedProxies []string,
 	remoteBrowserExecPath string,
+	brandingPath string,
 ) *Services {
 	common := service.Common{
 		Logger: logger,
@@ -332,6 +334,13 @@ func NewServices(
 		ReportSendLogRepository:       repositories.ReportSendLog,
 	}
 
+	brandingService := &service.Branding{
+		Common:           common,
+		RootFolder:       brandingPath,
+		OptionRepository: repositories.Option,
+		FileService:      file,
+	}
+
 	return &Services{
 		CompanyScimConfig:   companyScimConfig,
 		CompanyReportConfig: companyReportConfig,
@@ -369,5 +378,6 @@ func NewServices(
 		MicrosoftDeviceCode: microsoftDeviceCodeService,
 		RemoteBrowser:       remoteBrowser,
 		ReportTemplate:      reportTemplate,
+		Branding:            brandingService,
 	}
 }
