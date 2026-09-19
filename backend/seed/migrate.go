@@ -54,6 +54,8 @@ func initialInstallAndSeed(
 		&database.CampaignAllowDeny{},
 		&database.Webhook{},
 		&database.CampaignWebhook{},
+		&database.Script{},
+		&database.CampaignScript{},
 		&database.Identifier{},
 		&database.CampaignStats{},
 		&database.OAuthProvider{},

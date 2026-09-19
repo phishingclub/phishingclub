@@ -63,6 +63,7 @@ type CampaignOption struct {
 	WithDenyPage            bool
 	WithEvasionPage         bool
 	WithWebhooks            bool
+	WithScripts             bool
 	IncludeTestCampaigns    bool
 }
 
@@ -475,6 +476,101 @@ func (r *Campaign) RemoveWebhookFromJunctionByWebhookID(
 	res := r.DB.
 		Where("webhook_id = ?", webhookID.String()).
 		Delete(&database.CampaignWebhook{})
+
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// AddScripts adds scripts to a campaign with per script configuration
+func (r *Campaign) AddScripts(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	scripts []*model.CampaignScript,
+) error {
+	batch := []database.CampaignScript{}
+	// deduplicate by script id to prevent unique constraint violations
+	seen := map[string]struct{}{}
+	for _, ca := range scripts {
+		scriptID := ca.ScriptID.MustGet()
+		key := scriptID.String()
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		batch = append(batch, database.CampaignScript{
+			CampaignID:        campaignID,
+			ScriptID:          &scriptID,
+			ScriptIncludeData: ca.GetScriptIncludeDataOrDefault(),
+			ScriptEvents:      ca.GetScriptEventsOrDefault(),
+		})
+	}
+	if len(batch) == 0 {
+		return nil
+	}
+	res := r.DB.Create(&batch)
+
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// RemoveScriptsByCampaignID removes all scripts from a campaign
+func (r *Campaign) RemoveScriptsByCampaignID(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) error {
+	res := r.DB.
+		Where("campaign_id = ?", campaignID).
+		Delete(&database.CampaignScript{})
+
+	if res.Error != nil {
+		return res.Error
+	}
+	return nil
+}
+
+// GetCampaignScripts fetches script configurations for a campaign from the junction table
+func (r *Campaign) GetCampaignScripts(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) ([]*model.CampaignScript, error) {
+	var rows []database.CampaignScript
+	res := r.DB.
+		Where("campaign_id = ?", campaignID.String()).
+		Find(&rows)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+
+	scripts := []*model.CampaignScript{}
+	for _, row := range rows {
+		if row.ScriptID == nil {
+			continue
+		}
+		ca := &model.CampaignScript{
+			ScriptID:          nullable.NewNullableWithValue(*row.ScriptID),
+			ScriptIncludeData: nullable.NewNullableWithValue(row.ScriptIncludeData),
+			ScriptEvents:      nullable.NewNullableWithValue(row.ScriptEvents),
+		}
+		scripts = append(scripts, ca)
+	}
+
+	return scripts, nil
+}
+
+// RemoveScriptFromJunctionByScriptID removes all campaign_scripts rows for a given script id
+// must be called before deleting a script to avoid orphaned junction rows
+func (r *Campaign) RemoveScriptFromJunctionByScriptID(
+	ctx context.Context,
+	scriptID *uuid.UUID,
+) error {
+	res := r.DB.
+		Where("script_id = ?", scriptID.String()).
+		Delete(&database.CampaignScript{})
 
 	if res.Error != nil {
 		return res.Error
@@ -1296,6 +1392,13 @@ func (r *Campaign) GetByID(
 			return nil, err
 		}
 		campaign.Webhooks = nullable.NewNullableWithValue(webhooks)
+	}
+	if options.WithScripts {
+		scripts, err := r.GetCampaignScripts(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		campaign.Scripts = nullable.NewNullableWithValue(scripts)
 	}
 	return campaign, nil
 }

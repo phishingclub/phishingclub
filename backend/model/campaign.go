@@ -76,6 +76,10 @@ type Campaign struct {
 	// webhooks configuration with per-webhook settings
 	Webhooks nullable.Nullable[[]*CampaignWebhook] `json:"webhooks,omitempty"`
 
+	// scripts configuration with per-script settings.
+	// attached to a campaign the same way webhooks are.
+	Scripts nullable.Nullable[[]*CampaignScript] `json:"scripts,omitempty"`
+
 	// snapshotted from the campaign template while the campaign holds no
 	// recipients. read only, see ToDBMap.
 	LureURLMode    nullable.Nullable[string] `json:"lureURLMode"`

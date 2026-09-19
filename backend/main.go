@@ -251,6 +251,7 @@ func main() {
 		conf.IPSecurity.TrustedProxies,
 		conf.RemoteBrowser.ExecPath,
 		brandingPath,
+		conf.Script.Enabled,
 	)
 	// get entra-id options and setup msal client
 	ssoOpt, err := services.SSO.GetSSOOptionWithoutAuth(context.Background())
@@ -536,6 +537,24 @@ func main() {
 		logger.Debugf("Stopping HTTPS Phishing server")
 		if err := phishingServer.HTTPSServer.Shutdown(ctx); err != nil {
 			logger.Errorw("HTTPS server shutdown error", "error", err)
+		}
+
+		// Drain in flight scripts before closing the database, since their write
+		// back funnel needs the DB. Nil when the feature is disabled. Bounded so a
+		// full queue cannot overrun the graceful shutdown window: in flight jobs
+		// finish, jobs still queued past the window are abandoned (best effort).
+		if services.ScriptDispatcher != nil {
+			logger.Debugf("Stopping script dispatcher")
+			drained := make(chan struct{})
+			go func() {
+				services.ScriptDispatcher.Stop()
+				close(drained)
+			}()
+			select {
+			case <-drained:
+			case <-time.After(20 * time.Second):
+				logger.Warnw("script dispatcher drain exceeded its window, abandoning queued jobs")
+			}
 		}
 
 		// Close database connections

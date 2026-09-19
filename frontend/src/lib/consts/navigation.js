@@ -101,6 +101,11 @@ export const route = {
 		label: 'Webhooks',
 		route: '/webhook/'
 	},
+	script: {
+		label: 'Scripts',
+		route: '/script/',
+		blackbox: true
+	},
 	userGuide: {
 		label: 'User Guide',
 		route: 'https://phishing.club/guide/introduction/',
@@ -118,7 +123,13 @@ export const menu = [
 	{
 		label: 'Campaigns',
 		type: 'submenu',
-		items: [route.campaigns, route.campaignTemplates, route.allowDeny, route.webhook]
+		items: [
+			route.campaigns,
+			route.campaignTemplates,
+			route.allowDeny,
+			route.webhook,
+			route.script
+		]
 	},
 
 	{

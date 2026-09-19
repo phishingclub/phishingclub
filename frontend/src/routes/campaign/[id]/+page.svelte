@@ -84,6 +84,7 @@
 		allowDenyIDs: [],
 		webhookID: null,
 		webhooks: [],
+		scripts: [],
 		// groups by name, must be mapped to IDs before sending to the server
 		recipientGroups: [],
 		events: [],
@@ -94,6 +95,8 @@
 	};
 	// map of webhook id -> webhook name for display
 	let webhookMap = new BiMap({});
+	// map of script id -> script name for display
+	let scriptMap = new BiMap({});
 	let allowedFilter = null;
 	let campaignRecipients = [];
 	let campaignRecipientsHasNextPage = false;
@@ -378,6 +381,7 @@
 			campaign.evasionPage = t.evasionPage;
 			campaign.webhookID = t.webhookID;
 			campaign.webhooks = t.webhooks ?? [];
+			campaign.scripts = t.scripts ?? [];
 			campaign.companyID = t.companyID;
 			campaign.company = t.company;
 
@@ -389,6 +393,19 @@
 				webhookMap = BiMap.FromArrayOfObjects(allWebhooks);
 			} catch (e) {
 				console.error('failed to load webhooks for display', e);
+			}
+
+			// load script names for display; the endpoint 404s when the feature is
+			// off, which the catch swallows so the view still renders
+			if (campaign.scripts.length) {
+				try {
+					const allScripts = await fetchAllRows((options) => {
+						return api.script.getAll(options, campaign.companyID ?? null);
+					});
+					scriptMap = BiMap.FromArrayOfObjects(allScripts);
+				} catch (e) {
+					console.error('failed to load scripts for display', e);
+				}
 			}
 
 			// if company exists but name is missing, fetch it
@@ -2216,6 +2233,21 @@
 							{/if}
 						</div>
 					</div>
+
+					{#if campaign.scripts?.length}
+						<div class="flex justify-between">
+							<span class="text-gray-600 dark:text-gray-400">Scripts:</span>
+							<div class="text-right">
+								{#each campaign.scripts as s, i}
+									<a
+										class="text-cta-blue dark:text-blue-400 hover:underline"
+										href="/script?edit={s.scriptID}"
+										target="_blank">{scriptMap.byKey(s.scriptID) || s.scriptID}</a
+									>{#if i < campaign.scripts.length - 1},&nbsp;{/if}
+								{/each}
+							</div>
+						</div>
+					{/if}
 
 					<div class="flex justify-between">
 						<span class="text-gray-600 dark:text-gray-400">Data Saving:</span>

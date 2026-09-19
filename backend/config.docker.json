@@ -19,5 +19,8 @@
   },
   "remote_browser": {
     "enabled": true
+  },
+  "script": {
+    "enabled": true
   }
 }

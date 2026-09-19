@@ -28,7 +28,11 @@ func Unmarshal(data []byte, v any) error {
 		return err
 	}
 	var typ *json.UnmarshalTypeError
-	if errors.As(err, &typ) {
+	// the standard library annotates Field for a plain type mismatch, but a
+	// mismatch thrown from inside a custom UnmarshalJSON has no Field. Only
+	// short circuit when the field is already known, otherwise fall through to
+	// locate so the dotted path can be recovered.
+	if errors.As(err, &typ) && typ.Field != "" {
 		return sanitizeTypeError(typ, nil)
 	}
 	t, ok := targetType(v)

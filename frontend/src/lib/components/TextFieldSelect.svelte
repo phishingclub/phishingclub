@@ -310,6 +310,7 @@
 			class="flex items-center relative"
 			class:w-28={size == 'small'}
 			class:w-60={size == 'normal'}
+			class:w-full={size == 'full'}
 		>
 			<input
 				bind:this={inputElement}

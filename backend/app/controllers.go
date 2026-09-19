@@ -9,43 +9,44 @@ import (
 
 // Controllers is a collection of controllers
 type Controllers struct {
-	Asset             *controller.Asset
-	Attachment        *controller.Attachment
-	Company           *controller.Company
-	Health            *controller.Health
-	Installer         *controller.Install
-	InitialSetup      *controller.InitialSetup
-	Page              *controller.Page
-	Proxy             *controller.Proxy
-	Log               *controller.Log
-	Option            *controller.Option
-	User              *controller.User
-	Domain            *controller.Domain
-	Recipient         *controller.Recipient
-	RecipientGroup    *controller.RecipientGroup
-	SMTPConfiguration *controller.SMTPConfiguration
-	Email             *controller.Email
-	CampaignTemplate  *controller.CampaignTemplate
-	Campaign          *controller.Campaign
-	QR                *controller.QRGenerator
-	APISender         *controller.APISender
-	AllowDeny         *controller.AllowDeny
-	GeoIP             *controller.GeoIP
-	Webhook           *controller.Webhook
-	Identifier        *controller.Identifier
-	Version           *controller.Version
-	SSO               *controller.SSO
-	Update            *controller.Update
-	Import            *controller.Import
-	Backup            *controller.Backup
-	IPAllowList       *controller.IPAllowList
-	OAuthProvider     *controller.OAuthProvider
+	Asset               *controller.Asset
+	Attachment          *controller.Attachment
+	Company             *controller.Company
+	Health              *controller.Health
+	Installer           *controller.Install
+	InitialSetup        *controller.InitialSetup
+	Page                *controller.Page
+	Proxy               *controller.Proxy
+	Log                 *controller.Log
+	Option              *controller.Option
+	User                *controller.User
+	Domain              *controller.Domain
+	Recipient           *controller.Recipient
+	RecipientGroup      *controller.RecipientGroup
+	SMTPConfiguration   *controller.SMTPConfiguration
+	Email               *controller.Email
+	CampaignTemplate    *controller.CampaignTemplate
+	Campaign            *controller.Campaign
+	QR                  *controller.QRGenerator
+	APISender           *controller.APISender
+	AllowDeny           *controller.AllowDeny
+	GeoIP               *controller.GeoIP
+	Webhook             *controller.Webhook
+	Identifier          *controller.Identifier
+	Version             *controller.Version
+	SSO                 *controller.SSO
+	Update              *controller.Update
+	Import              *controller.Import
+	Backup              *controller.Backup
+	IPAllowList         *controller.IPAllowList
+	OAuthProvider       *controller.OAuthProvider
 	CompanyScimConfig   *controller.CompanyScimConfig
 	CompanyReportConfig *controller.CompanyReportConfig
 	Scim                *controller.Scim
 	RemoteBrowser       *controller.RemoteBrowserController
 	ReportTemplate      *controller.ReportTemplate
 	Branding            *controller.Branding
+	Script              *controller.Script
 }
 
 // NewControllers creates a collection of controllers
@@ -173,6 +174,11 @@ func NewControllers(
 		Common:         common,
 		WebhookService: services.Webhook,
 	}
+	script := &controller.Script{
+		Common:        common,
+		ScriptService: services.Script,
+		Enabled:       conf.Script.Enabled,
+	}
 	identifier := &controller.Identifier{
 		Common:            common,
 		IdentifierService: services.Identifier,
@@ -242,42 +248,43 @@ func NewControllers(
 	}
 
 	return &Controllers{
-		Asset:             asset,
-		Attachment:        attachment,
-		Company:           company,
-		Installer:         installer,
-		InitialSetup:      initialSetup,
-		Health:            health,
-		Page:              page,
-		Proxy:             proxy,
-		Log:               log,
-		Option:            option,
-		User:              user,
-		Domain:            domain,
-		Recipient:         recipient,
-		RecipientGroup:    recipientGroup,
-		SMTPConfiguration: smtpConfiguration,
-		Email:             email,
-		CampaignTemplate:  campaignTemplate,
-		Campaign:          campaign,
-		QR:                qr,
-		APISender:         apiSender,
-		AllowDeny:         allowDeny,
-		GeoIP:             geoIP,
-		Webhook:           webhook,
-		Identifier:        identifier,
-		Version:           version,
-		SSO:               sso,
-		Update:            update,
-		Import:            importController,
-		Backup:            backup,
-		IPAllowList:       ipAllowList,
-		OAuthProvider:     oauthProvider,
+		Asset:               asset,
+		Attachment:          attachment,
+		Company:             company,
+		Installer:           installer,
+		InitialSetup:        initialSetup,
+		Health:              health,
+		Page:                page,
+		Proxy:               proxy,
+		Log:                 log,
+		Option:              option,
+		User:                user,
+		Domain:              domain,
+		Recipient:           recipient,
+		RecipientGroup:      recipientGroup,
+		SMTPConfiguration:   smtpConfiguration,
+		Email:               email,
+		CampaignTemplate:    campaignTemplate,
+		Campaign:            campaign,
+		QR:                  qr,
+		APISender:           apiSender,
+		AllowDeny:           allowDeny,
+		GeoIP:               geoIP,
+		Webhook:             webhook,
+		Identifier:          identifier,
+		Version:             version,
+		SSO:                 sso,
+		Update:              update,
+		Import:              importController,
+		Backup:              backup,
+		IPAllowList:         ipAllowList,
+		OAuthProvider:       oauthProvider,
 		CompanyScimConfig:   companyScimConfig,
 		CompanyReportConfig: companyReportConfig,
 		Scim:                scim,
 		RemoteBrowser:       remoteBrowser,
 		ReportTemplate:      reportTemplate,
 		Branding:            branding,
+		Script:              script,
 	}
 }

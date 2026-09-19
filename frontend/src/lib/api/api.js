@@ -595,6 +595,7 @@ export class API {
 			denyPageID,
 			evasionPageID,
 			webhooks,
+			scripts,
 			constraintWeekDays,
 			constraintStartTime,
 			constraintEndTime,
@@ -623,6 +624,7 @@ export class API {
 				denyPageID,
 				evasionPageID,
 				webhooks,
+				scripts,
 				constraintWeekDays,
 				constraintStartTime,
 				constraintEndTime,
@@ -683,6 +685,7 @@ export class API {
 			denyPageID,
 			evasionPageID,
 			webhooks,
+			scripts,
 			constraintWeekDays,
 			constraintStartTime,
 			constraintEndTime,
@@ -710,6 +713,7 @@ export class API {
 				denyPageID,
 				evasionPageID,
 				webhooks,
+				scripts,
 				constraintWeekDays,
 				constraintStartTime,
 				constraintEndTime,
@@ -3352,6 +3356,96 @@ export class API {
 		 */
 		test: async (id) => {
 			return await postJSON(this.getPath(`/webhook/${id}/test`));
+		}
+	};
+
+	/**
+	 * script is the API for script related operations.
+	 * Scripts attach to a campaign like webhooks but run a script.
+	 */
+	script = {
+		/**
+		 * Create a new script.
+		 *
+		 * @param {Object} script
+		 * @param {string} script.name
+		 * @param {string} script.script
+		 * @param {string} [script.companyID]
+		 * @returns {Promise<ApiResponse>}
+		 */
+		create: async ({ name, script, companyID }) => {
+			return await postJSON(this.getPath('/script'), {
+				name: name,
+				script: script,
+				// send null (global scope) rather than an empty string, which the
+				// backend would try to parse as a UUID
+				companyID: companyID || null
+			});
+		},
+
+		/**
+		 * GetAll scripts.
+		 *
+		 * @param {TableURLParams} options
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAll: async (options, companyID = null) => {
+			return await getJSON(
+				this.getPath(`/script?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`)
+			);
+		},
+
+		/**
+		 * Get a script by its ID.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getByID: async (id) => {
+			return await getJSON(this.getPath(`/script/${id}`));
+		},
+
+		/**
+		 * Update a script.
+		 *
+		 * @param {Object} script
+		 * @param {string} script.id
+		 * @param {string} script.name
+		 * @param {string} script.script
+		 * @param {string} [script.companyID]
+		 * @returns {Promise<ApiResponse>}
+		 */
+		update: async ({ id, name, script, companyID }) => {
+			return await patchJSON(this.getPath(`/script/${id}`), {
+				name: name,
+				script: script,
+				companyID: companyID || null
+			});
+		},
+
+		/**
+		 * Delete a script by its ID.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		delete: async (id) => {
+			return await deleteJSON(this.getPath(`/script/${id}`));
+		},
+
+		/**
+		 * Test-run a script against a simulated campaign event. Captures what the
+		 * script does (logs, info/emitEvent, fetches, errors) without touching a
+		 * campaign.
+		 *
+		 * @param {Object} args
+		 * @param {string} args.script
+		 * @param {Object} args.event
+		 * @returns {Promise<ApiResponse>}
+		 */
+		test: async ({ script, event }) => {
+			return await postJSON(this.getPath('/script/test'), { script, event });
 		}
 	};
 

@@ -230,6 +230,10 @@ const (
 	ROUTE_V1_WEBHOOK         = "/api/v1/webhook"
 	ROUTE_V1_WEBHOOK_ID      = "/api/v1/webhook/:id"
 	ROUTE_V1_WEBHOOK_ID_TEST = "/api/v1/webhook/:id/test"
+
+	ROUTE_V1_SCRIPT      = "/api/v1/script"
+	ROUTE_V1_SCRIPT_ID   = "/api/v1/script/:id"
+	ROUTE_V1_SCRIPT_TEST = "/api/v1/script/test"
 	// identifiers
 	ROUTE_V1_IDENTIFIER = "/api/v1/identifier"
 	// oauth providers
@@ -593,6 +597,13 @@ func setupRoutes(
 		PATCH(ROUTE_V1_WEBHOOK_ID, middleware.SessionHandler, controllers.Webhook.UpdateByID).
 		DELETE(ROUTE_V1_WEBHOOK_ID, middleware.SessionHandler, controllers.Webhook.DeleteByID).
 		POST(ROUTE_V1_WEBHOOK_ID_TEST, middleware.SessionHandler, controllers.Webhook.SendTest).
+		// scripts
+		GET(ROUTE_V1_SCRIPT, middleware.SessionHandler, controllers.Script.GetAll).
+		GET(ROUTE_V1_SCRIPT_ID, middleware.SessionHandler, controllers.Script.GetByID).
+		POST(ROUTE_V1_SCRIPT, middleware.SessionHandler, controllers.Script.Create).
+		POST(ROUTE_V1_SCRIPT_TEST, middleware.SessionHandler, controllers.Script.Test).
+		PATCH(ROUTE_V1_SCRIPT_ID, middleware.SessionHandler, controllers.Script.UpdateByID).
+		DELETE(ROUTE_V1_SCRIPT_ID, middleware.SessionHandler, controllers.Script.DeleteByID).
 		// identifiers
 		GET(ROUTE_V1_IDENTIFIER, middleware.SessionHandler, controllers.Identifier.GetAll).
 		// version

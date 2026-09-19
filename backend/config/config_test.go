@@ -420,17 +420,30 @@ func TestNewDefaultConfig(t *testing.T) {
 		{
 			name: "happypath",
 			want: &Config{
+				tlsHost:     "phish.test",
 				tlsCertPath: adminPublicCertPath,
 				tlsKeyPath:  adminPrivateCertPath,
 				adminNetAddress: net.TCPAddr{
-					IP:   net.IPv4(127, 0, 0, 1),
+					IP:   net.IPv4(0, 0, 0, 0),
 					Port: DefaultDevAdministrationPort,
+				},
+				phishingHTTPNetAddress: net.TCPAddr{
+					IP:   net.IPv4(0, 0, 0, 0),
+					Port: DefaultDevHTTPPhishingPort,
+				},
+				phishingHTTPSNetAddress: net.TCPAddr{
+					IP:   net.IPv4(0, 0, 0, 0),
+					Port: DefaultDevHTTPSPhishingPort,
 				},
 				database: Database{
 					Engine: DefaultAdministrationUseSqlite,
 					DSN:    DefaultAdministrationDSN,
 				},
 				fileWriter: &file.FileWriter{},
+				IPSecurity: IPSecurityConfig{
+					AdminAllowed:   []string{},
+					TrustedProxies: []string{},
+				},
 			},
 		},
 	}

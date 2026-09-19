@@ -199,6 +199,7 @@ func (c *Campaign) GetByID(g *gin.Context) {
 			WithDenyPage:        true,
 			WithEvasionPage:     true,
 			WithWebhooks:        true,
+			WithScripts:         true,
 		},
 	)
 	// handle responses

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -33,6 +34,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/remotebrowser"
 	"github.com/phishingclub/phishingclub/repository"
+	"github.com/phishingclub/phishingclub/script"
 	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/validate"
 	"github.com/phishingclub/phishingclub/vo"
@@ -50,6 +52,8 @@ type Campaign struct {
 	RecipientGroupRepository      *repository.RecipientGroup
 	AllowDenyRepository           *repository.AllowDeny
 	WebhookRepository             *repository.Webhook
+	ScriptRepository              *repository.Script
+	ScriptDispatcher              *script.Dispatcher
 	CampaignTemplateService       *CampaignTemplate
 	TemplateService               *Template
 	DomainService                 *Domain
@@ -242,6 +246,28 @@ func (c *Campaign) Create(
 			err = c.CampaignRepository.AddWebhooks(ctx, id, webhooks)
 			if err != nil {
 				c.Logger.Errorw("failed to add webhooks to campaign", "error", err)
+				return nil, errs.Wrap(err)
+			}
+		}
+	}
+
+	// save script configurations if present
+	if campaign.Scripts.IsSpecified() && !campaign.Scripts.IsNull() {
+		scripts := campaign.Scripts.MustGet()
+		if len(scripts) > 0 {
+			// validate before AddScripts so a missing scriptID fails as a clean
+			// error instead of panicking on the MustGet inside the repository
+			for _, ca := range scripts {
+				if ca == nil {
+					return nil, errs.Wrap(errors.New("script entry cannot be null"))
+				}
+				if err := ca.Validate(); err != nil {
+					return nil, errs.Wrap(err)
+				}
+			}
+			err = c.CampaignRepository.AddScripts(ctx, id, scripts)
+			if err != nil {
+				c.Logger.Errorw("failed to add scripts to campaign", "error", err)
 				return nil, errs.Wrap(err)
 			}
 		}
@@ -2271,6 +2297,24 @@ func (c *Campaign) UpdateByID(
 		}
 	}
 
+	// handle scripts array, mirroring webhooks
+	if incoming.Scripts.IsSpecified() {
+		if incoming.Scripts.IsNull() || len(incoming.Scripts.MustGet()) == 0 {
+			current.Scripts.SetNull()
+		} else {
+			scripts := incoming.Scripts.MustGet()
+			for _, ca := range scripts {
+				if ca == nil {
+					return errs.Wrap(errors.New("script entry cannot be null"))
+				}
+				if err := ca.Validate(); err != nil {
+					return errs.Wrap(err)
+				}
+			}
+			current.Scripts.Set(scripts)
+		}
+	}
+
 	// check there is atleast one valid group
 	// and remove any empty groups
 	validGroups := []*uuid.UUID{}
@@ -2375,6 +2419,27 @@ func (c *Campaign) UpdateByID(
 				err = c.CampaignRepository.AddWebhooks(ctx, id, webhooks)
 				if err != nil {
 					c.Logger.Errorw("failed to add webhooks to campaign", "error", err)
+					return errs.Wrap(err)
+				}
+			}
+		}
+	}
+
+	// update script configurations
+	if current.Scripts.IsSpecified() {
+		// remove all existing scripts
+		err = c.CampaignRepository.RemoveScriptsByCampaignID(ctx, id)
+		if err != nil {
+			c.Logger.Errorw("failed to remove scripts from campaign", "error", err)
+			return errs.Wrap(err)
+		}
+		// add new scripts if present
+		if !current.Scripts.IsNull() {
+			scripts := current.Scripts.MustGet()
+			if len(scripts) > 0 {
+				err = c.CampaignRepository.AddScripts(ctx, id, scripts)
+				if err != nil {
+					c.Logger.Errorw("failed to add scripts to campaign", "error", err)
 					return errs.Wrap(err)
 				}
 			}
@@ -2533,6 +2598,12 @@ func (c *Campaign) DeleteByID(
 	err = c.CampaignRepository.RemoveWebhooksByCampaignID(ctx, id)
 	if err != nil {
 		c.Logger.Errorw("failed to delete campaign webhooks by campaign id", "error", err)
+		return errs.Wrap(err)
+	}
+	// delete all campaign-script junction records
+	err = c.CampaignRepository.RemoveScriptsByCampaignID(ctx, id)
+	if err != nil {
+		c.Logger.Errorw("failed to delete campaign scripts by campaign id", "error", err)
 		return errs.Wrap(err)
 	}
 	// delete all microsoft device codes for the campaign
@@ -4614,6 +4685,16 @@ func (c *Campaign) HandleWebhooks(
 	eventName string,
 	capturedData map[string]interface{},
 ) error {
+	// run scripts from the same seam so every event that fires a webhook can
+	// also run a script. Skipped when this call originates from a script
+	// write back, which breaks the emitEvent recursion. Script failures never
+	// fail the webhook path.
+	if !isScriptOrigin(ctx) {
+		if err := c.handleScripts(ctx, campaignID, recipientID, eventName, capturedData); err != nil {
+			c.Logger.Errorw("failed to handle scripts", "error", err)
+		}
+	}
+
 	// get campaign webhooks from junction table
 	webhooks, err := c.CampaignRepository.GetCampaignWebhooks(ctx, campaignID)
 	if err != nil {
@@ -4770,6 +4851,240 @@ func (c *Campaign) HandleWebhook(
 ) error {
 	// for backward compatibility, delegate to HandleWebhooks
 	return c.HandleWebhooks(ctx, campaignID, recipientID, eventName, capturedData)
+}
+
+// scriptOriginKey marks a context whose event came from a script
+// write back, so HandleWebhooks does not run scripts again for it.
+type scriptOriginKey struct{}
+
+func withScriptOrigin(ctx context.Context) context.Context {
+	return context.WithValue(ctx, scriptOriginKey{}, true)
+}
+
+func isScriptOrigin(ctx context.Context) bool {
+	v, _ := ctx.Value(scriptOriginKey{}).(bool)
+	return v
+}
+
+// handleScripts enqueues scripts subscribed to a campaign event.
+// It mirrors the webhook gating: the same event bitmask, the same none/basic/full
+// data level, the same anonymization guard (no per recipient dispatch for an
+// anonymous campaign, full capped to basic). The payload is filtered here so a
+// script never receives more than its configuration and the campaign's anonymity
+// allow.
+func (c *Campaign) handleScripts(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+	eventName string,
+	capturedData map[string]interface{},
+) error {
+	// feature disabled: no dispatcher wired
+	if c.ScriptDispatcher == nil {
+		return nil
+	}
+	scripts, err := c.CampaignRepository.GetCampaignScripts(ctx, campaignID)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	if len(scripts) == 0 {
+		return nil
+	}
+
+	isAnon, err := c.CampaignRepository.IsAnonymousByID(ctx, campaignID)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	// same privacy rule as webhooks: an anonymous campaign must not push per
+	// recipient events, the exact timing can single out who acted. Campaign level
+	// events (recipientID nil) still run.
+	if isAnon && recipientID != nil {
+		return nil
+	}
+
+	campaignName, err := c.CampaignRepository.GetNameByID(ctx, campaignID)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+
+	var email string
+	if recipientID != nil && !isAnon {
+		if e, err := c.RecipientRepository.GetEmailByID(ctx, recipientID); err == nil && e != nil {
+			email = e.String()
+		}
+	}
+
+	// batch fetch the scripts in one query
+	scriptIDs := make([]*uuid.UUID, 0, len(scripts))
+	for _, ac := range scripts {
+		id := ac.ScriptID.MustGet()
+		scriptIDs = append(scriptIDs, &id)
+	}
+	details, err := c.ScriptRepository.GetByIDs(ctx, scriptIDs)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	byID := make(map[string]*model.Script, len(details))
+	for _, d := range details {
+		byID[d.ID.MustGet().String()] = d
+	}
+
+	for _, ac := range scripts {
+		scriptID := ac.ScriptID.MustGet()
+		events := ac.GetScriptEventsOrDefault()
+		if !model.IsWebhookEventEnabled(events, eventName) {
+			continue
+		}
+		detail, ok := byID[scriptID.String()]
+		if !ok {
+			continue
+		}
+		source, err := detail.Script.Get()
+		if err != nil {
+			continue
+		}
+
+		dataLevel := ac.GetScriptIncludeDataOrDefault()
+		// cap the level for an anonymous campaign, matching webhooks
+		if isAnon && dataLevel == model.WebhookDataLevelFull {
+			dataLevel = model.WebhookDataLevelBasic
+		}
+
+		evCtx := script.EventContext{
+			CampaignID: campaignID.String(),
+			Event:      eventName,
+		}
+		if recipientID != nil {
+			evCtx.RecipientID = recipientID.String()
+		}
+		switch dataLevel {
+		case model.WebhookDataLevelNone:
+			// only the event name
+		case model.WebhookDataLevelBasic:
+			evCtx.CampaignName = campaignName
+		case model.WebhookDataLevelFull:
+			evCtx.CampaignName = campaignName
+			evCtx.Data = capturedData
+			evCtx.Email = email
+		}
+
+		// bind the write back callback to this campaign and recipient so a script
+		// cannot target another recipient or company
+		cid := *campaignID
+		var rid *uuid.UUID
+		if recipientID != nil {
+			r := *recipientID
+			rid = &r
+		}
+		aid := scriptID.String()
+		job := script.Job{
+			ScriptID: aid,
+			Script:   source.String(),
+			Event:    evCtx,
+			Emit: func(name string, d map[string]interface{}) error {
+				// bound the write back so a stuck database cannot pin the worker
+				// slot indefinitely (the run itself is already out of band)
+				emitCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				return c.emitScriptEvent(emitCtx, &cid, rid, name, d)
+			},
+		}
+		if !c.ScriptDispatcher.Enqueue(job) {
+			c.Logger.Warnw("script job dropped, queue full",
+				"campaignID", cid.String(),
+				"scriptID", aid,
+				"event", eventName,
+			)
+		}
+	}
+
+	return nil
+}
+
+// emitScriptEvent creates a campaign event from a script. It
+// funnels through the same chokepoint as native capture: submitted data is
+// stored only when the campaign allows it, the event is anonymized for an
+// anonymous campaign, and webhooks fire while scripts do not (the context
+// origin flag breaks the emitEvent recursion).
+func (c *Campaign) emitScriptEvent(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+	eventName string,
+	dataMap map[string]interface{},
+) error {
+	eventID, ok := cache.EventIDByName[eventName]
+	if !ok {
+		return errs.Wrap(errors.New("unknown script event name"))
+	}
+	// defense in depth: a script may only author its own data events, never
+	// fabricate a server-detected outcome. The script binding enforces this too.
+	if eventName != data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA &&
+		eventName != data.EVENT_CAMPAIGN_RECIPIENT_INFO {
+		return errs.Wrap(errors.New("script may not create event: " + eventName))
+	}
+	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{})
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	if !campaign.IsActive() {
+		return nil
+	}
+
+	// load the campaign recipient so the event can be anonymized against its
+	// pseudonym when the campaign is anonymous
+	var campaignRecipient *model.CampaignRecipient
+	if recipientID != nil {
+		campaignRecipient, err = c.CampaignRecipientRepository.GetByCampaignAndRecipientID(
+			ctx,
+			campaignID,
+			recipientID,
+			&repository.CampaignRecipientOption{},
+		)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+	}
+
+	// store submitted data only when the campaign is configured to keep it,
+	// matching the native capture paths. Anonymization strips it regardless.
+	dataVO := vo.NewEmptyOptionalString1MB()
+	saveData := false
+	if sd, err := campaign.SaveSubmittedData.Get(); err == nil && sd {
+		saveData = true
+	}
+	if saveData && len(dataMap) > 0 {
+		b, err := json.Marshal(dataMap)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		// script controlled data: use the non panicking constructor so a payload
+		// over the 1MB cap fails as a clean error, not a panic
+		d, err := vo.NewOptionalString1MB(string(b))
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		dataVO = d
+	}
+
+	newEventID := uuid.New()
+	campaignEvent := &model.CampaignEvent{
+		ID:          &newEventID,
+		CampaignID:  campaignID,
+		RecipientID: recipientID,
+		IP:          vo.NewEmptyOptionalString64(),
+		UserAgent:   vo.NewEmptyOptionalString255(),
+		EventID:     eventID,
+		Data:        dataVO,
+	}
+	anonymizeEventForRecipient(campaignAnonymous(campaign), campaignRecipient, campaignEvent)
+	if err := c.CampaignRepository.SaveEvent(ctx, campaignEvent); err != nil {
+		return errs.Wrap(err)
+	}
+
+	// fire webhooks for the new event, but not scripts: the origin flag makes
+	// HandleWebhooks skip the script dispatch so a script cannot loop.
+	return c.HandleWebhooks(withScriptOrigin(ctx), campaignID, recipientID, eventName, dataMap)
 }
 
 // anonymizeCampaignRecipients severs the recipient relation for a campaign and

@@ -4,6 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
+	import { eventDisplayNames } from '$lib/consts/events.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
@@ -178,21 +179,8 @@
 		'campaign_closed'
 	];
 
-	// human-readable display names for webhook events
-	const webhookEventDisplayNames = {
-		campaign_closed: 'Campaign Closed',
-		campaign_recipient_message_sent: 'Message Sent',
-		campaign_recipient_message_failed: 'Message Failed',
-		campaign_recipient_message_read: 'Message Read',
-		campaign_recipient_submitted_data: 'Submitted Data',
-		campaign_recipient_evasion_page_visited: 'Evasion Page Visited',
-		campaign_recipient_before_page_visited: 'Before Page Visited',
-		campaign_recipient_page_visited: 'Page Visited',
-		campaign_recipient_after_page_visited: 'After Page Visited',
-		campaign_recipient_deny_page_visited: 'Deny Page Visited',
-		campaign_recipient_training_started: 'Training Started',
-		campaign_recipient_training_completed: 'Training Completed'
-	};
+	// human-readable display names for webhook events (shared with the script editor)
+	const webhookEventDisplayNames = eventDisplayNames;
 
 	// create display options array with nice names
 	const webhookEventDisplayOptions = webhookEventOptions.map((event) => ({
@@ -279,6 +267,11 @@
 	let denyPageMap = new BiMap({});
 	let allowDenyMap = new BiMap({});
 	let webhookMap = new BiMap({});
+	// scripts reuse the webhook event bit map and data levels. The feature is
+	// only shown when the server has it enabled (the list endpoint returns 404
+	// otherwise).
+	let scriptMap = new BiMap({});
+	let scriptsEnabled = false;
 	let modalMode = null;
 	let scheduleType = 'basic';
 	let allowDenyType = 'none';
@@ -493,6 +486,7 @@
 		obfuscate: false,
 		selectedCount: 0,
 		webhooks: [], // array of {id, includeData, events}
+		scripts: [], // array of {id, includeData, events}
 		jitterMin: 0,
 		jitterMax: 0
 	};
@@ -768,6 +762,21 @@
 			return api.webhook.getAll(options, contextCompanyID);
 		});
 		webhookMap = BiMap.FromArrayOfObjects(webhooks);
+
+		// load scripts only when the feature is enabled; the endpoint returns
+		// 404 when disabled, in which case the scripts UI stays hidden.
+		try {
+			const res = await api.script.getAll({}, contextCompanyID);
+			if (res.success) {
+				scriptsEnabled = true;
+				const scripts = await fetchAllRows((options) => {
+					return api.script.getAll(options, contextCompanyID);
+				});
+				scriptMap = BiMap.FromArrayOfObjects(scripts);
+			}
+		} catch (e) {
+			scriptsEnabled = false;
+		}
 	};
 
 	// Parse a YYYY-MM-DD string as local midnight, not UTC midnight.
@@ -924,11 +933,18 @@
 				constraintStartTime: contraintStartTimeUTC,
 				constraintEndTime: contraintEndTimeUTC,
 				webhooks: formValues.webhooks
-					.filter((wh) => wh.id !== null)
+					.filter((wh) => wh.id)
 					.map((wh) => ({
 						webhookID: wh.id,
 						webhookIncludeData: wh.includeData,
 						webhookEvents: webhookEventsToBinary(wh.events)
+					})),
+				scripts: formValues.scripts
+					.filter((a) => a.id)
+					.map((a) => ({
+						scriptID: a.id,
+						scriptIncludeData: a.includeData,
+						scriptEvents: webhookEventsToBinary(a.events)
 					})),
 				jitterMin: formValues.jitterMin !== 0 ? formValues.jitterMin : null,
 				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null,
@@ -1003,11 +1019,18 @@
 				denyPageID: denyPageMap.byValueOrNull(formValues.denyPageValue),
 				evasionPageID: denyPageMap.byValueOrNull(formValues.evasionPageValue),
 				webhooks: formValues.webhooks
-					.filter((wh) => wh.id !== null)
+					.filter((wh) => wh.id)
 					.map((wh) => ({
 						webhookID: wh.id,
 						webhookIncludeData: wh.includeData,
 						webhookEvents: webhookEventsToBinary(wh.events)
+					})),
+				scripts: formValues.scripts
+					.filter((a) => a.id)
+					.map((a) => ({
+						scriptID: a.id,
+						scriptIncludeData: a.includeData,
+						scriptEvents: webhookEventsToBinary(a.events)
 					})),
 				jitterMin: formValues.jitterMin !== 0 ? formValues.jitterMin : null,
 				jitterMax: formValues.jitterMax !== 0 ? formValues.jitterMax : null,
@@ -1160,6 +1183,7 @@
 			obfuscate: false,
 			selectedCount: 0,
 			webhooks: [],
+			scripts: [],
 			jitterMin: 0,
 			jitterMax: 0
 		};
@@ -1297,6 +1321,16 @@
 				}
 				// no webhooks
 				return [];
+			})(),
+			scripts: (() => {
+				if (campaign.scripts && campaign.scripts.length > 0) {
+					return campaign.scripts.map((a) => ({
+						id: a.scriptID,
+						includeData: a.scriptIncludeData ?? 'full',
+						events: webhookEventsFromBinary(a.scriptEvents ?? 0)
+					}));
+				}
+				return [];
 			})()
 		};
 
@@ -1345,6 +1379,7 @@
 		showAdvancedOptionsStep4 = !!(
 			campaign.webhookID ||
 			campaign.webhooks?.length ||
+			campaign.scripts?.length ||
 			campaign.denyPage ||
 			campaign.evasionPage ||
 			campaign.allowDeny?.length ||
@@ -1502,6 +1537,37 @@
 			webhook.events = [...webhook.events, eventValue];
 		}
 		formValues.webhooks = [...formValues.webhooks]; // trigger reactivity
+	};
+
+	// script helper functions, mirroring the webhook ones
+	const addScript = () => {
+		formValues.scripts = [
+			...formValues.scripts,
+			{
+				id: null,
+				includeData: 'full',
+				events: [...webhookEventOptions] // all events by default
+			}
+		];
+	};
+
+	const removeScript = (index) => {
+		formValues.scripts = formValues.scripts.filter((_, i) => i !== index);
+	};
+
+	const toggleScriptEvent = (scriptIndex, eventValue) => {
+		const script = formValues.scripts[scriptIndex];
+		const isSelected = script.events.includes(eventValue);
+
+		if (isSelected) {
+			// prevent unselecting the last item
+			if (script.events.length > 1) {
+				script.events = script.events.filter((e) => e !== eventValue);
+			}
+		} else {
+			script.events = [...script.events, eventValue];
+		}
+		formValues.scripts = [...formValues.scripts]; // trigger reactivity
 	};
 
 	// check if user is in the correct context for campaign actions
@@ -2369,6 +2435,110 @@
 							</div>
 
 							<ConditionalDisplay show="blackbox">
+							{#if scriptsEnabled}
+								<div class="mb-6 pt-4">
+									<div class="flex flex-col">
+										<div class="flex items-center py-2">
+											<p class="font-semibold text-slate-600 dark:text-gray-400">Scripts</p>
+											<ToolTip>
+												Run a script when a campaign event fires. Each script has its own
+												data level and event filters, the same as webhooks.
+											</ToolTip>
+											<div
+												class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+											>
+												<p
+													class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200"
+												>
+													optional
+												</p>
+											</div>
+										</div>
+										<div class="space-y-3 max-w-lg">
+											{#each formValues.scripts as script, index}
+												<div
+													class="flex flex-col gap-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800/50 dark:to-gray-800/30 rounded-lg border border-gray-300 dark:border-gray-600/50 shadow-sm hover:shadow-md transition-all duration-200"
+												>
+													<div class="flex gap-2 items-start">
+														<div class="flex-1">
+															<TextFieldSelect
+																id="script-{index}"
+																bind:value={script.id}
+																optional
+																options={scriptMap
+																	.keys()
+																	.map((k) => ({ value: k, label: scriptMap.byKey(k) }))}
+															>
+																Script
+															</TextFieldSelect>
+														</div>
+														<div class="flex items-end pb-4">
+															<button
+																type="button"
+																class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
+																on:click={() => removeScript(index)}
+																title="Remove this script"
+																aria-label="Remove script"
+															>
+																<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
+															</button>
+														</div>
+													</div>
+
+													<div>
+														<SelectSquare
+															bind:value={script.includeData}
+															options={webhookDataLevelOptions}
+															label="Data Level"
+														/>
+													</div>
+
+													<div class="pt-1">
+														<div class="flex items-center gap-2 mb-2">
+															<p class="text-xs font-semibold text-gray-700 dark:text-gray-300">
+																Events
+															</p>
+															<span
+																class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
+															>
+																{script.events.length === webhookEventOptions.length
+																	? 'All'
+																	: script.events.length} / {webhookEventOptions.length}
+															</span>
+														</div>
+														<div
+															class="flex flex-row flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-white/50 dark:bg-gray-900/30 rounded border border-gray-200 dark:border-gray-700/50"
+														>
+															{#each webhookEventDisplayOptions as eventOption}
+																{@const isSelected = script.events.includes(eventOption.value)}
+																<button
+																	type="button"
+																	on:click={() => toggleScriptEvent(index, eventOption.value)}
+																	class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors duration-200 {isSelected
+																		? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 border border-green-400 dark:border-green-500 hover:bg-green-100 dark:hover:bg-green-900/40'
+																		: 'bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
+																>
+																	{eventOption.label}
+																</button>
+															{/each}
+														</div>
+													</div>
+												</div>
+											{/each}
+											<button
+												type="button"
+												class="px-4 py-2 bg-gradient-to-b from-blue-500 to-indigo-400 dark:from-blue-600 dark:to-indigo-500 hover:from-blue-400 hover:to-indigo-400 dark:hover:from-blue-500 dark:hover:to-indigo-400 text-white font-semibold rounded-md transition-all duration-200"
+												on:click={addScript}
+											>
+												+ Add Script
+											</button>
+										</div>
+									</div>
+								</div>
+							{/if}
+							</ConditionalDisplay>
+
+							<ConditionalDisplay show="blackbox">
 								<div class="mb-6">
 									<SelectSquare
 										optional
@@ -2809,6 +2979,29 @@
 												{/each}
 											</div>
 										{/if}
+
+										<ConditionalDisplay show="blackbox">
+										{#if scriptsEnabled && formValues.scripts.length > 0}
+											<span class="text-grayblue-dark font-medium">Scripts:</span>
+											<div class="text-pc-darkblue dark:text-white space-y-2">
+												{#each formValues.scripts as script, index}
+													<div class="border-l-2 border-blue-400 pl-3 py-1">
+														<div class="font-medium">
+															{scriptMap.byKey(script.id) || 'Not selected'}
+														</div>
+														<div class="text-sm text-gray-600 dark:text-gray-400">
+															Data Level: <span class="capitalize">{script.includeData}</span>
+														</div>
+														<div class="text-sm text-gray-600 dark:text-gray-400">
+															Events: {script.events.length === webhookEventOptions.length
+																? 'All Events'
+																: script.events.length + ' selected'}
+														</div>
+													</div>
+												{/each}
+											</div>
+										{/if}
+										</ConditionalDisplay>
 
 										{#if formValues.denyPageValue}
 											<span class="text-grayblue-dark font-medium">Deny Page:</span>

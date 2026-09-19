@@ -80,6 +80,7 @@ type (
 
 		IPSecurity     IPSecurityConfig
 		RemoteBrowser  RemoteBrowserServerConfig
+		Script         ScriptServerConfig
 		Authentication AuthenticationConfig
 	}
 
@@ -92,6 +93,7 @@ type (
 		Log                  Log                       `json:"log"`
 		IPSecurity           IPSecurityConfig          `json:"ip_security"`
 		RemoteBrowser        RemoteBrowserServerConfig `json:"remote_browser"`
+		Script               ScriptServerConfig        `json:"script"`
 		Authentication       AuthenticationConfig      `json:"authentication"`
 	}
 
@@ -146,6 +148,16 @@ type (
 		// ExecPath is the path to a Chrome/Chromium binary. When empty Rod uses
 		// its own auto-downloaded Chromium. Set at the server level only.
 		ExecPath string `json:"exec_path"`
+	}
+
+	// ScriptServerConfig holds server side script settings.
+	ScriptServerConfig struct {
+		// Enabled controls whether the script feature is available.
+		// Defaults to false. When false all script endpoints return 404 and
+		// no scripts run. When true admin authored scripts run in a sandboxed
+		// engine with outbound network access, so only enable on instances where
+		// every operator is trusted as a server admin.
+		Enabled bool `json:"enabled"`
 	}
 )
 
@@ -506,6 +518,7 @@ func FromDTO(dto *ConfigDTO) (*Config, error) {
 		return nil, err
 	}
 	cfg.RemoteBrowser = dto.RemoteBrowser
+	cfg.Script = dto.Script
 	cfg.Authentication = dto.Authentication
 	return cfg, nil
 }
@@ -537,6 +550,7 @@ func (c *Config) ToDTO() *ConfigDTO {
 		},
 		IPSecurity:     c.IPSecurity,
 		RemoteBrowser:  c.RemoteBrowser,
+		Script:         c.Script,
 		Authentication: c.Authentication,
 	}
 }

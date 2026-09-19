@@ -24,5 +24,8 @@
   "remote_browser": {
     "enabled": false,
     "exec_path": ""
+  },
+  "script": {
+    "enabled": false
   }
 }

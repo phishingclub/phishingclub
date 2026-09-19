@@ -36,6 +36,7 @@ type Repositories struct {
 	ReportSendLog       *repository.ReportSendLog
 	RemoteBrowser       *repository.RemoteBrowser
 	ReportTemplate      *repository.ReportTemplate
+	Script              *repository.Script
 }
 
 // NewRepositories creates a collection of repositories
@@ -73,5 +74,6 @@ func NewRepositories(
 		ReportSendLog:       &repository.ReportSendLog{DB: db},
 		RemoteBrowser:       &repository.RemoteBrowser{DB: db},
 		ReportTemplate:      &repository.ReportTemplate{DB: db},
+		Script:              &repository.Script{DB: db},
 	}
 }
