@@ -30,10 +30,11 @@
 	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import Editor from '$lib/components/editor/Editor.svelte';
-	import { defaultOptions, fetchAllRows } from '$lib/utils/api-utils';
+	import { fetchAllRows } from '$lib/utils/api-utils';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import TextFieldSearchSelect from '$lib/components/TextFieldSearchSelect.svelte';
 	import { BiMap } from '$lib/utils/maps';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
@@ -70,12 +71,15 @@
 		name: null
 	};
 	let smtpMap = new BiMap({});
-	let recipientMap = new BiMap({});
 	let domainMap = new BiMap({});
 	let selectedTestSMTPValue = null;
 	let selectedTestEmailID = null;
-	let selectedTestEmailRecipientID = null;
 	let selectedTestDomainID = null;
+	// recipient is searched on demand instead of preloading every recipient
+	let recipientSearch = '';
+	let recipientSearchOptions = [];
+	let recipientSearchMap = new BiMap({});
+	let selectedTestRecipientID = null;
 	let modalError = '';
 	let sendTestModalError = '';
 	let emails = [];
@@ -344,18 +348,13 @@
 			const smtps = await fetchAllRows(async (options) => {
 				return api.smtpConfiguration.getAll(options, contextCompanyID);
 			});
-			const recipients = await fetchAllRows(
-				async (options) => {
-					return api.recipient.getAll(options, contextCompanyID);
-				},
-				{
-					...defaultOptions,
-					sortBy: 'first_name'
-				}
-			);
 			await refreshDomains();
 			smtpMap = BiMap.FromArrayOfObjects(smtps);
-			recipientMap = BiMap.FromArrayOfObjects(recipients, 'id', 'email');
+			// reset recipient search state for a fresh modal
+			recipientSearch = '';
+			recipientSearchOptions = [];
+			recipientSearchMap = new BiMap({});
+			selectedTestRecipientID = null;
 			selectedTestEmailID = id;
 			isSendTestModalVisible = true;
 		} catch (e) {
@@ -365,10 +364,47 @@
 		}
 	};
 
+	// searchRecipients queries the backend for recipients matching the typed text
+	// so we never load the whole recipient set into the browser
+	const searchRecipients = async () => {
+		try {
+			// typing a new search invalidates any previous pick until one is chosen again
+			selectedTestRecipientID = null;
+			const res = await api.recipient.getAll({ search: recipientSearch }, contextCompanyID);
+			if (!res.success) {
+				throw res.error;
+			}
+			/** @type {Record<string, string>} */
+			const idToLabel = {};
+			recipientSearchOptions = res.data.rows.map((r) => {
+				const name = [r.firstName, r.lastName].filter(Boolean).join(' ');
+				const label = name ? `${name} (${r.email})` : r.email;
+				idToLabel[r.id] = label;
+				return label;
+			});
+			recipientSearchMap = new BiMap(idToLabel);
+			return recipientSearchOptions;
+		} catch (err) {
+			addToast('Failed to search recipients', 'Error');
+			console.error('failed to search recipients', err);
+		}
+	};
+
+	/** @param {string} option */
+	const onSelectTestRecipient = (option) => {
+		selectedTestRecipientID = recipientSearchMap.byValue(option);
+		// keep the chosen recipient visible in the field, like the other selects
+		recipientSearch = option;
+	};
+
 	const closeSendTestModal = () => {
 		isSendTestModalVisible = false;
 		selectedTestSMTPValue = null;
 		selectedTestEmailID = null;
+		recipientSearch = '';
+		recipientSearchOptions = [];
+		recipientSearchMap = new BiMap({});
+		selectedTestRecipientID = null;
 	};
 
 	const openDeleteAlert = async (email) => {
@@ -380,8 +416,12 @@
 	const sendPreview = async () => {
 		try {
 			const smtpID = smtpMap.byValue(selectedTestSMTPValue);
-			const recpID = recipientMap.byValue(selectedTestEmailRecipientID);
+			const recpID = selectedTestRecipientID;
 			const domainID = domainMap.byValue(selectedTestDomainID);
+			if (!recpID) {
+				sendTestModalError = 'Please search for and select a recipient';
+				return;
+			}
 
 			const res = await api.email.sendTest({
 				id: selectedTestEmailID,
@@ -561,11 +601,13 @@
 					>
 				</FormColumn>
 				<FormColumn>
-					<TextFieldSelect
-						required
+					<TextFieldSearchSelect
 						id="recp"
-						options={recipientMap.values()}
-						bind:value={selectedTestEmailRecipientID}>Reciever</TextFieldSelect
+						placeholder={'Type to search'}
+						onKeyUp={searchRecipients}
+						onSelect={onSelectTestRecipient}
+						options={recipientSearchOptions}
+						bind:value={recipientSearch}>Receiver</TextFieldSearchSelect
 					>
 				</FormColumn>
 			</FormColumns>
