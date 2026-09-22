@@ -20,6 +20,7 @@ type SMTPConfiguration struct {
 	Username         nullable.Nullable[vo.OptionalString255] `json:"username"`
 	Password         nullable.Nullable[vo.OptionalString255] `json:"password"`
 	IgnoreCertErrors nullable.Nullable[bool]                 `json:"ignoreCertErrors"`
+	Helo             nullable.Nullable[vo.OptionalString255] `json:"helo"`
 	CompanyID        nullable.Nullable[uuid.UUID]            `json:"companyID"`
 	Company          *Company                                `json:"company"`
 	Headers          []*SMTPHeader                           `json:"headers"`
@@ -87,6 +88,12 @@ func (s *SMTPConfiguration) ToDBMap() map[string]any {
 		m["ignore_cert_errors"] = nil
 		if ignoreCertErrors, err := s.IgnoreCertErrors.Get(); err == nil {
 			m["ignore_cert_errors"] = ignoreCertErrors
+		}
+	}
+	if s.Helo.IsSpecified() {
+		m["helo"] = ""
+		if helo, err := s.Helo.Get(); err == nil {
+			m["helo"] = helo.String()
 		}
 	}
 	if v, err := s.CompanyID.Get(); err == nil {

@@ -242,6 +242,13 @@ func (s *SMTPConfiguration) SendTestEmail(
 			},
 		),
 	}
+	// use a custom HELO/EHLO hostname when set, otherwise go-mail
+	// falls back to the machine hostname
+	if helo, err := smtpConfig.Helo.Get(); err == nil {
+		if h := helo.String(); len(h) > 0 {
+			emailOptions = append(emailOptions, mail.WithHELO(h))
+		}
+	}
 	// setup authentication if provided
 	username, err := smtpConfig.Username.Get()
 	if err != nil {
@@ -454,6 +461,9 @@ func (s *SMTPConfiguration) UpdateByID(
 	if v, err := incoming.IgnoreCertErrors.Get(); err == nil {
 		current.IgnoreCertErrors.Set(v)
 	}
+	if v, err := incoming.Helo.Get(); err == nil {
+		current.Helo.Set(v)
+	}
 	if err := incoming.Validate(); err != nil {
 		s.Logger.Errorw("failed to update SMTP configuration", "error", err)
 		return err
@@ -655,6 +665,13 @@ func (s *SMTPConfiguration) SendMessages(
 				InsecureSkipVerify: smtpIgnoreCertErrors,
 			},
 		),
+	}
+	// use a custom HELO/EHLO hostname when set, otherwise go-mail
+	// falls back to the machine hostname
+	if helo, err := smtpConfig.Helo.Get(); err == nil {
+		if h := helo.String(); len(h) > 0 {
+			emailOptions = append(emailOptions, mail.WithHELO(h))
+		}
 	}
 	username, err := smtpConfig.Username.Get()
 	if err != nil {
