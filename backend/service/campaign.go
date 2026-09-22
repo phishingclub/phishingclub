@@ -3112,6 +3112,13 @@ func (c *Campaign) sendCampaignMessages(
 			},
 		),
 	}
+	// use a custom HELO/EHLO hostname when set, otherwise go-mail
+	// falls back to the machine hostname
+	if helo, err := smtpConfig.Helo.Get(); err == nil {
+		if h := helo.String(); len(h) > 0 {
+			emailOptions = append(emailOptions, mail.WithHELO(h))
+		}
+	}
 	// setup authentication if provided
 	username, err := smtpConfig.Username.Get()
 	if err != nil {
@@ -5552,6 +5559,14 @@ func (c *Campaign) sendSingleEmailSMTP(
 				InsecureSkipVerify: smtpIgnoreCertErrors,
 			},
 		),
+	}
+
+	// use a custom HELO/EHLO hostname when set, otherwise go-mail
+	// falls back to the machine hostname
+	if helo, err := smtpConfig.Helo.Get(); err == nil {
+		if h := helo.String(); len(h) > 0 {
+			emailOptions = append(emailOptions, mail.WithHELO(h))
+		}
 	}
 
 	// setup authentication if provided

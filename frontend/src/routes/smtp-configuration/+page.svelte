@@ -54,7 +54,8 @@
 		port: null,
 		username: null,
 		password: null,
-		ignoreCertErrors: null
+		ignoreCertErrors: null,
+		helo: null
 	};
 	let headerFormValues = {
 		id: null,
@@ -206,6 +207,7 @@
 				username: formValues.username,
 				password: formValues.password,
 				ignoreCertErrors: formValues.ignoreCertErrors,
+				helo: formValues.helo,
 				companyID: contextCompanyID
 			});
 			if (!res.success) {
@@ -233,6 +235,7 @@
 				username: formValues.username,
 				password: formValues.password,
 				ignoreCertErrors: formValues.ignoreCertErrors,
+				helo: formValues.helo,
 				companyID: formValues.companyID
 			});
 			if (res.success) {
@@ -381,7 +384,8 @@
 			port: configuration.port,
 			username: configuration.username,
 			password: configuration.password,
-			ignoreCertErrors: configuration.ignoreCertErrors
+			ignoreCertErrors: configuration.ignoreCertErrors,
+			helo: configuration.helo
 		};
 	};
 
@@ -559,6 +563,15 @@
 								max={65535}
 								bind:value={formValues.port}
 								placeholder="587">Port</TextField
+							>
+							<TextField
+								minLength={0}
+								maxLength={255}
+								bind:value={formValues.helo}
+								placeholder="mail.example.test"
+								optional={true}
+								toolTipText="Hostname sent in the SMTP HELO/EHLO greeting. Leave empty to use the server's own hostname."
+								>HELO/EHLO Hostname</TextField
 							>
 						</div>
 					</div>

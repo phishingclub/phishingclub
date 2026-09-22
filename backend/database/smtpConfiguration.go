@@ -23,6 +23,9 @@ type SMTPConfiguration struct {
 	Username         string     `gorm:"not null;"`
 	Password         string     `gorm:"not null;"`
 	IgnoreCertErrors bool       `gorm:"not null;"`
+	// Helo is the hostname sent in the SMTP HELO/EHLO greeting.
+	// empty means go-mail falls back to the machine hostname.
+	Helo string `gorm:"not null;default:'';"`
 
 	// back-reference
 	Headers []*SMTPHeader

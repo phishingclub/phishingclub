@@ -2016,6 +2016,7 @@ export class API {
 		 * @param {string} configuration.username
 		 * @param {string} configuration.password
 		 * @param {boolean} configuration.ignoreCertErrors
+		 * @param {string} configuration.helo
 		 * @param {string} configuration.companyID
 		 * @returns
 		 */
@@ -2034,6 +2035,7 @@ export class API {
 		 * @param {string} configuration.username
 		 * @param {string} configuration.password
 		 * @param {boolean} configuration.ignoreCertErrors
+		 * @param {string} configuration.helo
 		 * @param {string} configuration.companyID
 		 * @returns {Promise<ApiResponse>}
 		 */

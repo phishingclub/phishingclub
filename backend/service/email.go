@@ -532,6 +532,13 @@ func (m *Email) SendTestEmail(
 			},
 		),
 	}
+	// use a custom HELO/EHLO hostname when set, otherwise go-mail
+	// falls back to the machine hostname
+	if helo, err := smtp.Helo.Get(); err == nil {
+		if h := helo.String(); len(h) > 0 {
+			emailOptions = append(emailOptions, mail.WithHELO(h))
+		}
+	}
 	// setup authentication if provided
 	username, err := smtp.Username.Get()
 	if err != nil {

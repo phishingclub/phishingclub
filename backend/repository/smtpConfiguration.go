@@ -283,6 +283,7 @@ func ToSMTPConfiguration(
 	username := nullable.NewNullableWithValue(*vo.NewOptionalString255Must(row.Username))
 	password := nullable.NewNullableWithValue(*vo.NewOptionalString255Must(row.Password))
 	ignoreCertErrors := nullable.NewNullableWithValue(row.IgnoreCertErrors)
+	helo := nullable.NewNullableWithValue(*vo.NewOptionalString255Must(row.Helo))
 
 	return &model.SMTPConfiguration{
 		ID:               id,
@@ -295,6 +296,7 @@ func ToSMTPConfiguration(
 		Username:         username,
 		Password:         password,
 		IgnoreCertErrors: ignoreCertErrors,
+		Helo:             helo,
 		Headers:          headers,
 	}
 }
