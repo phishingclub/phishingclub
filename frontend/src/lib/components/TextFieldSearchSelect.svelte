@@ -68,22 +68,21 @@
 	});
 </script>
 
-<div class="flex flex-col justify-start">
-	<label class="flex flex-col py-2 relative">
-		<div class="flex items-center">
-			<p
-				class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200"
-			>
-				<slot />
-			</p>
-			{#if toolTipText.length > 0}
-				<ToolTip>
-					{toolTipText}
-				</ToolTip>
-			{/if}
-		</div>
-	</label>
-	<div class="relative">
+<label class="flex flex-col py-2 relative">
+	<div class="flex items-center">
+		<p
+			class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
+		>
+			<slot />
+		</p>
+		{#if toolTipText.length > 0}
+			<ToolTip>
+				{toolTipText}
+			</ToolTip>
+		{/if}
+	</div>
+</label>
+<div class="relative">
 		<div class="flex items-center relative w-60">
 			<input
 				type="text"
@@ -131,4 +130,3 @@
 			</div>
 		{/if}
 	</div>
-</div>
