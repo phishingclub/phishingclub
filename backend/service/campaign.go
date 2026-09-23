@@ -3199,6 +3199,8 @@ func (c *Campaign) sendCampaignMessages(
 			c.Logger.Errorw("failed to set envelope from", "error", err)
 			return errs.Wrap(err)
 		}
+		// message id from the sending domain so the host is not leaked
+		setMessageIDFromAddress(m, email.MailEnvelopeFrom.MustGet().String())
 		// headers
 		err = m.From(email.MailHeaderFrom.MustGet().String())
 		if err != nil {
@@ -5598,6 +5600,8 @@ func (c *Campaign) sendSingleEmailSMTP(
 		c.Logger.Errorw("failed to set envelope from", "error", err)
 		return errs.Wrap(err)
 	}
+	// message id from the sending domain so the host is not leaked
+	setMessageIDFromAddress(m, email.MailEnvelopeFrom.MustGet().String())
 
 	// set headers
 	err = m.From(email.MailHeaderFrom.MustGet().String())
@@ -6947,6 +6951,8 @@ func (c *Campaign) SendCampaignReport(
 		}
 		return errs.Wrap(err)
 	}
+	// message id from the sending domain so the host is not leaked
+	setMessageIDFromAddress(m, senderEmail.String())
 	if err := m.From(senderEmail.String()); err != nil {
 		if onDemand {
 			return errs.NewCustomError(fmt.Errorf("the report sender email address is invalid: %w", err))

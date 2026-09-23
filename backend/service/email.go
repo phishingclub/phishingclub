@@ -576,6 +576,8 @@ func (m *Email) SendTestEmail(
 		m.Logger.Errorw("failed to set envelope from", "error", err)
 		return errs.Wrap(err)
 	}
+	// message id from the sending domain so the host is not leaked
+	setMessageIDFromAddress(msg, email.MailEnvelopeFrom.MustGet().String())
 	// headers
 	err = msg.From(email.MailHeaderFrom.MustGet().String())
 	if err != nil {
