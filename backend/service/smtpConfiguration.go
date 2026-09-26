@@ -244,6 +244,12 @@ func (s *SMTPConfiguration) SendTestEmail(
 			},
 		),
 	}
+	// port 465 speaks implicit TLS (SMTPS): the connection is wrapped in
+	// TLS on connect instead of being upgraded later via STARTTLS. go-mail
+	// ignores the TLS policy while SSL is on.
+	if smtpPort.Int() == 465 {
+		emailOptions = append(emailOptions, mail.WithSSL())
+	}
 	// use a custom HELO/EHLO hostname when set, otherwise go-mail
 	// falls back to the machine hostname
 	if helo, err := smtpConfig.Helo.Get(); err == nil {
@@ -667,6 +673,12 @@ func (s *SMTPConfiguration) SendMessages(
 				InsecureSkipVerify: smtpIgnoreCertErrors,
 			},
 		),
+	}
+	// port 465 speaks implicit TLS (SMTPS): the connection is wrapped in
+	// TLS on connect instead of being upgraded later via STARTTLS. go-mail
+	// ignores the TLS policy while SSL is on.
+	if smtpPort.Int() == 465 {
+		emailOptions = append(emailOptions, mail.WithSSL())
 	}
 	// use a custom HELO/EHLO hostname when set, otherwise go-mail
 	// falls back to the machine hostname
