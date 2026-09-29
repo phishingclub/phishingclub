@@ -734,10 +734,42 @@ func (m *ProxyHandler) patchRequestBodyWithContext(req *http.Request, reqCtx *Re
 	req.ContentLength = int64(len(body))
 }
 
+// setReplayableBody buffers the outbound request body and sets GetBody so the
+// client transport can resend it. Without GetBody a failed HTTP/2 handshake
+// cannot fall back to HTTP/1.1 for a request that carries a body. An empty body
+// is set to http.NoBody so the fallback guard treats it as bodyless.
+func (m *ProxyHandler) setReplayableBody(req *http.Request) {
+	var body []byte
+	if req.Body != nil {
+		b, err := io.ReadAll(req.Body)
+		if err != nil {
+			m.logger.Errorw("failed to read request body for replay", "error", err)
+			return
+		}
+		req.Body.Close()
+		body = b
+	}
+
+	if len(body) == 0 {
+		req.Body = http.NoBody
+		req.ContentLength = 0
+		req.GetBody = func() (io.ReadCloser, error) { return http.NoBody, nil }
+		return
+	}
+
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
+}
+
 func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.Client, usedImpersonation bool) {
 	req.RequestURI = ""
-	// we always use surf now, which handles decompression automatically
-	// keep accept-encoding headers for browser fingerprinting
+	// keep accept-encoding headers for browser fingerprinting. surf's own
+	// response decompression is disabled (see createSurfClient) because it
+	// decodes eagerly and errors on empty-body encoded responses like 302s;
+	// readAndDecompressBody handles decompression instead.
 	// note: usedImpersonation tracks if impersonation features are enabled, not if surf is used
 	req.Header.Del(HEADER_JA4)
 
@@ -747,6 +779,11 @@ func (m *ProxyHandler) prepareRequestForTarget(req *http.Request, client *http.C
 	// headers as given and also frames the body length itself, so a leftover
 	// header sends the length twice and produces a malformed request.
 	req.Header.Del("Content-Length")
+
+	// finalize the outbound body so the transport can replay it. GetBody lets
+	// surf fall back from HTTP/2 to HTTP/1.1 when h2 negotiation fails. an empty
+	// body becomes http.NoBody so the fallback path is not blocked at all.
+	m.setReplayableBody(req)
 
 	// setup cookie jar for redirect handling
 	jar, _ := cookiejar.New(nil)
