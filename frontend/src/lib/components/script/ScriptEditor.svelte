@@ -111,6 +111,14 @@ declare const event: {
 	data: Record<string, any>;
 };
 
+/**
+ * input is the data object passed when this script is run in callable mode,
+ * e.g. from a remote browser script via runScript('name', data). It is an empty
+ * object for campaign event triggered runs. Return an object to send data back
+ * to the caller (callable mode only).
+ */
+declare const input: Record<string, any>;
+
 interface FetchOptions {
 	/** HTTP method: GET (default), POST, PUT, PATCH, DELETE, ... */
 	method?: string;

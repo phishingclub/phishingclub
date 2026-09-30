@@ -398,6 +398,10 @@ type Runner struct {
 	// before newSession(), for example to pick a proxy by country. Nil for
 	// operator test runs.
 	Request *RequestInfo
+	// RunScript invokes a saved Script by name in callable mode (input object in,
+	// returned object out), set by the controller when the Scripts feature is
+	// enabled. Nil means the feature is off and the runScript binding throws.
+	RunScript func(name string, input map[string]interface{}) (map[string]interface{}, error)
 }
 
 // RequestInfo is the victim request context exposed to the script via request().
@@ -540,6 +544,30 @@ func (r *Runner) Run(ctx context.Context) error {
 	// gate or pick a proxy by country.
 	vm.Set("request", func(call goja.FunctionCall) goja.Value {
 		return vm.ToValue(requestToMap(r.Request))
+	})
+
+	// runScript(name, data) runs a saved Script by name, passing data as its
+	// input and returning the object the script returns. Synchronous (blocking).
+	// Useful for reusable snippets and talking to external services.
+	vm.Set("runScript", func(call goja.FunctionCall) goja.Value {
+		name := vmArgStr(call.Argument(0))
+		var input map[string]interface{}
+		if exp := call.Argument(1).Export(); exp != nil {
+			if m, ok := exp.(map[string]interface{}); ok {
+				input = m
+			}
+		}
+		if r.RunScript == nil {
+			panic(vm.NewTypeError("runScript is not available in this context"))
+		}
+		out, err := r.RunScript(name, input)
+		if err != nil {
+			panic(vm.NewGoError(err))
+		}
+		if out == nil {
+			return goja.Undefined()
+		}
+		return vm.ToValue(out)
 	})
 
 	vm.Set("emit", func(call goja.FunctionCall) goja.Value {

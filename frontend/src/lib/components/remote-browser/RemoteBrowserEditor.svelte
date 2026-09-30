@@ -765,6 +765,15 @@ interface RequestInfo {
  *   var s = newSession({ proxy: r.country === 'DE' ? 'de-proxy' : 'us-proxy' });
  */
 declare function request(): RequestInfo;
+/**
+ * Run a saved Script by name, passing data as its input, and return the object
+ * the Script returns. Synchronous (blocks until the Script finishes). Useful for
+ * reusable snippets and talking to external services. Requires the Scripts
+ * feature to be enabled.
+ *   var geo = runScript('enrich-ip', { ip: request().ip });
+ *   var s = newSession({ proxy: geo.proxy });
+ */
+declare function runScript(name: string, data?: object): any;
 /** Send an event to the victim page (visible to the victim's JS) */
 declare function emit(key: string, value?: any): void;
 /** Log a message to the test runner */

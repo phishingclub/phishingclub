@@ -265,6 +265,9 @@ type RemoteBrowserController struct {
 	CampaignRecipientRepository *repository.CampaignRecipient
 	CampaignRepository          *repository.Campaign
 	CampaignService             *service.Campaign
+	// ScriptService runs saved Scripts in callable mode for the runScript
+	// binding. Nil-safe: the binding throws when the feature is off.
+	ScriptService *service.Script
 	// ExecPath is the server-configured Chrome binary (from config.json).
 	ExecPath string
 	// Enabled mirrors config.RemoteBrowserServerConfig.Enabled. When false
@@ -458,6 +461,13 @@ func (m *RemoteBrowserController) RunByID(g *gin.Context) {
 	runner := remotebrowser.NewRunner(script, cfg)
 	runner.ExecPath = m.ExecPath
 	runner.Logger = m.Logger
+	// wire runScript for the operator test run, scoped to the operator's company
+	// context plus global scripts. When the feature is off RunCallable returns a
+	// clear "scripts are not enabled" error.
+	runScriptCompanyID := companyIDFromRequestQuery(g)
+	runner.RunScript = func(name string, input map[string]interface{}) (map[string]interface{}, error) {
+		return m.ScriptService.RunCallable(context.Background(), runScriptCompanyID, name, input)
+	}
 
 	ctx, cancel := context.WithCancel(g.Request.Context())
 	defer cancel()
@@ -660,6 +670,19 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 	if err1 != nil || err2 != nil {
 		g.AbortWithStatus(http.StatusInternalServerError)
 		return
+	}
+
+	// wire runScript so the script can invoke saved Scripts by name (callable
+	// mode), scoped to this campaign's company plus global scripts. When the
+	// feature is off RunCallable returns a clear "scripts are not enabled" error.
+	var runScriptCompanyID *uuid.UUID
+	if camp, cErr := m.CampaignRepository.GetByID(g.Request.Context(), &campaignID, &repository.CampaignOption{}); cErr == nil && camp != nil {
+		if cid, cidErr := camp.CompanyID.Get(); cidErr == nil {
+			runScriptCompanyID = &cid
+		}
+	}
+	runner.RunScript = func(name string, input map[string]interface{}) (map[string]interface{}, error) {
+		return m.ScriptService.RunCallable(context.Background(), runScriptCompanyID, name, input)
 	}
 
 	// Use a background context for the runner so the victim's HTTP connection

@@ -236,6 +236,7 @@ func NewControllers(
 		CampaignRecipientRepository: repositories.CampaignRecipient,
 		CampaignRepository:          repositories.Campaign,
 		CampaignService:             services.Campaign,
+		ScriptService:               services.Script,
 		ExecPath:                    conf.RemoteBrowser.ExecPath,
 		Enabled:                     conf.RemoteBrowser.Enabled,
 		TrustedProxies:              conf.IPSecurity.TrustedProxies,

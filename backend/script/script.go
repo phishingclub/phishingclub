@@ -96,6 +96,9 @@ type Job struct {
 	Script   string
 	Event    EventContext
 	Emit     EmitFunc
+	// Input is the data object for a callable run (RunCallable), exposed to the
+	// script as input. Nil for campaign event triggered runs.
+	Input map[string]interface{}
 
 	// test, when set, puts the run in capture mode: log/info/emitEvent are
 	// recorded into it instead of applied, and errors are captured. Set only by
@@ -192,6 +195,57 @@ func (r *Runner) run(job Job) {
 	}
 }
 
+// RunCallable runs a script in callable mode: it receives input as the `input`
+// binding, has the same http.fetch and codec toolkit, and the object it returns
+// is exported back to the caller. Campaign bindings (emitEvent, info) are inert.
+// Synchronous and bounded by the same wall clock timeout as an event run.
+func (r *Runner) RunCallable(ctx context.Context, source string, input map[string]interface{}) (out map[string]interface{}, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			out = nil
+			err = fmt.Errorf("script panicked: %v", rec)
+		}
+	}()
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	vm := goja.New()
+	vm.SetMaxCallStackSize(maxCallStackSize)
+	go func() {
+		defer func() { _ = recover() }()
+		<-runCtx.Done()
+		vm.Interrupt(runCtx.Err())
+	}()
+
+	r.registerBindings(vm, Job{Script: source, Input: input}, runCtx)
+
+	val, runErr := vm.RunString("(function(){\n" + source + "\n})()")
+	if runErr != nil {
+		var stopErr scriptStopError
+		if errors.As(runErr, &stopErr) {
+			return nil, nil
+		}
+		if _, ok := runErr.(*goja.InterruptedError); ok {
+			return nil, errors.New("script exceeded its time budget")
+		}
+		if runCtx.Err() == context.DeadlineExceeded {
+			return nil, errors.New("script exceeded its time budget")
+		}
+		return nil, runErr
+	}
+	if val == nil || goja.IsUndefined(val) || goja.IsNull(val) {
+		return nil, nil
+	}
+	if m, ok := val.Export().(map[string]interface{}); ok {
+		return m, nil
+	}
+	return nil, errors.New("script must return an object")
+}
+
 // reportError records an uncaught script failure as a campaign info event so
 // it is visible beyond the server logs. It goes through the same event funnel as
 // emitEvent, so the detail follows the campaign's data-retention and anonymity
@@ -244,6 +298,14 @@ func (r *Runner) registerBindings(vm *goja.Runtime, job Job, ctx context.Context
 		"email":        job.Event.Email,
 		"data":         job.Event.Data,
 	})
+
+	// input is the data object passed to a callable run (RunCallable); empty for
+	// campaign event triggered runs.
+	if job.Input != nil {
+		vm.Set("input", job.Input)
+	} else {
+		vm.Set("input", map[string]interface{}{})
+	}
 
 	vm.Set("stop", func(call goja.FunctionCall) goja.Value {
 		panic(vm.NewGoError(scriptStopError{}))

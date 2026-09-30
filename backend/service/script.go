@@ -54,6 +54,30 @@ func (a *Script) Test(
 	return result, nil
 }
 
+// RunCallable runs a saved script by name in callable mode (input in, returned
+// object out), scoped to the company or a global script. Used by the remote
+// browser runScript binding. No session: it is invoked server side from the
+// victim flow, gated by the feature being enabled and the company scope.
+func (a *Script) RunCallable(
+	ctx context.Context,
+	companyID *uuid.UUID,
+	name string,
+	input map[string]interface{},
+) (map[string]interface{}, error) {
+	if a.TestRunner == nil {
+		return nil, errs.Wrap(errors.New("scripts are not enabled"))
+	}
+	sc, err := a.ScriptRepository.GetByNameScoped(ctx, name, companyID)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	source, err := sc.Script.Get()
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	return a.TestRunner.RunCallable(ctx, source.String(), input)
+}
+
 // Create creates a new script
 func (a *Script) Create(
 	ctx context.Context,

@@ -127,6 +127,31 @@ func (r *Script) GetByID(
 	return ToScript(&row), nil
 }
 
+// GetByNameScoped returns a script by name that is visible to the company: its
+// own script or a global one. Used by the callable run path (runScript).
+func (r *Script) GetByNameScoped(
+	ctx context.Context,
+	name string,
+	companyID *uuid.UUID,
+) (*model.Script, error) {
+	db := withCompanyIncludingNullContext(r.DB, companyID, database.SCRIPT_TABLE)
+	var row database.Script
+	res := db.
+		Where(
+			fmt.Sprintf("%s = ?", TableColumnName(database.SCRIPT_TABLE)),
+			name,
+		).
+		// prefer a company scoped script over a global one with the same name
+		// (company_id IS NULL sorts last: false before true in both sqlite and postgres)
+		Order(fmt.Sprintf("`%s`.company_id IS NULL", database.SCRIPT_TABLE)).
+		First(&row)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return ToScript(&row), nil
+}
+
 // GetByIDs fetches multiple scripts by their IDs in a single query
 func (r *Script) GetByIDs(
 	ctx context.Context,
