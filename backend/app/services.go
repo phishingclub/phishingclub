@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/caddyserver/certmagic"
+	"github.com/phishingclub/phishingclub/ipdata"
 	"github.com/phishingclub/phishingclub/script"
 	"github.com/phishingclub/phishingclub/service"
 	"go.uber.org/zap"
@@ -38,6 +39,7 @@ type Services struct {
 	Version             *service.Version
 	SSO                 *service.SSO
 	Update              *service.Update
+	IPData              *service.IPData
 	Import              *service.Import
 	Backup              *service.Backup
 	IPAllowList         *service.IPAllowListService
@@ -326,6 +328,10 @@ func NewServices(
 		Common:        common,
 		OptionService: optionService,
 	}
+	ipDataService := &service.IPData{
+		Common: common,
+		Store:  ipdata.Get(),
+	}
 	importService := &service.Import{
 		Common:          common,
 		Asset:           asset,
@@ -406,6 +412,7 @@ func NewServices(
 		Version:             versionService,
 		SSO:                 ssoService,
 		Update:              updateService,
+		IPData:              ipDataService,
 		Import:              importService,
 		Backup:              backupService,
 		IPAllowList:         ipAllowListService,

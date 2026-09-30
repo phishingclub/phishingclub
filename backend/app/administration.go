@@ -226,6 +226,13 @@ const (
 	// geoip
 	ROUTE_V1_GEOIP_METADATA = "/api/v1/geoip/metadata"
 	ROUTE_V1_GEOIP_LOOKUP   = "/api/v1/geoip/lookup"
+
+	ROUTE_V1_IPDATA_STATUS           = "/api/v1/ipdata/status"
+	ROUTE_V1_IPDATA_PACKAGE_KIND     = "/api/v1/ipdata/package/:kind"
+	ROUTE_V1_IPDATA_PACKAGE_DOWNLOAD = "/api/v1/ipdata/package/:kind/download"
+	ROUTE_V1_IPDATA_ASN_SEARCH       = "/api/v1/ipdata/asn/search"
+	ROUTE_V1_IPDATA_ASN_RESOLVE      = "/api/v1/ipdata/asn/resolve"
+	ROUTE_V1_IPDATA_ASN_LOOKUP       = "/api/v1/ipdata/asn/lookup"
 	// web hooks
 	ROUTE_V1_WEBHOOK         = "/api/v1/webhook"
 	ROUTE_V1_WEBHOOK_ID      = "/api/v1/webhook/:id"
@@ -590,6 +597,13 @@ func setupRoutes(
 		// geoip
 		GET(ROUTE_V1_GEOIP_METADATA, middleware.SessionHandler, controllers.GeoIP.GetMetadata).
 		GET(ROUTE_V1_GEOIP_LOOKUP, middleware.SessionHandler, controllers.GeoIP.Lookup).
+		// ip data packages (country + asn)
+		GET(ROUTE_V1_IPDATA_STATUS, middleware.SessionHandler, controllers.IPData.Status).
+		POST(ROUTE_V1_IPDATA_PACKAGE_DOWNLOAD, middleware.SessionHandler, controllers.IPData.Download).
+		DELETE(ROUTE_V1_IPDATA_PACKAGE_KIND, middleware.SessionHandler, controllers.IPData.Remove).
+		GET(ROUTE_V1_IPDATA_ASN_SEARCH, middleware.SessionHandler, controllers.IPData.SearchASN).
+		POST(ROUTE_V1_IPDATA_ASN_RESOLVE, middleware.SessionHandler, controllers.IPData.ResolveASNs).
+		GET(ROUTE_V1_IPDATA_ASN_LOOKUP, middleware.SessionHandler, controllers.IPData.LookupASN).
 		// web hooks
 		GET(ROUTE_V1_WEBHOOK, middleware.SessionHandler, controllers.Webhook.GetAll).
 		GET(ROUTE_V1_WEBHOOK_ID, middleware.SessionHandler, controllers.Webhook.GetByID).

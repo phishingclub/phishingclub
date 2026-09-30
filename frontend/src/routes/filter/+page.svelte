@@ -42,6 +42,7 @@
 		runBulkDelete
 	} from '$lib/service/tableSelection.js';
 	import TextFieldMultiSelect from '$lib/components/TextFieldMultiSelect.svelte';
+	import AsnSelect from '$lib/components/AsnSelect.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -54,6 +55,7 @@
 		cidrs: null,
 		ja4Fingerprints: null,
 		countryCodes: [],
+		asns: [],
 		headers: [],
 		allowed: null
 	};
@@ -83,6 +85,7 @@
 	let modalMode = null;
 	let modalText = '';
 	let availableCountryCodes = [];
+	let asnAvailable = false;
 
 	let isDeleteAlertVisible = false;
 	let deleteValues = {
@@ -121,6 +124,7 @@
 			const res = await api.geoip.getMetadata();
 			if (res.success && res.data) {
 				availableCountryCodes = res.data.country_codes || [];
+				asnAvailable = res.data.asn_available || false;
 			}
 		} catch (e) {
 			console.error('failed to load geoip metadata', e);
@@ -175,15 +179,16 @@
 	};
 
 	const onClickSubmit = async () => {
-		// validate that at least one of cidrs, ja4Fingerprints, countryCodes, or headers is provided
+		// validate that at least one of cidrs, ja4Fingerprints, countryCodes, asns, or headers is provided
 		const hasCidrs = formValues.cidrs && formValues.cidrs.trim().length > 0;
 		const hasJA4 = formValues.ja4Fingerprints && formValues.ja4Fingerprints.trim().length > 0;
 		const hasCountryCodes = formValues.countryCodes && formValues.countryCodes.length > 0;
+		const hasAsns = formValues.asns && formValues.asns.length > 0;
 		const hasHeaders = formValues.headers && formValues.headers.length > 0;
 
-		if (!hasCidrs && !hasJA4 && !hasCountryCodes && !hasHeaders) {
+		if (!hasCidrs && !hasJA4 && !hasCountryCodes && !hasAsns && !hasHeaders) {
 			formError =
-				'At least one of CIDRs, JA4 fingerprints, Country Codes, or Headers must be provided';
+				'At least one of CIDRs, JA4 fingerprints, Country Codes, ASNs, or Headers must be provided';
 			return;
 		}
 
@@ -226,6 +231,7 @@
 				cidrs: formValues.cidrs,
 				ja4Fingerprints: formValues.ja4Fingerprints || '',
 				countryCodes: formValues.countryCodes.join('\n'),
+				asns: formValues.asns.join('\n'),
 				headers: headersStr,
 				allowed: formValues.allowed,
 				companyID: contextCompanyID
@@ -269,6 +275,7 @@
 				cidrs: formValues.cidrs,
 				ja4Fingerprints: formValues.ja4Fingerprints || '',
 				countryCodes: formValues.countryCodes.join('\n'),
+				asns: formValues.asns.join('\n'),
 				headers: headersStr,
 				companyID: formValues.companyID
 			});
@@ -312,6 +319,16 @@
 
 	const openCreateModal = () => {
 		modalMode = 'create';
+		formValues = {
+			id: null,
+			name: null,
+			cidrs: null,
+			ja4Fingerprints: null,
+			countryCodes: [],
+			asns: [],
+			headers: [],
+			allowed: null
+		};
 		isModalVisible = true;
 	};
 
@@ -373,6 +390,15 @@
 				.filter((code) => code.length > 0);
 		}
 
+		// parse asns from newline-separated string to array
+		let asnsArray = [];
+		if (allowDeny.asns) {
+			asnsArray = allowDeny.asns
+				.split('\n')
+				.map((a) => a.trim())
+				.filter((a) => a.length > 0);
+		}
+
 		// parse headers from json string to array
 		let headersArray = [];
 		if (allowDeny.headers) {
@@ -390,6 +416,7 @@
 			cidrs: allowDeny.cidrs,
 			ja4Fingerprints: allowDeny.ja4Fingerprints || '',
 			countryCodes: countryCodesArray,
+			asns: asnsArray,
 			headers: headersArray,
 			allowed: allowDeny.allowed,
 			companyID: allowDeny.companyID
@@ -597,6 +624,11 @@
 					>
 						GeoIP Country Codes
 					</TextFieldMultiSelect>
+					<AsnSelect
+						bind:value={formValues.asns}
+						installed={asnAvailable}
+						toolTipText="Filter based on the autonomous system that announces the visitor IP. Requires the ASN data package under Settings."
+					/>
 				</FormColumn>
 			</FormColumns>
 			<FormError message={formError} />

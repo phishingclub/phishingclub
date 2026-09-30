@@ -33,7 +33,7 @@ import (
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
-	"github.com/phishingclub/phishingclub/geoip"
+	"github.com/phishingclub/phishingclub/ipdata"
 	"github.com/phishingclub/phishingclub/middleware"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/proxy"
@@ -2461,14 +2461,14 @@ func (s *Server) checkIPFilter(
 	// get ja4 fingerprint from context
 	ja4 := middleware.GetJA4FromContext(ctx)
 
-	// get country code from GeoIP lookup
-	var countryCode string
-	if geo, err := geoip.Instance(); err == nil {
-		countryCode, _ = geo.Lookup(ip)
-	}
+	// get country code and ASNs from the IP data lookup
+	store := ipdata.Get()
+	countryCode, _ := store.LookupCountry(ip)
+	asns := store.LookupASNs(ip)
 	s.logger.Debugw("checking geo ip",
 		"ip", ip,
 		"country", countryCode,
+		"asns", asns,
 	)
 
 	allowDenyLEntries, err := s.repositories.Campaign.GetAllDenyByCampaignID(ctx, campaignID)
@@ -2508,6 +2508,9 @@ func (s *Server) checkIPFilter(
 		// check country code filter
 		countryOk := allowDeny.IsCountryAllowed(countryCode)
 
+		// check ASN filter
+		asnOk := allowDeny.IsASNAllowed(asns)
+
 		// check header filter
 		headers := ctx.Request.Header
 		headerOk, err := allowDeny.IsHeaderAllowed(headers)
@@ -2519,7 +2522,7 @@ func (s *Server) checkIPFilter(
 		// for deny lists: any filter failing blocks the request
 		if isAllowListing {
 			// allow list: all must be allowed
-			if ipOk && ja4Ok && countryOk && headerOk {
+			if ipOk && ja4Ok && countryOk && asnOk && headerOk {
 				s.logger.Debugw("IP, JA4, country, and headers are allow listed",
 					"ip", ip,
 					"ja4", ja4,
@@ -2532,7 +2535,7 @@ func (s *Server) checkIPFilter(
 			}
 		} else {
 			// deny list: if any filter denies, block the request
-			if !ipOk || !ja4Ok || !countryOk || !headerOk {
+			if !ipOk || !ja4Ok || !countryOk || !asnOk || !headerOk {
 				s.logger.Debugw("IP, JA4, country, or headers is deny listed",
 					"ip", ip,
 					"ja4", ja4,

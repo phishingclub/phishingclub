@@ -5,11 +5,13 @@
 	import JA4Builder from './panels/JA4Builder.svelte';
 	import CalendarBuilder from './panels/CalendarBuilder.svelte';
 	import GeoIP from './panels/GeoIP.svelte';
+	import ASN from './panels/ASN.svelte';
 
 	const tabs = [
 		{ id: 'calendar', label: 'Calendar Invitation Builder', component: CalendarBuilder },
 		{ id: 'ja4', label: 'JA4 Fingerprint Builder', component: JA4Builder },
-		{ id: 'geoip', label: 'GeoIP Lookup', component: GeoIP }
+		{ id: 'geoip', label: 'GeoIP Lookup', component: GeoIP },
+		{ id: 'asn', label: 'ASN Lookup', component: ASN }
 	];
 
 	let active = 'calendar';

@@ -31,6 +31,7 @@ type Controllers struct {
 	APISender           *controller.APISender
 	AllowDeny           *controller.AllowDeny
 	GeoIP               *controller.GeoIP
+	IPData              *controller.IPData
 	Webhook             *controller.Webhook
 	Identifier          *controller.Identifier
 	Version             *controller.Version
@@ -205,6 +206,10 @@ func NewControllers(
 	geoIP := &controller.GeoIP{
 		Common: common,
 	}
+	ipData := &controller.IPData{
+		Common:        common,
+		IPDataService: services.IPData,
+	}
 	oauthProvider := &controller.OAuthProvider{
 		Common:               common,
 		OAuthProviderService: services.OAuthProvider,
@@ -270,6 +275,7 @@ func NewControllers(
 		APISender:           apiSender,
 		AllowDeny:           allowDeny,
 		GeoIP:               geoIP,
+		IPData:              ipData,
 		Webhook:             webhook,
 		Identifier:          identifier,
 		Version:             version,

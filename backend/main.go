@@ -27,6 +27,7 @@ import (
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/install"
+	"github.com/phishingclub/phishingclub/ipdata"
 	"github.com/phishingclub/phishingclub/middleware"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
@@ -235,6 +236,9 @@ func main() {
 		logger.Errorw("failed to setup certmagic", "error", err)
 		return
 	}
+	// load the country and ASN data into memory. a downloaded package in the
+	// data directory wins over the embedded country data.
+	ipdata.Init(*flagFilePath, logger)
 	// setup services, middleware and controllers
 	services := app.NewServices(
 		db,

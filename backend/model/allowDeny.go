@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ type AllowDeny struct {
 	Cidrs           nullable.Nullable[vo.IPNetSlice] `json:"cidrs"`
 	JA4Fingerprints nullable.Nullable[string]        `json:"ja4Fingerprints"`
 	CountryCodes    nullable.Nullable[string]        `json:"countryCodes"`
+	Asns            nullable.Nullable[string]        `json:"asns"`
 	Headers         nullable.Nullable[string]        `json:"headers"`
 	Allowed         nullable.Nullable[bool]          `json:"allowed"`
 	CompanyID       nullable.Nullable[uuid.UUID]     `json:"companyID"`
@@ -62,6 +64,13 @@ func (r *AllowDeny) Validate() error {
 		}
 	}
 
+	hasASNs := false
+	if r.Asns.IsSpecified() {
+		if asns, err := r.Asns.Get(); err == nil && asns != "" {
+			hasASNs = true
+		}
+	}
+
 	hasHeaders := false
 	if r.Headers.IsSpecified() {
 		if headers, err := r.Headers.Get(); err == nil && headers != "" {
@@ -69,10 +78,22 @@ func (r *AllowDeny) Validate() error {
 		}
 	}
 
-	if !hasCidrs && !hasJA4 && !hasCountryCodes && !hasHeaders {
+	if !hasCidrs && !hasJA4 && !hasCountryCodes && !hasASNs && !hasHeaders {
 		return errs.NewValidationError(
-			errors.New("at least one of CIDRs, JA4 fingerprints, country codes, or headers must be provided"),
+			errors.New("at least one of CIDRs, JA4 fingerprints, country codes, ASNs, or headers must be provided"),
 		)
+	}
+
+	// each ASN line must be a number, optionally prefixed with AS
+	if hasASNs {
+		asns, _ := r.Asns.Get()
+		for _, line := range parseCountryCodes(asns) {
+			if _, ok := parseASN(line); !ok {
+				return errs.NewValidationError(
+					fmt.Errorf("invalid ASN: %s", line),
+				)
+			}
+		}
 	}
 
 	return nil
@@ -115,6 +136,12 @@ func (r *AllowDeny) ToDBMap() map[string]any {
 		m["country_codes"] = ""
 		if codes, err := r.CountryCodes.Get(); err == nil {
 			m["country_codes"] = codes
+		}
+	}
+	if r.Asns.IsSpecified() {
+		m["asns"] = ""
+		if asns, err := r.Asns.Get(); err == nil {
+			m["asns"] = asns
 		}
 	}
 	if r.Headers.IsSpecified() {
@@ -327,28 +354,19 @@ func isSpace(b byte) bool {
 
 // IsCountryAllowed checks if a country code is allowed based on the filter rules
 func (r *AllowDeny) IsCountryAllowed(countryCode string) bool {
-	if countryCode == "" {
-		// if no country code available, skip country check
-		return true
-	}
-
 	isTypeAllowList := r.Allowed.MustGet()
 
 	// get country codes list
 	countryCodesStr, err := r.CountryCodes.Get()
 	if err != nil || countryCodesStr == "" {
-		// if no country codes configured, skip country check
+		// no country filter configured, this dimension does not restrict
 		return true
 	}
 
-	// if country code is empty but we have country filters configured
 	if countryCode == "" {
-		// in allow list mode: unknown country should be denied
-		// in deny list mode: unknown country should be allowed
-		if isTypeAllowList {
-			return false
-		}
-		return true
+		// a country filter is configured but the visitor country is unknown.
+		// allow list denies the unknown visitor, deny list allows it.
+		return !isTypeAllowList
 	}
 
 	// parse country codes (newline separated)
@@ -380,6 +398,81 @@ func (r *AllowDeny) IsCountryAllowed(countryCode string) bool {
 
 	// If this is a deny list and country didn't match, it is allowed
 	return true
+}
+
+// IsASNAllowed checks if the autonomous systems that announce the visitor IP
+// are allowed based on the filter rules. asns is every ASN that announces the
+// longest prefix containing the IP, usually one, sometimes several.
+func (r *AllowDeny) IsASNAllowed(asns []uint32) bool {
+	isTypeAllowList := r.Allowed.MustGet()
+
+	// get asn list
+	asnStr, err := r.Asns.Get()
+	if err != nil || asnStr == "" {
+		// no asn filter configured, this dimension does not restrict
+		return true
+	}
+
+	if len(asns) == 0 {
+		// an asn filter is configured but the visitor ASN is unknown.
+		// allow list denies the unknown visitor, deny list allows it.
+		return !isTypeAllowList
+	}
+
+	// parse configured asns into a set
+	configured := map[uint32]struct{}{}
+	for _, line := range parseCountryCodes(asnStr) {
+		if n, ok := parseASN(line); ok {
+			configured[n] = struct{}{}
+		}
+	}
+
+	// a visitor matches if any of its announcing ASNs is configured
+	isMatch := false
+	for _, n := range asns {
+		if _, ok := configured[n]; ok {
+			isMatch = true
+			break
+		}
+	}
+
+	// if allow list and asn matches
+	if isTypeAllowList && isMatch {
+		return true
+	}
+	// if deny list and asn matches
+	if !isTypeAllowList && isMatch {
+		return false
+	}
+
+	// If this is an allow list and asn didn't match, not allowed
+	if isTypeAllowList {
+		return false
+	}
+
+	// If this is a deny list and asn didn't match, it is allowed
+	return true
+}
+
+// parseASN parses a single ASN line into a number. It accepts an optional AS
+// or ASN prefix, so "AS15169", "asn15169" and "15169" are all valid.
+func parseASN(line string) (uint32, bool) {
+	s := trimSpace(line)
+	if s == "" {
+		return 0, false
+	}
+	lower := strings.ToLower(s)
+	lower = strings.TrimPrefix(lower, "asn")
+	lower = strings.TrimPrefix(lower, "as")
+	lower = trimSpace(lower)
+	if lower == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(lower, 10, 32)
+	if err != nil {
+		return 0, false
+	}
+	return uint32(n), true
 }
 
 // parseCountryCodes splits newline-separated country codes and trims whitespace

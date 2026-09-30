@@ -900,9 +900,7 @@ export class API {
 		 * @returns {Promise<ApiResponse>}
 		 */
 		getGroupedResultStats: async (campaignID, by = 'position') => {
-			return await getJSON(
-				this.getPath(`/campaign/${campaignID}/grouped-statistics?by=${by}`)
-			);
+			return await getJSON(this.getPath(`/campaign/${campaignID}/grouped-statistics?by=${by}`));
 		},
 
 		/**
@@ -3170,17 +3168,28 @@ export class API {
 		 * @param {string} allowdeny.cidrs
 		 * @param {string} allowdeny.ja4Fingerprints
 		 * @param {string} allowdeny.countryCodes
+		 * @param {string} allowdeny.asns
 		 * @param {string} allowdeny.headers
 		 * @param {boolean} allowdeny.allowed
 		 * @param {string} allowdeny.companyID
 		 * @returns {Promise<ApiResponse>}
 		 */
-		create: async ({ name, cidrs, ja4Fingerprints, countryCodes, headers, allowed, companyID }) => {
+		create: async ({
+			name,
+			cidrs,
+			ja4Fingerprints,
+			countryCodes,
+			asns,
+			headers,
+			allowed,
+			companyID
+		}) => {
 			return await postJSON(this.getPath('/allow-deny'), {
 				name: name,
 				cidrs: cidrs,
 				ja4Fingerprints: ja4Fingerprints,
 				countryCodes: countryCodes,
+				asns: asns,
 				headers: headers,
 				allowed: allowed,
 				companyID: companyID
@@ -3238,12 +3247,22 @@ export class API {
 		 * @param {string} allowdeny.companyID
 		 * @returns {Promise<ApiResponse>}
 		 */
-		update: async ({ id, name, cidrs, ja4Fingerprints, countryCodes, headers, companyID }) => {
+		update: async ({
+			id,
+			name,
+			cidrs,
+			ja4Fingerprints,
+			countryCodes,
+			asns,
+			headers,
+			companyID
+		}) => {
 			return await patchJSON(this.getPath(`/allow-deny/${id}`), {
 				name: name,
 				cidrs: cidrs,
 				ja4Fingerprints: ja4Fingerprints,
 				countryCodes: countryCodes,
+				asns: asns,
 				headers: headers,
 				companyID: companyID
 			});
@@ -3271,6 +3290,65 @@ export class API {
 		 */
 		getMetadata: async () => {
 			return await getJSON(this.getPath('/geoip/metadata'));
+		}
+	};
+
+	/**
+	 * ipdata is the API for the downloadable country and ASN data packages.
+	 */
+	ipdata = {
+		/**
+		 * Get the state of both data packages, including whether an update is
+		 * available.
+		 *
+		 * @returns {Promise<ApiResponse>}
+		 */
+		status: async () => {
+			return await getJSON(this.getPath('/ipdata/status'));
+		},
+
+		/**
+		 * Download and install a package.
+		 *
+		 * @param {string} kind - "geoip" or "asn"
+		 * @returns {Promise<ApiResponse>}
+		 */
+		download: async (kind) => {
+			return await postJSON(this.getPath(`/ipdata/package/${kind}/download`), {});
+		},
+
+		/**
+		 * Remove an installed package.
+		 *
+		 * @param {string} kind - "geoip" or "asn"
+		 * @returns {Promise<ApiResponse>}
+		 */
+		remove: async (kind) => {
+			return await deleteJSON(this.getPath(`/ipdata/package/${kind}`));
+		},
+
+		/**
+		 * Search ASNs by number, name or handle for the filter typeahead.
+		 *
+		 * @param {string} query
+		 * @param {number} [limit]
+		 * @returns {Promise<ApiResponse>}
+		 */
+		searchASN: async (query, limit = 25) => {
+			return await getJSON(
+				this.getPath(`/ipdata/asn/search?q=${encodeURIComponent(query)}&limit=${limit}`)
+			);
+		},
+
+		/**
+		 * Resolve configured ASN numbers to their details. ASNs absent from the
+		 * dataset are left out of the result so the UI can flag them.
+		 *
+		 * @param {string[]} asns
+		 * @returns {Promise<ApiResponse>}
+		 */
+		resolveASN: async (asns) => {
+			return await postJSON(this.getPath('/ipdata/asn/resolve'), { asns });
 		}
 	};
 

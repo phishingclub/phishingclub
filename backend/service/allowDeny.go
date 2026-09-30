@@ -133,6 +133,9 @@ func (s *AllowDeny) Update(
 	if v, err := incoming.CountryCodes.Get(); err == nil {
 		current.CountryCodes.Set(v)
 	}
+	if v, err := incoming.Asns.Get(); err == nil {
+		current.Asns.Set(v)
+	}
 	if v, err := incoming.Headers.Get(); err == nil {
 		current.Headers.Set(v)
 	}

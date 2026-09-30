@@ -12,6 +12,7 @@
 	import RedTeam from './panels/RedTeam.svelte';
 	import System from './panels/System.svelte';
 	import Branding from './panels/Branding.svelte';
+	import IPData from './panels/IPData.svelte';
 
 	// Red Team panel is only relevant in red team phishing (blackbox) mode
 	$: tabs = [
@@ -19,6 +20,7 @@
 		{ id: 'access', label: 'Access', component: Access },
 		{ id: 'scim', label: 'SCIM', component: Scim },
 		{ id: 'data', label: 'Data', component: Data },
+		{ id: 'ipdata', label: 'IP Data', component: IPData },
 		{ id: 'reports', label: 'Reports', component: Reports },
 		...($displayMode === DISPLAY_MODE.BLACKBOX
 			? [{ id: 'redteam', label: 'Red Team', component: RedTeam }]

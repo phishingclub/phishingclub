@@ -29,7 +29,7 @@ import (
 	"github.com/phishingclub/phishingclub/cache"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
-	"github.com/phishingclub/phishingclub/geoip"
+	"github.com/phishingclub/phishingclub/ipdata"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/server"
@@ -5333,14 +5333,14 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 	// get ja4 fingerprint from request header (set by middleware)
 	ja4 := req.Header.Get(HEADER_JA4)
 
-	// get country code from GeoIP lookup
-	var countryCode string
-	if geo, err := geoip.Instance(); err == nil {
-		countryCode, _ = geo.Lookup(ip)
-	}
+	// get country code and ASNs from the IP data lookup
+	store := ipdata.Get()
+	countryCode, _ := store.LookupCountry(ip)
+	asns := store.LookupASNs(ip)
 	m.logger.Debugw("checking geo ip",
 		"ip", ip,
 		"country", countryCode,
+		"asns", asns,
 	)
 
 	// check IP, JA4, and country code against allow/deny lists
@@ -5371,6 +5371,9 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 		// check country code filter
 		countryOk := allowDeny.IsCountryAllowed(countryCode)
 
+		// check ASN filter
+		asnOk := allowDeny.IsASNAllowed(asns)
+
 		// check header filter
 		headers := req.Header
 		headerOk, err := allowDeny.IsHeaderAllowed(headers)
@@ -5382,13 +5385,13 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 		// for deny lists: any filter failing blocks the request
 		if isAllowListing {
 			// allow list: all must be allowed
-			if ipOk && ja4Ok && countryOk && headerOk {
+			if ipOk && ja4Ok && countryOk && asnOk && headerOk {
 				allowed = true
 				break
 			}
 		} else {
 			// deny list: if any filter denies, block the request
-			if !ipOk || !ja4Ok || !countryOk || !headerOk {
+			if !ipOk || !ja4Ok || !countryOk || !asnOk || !headerOk {
 				allowed = false
 				break
 			}
