@@ -12,8 +12,10 @@ import (
 	"image/png"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +30,7 @@ import (
 	"github.com/phishingclub/phishingclub/cache"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
+	"github.com/phishingclub/phishingclub/ipdata"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/remotebrowser"
 	"github.com/phishingclub/phishingclub/repository"
@@ -548,6 +551,42 @@ func (m *RemoteBrowserController) RunByID(g *gin.Context) {
 // The handler bridges victim WebSocket messages into the runner's Incoming channel and
 // forwards runner events back to the victim. When the runner emits a "capture" event
 // the cookies are saved as a CampaignEvent so they appear alongside AITM captures.
+// buildRequestInfo captures the victim connection for the script's request()
+// binding: the trusted proxy aware IP, its country and ASNs from the ipdata
+// store, the JA4 fingerprint, and the request headers.
+func (m *RemoteBrowserController) buildRequestInfo(g *gin.Context) *remotebrowser.RequestInfo {
+	ip := utils.ExtractClientIP(g.Request, m.TrustedProxies)
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+	// read the JA4 fingerprint the same way middleware.GetJA4FromContext does,
+	// by the literal context key and header. The constants are not imported
+	// because the middleware package imports controller (import cycle).
+	ja4 := g.GetString("ja4_fingerprint")
+	if ja4 == "" {
+		ja4 = g.Request.Header.Get("X-JA4")
+	}
+	info := &remotebrowser.RequestInfo{
+		IP:             ip,
+		JA4:            ja4,
+		UserAgent:      g.Request.UserAgent(),
+		AcceptLanguage: g.GetHeader("Accept-Language"),
+		Headers:        map[string]string{},
+	}
+	for k := range g.Request.Header {
+		info.Headers[strings.ToLower(k)] = g.Request.Header.Get(k)
+	}
+	if store := ipdata.Get(); store != nil {
+		if country, ok := store.LookupCountry(ip); ok {
+			info.Country = country
+		}
+		for _, a := range store.LookupASNDetails(ip) {
+			info.ASNs = append(info.ASNs, remotebrowser.RequestASN{Number: a.ASN, Name: a.Name})
+		}
+	}
+	return info
+}
+
 func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 	if !m.isEnabled(g) {
 		return
@@ -612,6 +651,9 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 	runner := remotebrowser.NewRunner(scriptVal.String(), cfg)
 	runner.ExecPath = m.ExecPath
 	runner.Logger = m.Logger
+	// describe the victim connection so the script can read it via request()
+	// before newSession(), e.g. to pick a proxy by country
+	runner.Request = m.buildRequestInfo(g)
 
 	campaignID, err1 := cr.CampaignID.Get()
 	recipientID, err2 := cr.RecipientID.Get()

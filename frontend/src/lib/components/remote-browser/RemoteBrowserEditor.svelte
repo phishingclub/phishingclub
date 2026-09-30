@@ -735,6 +735,36 @@ interface FrameSession {
 
 /** Open a new browser session */
 declare function newSession(options?: SessionOptions): Session;
+
+interface RequestASN {
+  /** Autonomous system number, e.g. 16509 */
+  number: number;
+  /** Autonomous system name / org, e.g. "AMAZON-02" */
+  name: string;
+}
+interface RequestInfo {
+  /** The victim's request IP (trusted proxy aware). */
+  ip: string;
+  /** ISO country code from the GeoIP database, e.g. "DE". Empty if unknown. */
+  country: string;
+  /** Autonomous systems the IP belongs to. Empty unless the ASN package is downloaded. */
+  asns: RequestASN[];
+  /** JA4 TLS fingerprint of the connection. Empty if not captured. */
+  ja4: string;
+  /** The User-Agent header. */
+  userAgent: string;
+  /** The Accept-Language header. */
+  acceptLanguage: string;
+  /** All request headers, keys lowercased. */
+  headers: { [name: string]: string };
+}
+/**
+ * The victim connection that started this session. Available before
+ * newSession(), for example to pick a proxy by country:
+ *   var r = request();
+ *   var s = newSession({ proxy: r.country === 'DE' ? 'de-proxy' : 'us-proxy' });
+ */
+declare function request(): RequestInfo;
 /** Send an event to the victim page (visible to the victim's JS) */
 declare function emit(key: string, value?: any): void;
 /** Log a message to the test runner */

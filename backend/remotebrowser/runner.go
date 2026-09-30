@@ -393,6 +393,63 @@ type Runner struct {
 	// keepAliveActive is set by s.keepAlive() so Run() parks after the script
 	// finishes, waiting for the operator to explicitly end the session.
 	keepAliveActive atomic.Bool
+	// Request describes the victim connection that started this session. The
+	// controller populates it before Run so the script can read it via request()
+	// before newSession(), for example to pick a proxy by country. Nil for
+	// operator test runs.
+	Request *RequestInfo
+}
+
+// RequestInfo is the victim request context exposed to the script via request().
+// It is filled by the caller (the controller) from the incoming connection.
+type RequestInfo struct {
+	IP             string            `json:"ip"`
+	Country        string            `json:"country"`
+	ASNs           []RequestASN      `json:"asns"`
+	JA4            string            `json:"ja4"`
+	UserAgent      string            `json:"userAgent"`
+	AcceptLanguage string            `json:"acceptLanguage"`
+	Headers        map[string]string `json:"headers"`
+}
+
+// RequestASN is one autonomous system the request IP belongs to.
+type RequestASN struct {
+	Number uint32 `json:"number"`
+	Name   string `json:"name"`
+}
+
+// requestToMap converts the request info into a plain map so goja exposes the
+// exact lowercase JS keys. A nil Request yields an empty shaped object so a
+// script reading request().country never hits undefined.
+func requestToMap(ri *RequestInfo) map[string]interface{} {
+	if ri == nil {
+		return map[string]interface{}{
+			"ip":             "",
+			"country":        "",
+			"asns":           []interface{}{},
+			"ja4":            "",
+			"userAgent":      "",
+			"acceptLanguage": "",
+			"headers":        map[string]interface{}{},
+		}
+	}
+	asns := make([]interface{}, 0, len(ri.ASNs))
+	for _, a := range ri.ASNs {
+		asns = append(asns, map[string]interface{}{"number": a.Number, "name": a.Name})
+	}
+	headers := make(map[string]interface{}, len(ri.Headers))
+	for k, v := range ri.Headers {
+		headers[k] = v
+	}
+	return map[string]interface{}{
+		"ip":             ri.IP,
+		"country":        ri.Country,
+		"asns":           asns,
+		"ja4":            ri.JA4,
+		"userAgent":      ri.UserAgent,
+		"acceptLanguage": ri.AcceptLanguage,
+		"headers":        headers,
+	}
 }
 
 // IncomingMsg is an event sent from the client into the running script.
@@ -476,6 +533,13 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	vm.Set("stop", func(call goja.FunctionCall) goja.Value {
 		panic(vm.NewGoError(scriptStopError{}))
+	})
+
+	// request() returns the victim connection that started this session (IP,
+	// country, ASNs, JA4, headers). Available before newSession() so a script can
+	// gate or pick a proxy by country.
+	vm.Set("request", func(call goja.FunctionCall) goja.Value {
+		return vm.ToValue(requestToMap(r.Request))
 	})
 
 	vm.Set("emit", func(call goja.FunctionCall) goja.Value {
