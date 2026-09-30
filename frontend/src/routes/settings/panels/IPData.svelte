@@ -130,6 +130,16 @@
 							</p>
 						{/if}
 					</div>
+					{#if p.kind === 'geoip' && !(p.info && p.info.downloaded)}
+						<div
+							class="rounded-md border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 transition-colors duration-200"
+						>
+							<p class="text-sm text-amber-800 dark:text-amber-200">
+								The built in Geo IP data is deprecated and will be removed in a future release.
+								Download it to keep country filters working.
+							</p>
+						</div>
+					{/if}
 				</div>
 				<svelte:fragment slot="footer">
 					<div class="flex gap-3">
