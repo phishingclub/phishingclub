@@ -31,6 +31,12 @@ type ProxySession struct {
 
 	// client user-agent stored for analytics and logging
 	UserAgent string
+
+	// UpstreamProxy is the forwarding proxy chosen for this session by the
+	// session script. It is set once when the session is created, before the
+	// session is stored, and read on every following request to build the
+	// outbound client. Empty means use the proxy from the yaml config.
+	UpstreamProxy string
 }
 
 // ProxySessionManager manages proxy session lifecycle and storage

@@ -232,6 +232,7 @@ func NewServices(
 		CampaignTemplateService: campaignTemplate,
 		DomainService:           domain,
 		ProxySessionManager:     proxySessionManager,
+		ScriptEnabled:           scriptEnabled,
 	}
 	ipAllowListService := service.NewIPAllowListService(logger, repositories.Proxy)
 	email := &service.Email{

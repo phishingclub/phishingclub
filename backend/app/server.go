@@ -99,6 +99,7 @@ func NewServer(
 		services.IPAllowList,
 		repositories.Option,
 		services.Option,
+		services.Script,
 		trustedProxies,
 	)
 

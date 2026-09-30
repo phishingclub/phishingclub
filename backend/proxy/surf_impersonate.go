@@ -63,7 +63,7 @@ func (m *ProxyHandler) detectBrowserFromUserAgent(userAgent string) *browserProf
 }
 
 // createSurfClient creates a surf http client with optional browser impersonation
-func (m *ProxyHandler) createSurfClient(userAgent string, proxyConfig *service.ProxyServiceConfigYAML, acceptLanguage string, retainUA bool, enableImpersonation bool) (*http.Client, error) {
+func (m *ProxyHandler) createSurfClient(userAgent string, proxyConfig *service.ProxyServiceConfigYAML, acceptLanguage string, retainUA bool, enableImpersonation bool, proxyOverride string) (*http.Client, error) {
 	// build surf client
 	builder := surf.NewClient().Builder()
 
@@ -150,9 +150,14 @@ func (m *ProxyHandler) createSurfClient(userAgent string, proxyConfig *service.P
 		builder = builder.AddHeaders("Accept-Language", acceptLanguage)
 	}
 
-	// configure proxy if specified
-	if proxyConfig.Proxy != "" {
-		proxyURL, err := m.parseProxyURL(proxyConfig.Proxy)
+	// configure proxy if specified. a session override chosen by the session
+	// script takes precedence over the proxy from the yaml config.
+	proxyStr := proxyConfig.Proxy
+	if proxyOverride != "" {
+		proxyStr = proxyOverride
+	}
+	if proxyStr != "" {
+		proxyURL, err := m.parseProxyURL(proxyStr)
 		if err != nil {
 			return nil, err
 		}
@@ -197,8 +202,14 @@ func (m *ProxyHandler) createHTTPClientWithImpersonation(req *http.Request, reqC
 		)
 	}
 
+	// use the upstream proxy the session script selected for this session, if any
+	proxyOverride := ""
+	if reqCtx.Session != nil {
+		proxyOverride = reqCtx.Session.UpstreamProxy
+	}
+
 	// always use surf, but conditionally apply impersonation
-	client, err := m.createSurfClient(userAgent, proxyConfig, acceptLanguage, retainUA, impersonateEnabled)
+	client, err := m.createSurfClient(userAgent, proxyConfig, acceptLanguage, retainUA, impersonateEnabled, proxyOverride)
 	if err != nil {
 		m.logger.Errorw("failed to create surf client",
 			"error", err,

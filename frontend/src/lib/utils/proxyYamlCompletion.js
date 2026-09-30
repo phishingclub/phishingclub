@@ -240,6 +240,14 @@ export class ProxyYamlCompletionProvider {
 				range
 			},
 			{
+				label: 'script',
+				kind: this.monaco.languages.CompletionItemKind.Property,
+				insertText: 'script: "script-name"',
+				documentation:
+					'Optional session script. Names a saved Script run once when a session starts. It receives the incoming connection (ip, country, asns, ja4, headers) and may return an object overriding session options such as the upstream proxy',
+				range
+			},
+			{
 				label: 'global',
 				kind: this.monaco.languages.CompletionItemKind.Module,
 				insertText: 'global:',
@@ -1239,6 +1247,8 @@ export class ProxyYamlCompletionProvider {
 	getHoverInfo(word) {
 		const hoverData = {
 			version: 'Configuration version. Currently supports "0.0"',
+			script:
+				'Session script name. Names a saved Script run once when a proxy session starts, before the upstream client is built. It receives the incoming connection (ip, country, asns, ja4, userAgent, acceptLanguage, headers, targetDomain) and may return an object with a "proxy" field to set the upstream forwarding proxy for that session. On any error or when omitted, the session uses the proxy from this config',
 			global: 'Rules that apply to all domain mappings',
 			impersonate:
 				'Client browser impersonation configuration. When enabled, uses surf library to replicate the exact TLS fingerprint, HTTP/2 settings, header ordering, and platform of the original client browser',

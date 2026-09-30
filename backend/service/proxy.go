@@ -31,6 +31,9 @@ type Proxy struct {
 	CampaignTemplateService *CampaignTemplate
 	DomainService           *Domain
 	ProxySessionManager     *ProxySessionManager
+	// ScriptEnabled reports whether the Scripts feature is enabled on this
+	// instance. A config that names a session script is rejected when it is off.
+	ScriptEnabled bool
 }
 
 // ProxyServiceConfig represents the YAML configuration for proxy
@@ -495,6 +498,7 @@ type ProxyServiceResponseRule struct {
 type ProxyServiceConfigYAML struct {
 	Version string                               `yaml:"version,omitempty"`
 	Proxy   string                               `yaml:"proxy,omitempty"`
+	Script  string                               `yaml:"script,omitempty"` // name of a saved Script run once when a session starts to override session options such as the upstream proxy
 	Global  *ProxyServiceRules                   `yaml:"global,omitempty"`
 	Hosts   map[string]*ProxyServiceDomainConfig `yaml:",inline"` // inline allows domain names as top-level keys
 }
@@ -503,6 +507,15 @@ type ProxyServiceConfigYAML struct {
 func ValidateVersion(config *ProxyServiceConfigYAML) error {
 	if config.Version != "0.0" {
 		return errors.New("only version 0.0 is supported")
+	}
+	return nil
+}
+
+// validateSessionScript rejects a config that names a session script when the
+// Scripts feature is not enabled on this instance.
+func (m *Proxy) validateSessionScript(config *ProxyServiceConfigYAML) error {
+	if strings.TrimSpace(config.Script) != "" && !m.ScriptEnabled {
+		return errors.New("session script is set but the Scripts feature is not enabled on this instance")
 	}
 	return nil
 }
@@ -827,6 +840,11 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 
 	// validate version (after defaults are applied)
 	if err := ValidateVersion(&config); err != nil {
+		return validate.WrapErrorWithField(err, "proxyConfig")
+	}
+
+	// reject a session script when the Scripts feature is disabled
+	if err := m.validateSessionScript(&config); err != nil {
 		return validate.WrapErrorWithField(err, "proxyConfig")
 	}
 
@@ -1755,6 +1773,11 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 
 	// validate version (after defaults are applied)
 	if err := ValidateVersion(&config); err != nil {
+		return validate.WrapErrorWithField(err, "proxyConfig")
+	}
+
+	// reject a session script when the Scripts feature is disabled
+	if err := m.validateSessionScript(&config); err != nil {
 		return validate.WrapErrorWithField(err, "proxyConfig")
 	}
 

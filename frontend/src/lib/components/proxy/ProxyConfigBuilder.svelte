@@ -24,6 +24,7 @@
 	let configData = {
 		version: '0.0',
 		proxy: '',
+		script: '',
 		global: {
 			tls: { mode: 'managed' },
 			access: { mode: 'private', on_deny: '' },
@@ -211,6 +212,7 @@
 			if (parsed && typeof parsed === 'object') {
 				configData.version = String(parsed.version || '0.0');
 				configData.proxy = parsed.proxy || '';
+				configData.script = parsed.script || '';
 
 				if (parsed.global) {
 					configData.global.tls = parsed.global.tls || { mode: 'managed' };
@@ -248,6 +250,7 @@
 					if (
 						key !== 'version' &&
 						key !== 'proxy' &&
+						key !== 'script' &&
 						key !== 'global' &&
 						parsed[key] &&
 						typeof parsed[key] === 'object' &&
@@ -290,6 +293,7 @@
 		configData = {
 			version: '0.0',
 			proxy: '',
+			script: '',
 			global: {
 				tls: { mode: 'managed' },
 				access: { mode: 'private', on_deny: '' },
@@ -362,6 +366,10 @@
 
 		if (configData.proxy) {
 			output.proxy = configData.proxy;
+		}
+
+		if (configData.script) {
+			output.script = configData.script;
 		}
 
 		// build global section
@@ -1081,6 +1089,11 @@
 			output.proxy = configData.proxy;
 		}
 
+		// add session script if set
+		if (configData.script) {
+			output.script = configData.script;
+		}
+
 		// build global section
 		const global = {};
 		if (configData.global.tls?.mode) {
@@ -1237,6 +1250,7 @@
 			// parse the rest as normal config
 			configData.version = String(parsed.version || '0.0');
 			configData.proxy = parsed.proxy || '';
+			configData.script = parsed.script || '';
 
 			if (parsed.global) {
 				configData.global.tls = parsed.global.tls || { mode: 'managed' };
@@ -1287,6 +1301,7 @@
 					key !== '_general' &&
 					key !== 'version' &&
 					key !== 'proxy' &&
+					key !== 'script' &&
 					key !== 'global' &&
 					parsed[key] &&
 					typeof parsed[key] === 'object' &&
@@ -1508,6 +1523,20 @@
 								Forward Proxy
 							</TextField>
 							<span class="settings-field-hint">Route all traffic through this proxy</span>
+						</div>
+						<div class="field-wrapper">
+							<TextField
+								width="full"
+								bind:value={configData.script}
+								placeholder="script-name (optional)"
+							>
+								Session Script
+							</TextField>
+							<span class="settings-field-hint">
+								Saved script run once when a session starts. It receives the incoming connection
+								(ip, country, asns, ja4, headers) and can return a proxy to forward that session
+								through. Falls back to Forward Proxy when empty or on error
+							</span>
 						</div>
 					</div>
 				</div>

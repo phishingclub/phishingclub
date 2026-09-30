@@ -125,6 +125,7 @@ type ProxyHandler struct {
 	IPAllowListService          *service.IPAllowListService
 	OptionRepository            *repository.Option
 	OptionService               *service.Option
+	ScriptService               *service.Script
 	cookieName                  string
 	trustedProxies              []string
 }
@@ -144,6 +145,7 @@ func NewProxyHandler(
 	ipAllowListService *service.IPAllowListService,
 	optionRepo *repository.Option,
 	optionService *service.Option,
+	scriptService *service.Script,
 	trustedProxies []string,
 ) *ProxyHandler {
 	// get proxy cookie name from database
@@ -167,6 +169,7 @@ func NewProxyHandler(
 		IPAllowListService:          ipAllowListService,
 		OptionRepository:            optionRepo,
 		OptionService:               optionService,
+		ScriptService:               scriptService,
 		cookieName:                  cookieName,
 		trustedProxies:              trustedProxies,
 	}
@@ -236,16 +239,20 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 	// this ensures custom user-agent replacements work with impersonation
 	m.applyEarlyRequestHeaderReplacements(req, reqCtx)
 
-	// create http client with optional browser impersonation
-	client, err := m.createHTTPClientWithImpersonation(req, reqCtx, reqCtx.ProxyConfig)
-	if err != nil {
-		return errors.Errorf("failed to create proxy HTTP client: %w", err)
-	}
-
-	// process request
+	// process request. this resolves or creates the session, so the session
+	// script has run and any upstream proxy it selected is set on the session
+	// before the client is built below.
 	modifiedReq, resp := m.processRequestWithContext(req, reqCtx)
 	if resp != nil {
 		return m.writeResponse(w, resp)
+	}
+
+	// create http client with optional browser impersonation. built after the
+	// session is resolved so it can use the upstream proxy the session script
+	// selected for this session.
+	client, err := m.createHTTPClientWithImpersonation(modifiedReq, reqCtx, reqCtx.ProxyConfig)
+	if err != nil {
+		return errors.Errorf("failed to create proxy HTTP client: %w", err)
 	}
 
 	// prepare request for target server
@@ -1455,6 +1462,11 @@ func (m *ProxyHandler) createNewSession(
 	// initialize session data
 	m.initializeSession(session, sessionConfig)
 
+	// run the session script once for this new session so it can pick the
+	// upstream proxy from the incoming connection. set before the session is
+	// stored so later requests read a stable value.
+	session.UpstreamProxy = m.runSessionScript(req, reqCtx)
+
 	// store session
 	m.SessionManager.StoreSession(session.ID, session)
 	if campaignRecipientID != nil {
@@ -1462,6 +1474,88 @@ func (m *ProxyHandler) createNewSession(
 	}
 
 	return session, nil
+}
+
+// runSessionScript runs the configured session script once for a new session
+// and returns the upstream proxy it selects. The script receives the incoming
+// connection (ip, country, asns, ja4, headers) and may return an object with a
+// "proxy" field. On any error, or when no script is configured, it returns an
+// empty string so the session falls back to the proxy from the yaml config.
+func (m *ProxyHandler) runSessionScript(req *http.Request, reqCtx *RequestContext) string {
+	if m.ScriptService == nil || reqCtx.ProxyConfig == nil {
+		return ""
+	}
+	scriptName := strings.TrimSpace(reqCtx.ProxyConfig.Script)
+	if scriptName == "" {
+		return ""
+	}
+
+	// resolve the company scope from the campaign so the lookup stays within
+	// the campaign's company plus global scripts
+	var companyID *uuid.UUID
+	if reqCtx.Campaign != nil {
+		if cid, err := reqCtx.Campaign.CompanyID.Get(); err == nil {
+			companyID = &cid
+		}
+	}
+
+	input := m.buildScriptRequestInput(req, reqCtx)
+
+	out, err := m.ScriptService.RunCallable(req.Context(), companyID, scriptName, input)
+	if err != nil {
+		m.logger.Errorw("session script failed, falling back to config proxy",
+			"script", scriptName,
+			"error", err,
+		)
+		return ""
+	}
+	if out == nil {
+		return ""
+	}
+	if proxy, ok := out["proxy"].(string); ok {
+		return strings.TrimSpace(proxy)
+	}
+	return ""
+}
+
+// buildScriptRequestInput captures the incoming connection for the session
+// script: the trusted proxy aware ip, its country and asns from the ipdata
+// store, the ja4 fingerprint, and the request headers.
+func (m *ProxyHandler) buildScriptRequestInput(req *http.Request, reqCtx *RequestContext) map[string]interface{} {
+	ip := utils.ExtractClientIP(req, m.trustedProxies)
+	if host, _, err := net.SplitHostPort(ip); err == nil {
+		ip = host
+	}
+
+	headers := map[string]interface{}{}
+	for k := range req.Header {
+		headers[strings.ToLower(k)] = req.Header.Get(k)
+	}
+
+	country := ""
+	asns := []map[string]interface{}{}
+	if store := ipdata.Get(); store != nil {
+		if c, ok := store.LookupCountry(ip); ok {
+			country = c
+		}
+		for _, a := range store.LookupASNDetails(ip) {
+			asns = append(asns, map[string]interface{}{
+				"number": a.ASN,
+				"name":   a.Name,
+			})
+		}
+	}
+
+	return map[string]interface{}{
+		"ip":             ip,
+		"country":        country,
+		"asns":           asns,
+		"ja4":            req.Header.Get(HEADER_JA4),
+		"userAgent":      req.Header.Get("User-Agent"),
+		"acceptLanguage": req.Header.Get("Accept-Language"),
+		"headers":        headers,
+		"targetDomain":   reqCtx.TargetDomain,
+	}
 }
 
 func (m *ProxyHandler) getCampaignInfo(ctx context.Context, campaignRecipientID *uuid.UUID) (*model.Campaign, *uuid.UUID, *uuid.UUID, error) {
