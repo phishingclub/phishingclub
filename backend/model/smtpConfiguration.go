@@ -46,6 +46,15 @@ func (s *SMTPConfiguration) Validate() error {
 	if err := validate.NullableFieldRequired("ignoreCertErrors", s.IgnoreCertErrors); err != nil {
 		return err
 	}
+	// helo is sent as a line in the SMTP dialog, so a control character such as
+	// a newline must never pass into it
+	if s.Helo.IsSpecified() {
+		if helo, err := s.Helo.Get(); err == nil {
+			if err := validate.ErrorIfContainsControlChars("helo", helo.String()); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 

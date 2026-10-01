@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/go-errors/errors"
 
@@ -275,6 +276,19 @@ func ErrorIfNotAlphaNumeric(s string) error {
 	}
 	return errs.NewValidationError(
 		fmt.Errorf("must be alphanumeric"),
+	)
+}
+
+// ErrorIfContainsControlChars rejects a string that holds any control
+// character such as a carriage return, line feed or tab. It guards fields that
+// are placed into a line based protocol like the SMTP dialog, where an
+// embedded newline would let a value inject a second command or header.
+func ErrorIfContainsControlChars(field string, s string) error {
+	if strings.IndexFunc(s, unicode.IsControl) < 0 {
+		return nil
+	}
+	return errs.NewValidationError(
+		fmt.Errorf("%s must not contain control characters", field),
 	)
 }
 
