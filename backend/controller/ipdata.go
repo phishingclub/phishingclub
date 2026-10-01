@@ -58,8 +58,11 @@ func (c *IPData) Remove(g *gin.Context) {
 
 // SearchASN returns ASNs matching the query for the filter typeahead
 func (c *IPData) SearchASN(g *gin.Context) {
-	_, _, ok := c.handleSession(g)
+	session, _, ok := c.handleSession(g)
 	if !ok {
+		return
+	}
+	if !c.handleGlobalAuthorization(g, session) {
 		return
 	}
 	q := g.Query("q")
@@ -75,8 +78,11 @@ func (c *IPData) SearchASN(g *gin.Context) {
 
 // LookupASN returns the autonomous systems that announce the given IP address
 func (c *IPData) LookupASN(g *gin.Context) {
-	_, _, ok := c.handleSession(g)
+	session, _, ok := c.handleSession(g)
 	if !ok {
+		return
+	}
+	if !c.handleGlobalAuthorization(g, session) {
 		return
 	}
 	ip := g.Query("ip")
@@ -102,8 +108,11 @@ type ResolveASNRequest struct {
 // ResolveASNs returns the details of the given ASNs that exist in the dataset.
 // ASNs that are absent are left out, which lets the UI flag orphaned entries.
 func (c *IPData) ResolveASNs(g *gin.Context) {
-	_, _, ok := c.handleSession(g)
+	session, _, ok := c.handleSession(g)
 	if !ok {
+		return
+	}
+	if !c.handleGlobalAuthorization(g, session) {
 		return
 	}
 	var req ResolveASNRequest

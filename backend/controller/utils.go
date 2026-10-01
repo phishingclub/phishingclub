@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/api"
+	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/service"
@@ -56,6 +57,25 @@ func (c *Common) handleSession(
 		return nil, nil, false
 	}
 	return session, user, true
+}
+
+// handleGlobalAuthorization checks the session holds the global permission.
+// On a server error or a failed authorization it writes the response and
+// returns false.
+func (c *Common) handleGlobalAuthorization(
+	g *gin.Context,
+	session *model.Session,
+) bool {
+	isAuthorized, err := service.IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		_ = handleServerError(g, c.Response, err)
+		return false
+	}
+	if !isAuthorized {
+		c.Response.Unauthorized(g)
+		return false
+	}
+	return true
 }
 
 // HandleParseRequest parses the request and returns true if successful

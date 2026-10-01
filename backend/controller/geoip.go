@@ -12,8 +12,11 @@ type GeoIP struct {
 
 // GetMetadata returns the available country codes for the filter UI
 func (c *GeoIP) GetMetadata(g *gin.Context) {
-	_, _, ok := c.handleSession(g)
+	session, _, ok := c.handleSession(g)
 	if !ok {
+		return
+	}
+	if !c.handleGlobalAuthorization(g, session) {
 		return
 	}
 
@@ -28,8 +31,11 @@ func (c *GeoIP) GetMetadata(g *gin.Context) {
 
 // Lookup performs a country lookup for the provided IP address
 func (c *GeoIP) Lookup(g *gin.Context) {
-	_, _, ok := c.handleSession(g)
+	session, _, ok := c.handleSession(g)
 	if !ok {
+		return
+	}
+	if !c.handleGlobalAuthorization(g, session) {
 		return
 	}
 
