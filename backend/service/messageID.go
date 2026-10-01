@@ -24,15 +24,20 @@ func domainFromEmailAddress(address string) string {
 	return domain
 }
 
+// fallbackMessageIDDomain is a neutral right side used when the sender address
+// has no usable domain. It keeps the machine hostname out of the Message-ID
+// that go-mail would otherwise fall back to.
+const fallbackMessageIDDomain = "localhost.localdomain"
+
 // setMessageIDFromAddress sets the message "Message-ID" header as uuid@domain,
 // using the sending domain as the right side, so outgoing mail does not carry
 // the machine hostname that go-mail would otherwise use by default.
-// when the address has no usable domain the message keeps whatever Message-ID
-// go-mail assigns.
+// when the address has no usable domain a neutral right side is used so the
+// hostname is never leaked.
 func setMessageIDFromAddress(m *mail.Msg, address string) {
 	domain := domainFromEmailAddress(address)
 	if domain == "" {
-		return
+		domain = fallbackMessageIDDomain
 	}
 	m.SetMessageIDWithValue(uuid.NewString() + "@" + domain)
 }
