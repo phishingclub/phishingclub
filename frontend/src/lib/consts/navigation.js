@@ -123,13 +123,7 @@ export const menu = [
 	{
 		label: 'Campaigns',
 		type: 'submenu',
-		items: [
-			route.campaigns,
-			route.campaignTemplates,
-			route.allowDeny,
-			route.webhook,
-			route.script
-		]
+		items: [route.campaigns, route.campaignTemplates, route.allowDeny, route.webhook]
 	},
 
 	{
@@ -158,6 +152,12 @@ export const menu = [
 		type: 'submenu',
 		blackbox: true,
 		items: [route.remoteBrowser]
+	},
+	{
+		label: 'Scripts',
+		type: 'submenu',
+		blackbox: true,
+		items: [route.script]
 	}
 ];
 
