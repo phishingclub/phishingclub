@@ -38,7 +38,7 @@ Phishing Club provides a lot of features for simulation and red teaming, such as
 - **Awareness training** - Run training campaigns that record started and completed, kept separate from phishing risk
 - **Campaign reports** - PDF export with customizable HTML templates for phishing and training, automatically emailed on completion
 - **Analytics** - Timelines, dashboards, per-user event history
-- **Automation** - HMAC-signed webhooks, REST API, import/export
+- **Automation** - HMAC-signed webhooks, REST API and embedded JavaScript scripting engine
 - **Multi-tenancy** - Segregated client handling and statistics for service providers
 - **Anonymization** - Pseudonymized campaigns, automatic anonymization on close and retention windows for compliance
 - **Branding** - Replace logos and login image with your own
@@ -104,22 +104,13 @@ For prerequisites, service ports, make commands, local DNS and SSL setup, see [D
 
 ## License
 
-Phishing Club is available under a dual licensing model:
-
-### Open Source License (AGPL-3.0)
 This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). This means:
 - ✅ You can use, modify, and distribute the software freely
 - ✅ Perfect for educational, research, and commercial use
 - ✅ You can run your own instance for security testing or professional services
 - ⚠️ **Important**: If you provide the software modified as a network service, you must make your source code available under AGPL-3.0
 
-### Commercial License
-For organizations that want to:
-- Use Phishing Club in commercial products without AGPL restrictions
-- Offer Phishing Club as a service without source code disclosure
-- Modify the codebase without source code disclosure
-
-**Contact for commercial licensing**: [license@phishing.club](mailto:license@phishing.club)
+**Contact reqarding license**: [license@phishing.club](mailto:license@phishing.club)
 
 ## Roadmap
 
