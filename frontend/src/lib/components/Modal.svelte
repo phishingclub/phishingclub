@@ -358,7 +358,7 @@
 					</button>
 				</div>
 				<div
-					class="px-8 overflow-y-auto overflow-x-visible {scrollBarClassesVertical} {fullscreen
+					class="px-8 overflow-y-auto overflow-x-visible select-text {scrollBarClassesVertical} {fullscreen
 						? 'flex-1'
 						: ''}"
 				>
