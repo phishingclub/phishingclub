@@ -50,6 +50,12 @@
 	let userHasSetTrendN = false; // track if user has manually changed trendN
 	let userHasSetMovingAvgN = false; // track if user has manually changed movingAvgN
 
+	// above this many campaigns the raw per campaign lines and markers turn into
+	// visual noise, so the chart collapses to moving average lines only
+	const DENSITY_THRESHOLD = 60;
+	// lets the user bring the raw lines and markers back while above the threshold
+	let showRawOverride = false;
+
 	// load saved trendN and movingAvgN from localStorage
 	try {
 		const storedTrendN = localStorage.getItem(TREND_N_KEY);
@@ -85,13 +91,17 @@
 				trendN = chartData.length;
 			}
 
-			// if current movingAvgN is larger than available data, adjust it only if user hasn't set it
-			if (!userHasSetMovingAvgN && movingAvgN > chartData.length) {
-				movingAvgN = chartData.length;
-			}
-			// if movingAvgN is less than 1, set it to 1 (minimum) only if user hasn't set it
-			if (!userHasSetMovingAvgN && movingAvgN < 1) {
-				movingAvgN = 1;
+			if (!userHasSetMovingAvgN) {
+				if (chartData.length > DENSITY_THRESHOLD) {
+					// dense data smooths with a window that grows with the data,
+					// clamped so it stays readable at both ends
+					movingAvgN = Math.max(5, Math.min(30, Math.round(chartData.length / 20)));
+				} else if (movingAvgN > chartData.length) {
+					// window larger than the data, fall back to the data length
+					movingAvgN = chartData.length;
+				} else if (movingAvgN < 1) {
+					movingAvgN = 1;
+				}
 			}
 		}
 	}
@@ -288,7 +298,13 @@
 
 	// a metric with a `mavg` also renders a dashed moving-average line and legend toggle
 	const phishingMetrics = [
-		{ key: 'openRate', label: 'Read Rate', color: '#4cb5b5', suffix: '%' },
+		{
+			key: 'openRate',
+			label: 'Read Rate',
+			color: '#4cb5b5',
+			suffix: '%',
+			mavg: { color: '#7fd3d3', label: 'Read MA' }
+		},
 		{
 			key: 'clickRate',
 			label: 'Click Rate',
@@ -407,6 +423,12 @@
 	// Use filtered campaign stats based on selected time range, relative metrics and mode
 	$: chartData = processData(filteredCampaignStats, useRelativeMetrics, chartMode);
 
+	// too many campaigns to read individually, so raw lines and markers are
+	// available to turn back on but off by default
+	$: densePossible = chartData.length > DENSITY_THRESHOLD;
+	// when true the chart shows only the smoothed moving average lines
+	$: maOnlyMode = densePossible && !showRawOverride;
+
 	function createChart() {
 		if (!chartContainer || chartData.length < 2) return;
 
@@ -452,36 +474,46 @@
 		createGridLines(svg);
 		createAxes(svg);
 
-		metrics.forEach((metric) => {
-			createLine(svg, metric);
-			// Hide line if not visible
-			if (!visibleMetrics[metric.key]) {
-				const lines = svg.querySelectorAll(`.main-line-${metric.key}`);
-				lines.forEach((line) => {
-					if (line instanceof HTMLElement) line.style.display = 'none';
-				});
-			}
-		});
-		// draw the moving average for any metric that supports one and is toggled on
-		metrics.forEach((metric) => {
-			if (metric.mavg && visibleMetrics[`mavg-${metric.key}`]) {
-				createMovingAverageLine(svg, metric, movingAvgN);
-			}
-		});
-		metrics.forEach((metric) => {
-			createDataPoints(svg, metric);
-			// Hide data points if not visible
-			if (!visibleMetrics[metric.key]) {
-				const points = svg.querySelectorAll(`[data-metric="${metric.key}"]`);
-				const glows = svg.querySelectorAll(`.chart-point-glow-${metric.key}`);
-				points.forEach((point) => {
-					if (point instanceof HTMLElement) point.style.display = 'none';
-				});
-				glows.forEach((glow) => {
-					if (glow instanceof HTMLElement) glow.style.display = 'none';
-				});
-			}
-		});
+		if (maOnlyMode) {
+			// only the smoothed lines, one per metric that is toggled on. the main
+			// series toggle drives visibility since the raw lines are not drawn
+			metrics.forEach((metric) => {
+				if (metric.mavg) {
+					createMovingAverageLine(svg, metric, movingAvgN);
+				}
+			});
+		} else {
+			metrics.forEach((metric) => {
+				createLine(svg, metric);
+				// Hide line if not visible
+				if (!visibleMetrics[metric.key]) {
+					const lines = svg.querySelectorAll(`.main-line-${metric.key}`);
+					lines.forEach((line) => {
+						if (line instanceof HTMLElement) line.style.display = 'none';
+					});
+				}
+			});
+			// draw the moving average for any metric that supports one and is toggled on
+			metrics.forEach((metric) => {
+				if (metric.mavg && visibleMetrics[`mavg-${metric.key}`]) {
+					createMovingAverageLine(svg, metric, movingAvgN);
+				}
+			});
+			metrics.forEach((metric) => {
+				createDataPoints(svg, metric);
+				// Hide data points if not visible
+				if (!visibleMetrics[metric.key]) {
+					const points = svg.querySelectorAll(`[data-metric="${metric.key}"]`);
+					const glows = svg.querySelectorAll(`.chart-point-glow-${metric.key}`);
+					points.forEach((point) => {
+						if (point instanceof HTMLElement) point.style.display = 'none';
+					});
+					glows.forEach((glow) => {
+						if (glow instanceof HTMLElement) glow.style.display = 'none';
+					});
+				}
+			});
+		}
 		createLegend(svg, svg);
 		createTooltip(svg, svg.querySelectorAll('.chart-point'));
 
@@ -532,12 +564,22 @@
 		if (started) {
 			path.setAttribute('d', pathData);
 			path.setAttribute('fill', 'none');
-			// lighter shade defined on the metric, falling back to the metric color
-			const avgColor = (metric.mavg && metric.mavg.color) || metric.color;
-			path.setAttribute('stroke', avgColor);
-			path.setAttribute('stroke-width', '1.2');
-			path.setAttribute('stroke-dasharray', '6,4');
-			path.setAttribute('opacity', '0.95');
+			if (maOnlyMode) {
+				// the only mark on the chart, so it reads as a primary solid line
+				// in the metric color to match the stat tiles and legend
+				path.setAttribute('stroke', metric.color);
+				path.setAttribute('stroke-width', '2.5');
+				path.setAttribute('stroke-linecap', 'round');
+				path.setAttribute('stroke-linejoin', 'round');
+				path.setAttribute('opacity', '1');
+			} else {
+				// a secondary overlay on top of the raw line, so lighter and dashed
+				const avgColor = (metric.mavg && metric.mavg.color) || metric.color;
+				path.setAttribute('stroke', avgColor);
+				path.setAttribute('stroke-width', '1.2');
+				path.setAttribute('stroke-dasharray', '6,4');
+				path.setAttribute('opacity', '0.95');
+			}
 			path.setAttribute('class', `moving-average-line moving-average-${metric.key}`);
 			svg.appendChild(path);
 		}
@@ -626,23 +668,6 @@
 			line.setAttribute('stroke-width', '1');
 			line.setAttribute('opacity', '0.4');
 			svg.appendChild(line);
-		});
-
-		// Thin vertical background lines for data points
-		chartData.forEach((d, i) => {
-			const x = xScale(i);
-			const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-			vLine.setAttribute('x1', x.toString());
-			vLine.setAttribute('x2', x.toString());
-			vLine.setAttribute('y1', margin.top.toString());
-			vLine.setAttribute('y2', (height - margin.bottom).toString());
-			vLine.setAttribute(
-				'stroke',
-				document.documentElement.classList.contains('dark') ? '#374151' : '#e5e7eb'
-			);
-			vLine.setAttribute('stroke-width', '0.5');
-			vLine.setAttribute('opacity', '0.3');
-			svg.appendChild(vLine);
 		});
 	}
 
@@ -821,6 +846,17 @@
 	}
 
 	function applyVisibility(svg) {
+		if (maOnlyMode) {
+			// only moving average lines are drawn, each driven by its main toggle
+			metrics.forEach((metric) => {
+				const lines = svg.querySelectorAll(`.moving-average-${metric.key}`);
+				lines.forEach((line) => {
+					line.style.display = visibleMetrics[metric.key] ? 'block' : 'none';
+					line.classList.remove('line-enhanced', 'line-faded');
+				});
+			});
+			return;
+		}
 		// enforce visibility state for all chart elements based on visibleMetrics
 		const allMainLines = svg.querySelectorAll('.main-line');
 		const allMovingAvgLines = svg.querySelectorAll('.moving-average-line');
@@ -879,10 +915,13 @@
 		// Build a flat list of legend items (main and moving averages)
 		const legendItems = [];
 		metrics.forEach((metric) => {
+			// in moving average only mode the drawn line is the average, so the entry
+			// carries the MA name to avoid reading as the raw per campaign rate
+			const mainLabel = maOnlyMode && metric.mavg ? metric.mavg.label : metric.label;
 			legendItems.push({
 				type: 'main',
 				key: metric.key,
-				label: metric.label,
+				label: mainLabel,
 				color: metric.color,
 				class: `legend-line legend-${metric.key}`,
 				labelClass: `legend-label legend-${metric.key}`,
@@ -891,7 +930,9 @@
 				strokeDasharray: null,
 				opacity: 1
 			});
-			if (metric.mavg) {
+			// in moving average only mode the raw lines are gone, so a separate MA
+			// entry per metric would just double the legend
+			if (metric.mavg && !maOnlyMode) {
 				legendItems.push({
 					type: 'mavg',
 					key: metric.key,
@@ -1011,6 +1052,16 @@
 							line.classList.remove('line-faded');
 						}
 					});
+					if (maOnlyMode) {
+						// the hovered metric is drawn as its moving average line here
+						allMovingAvgLines.forEach((line) => {
+							if (line.classList.contains(`moving-average-${hoveredMetric}`)) {
+								line.style.display = 'block';
+								line.classList.add('line-enhanced');
+								line.classList.remove('line-faded');
+							}
+						});
+					}
 					// Show and enhance data points for the hovered metric
 					allDataPoints.forEach((point) => {
 						if (point.getAttribute('data-metric') === hoveredMetric) {
@@ -1279,6 +1330,7 @@
 			useLogScale;
 			useRelativeMetrics;
 			chartMode;
+			maOnlyMode;
 			createChart();
 		}
 	}
@@ -1444,6 +1496,18 @@
 								Log scale:
 								<input type="checkbox" bind:checked={useLogScale} class="accent-blue-600" />
 							</label>
+							{#if densePossible}
+								<label
+									class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
+								>
+									Show raw points:
+									<input
+										type="checkbox"
+										bind:checked={showRawOverride}
+										class="accent-blue-600"
+									/>
+								</label>
+							{/if}
 							<div class="ml-auto flex items-center">
 								<label
 									class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
