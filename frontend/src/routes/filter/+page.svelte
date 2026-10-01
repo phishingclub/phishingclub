@@ -97,6 +97,15 @@
 		modalText = getModalText('Filter', modalMode);
 	}
 
+	// an allow filter that lists ASNs blocks every visitor while no ASN data is
+	// downloaded, because no visitor IP can resolve to an ASN and an allow list
+	// denies what it can not match
+	$: asnAllowBlocksAll =
+		formValues.allowed === true &&
+		formValues.asns &&
+		formValues.asns.length > 0 &&
+		!asnAvailable;
+
 	// hooks
 	onMount(() => {
 		if (appStateService.getContext()) {
@@ -539,6 +548,21 @@
 							]}
 							bind:value={formValues.allowed}
 						/>
+					{/if}
+					{#if asnAllowBlocksAll}
+						<div
+							class="rounded-md border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 mb-4 transition-colors duration-200"
+						>
+							<p class="text-sm text-amber-800 dark:text-amber-200">
+								This allow filter lists ASNs but no ASN data is downloaded, so it will block
+								every visitor. Download the ASN data under
+								<a
+									class="text-cta-blue dark:text-highlight-blue hover:opacity-80"
+									href="/settings#ipdata">Settings, IP Data</a
+								>
+								or remove the ASN rules.
+							</p>
+						</div>
 					{/if}
 					<div class="mb-6 pt-4">
 						<label class="flex flex-col">
