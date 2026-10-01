@@ -4,7 +4,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
 	plugins: [sveltekit()],
 	build: {
-		sourcemap: true,
+		sourcemap: false,
 		cssMinify: true,
 		minify: true,
 		assetsInlineLimit: 4096,
