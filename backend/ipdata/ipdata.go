@@ -442,11 +442,12 @@ func (s *Store) SearchASN(query string, limit int) []ASN {
 	}
 	q := strings.ToLower(strings.TrimSpace(query))
 
-	type scored struct {
-		a     ASN
-		score int
-	}
-	var matches []scored
+	// nums are stored in ascending ASN order (see newASNDataset), so entries
+	// are seen smallest first. Collect at most limit per score bucket: the
+	// first limit in a bucket are already its smallest ASNs, so no later entry
+	// can displace them. This keeps the work bounded so a broad query over a
+	// large dataset never allocates or sorts the whole match set.
+	var buckets [3][]ASN
 	for i := range asn.nums {
 		numStr := fmt.Sprintf("%d", asn.nums[i])
 		name := strings.ToLower(asn.names[i])
@@ -461,25 +462,31 @@ func (s *Store) SearchASN(query string, limit int) []ASN {
 		case strings.Contains(name, q) || strings.Contains(handle, q):
 			score = 2
 		}
-		if score >= 0 {
-			matches = append(matches, scored{
-				a:     ASN{ASN: asn.nums[i], Handle: asn.handles[i], Name: asn.names[i], Country: asn.countries[i]},
-				score: score,
-			})
+		if score < 0 || len(buckets[score]) >= limit {
+			continue
+		}
+		buckets[score] = append(buckets[score], ASN{
+			ASN:     asn.nums[i],
+			Handle:  asn.handles[i],
+			Name:    asn.names[i],
+			Country: asn.countries[i],
+		})
+		// once the best bucket is full, every remaining entry has a larger ASN
+		// and cannot outrank what is already collected, so the scan can stop
+		if len(buckets[0]) >= limit {
+			break
 		}
 	}
 
-	// best score first, then by ascending ASN number for a stable order
-	sort.SliceStable(matches, func(i, j int) bool {
-		if matches[i].score != matches[j].score {
-			return matches[i].score < matches[j].score
+	// best score first, each bucket already in ascending ASN order
+	out := make([]ASN, 0, limit)
+	for score := range buckets {
+		for _, a := range buckets[score] {
+			if len(out) >= limit {
+				return out
+			}
+			out = append(out, a)
 		}
-		return matches[i].a.ASN < matches[j].a.ASN
-	})
-
-	out := []ASN{}
-	for i := 0; i < len(matches) && i < limit; i++ {
-		out = append(out, matches[i].a)
 	}
 	return out
 }
