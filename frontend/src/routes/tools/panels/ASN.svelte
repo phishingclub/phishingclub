@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import { api } from '$lib/api/apiProxy.js';
 	import TextField from '$lib/components/TextField.svelte';
 	import FormError from '$lib/components/FormError.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -14,15 +15,11 @@
 	let searchTimer = null;
 
 	onMount(async () => {
-		try {
-			const res = await fetch('/api/v1/geoip/metadata', { credentials: 'include' });
-			if (res.ok) {
-				const data = await res.json();
-				asnAvailable = !!data.data?.asn_available;
-			}
-		} catch (_) {
-			// leave asnAvailable true, a failed lookup will surface the reason
+		const res = await api.geoip.getMetadata();
+		if (res.success && res.data) {
+			asnAvailable = !!res.data.asn_available;
 		}
+		// on failure leave asnAvailable true, a failed lookup will surface the reason
 	});
 
 	const isIP = (s) => {
@@ -34,25 +31,22 @@
 		isSubmitting = true;
 		lookupError = '';
 		try {
-			let url;
+			let res;
 			if (isIP(q)) {
 				mode = 'ip';
-				url = `/api/v1/ipdata/asn/lookup?ip=${encodeURIComponent(q)}`;
+				res = await api.ipdata.lookupASN(q);
 			} else {
 				mode = 'search';
-				url = `/api/v1/ipdata/asn/search?q=${encodeURIComponent(q)}&limit=50`;
+				res = await api.ipdata.searchASN(q, 50);
 			}
-			const response = await fetch(url, { method: 'GET', credentials: 'include' });
-			if (!response.ok) {
-				const errorData = await response.json();
-				lookupError = errorData.message || 'failed to look up ASN';
+			if (!res.success) {
+				lookupError = res.error || 'failed to look up ASN';
 				return;
 			}
-			const data = await response.json();
-			if (mode === 'ip' && data.data && data.data.available === false) {
+			if (mode === 'ip' && res.data && res.data.available === false) {
 				asnAvailable = false;
 			}
-			results = data.data?.results || [];
+			results = res.data?.results || [];
 		} catch (error) {
 			lookupError = 'an error occurred while looking up the ASN';
 			console.error('asn lookup error:', error);

@@ -3341,6 +3341,16 @@ export class API {
 		},
 
 		/**
+		 * Look up the autonomous systems that announce the given IP address.
+		 *
+		 * @param {string} ip
+		 * @returns {Promise<ApiResponse>}
+		 */
+		lookupASN: async (ip) => {
+			return await getJSON(this.getPath(`/ipdata/asn/lookup?ip=${encodeURIComponent(ip)}`));
+		},
+
+		/**
 		 * Resolve configured ASN numbers to their details. ASNs absent from the
 		 * dataset are left out of the result so the UI can flag them.
 		 *
