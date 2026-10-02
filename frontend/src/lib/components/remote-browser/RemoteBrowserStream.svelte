@@ -242,7 +242,7 @@
 					const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
 					if (canvas) {
 						const ctx = canvas.getContext('2d');
-						// Only resize when dimensions change — resizing always clears the
+						// Only resize when dimensions change, resizing always clears the
 						// canvas and flushes the GPU texture even when the value is identical.
 						if (canvas.width !== bmp.width) canvas.width = bmp.width;
 						if (canvas.height !== bmp.height) canvas.height = bmp.height;
@@ -406,7 +406,7 @@
 		if (e.key === 'Escape') return;
 		if (urlBarFocused || isLocalInputFocused()) return;
 
-		// Intercept Ctrl+V / Cmd+V — read clipboard directly because
+		// Intercept Ctrl+V / Cmd+V, read clipboard directly because
 		// e.preventDefault() below would kill the native paste event.
 		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
 			e.preventDefault();
@@ -414,7 +414,7 @@
 			navigator.clipboard.readText().then((text) => {
 				if (text) sendInput({ type: 'paste', text });
 			}).catch(() => {
-				// Clipboard API denied — fall back to forwarding Ctrl+V as a shortcut
+				// Clipboard API denied, fall back to forwarding Ctrl+V as a shortcut
 				sendInput({ type: 'keydown', key: e.key, code: e.code, keyCode: e.keyCode, modifiers: mods(e), charText: '' });
 			});
 			return;

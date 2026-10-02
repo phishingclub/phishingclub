@@ -1021,7 +1021,7 @@ export class ProxyYamlCompletionProvider {
 	}
 
 	getEngineSuggestions(range, linesAbove, currentIndent) {
-		// Determine context — rewrite rules have 'dom' and 'header', capture rules don't have 'dom'
+		// Determine context, rewrite rules have 'dom' and 'header', capture rules don't have 'dom'
 		const context = this.findParentSection(linesAbove || [], currentIndent);
 		const isRewrite = context === 'rewrite';
 

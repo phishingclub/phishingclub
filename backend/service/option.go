@@ -192,7 +192,7 @@ func (o *Option) SetOptionByKey(
 			)
 		}
 	case data.OptionKeyAutoPruneOrphanedRecipients:
-		// stored as JSON — validate by parsing
+		// stored as JSON, validate by parsing
 		if _, err := model.NewAutoPruneOptionFromJSON([]byte(v)); err != nil {
 			o.Logger.Debugw("invalid auto-prune option value", "value", v)
 			return validate.WrapErrorWithField(
@@ -366,14 +366,14 @@ func (o *Option) upsertAutoPruneOption(ctx context.Context, autoPruneOpt *model.
 			o.Logger.Errorw("failed to check auto-prune option existence", "error", getErr)
 			return errs.Wrap(getErr)
 		}
-		// row does not exist yet — insert
+		// row does not exist yet, insert
 		if _, insertErr := o.OptionRepository.Insert(ctx, opt); insertErr != nil {
 			o.Logger.Errorw("failed to insert auto-prune option", "error", insertErr)
 			return errs.Wrap(insertErr)
 		}
 		return nil
 	}
-	// row exists — update
+	// row exists, update
 	if updateErr := o.OptionRepository.UpdateByKey(ctx, opt); updateErr != nil {
 		o.Logger.Errorw("failed to update auto-prune option", "error", updateErr)
 		return errs.Wrap(updateErr)

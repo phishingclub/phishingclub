@@ -85,7 +85,7 @@
         streamLastStart[m.name] = m;
         var st = streams[m.name];
         if (st) {
-          // Stream already mounted — this is a resize/reposition update only.
+          // Stream already mounted, this is a resize/reposition update only.
           // Do NOT re-fire user handlers; that would call mountStream() again
           // and create duplicate canvases.
           applyStreamStart(st, m);

@@ -121,7 +121,7 @@
 	let logContainer;
 	let userScrolledUp = false;
 
-	// live stream (View / Control) — populated once the backend sends {"type":"session","id":"..."}
+	// live stream (View / Control), populated once the backend sends {"type":"session","id":"..."}
 	let streamSessionID = '';
 	let streamVisible = false;
 	let streamControlMode = false;
@@ -234,7 +234,7 @@
 
 	const remoteBrowserDTS = `
 interface SessionOptions {
-  /** DevTools WebSocket URL — connects to an existing Chrome instead of launching one */
+  /** DevTools WebSocket URL, connects to an existing Chrome instead of launching one */
   remote?: string;
   /** SOCKS5 or HTTP proxy, e.g. "socks5://127.0.0.1:1080" */
   proxy?: string;
@@ -253,7 +253,7 @@ interface SessionOptions {
   /**
    * BCP 47 locale for Chrome's language setting, e.g. "en-US" or "en-GB".
    * Sets navigator.language, navigator.languages, and the Accept-Language header
-   * at the process level — consistent across the main frame AND Web Workers.
+   * at the process level, consistent across the main frame AND Web Workers.
    * Local mode only; ignored when connecting to a remote browser.
    * Prefer this over patching navigator.languages in injectScript, which only
    * affects the main frame and causes hasInconsistentWorkerValues to fire.
@@ -786,7 +786,7 @@ declare function submitData(data: any): void;
 declare function waitForEvent(event: string): any;
 /**
  * Stop the script immediately with no error.
- * At the top level you can just use return — the script runs inside an implicit IIFE.
+ * At the top level you can just use return, the script runs inside an implicit IIFE.
  * Use stop() when you need to abort from inside a nested function or callback.
  */
 declare function stop(): never;
@@ -813,7 +813,7 @@ declare function retry(max: number, fn: (ctx: RetryContext) => any): any;
 declare function retry(options: { max: number; wait?: number }, fn: (ctx: RetryContext) => any): any;
 
 // ECMAScript built-ins available in the goja runtime (ES2015+).
-// (No DOM, no Node.js — those are not available in scripts.)
+// (No DOM, no Node.js, those are not available in scripts.)
 // Instance methods for the string, number and boolean primitives. The String,
 // Number and Boolean call forms are declared further down; these interfaces are
 // what give a string value methods like indexOf, includes and split.
@@ -1097,7 +1097,7 @@ declare var Infinity: number;
 		monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
 			noSemanticValidation: false,
 			noSyntaxValidation: false,
-			diagnosticCodesToIgnore: [1108] // 'return' outside function — valid here because the script runs inside an implicit IIFE
+			diagnosticCodesToIgnore: [1108] // 'return' outside function, valid here because the script runs inside an implicit IIFE
 		});
 		monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
 			noLib: true,

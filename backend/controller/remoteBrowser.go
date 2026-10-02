@@ -102,7 +102,7 @@ func (a *activeSession) setBrowserPage(page *rod.Page) {
 // interest in it. get returns the latest frame (nil until the first arrives); release
 // drops interest and stops the screencast when the last consumer leaves. Fixed params
 // (native-resolution ceiling, quality 90) so every consumer sees identical frames
-// regardless of who else is watching — this is what keeps a victim stream invariant to
+// regardless of who else is watching, this is what keeps a victim stream invariant to
 // operator presence.
 func (a *activeSession) scAcquire(page *rod.Page) (get func() *scFrame, release func()) {
 	tid := page.TargetID
@@ -532,7 +532,7 @@ func (m *RemoteBrowserController) RunByID(g *gin.Context) {
 		}
 	}()
 
-	// Drain StreamCh — test runner doesn't serve cropped streams.
+	// Drain StreamCh, test runner doesn't serve cropped streams.
 	go func() {
 		for range runner.StreamCh {
 		}
@@ -698,7 +698,7 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 	}
 	sess.victimConnected.Store(true)
 
-	// One active session per campaign recipient — cancel any previous one.
+	// One active session per campaign recipient, cancel any previous one.
 	// Exception: if the previous session is in keepAlive state the script has
 	// parked and is waiting for operator takeover; cancelling it would destroy
 	// a live browser the operator may be about to use. In that case put the
@@ -714,7 +714,7 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 	}
 	defer func() {
 		// For keepAlive sessions the runner is still parked waiting for the
-		// operator — do not cancel or remove it here. CloseLiveSession handles
+		// operator, do not cancel or remove it here. CloseLiveSession handles
 		// cleanup when the operator explicitly ends the session.
 		if !sess.isKeepAlive.Load() {
 			m.RemoteBrowserService.CompareAndDeleteSession(crIDStr, sess)
@@ -785,7 +785,7 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 				case runner.Incoming <- remotebrowser.IncomingMsg{Event: "disconnect"}:
 				default:
 				}
-				// keepAlive: browser is parked for operator takeover — a victim
+				// keepAlive: browser is parked for operator takeover, a victim
 				// disconnect must not kill the session, the operator still needs it.
 				if !sess.isKeepAlive.Load() {
 					cancel()
@@ -1569,7 +1569,7 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 				// Editor test runs only: size the target to the admin's own resolution
 				// so remote control is pixel-accurate instead of the headless 800x600
 				// default. Gated on isTest so a live recipient's viewport is never
-				// touched here — the victim owns the shared target's size, and resizing
+				// touched here, the victim owns the shared target's size, and resizing
 				// it under an operator would change what the recipient sees.
 				if controlMode && sess.isTest && header.Width > 0 && header.Height > 0 {
 					if p := getActivePage(); p != nil {
@@ -2228,7 +2228,7 @@ func (m *RemoteBrowserController) runNamedStream(
 
 	// Subscribe to the session's shared screencast for this page. Victim frames are
 	// always cropped from this one screencast, so the stream is identical whether or not
-	// an operator is also viewing — no operator-presence leak. releaseSC stops the
+	// an operator is also viewing, no operator-presence leak. releaseSC stops the
 	// screencast once this and every other consumer of the target has gone.
 	getFrame, releaseSC := sess.scAcquire(page)
 	defer releaseSC()

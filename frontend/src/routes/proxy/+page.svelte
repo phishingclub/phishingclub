@@ -55,7 +55,7 @@
 	};
 	let isSubmitting = false;
 
-	// cert state for custom TLS mode — populated by certChange event (visual mode) or yaml cert upload fields
+	// cert state for custom TLS mode, populated by certChange event (visual mode) or yaml cert upload fields
 	let globalTLSKey = '';
 	let globalTLSPem = '';
 
@@ -65,7 +65,7 @@
 		try {
 			// simple string check first to avoid parsing on every keystroke
 			if (!formValues.proxyConfig.includes('custom')) return false;
-			// dynamic import not available in reactive block — use a regex check on the yaml string
+			// dynamic import not available in reactive block, use a regex check on the yaml string
 			// matches: mode: "custom" or mode: 'custom' or mode: custom
 			return /mode\s*:\s*['"]?custom['"]?/.test(formValues.proxyConfig);
 		} catch {

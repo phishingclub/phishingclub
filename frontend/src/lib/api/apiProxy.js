@@ -18,7 +18,7 @@ const wrapSection = (section) =>
 			if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
 				return wrapSection(value);
 			}
-			// otherwise it is a method — wrap it with the response handler
+			// otherwise it is a method, wrap it with the response handler
 			return wrapMethod(value);
 		}
 	});

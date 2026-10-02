@@ -172,8 +172,8 @@
 		if (!ua) return '';
 		let os = '';
 		if (/Windows/.test(ua)) os = 'Windows';
-		else if (/Android/.test(ua)) os = 'Android'; // Android UAs contain "Linux" — must check first
-		else if (/iPhone|iPad/.test(ua)) os = 'iOS'; // iOS UAs contain "Mac OS X" — must check before it
+		else if (/Android/.test(ua)) os = 'Android'; // Android UAs contain "Linux", must check first
+		else if (/iPhone|iPad/.test(ua)) os = 'iOS'; // iOS UAs contain "Mac OS X", must check before it
 		else if (/Mac OS X/.test(ua)) os = 'macOS';
 		else if (/Linux/.test(ua)) os = 'Linux';
 		let browser = '';

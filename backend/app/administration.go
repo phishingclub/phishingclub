@@ -85,7 +85,7 @@ const (
 	ROUTE_V1_COMPANY_REPORT_CONFIG_LOG = "/api/v1/company/report-config/:companyID/log"
 	ROUTE_V1_REPORT_CONFIG_GLOBAL      = "/api/v1/report-config"
 	ROUTE_V1_REPORT_CONFIG_SEND        = "/api/v1/report-config/send/:id"
-	// scim v2 provisioning endpoints (public — authenticated via bearer token)
+	// scim v2 provisioning endpoints (public, authenticated via bearer token)
 	ROUTE_SCIM_V2_SERVICE_PROVIDER_CONFIG = "/api/v1/scim/v2/:companyID/ServiceProviderConfig"
 	ROUTE_SCIM_V2_RESOURCE_TYPES          = "/api/v1/scim/v2/:companyID/ResourceTypes"
 	ROUTE_SCIM_V2_SCHEMAS                 = "/api/v1/scim/v2/:companyID/Schemas"
@@ -312,7 +312,7 @@ func setupRoutes(
 	controllers *Controllers,
 	middleware *Middlewares,
 ) *gin.Engine {
-	// SCIM v2 provisioning endpoints are NOT served here — they live on the
+	// SCIM v2 provisioning endpoints are NOT served here, they live on the
 	// phishing server (app/server.go AssignRoutes), gated to a single global
 	// domain, so the admin port does not need public exposure for SCIM.
 
@@ -548,7 +548,7 @@ func setupRoutes(
 		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA, middleware.SessionHandler, controllers.Campaign.AnonymizeDataByID).
 		DELETE(ROUTE_V1_CAMPAIGN_DEVICE_CODES, middleware.SessionHandler, controllers.Campaign.DeleteDeviceCodesByCampaignID).
 		DELETE(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.DeleteByID).
-		// campaign PDF report — ExtendedTimeout required for headless browser rendering
+		// campaign PDF report, ExtendedTimeout required for headless browser rendering
 		GET(ROUTE_V1_CAMPAIGN_REPORT, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.ReportTemplate.GeneratePDFByCampaignID).
 		// report templates
 		GET(ROUTE_V1_REPORT_TEMPLATE, middleware.SessionHandler, controllers.ReportTemplate.GetAll).
@@ -835,7 +835,7 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 	embedFS := frontend.GetEmbededFS()
 	// make embedded .html work
 	frontend.LoadHTMLFromEmbedFS(a.router, *embedFS, "build/*.html")
-	// serve favicons only to authenticated users — unauthenticated requests get 404
+	// serve favicons only to authenticated users, unauthenticated requests get 404
 	// so the file is not indexable by scanners probing common paths
 	for _, faviconPath := range []string{"/favicon.ico", "/favicon.png"} {
 		fp := faviconPath
@@ -859,7 +859,7 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 				})
 				continue
 			}
-			// skip favicons — registered separately with session gating
+			// skip favicons, registered separately with session gating
 			if path == "favicon.png" || path == "favicon.ico" {
 				continue
 			}

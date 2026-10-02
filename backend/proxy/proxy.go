@@ -2811,7 +2811,7 @@ func (m *ProxyHandler) rewriteRuleMatchesRequest(rule service.ProxyServiceReplac
 	}
 	if rule.Path != "" {
 		if rule.PathRe == nil {
-			// path was set but failed to compile — skip rule safely
+			// path was set but failed to compile, skip rule safely
 			return false
 		}
 		if !rule.PathRe.MatchString(req.URL.Path) {
@@ -2889,7 +2889,7 @@ func (m *ProxyHandler) applyReplacementWithVariables(body []byte, replacement se
 	case "dom":
 		return m.applyDomReplacement(body, interpolatedReplacement, sessionID, contentType)
 	case "header":
-		// header engine operates directly on http.Header — it cannot be used in a body rewrite context.
+		// header engine operates directly on http.Header, it cannot be used in a body rewrite context.
 		// callers that handle headers (applyCustomResponseHeaderReplacementsWithVariables,
 		// applyCustomResponseHeaderReplacementsWithoutSession, applyEarlyRequestHeaderReplacements)
 		// intercept this engine before reaching here.
@@ -3840,7 +3840,7 @@ func (m *ProxyHandler) buildCampaignFlowRedirectURL(session *service.ProxySessio
 }
 
 // createCampaignInfoEvent saves captured data as a low-priority info event instead of a submit event.
-// The capture still participates in completion tracking and flow progression normally — only the
+// The capture still participates in completion tracking and flow progression normally, only the
 // saved event type differs.
 func (m *ProxyHandler) createCampaignInfoEvent(session *service.ProxySession, capturedData map[string]interface{}, req *http.Request, originalUserAgent string) {
 	if session.CampaignID == nil || session.CampaignRecipientID == nil {
@@ -4785,7 +4785,7 @@ func (m *ProxyHandler) checkAndServeEvasionPage(req *http.Request, reqCtx *Reque
 	}
 
 	// build the post-evasion redirect url using the start url as the source of truth for
-	// path and query params — the incoming request only has the campaign id param, not the
+	// path and query params, the incoming request only has the campaign id param, not the
 	// real start url params (client_id, redirect_uri etc.). apply rewrite_urls rules so the
 	// victim sees the friendly path and remapped param names, not the real ones.
 	var startPath string
@@ -4805,7 +4805,7 @@ func (m *ProxyHandler) checkAndServeEvasionPage(req *http.Request, reqCtx *Reque
 		startQuery = url.Values{}
 	}
 
-	// collect rewrite_urls rules — host-specific first, then global
+	// collect rewrite_urls rules, host-specific first, then global
 	var rewriteRules []service.ProxyServiceURLRewriteRule
 	if hostCfg, ok := reqCtx.ProxyConfig.Hosts[reqCtx.TargetDomain]; ok && hostCfg != nil {
 		rewriteRules = append(rewriteRules, hostCfg.RewriteURLs...)

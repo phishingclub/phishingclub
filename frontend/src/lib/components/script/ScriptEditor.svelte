@@ -156,7 +156,7 @@ declare const http: {
 	 * }
 	 *
 	 * @example
-	 * // capture from a response body with a regex — the whole JS RegExp API
+	 * // capture from a response body with a regex, the whole JS RegExp API
 	 * // works (match/matchAll/exec/replace/test); use numbered groups (m[1])
 	 * const res = http.fetch('https://api.example.test/login');
 	 * const m = res.body.match(/"csrf_token":"([A-Za-z0-9._-]+)"/);

@@ -1664,7 +1664,7 @@ func (s *Server) checkAndServePhishingPage(
 		// expects when the request arrives at the proxy.
 		urlParam := cTemplate.URLIdentifier.Name.MustGet()
 
-		// collect rewrite_urls rules for the start domain — host-specific first, then global
+		// collect rewrite_urls rules for the start domain, host-specific first, then global
 		var rewriteRules []service.ProxyServiceURLRewriteRule
 		if hostCfg, ok := parsedConfig.Hosts[startDomain]; ok && hostCfg != nil {
 			rewriteRules = append(rewriteRules, hostCfg.RewriteURLs...)

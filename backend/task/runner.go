@@ -218,7 +218,7 @@ func (d *Runner) PruneOrphanedRecipients(
 	ctx context.Context,
 	session *model.Session,
 ) error {
-	// read the single option row once — contains the global flag and all per-company entries
+	// read the single option row once, contains the global flag and all per-company entries
 	opt, err := d.OptionService.GetAutoPruneOptionInternal(ctx)
 	if err != nil {
 		d.Logger.Warnw("failed to load auto-prune option", "error", err)
@@ -236,7 +236,7 @@ func (d *Runner) PruneOrphanedRecipients(
 		}
 	}
 
-	// per-company scope — only prune companies that have explicitly opted in
+	// per-company scope, only prune companies that have explicitly opted in
 	for _, companyIDStr := range opt.Companies {
 		companyID, err := uuid.Parse(companyIDStr)
 		if err != nil {

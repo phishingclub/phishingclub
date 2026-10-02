@@ -288,7 +288,7 @@
 			}
 			liveSessions = map;
 		} catch {
-			// network error during poll — silently skip this tick
+			// network error during poll, silently skip this tick
 		}
 	};
 
@@ -1553,7 +1553,7 @@
 					const cookieValue = cookieData.value || cookieData.cookie_value || '';
 					const cookieDomain = cookieData.domain || cookieData.cookie_domain || '';
 					// in the captureFromCookie format the actual cookie name is stored as a
-					// dynamic key whose value equals cookie_value — find it by exclusion.
+					// dynamic key whose value equals cookie_value, find it by exclusion.
 					const knownKeys = new Set([
 						'capture_name',
 						'cookie_value',

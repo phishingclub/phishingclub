@@ -62,7 +62,7 @@ func setupCertMagic(
 				return nil
 			}
 			// allow on-demand ACME only for domains that use managed TLS (let's encrypt / acme).
-			// own_managed_tls and self_signed_tls domains must never trigger ACME acquisition —
+			// own_managed_tls and self_signed_tls domains must never trigger ACME acquisition,
 			// their certificates are provided manually or generated internally.
 			res := db.
 				Select("id").

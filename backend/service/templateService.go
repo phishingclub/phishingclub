@@ -906,7 +906,7 @@ func (t *Template) TemplateFuncsWithDeviceCode(
 ) template.FuncMap {
 	funcs := TemplateFuncs()
 	if t.MicrosoftDeviceCodeService == nil || *campaignID == uuid.Nil || *recipientID == uuid.Nil {
-		// device code service not wired or no real ids available (e.g. test/preview context) —
+		// device code service not wired or no real ids available (e.g. test/preview context),
 		// return the no-op stub so the template still renders with placeholder values
 		return funcs
 	}

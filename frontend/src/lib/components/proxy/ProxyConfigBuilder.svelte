@@ -669,7 +669,7 @@
 		configData = configData;
 	}
 
-	// url rewrite query param helpers — query is []{ find, replace }
+	// url rewrite query param helpers, query is []{ find, replace }
 	function addURLRewriteQueryParam(rule) {
 		rule.query = [...(rule.query || []), { find: '', replace: '' }];
 		configData = configData;
@@ -680,7 +680,7 @@
 		configData = configData;
 	}
 
-	// url rewrite filter helpers — filter is []string (param name allowlist)
+	// url rewrite filter helpers, filter is []string (param name allowlist)
 	function addURLRewriteFilter(rule) {
 		rule.filter = [...(rule.filter || []), ''];
 		configData = configData;

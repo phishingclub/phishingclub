@@ -512,8 +512,8 @@ func (r *Runner) Run(ctx context.Context) error {
 	vm := goja.New()
 
 	// Interrupt the JS VM on termination. Two cases:
-	//   DeadlineExceeded — real timeout: interrupt immediately.
-	//   Canceled         — either keepAlive() cancelled the script timeout to
+	//   DeadlineExceeded, real timeout: interrupt immediately.
+	//   Canceled        , either keepAlive() cancelled the script timeout to
 	//                      park the session, or the operator cancelled. Either
 	//                      way wait for the outer context so we only interrupt
 	//                      when the operator actually ends the session.
@@ -1054,16 +1054,16 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 			// Note: console.* are deliberately left native. Replacing them with noop
 			// functions (to suppress page logging) makes console.log.toString() non-native,
-			// which trips TamperedFunctions. The console is not captured anyway — we never
+			// which trips TamperedFunctions. The console is not captured anyway, we never
 			// enable the Runtime domain (see the opsec note in browser.go), so no page
 			// console output reaches the server regardless.
 		}
 
 		// Identity handling differs by mode:
-		//   local  — the UA is already set via the --user-agent launch flag above,
+		//   local , the UA is already set via the --user-agent launch flag above,
 		//            which keeps every context (including service workers) consistent
 		//            and preserves Chrome's native client hints. No CDP override here.
-		//   remote — no launch flag is possible, so align the main frame via CDP:
+		//   remote, no launch flag is possible, so align the main frame via CDP:
 		//            fetch the real UA, strip any "HeadlessChrome" token, and set a
 		//            matching platform and client-hint metadata.
 		if opts.Remote != "" {
@@ -1124,7 +1124,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			_, err := fn(goja.Undefined(), tmpSession)
 			if err != nil {
 				// If our own timeout context expired, return false instead of
-				// propagating — lets callers branch without try/catch.
+				// propagating, lets callers branch without try/catch.
 				if tCtx.Err() != nil {
 					return vm.ToValue(false)
 				}
@@ -1163,14 +1163,14 @@ func (r *Runner) Run(ctx context.Context) error {
 				Time: time.Now().UTC().Format(time.RFC3339Nano),
 			})
 			r.keepAliveActive.Store(true)
-			timeoutCancel() // release script timeout — operator controls lifetime now
+			timeoutCancel() // release script timeout, operator controls lifetime now
 			return goja.Undefined()
 		})
 
 		// Event-driven API: s.on(event, fn) + s.listen() + s.done()
 		// Built-in lifecycle events emitted by the server:
-		//   "disconnect" — victim WebSocket connection dropped
-		//   "navigate"   — main frame navigated; data: { url: string }
+		//   "disconnect", victim WebSocket connection dropped
+		//   "navigate"  , main frame navigated; data: { url: string }
 		handlers := map[string]goja.Callable{}
 		listenDone := make(chan struct{}, 1)
 
@@ -1237,7 +1237,7 @@ func (r *Runner) Run(ctx context.Context) error {
 			}
 		})
 
-		// s.stream(selector, name) — non-blocking; returns {stop()} to end the stream.
+		// s.stream(selector, name), non-blocking; returns {stop()} to end the stream.
 		// The caller (controller) watches StreamCh to start/stop cropped frame forwarding.
 		streamDebug := opts.Debug // capture bool, not struct field, to match RegisterBrowserBindings pattern
 		session.Set("stream", func(call goja.FunctionCall) goja.Value {
@@ -1658,7 +1658,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err != nil {
 		// errors.Is/As traverse goja.Exception.Unwrap(), which extracts the Go error
 		// stored in the "value" property of a GoError object. Do NOT use
-		// ex.Value().Export().(error) — that returns map[string]interface{} for JS
+		// ex.Value().Export().(error), that returns map[string]interface{} for JS
 		// objects and always fails the type assertion.
 		var stopErr scriptStopError
 		if errors.As(err, &stopErr) {
@@ -1667,7 +1667,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			// Check whether the *global* script timeout fired. If ctx.Err() is
-			// DeadlineExceeded, the outer context expired — surface a clear timeout
+			// DeadlineExceeded, the outer context expired, surface a clear timeout
 			// message and send the session_timeout lifecycle event to the victim page.
 			// Otherwise this is a per-operation timeout (withTimeout, queryTimeout).
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
