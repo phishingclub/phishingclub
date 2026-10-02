@@ -2320,12 +2320,18 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		}
 	}
 	allowDeny := []*model.AllowDeny{}
-	allowDenyIDs := []*uuid.UUID{}
+	// AllowDenyIDs stays unspecified unless the allow/deny association was
+	// preloaded. A scalar-only UpdateByID (notable event, close) reads a campaign
+	// without that preload and must leave the filter lists alone; a specified but
+	// empty value makes UpdateByID delete every join row.
+	var allowDenyIDs nullable.Nullable[[]*uuid.UUID]
 	if row.AllowDeny != nil {
+		ids := []*uuid.UUID{}
 		for _, ad := range row.AllowDeny {
 			allowDeny = append(allowDeny, ToAllowDeny(ad))
-			allowDenyIDs = append(allowDenyIDs, ad.ID)
+			ids = append(ids, ad.ID)
 		}
+		allowDenyIDs.Set(ids)
 	}
 	var denyPage *model.Page
 	if row.DenyPage != nil {
@@ -2450,7 +2456,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		RecipientGroups:     recipientGroups,
 		RecipientGroupIDs:   nullable.NewNullableWithValue(recipientGroupIDs),
 		AllowDeny:           allowDeny,
-		AllowDenyIDs:        nullable.NewNullableWithValue(allowDenyIDs),
+		AllowDenyIDs:        allowDenyIDs,
 		DenyPage:            denyPage,
 		DenyPageID:          denyPageID,
 		EvasionPage:         evasionPage,
