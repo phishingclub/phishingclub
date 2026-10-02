@@ -338,7 +338,7 @@
 <HeadTitle title="Pages" />
 <main>
 	<div class="flex justify-between">
-		<Headline>Pages</Headline>
+		<Headline docSlug="pages">Pages</Headline>
 		<AutoRefresh
 			isLoading={false}
 			onRefresh={() => {

@@ -134,7 +134,7 @@
 
 <HeadTitle title="companies" />
 <main>
-	<Headline>Companies</Headline>
+	<Headline docSlug="settings">Companies</Headline>
 	<BigButton on:click={openCreateModal}>New company</BigButton>
 	<BigButton on:click={openExportSharedModal}>Export shared</BigButton>
 	<Table

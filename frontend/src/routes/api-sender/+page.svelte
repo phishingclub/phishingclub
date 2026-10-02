@@ -364,7 +364,7 @@
 
 <HeadTitle title="API Senders" />
 <main>
-	<Headline>API Senders</Headline>
+	<Headline docSlug="api-senders">API Senders</Headline>
 	<BigButton on:click={openCreateModal}>New API sender</BigButton>
 	<BulkActionBar
 		count={$selection.size}

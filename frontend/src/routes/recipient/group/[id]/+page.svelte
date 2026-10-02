@@ -401,7 +401,7 @@
 
 <HeadTitle title="Group ({groupValues.name}" />
 <main>
-	<Headline>Group Recipients</Headline>
+	<Headline docSlug="groups">Group Recipients</Headline>
 	<SubHeadline>
 		{#if groupValues.isDynamic}
 			<DynamicLabel />

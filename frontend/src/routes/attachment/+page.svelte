@@ -294,7 +294,7 @@
 
 <HeadTitle title="Attachments" />
 <main>
-	<Headline>Attachments</Headline>
+	<Headline docSlug="attachments">Attachments</Headline>
 	<BigButton on:click={openCreateModal}>New attachment</BigButton>
 	<BulkActionBar
 		count={$selection.size}

@@ -518,7 +518,7 @@
 
 <HeadTitle title="OAuth" />
 <main>
-	<Headline>OAuth</Headline>
+	<Headline docSlug="oauth-providers">OAuth</Headline>
 	<div class="flex gap-2 mb-4">
 		<BigButton on:click={openCreateModal}>New OAuth</BigButton>
 		<BigButton on:click={openImportModal}>Import Token</BigButton>

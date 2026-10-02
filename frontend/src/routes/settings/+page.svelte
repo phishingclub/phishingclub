@@ -66,7 +66,7 @@
 
 <HeadTitle title="Settings" />
 <main class="pb-8">
-	<Headline>Settings</Headline>
+	<Headline docSlug="settings">Settings</Headline>
 
 	<nav class="mt-4 mb-6 border-b border-gray-200 dark:border-gray-700">
 		<div class="flex items-center justify-between">

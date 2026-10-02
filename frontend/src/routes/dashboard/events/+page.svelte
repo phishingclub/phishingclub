@@ -126,7 +126,7 @@
 
 <HeadTitle title="Dashboard - Events" />
 <main>
-	<Headline>Dashboard</Headline>
+	<Headline docSlug="dashboard">Dashboard</Headline>
 
 	<DashboardNav />
 

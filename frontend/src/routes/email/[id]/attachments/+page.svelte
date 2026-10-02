@@ -206,7 +206,7 @@
 
 <HeadTitle title="Email attachment ({emailName})" />
 <main>
-	<Headline>Attachments: {emailName}</Headline>
+	<Headline docSlug="attachments">Attachments: {emailName}</Headline>
 	<BigButton on:click={openModal}>Add attachement</BigButton>
 	<Table
 		columns={['Name', 'Description', 'Filename', { column: 'Inline', alignText: 'center' }]}

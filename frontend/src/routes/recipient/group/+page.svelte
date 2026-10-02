@@ -368,7 +368,7 @@
 
 <HeadTitle title="Groups" />
 <main>
-	<Headline>Groups</Headline>
+	<Headline docSlug="groups">Groups</Headline>
 	<div class="flex gap-3">
 		<BigButton on:click={openCreateModal}>New group</BigButton>
 		<BigButton on:click={openDynamicCreateModal}>New dynamic group</BigButton>

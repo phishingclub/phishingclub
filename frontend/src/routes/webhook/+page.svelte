@@ -306,7 +306,7 @@
 
 <HeadTitle title="Webhooks" />
 <main>
-	<Headline>Webhooks</Headline>
+	<Headline docSlug="webhooks">Webhooks</Headline>
 	<BigButton on:click={openCreateModal}>New webhook</BigButton>
 	<BulkActionBar
 		count={$selection.size}

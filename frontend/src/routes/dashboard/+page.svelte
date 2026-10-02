@@ -198,7 +198,7 @@
 
 <HeadTitle title="Dashboard" />
 <main>
-	<Headline>Dashboard</Headline>
+	<Headline docSlug="dashboard">Dashboard</Headline>
 
 	<DashboardNav />
 

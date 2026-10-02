@@ -457,7 +457,7 @@
 
 <HeadTitle title="Filter" />
 <main>
-	<Headline>Filters</Headline>
+	<Headline docSlug="filtering">Filters</Headline>
 	<BigButton on:click={openCreateModal}>New filter</BigButton>
 	<BulkActionBar
 		count={$selection.size}

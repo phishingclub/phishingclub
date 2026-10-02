@@ -668,7 +668,7 @@ portal.example.com:
 <main>
 	<div class="flex justify-between">
 		<div class="flex items-center gap-2">
-			<Headline>Proxies</Headline>
+			<Headline docSlug="proxies">Proxies</Headline>
 		</div>
 		<AutoRefresh
 			isLoading={false}

@@ -1641,7 +1641,7 @@
 
 <main>
 	<div class="flex justify-between">
-		<Headline>Campaigns</Headline>
+		<Headline docSlug="campaigns">Campaigns</Headline>
 		<div class="flex gap-4 items-center">
 			<CheckboxField
 				bind:value={includeTestCampaigns}

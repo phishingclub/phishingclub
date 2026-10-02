@@ -267,7 +267,7 @@
 
 <HeadTitle title="Scripts" />
 <main>
-	<Headline>Scripts</Headline>
+	<Headline docSlug="scripts">Scripts</Headline>
 
 	{#if featureDisabled}
 		<div class="mt-6 max-w-xl rounded-lg border border-slate-700 bg-slate-800/50 px-6 py-8">

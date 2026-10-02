@@ -450,7 +450,7 @@
 
 <HeadTitle title="Recipients" />
 <section>
-	<Headline>Recipients</Headline>
+	<Headline docSlug="recipients">Recipients</Headline>
 
 	<div class="flex gap-3">
 		<BigButton on:click={openCreateModal}>New recipient</BigButton>

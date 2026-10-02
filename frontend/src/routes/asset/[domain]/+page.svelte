@@ -446,7 +446,7 @@
 
 <HeadTitle title="Assets ({isCompanyFolder ? 'company' : $page.params.domain})" />
 <main>
-	<Headline>
+	<Headline docSlug="assets">
 		{#if isCompanyFolder}
 			Company assets
 		{:else}

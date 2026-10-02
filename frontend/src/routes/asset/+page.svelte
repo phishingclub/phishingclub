@@ -53,7 +53,7 @@
 
 <HeadTitle title="Assets" />
 <main>
-	<Headline>Asset by domains</Headline>
+	<Headline docSlug="assets">Asset by domains</Headline>
 	{#if !contextCompanyID}
 		<BigButton
 			on:click={() => {

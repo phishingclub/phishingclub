@@ -118,7 +118,7 @@
 <HeadTitle title="Orphaned Recipients" />
 
 <section>
-	<Headline>Orphaned Recipients</Headline>
+	<Headline docSlug="recipients">Orphaned Recipients</Headline>
 
 	<div class="flex gap-4 mb-4">
 		<BigButton on:click={() => goto('/recipient/')}>View recipients</BigButton>

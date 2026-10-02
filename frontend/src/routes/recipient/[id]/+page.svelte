@@ -142,7 +142,7 @@
 <HeadTitle title="Recipients" />
 <section>
 	<div class="flex justify-between">
-		<Headline>
+		<Headline docSlug="recipients">
 			<span class="select-text">{recipient.email}</span>
 		</Headline>
 		<AutoRefresh

@@ -658,7 +658,7 @@
 <HeadTitle title="Campaigns templates" />
 
 <main>
-	<Headline>Campaigns templates</Headline>
+	<Headline docSlug="templates">Campaigns templates</Headline>
 	<BigButton on:click={openCreateModal}>New template</BigButton>
 
 	<BulkActionBar
