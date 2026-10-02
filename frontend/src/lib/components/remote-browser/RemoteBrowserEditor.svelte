@@ -1340,7 +1340,7 @@ declare var Infinity: number;
 							>
 							<div class="flex flex-col">
 								<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200 text-sm">
-									Flags <span class="font-normal text-xs">(one per line — <code class="font-mono">--flag</code> adds/overrides, <code class="font-mono">!--flag</code> removes)</span>
+									Flags <span class="font-normal text-xs">(one per line, <code class="font-mono">--flag</code> adds/overrides, <code class="font-mono">!--flag</code> removes)</span>
 								</p>
 								<textarea
 									bind:value={cfgExtraFlags}

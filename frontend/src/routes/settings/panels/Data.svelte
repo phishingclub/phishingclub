@@ -429,7 +429,7 @@
 									{#each importResult.assets_errors_list as err}
 										<li>
 											<strong>{err.type}:</strong>
-											{err.name} — {err.message}
+											{err.name}: {err.message}
 										</li>
 									{/each}
 								</ul>
@@ -477,7 +477,7 @@
 												{#each importResult.pages_errors_list as err}
 													<li>
 														<strong>{err.type}:</strong>
-														{err.name} — {err.message}
+														{err.name}: {err.message}
 													</li>
 												{/each}
 											</ul>
@@ -518,7 +518,7 @@
 												{#each importResult.emails_errors_list as err}
 													<li>
 														<strong>{err.type}:</strong>
-														{err.name} — {err.message}
+														{err.name}: {err.message}
 													</li>
 												{/each}
 											</ul>
@@ -537,7 +537,7 @@
 						{#each importResult.errors as err}
 							<li>
 								<strong>{err.type}:</strong>
-								{err.name} — {err.message}
+								{err.name}: {err.message}
 							</li>
 						{/each}
 					</ul>

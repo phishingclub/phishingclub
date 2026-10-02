@@ -643,7 +643,7 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'action: "set"',
 				documentation:
-					'DOM action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove — Header action: set, add, remove',
+					'DOM action: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove. Header action: set, add, remove',
 				range
 			},
 			{
@@ -1092,7 +1092,7 @@ export class ProxyYamlCompletionProvider {
 				label: 'dom',
 				kind: this.monaco.languages.CompletionItemKind.Value,
 				insertText: 'dom',
-				documentation: 'DOM manipulation — modify HTML elements via CSS selectors',
+				documentation: 'DOM manipulation: modify HTML elements via CSS selectors',
 				range
 			}
 		];
@@ -1103,7 +1103,7 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Value,
 				insertText: 'status',
 				documentation:
-					'Diagnostic only — on visiting the rule path, report which required captures have not fired yet. Captures no data and does not affect the flow',
+					'Diagnostic only: on visiting the rule path, report which required captures have not fired yet. Captures no data and does not affect the flow',
 				range
 			}
 		];
@@ -1268,7 +1268,7 @@ export class ProxyYamlCompletionProvider {
 			method: 'HTTP method to match (GET, POST, PUT, DELETE, etc.)',
 			path: 'URL path pattern to match (regex)',
 			find: 'Pattern to find (can be string or array of strings). Meaning depends on engine: regex pattern (regex), header name (header), cookie name (cookie), JSON path (json), form field name (form/urlencoded/form-data/multipart), CSS selector (dom)',
-			from: 'Location to search: request_body, request_header, response_body, response_header, any — for capture: cookie also valid (deprecated, use engine instead)',
+			from: 'Location to search: request_body, request_header, response_body, response_header, any. For capture: cookie also valid (deprecated, use engine instead)',
 			required: 'Whether this capture is required for page and capture completion',
 			event:
 				'Event type to save when data is captured: "submit" (default, saved as submitted-data event) or "info" (saved as low-priority info event)',
@@ -1281,9 +1281,9 @@ export class ProxyYamlCompletionProvider {
 			replace:
 				'Replacement value: replacement text (regex engine), value for dom actions, or new header value (header engine)',
 			engine:
-				'Engine type - For capture: regex (default), header, cookie, json, form/urlencoded/formdata/multipart. For rewrite: regex (default), dom (HTML manipulation), header (set/add/remove a header directly)',
+				'Engine type. For capture: regex (default), header, cookie, json, form/urlencoded/formdata/multipart. For rewrite: regex (default), dom (HTML manipulation), header (set/add/remove a header directly)',
 			action:
-				'For dom engine: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove — For header engine: set (overwrite), add (append), remove (delete)',
+				'For dom engine: setText, setHtml, setAttr, removeAttr, addClass, removeClass, remove. For header engine: set (overwrite), add (append), remove (delete)',
 			target:
 				'Target matching (dom engine only): "first", "last", "all" (default), "1,3,5" (specific), "2-4" (range)',
 			to: 'Target phishing domain for this original domain',

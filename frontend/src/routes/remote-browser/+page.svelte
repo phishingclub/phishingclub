@@ -306,7 +306,7 @@ s.keepAlive();
 				To enable it, set <code class="text-slate-200 bg-slate-700 px-1 rounded">enabled: true</code
 				>
 				in the <code class="text-slate-200 bg-slate-700 px-1 rounded">remote_browser</code> block of
-				<code class="text-slate-200 bg-slate-700 px-1 rounded">config.json</code> and retart the service.
+				<code class="text-slate-200 bg-slate-700 px-1 rounded">config.json</code> and restart the service.
 			</p>
 			<a
 				href="https://phishing.club/guide/remote-browser/#enabling"

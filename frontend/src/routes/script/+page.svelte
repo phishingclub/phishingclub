@@ -274,7 +274,7 @@
 			<p class="mb-1 text-sm font-semibold text-white">Scripts are not enabled</p>
 			<p class="mb-3 text-sm text-slate-400">
 				This feature is disabled by default for security reasons. When enabled, any operator with
-				access can write scripts that run on the server when campaign events fire — including
+				access can write scripts that run on the server when campaign events fire, including
 				making outbound HTTP requests. Only enable it on instances where every operator is trusted
 				as a server admin.
 			</p>

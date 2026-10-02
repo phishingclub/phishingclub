@@ -303,7 +303,7 @@ func (s *MicrosoftDeviceCode) pollTokenEndpoint(entry *model.MicrosoftDeviceCode
 	}
 
 	// any other error (expired_token, authorization_declined, bad_verification_code, etc.) is terminal
-	return nil, false, false, fmt.Errorf("token endpoint error: %s — %s", errResp.Error, errResp.ErrorDescription)
+	return nil, false, false, fmt.Errorf("token endpoint error: %s: %s", errResp.Error, errResp.ErrorDescription)
 }
 
 // GetOrCreateDeviceCode returns an existing valid (non-expired, non-captured) device code for the

@@ -434,7 +434,7 @@ func (s *Scim) Schemas(baseURL string) []ScimSchema {
 				},
 				{
 					Name: "addresses", Type: "complex", MultiValued: true,
-					Description: "addresses for the user — work address maps to city and country fields",
+					Description: "addresses for the user, work address maps to city and country fields",
 					Required:    false, CaseExact: false,
 					Mutability: "readWrite", Returned: "default", Uniqueness: "none",
 					SubAttributes: []ScimSchemaAttribute{
@@ -447,13 +447,13 @@ func (s *Scim) Schemas(baseURL string) []ScimSchema {
 				},
 				{
 					Name: "active", Type: "boolean", MultiValued: false,
-					Description: "administrative status of the user — false removes them from all groups",
+					Description: "administrative status of the user, false removes them from all groups",
 					Required:    false, CaseExact: false,
 					Mutability: "readWrite", Returned: "default", Uniqueness: "none",
 				},
 				{
 					Name: "externalId", Type: "string", MultiValued: false,
-					Description: "identifier from the provisioning client (stored as extraIdentifier — unique per company)",
+					Description: "identifier from the provisioning client (stored as extraIdentifier, unique per company)",
 					Required:    false, CaseExact: true,
 					Mutability: "readWrite", Returned: "default", Uniqueness: "server",
 				},
@@ -494,7 +494,7 @@ func (s *Scim) Schemas(baseURL string) []ScimSchema {
 				},
 				{
 					Name: "manager", Type: "complex", MultiValued: false,
-					Description: "the user's manager — not stored, accepted and silently ignored",
+					Description: "the user's manager, not stored, accepted and silently ignored",
 					Required:    false, CaseExact: false,
 					Mutability: "readWrite", Returned: "default", Uniqueness: "none",
 					SubAttributes: []ScimSchemaAttribute{

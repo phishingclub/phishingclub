@@ -2517,7 +2517,7 @@
 															</div>
 														{/if}
 														<span class="form-hint"
-															>allowlist of query parameters to keep — if empty, all parameters are
+															>allowlist of query parameters to keep. If empty, all parameters are
 															forwarded</span
 														>
 													</div>
@@ -3459,7 +3459,7 @@
 														</div>
 													{/if}
 													<span class="form-hint"
-														>allowlist of query parameters to keep — if empty, all parameters are
+														>allowlist of query parameters to keep. If empty, all parameters are
 														forwarded</span
 													>
 												</div>

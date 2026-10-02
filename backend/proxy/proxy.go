@@ -2893,7 +2893,7 @@ func (m *ProxyHandler) applyReplacementWithVariables(body []byte, replacement se
 		// callers that handle headers (applyCustomResponseHeaderReplacementsWithVariables,
 		// applyCustomResponseHeaderReplacementsWithoutSession, applyEarlyRequestHeaderReplacements)
 		// intercept this engine before reaching here.
-		m.logger.Errorw("header engine used in a non-header rewrite context — use from: request_header or response_header", "sessionID", sessionID, "rule", replacement.Name)
+		m.logger.Errorw("header engine used in a non-header rewrite context, use from: request_header or response_header", "sessionID", sessionID, "rule", replacement.Name)
 		return body
 	default:
 		m.logger.Errorw("unsupported replacement engine", "engine", engine, "sessionID", sessionID)

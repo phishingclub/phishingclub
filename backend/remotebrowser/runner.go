@@ -343,7 +343,7 @@ var knownGoErrors = []struct {
 	substr  string
 	message string
 }{
-	{"connection refused", "browser connection refused — is Chrome running?"},
+	{"connection refused", "browser connection refused, is Chrome running?"},
 	{"use of closed network connection", "browser connection closed unexpectedly"},
 	{"i/o timeout", "browser CDP connection timed out"},
 	{"EOF", "browser disconnected unexpectedly"},
