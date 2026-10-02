@@ -13,6 +13,7 @@
 - Added ASN look up tool
 - Added change of campaign trend graph type when over 60 campaigns in view
 - Updated Remote Browser default template
+- Fix filters deleted during scheduling update
 - Fix modal text is now globally selectable
 - Fix message-id was leaking internals
 - Fix added implicit TLS on SMTP when using port 465
