@@ -28,6 +28,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
+	import TextField from '$lib/components/TextField.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
@@ -72,6 +73,23 @@
 	const tableImportParams = newTableParams({ sortBy: 'email' });
 	let selectedRecipientsImportPaginatedChunk = [];
 	let isImportModalVisible = false;
+
+	// create recipient
+	let isCreateRecipientModalVisible = false;
+	let createRecipientForm = null;
+	let createRecipientError = '';
+	let createRecipientValues = {
+		email: '',
+		phone: '',
+		extraIdentifier: '',
+		firstName: '',
+		lastName: '',
+		position: '',
+		department: '',
+		city: '',
+		country: '',
+		misc: ''
+	};
 
 	// local state
 	let isAddRecipientModalVisible = false;
@@ -369,6 +387,65 @@
 		refreshImportsPaginated();
 	};
 
+	const onClickCreateRecipient = async () => {
+		try {
+			isSubmitting = true;
+			const res = await api.recipient.create({
+				email: createRecipientValues.email,
+				phone: createRecipientValues.phone,
+				extraIdentifier: createRecipientValues.extraIdentifier,
+				firstName: createRecipientValues.firstName,
+				lastName: createRecipientValues.lastName,
+				position: createRecipientValues.position,
+				department: createRecipientValues.department,
+				city: createRecipientValues.city,
+				country: createRecipientValues.country,
+				misc: createRecipientValues.misc,
+				companyID: contextCompanyID
+			});
+			if (!res.success) {
+				createRecipientError = res.error;
+				return;
+			}
+			const addRes = await api.recipient.addToGroup($page.params.id, [res.data.id]);
+			if (!addRes.success) {
+				createRecipientError = addRes.error;
+				return;
+			}
+			addToast('Recipient created and added to group', 'Success');
+			refreshRecipients();
+			closeCreateRecipientModal();
+		} catch (err) {
+			addToast('Failed to create recipient', 'Error');
+			console.error('failed to create recipient', err);
+		} finally {
+			isSubmitting = false;
+		}
+	};
+
+	const openCreateRecipientModal = () => {
+		createRecipientError = '';
+		isCreateRecipientModalVisible = true;
+	};
+
+	const closeCreateRecipientModal = () => {
+		isCreateRecipientModalVisible = false;
+		createRecipientError = '';
+		createRecipientValues = {
+			email: '',
+			phone: '',
+			extraIdentifier: '',
+			firstName: '',
+			lastName: '',
+			position: '',
+			department: '',
+			city: '',
+			country: '',
+			misc: ''
+		};
+		createRecipientForm.reset();
+	};
+
 	const openAddRecipientsModal = () => {
 		isAddRecipientModalVisible = true;
 	};
@@ -422,6 +499,10 @@
 			are included automatically.
 		</p>
 	{:else}
+		<BigButton
+			on:click={openCreateRecipientModal}
+			{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>New Recipient</BigButton
+		>
 		<BigButton
 			on:click={openAddRecipientsModal}
 			{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Add Recipients</BigButton
@@ -510,6 +591,100 @@
 		{/each}
 	</Table>
 
+	<Modal
+		headerText={'New recipient'}
+		visible={isCreateRecipientModalVisible}
+		onClose={closeCreateRecipientModal}
+		{isSubmitting}
+	>
+		<FormGrid
+			on:submit={onClickCreateRecipient}
+			bind:bindTo={createRecipientForm}
+			{isSubmitting}
+		>
+			<FormColumns>
+				<FormColumn>
+					<TextField
+						required
+						minLength={1}
+						maxLength={255}
+						type="email"
+						bind:value={createRecipientValues.email}
+						placeholder="bob@example.test">Email</TextField
+					>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.firstName}
+						placeholder="Bob"
+						optional>First name</TextField
+					>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.lastName}
+						placeholder="Bob"
+						optional>Last name</TextField
+					>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.phone}
+						placeholder="+45 555 555 5555"
+						optional>Phone</TextField
+					>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.extraIdentifier}
+						placeholder="4982347283947"
+						optional
+						toolTipText="Optional extra identifier">Extra identifier</TextField
+					>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.position}
+						placeholder="CEO"
+						optional>Position</TextField
+					>
+				</FormColumn>
+				<FormColumn>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.department}
+						placeholder="Sales"
+						optional>Department</TextField
+					>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.city}
+						optional
+						placeholder="Copenhagen">City</TextField
+					>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.country}
+						optional
+						placeholder="Denmark">Country</TextField
+					>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.misc}
+						optional
+						placeholder="VIP"
+						toolTipText="Any extra information">Miscallaneous</TextField
+					>
+				</FormColumn>
+			</FormColumns>
+			<FormError message={createRecipientError} />
+			<FormFooter closeModal={closeCreateRecipientModal} {isSubmitting} />
+		</FormGrid>
+	</Modal>
 	<Modal
 		headerText={'Add recipients'}
 		visible={isAddRecipientModalVisible}
