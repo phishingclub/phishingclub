@@ -250,7 +250,7 @@ func (c *Campaign) Validate() error {
 				return validate.WrapErrorWithField(errors.New("anonymize at must be after close date"), "AnonymizeAt")
 			}
 		}
-		if v, err := c.SendEndAt.Get(); err != nil {
+		if v, err := c.SendEndAt.Get(); err == nil {
 			if anonymizeAt.Before(v) {
 				return validate.WrapErrorWithField(errors.New("anonymize at must be after end date"), "AnonymizeAt")
 			}
