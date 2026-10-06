@@ -207,6 +207,9 @@ const (
 	ROUTE_V1_ASSET_DOMAIN_CONTEXT = "/api/v1/asset/domain/:domain"
 	ROUTE_V1_ASSET_GLOBAL_CONTEXT = "/api/v1/asset/domain/"
 	ROUTE_V1_ASSET_DOMAIN_VIEW    = "/api/v1/asset/view/domain/:domain/*path"
+	ROUTE_V1_ASSET_ID_CONTENT     = "/api/v1/asset/:id/content"
+	ROUTE_V1_ASSET_ID_MOVE        = "/api/v1/asset/:id/move"
+	ROUTE_V1_ASSET_ID_FILE        = "/api/v1/asset/:id/file"
 	// attachments
 	ROUTE_V1_ATTACHMENT                 = "/api/v1/attachment"
 	ROUTE_V1_ATTACHMENT_ID              = "/api/v1/attachment/:id"
@@ -568,6 +571,10 @@ func setupRoutes(
 		GET(ROUTE_V1_ASSET_DOMAIN_VIEW, middleware.SessionHandler, controllers.Asset.GetContentByID).
 		GET(ROUTE_V1_ASSET_ID, middleware.SessionHandler, controllers.Asset.GetByID).
 		PATCH(ROUTE_V1_ASSET_ID, middleware.SessionHandler, controllers.Asset.UpdateByID).
+		GET(ROUTE_V1_ASSET_ID_CONTENT, middleware.SessionHandler, controllers.Asset.GetEditableContentByID).
+		PUT(ROUTE_V1_ASSET_ID_CONTENT, middleware.SessionHandler, controllers.Asset.SaveContentByID).
+		PATCH(ROUTE_V1_ASSET_ID_MOVE, middleware.SessionHandler, controllers.Asset.MoveByID).
+		POST(ROUTE_V1_ASSET_ID_FILE, middleware.SessionHandler, controllers.Asset.ReplaceFileByID).
 		GET(ROUTE_V1_ASSET_DOMAIN_CONTEXT, middleware.SessionHandler, controllers.Asset.GetAllForContext).
 		GET(ROUTE_V1_ASSET_GLOBAL_CONTEXT, middleware.SessionHandler, controllers.Asset.GetAllForContext).
 		POST(ROUTE_V1_ASSET, middleware.SessionHandler, controllers.Asset.Create).

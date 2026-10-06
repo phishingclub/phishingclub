@@ -130,6 +130,12 @@
 		/* @ts-ignore - editorOptions is not complete */
 		editor = monaco.editor.create(editorContainer, editorOptions);
 
+		// Ctrl/Cmd+S saves by submitting the surrounding form, so the editor's usual
+		// save shortcut maps to the page's save action.
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+			editorContainer?.closest('form')?.requestSubmit();
+		});
+
 		// vim mode will be initialized by reactive statement if needed
 
 		// Update value when editor content changes

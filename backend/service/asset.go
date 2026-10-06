@@ -1,10 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-errors/errors"
 
@@ -21,6 +25,31 @@ import (
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
 )
+
+// textEditableExtensions are the file extensions whose content can be loaded
+// into the asset editor and saved back as UTF-8 text.
+var textEditableExtensions = map[string]bool{
+	".html":  true,
+	".htm":   true,
+	".xhtml": true,
+	".txt":   true,
+	".css":   true,
+	".js":    true,
+	".mjs":   true,
+	".json":  true,
+	".xml":   true,
+	".svg":   true,
+	".md":    true,
+	".csv":   true,
+	".yml":   true,
+	".yaml":  true,
+}
+
+// isTextEditablePath reports whether a path points at a file that can be
+// edited as text, based on its extension.
+func isTextEditablePath(p string) bool {
+	return textEditableExtensions[strings.ToLower(filepath.Ext(p))]
+}
 
 // Asset is a Asset service
 type Asset struct {
@@ -806,6 +835,348 @@ func (a *Asset) DeleteAllByDomainID(
 			return err
 		}
 	}
+	a.AuditLogAuthorized(ae)
+	return nil
+}
+
+// openContextRoot opens a root confined to the folder the asset is stored in.
+// The caller is responsible for closing both returned roots.
+func (a *Asset) openContextRoot(
+	ctx context.Context,
+	asset *model.Asset,
+) (*os.Root, *os.Root, error) {
+	domainContext, err := a.assetContextFolder(ctx, asset)
+	if err != nil {
+		return nil, nil, err
+	}
+	root, err := os.OpenRoot(a.RootFolder)
+	if err != nil {
+		a.Logger.Debugw("failed to open root folder", "error", err)
+		return nil, nil, err
+	}
+	contextRoot, err := root.OpenRoot(domainContext)
+	if err != nil {
+		root.Close()
+		a.Logger.Debugw("failed to open context", "error", err)
+		return nil, nil, err
+	}
+	return root, contextRoot, nil
+}
+
+// GetContentByID returns an asset's file content and whether it can be edited
+// as text. Content is read through a root confined to the asset folder.
+func (a *Asset) GetContentByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	maxBytes int64,
+) ([]byte, bool, error) {
+	ae := NewAuditEvent("Asset.GetContentById", session)
+	ae.Details["id"] = id.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		a.LogAuthError(err)
+		return nil, false, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		a.AuditLogNotAuthorized(ae)
+		return nil, false, errs.ErrAuthorizationFailed
+	}
+	// get the asset
+	asset, err := a.AssetRepository.GetByID(ctx, id)
+	if err != nil {
+		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
+		return nil, false, errs.Wrap(err)
+	}
+	p, err := asset.Path.Get()
+	if err != nil {
+		a.Logger.Debugw("failed to get path", "error", err)
+		return nil, false, err
+	}
+	root, contextRoot, err := a.openContextRoot(ctx, asset)
+	if err != nil {
+		return nil, false, err
+	}
+	defer root.Close()
+	defer contextRoot.Close()
+	f, err := contextRoot.Open(p.String())
+	if err != nil {
+		a.Logger.Debugw("failed to open asset file", "error", err)
+		return nil, false, err
+	}
+	defer f.Close()
+	// refuse to load a file larger than the limit so a huge asset is not read into
+	// memory (and base64 inflated) just to answer an edit request.
+	if maxBytes > 0 {
+		if info, serr := f.Stat(); serr == nil && info.Size() > maxBytes {
+			return nil, false, errs.NewValidationError(fmt.Errorf("file is too large to edit"))
+		}
+	}
+	// bound the read as a safeguard even if the Stat above was skipped or lied
+	var reader io.Reader = f
+	if maxBytes > 0 {
+		reader = io.LimitReader(f, maxBytes)
+	}
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		a.Logger.Errorw("failed to read asset file", "error", err)
+		return nil, false, err
+	}
+	editable := isTextEditablePath(p.String()) && utf8.Valid(content)
+	// no audit on read
+	return content, editable, nil
+}
+
+// SaveContentByID overwrites an existing text asset's file content. Only UTF-8
+// text files with an editable extension can be saved this way.
+func (a *Asset) SaveContentByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	content []byte,
+) error {
+	ae := NewAuditEvent("Asset.SaveContentById", session)
+	ae.Details["id"] = id.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		a.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		a.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// get the asset
+	asset, err := a.AssetRepository.GetByID(ctx, id)
+	if err != nil {
+		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
+		return err
+	}
+	p, err := asset.Path.Get()
+	if err != nil {
+		a.Logger.Debugw("failed to get path", "error", err)
+		return err
+	}
+	// only editable text files can be written through the editor
+	if !isTextEditablePath(p.String()) {
+		return errs.NewValidationError(fmt.Errorf("file is not an editable text file"))
+	}
+	if !utf8.Valid(content) {
+		return errs.NewValidationError(fmt.Errorf("content is not valid UTF-8 text"))
+	}
+	root, contextRoot, err := a.openContextRoot(ctx, asset)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	defer contextRoot.Close()
+	// the file must already exist, editing never creates a new asset
+	if _, err := contextRoot.Stat(p.String()); err != nil {
+		a.Logger.Debugw("asset file not found", "path", p.String(), "error", err)
+		return err
+	}
+	if err := a.FileService.UploadFile(contextRoot, p.String(), bytes.NewBuffer(content), true); err != nil {
+		a.Logger.Errorw("failed to write asset content", "error", err)
+		return err
+	}
+	// bump updated_at
+	if err := a.AssetRepository.UpdateByID(ctx, id, &model.Asset{}); err != nil {
+		a.Logger.Errorw("failed to update asset timestamp", "error", err)
+		return err
+	}
+	ae.Details["path"] = p.String()
+	a.AuditLogAuthorized(ae)
+	return nil
+}
+
+// MoveByID renames or moves an asset to a new path within its current context
+// folder. It does not change the asset owner (domain or company).
+func (a *Asset) MoveByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	newPath nullable.Nullable[vo.RelativeFilePath],
+) error {
+	ae := NewAuditEvent("Asset.MoveById", session)
+	ae.Details["id"] = id.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		a.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		a.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// get the asset
+	asset, err := a.AssetRepository.GetByID(ctx, id)
+	if err != nil {
+		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
+		return err
+	}
+	oldPath, err := asset.Path.Get()
+	if err != nil {
+		a.Logger.Debugw("failed to get path", "error", err)
+		return err
+	}
+	np, err := newPath.Get()
+	if err != nil {
+		return validate.WrapErrorWithField(errs.NewValidationError(err), "Path")
+	}
+	// ensure the destination path is safe to use
+	cleaned := strings.TrimPrefix(np.String(), "/")
+	if cleaned == "" || strings.Contains(cleaned, "..") || strings.HasPrefix(cleaned, "/") {
+		a.Logger.Warnw("insecure path", "path", cleaned)
+		return validate.WrapErrorWithField(
+			errs.NewValidationError(fmt.Errorf("invalid path: %s", cleaned)),
+			"Path",
+		)
+	}
+	dst, err := vo.NewRelativeFilePath(cleaned)
+	if err != nil {
+		return validate.WrapErrorWithField(errs.NewValidationError(err), "Path")
+	}
+	// nothing to do if the path is unchanged
+	if dst.String() == oldPath.String() {
+		a.AuditLogAuthorized(ae)
+		return nil
+	}
+	domainContext, err := a.assetContextFolder(ctx, asset)
+	if err != nil {
+		return err
+	}
+	root, contextRoot, err := a.openContextRoot(ctx, asset)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	defer contextRoot.Close()
+	// the source must exist
+	if _, err := contextRoot.Stat(oldPath.String()); err != nil {
+		a.Logger.Debugw("source file not found", "path", oldPath.String(), "error", err)
+		return err
+	}
+	// create destination directories through the root
+	dstDir := filepath.Dir(dst.String())
+	if dstDir != "." {
+		if err := contextRoot.MkdirAll(dstDir, 0755); err != nil {
+			a.Logger.Errorw("failed to create destination directory", "error", err)
+			return err
+		}
+	}
+	// move with no overwrite: Link creates the destination only when it does not
+	// already exist, failing with EEXIST otherwise, so a move can never replace an
+	// existing file, even if one appears between a check and the move. the source
+	// is then unlinked. Rename is avoided because it silently overwrites the
+	// destination. both paths stay confined to the asset context root.
+	if err := contextRoot.Link(oldPath.String(), dst.String()); err != nil {
+		if os.IsExist(err) {
+			return errs.NewValidationError(fmt.Errorf("file already exists: %s", dst.String()))
+		}
+		a.Logger.Errorw("failed to move asset file", "error", err)
+		return err
+	}
+	if err := contextRoot.Remove(oldPath.String()); err != nil {
+		// nothing visible changed yet; drop the new link so no duplicate is left.
+		_ = contextRoot.Remove(dst.String())
+		a.Logger.Errorw("failed to remove old asset file after move", "error", err)
+		return err
+	}
+	// update the path in the database. if this fails, move the file back so the
+	// filesystem and the database never disagree about where the asset lives.
+	update := &model.Asset{Path: nullable.NewNullableWithValue(*dst)}
+	if err := a.AssetRepository.UpdateByID(ctx, id, update); err != nil {
+		a.Logger.Errorw("failed to update asset path, rolling back the file move", "error", err)
+		if rbErr := contextRoot.Link(dst.String(), oldPath.String()); rbErr != nil {
+			a.Logger.Errorw("failed to restore asset file after a failed move, manual fix needed",
+				"from", dst.String(), "to", oldPath.String(), "error", rbErr)
+		} else {
+			_ = contextRoot.Remove(dst.String())
+		}
+		return err
+	}
+	// remove directories left empty by the move. this is cosmetic and runs only
+	// after the database agrees with the filesystem, so a failure here does not
+	// fail the move or leave the two out of sync.
+	oldFullPath := filepath.Join(a.RootFolder, domainContext, oldPath.String())
+	if err := a.FileService.RemoveEmptyFolderRecursively(
+		filepath.Join(a.RootFolder, domainContext),
+		filepath.Dir(oldFullPath),
+	); err != nil {
+		a.Logger.Debugw("failed to remove empty folders after move", "error", err)
+	}
+	ae.Details["from"] = oldPath.String()
+	ae.Details["to"] = dst.String()
+	a.AuditLogAuthorized(ae)
+	return nil
+}
+
+// ReplaceFileByID overwrites an existing asset's file content with an uploaded
+// file, keeping the asset's path and filename.
+func (a *Asset) ReplaceFileByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	file *multipart.FileHeader,
+) error {
+	ae := NewAuditEvent("Asset.ReplaceFileById", session)
+	ae.Details["id"] = id.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		a.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		a.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// get the asset
+	asset, err := a.AssetRepository.GetByID(ctx, id)
+	if err != nil {
+		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
+		return err
+	}
+	p, err := asset.Path.Get()
+	if err != nil {
+		a.Logger.Debugw("failed to get path", "error", err)
+		return err
+	}
+	root, contextRoot, err := a.openContextRoot(ctx, asset)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	defer contextRoot.Close()
+	// the file must already exist, replacing never creates a new asset
+	if _, err := contextRoot.Stat(p.String()); err != nil {
+		a.Logger.Debugw("asset file not found", "path", p.String(), "error", err)
+		return err
+	}
+	src, err := file.Open()
+	if err != nil {
+		a.Logger.Errorw("failed to open uploaded file", "error", err)
+		return err
+	}
+	defer src.Close()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, src); err != nil {
+		a.Logger.Errorw("failed to read uploaded file", "error", err)
+		return err
+	}
+	if err := a.FileService.UploadFile(contextRoot, p.String(), &buf, true); err != nil {
+		a.Logger.Errorw("failed to write asset content", "error", err)
+		return err
+	}
+	// bump updated_at
+	if err := a.AssetRepository.UpdateByID(ctx, id, &model.Asset{}); err != nil {
+		a.Logger.Errorw("failed to update asset timestamp", "error", err)
+		return err
+	}
+	ae.Details["path"] = p.String()
 	a.AuditLogAuthorized(ae)
 	return nil
 }

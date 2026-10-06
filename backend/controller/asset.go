@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/go-errors/errors"
@@ -476,6 +477,197 @@ func (a *Asset) UpdateByID(g *gin.Context) {
 		req.Name,
 		req.Description,
 	)
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	a.Response.OK(g, gin.H{})
+}
+
+// GetEditableContentByID returns an asset's content and whether it can be
+// edited as text in the editor.
+func (a *Asset) GetEditableContentByID(g *gin.Context) {
+	// handle session
+	session, _, ok := a.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := a.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	// cap the read at the configured upload size so a huge asset is not loaded
+	// into memory just to answer an edit request
+	maxFile, err := a.OptionService.GetOption(g, session, data.OptionKeyMaxFileUploadSizeMB)
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	maxBytes := int64(64 << 20)
+	// only a positive option overrides the fallback, so a "0" or negative option
+	// cannot disable the cap and allow an unbounded read.
+	if maxMB, perr := strconv.Atoi(maxFile.Value.String()); perr == nil && maxMB > 0 {
+		maxBytes = int64(maxMB) * 1024 * 1024
+	}
+	// get the content
+	ctx := g.Request.Context()
+	content, editable, err := a.AssetService.GetContentByID(ctx, session, id, maxBytes)
+	if a.fileMissing(g, err) {
+		return
+	}
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	a.Response.OK(g, gin.H{
+		"content":  base64.StdEncoding.EncodeToString(content),
+		"editable": editable,
+	})
+}
+
+// fileMissing answers 404 when the error is a backing file that is gone (a DB
+// row whose file was removed), instead of letting it fall through to a 500.
+func (a *Asset) fileMissing(g *gin.Context, err error) bool {
+	if err != nil && os.IsNotExist(err) {
+		a.Response.NotFound(g)
+		return true
+	}
+	return false
+}
+
+// SaveContentByID overwrites a text asset's content from the editor.
+func (a *Asset) SaveContentByID(g *gin.Context) {
+	// handle session
+	session, _, ok := a.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := a.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	// load the size limit first so the request body can be capped before it is
+	// read into memory, instead of only checking the size after buffering it all.
+	maxFile, err := a.OptionService.GetOption(g, session, data.OptionKeyMaxFileUploadSizeMB)
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	// cap the body generously above the content limit since JSON adds quoting and
+	// escaping; the exact size is still checked below. a malformed option falls
+	// back to a large cap so valid saves are not blocked at this stage.
+	bodyLimit := int64(64 << 20)
+	if maxMB, perr := strconv.Atoi(maxFile.Value.String()); perr == nil && maxMB > 0 {
+		bodyLimit = int64(maxMB)*1024*1024 + (1 << 20)
+	}
+	g.Request.Body = http.MaxBytesReader(g.Writer, g.Request.Body, bodyLimit)
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if ok := a.handleParseRequest(g, &req); !ok {
+		return
+	}
+	content := []byte(req.Content)
+	okSize, err := utils.CompareFileSizeFromString(int64(len(content)), maxFile.Value.String())
+	if err != nil {
+		a.Logger.Errorw("invalid max upload size option", "value", maxFile.Value.String(), "error", err)
+		a.Response.ServerErrorMessage(g, "upload size limit is misconfigured")
+		return
+	}
+	if !okSize {
+		a.Response.ValidationFailed(g, "Content", fmt.Errorf("content is too large"))
+		return
+	}
+	// save the content
+	ctx := g.Request.Context()
+	err = a.AssetService.SaveContentByID(ctx, session, id, content)
+	if a.fileMissing(g, err) {
+		return
+	}
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	a.Response.OK(g, gin.H{})
+}
+
+// MoveByID renames or moves an asset to a new path within its context.
+func (a *Asset) MoveByID(g *gin.Context) {
+	// handle session
+	session, _, ok := a.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := a.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if ok := a.handleParseRequest(g, &req); !ok {
+		return
+	}
+	path, err := vo.NewRelativeFilePath(req.Path)
+	if err != nil {
+		a.Logger.Debugw("failed to parse path", "error", err)
+		a.Response.ValidationFailed(g, "Path", err)
+		return
+	}
+	// move the asset
+	ctx := g.Request.Context()
+	err = a.AssetService.MoveByID(ctx, session, id, nullable.NewNullableWithValue(*path))
+	if a.fileMissing(g, err) {
+		return
+	}
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	a.Response.OK(g, gin.H{})
+}
+
+// ReplaceFileByID replaces an asset's file content with an uploaded file.
+func (a *Asset) ReplaceFileByID(g *gin.Context) {
+	// handle session
+	session, _, ok := a.handleSession(g)
+	if !ok {
+		return
+	}
+	// parse request
+	id, ok := a.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	file, err := g.FormFile("file")
+	if err != nil {
+		a.Logger.Debugw("no file provided", "error", err)
+		a.Response.BadRequestMessage(g, "No file selected")
+		return
+	}
+	// enforce the max file size option
+	maxFile, err := a.OptionService.GetOption(g, session, data.OptionKeyMaxFileUploadSizeMB)
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	okSize, err := utils.CompareFileSizeFromString(file.Size, maxFile.Value.String())
+	if err != nil {
+		a.Logger.Errorw("invalid max upload size option", "value", maxFile.Value.String(), "error", err)
+		a.Response.ServerErrorMessage(g, "upload size limit is misconfigured")
+		return
+	}
+	if !okSize {
+		a.Response.ValidationFailed(
+			g,
+			"File",
+			fmt.Errorf("file '%s' is too large", utils.ReadableFileName(file.Filename)),
+		)
+		return
+	}
+	// replace the file
+	ctx := g.Request.Context()
+	err = a.AssetService.ReplaceFileByID(ctx, session, id, file)
+	if a.fileMissing(g, err) {
+		return
+	}
 	if ok := a.handleErrors(g, err); !ok {
 		return
 	}
