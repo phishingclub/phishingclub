@@ -182,10 +182,16 @@ func (a *APISender) SendTest(g *gin.Context) {
 	if !ok {
 		return
 	}
+	// parse the optional test values, an empty body means use the defaults
+	var req model.APISenderTestRequest
+	if ok := a.handleParseOptionalRequest(g, &req); !ok {
+		return
+	}
 	data, err := a.APISenderService.SendTest(
 		g.Request.Context(),
 		session,
 		id,
+		&req,
 	)
 	// output the error
 	if err != nil {

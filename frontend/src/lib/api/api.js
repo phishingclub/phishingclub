@@ -3203,10 +3203,11 @@ export class API {
 		/**
 		 * Send a test request to an API sender.
 		 * @param {string} id
+		 * @param {object} [values] optional test values, empty fields use defaults
 		 * @returns {Promise<ApiResponse>}
 		 */
-		test: async (id) => {
-			return await postJSON(this.getPath(`/api-sender/${id}/test`));
+		test: async (id, values = {}) => {
+			return await postJSON(this.getPath(`/api-sender/${id}/test`), values);
 		}
 	};
 
