@@ -319,8 +319,9 @@ func setupRoutes(
 	// phishing server (app/server.go AssignRoutes), gated to a single global
 	// domain, so the admin port does not need public exposure for SCIM.
 
-	// all other admin routes are protected by the ip allowlist middleware
-	admin := r.Group("/", middleware.IPLimiter)
+	// ip allowlist on all admin routes; NoStore keeps API responses out of the
+	// browser disk cache. static assets are served off the group and stay cacheable.
+	admin := r.Group("/", middleware.IPLimiter, middleware.NoStore)
 	_ = admin
 
 	if !build.Flags.Production {

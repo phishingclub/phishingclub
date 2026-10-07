@@ -15,6 +15,7 @@ type Middlewares struct {
 	LoginRateLimiter   gin.HandlerFunc
 	SessionHandler     gin.HandlerFunc
 	SoftSessionHandler gin.HandlerFunc
+	NoStore            gin.HandlerFunc
 }
 
 // NewMiddlewares creates a collection of middlewares
@@ -48,6 +49,7 @@ func NewMiddlewares(
 		LoginRateLimiter:   loginThrottle,
 		SessionHandler:     sessionHandler,
 		SoftSessionHandler: softSessionHandler,
+		NoStore:            middleware.NoStore(),
 	}
 }
 
