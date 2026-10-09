@@ -76,7 +76,7 @@
 
 	async function refreshScimDomain() {
 		try {
-			// only normal global domains may serve SCIM — exclude AiTM proxy domains
+			// only normal global domains may serve SCIM, exclude AiTM proxy domains
 			const [current, domains] = await Promise.all([
 				api.option.getScimDomain(),
 				api.domain.getAllSubsetWithoutProxies({ perPage: 1000 }, null)

@@ -45,27 +45,27 @@ type ScimUser struct {
 	Name *ScimName `json:"name,omitempty"`
 	// flat display name (used if name sub-object absent)
 	DisplayName string `json:"displayName,omitempty"`
-	// core title attribute — Microsoft Entra maps the directory jobTitle here by
+	// core title attribute, Microsoft Entra maps the directory jobTitle here by
 	// default (not the enterprise extension), so this is the primary source for Position
 	Title string `json:"title,omitempty"`
-	// emails list — we treat the first primary (or first) as canonical
+	// emails list, we treat the first primary (or first) as canonical
 	Emails []ScimEmail `json:"emails,omitempty"`
 	// phone numbers list
 	PhoneNumbers []ScimPhoneNumber `json:"phoneNumbers,omitempty"`
 	// enterprise extension fields (department, title/position)
-	// division is intentionally omitted — it is not stored
+	// division is intentionally omitted, it is not stored
 	EnterpriseUser *ScimEnterpriseUser `json:"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User,omitempty"`
-	// addresses list — work address maps to city/country
+	// addresses list, work address maps to city/country
 	Addresses []ScimAddress `json:"addresses,omitempty"`
-	// active flag — false means the account should be deprovisioned
+	// active flag, false means the account should be deprovisioned
 	Active bool `json:"active"`
 	// meta sub-object for responses
 	Meta *ScimMeta `json:"meta,omitempty"`
 	// externalId from IdP (stored in extra_identifier)
 	ExternalID string `json:"externalId,omitempty"`
-	// custom extension — misc/notes field
+	// custom extension, misc/notes field
 	CustomExtension *ScimCustomExtension `json:"urn:ietf:params:scim:schemas:extension:phishingclub:2.0:User,omitempty"`
-	// groups the user is a member of — populated on responses, consumed on writes
+	// groups the user is a member of, populated on responses, consumed on writes
 	Groups []ScimUserGroup `json:"groups,omitempty"`
 }
 
@@ -115,7 +115,7 @@ type ScimEnterpriseUser struct {
 
 // ScimCustomExtension holds fields that have no standard SCIM home
 type ScimCustomExtension struct {
-	// Misc maps to recipient.misc — free-form notes
+	// Misc maps to recipient.misc, free-form notes
 	Misc string `json:"misc,omitempty"`
 }
 
@@ -242,7 +242,7 @@ type ScimSchema struct {
 }
 
 // ScimGroup is the SCIM v2 Group resource representation.
-// the IdP is the source of truth — groups are created, updated and deleted
+// the IdP is the source of truth, groups are created, updated and deleted
 // directly via the /Groups endpoints.
 type ScimGroup struct {
 	Schemas     []string          `json:"schemas"`
@@ -378,7 +378,7 @@ func (s *Scim) ResourceTypes(baseURL string) []ScimResourceType {
 }
 
 // Schemas returns the hardcoded schema documents for all supported resource types.
-// these are static — no database required.
+// these are static, no database required.
 func (s *Scim) Schemas(baseURL string) []ScimSchema {
 	return []ScimSchema{
 		{
@@ -434,7 +434,7 @@ func (s *Scim) Schemas(baseURL string) []ScimSchema {
 				},
 				{
 					Name: "addresses", Type: "complex", MultiValued: true,
-					Description: "addresses for the user — work address maps to city and country fields",
+					Description: "addresses for the user, work address maps to city and country fields",
 					Required:    false, CaseExact: false,
 					Mutability: "readWrite", Returned: "default", Uniqueness: "none",
 					SubAttributes: []ScimSchemaAttribute{
@@ -447,13 +447,13 @@ func (s *Scim) Schemas(baseURL string) []ScimSchema {
 				},
 				{
 					Name: "active", Type: "boolean", MultiValued: false,
-					Description: "administrative status of the user — false removes them from all groups",
+					Description: "administrative status of the user, false removes them from all groups",
 					Required:    false, CaseExact: false,
 					Mutability: "readWrite", Returned: "default", Uniqueness: "none",
 				},
 				{
 					Name: "externalId", Type: "string", MultiValued: false,
-					Description: "identifier from the provisioning client (stored as extraIdentifier — unique per company)",
+					Description: "identifier from the provisioning client (stored as extraIdentifier, unique per company)",
 					Required:    false, CaseExact: true,
 					Mutability: "readWrite", Returned: "default", Uniqueness: "server",
 				},
@@ -494,7 +494,7 @@ func (s *Scim) Schemas(baseURL string) []ScimSchema {
 				},
 				{
 					Name: "manager", Type: "complex", MultiValued: false,
-					Description: "the user's manager — not stored, accepted and silently ignored",
+					Description: "the user's manager, not stored, accepted and silently ignored",
 					Required:    false, CaseExact: false,
 					Mutability: "readWrite", Returned: "default", Uniqueness: "none",
 					SubAttributes: []ScimSchemaAttribute{
@@ -606,7 +606,7 @@ func (s *Scim) ListGroupsRaw(
 	}
 	all = all[offset:]
 
-	// apply count — 0 returns zero resources (RFC 7644 §3.4.2.4); a negative or
+	// apply count, 0 returns zero resources (RFC 7644 §3.4.2.4); a negative or
 	// absent value means no limit
 	if count == 0 {
 		all = []ScimGroup{}
@@ -651,7 +651,7 @@ func (s *Scim) GetGroup(
 }
 
 // CreateGroup provisions a new recipient group from a SCIM Group resource.
-// the IdP is the source of truth — it chooses the display name and membership.
+// the IdP is the source of truth, it chooses the display name and membership.
 func (s *Scim) CreateGroup(
 	ctx context.Context,
 	companyID *uuid.UUID,
@@ -961,7 +961,7 @@ func (s *Scim) ListUsers(
 	}
 	all = all[offset:]
 
-	// apply count — 0 returns zero resources (RFC 7644 §3.4.2.4); a negative or
+	// apply count, 0 returns zero resources (RFC 7644 §3.4.2.4); a negative or
 	// absent value means no limit
 	if count == 0 {
 		all = []ScimUser{}
@@ -1023,7 +1023,7 @@ func (s *Scim) CreateUser(
 		return nil, errs.NewValidationError(fmt.Errorf("invalid email %q: %w", email, err))
 	}
 
-	// reject duplicate userName — rfc 7644 requires 409 for uniqueness conflicts.
+	// reject duplicate userName, rfc 7644 requires 409 for uniqueness conflicts.
 	// the lookup is case-insensitive so John@X.com and john@x.com collide.
 	existingByEmail, err := s.RecipientRepository.GetByEmailLowerAndCompanyID(ctx, emailVO, companyID)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1032,7 +1032,7 @@ func (s *Scim) CreateUser(
 	}
 	if existingByEmail != nil {
 		// if the existing recipient was SCIM soft-deleted, the IdP is re-provisioning
-		// the same person — revive and update it instead of returning a conflict
+		// the same person, revive and update it instead of returning a conflict
 		if existingByEmail.ScimSoftDeletedAt != nil {
 			existingID := existingByEmail.ID.MustGet()
 			if err := s.RecipientRepository.ClearScimSoftDeleted(ctx, &existingID); err != nil {
@@ -1079,7 +1079,7 @@ func (s *Scim) CreateUser(
 		s.Logger.Errorw("scim create user: failed to reload recipient", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	// note: active=false on create is not separately representable — a recipient
+	// note: active=false on create is not separately representable, a recipient
 	// either exists (active) or is deprovisioned (deleted). the resource is still
 	// created so the IdP receives a retrievable 201 response.
 	s.auditScim("Scim.CreateUser", config, map[string]any{"recipientID": recipientID.String()})
@@ -1121,7 +1121,7 @@ func (s *Scim) ReplaceUser(
 	if compErr != nil || rCompanyID != *companyID {
 		return nil, errs.Wrap(gorm.ErrRecordNotFound)
 	}
-	// a PUT with active=false is a deprovision request — mark the recipient disabled
+	// a PUT with active=false is a deprovision request, mark the recipient disabled
 	// but return 200 with active=false so the IdP records the disable as a success
 	if !scimUser.Active {
 		if err := s.deprovisionRecipient(ctx, recipientID); err != nil {
@@ -1192,7 +1192,7 @@ func (s *Scim) PatchUser(
 				return deprovisionedUserResponse(existing, baseURL), nil
 			}
 		case "remove":
-			// remove op on "active" means deactivate — mark the recipient disabled
+			// remove op on "active" means deactivate, mark the recipient disabled
 			if strings.EqualFold(op.Path, "active") {
 				if err := s.deprovisionRecipient(ctx, recipientID); err != nil {
 					return nil, errs.Wrap(err)
@@ -1304,7 +1304,7 @@ func (s *Scim) reviveIfSoftDeleted(ctx context.Context, existing *model.Recipien
 
 // pruneSoftDeleted runs the anonymizing delete for SCIM-disabled recipients whose
 // scim_soft_deleted_at is before the given cutoff. A nil companyID covers all
-// companies. No authorization check — callers are responsible for that.
+// companies. No authorization check, callers are responsible for that.
 func (s *Scim) pruneSoftDeleted(ctx context.Context, companyID *uuid.UUID, before time.Time) (int, error) {
 	recipients, err := s.RecipientRepository.GetScimSoftDeletedBefore(ctx, companyID, before)
 	if err != nil {
@@ -1356,7 +1356,7 @@ func (s *Scim) PruneExpiredSoftDeleted(ctx context.Context, session *model.Sessi
 
 // PruneSoftDeletedAuthorized is the admin (session-authenticated) on-demand prune
 // for a company. Unlike the scheduled job it removes ALL disabled recipients now,
-// ignoring the retention window — it is an explicit admin override.
+// ignoring the retention window, it is an explicit admin override.
 func (s *Scim) PruneSoftDeletedAuthorized(
 	ctx context.Context,
 	session *model.Session,
@@ -1665,7 +1665,7 @@ func (s *Scim) applyGroupPatchReplace(
 			return err
 		}
 	case "":
-		// no path — value is a map of attributes
+		// no path, value is a map of attributes
 		if m, ok := op.Value.(map[string]any); ok {
 			if dn, ok := m["displayName"].(string); ok && dn != "" {
 				nameVO, err := vo.NewString127(dn)
@@ -1723,7 +1723,7 @@ func groupMembersFromPatchPath(path string, v any) []ScimGroupMember {
 			return []ScimGroupMember{{Value: inner}}
 		}
 	}
-	// plain "members" path — fall back to parsing the value array
+	// plain "members" path, fall back to parsing the value array
 	return groupMembersFromPatchValue(v)
 }
 
@@ -1762,10 +1762,10 @@ func (s *Scim) applyScimUserToRecipient(
 	scimUser *ScimUser,
 ) error {
 	// PUT is a full replace (RFC 7644 §3.5.1): attributes absent from the
-	// request are cleared. email is the one exception — it is required, so an
+	// request are cleared. email is the one exception, it is required, so an
 	// absent or invalid email leaves the existing address untouched.
 	existing.ScimUserName.Set(*vo.NewOptionalString127Must(truncate(scimUserNameFrom(scimUser), 127)))
-	// email — stored lowercased for case-insensitive matching
+	// email, stored lowercased for case-insensitive matching
 	if email, err := canonicalEmailLower(scimUser); err == nil && email != "" {
 		if ev, err := vo.NewEmail(email); err == nil {
 			existing.Email.Set(*ev)
@@ -1784,7 +1784,7 @@ func (s *Scim) applyScimUserToRecipient(
 	}
 	existing.Department.Set(*vo.NewOptionalString127Must(truncate(department, 127)))
 	existing.Position.Set(*vo.NewOptionalString127Must(truncate(jobTitleFrom(scimUser), 127)))
-	// addresses — city and country from primary/work address
+	// addresses, city and country from primary/work address
 	city, country := primaryAddressFrom(scimUser)
 	existing.City.Set(*vo.NewOptionalString127Must(truncate(city, 127)))
 	existing.Country.Set(*vo.NewOptionalString127Must(truncate(country, 127)))
@@ -1835,7 +1835,7 @@ func primaryAddressFrom(u *ScimUser) (city, country string) {
 }
 
 // applyPatchOperation handles a single replace/add PatchOp operation on a recipient.
-// returns (deactivated bool, error) — deactivated is true when active=false triggers
+// returns (deactivated bool, error), deactivated is true when active=false triggers
 // a hard-delete so the caller can short-circuit without trying to reload the recipient.
 func (s *Scim) applyPatchOperation(
 	ctx context.Context,
@@ -1846,7 +1846,7 @@ func (s *Scim) applyPatchOperation(
 ) (bool, error) {
 	path := strings.ToLower(op.Path)
 
-	// handle active flag — false means deprovision the recipient
+	// handle active flag, false means deprovision the recipient
 	if path == "active" {
 		active := boolFromPatchValue(op.Value)
 		if !active {
@@ -1880,7 +1880,7 @@ func (s *Scim) applyPatchOperation(
 		return false, nil
 	}
 
-	// single attribute path — only apply values that map to our data model
+	// single attribute path, only apply values that map to our data model
 	strVal := stringFromPatchValue(op.Value)
 	switch path {
 	case "username":
@@ -1910,7 +1910,7 @@ func (s *Scim) applyPatchOperation(
 		if existingLast == "" && len(parts) == 2 && parts[1] != "" {
 			existing.LastName.Set(*vo.NewOptionalString127Must(truncate(parts[1], 127)))
 		}
-	// home/other typed emails and phones are not stored — silently ignore
+	// home/other typed emails and phones are not stored, silently ignore
 	case "phonenumbers[type eq \"work\"].value", "phonenumbers":
 		existing.Phone.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
 	case "urn:ietf:params:scim:schemas:extension:enterprise:2.0:user:department":
@@ -1921,7 +1921,7 @@ func (s *Scim) applyPatchOperation(
 		existing.City.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
 	case "addresses[type eq \"work\"].country", "addresses.country":
 		existing.Country.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
-	// home/other typed addresses are not stored — silently ignore
+	// home/other typed addresses are not stored, silently ignore
 	case "externalid":
 		existing.ExtraIdentifier.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
 	case "urn:ietf:params:scim:schemas:extension:phishingclub:2.0:user:misc":
@@ -1978,7 +1978,7 @@ func (s *Scim) applyAttributeMap(
 		}
 	}
 
-	// apply name fields — explicit sub-attributes take priority over formatted
+	// apply name fields, explicit sub-attributes take priority over formatted
 	if givenName != "" {
 		existing.FirstName.Set(*vo.NewOptionalString127Must(truncate(givenName, 127)))
 	}
@@ -2063,7 +2063,7 @@ func recipientToScimUser(r *model.Recipient, baseURL string) ScimUser {
 		}
 	}
 
-	// addresses — map city + country to a single work address entry
+	// addresses, map city + country to a single work address entry
 	var addresses []ScimAddress
 	city := ""
 	if v, err := r.City.Get(); err == nil {
@@ -2087,7 +2087,7 @@ func recipientToScimUser(r *model.Recipient, baseURL string) ScimUser {
 		externalID = v.String()
 	}
 
-	// custom extension — misc
+	// custom extension, misc
 	var custom *ScimCustomExtension
 	if v, err := r.Misc.Get(); err == nil && v.String() != "" {
 		custom = &ScimCustomExtension{Misc: v.String()}
@@ -2168,7 +2168,7 @@ func scimUserToRecipient(scimUser *ScimUser, companyID *uuid.UUID) *model.Recipi
 	r.Department = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(truncate(department, 127)))
 	r.Position = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(truncate(jobTitleFrom(scimUser), 127)))
 
-	// addresses — prefer work, fall back to first entry
+	// addresses, prefer work, fall back to first entry
 	city, country := primaryAddressFrom(scimUser)
 	r.City = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(truncate(city, 127)))
 	r.Country = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(truncate(country, 127)))
@@ -2179,7 +2179,7 @@ func scimUserToRecipient(scimUser *ScimUser, companyID *uuid.UUID) *model.Recipi
 		r.ExtraIdentifier = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(""))
 	}
 
-	// custom extension — misc
+	// custom extension, misc
 	if scimUser.CustomExtension != nil && scimUser.CustomExtension.Misc != "" {
 		r.Misc = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(truncate(scimUser.CustomExtension.Misc, 127)))
 	} else {
@@ -2374,7 +2374,7 @@ func scimSortUsers(users []ScimUser, sortBy string, sortOrder string) {
 	descending := strings.EqualFold(sortOrder, "descending")
 	key := strings.ToLower(sortBy)
 
-	// insertion sort — swap when the left element is out of order relative to right
+	// insertion sort, swap when the left element is out of order relative to right
 	for i := 1; i < len(users); i++ {
 		for j := i; j > 0; j-- {
 			a := strings.ToLower(scimUserSortKey(users[j-1], key))

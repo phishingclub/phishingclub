@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.43.0] - 2026-10-01
+- Added scripts feature with support in campaigns, AiTM proxy and Remote Browser
+- Added custom branding settings
+- Added AiTM Proxy status engine
+- Added Remote Browser request() API.
+- Added Remote Browser state machine API for managing flow in sessions
+- Added Remote Browser can manipulate headers
+- Added hotkey for VIM toggle in editor
+- Added custom EHLO/HELO on SMTP
+- Added updatable external IP and ASN data for filters
+- Added ASN look up tool
+- Added change of campaign trend graph type when over 60 campaigns in view
+- Updated Remote Browser default template
+- Fix filters deleted during scheduling update
+- Fix modal text is now globally selectable
+- Fix message-id was leaking internals
+- Fix added implicit TLS on SMTP when using port 465
+- Fix malformed request when using browser impersonation
+- Fix AiTM Proxy did not collect cookie when required was set to false
+- Fix global company assets could not be deleted
+- Fix improve error message when browser start fails
+- Fix campaign creation schedule time matched against current time in some timezones
+- Fix domain listing could 500 via API
+- Fix Remote Browser 'disableFidoUI' and renamed it - Deprecated disableFioUI
+- Fix loader location on settings page
+- Fix send test email search recipient ondemand
+- Fix alignment on TextFieldSearchSelect component
+- Fix reduce binary size ~50% by stripping js.map's and debug from build
+- Deprecated notification for embedded IP filter list
+- Bumped dependencies
+
 ## [1.42.0] - 2026-09-11
 - Added position and department statistics to campaigns
 - Added anonymous campaign mode

@@ -10,7 +10,7 @@ import (
 // runLog entry shape so the editor renders both the same way.
 //   - type "log":   Message (+ optional Data)
 //   - type "info":  Message
-//   - type "event": Key (event name) + Value (event data) — an emitEvent call
+//   - type "event": Key (event name) + Value (event data), an emitEvent call
 //   - type "error": Message
 //   - type "done":  end marker
 type TestEntry struct {

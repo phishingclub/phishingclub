@@ -285,7 +285,7 @@ s.keepAlive();
 <div class="col-start-1 col-end-13 row-start-1 px-4">
 	<div class="flex justify-between items-center">
 		<div class="flex items-center gap-3">
-			<Headline>Remote Browsers</Headline>
+			<Headline docSlug="remote-browser">Remote Browsers</Headline>
 			<span
 				class="px-2 py-0.5 text-xs font-medium rounded bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400"
 				>Experimental</span
@@ -306,7 +306,7 @@ s.keepAlive();
 				To enable it, set <code class="text-slate-200 bg-slate-700 px-1 rounded">enabled: true</code
 				>
 				in the <code class="text-slate-200 bg-slate-700 px-1 rounded">remote_browser</code> block of
-				<code class="text-slate-200 bg-slate-700 px-1 rounded">config.json</code> and retart the service.
+				<code class="text-slate-200 bg-slate-700 px-1 rounded">config.json</code> and restart the service.
 			</p>
 			<a
 				href="https://phishing.club/guide/remote-browser/#enabling"

@@ -669,7 +669,7 @@
 		configData = configData;
 	}
 
-	// url rewrite query param helpers — query is []{ find, replace }
+	// url rewrite query param helpers, query is []{ find, replace }
 	function addURLRewriteQueryParam(rule) {
 		rule.query = [...(rule.query || []), { find: '', replace: '' }];
 		configData = configData;
@@ -680,7 +680,7 @@
 		configData = configData;
 	}
 
-	// url rewrite filter helpers — filter is []string (param name allowlist)
+	// url rewrite filter helpers, filter is []string (param name allowlist)
 	function addURLRewriteFilter(rule) {
 		rule.filter = [...(rule.filter || []), ''];
 		configData = configData;
@@ -2517,7 +2517,7 @@
 															</div>
 														{/if}
 														<span class="form-hint"
-															>allowlist of query parameters to keep — if empty, all parameters are
+															>allowlist of query parameters to keep. If empty, all parameters are
 															forwarded</span
 														>
 													</div>
@@ -3459,7 +3459,7 @@
 														</div>
 													{/if}
 													<span class="form-hint"
-														>allowlist of query parameters to keep — if empty, all parameters are
+														>allowlist of query parameters to keep. If empty, all parameters are
 														forwarded</span
 													>
 												</div>

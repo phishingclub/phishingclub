@@ -382,7 +382,7 @@ func (r *Recipient) GetOrphaned(
 		r.AuditLogNotAuthorized(ae)
 		return result, errs.ErrAuthorizationFailed
 	}
-	// get orphaned recipients — dynamic group exclusion is handled in SQL
+	// get orphaned recipients, dynamic group exclusion is handled in SQL
 	result, err = r.RecipientRepository.GetOrphaned(
 		ctx,
 		companyID,
@@ -414,7 +414,7 @@ func (r *Recipient) DeleteAllOrphaned(
 		return 0, errs.ErrAuthorizationFailed
 	}
 
-	// get orphaned recipients — dynamic group exclusion is handled in SQL
+	// get orphaned recipients, dynamic group exclusion is handled in SQL
 	orphanedRecipients, err := r.RecipientRepository.GetOrphaned(
 		ctx,
 		companyID,

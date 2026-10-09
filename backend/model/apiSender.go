@@ -37,6 +37,25 @@ type APISender struct {
 	ExpectedResponseBody       nullable.Nullable[vo.OptionalString1MB] `json:"expectedResponseBody"`
 }
 
+// APISenderTestRequest holds optional values the user sets when running a
+// test send. A nil or empty field falls back to the built in default.
+type APISenderTestRequest struct {
+	Email           *string `json:"email"`
+	FirstName       *string `json:"firstName"`
+	LastName        *string `json:"lastName"`
+	Subject         *string `json:"subject"`
+	Content         *string `json:"content"`
+	FromEmail       *string `json:"fromEmail"`
+	FromName        *string `json:"fromName"`
+	Phone           *string `json:"phone"`
+	ExtraIdentifier *string `json:"extraIdentifier"`
+	Position        *string `json:"position"`
+	Department      *string `json:"department"`
+	City            *string `json:"city"`
+	Country         *string `json:"country"`
+	Misc            *string `json:"misc"`
+}
+
 // Validate checks if the API sender has a valid state
 func (a *APISender) Validate() error {
 	if err := validate.NullableFieldRequired("name", a.Name); err != nil {

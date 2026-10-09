@@ -22,7 +22,7 @@
 	let isPruning = false;
 	let isRestoring = false;
 
-	// token reveal — only populated immediately after create or rotate
+	// token reveal, only populated immediately after create or rotate
 	let revealedToken = '';
 	let showTokenReveal = false;
 
@@ -90,7 +90,7 @@
 		}
 	};
 
-	// called once — creates the config and reveals the token
+	// called once, creates the config and reveals the token
 	const onSetUp = async () => {
 		isSettingUp = true;
 		try {
@@ -113,7 +113,7 @@
 		}
 	};
 
-	// inline toggle — immediately persists the new enabled state
+	// inline toggle, immediately persists the new enabled state
 	const onToggleEnabled = async () => {
 		if (!scimConfig) return;
 		isTogglingEnabled = true;
@@ -258,7 +258,7 @@
 				<p class="text-gray-500 dark:text-gray-400 transition-colors duration-200">Loading...</p>
 			</div>
 		{:else if showTokenReveal && revealedToken}
-			<!-- ── step 2: token reveal — nothing else until dismissed ── -->
+			<!-- ── step 2: token reveal, nothing else until dismissed ── -->
 			<div
 				class="rounded-md border border-amber-400 dark:border-amber-500/60 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3 transition-colors duration-200"
 			>

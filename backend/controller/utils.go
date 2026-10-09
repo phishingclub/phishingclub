@@ -84,6 +84,26 @@ func (c *Common) handleParseRequest(
 	g *gin.Context,
 	req any,
 ) bool {
+	return c.parseRequest(g, req, false)
+}
+
+// handleParseOptionalRequest parses a request body like handleParseRequest but
+// treats an empty body as no input, leaving req at its zero value. Use it for
+// endpoints where every field is optional.
+func (c *Common) handleParseOptionalRequest(
+	g *gin.Context,
+	req any,
+) bool {
+	return c.parseRequest(g, req, true)
+}
+
+// parseRequest reads and unmarshals the request body. When allowEmpty is true an
+// empty body is accepted and leaves req untouched.
+func (c *Common) parseRequest(
+	g *gin.Context,
+	req any,
+	allowEmpty bool,
+) bool {
 	body, err := io.ReadAll(g.Request.Body)
 	if err != nil {
 		c.Logger.Debugw("failed to read request body",
@@ -91,6 +111,9 @@ func (c *Common) handleParseRequest(
 		)
 		c.Response.BadRequest(g)
 		return false
+	}
+	if allowEmpty && len(bytes.TrimSpace(body)) == 0 {
+		return true
 	}
 	if err := utils.Unmarshal(body, &req); err != nil {
 		c.Logger.Debugw("failed to parse request",

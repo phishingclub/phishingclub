@@ -125,7 +125,7 @@
 
 <HeadTitle title="Sessions" />
 <main>
-	<Headline>Sessions</Headline>
+	<Headline docSlug="settings">Sessions</Headline>
 	<BigButton on:click={openDeleteAllSessionsAlert}>Delete all sessions</BigButton>
 	<Table
 		columns={[

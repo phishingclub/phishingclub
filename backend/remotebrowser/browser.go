@@ -82,7 +82,7 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 	// frameCtxs tracks execution contexts for same-process sub-frames, keyed by context ID.
 	// Value is [3]string{frameId, origin, name}. Populated on demand by resolveSameOriginFrames
 	// via Page.createIsolatedWorld (not Runtime execution-context events, which would enable
-	// the Runtime domain — a CDP tell). frameWorlds caches which frame already has a world so
+	// the Runtime domain, a CDP tell). frameWorlds caches which frame already has a world so
 	// we don't recreate one every scan; navigation invalidates the entry.
 	var frameCtxs sync.Map   // proto.RuntimeExecutionContextID → [3]string{frameId, origin, name}
 	var frameWorlds sync.Map // frameId string → proto.RuntimeExecutionContextID
@@ -125,7 +125,7 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 
 	// IMPORTANT (opsec): do NOT subscribe to any Runtime.* events here. rod auto-enables
 	// a domain for every event type passed to EachEvent, and enabling the Runtime domain
-	// is a detectable CDP tell — the console/Error.stack serialization leak that trips
+	// is a detectable CDP tell, the console/Error.stack serialization leak that trips
 	// isAutomatedWithCDP. We only track OOPIF targets (Target.*, no such leak); same-origin
 	// sub-frame contexts are resolved on demand via Page.createIsolatedWorld instead.
 	waitFrameEvt := page.EachEvent(
@@ -151,7 +151,7 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 			return false
 		},
 		// Page.* is safe to subscribe to (no Runtime-enable tell). On navigation a frame's
-		// isolated world is destroyed, so drop the cache entry — resolveSameOriginFrames
+		// isolated world is destroyed, so drop the cache entry, resolveSameOriginFrames
 		// recreates it on the next scan.
 		func(e *proto.PageFrameNavigated) bool {
 			if e.Frame == nil {
@@ -176,7 +176,7 @@ func RegisterBrowserBindings(vm *goja.Runtime, pc *goja.Object, page *rod.Page, 
 	// same-process child frame (Page.createIsolatedWorld). This replaces the old Runtime
 	// execution-context event tracking, which enabled the Runtime domain (a CDP tell).
 	// OOPIF frames live in another process, so createIsolatedWorld fails for them and they
-	// are skipped — those are scanned separately via framePages. Worlds are cached per
+	// are skipped, those are scanned separately via framePages. Worlds are cached per
 	// frame (frameWorlds) and invalidated on navigation, so scanning does not churn worlds.
 	// Throttled so a tight poll loop issues at most one getFrameTree per interval.
 	var lastFrameResolve time.Time

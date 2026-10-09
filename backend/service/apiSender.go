@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/mail"
 	"strings"
 	"text/template"
 	"time"
@@ -400,6 +401,7 @@ func (a *APISender) SendTest(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
+	req *model.APISenderTestRequest,
 ) (*APISenderTestResponse, error) {
 	ae := NewAuditEvent("ApiSender.SendTest", session)
 	ae.Details["id"] = id.String()
@@ -436,26 +438,156 @@ func (a *APISender) SendTest(
 		oauthAccessToken = token
 		a.Logger.Debugw("got oauth access token for api test request", "oauthProviderID", oauthProviderID)
 	}
-	emailRaw := "bob@enterprise.test"
-	email := *vo.NewEmailMust(emailRaw)
+	// resolve the test values, a nil or empty override falls back to the default
+	if req == nil {
+		req = &model.APISenderTestRequest{}
+	}
+	const (
+		defFromEmail = "bob@enterprise.test"
+		defFromName  = "Bob"
+		defEmail     = "bob@enterprise.test"
+		defFirstName = "Bob"
+		defLastName  = "Test"
+		defSubject   = "Test Email Subject"
+		defContent   = "Hi {{.FirstName}},\n\nThis is a test email.\n\nBest,\nBob"
+		defPhone     = "+1234567890"
+		defExtraID   = "extra-test-identifier"
+		defPosition  = "Lead API Tester"
+		defDept      = "Research and Development"
+		defCity      = "Odin"
+		defCountry   = "Denmark"
+		defMisc      = "This is a test recipient"
+	)
+	pick := func(p *string, def string) string {
+		if p != nil && *p != "" {
+			return *p
+		}
+		return def
+	}
+	// trim the from fields, they are composed into one header below where
+	// surrounding whitespace would otherwise fail validation
+	fromEmailRaw := strings.TrimSpace(pick(req.FromEmail, defFromEmail))
+	fromNameRaw := strings.TrimSpace(pick(req.FromName, defFromName))
+	recipientEmailRaw := pick(req.Email, defEmail)
+	firstNameRaw := pick(req.FirstName, defFirstName)
+	lastNameRaw := pick(req.LastName, defLastName)
+	subjectRaw := pick(req.Subject, defSubject)
+	contentRaw := pick(req.Content, defContent)
+	phoneRaw := pick(req.Phone, defPhone)
+	extraIdentifierRaw := pick(req.ExtraIdentifier, defExtraID)
+	positionRaw := pick(req.Position, defPosition)
+	departmentRaw := pick(req.Department, defDept)
+	cityRaw := pick(req.City, defCity)
+	countryRaw := pick(req.Country, defCountry)
+	miscRaw := pick(req.Misc, defMisc)
+
+	recipientEmail, err := vo.NewEmail(recipientEmailRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("email: %w", err))
+	}
+	envelopeFrom, err := vo.NewMailEnvelopeFrom(fromEmailRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("from email: %w", err))
+	}
+	// build the header via mail.Address so a display name with a comma or other
+	// special character is quoted correctly, fromEmail is already validated above
+	headerFromRaw := (&mail.Address{Name: fromNameRaw, Address: fromEmailRaw}).String()
+	headerFrom, err := vo.NewEmail(headerFromRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("from name or from email: %w", err))
+	}
+	subject, err := vo.NewOptionalString255(subjectRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("subject: %w", err))
+	}
+	content, err := vo.NewOptionalString1MB(contentRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("content: %w", err))
+	}
+	firstName, err := vo.NewOptionalString127(firstNameRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("first name: %w", err))
+	}
+	lastName, err := vo.NewOptionalString127(lastNameRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("last name: %w", err))
+	}
+	phone, err := vo.NewOptionalString127(phoneRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("phone: %w", err))
+	}
+	extraIdentifier, err := vo.NewOptionalString127(extraIdentifierRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("extra identifier: %w", err))
+	}
+	position, err := vo.NewOptionalString127(positionRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("position: %w", err))
+	}
+	department, err := vo.NewOptionalString127(departmentRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("department: %w", err))
+	}
+	city, err := vo.NewOptionalString127(cityRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("city: %w", err))
+	}
+	country, err := vo.NewOptionalString127(countryRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("country: %w", err))
+	}
+	misc, err := vo.NewOptionalString127(miscRaw)
+	if err != nil {
+		return nil, errs.Wrap(fmt.Errorf("misc: %w", err))
+	}
+
+	// record which values differ from the default, names only to avoid logging content
+	isOverride := func(p *string, def string) bool {
+		return p != nil && strings.TrimSpace(*p) != "" && strings.TrimSpace(*p) != def
+	}
+	overridden := []string{}
+	for _, f := range []struct {
+		name string
+		p    *string
+		def  string
+	}{
+		{"fromEmail", req.FromEmail, defFromEmail},
+		{"fromName", req.FromName, defFromName},
+		{"email", req.Email, defEmail},
+		{"firstName", req.FirstName, defFirstName},
+		{"lastName", req.LastName, defLastName},
+		{"subject", req.Subject, defSubject},
+		{"content", req.Content, defContent},
+		{"phone", req.Phone, defPhone},
+		{"extraIdentifier", req.ExtraIdentifier, defExtraID},
+		{"position", req.Position, defPosition},
+		{"department", req.Department, defDept},
+		{"city", req.City, defCity},
+		{"country", req.Country, defCountry},
+		{"misc", req.Misc, defMisc},
+	} {
+		if isOverride(f.p, f.def) {
+			overridden = append(overridden, f.name)
+		}
+	}
+	ae.Details["overridden"] = strings.Join(overridden, ",")
+
 	cid := nullable.NewNullableWithValue(uuid.New())
 	testEmail := &model.Email{
 		Name: nullable.NewNullableWithValue(
 			*vo.NewString64Must("Test Email"),
 		),
 		MailEnvelopeFrom: nullable.NewNullableWithValue(
-			*vo.NewMailEnvelopeFromMust(emailRaw),
+			*envelopeFrom,
 		),
 		MailHeaderFrom: nullable.NewNullableWithValue(
-			*vo.NewEmailMust(
-				fmt.Sprintf("Bob <%s>", emailRaw),
-			),
+			*headerFrom,
 		),
 		MailHeaderSubject: nullable.NewNullableWithValue(
-			*vo.NewOptionalString255Must("Test Email Subject"),
+			*subject,
 		),
 		Content: nullable.NewNullableWithValue(
-			*vo.NewOptionalString1MBMust("Hi {{.FirstName}},\n\nThis is a test email.\n\nBest,\nBob"),
+			*content,
 		),
 		AddTrackingPixel: nullable.NewNullableWithValue(false),
 	}
@@ -464,34 +596,34 @@ func (a *APISender) SendTest(
 		Recipient: &model.Recipient{
 			ID: cid,
 			Email: nullable.NewNullableWithValue(
-				email,
+				*recipientEmail,
 			),
 			Phone: nullable.NewNullableWithValue(
-				*vo.NewOptionalString127Must("+1234567890"),
+				*phone,
 			),
 			ExtraIdentifier: nullable.NewNullableWithValue(
-				*vo.NewOptionalString127Must("extra-test-identifier"),
+				*extraIdentifier,
 			),
 			FirstName: nullable.NewNullableWithValue(
-				*vo.NewOptionalString127Must("Bob"),
+				*firstName,
 			),
 			LastName: nullable.NewNullableWithValue(
-				*vo.NewOptionalString127Must("Test"),
+				*lastName,
 			),
 			Position: nullable.NewNullableWithValue(
-				*vo.NewOptionalString127Must("Lead API Tester"),
+				*position,
 			),
 			Department: nullable.NewNullableWithValue(
-				*vo.NewOptionalString127Must("Research and Development"),
+				*department,
 			),
 			City: nullable.NewNullableWithValue(
-				*vo.NewOptionalString127Must("Odin"),
+				*city,
 			),
 			Country: nullable.NewNullableWithValue(
-				*vo.NewOptionalString127Must("Denmark"),
+				*country,
 			),
 			Misc: nullable.NewNullableWithValue(
-				*vo.NewOptionalString127Must("This is a test recipient"),
+				*misc,
 			),
 			Company: &model.Company{
 				Name: nullable.NewNullableWithValue(

@@ -73,19 +73,32 @@ Phishing Club provides a lot of features for simulation and red teaming, such as
 
 Wrote a blog post or write up about Phishing Club? Tell us about it and we might add it here. Reach out via a GitHub issue, discord or find our email :)
 
-## Template Development
+## More from Phishing Club
 
-### Phishing Template Workbench
+Open source projects and learning resources built for students and red teamers.
 
-Speed up your template development with our template workbench tool:
+### Training Labs
 
-**[Phishing Template Workbench](https://github.com/phishingclub/templates)** - A developer-focused environment for creating and testing phishing simulation templates.
+**[Phishing Club Training Labs](https://labs.phishing.club/)** - Free hands on labs for adversary in the middle and remote browser phishing. Steal the session, not just the password. Capture credentials, hijack live sessions, and defeat real defenses like CSP pinning, beacon detection and passkey prompts.
 
-- **Preview** - Preview templates
-- **Variable support** - See `{{.FirstName}}`, `{{.Email}}` substitution with realistic sample data
+### Session Sushi
+
+**[Session Sushi](https://github.com/phishingclub/session-sushi)** - A zero dependency browser extension for handling cookies, Microsoft 365 OAuth tokens, and Graph API interactions. Built for security professionals.
+
+- **Cookie Management** - View, import/export as JSON, search, filter, and clear cookies, with incognito session support
+- **Microsoft 365 Sessions** - Acquire OAuth tokens, store multiple M365 refresh tokens as sessions, refresh manually or automatically, and import/export sessions
+- **M365 Data Browsers** - Graph, User, Directory, Mailbox, Calendar, OneDrive, SharePoint and Teams
+
+### Template Workbench
+
+**[Phishing Template Workbench](https://github.com/phishingclub/templates)** - A developer focused environment for creating and testing phishing simulation templates.
+
+- **Preview** - See how templates render with test data
+- **Variable support** - `{{.BaseURL}}`, `{{.Email}}`, `{{.FirstName}}` substitution with realistic sample data
 - **Naive Responsive Testing** - Preview templates across mobile, tablet, and desktop
-- **Export Ready** - Compatible with Phishing Club formats
-- **Included Templates** - Comes with example templates covering common phishing scenarios that you can import and customize
+- **Naive Email Testing** - Check email templates in Mailpit and score HTML/CSS and SpamAssassin across clients
+- **Asset Management** - Resolve template assets with fallback to global asset directories
+- **Export Ready** - Copy processed HTML, download template folders, and export collections compatible with Phishing Club
 
 ## Development
 

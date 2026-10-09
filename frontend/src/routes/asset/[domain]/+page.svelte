@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
+	import { openPreviewBytes } from '$lib/utils/safePreview.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
@@ -15,6 +16,7 @@
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
+	import { fetchAllRows } from '$lib/utils/api-utils';
 	import Modal from '$lib/components/Modal.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import { goto } from '$app/navigation';
@@ -30,6 +32,9 @@
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import FileField from '$lib/components/FileField.svelte';
+	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
+	import Editor from '$lib/components/editor/Editor.svelte';
+	import { BiMap } from '$lib/utils/maps.js';
 	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
 	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
 	import {
@@ -119,6 +124,7 @@
 		// if were have a domain context but are in
 		refreshAssets();
 		redirectIfWrongContext();
+		loadDomainMap();
 		tableURLParams.onChange(refreshAssets);
 		return () => {
 			tableURLParams.unsubscribe();
@@ -210,15 +216,32 @@
 
 	const update = async () => {
 		try {
+			// 1. name and description
 			const res = await api.asset.update(formValues.id, formValues.name, formValues.description);
-			if (res.success) {
-				addToast('Updated asset', 'Success');
-				refreshAssets();
-				closeModal();
-				return;
+			if (!res.success) {
+				modalError = res.error;
+				throw res.error;
 			}
-			modalError = res.error;
-			throw res.error;
+			// 2. content, for a text file edited in the same modal. runs before the move
+			// so the text check uses the current extension.
+			if (editContentEditable) {
+				const cr = await api.asset.saveContent(formValues.id, editContent.value);
+				if (!cr.success) {
+					modalError = cr.error;
+					throw cr.error;
+				}
+			}
+			// 3. rename / move, only when the path changed
+			if (formValues.path && formValues.path !== editOriginalPath) {
+				const mr = await api.asset.move(formValues.id, formValues.path);
+				if (!mr.success) {
+					modalError = mr.error;
+					throw mr.error;
+				}
+			}
+			addToast('Updated asset', 'Success');
+			refreshAssets();
+			closeModal();
 		} catch (e) {
 			addToast('Failed to update asset', 'Error');
 			console.error('failed to update asset', e);
@@ -261,37 +284,203 @@
 	const closeModal = () => {
 		modalError = '';
 		isModalVisible = false;
+		editContentEditable = false;
+		editContent = { id: '', path: '', value: '', language: 'plaintext' };
+		editIsHtml = false;
 		form.reset();
 	};
 
 	const openCreateModal = async () => {
 		modalMode = 'create';
+		// start clean so a previously edited asset's path does not leak in
+		formValues = { id: '', name: '', description: '', path: '' };
+		editContentEditable = false;
+		editIsHtml = false;
+		editOriginalPath = '';
 		isModalVisible = true;
 	};
 
 	/**
-	 * @param {string} id
+	 * Open the edit modal: name and description, plus the content editor for a text file.
+	 * @param {*} asset
 	 */
-	const onClickEdit = async (id) => {
+	const onClickEdit = async (asset) => {
 		modalMode = 'update';
-		// get the asset
+		editContentEditable = false;
+		editContent = { id: asset.id, path: asset.path, value: '', language: 'plaintext' };
+		editIsHtml = /\.(html?|xhtml)$/i.test(asset.path);
 		try {
 			showIsLoading();
-			const res = await api.asset.getByID(id);
+			const res = await api.asset.getByID(asset.id);
 			if (!res.success) {
 				addToast('Failed to get asset', 'Error');
 				console.error('failed to get asset', res.error);
 				return;
 			}
-			isModalVisible = true;
 			formValues.id = res.data.id;
 			formValues.name = res.data.name;
 			formValues.description = res.data.description;
+			formValues.path = res.data.path;
+			editOriginalPath = res.data.path;
+			// for a text file, load its content so the same modal can edit it
+			if (isTextEditable(asset.path)) {
+				const cr = await api.asset.getContent(asset.id);
+				if (cr.success && cr.data.editable) {
+					editContentEditable = true;
+					editContent.value = decodeBase64Utf8(cr.data.content);
+					editContent.language = languageForPath(asset.path);
+				}
+			}
+			isModalVisible = true;
 		} catch (e) {
 			addToast('Failed to get asset', 'Error');
 			console.error('failed to get asset', e);
 		} finally {
 			hideIsLoading();
+		}
+	};
+
+	// text content editing, folded into the edit modal for text files
+	let editContent = { id: '', path: '', value: '', language: 'plaintext' };
+	let editContentEditable = false;
+	// an HTML asset uses the same editor as a landing page, with its live domain
+	// preview; other text files use a plain code editor
+	let editIsHtml = false;
+	// domains for the editor's preview dropdown, same source as the page editor
+	let domainMap = new BiMap({});
+
+	const loadDomainMap = async () => {
+		try {
+			const domains = await fetchAllRows((options) =>
+				api.domain.getAllSubsetWithoutProxies(options, contextCompanyID)
+			);
+			domainMap = BiMap.FromArrayOfObjects(domains);
+		} catch (e) {
+			console.error('failed to load domains for preview', e);
+		}
+	};
+
+	// the asset's path when the edit modal opened, to detect a rename / move on save
+	let editOriginalPath = '';
+
+	// replace file modal
+	let isReplaceVisible = false;
+	let replaceValues = { id: '', path: '' };
+	let replaceError = '';
+	let isReplacing = false;
+	let replaceForm = null;
+
+	// extensions whose content can be edited as text, mirrors the backend
+	const textEditableExtensions = [
+		'.html',
+		'.htm',
+		'.xhtml',
+		'.txt',
+		'.css',
+		'.js',
+		'.mjs',
+		'.json',
+		'.xml',
+		'.svg',
+		'.md',
+		'.csv',
+		'.yml',
+		'.yaml'
+	];
+
+	/**
+	 * Check if a file can be edited as text based on its extension
+	 * @param {string} path
+	 */
+	const isTextEditable = (path) => {
+		if (!path) {
+			return false;
+		}
+		const extension = path.toLowerCase().substring(path.lastIndexOf('.'));
+		return textEditableExtensions.includes(extension);
+	};
+
+	/**
+	 * Map a file extension to a Monaco language for syntax highlighting
+	 * @param {string} path
+	 */
+	const languageForPath = (path) => {
+		const extension = path.toLowerCase().substring(path.lastIndexOf('.'));
+		switch (extension) {
+			case '.html':
+			case '.htm':
+			case '.xhtml':
+				return 'html';
+			case '.css':
+				return 'css';
+			case '.js':
+			case '.mjs':
+				return 'javascript';
+			case '.json':
+				return 'json';
+			case '.xml':
+			case '.svg':
+				return 'xml';
+			case '.md':
+				return 'markdown';
+			case '.yml':
+			case '.yaml':
+				return 'yaml';
+			default:
+				return 'plaintext';
+		}
+	};
+
+	/**
+	 * Decode a base64 string of UTF-8 bytes into text
+	 * @param {string} b64
+	 */
+	const decodeBase64Utf8 = (b64) => {
+		const binary = atob(b64);
+		const bytes = new Uint8Array(binary.length);
+		for (let i = 0; i < binary.length; i++) {
+			bytes[i] = binary.charCodeAt(i);
+		}
+		return new TextDecoder('utf-8').decode(bytes);
+	};
+
+	/**
+	 * Open the replace file modal for an asset
+	 * @param {*} asset
+	 */
+	const openReplaceModal = (asset) => {
+		replaceValues = { id: asset.id, path: asset.path };
+		replaceError = '';
+		isReplaceVisible = true;
+	};
+
+	const submitReplace = async () => {
+		try {
+			isReplacing = true;
+			/** @type {HTMLInputElement} */
+			const fileInput = document.querySelector('#replaceFile');
+			if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+				replaceError = 'Select a file';
+				return;
+			}
+			const formData = new FormData();
+			formData.append('file', fileInput.files[0]);
+			const res = await api.asset.replaceFile(replaceValues.id, formData);
+			if (!res.success) {
+				replaceError = res.error;
+				return;
+			}
+			addToast('Replaced asset file', 'Success');
+			isReplaceVisible = false;
+			if (replaceForm) {
+				replaceForm.reset();
+			}
+			refreshAssets();
+		} catch (e) {
+			addToast('Failed to replace asset file', 'Error');
+			console.error('failed to replace asset file', e);
+		} finally {
+			isReplacing = false;
 		}
 	};
 
@@ -337,11 +526,12 @@
 			for (let i = 0; i < binaryData.length; i++) {
 				byteArray[i] = binaryData.charCodeAt(i);
 			}
-			const blob = new Blob([byteArray], { type: res.data.mimeType });
-			const url = URL.createObjectURL(blob);
-			window.open(url, '_blank');
+			// isolate html and other active content in a sandbox so a preview
+			// can not run script on the admin origin
+			openPreviewBytes(byteArray, res.data.mimeType);
 		} else {
-			window.open(`https://${$page.params.domain}/${path}`, '_blank');
+			// a real domain asset opens on the phishing origin, separate from admin
+			window.open(`https://${$page.params.domain}/${path}`, '_blank', 'noopener,noreferrer');
 		}
 	};
 
@@ -446,7 +636,7 @@
 
 <HeadTitle title="Assets ({isCompanyFolder ? 'company' : $page.params.domain})" />
 <main>
-	<Headline>
+	<Headline docSlug="assets">
 		{#if isCompanyFolder}
 			Company assets
 		{:else}
@@ -551,7 +741,13 @@
 							/>
 						{/if}
 						<TableUpdateButton
-							on:click={() => onClickEdit(asset.id)}
+							on:click={() => onClickEdit(asset)}
+							{...globalButtonDisabledAttributes(asset, contextCompanyID)}
+						/>
+						<TableDropDownButton
+							name="Replace file"
+							title="Replace the file content with an upload"
+							on:click={() => openReplaceModal(asset)}
 							{...globalButtonDisabledAttributes(asset, contextCompanyID)}
 						/>
 						<TableDeleteButton
@@ -564,40 +760,136 @@
 		{/each}
 	</Table>
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
-		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
-			<FormColumns>
-				<FormColumn>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.name}
-						optional={true}
-						placeholder={'Candidate CV'}>Name</TextField
-					>
-					<TextField
-						bind:value={formValues.description}
-						optional={true}
-						minLength={1}
-						maxLength={255}
-						placeholder="Fake CV with embedded link">Description</TextField
-					>
-					{#if modalMode === 'create'}
+		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
+			{#if modalMode === 'update' && editContentEditable && editIsHtml}
+				<!-- HTML asset: the same editor as a landing page, with live domain preview -->
+				<Editor
+					contentType="domain"
+					{domainMap}
+					baseURL={domainContext || 'example.test'}
+					bind:value={editContent.value}
+				>
+					<div class="flex w-full flex-row flex-wrap items-start gap-x-6 gap-y-2 pl-4">
+						<TextField
+							minLength={1}
+							maxLength={127}
+							bind:value={formValues.name}
+							optional={true}
+							placeholder={'Candidate CV'}>Name</TextField
+						>
+						<TextField
+							bind:value={formValues.description}
+							optional={true}
+							minLength={1}
+							maxLength={255}
+							placeholder="Fake CV with embedded link">Description</TextField
+						>
 						<TextField
 							bind:value={formValues.path}
 							minLength={2}
 							maxLength={512}
 							pattern="[a-zA-Z0-9\._\/\-]+"
-							optional={true}
-							placeholder={'profile/alice'}
-							toolTipText={pathTooltip}>Path</TextField
+							placeholder={'profile/alice/cv.html'}
+							toolTipText="Full path including filename. Change it to rename or move the file on save."
+							>Path</TextField
 						>
+					</div>
+				</Editor>
+			{:else if modalMode === 'update' && editContentEditable}
+				<!-- non-HTML text asset: plain code editor, no preview -->
+				<div class="col-start-1 col-end-4 flex w-[70vw] flex-col gap-4">
+					<div class="flex w-full flex-row flex-wrap items-start gap-x-6 gap-y-2">
+						<TextField
+							minLength={1}
+							maxLength={127}
+							bind:value={formValues.name}
+							optional={true}
+							placeholder={'Candidate CV'}>Name</TextField
+						>
+						<TextField
+							bind:value={formValues.description}
+							optional={true}
+							minLength={1}
+							maxLength={255}
+							placeholder="Fake CV with embedded link">Description</TextField
+						>
+						<TextField
+							bind:value={formValues.path}
+							minLength={2}
+							maxLength={512}
+							pattern="[a-zA-Z0-9\._\/\-]+"
+							placeholder={'profile/alice/app.css'}
+							toolTipText="Full path including filename. Change it to rename or move the file on save."
+							>Path</TextField
+						>
+					</div>
+					<SimpleCodeEditor
+						bind:value={editContent.value}
+						language={editContent.language}
+						height="large"
+					/>
+				</div>
+			{:else}
+				<FormColumns>
+					<FormColumn>
+						<TextField
+							minLength={1}
+							maxLength={127}
+							bind:value={formValues.name}
+							optional={true}
+							placeholder={'Candidate CV'}>Name</TextField
+						>
+						<TextField
+							bind:value={formValues.description}
+							optional={true}
+							minLength={1}
+							maxLength={255}
+							placeholder="Fake CV with embedded link">Description</TextField
+						>
+						{#if modalMode === 'create'}
+							<TextField
+								bind:value={formValues.path}
+								minLength={2}
+								maxLength={512}
+								pattern="[a-zA-Z0-9\._\/\-]+"
+								optional={true}
+								placeholder={'profile/alice'}
+								toolTipText={pathTooltip}>Path</TextField
+							>
 
-						<FileField name="files" multiple={true}>Files</FileField>
-					{/if}
-				</FormColumn>
-			</FormColumns>
+							<FileField name="files" multiple={true}>Files</FileField>
+						{:else}
+							<TextField
+								bind:value={formValues.path}
+								minLength={2}
+								maxLength={512}
+								pattern="[a-zA-Z0-9\._\/\-]+"
+								placeholder={'profile/alice/cv.pdf'}
+								toolTipText="Full path including filename. Change it to rename or move the file on save."
+								>Path</TextField
+							>
+						{/if}
+					</FormColumn>
+				</FormColumns>
+			{/if}
 			<FormError message={modalError} />
 			<FormFooter {closeModal} {isSubmitting} />
+		</FormGrid>
+	</Modal>
+	<Modal
+		headerText={`Replace: ${replaceValues.path}`}
+		visible={isReplaceVisible}
+		onClose={() => (isReplaceVisible = false)}
+		isSubmitting={isReplacing}
+	>
+		<FormGrid on:submit={submitReplace} bind:bindTo={replaceForm} isSubmitting={isReplacing}>
+			<FormColumns>
+				<FormColumn>
+					<FileField name="replaceFile" multiple={false}>File</FileField>
+				</FormColumn>
+			</FormColumns>
+			<FormError message={replaceError} />
+			<FormFooter closeModal={() => (isReplaceVisible = false)} isSubmitting={isReplacing} />
 		</FormGrid>
 	</Modal>
 	<DeleteAlert

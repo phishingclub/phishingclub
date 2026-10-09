@@ -642,7 +642,7 @@
 <HeadTitle title="Domains" />
 <main>
 	<div class="flex justify-between">
-		<Headline>Domains</Headline>
+		<Headline docSlug="domains">Domains</Headline>
 	</div>
 	<BigButton on:click={openCreateModal}>New domain</BigButton>
 	<Table

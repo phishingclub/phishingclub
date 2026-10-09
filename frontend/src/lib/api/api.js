@@ -363,6 +363,60 @@ export class API {
 		},
 
 		/**
+		 * Get an asset's content in base64 and whether it is editable as text
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getContent: async (id) => {
+			return await getJSON(this.getPath(`/asset/${id}/content`));
+		},
+
+		/**
+		 * Save an asset's text content
+		 *
+		 * @param {string} id
+		 * @param {string} content
+		 * @returns {Promise<ApiResponse>}
+		 */
+		saveContent: async (id, content) => {
+			return await putJSON(this.getPath(`/asset/${id}/content`), {
+				content: content
+			});
+		},
+
+		/**
+		 * Rename or move an asset to a new path within its context
+		 *
+		 * @param {string} id
+		 * @param {string} path
+		 * @returns {Promise<ApiResponse>}
+		 */
+		move: async (id, path) => {
+			return await patchJSON(this.getPath(`/asset/${id}/move`), {
+				path: path
+			});
+		},
+
+		/**
+		 * Replace an asset's file with an uploaded file
+		 *
+		 * @param {string} id
+		 * @param {FormData} data  form data with a 'file' field
+		 * @returns {Promise<ApiResponse>}
+		 */
+		replaceFile: async (id, data) => {
+			const res = await fetch(this.getPath(`/asset/${id}/file`), {
+				method: 'POST',
+				// content-type is set automatically by the browser
+				body: data
+			});
+			const body = await res.json();
+
+			return newResponse(body.success, res.status, body.error, body.data);
+		},
+
+		/**
 		 * Get all assets for a domain using pagination.
 		 *
 		 * @param {string} id
@@ -3149,10 +3203,11 @@ export class API {
 		/**
 		 * Send a test request to an API sender.
 		 * @param {string} id
+		 * @param {object} [values] optional test values, empty fields use defaults
 		 * @returns {Promise<ApiResponse>}
 		 */
-		test: async (id) => {
-			return await postJSON(this.getPath(`/api-sender/${id}/test`));
+		test: async (id, values = {}) => {
+			return await postJSON(this.getPath(`/api-sender/${id}/test`), values);
 		}
 	};
 

@@ -112,7 +112,7 @@ func (r *KeyRateLimiter) GetLimiter(key string) *rate.Limiter {
 	entry.lastAccess.Store(time.Now().UnixNano())
 
 	// LoadOrStore atomically either stores our new entry or returns the
-	// existing one — correctly handles both the common case and concurrent
+	// existing one, correctly handles both the common case and concurrent
 	// goroutines racing to create an entry for the same key
 	actual, loaded := r.key.LoadOrStore(key, entry)
 	if loaded {

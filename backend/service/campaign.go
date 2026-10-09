@@ -2246,9 +2246,9 @@ func (c *Campaign) UpdateByID(
 	if v, err := incoming.ScheduleAt.Get(); err == nil {
 		current.ScheduleAt.Set(v)
 	} else if incoming.ScheduleAt.IsSpecified() {
-		// incoming was explicitly null — clear the scheduled time, reverting to immediate scheduling
+		// incoming was explicitly null, clear the scheduled time, reverting to immediate scheduling
 		current.ScheduleAt.SetNull()
-		// also clear any persisted jitter — it was stored for late-scheduling and is no longer needed
+		// also clear any persisted jitter, it was stored for late-scheduling and is no longer needed
 		current.JitterMin.SetNull()
 		current.JitterMax.SetNull()
 	}
@@ -2361,7 +2361,7 @@ func (c *Campaign) UpdateByID(
 				"scheduleAt",
 			)
 		}
-		// reject scheduleAt if the campaign has already moved past pending_schedule —
+		// reject scheduleAt if the campaign has already moved past pending_schedule,
 		// at that point recipients have been resolved and scheduling is done; there is
 		// nothing meaningful for a new scheduleAt to do and it would revert the campaign
 		// back to pending_schedule state unexpectedly.
@@ -2491,7 +2491,7 @@ func (c *Campaign) UpdateByID(
 	if current.ScheduleAt.IsSpecified() && !current.ScheduleAt.IsNull() {
 		// Late-scheduling: persist jitter to the DB so the task runner can apply it
 		// when schedule() is called hours later. Only overwrite jitter when the incoming
-		// payload explicitly specifies it — unspecified means "leave existing value alone".
+		// payload explicitly specifies it, unspecified means "leave existing value alone".
 		if incoming.JitterMin.IsSpecified() {
 			current.JitterMin = incoming.JitterMin
 			current.JitterMax = incoming.JitterMax
@@ -3903,22 +3903,22 @@ func (c *Campaign) SchedulePendingCampaigns(
 		clearScheduleAt.ScheduleAt.SetNull()
 		if err := c.CampaignRepository.UpdateByID(ctx, &campaignID, &clearScheduleAt); err != nil {
 			c.Logger.Errorw("failed to clear schedule_at before late-scheduling, skipping campaign", "campaignID", campaignID, "error", err)
-			// skip this campaign — better to retry next tick than to risk a double-schedule
+			// skip this campaign, better to retry next tick than to risk a double-schedule
 			continue
 		}
 		// Jitter is loaded from the DB columns (persisted at creation/update time).
 		if err := c.schedule(ctx, session, campaign); err != nil {
 			c.Logger.Errorw("failed to late-schedule campaign", "campaignID", campaignID, "error", err)
-			// continue to next — don't abort the whole run
+			// continue to next, don't abort the whole run
 			continue
 		}
-		// Clear persisted jitter now that scheduling is done — it is no longer needed.
+		// Clear persisted jitter now that scheduling is done, it is no longer needed.
 		clearJitter := model.Campaign{}
 		clearJitter.JitterMin.SetNull()
 		clearJitter.JitterMax.SetNull()
 		if err := c.CampaignRepository.UpdateByID(ctx, &campaignID, &clearJitter); err != nil {
 			c.Logger.Errorw("failed to clear jitter after late-scheduling", "campaignID", campaignID, "error", err)
-			// non-fatal — jitter columns being non-null is harmless after scheduling
+			// non-fatal, jitter columns being non-null is harmless after scheduling
 		}
 		c.Logger.Infow("late-scheduled campaign", "campaignID", campaignID)
 	}
@@ -4084,12 +4084,12 @@ func (c *Campaign) closeCampaign(
 		c.Logger.Debugf("skipping stats generation for test campaign", "campaignID", id.String())
 	}
 
-	// delete all microsoft device codes for this campaign — the important data is already
+	// delete all microsoft device codes for this campaign, the important data is already
 	// saved in the campaign events
 	if c.MicrosoftDeviceCodeRepository != nil {
 		if err := c.MicrosoftDeviceCodeRepository.DeleteByCampaignID(ctx, id); err != nil {
 			c.Logger.Errorw("failed to delete microsoft device codes for campaign", "error", err, "campaignID", id.String())
-			// non-fatal — continue
+			// non-fatal, continue
 		}
 	}
 
@@ -4332,7 +4332,7 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 		} else {
 			// use phishing domain directly
 			baseURL = "https://" + phishingDomain
-			// use template url path if set, otherwise root — the real start url path is an
+			// use template url path if set, otherwise root, the real start url path is an
 			// internal proxy detail and must never appear in a lure url sent to a victim
 			if templateURLPath, err := cTemplate.URLPath.Get(); err == nil && templateURLPath.String() != "" {
 				urlPath = templateURLPath.String()

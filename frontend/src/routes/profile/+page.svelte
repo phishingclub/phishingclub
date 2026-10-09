@@ -352,7 +352,7 @@
 
 <HeadTitle title="Profile" />
 <main class="pb-8">
-	<Headline>Profile</Headline>
+	<Headline docSlug="settings">Profile</Headline>
 	{#if isInitiallyLoaded}
 		<div class="max-w-7xl pt-4 space-y-8">
 			<!-- Profile and Password Section -->

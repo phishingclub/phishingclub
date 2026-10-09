@@ -69,6 +69,7 @@ const (
 	ROUTE_V1_USER_MFA_TOTP              = "/api/v1/user/mfa/totp"
 	ROUTE_V1_QR_FROM_TOTP               = "/api/v1/qr/totp"
 	ROUTE_V1_QR_URL_TO_HTML             = "/api/v1/qr/html"
+	ROUTE_V1_PREVIEW                    = "/api/v1/preview"
 	// session
 	ROUTE_V1_SESSION_ID   = "/api/v1/session/:id"
 	ROUTE_V1_SESSION_PING = "/api/v1/session/ping"
@@ -85,7 +86,7 @@ const (
 	ROUTE_V1_COMPANY_REPORT_CONFIG_LOG = "/api/v1/company/report-config/:companyID/log"
 	ROUTE_V1_REPORT_CONFIG_GLOBAL      = "/api/v1/report-config"
 	ROUTE_V1_REPORT_CONFIG_SEND        = "/api/v1/report-config/send/:id"
-	// scim v2 provisioning endpoints (public — authenticated via bearer token)
+	// scim v2 provisioning endpoints (public, authenticated via bearer token)
 	ROUTE_SCIM_V2_SERVICE_PROVIDER_CONFIG = "/api/v1/scim/v2/:companyID/ServiceProviderConfig"
 	ROUTE_SCIM_V2_RESOURCE_TYPES          = "/api/v1/scim/v2/:companyID/ResourceTypes"
 	ROUTE_SCIM_V2_SCHEMAS                 = "/api/v1/scim/v2/:companyID/Schemas"
@@ -207,6 +208,9 @@ const (
 	ROUTE_V1_ASSET_DOMAIN_CONTEXT = "/api/v1/asset/domain/:domain"
 	ROUTE_V1_ASSET_GLOBAL_CONTEXT = "/api/v1/asset/domain/"
 	ROUTE_V1_ASSET_DOMAIN_VIEW    = "/api/v1/asset/view/domain/:domain/*path"
+	ROUTE_V1_ASSET_ID_CONTENT     = "/api/v1/asset/:id/content"
+	ROUTE_V1_ASSET_ID_MOVE        = "/api/v1/asset/:id/move"
+	ROUTE_V1_ASSET_ID_FILE        = "/api/v1/asset/:id/file"
 	// attachments
 	ROUTE_V1_ATTACHMENT                 = "/api/v1/attachment"
 	ROUTE_V1_ATTACHMENT_ID              = "/api/v1/attachment/:id"
@@ -276,6 +280,12 @@ type administrationServer struct {
 	embedBackendFS     *embed.FS
 	certMagicConfig    *certmagic.Config
 	softSessionHandler gin.HandlerFunc
+	// the single page app index html with the SvelteKit csp meta tag removed,
+	// and the full policy promoted to a response header, so the whole csp is
+	// delivered server side. nil when the meta could not be read, in which case
+	// index.html is served unchanged and the policy stays in its meta tag.
+	spaIndexHTML []byte
+	spaCSP       string
 }
 
 // NewAdministrationServer creates a new administration app
@@ -312,12 +322,13 @@ func setupRoutes(
 	controllers *Controllers,
 	middleware *Middlewares,
 ) *gin.Engine {
-	// SCIM v2 provisioning endpoints are NOT served here — they live on the
+	// SCIM v2 provisioning endpoints are NOT served here, they live on the
 	// phishing server (app/server.go AssignRoutes), gated to a single global
 	// domain, so the admin port does not need public exposure for SCIM.
 
-	// all other admin routes are protected by the ip allowlist middleware
-	admin := r.Group("/", middleware.IPLimiter)
+	// ip allowlist on all admin routes; NoStore keeps API responses out of the
+	// browser disk cache. static assets are served off the group and stay cacheable.
+	admin := r.Group("/", middleware.IPLimiter, middleware.NoStore)
 	_ = admin
 
 	if !build.Flags.Production {
@@ -377,6 +388,8 @@ func setupRoutes(
 		// qr
 		POST(ROUTE_V1_QR_FROM_TOTP, middleware.SessionHandler, controllers.QR.ToTOTPURL).
 		POST(ROUTE_V1_QR_URL_TO_HTML, middleware.SessionHandler, controllers.QR.ToHTML).
+		// preview renders admin authored content isolated with a sandbox CSP
+		POST(ROUTE_V1_PREVIEW, middleware.SessionHandler, controllers.Preview.Render).
 		// company
 		POST(ROUTE_V1_COMPANY, middleware.SessionHandler, controllers.Company.Create).
 		POST(ROUTE_V1_COMPANY_ID, middleware.SessionHandler, controllers.Company.ChangeName).
@@ -548,7 +561,7 @@ func setupRoutes(
 		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA, middleware.SessionHandler, controllers.Campaign.AnonymizeDataByID).
 		DELETE(ROUTE_V1_CAMPAIGN_DEVICE_CODES, middleware.SessionHandler, controllers.Campaign.DeleteDeviceCodesByCampaignID).
 		DELETE(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.DeleteByID).
-		// campaign PDF report — ExtendedTimeout required for headless browser rendering
+		// campaign PDF report, ExtendedTimeout required for headless browser rendering
 		GET(ROUTE_V1_CAMPAIGN_REPORT, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.ReportTemplate.GeneratePDFByCampaignID).
 		// report templates
 		GET(ROUTE_V1_REPORT_TEMPLATE, middleware.SessionHandler, controllers.ReportTemplate.GetAll).
@@ -568,6 +581,10 @@ func setupRoutes(
 		GET(ROUTE_V1_ASSET_DOMAIN_VIEW, middleware.SessionHandler, controllers.Asset.GetContentByID).
 		GET(ROUTE_V1_ASSET_ID, middleware.SessionHandler, controllers.Asset.GetByID).
 		PATCH(ROUTE_V1_ASSET_ID, middleware.SessionHandler, controllers.Asset.UpdateByID).
+		GET(ROUTE_V1_ASSET_ID_CONTENT, middleware.SessionHandler, controllers.Asset.GetEditableContentByID).
+		PUT(ROUTE_V1_ASSET_ID_CONTENT, middleware.SessionHandler, controllers.Asset.SaveContentByID).
+		PATCH(ROUTE_V1_ASSET_ID_MOVE, middleware.SessionHandler, controllers.Asset.MoveByID).
+		POST(ROUTE_V1_ASSET_ID_FILE, middleware.SessionHandler, controllers.Asset.ReplaceFileByID).
 		GET(ROUTE_V1_ASSET_DOMAIN_CONTEXT, middleware.SessionHandler, controllers.Asset.GetAllForContext).
 		GET(ROUTE_V1_ASSET_GLOBAL_CONTEXT, middleware.SessionHandler, controllers.Asset.GetAllForContext).
 		POST(ROUTE_V1_ASSET, middleware.SessionHandler, controllers.Asset.Create).
@@ -835,7 +852,18 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 	embedFS := frontend.GetEmbededFS()
 	// make embedded .html work
 	frontend.LoadHTMLFromEmbedFS(a.router, *embedFS, "build/*.html")
-	// serve favicons only to authenticated users — unauthenticated requests get 404
+	// promote the SvelteKit csp meta tag to a response header so the whole
+	// policy is delivered server side and nothing is left in the document. The
+	// meta holds script-src with the build time script hash plus style-src and
+	// the other resource directives; we add the directives a meta can not carry.
+	// If the meta can not be read we leave index.html and its meta untouched.
+	if policy, indexHTML, ok := frontend.ExtractCSPFromIndex(*embedFS); ok {
+		a.spaIndexHTML = indexHTML
+		a.spaCSP = policy + "; frame-ancestors 'none'; form-action 'self'"
+	} else {
+		a.logger.Warn("could not read csp meta from index.html, serving it unchanged")
+	}
+	// serve favicons only to authenticated users, unauthenticated requests get 404
 	// so the file is not indexable by scanners probing common paths
 	for _, faviconPath := range []string{"/favicon.ico", "/favicon.png"} {
 		fp := faviconPath
@@ -854,12 +882,10 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 		if !entry.IsDir() {
 			// special case for the frontpage
 			if path == "index.html" {
-				a.router.GET("/", func(c *gin.Context) {
-					c.HTML(http.StatusOK, "build/index.html", nil)
-				})
+				a.router.GET("/", a.serveIndex)
 				continue
 			}
-			// skip favicons — registered separately with session gating
+			// skip favicons, registered separately with session gating
 			if path == "favicon.png" || path == "favicon.ico" {
 				continue
 			}
@@ -882,11 +908,22 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 		}
 	}
 	// fall back to the root index.html
-	a.router.NoRoute(func(c *gin.Context) {
-		c.HTML(http.StatusOK, "build/index.html", nil)
-	})
+	a.router.NoRoute(a.serveIndex)
 
 	return nil
+}
+
+// serveIndex serves the single page app shell. When the csp meta was promoted
+// to a header at startup it serves the stripped html with the full policy header,
+// which replaces the strict header the security middleware set. Otherwise it
+// serves the original template and the meta carries the resource directives.
+func (a *administrationServer) serveIndex(c *gin.Context) {
+	if a.spaIndexHTML != nil {
+		c.Header("Content-Security-Policy", a.spaCSP)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", a.spaIndexHTML)
+		return
+	}
+	c.HTML(http.StatusOK, "build/index.html", nil)
 }
 
 func (a *administrationServer) StartServer(

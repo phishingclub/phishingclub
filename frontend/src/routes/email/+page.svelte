@@ -445,7 +445,7 @@
 
 <HeadTitle title="Emails" />
 <main>
-	<Headline>Emails</Headline>
+	<Headline docSlug="emails">Emails</Headline>
 	<BigButton on:click={async () => await openCreateModal()}>New Email</BigButton>
 	<BulkActionBar
 		count={$selection.size}

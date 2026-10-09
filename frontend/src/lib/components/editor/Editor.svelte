@@ -158,6 +158,7 @@
 	import * as vimModule from 'monaco-vim';
 	import { BiMap } from '$lib/utils/maps';
 	import { previewQR as generateQR } from '$lib/utils/qrPreview';
+	import { submitPreviewForm } from '$lib/utils/safePreview.js';
 	import { vimModeEnabled } from '$lib/store/vimMode.js';
 	import {
 		setupVimClipboardIntegration,
@@ -176,6 +177,8 @@
 	let localVimMode = externalVimMode !== null ? externalVimMode : $vimModeEnabled;
 	let editor = null;
 	let previewFrame = null;
+	// unique name so the preview form can target this editor's iframe
+	let previewFrameName = 'pc-preview-' + Math.random().toString(36).slice(2);
 	let previewRenderDelayID = null;
 	let previewRenderDelay = 250;
 	let isRenderingPreview = false;
@@ -183,7 +186,6 @@
 	let previousQRHash = 0;
 
 	let isPreviewVisible = false;
-	let externalFrameRef = null;
 	let fileInputRef;
 	let shadowContainer = null;
 	let vimStatusBar = null;
@@ -639,6 +641,12 @@
 		/* @ts-ignore - editorOptions is not complete */
 		editor = monaco.editor.create(editorContainer, editorOptions);
 
+		// Ctrl/Cmd+S saves by submitting the surrounding form, so the editor's usual
+		// save shortcut maps to the page's save action.
+		editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+			editorContainer?.closest('form')?.requestSubmit();
+		});
+
 		// vim mode will be initialized by reactive statement if needed
 
 		editor.getModel().onDidChangeContent((e) => {
@@ -724,42 +732,23 @@
 		updatePreview();
 	};
 
-	// create shadow dom for iframe isolation
-	const createShadowIframe = () => {
+	// create the named iframe the preview form posts into. the sandboxed server
+	// response is what isolates the content; the sandbox attribute without
+	// allow-same-origin adds a second layer. a plain iframe, not a shadow root,
+	// so the form can find the frame by name.
+	const createPreviewIframe = () => {
 		if (!shadowContainer) return;
 
-		// clear existing content
 		shadowContainer.innerHTML = '';
 
-		// create shadow root
-		const shadowRoot = shadowContainer.attachShadow({ mode: 'closed' });
-
-		// create iframe inside shadow dom
 		const iframe = document.createElement('iframe');
-		iframe.sandbox = 'allow-forms allow-modals allow-popups allow-scripts allow-pointer-lock';
+		iframe.name = previewFrameName;
+		iframe.sandbox = 'allow-forms allow-modals allow-popups allow-scripts';
 		iframe.title = 'preview';
-		iframe.style.cssText = 'height: 100%; width: 100%; border: none;';
+		iframe.style.cssText = 'height: 100%; width: 100%; border: none; background: white;';
 
-		// add styles to shadow root to isolate it
-		const style = document.createElement('style');
-		style.textContent = `
-			:host {
-				display: block;
-				height: 100%;
-				width: 100%;
-				background: white;
-			}
-			iframe {
-				height: 100%;
-				width: 100%;
-				border: none;
-			}
-		`;
+		shadowContainer.appendChild(iframe);
 
-		shadowRoot.appendChild(style);
-		shadowRoot.appendChild(iframe);
-
-		// set as preview frame
 		previewFrame = iframe;
 	};
 
@@ -771,19 +760,15 @@
 		value = v;
 		const content = await replaceTemplateVariables(v);
 
-		// create shadow iframe if not exists
+		// create the preview iframe if not exists
 		if (shadowContainer && !previewFrame) {
-			createShadowIframe();
+			createPreviewIframe();
 		}
 
+		// post the content to the backend, which returns it with a sandbox policy
+		// so the preview runs isolated and still loads its own external resources
 		if (previewFrame) {
-			// use data url for null origin isolation
-			previewFrame.src = 'data:text/html;charset=utf-8,' + encodeURIComponent(content);
-		}
-		if (externalFrameRef) {
-			const embedContent = createEmbed(content);
-			const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(embedContent);
-			externalFrameRef.location.replace(dataUrl);
+			submitPreviewForm(content, previewFrameName);
 		}
 		isRenderingPreview = false;
 	};
@@ -1000,33 +985,14 @@
 		reader.readAsText(file);
 	};
 
-	const createEmbed = (content) => {
-		return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title></title>
-          <style>
-            *, body, iframe {margin: 0; padding: 0; border: 0; height: 100%; width: 100%;}
-          </style>
-        </head>
-        <body>
-          <iframe
-            sandbox="allow-forms allow-modals allow-popups allow-scripts allow-pointer-lock"
-            src="data:text/html;charset=utf-8,${encodeURIComponent(content)}"></iframe>
-        </body>
-      </html>
-    `;
-	};
-
 	const openFullPagePreview = async (e) => {
 		e.preventDefault();
 		const v = editor.getValue();
 		value = v;
 		const content = await replaceTemplateVariables(v);
-		const blob = new Blob([createEmbed(content)], { type: 'text/html' });
-		let url = URL.createObjectURL(blob);
-		externalFrameRef = window.open(url, '_blank');
+		// open the current content isolated in a new tab through the backend so it
+		// gets its own sandbox policy and loads its own external resources
+		submitPreviewForm(content, '_blank');
 	};
 
 	const triggerFileInput = () => {

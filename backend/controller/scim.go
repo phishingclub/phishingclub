@@ -430,7 +430,7 @@ func (c *Scim) DeleteGroup(g *gin.Context) {
 		return
 	}
 	go c.ScimService.UpdateLastSync(context.Background(), result.Config)
-	// rfc 7644 §3.6 — successful DELETE returns 204 No Content
+	// rfc 7644 §3.6, successful DELETE returns 204 No Content
 	g.Status(http.StatusNoContent)
 }
 
@@ -634,7 +634,7 @@ func (c *Scim) DeleteUser(g *gin.Context) {
 		return
 	}
 	go c.ScimService.UpdateLastSync(context.Background(), result.Config)
-	// RFC 7644 §3.6 — successful DELETE returns 204 No Content
+	// RFC 7644 §3.6, successful DELETE returns 204 No Content
 	g.Status(http.StatusNoContent)
 }
 

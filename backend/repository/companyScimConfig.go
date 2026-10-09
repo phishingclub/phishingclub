@@ -228,7 +228,7 @@ func (r *CompanyScimConfig) DeleteByCompanyID(
 }
 
 // ToCompanyScimConfig maps a database row to the business model.
-// the token field is intentionally left empty — it is never read back from storage.
+// the token field is intentionally left empty, it is never read back from storage.
 func ToCompanyScimConfig(row *database.CompanyScimConfig) *model.CompanyScimConfig {
 	id := nullable.NewNullableWithValue(*row.ID)
 

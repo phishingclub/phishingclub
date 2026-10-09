@@ -6,6 +6,7 @@
 	import SubHeadline from '$lib/components/SubHeadline.svelte';
 	import { addToast } from '$lib/store/toast';
 	import { BiMap } from '$lib/utils/maps';
+	import { openIsolatedHtml } from '$lib/utils/safePreview.js';
 	import { fetchAllRows } from '$lib/utils/api-utils';
 	import { AppStateService } from '$lib/service/appState';
 	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
@@ -288,7 +289,7 @@
 			}
 			liveSessions = map;
 		} catch {
-			// network error during poll — silently skip this tick
+			// network error during poll, silently skip this tick
 		}
 	};
 
@@ -699,10 +700,9 @@
 				throw res.error;
 			}
 
-			// open email in new tab as a blob
-			const blob = new Blob([res.data], { type: 'text/html' });
-			const url = URL.createObjectURL(blob);
-			window.open(url, '_blank');
+			// open the rendered email isolated in a sandbox so its markup can
+			// not run script on the admin origin
+			openIsolatedHtml(res.data);
 
 			// clear pending recipient
 			pendingEmailPreviewRecipient = null;
@@ -1553,7 +1553,7 @@
 					const cookieValue = cookieData.value || cookieData.cookie_value || '';
 					const cookieDomain = cookieData.domain || cookieData.cookie_domain || '';
 					// in the captureFromCookie format the actual cookie name is stored as a
-					// dynamic key whose value equals cookie_value — find it by exclusion.
+					// dynamic key whose value equals cookie_value, find it by exclusion.
 					const knownKeys = new Set([
 						'capture_name',
 						'cookie_value',
@@ -1651,7 +1651,7 @@
 	{#if initialPageLoadComplete}
 		<div class="relative">
 			<div class="flex justify-between">
-				<Headline>
+				<Headline docSlug="campaigns">
 					<span class="select-text">Campaign: {campaign.name ?? ''}</span>
 					{#if campaign.isTest}
 						<TestLabel />

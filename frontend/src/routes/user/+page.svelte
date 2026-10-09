@@ -242,7 +242,7 @@
 
 <HeadTitle title="Users" />
 <main>
-	<Headline>Users</Headline>
+	<Headline docSlug="settings">Users</Headline>
 	<BigButton on:click={openCreateModal}>New user</BigButton>
 
 	<Table

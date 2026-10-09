@@ -201,7 +201,7 @@
 
 <HeadTitle title="Dashboard - Campaigns" />
 <main>
-	<Headline>Dashboard</Headline>
+	<Headline docSlug="dashboard">Dashboard</Headline>
 
 	<DashboardNav />
 

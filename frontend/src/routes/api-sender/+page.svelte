@@ -43,6 +43,7 @@
 	import { fetchAllRows } from '$lib/utils/api-utils';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import VimToggle from '$lib/components/editor/VimToggle.svelte';
+	import FormButton from '$lib/components/FormButton.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -107,6 +108,68 @@
 	let testResponse = {};
 
 	let isTestModalVisible = false;
+	let isTestSubmitting = false;
+	let selectedTestID = null;
+
+	// defaults mirror the backend test defaults, empty fields fall back to them
+	const testValuesDefault = () => ({
+		fromEmail: 'bob@enterprise.test',
+		fromName: 'Bob',
+		email: 'bob@enterprise.test',
+		firstName: 'Bob',
+		lastName: 'Test',
+		subject: 'Test Email Subject',
+		content: 'Hi {{.FirstName}},\n\nThis is a test email.\n\nBest,\nBob'
+	});
+	let testValues = testValuesDefault();
+
+	// optional recipient variables the user can add to a test on demand
+	const extraVariableDefs = [
+		{ key: 'phone', label: 'Phone', variable: '{{.Phone}}', value: '+1234567890' },
+		{
+			key: 'extraIdentifier',
+			label: 'Extra Identifier',
+			variable: '{{.ExtraIdentifier}}',
+			value: 'extra-test-identifier'
+		},
+		{ key: 'position', label: 'Position', variable: '{{.Position}}', value: 'Lead API Tester' },
+		{
+			key: 'department',
+			label: 'Department',
+			variable: '{{.Department}}',
+			value: 'Research and Development'
+		},
+		{ key: 'city', label: 'City', variable: '{{.City}}', value: 'Odin' },
+		{ key: 'country', label: 'Country', variable: '{{.Country}}', value: 'Denmark' },
+		{ key: 'misc', label: 'Misc', variable: '{{.Misc}}', value: 'This is a test recipient' }
+	];
+	let extraOverrides = [];
+	let selectedExtra = '';
+	// remembers an edited value so a removed variable keeps it when added again
+	let extraValueCache = {};
+	$: availableExtras = extraVariableDefs
+		.filter((d) => !extraOverrides.some((o) => o.key === d.key))
+		.map((d) => ({ value: d.key, label: d.label }));
+
+	/** @param {string} key */
+	const addExtra = (key) => {
+		const def = extraVariableDefs.find((d) => d.key === key);
+		if (!def || extraOverrides.some((o) => o.key === key)) {
+			return;
+		}
+		const value = key in extraValueCache ? extraValueCache[key] : def.value;
+		extraOverrides = [...extraOverrides, { ...def, value }];
+		selectedExtra = '';
+	};
+
+	/** @param {string} key */
+	const removeExtra = (key) => {
+		const existing = extraOverrides.find((o) => o.key === key);
+		if (existing) {
+			extraValueCache[key] = existing.value;
+		}
+		extraOverrides = extraOverrides.filter((o) => o.key !== key);
+	};
 
 	$: {
 		modalText = getModalText('api sender', modalMode);
@@ -318,32 +381,44 @@
 	};
 
 	/** @param {string} id */
-	const openTestModal = async (id) => {
+	const openTestModal = (id) => {
+		selectedTestID = id;
+		testResponse = {};
+		testValues = testValuesDefault();
+		extraOverrides = [];
+		extraValueCache = {};
+		selectedExtra = '';
+		isTestModalVisible = true;
+	};
+
+	const runTest = async () => {
 		try {
-			showIsLoading();
-			const res = await api.apiSender.test(id);
+			isTestSubmitting = true;
+			const payload = { ...testValues };
+			for (const o of extraOverrides) {
+				payload[o.key] = o.value;
+			}
+			const res = await api.apiSender.test(selectedTestID, payload);
 			if (!res.success) {
-				const res2 = await api.apiSender.getByID(id);
+				const res2 = await api.apiSender.getByID(selectedTestID);
 				if (!res2.success) {
 					throw res2.error;
 				}
-				testResponse.apiSender = res2.data;
-				testResponse.error = res.error;
-				isTestModalVisible = true;
+				testResponse = { apiSender: res2.data, error: res.error };
 				return;
 			}
 			testResponse = res.data;
-			isTestModalVisible = true;
 		} catch (e) {
 			addToast('Failed to test API sender', 'Error');
 			console.error('failed to test API sender:', e);
 		} finally {
-			hideIsLoading();
+			isTestSubmitting = false;
 		}
 	};
 
 	const closeTestModal = () => {
 		testResponse = {};
+		selectedTestID = null;
 		isTestModalVisible = false;
 	};
 
@@ -364,7 +439,7 @@
 
 <HeadTitle title="API Senders" />
 <main>
-	<Headline>API Senders</Headline>
+	<Headline docSlug="api-senders">API Senders</Headline>
 	<BigButton on:click={openCreateModal}>New API sender</BigButton>
 	<BulkActionBar
 		count={$selection.size}
@@ -664,11 +739,106 @@ X-Custom-Header: Hello Friend"
 		</FormGrid>
 	</Modal>
 
-	<Modal headerText="API Sender Test Results" visible={isTestModalVisible} onClose={closeTestModal}>
+	<Modal headerText="API Sender Test" visible={isTestModalVisible} onClose={closeTestModal}>
 		<div
-			class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-6 select-text overflow-x-hidden"
+			class="col-span-3 w-[800px] max-w-full overflow-y-auto px-6 py-4 space-y-6 select-text overflow-x-hidden"
 		>
-			{#if !testResponse.error}
+			<!-- Test values, empty fields fall back to the defaults -->
+			<form on:submit|preventDefault={runTest}>
+				<div class="pt-4 pb-2 w-full">
+					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Test values</h3>
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+						<TextField
+							type="email"
+							width="full"
+							maxLength={254}
+							bind:value={testValues.fromEmail}
+							toolTipText={'Sent as {{.FromEmail}}'}
+							placeholder="bob@enterprise.test">From Email</TextField
+						>
+						<TextField
+							width="full"
+							maxLength={128}
+							bind:value={testValues.fromName}
+							toolTipText={'Sent as {{.FromName}}'}
+							placeholder="Bob">From Name</TextField
+						>
+						<TextField
+							type="email"
+							width="full"
+							maxLength={254}
+							bind:value={testValues.email}
+							toolTipText={'Sent as {{.Email}}'}
+							placeholder="bob@enterprise.test">Email</TextField
+						>
+						<TextField
+							width="full"
+							maxLength={127}
+							bind:value={testValues.firstName}
+							toolTipText={'Sent as {{.FirstName}}'}
+							placeholder="Bob">First Name</TextField
+						>
+						<TextField
+							width="full"
+							maxLength={127}
+							bind:value={testValues.lastName}
+							toolTipText={'Sent as {{.LastName}}'}
+							placeholder="Test">Last Name</TextField
+						>
+						<TextField
+							width="full"
+							maxLength={255}
+							bind:value={testValues.subject}
+							toolTipText={'Sent as {{.Subject}}'}
+							placeholder="Test Email Subject">Subject</TextField
+						>
+					</div>
+					<div class="mt-4">
+						<TextareaField
+							fullWidth
+							height={'medium'}
+							bind:value={testValues.content}
+							toolTipText={'Sent as {{.Content}}'}>Content</TextareaField
+						>
+					</div>
+					<!-- optional recipient variables added on demand -->
+					<div class="mt-4 space-y-3">
+						{#each extraOverrides as extra (extra.key)}
+							<div class="flex items-end gap-2">
+								<div class="flex-1">
+									<TextField
+										width="full"
+										maxLength={127}
+										bind:value={extra.value}
+										toolTipText={'Sent as ' + extra.variable}>{extra.label}</TextField
+									>
+								</div>
+								<button
+									type="button"
+									class="mb-3 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:text-red-600"
+									on:click={() => removeExtra(extra.key)}
+									aria-label={'Remove ' + extra.label}>Remove</button
+								>
+							</div>
+						{/each}
+						{#if availableExtras.length > 0}
+							<TextFieldSelect
+								id="addTestVariable"
+								placeholder="Add another variable..."
+								bind:value={selectedExtra}
+								options={availableExtras}
+								optional={true}
+								onSelect={addExtra}>Add variable</TextFieldSelect
+							>
+						{/if}
+					</div>
+					<div class="flex justify-end mt-4">
+						<FormButton isSubmitting={isTestSubmitting}>Run test</FormButton>
+					</div>
+				</div>
+			</form>
+			{#if testResponse.request || testResponse.error}
+				{#if !testResponse.error}
 				<!-- Successful Test -->
 				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
 					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
@@ -819,6 +989,7 @@ X-Custom-Header: Hello Friend"
 						<div class="text-red-600 whitespace-pre-wrap break-words">{testResponse.error}</div>
 					</div>
 				</div>
+				{/if}
 			{/if}
 
 			<!-- Footer with Close Button -->

@@ -98,7 +98,7 @@ func handleAPISession(
 		found := false
 		// compare each key using constant-time comparison to avoid hash timing leaks.
 		// early exit via break is acceptable here because the key slice is derived from
-		// a go map, which randomizes iteration order on every call — an attacker cannot
+		// a go map, which randomizes iteration order on every call, an attacker cannot
 		// correlate iteration count to a stable key position across requests.
 		var rApiUser *model.APIUser
 		for _, apiUser := range apiUsers {

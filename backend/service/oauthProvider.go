@@ -479,7 +479,7 @@ func (o *OAuthProvider) ExchangeCodeForTokens(
 		return errs.Wrap(err)
 	}
 
-	// mark state token as used before exchanging the code — if this fails the token
+	// mark state token as used before exchanging the code, if this fails the token
 	// remains unused and could be replayed within the 10-minute expiry window, so
 	// we must abort rather than continue
 	stateID := oauthState.ID.MustGet()

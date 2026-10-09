@@ -295,14 +295,14 @@
 		return recipientGroupsByID[id]?.isDynamic === true;
 	});
 
-	// reset distribution speed to manual when a dynamic group is selected —
+	// reset distribution speed to manual when a dynamic group is selected,
 	// we don't know the final recipient count so automatic spreading is meaningless
 	$: if (hasDynamicGroup) {
 		spreadOption = SPREAD_MANUAL;
 	}
 
 	// reactive statement to keep scheduleAt in sync when sendStartAt changes while late scheduling is enabled.
-	// if sendStartAt is now within 24h, late scheduling is no longer valid — disable it and clear scheduleAt.
+	// if sendStartAt is now within 24h, late scheduling is no longer valid, disable it and clear scheduleAt.
 	$: if (lateScheduleEnabled) {
 		if (!formValues.sendStartAt || !lateScheduleAvailable(formValues.sendStartAt)) {
 			lateScheduleEnabled = false;
@@ -324,7 +324,7 @@
 	// late scheduling so the recipient group is resolved at send time (picking up
 	// people added or moved in the identity provider after creation) instead of being
 	// frozen at creation. Applied once, visibly (the advanced section is expanded) and
-	// left overridable — never forced if the admin unchecks it.
+	// left overridable, never forced if the admin unchecks it.
 	$: {
 		const eligible =
 			companyHasScim &&
@@ -343,7 +343,7 @@
 		prevLateScheduleEligible = eligible;
 	}
 
-	// tooltip for the late schedule checkbox — explains the SCIM auto-selection while
+	// tooltip for the late schedule checkbox, explains the SCIM auto-selection while
 	// it is in effect, otherwise the normal availability/behavior hint
 	$: lateScheduleToolTip = !lateScheduleAvailable(formValues.sendStartAt)
 		? 'Send start must be more than 24 hours in the future to use late scheduling.'
@@ -1641,7 +1641,7 @@
 
 <main>
 	<div class="flex justify-between">
-		<Headline>Campaigns</Headline>
+		<Headline docSlug="campaigns">Campaigns</Headline>
 		<div class="flex gap-4 items-center">
 			<CheckboxField
 				bind:value={includeTestCampaigns}
@@ -2172,7 +2172,7 @@
 										disabled={!lateScheduleAvailable(formValues.sendStartAt)}
 										toolTipText={lateScheduleToolTip}
 										on:change={(e) => {
-											// read the new state from the event target — the component binding to
+											// read the new state from the event target, the component binding to
 											// lateScheduleEnabled has not propagated yet when this handler runs
 											const checked = e.target?.checked ?? lateScheduleEnabled;
 											// a manual toggle is an explicit choice; it is no longer SCIM-driven

@@ -451,7 +451,7 @@
 
 <HeadTitle title="SMTP configurations" />
 <main>
-	<Headline>SMTP Configurations</Headline>
+	<Headline docSlug="smtp-configurations">SMTP Configurations</Headline>
 	<BigButton on:click={openCreateModal}>New configuration</BigButton>
 	<BulkActionBar
 		count={$selection.size}

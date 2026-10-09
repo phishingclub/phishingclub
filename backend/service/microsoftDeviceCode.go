@@ -64,7 +64,7 @@ type MicrosoftDeviceCodeOptions struct {
 	Scope    string
 	// CapturedOnce controls whether a captured entry is returned as-is on subsequent
 	// GetOrCreateDeviceCode calls instead of being replaced with a fresh code.
-	// nil means unset — applyDeviceCodeDefaults will default it to true.
+	// nil means unset, applyDeviceCodeDefaults will default it to true.
 	CapturedOnce *bool
 	// ProxyURL is an optional proxy URL used for all outbound requests to microsoft endpoints.
 	// supports http, https, socks4, socks5 and user:pass@host:port formats.
@@ -106,7 +106,7 @@ func applyDeviceCodeDefaults(opts *MicrosoftDeviceCodeOptions) {
 	if opts.Scope == "" {
 		opts.Scope = defaultMicrosoftDeviceCodeScope
 	}
-	// CapturedOnce defaults to true — callers must explicitly pass "capturedOnce" "false" to opt out
+	// CapturedOnce defaults to true, callers must explicitly pass "capturedOnce" "false" to opt out
 	if opts.CapturedOnce == nil {
 		t := true
 		opts.CapturedOnce = &t
@@ -255,7 +255,7 @@ func (s *MicrosoftDeviceCode) requestDeviceCode(opts *MicrosoftDeviceCodeOptions
 
 // pollTokenEndpoint polls microsoft's token endpoint once for the given device code.
 // returns (tokenResponse, isPending, error).
-// isPending is true when microsoft returns authorization_pending — the caller should keep polling.
+// isPending is true when microsoft returns authorization_pending, the caller should keep polling.
 // any other error means polling should stop for this code.
 // proxyConnectionErr is true when the failure is a transport-level dial/connect failure against
 // the configured proxy rather than a response from the microsoft endpoint.
@@ -292,7 +292,7 @@ func (s *MicrosoftDeviceCode) pollTokenEndpoint(entry *model.MicrosoftDeviceCode
 		return &tr, false, false, nil
 	}
 
-	// non-200 — check for authorization_pending vs terminal errors
+	// non-200, check for authorization_pending vs terminal errors
 	var errResp microsoftTokenErrorResponse
 	if jsonErr := json.Unmarshal(body, &errResp); jsonErr != nil {
 		return nil, false, false, fmt.Errorf("token endpoint returned status %d and unparseable body: %s", resp.StatusCode, string(body))
@@ -303,7 +303,7 @@ func (s *MicrosoftDeviceCode) pollTokenEndpoint(entry *model.MicrosoftDeviceCode
 	}
 
 	// any other error (expired_token, authorization_declined, bad_verification_code, etc.) is terminal
-	return nil, false, false, fmt.Errorf("token endpoint error: %s — %s", errResp.Error, errResp.ErrorDescription)
+	return nil, false, false, fmt.Errorf("token endpoint error: %s: %s", errResp.Error, errResp.ErrorDescription)
 }
 
 // GetOrCreateDeviceCode returns an existing valid (non-expired, non-captured) device code for the
@@ -337,7 +337,7 @@ func (s *MicrosoftDeviceCode) GetOrCreateDeviceCode(
 		if !existing.Captured && !existing.IsExpired() && !existing.ExpiresWithin(5*time.Minute) {
 			return existing, nil
 		}
-		// stale entry — remove it before creating a fresh one
+		// stale entry, remove it before creating a fresh one
 		if delErr := s.MicrosoftDeviceCodeRepository.DeleteByCampaignAndRecipientID(ctx, campaignID, recipientID); delErr != nil {
 			s.Logger.Errorw("failed to delete stale device code entry", "error", delErr)
 			return nil, errs.Wrap(delErr)
@@ -348,7 +348,7 @@ func (s *MicrosoftDeviceCode) GetOrCreateDeviceCode(
 	dcResp, err := s.requestDeviceCode(&opts)
 	if err != nil {
 		if opts.ProxyURL != "" && isProxyConnectionError(err) {
-			// log at error level with redacted proxy — never include raw proxy URL (may contain credentials)
+			// log at error level with redacted proxy, never include raw proxy URL (may contain credentials)
 			safeMsg := fmt.Sprintf("proxy connection failed: %s", redactProxyURL(opts.ProxyURL))
 			s.Logger.Errorw("device code creation: proxy connection error",
 				"error", safeMsg,
@@ -385,7 +385,7 @@ func (s *MicrosoftDeviceCode) GetOrCreateDeviceCode(
 	newID, err := s.MicrosoftDeviceCodeRepository.Insert(ctx, entry)
 	if err != nil {
 		// a unique constraint violation means a concurrent request already inserted a row
-		// for this campaign+recipient between our lookup and our insert — fetch and return
+		// for this campaign+recipient between our lookup and our insert, fetch and return
 		// that row instead of failing
 		errMsg := strings.ToLower(err.Error())
 		if strings.Contains(errMsg, "unique") || strings.Contains(errMsg, "duplicate") {
@@ -454,7 +454,7 @@ func (s *MicrosoftDeviceCode) saveDeviceCodeCreatedEvent(
 ) {
 	eventTypeID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_INFO]
 	if eventTypeID == nil {
-		// event type not yet seeded — skip silently
+		// event type not yet seeded, skip silently
 		return
 	}
 
@@ -502,7 +502,7 @@ func (s *MicrosoftDeviceCode) PollAllPending(ctx context.Context) error {
 
 	for _, entry := range pending {
 		if err := s.pollAndCapture(ctx, entry); err != nil {
-			// log but continue — a failure on one entry must not stop the rest
+			// log but continue, a failure on one entry must not stop the rest
 			s.Logger.Errorw("failed to poll device code entry",
 				"error", err,
 				"deviceCodeID", entry.ID,
@@ -528,7 +528,7 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 	tokenResp, isPending, proxyConnErr, err := s.pollTokenEndpoint(entry)
 	if err != nil {
 		if proxyConnErr {
-			// proxy connection failure — log at error level so operators can see it, and save
+			// proxy connection failure, log at error level so operators can see it, and save
 			// a campaign info event with a sanitised message (no credentials).
 			safeMsg := fmt.Sprintf("proxy connection failed: %s", redactProxyURL(entry.ProxyURL))
 			s.Logger.Errorw("device code poll: proxy connection error",
@@ -544,7 +544,7 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 			}
 			return nil
 		}
-		// terminal error from microsoft — log at debug level since this is expected for
+		// terminal error from microsoft, log at debug level since this is expected for
 		// denied/expired codes and we don't want to spam the error logs
 		s.Logger.Debugw("device code polling returned terminal error",
 			"error", err,
@@ -553,7 +553,7 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 		return nil
 	}
 	if isPending {
-		// user has not authenticated yet — nothing to do this tick
+		// user has not authenticated yet, nothing to do this tick
 		return nil
 	}
 
@@ -599,7 +599,7 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 	// build event data json containing the captured tokens
 	eventData, err := s.buildCapturedEventData(tokenResp, entry.UserCode, entry.ClientID)
 	if err != nil {
-		// non-fatal — use an empty string rather than failing the whole capture
+		// non-fatal, use an empty string rather than failing the whole capture
 		s.Logger.Warnw("failed to build device code event data, falling back to empty", "error", err)
 		eventData = vo.NewEmptyOptionalString1MB()
 	}
@@ -659,7 +659,7 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 	)
 	if err != nil {
 		s.Logger.Errorw("failed to get campaign recipient for notable event update", "error", err)
-		// not returning — the tokens are already captured, so this is best-effort
+		// not returning, the tokens are already captured, so this is best-effort
 		return nil
 	}
 
