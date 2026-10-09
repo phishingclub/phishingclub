@@ -69,6 +69,7 @@ const (
 	ROUTE_V1_USER_MFA_TOTP              = "/api/v1/user/mfa/totp"
 	ROUTE_V1_QR_FROM_TOTP               = "/api/v1/qr/totp"
 	ROUTE_V1_QR_URL_TO_HTML             = "/api/v1/qr/html"
+	ROUTE_V1_PREVIEW                    = "/api/v1/preview"
 	// session
 	ROUTE_V1_SESSION_ID   = "/api/v1/session/:id"
 	ROUTE_V1_SESSION_PING = "/api/v1/session/ping"
@@ -279,6 +280,12 @@ type administrationServer struct {
 	embedBackendFS     *embed.FS
 	certMagicConfig    *certmagic.Config
 	softSessionHandler gin.HandlerFunc
+	// the single page app index html with the SvelteKit csp meta tag removed,
+	// and the full policy promoted to a response header, so the whole csp is
+	// delivered server side. nil when the meta could not be read, in which case
+	// index.html is served unchanged and the policy stays in its meta tag.
+	spaIndexHTML []byte
+	spaCSP       string
 }
 
 // NewAdministrationServer creates a new administration app
@@ -381,6 +388,8 @@ func setupRoutes(
 		// qr
 		POST(ROUTE_V1_QR_FROM_TOTP, middleware.SessionHandler, controllers.QR.ToTOTPURL).
 		POST(ROUTE_V1_QR_URL_TO_HTML, middleware.SessionHandler, controllers.QR.ToHTML).
+		// preview renders admin authored content isolated with a sandbox CSP
+		POST(ROUTE_V1_PREVIEW, middleware.SessionHandler, controllers.Preview.Render).
 		// company
 		POST(ROUTE_V1_COMPANY, middleware.SessionHandler, controllers.Company.Create).
 		POST(ROUTE_V1_COMPANY_ID, middleware.SessionHandler, controllers.Company.ChangeName).
@@ -843,6 +852,17 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 	embedFS := frontend.GetEmbededFS()
 	// make embedded .html work
 	frontend.LoadHTMLFromEmbedFS(a.router, *embedFS, "build/*.html")
+	// promote the SvelteKit csp meta tag to a response header so the whole
+	// policy is delivered server side and nothing is left in the document. The
+	// meta holds script-src with the build time script hash plus style-src and
+	// the other resource directives; we add the directives a meta can not carry.
+	// If the meta can not be read we leave index.html and its meta untouched.
+	if policy, indexHTML, ok := frontend.ExtractCSPFromIndex(*embedFS); ok {
+		a.spaIndexHTML = indexHTML
+		a.spaCSP = policy + "; frame-ancestors 'none'; form-action 'self'"
+	} else {
+		a.logger.Warn("could not read csp meta from index.html, serving it unchanged")
+	}
 	// serve favicons only to authenticated users, unauthenticated requests get 404
 	// so the file is not indexable by scanners probing common paths
 	for _, faviconPath := range []string{"/favicon.ico", "/favicon.png"} {
@@ -862,9 +882,7 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 		if !entry.IsDir() {
 			// special case for the frontpage
 			if path == "index.html" {
-				a.router.GET("/", func(c *gin.Context) {
-					c.HTML(http.StatusOK, "build/index.html", nil)
-				})
+				a.router.GET("/", a.serveIndex)
 				continue
 			}
 			// skip favicons, registered separately with session gating
@@ -890,11 +908,22 @@ func (a *administrationServer) loadEmbeddedFileSystem(
 		}
 	}
 	// fall back to the root index.html
-	a.router.NoRoute(func(c *gin.Context) {
-		c.HTML(http.StatusOK, "build/index.html", nil)
-	})
+	a.router.NoRoute(a.serveIndex)
 
 	return nil
+}
+
+// serveIndex serves the single page app shell. When the csp meta was promoted
+// to a header at startup it serves the stripped html with the full policy header,
+// which replaces the strict header the security middleware set. Otherwise it
+// serves the original template and the meta carries the resource directives.
+func (a *administrationServer) serveIndex(c *gin.Context) {
+	if a.spaIndexHTML != nil {
+		c.Header("Content-Security-Policy", a.spaCSP)
+		c.Data(http.StatusOK, "text/html; charset=utf-8", a.spaIndexHTML)
+		return
+	}
+	c.HTML(http.StatusOK, "build/index.html", nil)
 }
 
 func (a *administrationServer) StartServer(

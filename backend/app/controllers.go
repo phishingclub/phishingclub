@@ -28,6 +28,7 @@ type Controllers struct {
 	CampaignTemplate    *controller.CampaignTemplate
 	Campaign            *controller.Campaign
 	QR                  *controller.QRGenerator
+	Preview             *controller.Preview
 	APISender           *controller.APISender
 	AllowDeny           *controller.AllowDeny
 	GeoIP               *controller.GeoIP
@@ -163,6 +164,9 @@ func NewControllers(
 	qr := &controller.QRGenerator{
 		Common: common,
 	}
+	preview := &controller.Preview{
+		Common: common,
+	}
 	apiSender := &controller.APISender{
 		Common:           common,
 		APISenderService: services.APISender,
@@ -273,6 +277,7 @@ func NewControllers(
 		CampaignTemplate:    campaignTemplate,
 		Campaign:            campaign,
 		QR:                  qr,
+		Preview:             preview,
 		APISender:           apiSender,
 		AllowDeny:           allowDeny,
 		GeoIP:               geoIP,

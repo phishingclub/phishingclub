@@ -428,6 +428,27 @@ func OneOfNullableFieldsRequired(fields map[string]any) error {
 	return fmt.Errorf("one of the fields (%s) must be supplied", strings.Join(keys, ", "))
 }
 
+// ErrorIfNotHTTPURL validates that a string parses as a url with the http or
+// https scheme. Unlike ErrorIfInvalidURL it does not require a dotted public
+// domain, so a localhost or internal host is allowed. Use it where the goal is
+// only to keep a javascript or data url out, not to enforce a public host.
+func ErrorIfNotHTTPURL(urlStr string) error {
+	if urlStr == "" {
+		return errs.NewValidationError(errors.New("URL cannot be empty"))
+	}
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return errs.NewValidationError(errors.New("must be a valid URL"))
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return errs.NewValidationError(errors.New("must use http or https protocol"))
+	}
+	if parsedURL.Host == "" {
+		return errs.NewValidationError(errors.New("must have a valid host"))
+	}
+	return nil
+}
+
 // ErrorIfInvalidURL validates that a string is a valid URL with http/https scheme
 func ErrorIfInvalidURL(urlStr string) error {
 	if urlStr == "" {

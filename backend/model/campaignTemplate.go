@@ -170,6 +170,14 @@ func (c *CampaignTemplate) Validate() error {
 		)
 	}
 
+	// the redirect url is shown as a link in the admin area, so reject any
+	// scheme other than http or https to keep a javascript url out of an href
+	if v, err := c.AfterLandingPageRedirectURL.Get(); err == nil && v.String() != "" {
+		if err := validate.ErrorIfInvalidURL(v.String()); err != nil {
+			return validate.WrapErrorWithField(err, "afterLandingPageRedirectURL")
+		}
+	}
+
 	return nil
 }
 

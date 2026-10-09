@@ -3,6 +3,7 @@
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
+	import { safeExternalHref } from '$lib/utils/url.js';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
@@ -491,13 +492,20 @@
 			showIsLoading();
 			const res = await api.oauthProvider.getAuthorizationURL(id);
 			if (res.success && res.data.authorizationURL) {
+				// the url comes from the provider discovery document, so only open
+				// it when it is http or https, never a javascript or data scheme
+				const authURL = safeExternalHref(res.data.authorizationURL);
+				if (!authURL) {
+					addToast('Provider returned an invalid authorization URL', 'Error');
+					return;
+				}
 				// open authorization url in popup window
 				const width = 600;
 				const height = 700;
 				const left = window.screenX + (window.outerWidth - width) / 2;
 				const top = window.screenY + (window.outerHeight - height) / 2;
 				const popup = window.open(
-					res.data.authorizationURL,
+					authURL,
 					'OAuth Authorization',
 					`width=${width},height=${height},left=${left},top=${top},toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes`
 				);

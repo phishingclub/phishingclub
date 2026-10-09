@@ -66,6 +66,19 @@ func (o *OAuthProvider) Validate() error {
 	if err := validate.NullableFieldRequired("clientSecret", o.ClientSecret); err != nil {
 		return err
 	}
+	// the auth url is opened in the operator browser during authorization, so
+	// reject any scheme other than http or https to keep a javascript url out.
+	// the token url is only called server side but is held to the same rule.
+	if v, err := o.AuthURL.Get(); err == nil {
+		if err := validate.ErrorIfNotHTTPURL(v.String()); err != nil {
+			return validate.WrapErrorWithField(err, "authURL")
+		}
+	}
+	if v, err := o.TokenURL.Get(); err == nil {
+		if err := validate.ErrorIfNotHTTPURL(v.String()); err != nil {
+			return validate.WrapErrorWithField(err, "tokenURL")
+		}
+	}
 	return nil
 }
 

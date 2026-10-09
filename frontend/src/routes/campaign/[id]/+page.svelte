@@ -6,6 +6,7 @@
 	import SubHeadline from '$lib/components/SubHeadline.svelte';
 	import { addToast } from '$lib/store/toast';
 	import { BiMap } from '$lib/utils/maps';
+	import { openIsolatedHtml } from '$lib/utils/safePreview.js';
 	import { fetchAllRows } from '$lib/utils/api-utils';
 	import { AppStateService } from '$lib/service/appState';
 	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
@@ -699,10 +700,9 @@
 				throw res.error;
 			}
 
-			// open email in new tab as a blob
-			const blob = new Blob([res.data], { type: 'text/html' });
-			const url = URL.createObjectURL(blob);
-			window.open(url, '_blank');
+			// open the rendered email isolated in a sandbox so its markup can
+			// not run script on the admin origin
+			openIsolatedHtml(res.data);
 
 			// clear pending recipient
 			pendingEmailPreviewRecipient = null;

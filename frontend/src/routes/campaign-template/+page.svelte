@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
+	import { safeExternalHref } from '$lib/utils/url.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
@@ -839,14 +840,22 @@
 				</TableCell>
 				<TableCell>
 					{#if template.afterLandingPageRedirectURL}
-						<a
-							href={`${template.afterLandingPageRedirectURL}`}
-							target="_blank"
-							class="block w-full py-1"
-							title={template.afterLandingPageRedirectURL}
-						>
-							{template.afterLandingPageRedirectURL}
-						</a>
+						{@const redirectHref = safeExternalHref(template.afterLandingPageRedirectURL)}
+						{#if redirectHref}
+							<a
+								href={redirectHref}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="block w-full py-1"
+								title={template.afterLandingPageRedirectURL}
+							>
+								{template.afterLandingPageRedirectURL}
+							</a>
+						{:else}
+							<span class="block w-full py-1" title={template.afterLandingPageRedirectURL}>
+								{template.afterLandingPageRedirectURL}
+							</span>
+						{/if}
 					{/if}
 				</TableCell>
 				<TableCellCheck value={template.isUsable} />

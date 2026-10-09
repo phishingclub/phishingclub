@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
+	import { openPreviewBytes } from '$lib/utils/safePreview.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
@@ -525,11 +526,12 @@
 			for (let i = 0; i < binaryData.length; i++) {
 				byteArray[i] = binaryData.charCodeAt(i);
 			}
-			const blob = new Blob([byteArray], { type: res.data.mimeType });
-			const url = URL.createObjectURL(blob);
-			window.open(url, '_blank');
+			// isolate html and other active content in a sandbox so a preview
+			// can not run script on the admin origin
+			openPreviewBytes(byteArray, res.data.mimeType);
 		} else {
-			window.open(`https://${$page.params.domain}/${path}`, '_blank');
+			// a real domain asset opens on the phishing origin, separate from admin
+			window.open(`https://${$page.params.domain}/${path}`, '_blank', 'noopener,noreferrer');
 		}
 	};
 
