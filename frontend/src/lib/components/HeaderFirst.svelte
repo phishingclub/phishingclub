@@ -11,5 +11,5 @@
 <div
 	class="bg-gray-300 dark:bg-gray-700 w-full h-1/10 flex justify-center transition-colors duration-200"
 >
-	<BrandingImage src={logoSrc} alt="logo" {display} boxClass="h-16 w-64 max-w-full" />
+	<BrandingImage src={logoSrc} alt="logo" {display} ready={$branding.loaded} boxClass="h-16 w-64 max-w-full" />
 </div>

@@ -190,7 +190,7 @@
 		<div
 			class="mobile-menu-header flex justify-between h-20 items-center bg-pc-darkblue/90 dark:bg-gray-900/90 px-6 border-b border-white/10 dark:border-gray-700/50"
 		>
-			<BrandingImage src={logoSrc} alt="logo" display={logoDisplay} boxClass="h-12 w-40" />
+			<BrandingImage src={logoSrc} alt="logo" display={logoDisplay} ready={$branding.loaded} boxClass="h-12 w-40" />
 			<div class="flex items-center gap-2">
 				<div
 					class="flex items-center justify-center w-12 h-12 rounded-lg hover:bg-white/10 dark:hover:bg-gray-600/30 transition-all duration-200"

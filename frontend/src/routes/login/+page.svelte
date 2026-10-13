@@ -37,7 +37,9 @@
 				? BRANDING_DEFAULTS.loginLogoDark
 				: BRANDING_DEFAULTS.loginLogoLight;
 	$: loginLogoDisplay = brandingDisplayFor($branding, BRANDING_SLOT.loginLogo);
-	$: sideImageRemoved = $branding.loginSideImageHidden;
+	// only collapse to the centered layout once branding has loaded, so the
+	// two column layout does not shift while the state is still unknown
+	$: sideImageRemoved = $branding.loaded && $branding.loginSideImageHidden;
 	$: sideImageSrc =
 		$branding.loginSideImage === 'custom'
 			? brandingImageURL(BRANDING_SLOT.loginSideImage, $branding.version)
@@ -275,6 +277,7 @@
 			src={loginLogoSrc}
 			alt="phishing club logo"
 			display={loginLogoDisplay}
+			ready={$branding.loaded}
 			boxClass="fixed top-6 left-4 z-40 w-1/4 md:w-1/4 lg:w-1/6 h-24"
 		/>
 		<div
@@ -477,6 +480,7 @@
 				src={sideImageSrc}
 				alt="login side image"
 				display={sideImageDisplay}
+				ready={$branding.loaded}
 				boxClass="w-full h-full"
 			/>
 		</div>
