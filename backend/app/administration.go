@@ -3,9 +3,7 @@ package app
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"embed"
-	"encoding/pem"
 	"fmt"
 	"io/fs"
 	"log"
@@ -666,19 +664,31 @@ func setupRoutes(
 func (a *administrationServer) handleTLSCertificate(
 	conf *config.Config,
 ) error {
-	publicCertExists := true
-	privateCertExists := true
+	certExists := true
 	if _, err := os.Stat(conf.TLSCertPath()); err != nil {
 		if !os.IsNotExist(err) {
 			return err
 		}
-		privateCertExists = false
+		certExists = false
 	}
-	if _, err := os.Stat(conf.TLSKeyPath()); err != nil {
-		if !os.IsNotExist(err) {
-			return err
+
+	// Never overwrite a certificate that is already present. With tls_auto
+	// false it may be one an operator supplied, and regenerating would destroy
+	// it. A self signed certificate the app created earlier is kept too. Only
+	// create one when none is present so the admin interface still comes up on
+	// first run.
+	if certExists {
+		a.logger.Debug("using existing certificate for administration server")
+		// a certificate with no key cannot serve TLS, but we still do not touch
+		// the certificate file so an operator certificate is never destroyed
+		if _, err := os.Stat(conf.TLSKeyPath()); err != nil && os.IsNotExist(err) {
+			a.logger.Warnw(
+				"administration certificate present but key file missing, leaving the certificate untouched",
+				"cert", conf.TLSCertPath(),
+				"key", conf.TLSKeyPath(),
+			)
 		}
-		publicCertExists = false
+		return nil
 	}
 
 	// determine hostnames to include in the certificate
@@ -712,93 +722,30 @@ func (a *administrationServer) handleTLSCertificate(
 		}
 	}
 
-	needToCreateCert := !privateCertExists || !publicCertExists
+	a.logger.Debug("creating self signed certificate for administration server")
 
-	// check if we need to recreate the certificate because host/IP has changed
-	if privateCertExists && publicCertExists {
-		// read the existing certificate to check the hostnames
-		certData, err := os.ReadFile(conf.TLSCertPath())
-		if err == nil {
-			block, _ := pem.Decode(certData)
-			if block != nil && block.Type == "CERTIFICATE" {
-				cert, err := x509.ParseCertificate(block.Bytes)
-				if err == nil {
-					// vheck if all requested hostnames are in the certificate
-					missingHosts := false
-					hostMap := make(map[string]bool)
-
-					// add all current certificate SANs to the map
-					for _, dnsName := range cert.DNSNames {
-						hostMap[dnsName] = true
-					}
-					for _, ip := range cert.IPAddresses {
-						hostMap[ip.String()] = true
-					}
-
-					// check if the common name is in our hostnames
-					if cert.Subject.CommonName != "" {
-						hostMap[cert.Subject.CommonName] = true
-					}
-
-					// Check if all requested hostnames are covered
-					for _, host := range hostnames {
-						if !hostMap[host] {
-							missingHosts = true
-							a.logger.Debugw("host not found in existing certificate", "host", host)
-							break
-						}
-					}
-
-					// if the TLSHost is specified and not in the certificate, or other hosts are missing, regenerate
-					if missingHosts {
-						a.logger.Debug("recreating certificate due to changed host/IP configuration")
-						needToCreateCert = true
-					}
-				} else {
-					a.logger.Warnw("could not parse existing certificate, will recreate", "error", err)
-					needToCreateCert = true
-				}
-			} else {
-				a.logger.Warn("invalid certificate format, will recreate")
-				needToCreateCert = true
-			}
-		} else {
-			a.logger.Warnw("could not read existing certificate, will recreate", "error", err)
-			needToCreateCert = true
-		}
+	info := acme.NewInformationWithDefault()
+	if len(hostnames) > 0 {
+		info.CommonName = hostnames[0]
 	}
 
-	// create certificates if needed
-	if needToCreateCert {
-		a.logger.Debug("creating self signed certificate for administration server")
+	a.logger.Debugw("generating certificate with hostnames", "hostnames", hostnames)
 
-		info := acme.NewInformationWithDefault()
-		if len(hostnames) > 0 {
-			info.CommonName = hostnames[0]
-		}
-
-		a.logger.Debugw("generating certificate with hostnames", "hostnames", hostnames)
-
-		err = acme.CreateSelfSignedCert(
-			a.logger,
-			info,
-			hostnames,
-			conf.TLSCertPath(),
-			conf.TLSKeyPath(),
-		)
-
-		if err != nil {
-			return fmt.Errorf("failed to create self signed certificate: %s", err)
-		}
-
-		a.logger.Debugw(
-			"saved self signed certificate for administration servers",
-			"TLS certificate", conf.TLSCertPath(),
-			"TLS key path", conf.TLSKeyPath(),
-		)
-	} else {
-		a.logger.Debug("using existing certificate for administration server")
+	if err := acme.CreateSelfSignedCert(
+		a.logger,
+		info,
+		hostnames,
+		conf.TLSCertPath(),
+		conf.TLSKeyPath(),
+	); err != nil {
+		return fmt.Errorf("failed to create self signed certificate: %s", err)
 	}
+
+	a.logger.Debugw(
+		"saved self signed certificate for administration servers",
+		"TLS certificate", conf.TLSCertPath(),
+		"TLS key path", conf.TLSKeyPath(),
+	)
 
 	return nil
 }
