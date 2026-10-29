@@ -1,11 +1,11 @@
 module github.com/phishingclub/phishingclub
 
-go 1.27
+go 1.27.3
 
 require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.3.2
 	github.com/PuerkitoBio/goquery v1.8.1
-	github.com/andybalholm/brotli v1.2.0
+	github.com/andybalholm/brotli v1.2.7
 	github.com/boombuler/barcode v1.0.1
 	github.com/brianvoe/gofakeit/v7 v7.0.4
 	github.com/caddyserver/certmagic v0.19.2

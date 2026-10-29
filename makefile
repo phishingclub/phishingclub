@@ -173,7 +173,7 @@ geoip-fetch:
 # run the proxy package tests in a standalone go container using the vendored
 # dependencies, so it works without the dev stack running. the named volume
 # keeps the go build cache between runs so only the first run does a full
-# compile. the first run also pulls golang:1.25.10 and can take a few minutes;
+# compile. the first run also pulls golang:1.27.3 and can take a few minutes;
 # go test prints nothing until the build finishes, so silence is expected.
 test-proxy:
 	$(DOCKER) run --rm \
@@ -181,7 +181,7 @@ test-proxy:
 		-v $(CURDIR)/backend:/app \
 		-v phishingclub_gocache:/gocache \
 		-w /app \
-		golang:1.25.10 \
+		golang:1.27.3@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b \
 		go test ./proxy/... -v
 
 # same tests but inside the already running backend container, which has a warm
@@ -197,7 +197,7 @@ test-lure:
 		-v $(CURDIR)/backend:/app \
 		-v phishingclub_gocache:/gocache \
 		-w /app \
-		golang:1.25.10 \
+		golang:1.27.3@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b \
 		go test ./lure/... ./server/... -v
 
 # same tests inside the already running backend container
@@ -209,5 +209,5 @@ govulncheck:
 	$(DOCKER) run --rm \
 		-v $(CURDIR)/backend:/app \
 		-w /app \
-		golang:1.25.10 \
+		golang:1.27.3@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b \
 		sh -c "go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./... -show verbose"
