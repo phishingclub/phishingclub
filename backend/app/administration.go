@@ -180,6 +180,8 @@ const (
 	ROUTE_V1_CAMPAIGN_UPCOMING           = "/api/v1/campaign/upcoming"
 	ROUTE_V1_CAMPAIGN_FINISHED           = "/api/v1/campaign/finished"
 	ROUTE_V1_CAMPAIGN_CLOSE              = "/api/v1/campaign/:id/close"
+	ROUTE_V1_CAMPAIGN_PAUSE              = "/api/v1/campaign/:id/pause"
+	ROUTE_V1_CAMPAIGN_RESUME             = "/api/v1/campaign/:id/resume"
 	ROUTE_V1_CAMPAIGN_EXPORT_EVENTS      = "/api/v1/campaign/:id/export/events"
 	ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS = "/api/v1/campaign/:id/export/submissions"
 	ROUTE_V1_CAMPAIGN_ANONYMIZE          = "/api/v1/campaign/:id/anonymize"
@@ -585,6 +587,8 @@ func setupRoutes(
 		// TODO PATCH
 		POST(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.UpdateByID).
 		POST(ROUTE_V1_CAMPAIGN_CLOSE, middleware.SessionHandler, controllers.Campaign.CloseCampaignByID).
+		POST(ROUTE_V1_CAMPAIGN_PAUSE, middleware.SessionHandler, controllers.Campaign.PauseCampaignByID).
+		POST(ROUTE_V1_CAMPAIGN_RESUME, middleware.SessionHandler, controllers.Campaign.ResumeCampaignByID).
 		GET(ROUTE_V1_CAMPAIGN_EXPORT_EVENTS, middleware.SessionHandler, controllers.Campaign.ExportEventsAsCSV).
 		GET(ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS, middleware.SessionHandler, controllers.Campaign.ExportSubmissionsAsCSV).
 		POST(ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED, middleware.SessionHandler, controllers.Campaign.UploadReportedCSV).

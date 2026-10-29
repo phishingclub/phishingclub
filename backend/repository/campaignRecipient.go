@@ -161,6 +161,46 @@ func (r *CampaignRecipient) SetLureCodeByID(
 	return res.Error
 }
 
+// RecipientSendAt pairs a campaign recipient id with a new send time, for a
+// batched reschedule.
+type RecipientSendAt struct {
+	ID     *uuid.UUID
+	SendAt time.Time
+}
+
+// SetSendAtBatch assigns new send times to many recipients in one transaction, so
+// resuming a large campaign is a single commit rather than one fsync per row (the
+// same reason schedule() batches its inserts). Only send_at is touched, so a sent,
+// cancelled or attempted row is never disturbed. No reads happen inside the
+// transaction, keeping it safe on a single connection sqlite.
+func (c *CampaignRecipient) SetSendAtBatch(
+	ctx context.Context,
+	items []RecipientSendAt,
+) error {
+	if len(items) == 0 {
+		return nil
+	}
+	return c.DB.Transaction(func(tx *gorm.DB) error {
+		for _, it := range items {
+			row := map[string]any{
+				"send_at": utils.RFC3339UTC(it.SendAt),
+			}
+			AddUpdatedAt(row)
+			res := tx.
+				Model(&database.CampaignRecipient{}).
+				Where(
+					fmt.Sprintf("%s = ?", TableColumnID(database.CAMPAIGN_RECIPIENT_TABLE_NAME)),
+					it.ID.String(),
+				).
+				Updates(row)
+			if res.Error != nil {
+				return res.Error
+			}
+		}
+		return nil
+	})
+}
+
 // DeleteRecipientsNotIn deletes recipients in campaign that are
 // not in the slice recipient ids supplied
 func (r *CampaignRecipient) DeleteRecipientsNotIn(
@@ -609,6 +649,14 @@ func (r *CampaignRecipient) GetUnsendRecipientsForSending(
 		Where(fmt.Sprintf(
 			"NOT EXISTS (SELECT 1 FROM %s sd WHERE sd.id = %s.recipient_id AND sd.scim_soft_deleted_at IS NOT NULL)",
 			database.RECIPIENT_TABLE,
+			database.CAMPAIGN_RECIPIENT_TABLE_NAME,
+		)).
+		// never deliver while the campaign is paused. a subquery keeps the
+		// campaign_recipients SELECT from widening with campaign columns, same as the
+		// scim guard above.
+		Where(fmt.Sprintf(
+			"NOT EXISTS (SELECT 1 FROM %s c WHERE c.id = %s.campaign_id AND c.paused_at IS NOT NULL)",
+			database.CAMPAIGN_TABLE,
 			database.CAMPAIGN_RECIPIENT_TABLE_NAME,
 		)).
 		Where(

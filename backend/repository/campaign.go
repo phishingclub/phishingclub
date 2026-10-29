@@ -1942,6 +1942,36 @@ func (r *Campaign) UpdateByID(
 	return nil
 }
 
+// SetPausedByID marks a campaign as paused by setting its paused at timestamp.
+// It is a targeted write so it never touches any other campaign column.
+func (r *Campaign) SetPausedByID(
+	ctx context.Context,
+	id *uuid.UUID,
+) error {
+	row := map[string]any{"paused_at": utils.NowRFC3339UTC()}
+	AddUpdatedAt(row)
+	res := r.DB.
+		Model(&database.Campaign{}).
+		Where("id = ?", id).
+		Updates(row)
+	return res.Error
+}
+
+// ClearPausedByID clears the paused at timestamp. Used on resume and on close so
+// a closed campaign is never left paused.
+func (r *Campaign) ClearPausedByID(
+	ctx context.Context,
+	id *uuid.UUID,
+) error {
+	row := map[string]any{"paused_at": nil}
+	AddUpdatedAt(row)
+	res := r.DB.
+		Model(&database.Campaign{}).
+		Where("id = ?", id).
+		Updates(row)
+	return res.Error
+}
+
 // RemoveCampaignRecipientGroups removes all recipient groups from a campaign
 func (r *Campaign) RemoveCampaignRecipientGroups(
 	ctx context.Context,
@@ -2302,6 +2332,11 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	if row.ClosedAt != nil {
 		closedAt = nullable.NewNullableWithValue(*row.ClosedAt)
 	}
+	var pausedAt nullable.Nullable[time.Time]
+	pausedAt.SetNull()
+	if row.PausedAt != nil {
+		pausedAt = nullable.NewNullableWithValue(*row.PausedAt)
+	}
 	var sortField nullable.Nullable[vo.CampaignSortField]
 	if row.SortField != "" {
 		sf, err := vo.NewCampaignSortField(row.SortField)
@@ -2491,6 +2526,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		Name:                name,
 		CloseAt:             closeAt,
 		ClosedAt:            closedAt,
+		PausedAt:            pausedAt,
 		AnonymizeAt:         anonymizeAt,
 		AnonymizedAt:        anonymizedAt,
 		DataAnonymizeAt:     dataAnonymizeAt,

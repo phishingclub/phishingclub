@@ -537,6 +537,31 @@ export class API {
 		},
 
 		/**
+		 * Pause the sending of a campaign. Landing pages and event recording stay
+		 * live, only delivery of the remaining recipients stops.
+		 * @param {string} campaignID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		pause: async (campaignID) => {
+			return postJSON(this.getPath(`/campaign/${campaignID}/pause`));
+		},
+
+		/**
+		 * Resume a paused campaign, spreading the remaining recipients over a new
+		 * delivery window.
+		 * @param {string} campaignID
+		 * @param {object} window
+		 * @param {string} window.sendStartAt  ISO string
+		 * @param {string} window.sendEndAt    ISO string
+		 * @param {number} [window.jitterMin]  minutes
+		 * @param {number} [window.jitterMax]  minutes
+		 * @returns {Promise<ApiResponse>}
+		 */
+		resume: async (campaignID, window) => {
+			return postJSON(this.getPath(`/campaign/${campaignID}/resume`), window);
+		},
+
+		/**
 		 * @param {string} campaignID
 		 * @returns
 		 */

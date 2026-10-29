@@ -23,6 +23,7 @@ type Campaign struct {
 	UpdatedAt           *time.Time                                   `json:"updatedAt"`
 	CloseAt             nullable.Nullable[time.Time]                 `json:"closeAt"`
 	ClosedAt            nullable.Nullable[time.Time]                 `json:"closedAt"`
+	PausedAt            nullable.Nullable[time.Time]                 `json:"pausedAt"`
 	AnonymizeAt         nullable.Nullable[time.Time]                 `json:"anonymizeAt"`
 	AnonymizedAt        nullable.Nullable[time.Time]                 `json:"anonymizedAt"`
 	DataAnonymizeAt     nullable.Nullable[time.Time]                 `json:"dataAnonymizeAt"`
@@ -711,4 +712,19 @@ func (c *Campaign) IsActive() bool {
 // IsSelfManaged returns true if the campaign is self managed
 func (c *Campaign) IsSelfManaged() bool {
 	return c.SendStartAt.IsSpecified() && c.SendStartAt.IsNull() && c.SendEndAt.IsSpecified() && c.SendEndAt.IsNull()
+}
+
+// IsPaused returns true if sending is paused
+func (c *Campaign) IsPaused() bool {
+	return c.PausedAt.IsSpecified() && !c.PausedAt.IsNull()
+}
+
+// IsStarted returns true if the send start time has passed. A self managed
+// campaign has no send window and is never started in this sense.
+func (c *Campaign) IsStarted() bool {
+	v, err := c.SendStartAt.Get()
+	if err != nil {
+		return false
+	}
+	return !v.After(time.Now())
 }
