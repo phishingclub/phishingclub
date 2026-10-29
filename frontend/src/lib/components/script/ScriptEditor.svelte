@@ -335,8 +335,8 @@ if (username) {
 			}
 		};
 
-		// noLib removes the browser DOM lib so dot completion only shows the
-		// declared script API. 1108 is 'return' outside function, valid here
+		// lib es2020 gives the core JS types (Array, String, JSON, Math) but
+		// leaves out the browser DOM, so completion has no window or document. 1108 is 'return' outside function, valid here
 		// because the script runs inside an implicit IIFE on the backend.
 		monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
 			noSemanticValidation: false,
@@ -344,7 +344,7 @@ if (username) {
 			diagnosticCodesToIgnore: [1108]
 		});
 		monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
-			noLib: true,
+			lib: ['es2020'],
 			allowJs: true,
 			checkJs: true,
 			allowNonTsExtensions: true,
