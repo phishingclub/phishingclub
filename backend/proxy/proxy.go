@@ -5415,12 +5415,17 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 
 	// get allow/deny list entries
 	allowDenyEntries, err := m.CampaignRepository.GetAllDenyByCampaignID(req.Context(), campaignID)
-	if err != nil && err != gorm.ErrRecordNotFound {
-		return false, nil // allow if we can't get the list
+	lookupFailed := err != nil && !errors.Is(err, gorm.ErrRecordNotFound)
+	if lookupFailed {
+		// the filters are unknown, so block rather than let the visitor through
+		m.logger.Errorw("failed to get filters for campaign, blocking visitor",
+			"campaignID", campaignID.String(),
+			"error", err,
+		)
 	}
 
 	// if there are no entries, allow access
-	if len(allowDenyEntries) == 0 {
+	if !lookupFailed && len(allowDenyEntries) == 0 {
 		return false, nil
 	}
 
@@ -5437,58 +5442,30 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 		"asns", asns,
 	)
 
-	// check IP, JA4, and country code against allow/deny lists
-	isAllowListing := false
-	allowed := false // for allow lists, default is deny
-
-	for i, allowDeny := range allowDenyEntries {
-		if i == 0 {
-			isAllowListing = allowDeny.Allowed.MustGet()
-			if !isAllowListing {
-				// if deny listing, then by default the IP is allowed until proven otherwise
-				allowed = true
-			}
-		}
-
-		// check IP filter
-		ipOk, err := allowDeny.IsIPAllowed(ip)
+	allowed := false
+	if !lookupFailed {
+		var decidedBy *model.AllowDeny
+		allowed, decidedBy, err = model.EvaluateFilters(allowDenyEntries, model.FilterVisitor{
+			IP:      ip,
+			JA4:     ja4,
+			Country: countryCode,
+			ASNs:    asns,
+			Headers: req.Header,
+		})
 		if err != nil {
-			continue
+			// a broken filter blocks the visitor rather than letting it through
+			m.logger.Errorw("failed to evaluate filters, blocking visitor",
+				"campaignID", campaignID.String(),
+				"error", err,
+			)
+			allowed = false
 		}
-
-		// check JA4 filter
-		ja4Ok, err := allowDeny.IsJA4Allowed(ja4)
-		if err != nil {
-			continue
-		}
-
-		// check country code filter
-		countryOk := allowDeny.IsCountryAllowed(countryCode)
-
-		// check ASN filter
-		asnOk := allowDeny.IsASNAllowed(asns)
-
-		// check header filter
-		headers := req.Header
-		headerOk, err := allowDeny.IsHeaderAllowed(headers)
-		if err != nil {
-			continue
-		}
-
-		// for allow lists: all filters (IP, JA4, country, headers) must pass
-		// for deny lists: any filter failing blocks the request
-		if isAllowListing {
-			// allow list: all must be allowed
-			if ipOk && ja4Ok && countryOk && asnOk && headerOk {
-				allowed = true
-				break
-			}
-		} else {
-			// deny list: if any filter denies, block the request
-			if !ipOk || !ja4Ok || !countryOk || !asnOk || !headerOk {
-				allowed = false
-				break
-			}
+		if decidedBy != nil {
+			m.logger.Debugw("filter decided visit",
+				"allowed", allowed,
+				"list name", decidedBy.Name.MustGet().String(),
+				"list id", decidedBy.ID.MustGet().String(),
+			)
 		}
 	}
 

@@ -2531,6 +2531,7 @@ func (c *Campaign) validateAllowDenyIsSameTypeByIDs(
 			entry, err := c.AllowDenyRepository.GetByID(ctx, id, &repository.AllowDenyOption{})
 			if err != nil {
 				c.Logger.Errorw("failed to get allow deny by id", "error", err)
+				return validate.WrapErrorWithField(errors.New("filter not found"), "allowDenyIDs")
 			}
 			allowed := entry.Allowed.MustGet()
 			if i == 0 {

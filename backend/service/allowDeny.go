@@ -95,6 +95,7 @@ func (s *AllowDeny) Update(
 	current, err := s.AllowDenyRepository.GetByID(ctx, id, &repository.AllowDenyOption{})
 	if err != nil {
 		s.Logger.Errorw("failed to get allow deny", "error", err)
+		return err
 	}
 	// update config - if a field is not set, it is not updated
 	if v, err := incoming.Name.Get(); err == nil {

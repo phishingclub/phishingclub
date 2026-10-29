@@ -98,21 +98,24 @@
 		modalText = getModalText('Filter', modalMode);
 	}
 
-	// an allow filter that lists ASNs blocks every visitor while no ASN data is
-	// downloaded, because no visitor IP can resolve to an ASN and an allow list
-	// denies what it can not match
-	$: asnAllowBlocksAll =
-		formValues.allowed === true &&
-		formValues.asns &&
-		formValues.asns.length > 0 &&
-		!asnAvailable;
-	// a deny filter that lists ASNs has no effect while no ASN data is downloaded,
-	// because no visitor IP can resolve to an ASN, so the ASN rule never matches.
-	$: asnDenyNoEffect =
-		formValues.allowed === false &&
-		formValues.asns &&
-		formValues.asns.length > 0 &&
-		!asnAvailable;
+	// a visitor matches a filter when it matches any of its rules. While no ASN
+	// data is downloaded no visitor IP resolves to an ASN, so an ASN rule never
+	// matches. An allow filter whose only rule is ASNs then blocks every visitor,
+	// otherwise the ASN rule simply has no effect.
+	const hasNonASNRules = (f) =>
+		!!(f.cidrs && f.cidrs.trim()) ||
+		!!(f.ja4Fingerprints && f.ja4Fingerprints.trim()) ||
+		(Array.isArray(f.countryCodes)
+			? f.countryCodes.length > 0
+			: !!(f.countryCodes && f.countryCodes.trim())) ||
+		(Array.isArray(f.headers)
+			? f.headers.length > 0
+			: !!(f.headers && f.headers.trim() && f.headers.trim() !== '[]'));
+	const asnOnlyAllow = (f) => f.allowed === true && !hasNonASNRules(f);
+
+	$: formListsASNs = !!(formValues.asns && formValues.asns.length > 0) && !asnAvailable;
+	$: asnAllowBlocksAll = formListsASNs && asnOnlyAllow(formValues);
+	$: asnRuleNoEffect = formListsASNs && !asnAllowBlocksAll;
 
 	// hooks
 	onMount(() => {
@@ -511,7 +514,7 @@
 					{#if entry.asns && entry.asns.trim() && !asnAvailable}
 						<span
 							class="ml-2 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
-							title={entry.allowed
+							title={asnOnlyAllow(entry)
 								? 'This filter lists ASNs but ASN data is not downloaded, so it blocks every visitor. Download it under Settings, IP Data.'
 								: 'This filter lists ASNs but ASN data is not downloaded, so its ASN rule has no effect. Download it under Settings, IP Data.'}
 						>
@@ -570,13 +573,21 @@
 							bind:value={formValues.allowed}
 						/>
 					{/if}
+					<p class="text-sm text-gray-600 dark:text-gray-400 mb-4 transition-colors duration-200">
+						A visitor matches this filter when it matches any one of its rules.
+						{#if formValues.allowed === true}
+							Matching visitors are let in.
+						{:else if formValues.allowed === false}
+							Matching visitors are blocked.
+						{/if}
+					</p>
 					{#if asnAllowBlocksAll}
 						<div
 							class="rounded-md border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 mb-4 transition-colors duration-200"
 						>
 							<p class="text-sm text-amber-800 dark:text-amber-200">
-								This allow filter lists ASNs but no ASN data is downloaded, so it will block
-								every visitor. Download the ASN data under
+								This allow filter only lists ASNs and no ASN data is downloaded, so it will
+								block every visitor. Download the ASN data under
 								<a
 									class="text-cta-blue dark:text-highlight-blue hover:opacity-80"
 									href="/settings#ipdata">Settings, IP Data</a
@@ -585,12 +596,12 @@
 							</p>
 						</div>
 					{/if}
-					{#if asnDenyNoEffect}
+					{#if asnRuleNoEffect}
 						<div
 							class="rounded-md border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 mb-4 transition-colors duration-200"
 						>
 							<p class="text-sm text-amber-800 dark:text-amber-200">
-								This deny filter lists ASNs but no ASN data is downloaded, so its ASN rule has no
+								This filter lists ASNs but no ASN data is downloaded, so its ASN rule has no
 								effect (no visitor can be matched by ASN). Download the ASN data under
 								<a
 									class="text-cta-blue dark:text-highlight-blue hover:opacity-80"

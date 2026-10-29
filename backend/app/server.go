@@ -368,6 +368,8 @@ func (s *Server) Handler(c *gin.Context) {
 		return
 	}
 
+	// the fingerprint header is internal, a client must never be able to set it
+	c.Request.Header.Del(middleware.HeaderJA4)
 	if cacheEntry, ok := s.ja4Middleware.ConnectionFingerprints.Load(c.Request.RemoteAddr); ok {
 		if entry, ok := cacheEntry.(*middleware.FingerprintEntry); ok {
 			fingerprint := entry.Fingerprint
@@ -2514,78 +2516,30 @@ func (s *Server) checkIPFilter(
 		)
 		return false, fmt.Errorf("failed to get deny list for campaign: %s", err)
 	}
-	// if there is a deny list, check if the IP and JA4 allowed / denied
-	// when allow listing we must check all entries to see if we have a allowed IP/JA4
-	// when deny listing only a single entry needs to deny the IP/JA4
-	isAllowListing := false
-	allowed := len(allowDenyLEntries) == 0
-	for i, allowDeny := range allowDenyLEntries {
-		if i == 0 {
-			isAllowListing = allowDeny.Allowed.MustGet()
-			if !isAllowListing {
-				// if deny listing, then by default the IP is allowed until proven otherwise
-				allowed = true
-			}
-		}
-
-		// check IP filter
-		ipOk, err := allowDeny.IsIPAllowed(ip)
-		if err != nil {
-			return false, errs.Wrap(err)
-		}
-
-		// check JA4 filter
-		ja4Ok, err := allowDeny.IsJA4Allowed(ja4)
-		if err != nil {
-			return false, errs.Wrap(err)
-		}
-
-		// check country code filter
-		countryOk := allowDeny.IsCountryAllowed(countryCode)
-
-		// check ASN filter
-		asnOk := allowDeny.IsASNAllowed(asns)
-
-		// check header filter
-		headers := ctx.Request.Header
-		headerOk, err := allowDeny.IsHeaderAllowed(headers)
-		if err != nil {
-			return false, errs.Wrap(err)
-		}
-
-		// for allow lists: all filters (IP, JA4, country, headers) must pass
-		// for deny lists: any filter failing blocks the request
-		if isAllowListing {
-			// allow list: all must be allowed
-			if ipOk && ja4Ok && countryOk && asnOk && headerOk {
-				s.logger.Debugw("IP, JA4, country, and headers are allow listed",
-					"ip", ip,
-					"ja4", ja4,
-					"country", countryCode,
-					"list name", allowDeny.Name.MustGet().String(),
-					"list id", allowDeny.ID.MustGet().String(),
-				)
-				allowed = true
-				break
-			}
-		} else {
-			// deny list: if any filter denies, block the request
-			if !ipOk || !ja4Ok || !countryOk || !asnOk || !headerOk {
-				s.logger.Debugw("IP, JA4, country, or headers is deny listed",
-					"ip", ip,
-					"ja4", ja4,
-					"country", countryCode,
-					"ipOk", ipOk,
-					"ja4Ok", ja4Ok,
-					"countryOk", countryOk,
-					"headerOk", headerOk,
-					"list name", allowDeny.Name.MustGet().String(),
-					"list id", allowDeny.ID.MustGet().String(),
-				)
-				allowed = false
-				break
-			}
-		}
+	if len(allowDenyLEntries) == 0 {
+		return false, nil
+	}
+	allowed, decidedBy, err := model.EvaluateFilters(allowDenyLEntries, model.FilterVisitor{
+		IP:      ip,
+		JA4:     ja4,
+		Country: countryCode,
+		ASNs:    asns,
+		Headers: ctx.Request.Header,
+	})
+	if err != nil {
+		// a broken filter blocks the visitor rather than letting it through
+		s.logger.Errorw("failed to evaluate filters, blocking visitor",
+			"campaignID", campaignID.String(),
+			"error", err,
+		)
+		allowed = false
+	}
+	if decidedBy != nil {
+		s.logger.Debugw("filter decided visit",
+			"allowed", allowed,
+			"list name", decidedBy.Name.MustGet().String(),
+			"list id", decidedBy.ID.MustGet().String(),
+		)
 	}
 	if !allowed {
 		s.logger.Debugw("IP, JA4, country, or headers is not allowed",
