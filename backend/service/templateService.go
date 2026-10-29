@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net/mail"
 	"net/url"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -493,7 +494,13 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 		wsPath := t.remoteBrowserWSPath(ctx)
 		capturedID := id // close over the campaign recipient ID for this render
 		hasCampaign := campaign != nil
-		templateFuncs["RemoteBrowserScript"] = func(rbName string) string {
+		// opts is a client transport concern set per page, not stored on the
+		// script: opts[0] = transport ("auto" default, or "polling"); opts[1] =
+		// poll interval in ms (default 1000, clamped). Usage:
+		//   {{RemoteBrowserScript "name"}}
+		//   {{RemoteBrowserScript "name" "polling"}}
+		//   {{RemoteBrowserScript "name" "polling" "2000"}}
+		templateFuncs["RemoteBrowserScript"] = func(rbName string, opts ...string) string {
 			if !hasCampaign || capturedID == "" || rbName == "" || t.RemoteBrowserRepository == nil {
 				return ""
 			}
@@ -509,10 +516,24 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 			if err != nil {
 				return ""
 			}
+			// transport mode and poll cadence are set per page here (client
+			// concern), defaulting to auto / 1000ms.
+			transport := model.TransportAuto
+			if len(opts) > 0 && opts[0] != "" {
+				transport = model.NormalizeTransport(opts[0])
+			}
+			pollMS := model.DefaultPollIntervalMS
+			if len(opts) > 1 {
+				if n, convErr := strconv.Atoi(strings.TrimSpace(opts[1])); convErr == nil {
+					pollMS = model.ClampPollIntervalMS(n)
+				}
+			}
 			script := strings.NewReplacer(
 				"__WS_PATH__", wsPath,
 				"__CR_ID__", capturedID,
 				"__RB_ID__", rbIDVal.String(),
+				"__RB_TRANSPORT__", transport,
+				"__RB_POLL_MS__", strconv.Itoa(pollMS),
 			).Replace(embedded.RemoteBrowserInjectJS)
 			return "<script>" + script + "</script>"
 		}

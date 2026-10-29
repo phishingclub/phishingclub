@@ -2205,6 +2205,12 @@ func (s *Server) AssignRoutes(r *gin.Engine) {
 	// explicit prefix check that calls c.Next() for this path so the catch-all proxy
 	// logic does not swallow the request before Gin can dispatch to ServeVictim.
 	r.GET("/"+s.remoteBrowserWSPath+"/:crID/:rbID", s.controllers.RemoteBrowser.ServeVictim)
+	// HTTP polling fallback for the victim transport, used when the WebSocket
+	// upgrade is blocked (for example by a proxy that strips the Upgrade header).
+	// GET drains buffered messages, POST delivers client messages. Same seeded
+	// path and same crID identity as the WebSocket route.
+	r.GET("/"+s.remoteBrowserWSPath+"/:crID/:rbID/poll", s.controllers.RemoteBrowser.PollVictimRecv)
+	r.POST("/"+s.remoteBrowserWSPath+"/:crID/:rbID/poll", s.controllers.RemoteBrowser.PollVictimSend)
 
 	// SCIM v2 provisioning endpoints. They live on the phishing engine (not the
 	// admin engine) so the admin port need not be publicly exposed. Each route is
