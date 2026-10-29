@@ -16,6 +16,7 @@
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Table from '$lib/components/table/Table.svelte';
@@ -344,6 +345,9 @@
 		onClose={closeModal}
 		{isSubmitting}
 	>
+		{#if modalMode === 'update'}
+			<InstalledResourceBadge resourceType="script" resourceId={formValues.id} variant="notice" />
+		{/if}
 		<FormGrid on:submit={onSubmit} {isSubmitting} {modalMode}>
 			<div class="col-span-3 flex flex-col min-h-0 overflow-hidden px-4 py-4">
 				{#key editorKey}

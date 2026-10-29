@@ -668,10 +668,10 @@ func (m *Email) SendTestEmail(
 			// inline attachment - embedded in email body, can be referenced via cid:filename
 			if !attachment.EmbeddedContent.MustGet() {
 				// simple inline image - no template processing needed
-				msg.EmbedFile(p.String())
+				msg.EmbedFile(p)
 			} else {
 				// inline image with template processing
-				attachmentContent, err := os.ReadFile(p.String())
+				attachmentContent, err := os.ReadFile(p)
 				if err != nil {
 					return errs.Wrap(err)
 				}
@@ -709,25 +709,25 @@ func (m *Email) SendTestEmail(
 				// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
 				// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
 				msg.EmbedReader(
-					filepath.Base(p.String()),
+					filepath.Base(p),
 					strings.NewReader(attachmentStr),
 				)
 			}
 		} else if !attachment.EmbeddedContent.MustGet() {
-			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 				// calendar invitation parsed natively by Outlook, raw file content
-				icsContent, err := os.ReadFile(p.String())
+				icsContent, err := os.ReadFile(p)
 				if err != nil {
 					return fmt.Errorf("failed to read calendar file: %s", err)
 				}
 				msg.AddAlternativeString(calendarContentType, string(icsContent))
 			} else {
 				// regular attachment - shows in attachment list
-				msg.AttachFile(p.String())
+				msg.AttachFile(p)
 			}
 		} else {
 			// inline attachment - embedded in email body, can be referenced via cid:filename
-			attachmentContent, err := os.ReadFile(p.String())
+			attachmentContent, err := os.ReadFile(p)
 			if err != nil {
 				return errs.Wrap(err)
 			}
@@ -762,14 +762,14 @@ func (m *Email) SendTestEmail(
 			if err != nil {
 				return fmt.Errorf("failed to setup attachment with embedded content: %s", err)
 			}
-			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 				// calendar invitation parsed natively by Outlook, with rendered variables
 				msg.AddAlternativeString(calendarContentType, attachmentStr)
 			} else {
 				// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
 				// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
 				msg.EmbedReader(
-					filepath.Base(p.String()),
+					filepath.Base(p),
 					strings.NewReader(attachmentStr),
 				)
 			}

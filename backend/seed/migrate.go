@@ -66,6 +66,10 @@ func initialInstallAndSeed(
 		&database.ReportSendLog{},
 		&database.RemoteBrowser{},
 		&database.ReportTemplate{},
+		&database.Registry{},
+		&database.InstalledPackage{},
+		&database.InstalledResource{},
+		&database.InstalledPackageMember{},
 	}
 
 	// disable foreign key constraints temporarily for sqlite to allow table recreation

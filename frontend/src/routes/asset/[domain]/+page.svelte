@@ -545,40 +545,68 @@
 		return imageExtensions.includes(extension);
 	};
 
+	// image types allowed in a thumbnail data: url, keyed by file extension
+	const THUMBNAIL_MIME_BY_EXTENSION = {
+		'.jpg': 'image/jpeg',
+		'.jpeg': 'image/jpeg',
+		'.png': 'image/png',
+		'.gif': 'image/gif',
+		'.bmp': 'image/bmp',
+		'.webp': 'image/webp',
+		'.svg': 'image/svg+xml',
+		'.ico': 'image/x-icon'
+	};
+	const THUMBNAIL_MIME_TYPES = new Set(Object.values(THUMBNAIL_MIME_BY_EXTENSION));
+
+	/**
+	 * Pick a safe image type for a thumbnail. The reported type is used only when
+	 * it is a known image type, otherwise the extension decides.
+	 * @param {string} path
+	 * @param {string} reported
+	 * @returns {string|null}
+	 */
+	const thumbnailMimeType = (path, reported) => {
+		const base = (reported || '').split(';')[0].trim().toLowerCase();
+		if (THUMBNAIL_MIME_TYPES.has(base)) {
+			return base;
+		}
+		const extension = path.toLowerCase().substring(path.lastIndexOf('.'));
+		return THUMBNAIL_MIME_BY_EXTENSION[extension] || null;
+	};
+
 	/**
 	 * Get image URL for preview
 	 * @param {string} path
 	 */
 	const getImagePreviewUrl = async (path) => {
-		if ($page.params.domain === 'shared' || isCompanyFolder) {
-			try {
+		try {
+			// Domain assets are loaded through the admin API as well, because the
+			// admin CSP only allows images from self, data: and blob:.
+			let res;
+			if ($page.params.domain === 'shared' || isCompanyFolder) {
 				const viewPath = isCompanyFolder ? `${companyAssetsKey}/${path}` : path;
-				const res = await api.asset.getRaw('shared', viewPath);
-				if (!res.success) {
-					return null;
-				}
-
-				// Handle SVG files differently - they're text-based
-				if (path.toLowerCase().endsWith('.svg')) {
-					const svgContent = atob(res.data.file);
-					const blob = new Blob([svgContent], { type: 'image/svg+xml' });
-					return URL.createObjectURL(blob);
-				} else {
-					// Handle binary image files
-					const binaryData = atob(res.data.file);
-					const byteArray = new Uint8Array(binaryData.length);
-					for (let i = 0; i < binaryData.length; i++) {
-						byteArray[i] = binaryData.charCodeAt(i);
-					}
-					const blob = new Blob([byteArray], { type: res.data.mimeType });
-					return URL.createObjectURL(blob);
-				}
-			} catch (e) {
-				console.error('failed to get image preview', e);
+				res = await api.asset.getRaw('shared', viewPath);
+			} else {
+				res = await api.asset.getRaw($page.params.domain, path);
+			}
+			if (!res.success) {
 				return null;
 			}
-		} else {
-			return `https://${$page.params.domain}/${path}`;
+
+			// The thumbnail is a data: url, never a blob: url. A blob url lives on
+			// the admin origin, so opening it in a tab would run any script in an
+			// svg (or a file whose type is html) as the admin. Browsers refuse a
+			// top level navigation to a data: url, and an <img> never runs svg
+			// script. The type is picked from a fixed list of image types so
+			// the server reported type can not turn the thumbnail into a page.
+			const type = thumbnailMimeType(path, res.data.mimeType);
+			if (!type || typeof res.data.file !== 'string') {
+				return null;
+			}
+			return `data:${type};base64,${res.data.file}`;
+		} catch (e) {
+			console.error('failed to get image preview', e);
+			return null;
 		}
 	};
 
@@ -908,7 +936,7 @@
 	<!-- Image Preview Popover -->
 	{#if hoveredImageUrl}
 		<div
-			class="fixed z-50 bg-white border border-gray-300 rounded-lg shadow-lg p-2 max-w-xs"
+			class="fixed z-50 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg p-2 max-w-xs"
 			style="left: {popoverPosition.x}px; top: {popoverPosition.y}px;"
 			on:mouseenter={handlePopoverMouseEnter}
 			on:mouseleave={handlePopoverMouseLeave}
@@ -921,7 +949,7 @@
 				class="max-w-full max-h-64 object-contain rounded"
 				on:error={() => console.error('Failed to load popover image')}
 			/>
-			<div class="text-xs text-gray-600 mt-1 truncate">{hoveredImageName}</div>
+			<div class="text-xs text-gray-600 dark:text-gray-300 mt-1 truncate">{hoveredImageName}</div>
 		</div>
 	{/if}
 </main>

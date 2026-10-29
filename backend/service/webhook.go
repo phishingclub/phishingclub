@@ -225,6 +225,9 @@ func (w *Webhook) Update(
 		current.Name.Set(v)
 	}
 	if v, err := webhook.URL.Get(); err == nil {
+		if err := model.ValidateWebhookURL(v.String()); err != nil {
+			return err
+		}
 		current.URL.Set(v)
 	}
 	if v, err := webhook.Secret.Get(); err == nil {

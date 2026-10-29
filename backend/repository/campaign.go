@@ -439,6 +439,68 @@ func (r *Campaign) GetByAllowDenyID(
 	return models, nil
 }
 
+// GetByDenyPageID gets the campaigns that use a page as their deny page
+// not paginated
+func (r *Campaign) GetByDenyPageID(
+	ctx context.Context,
+	pageID *uuid.UUID,
+) ([]*model.Campaign, error) {
+	rows := []*database.Campaign{}
+	models := []*model.Campaign{}
+	res := r.DB.
+		Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_TABLE, "deny_page_id")),
+			pageID.String(),
+		).
+		Find(&rows)
+	if res.Error != nil {
+		return models, res.Error
+	}
+	for _, row := range rows {
+		c, err := ToCampaign(row)
+		if err != nil {
+			return models, errs.Wrap(err)
+		}
+		models = append(models, c)
+	}
+	return models, nil
+}
+
+// GetByScriptID gets the campaigns a script is attached to
+// not paginated
+func (r *Campaign) GetByScriptID(
+	ctx context.Context,
+	scriptID *uuid.UUID,
+) ([]*model.Campaign, error) {
+	rows := []*database.Campaign{}
+	models := []*model.Campaign{}
+	res := r.DB.
+		InnerJoins(
+			LeftJoinOn(
+				database.CAMPAIGN_TABLE,
+				"id",
+				database.CAMPAIGN_SCRIPT_TABLE,
+				"campaign_id",
+			),
+		).
+		Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_SCRIPT_TABLE, "script_id")),
+			scriptID.String(),
+		).
+		Find(&rows)
+	if res.Error != nil {
+		return models, res.Error
+	}
+	for _, row := range rows {
+		c, err := ToCampaign(row)
+		if err != nil {
+			return models, errs.Wrap(err)
+		}
+		models = append(models, c)
+	}
+	return models, nil
+}
+
 // GetByTemplateIDs gets campaigns by template IDs
 // not paginated
 func (r *Campaign) GetByTemplateIDs(

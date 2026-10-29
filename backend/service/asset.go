@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"path"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -548,74 +549,8 @@ func (a *Asset) DeleteByID(
 		)
 		return err
 	}
-	// delete the file
-	domainContext, err := a.assetContextFolder(ctx, asset)
+	filePath, err := a.deleteAssetFileAndRow(ctx, asset)
 	if err != nil {
-		return err
-	}
-	p, err := asset.Path.Get()
-	if err != nil {
-		a.Logger.Debugw("failed to get path", "error", err)
-		return err
-	}
-
-	// create root filesystem for secure deletion
-	root, err := os.OpenRoot(a.RootFolder)
-	if err != nil {
-		a.Logger.Debugw("failed to open root folder", "error", err)
-		return err
-	}
-	defer root.Close()
-
-	// validate domain context access
-	domainRoot, err := root.OpenRoot(domainContext)
-	if err != nil {
-		a.Logger.Debugw("failed to open domain context", "error", err)
-		return err
-	}
-	defer domainRoot.Close()
-
-	// validate file exists within domain context
-	_, err = domainRoot.Stat(p.String())
-	if err != nil {
-		a.Logger.Debugw("file not found in domain context", "error", err)
-		return err
-	}
-
-	// build safe file path (validated by OpenRoot)
-	filePath := filepath.Join(a.RootFolder, domainContext, p.String())
-
-	err = a.FileService.Delete(
-		filePath,
-	)
-	if err != nil {
-		a.Logger.Debugw("failed to delete file",
-			"path", filePath,
-			"error", err,
-		)
-		return err
-	}
-	err = a.FileService.RemoveEmptyFolderRecursively(
-		filepath.Join(a.RootFolder, domainContext),
-		filepath.Dir(filePath),
-	)
-	if err != nil {
-		a.Logger.Debugw("failed to remove empty folders",
-			"path", filePath,
-			"error", err,
-		)
-		return err
-	}
-	// delete the asset from the database
-	err = a.AssetRepository.DeleteByID(
-		ctx,
-		id,
-	)
-	if err != nil {
-		a.Logger.Errorw("failed to delete asset from database but the file is deleted",
-			"path", filePath,
-			"error", err,
-		)
 		return err
 	}
 	ae.Details["path"] = filePath
@@ -653,73 +588,7 @@ func (a *Asset) DeleteAllByCompanyID(
 		return err
 	}
 	for _, asset := range assets {
-		// delete the file
-		domainContext, err := a.assetContextFolder(ctx, asset)
-		if err != nil {
-			return err
-		}
-		p, err := asset.Path.Get()
-		if err != nil {
-			a.Logger.Debugw("failed to get path", "error", err)
-			return err
-		}
-		// create root filesystem for secure deletion
-		root, err := os.OpenRoot(a.RootFolder)
-		if err != nil {
-			a.Logger.Debugw("failed to open root folder", "error", err)
-			return err
-		}
-		defer root.Close()
-
-		// validate domain context access
-		domainContextRoot, err := root.OpenRoot(domainContext)
-		if err != nil {
-			a.Logger.Debugw("failed to open domain context", "error", err)
-			return err
-		}
-		defer domainContextRoot.Close()
-
-		// validate file exists within domain context
-		_, err = domainContextRoot.Stat(p.String())
-		if err != nil {
-			a.Logger.Debugw("file not found in domain context", "error", err)
-			return err
-		}
-
-		// build safe file path (validated by OpenRoot)
-		filePath := filepath.Join(a.RootFolder, domainContext, p.String())
-		err = a.FileService.Delete(
-			filePath,
-		)
-		if err != nil {
-			a.Logger.Debugw("failed to delete file",
-				"path", filePath,
-				"error", err,
-			)
-			return err
-		}
-		err = a.FileService.RemoveEmptyFolderRecursively(
-			filepath.Join(a.RootFolder, domainContext),
-			filepath.Dir(filePath),
-		)
-		if err != nil {
-			a.Logger.Debugw("failed to remove empty folders",
-				"path", filePath,
-				"error", err,
-			)
-			return err
-		}
-		// delete the asset from the database
-		assetID := asset.ID.MustGet()
-		err = a.AssetRepository.DeleteByID(
-			ctx,
-			&assetID,
-		)
-		if err != nil {
-			a.Logger.Errorw("failed to delete asset from database but the file is deleted",
-				"path", filePath,
-				"error", err,
-			)
+		if _, err := a.deleteAssetFileAndRow(ctx, asset); err != nil {
 			return err
 		}
 	}
@@ -761,82 +630,77 @@ func (a *Asset) DeleteAllByDomainID(
 	}
 	// delete
 	for _, asset := range assets {
-
-		// delete the file
-		domainContext, err := a.assetContextFolder(ctx, asset)
-		if err != nil {
-			return err
-		}
-		p, err := asset.Path.Get()
-		if err != nil {
-			a.Logger.Debugw("failed to get path",
-				"error", err,
-			)
-			return err
-		}
-
-		// create root filesystem for secure deletion
-		root, err := os.OpenRoot(a.RootFolder)
-		if err != nil {
-			a.Logger.Debugw("failed to open root folder", "error", err)
-			return err
-		}
-		defer root.Close()
-
-		// validate domain context access
-		domainContextRoot, err := root.OpenRoot(domainContext)
-		if err != nil {
-			a.Logger.Debugw("failed to open domain context", "error", err)
-			return err
-		}
-		defer domainContextRoot.Close()
-
-		// validate file exists within domain context
-		_, err = domainContextRoot.Stat(p.String())
-		if err != nil {
-			a.Logger.Debugw("file not found in domain context", "error", err)
-			return err
-		}
-
-		// build safe file path (validated by OpenRoot)
-		filePath := filepath.Join(a.RootFolder, domainContext, p.String())
-		err = a.FileService.Delete(
-			filePath,
-		)
-		if err != nil {
-			a.Logger.Debugw("failed to delete file",
-				"path", filePath,
-				"error", err,
-			)
-			return err
-		}
-		err = a.FileService.RemoveEmptyFolderRecursively(
-			filepath.Join(a.RootFolder, domainContext),
-			filepath.Dir(filePath),
-		)
-		if err != nil {
-			a.Logger.Debugw("failed to remove empty folders",
-				"path", filePath,
-				"error", err,
-			)
-			return err
-		}
-		// delete the asset from the database
-		assetID := asset.ID.MustGet()
-		err = a.AssetRepository.DeleteByID(
-			ctx,
-			&assetID,
-		)
-		if err != nil {
-			a.Logger.Errorw("failed to delete asset from database but the file is deleted",
-				"path", filePath,
-				"error", err,
-			)
+		if _, err := a.deleteAssetFileAndRow(ctx, asset); err != nil {
 			return err
 		}
 	}
 	a.AuditLogAuthorized(ae)
 	return nil
+}
+
+// deleteAssetFileAndRow deletes the file of an asset and then its row. An
+// asset whose stored path can not be loaded has no file to act on, so only
+// the row is deleted. It returns the full file path, or an empty string when
+// no file was deleted.
+func (a *Asset) deleteAssetFileAndRow(
+	ctx context.Context,
+	asset *model.Asset,
+) (string, error) {
+	assetID, err := asset.ID.Get()
+	if err != nil {
+		a.Logger.Debugw("failed to get asset id", "error", err)
+		return "", err
+	}
+	filePath := ""
+	p, err := asset.Path.Get()
+	relPath := ""
+	if err == nil {
+		relPath = path.Clean(p.String())
+	}
+	if relPath == "" || relPath == "." || relPath == "/" {
+		a.Logger.Warnw("asset has no usable path, deleting only the row",
+			"id", assetID.String(),
+		)
+	} else {
+		domainContext, err := a.assetContextFolder(ctx, asset)
+		if err != nil {
+			return "", err
+		}
+		root, contextRoot, err := a.openContextRootFor(domainContext)
+		if err != nil {
+			return "", err
+		}
+		defer root.Close()
+		defer contextRoot.Close()
+
+		filePath = filepath.Join(a.RootFolder, domainContext, relPath)
+		if err := a.FileService.Delete(contextRoot, relPath); err != nil {
+			a.Logger.Debugw("failed to delete file",
+				"path", filePath,
+				"error", err,
+			)
+			return "", err
+		}
+		if err := a.FileService.RemoveEmptyFolderRecursively(
+			contextRoot,
+			path.Dir(relPath),
+		); err != nil {
+			a.Logger.Debugw("failed to remove empty folders",
+				"path", filePath,
+				"error", err,
+			)
+			return "", err
+		}
+	}
+	if err := a.AssetRepository.DeleteByID(ctx, &assetID); err != nil {
+		a.Logger.Errorw("failed to delete asset from database",
+			"id", assetID.String(),
+			"path", filePath,
+			"error", err,
+		)
+		return "", err
+	}
+	return filePath, nil
 }
 
 // openContextRoot opens a root confined to the folder the asset is stored in.
@@ -849,6 +713,14 @@ func (a *Asset) openContextRoot(
 	if err != nil {
 		return nil, nil, err
 	}
+	return a.openContextRootFor(domainContext)
+}
+
+// openContextRootFor opens a root confined to the given context folder.
+// The caller is responsible for closing both returned roots.
+func (a *Asset) openContextRootFor(
+	domainContext string,
+) (*os.Root, *os.Root, error) {
 	root, err := os.OpenRoot(a.RootFolder)
 	if err != nil {
 		a.Logger.Debugw("failed to open root folder", "error", err)
@@ -873,7 +745,6 @@ func (a *Asset) GetContentByID(
 ) ([]byte, bool, error) {
 	ae := NewAuditEvent("Asset.GetContentById", session)
 	ae.Details["id"] = id.String()
-	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		a.LogAuthError(err)
@@ -883,7 +754,6 @@ func (a *Asset) GetContentByID(
 		a.AuditLogNotAuthorized(ae)
 		return nil, false, errs.ErrAuthorizationFailed
 	}
-	// get the asset
 	asset, err := a.AssetRepository.GetByID(ctx, id)
 	if err != nil {
 		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
@@ -938,7 +808,6 @@ func (a *Asset) SaveContentByID(
 ) error {
 	ae := NewAuditEvent("Asset.SaveContentById", session)
 	ae.Details["id"] = id.String()
-	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		a.LogAuthError(err)
@@ -948,7 +817,6 @@ func (a *Asset) SaveContentByID(
 		a.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	// get the asset
 	asset, err := a.AssetRepository.GetByID(ctx, id)
 	if err != nil {
 		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
@@ -981,7 +849,6 @@ func (a *Asset) SaveContentByID(
 		a.Logger.Errorw("failed to write asset content", "error", err)
 		return err
 	}
-	// bump updated_at
 	if err := a.AssetRepository.UpdateByID(ctx, id, &model.Asset{}); err != nil {
 		a.Logger.Errorw("failed to update asset timestamp", "error", err)
 		return err
@@ -1001,7 +868,6 @@ func (a *Asset) MoveByID(
 ) error {
 	ae := NewAuditEvent("Asset.MoveById", session)
 	ae.Details["id"] = id.String()
-	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		a.LogAuthError(err)
@@ -1011,7 +877,6 @@ func (a *Asset) MoveByID(
 		a.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	// get the asset
 	asset, err := a.AssetRepository.GetByID(ctx, id)
 	if err != nil {
 		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
@@ -1039,14 +904,9 @@ func (a *Asset) MoveByID(
 	if err != nil {
 		return validate.WrapErrorWithField(errs.NewValidationError(err), "Path")
 	}
-	// nothing to do if the path is unchanged
 	if dst.String() == oldPath.String() {
 		a.AuditLogAuthorized(ae)
 		return nil
-	}
-	domainContext, err := a.assetContextFolder(ctx, asset)
-	if err != nil {
-		return err
 	}
 	root, contextRoot, err := a.openContextRoot(ctx, asset)
 	if err != nil {
@@ -1054,7 +914,6 @@ func (a *Asset) MoveByID(
 	}
 	defer root.Close()
 	defer contextRoot.Close()
-	// the source must exist
 	if _, err := contextRoot.Stat(oldPath.String()); err != nil {
 		a.Logger.Debugw("source file not found", "path", oldPath.String(), "error", err)
 		return err
@@ -1101,10 +960,9 @@ func (a *Asset) MoveByID(
 	// remove directories left empty by the move. this is cosmetic and runs only
 	// after the database agrees with the filesystem, so a failure here does not
 	// fail the move or leave the two out of sync.
-	oldFullPath := filepath.Join(a.RootFolder, domainContext, oldPath.String())
 	if err := a.FileService.RemoveEmptyFolderRecursively(
-		filepath.Join(a.RootFolder, domainContext),
-		filepath.Dir(oldFullPath),
+		contextRoot,
+		path.Dir(oldPath.String()),
 	); err != nil {
 		a.Logger.Debugw("failed to remove empty folders after move", "error", err)
 	}
@@ -1124,7 +982,6 @@ func (a *Asset) ReplaceFileByID(
 ) error {
 	ae := NewAuditEvent("Asset.ReplaceFileById", session)
 	ae.Details["id"] = id.String()
-	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		a.LogAuthError(err)
@@ -1134,7 +991,6 @@ func (a *Asset) ReplaceFileByID(
 		a.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	// get the asset
 	asset, err := a.AssetRepository.GetByID(ctx, id)
 	if err != nil {
 		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
@@ -1171,7 +1027,6 @@ func (a *Asset) ReplaceFileByID(
 		a.Logger.Errorw("failed to write asset content", "error", err)
 		return err
 	}
-	// bump updated_at
 	if err := a.AssetRepository.UpdateByID(ctx, id, &model.Asset{}); err != nil {
 		a.Logger.Errorw("failed to update asset timestamp", "error", err)
 		return err

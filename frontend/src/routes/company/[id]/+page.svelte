@@ -315,7 +315,7 @@
 						</form>
 					</SettingsCard>
 
-					<SettingsCard title="Auto-Prune Orphaned Recipients">
+					<SettingsCard title="Automatically prune orphaned recipients">
 						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
 							Choose whether orphaned recipients are removed automatically.
 						</p>

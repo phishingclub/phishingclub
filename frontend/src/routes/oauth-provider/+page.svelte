@@ -19,6 +19,7 @@
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
@@ -114,32 +115,30 @@
 		refreshProviders();
 		tableURLParams.onChange(refreshProviders);
 
-		// listen for oauth callback messages from popup window
-		const handleMessage = (event) => {
-			console.log('received message:', event.data, 'from origin:', event.origin);
-			// verify message is from our origin or localhost (for dev with vite proxy)
-			const isValidOrigin =
-				event.origin === window.location.origin ||
-				(window.location.hostname === 'localhost' &&
-					new URL(event.origin).hostname === 'localhost');
-			if (!isValidOrigin) {
-				console.log('message origin does not match, ignoring');
-				return;
-			}
-			// handle oauth callback result
-			if (event.data && event.data.type === 'oauth-callback') {
-				console.log('oauth callback message received with status:', event.data.status);
+		// the callback page posts its result on a same origin BroadcastChannel,
+		// since the popup is opened without an opener
+		if (typeof BroadcastChannel !== 'undefined') {
+			oauthChannel = new BroadcastChannel(OAUTH_CALLBACK_CHANNEL);
+			oauthChannel.onmessage = (event) => {
+				if (!event.data || event.data.type !== 'oauth-callback') {
+					return;
+				}
+				// only act on the flow this page started
+				if (
+					!pendingAuthorization ||
+					event.data.providerID !== pendingAuthorization.providerID
+				) {
+					return;
+				}
+				stopAuthorizationPolling();
 				if (event.data.status === 'success') {
 					addToast('OAuth authorization successful!', 'Success');
 					refreshProviders();
 				} else if (event.data.status === 'error') {
 					addToast('OAuth authorization failed', 'Error');
 				}
-			}
-		};
-
-		window.addEventListener('message', handleMessage);
-		console.log('message listener added for oauth callbacks');
+			};
+		}
 
 		(async () => {
 			const editID = $page.url.searchParams.get('edit');
@@ -150,7 +149,9 @@
 
 		return () => {
 			tableURLParams.unsubscribe();
-			window.removeEventListener('message', handleMessage);
+			stopAuthorizationPolling();
+			oauthChannel?.close();
+			oauthChannel = null;
 		};
 	});
 
@@ -487,6 +488,68 @@
 		form?.reset();
 	};
 
+	// name shared with the backend oauth callback page
+	const OAUTH_CALLBACK_CHANNEL = 'phishingclub-oauth-callback';
+	const AUTHORIZATION_POLL_INTERVAL_MS = 2000;
+	const AUTHORIZATION_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+	/** @type {BroadcastChannel|null} */
+	let oauthChannel = null;
+	/** @type {ReturnType<typeof setInterval>|null} */
+	let authorizationPollTimer = null;
+	/** @type {{providerID: string, state: string}|null} */
+	let pendingAuthorization = null;
+
+	const stopAuthorizationPolling = () => {
+		if (authorizationPollTimer) {
+			clearInterval(authorizationPollTimer);
+			authorizationPollTimer = null;
+		}
+		pendingAuthorization = null;
+	};
+
+	// Poll the flow status until it is no longer pending. This is how the page
+	// learns the result when the callback is served from another origin than
+	// this page, which a BroadcastChannel can not cross.
+	const startAuthorizationPolling = (id, state) => {
+		stopAuthorizationPolling();
+		pendingAuthorization = { providerID: id, state: state };
+		const startedAt = Date.now();
+		let inFlight = false;
+		authorizationPollTimer = setInterval(async () => {
+			if (Date.now() - startedAt > AUTHORIZATION_POLL_TIMEOUT_MS) {
+				stopAuthorizationPolling();
+				addToast('OAuth authorization did not complete in time', 'Error');
+				return;
+			}
+			if (inFlight) {
+				return;
+			}
+			inFlight = true;
+			try {
+				const res = await api.oauthProvider.getAuthorizationStatus(id, state);
+				if (!res.success) {
+					return;
+				}
+				const status = res.data?.status;
+				if (status === 'success') {
+					stopAuthorizationPolling();
+					addToast('OAuth authorization successful!', 'Success');
+					refreshProviders();
+				} else if (status === 'failed') {
+					stopAuthorizationPolling();
+					addToast('OAuth authorization failed', 'Error');
+				} else if (status === 'expired') {
+					stopAuthorizationPolling();
+					addToast('OAuth authorization expired, please try again', 'Error');
+				}
+			} catch (e) {
+				console.error('failed to poll oauth authorization status', e);
+			} finally {
+				inFlight = false;
+			}
+		}, AUTHORIZATION_POLL_INTERVAL_MS);
+	};
+
 	const onClickAuthorize = async (id) => {
 		try {
 			showIsLoading();
@@ -504,14 +567,26 @@
 				const height = 700;
 				const left = window.screenX + (window.outerWidth - width) / 2;
 				const top = window.screenY + (window.outerHeight - height) / 2;
-				const popup = window.open(
-					authURL,
-					'OAuth Authorization',
-					`width=${width},height=${height},left=${left},top=${top},toolbar=no,location=no,status=no,menubar=no,scrollbars=yes,resizable=yes`
-				);
-				if (!popup) {
-					addToast('Failed to open authorization window. Please allow popups.', 'Error');
+				// the authorization page belongs to the provider, so it gets no
+				// opener and can not navigate or message this admin window. With
+				// noopener window.open returns null, so a blocked popup can not be
+				// detected here.
+				let state = '';
+				try {
+					state = new URL(authURL).searchParams.get('state') ?? '';
+				} catch (e) {
+					state = '';
 				}
+				if (!state) {
+					addToast('Provider returned an invalid authorization URL', 'Error');
+					return;
+				}
+				window.open(
+					authURL,
+					'_blank',
+					`noopener,noreferrer,popup,width=${width},height=${height},left=${left},top=${top}`
+				);
+				startAuthorizationPolling(id, state);
 			} else {
 				throw res.error || 'No authorization URL returned';
 			}
@@ -616,7 +691,7 @@
 									on:click={() => onClickAuthorize(provider.id)}
 									class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
 								>
-									<p class="ml-2 text-left">Re-authorize</p>
+									<p class="ml-2 text-left">Authorize again</p>
 								</button>
 								<button
 									type="button"
@@ -638,6 +713,9 @@
 	</Table>
 
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
+		{#if modalMode === 'update'}
+			<InstalledResourceBadge resourceType="oauthprovider" resourceId={formValues.id} variant="notice" />
+		{/if}
 		<FormGrid on:submit={onClickSubmit} bind:bindTo={form} {isSubmitting}>
 			<FormColumns>
 				<FormColumn>

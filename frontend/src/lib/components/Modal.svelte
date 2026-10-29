@@ -337,7 +337,7 @@
 			>
 				<div
 					class:opacity-20={isSubmitting}
-					class="bg-cta-blue dark:bg-blue-800 text-white py-4 px-8 flex justify-between flex-shrink-0 transition-colors duration-200
+					class="bg-cta-blue dark:bg-cta-blue text-white py-4 px-8 flex justify-between flex-shrink-0 transition-colors duration-200
 						{fullscreen ? '' : 'rounded-t-md'}"
 				>
 					<div class="flex-1">

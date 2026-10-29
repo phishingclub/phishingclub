@@ -20,8 +20,8 @@ type Attachment struct {
 	FileName        nullable.Nullable[vo.FileName]          `json:"fileName"`
 	EmbeddedContent nullable.Nullable[bool]                 `json:"embeddedContent"`
 	SendAsCalendar  nullable.Nullable[bool]                 `json:"sendAsCalendar"`
-	// path is the calculated path to the file
-	Path nullable.Nullable[vo.RelativeFilePath] `json:"path"`
+	// path is the filesystem path of the file, set when read
+	Path nullable.Nullable[string] `json:"path"`
 	// used in the API to upload files
 	File *multipart.FileHeader `json:"-"`
 }
@@ -67,7 +67,7 @@ func (a *Attachment) ToDBMap() map[string]any {
 	if a.Path.IsSpecified() {
 		m["path"] = nil
 		if path, err := a.Path.Get(); err == nil {
-			m["path"] = path.String()
+			m["path"] = path
 		}
 	}
 	if v, err := a.EmbeddedContent.Get(); err == nil {

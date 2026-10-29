@@ -12,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // IsRecipientInGroup returns true when the given recipient is a member of the given group.
@@ -407,26 +408,12 @@ func (rg *RecipientGroup) GetByNameAndCompanyID(
 ) (*model.RecipientGroup, error) {
 	var recipientGroup database.RecipientGroup
 	db := rg.preload(options, rg.DB)
-	whereCompany := fmt.Sprintf(
-		"%s IS NULL",
-		TableColumn(database.RECIPIENT_GROUP_TABLE, "company_id"),
-	)
-	if companyID != nil {
-		whereCompany = fmt.Sprintf(
-			"%s = ?",
-			TableColumn(database.RECIPIENT_GROUP_TABLE, "company_id"),
-		)
-	}
 	result := db.
-		Where(
-			fmt.Sprintf(
-				"%s = ? AND %s",
-				TableColumnName(database.RECIPIENT_GROUP_TABLE),
-				whereCompany,
-			),
-			name,
-			companyID,
-		).
+		Where(clause.Eq{
+			Column: clause.Column{Table: database.RECIPIENT_GROUP_TABLE, Name: "name"},
+			Value:  name,
+		}).
+		Where(clause.Eq{Column: companyColumn(database.RECIPIENT_GROUP_TABLE), Value: companyID}).
 		First(&recipientGroup)
 
 	if result.Error != nil {

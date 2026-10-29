@@ -18,6 +18,7 @@
 	import { BiMap } from '$lib/utils/maps';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
@@ -979,6 +980,9 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 	</Modal>
 
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
+		{#if modalMode === 'update'}
+			<InstalledResourceBadge resourceType="campaigntemplate" resourceId={formValues.id} variant="notice" />
+		{/if}
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
 			<div class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-8">
 				<!-- Basic Information Section -->

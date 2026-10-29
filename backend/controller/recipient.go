@@ -40,7 +40,7 @@ var recipientColumnByMap = map[string]string{
 var recipientCampaignEventColumnMap = utils.MergeStringMaps(
 	campaignEventColumns,
 	map[string]string{
-		"event":    repository.TableColumnName(database.EVENT_TABLE),
+		"event":    repository.TableColumn(database.EVENT_TABLE, "name"),
 		"created":  repository.TableColumn(database.CAMPAIGN_EVENT_TABLE, "created_at"),
 		"campaign": repository.TableColumn(database.CAMPAIGN_TABLE, "name"),
 	},

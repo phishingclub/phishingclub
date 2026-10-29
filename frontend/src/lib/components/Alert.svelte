@@ -13,7 +13,14 @@
 	export let headline = 'Confirm';
 	export let cancel = 'Cancel';
 	export let ok = 'Yes, proceed';
+	// greys and blocks the confirm button while the action cannot proceed, for example an
+	// install whose bundle references packages that no longer exist on the registry.
+	export let okDisabled = false;
 	export let onConfirm;
+	// 'destructive' (red, warning icon) suits remove and uninstall, 'affirmative'
+	// (blue, no icon) suits positive actions like install and update.
+	export let tone = 'destructive';
+	$: isDestructive = tone !== 'affirmative';
 
 	let isLoading = false;
 	let error = '';
@@ -275,23 +282,27 @@
 		>
 			<!-- Header -->
 			<div
-				class="bg-red-700 dark:bg-red-700/90 text-white rounded-t-md py-4 px-8 flex items-center justify-between flex-shrink-0 transition-colors duration-200"
+				class="{isDestructive
+					? 'bg-red-700 dark:bg-red-700/90'
+					: 'bg-cta-blue dark:bg-cta-blue'} text-white rounded-t-md py-4 px-8 flex items-center justify-between flex-shrink-0 transition-colors duration-200"
 			>
 				<div class="flex items-center">
-					<svg
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-6 w-6 text-white mr-4"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-						/>
-					</svg>
+					{#if isDestructive}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							class="h-6 w-6 text-white mr-4"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+							/>
+						</svg>
+					{/if}
 					<h1 id="alert-title" class="uppercase mr-8 font-semibold text-2xl">{headline}</h1>
 				</div>
 				<button
@@ -349,12 +360,12 @@
 					<button
 						type="reset"
 						on:click={close}
-						class="bg-slate-400 hover:bg-slate-300 dark:bg-gray-700/80 dark:hover:bg-gray-600/80 text-sm mr-2 uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
+						class="bg-slate-400 hover:bg-slate-300 dark:bg-slate-600 dark:hover:bg-slate-500 text-sm mr-2 uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
 					>
 						{cancel}
 					</button>
 				{/if}
-				<FormButton isSubmitting={isLoading} on:click={onClickConfirm}>{ok}</FormButton>
+				<FormButton isSubmitting={isLoading} disabled={okDisabled} on:click={onClickConfirm}>{ok}</FormButton>
 			</div>
 		</section>
 	</div>

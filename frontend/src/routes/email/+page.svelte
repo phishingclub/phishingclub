@@ -19,6 +19,7 @@
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
 	import Table from '$lib/components/table/Table.svelte';
@@ -518,6 +519,9 @@
 		{/each}
 	</Table>
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
+		{#if modalMode === 'update'}
+			<InstalledResourceBadge resourceType="email" resourceId={formValues.id} variant="notice" />
+		{/if}
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<Editor
 				contentType="email"

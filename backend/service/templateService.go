@@ -16,10 +16,10 @@ import (
 
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
-	"github.com/phishingclub/phishingclub/embedded"
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
+	"github.com/phishingclub/phishingclub/embedded"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"

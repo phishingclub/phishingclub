@@ -916,6 +916,11 @@ func (m *Proxy) validateProxyConfigForUpdate(ctx context.Context, proxy *model.P
 			)
 		}
 
+		// validate the phishing domain name before any domain is created
+		if err := m.validateProxyToDomain(ctx, domainConfig.To, proxyID); err != nil {
+			return err
+		}
+
 		// validate domain-specific TLS config
 		if err := m.validateTLSConfig(domainConfig.TLS); err != nil {
 			return err
@@ -1854,6 +1859,11 @@ func (m *Proxy) validateProxyConfig(ctx context.Context, proxy *model.Proxy) err
 			)
 		}
 
+		// validate the phishing domain name before any domain is created
+		if err := m.validateProxyToDomain(ctx, domainConfig.To, nil); err != nil {
+			return err
+		}
+
 		// validate domain-specific scheme
 		if domainConfig.Scheme != "" && domainConfig.Scheme != "http" && domainConfig.Scheme != "https" {
 			return validate.WrapErrorWithField(
@@ -2034,56 +2044,109 @@ func (m *Proxy) applyConfigurationDefaults(proxy *model.Proxy) error {
 
 // deleteProxyDomains deletes all domains associated with a proxy
 func (m *Proxy) deleteProxyDomains(ctx context.Context, session *model.Session, proxyID *uuid.UUID, proxy *model.Proxy) error {
-	proxyConfig, err := proxy.ProxyConfig.Get()
+	domains, err := m.ProxyDomains(ctx, proxy)
 	if err != nil {
 		return err
+	}
+	for _, pd := range domains {
+		domainID := pd.ID
+		if err := m.DomainService.DeleteProxyDomain(ctx, session, &domainID); err != nil {
+			m.Logger.Warnw("failed to delete proxy domain",
+				"proxyID", proxyID.String(),
+				"domain", pd.Name,
+				"error", err,
+			)
+		} else {
+			m.Logger.Debugw("deleted proxy domain",
+				"proxyID", proxyID.String(),
+				"domain", pd.Name,
+			)
+		}
+	}
+	return nil
+}
+
+// ProxyDomain is a domain of type proxy that a proxy configuration maps to.
+type ProxyDomain struct {
+	ID   uuid.UUID
+	Name string
+}
+
+// ProxyDomains returns the existing proxy type domains a proxy configuration
+// maps to, the domains deleting the proxy also deletes.
+func (m *Proxy) ProxyDomains(ctx context.Context, proxy *model.Proxy) ([]ProxyDomain, error) {
+	proxyConfig, err := proxy.ProxyConfig.Get()
+	if err != nil {
+		return nil, err
 	}
 
 	// parse complete YAML structure
 	var config ProxyServiceConfigYAML
 	if err := yaml.Unmarshal([]byte(proxyConfig.String()), &config); err != nil {
-		return err
+		return nil, err
 	}
 
 	// set default values
 	m.setProxyConfigDefaults(&config)
 
-	// delete domains for each mapping
+	var out []ProxyDomain
 	for _, domainConfig := range config.Hosts {
 		if domainConfig == nil {
 			continue
 		}
-
-		// get domain by name and delete if it's a proxy domain
 		phishingDomainVO, err := vo.NewString255(domainConfig.To)
 		if err != nil {
 			continue
 		}
-
 		existingDomain, err := m.DomainRepository.GetByName(ctx, phishingDomainVO, &repository.DomainOption{})
-		if err == nil && existingDomain != nil {
-			// delete old domains that have proxy type
-			if existingDomain.Type.MustGet().String() == "proxy" {
-				domainID, err := existingDomain.ID.Get()
-				if err == nil {
-					err = m.DomainService.DeleteProxyDomain(ctx, session, &domainID)
-					if err != nil {
-						m.Logger.Warnw("failed to delete proxy domain",
-							"proxyID", proxyID.String(),
-							"domain", domainConfig.To,
-							"error", err,
-						)
-					} else {
-						m.Logger.Debugw("deleted proxy domain",
-							"proxyID", proxyID.String(),
-							"domain", domainConfig.To,
-						)
-					}
+		if err != nil || existingDomain == nil {
+			continue
+		}
+		// only domains of the proxy type belong to the proxy
+		if existingDomain.Type.MustGet().String() != "proxy" {
+			continue
+		}
+		if domainID, err := existingDomain.ID.Get(); err == nil {
+			out = append(out, ProxyDomain{ID: domainID, Name: domainConfig.To})
+		}
+	}
+	return out, nil
+}
+
+// validateProxyToDomain checks a 'to' phishing domain. A name equal to an
+// admin host is always refused. The name format is checked unless the domain
+// already exists and belongs to proxyID, so a proxy whose stored domain is from
+// before the format rules can still be saved.
+func (m *Proxy) validateProxyToDomain(ctx context.Context, to string, proxyID *uuid.UUID) error {
+	var reserved []string
+	if m.DomainService != nil {
+		reserved = m.DomainService.reservedHosts()
+	}
+	if model.IsReservedDomainName(to, reserved...) {
+		return validate.WrapErrorWithField(
+			fmt.Errorf("phishing domain '%s' is reserved for the administration server", to),
+			"proxyConfig",
+		)
+	}
+	if proxyID != nil && m.DomainRepository != nil {
+		if name, err := vo.NewString255(to); err == nil {
+			existing, err := m.DomainRepository.GetByName(ctx, name, &repository.DomainOption{})
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err == nil && existing != nil {
+				if pid, err := existing.ProxyID.Get(); err == nil && pid == *proxyID {
+					return nil
 				}
 			}
 		}
 	}
-
+	if err := model.ValidateDomainName(to); err != nil {
+		return validate.WrapErrorWithField(
+			fmt.Errorf("phishing domain '%s' is invalid: %s", to, strings.TrimPrefix(err.Error(), "name: ")),
+			"proxyConfig",
+		)
+	}
 	return nil
 }
 

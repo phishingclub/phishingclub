@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
@@ -11,6 +10,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var identifierAllowedColumns = assignTableToColumns(database.IDENTIFIER_TABLE, []string{
@@ -52,10 +52,10 @@ func (i *Identifier) GetByName(
 	var row database.Identifier
 	res := i.DB.
 		Model(&database.Identifier{}).
-		Where(
-			fmt.Sprintf("%s = ?", TableColumnName(database.IDENTIFIER_TABLE)),
-			name,
-		).
+		Where(clause.Eq{
+			Column: clause.Column{Table: database.IDENTIFIER_TABLE, Name: "name"},
+			Value:  name,
+		}).
 		First(&row)
 
 	if res.Error != nil {

@@ -1,6 +1,9 @@
 package model
 
 import (
+	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -35,10 +38,171 @@ type Domain struct {
 	Company             *Company                                 `json:"company"`
 }
 
-// Validate checks if the Domain configuration with a valid state
+// domain name length limits from RFC 1035
+const (
+	domainNameMaxLength  = 253
+	domainLabelMaxLength = 63
+)
+
+// ValidateDomainName only accepts a plain lowercase hostname, since the server
+// matches the request host against the stored name exactly. A name equal to a
+// reserved host is refused so a phishing domain can not take over the admin host.
+func ValidateDomainName(name string, reservedHosts ...string) error {
+	if err := domainNameFormat(name); err != nil {
+		return validate.WrapErrorWithField(err, "name")
+	}
+	if IsReservedDomainName(name, reservedHosts...) {
+		return validate.WrapErrorWithField(
+			errors.New("is reserved for the administration server"),
+			"name",
+		)
+	}
+	return nil
+}
+
+// IsReservedDomainName reports if name equals one of the reserved hosts. The
+// compare ignores case, a trailing dot and any port on either side.
+func IsReservedDomainName(name string, reservedHosts ...string) bool {
+	n := normalizeHostForCompare(name)
+	if n == "" {
+		return false
+	}
+	for _, h := range reservedHosts {
+		if r := normalizeHostForCompare(h); r != "" && r == n {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeHostForCompare lowercases a host, drops a port and a trailing dot
+func normalizeHostForCompare(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		s = host
+	}
+	s = strings.TrimSuffix(s, ".")
+	return strings.ToLower(s)
+}
+
+func domainNameFormat(name string) error {
+	if name == "" {
+		return errors.New("is required")
+	}
+	if len(name) > domainNameMaxLength {
+		return fmt.Errorf("must be at most %d characters", domainNameMaxLength)
+	}
+	for _, label := range strings.Split(name, ".") {
+		if label == "" {
+			return errors.New("must not have empty labels, leading or trailing dots")
+		}
+		if len(label) > domainLabelMaxLength {
+			return fmt.Errorf("labels must be at most %d characters", domainLabelMaxLength)
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return errors.New("labels must not start or end with a hyphen")
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			isLower := c >= 'a' && c <= 'z'
+			isDigit := c >= '0' && c <= '9'
+			if isLower || isDigit || c == '-' {
+				continue
+			}
+			if c >= 'A' && c <= 'Z' {
+				return errors.New("must be lowercase")
+			}
+			return errors.New("may only contain letters, digits, dots and hyphens, underscores and IPv6 addresses are not supported")
+		}
+	}
+	return nil
+}
+
+// NormalizeDomainName trims spaces, lowercases and drops one trailing dot
+func NormalizeDomainName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return strings.TrimSuffix(name, ".")
+}
+
+// ValidateDomainRedirectURL checks a domain redirect url, see ValidateRedirectURL
+func ValidateDomainRedirectURL(s string) error {
+	return ValidateRedirectURL(s, "redirectURL")
+}
+
+// ValidateDomainRedirectURLUpdate checks an incoming redirect url only when
+// it differs from the stored one, since the client sends it on every update
+// and an older stored value must not block other edits.
+func ValidateDomainRedirectURLUpdate(stored string, incoming string) error {
+	if incoming == stored {
+		return nil
+	}
+	return ValidateDomainRedirectURL(incoming)
+}
+
+// ValidateRedirectURL allows an empty value, a path on the same host such as
+// /landing, or an absolute http or https url. A value starting with // or
+// holding a backslash or control character is refused, since browsers may
+// read it as a url on another host. Errors are wrapped with field.
+func ValidateRedirectURL(s string, field string) error {
+	if s == "" {
+		return nil
+	}
+	for _, c := range s {
+		if c < 0x20 || c == 0x7f || c == '\\' {
+			return validate.WrapErrorWithField(
+				errors.New("must not contain backslashes or control characters"),
+				field,
+			)
+		}
+	}
+	if strings.HasPrefix(s, "/") {
+		if strings.HasPrefix(s, "//") {
+			return validate.WrapErrorWithField(
+				errors.New("must be a path starting with a single / or an http or https URL"),
+				field,
+			)
+		}
+		return nil
+	}
+	if err := validate.ErrorIfNotHTTPURL(s); err != nil {
+		return validate.WrapErrorWithField(err, field)
+	}
+	return nil
+}
+
+// Validate checks a new domain, including the name format and redirect url
 func (d *Domain) Validate() error {
+	return d.validate(true)
+}
+
+// ValidateExisting checks a stored domain on update. The name can not change
+// on update, so its format is not checked again, which keeps domains created
+// before the format rules editable. The redirect url is checked by the caller
+// only when a new value is supplied.
+func (d *Domain) ValidateExisting() error {
+	return d.validate(false)
+}
+
+func (d *Domain) validate(isNew bool) error {
 	if err := validate.NullableFieldRequired("name", d.Name); err != nil {
 		return err
+	}
+	name, err := d.Name.Get()
+	if err != nil || name.String() == "" {
+		return validate.WrapErrorWithField(errors.New("is required"), "name")
+	}
+	if isNew {
+		if err := ValidateDomainName(name.String()); err != nil {
+			return err
+		}
+		if redirectURL, err := d.RedirectURL.Get(); err == nil {
+			if err := ValidateDomainRedirectURL(redirectURL.String()); err != nil {
+				return err
+			}
+		}
 	}
 
 	// set default type if not specified

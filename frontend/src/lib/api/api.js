@@ -406,14 +406,7 @@ export class API {
 		 * @returns {Promise<ApiResponse>}
 		 */
 		replaceFile: async (id, data) => {
-			const res = await fetch(this.getPath(`/asset/${id}/file`), {
-				method: 'POST',
-				// content-type is set automatically by the browser
-				body: data
-			});
-			const body = await res.json();
-
-			return newResponse(body.success, res.status, body.error, body.data);
+			return await postMultipart(this.getPath(`/asset/${id}/file`), data);
 		},
 
 		/**
@@ -2220,6 +2213,19 @@ export class API {
 		},
 
 		/**
+		 * Get the result of an authorization flow started with the state token.
+		 *
+		 * @param {string} id
+		 * @param {string} state
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAuthorizationStatus: async (id, state) => {
+			return await getJSON(
+				this.getPath(`/oauth-authorize/${id}/status?state=${encodeURIComponent(state)}`)
+			);
+		},
+
+		/**
 		 * Remove authorization tokens from an OAuth Provider.
 		 *
 		 * @param {string} id
@@ -3966,6 +3972,72 @@ export class API {
 				formData.append('file', fileOrFormData);
 				return await postMultipart(this.getPath('/import'), formData);
 			}
+		}
+	};
+
+	/**
+	 * registry is the content registry (baitbox) consumer: connections, browse,
+	 * install, updates and removal.
+	 */
+	registry = {
+		list: async () => {
+			return await getJSON(this.getPath('/registry'));
+		},
+		add: async (name, url, token, insecure) => {
+			return await postJSON(this.getPath('/registry'), { name, url, token, insecure });
+		},
+		updateRegistry: async (id, name, url, token, insecure, clearToken = false) => {
+			return await patchJSON(this.getPath(`/registry/${id}`), {
+				name,
+				url,
+				token,
+				insecure,
+				clearToken
+			});
+		},
+		remove: async (id) => {
+			return await deleteJSON(this.getPath(`/registry/${id}`));
+		},
+		status: async (id) => {
+			return await getJSON(this.getPath(`/registry/${id}/status`));
+		},
+		browse: async (id) => {
+			return await getJSON(this.getPath(`/registry/${id}/packages`));
+		},
+		inspect: async (id, namespace, name) => {
+			const q = `namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`;
+			return await getJSON(this.getPath(`/registry/${id}/package?${q}`));
+		},
+		// overwriteReportTemplates lists the report template kinds the user agreed
+		// the package may overwrite.
+		install: async (registryId, namespace, name, variables, overwriteReportTemplates) => {
+			return await postJSON(this.getPath('/registry/install'), {
+				registryId,
+				namespace,
+				name,
+				variables,
+				overwriteReportTemplates: overwriteReportTemplates || []
+			});
+		},
+		installed: async () => {
+			return await getJSON(this.getPath('/installed'));
+		},
+		installedResources: async () => {
+			return await getJSON(this.getPath('/installed/resources'));
+		},
+		update: async (id, variables, resolutions, overwriteReportTemplates) => {
+			return await postJSON(this.getPath(`/installed/${id}/update`), {
+				variables,
+				resolutions,
+				overwriteReportTemplates: overwriteReportTemplates || []
+			});
+		},
+		// uninstallPreview changes nothing.
+		uninstallPreview: async (id) => {
+			return await getJSON(this.getPath(`/installed/${id}/uninstall-preview`));
+		},
+		uninstall: async (id) => {
+			return await deleteJSON(this.getPath(`/installed/${id}`));
 		}
 	};
 }

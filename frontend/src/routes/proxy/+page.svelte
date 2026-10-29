@@ -16,6 +16,7 @@
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
@@ -758,6 +759,9 @@ portal.example.com:
 		{isSubmitting}
 		fullscreen={isModalFullscreen}
 	>
+		{#if modalMode === 'update'}
+			<InstalledResourceBadge resourceType="proxy" resourceId={formValues.id} variant="notice" />
+		{/if}
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<div
 				class="col-span-3 w-full px-6 py-4 {isModalFullscreen

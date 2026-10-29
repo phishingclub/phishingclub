@@ -43,8 +43,8 @@ func TestRunCallableNonObject(t *testing.T) {
 	}
 }
 
-// TestRunCallableEmitEventUnavailable proves campaign bindings are inert in
-// callable mode (emitEvent throws, surfacing as an error).
+// TestRunCallableEmitEventUnavailable proves emitEvent throws in callable mode,
+// surfacing as an error.
 func TestRunCallableEmitEventUnavailable(t *testing.T) {
 	r := newTestRunner()
 	if _, err := r.RunCallable(context.Background(),

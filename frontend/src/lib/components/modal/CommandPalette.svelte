@@ -136,6 +136,13 @@
 				category: 'Development',
 				external: true
 			});
+
+			items.push({
+				label: 'Bait Box (local)',
+				url: 'https://localhost:8113',
+				category: 'Development',
+				external: true
+			});
 		}
 
 		return items;

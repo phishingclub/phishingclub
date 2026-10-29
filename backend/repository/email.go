@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
@@ -11,6 +10,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var allowedEmailOrderBy = assignTableToColumns(database.EMAIL_TABLE, []string{
@@ -281,31 +281,17 @@ func (m *Email) GetByNameAndCompanyID(
 ) (*model.Email, error) {
 	dbEmail := database.Email{}
 	db := m.load(m.DB, options)
-	var result *gorm.DB
-	if companyID == nil {
-		result = db.
-			Where(
-				fmt.Sprintf(
-					"%s = ? AND %s IS NULL",
-					TableColumn(database.EMAIL_TABLE, "name"),
-					TableColumn(database.EMAIL_TABLE, "company_id"),
-				),
-				name.String(),
-			).
-			First(&dbEmail)
-	} else {
-		result = db.
-			Where(
-				fmt.Sprintf(
-					"%s = ? AND %s = ?",
-					TableColumn(database.EMAIL_TABLE, "name"),
-					TableColumn(database.EMAIL_TABLE, "company_id"),
-				),
-				name.String(),
-				companyID.String(),
-			).
-			First(&dbEmail)
+	var companyValue interface{}
+	if companyID != nil {
+		companyValue = companyID.String()
 	}
+	result := db.
+		Where(clause.Eq{
+			Column: clause.Column{Table: database.EMAIL_TABLE, Name: "name"},
+			Value:  name.String(),
+		}).
+		Where(clause.Eq{Column: companyColumn(database.EMAIL_TABLE), Value: companyValue}).
+		First(&dbEmail)
 	if result.Error != nil {
 		return nil, result.Error
 	}

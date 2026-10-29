@@ -13,11 +13,16 @@ import (
 	"gorm.io/gorm"
 )
 
+// allowDenyAllowColumns are the columns a list request may order by and search
+// in. Each name must match a column of database.AllowDeny.
 var allowDenyAllowColumns = assignTableToColumns(database.ALLOW_DENY_TABLE, []string{
 	"created_at",
 	"updated_at",
 	"name",
-	"cidr",
+	"cidrs",
+	"country_codes",
+	"asns",
+	"ja4_fingerprints",
 	"allowed",
 })
 
@@ -56,7 +61,7 @@ func (r *AllowDeny) GetAll(
 	options *AllowDenyOption,
 ) (*model.Result[model.AllowDeny], error) {
 	result := model.NewEmptyResult[model.AllowDeny]()
-	db := withCompanyIncludingNullContext(r.DB, companyID, "allow_denies")
+	db := withCompanyIncludingNullContext(r.DB, companyID, database.ALLOW_DENY_TABLE)
 	db, err := useQuery(db, database.ALLOW_DENY_TABLE, options.QueryArgs, allowDenyAllowColumns...)
 	if err != nil {
 		return result, errs.Wrap(err)

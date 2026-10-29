@@ -197,7 +197,7 @@ func (r *Runner) run(job Job) {
 
 // RunCallable runs a script in callable mode: it receives input as the `input`
 // binding, has the same http.fetch and codec toolkit, and the object it returns
-// is exported back to the caller. Campaign bindings (emitEvent, info) are inert.
+// is exported back to the caller. Campaign bindings (emitEvent, info) do nothing.
 // Synchronous and bounded by the same wall clock timeout as an event run.
 func (r *Runner) RunCallable(ctx context.Context, source string, input map[string]interface{}) (out map[string]interface{}, err error) {
 	defer func() {

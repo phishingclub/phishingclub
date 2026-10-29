@@ -18,6 +18,7 @@
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
@@ -102,6 +103,13 @@
 	// denies what it can not match
 	$: asnAllowBlocksAll =
 		formValues.allowed === true &&
+		formValues.asns &&
+		formValues.asns.length > 0 &&
+		!asnAvailable;
+	// a deny filter that lists ASNs has no effect while no ASN data is downloaded,
+	// because no visitor IP can resolve to an ASN, so the ASN rule never matches.
+	$: asnDenyNoEffect =
+		formValues.allowed === false &&
 		formValues.asns &&
 		formValues.asns.length > 0 &&
 		!asnAvailable;
@@ -500,6 +508,16 @@
 					>
 						{entry.name}
 					</button>
+					{#if entry.asns && entry.asns.trim() && !asnAvailable}
+						<span
+							class="ml-2 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
+							title={entry.allowed
+								? 'This filter lists ASNs but ASN data is not downloaded, so it blocks every visitor. Download it under Settings, IP Data.'
+								: 'This filter lists ASNs but ASN data is not downloaded, so its ASN rule has no effect. Download it under Settings, IP Data.'}
+						>
+							ASN data missing
+						</span>
+					{/if}
 				</TableCell>
 				<TableCellCheck value={entry.allowed} />
 				{#if contextCompanyID}
@@ -529,6 +547,9 @@
 	</Table>
 
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
+		{#if modalMode === 'update'}
+			<InstalledResourceBadge resourceType="allowdeny" resourceId={formValues.id} variant="notice" />
+		{/if}
 		<FormGrid on:submit={onClickSubmit} bind:bindTo={form} {isSubmitting}>
 			<FormColumns>
 				<FormColumn>
@@ -561,6 +582,20 @@
 									href="/settings#ipdata">Settings, IP Data</a
 								>
 								or remove the ASN rules.
+							</p>
+						</div>
+					{/if}
+					{#if asnDenyNoEffect}
+						<div
+							class="rounded-md border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 mb-4 transition-colors duration-200"
+						>
+							<p class="text-sm text-amber-800 dark:text-amber-200">
+								This deny filter lists ASNs but no ASN data is downloaded, so its ASN rule has no
+								effect (no visitor can be matched by ASN). Download the ASN data under
+								<a
+									class="text-cta-blue dark:text-highlight-blue hover:opacity-80"
+									href="/settings#ipdata">Settings, IP Data</a
+								>.
 							</p>
 						</div>
 					{/if}

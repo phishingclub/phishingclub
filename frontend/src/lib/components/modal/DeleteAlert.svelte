@@ -6,6 +6,7 @@
 	export let name;
 	export let list = [];
 	export let title = 'Delete';
+	export let ok = 'Yes, proceed';
 	export let isVisible = false;
 	export let confirm = false;
 	export let confirmWord = 'confirm';
@@ -40,7 +41,7 @@
 </script>
 
 {#if isVisible}
-	<Alert headline={title} onConfirm={onConfirmDelete} bind:visible={isVisible}>
+	<Alert headline={title} {ok} onConfirm={onConfirmDelete} bind:visible={isVisible}>
 		<div class="space-y-6">
 			<!-- Main Delete Warning -->
 			<div>
@@ -75,6 +76,9 @@
 					</ul>
 				</div>
 			{/if}
+
+			<!-- extra details a caller wants shown above the confirm -->
+			<slot />
 
 			<!-- Confirmation Input -->
 			{#if confirm}

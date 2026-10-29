@@ -419,12 +419,24 @@ func (u *Update) RunUpdate(
 	return nil
 }
 
+// limits for the self update archive
+const (
+	updateMaxPackageBytes   = 512 << 20
+	updateMaxArchiveEntries = 32
+	updateMaxEntryBytes     = 512 << 20
+	updateMaxExtractedBytes = 1 << 30
+)
+
 // extractAndVerifyPackage extracts binary and signature from tar.gz and verifies the signature
 func (u *Update) extractAndVerifyPackage(packageData io.Reader, tmpDir string) (string, error) {
 	// Read the entire package
 	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, packageData); err != nil {
+	n, err := io.Copy(&buf, io.LimitReader(packageData, updateMaxPackageBytes+1))
+	if err != nil {
 		return "", errs.Wrap(err)
+	}
+	if n > updateMaxPackageBytes {
+		return "", errors.New("update package is too large")
 	}
 
 	// Create gzip reader
@@ -438,6 +450,8 @@ func (u *Update) extractAndVerifyPackage(packageData io.Reader, tmpDir string) (
 	tarReader := tar.NewReader(gzipReader)
 
 	var binaryPath, sigPath string
+	var entryCount int
+	var totalBytes int64
 
 	// Extract files from archive
 	for {
@@ -449,9 +463,21 @@ func (u *Update) extractAndVerifyPackage(packageData io.Reader, tmpDir string) (
 			return "", errs.Wrap(err)
 		}
 
+		entryCount++
+		if entryCount > updateMaxArchiveEntries {
+			return "", errors.New("update package has too many entries")
+		}
+
 		// Skip directories
 		if header.Typeflag != tar.TypeReg {
 			continue
+		}
+		if header.Size < 0 || header.Size > updateMaxEntryBytes {
+			return "", errors.New("update package entry is too large")
+		}
+		totalBytes += header.Size
+		if totalBytes > updateMaxExtractedBytes {
+			return "", errors.New("update package content is too large")
 		}
 
 		// Get the base filename
@@ -464,10 +490,15 @@ func (u *Update) extractAndVerifyPackage(packageData io.Reader, tmpDir string) (
 			return "", errs.Wrap(err)
 		}
 
-		// Copy file content
-		if _, err := io.Copy(outFile, tarReader); err != nil {
+		// Copy file content up to the entry cap
+		written, err := io.Copy(outFile, io.LimitReader(tarReader, updateMaxEntryBytes+1))
+		if err != nil {
 			outFile.Close()
 			return "", errs.Wrap(err)
+		}
+		if written > updateMaxEntryBytes {
+			outFile.Close()
+			return "", errors.New("update package entry is too large")
 		}
 		outFile.Close()
 

@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -12,6 +11,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var pageAllowedColumns = assignTableToColumns(database.PAGE_TABLE, []string{
@@ -174,7 +174,7 @@ func (pa *Page) GetByCompanyID(
 	dbPage := database.Page{}
 	db := pa.load(options, pa.DB)
 	result := db.
-		Where(TableColumn(database.PAGE_TABLE, "company_id")+" = ?", companyID).
+		Where(clause.Eq{Column: companyColumn(database.PAGE_TABLE), Value: companyID}).
 		First(&dbPage)
 
 	if result.Error != nil {
@@ -194,13 +194,10 @@ func (pa *Page) GetByNameAndCompanyID(
 	db := pa.load(options, pa.DB)
 	db = withCompanyIncludingNullContext(db, companyID, database.PAGE_TABLE)
 	result := db.
-		Where(
-			fmt.Sprintf(
-				"%s = ?",
-				TableColumn(database.PAGE_TABLE, "name"),
-			),
-			name.String(),
-		).
+		Where(clause.Eq{
+			Column: clause.Column{Table: database.PAGE_TABLE, Name: "name"},
+			Value:  name.String(),
+		}).
 		First(&page)
 
 	if result.Error != nil {

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -499,8 +500,8 @@ func (s *Server) Handler(c *gin.Context) {
 		return
 	}
 	// check if the request should be redirected
-	if domain.RedirectURL != "" {
-		c.Redirect(http.StatusMovedPermanently, domain.RedirectURL)
+	if status, ok := domainRedirectStatus(host, c.Request.URL.Path, domain.RedirectURL); ok {
+		c.Redirect(status, domain.RedirectURL)
 		c.Abort()
 		return
 	}
@@ -608,6 +609,39 @@ func (s *Server) Handler(c *gin.Context) {
 		buf.Bytes(),
 	)
 	c.Abort()
+}
+
+// domainRedirectStatus returns the status to use for a domain redirect and
+// false when no redirect should be sent. A target that points back at the
+// requested path is skipped so it can not loop. A path on the same host uses
+// 302 so browsers do not cache it, an absolute url keeps 301.
+func domainRedirectStatus(host, requestPath, target string) (int, bool) {
+	if target == "" {
+		return 0, false
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		return 0, false
+	}
+	samePath := cleanURLPath(u.Path) == cleanURLPath(requestPath)
+	if u.Scheme == "" && u.Host == "" {
+		if samePath {
+			return 0, false
+		}
+		return http.StatusFound, true
+	}
+	if samePath && strings.EqualFold(u.Hostname(), host) {
+		return 0, false
+	}
+	return http.StatusMovedPermanently, true
+}
+
+// cleanURLPath cleans a url path so equal paths compare equal.
+func cleanURLPath(p string) string {
+	if p == "" {
+		return "/"
+	}
+	return path.Clean("/" + p)
 }
 
 // handlerNotFound handles the request for a not found page

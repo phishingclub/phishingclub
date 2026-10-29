@@ -23,7 +23,7 @@ type Email struct {
 	CompanyID         nullable.Nullable[uuid.UUID]            `json:"companyID"`
 
 	Attachments []*EmailAttachment `json:"attachments"`
-	Company     *Company            `json:"company"`
+	Company     *Company           `json:"company"`
 }
 
 // Validate checks if the mail has a valid state

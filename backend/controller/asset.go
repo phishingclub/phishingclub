@@ -483,15 +483,12 @@ func (a *Asset) UpdateByID(g *gin.Context) {
 	a.Response.OK(g, gin.H{})
 }
 
-// GetEditableContentByID returns an asset's content and whether it can be
-// edited as text in the editor.
+// GetEditableContentByID returns an asset's content and whether it can be edited as text
 func (a *Asset) GetEditableContentByID(g *gin.Context) {
-	// handle session
 	session, _, ok := a.handleSession(g)
 	if !ok {
 		return
 	}
-	// parse request
 	id, ok := a.handleParseIDParam(g)
 	if !ok {
 		return
@@ -508,7 +505,6 @@ func (a *Asset) GetEditableContentByID(g *gin.Context) {
 	if maxMB, perr := strconv.Atoi(maxFile.Value.String()); perr == nil && maxMB > 0 {
 		maxBytes = int64(maxMB) * 1024 * 1024
 	}
-	// get the content
 	ctx := g.Request.Context()
 	content, editable, err := a.AssetService.GetContentByID(ctx, session, id, maxBytes)
 	if a.fileMissing(g, err) {
@@ -533,14 +529,12 @@ func (a *Asset) fileMissing(g *gin.Context, err error) bool {
 	return false
 }
 
-// SaveContentByID overwrites a text asset's content from the editor.
+// SaveContentByID overwrites a text asset's content from the editor
 func (a *Asset) SaveContentByID(g *gin.Context) {
-	// handle session
 	session, _, ok := a.handleSession(g)
 	if !ok {
 		return
 	}
-	// parse request
 	id, ok := a.handleParseIDParam(g)
 	if !ok {
 		return
@@ -577,7 +571,6 @@ func (a *Asset) SaveContentByID(g *gin.Context) {
 		a.Response.ValidationFailed(g, "Content", fmt.Errorf("content is too large"))
 		return
 	}
-	// save the content
 	ctx := g.Request.Context()
 	err = a.AssetService.SaveContentByID(ctx, session, id, content)
 	if a.fileMissing(g, err) {
@@ -589,14 +582,12 @@ func (a *Asset) SaveContentByID(g *gin.Context) {
 	a.Response.OK(g, gin.H{})
 }
 
-// MoveByID renames or moves an asset to a new path within its context.
+// MoveByID renames or moves an asset within its folder
 func (a *Asset) MoveByID(g *gin.Context) {
-	// handle session
 	session, _, ok := a.handleSession(g)
 	if !ok {
 		return
 	}
-	// parse request
 	id, ok := a.handleParseIDParam(g)
 	if !ok {
 		return
@@ -613,7 +604,6 @@ func (a *Asset) MoveByID(g *gin.Context) {
 		a.Response.ValidationFailed(g, "Path", err)
 		return
 	}
-	// move the asset
 	ctx := g.Request.Context()
 	err = a.AssetService.MoveByID(ctx, session, id, nullable.NewNullableWithValue(*path))
 	if a.fileMissing(g, err) {
@@ -625,14 +615,12 @@ func (a *Asset) MoveByID(g *gin.Context) {
 	a.Response.OK(g, gin.H{})
 }
 
-// ReplaceFileByID replaces an asset's file content with an uploaded file.
+// ReplaceFileByID replaces an asset's file with an uploaded file
 func (a *Asset) ReplaceFileByID(g *gin.Context) {
-	// handle session
 	session, _, ok := a.handleSession(g)
 	if !ok {
 		return
 	}
-	// parse request
 	id, ok := a.handleParseIDParam(g)
 	if !ok {
 		return
@@ -643,7 +631,6 @@ func (a *Asset) ReplaceFileByID(g *gin.Context) {
 		a.Response.BadRequestMessage(g, "No file selected")
 		return
 	}
-	// enforce the max file size option
 	maxFile, err := a.OptionService.GetOption(g, session, data.OptionKeyMaxFileUploadSizeMB)
 	if ok := a.handleErrors(g, err); !ok {
 		return
@@ -662,7 +649,6 @@ func (a *Asset) ReplaceFileByID(g *gin.Context) {
 		)
 		return
 	}
-	// replace the file
 	ctx := g.Request.Context()
 	err = a.AssetService.ReplaceFileByID(ctx, session, id, file)
 	if a.fileMissing(g, err) {

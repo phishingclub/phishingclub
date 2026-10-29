@@ -29,7 +29,17 @@ type OAuthState struct {
 	// whether this state token has been used (prevent replay attacks)
 	Used   bool       `gorm:"not null;default:false;index;"`
 	UsedAt *time.Time `gorm:"index;"`
+
+	// outcome of the flow, empty while pending, else success or failed.
+	// The admin page polls it when the callback runs on another origin.
+	Result string `gorm:"not null;default:'';type:varchar(16);"`
 }
+
+// oauth state results
+const (
+	OAUTH_STATE_RESULT_SUCCESS = "success"
+	OAUTH_STATE_RESULT_FAILED  = "failed"
+)
 
 func (OAuthState) TableName() string {
 	return OAUTH_STATE_TABLE

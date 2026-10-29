@@ -2137,6 +2137,7 @@ func (c *Campaign) UpdateByID(
 		}
 	}
 
+	storedDates := current.AnonymizeDates()
 	// update the values
 	if v, err := incoming.Name.Get(); err == nil {
 		// check uniqueness
@@ -2395,7 +2396,7 @@ func (c *Campaign) UpdateByID(
 		}
 	}
 	// validate and update
-	if err := current.Validate(); err != nil {
+	if err := current.ValidateUpdate(storedDates); err != nil {
 		return errs.Wrap(err)
 	}
 	err = c.CampaignRepository.UpdateByID(ctx, id, current)
@@ -3325,10 +3326,10 @@ func (c *Campaign) sendCampaignMessages(
 				// inline attachment - embedded in email body, can be referenced via cid:filename
 				if !attachment.EmbeddedContent.MustGet() {
 					// simple inline image - no template processing needed
-					m.EmbedFile(p.String())
+					m.EmbedFile(p)
 				} else {
 					// inline image with template processing
-					attachmentContent, err := os.ReadFile(p.String())
+					attachmentContent, err := os.ReadFile(p)
 					if err != nil {
 						return errs.Wrap(err)
 					}
@@ -3378,25 +3379,25 @@ func (c *Campaign) sendCampaignMessages(
 					// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
 					// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
 					m.EmbedReader(
-						filepath.Base(p.String()),
+						filepath.Base(p),
 						strings.NewReader(attachmentStr),
 					)
 				}
 			} else if !attachment.EmbeddedContent.MustGet() {
-				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 					// calendar invitation parsed natively by Outlook, raw file content
-					icsContent, err := os.ReadFile(p.String())
+					icsContent, err := os.ReadFile(p)
 					if err != nil {
 						return fmt.Errorf("failed to read calendar file: %s", err)
 					}
 					m.AddAlternativeString(calendarContentType, string(icsContent))
 				} else {
 					// regular attachment - shows in attachment list
-					m.AttachFile(p.String())
+					m.AttachFile(p)
 				}
 			} else {
 				// regular attachment with template processing
-				attachmentContent, err := os.ReadFile(p.String())
+				attachmentContent, err := os.ReadFile(p)
 				if err != nil {
 					return errs.Wrap(err)
 				}
@@ -3443,12 +3444,12 @@ func (c *Campaign) sendCampaignMessages(
 				if err != nil {
 					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
 				}
-				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 					// calendar invitation parsed natively by Outlook, with rendered variables
 					m.AddAlternativeString(calendarContentType, attachmentStr)
 				} else {
 					m.AttachReadSeeker(
-						filepath.Base(p.String()),
+						filepath.Base(p),
 						strings.NewReader(attachmentStr),
 					)
 				}
@@ -5717,10 +5718,10 @@ func (c *Campaign) sendSingleEmailSMTP(
 			// inline attachment - embedded in email body, can be referenced via cid:filename
 			if !attachment.EmbeddedContent.MustGet() {
 				// simple inline image - no template processing needed
-				m.EmbedFile(p.String())
+				m.EmbedFile(p)
 			} else {
 				// inline image with template processing
-				attachmentContent, err := os.ReadFile(p.String())
+				attachmentContent, err := os.ReadFile(p)
 				if err != nil {
 					return errs.Wrap(err)
 				}
@@ -5770,25 +5771,25 @@ func (c *Campaign) sendSingleEmailSMTP(
 				// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
 				// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
 				m.EmbedReader(
-					filepath.Base(p.String()),
+					filepath.Base(p),
 					strings.NewReader(attachmentStr),
 				)
 			}
 		} else if !attachment.EmbeddedContent.MustGet() {
-			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 				// calendar invitation parsed natively by Outlook, raw file content
-				icsContent, err := os.ReadFile(p.String())
+				icsContent, err := os.ReadFile(p)
 				if err != nil {
 					return fmt.Errorf("failed to read calendar file: %s", err)
 				}
 				m.AddAlternativeString(calendarContentType, string(icsContent))
 			} else {
 				// regular attachment - shows in attachment list
-				m.AttachFile(p.String())
+				m.AttachFile(p)
 			}
 		} else {
 			// regular attachment with template processing
-			attachmentContent, err := os.ReadFile(p.String())
+			attachmentContent, err := os.ReadFile(p)
 			if err != nil {
 				return errs.Wrap(err)
 			}
@@ -5835,12 +5836,12 @@ func (c *Campaign) sendSingleEmailSMTP(
 			if err != nil {
 				return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
 			}
-			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 				// calendar invitation parsed natively by Outlook, with rendered variables
 				m.AddAlternativeString(calendarContentType, attachmentStr)
 			} else {
 				m.AttachReadSeeker(
-					filepath.Base(p.String()),
+					filepath.Base(p),
 					strings.NewReader(attachmentStr),
 				)
 			}

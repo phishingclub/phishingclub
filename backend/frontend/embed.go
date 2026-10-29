@@ -20,11 +20,8 @@ var cspMetaRe = regexp.MustCompile(`(?is)<meta[^>]+http-equiv=["']content-securi
 // attribute is double quoted and its value runs to the next double quote.
 var cspContentRe = regexp.MustCompile(`(?is)content="([^"]*)"`)
 
-// ExtractCSPFromIndex reads build/index.html from the embedded file system,
-// pulls the policy out of the SvelteKit content security policy meta tag, and
-// returns that policy, the html with the meta tag removed, and whether a tag was
-// found. When nothing is found it returns the original bytes and false so the
-// caller can fall back to serving the document unchanged.
+// ExtractCSPFromIndex returns the original bytes and false when no csp meta tag
+// is found, so the caller can serve the document unchanged.
 func ExtractCSPFromIndex(embedFS embed.FS) (policy string, indexHTML []byte, ok bool) {
 	data, err := embedFS.ReadFile("build/index.html")
 	if err != nil {

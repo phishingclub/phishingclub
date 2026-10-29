@@ -2,6 +2,7 @@ package vo
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -22,7 +23,7 @@ func NewHTTPMethod(s string) (*HTTPMethod, error) {
 	s = strings.ToUpper(s)
 	if err := validate.ErrorIfNotContains(validHTTPMethods, s); err != nil {
 		return nil, validate.WrapErrorWithField(
-			fmt.Errorf("invalid http method: %s", s),
+			errors.New("invalid http method"),
 			"HTTPMethod",
 		)
 	}
@@ -76,13 +77,13 @@ func NewHTTPHeader(key, val string) (*HTTPHeader, error) {
 	val = strings.TrimSpace(val)
 	if validate.ErrorIfStringEqual(key, "") != nil {
 		return nil, validate.WrapErrorWithField(
-			fmt.Errorf("invalid http header key: %s", key),
+			errors.New("invalid http header key"),
 			"HTTPHeader",
 		)
 	}
 	if validate.ErrorIfStringEqual(val, "") != nil {
 		return nil, validate.WrapErrorWithField(
-			fmt.Errorf("invalid http header value: %s", val),
+			errors.New("invalid http header value"),
 			"HTTPHeader",
 		)
 	}
@@ -143,7 +144,7 @@ func NewURLPath(s string) (*URLPath, error) {
 	p, err := url.Parse(s)
 	if err != nil {
 		return nil, validate.WrapErrorWithField(
-			fmt.Errorf("invalid url path: %s", s),
+			errors.New("invalid url path"),
 			"URLPath",
 		)
 	}

@@ -68,6 +68,7 @@ const (
 	ROUTE_V1_QR_FROM_TOTP               = "/api/v1/qr/totp"
 	ROUTE_V1_QR_URL_TO_HTML             = "/api/v1/qr/html"
 	ROUTE_V1_PREVIEW                    = "/api/v1/preview"
+	ROUTE_V1_PREVIEW_PACKAGE            = "/api/v1/preview/package"
 	// session
 	ROUTE_V1_SESSION_ID   = "/api/v1/session/:id"
 	ROUTE_V1_SESSION_PING = "/api/v1/session/ping"
@@ -121,6 +122,19 @@ const (
 	ROUTE_V1_PAGE_OVERVIEW   = "/api/v1/page/overview"
 	ROUTE_V1_PAGE_ID         = "/api/v1/page/:id"
 	ROUTE_V1_PAGE_CONTENT_ID = "/api/v1/page/:id/content"
+	// content registry consumer
+	ROUTE_V1_REGISTRY             = "/api/v1/registry"
+	ROUTE_V1_REGISTRY_ID          = "/api/v1/registry/:id"
+	ROUTE_V1_REGISTRY_PACKAGES    = "/api/v1/registry/:id/packages"
+	ROUTE_V1_REGISTRY_PACKAGE     = "/api/v1/registry/:id/package"
+	ROUTE_V1_REGISTRY_PREVIEW     = "/api/v1/registry/:id/preview"
+	ROUTE_V1_REGISTRY_INSTALL     = "/api/v1/registry/install"
+	ROUTE_V1_REGISTRY_STATUS      = "/api/v1/registry/:id/status"
+	ROUTE_V1_INSTALLED            = "/api/v1/installed"
+	ROUTE_V1_INSTALLED_RESOURCES  = "/api/v1/installed/resources"
+	ROUTE_V1_INSTALLED_ID         = "/api/v1/installed/:id"
+	ROUTE_V1_INSTALLED_ID_UPDATE  = "/api/v1/installed/:id/update"
+	ROUTE_V1_INSTALLED_ID_PREVIEW = "/api/v1/installed/:id/uninstall-preview"
 	// proxy
 	ROUTE_V1_PROXY          = "/api/v1/proxy"
 	ROUTE_V1_PROXY_OVERVIEW = "/api/v1/proxy/overview"
@@ -250,6 +264,7 @@ const (
 	ROUTE_V1_OAUTH_PROVIDER_ID          = "/api/v1/oauth-provider/:id"
 	ROUTE_V1_OAUTH_PROVIDER_REMOVE_AUTH = "/api/v1/oauth-provider/:id/remove-authorization"
 	ROUTE_V1_OAUTH_AUTHORIZE            = "/api/v1/oauth-authorize/:id"
+	ROUTE_V1_OAUTH_AUTHORIZE_STATUS     = "/api/v1/oauth-authorize/:id/status"
 	ROUTE_V1_OAUTH_CALLBACK             = "/api/v1/oauth-callback"
 	ROUTE_V1_OAUTH_IMPORT_TOKENS        = "/api/v1/oauth-provider/import-tokens"
 	ROUTE_V1_OAUTH_EXPORT_TOKENS        = "/api/v1/oauth-provider/:id/export-tokens"
@@ -386,8 +401,10 @@ func setupRoutes(
 		// qr
 		POST(ROUTE_V1_QR_FROM_TOTP, middleware.SessionHandler, controllers.QR.ToTOTPURL).
 		POST(ROUTE_V1_QR_URL_TO_HTML, middleware.SessionHandler, controllers.QR.ToHTML).
-		// preview renders admin authored content isolated with a sandbox CSP
+		// preview renders admin authored and third party package content isolated
+		// with a sandbox CSP
 		POST(ROUTE_V1_PREVIEW, middleware.SessionHandler, controllers.Preview.Render).
+		POST(ROUTE_V1_PREVIEW_PACKAGE, middleware.SessionHandler, controllers.Preview.RenderPackage).
 		// company
 		POST(ROUTE_V1_COMPANY, middleware.SessionHandler, controllers.Company.Create).
 		POST(ROUTE_V1_COMPANY_ID, middleware.SessionHandler, controllers.Company.ChangeName).
@@ -475,6 +492,21 @@ func setupRoutes(
 		POST(ROUTE_V1_PAGE, middleware.SessionHandler, controllers.Page.Create).
 		PATCH(ROUTE_V1_PAGE_ID, middleware.SessionHandler, controllers.Page.UpdateByID).
 		DELETE(ROUTE_V1_PAGE_ID, middleware.SessionHandler, controllers.Page.DeleteByID).
+		// content registry consumer
+		GET(ROUTE_V1_REGISTRY, middleware.SessionHandler, controllers.ContentRegistry.ListRegistries).
+		POST(ROUTE_V1_REGISTRY, middleware.SessionHandler, controllers.ContentRegistry.AddRegistry).
+		POST(ROUTE_V1_REGISTRY_INSTALL, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.ContentRegistry.Install).
+		GET(ROUTE_V1_REGISTRY_PACKAGES, middleware.SessionHandler, controllers.ContentRegistry.Browse).
+		GET(ROUTE_V1_REGISTRY_PACKAGE, middleware.SessionHandler, controllers.ContentRegistry.Inspect).
+		GET(ROUTE_V1_REGISTRY_PREVIEW, middleware.SessionHandler, controllers.ContentRegistry.PreviewImage).
+		GET(ROUTE_V1_REGISTRY_STATUS, middleware.SessionHandler, controllers.ContentRegistry.RegistryStatus).
+		PATCH(ROUTE_V1_REGISTRY_ID, middleware.SessionHandler, controllers.ContentRegistry.UpdateRegistry).
+		DELETE(ROUTE_V1_REGISTRY_ID, middleware.SessionHandler, controllers.ContentRegistry.DeleteRegistry).
+		GET(ROUTE_V1_INSTALLED, middleware.SessionHandler, controllers.ContentRegistry.InstalledList).
+		GET(ROUTE_V1_INSTALLED_RESOURCES, middleware.SessionHandler, controllers.ContentRegistry.InstalledResources).
+		POST(ROUTE_V1_INSTALLED_ID_UPDATE, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.ContentRegistry.InstalledUpdate).
+		GET(ROUTE_V1_INSTALLED_ID_PREVIEW, middleware.SessionHandler, controllers.ContentRegistry.InstalledUninstallPreview).
+		DELETE(ROUTE_V1_INSTALLED_ID, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.ContentRegistry.InstalledRemove).
 		// proxy
 		GET(ROUTE_V1_PROXY, middleware.SessionHandler, controllers.Proxy.GetAll).
 		GET(ROUTE_V1_PROXY_OVERVIEW, middleware.SessionHandler, controllers.Proxy.GetOverview).
@@ -503,6 +535,7 @@ func setupRoutes(
 		DELETE(ROUTE_V1_OAUTH_PROVIDER_ID, middleware.SessionHandler, controllers.OAuthProvider.DeleteByID).
 		POST(ROUTE_V1_OAUTH_PROVIDER_REMOVE_AUTH, middleware.SessionHandler, controllers.OAuthProvider.RemoveAuthorization).
 		GET(ROUTE_V1_OAUTH_AUTHORIZE, middleware.SessionHandler, controllers.OAuthProvider.GetAuthorizationURL).
+		GET(ROUTE_V1_OAUTH_AUTHORIZE_STATUS, middleware.SessionHandler, controllers.OAuthProvider.GetAuthorizationStatus).
 		GET(ROUTE_V1_OAUTH_CALLBACK, controllers.OAuthProvider.HandleCallback).
 		POST(ROUTE_V1_OAUTH_IMPORT_TOKENS, middleware.SessionHandler, controllers.OAuthProvider.ImportAuthorizedTokens).
 		GET(ROUTE_V1_OAUTH_EXPORT_TOKENS, middleware.SessionHandler, controllers.OAuthProvider.ExportAuthorizedTokens).

@@ -611,6 +611,10 @@ func (c *CampaignTemplate) UpdateByID(
 		c.Logger.Errorw("failed to update campaign template by id", "error", err)
 		return err
 	}
+	storedRedirectURL := ""
+	if v, err := incoming.AfterLandingPageRedirectURL.Get(); err == nil {
+		storedRedirectURL = v.String()
+	}
 	// update the campaign CampaignTemplate
 	if v, err := campaignTemplate.Name.Get(); err == nil {
 		// check uniqueness
@@ -750,7 +754,7 @@ func (c *CampaignTemplate) UpdateByID(
 		incoming.IsTraining.Set(v)
 	}
 	// validate
-	if err := incoming.Validate(); err != nil {
+	if err := incoming.ValidateUpdate(storedRedirectURL); err != nil {
 		c.Logger.Errorw("failed to validate campaign template", "error", err)
 		return err
 	}

@@ -1,7 +1,7 @@
 // Opens untrusted preview content without ever giving it the admin origin.
 // Untrusted markup is posted to the backend preview endpoint, which returns it
 // with a sandbox content security policy. The sandbox gives the document an
-// opaque origin, so its scripts can not read admin cookies, call the API with
+// opaque origin, so its scripts cannot read admin cookies, call the API with
 // the admin session, or reach window.opener. Because it is a real server
 // response it carries its own policy and does not inherit the strict admin CSP,
 // so the preview still loads its own images, styles, fonts and scripts. A data:
@@ -12,7 +12,7 @@
 // empty type, is treated as active content and isolated in the sandbox, so a
 // mislabeled file errs on the safe side. image/svg+xml is deliberately left out
 // because an svg opened as a document can run script.
-const INERT_MIME_ALLOWLIST = new Set([
+const SAFE_MIME_ALLOWLIST = new Set([
 	// documents and images that render in a native viewer
 	'application/pdf',
 	'image/png',
@@ -57,15 +57,18 @@ const INERT_MIME_ALLOWLIST = new Set([
 const baseMime = (mime) => (mime || '').split(';')[0].trim().toLowerCase();
 
 export const PREVIEW_ENDPOINT = '/api/v1/preview';
+// Bait Box package html is third party. This endpoint serves it under a tighter
+// policy: no modal dialogs, no fetch or form posts, framed only by the admin app.
+export const PACKAGE_PREVIEW_ENDPOINT = '/api/v1/preview/package';
 
 // Post html to the preview endpoint and navigate the target to the sandboxed
 // response. target is a window or frame name, or '_blank' for a new tab. A new
 // tab opened this way gets no opener in current browsers, and the response
 // sandbox keeps it isolated regardless.
-export const submitPreviewForm = (html, target = '_blank') => {
+export const submitPreviewForm = (html, target = '_blank', endpoint = PREVIEW_ENDPOINT) => {
 	const form = document.createElement('form');
 	form.method = 'POST';
-	form.action = PREVIEW_ENDPOINT;
+	form.action = endpoint;
 	form.target = target;
 	// a new tab must not keep a handle to the admin window. current browsers
 	// imply this for a blank target, this makes it explicit where honored.
@@ -105,8 +108,8 @@ const openIsolatedText = (text) =>
 		`<!doctype html><meta charset="utf-8"><pre style="white-space:pre-wrap;word-break:break-word">${escapeHtml(text)}</pre>`
 	);
 
-// Open fetched bytes. Inert types render directly, active or unknown types are
-// isolated. bytes may be a Uint8Array, an ArrayBuffer or a string.
+// Open fetched bytes. Types that cannot run scripts open directly, active or
+// unknown types are isolated. bytes may be a Uint8Array, an ArrayBuffer or a string.
 export const openPreviewBytes = (bytes, mime) => {
 	const type = baseMime(mime);
 	if (TEXT_DISPLAY_TYPES.has(type)) {
@@ -114,7 +117,7 @@ export const openPreviewBytes = (bytes, mime) => {
 		openIsolatedText(text);
 		return;
 	}
-	if (INERT_MIME_ALLOWLIST.has(type)) {
+	if (SAFE_MIME_ALLOWLIST.has(type)) {
 		openBlobTab(bytes, mime);
 		return;
 	}

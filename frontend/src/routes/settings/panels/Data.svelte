@@ -313,7 +313,7 @@
 		</svelte:fragment>
 	</SettingsCard>
 
-	<SettingsCard title="Auto-Prune Recipients">
+	<SettingsCard title="Automatically prune recipients">
 		<div class="space-y-4">
 			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
 				Automatically delete orphaned recipients (not in any group) on a hourly schedule.

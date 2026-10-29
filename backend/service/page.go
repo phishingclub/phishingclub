@@ -283,7 +283,7 @@ func (p *Page) UpdateByID(
 		return err
 	}
 	ae.Details["id"] = id.String()
-	p.AuditLogNotAuthorized(ae)
+	p.AuditLogAuthorized(ae)
 
 	return nil
 }

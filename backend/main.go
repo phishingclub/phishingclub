@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	golog "log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -257,6 +258,14 @@ func main() {
 		brandingPath,
 		conf.Script.Enabled,
 	)
+	// a phishing domain may not take the name the admin server answers on
+	services.Domain.AdminHosts = func() []string {
+		hosts := []string{conf.TLSHost()}
+		if host, _, err := net.SplitHostPort(conf.AdminNetAddress()); err == nil {
+			hosts = append(hosts, host)
+		}
+		return hosts
+	}
 	// get entra-id options and setup msal client
 	ssoOpt, err := services.SSO.GetSSOOptionWithoutAuth(context.Background())
 	if err != nil {

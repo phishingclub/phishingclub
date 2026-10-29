@@ -6,6 +6,7 @@
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import Alert from '$lib/components/Alert.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import FormError from '$lib/components/FormError.svelte';
@@ -232,6 +233,13 @@
 		headerText="Edit Report Template"
 		onClose={closeReportTemplateModal}
 	>
+		{#if reportTemplateID}
+			<InstalledResourceBadge
+				resourceType="reporttemplate"
+				resourceId={reportTemplateID}
+				variant="notice"
+			/>
+		{/if}
 		<FormGrid
 			on:submit={onSubmitReportTemplate}
 			isSubmitting={isReportTemplateSubmitting}

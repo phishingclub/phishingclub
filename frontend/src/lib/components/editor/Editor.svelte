@@ -760,7 +760,6 @@
 		value = v;
 		const content = await replaceTemplateVariables(v);
 
-		// create the preview iframe if not exists
 		if (shadowContainer && !previewFrame) {
 			createPreviewIframe();
 		}

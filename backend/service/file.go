@@ -6,8 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"os"
-	"path/filepath"
-	"strings"
+	"path"
 
 	"github.com/gin-gonic/gin"
 	"github.com/phishingclub/phishingclub/errs"
@@ -34,11 +33,12 @@ type File struct {
 	Common
 }
 
-// Delete deletes a file
+// Delete deletes a file inside root
 func (f *File) Delete(
-	path string,
+	root *os.Root,
+	relativePath string,
 ) error {
-	err := os.Remove(path)
+	err := root.Remove(relativePath)
 	if err != nil {
 		f.Logger.Errorw("failed to delete file", "error", err)
 		return err
@@ -58,42 +58,28 @@ func (f *File) DeleteAll(
 	return nil
 }
 
-// RemoveEmptyFolderRecursively folders recursively deletes all empty folders
-// until it hits an non-empty folder or the root
+// RemoveEmptyFolderRecursively removes dir and then each parent folder inside
+// root while they are empty. It stops at the root, at a folder that is not
+// empty, and at anything that is not a real folder such as a symlink.
 func (f *File) RemoveEmptyFolderRecursively(
-	rootPath string,
-	path string,
+	root *os.Root,
+	dir string,
 ) error {
-	f.Logger.Debugw("Checking if empty folders should be removed, root: %s, path: %s",
-		"rootPath", rootPath,
-		"path", path,
-	)
-
-	// check if the path is the root
-	if path == rootPath {
-		f.Logger.Debug("path is the root, stopping recursion")
-		return nil
+	for dir != "." && dir != "" && dir != "/" {
+		info, err := root.Lstat(dir)
+		if err != nil || !info.IsDir() {
+			f.Logger.Debugw("not a folder inside the root, stopping", "path", dir)
+			return nil
+		}
+		// a folder that is not empty fails to remove, which ends the walk.
+		if err := root.Remove(dir); err != nil {
+			f.Logger.Debugw("folder not removed, stopping", "path", dir, "error", err)
+			return nil
+		}
+		f.Logger.Debugw("deleted empty folder", "path", dir)
+		dir = path.Dir(dir)
 	}
-	// check if the path is empty
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		f.Logger.Errorw("failed to read directory", "error", err)
-		return nil
-	}
-	if len(entries) > 0 {
-		f.Logger.Debug("path is not empty, stopping recursion")
-		return nil
-	}
-	// delete the empty folder
-	f.Logger.Debugw("deleting empty folder", "path", path)
-	err = os.Remove(path)
-	if err != nil {
-		f.Logger.Errorw("failed to delete empty folder", "error", err)
-		return err
-	}
-	// check the parent folder
-	parent := filepath.Dir(path)
-	return f.RemoveEmptyFolderRecursively(rootPath, parent)
+	return nil
 }
 
 // Upload uploads files using os.Root for security
@@ -106,61 +92,9 @@ func (f *File) Upload(
 		relativePath := fileUpload.RelativePath
 		file := fileUpload.File
 
-		f.Logger.Debugw("checking if file path is valid", "path", relativePath)
-
-		// validate path is safe through root
-		_, err := root.Stat(relativePath)
-		if err != nil && !os.IsNotExist(err) {
-			f.Logger.Errorw("invalid file path", "path", relativePath, "error", err)
-			return 0, errs.Wrap(err)
-		}
-
-		// check if file already exists
-		pathDoesNotExist := os.IsNotExist(err)
-		if !pathDoesNotExist {
-			f.Logger.Debugw("file already exists", "path", relativePath)
-			return 0, errs.NewValidationError(fmt.Errorf("file already exists: %s", relativePath))
-		}
-
-		// create directory structure if needed
-		dirPath := filepath.Dir(relativePath)
-		if dirPath != "." {
-			// create directories step by step
-			parts := strings.Split(dirPath, "/")
-			currentPath := ""
-			for _, part := range parts {
-				if part != "" {
-					if currentPath == "" {
-						currentPath = part
-					} else {
-						currentPath = filepath.Join(currentPath, part)
-					}
-
-					// check if directory exists
-					_, err = root.Stat(currentPath)
-					if err != nil && !os.IsNotExist(err) {
-						f.Logger.Errorw("invalid directory path", "path", currentPath, "error", err)
-						return 0, errs.Wrap(err)
-					}
-
-					// create directory if it doesn't exist
-					if os.IsNotExist(err) {
-						err = root.Mkdir(currentPath, 0755)
-						if err != nil {
-							f.Logger.Errorw("failed to create directory", "path", currentPath, "error", err)
-							return 0, errs.Wrap(err)
-						}
-						f.Logger.Debugw("created directory", "path", currentPath)
-					}
-				}
-			}
-		}
-
-		// open file for writing through root
-		dst, err := root.OpenFile(relativePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+		dst, err := f.createInRoot(root, relativePath, false)
 		if err != nil {
-			f.Logger.Errorw("failed to create file", "path", relativePath, "error", err)
-			return 0, errs.Wrap(err)
+			return 0, err
 		}
 		defer dst.Close()
 
@@ -191,61 +125,9 @@ func (f *File) UploadFile(
 	contents *bytes.Buffer,
 	overwrite bool,
 ) error {
-	f.Logger.Debugw("checking if file path is valid", "path", relativePath)
-
-	// validate path is safe through root
-	_, err := root.Stat(relativePath)
-	if err != nil && !os.IsNotExist(err) {
-		f.Logger.Errorw("invalid file path", "path", relativePath, "error", err)
-		return errs.Wrap(err)
-	}
-
-	// check if file exists
-	pathDoesNotExist := os.IsNotExist(err)
-	if !pathDoesNotExist && !overwrite {
-		f.Logger.Debugw("file already exists and overwrite is false", "path", relativePath)
-		return errs.NewValidationError(fmt.Errorf("file already exists: %s", relativePath))
-	}
-
-	// create directory structure if needed
-	dirPath := filepath.Dir(relativePath)
-	if dirPath != "." {
-		// create directories step by step
-		parts := strings.Split(dirPath, "/")
-		currentPath := ""
-		for _, part := range parts {
-			if part != "" {
-				if currentPath == "" {
-					currentPath = part
-				} else {
-					currentPath = filepath.Join(currentPath, part)
-				}
-
-				// check if directory exists
-				_, err = root.Stat(currentPath)
-				if err != nil && !os.IsNotExist(err) {
-					f.Logger.Errorw("invalid directory path", "path", currentPath, "error", err)
-					return errs.Wrap(err)
-				}
-
-				// create directory if it doesn't exist
-				if os.IsNotExist(err) {
-					err = root.Mkdir(currentPath, 0755)
-					if err != nil {
-						f.Logger.Errorw("failed to create directory", "path", currentPath, "error", err)
-						return errs.Wrap(err)
-					}
-					f.Logger.Debugw("created directory", "path", currentPath)
-				}
-			}
-		}
-	}
-
-	// open file for writing through root
-	dst, err := root.OpenFile(relativePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	dst, err := f.createInRoot(root, relativePath, overwrite)
 	if err != nil {
-		f.Logger.Errorw("failed to create file", "path", relativePath, "error", err)
-		return errs.Wrap(err)
+		return err
 	}
 	defer dst.Close()
 
@@ -258,4 +140,30 @@ func (f *File) UploadFile(
 
 	f.Logger.Debugw("file uploaded successfully", "path", relativePath)
 	return nil
+}
+
+// createInRoot creates the parent folders and opens relativePath for writing
+// inside root. Without overwrite the file is opened with O_EXCL, so an existing
+// file is never replaced, even one that appears just before the open.
+func (f *File) createInRoot(root *os.Root, relativePath string, overwrite bool) (*os.File, error) {
+	if dir := path.Dir(relativePath); dir != "." {
+		if err := root.MkdirAll(dir, 0755); err != nil {
+			f.Logger.Errorw("failed to create directory", "path", dir, "error", err)
+			return nil, errs.Wrap(err)
+		}
+	}
+	flag := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	if overwrite {
+		flag = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	}
+	dst, err := root.OpenFile(relativePath, flag, 0644)
+	if err != nil {
+		if os.IsExist(err) {
+			f.Logger.Debugw("file already exists", "path", relativePath)
+			return nil, errs.NewValidationError(fmt.Errorf("file already exists: %s", relativePath))
+		}
+		f.Logger.Errorw("failed to create file", "path", relativePath, "error", err)
+		return nil, errs.Wrap(err)
+	}
+	return dst, nil
 }

@@ -2795,7 +2795,7 @@
 							{#if campaign.isAnonymous}
 								<span
 									class="text-sm italic text-gray-400 dark:text-gray-500"
-									title="Per-recipient outcomes are hidden for anonymous campaigns. See Results by position or department."
+									title="Per recipient outcomes are hidden for anonymous campaigns. See Results by position or department."
 									>Hidden</span
 								>
 							{:else}
@@ -3303,6 +3303,7 @@
 							<a
 								href="https://{campaign.template?.domain?.name}"
 								target="_blank"
+								rel="noopener noreferrer"
 								class="text-cta-blue dark:text-white hover:underline"
 							>
 								{campaign.template?.domain?.name}
@@ -3613,6 +3614,7 @@
 						Tokens can be imported into <a
 							href="https://github.com/phishingclub/session-sushi"
 							target="_blank"
+							rel="noopener noreferrer"
 							class="text-blue-600 dark:text-white hover:underline">Session Sushi</a
 						> to hijack the captured session.
 					</p>
@@ -3647,6 +3649,7 @@
 						Cookies can be imported and exchanged for tokens using the <a
 							href="https://github.com/phishingclub/session-sushi"
 							target="_blank"
+							rel="noopener noreferrer"
 							class="text-blue-600 dark:text-white hover:underline">Session Sushi</a
 						> extension.
 					</p>

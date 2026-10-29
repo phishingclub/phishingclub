@@ -11,6 +11,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var webhookAllowedColumns = assignTableToColumns(database.WEBHOOK_TABLE, []string{
@@ -164,13 +165,10 @@ func (r *Webhook) GetByName(
 ) (*model.Webhook, error) {
 	var row database.Webhook
 	res := r.DB.
-		Where(
-			fmt.Sprintf(
-				"%s = ?",
-				TableColumnName(database.WEBHOOK_TABLE),
-			),
-			name.String(),
-		).
+		Where(clause.Eq{
+			Column: clause.Column{Table: database.WEBHOOK_TABLE, Name: "name"},
+			Value:  name.String(),
+		}).
 		First(&row)
 
 	if res.Error != nil {

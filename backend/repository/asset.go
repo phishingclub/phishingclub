@@ -170,6 +170,26 @@ func (r *Asset) GetByPath(
 	return ToAsset(&dbModel), nil
 }
 
+// GetGlobalByPath gets the global asset (no company and no domain) stored at
+// the given path. It returns nil and no error when there is none.
+func (r *Asset) GetGlobalByPath(
+	ctx context.Context,
+	path string,
+) (*model.Asset, error) {
+	var dbModels []database.Asset
+	res := r.DB.Model(&database.Asset{}).
+		Where("path = ? AND company_id IS NULL AND domain_id IS NULL", path).
+		Limit(1).
+		Find(&dbModels)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if len(dbModels) == 0 {
+		return nil, nil
+	}
+	return ToAsset(&dbModels[0]), nil
+}
+
 // GetByID gets an asset by id
 func (r *Asset) GetByID(
 	ctx context.Context,
@@ -266,9 +286,12 @@ func ToAsset(row *database.Asset) *model.Asset {
 	description := nullable.NewNullableWithValue(
 		*vo.NewOptionalString255Must(row.Description),
 	)
-	path := nullable.NewNullableWithValue(
-		*vo.NewRelativeFilePathMust(row.Path),
-	)
+	// an old row with a path the value object now refuses loads without a path
+	// instead of panicking, so listings keep working.
+	path := nullable.NewNullNullable[vo.RelativeFilePath]()
+	if p, err := vo.NewRelativeFilePath(row.Path); err == nil {
+		path = nullable.NewNullableWithValue(*p)
+	}
 	asset := &model.Asset{
 		ID:          id,
 		CreatedAt:   row.CreatedAt,
