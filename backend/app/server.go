@@ -222,7 +222,7 @@ func (s *Server) testTCPConnection(identifier string, addr string) chan server.S
 // checkAndServeAssets checks if the request is for static content
 // and serves it if it is
 // return true if the request was for static content
-func (s *Server) checkAndServeAssets(c *gin.Context, host string) bool {
+func (s *Server) checkAndServeAssets(c *gin.Context, host string, domainID *uuid.UUID) bool {
 	// create root filesystem for asset validation
 	root, err := os.OpenRoot(s.staticPath)
 	if err != nil {
@@ -282,9 +282,60 @@ func (s *Server) checkAndServeAssets(c *gin.Context, host string) bool {
 	}
 	defer file.Close()
 
-	c.Header("Content-Type", mime.TypeByExtension(filepath.Ext(cleanPath)))
-	c.DataFromReader(http.StatusOK, info.Size(), mime.TypeByExtension(filepath.Ext(cleanPath)), file, nil)
+	var settings *model.AssetServeSettings
+	if domainID != nil {
+		settings, err = s.repositories.Asset.GetServeSettingsForDomainAsset(
+			c.Request.Context(),
+			domainID,
+			filepath.ToSlash(cleanPath),
+		)
+		if err != nil {
+			s.logger.Errorw("failed to get asset serve settings, serving with defaults",
+				"path", fullRelativePathForFile,
+				"error", err,
+			)
+			settings = nil
+		}
+	}
+	contentType := applyAssetServeSettings(c, settings, mime.TypeByExtension(filepath.Ext(cleanPath)))
+	c.DataFromReader(http.StatusOK, info.Size(), contentType, file, nil)
 	return true
+}
+
+// applyAssetServeSettings sets the response content type and the custom
+// headers of an asset. The content type is set first and the custom headers
+// after, so a custom header replaces any earlier value for the same name.
+// A header name used more than once is sent once per value. With no settings
+// only the default content type is set. It returns the content type in use.
+func applyAssetServeSettings(
+	c *gin.Context,
+	settings *model.AssetServeSettings,
+	defaultContentType string,
+) string {
+	contentType := defaultContentType
+	if settings != nil && settings.ContentType != "" {
+		contentType = settings.ContentType
+	}
+	c.Header("Content-Type", contentType)
+	if settings == nil {
+		return contentType
+	}
+	header := c.Writer.Header()
+	replaced := map[string]bool{}
+	for _, h := range settings.Headers {
+		key := http.CanonicalHeaderKey(h.Key)
+		// stored headers are validated on save, this check only guards against
+		// a row that was changed outside the application
+		if model.ValidateAssetHeader(key, h.Value) != nil {
+			continue
+		}
+		if !replaced[key] {
+			header.Del(key)
+			replaced[key] = true
+		}
+		header.Add(key, h.Value)
+	}
+	return contentType
 }
 
 func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
@@ -342,8 +393,19 @@ func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
 	}
 	defer file.Close()
 
-	c.Header("Content-Type", mime.TypeByExtension(filepath.Ext(cleanPath)))
-	c.DataFromReader(http.StatusOK, info.Size(), mime.TypeByExtension(filepath.Ext(cleanPath)), file, nil)
+	settings, err := s.repositories.Asset.GetServeSettingsForSharedAsset(
+		c.Request.Context(),
+		filepath.ToSlash(cleanPath),
+	)
+	if err != nil {
+		s.logger.Errorw("failed to get shared asset serve settings, serving with defaults",
+			"path", sharedRelativePath,
+			"error", err,
+		)
+		settings = nil
+	}
+	contentType := applyAssetServeSettings(c, settings, mime.TypeByExtension(filepath.Ext(cleanPath)))
+	c.DataFromReader(http.StatusOK, info.Size(), contentType, file, nil)
 	return true
 }
 
@@ -495,7 +557,7 @@ func (s *Server) Handler(c *gin.Context) {
 		return
 	}
 	// check if the request is for assets
-	servedAssets := s.checkAndServeAssets(c, host)
+	servedAssets := s.checkAndServeAssets(c, host, &domain.ID)
 	if servedAssets {
 		s.logger.Debug("served static asset")
 		c.Abort()

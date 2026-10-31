@@ -404,6 +404,12 @@ func (a *Asset) GetByID(
 		)
 		return nil, errs.Wrap(err)
 	}
+	headers, err := a.AssetRepository.GetHeadersByAssetID(ctx, id)
+	if err != nil {
+		a.Logger.Errorw("failed to get asset headers", "id", id.String(), "error", err)
+		return nil, errs.Wrap(err)
+	}
+	asset.Headers = headers
 	// no audit on read
 	return asset, nil
 }
@@ -446,6 +452,7 @@ func (a *Asset) UpdateByID(
 	id *uuid.UUID,
 	name nullable.Nullable[vo.OptionalString127],
 	description nullable.Nullable[vo.OptionalString255],
+	contentType nullable.Nullable[vo.OptionalString255],
 ) error {
 	ae := NewAuditEvent("Asset.UpdateById", session)
 	ae.Details["id"] = id.String()
@@ -471,6 +478,17 @@ func (a *Asset) UpdateByID(
 	// update the asset
 	current.Name = name
 	current.Description = description
+	// the content type is kept when the request does not include it
+	if contentType.IsSpecified() {
+		if contentType.IsNull() {
+			current.ContentType = nullable.NewNullableWithValue(*vo.NewEmptyOptionalString255())
+		} else {
+			current.ContentType = contentType
+		}
+		if ct, err := current.ContentType.Get(); err == nil {
+			ae.Details["contentType"] = ct.String()
+		}
+	}
 	// validate
 	if err := current.Validate(); err != nil {
 		a.Logger.Debugw("failed to validate asset", "error", err)
@@ -484,6 +502,80 @@ func (a *Asset) UpdateByID(
 	)
 	if err != nil {
 		a.Logger.Errorw("failed to update asset", "error", err)
+		return err
+	}
+	a.AuditLogAuthorized(ae)
+	return nil
+}
+
+// AddHeader adds a response header to an asset
+func (a *Asset) AddHeader(
+	ctx context.Context,
+	session *model.Session,
+	assetID *uuid.UUID,
+	header *model.AssetHeader,
+) (*uuid.UUID, error) {
+	ae := NewAuditEvent("Asset.AddHeader", session)
+	ae.Details["id"] = assetID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		a.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		a.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+	// ensure the asset exists
+	if _, err := a.AssetRepository.GetByID(ctx, assetID); err != nil {
+		a.Logger.Debugw("asset not found", "id", assetID.String(), "error", err)
+		return nil, errs.Wrap(err)
+	}
+	header.AssetID = nullable.NewNullableWithValue(*assetID)
+	if err := header.Validate(); err != nil {
+		a.Logger.Debugw("failed to validate asset header", "error", err)
+		return nil, err
+	}
+	headerID, err := a.AssetRepository.AddHeader(ctx, header)
+	if err != nil {
+		a.Logger.Errorw("failed to add asset header", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	ae.Details["headerId"] = headerID.String()
+	ae.Details["key"] = header.Key.MustGet().String()
+	a.AuditLogAuthorized(ae)
+	return headerID, nil
+}
+
+// RemoveHeader removes a response header from an asset
+func (a *Asset) RemoveHeader(
+	ctx context.Context,
+	session *model.Session,
+	assetID *uuid.UUID,
+	headerID *uuid.UUID,
+) error {
+	ae := NewAuditEvent("Asset.RemoveHeader", session)
+	ae.Details["id"] = assetID.String()
+	ae.Details["headerId"] = headerID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		a.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		a.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// ensure the asset exists
+	if _, err := a.AssetRepository.GetByID(ctx, assetID); err != nil {
+		a.Logger.Debugw("asset not found", "id", assetID.String(), "error", err)
+		return err
+	}
+	// only a header that belongs to this asset is removed
+	if err := a.AssetRepository.RemoveHeader(ctx, assetID, headerID); err != nil {
+		a.Logger.Debugw("failed to remove asset header", "error", err)
 		return err
 	}
 	a.AuditLogAuthorized(ae)

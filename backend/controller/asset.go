@@ -476,7 +476,54 @@ func (a *Asset) UpdateByID(g *gin.Context) {
 		id,
 		req.Name,
 		req.Description,
+		req.ContentType,
 	)
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	a.Response.OK(g, gin.H{})
+}
+
+// AddHeader adds a response header to an asset
+func (a *Asset) AddHeader(g *gin.Context) {
+	session, _, ok := a.handleSession(g)
+	if !ok {
+		return
+	}
+	var req model.AssetHeader
+	if ok := a.handleParseRequest(g, &req); !ok {
+		return
+	}
+	id, ok := a.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	createdID, err := a.AssetService.AddHeader(g.Request.Context(), session, id, &req)
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	a.Response.OK(g, gin.H{
+		"id": createdID.String(),
+	})
+}
+
+// RemoveHeader removes a response header from an asset
+func (a *Asset) RemoveHeader(g *gin.Context) {
+	session, _, ok := a.handleSession(g)
+	if !ok {
+		return
+	}
+	id, ok := a.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	headerID, err := uuid.Parse(g.Param("headerID"))
+	if err != nil {
+		a.Logger.Debugw("invalid header id", "headerID", g.Param("headerID"), "error", err)
+		a.Response.BadRequestMessage(g, "invalid header id")
+		return
+	}
+	err = a.AssetService.RemoveHeader(g.Request.Context(), session, id, &headerID)
 	if ok := a.handleErrors(g, err); !ok {
 		return
 	}

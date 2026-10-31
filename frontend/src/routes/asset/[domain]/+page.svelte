@@ -88,7 +88,22 @@
 		id: '',
 		name: '',
 		description: '',
-		path: ''
+		path: '',
+		contentType: ''
+	};
+	// the type found from the file extension, shown as the content type placeholder
+	let detectedContentType = '';
+
+	// response headers modal
+	let isHeaderModalVisible = false;
+	let headerForm = null;
+	let headerError = '';
+	let headers = [];
+	let headerFormValues = {
+		id: null,
+		path: '',
+		key: '',
+		value: ''
 	};
 
 	let isDeleteAlertVisible = false;
@@ -217,7 +232,12 @@
 	const update = async () => {
 		try {
 			// 1. name and description
-			const res = await api.asset.update(formValues.id, formValues.name, formValues.description);
+			const res = await api.asset.update(
+				formValues.id,
+				formValues.name,
+				formValues.description,
+				formValues.contentType
+			);
 			if (!res.success) {
 				modalError = res.error;
 				throw res.error;
@@ -293,7 +313,8 @@
 	const openCreateModal = async () => {
 		modalMode = 'create';
 		// start clean so a previously edited asset's path does not leak in
-		formValues = { id: '', name: '', description: '', path: '' };
+		formValues = { id: '', name: '', description: '', path: '', contentType: '' };
+		detectedContentType = '';
 		editContentEditable = false;
 		editIsHtml = false;
 		editOriginalPath = '';
@@ -321,6 +342,8 @@
 			formValues.name = res.data.name;
 			formValues.description = res.data.description;
 			formValues.path = res.data.path;
+			formValues.contentType = res.data.contentType ?? '';
+			detectedContentType = res.data.detectedContentType ?? '';
 			editOriginalPath = res.data.path;
 			// for a text file, load its content so the same modal can edit it
 			if (isTextEditable(asset.path)) {
@@ -482,6 +505,81 @@
 		} finally {
 			isReplacing = false;
 		}
+	};
+
+	/**
+	 * Open the response headers modal for an asset
+	 * @param {string} id
+	 */
+	const openHeaderModal = async (id) => {
+		try {
+			showIsLoading();
+			const res = await api.asset.getByID(id);
+			if (!res.success) {
+				throw res.error;
+			}
+			headers = res.data.headers ?? [];
+			headerFormValues.id = id;
+			headerFormValues.path = res.data.path;
+			isHeaderModalVisible = true;
+		} catch (e) {
+			addToast('Failed to open response headers', 'Error');
+			console.error('failed to open asset header modal', e);
+		} finally {
+			hideIsLoading();
+		}
+	};
+
+	const closeHeaderModal = () => {
+		headerForm.reset();
+		headerError = '';
+		headerFormValues.id = null;
+		isHeaderModalVisible = false;
+	};
+
+	const onClickCreateHeader = async () => {
+		headerError = '';
+		try {
+			isSubmitting = true;
+			const res = await api.asset.addHeader(
+				headerFormValues.id,
+				headerFormValues.key,
+				headerFormValues.value
+			);
+			if (!res.success) {
+				headerError = res.error;
+				return;
+			}
+			addToast('Added response header', 'Success');
+			headerForm.reset();
+			openHeaderModal(headerFormValues.id);
+		} catch (e) {
+			addToast('Failed to add response header', 'Error');
+			console.error('failed to add asset header', e);
+		} finally {
+			isSubmitting = false;
+		}
+	};
+
+	/**
+	 * Delete a response header
+	 * @param {string} id asset id
+	 * @param {string} headerID
+	 */
+	const onClickDeleteHeader = async (id, headerID) => {
+		const action = api.asset.deleteHeader(id, headerID);
+		action
+			.then((res) => {
+				if (!res.success) {
+					throw res.error;
+				}
+				openHeaderModal(id);
+			})
+			.catch((e) => {
+				addToast('Failed to delete response header', 'Error');
+				console.error('failed to delete asset header', e);
+			});
+		return action;
 	};
 
 	/**
@@ -773,6 +871,12 @@
 							{...globalButtonDisabledAttributes(asset, contextCompanyID)}
 						/>
 						<TableDropDownButton
+							name="Response headers"
+							title="Headers sent when the file is served"
+							on:click={() => openHeaderModal(asset.id)}
+							{...globalButtonDisabledAttributes(asset, contextCompanyID)}
+						/>
+						<TableDropDownButton
 							name="Replace file"
 							title="Replace the file content with an upload"
 							on:click={() => openReplaceModal(asset)}
@@ -821,6 +925,14 @@
 							toolTipText="Full path including filename. Change it to rename or move the file on save."
 							>Path</TextField
 						>
+						<TextField
+							bind:value={formValues.contentType}
+							optional={true}
+							maxLength={255}
+							placeholder={detectedContentType || 'application/octet-stream'}
+							toolTipText="Content-Type sent when the file is served. Leave empty to use the type from the file extension."
+							>Content type</TextField
+						>
 					</div>
 				</Editor>
 			{:else if modalMode === 'update' && editContentEditable}
@@ -849,6 +961,14 @@
 							placeholder={'profile/alice/app.css'}
 							toolTipText="Full path including filename. Change it to rename or move the file on save."
 							>Path</TextField
+						>
+						<TextField
+							bind:value={formValues.contentType}
+							optional={true}
+							maxLength={255}
+							placeholder={detectedContentType || 'application/octet-stream'}
+							toolTipText="Content-Type sent when the file is served. Leave empty to use the type from the file extension."
+							>Content type</TextField
 						>
 					</div>
 					<SimpleCodeEditor
@@ -896,6 +1016,14 @@
 								toolTipText="Full path including filename. Change it to rename or move the file on save."
 								>Path</TextField
 							>
+							<TextField
+								bind:value={formValues.contentType}
+								optional={true}
+								maxLength={255}
+								placeholder={detectedContentType || 'application/octet-stream'}
+								toolTipText="Content-Type sent when the file is served. Leave empty to use the type from the file extension."
+								>Content type</TextField
+							>
 						{/if}
 					</FormColumn>
 				</FormColumns>
@@ -918,6 +1046,55 @@
 			</FormColumns>
 			<FormError message={replaceError} />
 			<FormFooter closeModal={() => (isReplaceVisible = false)} isSubmitting={isReplacing} />
+		</FormGrid>
+	</Modal>
+	<Modal
+		headerText={`Response headers: ${headerFormValues.path}`}
+		visible={isHeaderModalVisible}
+		onClose={closeHeaderModal}
+		{isSubmitting}
+	>
+		<FormGrid on:submit={onClickCreateHeader} bind:bindTo={headerForm} {isSubmitting}>
+			<FormColumns>
+				<FormColumn>
+					<TextField
+						bind:value={headerFormValues.key}
+						maxLength={127}
+						placeholder="Cache-Control"
+						toolTipText="Response header name without trailing :">Key</TextField
+					>
+					<TextField bind:value={headerFormValues.value} maxLength={2048} placeholder="no-store"
+						>Value</TextField
+					>
+				</FormColumn>
+				<FormColumn>
+					<Table
+						columns={[
+							{ column: 'Key', size: 'medium' },
+							{ column: 'Value', size: 'medium' }
+						]}
+						hasData={!!headers.length}
+						plural="headers"
+					>
+						{#each headers as header}
+							<TableRow>
+								<TableCell value={header.key} />
+								<TableCell value={header.value} />
+								<TableCellEmpty />
+								<TableCellAction>
+									<TableDropDownEllipsis>
+										<TableDeleteButton
+											on:click={() => onClickDeleteHeader(headerFormValues.id, header.id)}
+										/>
+									</TableDropDownEllipsis>
+								</TableCellAction>
+							</TableRow>
+						{/each}
+					</Table>
+				</FormColumn>
+			</FormColumns>
+			<FormError message={headerError} />
+			<FormFooter closeText={'Close'} closeModal={closeHeaderModal} {isSubmitting} />
 		</FormGrid>
 	</Modal>
 	<DeleteAlert

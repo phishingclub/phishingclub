@@ -26,6 +26,7 @@ func initialInstallAndSeed(
 ) error {
 	tables := []any{
 		&database.Asset{},
+		&database.AssetHeader{},
 		&database.Option{},
 		&database.Company{},
 		&database.APISender{},

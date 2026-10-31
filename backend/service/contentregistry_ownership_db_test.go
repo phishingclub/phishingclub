@@ -31,6 +31,7 @@ func newOwnershipFixture(t *testing.T) *ownershipFixture {
 	if err := h.db.AutoMigrate(
 		&database.Domain{},
 		&database.Asset{},
+		&database.AssetHeader{},
 		&database.Email{},
 		&database.Attachment{},
 		&database.EmailAttachment{},

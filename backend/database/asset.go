@@ -17,7 +17,7 @@ type Asset struct {
 	UpdatedAt *time.Time `gorm:"not null;index;"`
 
 	// has one
-	DomainID   *uuid.UUID `gorm:"index;type:uuid;"`
+	DomainID   *uuid.UUID `gorm:"index;index:idx_assets_domain_id_path,priority:1;type:uuid;"`
 	DomainName string
 
 	// can has one
@@ -25,7 +25,13 @@ type Asset struct {
 
 	Name        string `gorm:";index"`
 	Description string `gorm:";"`
-	Path        string `gorm:"not null;index"`
+	Path        string `gorm:"not null;index;index:idx_assets_domain_id_path,priority:2"`
+	// ContentType is the media type sent when the asset is served. Empty means
+	// the type is found from the file extension.
+	ContentType string `gorm:"not null;default:''"`
+
+	// has many
+	Headers []*AssetHeader `gorm:"foreignKey:AssetID"`
 }
 
 func (Asset) TableName() string {

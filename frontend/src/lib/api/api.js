@@ -353,13 +353,41 @@ export class API {
 		 * @param {string} id
 		 * @param {string} name
 		 * @param {string} description
+		 * @param {string} contentType empty uses the type from the file extension
 		 * @returns {Promise<ApiResponse>}
 		 */
-		update: async (id, name, description) => {
+		update: async (id, name, description, contentType) => {
 			return await patchJSON(this.getPath(`/asset/${id}`), {
 				name: name,
-				description: description
+				description: description,
+				contentType: contentType
 			});
+		},
+
+		/**
+		 * Add a response header to an asset
+		 *
+		 * @param {string} assetID
+		 * @param {string} key
+		 * @param {string} value
+		 * @returns {Promise<ApiResponse>}
+		 */
+		addHeader: async (assetID, key, value) => {
+			return await patchJSON(this.getPath(`/asset/${assetID}/header`), {
+				key: key,
+				value: value
+			});
+		},
+
+		/**
+		 * Delete a response header from an asset
+		 *
+		 * @param {string} assetID
+		 * @param {string} headerID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		deleteHeader: async (assetID, headerID) => {
+			return await deleteJSON(this.getPath(`/asset/${assetID}/header/${headerID}`));
 		},
 
 		/**

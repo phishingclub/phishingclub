@@ -35,7 +35,7 @@ func newAssetDeleteFixture(t *testing.T) *assetDeleteFixture {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Domain{}, &database.Asset{}); err != nil {
+	if err := db.AutoMigrate(&database.Domain{}, &database.Asset{}, &database.AssetHeader{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	root := filepath.Join(dir, "files")
@@ -163,5 +163,58 @@ func TestAssetDeleteAllByCompanyIDWithUnloadablePath(t *testing.T) {
 	}
 	if f.rowExists(id) {
 		t.Fatalf("row was not deleted")
+	}
+}
+
+func (f *assetDeleteFixture) addHeader(assetID uuid.UUID, key, value string) {
+	f.t.Helper()
+	id := uuid.New()
+	now := time.Now()
+	if err := f.db.Create(&database.AssetHeader{
+		ID: &id, CreatedAt: &now, UpdatedAt: &now,
+		AssetID: &assetID, Key: key, Value: value,
+	}).Error; err != nil {
+		f.t.Fatalf("insert header: %v", err)
+	}
+}
+
+func (f *assetDeleteFixture) headerCount(assetID uuid.UUID) int64 {
+	var n int64
+	f.db.Model(&database.AssetHeader{}).Where("asset_id = ?", assetID).Count(&n)
+	return n
+}
+
+// TestAssetDeleteRemovesHeaders checks that every delete path removes the
+// headers of the deleted assets and leaves the headers of other assets
+func TestAssetDeleteRemovesHeaders(t *testing.T) {
+	f := newAssetDeleteFixture(t)
+	ctx := context.Background()
+	domainID := uuid.New()
+	otherDomainID := uuid.New()
+	f.writeFile(filepath.Join("a.test", "one.html"))
+	f.writeFile(filepath.Join("a.test", "two.html"))
+	f.writeFile(filepath.Join("b.test", "keep.html"))
+	one := f.insert(&domainID, "a.test", "one.html")
+	two := f.insert(&domainID, "a.test", "two.html")
+	keep := f.insert(&otherDomainID, "b.test", "keep.html")
+	f.addHeader(one, "X-One", "1")
+	f.addHeader(two, "X-Two", "2")
+	f.addHeader(two, "Set-Cookie", "a=b")
+	f.addHeader(keep, "X-Keep", "k")
+
+	if err := f.svc.DeleteByID(ctx, f.session, &one); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if f.headerCount(one) != 0 {
+		t.Fatalf("headers of deleted asset were kept")
+	}
+	if err := f.svc.DeleteAllByDomainID(ctx, f.session, &domainID); err != nil {
+		t.Fatalf("delete all by domain: %v", err)
+	}
+	if f.headerCount(two) != 0 {
+		t.Fatalf("headers of asset deleted with its domain were kept")
+	}
+	if f.headerCount(keep) != 1 {
+		t.Fatalf("headers of an unrelated asset were deleted")
 	}
 }
