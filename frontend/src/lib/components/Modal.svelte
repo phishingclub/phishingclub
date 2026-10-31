@@ -343,7 +343,7 @@
 					<div class="flex-1">
 						<h1 id="modal-title" class="uppercase mr-8 font-semibold text-2xl">{headerText}</h1>
 						{#if description}
-							<p id="modal-description" class="mt-2 text-sm opacity-90">{description}</p>
+							<p id="modal-description" class="mt-2 text-sm opacity-90 break-all">{description}</p>
 						{/if}
 					</div>
 					<button

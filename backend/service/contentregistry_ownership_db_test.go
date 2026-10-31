@@ -32,6 +32,7 @@ func newOwnershipFixture(t *testing.T) *ownershipFixture {
 		&database.Domain{},
 		&database.Asset{},
 		&database.AssetHeader{},
+		&database.AssetAllowDeny{},
 		&database.Email{},
 		&database.Attachment{},
 		&database.EmailAttachment{},

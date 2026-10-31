@@ -219,17 +219,36 @@ func (s *Server) testTCPConnection(identifier string, addr string) chan server.S
 	return c
 }
 
-// checkAndServeAssets checks if the request is for static content
-// and serves it if it is
-// return true if the request was for static content
-func (s *Server) checkAndServeAssets(c *gin.Context, host string, domainID *uuid.UUID) bool {
+// assetServeResult is the outcome of an asset request
+type assetServeResult int
+
+const (
+	// assetNotFound means there is no asset file at the path
+	assetNotFound assetServeResult = iota
+	// assetServed means the file was sent
+	assetServed
+	// assetDenied means there is a file but the visitor did not pass its allow
+	// deny lists. The visitor must get the same response as when there is no
+	// file, and a shared file at the same path must not be used instead.
+	assetDenied
+)
+
+// assetFilteredCacheControl is sent with a file that has allow deny lists, so
+// a shared cache can not give an allowed response to a denied visitor. A
+// Cache-Control header set on the asset replaces it.
+const assetFilteredCacheControl = "private, no-store"
+
+// checkAndServeAssets checks if the request is for an asset file of the
+// domain or a shared asset file and serves it when the visitor may get it.
+// Nothing is written to the response unless the file is served.
+func (s *Server) checkAndServeAssets(c *gin.Context, host string, domainID *uuid.UUID) assetServeResult {
 	// create root filesystem for asset validation
 	root, err := os.OpenRoot(s.staticPath)
 	if err != nil {
 		s.logger.Infow("failed to open static path root",
 			"error", err,
 		)
-		return false
+		return assetNotFound
 	}
 	defer root.Close()
 
@@ -240,7 +259,7 @@ func (s *Server) checkAndServeAssets(c *gin.Context, host string, domainID *uuid
 			"host", host,
 			"error", err,
 		)
-		return false
+		return assetNotFound
 	}
 
 	// clean path and remove leading slash
@@ -254,7 +273,7 @@ func (s *Server) checkAndServeAssets(c *gin.Context, host string, domainID *uuid
 			"path", fullRelativePath,
 			"error", err,
 		)
-		return false
+		return assetNotFound
 	}
 
 	// check if file exists and get info through root
@@ -268,7 +287,7 @@ func (s *Server) checkAndServeAssets(c *gin.Context, host string, domainID *uuid
 		return s.checkAndServeSharedAsset(c)
 	}
 	if info.IsDir() {
-		return false
+		return assetNotFound
 	}
 
 	// open and serve file through root to maintain security boundaries
@@ -278,28 +297,143 @@ func (s *Server) checkAndServeAssets(c *gin.Context, host string, domainID *uuid
 			"path", fullRelativePathForFile,
 			"error", err,
 		)
-		return false
+		return assetNotFound
 	}
 	defer file.Close()
 
 	var settings *model.AssetServeSettings
+	filtered := false
 	if domainID != nil {
-		settings, err = s.repositories.Asset.GetServeSettingsForDomainAsset(
-			c.Request.Context(),
-			domainID,
-			filepath.ToSlash(cleanPath),
+		assetPath := filepath.ToSlash(cleanPath)
+		var allowed bool
+		settings, filtered, allowed = s.checkAssetAccess(
+			c,
+			fullRelativePathForFile,
+			func() (*model.AssetServeSettings, error) {
+				return s.repositories.Asset.GetServeSettingsForDomainAsset(c.Request.Context(), domainID, assetPath)
+			},
+			func() ([]uuid.UUID, error) {
+				return s.repositories.Asset.GetFilteredAssetIDsForDomainAsset(c.Request.Context(), domainID, assetPath)
+			},
 		)
-		if err != nil {
-			s.logger.Errorw("failed to get asset serve settings, serving with defaults",
-				"path", fullRelativePathForFile,
-				"error", err,
-			)
-			settings = nil
+		if !allowed {
+			return assetDenied
 		}
 	}
-	contentType := applyAssetServeSettings(c, settings, mime.TypeByExtension(filepath.Ext(cleanPath)))
-	c.DataFromReader(http.StatusOK, info.Size(), contentType, file, nil)
+	s.writeAsset(c, settings, filtered, cleanPath, info.Size(), file)
+	return assetServed
+}
+
+// checkAssetAccess gets the serve settings of an asset file and decides if the
+// visitor may get it. lookup gets the serve settings together with the ids of
+// the filtered rows. When lookup fails the file is served with the default
+// settings, but only when filteredOnly can tell that it has no allow deny
+// lists, or when the visitor passes them. When that can not be told the
+// visitor is denied. filtered reports whether the file has allow deny lists.
+func (s *Server) checkAssetAccess(
+	c *gin.Context,
+	logPath string,
+	lookup func() (*model.AssetServeSettings, error),
+	filteredOnly func() ([]uuid.UUID, error),
+) (settings *model.AssetServeSettings, filtered bool, allowed bool) {
+	settings, err := lookup()
+	var filteredIDs []uuid.UUID
+	if err != nil {
+		s.logger.Errorw("failed to get asset serve settings, serving with defaults if not filtered",
+			"path", logPath,
+			"error", err,
+		)
+		settings = nil
+		filteredIDs, err = filteredOnly()
+		if err != nil {
+			s.logger.Errorw("failed to get asset filters, denying visitor",
+				"path", logPath,
+				"error", err,
+			)
+			return nil, true, false
+		}
+	} else if settings != nil {
+		filteredIDs = settings.FilteredAssetIDs
+	}
+	if len(filteredIDs) == 0 {
+		return settings, false, true
+	}
+	if !s.assetFiltersAllow(c, logPath, filteredIDs) {
+		return nil, true, false
+	}
+	return settings, true, true
+}
+
+// assetFiltersAllow reports whether the visitor passes the allow deny lists
+// of every asset row. Each row is evaluated on its own lists, so the visitor
+// is denied when the lists of any row deny it. Any error denies the visitor.
+func (s *Server) assetFiltersAllow(c *gin.Context, logPath string, assetIDs []uuid.UUID) bool {
+	lists, err := s.repositories.Asset.GetAllowDenyByAssetIDs(c.Request.Context(), assetIDs)
+	if err != nil {
+		s.logger.Errorw("failed to get asset allow deny lists, denying visitor",
+			"path", logPath,
+			"error", err,
+		)
+		return false
+	}
+	visitor := s.newFilterVisitor(c, utils.ExtractClientIP(c.Request, s.trustedProxies))
+	for _, assetID := range assetIDs {
+		filters := lists[assetID]
+		if len(filters) == 0 {
+			continue
+		}
+		allowed, _, err := model.EvaluateFilters(filters, visitor)
+		if err != nil {
+			s.logger.Errorw("failed to evaluate asset filters, denying visitor",
+				"path", logPath,
+				"assetID", assetID.String(),
+				"error", err,
+			)
+			return false
+		}
+		if !allowed {
+			s.logger.Debugw("asset filter denied visitor",
+				"path", logPath,
+				"assetID", assetID.String(),
+				"ip", visitor.IP,
+				"ja4", visitor.JA4,
+				"country", visitor.Country,
+			)
+			return false
+		}
+	}
 	return true
+}
+
+// newFilterVisitor collects what allow deny lists match a request on: the IP,
+// the JA4 fingerprint, the country and the ASNs of the IP, and the headers
+func (s *Server) newFilterVisitor(c *gin.Context, ip string) model.FilterVisitor {
+	store := ipdata.Get()
+	countryCode, _ := store.LookupCountry(ip)
+	return model.FilterVisitor{
+		IP:      ip,
+		JA4:     middleware.GetJA4FromContext(c),
+		Country: countryCode,
+		ASNs:    store.LookupASNs(ip),
+		Headers: c.Request.Header,
+	}
+}
+
+// writeAsset sends an asset file with its serve settings. A file with allow
+// deny lists is marked as not to be stored by caches.
+func (s *Server) writeAsset(
+	c *gin.Context,
+	settings *model.AssetServeSettings,
+	filtered bool,
+	cleanPath string,
+	size int64,
+	file io.Reader,
+) {
+	if filtered {
+		c.Header("Cache-Control", assetFilteredCacheControl)
+	}
+	contentType := applyAssetServeSettings(c, settings, mime.TypeByExtension(filepath.Ext(cleanPath)))
+	c.DataFromReader(http.StatusOK, size, contentType, file, nil)
 }
 
 // applyAssetServeSettings sets the response content type and the custom
@@ -338,14 +472,16 @@ func applyAssetServeSettings(
 	return contentType
 }
 
-func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
+// checkAndServeSharedAsset checks if the request is for a shared asset file
+// and serves it when the visitor may get it
+func (s *Server) checkAndServeSharedAsset(c *gin.Context) assetServeResult {
 	// create root filesystem for secure shared asset validation
 	root, err := os.OpenRoot(s.staticPath)
 	if err != nil {
 		s.logger.Infow("failed to open static path root",
 			"error", err,
 		)
-		return false
+		return assetNotFound
 	}
 	defer root.Close()
 
@@ -355,7 +491,7 @@ func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
 		s.logger.Infow("insecure shared path",
 			"error", err,
 		)
-		return false
+		return assetNotFound
 	}
 
 	// clean path and remove leading slash
@@ -369,17 +505,17 @@ func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
 			"path", fullRelativePath,
 			"error", err,
 		)
-		return false
+		return assetNotFound
 	}
 
 	// check if file exists and get info through root
 	sharedRelativePath := filepath.Join("shared", cleanPath)
 	info, err := root.Stat(sharedRelativePath)
 	if err != nil {
-		return false
+		return assetNotFound
 	}
 	if info.IsDir() {
-		return false
+		return assetNotFound
 	}
 
 	// open and serve file through root to maintain security boundaries
@@ -389,24 +525,26 @@ func (s *Server) checkAndServeSharedAsset(c *gin.Context) bool {
 			"path", sharedRelativePath,
 			"error", err,
 		)
-		return false
+		return assetNotFound
 	}
 	defer file.Close()
 
-	settings, err := s.repositories.Asset.GetServeSettingsForSharedAsset(
-		c.Request.Context(),
-		filepath.ToSlash(cleanPath),
+	assetPath := filepath.ToSlash(cleanPath)
+	settings, filtered, allowed := s.checkAssetAccess(
+		c,
+		sharedRelativePath,
+		func() (*model.AssetServeSettings, error) {
+			return s.repositories.Asset.GetServeSettingsForSharedAsset(c.Request.Context(), assetPath)
+		},
+		func() ([]uuid.UUID, error) {
+			return s.repositories.Asset.GetFilteredAssetIDsForSharedAsset(c.Request.Context(), assetPath)
+		},
 	)
-	if err != nil {
-		s.logger.Errorw("failed to get shared asset serve settings, serving with defaults",
-			"path", sharedRelativePath,
-			"error", err,
-		)
-		settings = nil
+	if !allowed {
+		return assetDenied
 	}
-	contentType := applyAssetServeSettings(c, settings, mime.TypeByExtension(filepath.Ext(cleanPath)))
-	c.DataFromReader(http.StatusOK, info.Size(), contentType, file, nil)
-	return true
+	s.writeAsset(c, settings, filtered, cleanPath, info.Size(), file)
+	return assetServed
 }
 
 // Handler is middleware that takes care of everything related to incoming phishing requests
@@ -556,9 +694,9 @@ func (s *Server) Handler(c *gin.Context) {
 		c.Abort()
 		return
 	}
-	// check if the request is for assets
-	servedAssets := s.checkAndServeAssets(c, host, &domain.ID)
-	if servedAssets {
+	// check if the request is for assets. A denied asset continues below
+	// exactly like a path without a file
+	if s.checkAndServeAssets(c, host, &domain.ID) == assetServed {
 		s.logger.Debug("served static asset")
 		c.Abort()
 		return
@@ -2563,13 +2701,11 @@ func (s *Server) checkIPFilter(
 	domain *database.Domain,
 	campaignID *uuid.UUID,
 ) (bool, error) {
-	// get ja4 fingerprint from context
-	ja4 := middleware.GetJA4FromContext(ctx)
-
-	// get country code and ASNs from the IP data lookup
-	store := ipdata.Get()
-	countryCode, _ := store.LookupCountry(ip)
-	asns := store.LookupASNs(ip)
+	// get the ja4 fingerprint, country code and ASNs of the visitor
+	visitor := s.newFilterVisitor(ctx, ip)
+	ja4 := visitor.JA4
+	countryCode := visitor.Country
+	asns := visitor.ASNs
 	s.logger.Debugw("checking geo ip",
 		"ip", ip,
 		"country", countryCode,
@@ -2587,13 +2723,7 @@ func (s *Server) checkIPFilter(
 	if len(allowDenyLEntries) == 0 {
 		return false, nil
 	}
-	allowed, decidedBy, err := model.EvaluateFilters(allowDenyLEntries, model.FilterVisitor{
-		IP:      ip,
-		JA4:     ja4,
-		Country: countryCode,
-		ASNs:    asns,
-		Headers: ctx.Request.Header,
-	})
+	allowed, decidedBy, err := model.EvaluateFilters(allowDenyLEntries, visitor)
 	if err != nil {
 		// a broken filter blocks the visitor rather than letting it through
 		s.logger.Errorw("failed to evaluate filters, blocking visitor",

@@ -40,6 +40,8 @@ func newAssetServeFixture(t *testing.T) *assetServeFixture {
 		&database.Domain{},
 		&database.Asset{},
 		&database.AssetHeader{},
+		&database.AllowDeny{},
+		&database.AssetAllowDeny{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -103,16 +105,34 @@ func (f *assetServeFixture) header(assetID uuid.UUID, key, value string) {
 // recorded response and whether the request was served as an asset
 func (f *assetServeFixture) serve(host string, domainID *uuid.UUID, path string, preset http.Header) (*httptest.ResponseRecorder, bool) {
 	f.t.Helper()
+	w, res := f.request(http.MethodGet, host, domainID, path, preset, nil)
+	return w, res == assetServed
+}
+
+// request runs the asset handler for a request with the given method. setup
+// can change the request and context before the handler runs.
+func (f *assetServeFixture) request(
+	method string,
+	host string,
+	domainID *uuid.UUID,
+	path string,
+	preset http.Header,
+	setup func(c *gin.Context),
+) (*httptest.ResponseRecorder, assetServeResult) {
+	f.t.Helper()
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "https://"+host+path, nil)
+	c.Request = httptest.NewRequest(method, "https://"+host+path, nil)
 	for k, vs := range preset {
 		for _, v := range vs {
 			c.Writer.Header().Add(k, v)
 		}
 	}
-	ok := f.server.checkAndServeAssets(c, host, domainID)
-	return w, ok
+	if setup != nil {
+		setup(c)
+	}
+	res := f.server.checkAndServeAssets(c, host, domainID)
+	return w, res
 }
 
 func TestServeAssetWithoutSettings(t *testing.T) {

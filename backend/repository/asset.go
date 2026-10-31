@@ -4,6 +4,7 @@ import (
 	"context"
 	"mime"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -86,6 +87,9 @@ func (r *Asset) GetAllByDomainAndContext(
 	for _, dbModel := range dbModels {
 		result.Rows = append(result.Rows, ToAsset(dbModel))
 	}
+	if err := r.markHasAllowDeny(ctx, result.Rows); err != nil {
+		return result, errs.Wrap(err)
+	}
 	return result, nil
 }
 
@@ -121,6 +125,9 @@ func (r *Asset) GetAllByGlobalContext(
 	for _, dbModel := range dbModels {
 		result.Rows = append(result.Rows, ToAsset(dbModel))
 	}
+	if err := r.markHasAllowDeny(ctx, result.Rows); err != nil {
+		return result, errs.Wrap(err)
+	}
 	return result, nil
 }
 
@@ -152,6 +159,9 @@ func (r *Asset) GetAllByCompanyContext(
 	result.HasNextPage = hasNextPage
 	for _, dbModel := range dbModels {
 		result.Rows = append(result.Rows, ToAsset(dbModel))
+	}
+	if err := r.markHasAllowDeny(ctx, result.Rows); err != nil {
+		return result, errs.Wrap(err)
 	}
 	return result, nil
 }
@@ -268,7 +278,8 @@ func (r *Asset) UpdateByID(
 	return nil
 }
 
-// DeleteByID deletes an asset by id together with its headers
+// DeleteByID deletes an asset by id together with its headers and the links
+// to its allow deny lists
 func (r *Asset) DeleteByID(
 	ctx context.Context,
 	id *uuid.UUID,
@@ -277,8 +288,128 @@ func (r *Asset) DeleteByID(
 		if err := tx.Where("asset_id = ?", id).Delete(&database.AssetHeader{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("asset_id = ?", id).Delete(&database.AssetAllowDeny{}).Error; err != nil {
+			return err
+		}
 		return tx.Where("id = ?", id).Delete(&database.Asset{}).Error
 	})
+}
+
+// assetAllowDenyRow is an allow deny list joined with the asset it is linked to
+type assetAllowDenyRow struct {
+	database.AllowDeny `gorm:"embedded"`
+	LinkAssetID        *uuid.UUID
+}
+
+// GetAllowDenyByAssetIDs gets the allow deny lists linked to each of the
+// assets, keyed by asset id. An asset without lists has no key.
+func (r *Asset) GetAllowDenyByAssetIDs(
+	ctx context.Context,
+	assetIDs []uuid.UUID,
+) (map[uuid.UUID][]*model.AllowDeny, error) {
+	out := map[uuid.UUID][]*model.AllowDeny{}
+	if len(assetIDs) == 0 {
+		return out, nil
+	}
+	rows := []assetAllowDenyRow{}
+	res := r.DB.WithContext(ctx).
+		Model(&database.AllowDeny{}).
+		Select("allow_denies.*, asset_allow_denies.asset_id AS link_asset_id").
+		Joins("JOIN asset_allow_denies ON asset_allow_denies.allow_deny_id = allow_denies.id").
+		Where("asset_allow_denies.asset_id IN ?", assetIDs).
+		Order("allow_denies.name, allow_denies.id").
+		Scan(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	for i := range rows {
+		if rows[i].LinkAssetID == nil || rows[i].ID == nil {
+			continue
+		}
+		assetID := *rows[i].LinkAssetID
+		out[assetID] = append(out[assetID], ToAllowDeny(&rows[i].AllowDeny))
+	}
+	return out, nil
+}
+
+// markHasAllowDeny sets HasAllowDeny on each asset that has allow deny lists
+func (r *Asset) markHasAllowDeny(ctx context.Context, assets []*model.Asset) error {
+	ids := make([]uuid.UUID, 0, len(assets))
+	for _, a := range assets {
+		if id, err := a.ID.Get(); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	filtered := []uuid.UUID{}
+	res := r.DB.WithContext(ctx).
+		Model(&database.AssetAllowDeny{}).
+		Distinct().
+		Where("asset_id IN ?", ids).
+		Pluck("asset_id", &filtered)
+	if res.Error != nil {
+		return res.Error
+	}
+	for _, a := range assets {
+		if id, err := a.ID.Get(); err == nil {
+			a.HasAllowDeny = slices.Contains(filtered, id)
+		}
+	}
+	return nil
+}
+
+// GetAllowDenyByAssetID gets the allow deny lists linked to an asset
+func (r *Asset) GetAllowDenyByAssetID(
+	ctx context.Context,
+	assetID *uuid.UUID,
+) ([]*model.AllowDeny, error) {
+	lists, err := r.GetAllowDenyByAssetIDs(ctx, []uuid.UUID{*assetID})
+	if err != nil {
+		return nil, err
+	}
+	if l := lists[*assetID]; l != nil {
+		return l, nil
+	}
+	return []*model.AllowDeny{}, nil
+}
+
+// ReplaceAllowDeny replaces the allow deny lists linked to an asset with the
+// given lists. An empty list removes all links.
+func (r *Asset) ReplaceAllowDeny(
+	ctx context.Context,
+	assetID *uuid.UUID,
+	allowDenyIDs []*uuid.UUID,
+) error {
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("asset_id = ?", assetID).Delete(&database.AssetAllowDeny{}).Error; err != nil {
+			return err
+		}
+		if len(allowDenyIDs) == 0 {
+			return nil
+		}
+		batch := make([]database.AssetAllowDeny, 0, len(allowDenyIDs))
+		for _, id := range allowDenyIDs {
+			batch = append(batch, database.AssetAllowDeny{
+				AssetID:     assetID,
+				AllowDenyID: id,
+			})
+		}
+		return tx.Create(&batch).Error
+	})
+}
+
+// RemoveAllowDenyByAllowDenyID removes an allow deny list from every asset
+// that uses it
+func (r *Asset) RemoveAllowDenyByAllowDenyID(
+	ctx context.Context,
+	allowDenyID *uuid.UUID,
+) error {
+	return r.DB.WithContext(ctx).
+		Where("allow_deny_id = ?", allowDenyID).
+		Delete(&database.AssetAllowDeny{}).
+		Error
 }
 
 // GetHeadersByAssetID gets the response headers of an asset in the order they
@@ -346,8 +477,38 @@ type assetServeRow struct {
 	AssetID     *uuid.UUID
 	CompanyID   *uuid.UUID
 	ContentType string
+	HasFilters  bool
 	HeaderKey   *string
 	HeaderValue *string
+}
+
+// assetServeSelect is the column list of the serve settings lookup. It tells
+// for each asset row whether it has allow deny lists, so an asset without
+// lists still costs only one query when served.
+const assetServeSelect = "assets.id AS asset_id, assets.company_id AS company_id, assets.content_type AS content_type, EXISTS (SELECT 1 FROM asset_allow_denies WHERE asset_allow_denies.asset_id = assets.id) AS has_filters, asset_headers.key AS header_key, asset_headers.value AS header_value"
+
+// domainAssetMatch limits a query to the assets of the domain stored at path
+func domainAssetMatch(domainID *uuid.UUID, path string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		return db.Where("assets.domain_id = ? AND assets.path = ?", domainID, path)
+	}
+}
+
+// sharedAssetMatch limits a query to the assets stored at path in the shared
+// folder, global assets and company folder assets alike. The query must join
+// the companies table.
+func (r *Asset) sharedAssetMatch(path string) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		match := r.DB.Where("assets.company_id IS NULL AND assets.path = ?", path)
+		if companyKey, companyPath, ok := SplitCompanyAssetPath(path); ok {
+			match = match.Or(
+				"assets.company_id IS NOT NULL AND companies.assets_key = ? AND assets.path = ?",
+				companyKey,
+				companyPath,
+			)
+		}
+		return db.Where("assets.domain_id IS NULL").Where(match)
+	}
 }
 
 // GetServeSettingsForDomainAsset gets the serve settings of the domain asset
@@ -361,9 +522,9 @@ func (r *Asset) GetServeSettingsForDomainAsset(
 	rows := []assetServeRow{}
 	res := r.DB.WithContext(ctx).
 		Model(&database.Asset{}).
-		Select("assets.id AS asset_id, assets.company_id AS company_id, assets.content_type AS content_type, asset_headers.key AS header_key, asset_headers.value AS header_value").
+		Select(assetServeSelect).
 		Joins("LEFT JOIN asset_headers ON asset_headers.asset_id = assets.id").
-		Where("assets.domain_id = ? AND assets.path = ?", domainID, path).
+		Scopes(domainAssetMatch(domainID, path)).
 		Order("assets.created_at, assets.id, asset_headers.created_at, asset_headers.id").
 		Scan(&rows)
 	if res.Error != nil {
@@ -372,38 +533,74 @@ func (r *Asset) GetServeSettingsForDomainAsset(
 	return toAssetServeSettings(rows, false), nil
 }
 
+// GetFilteredAssetIDsForDomainAsset gets the ids of the domain assets stored
+// at path for the domain that have allow deny lists. It does not read the
+// headers, so it can tell if a file is filtered when the full serve settings
+// lookup fails.
+func (r *Asset) GetFilteredAssetIDsForDomainAsset(
+	ctx context.Context,
+	domainID *uuid.UUID,
+	path string,
+) ([]uuid.UUID, error) {
+	ids := []uuid.UUID{}
+	res := r.DB.WithContext(ctx).
+		Model(&database.AssetAllowDeny{}).
+		Distinct().
+		Joins("JOIN assets ON assets.id = asset_allow_denies.asset_id").
+		Scopes(domainAssetMatch(domainID, path)).
+		Pluck("asset_allow_denies.asset_id", &ids)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return ids, nil
+}
+
 // GetServeSettingsForSharedAsset gets the serve settings of the asset stored at
 // path in the shared folder. A file there belongs to either a global asset,
 // stored with the full path, or a company folder asset, stored under the
 // folder named by the company assets key with the path after that folder.
-// When both exist for the same file the company asset is used. It returns nil
-// and no error when there is no such asset.
+// When both exist for the same file the content type and headers of the
+// company asset are used, while the allow deny lists of both apply. It returns
+// nil and no error when there is no such asset.
 func (r *Asset) GetServeSettingsForSharedAsset(
 	ctx context.Context,
 	path string,
 ) (*model.AssetServeSettings, error) {
-	match := r.DB.Where("assets.company_id IS NULL AND assets.path = ?", path)
-	if companyKey, companyPath, ok := SplitCompanyAssetPath(path); ok {
-		match = match.Or(
-			"assets.company_id IS NOT NULL AND companies.assets_key = ? AND assets.path = ?",
-			companyKey,
-			companyPath,
-		)
-	}
 	rows := []assetServeRow{}
 	res := r.DB.WithContext(ctx).
 		Model(&database.Asset{}).
-		Select("assets.id AS asset_id, assets.company_id AS company_id, assets.content_type AS content_type, asset_headers.key AS header_key, asset_headers.value AS header_value").
+		Select(assetServeSelect).
 		Joins("LEFT JOIN companies ON companies.id = assets.company_id").
 		Joins("LEFT JOIN asset_headers ON asset_headers.asset_id = assets.id").
-		Where("assets.domain_id IS NULL").
-		Where(match).
+		Scopes(r.sharedAssetMatch(path)).
 		Order("assets.created_at, assets.id, asset_headers.created_at, asset_headers.id").
 		Scan(&rows)
 	if res.Error != nil {
 		return nil, res.Error
 	}
 	return toAssetServeSettings(rows, true), nil
+}
+
+// GetFilteredAssetIDsForSharedAsset gets the ids of the assets stored at path
+// in the shared folder that have allow deny lists. It does not read the
+// headers, so it can tell if a file is filtered when the full serve settings
+// lookup fails.
+func (r *Asset) GetFilteredAssetIDsForSharedAsset(
+	ctx context.Context,
+	path string,
+) ([]uuid.UUID, error) {
+	ids := []uuid.UUID{}
+	res := r.DB.WithContext(ctx).
+		Model(&database.AssetAllowDeny{}).
+		Distinct().
+		Joins("JOIN assets ON assets.id = asset_allow_denies.asset_id").
+		Joins("LEFT JOIN companies ON companies.id = assets.company_id").
+		Scopes(r.sharedAssetMatch(path)).
+		Pluck("asset_allow_denies.asset_id", &ids)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return ids, nil
 }
 
 // SplitCompanyAssetPath splits a path in the shared folder into the company
@@ -441,6 +638,13 @@ func toAssetServeSettings(rows []assetServeRow, preferCompany bool) *model.Asset
 		return nil
 	}
 	settings := &model.AssetServeSettings{AssetID: *pick}
+	// the lists of every row stored for the file apply, not only the picked one
+	for _, row := range rows {
+		if row.AssetID == nil || !row.HasFilters || slices.Contains(settings.FilteredAssetIDs, *row.AssetID) {
+			continue
+		}
+		settings.FilteredAssetIDs = append(settings.FilteredAssetIDs, *row.AssetID)
+	}
 	for _, row := range rows {
 		if row.AssetID == nil || *row.AssetID != *pick {
 			continue

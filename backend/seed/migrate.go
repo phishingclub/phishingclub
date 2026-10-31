@@ -53,6 +53,7 @@ func initialInstallAndSeed(
 		&database.EmailAttachment{},
 		&database.AllowDeny{},
 		&database.CampaignAllowDeny{},
+		&database.AssetAllowDeny{},
 		&database.Webhook{},
 		&database.CampaignWebhook{},
 		&database.Script{},

@@ -35,7 +35,7 @@ func newAssetDeleteFixture(t *testing.T) *assetDeleteFixture {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Domain{}, &database.Asset{}, &database.AssetHeader{}); err != nil {
+	if err := db.AutoMigrate(&database.Domain{}, &database.Asset{}, &database.AssetHeader{}, &database.AssetAllowDeny{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	root := filepath.Join(dir, "files")

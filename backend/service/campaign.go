@@ -2526,22 +2526,16 @@ func (c *Campaign) validateAllowDenyIsSameTypeByIDs(
 		if len(allowDenyIDs) == 0 {
 			return nil
 		}
-		isAllowList := false
-		for i, id := range allowDenyIDs {
+		entries := make([]*model.AllowDeny, 0, len(allowDenyIDs))
+		for _, id := range allowDenyIDs {
 			entry, err := c.AllowDenyRepository.GetByID(ctx, id, &repository.AllowDenyOption{})
 			if err != nil {
 				c.Logger.Errorw("failed to get allow deny by id", "error", err)
 				return validate.WrapErrorWithField(errors.New("filter not found"), "allowDenyIDs")
 			}
-			allowed := entry.Allowed.MustGet()
-			if i == 0 {
-				isAllowList = allowed
-				continue
-			}
-			if isAllowList != allowed {
-				return validate.WrapErrorWithField(errors.New("allow and deny list are mutually exclusive"), "allowDenyIDs")
-			}
+			entries = append(entries, entry)
 		}
+		return model.ValidateAllowDenySameType(entries)
 	}
 	return nil
 }

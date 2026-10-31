@@ -530,6 +530,37 @@ func (a *Asset) RemoveHeader(g *gin.Context) {
 	a.Response.OK(g, gin.H{})
 }
 
+// SetAllowDenyRequest is the request to replace the allow deny lists of an
+// asset. An empty list removes all lists, a missing list is refused.
+type SetAllowDenyRequest struct {
+	AllowDenyIDs *[]uuid.UUID `json:"allowDenyIDs"`
+}
+
+// SetAllowDeny replaces the allow deny lists of an asset
+func (a *Asset) SetAllowDeny(g *gin.Context) {
+	session, _, ok := a.handleSession(g)
+	if !ok {
+		return
+	}
+	var req SetAllowDenyRequest
+	if ok := a.handleParseRequest(g, &req); !ok {
+		return
+	}
+	id, ok := a.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	if req.AllowDenyIDs == nil {
+		a.Response.BadRequestMessage(g, "allowDenyIDs is required")
+		return
+	}
+	err := a.AssetService.SetAllowDenyByID(g.Request.Context(), session, id, *req.AllowDenyIDs)
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	a.Response.OK(g, gin.H{})
+}
+
 // GetEditableContentByID returns an asset's content and whether it can be edited as text
 func (a *Asset) GetEditableContentByID(g *gin.Context) {
 	session, _, ok := a.handleSession(g)

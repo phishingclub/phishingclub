@@ -32,9 +32,18 @@ type Asset struct {
 	// the type is found from the file extension
 	ContentType nullable.Nullable[vo.OptionalString255] `json:"contentType"`
 	// DetectedContentType is the type found from the file extension, read only
-	DetectedContentType string               `json:"detectedContentType"`
-	Headers             []*AssetHeader       `json:"headers"`
-	File                multipart.FileHeader `json:"-"`
+	DetectedContentType string         `json:"detectedContentType"`
+	Headers             []*AssetHeader `json:"headers"`
+	// AllowDeny are the allow deny lists that decide who can get the file, read
+	// only, they are set with their own endpoint
+	AllowDeny []*AllowDeny `json:"allowDeny"`
+	// AllowDenyCompanyID is the company whose lists can be used on the asset
+	// together with the global lists. Null means only global lists, read only
+	AllowDenyCompanyID nullable.Nullable[uuid.UUID] `json:"allowDenyCompanyID"`
+	// HasAllowDeny tells if the asset has allow deny lists, set in listings,
+	// read only
+	HasAllowDeny bool                 `json:"hasAllowDeny"`
+	File         multipart.FileHeader `json:"-"`
 }
 
 // Validate checks if the Asset has a valid state
@@ -221,6 +230,10 @@ type AssetServeSettings struct {
 	AssetID     uuid.UUID
 	ContentType string
 	Headers     []AssetServeHeader
+	// FilteredAssetIDs are the ids of every asset row stored for the file that
+	// has allow deny lists. It holds more than one id when several rows point
+	// at the same file, the visitor must pass the lists of each of them.
+	FilteredAssetIDs []uuid.UUID
 }
 
 // AssetServeHeader is one response header sent with an asset

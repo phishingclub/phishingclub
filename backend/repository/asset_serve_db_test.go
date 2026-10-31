@@ -32,6 +32,8 @@ func newAssetServeFixture(t *testing.T) *assetServeFixture {
 		&database.Domain{},
 		&database.Asset{},
 		&database.AssetHeader{},
+		&database.AllowDeny{},
+		&database.AssetAllowDeny{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

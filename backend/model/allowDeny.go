@@ -453,3 +453,37 @@ func (c compiledHeaderRule) matches(headers map[string][]string) bool {
 	}
 	return false
 }
+
+// ValidateAllowDenySameType checks that the lists are all allow lists or all
+// deny lists. A campaign or an asset can not mix the two.
+func ValidateAllowDenySameType(lists []*AllowDeny) error {
+	if len(lists) == 0 {
+		return nil
+	}
+	first, err := lists[0].Allowed.Get()
+	if err != nil {
+		return validate.WrapErrorWithField(errors.New("filter has no type"), "allowDenyIDs")
+	}
+	for _, list := range lists[1:] {
+		allowed, err := list.Allowed.Get()
+		if err != nil {
+			return validate.WrapErrorWithField(errors.New("filter has no type"), "allowDenyIDs")
+		}
+		if allowed != first {
+			return validate.WrapErrorWithField(errors.New("allow and deny list are mutually exclusive"), "allowDenyIDs")
+		}
+	}
+	return nil
+}
+
+// AllowDenyUsableInCompany reports whether a list can be used by something
+// that belongs to the company. A global list can be used everywhere. A company
+// list can only be used by the same company. A nil company is the global
+// context, where only global lists can be used.
+func AllowDenyUsableInCompany(list *AllowDeny, companyID *uuid.UUID) bool {
+	listCompanyID, err := list.CompanyID.Get()
+	if err != nil {
+		return true
+	}
+	return companyID != nil && listCompanyID == *companyID
+}

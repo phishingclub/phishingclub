@@ -706,12 +706,20 @@
 		</FormGrid>
 	</Modal>
 	<DeleteAlert
+		list={[
+			'It is removed from the campaigns and assets that use it',
+			'Assets with no lists left are no longer filtered'
+		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
 	></DeleteAlert>
 	<DeleteAlert
 		title="Delete filters"
+		list={[
+			'They are removed from the campaigns and assets that use them',
+			'Assets with no lists left are no longer filtered'
+		]}
 		name={`${$selection.size} filter${$selection.size === 1 ? '' : 's'}`}
 		onClick={onClickBulkDelete}
 		confirm

@@ -391,6 +391,19 @@ export class API {
 		},
 
 		/**
+		 * Replace the allow / deny lists of an asset. An empty list removes all lists.
+		 *
+		 * @param {string} assetID
+		 * @param {string[]} allowDenyIDs
+		 * @returns {Promise<ApiResponse>}
+		 */
+		setAllowDeny: async (assetID, allowDenyIDs) => {
+			return await putJSON(this.getPath(`/asset/${assetID}/allow-deny`), {
+				allowDenyIDs: allowDenyIDs
+			});
+		},
+
+		/**
 		 * Get an asset's content in base64 and whether it is editable as text
 		 *
 		 * @param {string} id

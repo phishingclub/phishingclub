@@ -227,6 +227,7 @@ const (
 	ROUTE_V1_ASSET_ID_FILE        = "/api/v1/asset/:id/file"
 	ROUTE_V1_ASSET_ID_HEADER      = "/api/v1/asset/:id/header"
 	ROUTE_V1_ASSET_HEADER_ID      = "/api/v1/asset/:id/header/:headerID"
+	ROUTE_V1_ASSET_ID_ALLOW_DENY  = "/api/v1/asset/:id/allow-deny"
 	// attachments
 	ROUTE_V1_ATTACHMENT                 = "/api/v1/attachment"
 	ROUTE_V1_ATTACHMENT_ID              = "/api/v1/attachment/:id"
@@ -624,6 +625,7 @@ func setupRoutes(
 		POST(ROUTE_V1_ASSET_ID_FILE, middleware.SessionHandler, controllers.Asset.ReplaceFileByID).
 		PATCH(ROUTE_V1_ASSET_ID_HEADER, middleware.SessionHandler, controllers.Asset.AddHeader).
 		DELETE(ROUTE_V1_ASSET_HEADER_ID, middleware.SessionHandler, controllers.Asset.RemoveHeader).
+		PUT(ROUTE_V1_ASSET_ID_ALLOW_DENY, middleware.SessionHandler, controllers.Asset.SetAllowDeny).
 		GET(ROUTE_V1_ASSET_DOMAIN_CONTEXT, middleware.SessionHandler, controllers.Asset.GetAllForContext).
 		GET(ROUTE_V1_ASSET_GLOBAL_CONTEXT, middleware.SessionHandler, controllers.Asset.GetAllForContext).
 		POST(ROUTE_V1_ASSET, middleware.SessionHandler, controllers.Asset.Create).

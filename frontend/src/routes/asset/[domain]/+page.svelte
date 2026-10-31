@@ -43,6 +43,8 @@
 		runBulkDelete
 	} from '$lib/service/tableSelection.js';
 	import { onClickCopy } from '$lib/utils/common.js';
+	import SelectSquare from '$lib/components/SelectSquare.svelte';
+	import TextFieldMultiSelect from '$lib/components/TextFieldMultiSelect.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -105,6 +107,22 @@
 		key: '',
 		value: ''
 	};
+
+	// filters modal, picks the allow / deny lists of an asset
+	const filteringOptions = [
+		{ label: 'None', value: 'none', icon: '' },
+		{ label: 'Allow', value: 'allow', icon: '' },
+		{ label: 'Deny', value: 'deny', icon: '' }
+	];
+	let isFilterModalVisible = false;
+	let filterForm = null;
+	let filterError = '';
+	let filterAssetID = null;
+	let filterAssetPath = '';
+	let allowDenyType = 'none';
+	let allAllowDeny = [];
+	let allowDenyMap = new BiMap({});
+	let selectedAllowDeny = [];
 
 	let isDeleteAlertVisible = false;
 	let deleteValues = {
@@ -583,6 +601,98 @@
 	};
 
 	/**
+	 * Show only the lists of the picked type as options
+	 */
+	const setAllowDenyOptions = () => {
+		let entries = [];
+		switch (allowDenyType) {
+			case 'allow':
+				entries = allAllowDeny.filter((entry) => entry.allowed);
+				break;
+			case 'deny':
+				entries = allAllowDeny.filter((entry) => !entry.allowed);
+				break;
+		}
+		allowDenyMap = BiMap.FromArrayOfObjects(entries);
+	};
+
+	const onChangeAllowDenyType = () => {
+		selectedAllowDeny = [];
+		filterError = '';
+		setAllowDenyOptions();
+	};
+
+	/**
+	 * Open the filters modal for an asset
+	 * @param {string} id
+	 */
+	const openFilterModal = async (id) => {
+		try {
+			showIsLoading();
+			const res = await api.asset.getByID(id);
+			if (!res.success) {
+				throw res.error;
+			}
+			// the asset may use the lists of its company and the global lists
+			const companyID = res.data.allowDenyCompanyID ?? null;
+			allAllowDeny = await fetchAllRows((options) =>
+				api.allowDeny.getAllOverview(options, companyID)
+			);
+			const current = res.data.allowDeny ?? [];
+			if (current.length) {
+				allowDenyType = current[0].allowed ? 'allow' : 'deny';
+			} else {
+				allowDenyType = 'none';
+			}
+			setAllowDenyOptions();
+			selectedAllowDeny = current
+				.map((entry) => allowDenyMap.byKey(entry.id))
+				.filter((name) => !!name);
+			filterAssetID = id;
+			filterAssetPath = res.data.path;
+			filterError = '';
+			isFilterModalVisible = true;
+		} catch (e) {
+			addToast('Failed to open filters', 'Error');
+			console.error('failed to open asset filter modal', e);
+		} finally {
+			hideIsLoading();
+		}
+	};
+
+	const closeFilterModal = () => {
+		filterError = '';
+		filterAssetID = null;
+		isFilterModalVisible = false;
+	};
+
+	const onSubmitFilters = async () => {
+		filterError = '';
+		const ids =
+			allowDenyType === 'none' ? [] : selectedAllowDeny.map((name) => allowDenyMap.byValue(name));
+		if (allowDenyType !== 'none' && !ids.length) {
+			filterError = 'Select one or more lists, or pick None';
+			return;
+		}
+		try {
+			isSubmitting = true;
+			const res = await api.asset.setAllowDeny(filterAssetID, ids);
+			if (!res.success) {
+				filterError = res.error;
+				return;
+			}
+			addToast('Saved filters', 'Success');
+			closeFilterModal();
+			refreshAssets();
+		} catch (e) {
+			addToast('Failed to save filters', 'Error');
+			console.error('failed to save asset filters', e);
+		} finally {
+			isSubmitting = false;
+		}
+	};
+
+	/**
 	 * Delete an asset
 	 * @param {string} id
 	 */
@@ -843,13 +953,39 @@
 					{/if}
 				</TableCell>
 				<TableCell>
-					<button
-						on:click={() => {
-							onClickPreview(asset.path);
-						}}
-					>
-						{asset.name}
-					</button>
+					<div class="!flex items-center">
+						<button
+							class="truncate"
+							on:click={() => {
+								onClickPreview(asset.path);
+							}}
+						>
+							{asset.name}
+						</button>
+						{#if asset.hasAllowDeny}
+							<!-- same quiet marker as the installed badge, with the filters menu icon -->
+							<span
+								class="ml-2 inline-flex shrink-0 items-center gap-1 rounded bg-grayblue-light px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800/60 dark:text-gray-400"
+								title="Visitors must pass the allow or deny lists"
+							>
+								<svg
+									class="h-3 w-3"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<path
+										d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"
+									/>
+								</svg>
+								Filtered
+							</span>
+						{/if}
+					</div>
 				</TableCell>
 				<TableCell value={asset.description} />
 				<TableCell>
@@ -874,6 +1010,12 @@
 							name="Response headers"
 							title="Headers sent when the file is served"
 							on:click={() => openHeaderModal(asset.id)}
+							{...globalButtonDisabledAttributes(asset, contextCompanyID)}
+						/>
+						<TableDropDownButton
+							name="Filters"
+							title="Allow or deny lists that decide who can get the file"
+							on:click={() => openFilterModal(asset.id)}
 							{...globalButtonDisabledAttributes(asset, contextCompanyID)}
 						/>
 						<TableDropDownButton
@@ -1033,7 +1175,8 @@
 		</FormGrid>
 	</Modal>
 	<Modal
-		headerText={`Replace: ${replaceValues.path}`}
+		headerText="Replace"
+		description={replaceValues.path}
 		visible={isReplaceVisible}
 		onClose={() => (isReplaceVisible = false)}
 		isSubmitting={isReplacing}
@@ -1049,7 +1192,8 @@
 		</FormGrid>
 	</Modal>
 	<Modal
-		headerText={`Response headers: ${headerFormValues.path}`}
+		headerText="Response headers"
+		description={headerFormValues.path}
 		visible={isHeaderModalVisible}
 		onClose={closeHeaderModal}
 		{isSubmitting}
@@ -1095,6 +1239,46 @@
 			</FormColumns>
 			<FormError message={headerError} />
 			<FormFooter closeText={'Close'} closeModal={closeHeaderModal} {isSubmitting} />
+		</FormGrid>
+	</Modal>
+	<Modal
+		headerText="Filters"
+		description={filterAssetPath}
+		visible={isFilterModalVisible}
+		onClose={closeFilterModal}
+		{isSubmitting}
+	>
+		<FormGrid on:submit={onSubmitFilters} bind:bindTo={filterForm} {isSubmitting}>
+			<FormColumns>
+				<FormColumn>
+					<SelectSquare
+						label="Filtering"
+						toolTipText="Use allow lists or deny lists, not both"
+						options={filteringOptions}
+						width="small"
+						bind:value={allowDenyType}
+						onChange={onChangeAllowDenyType}
+					/>
+					{#if allowDenyType !== 'none'}
+						<div class="mt-4">
+							<TextFieldMultiSelect
+								id="allowDenyIDs"
+								toolTipText="Lists of this type that the asset can use"
+								bind:value={selectedAllowDeny}
+								options={Array.from(allowDenyMap.values())}>Lists</TextFieldMultiSelect
+							>
+						</div>
+					{/if}
+					<p
+						class="text-sm text-gray-600 dark:text-gray-400 mt-4 max-w-md transition-colors duration-200"
+					>
+						Visitors that do not pass the lists get the not found response. Browsers and proxies do
+						not cache a filtered file unless the asset has a Cache-Control header.
+					</p>
+				</FormColumn>
+			</FormColumns>
+			<FormError message={filterError} />
+			<FormFooter closeModal={closeFilterModal} {isSubmitting} />
 		</FormGrid>
 	</Modal>
 	<DeleteAlert

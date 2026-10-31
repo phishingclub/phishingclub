@@ -16,13 +16,14 @@ import (
 // withAllowDenyService wires the real AllowDeny service onto the fixture.
 func (h *regFixture) withAllowDenyService() {
 	h.t.Helper()
-	if err := h.db.AutoMigrate(&database.AllowDeny{}); err != nil {
+	if err := h.db.AutoMigrate(&database.AllowDeny{}, &database.AssetAllowDeny{}); err != nil {
 		h.t.Fatalf("migrate: %v", err)
 	}
 	h.s.AllowDeny = &AllowDeny{
 		Common:              h.s.Common,
 		AllowDenyRepository: &repository.AllowDeny{DB: h.db},
 		CampaignRepository:  &repository.Campaign{DB: h.db},
+		AssetRepository:     &repository.Asset{DB: h.db},
 	}
 }
 

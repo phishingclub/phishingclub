@@ -55,11 +55,12 @@ func isTextEditablePath(p string) bool {
 // Asset is a Asset service
 type Asset struct {
 	Common
-	RootFolder        string
-	FileService       *File
-	AssetRepository   *repository.Asset
-	DomainRepository  *repository.Domain
-	CompanyRepository *repository.Company
+	RootFolder          string
+	FileService         *File
+	AssetRepository     *repository.Asset
+	DomainRepository    *repository.Domain
+	CompanyRepository   *repository.Company
+	AllowDenyRepository *repository.AllowDeny
 }
 
 // Create creates and stores a new assets
@@ -410,8 +411,126 @@ func (a *Asset) GetByID(
 		return nil, errs.Wrap(err)
 	}
 	asset.Headers = headers
+	lists, err := a.AssetRepository.GetAllowDenyByAssetID(ctx, id)
+	if err != nil {
+		a.Logger.Errorw("failed to get asset allow deny lists", "id", id.String(), "error", err)
+		return nil, errs.Wrap(err)
+	}
+	asset.AllowDeny = lists
+	companyID, err := a.allowDenyCompanyID(ctx, asset)
+	if err != nil {
+		a.Logger.Errorw("failed to get asset company context", "id", id.String(), "error", err)
+		return nil, errs.Wrap(err)
+	}
+	asset.AllowDenyCompanyID = nullable.NewNullNullable[uuid.UUID]()
+	if companyID != nil {
+		asset.AllowDenyCompanyID.Set(*companyID)
+	}
 	// no audit on read
 	return asset, nil
+}
+
+// allowDenyCompanyID returns the company whose allow deny lists the asset can
+// use together with the global lists. An asset with a company uses that
+// company. An asset without a company on a domain that belongs to a company
+// uses the company of the domain. Otherwise it is nil and only global lists
+// can be used.
+func (a *Asset) allowDenyCompanyID(
+	ctx context.Context,
+	asset *model.Asset,
+) (*uuid.UUID, error) {
+	if companyID, err := asset.CompanyID.Get(); err == nil {
+		return &companyID, nil
+	}
+	domainID, err := asset.DomainID.Get()
+	if err != nil {
+		return nil, nil
+	}
+	domain, err := a.DomainRepository.GetByID(ctx, &domainID, &repository.DomainOption{})
+	if err != nil {
+		return nil, err
+	}
+	if companyID, err := domain.CompanyID.Get(); err == nil {
+		return &companyID, nil
+	}
+	return nil, nil
+}
+
+// SetAllowDenyByID replaces the allow deny lists of an asset. The lists must
+// all be allow lists or all deny lists. An asset in a company context can use
+// the lists of that company and global lists, any other asset can only use
+// global lists. An empty list removes all lists from the asset.
+func (a *Asset) SetAllowDenyByID(
+	ctx context.Context,
+	session *model.Session,
+	assetID *uuid.UUID,
+	allowDenyIDs []uuid.UUID,
+) error {
+	ae := NewAuditEvent("Asset.SetAllowDeny", session)
+	ae.Details["id"] = assetID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		a.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		a.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	asset, err := a.AssetRepository.GetByID(ctx, assetID)
+	if err != nil {
+		a.Logger.Debugw("asset not found", "id", assetID.String(), "error", err)
+		return err
+	}
+	companyID, err := a.allowDenyCompanyID(ctx, asset)
+	if err != nil {
+		a.Logger.Errorw("failed to get asset company context", "id", assetID.String(), "error", err)
+		return errs.Wrap(err)
+	}
+	// load each list once, in the given order
+	ids := []*uuid.UUID{}
+	idsStr := []string{}
+	lists := []*model.AllowDeny{}
+	seen := map[uuid.UUID]bool{}
+	for _, id := range allowDenyIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		listID := id
+		list, err := a.AllowDenyRepository.GetByID(ctx, &listID, &repository.AllowDenyOption{})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return validate.WrapErrorWithField(errors.New("filter not found"), "allowDenyIDs")
+		}
+		if err != nil {
+			a.Logger.Errorw("failed to get allow deny list", "id", listID.String(), "error", err)
+			return errs.Wrap(err)
+		}
+		if !model.AllowDenyUsableInCompany(list, companyID) {
+			a.Logger.Debugw("allow deny list not usable for asset",
+				"assetID", assetID.String(),
+				"allowDenyID", listID.String(),
+			)
+			return validate.WrapErrorWithField(
+				errors.New("filter belongs to another company"),
+				"allowDenyIDs",
+			)
+		}
+		lists = append(lists, list)
+		ids = append(ids, &listID)
+		idsStr = append(idsStr, listID.String())
+	}
+	if err := model.ValidateAllowDenySameType(lists); err != nil {
+		return err
+	}
+	if err := a.AssetRepository.ReplaceAllowDeny(ctx, assetID, ids); err != nil {
+		a.Logger.Errorw("failed to set asset allow deny lists", "id", assetID.String(), "error", err)
+		return errs.Wrap(err)
+	}
+	ae.Details["allowDenyIDs"] = idsStr
+	a.AuditLogAuthorized(ae)
+	return nil
 }
 
 // GetByID gets an asset by path
