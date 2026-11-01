@@ -3,9 +3,7 @@ package app
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"embed"
-	"encoding/pem"
 	"fmt"
 	"io/fs"
 	"log"
@@ -70,6 +68,7 @@ const (
 	ROUTE_V1_QR_FROM_TOTP               = "/api/v1/qr/totp"
 	ROUTE_V1_QR_URL_TO_HTML             = "/api/v1/qr/html"
 	ROUTE_V1_PREVIEW                    = "/api/v1/preview"
+	ROUTE_V1_PREVIEW_PACKAGE            = "/api/v1/preview/package"
 	// session
 	ROUTE_V1_SESSION_ID   = "/api/v1/session/:id"
 	ROUTE_V1_SESSION_PING = "/api/v1/session/ping"
@@ -123,6 +122,19 @@ const (
 	ROUTE_V1_PAGE_OVERVIEW   = "/api/v1/page/overview"
 	ROUTE_V1_PAGE_ID         = "/api/v1/page/:id"
 	ROUTE_V1_PAGE_CONTENT_ID = "/api/v1/page/:id/content"
+	// content registry consumer
+	ROUTE_V1_REGISTRY             = "/api/v1/registry"
+	ROUTE_V1_REGISTRY_ID          = "/api/v1/registry/:id"
+	ROUTE_V1_REGISTRY_PACKAGES    = "/api/v1/registry/:id/packages"
+	ROUTE_V1_REGISTRY_PACKAGE     = "/api/v1/registry/:id/package"
+	ROUTE_V1_REGISTRY_PREVIEW     = "/api/v1/registry/:id/preview"
+	ROUTE_V1_REGISTRY_INSTALL     = "/api/v1/registry/install"
+	ROUTE_V1_REGISTRY_STATUS      = "/api/v1/registry/:id/status"
+	ROUTE_V1_INSTALLED            = "/api/v1/installed"
+	ROUTE_V1_INSTALLED_RESOURCES  = "/api/v1/installed/resources"
+	ROUTE_V1_INSTALLED_ID         = "/api/v1/installed/:id"
+	ROUTE_V1_INSTALLED_ID_UPDATE  = "/api/v1/installed/:id/update"
+	ROUTE_V1_INSTALLED_ID_PREVIEW = "/api/v1/installed/:id/uninstall-preview"
 	// proxy
 	ROUTE_V1_PROXY          = "/api/v1/proxy"
 	ROUTE_V1_PROXY_OVERVIEW = "/api/v1/proxy/overview"
@@ -168,6 +180,8 @@ const (
 	ROUTE_V1_CAMPAIGN_UPCOMING           = "/api/v1/campaign/upcoming"
 	ROUTE_V1_CAMPAIGN_FINISHED           = "/api/v1/campaign/finished"
 	ROUTE_V1_CAMPAIGN_CLOSE              = "/api/v1/campaign/:id/close"
+	ROUTE_V1_CAMPAIGN_PAUSE              = "/api/v1/campaign/:id/pause"
+	ROUTE_V1_CAMPAIGN_RESUME             = "/api/v1/campaign/:id/resume"
 	ROUTE_V1_CAMPAIGN_EXPORT_EVENTS      = "/api/v1/campaign/:id/export/events"
 	ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS = "/api/v1/campaign/:id/export/submissions"
 	ROUTE_V1_CAMPAIGN_ANONYMIZE          = "/api/v1/campaign/:id/anonymize"
@@ -211,6 +225,9 @@ const (
 	ROUTE_V1_ASSET_ID_CONTENT     = "/api/v1/asset/:id/content"
 	ROUTE_V1_ASSET_ID_MOVE        = "/api/v1/asset/:id/move"
 	ROUTE_V1_ASSET_ID_FILE        = "/api/v1/asset/:id/file"
+	ROUTE_V1_ASSET_ID_HEADER      = "/api/v1/asset/:id/header"
+	ROUTE_V1_ASSET_HEADER_ID      = "/api/v1/asset/:id/header/:headerID"
+	ROUTE_V1_ASSET_ID_ALLOW_DENY  = "/api/v1/asset/:id/allow-deny"
 	// attachments
 	ROUTE_V1_ATTACHMENT                 = "/api/v1/attachment"
 	ROUTE_V1_ATTACHMENT_ID              = "/api/v1/attachment/:id"
@@ -252,6 +269,7 @@ const (
 	ROUTE_V1_OAUTH_PROVIDER_ID          = "/api/v1/oauth-provider/:id"
 	ROUTE_V1_OAUTH_PROVIDER_REMOVE_AUTH = "/api/v1/oauth-provider/:id/remove-authorization"
 	ROUTE_V1_OAUTH_AUTHORIZE            = "/api/v1/oauth-authorize/:id"
+	ROUTE_V1_OAUTH_AUTHORIZE_STATUS     = "/api/v1/oauth-authorize/:id/status"
 	ROUTE_V1_OAUTH_CALLBACK             = "/api/v1/oauth-callback"
 	ROUTE_V1_OAUTH_IMPORT_TOKENS        = "/api/v1/oauth-provider/import-tokens"
 	ROUTE_V1_OAUTH_EXPORT_TOKENS        = "/api/v1/oauth-provider/:id/export-tokens"
@@ -388,8 +406,10 @@ func setupRoutes(
 		// qr
 		POST(ROUTE_V1_QR_FROM_TOTP, middleware.SessionHandler, controllers.QR.ToTOTPURL).
 		POST(ROUTE_V1_QR_URL_TO_HTML, middleware.SessionHandler, controllers.QR.ToHTML).
-		// preview renders admin authored content isolated with a sandbox CSP
+		// preview renders admin authored and third party package content isolated
+		// with a sandbox CSP
 		POST(ROUTE_V1_PREVIEW, middleware.SessionHandler, controllers.Preview.Render).
+		POST(ROUTE_V1_PREVIEW_PACKAGE, middleware.SessionHandler, controllers.Preview.RenderPackage).
 		// company
 		POST(ROUTE_V1_COMPANY, middleware.SessionHandler, controllers.Company.Create).
 		POST(ROUTE_V1_COMPANY_ID, middleware.SessionHandler, controllers.Company.ChangeName).
@@ -477,6 +497,21 @@ func setupRoutes(
 		POST(ROUTE_V1_PAGE, middleware.SessionHandler, controllers.Page.Create).
 		PATCH(ROUTE_V1_PAGE_ID, middleware.SessionHandler, controllers.Page.UpdateByID).
 		DELETE(ROUTE_V1_PAGE_ID, middleware.SessionHandler, controllers.Page.DeleteByID).
+		// content registry consumer
+		GET(ROUTE_V1_REGISTRY, middleware.SessionHandler, controllers.ContentRegistry.ListRegistries).
+		POST(ROUTE_V1_REGISTRY, middleware.SessionHandler, controllers.ContentRegistry.AddRegistry).
+		POST(ROUTE_V1_REGISTRY_INSTALL, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.ContentRegistry.Install).
+		GET(ROUTE_V1_REGISTRY_PACKAGES, middleware.SessionHandler, controllers.ContentRegistry.Browse).
+		GET(ROUTE_V1_REGISTRY_PACKAGE, middleware.SessionHandler, controllers.ContentRegistry.Inspect).
+		GET(ROUTE_V1_REGISTRY_PREVIEW, middleware.SessionHandler, controllers.ContentRegistry.PreviewImage).
+		GET(ROUTE_V1_REGISTRY_STATUS, middleware.SessionHandler, controllers.ContentRegistry.RegistryStatus).
+		PATCH(ROUTE_V1_REGISTRY_ID, middleware.SessionHandler, controllers.ContentRegistry.UpdateRegistry).
+		DELETE(ROUTE_V1_REGISTRY_ID, middleware.SessionHandler, controllers.ContentRegistry.DeleteRegistry).
+		GET(ROUTE_V1_INSTALLED, middleware.SessionHandler, controllers.ContentRegistry.InstalledList).
+		GET(ROUTE_V1_INSTALLED_RESOURCES, middleware.SessionHandler, controllers.ContentRegistry.InstalledResources).
+		POST(ROUTE_V1_INSTALLED_ID_UPDATE, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.ContentRegistry.InstalledUpdate).
+		GET(ROUTE_V1_INSTALLED_ID_PREVIEW, middleware.SessionHandler, controllers.ContentRegistry.InstalledUninstallPreview).
+		DELETE(ROUTE_V1_INSTALLED_ID, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.ContentRegistry.InstalledRemove).
 		// proxy
 		GET(ROUTE_V1_PROXY, middleware.SessionHandler, controllers.Proxy.GetAll).
 		GET(ROUTE_V1_PROXY_OVERVIEW, middleware.SessionHandler, controllers.Proxy.GetOverview).
@@ -505,6 +540,7 @@ func setupRoutes(
 		DELETE(ROUTE_V1_OAUTH_PROVIDER_ID, middleware.SessionHandler, controllers.OAuthProvider.DeleteByID).
 		POST(ROUTE_V1_OAUTH_PROVIDER_REMOVE_AUTH, middleware.SessionHandler, controllers.OAuthProvider.RemoveAuthorization).
 		GET(ROUTE_V1_OAUTH_AUTHORIZE, middleware.SessionHandler, controllers.OAuthProvider.GetAuthorizationURL).
+		GET(ROUTE_V1_OAUTH_AUTHORIZE_STATUS, middleware.SessionHandler, controllers.OAuthProvider.GetAuthorizationStatus).
 		GET(ROUTE_V1_OAUTH_CALLBACK, controllers.OAuthProvider.HandleCallback).
 		POST(ROUTE_V1_OAUTH_IMPORT_TOKENS, middleware.SessionHandler, controllers.OAuthProvider.ImportAuthorizedTokens).
 		GET(ROUTE_V1_OAUTH_EXPORT_TOKENS, middleware.SessionHandler, controllers.OAuthProvider.ExportAuthorizedTokens).
@@ -554,6 +590,8 @@ func setupRoutes(
 		// TODO PATCH
 		POST(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.UpdateByID).
 		POST(ROUTE_V1_CAMPAIGN_CLOSE, middleware.SessionHandler, controllers.Campaign.CloseCampaignByID).
+		POST(ROUTE_V1_CAMPAIGN_PAUSE, middleware.SessionHandler, controllers.Campaign.PauseCampaignByID).
+		POST(ROUTE_V1_CAMPAIGN_RESUME, middleware.SessionHandler, controllers.Campaign.ResumeCampaignByID).
 		GET(ROUTE_V1_CAMPAIGN_EXPORT_EVENTS, middleware.SessionHandler, controllers.Campaign.ExportEventsAsCSV).
 		GET(ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS, middleware.SessionHandler, controllers.Campaign.ExportSubmissionsAsCSV).
 		POST(ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED, middleware.SessionHandler, controllers.Campaign.UploadReportedCSV).
@@ -585,6 +623,9 @@ func setupRoutes(
 		PUT(ROUTE_V1_ASSET_ID_CONTENT, middleware.SessionHandler, controllers.Asset.SaveContentByID).
 		PATCH(ROUTE_V1_ASSET_ID_MOVE, middleware.SessionHandler, controllers.Asset.MoveByID).
 		POST(ROUTE_V1_ASSET_ID_FILE, middleware.SessionHandler, controllers.Asset.ReplaceFileByID).
+		PATCH(ROUTE_V1_ASSET_ID_HEADER, middleware.SessionHandler, controllers.Asset.AddHeader).
+		DELETE(ROUTE_V1_ASSET_HEADER_ID, middleware.SessionHandler, controllers.Asset.RemoveHeader).
+		PUT(ROUTE_V1_ASSET_ID_ALLOW_DENY, middleware.SessionHandler, controllers.Asset.SetAllowDeny).
 		GET(ROUTE_V1_ASSET_DOMAIN_CONTEXT, middleware.SessionHandler, controllers.Asset.GetAllForContext).
 		GET(ROUTE_V1_ASSET_GLOBAL_CONTEXT, middleware.SessionHandler, controllers.Asset.GetAllForContext).
 		POST(ROUTE_V1_ASSET, middleware.SessionHandler, controllers.Asset.Create).
@@ -666,19 +707,31 @@ func setupRoutes(
 func (a *administrationServer) handleTLSCertificate(
 	conf *config.Config,
 ) error {
-	publicCertExists := true
-	privateCertExists := true
+	certExists := true
 	if _, err := os.Stat(conf.TLSCertPath()); err != nil {
 		if !os.IsNotExist(err) {
 			return err
 		}
-		privateCertExists = false
+		certExists = false
 	}
-	if _, err := os.Stat(conf.TLSKeyPath()); err != nil {
-		if !os.IsNotExist(err) {
-			return err
+
+	// Never overwrite a certificate that is already present. With tls_auto
+	// false it may be one an operator supplied, and regenerating would destroy
+	// it. A self signed certificate the app created earlier is kept too. Only
+	// create one when none is present so the admin interface still comes up on
+	// first run.
+	if certExists {
+		a.logger.Debug("using existing certificate for administration server")
+		// a certificate with no key cannot serve TLS, but we still do not touch
+		// the certificate file so an operator certificate is never destroyed
+		if _, err := os.Stat(conf.TLSKeyPath()); err != nil && os.IsNotExist(err) {
+			a.logger.Warnw(
+				"administration certificate present but key file missing, leaving the certificate untouched",
+				"cert", conf.TLSCertPath(),
+				"key", conf.TLSKeyPath(),
+			)
 		}
-		publicCertExists = false
+		return nil
 	}
 
 	// determine hostnames to include in the certificate
@@ -712,93 +765,30 @@ func (a *administrationServer) handleTLSCertificate(
 		}
 	}
 
-	needToCreateCert := !privateCertExists || !publicCertExists
+	a.logger.Debug("creating self signed certificate for administration server")
 
-	// check if we need to recreate the certificate because host/IP has changed
-	if privateCertExists && publicCertExists {
-		// read the existing certificate to check the hostnames
-		certData, err := os.ReadFile(conf.TLSCertPath())
-		if err == nil {
-			block, _ := pem.Decode(certData)
-			if block != nil && block.Type == "CERTIFICATE" {
-				cert, err := x509.ParseCertificate(block.Bytes)
-				if err == nil {
-					// vheck if all requested hostnames are in the certificate
-					missingHosts := false
-					hostMap := make(map[string]bool)
-
-					// add all current certificate SANs to the map
-					for _, dnsName := range cert.DNSNames {
-						hostMap[dnsName] = true
-					}
-					for _, ip := range cert.IPAddresses {
-						hostMap[ip.String()] = true
-					}
-
-					// check if the common name is in our hostnames
-					if cert.Subject.CommonName != "" {
-						hostMap[cert.Subject.CommonName] = true
-					}
-
-					// Check if all requested hostnames are covered
-					for _, host := range hostnames {
-						if !hostMap[host] {
-							missingHosts = true
-							a.logger.Debugw("host not found in existing certificate", "host", host)
-							break
-						}
-					}
-
-					// if the TLSHost is specified and not in the certificate, or other hosts are missing, regenerate
-					if missingHosts {
-						a.logger.Debug("recreating certificate due to changed host/IP configuration")
-						needToCreateCert = true
-					}
-				} else {
-					a.logger.Warnw("could not parse existing certificate, will recreate", "error", err)
-					needToCreateCert = true
-				}
-			} else {
-				a.logger.Warn("invalid certificate format, will recreate")
-				needToCreateCert = true
-			}
-		} else {
-			a.logger.Warnw("could not read existing certificate, will recreate", "error", err)
-			needToCreateCert = true
-		}
+	info := acme.NewInformationWithDefault()
+	if len(hostnames) > 0 {
+		info.CommonName = hostnames[0]
 	}
 
-	// create certificates if needed
-	if needToCreateCert {
-		a.logger.Debug("creating self signed certificate for administration server")
+	a.logger.Debugw("generating certificate with hostnames", "hostnames", hostnames)
 
-		info := acme.NewInformationWithDefault()
-		if len(hostnames) > 0 {
-			info.CommonName = hostnames[0]
-		}
-
-		a.logger.Debugw("generating certificate with hostnames", "hostnames", hostnames)
-
-		err = acme.CreateSelfSignedCert(
-			a.logger,
-			info,
-			hostnames,
-			conf.TLSCertPath(),
-			conf.TLSKeyPath(),
-		)
-
-		if err != nil {
-			return fmt.Errorf("failed to create self signed certificate: %s", err)
-		}
-
-		a.logger.Debugw(
-			"saved self signed certificate for administration servers",
-			"TLS certificate", conf.TLSCertPath(),
-			"TLS key path", conf.TLSKeyPath(),
-		)
-	} else {
-		a.logger.Debug("using existing certificate for administration server")
+	if err := acme.CreateSelfSignedCert(
+		a.logger,
+		info,
+		hostnames,
+		conf.TLSCertPath(),
+		conf.TLSKeyPath(),
+	); err != nil {
+		return fmt.Errorf("failed to create self signed certificate: %s", err)
 	}
+
+	a.logger.Debugw(
+		"saved self signed certificate for administration servers",
+		"TLS certificate", conf.TLSCertPath(),
+		"TLS key path", conf.TLSKeyPath(),
+	)
 
 	return nil
 }

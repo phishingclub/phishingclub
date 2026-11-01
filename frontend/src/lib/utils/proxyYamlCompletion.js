@@ -429,7 +429,7 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'enabled: true',
 				documentation:
-					'Enable surf browser impersonation based on JA4 fingerprint. Replicates client TLS fingerprint, HTTP/2 settings, header ordering, and platform',
+					'Enable surf browser impersonation based on JA4 fingerprint. Replicates client TLS fingerprint, HTTP/2 settings, header ordering, and platform. Unstable: the Firefox profile fails the TLS handshake on many sites and the Chrome profile can fail to connect at random. Turn this off if requests to the target fail',
 				range
 			},
 			{
@@ -437,7 +437,7 @@ export class ProxyYamlCompletionProvider {
 				kind: this.monaco.languages.CompletionItemKind.Property,
 				insertText: 'retain_ua: false',
 				documentation:
-					"Retain client's original User-Agent header instead of using surf's impersonated one. Useful when you want fingerprint matching but original UA",
+					"Retain client's original User-Agent header instead of using surf's impersonated one. Useful when you want fingerprint matching but original UA. Safari and iOS clients get the Chrome profile, so their UA will not match the TLS fingerprint",
 				range
 			}
 		];

@@ -90,6 +90,8 @@ func (m *JA4Middleware) ConnStateCallback(conn net.Conn, state http.ConnState) {
 // GinHandler returns a gin handler that injects ja4 fingerprint into context and headers
 func (m *JA4Middleware) GinHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// the fingerprint header is internal, a client must never be able to set it
+		c.Request.Header.Del(HeaderJA4)
 		// try to get fingerprint from cache
 		if cacheEntry, ok := m.ConnectionFingerprints.Load(c.Request.RemoteAddr); ok {
 			if entry, ok := cacheEntry.(*FingerprintEntry); ok {

@@ -1,11 +1,11 @@
 module github.com/phishingclub/phishingclub
 
-go 1.27
+go 1.27.3
 
 require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.3.2
 	github.com/PuerkitoBio/goquery v1.8.1
-	github.com/andybalholm/brotli v1.2.0
+	github.com/andybalholm/brotli v1.2.7
 	github.com/boombuler/barcode v1.0.1
 	github.com/brianvoe/gofakeit/v7 v7.0.4
 	github.com/caddyserver/certmagic v0.19.2
@@ -63,7 +63,7 @@ require (
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/gabriel-vasile/mimetype v1.4.5 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.22.0 // indirect

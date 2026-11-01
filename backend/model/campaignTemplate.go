@@ -82,6 +82,21 @@ type CampaignTemplate struct {
 
 // Validate checks if the campaign template has a valid state
 func (c *CampaignTemplate) Validate() error {
+	return c.validate(true)
+}
+
+// ValidateUpdate checks a stored template after an update is merged in. The
+// redirect url is only checked when it differs from storedRedirectURL, so a
+// value saved before the check existed does not block other edits.
+func (c *CampaignTemplate) ValidateUpdate(storedRedirectURL string) error {
+	changed := false
+	if v, err := c.AfterLandingPageRedirectURL.Get(); err == nil {
+		changed = v.String() != storedRedirectURL
+	}
+	return c.validate(changed)
+}
+
+func (c *CampaignTemplate) validate(checkRedirectURL bool) error {
 	if err := validate.NullableFieldRequired("name", c.Name); err != nil {
 		return err
 	}
@@ -172,9 +187,11 @@ func (c *CampaignTemplate) Validate() error {
 
 	// the redirect url is shown as a link in the admin area, so reject any
 	// scheme other than http or https to keep a javascript url out of an href
-	if v, err := c.AfterLandingPageRedirectURL.Get(); err == nil && v.String() != "" {
-		if err := validate.ErrorIfInvalidURL(v.String()); err != nil {
-			return validate.WrapErrorWithField(err, "afterLandingPageRedirectURL")
+	if checkRedirectURL {
+		if v, err := c.AfterLandingPageRedirectURL.Get(); err == nil {
+			if err := ValidateRedirectURL(v.String(), "afterLandingPageRedirectURL"); err != nil {
+				return err
+			}
 		}
 	}
 

@@ -43,6 +43,8 @@
 		runBulkDelete
 	} from '$lib/service/tableSelection.js';
 	import { onClickCopy } from '$lib/utils/common.js';
+	import SelectSquare from '$lib/components/SelectSquare.svelte';
+	import TextFieldMultiSelect from '$lib/components/TextFieldMultiSelect.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -88,8 +90,39 @@
 		id: '',
 		name: '',
 		description: '',
-		path: ''
+		path: '',
+		contentType: ''
 	};
+	// the type found from the file extension, shown as the content type placeholder
+	let detectedContentType = '';
+
+	// response headers modal
+	let isHeaderModalVisible = false;
+	let headerForm = null;
+	let headerError = '';
+	let headers = [];
+	let headerFormValues = {
+		id: null,
+		path: '',
+		key: '',
+		value: ''
+	};
+
+	// filters modal, picks the allow / deny lists of an asset
+	const filteringOptions = [
+		{ label: 'None', value: 'none', icon: '' },
+		{ label: 'Allow', value: 'allow', icon: '' },
+		{ label: 'Deny', value: 'deny', icon: '' }
+	];
+	let isFilterModalVisible = false;
+	let filterForm = null;
+	let filterError = '';
+	let filterAssetID = null;
+	let filterAssetPath = '';
+	let allowDenyType = 'none';
+	let allAllowDeny = [];
+	let allowDenyMap = new BiMap({});
+	let selectedAllowDeny = [];
 
 	let isDeleteAlertVisible = false;
 	let deleteValues = {
@@ -217,7 +250,12 @@
 	const update = async () => {
 		try {
 			// 1. name and description
-			const res = await api.asset.update(formValues.id, formValues.name, formValues.description);
+			const res = await api.asset.update(
+				formValues.id,
+				formValues.name,
+				formValues.description,
+				formValues.contentType
+			);
 			if (!res.success) {
 				modalError = res.error;
 				throw res.error;
@@ -293,7 +331,8 @@
 	const openCreateModal = async () => {
 		modalMode = 'create';
 		// start clean so a previously edited asset's path does not leak in
-		formValues = { id: '', name: '', description: '', path: '' };
+		formValues = { id: '', name: '', description: '', path: '', contentType: '' };
+		detectedContentType = '';
 		editContentEditable = false;
 		editIsHtml = false;
 		editOriginalPath = '';
@@ -321,6 +360,8 @@
 			formValues.name = res.data.name;
 			formValues.description = res.data.description;
 			formValues.path = res.data.path;
+			formValues.contentType = res.data.contentType ?? '';
+			detectedContentType = res.data.detectedContentType ?? '';
 			editOriginalPath = res.data.path;
 			// for a text file, load its content so the same modal can edit it
 			if (isTextEditable(asset.path)) {
@@ -485,6 +526,173 @@
 	};
 
 	/**
+	 * Open the response headers modal for an asset
+	 * @param {string} id
+	 */
+	const openHeaderModal = async (id) => {
+		try {
+			showIsLoading();
+			const res = await api.asset.getByID(id);
+			if (!res.success) {
+				throw res.error;
+			}
+			headers = res.data.headers ?? [];
+			headerFormValues.id = id;
+			headerFormValues.path = res.data.path;
+			isHeaderModalVisible = true;
+		} catch (e) {
+			addToast('Failed to open response headers', 'Error');
+			console.error('failed to open asset header modal', e);
+		} finally {
+			hideIsLoading();
+		}
+	};
+
+	const closeHeaderModal = () => {
+		headerForm.reset();
+		headerError = '';
+		headerFormValues.id = null;
+		isHeaderModalVisible = false;
+	};
+
+	const onClickCreateHeader = async () => {
+		headerError = '';
+		try {
+			isSubmitting = true;
+			const res = await api.asset.addHeader(
+				headerFormValues.id,
+				headerFormValues.key,
+				headerFormValues.value
+			);
+			if (!res.success) {
+				headerError = res.error;
+				return;
+			}
+			addToast('Added response header', 'Success');
+			headerForm.reset();
+			openHeaderModal(headerFormValues.id);
+		} catch (e) {
+			addToast('Failed to add response header', 'Error');
+			console.error('failed to add asset header', e);
+		} finally {
+			isSubmitting = false;
+		}
+	};
+
+	/**
+	 * Delete a response header
+	 * @param {string} id asset id
+	 * @param {string} headerID
+	 */
+	const onClickDeleteHeader = async (id, headerID) => {
+		const action = api.asset.deleteHeader(id, headerID);
+		action
+			.then((res) => {
+				if (!res.success) {
+					throw res.error;
+				}
+				openHeaderModal(id);
+			})
+			.catch((e) => {
+				addToast('Failed to delete response header', 'Error');
+				console.error('failed to delete asset header', e);
+			});
+		return action;
+	};
+
+	/**
+	 * Show only the lists of the picked type as options
+	 */
+	const setAllowDenyOptions = () => {
+		let entries = [];
+		switch (allowDenyType) {
+			case 'allow':
+				entries = allAllowDeny.filter((entry) => entry.allowed);
+				break;
+			case 'deny':
+				entries = allAllowDeny.filter((entry) => !entry.allowed);
+				break;
+		}
+		allowDenyMap = BiMap.FromArrayOfObjects(entries);
+	};
+
+	const onChangeAllowDenyType = () => {
+		selectedAllowDeny = [];
+		filterError = '';
+		setAllowDenyOptions();
+	};
+
+	/**
+	 * Open the filters modal for an asset
+	 * @param {string} id
+	 */
+	const openFilterModal = async (id) => {
+		try {
+			showIsLoading();
+			const res = await api.asset.getByID(id);
+			if (!res.success) {
+				throw res.error;
+			}
+			// the asset may use the lists of its company and the global lists
+			const companyID = res.data.allowDenyCompanyID ?? null;
+			allAllowDeny = await fetchAllRows((options) =>
+				api.allowDeny.getAllOverview(options, companyID)
+			);
+			const current = res.data.allowDeny ?? [];
+			if (current.length) {
+				allowDenyType = current[0].allowed ? 'allow' : 'deny';
+			} else {
+				allowDenyType = 'none';
+			}
+			setAllowDenyOptions();
+			selectedAllowDeny = current
+				.map((entry) => allowDenyMap.byKey(entry.id))
+				.filter((name) => !!name);
+			filterAssetID = id;
+			filterAssetPath = res.data.path;
+			filterError = '';
+			isFilterModalVisible = true;
+		} catch (e) {
+			addToast('Failed to open filters', 'Error');
+			console.error('failed to open asset filter modal', e);
+		} finally {
+			hideIsLoading();
+		}
+	};
+
+	const closeFilterModal = () => {
+		filterError = '';
+		filterAssetID = null;
+		isFilterModalVisible = false;
+	};
+
+	const onSubmitFilters = async () => {
+		filterError = '';
+		const ids =
+			allowDenyType === 'none' ? [] : selectedAllowDeny.map((name) => allowDenyMap.byValue(name));
+		if (allowDenyType !== 'none' && !ids.length) {
+			filterError = 'Select one or more lists, or pick None';
+			return;
+		}
+		try {
+			isSubmitting = true;
+			const res = await api.asset.setAllowDeny(filterAssetID, ids);
+			if (!res.success) {
+				filterError = res.error;
+				return;
+			}
+			addToast('Saved filters', 'Success');
+			closeFilterModal();
+			refreshAssets();
+		} catch (e) {
+			addToast('Failed to save filters', 'Error');
+			console.error('failed to save asset filters', e);
+		} finally {
+			isSubmitting = false;
+		}
+	};
+
+	/**
 	 * Delete an asset
 	 * @param {string} id
 	 */
@@ -545,40 +753,68 @@
 		return imageExtensions.includes(extension);
 	};
 
+	// image types allowed in a thumbnail data: url, keyed by file extension
+	const THUMBNAIL_MIME_BY_EXTENSION = {
+		'.jpg': 'image/jpeg',
+		'.jpeg': 'image/jpeg',
+		'.png': 'image/png',
+		'.gif': 'image/gif',
+		'.bmp': 'image/bmp',
+		'.webp': 'image/webp',
+		'.svg': 'image/svg+xml',
+		'.ico': 'image/x-icon'
+	};
+	const THUMBNAIL_MIME_TYPES = new Set(Object.values(THUMBNAIL_MIME_BY_EXTENSION));
+
+	/**
+	 * Pick a safe image type for a thumbnail. The reported type is used only when
+	 * it is a known image type, otherwise the extension decides.
+	 * @param {string} path
+	 * @param {string} reported
+	 * @returns {string|null}
+	 */
+	const thumbnailMimeType = (path, reported) => {
+		const base = (reported || '').split(';')[0].trim().toLowerCase();
+		if (THUMBNAIL_MIME_TYPES.has(base)) {
+			return base;
+		}
+		const extension = path.toLowerCase().substring(path.lastIndexOf('.'));
+		return THUMBNAIL_MIME_BY_EXTENSION[extension] || null;
+	};
+
 	/**
 	 * Get image URL for preview
 	 * @param {string} path
 	 */
 	const getImagePreviewUrl = async (path) => {
-		if ($page.params.domain === 'shared' || isCompanyFolder) {
-			try {
+		try {
+			// Domain assets are loaded through the admin API as well, because the
+			// admin CSP only allows images from self, data: and blob:.
+			let res;
+			if ($page.params.domain === 'shared' || isCompanyFolder) {
 				const viewPath = isCompanyFolder ? `${companyAssetsKey}/${path}` : path;
-				const res = await api.asset.getRaw('shared', viewPath);
-				if (!res.success) {
-					return null;
-				}
-
-				// Handle SVG files differently - they're text-based
-				if (path.toLowerCase().endsWith('.svg')) {
-					const svgContent = atob(res.data.file);
-					const blob = new Blob([svgContent], { type: 'image/svg+xml' });
-					return URL.createObjectURL(blob);
-				} else {
-					// Handle binary image files
-					const binaryData = atob(res.data.file);
-					const byteArray = new Uint8Array(binaryData.length);
-					for (let i = 0; i < binaryData.length; i++) {
-						byteArray[i] = binaryData.charCodeAt(i);
-					}
-					const blob = new Blob([byteArray], { type: res.data.mimeType });
-					return URL.createObjectURL(blob);
-				}
-			} catch (e) {
-				console.error('failed to get image preview', e);
+				res = await api.asset.getRaw('shared', viewPath);
+			} else {
+				res = await api.asset.getRaw($page.params.domain, path);
+			}
+			if (!res.success) {
 				return null;
 			}
-		} else {
-			return `https://${$page.params.domain}/${path}`;
+
+			// The thumbnail is a data: url, never a blob: url. A blob url lives on
+			// the admin origin, so opening it in a tab would run any script in an
+			// svg (or a file whose type is html) as the admin. Browsers refuse a
+			// top level navigation to a data: url, and an <img> never runs svg
+			// script. The type is picked from a fixed list of image types so
+			// the server reported type can not turn the thumbnail into a page.
+			const type = thumbnailMimeType(path, res.data.mimeType);
+			if (!type || typeof res.data.file !== 'string') {
+				return null;
+			}
+			return `data:${type};base64,${res.data.file}`;
+		} catch (e) {
+			console.error('failed to get image preview', e);
+			return null;
 		}
 	};
 
@@ -717,13 +953,39 @@
 					{/if}
 				</TableCell>
 				<TableCell>
-					<button
-						on:click={() => {
-							onClickPreview(asset.path);
-						}}
-					>
-						{asset.name}
-					</button>
+					<div class="!flex items-center">
+						<button
+							class="truncate"
+							on:click={() => {
+								onClickPreview(asset.path);
+							}}
+						>
+							{asset.name}
+						</button>
+						{#if asset.hasAllowDeny}
+							<!-- same quiet marker as the installed badge, with the filters menu icon -->
+							<span
+								class="ml-2 inline-flex shrink-0 items-center gap-1 rounded bg-grayblue-light px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800/60 dark:text-gray-400"
+								title="Visitors must pass the allow or deny lists"
+							>
+								<svg
+									class="h-3 w-3"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<path
+										d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z"
+									/>
+								</svg>
+								Filtered
+							</span>
+						{/if}
+					</div>
 				</TableCell>
 				<TableCell value={asset.description} />
 				<TableCell>
@@ -742,6 +1004,18 @@
 						{/if}
 						<TableUpdateButton
 							on:click={() => onClickEdit(asset)}
+							{...globalButtonDisabledAttributes(asset, contextCompanyID)}
+						/>
+						<TableDropDownButton
+							name="Response headers"
+							title="Headers sent when the file is served"
+							on:click={() => openHeaderModal(asset.id)}
+							{...globalButtonDisabledAttributes(asset, contextCompanyID)}
+						/>
+						<TableDropDownButton
+							name="Filters"
+							title="Allow or deny lists that decide who can get the file"
+							on:click={() => openFilterModal(asset.id)}
 							{...globalButtonDisabledAttributes(asset, contextCompanyID)}
 						/>
 						<TableDropDownButton
@@ -793,6 +1067,14 @@
 							toolTipText="Full path including filename. Change it to rename or move the file on save."
 							>Path</TextField
 						>
+						<TextField
+							bind:value={formValues.contentType}
+							optional={true}
+							maxLength={255}
+							placeholder={detectedContentType || 'application/octet-stream'}
+							toolTipText="Content-Type sent when the file is served. Leave empty to use the type from the file extension."
+							>Content type</TextField
+						>
 					</div>
 				</Editor>
 			{:else if modalMode === 'update' && editContentEditable}
@@ -821,6 +1103,14 @@
 							placeholder={'profile/alice/app.css'}
 							toolTipText="Full path including filename. Change it to rename or move the file on save."
 							>Path</TextField
+						>
+						<TextField
+							bind:value={formValues.contentType}
+							optional={true}
+							maxLength={255}
+							placeholder={detectedContentType || 'application/octet-stream'}
+							toolTipText="Content-Type sent when the file is served. Leave empty to use the type from the file extension."
+							>Content type</TextField
 						>
 					</div>
 					<SimpleCodeEditor
@@ -868,6 +1158,14 @@
 								toolTipText="Full path including filename. Change it to rename or move the file on save."
 								>Path</TextField
 							>
+							<TextField
+								bind:value={formValues.contentType}
+								optional={true}
+								maxLength={255}
+								placeholder={detectedContentType || 'application/octet-stream'}
+								toolTipText="Content-Type sent when the file is served. Leave empty to use the type from the file extension."
+								>Content type</TextField
+							>
 						{/if}
 					</FormColumn>
 				</FormColumns>
@@ -877,7 +1175,8 @@
 		</FormGrid>
 	</Modal>
 	<Modal
-		headerText={`Replace: ${replaceValues.path}`}
+		headerText="Replace"
+		description={replaceValues.path}
 		visible={isReplaceVisible}
 		onClose={() => (isReplaceVisible = false)}
 		isSubmitting={isReplacing}
@@ -890,6 +1189,96 @@
 			</FormColumns>
 			<FormError message={replaceError} />
 			<FormFooter closeModal={() => (isReplaceVisible = false)} isSubmitting={isReplacing} />
+		</FormGrid>
+	</Modal>
+	<Modal
+		headerText="Response headers"
+		description={headerFormValues.path}
+		visible={isHeaderModalVisible}
+		onClose={closeHeaderModal}
+		{isSubmitting}
+	>
+		<FormGrid on:submit={onClickCreateHeader} bind:bindTo={headerForm} {isSubmitting}>
+			<FormColumns>
+				<FormColumn>
+					<TextField
+						bind:value={headerFormValues.key}
+						maxLength={127}
+						placeholder="Cache-Control"
+						toolTipText="Response header name without trailing :">Key</TextField
+					>
+					<TextField bind:value={headerFormValues.value} maxLength={2048} placeholder="no-store"
+						>Value</TextField
+					>
+				</FormColumn>
+				<FormColumn>
+					<Table
+						columns={[
+							{ column: 'Key', size: 'medium' },
+							{ column: 'Value', size: 'medium' }
+						]}
+						hasData={!!headers.length}
+						plural="headers"
+					>
+						{#each headers as header}
+							<TableRow>
+								<TableCell value={header.key} />
+								<TableCell value={header.value} />
+								<TableCellEmpty />
+								<TableCellAction>
+									<TableDropDownEllipsis>
+										<TableDeleteButton
+											on:click={() => onClickDeleteHeader(headerFormValues.id, header.id)}
+										/>
+									</TableDropDownEllipsis>
+								</TableCellAction>
+							</TableRow>
+						{/each}
+					</Table>
+				</FormColumn>
+			</FormColumns>
+			<FormError message={headerError} />
+			<FormFooter closeText={'Close'} closeModal={closeHeaderModal} {isSubmitting} />
+		</FormGrid>
+	</Modal>
+	<Modal
+		headerText="Filters"
+		description={filterAssetPath}
+		visible={isFilterModalVisible}
+		onClose={closeFilterModal}
+		{isSubmitting}
+	>
+		<FormGrid on:submit={onSubmitFilters} bind:bindTo={filterForm} {isSubmitting}>
+			<FormColumns>
+				<FormColumn>
+					<SelectSquare
+						label="Filtering"
+						toolTipText="Use allow lists or deny lists, not both"
+						options={filteringOptions}
+						width="small"
+						bind:value={allowDenyType}
+						onChange={onChangeAllowDenyType}
+					/>
+					{#if allowDenyType !== 'none'}
+						<div class="mt-4">
+							<TextFieldMultiSelect
+								id="allowDenyIDs"
+								toolTipText="Lists of this type that the asset can use"
+								bind:value={selectedAllowDeny}
+								options={Array.from(allowDenyMap.values())}>Lists</TextFieldMultiSelect
+							>
+						</div>
+					{/if}
+					<p
+						class="text-sm text-gray-600 dark:text-gray-400 mt-4 max-w-md transition-colors duration-200"
+					>
+						Visitors that do not pass the lists get the not found response. Browsers and proxies do
+						not cache a filtered file unless the asset has a Cache-Control header.
+					</p>
+				</FormColumn>
+			</FormColumns>
+			<FormError message={filterError} />
+			<FormFooter closeModal={closeFilterModal} {isSubmitting} />
 		</FormGrid>
 	</Modal>
 	<DeleteAlert
@@ -908,7 +1297,7 @@
 	<!-- Image Preview Popover -->
 	{#if hoveredImageUrl}
 		<div
-			class="fixed z-50 bg-white border border-gray-300 rounded-lg shadow-lg p-2 max-w-xs"
+			class="fixed z-50 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg p-2 max-w-xs"
 			style="left: {popoverPosition.x}px; top: {popoverPosition.y}px;"
 			on:mouseenter={handlePopoverMouseEnter}
 			on:mouseleave={handlePopoverMouseLeave}
@@ -921,7 +1310,7 @@
 				class="max-w-full max-h-64 object-contain rounded"
 				on:error={() => console.error('Failed to load popover image')}
 			/>
-			<div class="text-xs text-gray-600 mt-1 truncate">{hoveredImageName}</div>
+			<div class="text-xs text-gray-600 dark:text-gray-300 mt-1 truncate">{hoveredImageName}</div>
 		</div>
 	{/if}
 </main>

@@ -315,7 +315,7 @@
 				<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
 					<span class="text-gray-500 dark:text-gray-500">Token prefix</span>
 					<span class="text-gray-800 dark:text-gray-200 font-mono">
-						{scimConfig.tokenPrefix ? scimConfig.tokenPrefix + '...' : '—'}
+						{scimConfig.tokenPrefix ? scimConfig.tokenPrefix + '...' : '·'}
 					</span>
 					<span class="text-gray-500 dark:text-gray-500">Last sync</span>
 					<span class="text-gray-800 dark:text-gray-200">{formatDate(scimConfig.lastSyncAt)}</span>

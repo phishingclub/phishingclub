@@ -26,6 +26,7 @@ func initialInstallAndSeed(
 ) error {
 	tables := []any{
 		&database.Asset{},
+		&database.AssetHeader{},
 		&database.Option{},
 		&database.Company{},
 		&database.APISender{},
@@ -52,6 +53,7 @@ func initialInstallAndSeed(
 		&database.EmailAttachment{},
 		&database.AllowDeny{},
 		&database.CampaignAllowDeny{},
+		&database.AssetAllowDeny{},
 		&database.Webhook{},
 		&database.CampaignWebhook{},
 		&database.Script{},
@@ -66,6 +68,10 @@ func initialInstallAndSeed(
 		&database.ReportSendLog{},
 		&database.RemoteBrowser{},
 		&database.ReportTemplate{},
+		&database.Registry{},
+		&database.InstalledPackage{},
+		&database.InstalledResource{},
+		&database.InstalledPackageMember{},
 	}
 
 	// disable foreign key constraints temporarily for sqlite to allow table recreation

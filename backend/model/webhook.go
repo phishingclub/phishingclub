@@ -25,8 +25,21 @@ func (w *Webhook) Validate() error {
 	if err := validate.NullableFieldRequired("name", w.Name); err != nil {
 		return err
 	}
-	if err := validate.NullableFieldRequired("secret", w.URL); err != nil {
+	if err := validate.NullableFieldRequired("url", w.URL); err != nil {
 		return err
+	}
+	if u, err := w.URL.Get(); err == nil {
+		if err := ValidateWebhookURL(u.String()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateWebhookURL requires an absolute http or https url
+func ValidateWebhookURL(s string) error {
+	if err := validate.ErrorIfNotHTTPURL(s); err != nil {
+		return validate.WrapErrorWithField(err, "url")
 	}
 	return nil
 }

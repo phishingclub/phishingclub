@@ -77,14 +77,20 @@ type RelativeFilePath struct {
 	inner string
 }
 
-// NewRelativeFilePath creates a new file path
+// NewRelativeFilePath creates a new file path. It trims and cleans the input
+// and rejects any ".." segment. This value object is a data structure, not a
+// security control: file access must still go through os.Root.
 func NewRelativeFilePath(p string) (*RelativeFilePath, error) {
 	p = strings.TrimSpace(p)
 	p = path.Clean(p)
-	// string can not start with /, ./ or ..
 	err := validate.ErrorIfStringNotbetweenOrEqualTo(p, 1, 512)
 	if err != nil {
 		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return nil, fmt.Errorf("invalid path: \"..\" is not allowed")
+		}
 	}
 
 	// allow only a-zA-Z0-9_-. and / and space

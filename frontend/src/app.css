@@ -45,24 +45,13 @@
 	src: url('/Phudu-Black.ttf') format('truetype');
 }
 
-/* custom properties for theming */
+/* page background, text, shadow and scrollbar colors */
 :root {
 	/* light mode colors */
 	--color-bg-primary: #ffffff;
-	--color-bg-secondary: #f8f9fa;
-	--color-bg-tertiary: #f1f3f4;
-	--color-border: #e5e7eb;
-	--color-border-hover: #d1d5db;
 	--color-text-primary: #111827;
-	--color-text-secondary: #6b7280;
-	--color-text-tertiary: #9ca3af;
 	--color-shadow: rgba(0, 0, 0, 0.1);
 	--color-shadow-lg: rgba(0, 0, 0, 0.15);
-
-	/* form colors */
-	--color-input-bg: #ffffff;
-	--color-input-border: #d1d5db;
-	--color-input-border-focus: #2563eb;
 
 	/* scrollbar colors */
 	--color-scrollbar-track: #f1f1f1;
@@ -73,20 +62,9 @@
 .dark {
 	/* dark mode colors */
 	--color-bg-primary: #111827;
-	--color-bg-secondary: #1f2937;
-	--color-bg-tertiary: #374151;
-	--color-border: #374151;
-	--color-border-hover: #4b5563;
 	--color-text-primary: #f9fafb;
-	--color-text-secondary: #d1d5db;
-	--color-text-tertiary: #9ca3af;
 	--color-shadow: rgba(0, 0, 0, 0.3);
 	--color-shadow-lg: rgba(0, 0, 0, 0.4);
-
-	/* form colors */
-	--color-input-bg: #374151;
-	--color-input-border: #4b5563;
-	--color-input-border-focus: #3b82f6;
 
 	/* scrollbar colors */
 	--color-scrollbar-track: #374151;
@@ -112,56 +90,14 @@ body {
     [&::-webkit-scrollbar-thumb:hover]:bg-[var(--color-scrollbar-thumb-hover)];
 }
 
-/* dark mode utility classes */
+/* box shadow utilities driven by the shadow custom properties */
 @layer utilities {
-	.bg-theme-primary {
-		background-color: var(--color-bg-primary);
-	}
-
-	.bg-theme-secondary {
-		background-color: var(--color-bg-secondary);
-	}
-
-	.bg-theme-tertiary {
-		background-color: var(--color-bg-tertiary);
-	}
-
-	.text-theme-primary {
-		color: var(--color-text-primary);
-	}
-
-	.text-theme-secondary {
-		color: var(--color-text-secondary);
-	}
-
-	.text-theme-tertiary {
-		color: var(--color-text-tertiary);
-	}
-
-	.border-theme {
-		border-color: var(--color-border);
-	}
-
-	.border-theme-hover:hover {
-		border-color: var(--color-border-hover);
-	}
-
 	.shadow-theme {
 		box-shadow: 0 1px 3px 0 var(--color-shadow);
 	}
 
 	.shadow-theme-lg {
 		box-shadow: 0 10px 15px -3px var(--color-shadow-lg);
-	}
-
-	.input-theme {
-		background-color: var(--color-input-bg);
-		border-color: var(--color-input-border);
-		color: var(--color-text-primary);
-	}
-
-	.input-theme:focus {
-		border-color: var(--color-input-border-focus);
 	}
 }
 

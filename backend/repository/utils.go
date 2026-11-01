@@ -12,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var defaultAllowdSearchColumns = []string{
@@ -256,35 +257,37 @@ func LeftJoinOnWithAlias(tableLeft, columnLeft, tableRight, columnRight, alias s
 	return fmt.Sprintf("LEFT JOIN `%s` '%s' on `%s`.`%s` = `%s`.`%s`", tableRight, alias, tableLeft, columnLeft, alias, columnRight)
 }
 
-// withCompanyTableContext adds a company context to the query
+// companyColumn is the company_id column of a table
+func companyColumn(tableName string) clause.Column {
+	return clause.Column{Table: tableName, Name: "company_id"}
+}
+
+// withCompanyIncludingNullContext limits rows to the company and global rows
+// if companyID is nil only global rows are used
 func withCompanyIncludingNullContext(db *gorm.DB, companyID *uuid.UUID, tableName string) *gorm.DB {
-	column := fmt.Sprintf("`%s`.company_id", tableName)
+	column := companyColumn(tableName)
 	if companyID != nil {
-		return db.Where(
-			fmt.Sprintf("(%s = ? OR %s IS NULL)", column, column), companyID)
+		return db.Where(clause.Or(
+			clause.Eq{Column: column, Value: companyID},
+			clause.Eq{Column: column, Value: nil},
+		))
 	}
-	return db.Where(
-		fmt.Sprintf("(%s IS NULL)", column),
-	)
+	return db.Where(clause.Eq{Column: column, Value: nil})
 }
 
-// withCompany adds a where company id
-// if companyID is NIL it will add a companyID IS NULL
+// whereCompany adds a where company id
+// if companyID is nil it adds company_id IS NULL
 func whereCompany(db *gorm.DB, tableName string, companyID *uuid.UUID) *gorm.DB {
-	column := fmt.Sprintf("`%s`.company_id", tableName)
+	column := companyColumn(tableName)
 	if companyID == nil {
-		return db.Where(fmt.Sprintf("%s IS NULL", column))
-	} else {
-		return db.Where(
-			fmt.Sprintf("%s = ?", column), companyID)
+		return db.Where(clause.Eq{Column: column, Value: nil})
 	}
+	return db.Where(clause.Eq{Column: column, Value: companyID})
 }
 
-// withCompany adds a where company id is null
+// whereCompanyIsNull adds a where company id is null
 func whereCompanyIsNull(db *gorm.DB, tableName string) *gorm.DB {
-	column := fmt.Sprintf("`%s`.company_id", tableName)
-	return db.Where(
-		fmt.Sprintf("%s IS NULL", column))
+	return db.Where(clause.Eq{Column: companyColumn(tableName), Value: nil})
 }
 
 // AddTimestamps adds created_at and updated_at to a map
@@ -302,7 +305,7 @@ func AddUpdatedAt(row map[string]interface{}) {
 // CheckColumnIsUnique checks if a column is unique within a company and globally
 // if companyID is nil, it is global no other row should use the name, period.
 // if companyID is set, then the same column id should not use it, and no null company ID
-// columns is not sqli safe
+// the column is passed as a quoted column, never as SQL text
 func CheckColumnIsUnique(
 	ctx context.Context,
 	db *gorm.DB,
@@ -315,10 +318,13 @@ func CheckColumnIsUnique(
 	var count int64
 	tx := db.Table(table)
 
+	tx = tx.Where(clause.Eq{Column: clause.Column{Name: column}, Value: value})
 	if companyID != nil {
-		tx = tx.Where(column+" = ? AND (company_id = ? OR company_id IS NULL)", value, companyID)
-	} else {
-		tx = tx.Where(column+" = ?", value)
+		companyCol := clause.Column{Name: "company_id"}
+		tx = tx.Where(clause.Or(
+			clause.Eq{Column: companyCol, Value: companyID},
+			clause.Eq{Column: companyCol, Value: nil},
+		))
 	}
 	if currentID != nil {
 		tx = tx.Where("id != ?", currentID)
@@ -374,8 +380,4 @@ func TableColumnAll(tableName string) string {
 
 func TableColumnID(tableName string) string {
 	return TableColumn(tableName, "id")
-}
-
-func TableColumnName(tableName string) string {
-	return TableColumn(tableName, "name")
 }

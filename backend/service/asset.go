@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"path"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -54,11 +55,12 @@ func isTextEditablePath(p string) bool {
 // Asset is a Asset service
 type Asset struct {
 	Common
-	RootFolder        string
-	FileService       *File
-	AssetRepository   *repository.Asset
-	DomainRepository  *repository.Domain
-	CompanyRepository *repository.Company
+	RootFolder          string
+	FileService         *File
+	AssetRepository     *repository.Asset
+	DomainRepository    *repository.Domain
+	CompanyRepository   *repository.Company
+	AllowDenyRepository *repository.AllowDeny
 }
 
 // Create creates and stores a new assets
@@ -403,8 +405,132 @@ func (a *Asset) GetByID(
 		)
 		return nil, errs.Wrap(err)
 	}
+	headers, err := a.AssetRepository.GetHeadersByAssetID(ctx, id)
+	if err != nil {
+		a.Logger.Errorw("failed to get asset headers", "id", id.String(), "error", err)
+		return nil, errs.Wrap(err)
+	}
+	asset.Headers = headers
+	lists, err := a.AssetRepository.GetAllowDenyByAssetID(ctx, id)
+	if err != nil {
+		a.Logger.Errorw("failed to get asset allow deny lists", "id", id.String(), "error", err)
+		return nil, errs.Wrap(err)
+	}
+	asset.AllowDeny = lists
+	companyID, err := a.allowDenyCompanyID(ctx, asset)
+	if err != nil {
+		a.Logger.Errorw("failed to get asset company context", "id", id.String(), "error", err)
+		return nil, errs.Wrap(err)
+	}
+	asset.AllowDenyCompanyID = nullable.NewNullNullable[uuid.UUID]()
+	if companyID != nil {
+		asset.AllowDenyCompanyID.Set(*companyID)
+	}
 	// no audit on read
 	return asset, nil
+}
+
+// allowDenyCompanyID returns the company whose allow deny lists the asset can
+// use together with the global lists. An asset with a company uses that
+// company. An asset without a company on a domain that belongs to a company
+// uses the company of the domain. Otherwise it is nil and only global lists
+// can be used.
+func (a *Asset) allowDenyCompanyID(
+	ctx context.Context,
+	asset *model.Asset,
+) (*uuid.UUID, error) {
+	if companyID, err := asset.CompanyID.Get(); err == nil {
+		return &companyID, nil
+	}
+	domainID, err := asset.DomainID.Get()
+	if err != nil {
+		return nil, nil
+	}
+	domain, err := a.DomainRepository.GetByID(ctx, &domainID, &repository.DomainOption{})
+	if err != nil {
+		return nil, err
+	}
+	if companyID, err := domain.CompanyID.Get(); err == nil {
+		return &companyID, nil
+	}
+	return nil, nil
+}
+
+// SetAllowDenyByID replaces the allow deny lists of an asset. The lists must
+// all be allow lists or all deny lists. An asset in a company context can use
+// the lists of that company and global lists, any other asset can only use
+// global lists. An empty list removes all lists from the asset.
+func (a *Asset) SetAllowDenyByID(
+	ctx context.Context,
+	session *model.Session,
+	assetID *uuid.UUID,
+	allowDenyIDs []uuid.UUID,
+) error {
+	ae := NewAuditEvent("Asset.SetAllowDeny", session)
+	ae.Details["id"] = assetID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		a.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		a.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	asset, err := a.AssetRepository.GetByID(ctx, assetID)
+	if err != nil {
+		a.Logger.Debugw("asset not found", "id", assetID.String(), "error", err)
+		return err
+	}
+	companyID, err := a.allowDenyCompanyID(ctx, asset)
+	if err != nil {
+		a.Logger.Errorw("failed to get asset company context", "id", assetID.String(), "error", err)
+		return errs.Wrap(err)
+	}
+	// load each list once, in the given order
+	ids := []*uuid.UUID{}
+	idsStr := []string{}
+	lists := []*model.AllowDeny{}
+	seen := map[uuid.UUID]bool{}
+	for _, id := range allowDenyIDs {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		listID := id
+		list, err := a.AllowDenyRepository.GetByID(ctx, &listID, &repository.AllowDenyOption{})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return validate.WrapErrorWithField(errors.New("filter not found"), "allowDenyIDs")
+		}
+		if err != nil {
+			a.Logger.Errorw("failed to get allow deny list", "id", listID.String(), "error", err)
+			return errs.Wrap(err)
+		}
+		if !model.AllowDenyUsableInCompany(list, companyID) {
+			a.Logger.Debugw("allow deny list not usable for asset",
+				"assetID", assetID.String(),
+				"allowDenyID", listID.String(),
+			)
+			return validate.WrapErrorWithField(
+				errors.New("filter belongs to another company"),
+				"allowDenyIDs",
+			)
+		}
+		lists = append(lists, list)
+		ids = append(ids, &listID)
+		idsStr = append(idsStr, listID.String())
+	}
+	if err := model.ValidateAllowDenySameType(lists); err != nil {
+		return err
+	}
+	if err := a.AssetRepository.ReplaceAllowDeny(ctx, assetID, ids); err != nil {
+		a.Logger.Errorw("failed to set asset allow deny lists", "id", assetID.String(), "error", err)
+		return errs.Wrap(err)
+	}
+	ae.Details["allowDenyIDs"] = idsStr
+	a.AuditLogAuthorized(ae)
+	return nil
 }
 
 // GetByID gets an asset by path
@@ -445,6 +571,7 @@ func (a *Asset) UpdateByID(
 	id *uuid.UUID,
 	name nullable.Nullable[vo.OptionalString127],
 	description nullable.Nullable[vo.OptionalString255],
+	contentType nullable.Nullable[vo.OptionalString255],
 ) error {
 	ae := NewAuditEvent("Asset.UpdateById", session)
 	ae.Details["id"] = id.String()
@@ -470,6 +597,17 @@ func (a *Asset) UpdateByID(
 	// update the asset
 	current.Name = name
 	current.Description = description
+	// the content type is kept when the request does not include it
+	if contentType.IsSpecified() {
+		if contentType.IsNull() {
+			current.ContentType = nullable.NewNullableWithValue(*vo.NewEmptyOptionalString255())
+		} else {
+			current.ContentType = contentType
+		}
+		if ct, err := current.ContentType.Get(); err == nil {
+			ae.Details["contentType"] = ct.String()
+		}
+	}
 	// validate
 	if err := current.Validate(); err != nil {
 		a.Logger.Debugw("failed to validate asset", "error", err)
@@ -483,6 +621,90 @@ func (a *Asset) UpdateByID(
 	)
 	if err != nil {
 		a.Logger.Errorw("failed to update asset", "error", err)
+		return err
+	}
+	a.AuditLogAuthorized(ae)
+	return nil
+}
+
+// AddHeader adds a response header to an asset
+func (a *Asset) AddHeader(
+	ctx context.Context,
+	session *model.Session,
+	assetID *uuid.UUID,
+	header *model.AssetHeader,
+) (*uuid.UUID, error) {
+	ae := NewAuditEvent("Asset.AddHeader", session)
+	ae.Details["id"] = assetID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		a.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		a.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+	// ensure the asset exists
+	if _, err := a.AssetRepository.GetByID(ctx, assetID); err != nil {
+		a.Logger.Debugw("asset not found", "id", assetID.String(), "error", err)
+		return nil, errs.Wrap(err)
+	}
+	header.AssetID = nullable.NewNullableWithValue(*assetID)
+	if err := header.Validate(); err != nil {
+		a.Logger.Debugw("failed to validate asset header", "error", err)
+		return nil, err
+	}
+	current, err := a.AssetRepository.GetHeadersByAssetID(ctx, assetID)
+	if err != nil {
+		a.Logger.Errorw("failed to get asset headers", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	if len(current) >= model.MaxAssetHeaders {
+		return nil, errs.NewValidationError(
+			fmt.Errorf("an asset can have at most %d response headers", model.MaxAssetHeaders),
+		)
+	}
+	headerID, err := a.AssetRepository.AddHeader(ctx, header)
+	if err != nil {
+		a.Logger.Errorw("failed to add asset header", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	ae.Details["headerId"] = headerID.String()
+	ae.Details["key"] = header.Key.MustGet().String()
+	a.AuditLogAuthorized(ae)
+	return headerID, nil
+}
+
+// RemoveHeader removes a response header from an asset
+func (a *Asset) RemoveHeader(
+	ctx context.Context,
+	session *model.Session,
+	assetID *uuid.UUID,
+	headerID *uuid.UUID,
+) error {
+	ae := NewAuditEvent("Asset.RemoveHeader", session)
+	ae.Details["id"] = assetID.String()
+	ae.Details["headerId"] = headerID.String()
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		a.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		a.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// ensure the asset exists
+	if _, err := a.AssetRepository.GetByID(ctx, assetID); err != nil {
+		a.Logger.Debugw("asset not found", "id", assetID.String(), "error", err)
+		return err
+	}
+	// only a header that belongs to this asset is removed
+	if err := a.AssetRepository.RemoveHeader(ctx, assetID, headerID); err != nil {
+		a.Logger.Debugw("failed to remove asset header", "error", err)
 		return err
 	}
 	a.AuditLogAuthorized(ae)
@@ -548,74 +770,8 @@ func (a *Asset) DeleteByID(
 		)
 		return err
 	}
-	// delete the file
-	domainContext, err := a.assetContextFolder(ctx, asset)
+	filePath, err := a.deleteAssetFileAndRow(ctx, asset)
 	if err != nil {
-		return err
-	}
-	p, err := asset.Path.Get()
-	if err != nil {
-		a.Logger.Debugw("failed to get path", "error", err)
-		return err
-	}
-
-	// create root filesystem for secure deletion
-	root, err := os.OpenRoot(a.RootFolder)
-	if err != nil {
-		a.Logger.Debugw("failed to open root folder", "error", err)
-		return err
-	}
-	defer root.Close()
-
-	// validate domain context access
-	domainRoot, err := root.OpenRoot(domainContext)
-	if err != nil {
-		a.Logger.Debugw("failed to open domain context", "error", err)
-		return err
-	}
-	defer domainRoot.Close()
-
-	// validate file exists within domain context
-	_, err = domainRoot.Stat(p.String())
-	if err != nil {
-		a.Logger.Debugw("file not found in domain context", "error", err)
-		return err
-	}
-
-	// build safe file path (validated by OpenRoot)
-	filePath := filepath.Join(a.RootFolder, domainContext, p.String())
-
-	err = a.FileService.Delete(
-		filePath,
-	)
-	if err != nil {
-		a.Logger.Debugw("failed to delete file",
-			"path", filePath,
-			"error", err,
-		)
-		return err
-	}
-	err = a.FileService.RemoveEmptyFolderRecursively(
-		filepath.Join(a.RootFolder, domainContext),
-		filepath.Dir(filePath),
-	)
-	if err != nil {
-		a.Logger.Debugw("failed to remove empty folders",
-			"path", filePath,
-			"error", err,
-		)
-		return err
-	}
-	// delete the asset from the database
-	err = a.AssetRepository.DeleteByID(
-		ctx,
-		id,
-	)
-	if err != nil {
-		a.Logger.Errorw("failed to delete asset from database but the file is deleted",
-			"path", filePath,
-			"error", err,
-		)
 		return err
 	}
 	ae.Details["path"] = filePath
@@ -653,73 +809,7 @@ func (a *Asset) DeleteAllByCompanyID(
 		return err
 	}
 	for _, asset := range assets {
-		// delete the file
-		domainContext, err := a.assetContextFolder(ctx, asset)
-		if err != nil {
-			return err
-		}
-		p, err := asset.Path.Get()
-		if err != nil {
-			a.Logger.Debugw("failed to get path", "error", err)
-			return err
-		}
-		// create root filesystem for secure deletion
-		root, err := os.OpenRoot(a.RootFolder)
-		if err != nil {
-			a.Logger.Debugw("failed to open root folder", "error", err)
-			return err
-		}
-		defer root.Close()
-
-		// validate domain context access
-		domainContextRoot, err := root.OpenRoot(domainContext)
-		if err != nil {
-			a.Logger.Debugw("failed to open domain context", "error", err)
-			return err
-		}
-		defer domainContextRoot.Close()
-
-		// validate file exists within domain context
-		_, err = domainContextRoot.Stat(p.String())
-		if err != nil {
-			a.Logger.Debugw("file not found in domain context", "error", err)
-			return err
-		}
-
-		// build safe file path (validated by OpenRoot)
-		filePath := filepath.Join(a.RootFolder, domainContext, p.String())
-		err = a.FileService.Delete(
-			filePath,
-		)
-		if err != nil {
-			a.Logger.Debugw("failed to delete file",
-				"path", filePath,
-				"error", err,
-			)
-			return err
-		}
-		err = a.FileService.RemoveEmptyFolderRecursively(
-			filepath.Join(a.RootFolder, domainContext),
-			filepath.Dir(filePath),
-		)
-		if err != nil {
-			a.Logger.Debugw("failed to remove empty folders",
-				"path", filePath,
-				"error", err,
-			)
-			return err
-		}
-		// delete the asset from the database
-		assetID := asset.ID.MustGet()
-		err = a.AssetRepository.DeleteByID(
-			ctx,
-			&assetID,
-		)
-		if err != nil {
-			a.Logger.Errorw("failed to delete asset from database but the file is deleted",
-				"path", filePath,
-				"error", err,
-			)
+		if _, err := a.deleteAssetFileAndRow(ctx, asset); err != nil {
 			return err
 		}
 	}
@@ -761,82 +851,77 @@ func (a *Asset) DeleteAllByDomainID(
 	}
 	// delete
 	for _, asset := range assets {
-
-		// delete the file
-		domainContext, err := a.assetContextFolder(ctx, asset)
-		if err != nil {
-			return err
-		}
-		p, err := asset.Path.Get()
-		if err != nil {
-			a.Logger.Debugw("failed to get path",
-				"error", err,
-			)
-			return err
-		}
-
-		// create root filesystem for secure deletion
-		root, err := os.OpenRoot(a.RootFolder)
-		if err != nil {
-			a.Logger.Debugw("failed to open root folder", "error", err)
-			return err
-		}
-		defer root.Close()
-
-		// validate domain context access
-		domainContextRoot, err := root.OpenRoot(domainContext)
-		if err != nil {
-			a.Logger.Debugw("failed to open domain context", "error", err)
-			return err
-		}
-		defer domainContextRoot.Close()
-
-		// validate file exists within domain context
-		_, err = domainContextRoot.Stat(p.String())
-		if err != nil {
-			a.Logger.Debugw("file not found in domain context", "error", err)
-			return err
-		}
-
-		// build safe file path (validated by OpenRoot)
-		filePath := filepath.Join(a.RootFolder, domainContext, p.String())
-		err = a.FileService.Delete(
-			filePath,
-		)
-		if err != nil {
-			a.Logger.Debugw("failed to delete file",
-				"path", filePath,
-				"error", err,
-			)
-			return err
-		}
-		err = a.FileService.RemoveEmptyFolderRecursively(
-			filepath.Join(a.RootFolder, domainContext),
-			filepath.Dir(filePath),
-		)
-		if err != nil {
-			a.Logger.Debugw("failed to remove empty folders",
-				"path", filePath,
-				"error", err,
-			)
-			return err
-		}
-		// delete the asset from the database
-		assetID := asset.ID.MustGet()
-		err = a.AssetRepository.DeleteByID(
-			ctx,
-			&assetID,
-		)
-		if err != nil {
-			a.Logger.Errorw("failed to delete asset from database but the file is deleted",
-				"path", filePath,
-				"error", err,
-			)
+		if _, err := a.deleteAssetFileAndRow(ctx, asset); err != nil {
 			return err
 		}
 	}
 	a.AuditLogAuthorized(ae)
 	return nil
+}
+
+// deleteAssetFileAndRow deletes the file of an asset and then its row. An
+// asset whose stored path can not be loaded has no file to act on, so only
+// the row is deleted. It returns the full file path, or an empty string when
+// no file was deleted.
+func (a *Asset) deleteAssetFileAndRow(
+	ctx context.Context,
+	asset *model.Asset,
+) (string, error) {
+	assetID, err := asset.ID.Get()
+	if err != nil {
+		a.Logger.Debugw("failed to get asset id", "error", err)
+		return "", err
+	}
+	filePath := ""
+	p, err := asset.Path.Get()
+	relPath := ""
+	if err == nil {
+		relPath = path.Clean(p.String())
+	}
+	if relPath == "" || relPath == "." || relPath == "/" {
+		a.Logger.Warnw("asset has no usable path, deleting only the row",
+			"id", assetID.String(),
+		)
+	} else {
+		domainContext, err := a.assetContextFolder(ctx, asset)
+		if err != nil {
+			return "", err
+		}
+		root, contextRoot, err := a.openContextRootFor(domainContext)
+		if err != nil {
+			return "", err
+		}
+		defer root.Close()
+		defer contextRoot.Close()
+
+		filePath = filepath.Join(a.RootFolder, domainContext, relPath)
+		if err := a.FileService.Delete(contextRoot, relPath); err != nil {
+			a.Logger.Debugw("failed to delete file",
+				"path", filePath,
+				"error", err,
+			)
+			return "", err
+		}
+		if err := a.FileService.RemoveEmptyFolderRecursively(
+			contextRoot,
+			path.Dir(relPath),
+		); err != nil {
+			a.Logger.Debugw("failed to remove empty folders",
+				"path", filePath,
+				"error", err,
+			)
+			return "", err
+		}
+	}
+	if err := a.AssetRepository.DeleteByID(ctx, &assetID); err != nil {
+		a.Logger.Errorw("failed to delete asset from database",
+			"id", assetID.String(),
+			"path", filePath,
+			"error", err,
+		)
+		return "", err
+	}
+	return filePath, nil
 }
 
 // openContextRoot opens a root confined to the folder the asset is stored in.
@@ -849,6 +934,14 @@ func (a *Asset) openContextRoot(
 	if err != nil {
 		return nil, nil, err
 	}
+	return a.openContextRootFor(domainContext)
+}
+
+// openContextRootFor opens a root confined to the given context folder.
+// The caller is responsible for closing both returned roots.
+func (a *Asset) openContextRootFor(
+	domainContext string,
+) (*os.Root, *os.Root, error) {
 	root, err := os.OpenRoot(a.RootFolder)
 	if err != nil {
 		a.Logger.Debugw("failed to open root folder", "error", err)
@@ -873,7 +966,6 @@ func (a *Asset) GetContentByID(
 ) ([]byte, bool, error) {
 	ae := NewAuditEvent("Asset.GetContentById", session)
 	ae.Details["id"] = id.String()
-	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		a.LogAuthError(err)
@@ -883,7 +975,6 @@ func (a *Asset) GetContentByID(
 		a.AuditLogNotAuthorized(ae)
 		return nil, false, errs.ErrAuthorizationFailed
 	}
-	// get the asset
 	asset, err := a.AssetRepository.GetByID(ctx, id)
 	if err != nil {
 		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
@@ -938,7 +1029,6 @@ func (a *Asset) SaveContentByID(
 ) error {
 	ae := NewAuditEvent("Asset.SaveContentById", session)
 	ae.Details["id"] = id.String()
-	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		a.LogAuthError(err)
@@ -948,7 +1038,6 @@ func (a *Asset) SaveContentByID(
 		a.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	// get the asset
 	asset, err := a.AssetRepository.GetByID(ctx, id)
 	if err != nil {
 		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
@@ -981,7 +1070,6 @@ func (a *Asset) SaveContentByID(
 		a.Logger.Errorw("failed to write asset content", "error", err)
 		return err
 	}
-	// bump updated_at
 	if err := a.AssetRepository.UpdateByID(ctx, id, &model.Asset{}); err != nil {
 		a.Logger.Errorw("failed to update asset timestamp", "error", err)
 		return err
@@ -1001,7 +1089,6 @@ func (a *Asset) MoveByID(
 ) error {
 	ae := NewAuditEvent("Asset.MoveById", session)
 	ae.Details["id"] = id.String()
-	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		a.LogAuthError(err)
@@ -1011,7 +1098,6 @@ func (a *Asset) MoveByID(
 		a.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	// get the asset
 	asset, err := a.AssetRepository.GetByID(ctx, id)
 	if err != nil {
 		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
@@ -1039,14 +1125,9 @@ func (a *Asset) MoveByID(
 	if err != nil {
 		return validate.WrapErrorWithField(errs.NewValidationError(err), "Path")
 	}
-	// nothing to do if the path is unchanged
 	if dst.String() == oldPath.String() {
 		a.AuditLogAuthorized(ae)
 		return nil
-	}
-	domainContext, err := a.assetContextFolder(ctx, asset)
-	if err != nil {
-		return err
 	}
 	root, contextRoot, err := a.openContextRoot(ctx, asset)
 	if err != nil {
@@ -1054,7 +1135,6 @@ func (a *Asset) MoveByID(
 	}
 	defer root.Close()
 	defer contextRoot.Close()
-	// the source must exist
 	if _, err := contextRoot.Stat(oldPath.String()); err != nil {
 		a.Logger.Debugw("source file not found", "path", oldPath.String(), "error", err)
 		return err
@@ -1101,10 +1181,9 @@ func (a *Asset) MoveByID(
 	// remove directories left empty by the move. this is cosmetic and runs only
 	// after the database agrees with the filesystem, so a failure here does not
 	// fail the move or leave the two out of sync.
-	oldFullPath := filepath.Join(a.RootFolder, domainContext, oldPath.String())
 	if err := a.FileService.RemoveEmptyFolderRecursively(
-		filepath.Join(a.RootFolder, domainContext),
-		filepath.Dir(oldFullPath),
+		contextRoot,
+		path.Dir(oldPath.String()),
 	); err != nil {
 		a.Logger.Debugw("failed to remove empty folders after move", "error", err)
 	}
@@ -1124,7 +1203,6 @@ func (a *Asset) ReplaceFileByID(
 ) error {
 	ae := NewAuditEvent("Asset.ReplaceFileById", session)
 	ae.Details["id"] = id.String()
-	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		a.LogAuthError(err)
@@ -1134,7 +1212,6 @@ func (a *Asset) ReplaceFileByID(
 		a.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	// get the asset
 	asset, err := a.AssetRepository.GetByID(ctx, id)
 	if err != nil {
 		a.Logger.Debugw("asset not found", "id", id.String(), "error", err)
@@ -1171,7 +1248,6 @@ func (a *Asset) ReplaceFileByID(
 		a.Logger.Errorw("failed to write asset content", "error", err)
 		return err
 	}
-	// bump updated_at
 	if err := a.AssetRepository.UpdateByID(ctx, id, &model.Asset{}); err != nil {
 		a.Logger.Errorw("failed to update asset timestamp", "error", err)
 		return err

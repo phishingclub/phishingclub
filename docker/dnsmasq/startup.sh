@@ -6,6 +6,8 @@ BACKEND_IP=$(getent hosts backend | awk '{ print $1 }')
 echo "address=/.test/$BACKEND_IP" > /etc/dnsmasq.conf
 # labs can use *.labs.test
 echo "address=/labs.test/172.20.0.150" >> /etc/dnsmasq.conf
+# bait box registry and admin hosts, so pebble can validate their certificates
+echo "address=/baitbox.test/172.20.0.151" >> /etc/dnsmasq.conf
 echo "BACKEND_IP=$BACKEND_IP"
 echo "Loaded configuration (/etc/dnsmasq.conf):"
 cat /etc/dnsmasq.conf

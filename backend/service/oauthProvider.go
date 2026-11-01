@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
+	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/random"
@@ -226,10 +227,10 @@ func (o *OAuthProvider) UpdateByID(
 		provider.IsImported = nullable.NewNullNullable[bool]()
 	}
 
-	var companyID *uuid.UUID
-	if cid, err := existing.CompanyID.Get(); err == nil {
-		companyID = &cid
-	}
+	// the company of a provider is set on create and never changed by an update,
+	// so API senders referencing it stay within their company
+	provider.CompanyID = nullable.Nullable[uuid.UUID]{}
+	companyID := companyIDPtr(existing.CompanyID)
 
 	// check uniqueness
 	name := provider.Name.MustGet()
@@ -436,55 +437,135 @@ func (o *OAuthProvider) GetAuthorizationURL(
 	return authorizationURL, nil
 }
 
-// ExchangeCodeForTokens exchanges authorization code for access and refresh tokens
-// session can be nil when called from public callback endpoint
-// security is enforced through state token validation (one-time-use, expires)
+// ExchangeCodeForTokens exchanges authorization code for access and refresh tokens.
+// The callback arrives without the admin session, so session is nil and the
+// single use, expiring state token is the only check. It returns the provider
+// id of the state when known, so the callback page can name the flow.
 func (o *OAuthProvider) ExchangeCodeForTokens(
 	ctx context.Context,
 	session *model.Session,
 	stateToken string,
 	code string,
 	redirectURI string,
-) error {
+) (uuid.UUID, error) {
 	// retrieve state token from database
 	oauthState, err := o.OAuthStateRepository.GetByStateToken(ctx, stateToken)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			o.Logger.Warn("invalid or expired state token")
-			return errors.New("invalid or expired state token")
+			return uuid.Nil, errors.New("invalid or expired state token")
 		}
 		o.Logger.Errorw("failed to retrieve state token", "error", err)
-		return errs.Wrap(err)
+		return uuid.Nil, errs.Wrap(err)
 	}
+	providerID := oauthState.OAuthProviderID.MustGet()
 
 	// validate state token hasn't been used (prevent replay attacks)
 	if oauthState.Used {
-		o.Logger.Warnw("state token already used", "oauthProviderID", oauthState.OAuthProviderID.MustGet().String())
-		return errors.New("state token already used")
+		o.Logger.Warnw("state token already used", "oauthProviderID", providerID.String())
+		return uuid.Nil, errors.New("state token already used")
 	}
 
 	// validate state token hasn't expired
 	if oauthState.ExpiresAt != nil && time.Now().After(*oauthState.ExpiresAt) {
-		o.Logger.Warnw("state token expired", "oauthProviderID", oauthState.OAuthProviderID.MustGet().String(), "expiresAt", oauthState.ExpiresAt)
-		return errors.New("state token expired")
-	}
-
-	// get provider from state
-	providerID := oauthState.OAuthProviderID.MustGet()
-	provider, err := o.OAuthProviderRepository.GetByID(ctx, providerID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return errs.Wrap(err)
+		o.Logger.Warnw("state token expired", "oauthProviderID", providerID.String(), "expiresAt", oauthState.ExpiresAt)
+		if _, err := o.OAuthStateRepository.MarkFailedByStateToken(ctx, stateToken); err != nil {
+			return uuid.Nil, errors.New("state token expired")
 		}
-		return errs.Wrap(err)
+		return providerID, errors.New("state token expired")
 	}
 
-	// mark state token as used before exchanging the code, if this fails the token
-	// remains unused and could be replayed within the 10-minute expiry window, so
-	// we must abort rather than continue
+	// claim the state before exchanging the code. The update only matches an
+	// unused row, so a replayed or concurrent callback with the same state
+	// fails here and never reaches the token exchange.
 	stateID := oauthState.ID.MustGet()
 	if err := o.OAuthStateRepository.MarkAsUsed(ctx, stateID); err != nil {
-		o.Logger.Errorw("failed to mark state token as used, aborting token exchange to prevent replay", "error", err)
+		o.Logger.Warnw("failed to claim state token, aborting token exchange", "error", err)
+		return uuid.Nil, errs.Wrap(err)
+	}
+
+	if err := o.exchangeCodeForTokens(ctx, providerID, code, redirectURI); err != nil {
+		if rerr := o.OAuthStateRepository.SetResult(ctx, stateID, database.OAUTH_STATE_RESULT_FAILED); rerr != nil {
+			o.Logger.Errorw("failed to record oauth state result", "error", rerr)
+		}
+		return providerID, err
+	}
+	if err := o.OAuthStateRepository.SetResult(ctx, stateID, database.OAUTH_STATE_RESULT_SUCCESS); err != nil {
+		o.Logger.Errorw("failed to record oauth state result", "error", err)
+	}
+	return providerID, nil
+}
+
+// FailAuthorization records a failed flow for a state token the provider sent
+// back with an error. It returns the provider id when the state was pending.
+func (o *OAuthProvider) FailAuthorization(
+	ctx context.Context,
+	stateToken string,
+) uuid.UUID {
+	if stateToken == "" {
+		return uuid.Nil
+	}
+	providerID, err := o.OAuthStateRepository.MarkFailedByStateToken(ctx, stateToken)
+	if err != nil {
+		if !errors.Is(err, repository.ErrOAuthStateAlreadyUsed) {
+			o.Logger.Errorw("failed to record failed oauth state", "error", err)
+		}
+		return uuid.Nil
+	}
+	return providerID
+}
+
+// GetAuthorizationStatus returns the outcome of the flow started with
+// stateToken for the provider: pending, success, failed or expired.
+func (o *OAuthProvider) GetAuthorizationStatus(
+	ctx context.Context,
+	session *model.Session,
+	providerID *uuid.UUID,
+	stateToken string,
+) (string, error) {
+	ae := NewAuditEvent("OAuthProvider.GetAuthorizationStatus", session)
+
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return "", errs.Wrap(err)
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return "", errs.ErrAuthorizationFailed
+	}
+
+	oauthState, err := o.OAuthStateRepository.GetByStateToken(ctx, stateToken)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "expired", nil
+		}
+		o.Logger.Errorw("failed to get oauth state", "error", err)
+		return "", errs.Wrap(err)
+	}
+	if oauthState.OAuthProviderID.MustGet() != *providerID {
+		return "", errs.Wrap(gorm.ErrRecordNotFound)
+	}
+	switch oauthState.Result {
+	case database.OAUTH_STATE_RESULT_SUCCESS, database.OAUTH_STATE_RESULT_FAILED:
+		return oauthState.Result, nil
+	}
+	if !oauthState.Used && oauthState.ExpiresAt != nil && time.Now().After(*oauthState.ExpiresAt) {
+		return "expired", nil
+	}
+	return "pending", nil
+}
+
+// exchangeCodeForTokens swaps the code for tokens and stores them on the provider
+func (o *OAuthProvider) exchangeCodeForTokens(
+	ctx context.Context,
+	providerID uuid.UUID,
+	code string,
+	redirectURI string,
+) error {
+	provider, err := o.OAuthProviderRepository.GetByID(ctx, providerID)
+	if err != nil {
 		return errs.Wrap(err)
 	}
 

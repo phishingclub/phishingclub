@@ -4,6 +4,7 @@
 	import { menu, mobileTopMenu } from '$lib/consts/navigation';
 	import { shouldHideMenuItem } from '$lib/utils/common';
 	import ConditionalDisplay from '../ConditionalDisplay.svelte';
+	import BetaTag from '../BetaTag.svelte';
 	import ThemeToggle from '../ThemeToggle.svelte';
 	import { branding, loadBranding, headerLogoSrc, brandingDisplayFor, BRANDING_SLOT } from '$lib/store/branding';
 	import BrandingImage from '$lib/components/BrandingImage.svelte';
@@ -190,7 +191,7 @@
 		<div
 			class="mobile-menu-header flex justify-between h-20 items-center bg-pc-darkblue/90 dark:bg-gray-900/90 px-6 border-b border-white/10 dark:border-gray-700/50"
 		>
-			<BrandingImage src={logoSrc} alt="logo" display={logoDisplay} boxClass="h-12 w-40" />
+			<BrandingImage src={logoSrc} alt="logo" display={logoDisplay} ready={$branding.loaded} boxClass="h-12 w-40" />
 			<div class="flex items-center gap-2">
 				<div
 					class="flex items-center justify-center w-12 h-12 rounded-lg hover:bg-white/10 dark:hover:bg-gray-600/30 transition-all duration-200"
@@ -246,7 +247,9 @@
 							<div class="flex-shrink-0 mr-3 text-white dark:text-highlight-blue">
 								{@html getTopMenuIcon(link.label)}
 							</div>
-							<span class="flex-1 text-left">{link.label}</span>
+							<span class="flex-1 text-left"
+								>{link.label}{#if link.beta}<BetaTag onDark />{/if}</span
+							>
 							{#if $page.url.pathname === link.route}
 								<div class="w-2 h-2 bg-white rounded-full"></div>
 							{/if}

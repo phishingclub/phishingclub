@@ -1704,7 +1704,12 @@
 					{campaign.name}
 				</TableCellLink>
 				<TableCell>
-					{toEvent(campaign.notableEventName).name}
+					<!-- paused is just another status word like Active or Closed -->
+					{#if campaign.pausedAt && !campaign.closedAt}
+						<span data-paused-badge title="Sending paused">Paused</span>
+					{:else}
+						{toEvent(campaign.notableEventName).name}
+					{/if}
 				</TableCell>
 				<TableCellLink
 					href={`/campaign-template/?edit=${campaign.templateID}`}

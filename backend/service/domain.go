@@ -21,6 +21,7 @@ import (
 	"github.com/phishingclub/phishingclub/acme"
 	"github.com/phishingclub/phishingclub/build"
 	"github.com/phishingclub/phishingclub/data"
+	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
@@ -42,6 +43,60 @@ type Domain struct {
 	AssetService              *Asset
 	FileService               *File
 	TemplateService           *Template
+	// AdminHosts returns the hosts the administration server answers on. A
+	// domain may not use one of these names. It is read on each call so a
+	// changed config is picked up.
+	AdminHosts func() []string
+}
+
+// reservedHosts returns the admin hosts a domain may not use
+func (d *Domain) reservedHosts() []string {
+	if d.AdminHosts == nil {
+		return nil
+	}
+	return d.AdminHosts()
+}
+
+// validateNameNotReserved checks a new domain name format and refuses a name
+// equal to an admin host
+func (d *Domain) validateNameNotReserved(domain *model.Domain) error {
+	name, err := domain.Name.Get()
+	if err != nil {
+		return validate.WrapErrorWithField(errors.New("is required"), "name")
+	}
+	return model.ValidateDomainName(name.String(), d.reservedHosts()...)
+}
+
+// validateExistingNameNotReserved refuses a stored domain name equal to an
+// admin host, without checking the name format
+func (d *Domain) validateExistingNameNotReserved(domain *model.Domain) error {
+	name, err := domain.Name.Get()
+	if err != nil {
+		return validate.WrapErrorWithField(errors.New("is required"), "name")
+	}
+	if model.IsReservedDomainName(name.String(), d.reservedHosts()...) {
+		return validate.WrapErrorWithField(
+			errors.New("is reserved for the administration server"),
+			"name",
+		)
+	}
+	return nil
+}
+
+// normalizeDomainName stores the name trimmed, lowercase and without a
+// trailing dot, the form the server matches the request host against
+func normalizeDomainName(domain *model.Domain) {
+	name, err := domain.Name.Get()
+	if err != nil {
+		return
+	}
+	normalized := model.NormalizeDomainName(name.String())
+	if normalized == name.String() {
+		return
+	}
+	if v, err := vo.NewString255(normalized); err == nil {
+		domain.Name.Set(*v)
+	}
 }
 
 // CreateProxyDomain creates a proxy domain bypassing direct creation restrictions
@@ -104,11 +159,23 @@ func (d *Domain) createDomain(
 		if domainType, err := domain.Type.Get(); err == nil && domainType.String() == "proxy" {
 			return nil, validate.WrapErrorWithField(errors.New("proxy domains can only be created through proxy configuration, not directly"), "type")
 		}
+		// a linked proxy must be global or owned by the domain company. proxy
+		// configuration creates its domains with the proxy company, so this is
+		// only needed here.
+		refs := companyRefs{}
+		refs.add(database.PROXY_TABLE, "proxyID", domain.ProxyID)
+		if err := ValidateCompanyRefs(ctx, d.DomainRepository.DB, companyIDPtr(domain.CompanyID), refs); err != nil {
+			return nil, err
+		}
 	}
 
 	// validate data
+	normalizeDomainName(domain)
 	if err := domain.Validate(); err != nil {
 		d.Logger.Errorw("failed to validate domain", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	if err := d.validateNameNotReserved(domain); err != nil {
 		return nil, errs.Wrap(err)
 	}
 
@@ -572,6 +639,13 @@ func (d *Domain) updateDomain(
 			current.PageNotFoundContent.Set(v)
 		}
 		if v, err := incoming.RedirectURL.Get(); err == nil {
+			stored := ""
+			if c, err := current.RedirectURL.Get(); err == nil {
+				stored = c.String()
+			}
+			if err := model.ValidateDomainRedirectURLUpdate(stored, v.String()); err != nil {
+				return err
+			}
 			current.RedirectURL.Set(v)
 		}
 	}
@@ -603,9 +677,13 @@ func (d *Domain) updateDomain(
 		ownManagedTLSPemIsSet = len(v) > 0
 	}
 
-	// validate
-	if err := current.Validate(); err != nil {
+	// validate. The name can not change on update, so only the reserved host
+	// check runs on it, which keeps older names editable.
+	if err := current.ValidateExisting(); err != nil {
 		d.Logger.Errorw("failed to validate domain", "error", err)
+		return err
+	}
+	if err := d.validateExistingNameNotReserved(current); err != nil {
 		return err
 	}
 

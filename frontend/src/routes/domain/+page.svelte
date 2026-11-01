@@ -19,6 +19,7 @@
 	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
@@ -304,7 +305,8 @@
 				formValues.pageNotFoundContent = '';
 			}
 			const res = await api.domain.create({
-				name: formValues.name,
+				// host names are case insensitive and the server stores them lowercase
+				name: (formValues.name || '').trim().toLowerCase(),
 				type: 'regular',
 				proxyTargetDomain: '',
 				managedTLS: formValues.managedTLS,
@@ -707,7 +709,7 @@
 						<TableViewButton
 							title={'View'}
 							on:click={() => {
-								window.open(`https://${domain.name}`, '_blank');
+								window.open(`https://${domain.name}`, '_blank', 'noopener,noreferrer');
 							}}
 						/>
 						<TableUpdateButton
@@ -761,6 +763,9 @@
 		onClose={closeAllModals}
 		{isSubmitting}
 	>
+		{#if modalMode === 'update'}
+			<InstalledResourceBadge resourceType="domain" resourceId={formValues.id} variant="notice" />
+		{/if}
 		<FormGrid novalidate on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<FormColumns>
 				<FormColumn>
@@ -822,7 +827,7 @@
 							/>
 
 							<SelectSquare
-								label="Self-Signed Certificates"
+								label="Self signed certificates"
 								options={[
 									{ value: true, label: 'Enable' },
 									{ value: false, label: 'Disable' }

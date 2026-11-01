@@ -18,6 +18,7 @@
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
@@ -97,14 +98,24 @@
 		modalText = getModalText('Filter', modalMode);
 	}
 
-	// an allow filter that lists ASNs blocks every visitor while no ASN data is
-	// downloaded, because no visitor IP can resolve to an ASN and an allow list
-	// denies what it can not match
-	$: asnAllowBlocksAll =
-		formValues.allowed === true &&
-		formValues.asns &&
-		formValues.asns.length > 0 &&
-		!asnAvailable;
+	// a visitor matches a filter when it matches any of its rules. While no ASN
+	// data is downloaded no visitor IP resolves to an ASN, so an ASN rule never
+	// matches. An allow filter whose only rule is ASNs then blocks every visitor,
+	// otherwise the ASN rule simply has no effect.
+	const hasNonASNRules = (f) =>
+		!!(f.cidrs && f.cidrs.trim()) ||
+		!!(f.ja4Fingerprints && f.ja4Fingerprints.trim()) ||
+		(Array.isArray(f.countryCodes)
+			? f.countryCodes.length > 0
+			: !!(f.countryCodes && f.countryCodes.trim())) ||
+		(Array.isArray(f.headers)
+			? f.headers.length > 0
+			: !!(f.headers && f.headers.trim() && f.headers.trim() !== '[]'));
+	const asnOnlyAllow = (f) => f.allowed === true && !hasNonASNRules(f);
+
+	$: formListsASNs = !!(formValues.asns && formValues.asns.length > 0) && !asnAvailable;
+	$: asnAllowBlocksAll = formListsASNs && asnOnlyAllow(formValues);
+	$: asnRuleNoEffect = formListsASNs && !asnAllowBlocksAll;
 
 	// hooks
 	onMount(() => {
@@ -500,6 +511,16 @@
 					>
 						{entry.name}
 					</button>
+					{#if entry.asns && entry.asns.trim() && !asnAvailable}
+						<span
+							class="ml-2 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
+							title={asnOnlyAllow(entry)
+								? 'This filter lists ASNs but ASN data is not downloaded, so it blocks every visitor. Download it under Settings, IP Data.'
+								: 'This filter lists ASNs but ASN data is not downloaded, so its ASN rule has no effect. Download it under Settings, IP Data.'}
+						>
+							ASN data missing
+						</span>
+					{/if}
 				</TableCell>
 				<TableCellCheck value={entry.allowed} />
 				{#if contextCompanyID}
@@ -529,6 +550,9 @@
 	</Table>
 
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
+		{#if modalMode === 'update'}
+			<InstalledResourceBadge resourceType="allowdeny" resourceId={formValues.id} variant="notice" />
+		{/if}
 		<FormGrid on:submit={onClickSubmit} bind:bindTo={form} {isSubmitting}>
 			<FormColumns>
 				<FormColumn>
@@ -549,18 +573,40 @@
 							bind:value={formValues.allowed}
 						/>
 					{/if}
+					<p class="text-sm text-gray-600 dark:text-gray-400 mb-4 transition-colors duration-200">
+						A visitor matches this filter when it matches any one of its rules.
+						{#if formValues.allowed === true}
+							Matching visitors are let in.
+						{:else if formValues.allowed === false}
+							Matching visitors are blocked.
+						{/if}
+					</p>
 					{#if asnAllowBlocksAll}
 						<div
 							class="rounded-md border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 mb-4 transition-colors duration-200"
 						>
 							<p class="text-sm text-amber-800 dark:text-amber-200">
-								This allow filter lists ASNs but no ASN data is downloaded, so it will block
-								every visitor. Download the ASN data under
+								This allow filter only lists ASNs and no ASN data is downloaded, so it will
+								block every visitor. Download the ASN data under
 								<a
 									class="text-cta-blue dark:text-highlight-blue hover:opacity-80"
 									href="/settings#ipdata">Settings, IP Data</a
 								>
 								or remove the ASN rules.
+							</p>
+						</div>
+					{/if}
+					{#if asnRuleNoEffect}
+						<div
+							class="rounded-md border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 mb-4 transition-colors duration-200"
+						>
+							<p class="text-sm text-amber-800 dark:text-amber-200">
+								This filter lists ASNs but no ASN data is downloaded, so its ASN rule has no
+								effect (no visitor can be matched by ASN). Download the ASN data under
+								<a
+									class="text-cta-blue dark:text-highlight-blue hover:opacity-80"
+									href="/settings#ipdata">Settings, IP Data</a
+								>.
 							</p>
 						</div>
 					{/if}
@@ -660,12 +706,20 @@
 		</FormGrid>
 	</Modal>
 	<DeleteAlert
+		list={[
+			'It is removed from the campaigns and assets that use it',
+			'Assets with no lists left are no longer filtered'
+		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
 	></DeleteAlert>
 	<DeleteAlert
 		title="Delete filters"
+		list={[
+			'They are removed from the campaigns and assets that use them',
+			'Assets with no lists left are no longer filtered'
+		]}
 		name={`${$selection.size} filter${$selection.size === 1 ? '' : 's'}`}
 		onClick={onClickBulkDelete}
 		confirm

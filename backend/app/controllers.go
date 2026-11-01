@@ -39,6 +39,7 @@ type Controllers struct {
 	SSO                 *controller.SSO
 	Update              *controller.Update
 	Import              *controller.Import
+	ContentRegistry     *controller.ContentRegistry
 	Backup              *controller.Backup
 	IPAllowList         *controller.IPAllowList
 	OAuthProvider       *controller.OAuthProvider
@@ -116,6 +117,10 @@ func NewControllers(
 		Common:          common,
 		PageService:     services.Page,
 		TemplateService: services.Template,
+	}
+	contentRegistry := &controller.ContentRegistry{
+		Common:                 common,
+		ContentRegistryService: services.ContentRegistry,
 	}
 	proxy := &controller.Proxy{
 		Common:       common,
@@ -258,6 +263,7 @@ func NewControllers(
 	}
 
 	return &Controllers{
+		ContentRegistry:     contentRegistry,
 		Asset:               asset,
 		Attachment:          attachment,
 		Company:             company,

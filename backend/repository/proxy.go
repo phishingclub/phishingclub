@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -12,6 +11,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var proxyAllowedColumns = assignTableToColumns(database.PROXY_TABLE, []string{
@@ -217,13 +217,10 @@ func (m *Proxy) GetByNameAndCompanyID(
 	db := m.load(options, m.DB)
 	db = withCompanyIncludingNullContext(db, companyID, database.PROXY_TABLE)
 	result := db.
-		Where(
-			fmt.Sprintf(
-				"%s = ?",
-				TableColumn(database.PROXY_TABLE, "name"),
-			),
-			name.String(),
-		).
+		Where(clause.Eq{
+			Column: clause.Column{Table: database.PROXY_TABLE, Name: "name"},
+			Value:  name.String(),
+		}).
 		First(&proxy)
 
 	if result.Error != nil {

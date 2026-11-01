@@ -20,6 +20,7 @@
 	export let showExpandButton = true; // control expand button visibility
 	export let enableProxyCompletion = false; // enable proxy YAML completion
 	export let externalVimMode = null; // allow external control of vim mode
+	export let readOnly = false; // view only: no editing, no vim, no expand
 	let localVimMode = externalVimMode !== null ? externalVimMode : $vimModeEnabled;
 
 	let editor = null;
@@ -87,6 +88,7 @@
 			value: value || '',
 			language: language,
 			theme: 'vs-dark',
+			readOnly: readOnly,
 			automaticLayout: true,
 			minimap: {
 				enabled: false

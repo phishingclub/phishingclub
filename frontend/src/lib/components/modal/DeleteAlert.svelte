@@ -6,11 +6,14 @@
 	export let name;
 	export let list = [];
 	export let title = 'Delete';
+	export let ok = 'Yes, proceed';
 	export let isVisible = false;
 	export let confirm = false;
 	export let confirmWord = 'confirm';
 	export let permanent = true;
 	export let actionMessage = '';
+	// greys and blocks the confirm button while the action cannot proceed.
+	export let okDisabled = false;
 
 	let confirmText = '';
 
@@ -40,7 +43,7 @@
 </script>
 
 {#if isVisible}
-	<Alert headline={title} onConfirm={onConfirmDelete} bind:visible={isVisible}>
+	<Alert headline={title} {ok} {okDisabled} onConfirm={onConfirmDelete} bind:visible={isVisible}>
 		<div class="space-y-6">
 			<!-- Main Delete Warning -->
 			<div>
@@ -75,6 +78,9 @@
 					</ul>
 				</div>
 			{/if}
+
+			<!-- extra details a caller wants shown above the confirm -->
+			<slot />
 
 			<!-- Confirmation Input -->
 			{#if confirm}

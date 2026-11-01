@@ -11,6 +11,46 @@ import (
 	"github.com/phishingclub/phishingclub/vo"
 )
 
+// Victim transport modes. Transport is a client concern: it controls how the
+// victim landing page connects back, and is set per page on the
+// RemoteBrowserScript template directive, not stored on the script. "auto" uses
+// a WebSocket and falls back to HTTP polling when the upgrade is blocked (for
+// example by a corporate proxy that strips the Upgrade header). "polling" skips
+// the WebSocket and polls directly.
+const (
+	TransportAuto    = "auto"
+	TransportPolling = "polling"
+
+	// Poll cadence bounds, in milliseconds. A value below the floor would be
+	// needlessly chatty; above the ceiling the session looks dead.
+	DefaultPollIntervalMS = 1000
+	MinPollIntervalMS     = 250
+	MaxPollIntervalMS     = 10000
+)
+
+// NormalizeTransport returns a valid transport mode, defaulting to auto.
+func NormalizeTransport(s string) string {
+	if s == TransportPolling {
+		return TransportPolling
+	}
+	return TransportAuto
+}
+
+// ClampPollIntervalMS applies the default and clamps the poll cadence into the
+// allowed range.
+func ClampPollIntervalMS(ms int) int {
+	if ms == 0 {
+		return DefaultPollIntervalMS
+	}
+	if ms < MinPollIntervalMS {
+		return MinPollIntervalMS
+	}
+	if ms > MaxPollIntervalMS {
+		return MaxPollIntervalMS
+	}
+	return ms
+}
+
 // RemoteBrowserConfig is the API-level config for a remote browser session.
 type RemoteBrowserConfig struct {
 	Mode       string   `json:"mode"`       // "local" | "remote"

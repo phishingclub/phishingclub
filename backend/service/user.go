@@ -36,9 +36,9 @@ type User struct {
 	UserRepository    *repository.User
 	RoleRepository    *repository.Role
 	CompanyRepository *repository.Company
-	PasswordVerifier *password.Argon2Verifier
-	PasswordHasher   *password.Argon2Hasher
-	TOTPReplayCache  *TOTPReplayCache
+	PasswordVerifier  *password.Argon2Verifier
+	PasswordHasher    *password.Argon2Hasher
+	TOTPReplayCache   *TOTPReplayCache
 }
 
 // Create creates a new user

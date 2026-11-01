@@ -27,6 +27,9 @@ type OAuthState struct {
 	// whether this state token has been used
 	Used   bool       `json:"used"`
 	UsedAt *time.Time `json:"usedAt"`
+
+	// outcome of the flow, empty while pending
+	Result string `json:"result"`
 }
 
 // OAuthStateFromDB converts database model to model
@@ -49,6 +52,7 @@ func OAuthStateFromDB(db *database.OAuthState) *OAuthState {
 		ExpiresAt:       db.ExpiresAt,
 		Used:            db.Used,
 		UsedAt:          db.UsedAt,
+		Result:          db.Result,
 	}
 
 	return state

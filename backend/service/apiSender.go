@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
+	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
@@ -65,9 +66,12 @@ func (a *APISender) Create(
 		a.Logger.Errorw("failed to validate API sender", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	var companyID *uuid.UUID
-	if cid, err := apiSender.CompanyID.Get(); err == nil {
-		companyID = &cid
+	companyID := companyIDPtr(apiSender.CompanyID)
+	// the OAuth provider must be global or owned by the sender company
+	refs := companyRefs{}
+	refs.add(database.OAUTH_PROVIDER_TABLE, "oauthProviderID", apiSender.OAuthProviderID)
+	if err := ValidateCompanyRefs(ctx, a.APISenderRepository.DB, companyID, refs); err != nil {
+		return nil, err
 	}
 	// check uniqueness
 	name := apiSender.Name.MustGet()
@@ -253,10 +257,21 @@ func (a *APISender) UpdateByID(
 		a.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	var companyID *uuid.UUID
-	if incoming.CompanyID.IsSpecified() && !incoming.CompanyID.IsNull() {
-		cid := incoming.CompanyID.MustGet()
-		companyID = &cid
+	current, err := a.APISenderRepository.GetByID(ctx, id, &repository.APISenderOption{})
+	if err != nil {
+		a.Logger.Errorw("failed to get API sender by ID", "error", err)
+		return err
+	}
+	// the company of a sender is set on create and never changed by an update,
+	// so templates referencing it stay within their company
+	companyID := companyIDPtr(current.CompanyID)
+	// the OAuth provider must be global or owned by the sender company
+	refs := companyRefs{}
+	refs.add(database.OAUTH_PROVIDER_TABLE, "oauthProviderID", incoming.OAuthProviderID)
+	held := companyRefs{}
+	held.add(database.OAUTH_PROVIDER_TABLE, "oauthProviderID", current.OAuthProviderID)
+	if err := ValidateCompanyRefs(ctx, a.APISenderRepository.DB, companyID, newCompanyRefs(refs, held)); err != nil {
+		return err
 	}
 	if incoming.Name.IsSpecified() && !incoming.Name.IsNull() {
 		// check uniqueness
@@ -279,20 +294,8 @@ func (a *APISender) UpdateByID(
 		}
 	}
 	// update the api sender - if a field is present not not null update it
-	current, err := a.APISenderRepository.GetByID(ctx, id, &repository.APISenderOption{})
-	if err != nil {
-		a.Logger.Errorw("failed to get API sender by ID", "error", err)
-		return err
-	}
 	if v, err := incoming.Name.Get(); err == nil {
 		current.Name.Set(v)
-	}
-	if incoming.CompanyID.IsSpecified() {
-		if v, err := incoming.CompanyID.Get(); err == nil {
-			current.CompanyID.Set(v)
-		} else {
-			current.CompanyID.SetNull()
-		}
 	}
 	if v, err := incoming.APIKey.Get(); err == nil {
 		current.APIKey.Set(v)

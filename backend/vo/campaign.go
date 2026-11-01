@@ -215,7 +215,8 @@ func (c CampaignWeekDays) Int() int {
 // Count returns the number of days in the week days
 func (c CampaignWeekDays) Count() int {
 	count := 0
-	for i := 0; i < 6; i++ {
+	// seven day bits, Sunday (bit 0) through Saturday (bit 6)
+	for i := 0; i < 7; i++ {
 		if c.inner&(1<<i) != 0 {
 			count++
 		}

@@ -2678,6 +2678,10 @@
 								only, others default to Chrome)</span
 							>
 							{#if configData.global.impersonate.enabled}
+								<span class="form-hint text-amber-600 dark:text-amber-400"
+									>Unstable: the Firefox profile fails the TLS handshake on many sites and the Chrome
+									profile can fail to connect at random. Turn this off if requests to the target fail.</span
+								>
 								<label class="checkbox-label" style="margin-top: 0.5rem;">
 									<input
 										type="checkbox"

@@ -1,6 +1,6 @@
 <script>
-	export let variant = 'blue'; // blue, green, orange, red, gray
-	export let icon = 'edit'; // edit, close, anonymize, export, upload, delete, copy, view
+	export let variant = 'blue'; // blue, green, orange, red, gray, amber
+	export let icon = 'edit'; // edit, close, anonymize, export, upload, delete, copy, view, pause, play
 	export let disabled = false;
 	export let type = 'button';
 
@@ -10,7 +10,8 @@
 		green: 'bg-green-700 hover:bg-green-800 focus:ring-green-600',
 		orange: 'bg-orange-600 hover:bg-orange-700 focus:ring-orange-500',
 		red: 'bg-red-600 hover:bg-red-700 focus:ring-red-500',
-		gray: 'bg-gray-600 hover:bg-gray-700 focus:ring-gray-500'
+		gray: 'bg-gray-600 hover:bg-gray-700 focus:ring-gray-500',
+		amber: 'bg-amber-500 hover:bg-amber-600 focus:ring-amber-400'
 	};
 
 	$: colorClass = variantClasses[variant] || variantClasses.blue;
@@ -146,6 +147,42 @@
 				stroke-linejoin="round"
 				stroke-width="2"
 				d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+			/>
+		</svg>
+	{:else if icon === 'pause'}
+		<svg
+			xmlns="http://www.w3.org/2000/svg"
+			class="h-4 w-4 mr-2"
+			fill="none"
+			viewBox="0 0 24 24"
+			stroke="currentColor"
+		>
+			<path
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				stroke-width="2"
+				d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
+			/>
+		</svg>
+	{:else if icon === 'play'}
+		<svg
+			xmlns="http://www.w3.org/2000/svg"
+			class="h-4 w-4 mr-2"
+			fill="none"
+			viewBox="0 0 24 24"
+			stroke="currentColor"
+		>
+			<path
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				stroke-width="2"
+				d="M14.752 11.168l-3.197-1.832A1 1 0 0010 10.168v3.664a1 1 0 001.555.832l3.197-1.832a1 1 0 000-1.664z"
+			/>
+			<path
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				stroke-width="2"
+				d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
 			/>
 		</svg>
 	{/if}

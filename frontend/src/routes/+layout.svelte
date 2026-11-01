@@ -21,6 +21,7 @@
 	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
 	import { displayMode } from '$lib/store/displayMode';
 	import { toggleVimMode } from '$lib/store/vimMode.js';
+	import { resetInstalledResources } from '$lib/store/installedResources.js';
 
 	// services
 	const session = Session.instance;
@@ -257,6 +258,7 @@
 			}
 			localStorage.clear();
 			appState.clearContext();
+			resetInstalledResources();
 			goto('/login/');
 		} catch (e) {
 			console.error('failed to logout', e);

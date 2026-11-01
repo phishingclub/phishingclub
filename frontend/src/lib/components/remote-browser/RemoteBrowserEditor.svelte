@@ -1092,15 +1092,14 @@ declare var Infinity: number;
 		};
 
 		// Inject the remote browser type definitions into Monaco's JS language service.
-		// noLib removes the full browser DOM lib (window, document, addEventListener, …)
-		// so dot-completion on session objects only shows our declared Session methods.
 		monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
 			noSemanticValidation: false,
 			noSyntaxValidation: false,
 			diagnosticCodesToIgnore: [1108] // 'return' outside function, valid here because the script runs inside an implicit IIFE
 		});
+		// lib es2020 gives the core JS types but leaves out the browser DOM
 		monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
-			noLib: true,
+			lib: ['es2020'],
 			allowJs: true,
 			checkJs: true,
 			allowNonTsExtensions: true,

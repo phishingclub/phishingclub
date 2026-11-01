@@ -10,6 +10,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var domainAllowedColumns = assignTableToColumns(database.DOMAIN_TABLE, []string{
@@ -211,9 +212,10 @@ func (r *Domain) GetByName(
 		db = r.load(db)
 	}
 	result := db.
-		Where(
-			TableColumnName(database.DOMAIN_TABLE)+" = ?", name.String(),
-		).
+		Where(clause.Eq{
+			Column: clause.Column{Table: database.DOMAIN_TABLE, Name: "name"},
+			Value:  name.String(),
+		}).
 		First(&dbDomain)
 
 	if result.Error != nil {

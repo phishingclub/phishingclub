@@ -12,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var remoteBrowserAllowedColumns = assignTableToColumns(database.REMOTE_BROWSER_TABLE, []string{
@@ -148,10 +149,10 @@ func (m *RemoteBrowser) GetByNameAndCompanyID(
 	row := database.RemoteBrowser{}
 	db := m.load(options, m.DB)
 	db = withCompanyIncludingNullContext(db, companyID, database.REMOTE_BROWSER_TABLE)
-	res := db.Where(
-		fmt.Sprintf("%s = ?", TableColumn(database.REMOTE_BROWSER_TABLE, "name")),
-		name.String(),
-	).First(&row)
+	res := db.Where(clause.Eq{
+		Column: clause.Column{Table: database.REMOTE_BROWSER_TABLE, Name: "name"},
+		Value:  name.String(),
+	}).First(&row)
 	if res.Error != nil {
 		return nil, res.Error
 	}

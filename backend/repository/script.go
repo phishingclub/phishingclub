@@ -11,6 +11,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var scriptAllowedColumns = assignTableToColumns(database.SCRIPT_TABLE, []string{
@@ -137,14 +138,21 @@ func (r *Script) GetByNameScoped(
 	db := withCompanyIncludingNullContext(r.DB, companyID, database.SCRIPT_TABLE)
 	var row database.Script
 	res := db.
-		Where(
-			fmt.Sprintf("%s = ?", TableColumnName(database.SCRIPT_TABLE)),
-			name,
-		).
+		Where(clause.Eq{
+			Column: clause.Column{Table: database.SCRIPT_TABLE, Name: "name"},
+			Value:  name,
+		}).
 		// prefer a company scoped script over a global one with the same name
 		// (company_id IS NULL sorts last: false before true in both sqlite and postgres)
-		Order(fmt.Sprintf("`%s`.company_id IS NULL", database.SCRIPT_TABLE)).
-		First(&row)
+		// Take keeps this order, First would replace it with the primary key order
+		Order(clause.OrderBy{Expression: clause.Expr{
+			SQL: "? IS NULL, ?",
+			Vars: []interface{}{
+				companyColumn(database.SCRIPT_TABLE),
+				clause.Column{Table: database.SCRIPT_TABLE, Name: "id"},
+			},
+		}}).
+		Take(&row)
 
 	if res.Error != nil {
 		return nil, res.Error

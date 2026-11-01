@@ -41,6 +41,7 @@ type Services struct {
 	Update              *service.Update
 	IPData              *service.IPData
 	Import              *service.Import
+	ContentRegistry     *service.ContentRegistry
 	Backup              *service.Backup
 	IPAllowList         *service.IPAllowListService
 	ProxySessionManager *service.ProxySessionManager
@@ -109,12 +110,13 @@ func NewServices(
 		Common: common,
 	}
 	asset := &service.Asset{
-		Common:            common,
-		RootFolder:        assetPath,
-		FileService:       file,
-		AssetRepository:   repositories.Asset,
-		DomainRepository:  repositories.Domain,
-		CompanyRepository: repositories.Company,
+		Common:              common,
+		RootFolder:          assetPath,
+		FileService:         file,
+		AssetRepository:     repositories.Asset,
+		DomainRepository:    repositories.Domain,
+		CompanyRepository:   repositories.Company,
+		AllowDenyRepository: repositories.AllowDeny,
 	}
 	attachment := &service.Attachment{
 		Common:               common,
@@ -289,6 +291,7 @@ func NewServices(
 		Common:              common,
 		AllowDenyRepository: repositories.AllowDeny,
 		CampaignRepository:  repositories.Campaign,
+		AssetRepository:     repositories.Asset,
 	}
 	identifier := &service.Identifier{
 		Common:               common,
@@ -371,6 +374,36 @@ func NewServices(
 		ReportTemplateRepository: repositories.ReportTemplate,
 	}
 
+	contentRegistry := &service.ContentRegistry{
+		Common:                      common,
+		RegistryRepository:          repositories.Registry,
+		Page:                        page,
+		Email:                       email,
+		Asset:                       asset,
+		File:                        file,
+		Domain:                      domain,
+		Proxy:                       proxy,
+		Script:                      scriptSvc,
+		AllowDeny:                   allowDeny,
+		RemoteBrowser:               remoteBrowser,
+		ReportTemplate:              reportTemplate,
+		SMTPConfiguration:           smtpConfiguration,
+		APISender:                   apiSender,
+		OAuthProvider:               oauthProvider,
+		Webhook:                     webhook,
+		Attachment:                  attachment,
+		CampaignTemplate:            campaignTemplate,
+		PageRepository:              repositories.Page,
+		EmailRepository:             repositories.Email,
+		DomainRepository:            repositories.Domain,
+		ProxyRepository:             repositories.Proxy,
+		SMTPConfigurationRepository: repositories.SMTPConfiguration,
+		APISenderRepository:         repositories.APISender,
+		OAuthProviderRepository:     repositories.OAuthProvider,
+		CampaignTemplateRepository:  repositories.CampaignTemplate,
+		IdentifierRepository:        repositories.Identifier,
+	}
+
 	companyReportConfig := &service.CompanyReportConfig{
 		Common:                        common,
 		CompanyReportConfigRepository: repositories.CompanyReportConfig,
@@ -385,6 +418,7 @@ func NewServices(
 	}
 
 	return &Services{
+		ContentRegistry:     contentRegistry,
 		CompanyScimConfig:   companyScimConfig,
 		CompanyReportConfig: companyReportConfig,
 		Scim:                scim,

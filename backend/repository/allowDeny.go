@@ -13,11 +13,16 @@ import (
 	"gorm.io/gorm"
 )
 
+// allowDenyAllowColumns are the columns a list request may order by and search
+// in. Each name must match a column of database.AllowDeny.
 var allowDenyAllowColumns = assignTableToColumns(database.ALLOW_DENY_TABLE, []string{
 	"created_at",
 	"updated_at",
 	"name",
-	"cidr",
+	"cidrs",
+	"country_codes",
+	"asns",
+	"ja4_fingerprints",
 	"allowed",
 })
 
@@ -56,7 +61,7 @@ func (r *AllowDeny) GetAll(
 	options *AllowDenyOption,
 ) (*model.Result[model.AllowDeny], error) {
 	result := model.NewEmptyResult[model.AllowDeny]()
-	db := withCompanyIncludingNullContext(r.DB, companyID, "allow_denies")
+	db := withCompanyIncludingNullContext(r.DB, companyID, database.ALLOW_DENY_TABLE)
 	db, err := useQuery(db, database.ALLOW_DENY_TABLE, options.QueryArgs, allowDenyAllowColumns...)
 	if err != nil {
 		return result, errs.Wrap(err)
@@ -204,4 +209,25 @@ func ToAllowDeny(row *database.AllowDeny) *model.AllowDeny {
 		Allowed:         nullable.NewNullableWithValue(row.Allowed),
 		CompanyID:       companyID,
 	}
+}
+
+// GetByName gets the allow deny list with the exact name in the company. A nil
+// company gets the global list, one with no company. It returns
+// gorm.ErrRecordNotFound when there is none.
+func (r *AllowDeny) GetByName(
+	ctx context.Context,
+	name string,
+	companyID *uuid.UUID,
+) (*model.AllowDeny, error) {
+	db := r.DB.WithContext(ctx).Where("name = ?", name)
+	if companyID == nil {
+		db = db.Where("company_id IS NULL")
+	} else {
+		db = db.Where("company_id = ?", companyID)
+	}
+	var row database.AllowDeny
+	if err := db.First(&row).Error; err != nil {
+		return nil, err
+	}
+	return ToAllowDeny(&row), nil
 }

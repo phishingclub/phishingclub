@@ -11,6 +11,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var allowedSMTPConfigurationsSortBy = assignTableToColumns(database.SMTP_CONFIGURATION_TABLE, []string{
@@ -147,26 +148,12 @@ func (r *SMTPConfiguration) GetByNameAndCompanyID(
 ) (*model.SMTPConfiguration, error) {
 	db := r.preload(option, r.DB)
 	dbSMTP := &database.SMTPConfiguration{}
-	whereCompany := fmt.Sprintf(
-		"%s IS NULL",
-		TableColumn(database.SMTP_CONFIGURATION_TABLE, "company_id"),
-	)
-	if companyID != nil {
-		whereCompany = fmt.Sprintf(
-			"%s = ?",
-			TableColumn(database.SMTP_CONFIGURATION_TABLE, "company_id"),
-		)
-	}
 	res := db.
-		Where(
-			fmt.Sprintf(
-				"%s = ? AND %s",
-				TableColumnName(database.SMTP_CONFIGURATION_TABLE),
-				whereCompany,
-			),
-			name.String(),
-			companyID,
-		).
+		Where(clause.Eq{
+			Column: clause.Column{Table: database.SMTP_CONFIGURATION_TABLE, Name: "name"},
+			Value:  name.String(),
+		}).
+		Where(clause.Eq{Column: companyColumn(database.SMTP_CONFIGURATION_TABLE), Value: companyID}).
 		First(&dbSMTP)
 
 	if res.Error != nil {

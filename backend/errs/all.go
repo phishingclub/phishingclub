@@ -37,6 +37,10 @@ var (
 	ErrCampaignAlreadyClosed         = goerrors.New("campaign already closed")
 	ErrCampaignAlreadyAnonymized     = goerrors.New("campaign already anonymized")
 	ErrCampaignDataAlreadyAnonymized = goerrors.New("campaign data already anonymized")
+	ErrCampaignAlreadyPaused         = goerrors.New("campaign is already paused")
+	ErrCampaignNotPaused             = goerrors.New("campaign is not paused")
+	ErrCampaignCannotPause           = goerrors.New("campaign cannot be paused")
+	ErrCampaignNothingToSend         = goerrors.New("campaign has no remaining recipients to send to")
 
 	// validation err
 	ErrValidationFailed = goerrors.New("validation error")

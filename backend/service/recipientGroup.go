@@ -132,6 +132,11 @@ func (r *RecipientGroup) Import(
 	if group.IsDynamic.IsSpecified() && !group.IsDynamic.IsNull() && group.IsDynamic.MustGet() {
 		return nil, validate.WrapErrorWithField(errors.New("cannot import recipients into a dynamic group"), "group")
 	}
+	// recipients are saved under companyID before they are added to the group,
+	// so check the group can hold them first or they are left behind
+	if !model.UsableInCompany(companyID, companyIDPtr(group.CompanyID)) {
+		return nil, validate.WrapErrorWithField(errors.New("company id does not match group id"), "recipient")
+	}
 	result, err := r.RecipientService.Import(
 		ctx,
 		session,

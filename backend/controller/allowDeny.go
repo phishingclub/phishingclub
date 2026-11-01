@@ -108,6 +108,9 @@ func (c *AllowDeny) GetAllOverview(g *gin.Context) {
 				"company_id",
 				"name",
 				"allowed",
+				// asns lets the list flag a filter whose ASN rules cannot resolve a
+				// visitor because the ASN data package is not downloaded.
+				"asns",
 			},
 			QueryArgs: queryArgs,
 		},

@@ -7,6 +7,11 @@ export const route = {
 		label: 'Settings',
 		route: '/settings/'
 	},
+	baitBox: {
+		label: 'Bait Box',
+		route: '/bait-box/',
+		beta: true
+	},
 	tools: {
 		label: 'Tools',
 		route: '/tools/',
@@ -166,6 +171,7 @@ export const topMenu = [
 	route.sessions,
 	route.users,
 	route.companies,
+	route.baitBox,
 	route.settings,
 	route.tools,
 	route.userGuide
@@ -176,6 +182,7 @@ export const mobileTopMenu = [
 	route.sessions,
 	route.users,
 	route.companies,
+	route.baitBox,
 	route.settings,
 	route.tools,
 	route.userGuide

@@ -17,8 +17,8 @@ set -e
 
 # pinned images, keep in sync with .github/workflows/release.yml
 NODE_IMAGE="node@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920" # node:22-alpine
-GO_IMAGE_AMD64="golang@sha256:c4ea15b4a7912716eb362a022e2b12317762eca387423760bc59c0f9ae69423c" # golang:1.25.10-alpine linux/amd64
-GO_IMAGE_ARM64="golang@sha256:5331adf7f8a0803631d9dc28843e288874789c14b97a3d0b54ed13e59f9e0589" # golang:1.25.10-alpine linux/arm64
+GO_IMAGE_AMD64="golang@sha256:bff16a94c0b4b6d9642581e2a3aa81beb3edb940b2f5a3aac1d22c6a68cb7747" # golang:1.27.3-alpine linux/amd64
+GO_IMAGE_ARM64="golang@sha256:ee0dcdc452cb73890363fbef65fc333aeb0da7c24ba52f2c6428a37b0e7f4f1c" # golang:1.27.3-alpine linux/arm64
 
 # resolve the repo root from this script location so it works from any cwd
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)

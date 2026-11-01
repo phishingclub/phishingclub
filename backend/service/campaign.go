@@ -164,6 +164,15 @@ func (c *Campaign) Create(
 	if err := campaign.Validate(); err != nil {
 		return nil, errs.Wrap(err)
 	}
+	// every referenced record must be global or owned by the campaign company
+	if err := ValidateCompanyRefs(
+		ctx,
+		c.CampaignRepository.DB,
+		companyIDPtr(campaign.CompanyID),
+		campaignCompanyRefs(campaign),
+	); err != nil {
+		return nil, err
+	}
 	// check the template is usable
 	templateID := campaign.TemplateID.MustGet()
 	cTemplate, err := c.CampaignTemplateService.GetByID(
@@ -2137,13 +2146,35 @@ func (c *Campaign) UpdateByID(
 		}
 	}
 
+	// the company is never changed by an update, so the stored company decides
+	// which records the request may reference
+	companyID := companyIDPtr(current.CompanyID)
+	stored, err := c.CampaignRepository.GetByID(
+		ctx,
+		id,
+		&repository.CampaignOption{
+			WithRecipientGroups: true,
+			WithAllowDeny:       true,
+			WithWebhooks:        true,
+			WithScripts:         true,
+		},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign references", "error", err)
+		return errs.Wrap(err)
+	}
+	if err := ValidateCompanyRefs(
+		ctx,
+		c.CampaignRepository.DB,
+		companyID,
+		newCompanyRefs(campaignCompanyRefs(incoming), campaignCompanyRefs(stored)),
+	); err != nil {
+		return err
+	}
+	storedDates := current.AnonymizeDates()
 	// update the values
 	if v, err := incoming.Name.Get(); err == nil {
 		// check uniqueness
-		var companyID *uuid.UUID
-		if cid, err := incoming.CompanyID.Get(); err == nil {
-			companyID = &cid
-		}
 		name := incoming.Name.MustGet()
 		isOK, err := repository.CheckNameIsUnique(
 			ctx,
@@ -2395,7 +2426,7 @@ func (c *Campaign) UpdateByID(
 		}
 	}
 	// validate and update
-	if err := current.Validate(); err != nil {
+	if err := current.ValidateUpdate(storedDates); err != nil {
 		return errs.Wrap(err)
 	}
 	err = c.CampaignRepository.UpdateByID(ctx, id, current)
@@ -2525,21 +2556,16 @@ func (c *Campaign) validateAllowDenyIsSameTypeByIDs(
 		if len(allowDenyIDs) == 0 {
 			return nil
 		}
-		isAllowList := false
-		for i, id := range allowDenyIDs {
+		entries := make([]*model.AllowDeny, 0, len(allowDenyIDs))
+		for _, id := range allowDenyIDs {
 			entry, err := c.AllowDenyRepository.GetByID(ctx, id, &repository.AllowDenyOption{})
 			if err != nil {
 				c.Logger.Errorw("failed to get allow deny by id", "error", err)
+				return validate.WrapErrorWithField(errors.New("filter not found"), "allowDenyIDs")
 			}
-			allowed := entry.Allowed.MustGet()
-			if i == 0 {
-				isAllowList = allowed
-				continue
-			}
-			if isAllowList != allowed {
-				return validate.WrapErrorWithField(errors.New("allow and deny list are mutually exclusive"), "allowDenyIDs")
-			}
+			entries = append(entries, entry)
 		}
+		return model.ValidateAllowDenySameType(entries)
 	}
 	return nil
 }
@@ -3325,10 +3351,10 @@ func (c *Campaign) sendCampaignMessages(
 				// inline attachment - embedded in email body, can be referenced via cid:filename
 				if !attachment.EmbeddedContent.MustGet() {
 					// simple inline image - no template processing needed
-					m.EmbedFile(p.String())
+					m.EmbedFile(p)
 				} else {
 					// inline image with template processing
-					attachmentContent, err := os.ReadFile(p.String())
+					attachmentContent, err := os.ReadFile(p)
 					if err != nil {
 						return errs.Wrap(err)
 					}
@@ -3378,25 +3404,25 @@ func (c *Campaign) sendCampaignMessages(
 					// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
 					// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
 					m.EmbedReader(
-						filepath.Base(p.String()),
+						filepath.Base(p),
 						strings.NewReader(attachmentStr),
 					)
 				}
 			} else if !attachment.EmbeddedContent.MustGet() {
-				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 					// calendar invitation parsed natively by Outlook, raw file content
-					icsContent, err := os.ReadFile(p.String())
+					icsContent, err := os.ReadFile(p)
 					if err != nil {
 						return fmt.Errorf("failed to read calendar file: %s", err)
 					}
 					m.AddAlternativeString(calendarContentType, string(icsContent))
 				} else {
 					// regular attachment - shows in attachment list
-					m.AttachFile(p.String())
+					m.AttachFile(p)
 				}
 			} else {
 				// regular attachment with template processing
-				attachmentContent, err := os.ReadFile(p.String())
+				attachmentContent, err := os.ReadFile(p)
 				if err != nil {
 					return errs.Wrap(err)
 				}
@@ -3443,12 +3469,12 @@ func (c *Campaign) sendCampaignMessages(
 				if err != nil {
 					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
 				}
-				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 					// calendar invitation parsed natively by Outlook, with rendered variables
 					m.AddAlternativeString(calendarContentType, attachmentStr)
 				} else {
 					m.AttachReadSeeker(
-						filepath.Base(p.String()),
+						filepath.Base(p),
 						strings.NewReader(attachmentStr),
 					)
 				}
@@ -3956,6 +3982,362 @@ func (c *Campaign) DeleteDeviceCodesByCampaignID(
 	return nil
 }
 
+// PauseCampaignByID pauses the sending of a campaign. Only the delivery of
+// remaining recipients stops: the landing page and event recording stay live,
+// so this is distinct from closing. A paused campaign is resumed with a fresh
+// delivery window.
+//
+// Pause applies only to a started campaign that still has recipients to send to
+// and is not self managed, since a self managed campaign has no scheduled
+// sending to pause.
+func (c *Campaign) PauseCampaignByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+) error {
+	ae := NewAuditEvent("Campaign.PauseCampaignByID", session)
+	ae.Details["id"] = id.String()
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.Wrap(errs.ErrAuthorizationFailed)
+	}
+	campaign, err := c.CampaignRepository.GetByID(ctx, id, &repository.CampaignOption{})
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return errs.Wrap(err)
+	}
+	// a closed campaign has no sending left to pause
+	if campaign.ClosedAt.IsSpecified() && !campaign.ClosedAt.IsNull() {
+		return errs.Wrap(errs.ErrCampaignAlreadyClosed)
+	}
+	if campaign.IsPaused() {
+		return errs.Wrap(errs.ErrCampaignAlreadyPaused)
+	}
+	// self managed campaigns send on manual action, there is no schedule to pause
+	if campaign.IsSelfManaged() {
+		return errs.Wrap(errs.ErrCampaignCannotPause)
+	}
+	// nothing to pause before sending has started
+	if !campaign.IsStarted() {
+		return errs.Wrap(errs.ErrCampaignCannotPause)
+	}
+	// nothing to pause if every recipient is already sent, cancelled or attempted
+	remaining, err := c.CampaignRecipientRepository.GetUnsendRecipients(
+		ctx,
+		id,
+		repository.NO_LIMIT,
+		&repository.CampaignRecipientOption{},
+	)
+	if err != nil && !go_errors.Is(err, gorm.ErrRecordNotFound) {
+		c.Logger.Errorw("failed to get unsent recipients", "error", err)
+		return errs.Wrap(err)
+	}
+	if len(remaining) == 0 {
+		return errs.Wrap(errs.ErrCampaignNothingToSend)
+	}
+	if err := c.CampaignRepository.SetPausedByID(ctx, id); err != nil {
+		c.Logger.Errorw("failed to pause campaign", "error", err)
+		return errs.Wrap(err)
+	}
+	if err := c.saveCampaignEvent(ctx, id, data.EVENT_CAMPAIGN_PAUSED, "Sending paused"); err != nil {
+		c.Logger.Errorw("failed to save campaign paused event", "error", err)
+	}
+	c.AuditLogAuthorized(ae)
+	return nil
+}
+
+// ResumeCampaignByID resumes a paused campaign. The remaining recipients are
+// spread evenly, with jitter, over the new delivery window supplied in the
+// request. The old send times are in the past, so resuming without rescheduling
+// would send everything at once.
+//
+// The campaign's original send start and end are left as they were, so it keeps
+// its place in the active list and its planned window as a record. The resume
+// window drives only the recipients' new send times. If a close date is set and
+// would fall on or before the resume window, resume is rejected so the automatic
+// close does not cancel the sending that was just rescheduled.
+func (c *Campaign) ResumeCampaignByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	req *model.Campaign,
+) error {
+	ae := NewAuditEvent("Campaign.ResumeCampaignByID", session)
+	ae.Details["id"] = id.String()
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.Wrap(errs.ErrAuthorizationFailed)
+	}
+	campaign, err := c.CampaignRepository.GetByID(ctx, id, &repository.CampaignOption{})
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return errs.Wrap(err)
+	}
+	if campaign.ClosedAt.IsSpecified() && !campaign.ClosedAt.IsNull() {
+		return errs.Wrap(errs.ErrCampaignAlreadyClosed)
+	}
+	if !campaign.IsPaused() {
+		return errs.Wrap(errs.ErrCampaignNotPaused)
+	}
+	// validate the new delivery window
+	if err := req.ValidateSendTimesSet(); err != nil {
+		return errs.Wrap(err)
+	}
+	startAt := req.SendStartAt.MustGet().Truncate(time.Minute)
+	endAt := req.SendEndAt.MustGet().Truncate(time.Minute)
+	if !endAt.After(startAt) {
+		return validate.WrapErrorWithField(errors.New("send end time must be after start time"), "sendEndAt")
+	}
+	if !endAt.After(time.Now()) {
+		return validate.WrapErrorWithField(errors.New("send end time must be in the future"), "sendEndAt")
+	}
+	// a scheduled date that closes the campaign on or before the resume window would
+	// cancel the sends we are about to reschedule. both the close sweep (close at)
+	// and the anonymize sweep (anonymize at, which closes before it anonymizes) do
+	// this. a started campaign cannot have these dates edited, so the resume window
+	// must finish before whichever is set.
+	if v, err := campaign.CloseAt.Get(); err == nil {
+		if !v.After(endAt) {
+			return validate.WrapErrorWithField(
+				fmt.Errorf("the delivery finish must be before the campaign close date (%s)", utils.RFC3339UTC(v)),
+				"sendEndAt",
+			)
+		}
+	}
+	if v, err := campaign.AnonymizeAt.Get(); err == nil {
+		if !v.After(endAt) {
+			return validate.WrapErrorWithField(
+				fmt.Errorf("the delivery finish must be before the campaign anonymize date (%s)", utils.RFC3339UTC(v)),
+				"sendEndAt",
+			)
+		}
+	}
+	// Daily Slots mode: the request carries week day and daily time constraints that
+	// the reschedule must honor, the same options as the campaign scheduler. Validate
+	// them before any recipient is touched so an invalid schedule fails fast.
+	useConstraints := req.ConstraintWeekDays.IsSpecified() && !req.ConstraintWeekDays.IsNull()
+	if useConstraints {
+		if err := req.ValidateScheduledTimes(); err != nil {
+			return errs.Wrap(err)
+		}
+		cStart := req.ConstraintStartTime.MustGet()
+		cEnd := req.ConstraintEndTime.MustGet()
+		if cStart.IsAfter(cEnd) || cStart.IsEqual(cEnd) {
+			return validate.WrapErrorWithField(errors.New("daily end time must be after start time"), "constraintEndTime")
+		}
+		wd := req.ConstraintWeekDays.MustGet()
+		if wd.Count() == 0 {
+			return validate.WrapErrorWithField(errors.New("must have at least one day selected"), "constraintWeekDays")
+		}
+		if !wd.IsWithin(&startAt, &endAt) {
+			return validate.WrapErrorWithField(errors.New("selected week days must be within the delivery window"), "constraintWeekDays")
+		}
+	}
+	// read jitter from the request, both or neither
+	jitterMin := 0
+	jitterMax := 0
+	if v, err := req.JitterMin.Get(); err == nil {
+		jitterMin = v
+	}
+	if v, err := req.JitterMax.Get(); err == nil {
+		jitterMax = v
+	}
+	// the remaining recipients: not sent, not cancelled, not attempted
+	remaining, err := c.CampaignRecipientRepository.GetUnsendRecipients(
+		ctx,
+		id,
+		repository.NO_LIMIT,
+		&repository.CampaignRecipientOption{},
+	)
+	if err != nil && !go_errors.Is(err, gorm.ErrRecordNotFound) {
+		c.Logger.Errorw("failed to get unsent recipients", "error", err)
+		return errs.Wrap(err)
+	}
+	if len(remaining) == 0 {
+		return errs.Wrap(errs.ErrCampaignNothingToSend)
+	}
+	// keep the original intended order so the earliest planned recipients still go
+	// first in the new window
+	sort.SliceStable(remaining, func(i, j int) bool {
+		a, aErr := remaining[i].SendAt.Get()
+		b, bErr := remaining[j].SendAt.Get()
+		if aErr != nil {
+			return false
+		}
+		if bErr != nil {
+			return true
+		}
+		return a.Before(b)
+	})
+	var times []time.Time
+	if useConstraints {
+		wd := req.ConstraintWeekDays.MustGet()
+		times = constrainedSendTimes(
+			len(remaining),
+			startAt,
+			endAt,
+			wd.AsSlice(),
+			req.ConstraintStartTime.MustGet(),
+			req.ConstraintEndTime.MustGet(),
+			jitterMin,
+			jitterMax,
+		)
+	} else {
+		times = spreadSendTimes(len(remaining), startAt, endAt, jitterMin, jitterMax)
+	}
+	// reschedule every remaining recipient in one transaction before clearing the
+	// paused flag, so a failure leaves the campaign paused and safe to retry rather
+	// than half resumed and sending, and a large campaign is one commit not one
+	// fsync per row.
+	items := make([]repository.RecipientSendAt, 0, len(remaining))
+	for i, cr := range remaining {
+		crID := cr.ID.MustGet()
+		items = append(items, repository.RecipientSendAt{ID: &crID, SendAt: times[i]})
+	}
+	if err := c.CampaignRecipientRepository.SetSendAtBatch(ctx, items); err != nil {
+		c.Logger.Errorw("failed to reschedule recipients on resume", "error", err, "campaignID", id.String())
+		return errs.Wrap(err)
+	}
+	if err := c.CampaignRepository.ClearPausedByID(ctx, id); err != nil {
+		c.Logger.Errorw("failed to clear paused state on resume", "error", err)
+		return errs.Wrap(err)
+	}
+	if err := c.saveCampaignEvent(ctx, id, data.EVENT_CAMPAIGN_RESUMED, "Sending resumed"); err != nil {
+		c.Logger.Errorw("failed to save campaign resumed event", "error", err)
+	}
+	c.AuditLogAuthorized(ae)
+	return nil
+}
+
+// spreadSendTimes returns count send times spread evenly between startAt and
+// endAt with jitter applied, clamped to the window. It mirrors the even
+// distribution branch of schedule(), but resume reschedules recipients that
+// already exist, so the time computation is kept separate from the row writing.
+func spreadSendTimes(count int, startAt, endAt time.Time, jitterMin, jitterMax int) []time.Time {
+	times := make([]time.Time, count)
+	if count <= 0 {
+		return times
+	}
+	if count == 1 {
+		times[0] = applyJitter(startAt, jitterMin, jitterMax, startAt, endAt)
+		return times
+	}
+	duration := endAt.Sub(startAt)
+	interval := time.Duration(duration.Nanoseconds() / int64(count-1))
+	for i := 0; i < count; i++ {
+		baseTime := startAt.Add(time.Duration(i) * interval)
+		times[i] = applyJitter(baseTime, jitterMin, jitterMax, startAt, endAt)
+	}
+	return times
+}
+
+// constrainedSendTimes returns count send times for the Daily Slots schedule:
+// recipients are placed only on the selected week days and inside the daily time
+// window, spread evenly across the total available minutes with jitter. It
+// mirrors the constraint branch of schedule(), kept separate so resume can
+// recompute times for recipients that already exist. A degenerate window (no
+// matching day, or an empty daily slot) falls back to an even spread so it can
+// never divide by zero or loop forever. The first day's slots are clamped to
+// startAt so nothing lands before the chosen start.
+func constrainedSendTimes(
+	count int,
+	startAt, endAt time.Time,
+	weekDays []int,
+	dayStartTime, dayEndTime vo.CampaignTimeConstraint,
+	jitterMin, jitterMax int,
+) []time.Time {
+	times := make([]time.Time, 0, count)
+	if count <= 0 {
+		return times
+	}
+	// total sendable minutes across the matching week days in the range
+	campaignDuration := time.Duration(0)
+	for d := startAt; !d.After(endAt); d = d.AddDate(0, 0, 1) {
+		if slices.Contains(weekDays, int(d.Weekday())) {
+			campaignDuration += dayStartTime.DiffMinutes(dayEndTime)
+		}
+	}
+	if campaignDuration <= 0 {
+		return spreadSendTimes(count, startAt, endAt, jitterMin, jitterMax)
+	}
+	interval := time.Minute
+	if count > 1 {
+		interval = time.Duration(campaignDuration.Nanoseconds() / int64(count-1))
+	}
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	for d := startAt; !d.After(endAt) && len(times) < count; d = d.AddDate(0, 0, 1) {
+		if !slices.Contains(weekDays, int(d.Weekday())) {
+			continue
+		}
+		dayStart := d.Truncate(24 * time.Hour).Add(dayStartTime.Minutes())
+		dayEnd := d.Truncate(24 * time.Hour).Add(dayEndTime.Minutes())
+		lower := dayStart
+		if lower.Before(startAt) {
+			lower = startAt
+		}
+		for cur := lower; !cur.After(dayEnd) && len(times) < count; cur = cur.Add(interval) {
+			times = append(times, applyJitter(cur, jitterMin, jitterMax, lower, dayEnd))
+		}
+	}
+	// if the window could not fit everyone (rare, e.g. an API caller passes a mid
+	// day start that shortens the first day), put the rest on the last valid slot so
+	// they still land inside a daily window rather than at end of day
+	last := endAt
+	if len(times) > 0 {
+		last = times[len(times)-1]
+	}
+	for len(times) < count {
+		times = append(times, last)
+	}
+	return times
+}
+
+// saveCampaignEvent records a campaign level timeline event with a short reason.
+// Used for lifecycle actions such as pause and resume. It does not fire webhooks
+// or change the most notable event, those are reserved for risk events.
+func (c *Campaign) saveCampaignEvent(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	eventName string,
+	reason string,
+) error {
+	eventID := cache.EventIDByName[eventName]
+	if eventID == nil {
+		return fmt.Errorf("unknown event %q", eventName)
+	}
+	id := uuid.New()
+	r, err := vo.NewOptionalString1MB(reason)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	campaignEvent := &model.CampaignEvent{
+		ID:          &id,
+		CampaignID:  campaignID,
+		RecipientID: nil,
+		IP:          vo.NewOptionalString64Must(""),
+		UserAgent:   vo.NewOptionalString255Must(""),
+		EventID:     eventID,
+		Data:        r,
+		Metadata:    vo.NewEmptyOptionalString1MB(),
+	}
+	if err := c.CampaignRepository.SaveEvent(ctx, campaignEvent); err != nil {
+		return fmt.Errorf("failed to save event: %s", err)
+	}
+	return nil
+}
+
 func (c *Campaign) CloseCampaignByID(
 	ctx context.Context,
 	session *model.Session,
@@ -4050,6 +4432,12 @@ func (c *Campaign) closeCampaign(
 	err = c.CampaignRepository.UpdateByID(ctx, id, campaign)
 	if err != nil {
 		c.Logger.Errorw("failed to close campaign by id", "error", err)
+		return errs.Wrap(err)
+	}
+	// a closed campaign is never left paused. clearing it keeps the state clean so
+	// pause and resume only ever apply to a campaign that is still open.
+	if err := c.CampaignRepository.ClearPausedByID(ctx, id); err != nil {
+		c.Logger.Errorw("failed to clear paused state on close", "error", err)
 		return errs.Wrap(err)
 	}
 	err = c.saveEventCampaignClose(
@@ -5717,10 +6105,10 @@ func (c *Campaign) sendSingleEmailSMTP(
 			// inline attachment - embedded in email body, can be referenced via cid:filename
 			if !attachment.EmbeddedContent.MustGet() {
 				// simple inline image - no template processing needed
-				m.EmbedFile(p.String())
+				m.EmbedFile(p)
 			} else {
 				// inline image with template processing
-				attachmentContent, err := os.ReadFile(p.String())
+				attachmentContent, err := os.ReadFile(p)
 				if err != nil {
 					return errs.Wrap(err)
 				}
@@ -5770,25 +6158,25 @@ func (c *Campaign) sendSingleEmailSMTP(
 				// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
 				// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
 				m.EmbedReader(
-					filepath.Base(p.String()),
+					filepath.Base(p),
 					strings.NewReader(attachmentStr),
 				)
 			}
 		} else if !attachment.EmbeddedContent.MustGet() {
-			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 				// calendar invitation parsed natively by Outlook, raw file content
-				icsContent, err := os.ReadFile(p.String())
+				icsContent, err := os.ReadFile(p)
 				if err != nil {
 					return fmt.Errorf("failed to read calendar file: %s", err)
 				}
 				m.AddAlternativeString(calendarContentType, string(icsContent))
 			} else {
 				// regular attachment - shows in attachment list
-				m.AttachFile(p.String())
+				m.AttachFile(p)
 			}
 		} else {
 			// regular attachment with template processing
-			attachmentContent, err := os.ReadFile(p.String())
+			attachmentContent, err := os.ReadFile(p)
 			if err != nil {
 				return errs.Wrap(err)
 			}
@@ -5835,12 +6223,12 @@ func (c *Campaign) sendSingleEmailSMTP(
 			if err != nil {
 				return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
 			}
-			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 				// calendar invitation parsed natively by Outlook, with rendered variables
 				m.AddAlternativeString(calendarContentType, attachmentStr)
 			} else {
 				m.AttachReadSeeker(
-					filepath.Base(p.String()),
+					filepath.Base(p),
 					strings.NewReader(attachmentStr),
 				)
 			}

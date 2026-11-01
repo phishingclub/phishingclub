@@ -16,6 +16,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/build"
 	"github.com/phishingclub/phishingclub/data"
+	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
@@ -65,7 +66,7 @@ func (m *Email) AddAttachments(
 		return errs.ErrAuthorizationFailed
 	}
 	// TODO check if the user is privliged for the message
-	_, err = m.EmailRepository.GetByID(
+	email, err := m.EmailRepository.GetByID(
 		ctx,
 		messageID,
 		&repository.EmailOption{},
@@ -73,6 +74,24 @@ func (m *Email) AddAttachments(
 	if err != nil {
 		m.Logger.Errorw("failed to add attachment to email", "error", err)
 		return errs.Wrap(err)
+	}
+	// a company email can only use global attachments and its own. a shared
+	// email can carry attachments of several companies, each company only sees
+	// and sends its own and the global ones, see loadEmailAttachmentsWithContext
+	if emailCompanyID := companyIDPtr(email.CompanyID); emailCompanyID != nil {
+		refs := []CompanyRef{}
+		for _, attachment := range attachments {
+			if attachment.ID != nil {
+				refs = append(refs, CompanyRef{
+					Table: database.ATTACHMENT_TABLE,
+					Field: "attachments",
+					ID:    *attachment.ID,
+				})
+			}
+		}
+		if err := ValidateCompanyRefs(ctx, m.EmailRepository.DB, emailCompanyID, refs); err != nil {
+			return err
+		}
 	}
 	// add attachment to message
 	attachmentIdsStr := []string{}
@@ -668,10 +687,10 @@ func (m *Email) SendTestEmail(
 			// inline attachment - embedded in email body, can be referenced via cid:filename
 			if !attachment.EmbeddedContent.MustGet() {
 				// simple inline image - no template processing needed
-				msg.EmbedFile(p.String())
+				msg.EmbedFile(p)
 			} else {
 				// inline image with template processing
-				attachmentContent, err := os.ReadFile(p.String())
+				attachmentContent, err := os.ReadFile(p)
 				if err != nil {
 					return errs.Wrap(err)
 				}
@@ -709,25 +728,25 @@ func (m *Email) SendTestEmail(
 				// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
 				// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
 				msg.EmbedReader(
-					filepath.Base(p.String()),
+					filepath.Base(p),
 					strings.NewReader(attachmentStr),
 				)
 			}
 		} else if !attachment.EmbeddedContent.MustGet() {
-			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 				// calendar invitation parsed natively by Outlook, raw file content
-				icsContent, err := os.ReadFile(p.String())
+				icsContent, err := os.ReadFile(p)
 				if err != nil {
 					return fmt.Errorf("failed to read calendar file: %s", err)
 				}
 				msg.AddAlternativeString(calendarContentType, string(icsContent))
 			} else {
 				// regular attachment - shows in attachment list
-				msg.AttachFile(p.String())
+				msg.AttachFile(p)
 			}
 		} else {
 			// inline attachment - embedded in email body, can be referenced via cid:filename
-			attachmentContent, err := os.ReadFile(p.String())
+			attachmentContent, err := os.ReadFile(p)
 			if err != nil {
 				return errs.Wrap(err)
 			}
@@ -762,14 +781,14 @@ func (m *Email) SendTestEmail(
 			if err != nil {
 				return fmt.Errorf("failed to setup attachment with embedded content: %s", err)
 			}
-			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p.String()) {
+			if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
 				// calendar invitation parsed natively by Outlook, with rendered variables
 				msg.AddAlternativeString(calendarContentType, attachmentStr)
 			} else {
 				// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
 				// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
 				msg.EmbedReader(
-					filepath.Base(p.String()),
+					filepath.Base(p),
 					strings.NewReader(attachmentStr),
 				)
 			}
@@ -874,10 +893,9 @@ func (m *Email) UpdateByID(
 		m.Logger.Errorw("failed to update email by ID", "error", err)
 		return errs.Wrap(err)
 	}
-	var companyID *uuid.UUID
-	if cid, err := email.CompanyID.Get(); err == nil {
-		companyID = &cid
-	}
+	// the company of an email is set on create and never changed by an update,
+	// so templates referencing it stay within their company
+	companyID := companyIDPtr(current.CompanyID)
 	// check uniqueness
 	name := email.Name.MustGet()
 	isOK, err := repository.CheckNameIsUnique(
@@ -928,9 +946,6 @@ func (m *Email) UpdateByID(
 	}
 	if v, err := email.AddTrackingPixel.Get(); err == nil {
 		current.AddTrackingPixel.Set(v)
-	}
-	if v, err := email.CompanyID.Get(); err == nil {
-		current.CompanyID.Set(v)
 	}
 	// validate change
 	if err := current.Validate(); err != nil {

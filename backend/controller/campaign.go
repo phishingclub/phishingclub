@@ -125,6 +125,68 @@ func (c *Campaign) CloseCampaignByID(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
+// PauseCampaignByID pauses the sending of a campaign
+func (c *Campaign) PauseCampaignByID(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	err := c.CampaignService.PauseCampaignByID(
+		g.Request.Context(),
+		session,
+		id,
+	)
+	// these are expected states, report them as validation failures not server errors
+	if errors.Is(err, errs.ErrCampaignAlreadyPaused) ||
+		errors.Is(err, errs.ErrCampaignNotPaused) ||
+		errors.Is(err, errs.ErrCampaignCannotPause) ||
+		errors.Is(err, errs.ErrCampaignNothingToSend) ||
+		errors.Is(err, errs.ErrCampaignAlreadyClosed) {
+		c.Response.ValidationFailed(g, "", err)
+		return
+	}
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
+// ResumeCampaignByID resumes a paused campaign over a new delivery window
+func (c *Campaign) ResumeCampaignByID(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	var req model.Campaign
+	if ok := c.handleParseRequest(g, &req); !ok {
+		return
+	}
+	err := c.CampaignService.ResumeCampaignByID(
+		g.Request.Context(),
+		session,
+		id,
+		&req,
+	)
+	if errors.Is(err, errs.ErrCampaignNotPaused) ||
+		errors.Is(err, errs.ErrCampaignNothingToSend) ||
+		errors.Is(err, errs.ErrCampaignAlreadyClosed) {
+		c.Response.ValidationFailed(g, "", err)
+		return
+	}
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 // Create creates a new campaign
 func (c *Campaign) Create(g *gin.Context) {
 	// handle session

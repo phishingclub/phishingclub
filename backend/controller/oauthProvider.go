@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/build"
 	"github.com/phishingclub/phishingclub/config"
 	"github.com/phishingclub/phishingclub/database"
@@ -240,14 +241,16 @@ func (c *OAuthProvider) HandleCallback(g *gin.Context) {
 	if errorParam != "" {
 		errorDesc := g.Query("error_description")
 		c.Logger.Warnw("oauth provider returned error", "error", errorParam, "description", errorDesc)
-		c.renderCallbackPage(g, false, "provider_error")
+		providerID := c.OAuthProviderService.FailAuthorization(g.Request.Context(), state)
+		c.renderCallbackPage(g, false, "provider_error", providerID)
 		return
 	}
 
 	// validate parameters
 	if code == "" || state == "" {
 		c.Logger.Warnw("oauth callback missing required parameters")
-		c.renderCallbackPage(g, false, "invalid_request")
+		providerID := c.OAuthProviderService.FailAuthorization(g.Request.Context(), state)
+		c.renderCallbackPage(g, false, "invalid_request", providerID)
 		return
 	}
 
@@ -270,29 +273,64 @@ func (c *OAuthProvider) HandleCallback(g *gin.Context) {
 		redirectURI = fmt.Sprintf("https://%s:%d/api/v1/oauth-callback", host, adminPort)
 	}
 
-	// exchange code for tokens
-	// session is nil because callback is public (cross-site context doesn't send cookies)
-	// validation happens through state token lookup (bound to initiating session)
-	if err := c.OAuthProviderService.ExchangeCodeForTokens(
+	// The provider redirects the popup here as a cross site navigation, so the
+	// SameSite Strict admin session cookie is not sent and the state can not be
+	// bound to a session. The state token is the only check: random, single
+	// use and expiring after ten minutes.
+	providerID, err := c.OAuthProviderService.ExchangeCodeForTokens(
 		g.Request.Context(),
-		nil, // no session - callback is public
+		nil,
 		state,
 		code,
 		redirectURI,
-	); err != nil {
+	)
+	if err != nil {
 		// log detailed error internally, show generic error to user
 		c.Logger.Warnw("failed to exchange code for tokens", "reason", err)
-		c.renderCallbackPage(g, false, "token_exchange_failed")
+		c.renderCallbackPage(g, false, "token_exchange_failed", providerID)
 		return
 	}
 
 	// success - render success page
-	c.renderCallbackPage(g, true, "")
+	c.renderCallbackPage(g, true, "", providerID)
 }
 
+// GetAuthorizationStatus returns the result of an authorization flow, so the
+// admin page learns the outcome when the callback runs on another origin.
+func (c *OAuthProvider) GetAuthorizationStatus(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	state := g.Query("state")
+	if state == "" || len(state) > 255 {
+		c.Response.BadRequestMessage(g, "missing state")
+		return
+	}
+	status, err := c.OAuthProviderService.GetAuthorizationStatus(
+		g.Request.Context(),
+		session,
+		id,
+		state,
+	)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{"status": status})
+}
+
+// oauthCallbackChannel is the BroadcastChannel name the callback page posts the
+// result on. The admin oauth provider page listens on the same name.
+const oauthCallbackChannel = "phishingclub-oauth-callback"
+
 // renderCallbackPage renders a plain text page for oauth callback result
-// this page is shown in the popup window, notifies the parent, and instructs user to close it
-func (c *OAuthProvider) renderCallbackPage(g *gin.Context, success bool, errorCode string) {
+// this page is shown in the popup window, notifies the admin page, and instructs user to close it
+// providerID names the flow in the channel message, uuid.Nil when unknown.
+func (c *OAuthProvider) renderCallbackPage(g *gin.Context, success bool, errorCode string, providerID uuid.UUID) {
 	var text string
 	var status string
 
@@ -319,18 +357,15 @@ func (c *OAuthProvider) renderCallbackPage(g *gin.Context, success bool, errorCo
 		status = "error"
 	}
 
-	// determine target origin for postMessage
-	// in dev, use wildcard for localhost to handle vite proxy (frontend on :8003, backend on :8002)
-	// in production, use specific origin for security
-	var targetOrigin string
-	if build.Flags.Production {
-		targetOrigin = "window.location.origin"
-	} else {
-		// in dev, check if we're on localhost and use wildcard
-		targetOrigin = "(window.location.hostname === 'localhost' ? '*' : window.location.origin)"
+	// The popup is opened with noopener, so it has no handle to the admin
+	// window. The result is sent on a BroadcastChannel, which only reaches
+	// pages on this same origin. The admin page also polls the flow status, so
+	// a browser where the channel does not reach the admin page still updates.
+	// The provider id is a uuid string, so it is safe inside the script.
+	providerIDText := ""
+	if providerID != uuid.Nil {
+		providerIDText = providerID.String()
 	}
-
-	// html with script to notify parent window and plain text display
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -340,32 +375,15 @@ func (c *OAuthProvider) renderCallbackPage(g *gin.Context, success bool, errorCo
 <body>
 	<pre>%s</pre>
 	<script>
-		console.log('OAuth callback page loaded with status: %s');
-		if (window.opener) {
-			console.log('Sending message to parent window');
-			try {
-				var targetOrigin = %s;
-				console.log('Target origin:', targetOrigin);
-				window.opener.postMessage({
-					type: 'oauth-callback',
-					status: '%s'
-				}, targetOrigin);
-				console.log('Message sent successfully');
-			} catch (e) {
-				console.error('Failed to send message:', e);
-			}
-		} else {
-			console.log('No window.opener found');
-		}
-
-		// auto-close popup after 5 seconds
-		setTimeout(function() {
-			console.log('Auto-closing popup window');
-			window.close();
-		}, 5000);
+		try {
+			var channel = new BroadcastChannel('%s');
+			channel.postMessage({ type: 'oauth-callback', status: '%s', providerID: '%s' });
+			channel.close();
+		} catch (e) {}
+		setTimeout(function() { window.close(); }, 5000);
 	</script>
 </body>
-</html>`, text, status, targetOrigin, status)
+</html>`, text, oauthCallbackChannel, status, providerIDText)
 
 	g.Header("Content-Type", "text/html; charset=utf-8")
 	g.String(http.StatusOK, html)

@@ -7,7 +7,7 @@
 	import { addToast } from '$lib/store/toast';
 	import { BiMap } from '$lib/utils/maps';
 	import { openIsolatedHtml } from '$lib/utils/safePreview.js';
-	import { fetchAllRows } from '$lib/utils/api-utils';
+	import { fetchAllRows, localTimeToUTC, isTimeLarger } from '$lib/utils/api-utils';
 	import { AppStateService } from '$lib/service/appState';
 	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
@@ -21,6 +21,11 @@
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
 	import Datetime from '$lib/components/Datetime.svelte';
+	import DateTimeField from '$lib/components/DateTimeField.svelte';
+	import DateField from '$lib/components/DateField.svelte';
+	import ToIcon from '$lib/components/ToIcon.svelte';
+	import JitterSlider from '$lib/components/JitterSlider.svelte';
+	import SelectSquare from '$lib/components/SelectSquare.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import { debounceTyping } from '$lib/utils/common';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
@@ -69,6 +74,7 @@
 		dataAnonymizedAt: null,
 		closeAt: null,
 		closedAt: null,
+		pausedAt: null,
 		template: null,
 		isTest: false,
 		hasCustomLureCodes: false,
@@ -192,6 +198,104 @@
 	let isEventTableLoading = false;
 	let isRecipientTableLoading = false;
 	let isCloseModalVisible = false;
+	let isPauseModalVisible = false;
+	let isResumeModalVisible = false;
+	// new delivery window collected when resuming a paused campaign
+	let resumeSendStartAt = null;
+	let resumeSendEndAt = null;
+	let resumeJitterMin = 0;
+	let resumeJitterMax = 0;
+	// distribution speed for resume, same control as the campaign scheduler: Manual
+	// lets the operator pick the finish, a fixed spacing computes the finish from the
+	// number of recipients still to send so they go out that far apart
+	let resumeSpeedIndex = 0;
+	let resumeSpreadOption = 'manual';
+	const RESUME_SPREADS = [
+		{ value: 'manual', label: 'Manual timing', ms: null },
+		{ value: '1min', label: '1 minute apart', ms: 60000 },
+		{ value: '2min', label: '2 minutes apart', ms: 120000 },
+		{ value: '5min', label: '5 minutes apart', ms: 300000 },
+		{ value: '10min', label: '10 minutes apart', ms: 600000 },
+		{ value: '20min', label: '20 minutes apart', ms: 1200000 },
+		{ value: '30min', label: '30 minutes apart', ms: 1800000 },
+		{ value: '1hour', label: '1 hour apart', ms: 3600000 },
+		{ value: '2hour', label: '2 hours apart', ms: 7200000 },
+		{ value: '5hour', label: '5 hours apart', ms: 18000000 },
+		{ value: '12hour', label: '12 hours apart', ms: 43200000 },
+		{ value: '24hour', label: '24 hours apart', ms: 86400000 }
+	];
+	// recipients still to send, used to compute the finish for a fixed spacing. the
+	// scheduler spreads evenly across the window, so finish = start + spacing * (n - 1)
+	// makes the recipients land exactly that spacing apart
+	$: resumeRemaining = Math.max((result.recipients ?? 0) - (result.emailsSent ?? 0), 0);
+	// when a fixed spacing is picked, keep the finish in sync with the start and the
+	// recipient count. Manual leaves the finish to the operator.
+	$: if (isResumeModalVisible && resumeSpreadOption !== 'manual' && resumeSendStartAt) {
+		const spread = RESUME_SPREADS.find((s) => s.value === resumeSpreadOption);
+		const ms = spread ? spread.ms : null;
+		const n = Math.max(resumeRemaining, 1);
+		if (ms === 0 || n <= 1) {
+			resumeSendEndAt = resumeSendStartAt;
+		} else if (ms) {
+			resumeSendEndAt = new Date(new Date(resumeSendStartAt).getTime() + (n - 1) * ms).toISOString();
+		}
+	}
+	// resume scheduling mode: 'basic' is the Time Box window above, 'schedule' is the
+	// Daily Slots mode where delivery only runs on the chosen week days inside a daily
+	// time window. Same two modes offered when a campaign is created.
+	let resumeScheduleType = 'basic';
+	// same delivery method picker the create campaign form uses (SelectSquare), minus
+	// Self Managed which does not apply when resuming a scheduled campaign
+	const resumeScheduleOptions = [
+		{ label: 'Time Box', value: 'basic', icon: '🕒', description: 'Send within defined time box' },
+		{ label: 'Daily Slots', value: 'schedule', icon: '📅', description: 'Schedule specific times each day' }
+	];
+	// Daily Slots state: the date range, the selected week days, and the daily hours
+	let resumeScheduledStartAt = null;
+	let resumeScheduledEndAt = null;
+	let resumeConstraintWeekDays = [];
+	let resumeConstraintStartTime = null;
+	let resumeConstraintEndTime = null;
+	// week days that fall inside the chosen date range; a day outside it cannot be picked
+	let resumeWeekDaysAvailable = [];
+	const dayMap = {
+		0: 'Sunday',
+		1: 'Monday',
+		2: 'Tuesday',
+		3: 'Wednesday',
+		4: 'Thursday',
+		5: 'Friday',
+		6: 'Saturday'
+	};
+	// a date only string like "2026-10-29" parsed at local midnight
+	const parseLocalDate = (dateStr) => new Date(dateStr + 'T00:00:00');
+	// the distinct week days present in the inclusive date range
+	const weekDaysAvailableBetween = (start, end) => {
+		if (!start || !end) return [];
+		const startDate = parseLocalDate(start);
+		const endDate = parseLocalDate(end);
+		const daysInRange = new Set();
+		for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
+			daysInRange.add(date.getDay());
+		}
+		return Array.from(daysInRange).sort((a, b) => a - b);
+	};
+	// pack the selected week days into the bitmask the backend expects
+	const weekDaysAvailableToBinary = (weekDays) => {
+		if (!weekDays?.length) return null;
+		return weekDays.reduce((binary, day) => binary | (1 << day), 0);
+	};
+	// keep the selectable week days in step with the chosen date range
+	$: {
+		if (resumeScheduledStartAt && resumeScheduledEndAt) {
+			resumeWeekDaysAvailable = weekDaysAvailableBetween(
+				resumeScheduledStartAt,
+				resumeScheduledEndAt
+			);
+		} else {
+			resumeWeekDaysAvailable = [];
+		}
+	}
 	let isAnonymizeModalVisible = false;
 	let isAnonymizeDataModalVisible = false;
 	let isSendMessageModalVisible = false;
@@ -369,6 +473,7 @@
 			campaign.dataAnonymizeAt = t.dataAnonymizeAt;
 			campaign.closeAt = t.closeAt;
 			campaign.closedAt = t.closedAt;
+			campaign.pausedAt = t.pausedAt;
 			campaign.isTest = t.isTest;
 			campaign.isTraining = t.isTraining;
 			campaign.constraintWeekDays = t.constraintWeekDays;
@@ -494,37 +599,41 @@
 			timelineTooLarge = true;
 			return;
 		}
-		try {
-			/* does not implement the Result<T>
-			let rows = await fetchAllRows(
-				(options) => api.campaign.getAllCampaignRecipients($page.params.id, options),
-				{ ...defaultOptions, sortBy: 'created_at' }
-			);
-			*/
-			const res = await api.campaign.getAllCampaignRecipients($page.params.id, null);
-			if (!res.success) {
-				throw res.error;
+		// drop the existing scheduled points first, so a reschedule (resume) moves
+		// them and a pause removes them, instead of the old times lingering next to
+		// the new ones. the real events (non sched_ keys) are left untouched.
+		let schedChanged = false;
+		for (const k of Array.from(timelineEventsMap.keys())) {
+			if (typeof k === 'string' && k.startsWith('sched_')) {
+				timelineEventsMap.delete(k);
+				schedChanged = true;
 			}
-			const rawEvents = (res.data?.rows ?? [])
-				.filter((v) => v.sendAt)
-				.map((v) => ({
-					id: `sched_${v.id ?? v.recipient?.email + '_' + v.sendAt}`,
-					createdAt: v.sendAt,
-					eventName: 'campaign_recipient_scheduled',
-					recipient: v.recipient
-				}));
-			let schedChanged = false;
-			for (const e of rawEvents) {
-				if (!timelineEventsMap.has(e.id)) {
+		}
+		// a paused campaign has no scheduled sends to show until it is resumed
+		if (!campaign.pausedAt) {
+			try {
+				const res = await api.campaign.getAllCampaignRecipients($page.params.id, null);
+				if (!res.success) {
+					throw res.error;
+				}
+				const rawEvents = (res.data?.rows ?? [])
+					.filter((v) => v.sendAt && !v.sentAt)
+					.map((v) => ({
+						id: `sched_${v.id ?? v.recipient?.email + '_' + v.sendAt}`,
+						createdAt: v.sendAt,
+						eventName: 'campaign_recipient_scheduled',
+						recipient: v.recipient
+					}));
+				for (const e of rawEvents) {
 					timelineEventsMap.set(e.id, e);
 					schedChanged = true;
 				}
+			} catch (e) {
+				addToast('failed to recipient schedule', 'Error');
+				console.error('failed to load recipient schedule', e);
 			}
-			if (schedChanged) timelineEvents = Array.from(timelineEventsMap.values());
-		} catch (e) {
-			addToast('failed to recipient schedule', 'Error');
-			console.error('failed to load recipient schedule', e);
 		}
+		if (schedChanged) timelineEvents = Array.from(timelineEventsMap.values());
 	};
 
 	const refreshCampaignEventsSince = async () => {
@@ -995,6 +1104,174 @@
 	const closeCloseCampaignModal = () => {
 		isCloseModalVisible = false;
 	};
+
+	const showPauseModal = () => {
+		isPauseModalVisible = true;
+	};
+
+	const onConfirmPause = async () => {
+		let res;
+		try {
+			res = await api.campaign.pause($page.params.id);
+			if (!res.success) {
+				throw res.error;
+			}
+			addToast('Sending paused', 'Success');
+			isPauseModalVisible = false;
+			await refresh();
+			// rebuild the timeline so the now cancelled scheduled sends drop off it
+			await refreshRecipientsTimes();
+		} catch (e) {
+			addToast(res?.error || 'Failed to pause sending', 'Error');
+			console.error('failed to pause sending', e);
+		}
+		return res;
+	};
+
+	const showResumeModal = () => {
+		// default the start to now and clear the rest so each resume starts clean
+		resumeSendStartAt = new Date().toISOString();
+		resumeSendEndAt = null;
+		resumeJitterMin = 0;
+		resumeJitterMax = 0;
+		resumeSpeedIndex = 0;
+		resumeSpreadOption = 'manual';
+		// default to Time Box and clear the Daily Slots fields
+		resumeScheduleType = 'basic';
+		resumeScheduledStartAt = null;
+		resumeScheduledEndAt = null;
+		resumeConstraintWeekDays = [];
+		resumeConstraintStartTime = null;
+		resumeConstraintEndTime = null;
+		isResumeModalVisible = true;
+	};
+
+	// the Daily Slots window: delivery runs from the start of the start date to the
+	// end of the end date. start is local midnight, end is 23:59 local of the end date.
+	const resumeDailyWindow = () => {
+		if (!resumeScheduledStartAt || !resumeScheduledEndAt) {
+			return { start: null, end: null };
+		}
+		const start = parseLocalDate(resumeScheduledStartAt);
+		const end = parseLocalDate(resumeScheduledEndAt);
+		end.setHours(23, 59, 0, 0);
+		return { start, end };
+	};
+	// a started campaign cannot have its close or anonymize date edited, so the resume
+	// window has to finish before whichever is set, else the close or anonymize sweep
+	// would cancel the sends we just rescheduled
+	const resumeFinishBeforeLimits = (end) => {
+		if (campaign.closeAt && end >= new Date(campaign.closeAt)) {
+			return 'The finish must be before the campaign close date.';
+		}
+		if (campaign.anonymizeAt && end >= new Date(campaign.anonymizeAt)) {
+			return 'The finish must be before the campaign anonymize date.';
+		}
+		return '';
+	};
+	// validate the active mode. Time Box checks the start and finish window; Daily Slots
+	// checks the date range, the selected week days, and the daily hours.
+	$: resumeValidationError = (() => {
+		if (!isResumeModalVisible) {
+			return '';
+		}
+		if (resumeScheduleType === 'schedule') {
+			if (!resumeScheduledStartAt || !resumeScheduledEndAt) {
+				return 'Choose a delivery start and end date.';
+			}
+			const { start, end } = resumeDailyWindow();
+			if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+				return 'Choose a valid delivery start and end date.';
+			}
+			if (end < start) {
+				return 'The end date cannot be before the start date.';
+			}
+			if (!resumeConstraintWeekDays.length) {
+				return 'Choose at least one delivery day.';
+			}
+			if (!resumeConstraintStartTime || !resumeConstraintEndTime) {
+				return 'Choose the daily start and end time.';
+			}
+			if (isTimeLarger(resumeConstraintStartTime, resumeConstraintEndTime)) {
+				return 'The daily end time must be after the daily start time.';
+			}
+			if (end <= new Date()) {
+				return 'The end date must be in the future.';
+			}
+			return resumeFinishBeforeLimits(end);
+		}
+		if (!resumeSendStartAt || !resumeSendEndAt) {
+			return 'Choose a delivery start and finish.';
+		}
+		const start = new Date(resumeSendStartAt);
+		const end = new Date(resumeSendEndAt);
+		if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+			return 'Choose a valid delivery start and finish.';
+		}
+		if (end <= start) {
+			return 'The finish must be after the start.';
+		}
+		if (end <= new Date()) {
+			return 'The finish must be in the future.';
+		}
+		return resumeFinishBeforeLimits(end);
+	})();
+	$: isResumeValid = isResumeModalVisible && !resumeValidationError;
+
+	const onConfirmResume = async () => {
+		let res;
+		try {
+			let body;
+			if (resumeScheduleType === 'schedule') {
+				// Daily Slots: send the date range as the window plus the week day and
+				// daily hour constraints the backend applies inside it
+				const { start, end } = resumeDailyWindow();
+				body = {
+					sendStartAt: start.toISOString(),
+					sendEndAt: end.toISOString(),
+					constraintWeekDays: weekDaysAvailableToBinary(resumeConstraintWeekDays),
+					constraintStartTime: localTimeToUTC(resumeConstraintStartTime),
+					constraintEndTime: localTimeToUTC(resumeConstraintEndTime),
+					jitterMin: resumeJitterMin,
+					jitterMax: resumeJitterMax
+				};
+			} else {
+				// Time Box: the plain start and finish window
+				body = {
+					sendStartAt: new Date(resumeSendStartAt).toISOString(),
+					sendEndAt: new Date(resumeSendEndAt).toISOString(),
+					jitterMin: resumeJitterMin,
+					jitterMax: resumeJitterMax
+				};
+			}
+			res = await api.campaign.resume($page.params.id, body);
+			if (!res.success) {
+				throw res.error;
+			}
+			addToast('Sending resumed', 'Success');
+			isResumeModalVisible = false;
+			await refresh();
+			// rebuild the timeline so the scheduled sends show at their new times
+			await refreshRecipientsTimes();
+		} catch (e) {
+			addToast(res?.error || 'Failed to resume sending', 'Error');
+			console.error('failed to resume sending', e);
+		}
+		return res;
+	};
+
+	// the pause action shows only while there is still delivery to stop: a scheduled
+	// campaign that has started, is not already paused or closed, and still has emails
+	// left to send
+	$: canPause =
+		!campaign.closedAt &&
+		!campaign.pausedAt &&
+		!isSelfManaged &&
+		!!campaign.sendStartAt &&
+		new Date(campaign.sendStartAt) <= new Date() &&
+		result.recipients - result.emailsSent > 0;
+	// the resume action shows while a campaign is paused and not closed
+	$: canResume = !!campaign.pausedAt && !campaign.closedAt;
 
 	const showAnonymizeModal = () => {
 		isAnonymizeModalVisible = true;
@@ -2175,7 +2452,11 @@
 					<div class="flex justify-between">
 						<span class="text-gray-600 dark:text-gray-400">Status:</span>
 						<span class="text-pc-darkblue dark:text-white font-semibold">
-							{toEvent(campaign.notableEventName).name}
+							{#if campaign.pausedAt && !campaign.closedAt}
+								<span data-paused-badge title="Sending paused">Paused</span>
+							{:else}
+								{toEvent(campaign.notableEventName).name}
+							{/if}
 						</span>
 					</div>
 
@@ -2476,6 +2757,42 @@
 									Update
 								</IconButton>
 							</div>
+							{#if canPause}
+								<div
+									title={isContextMismatch()
+										? campaign.companyID
+											? 'Switch to company view to perform this action'
+											: 'Switch to global view to perform this action'
+										: ''}
+								>
+									<IconButton
+										variant="amber"
+										icon="pause"
+										disabled={isContextMismatch()}
+										on:click={showPauseModal}
+									>
+										Pause
+									</IconButton>
+								</div>
+							{/if}
+							{#if canResume}
+								<div
+									title={isContextMismatch()
+										? campaign.companyID
+											? 'Switch to company view to perform this action'
+											: 'Switch to global view to perform this action'
+										: ''}
+								>
+									<IconButton
+										variant="green"
+										icon="play"
+										disabled={isContextMismatch()}
+										on:click={showResumeModal}
+									>
+										Resume
+									</IconButton>
+								</div>
+							{/if}
 							<div
 								title={isContextMismatch()
 									? campaign.companyID
@@ -2795,7 +3112,7 @@
 							{#if campaign.isAnonymous}
 								<span
 									class="text-sm italic text-gray-400 dark:text-gray-500"
-									title="Per-recipient outcomes are hidden for anonymous campaigns. See Results by position or department."
+									title="Per recipient outcomes are hidden for anonymous campaigns. See Results by position or department."
 									>Hidden</span
 								>
 							{:else}
@@ -3303,6 +3620,7 @@
 							<a
 								href="https://{campaign.template?.domain?.name}"
 								target="_blank"
+								rel="noopener noreferrer"
 								class="text-cta-blue dark:text-white hover:underline"
 							>
 								{campaign.template?.domain?.name}
@@ -3376,6 +3694,185 @@
 				<li class="list-tem">Links in e-mails and landing pages will stop working</li>
 				<li class="list-tem">Campaign will be set as completed</li>
 			</ul>
+		</div>
+	</Alert>
+
+	<Alert
+		headline="pause sending"
+		tone="affirmative"
+		ok="Pause"
+		bind:visible={isPauseModalVisible}
+		onConfirm={onConfirmPause}
+	>
+		<div>
+			<p class="mb-2 text-gray-700 dark:text-gray-200 transition-colors duration-200">
+				Pausing stops sending the remaining emails.
+			</p>
+			<ul
+				class="list-disc ml-8 mt-4 mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+			>
+				<li class="list-tem">Emails already sent are not affected</li>
+				<li class="list-tem">Landing pages and tracking stay live</li>
+				<li class="list-tem">You can resume later by choosing a new delivery window</li>
+			</ul>
+		</div>
+	</Alert>
+
+	<Alert
+		headline="resume sending"
+		tone="affirmative"
+		ok="Resume"
+		bind:visible={isResumeModalVisible}
+		onConfirm={onConfirmResume}
+		okDisabled={!isResumeValid}
+	>
+		<div>
+			<p class="mb-2 text-gray-700 dark:text-gray-200 transition-colors duration-200">
+				Choose a new delivery window for the remaining emails. Landing pages and tracking stayed
+				live while the campaign was paused.
+			</p>
+			<div class="mb-4">
+				<SelectSquare
+					label="Delivery Method"
+					options={resumeScheduleOptions}
+					bind:value={resumeScheduleType}
+				/>
+			</div>
+			{#if resumeScheduleType === 'basic'}
+				<DateTimeField
+					bind:value={resumeSendStartAt}
+					min={new Date()}
+					labelWidth={'medium'}
+					resets={false}
+					required
+				>
+					Delivery start
+				</DateTimeField>
+				<div class="pt-4 pb-2">
+					<div class="flex flex-col gap-2">
+						<p class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200">
+							Distribution Speed
+							<span class="italic font-normal">
+								({RESUME_SPREADS[resumeSpeedIndex]?.label ?? 'Manual timing'})
+							</span>
+						</p>
+						<input
+							type="range"
+							min="0"
+							max={RESUME_SPREADS.length - 1}
+							bind:value={resumeSpeedIndex}
+							class="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:cursor-pointer hover:[&::-webkit-slider-thumb]:bg-blue-700 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-blue-600 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer hover:[&::-moz-range-thumb]:bg-blue-700 transition-colors duration-200"
+							on:input={(event) => {
+								resumeSpeedIndex = parseInt(event.currentTarget.value);
+								resumeSpreadOption = RESUME_SPREADS[resumeSpeedIndex].value;
+							}}
+						/>
+					</div>
+				</div>
+				<DateTimeField
+					bind:value={resumeSendEndAt}
+					min={resumeSendStartAt ? new Date(resumeSendStartAt) : new Date()}
+					labelWidth={'medium'}
+					resets={false}
+					required
+					disabled={resumeSpreadOption !== 'manual'}
+				>
+					Delivery finish
+				</DateTimeField>
+			{:else if resumeScheduleType === 'schedule'}
+				<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
+					Delivery start and end
+				</p>
+				<div class="flex">
+					<DateField
+						noLabel
+						inputWidth="small"
+						bind:value={resumeScheduledStartAt}
+						onChange={() => {
+							resumeConstraintWeekDays = [];
+						}}
+						required>Start</DateField
+					>
+					<div class="self-center px-4">
+						<ToIcon />
+					</div>
+					<DateField
+						noLabel
+						inputWidth="small"
+						bind:value={resumeScheduledEndAt}
+						onChange={() => {
+							resumeConstraintWeekDays = [];
+						}}
+						required>End</DateField
+					>
+				</div>
+				<div class="mt-4">
+					<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
+						Delivery days
+					</p>
+					<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+						{#each Object.entries(dayMap) as [dayNum, dayName]}
+							{@const dayInt = parseInt(dayNum)}
+							<label
+								class:opacity-10={!resumeWeekDaysAvailable.includes(dayInt)}
+								class="flex items-center gap-2 p-2 border border-gray-300 dark:border-gray-700/60 rounded"
+							>
+								<input
+									type="checkbox"
+									on:change={() => {
+										if (resumeConstraintWeekDays.includes(dayInt)) {
+											resumeConstraintWeekDays = resumeConstraintWeekDays.filter(
+												(d) => d !== dayInt
+											);
+										} else {
+											resumeConstraintWeekDays = [...resumeConstraintWeekDays, dayInt];
+										}
+										resumeConstraintWeekDays.sort();
+									}}
+									checked={resumeConstraintWeekDays.includes(dayInt)}
+									disabled={!resumeWeekDaysAvailable.includes(dayInt)}
+									title={!resumeWeekDaysAvailable.includes(dayInt)
+										? 'Delivery start and end must be set first'
+										: ''}
+								/>
+								<span>{dayName}</span>
+							</label>
+						{/each}
+					</div>
+				</div>
+				<p class="font-semibold text-slate-600 dark:text-gray-400 py-4 transition-colors duration-200">
+					Delivery hours
+				</p>
+				<div class="flex">
+					<div>
+						<input
+							class="rounded-md py-2 text-gray-600 text-center border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 focus:bg-gray-100 bg-grayblue-light font-normal"
+							type="time"
+							required
+							autocomplete="off"
+							bind:value={resumeConstraintStartTime}
+						/>
+					</div>
+					<div class="self-center px-4">
+						<ToIcon />
+					</div>
+					<div>
+						<input
+							class="rounded-md py-2 text-gray-600 text-center border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 focus:bg-gray-100 bg-grayblue-light font-normal"
+							type="time"
+							required
+							autocomplete="off"
+							bind:value={resumeConstraintEndTime}
+						/>
+					</div>
+				</div>
+			{/if}
+			<JitterSlider bind:valueMin={resumeJitterMin} bind:valueMax={resumeJitterMax}>
+				Jitter
+			</JitterSlider>
+			{#if resumeValidationError}
+				<div class="mt-2 text-sm text-red-600 dark:text-red-400">{resumeValidationError}</div>
+			{/if}
 		</div>
 	</Alert>
 
@@ -3613,6 +4110,7 @@
 						Tokens can be imported into <a
 							href="https://github.com/phishingclub/session-sushi"
 							target="_blank"
+							rel="noopener noreferrer"
 							class="text-blue-600 dark:text-white hover:underline">Session Sushi</a
 						> to hijack the captured session.
 					</p>
@@ -3647,6 +4145,7 @@
 						Cookies can be imported and exchanged for tokens using the <a
 							href="https://github.com/phishingclub/session-sushi"
 							target="_blank"
+							rel="noopener noreferrer"
 							class="text-blue-600 dark:text-white hover:underline">Session Sushi</a
 						> extension.
 					</p>

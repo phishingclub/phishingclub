@@ -139,6 +139,19 @@ func (r *Attachment) UpdateByID(
 	return nil
 }
 
+// CountGlobalByFileName counts attachments in the global context (no company)
+// that store their bytes under the given file name.
+func (r *Attachment) CountGlobalByFileName(
+	ctx context.Context,
+	fileName string,
+) (int64, error) {
+	var n int64
+	res := r.DB.Model(&database.Attachment{}).
+		Where("filename = ? AND company_id IS NULL", fileName).
+		Count(&n)
+	return n, res.Error
+}
+
 // DeleteByID deletes an attachment by id
 func (r *Attachment) DeleteByID(
 	ctx context.Context,

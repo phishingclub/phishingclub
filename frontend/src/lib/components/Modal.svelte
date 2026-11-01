@@ -337,13 +337,13 @@
 			>
 				<div
 					class:opacity-20={isSubmitting}
-					class="bg-cta-blue dark:bg-blue-800 text-white py-4 px-8 flex justify-between flex-shrink-0 transition-colors duration-200
+					class="bg-cta-blue dark:bg-cta-blue text-white py-4 px-8 flex justify-between flex-shrink-0 transition-colors duration-200
 						{fullscreen ? '' : 'rounded-t-md'}"
 				>
 					<div class="flex-1">
 						<h1 id="modal-title" class="uppercase mr-8 font-semibold text-2xl">{headerText}</h1>
 						{#if description}
-							<p id="modal-description" class="mt-2 text-sm opacity-90">{description}</p>
+							<p id="modal-description" class="mt-2 text-sm opacity-90 break-all">{description}</p>
 						{/if}
 					</div>
 					<button

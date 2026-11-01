@@ -439,6 +439,68 @@ func (r *Campaign) GetByAllowDenyID(
 	return models, nil
 }
 
+// GetByDenyPageID gets the campaigns that use a page as their deny page
+// not paginated
+func (r *Campaign) GetByDenyPageID(
+	ctx context.Context,
+	pageID *uuid.UUID,
+) ([]*model.Campaign, error) {
+	rows := []*database.Campaign{}
+	models := []*model.Campaign{}
+	res := r.DB.
+		Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_TABLE, "deny_page_id")),
+			pageID.String(),
+		).
+		Find(&rows)
+	if res.Error != nil {
+		return models, res.Error
+	}
+	for _, row := range rows {
+		c, err := ToCampaign(row)
+		if err != nil {
+			return models, errs.Wrap(err)
+		}
+		models = append(models, c)
+	}
+	return models, nil
+}
+
+// GetByScriptID gets the campaigns a script is attached to
+// not paginated
+func (r *Campaign) GetByScriptID(
+	ctx context.Context,
+	scriptID *uuid.UUID,
+) ([]*model.Campaign, error) {
+	rows := []*database.Campaign{}
+	models := []*model.Campaign{}
+	res := r.DB.
+		InnerJoins(
+			LeftJoinOn(
+				database.CAMPAIGN_TABLE,
+				"id",
+				database.CAMPAIGN_SCRIPT_TABLE,
+				"campaign_id",
+			),
+		).
+		Where(
+			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_SCRIPT_TABLE, "script_id")),
+			scriptID.String(),
+		).
+		Find(&rows)
+	if res.Error != nil {
+		return models, res.Error
+	}
+	for _, row := range rows {
+		c, err := ToCampaign(row)
+		if err != nil {
+			return models, errs.Wrap(err)
+		}
+		models = append(models, c)
+	}
+	return models, nil
+}
+
 // GetByTemplateIDs gets campaigns by template IDs
 // not paginated
 func (r *Campaign) GetByTemplateIDs(
@@ -1880,6 +1942,36 @@ func (r *Campaign) UpdateByID(
 	return nil
 }
 
+// SetPausedByID marks a campaign as paused by setting its paused at timestamp.
+// It is a targeted write so it never touches any other campaign column.
+func (r *Campaign) SetPausedByID(
+	ctx context.Context,
+	id *uuid.UUID,
+) error {
+	row := map[string]any{"paused_at": utils.NowRFC3339UTC()}
+	AddUpdatedAt(row)
+	res := r.DB.
+		Model(&database.Campaign{}).
+		Where("id = ?", id).
+		Updates(row)
+	return res.Error
+}
+
+// ClearPausedByID clears the paused at timestamp. Used on resume and on close so
+// a closed campaign is never left paused.
+func (r *Campaign) ClearPausedByID(
+	ctx context.Context,
+	id *uuid.UUID,
+) error {
+	row := map[string]any{"paused_at": nil}
+	AddUpdatedAt(row)
+	res := r.DB.
+		Model(&database.Campaign{}).
+		Where("id = ?", id).
+		Updates(row)
+	return res.Error
+}
+
 // RemoveCampaignRecipientGroups removes all recipient groups from a campaign
 func (r *Campaign) RemoveCampaignRecipientGroups(
 	ctx context.Context,
@@ -2240,6 +2332,11 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	if row.ClosedAt != nil {
 		closedAt = nullable.NewNullableWithValue(*row.ClosedAt)
 	}
+	var pausedAt nullable.Nullable[time.Time]
+	pausedAt.SetNull()
+	if row.PausedAt != nil {
+		pausedAt = nullable.NewNullableWithValue(*row.PausedAt)
+	}
 	var sortField nullable.Nullable[vo.CampaignSortField]
 	if row.SortField != "" {
 		sf, err := vo.NewCampaignSortField(row.SortField)
@@ -2429,6 +2526,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		Name:                name,
 		CloseAt:             closeAt,
 		ClosedAt:            closedAt,
+		PausedAt:            pausedAt,
 		AnonymizeAt:         anonymizeAt,
 		AnonymizedAt:        anonymizedAt,
 		DataAnonymizeAt:     dataAnonymizeAt,

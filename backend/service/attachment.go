@@ -214,7 +214,7 @@ func (a *Attachment) GetAll(
 			a.Logger.Debugw("failed to get path", "error", err)
 			return nil, errs.Wrap(err)
 		}
-		attachment.Path = nullable.NewNullableWithValue(*path)
+		attachment.Path = nullable.NewNullableWithValue(path)
 	}
 	// no audit on read
 	return result, nil
@@ -253,7 +253,7 @@ func (a *Attachment) GetByID(
 		a.Logger.Debugw("failed to get path", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	attachment.Path = nullable.NewNullableWithValue(*path)
+	attachment.Path = nullable.NewNullableWithValue(path)
 	// no audit log on read
 	return attachment, nil
 }
@@ -377,17 +377,10 @@ func (a *Attachment) DeleteByID(
 
 	attachmentFileName := attachment.FileName.MustGet()
 
-	// validate that the file exists and is accessible within the company context
-	_, err = companyRoot.Stat(attachmentFileName.String())
-	if err != nil {
-		a.Logger.Debugw("attachment file not found in context", "error", err)
-		return err
-	}
-
-	// build full path for file service (validated as safe by OpenRoot)
-	filename := filepath.Join(a.RootFolder, companyContext, attachmentFileName.String())
+	// delete through the company context root
 	err = a.FileService.Delete(
-		filename,
+		companyRoot,
+		attachmentFileName.String(),
 	)
 	if err != nil {
 		a.Logger.Debugw("failed to delete attachment file", "error", err)
@@ -408,7 +401,9 @@ func (a *Attachment) DeleteByID(
 	return nil
 }
 
-func (a *Attachment) GetPath(attachment *model.Attachment) (*vo.RelativeFilePath, error) {
+// GetPath returns the filesystem path of the attachment file after checking
+// that the file exists inside the attachment root folder.
+func (a *Attachment) GetPath(attachment *model.Attachment) (string, error) {
 	// path
 	contextFolder := ""
 	if !attachment.CompanyID.IsSpecified() || attachment.CompanyID.IsNull() {
@@ -423,7 +418,7 @@ func (a *Attachment) GetPath(attachment *model.Attachment) (*vo.RelativeFilePath
 	root, err := os.OpenRoot(a.RootFolder)
 	if err != nil {
 		a.Logger.Infow("failed to open root folder", "error", err)
-		return nil, errs.Wrap(err)
+		return "", errs.Wrap(err)
 	}
 	defer root.Close()
 
@@ -431,7 +426,7 @@ func (a *Attachment) GetPath(attachment *model.Attachment) (*vo.RelativeFilePath
 	contextRoot, err := root.OpenRoot(contextFolder)
 	if err != nil {
 		a.Logger.Infow("failed to open context folder", "error", err)
-		return nil, errs.Wrap(err)
+		return "", errs.Wrap(err)
 	}
 	defer contextRoot.Close()
 
@@ -439,15 +434,8 @@ func (a *Attachment) GetPath(attachment *model.Attachment) (*vo.RelativeFilePath
 	_, err = contextRoot.Stat(attachmentFilename)
 	if err != nil {
 		a.Logger.Debugw("file not accessible", "error", err)
-		return nil, errs.Wrap(err)
+		return "", errs.Wrap(err)
 	}
 
-	// build full path for return value
-	pathWithRootAndDomainContext := filepath.Join(a.RootFolder, contextFolder, attachmentFilename)
-	path, err := vo.NewRelativeFilePath(pathWithRootAndDomainContext)
-	if err != nil {
-		a.Logger.Debugw("failed to make file path", "error", err)
-		return nil, errs.Wrap(err)
-	}
-	return path, nil
+	return filepath.Join(a.RootFolder, contextFolder, attachmentFilename), nil
 }

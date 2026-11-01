@@ -16,6 +16,7 @@
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
@@ -509,6 +510,9 @@
 		{/each}
 	</Table>
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeCreateModal} {isSubmitting}>
+		{#if modalMode === 'update'}
+			<InstalledResourceBadge resourceType="apisender" resourceId={formValues.id} variant="notice" />
+		{/if}
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<FormColumns>
 				<FormColumn>

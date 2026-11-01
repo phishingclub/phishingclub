@@ -23,6 +23,7 @@ type Campaign struct {
 	UpdatedAt           *time.Time                                   `json:"updatedAt"`
 	CloseAt             nullable.Nullable[time.Time]                 `json:"closeAt"`
 	ClosedAt            nullable.Nullable[time.Time]                 `json:"closedAt"`
+	PausedAt            nullable.Nullable[time.Time]                 `json:"pausedAt"`
 	AnonymizeAt         nullable.Nullable[time.Time]                 `json:"anonymizeAt"`
 	AnonymizedAt        nullable.Nullable[time.Time]                 `json:"anonymizedAt"`
 	DataAnonymizeAt     nullable.Nullable[time.Time]                 `json:"dataAnonymizeAt"`
@@ -144,6 +145,49 @@ func IsWebhookEventEnabled(webhookEvents int, eventName string) bool {
 }
 
 func (c *Campaign) Validate() error {
+	return c.validate(true)
+}
+
+// CampaignAnonymizeDates holds the stored dates that the anonymize at rules
+// compare against
+type CampaignAnonymizeDates struct {
+	SendEndAt   nullable.Nullable[time.Time]
+	CloseAt     nullable.Nullable[time.Time]
+	AnonymizeAt nullable.Nullable[time.Time]
+}
+
+// AnonymizeDates returns a copy of the dates used by ValidateUpdate
+func (c *Campaign) AnonymizeDates() CampaignAnonymizeDates {
+	return CampaignAnonymizeDates{
+		SendEndAt:   c.SendEndAt,
+		CloseAt:     c.CloseAt,
+		AnonymizeAt: c.AnonymizeAt,
+	}
+}
+
+// ValidateUpdate checks a stored campaign after an update is merged in. The
+// rule that anonymize at is after the end date was not enforced in older
+// versions, so it only runs when the update changes anonymize at, close at or
+// the end date. This keeps such campaigns editable.
+func (c *Campaign) ValidateUpdate(stored CampaignAnonymizeDates) error {
+	changed := !sameMinute(c.SendEndAt, stored.SendEndAt) ||
+		!sameMinute(c.CloseAt, stored.CloseAt) ||
+		!sameMinute(c.AnonymizeAt, stored.AnonymizeAt)
+	return c.validate(changed)
+}
+
+// sameMinute compares two optional times at minute precision, since updates
+// truncate dates to the minute
+func sameMinute(a, b nullable.Nullable[time.Time]) bool {
+	av, aErr := a.Get()
+	bv, bErr := b.Get()
+	if aErr != nil || bErr != nil {
+		return (aErr != nil) == (bErr != nil)
+	}
+	return av.Truncate(time.Minute).Equal(bv.Truncate(time.Minute))
+}
+
+func (c *Campaign) validate(checkAnonymizeAfterEnd bool) error {
 	if err := validate.NullableFieldRequired("name", c.Name); err != nil {
 		return err
 	}
@@ -250,7 +294,7 @@ func (c *Campaign) Validate() error {
 				return validate.WrapErrorWithField(errors.New("anonymize at must be after close date"), "AnonymizeAt")
 			}
 		}
-		if v, err := c.SendEndAt.Get(); err == nil {
+		if v, err := c.SendEndAt.Get(); err == nil && checkAnonymizeAfterEnd {
 			if anonymizeAt.Before(v) {
 				return validate.WrapErrorWithField(errors.New("anonymize at must be after end date"), "AnonymizeAt")
 			}
@@ -668,4 +712,19 @@ func (c *Campaign) IsActive() bool {
 // IsSelfManaged returns true if the campaign is self managed
 func (c *Campaign) IsSelfManaged() bool {
 	return c.SendStartAt.IsSpecified() && c.SendStartAt.IsNull() && c.SendEndAt.IsSpecified() && c.SendEndAt.IsNull()
+}
+
+// IsPaused returns true if sending is paused
+func (c *Campaign) IsPaused() bool {
+	return c.PausedAt.IsSpecified() && !c.PausedAt.IsNull()
+}
+
+// IsStarted returns true if the send start time has passed. A self managed
+// campaign has no send window and is never started in this sense.
+func (c *Campaign) IsStarted() bool {
+	v, err := c.SendStartAt.Get()
+	if err != nil {
+		return false
+	}
+	return !v.After(time.Now())
 }

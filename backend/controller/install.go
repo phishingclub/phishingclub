@@ -210,8 +210,10 @@ func (in *Install) install(g *gin.Context, tx *gorm.DB) bool {
 		return false
 	}
 	ctx := g.Request.Context()
-	// check if already installed
-	isInstalled, err := in.OptionRepository.GetByKey(ctx, data.OptionKeyIsInstalled)
+	// check if already installed. read through the transaction because it
+	// already holds a pooled connection and the main handle may have none free
+	txOptions := &repository.Option{DB: tx}
+	isInstalled, err := txOptions.GetByKey(ctx, data.OptionKeyIsInstalled)
 	if err != nil {
 		in.Logger.Errorw("failed to install - could not get option",
 			"optionKey", data.OptionKeyIsInstalled,

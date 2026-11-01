@@ -18,6 +18,7 @@ import (
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
+	"github.com/phishingclub/phishingclub/safepath"
 	"github.com/phishingclub/phishingclub/vo"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
@@ -714,6 +715,19 @@ func (im *Import) createAssetFromZipFile(
 	f *zip.File,
 	relativePath string,
 ) (bool, error) {
+	// validate the path once and use that one value for the lookup, the row and
+	// the file on disk.
+	if err := safepath.Check(relativePath); err != nil {
+		return false, fmt.Errorf("invalid asset path: %w", err)
+	}
+	assetPath, err := vo.NewRelativeFilePath(relativePath)
+	if err != nil {
+		return false, fmt.Errorf("invalid asset path %q: %w", relativePath, err)
+	}
+	if assetPath.String() != relativePath {
+		return false, fmt.Errorf("invalid asset path %q", relativePath)
+	}
+
 	// check if asset already exists by path
 	existing, err := im.Asset.GetByPath(g.Request.Context(), session, relativePath)
 
@@ -742,9 +756,6 @@ func (im *Import) createAssetFromZipFile(
 		return false, err
 	}
 
-	// use the provided relativePath for the asset path
-	fullRelativePath := relativePath
-
 	// create asset model
 	asset := &model.Asset{}
 
@@ -754,10 +765,7 @@ func (im *Import) createAssetFromZipFile(
 		asset.Name = nullable.NewNullableWithValue(*name)
 	}
 
-	// set the relative path
-	if path, err := vo.NewRelativeFilePath(fullRelativePath); err == nil {
-		asset.Path = nullable.NewNullableWithValue(*path)
-	}
+	asset.Path = nullable.NewNullableWithValue(*assetPath)
 
 	// Assets are always global/shared - never set company ID
 
@@ -772,31 +780,30 @@ func (im *Import) createAssetFromZipFile(
 
 	// ensure base asset directory exists
 	if err := os.MkdirAll(im.Asset.RootFolder, 0755); err != nil {
+		im.Asset.AssetRepository.DeleteByID(g, id)
 		return false, err
 	}
 
 	// ensure shared directory exists
 	fullContextPath := filepath.Join(im.Asset.RootFolder, contextFolder)
 	if err := os.MkdirAll(fullContextPath, 0755); err != nil {
+		im.Asset.AssetRepository.DeleteByID(g, id)
 		return false, err
 	}
 
 	// create root filesystem for the full context path (controlled paths only)
 	contextRoot, err := os.OpenRoot(fullContextPath)
 	if err != nil {
+		im.Asset.AssetRepository.DeleteByID(g, id)
 		return false, err
 	}
 	defer contextRoot.Close()
 
-	// validate file path within context
-	_, err = contextRoot.Stat(fullRelativePath)
-	if err != nil && !os.IsNotExist(err) {
-		return false, err
-	}
-
-	// Upload the file content directly using secure method
+	// no asset row owns this path, so a file already on disk here is left over,
+	// for example after a database restore. Overwrite it so the new row serves
+	// the imported content.
 	contentBuffer := bytes.NewBuffer(content)
-	err = im.File.UploadFile(contextRoot, strings.Trim(fullRelativePath, "/"), contentBuffer, true)
+	err = im.File.UploadFile(contextRoot, relativePath, contentBuffer, true)
 	if err != nil {
 		// Clean up the database entry if file upload fails
 		im.Asset.AssetRepository.DeleteByID(g, id)

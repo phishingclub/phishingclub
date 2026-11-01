@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
@@ -121,6 +122,9 @@ func (s *ReportTemplate) UpdateByID(
 		s.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
+	// the company of a report template is set on create and never changed by an
+	// update, it decides which company the template applies to
+	tmpl.CompanyID = nullable.Nullable[uuid.UUID]{}
 	if err := s.ReportTemplateRepository.UpdateByID(ctx, id, tmpl); err != nil {
 		s.Logger.Errorw("failed to update report template", "error", err)
 		return errs.Wrap(err)

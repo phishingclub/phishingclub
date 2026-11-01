@@ -68,7 +68,7 @@ func (a *Attachment) GetContentByID(g *gin.Context) {
 	if ok := a.handleErrors(g, err); !ok {
 		return
 	}
-	p := attachment.Path.MustGet().String()
+	p := attachment.Path.MustGet()
 	// serve the file
 	// #nosec
 	content, err := os.ReadFile(p)

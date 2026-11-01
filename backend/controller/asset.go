@@ -476,6 +476,7 @@ func (a *Asset) UpdateByID(g *gin.Context) {
 		id,
 		req.Name,
 		req.Description,
+		req.ContentType,
 	)
 	if ok := a.handleErrors(g, err); !ok {
 		return
@@ -483,15 +484,89 @@ func (a *Asset) UpdateByID(g *gin.Context) {
 	a.Response.OK(g, gin.H{})
 }
 
-// GetEditableContentByID returns an asset's content and whether it can be
-// edited as text in the editor.
-func (a *Asset) GetEditableContentByID(g *gin.Context) {
-	// handle session
+// AddHeader adds a response header to an asset
+func (a *Asset) AddHeader(g *gin.Context) {
 	session, _, ok := a.handleSession(g)
 	if !ok {
 		return
 	}
-	// parse request
+	var req model.AssetHeader
+	if ok := a.handleParseRequest(g, &req); !ok {
+		return
+	}
+	id, ok := a.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	createdID, err := a.AssetService.AddHeader(g.Request.Context(), session, id, &req)
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	a.Response.OK(g, gin.H{
+		"id": createdID.String(),
+	})
+}
+
+// RemoveHeader removes a response header from an asset
+func (a *Asset) RemoveHeader(g *gin.Context) {
+	session, _, ok := a.handleSession(g)
+	if !ok {
+		return
+	}
+	id, ok := a.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	headerID, err := uuid.Parse(g.Param("headerID"))
+	if err != nil {
+		a.Logger.Debugw("invalid header id", "headerID", g.Param("headerID"), "error", err)
+		a.Response.BadRequestMessage(g, "invalid header id")
+		return
+	}
+	err = a.AssetService.RemoveHeader(g.Request.Context(), session, id, &headerID)
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	a.Response.OK(g, gin.H{})
+}
+
+// SetAllowDenyRequest is the request to replace the allow deny lists of an
+// asset. An empty list removes all lists, a missing list is refused.
+type SetAllowDenyRequest struct {
+	AllowDenyIDs *[]uuid.UUID `json:"allowDenyIDs"`
+}
+
+// SetAllowDeny replaces the allow deny lists of an asset
+func (a *Asset) SetAllowDeny(g *gin.Context) {
+	session, _, ok := a.handleSession(g)
+	if !ok {
+		return
+	}
+	var req SetAllowDenyRequest
+	if ok := a.handleParseRequest(g, &req); !ok {
+		return
+	}
+	id, ok := a.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	if req.AllowDenyIDs == nil {
+		a.Response.BadRequestMessage(g, "allowDenyIDs is required")
+		return
+	}
+	err := a.AssetService.SetAllowDenyByID(g.Request.Context(), session, id, *req.AllowDenyIDs)
+	if ok := a.handleErrors(g, err); !ok {
+		return
+	}
+	a.Response.OK(g, gin.H{})
+}
+
+// GetEditableContentByID returns an asset's content and whether it can be edited as text
+func (a *Asset) GetEditableContentByID(g *gin.Context) {
+	session, _, ok := a.handleSession(g)
+	if !ok {
+		return
+	}
 	id, ok := a.handleParseIDParam(g)
 	if !ok {
 		return
@@ -508,7 +583,6 @@ func (a *Asset) GetEditableContentByID(g *gin.Context) {
 	if maxMB, perr := strconv.Atoi(maxFile.Value.String()); perr == nil && maxMB > 0 {
 		maxBytes = int64(maxMB) * 1024 * 1024
 	}
-	// get the content
 	ctx := g.Request.Context()
 	content, editable, err := a.AssetService.GetContentByID(ctx, session, id, maxBytes)
 	if a.fileMissing(g, err) {
@@ -533,14 +607,12 @@ func (a *Asset) fileMissing(g *gin.Context, err error) bool {
 	return false
 }
 
-// SaveContentByID overwrites a text asset's content from the editor.
+// SaveContentByID overwrites a text asset's content from the editor
 func (a *Asset) SaveContentByID(g *gin.Context) {
-	// handle session
 	session, _, ok := a.handleSession(g)
 	if !ok {
 		return
 	}
-	// parse request
 	id, ok := a.handleParseIDParam(g)
 	if !ok {
 		return
@@ -577,7 +649,6 @@ func (a *Asset) SaveContentByID(g *gin.Context) {
 		a.Response.ValidationFailed(g, "Content", fmt.Errorf("content is too large"))
 		return
 	}
-	// save the content
 	ctx := g.Request.Context()
 	err = a.AssetService.SaveContentByID(ctx, session, id, content)
 	if a.fileMissing(g, err) {
@@ -589,14 +660,12 @@ func (a *Asset) SaveContentByID(g *gin.Context) {
 	a.Response.OK(g, gin.H{})
 }
 
-// MoveByID renames or moves an asset to a new path within its context.
+// MoveByID renames or moves an asset within its folder
 func (a *Asset) MoveByID(g *gin.Context) {
-	// handle session
 	session, _, ok := a.handleSession(g)
 	if !ok {
 		return
 	}
-	// parse request
 	id, ok := a.handleParseIDParam(g)
 	if !ok {
 		return
@@ -613,7 +682,6 @@ func (a *Asset) MoveByID(g *gin.Context) {
 		a.Response.ValidationFailed(g, "Path", err)
 		return
 	}
-	// move the asset
 	ctx := g.Request.Context()
 	err = a.AssetService.MoveByID(ctx, session, id, nullable.NewNullableWithValue(*path))
 	if a.fileMissing(g, err) {
@@ -625,14 +693,12 @@ func (a *Asset) MoveByID(g *gin.Context) {
 	a.Response.OK(g, gin.H{})
 }
 
-// ReplaceFileByID replaces an asset's file content with an uploaded file.
+// ReplaceFileByID replaces an asset's file with an uploaded file
 func (a *Asset) ReplaceFileByID(g *gin.Context) {
-	// handle session
 	session, _, ok := a.handleSession(g)
 	if !ok {
 		return
 	}
-	// parse request
 	id, ok := a.handleParseIDParam(g)
 	if !ok {
 		return
@@ -643,7 +709,6 @@ func (a *Asset) ReplaceFileByID(g *gin.Context) {
 		a.Response.BadRequestMessage(g, "No file selected")
 		return
 	}
-	// enforce the max file size option
 	maxFile, err := a.OptionService.GetOption(g, session, data.OptionKeyMaxFileUploadSizeMB)
 	if ok := a.handleErrors(g, err); !ok {
 		return
@@ -662,7 +727,6 @@ func (a *Asset) ReplaceFileByID(g *gin.Context) {
 		)
 		return
 	}
-	// replace the file
 	ctx := g.Request.Context()
 	err = a.AssetService.ReplaceFileByID(ctx, session, id, file)
 	if a.fileMissing(g, err) {

@@ -16,7 +16,7 @@
 	role="button"
 	class="flex items-center w-40 sm:w-40 md:w-42 lg:w-56 justify-center py-4 my-6 ml-4 cursor-pointer"
 >
-	<BrandingImage src={logoSrc} alt="logo" {display} boxClass="h-12 w-full rounded" />
+	<BrandingImage src={logoSrc} alt="logo" {display} ready={$branding.loaded} boxClass="h-12 w-full rounded" />
 </div>
 
 <style>

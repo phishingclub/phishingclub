@@ -10,6 +10,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var apiSenderAllowedColumns = assignTableToColumns(database.API_SENDER_TABLE, []string{
@@ -217,10 +218,13 @@ func (a *APISender) GetByName(
 	option *APISenderOption,
 ) (*model.APISender, error) {
 	db := a.preload(option, a.DB)
-	db = withCompanyIncludingNullContext(db, companyID, "api_senders")
+	db = withCompanyIncludingNullContext(db, companyID, database.API_SENDER_TABLE)
 
 	dbAPISender := &database.APISender{}
-	res := db.Where("name = ?", name.String()).First(&dbAPISender)
+	res := db.Where(clause.Eq{
+		Column: clause.Column{Table: database.API_SENDER_TABLE, Name: "name"},
+		Value:  name.String(),
+	}).First(&dbAPISender)
 	if res.Error != nil {
 		return nil, res.Error
 	}
@@ -257,6 +261,47 @@ func (a *APISender) DeleteByID(
 		return res.Error
 	}
 	return nil
+}
+
+// NamesByOAuthProviderID returns the names of the API senders that reference the
+// given OAuth provider. An OAuth provider cannot be deleted while any API sender
+// points at it (a foreign key), so callers use this to explain the dependency
+// rather than failing on the raw constraint.
+func (a *APISender) NamesByOAuthProviderID(
+	ctx context.Context,
+	oauthProviderID uuid.UUID,
+) ([]string, error) {
+	var names []string
+	err := a.DB.WithContext(ctx).
+		Table(database.API_SENDER_TABLE).
+		Where("o_auth_provider_id = ?", oauthProviderID).
+		Pluck("name", &names).Error
+	if err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+// NamesByOAuthProviderIDExcluding returns the names of the API senders that
+// reference the given OAuth provider, except those whose id is in exclude. An
+// uninstall uses this so an API sender shipped by the same package (and deleted
+// in the same call) does not count as an external user that blocks the uninstall.
+func (a *APISender) NamesByOAuthProviderIDExcluding(
+	ctx context.Context,
+	oauthProviderID uuid.UUID,
+	exclude []uuid.UUID,
+) ([]string, error) {
+	q := a.DB.WithContext(ctx).
+		Table(database.API_SENDER_TABLE).
+		Where("o_auth_provider_id = ?", oauthProviderID)
+	if len(exclude) > 0 {
+		q = q.Where("id NOT IN ?", exclude)
+	}
+	var names []string
+	if err := q.Pluck("name", &names).Error; err != nil {
+		return nil, err
+	}
+	return names, nil
 }
 
 // ToAPISender converts a API sender database  to a model

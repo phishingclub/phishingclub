@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -57,7 +58,12 @@ func (r *OAuthState) GetByStateToken(
 	return r.toModel(&dbState), nil
 }
 
-// MarkAsUsed marks a state token as used
+// ErrOAuthStateAlreadyUsed is returned when a state token was used before
+var ErrOAuthStateAlreadyUsed = errors.New("oauth state already used")
+
+// MarkAsUsed marks a state token as used. The update only matches an unused
+// row, so of two concurrent callbacks with the same state only one wins and
+// the other gets ErrOAuthStateAlreadyUsed.
 func (r *OAuthState) MarkAsUsed(
 	ctx context.Context,
 	id uuid.UUID,
@@ -65,7 +71,7 @@ func (r *OAuthState) MarkAsUsed(
 	now := time.Now()
 	result := r.DB.WithContext(ctx).
 		Model(&database.OAuthState{}).
-		Where("id = ?", id).
+		Where("id = ? AND used = ?", id, false).
 		Updates(map[string]interface{}{
 			"used":    true,
 			"used_at": &now,
@@ -74,7 +80,61 @@ func (r *OAuthState) MarkAsUsed(
 	if result.Error != nil {
 		return errs.Wrap(result.Error)
 	}
+	if result.RowsAffected != 1 {
+		return ErrOAuthStateAlreadyUsed
+	}
 
+	return nil
+}
+
+// MarkFailedByStateToken marks an unused state token as used and failed and
+// returns the provider it belongs to. Returns ErrOAuthStateAlreadyUsed when
+// the token is unknown or already used.
+func (r *OAuthState) MarkFailedByStateToken(
+	ctx context.Context,
+	stateToken string,
+) (uuid.UUID, error) {
+	var dbState database.OAuthState
+	err := r.DB.WithContext(ctx).
+		Where("state_token = ?", stateToken).
+		First(&dbState).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return uuid.Nil, ErrOAuthStateAlreadyUsed
+		}
+		return uuid.Nil, errs.Wrap(err)
+	}
+	now := time.Now()
+	result := r.DB.WithContext(ctx).
+		Model(&database.OAuthState{}).
+		Where("id = ? AND used = ?", dbState.ID, false).
+		Updates(map[string]interface{}{
+			"used":    true,
+			"used_at": &now,
+			"result":  database.OAUTH_STATE_RESULT_FAILED,
+		})
+	if result.Error != nil {
+		return uuid.Nil, errs.Wrap(result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return uuid.Nil, ErrOAuthStateAlreadyUsed
+	}
+	return dbState.OAuthProviderID, nil
+}
+
+// SetResult records the outcome of the flow for a state
+func (r *OAuthState) SetResult(
+	ctx context.Context,
+	id uuid.UUID,
+	stateResult string,
+) error {
+	result := r.DB.WithContext(ctx).
+		Model(&database.OAuthState{}).
+		Where("id = ?", id).
+		Update("result", stateResult)
+	if result.Error != nil {
+		return errs.Wrap(result.Error)
+	}
 	return nil
 }
 

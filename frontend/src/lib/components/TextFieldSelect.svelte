@@ -14,9 +14,15 @@
 	export let toolTipText = '';
 	export let optional = false;
 	export let hidden = false;
+	// skip rendering the label row entirely so the control takes no extra height.
+	export let hideLabel = false;
 	export let size = 'normal';
 	export let inline = false;
 	export let onSelect = (value) => {};
+	// keep the open list inside the enclosing modal box instead of the screen, so a
+	// field near the bottom of a short modal opens upward rather than hanging past
+	// the modal edge and over its footer buttons.
+	export let containInModal = false;
 
 	// Ensure options is always an array
 	$: optionsArray = Array.isArray(options) ? options : Array.from(options);
@@ -79,6 +85,7 @@
 			hasTyped = false; // Reset typing flag to show all options
 			allOptions = [...optionsArray]; // Show all options on focus
 			updateDropdownPosition();
+			positionDropdownAfterRender();
 		}
 		justSelected = false; // Reset the flag
 	};
@@ -90,6 +97,7 @@
 		hasTyped = true; // User has typed, enable filtering
 		allOptions = filterOptions(value);
 		updateDropdownPosition();
+		positionDropdownAfterRender();
 	};
 
 	// Select an option
@@ -115,16 +123,38 @@
 		activeFormElement.update((current) => (current === id ? null : current));
 	};
 
-	// Update dropdown position for fixed positioning
+	// Position the fixed overlay dropdown, flipping it above the field when there is
+	// not enough room below (for example the field sits low in a tall modal), so the
+	// options never run off the bottom of the screen.
 	const updateDropdownPosition = () => {
-		if (inputElement) {
-			const rect = inputElement.getBoundingClientRect();
-			dropdownPosition = {
-				top: rect.bottom + 4,
-				left: rect.left,
-				width: rect.width
-			};
+		if (!inputElement) return;
+		const rect = inputElement.getBoundingClientRect();
+		const gap = 6;
+		// the rendered menu height once it exists, else the capped maximum (max-h-40).
+		const menuHeight = dropdownElement?.offsetHeight || 160;
+		let boundTop = 0;
+		let boundBottom = window.innerHeight;
+		if (containInModal) {
+			const box = inputElement.closest('[aria-modal="true"] section');
+			if (box) {
+				const boxRect = box.getBoundingClientRect();
+				boundTop = Math.max(boundTop, boxRect.top);
+				boundBottom = Math.min(boundBottom, boxRect.bottom);
+			}
 		}
+		const spaceBelow = boundBottom - rect.bottom;
+		const spaceAbove = rect.top - boundTop;
+		const dropUp = spaceBelow < menuHeight + gap && spaceAbove > spaceBelow;
+		dropdownPosition = {
+			top: dropUp ? Math.max(gap, rect.top - menuHeight - gap) : rect.bottom + gap,
+			left: rect.left,
+			width: rect.width
+		};
+	};
+	// the menu renders after the flag flips, so recompute once it exists to use its real
+	// height rather than the estimate above.
+	const positionDropdownAfterRender = () => {
+		requestAnimationFrame(updateDropdownPosition);
 	};
 
 	// Handle blur to close dropdown when tabbing out
@@ -283,32 +313,35 @@
 	class:flex-col={!inline}
 	class:flex-row={inline}
 >
-	<label class="flex flex-col py-2 relative" class:py-2={!inline} class:pr-2={inline}>
-		<div class="flex items-center">
-			<p
-				id={labelId}
-				class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
-			>
-				<slot />
-			</p>
-			{#if toolTipText.length > 0}
-				<ToolTip>
-					{toolTipText}
-				</ToolTip>
-			{/if}
-			{#if optional === true}
-				<div
-					class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+	{#if !hideLabel}
+		<label class="flex flex-col py-2 relative" class:py-2={!inline} class:pr-2={inline}>
+			<div class="flex items-center">
+				<p
+					id={labelId}
+					class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
 				>
-					<p class="text-slate-600 dark:text-gray-400 text-xs">optional</p>
-				</div>
-			{/if}
-		</div>
-	</label>
+					<slot />
+				</p>
+				{#if toolTipText.length > 0}
+					<ToolTip>
+						{toolTipText}
+					</ToolTip>
+				{/if}
+				{#if optional === true}
+					<div
+						class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+					>
+						<p class="text-slate-600 dark:text-gray-400 text-xs">optional</p>
+					</div>
+				{/if}
+			</div>
+		</label>
+	{/if}
 	<div class="relative">
 		<div
 			class="flex items-center relative"
 			class:w-28={size == 'small'}
+			class:w-44={size == 'medium'}
 			class:w-60={size == 'normal'}
 			class:w-full={size == 'full'}
 		>
@@ -317,7 +350,8 @@
 				type="text"
 				role="combobox"
 				id={comboboxId}
-				aria-labelledby={labelId}
+				aria-labelledby={hideLabel ? undefined : labelId}
+				aria-label={hideLabel ? placeholder : undefined}
 				aria-expanded={ariaExpanded}
 				aria-controls={listboxId}
 				aria-autocomplete="list"
@@ -381,7 +415,7 @@
 					id={listboxId}
 					role="listbox"
 					aria-labelledby={labelId}
-					class="bg-gray-100 dark:bg-gray-900 list-none mt-4 z-[9999] rounded-md min-w-fit shadow-lg border border-gray-200 dark:border-gray-700/60 max-h-40 overflow-y-scroll transition-colors duration-200"
+					class="bg-gray-100 dark:bg-gray-900 list-none z-[9999] rounded-md min-w-fit shadow-lg border border-gray-200 dark:border-gray-700/60 max-h-40 overflow-y-scroll transition-colors duration-200"
 				>
 					{#if allOptions.length}
 						{#each allOptions as option, index}

@@ -1546,7 +1546,7 @@
 											typeof trendStats[metric.key] === 'number' &&
 											!isNaN(trendStats[metric.key])
 												? trendStats[metric.key].toFixed(1) + '%'
-												: '—'}
+												: '·'}
 										</span>
 									</div>
 								</div>

@@ -15,6 +15,7 @@
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import { getModalText } from '$lib/utils/common';
@@ -362,6 +363,9 @@ s.keepAlive();
 	onClose={closeModal}
 	{isSubmitting}
 >
+	{#if modalMode === 'update'}
+		<InstalledResourceBadge resourceType="remotebrowser" resourceId={formValues.id} variant="notice" />
+	{/if}
 	<FormGrid on:submit={onSubmit} {isSubmitting} {modalMode}>
 		<div class="col-span-3 flex flex-col min-h-0 overflow-hidden px-4 py-4">
 			<RemoteBrowserEditor

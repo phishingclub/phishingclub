@@ -1,11 +1,12 @@
 <script>
 	export let size = 'large';
 	export let isSubmitting = false;
+	export let disabled = false;
 </script>
 
 <button
 	type="submit"
-	disabled={isSubmitting}
+	disabled={isSubmitting || disabled}
 	class:w-32={size === 'small'}
 	class:w-36={size === 'medium'}
 	class:w-60={size === 'large'}

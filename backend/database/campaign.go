@@ -17,8 +17,12 @@ type Campaign struct {
 	CreatedAt *time.Time `gorm:"not null;index;"`
 	UpdatedAt *time.Time `gorm:"not null;index;"`
 
-	CloseAt      *time.Time `gorm:"index;"`
-	ClosedAt     *time.Time `gorm:"index;"`
+	CloseAt  *time.Time `gorm:"index;"`
+	ClosedAt *time.Time `gorm:"index;"`
+	// PausedAt is set while sending is paused. The send batch query skips a paused
+	// campaign, so no recipient is delivered to, while the landing page and event
+	// recording stay live. Cleared on resume and on close.
+	PausedAt     *time.Time `gorm:"index;"`
 	AnonymizeAt  *time.Time `gorm:"index;"`
 	AnonymizedAt *time.Time `gorm:"index;"`
 	// DataAnonymizeAt schedules anonymization of submitted data, user agent, ip

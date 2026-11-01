@@ -120,7 +120,7 @@
 <div class="">
 	<button
 		bind:this={buttonRef}
-		class="w-full h-full py-3 flex items-center justify-center"
+		class="w-full h-full min-w-11 py-3 flex items-center justify-center"
 		on:click|stopPropagation|preventDefault={toggle}
 		on:keydown={handleKeydown}
 	>

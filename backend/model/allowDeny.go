@@ -33,6 +33,9 @@ type AllowDeny struct {
 	CompanyID       nullable.Nullable[uuid.UUID]     `json:"companyID"`
 }
 
+// countryCodePattern is a two letter country code
+var countryCodePattern = regexp.MustCompile(`^[A-Za-z]{2}$`)
+
 // Validate checks if the allow deny list has a valid state
 func (r *AllowDeny) Validate() error {
 	if err := validate.NullableFieldRequired("name", r.Name); err != nil {
@@ -42,58 +45,42 @@ func (r *AllowDeny) Validate() error {
 		return err
 	}
 
-	// at least one of cidrs, ja4 fingerprints, country codes, or headers must be provided
-	hasCidrs := false
-	if r.Cidrs.IsSpecified() {
-		if cidrs, err := r.Cidrs.Get(); err == nil && len(cidrs) > 0 {
-			hasCidrs = true
+	// each country line must be a two letter code
+	countries := r.countryList()
+	for _, code := range countries {
+		if !countryCodePattern.MatchString(code) {
+			return errs.NewValidationError(
+				fmt.Errorf("invalid country code: %s", code),
+			)
 		}
-	}
-
-	hasJA4 := false
-	if r.JA4Fingerprints.IsSpecified() {
-		if ja4, err := r.JA4Fingerprints.Get(); err == nil && ja4 != "" {
-			hasJA4 = true
-		}
-	}
-
-	hasCountryCodes := false
-	if r.CountryCodes.IsSpecified() {
-		if codes, err := r.CountryCodes.Get(); err == nil && codes != "" {
-			hasCountryCodes = true
-		}
-	}
-
-	hasASNs := false
-	if r.Asns.IsSpecified() {
-		if asns, err := r.Asns.Get(); err == nil && asns != "" {
-			hasASNs = true
-		}
-	}
-
-	hasHeaders := false
-	if r.Headers.IsSpecified() {
-		if headers, err := r.Headers.Get(); err == nil && headers != "" {
-			hasHeaders = true
-		}
-	}
-
-	if !hasCidrs && !hasJA4 && !hasCountryCodes && !hasASNs && !hasHeaders {
-		return errs.NewValidationError(
-			errors.New("at least one of CIDRs, JA4 fingerprints, country codes, ASNs, or headers must be provided"),
-		)
 	}
 
 	// each ASN line must be a number, optionally prefixed with AS
-	if hasASNs {
-		asns, _ := r.Asns.Get()
-		for _, line := range parseCountryCodes(asns) {
-			if _, ok := parseASN(line); !ok {
-				return errs.NewValidationError(
-					fmt.Errorf("invalid ASN: %s", line),
-				)
-			}
+	asnLines := parseList(nullableString(r.Asns))
+	for _, line := range asnLines {
+		if _, ok := parseASN(line); !ok {
+			return errs.NewValidationError(
+				fmt.Errorf("invalid ASN: %s", line),
+			)
 		}
+	}
+
+	// header rules must be valid json with regexes that compile
+	var rules []compiledHeaderRule
+	if headersStr := nullableString(r.Headers); strings.TrimSpace(headersStr) != "" {
+		var err error
+		rules, err = compileHeaderRules(headersStr)
+		if err != nil {
+			return errs.NewValidationError(err)
+		}
+	}
+
+	hasCidrs := len(r.cidrList()) > 0
+	hasJA4 := len(parseList(nullableString(r.JA4Fingerprints))) > 0
+	if !hasCidrs && !hasJA4 && len(countries) == 0 && len(asnLines) == 0 && len(rules) == 0 {
+		return errs.NewValidationError(
+			errors.New("at least one of CIDRs, JA4 fingerprints, country codes, ASNs, or headers must be provided"),
+		)
 	}
 
 	return nil
@@ -113,17 +100,11 @@ func (r *AllowDeny) ToDBMap() map[string]any {
 	if r.Cidrs.IsSpecified() {
 		m["cidrs"] = nil
 		if cidrs, err := r.Cidrs.Get(); err == nil {
-			cidrsStr := ""
-			cidrsLen := len(cidrs)
-			for i, cidr := range cidrs {
-				if i == cidrsLen {
-					cidrsStr += fmt.Sprintf("%s", cidr.String())
-
-				} else {
-					cidrsStr += fmt.Sprintf("%s\n", cidr.String())
-				}
+			lines := make([]string, 0, len(cidrs))
+			for _, cidr := range cidrs {
+				lines = append(lines, cidr.String())
 			}
-			m["cidrs"] = cidrsStr
+			m["cidrs"] = strings.Join(lines, "\n")
 		}
 	}
 	if r.JA4Fingerprints.IsSpecified() {
@@ -167,85 +148,159 @@ func (r *AllowDeny) ToDBMap() map[string]any {
 	return m
 }
 
-func (r *AllowDeny) IsIPAllowed(ip string) (bool, error) {
-	isTypeAllowList := r.Allowed.MustGet()
-
-	// if no cidrs configured, skip ip check (always pass)
-	cidrs, err := r.Cidrs.Get()
-	if err != nil || len(cidrs) == 0 {
-		return true, nil
-	}
-
-	netIP := net.ParseIP(ip)
-	if netIP == nil {
-		return false, fmt.Errorf("invalid ip address: %s", ip)
-	}
-
-	for _, cidr := range cidrs {
-		isInRange := cidr.Contains(netIP)
-		// if allow list and ip is within range
-		if isTypeAllowList && isInRange {
-			return true, nil
-		}
-		// if deny list and ip is within range
-		if !isTypeAllowList && isInRange {
-			return false, nil
-		}
-	}
-
-	// If this is an allow list and we didn't find the IP, it's not allowed
-	if isTypeAllowList {
-		return false, nil
-	}
-
-	// If this is a deny list and we didn't find the IP, it is allowed
-	return true, nil
+// FilterVisitor is what a filter can match a request on. Empty values mean
+// the value is unknown for this request.
+type FilterVisitor struct {
+	IP      string
+	JA4     string
+	Country string
+	ASNs    []uint32
+	Headers map[string][]string
 }
 
-// IsJA4Allowed checks if a JA4 fingerprint is allowed based on the filter rules
-func (r *AllowDeny) IsJA4Allowed(ja4 string) (bool, error) {
-	if ja4 == "" {
-		// if no ja4 fingerprint available, skip ja4 check
+// Matches reports whether the visitor matches any of the rules set on the
+// filter. A filter lists things: an IP range, countries, ASNs, fingerprints
+// and header rules. The visitor matches the filter when it matches any one of
+// them, for allow and deny filters alike. Fields left empty never match, and a
+// visitor value that is unknown never matches.
+func (r *AllowDeny) Matches(v FilterVisitor) (bool, error) {
+	if r.matchesIP(v.IP) ||
+		r.matchesJA4(v.JA4) ||
+		r.matchesCountry(v.Country) ||
+		r.matchesASN(v.ASNs) {
 		return true, nil
 	}
+	return r.matchesHeaders(v.Headers)
+}
 
-	isTypeAllowList := r.Allowed.MustGet()
-
-	// get ja4 fingerprints list
-	ja4FingerprintsStr, err := r.JA4Fingerprints.Get()
-	if err != nil || ja4FingerprintsStr == "" {
-		// if no ja4 fingerprints configured, skip ja4 check
-		return true, nil
-	}
-
-	// parse fingerprints (newline separated)
-	fingerprints := parseFingerprints(ja4FingerprintsStr)
-
-	// check if ja4 matches any fingerprint (supports wildcard patterns with *)
-	isMatch := false
-	for _, fp := range fingerprints {
-		if matchJA4Pattern(fp, ja4) {
-			isMatch = true
-			break
+// EvaluateFilters decides if a visitor may pass the filters of a campaign.
+// The visitor is blocked when it matches any deny filter. When the campaign
+// has allow filters, the visitor must also match at least one of them. It
+// returns the filter that decided the outcome when there is one. On error the
+// visitor must be treated as blocked.
+func EvaluateFilters(filters []*AllowDeny, v FilterVisitor) (bool, *AllowDeny, error) {
+	hasAllow := false
+	var allowMatch *AllowDeny
+	for _, f := range filters {
+		isAllow, err := f.Allowed.Get()
+		if err != nil {
+			return false, f, fmt.Errorf("filter has no type")
+		}
+		matched, err := f.Matches(v)
+		if err != nil {
+			return false, f, err
+		}
+		if !isAllow {
+			if matched {
+				return false, f, nil
+			}
+			continue
+		}
+		hasAllow = true
+		if matched && allowMatch == nil {
+			allowMatch = f
 		}
 	}
-
-	// if allow list and ja4 matches
-	if isTypeAllowList && isMatch {
-		return true, nil
+	if hasAllow && allowMatch == nil {
+		return false, nil, nil
 	}
-	// if deny list and ja4 matches
-	if !isTypeAllowList && isMatch {
+	return true, allowMatch, nil
+}
+
+// cidrList returns the configured IP ranges
+func (r *AllowDeny) cidrList() vo.IPNetSlice {
+	cidrs, err := r.Cidrs.Get()
+	if err != nil {
+		return nil
+	}
+	return cidrs
+}
+
+// countryList returns the configured country codes
+func (r *AllowDeny) countryList() []string {
+	return parseList(nullableString(r.CountryCodes))
+}
+
+// matchesIP reports whether the ip is inside a configured range
+func (r *AllowDeny) matchesIP(ip string) bool {
+	cidrs := r.cidrList()
+	if len(cidrs) == 0 {
+		return false
+	}
+	netIP := net.ParseIP(ip)
+	if netIP == nil {
+		return false
+	}
+	for _, cidr := range cidrs {
+		if cidr.Contains(netIP) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesJA4 reports whether the fingerprint matches a configured pattern
+func (r *AllowDeny) matchesJA4(ja4 string) bool {
+	if ja4 == "" {
+		return false
+	}
+	for _, fp := range parseList(nullableString(r.JA4Fingerprints)) {
+		if matchJA4Pattern(fp, ja4) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesCountry reports whether the country is a configured country
+func (r *AllowDeny) matchesCountry(countryCode string) bool {
+	if countryCode == "" {
+		return false
+	}
+	for _, code := range r.countryList() {
+		if strings.EqualFold(code, countryCode) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesASN reports whether any of the systems that announce the visitor IP
+// is a configured ASN. asns is usually one number, sometimes several.
+func (r *AllowDeny) matchesASN(asns []uint32) bool {
+	if len(asns) == 0 {
+		return false
+	}
+	for _, line := range parseList(nullableString(r.Asns)) {
+		n, ok := parseASN(line)
+		if !ok {
+			continue
+		}
+		for _, a := range asns {
+			if a == n {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// matchesHeaders reports whether a request header matches a configured rule
+func (r *AllowDeny) matchesHeaders(headers map[string][]string) (bool, error) {
+	headersStr := nullableString(r.Headers)
+	if strings.TrimSpace(headersStr) == "" || len(headers) == 0 {
 		return false, nil
 	}
-
-	// If this is an allow list and ja4 didn't match, not allowed
-	if isTypeAllowList {
-		return false, nil
+	rules, err := compileHeaderRules(headersStr)
+	if err != nil {
+		return false, err
 	}
-
-	// If this is a deny list and ja4 didn't match, it is allowed
-	return true, nil
+	for _, rule := range rules {
+		if rule.matches(headers) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // matchJA4Pattern checks if a JA4 fingerprint matches a pattern with wildcard support
@@ -266,7 +321,7 @@ func matchJA4Pattern(pattern, ja4 string) bool {
 		return false
 	}
 
-	// wildcard-only pattern matches everything
+	// wildcard only pattern matches everything
 	if pattern == "*" {
 		return true
 	}
@@ -303,168 +358,41 @@ func matchJA4Pattern(pattern, ja4 string) bool {
 	return true
 }
 
-// parseFingerprints splits newline-separated fingerprints and trims whitespace
-func parseFingerprints(input string) []string {
+// nullableString returns the value or an empty string when unset or null
+func nullableString(n nullable.Nullable[string]) string {
+	v, err := n.Get()
+	if err != nil {
+		return ""
+	}
+	return v
+}
+
+// parseList splits a list on newlines and commas, trims each entry and drops
+// empty ones. The admin form stores one entry per line, other sources such as
+// the API or package installs may use commas.
+func parseList(input string) []string {
 	var result []string
-	lines := splitLines(input)
-	for _, line := range lines {
-		trimmed := trimSpace(line)
-		if trimmed != "" {
-			result = append(result, trimmed)
+	for _, line := range strings.Split(input, "\n") {
+		for _, part := range strings.Split(line, ",") {
+			if trimmed := strings.TrimSpace(part); trimmed != "" {
+				result = append(result, trimmed)
+			}
 		}
 	}
 	return result
 }
 
-// splitLines splits a string by newlines
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
-}
-
-// trimSpace removes leading and trailing whitespace
-func trimSpace(s string) string {
-	start := 0
-	end := len(s)
-
-	for start < end && isSpace(s[start]) {
-		start++
-	}
-	for end > start && isSpace(s[end-1]) {
-		end--
-	}
-
-	return s[start:end]
-}
-
-// isSpace checks if a byte is whitespace
-func isSpace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
-}
-
-// IsCountryAllowed checks if a country code is allowed based on the filter rules
-func (r *AllowDeny) IsCountryAllowed(countryCode string) bool {
-	isTypeAllowList := r.Allowed.MustGet()
-
-	// get country codes list
-	countryCodesStr, err := r.CountryCodes.Get()
-	if err != nil || countryCodesStr == "" {
-		// no country filter configured, this dimension does not restrict
-		return true
-	}
-
-	if countryCode == "" {
-		// a country filter is configured but the visitor country is unknown.
-		// allow list denies the unknown visitor, deny list allows it.
-		return !isTypeAllowList
-	}
-
-	// parse country codes (newline separated)
-	codes := parseCountryCodes(countryCodesStr)
-
-	// check if country code matches any in the list (case-insensitive)
-	isMatch := false
-	countryCodeUpper := strings.ToUpper(countryCode)
-	for _, code := range codes {
-		if strings.ToUpper(code) == countryCodeUpper {
-			isMatch = true
-			break
-		}
-	}
-
-	// if allow list and country matches
-	if isTypeAllowList && isMatch {
-		return true
-	}
-	// if deny list and country matches
-	if !isTypeAllowList && isMatch {
-		return false
-	}
-
-	// If this is an allow list and country didn't match, not allowed
-	if isTypeAllowList {
-		return false
-	}
-
-	// If this is a deny list and country didn't match, it is allowed
-	return true
-}
-
-// IsASNAllowed checks if the autonomous systems that announce the visitor IP
-// are allowed based on the filter rules. asns is every ASN that announces the
-// longest prefix containing the IP, usually one, sometimes several.
-func (r *AllowDeny) IsASNAllowed(asns []uint32) bool {
-	isTypeAllowList := r.Allowed.MustGet()
-
-	// get asn list
-	asnStr, err := r.Asns.Get()
-	if err != nil || asnStr == "" {
-		// no asn filter configured, this dimension does not restrict
-		return true
-	}
-
-	if len(asns) == 0 {
-		// an asn filter is configured but the visitor ASN is unknown.
-		// allow list denies the unknown visitor, deny list allows it.
-		return !isTypeAllowList
-	}
-
-	// parse configured asns into a set
-	configured := map[uint32]struct{}{}
-	for _, line := range parseCountryCodes(asnStr) {
-		if n, ok := parseASN(line); ok {
-			configured[n] = struct{}{}
-		}
-	}
-
-	// a visitor matches if any of its announcing ASNs is configured
-	isMatch := false
-	for _, n := range asns {
-		if _, ok := configured[n]; ok {
-			isMatch = true
-			break
-		}
-	}
-
-	// if allow list and asn matches
-	if isTypeAllowList && isMatch {
-		return true
-	}
-	// if deny list and asn matches
-	if !isTypeAllowList && isMatch {
-		return false
-	}
-
-	// If this is an allow list and asn didn't match, not allowed
-	if isTypeAllowList {
-		return false
-	}
-
-	// If this is a deny list and asn didn't match, it is allowed
-	return true
-}
-
 // parseASN parses a single ASN line into a number. It accepts an optional AS
 // or ASN prefix, so "AS15169", "asn15169" and "15169" are all valid.
 func parseASN(line string) (uint32, bool) {
-	s := trimSpace(line)
+	s := strings.TrimSpace(line)
 	if s == "" {
 		return 0, false
 	}
 	lower := strings.ToLower(s)
 	lower = strings.TrimPrefix(lower, "asn")
 	lower = strings.TrimPrefix(lower, "as")
-	lower = trimSpace(lower)
+	lower = strings.TrimSpace(lower)
 	if lower == "" {
 		return 0, false
 	}
@@ -475,129 +403,87 @@ func parseASN(line string) (uint32, bool) {
 	return uint32(n), true
 }
 
-// parseCountryCodes splits newline-separated country codes and trims whitespace
-func parseCountryCodes(input string) []string {
-	var result []string
-	lines := splitLines(input)
-	for _, line := range lines {
-		trimmed := trimSpace(line)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	return result
-}
-
-// IsHeaderAllowed checks if request headers are allowed based on the filter rules
-// headers parameter is a map of header key-value pairs from the HTTP request
-func (r *AllowDeny) IsHeaderAllowed(headers map[string][]string) (bool, error) {
-	if headers == nil || len(headers) == 0 {
-		// if no headers provided, skip header check
-		return true, nil
-	}
-
-	isTypeAllowList := r.Allowed.MustGet()
-
-	// get headers filter configuration
-	headersStr, err := r.Headers.Get()
-	if err != nil || headersStr == "" {
-		// if no headers configured, skip header check
-		return true, nil
-	}
-
-	// parse header rules from json array
-	rules, err := parseHeaderRules(headersStr)
-	if err != nil {
-		return false, err
-	}
-
-	if len(rules) == 0 {
-		// if no valid rules, skip header check
-		return true, nil
-	}
-
-	// check if any header rule matches
-	isMatch := false
-	for _, rule := range rules {
-		matched, err := matchHeaderRule(rule, headers)
-		if err != nil {
-			continue
-		}
-		if matched {
-			isMatch = true
-			break
-		}
-	}
-
-	// if allow list and header matches
-	if isTypeAllowList && isMatch {
-		return true, nil
-	}
-	// if deny list and header matches
-	if !isTypeAllowList && isMatch {
-		return false, nil
-	}
-
-	// If this is an allow list and header didn't match, not allowed
-	if isTypeAllowList {
-		return false, nil
-	}
-
-	// If this is a deny list and header didn't match, it is allowed
-	return true, nil
-}
-
 // HeaderRule represents a header matching rule with key and value regex patterns
 type HeaderRule struct {
 	KeyRegex   string `json:"keyRegex"`
 	ValueRegex string `json:"valueRegex"`
 }
 
-// parseHeaderRules parses json array of header rules
-func parseHeaderRules(input string) ([]HeaderRule, error) {
-	var rules []HeaderRule
+// compiledHeaderRule is a header rule with its regexes compiled
+type compiledHeaderRule struct {
+	key   *regexp.Regexp
+	value *regexp.Regexp
+}
 
+// compileHeaderRules parses a json array of header rules and compiles them
+func compileHeaderRules(input string) ([]compiledHeaderRule, error) {
+	var rules []HeaderRule
 	if err := json.Unmarshal([]byte(input), &rules); err != nil {
 		return nil, errors.New("invalid header rules json format")
 	}
-
-	// validate rules
+	out := make([]compiledHeaderRule, 0, len(rules))
 	for _, rule := range rules {
 		if rule.KeyRegex == "" || rule.ValueRegex == "" {
 			return nil, errors.New("header key regex and value regex cannot be empty")
 		}
+		key, err := regexp.Compile(rule.KeyRegex)
+		if err != nil {
+			return nil, fmt.Errorf("invalid header key regex: %s", rule.KeyRegex)
+		}
+		value, err := regexp.Compile(rule.ValueRegex)
+		if err != nil {
+			return nil, fmt.Errorf("invalid header value regex: %s", rule.ValueRegex)
+		}
+		out = append(out, compiledHeaderRule{key: key, value: value})
 	}
-
-	return rules, nil
+	return out, nil
 }
 
-// matchHeaderRule checks if any request header matches the rule
-// both key and value must match their respective regex patterns
-func matchHeaderRule(rule HeaderRule, headers map[string][]string) (bool, error) {
-	keyRegex, err := regexp.Compile(rule.KeyRegex)
-	if err != nil {
-		return false, err
-	}
-	valueRegex, err := regexp.Compile(rule.ValueRegex)
-	if err != nil {
-		return false, err
-	}
-
-	// iterate through all headers in the request
+// matches reports whether any request header matches both the key and value
+func (c compiledHeaderRule) matches(headers map[string][]string) bool {
 	for headerKey, headerValues := range headers {
-		// check if header key matches the key regex
-		if !keyRegex.MatchString(headerKey) {
+		if !c.key.MatchString(headerKey) {
 			continue
 		}
-
-		// if key matches, check if any value matches the value regex
 		for _, headerValue := range headerValues {
-			if valueRegex.MatchString(headerValue) {
-				// both key and value match
-				return true, nil
+			if c.value.MatchString(headerValue) {
+				return true
 			}
 		}
 	}
+	return false
+}
 
-	return false, nil
+// ValidateAllowDenySameType checks that the lists are all allow lists or all
+// deny lists. A campaign or an asset can not mix the two.
+func ValidateAllowDenySameType(lists []*AllowDeny) error {
+	if len(lists) == 0 {
+		return nil
+	}
+	first, err := lists[0].Allowed.Get()
+	if err != nil {
+		return validate.WrapErrorWithField(errors.New("filter has no type"), "allowDenyIDs")
+	}
+	for _, list := range lists[1:] {
+		allowed, err := list.Allowed.Get()
+		if err != nil {
+			return validate.WrapErrorWithField(errors.New("filter has no type"), "allowDenyIDs")
+		}
+		if allowed != first {
+			return validate.WrapErrorWithField(errors.New("allow and deny list are mutually exclusive"), "allowDenyIDs")
+		}
+	}
+	return nil
+}
+
+// AllowDenyUsableInCompany reports whether a list can be used by something
+// that belongs to the company. A global list can be used everywhere. A company
+// list can only be used by the same company. A nil company is the global
+// context, where only global lists can be used.
+func AllowDenyUsableInCompany(list *AllowDeny, companyID *uuid.UUID) bool {
+	listCompanyID, err := list.CompanyID.Get()
+	if err != nil {
+		return UsableInCompany(nil, companyID)
+	}
+	return UsableInCompany(&listCompanyID, companyID)
 }

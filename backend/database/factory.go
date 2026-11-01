@@ -13,6 +13,9 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+// sqliteMaxConns is the size of the sqlite connection pool
+const sqliteMaxConns = 8
+
 // FromConfig database factory from config
 func FromConfig(conf config.Config) (*gorm.DB, error) {
 	var db *gorm.DB
@@ -44,16 +47,20 @@ func FromConfig(conf config.Config) (*gorm.DB, error) {
 		if err != nil {
 			return nil, errs.Wrap(err)
 		}
-		// SetMaxOpenConns sets the maximum number of open connections to the database.
-		// without this, gorutines doing simultaneous db operations will cause
-		// "database is locked" error when using sqlite with a high concurrency
-		// this is because sqlite only allows one write operation at a time
-		// and locks the whole database for the duration any write operation
+		// the pool is bounded so a burst of requests waits for a free
+		// connection instead of opening a new sqlite connection per request,
+		// which can run out of file handles and leaves every extra writer
+		// waiting inside the sqlite busy handler. idle matches open so
+		// connections are reused rather than closed and reopened.
+		// more than one connection keeps reads running alongside a write
+		// (WAL), so code must never query the main handle while holding a
+		// transaction, or it can wait forever for a free connection.
 		innerDB, err := db.DB()
 		if err != nil {
 			return nil, errs.Wrap(err)
 		}
-		innerDB.SetMaxIdleConns(1)
+		innerDB.SetMaxOpenConns(sqliteMaxConns)
+		innerDB.SetMaxIdleConns(sqliteMaxConns)
 	default:
 		return nil, config.ErrInvalidDatabase
 	}
