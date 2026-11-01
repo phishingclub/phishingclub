@@ -44,6 +44,7 @@ Phishing Club provides a lot of features for simulation and red teaming, such as
 - **Branding** - Replace logos and login image with your own
 - **Security features** - MFA, SSO (Entra ID and OIDC), session management, IP filtering
 - **Operational tools** - In-app updates, CLI installer, config management
+- **Content registry** - Install and update templates, landing pages, assets and filters from your own Bait Box (beta)
 
 ## AiTM and Red Team Features
 
@@ -76,6 +77,16 @@ Wrote a blog post or write up about Phishing Club? Tell us about it and we might
 ## More from Phishing Club
 
 Open source projects and learning resources built for students and red teamers.
+
+### Bait Box
+
+**[Bait Box](https://github.com/phishingclub/baitbox)** - A self hosted content registry for Phishing Club. Publish your content to your own registry and install it into any Phishing Club instance.
+
+- **Self hostable registry** - Run your own instance; Bait Box ships no content, you own what you publish
+- **Namespaces and visibility** - Organize packages under namespaces, public or private
+- **Variable system** - `@@VAR@@` tokens filled in at install time
+- **Editors** - Write, preview and publish every Phishing Club content type, bundles included
+- **Export and import** - Move namespaces and packages to another registry as one file
 
 ### Training Labs
 
@@ -148,6 +159,7 @@ For complete details, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Suggestions for Contributors**
 - Improve or add templates to the [template project](https://github.com/phishingclub/templates)
+- Build and share content packages with [Bait Box](https://github.com/phishingclub/baitbox)
 - Check existing feature requests - Want to work on something, make a comment.
 
 
