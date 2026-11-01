@@ -16,6 +16,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/build"
 	"github.com/phishingclub/phishingclub/data"
+	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
@@ -65,7 +66,7 @@ func (m *Email) AddAttachments(
 		return errs.ErrAuthorizationFailed
 	}
 	// TODO check if the user is privliged for the message
-	_, err = m.EmailRepository.GetByID(
+	email, err := m.EmailRepository.GetByID(
 		ctx,
 		messageID,
 		&repository.EmailOption{},
@@ -73,6 +74,24 @@ func (m *Email) AddAttachments(
 	if err != nil {
 		m.Logger.Errorw("failed to add attachment to email", "error", err)
 		return errs.Wrap(err)
+	}
+	// a company email can only use global attachments and its own. a shared
+	// email can carry attachments of several companies, each company only sees
+	// and sends its own and the global ones, see loadEmailAttachmentsWithContext
+	if emailCompanyID := companyIDPtr(email.CompanyID); emailCompanyID != nil {
+		refs := []CompanyRef{}
+		for _, attachment := range attachments {
+			if attachment.ID != nil {
+				refs = append(refs, CompanyRef{
+					Table: database.ATTACHMENT_TABLE,
+					Field: "attachments",
+					ID:    *attachment.ID,
+				})
+			}
+		}
+		if err := ValidateCompanyRefs(ctx, m.EmailRepository.DB, emailCompanyID, refs); err != nil {
+			return err
+		}
 	}
 	// add attachment to message
 	attachmentIdsStr := []string{}
@@ -874,10 +893,9 @@ func (m *Email) UpdateByID(
 		m.Logger.Errorw("failed to update email by ID", "error", err)
 		return errs.Wrap(err)
 	}
-	var companyID *uuid.UUID
-	if cid, err := email.CompanyID.Get(); err == nil {
-		companyID = &cid
-	}
+	// the company of an email is set on create and never changed by an update,
+	// so templates referencing it stay within their company
+	companyID := companyIDPtr(current.CompanyID)
 	// check uniqueness
 	name := email.Name.MustGet()
 	isOK, err := repository.CheckNameIsUnique(
@@ -928,9 +946,6 @@ func (m *Email) UpdateByID(
 	}
 	if v, err := email.AddTrackingPixel.Get(); err == nil {
 		current.AddTrackingPixel.Set(v)
-	}
-	if v, err := email.CompanyID.Get(); err == nil {
-		current.CompanyID.Set(v)
 	}
 	// validate change
 	if err := current.Validate(); err != nil {

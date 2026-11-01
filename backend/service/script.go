@@ -6,6 +6,7 @@ import (
 	"github.com/go-errors/errors"
 
 	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
@@ -245,18 +246,19 @@ func (a *Script) Update(
 		return errors.New("unauthorized")
 	}
 	// confirm the script exists before updating
-	if _, err := a.ScriptRepository.GetByID(ctx, id); err != nil {
+	current, err := a.ScriptRepository.GetByID(ctx, id)
+	if err != nil {
 		a.Logger.Errorw("failed to get script", "error", err)
 		return err
 	}
+	// the company of a script is set on create and never changed by an update,
+	// so campaigns referencing it stay within their company
+	script.CompanyID = nullable.Nullable[uuid.UUID]{}
+	companyID := companyIDPtr(current.CompanyID)
 	// the repository update reads the changed fields from the incoming script,
 	// so only the name uniqueness needs checking here
 	if v, err := script.Name.Get(); err == nil {
 		// check uniqueness
-		var companyID *uuid.UUID
-		if cid, err := script.CompanyID.Get(); err == nil {
-			companyID = &cid
-		}
 
 		isOK, err := repository.CheckNameIsUnique(
 			ctx,

@@ -106,6 +106,15 @@ func (c *CampaignTemplate) Create(
 		c.Logger.Errorw("failed to validate campaign template", "error", err)
 		return nil, errs.Wrap(err)
 	}
+	// every referenced record must be global or owned by the template company
+	if err := ValidateCompanyRefs(
+		ctx,
+		c.CampaignTemplateRepository.DB,
+		companyID,
+		campaignTemplateCompanyRefs(campaignTemplate),
+	); err != nil {
+		return nil, err
+	}
 	// create
 	id, err := c.CampaignTemplateRepository.Insert(ctx, campaignTemplate)
 	if err != nil {
@@ -615,13 +624,23 @@ func (c *CampaignTemplate) UpdateByID(
 	if v, err := incoming.AfterLandingPageRedirectURL.Get(); err == nil {
 		storedRedirectURL = v.String()
 	}
+	// the company is never changed by an update, so the stored company decides
+	// which records the request may reference
+	companyID := companyIDPtr(incoming.CompanyID)
+	if err := ValidateCompanyRefs(
+		ctx,
+		c.CampaignTemplateRepository.DB,
+		companyID,
+		newCompanyRefs(
+			campaignTemplateCompanyRefs(campaignTemplate),
+			campaignTemplateCompanyRefs(incoming),
+		),
+	); err != nil {
+		return err
+	}
 	// update the campaign CampaignTemplate
 	if v, err := campaignTemplate.Name.Get(); err == nil {
 		// check uniqueness
-		var companyID *uuid.UUID
-		if cid, err := campaignTemplate.CompanyID.Get(); err == nil {
-			companyID = &cid
-		}
 		name := campaignTemplate.Name.MustGet()
 		isOK, err := repository.CheckNameIsUnique(
 			ctx,

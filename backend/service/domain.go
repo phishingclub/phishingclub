@@ -21,6 +21,7 @@ import (
 	"github.com/phishingclub/phishingclub/acme"
 	"github.com/phishingclub/phishingclub/build"
 	"github.com/phishingclub/phishingclub/data"
+	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
@@ -157,6 +158,14 @@ func (d *Domain) createDomain(
 	if !allowProxyCreation {
 		if domainType, err := domain.Type.Get(); err == nil && domainType.String() == "proxy" {
 			return nil, validate.WrapErrorWithField(errors.New("proxy domains can only be created through proxy configuration, not directly"), "type")
+		}
+		// a linked proxy must be global or owned by the domain company. proxy
+		// configuration creates its domains with the proxy company, so this is
+		// only needed here.
+		refs := companyRefs{}
+		refs.add(database.PROXY_TABLE, "proxyID", domain.ProxyID)
+		if err := ValidateCompanyRefs(ctx, d.DomainRepository.DB, companyIDPtr(domain.CompanyID), refs); err != nil {
+			return nil, err
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-errors/errors"
 	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
@@ -245,11 +246,11 @@ func (s *RemoteBrowser) UpdateByID(
 		return err
 	}
 
+	// the company of a remote browser is set on create and never changed by an
+	// update, the victim endpoint checks it against the campaign company
+	rb.CompanyID = nullable.Nullable[uuid.UUID]{}
 	if _, err := rb.Name.Get(); err == nil {
-		var companyID *uuid.UUID
-		if cid, err := current.CompanyID.Get(); err == nil {
-			companyID = &cid
-		}
+		companyID := companyIDPtr(current.CompanyID)
 		name := rb.Name.MustGet()
 		isOK, err := repository.CheckNameIsUnique(ctx, s.RemoteBrowserRepository.DB, "remote_browsers", name.String(), companyID, id)
 		if err != nil {

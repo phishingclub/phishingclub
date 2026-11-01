@@ -227,10 +227,10 @@ func (o *OAuthProvider) UpdateByID(
 		provider.IsImported = nullable.NewNullNullable[bool]()
 	}
 
-	var companyID *uuid.UUID
-	if cid, err := existing.CompanyID.Get(); err == nil {
-		companyID = &cid
-	}
+	// the company of a provider is set on create and never changed by an update,
+	// so API senders referencing it stay within their company
+	provider.CompanyID = nullable.Nullable[uuid.UUID]{}
+	companyID := companyIDPtr(existing.CompanyID)
 
 	// check uniqueness
 	name := provider.Name.MustGet()

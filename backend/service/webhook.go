@@ -14,6 +14,7 @@ import (
 	"github.com/go-errors/errors"
 
 	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
@@ -198,13 +199,13 @@ func (w *Webhook) Update(
 		w.Logger.Errorw("failed to get webhook", "error", err)
 		return err
 	}
+	// the company of a webhook is set on create and never changed by an update,
+	// so campaigns referencing it stay within their company
+	webhook.CompanyID = nullable.Nullable[uuid.UUID]{}
+	companyID := companyIDPtr(current.CompanyID)
 	// update values
 	if v, err := webhook.Name.Get(); err == nil {
 		// check uniqueness
-		var companyID *uuid.UUID
-		if cid, err := webhook.CompanyID.Get(); err == nil {
-			companyID = &cid
-		}
 
 		isOK, err := repository.CheckNameIsUnique(
 			ctx,

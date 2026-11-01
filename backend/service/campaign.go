@@ -164,6 +164,15 @@ func (c *Campaign) Create(
 	if err := campaign.Validate(); err != nil {
 		return nil, errs.Wrap(err)
 	}
+	// every referenced record must be global or owned by the campaign company
+	if err := ValidateCompanyRefs(
+		ctx,
+		c.CampaignRepository.DB,
+		companyIDPtr(campaign.CompanyID),
+		campaignCompanyRefs(campaign),
+	); err != nil {
+		return nil, err
+	}
 	// check the template is usable
 	templateID := campaign.TemplateID.MustGet()
 	cTemplate, err := c.CampaignTemplateService.GetByID(
@@ -2137,14 +2146,35 @@ func (c *Campaign) UpdateByID(
 		}
 	}
 
+	// the company is never changed by an update, so the stored company decides
+	// which records the request may reference
+	companyID := companyIDPtr(current.CompanyID)
+	stored, err := c.CampaignRepository.GetByID(
+		ctx,
+		id,
+		&repository.CampaignOption{
+			WithRecipientGroups: true,
+			WithAllowDeny:       true,
+			WithWebhooks:        true,
+			WithScripts:         true,
+		},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign references", "error", err)
+		return errs.Wrap(err)
+	}
+	if err := ValidateCompanyRefs(
+		ctx,
+		c.CampaignRepository.DB,
+		companyID,
+		newCompanyRefs(campaignCompanyRefs(incoming), campaignCompanyRefs(stored)),
+	); err != nil {
+		return err
+	}
 	storedDates := current.AnonymizeDates()
 	// update the values
 	if v, err := incoming.Name.Get(); err == nil {
 		// check uniqueness
-		var companyID *uuid.UUID
-		if cid, err := incoming.CompanyID.Get(); err == nil {
-			companyID = &cid
-		}
 		name := incoming.Name.MustGet()
 		isOK, err := repository.CheckNameIsUnique(
 			ctx,

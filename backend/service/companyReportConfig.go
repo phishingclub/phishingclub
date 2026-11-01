@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
+	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
@@ -96,6 +97,24 @@ func (s *CompanyReportConfig) Upsert(
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		s.Logger.Errorw("failed to look up existing report config", "error", err)
 		return nil, errs.Wrap(err)
+	}
+	// the recipient group and SMTP configuration must be global or owned by the
+	// company, the global default config can only use global ones
+	refs := companyRefs{}
+	refs.add(database.RECIPIENT_GROUP_TABLE, "recipientGroupID", incoming.RecipientGroupID)
+	refs.add(database.SMTP_CONFIGURATION_TABLE, "smtpConfigurationID", incoming.SMTPConfigurationID)
+	held := companyRefs{}
+	if existing != nil {
+		held.add(database.RECIPIENT_GROUP_TABLE, "recipientGroupID", existing.RecipientGroupID)
+		held.add(database.SMTP_CONFIGURATION_TABLE, "smtpConfigurationID", existing.SMTPConfigurationID)
+	}
+	if err := ValidateCompanyRefs(
+		ctx,
+		s.CompanyReportConfigRepository.DB,
+		companyID,
+		newCompanyRefs(refs, held),
+	); err != nil {
+		return nil, err
 	}
 	if existing != nil {
 		existingID, idErr := existing.ID.Get()

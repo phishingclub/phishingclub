@@ -483,7 +483,7 @@ func ValidateAllowDenySameType(lists []*AllowDeny) error {
 func AllowDenyUsableInCompany(list *AllowDeny, companyID *uuid.UUID) bool {
 	listCompanyID, err := list.CompanyID.Get()
 	if err != nil {
-		return true
+		return UsableInCompany(nil, companyID)
 	}
-	return companyID != nil && listCompanyID == *companyID
+	return UsableInCompany(&listCompanyID, companyID)
 }
