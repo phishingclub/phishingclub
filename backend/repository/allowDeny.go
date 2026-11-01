@@ -210,3 +210,24 @@ func ToAllowDeny(row *database.AllowDeny) *model.AllowDeny {
 		CompanyID:       companyID,
 	}
 }
+
+// GetByName gets the allow deny list with the exact name in the company. A nil
+// company gets the global list, one with no company. It returns
+// gorm.ErrRecordNotFound when there is none.
+func (r *AllowDeny) GetByName(
+	ctx context.Context,
+	name string,
+	companyID *uuid.UUID,
+) (*model.AllowDeny, error) {
+	db := r.DB.WithContext(ctx).Where("name = ?", name)
+	if companyID == nil {
+		db = db.Where("company_id IS NULL")
+	} else {
+		db = db.Where("company_id = ?", companyID)
+	}
+	var row database.AllowDeny
+	if err := db.First(&row).Error; err != nil {
+		return nil, err
+	}
+	return ToAllowDeny(&row), nil
+}

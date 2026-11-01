@@ -656,6 +656,16 @@ func (a *Asset) AddHeader(
 		a.Logger.Debugw("failed to validate asset header", "error", err)
 		return nil, err
 	}
+	current, err := a.AssetRepository.GetHeadersByAssetID(ctx, assetID)
+	if err != nil {
+		a.Logger.Errorw("failed to get asset headers", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	if len(current) >= model.MaxAssetHeaders {
+		return nil, errs.NewValidationError(
+			fmt.Errorf("an asset can have at most %d response headers", model.MaxAssetHeaders),
+		)
+	}
 	headerID, err := a.AssetRepository.AddHeader(ctx, header)
 	if err != nil {
 		a.Logger.Errorw("failed to add asset header", "error", err)

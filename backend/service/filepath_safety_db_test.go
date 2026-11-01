@@ -29,7 +29,7 @@ func TestInstallAssetLoosePathRefused(t *testing.T) {
 	if err := h.s.installEntities(h.ctx, h.session, pkg, map[string]string{}, ip, "{}", nil, &InstallResult{}); err == nil {
 		t.Fatalf("install accepted a path with a trailing space")
 	}
-	if _, _, err := h.s.installAsset(h.ctx, h.session, ip, "logo.png ", []byte("package bytes")); err == nil {
+	if _, _, err := h.s.installAsset(h.ctx, h.session, ip, "logo.png ", []byte("package bytes"), nil, nil); err == nil {
 		t.Fatalf("installAsset accepted a path with a trailing space")
 	}
 	if rs := h.resourcesOf(ip, "asset"); len(rs) != 0 {

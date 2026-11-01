@@ -19,6 +19,10 @@
 	export let size = 'normal';
 	export let inline = false;
 	export let onSelect = (value) => {};
+	// keep the open list inside the enclosing modal box instead of the screen, so a
+	// field near the bottom of a short modal opens upward rather than hanging past
+	// the modal edge and over its footer buttons.
+	export let containInModal = false;
 
 	// Ensure options is always an array
 	$: optionsArray = Array.isArray(options) ? options : Array.from(options);
@@ -128,8 +132,19 @@
 		const gap = 6;
 		// the rendered menu height once it exists, else the capped maximum (max-h-40).
 		const menuHeight = dropdownElement?.offsetHeight || 160;
-		const spaceBelow = window.innerHeight - rect.bottom;
-		const dropUp = spaceBelow < menuHeight + gap && rect.top > spaceBelow;
+		let boundTop = 0;
+		let boundBottom = window.innerHeight;
+		if (containInModal) {
+			const box = inputElement.closest('[aria-modal="true"] section');
+			if (box) {
+				const boxRect = box.getBoundingClientRect();
+				boundTop = Math.max(boundTop, boxRect.top);
+				boundBottom = Math.min(boundBottom, boxRect.bottom);
+			}
+		}
+		const spaceBelow = boundBottom - rect.bottom;
+		const spaceAbove = rect.top - boundTop;
+		const dropUp = spaceBelow < menuHeight + gap && spaceAbove > spaceBelow;
 		dropdownPosition = {
 			top: dropUp ? Math.max(gap, rect.top - menuHeight - gap) : rect.bottom + gap,
 			left: rect.left,

@@ -873,90 +873,44 @@ func (s *ContentRegistry) buildCampaignTemplateReconcile(
 	return items, campaignTemplateSpec.currents(s, ctx, session, resources, nil)
 }
 
-// reconcileAssets uploads a new asset, overwrites an asset only this install owns
-// whose bytes changed, and references an asset another installed package owns
-// with the same bytes without changing it. Other bytes at a path another package
-// owns fail the update, also when this install owns it too. A global asset the
-// user added at a package path is never adopted or overwritten; it fails the
-// update with a conflict error. Assets are global shared files, so there is no
-// conflict prompt and none are removed.
+// reconcileAssets writes what planAssetUpdate decided for each asset: it
+// creates a new asset with its settings and references an asset another
+// installed package owns with the same bytes and settings without changing it.
+// Other bytes or settings at a path another package owns fail the update, also
+// when this install owns it too. A global asset the user added at a package
+// path is never adopted or overwritten. The new bytes and settings of an asset
+// this install owns, and the lists and file of a new asset with lists, are
+// written later by applyAssetSettings, once every list of the update exists.
+// Assets are global shared files, so none are removed.
 func (s *ContentRegistry) reconcileAssets(
 	ctx context.Context,
 	session *model.Session,
 	ipID *uuid.UUID,
-	pkg *registry.VerifiedPackage,
-	resources []*database.InstalledResource,
 	boundVars string,
 	result *InstallResult,
 	undo *updateUndo,
+	plan *assetUpdatePlan,
+	resolutions map[string]string,
 ) error {
-	assetRes := map[string]*database.InstalledResource{}
-	for _, r := range resources {
-		if r.ResourceType == "asset" {
-			assetRes[r.ResourceID.String()] = r
-		}
-	}
-	for path, b := range pkg.Files {
-		if !strings.HasPrefix(path, "assets/") {
-			continue
-		}
-		rel := strings.TrimPrefix(path, "assets/")
-		if rel == "" {
-			continue
-		}
-		if perr := checkAssetRel(rel); perr != nil {
-			return perr
-		}
-		newH := contentHash(string(b))
-		existing, gerr := s.Asset.AssetRepository.GetGlobalByPath(ctx, rel)
-		if gerr != nil {
-			return errs.Wrap(gerr)
-		}
-		if existing != nil && existing.ID.IsSpecified() && !existing.ID.IsNull() {
-			aid := existing.ID.MustGet()
-			shared, cerr := s.assetOwnedByOtherInstall(ctx, &aid, ipID)
-			if cerr != nil {
-				return errs.Wrap(cerr)
+	for _, it := range plan.items {
+		rel, b := it.rel, it.body
+		if it.res != nil {
+			r := it.res
+			if it.settingsChanged && it.needsChoice() && !it.applySettings(resolutions) {
+				if it.localChanged {
+					result.Skipped = append(result.Skipped, "asset "+rel+" "+keptLocalEdit+")")
+				} else {
+					result.Skipped = append(result.Skipped, "asset "+rel+" settings kept (its allow/deny lists stay)")
+				}
 			}
-			if r, owned := assetRes[aid.String()]; owned {
-				if r.InstalledContentHash == newH {
-					continue
-				}
-				// another package uses the same file, so changing it would change
-				// that package's content too. Refuse the update so the version
-				// does not advance on stale bytes.
-				if shared {
-					return s.sharedAssetChangeErr(ctx, &aid, ipID, rel)
-				}
-				// keep the bytes on disk so a failed update can write them back.
-				old, rerr := s.readAssetFile(rel)
-				if rerr != nil {
+			if final := it.finalFP(resolutions); final != r.InstalledContentHash {
+				if rerr := s.rebaselineResourceTracked(ctx, r, final, boundVars, undo); rerr != nil {
 					return errs.Wrap(rerr)
 				}
-				if werr := s.writeAssetFile(rel, b, true); werr != nil {
-					return errs.Wrap(werr)
-				}
-				undo.pushErr(func() error { return s.writeAssetFile(rel, old, true) })
-				if rerr := s.rebaselineResourceTracked(ctx, r, newH, boundVars, undo); rerr != nil {
-					return errs.Wrap(rerr)
-				}
-				result.Assets = append(result.Assets, rel)
-				continue
-			}
-			if !shared {
-				return assetConflictErr([]string{rel})
-			}
-			if berr := s.checkSharedAssetBytes(ctx, &aid, ipID, rel, b); berr != nil {
-				return berr
-			}
-			// another installed package owns it with the same bytes: reference it so
-			// uninstall ref counts it.
-			if rerr := s.recordResourceTracked(ctx, ipID, "asset", rel, &aid, newH, boundVars, undo, nil); rerr != nil {
-				return errs.Wrap(rerr)
 			}
 			continue
 		}
-		id, created, aerr := s.installAsset(ctx, session, ipID, rel, b)
+		id, created, aerr := s.installAsset(ctx, session, ipID, rel, b, it.decl, result)
 		if aerr != nil {
 			return aerr
 		}
@@ -968,7 +922,7 @@ func (s *ContentRegistry) reconcileAssets(
 			undo.pushErr(func() error { return s.deleteResourceEntity(ctx, session, "asset", rid) })
 			result.Assets = append(result.Assets, rel)
 		}
-		if rerr := s.recordResourceTracked(ctx, ipID, "asset", rel, id, newH, boundVars, undo, nil); rerr != nil {
+		if rerr := s.recordResourceTracked(ctx, ipID, "asset", rel, id, it.fp, boundVars, undo, nil); rerr != nil {
 			return errs.Wrap(rerr)
 		}
 	}

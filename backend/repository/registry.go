@@ -167,6 +167,20 @@ func (r *Registry) GetPackageMembers(ctx context.Context, bundleID *uuid.UUID) (
 	return out, nil
 }
 
+// GetPackageParents returns the installed package ids that link a member, the
+// packages that installed or reused it.
+func (r *Registry) GetPackageParents(ctx context.Context, memberID *uuid.UUID) ([]*uuid.UUID, error) {
+	var rows []database.InstalledPackageMember
+	if err := r.DB.WithContext(ctx).Where("member_id = ?", memberID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]*uuid.UUID, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].BundleID)
+	}
+	return out, nil
+}
+
 // DeletePackageMembersByBundle removes every membership row for a bundle
 func (r *Registry) DeletePackageMembersByBundle(ctx context.Context, bundleID *uuid.UUID) error {
 	return r.DB.WithContext(ctx).Where("bundle_id = ?", bundleID).Delete(&database.InstalledPackageMember{}).Error

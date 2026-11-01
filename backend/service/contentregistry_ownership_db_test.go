@@ -251,7 +251,15 @@ func (h *ownershipFixture) reconcileAssetPkg(ipID *uuid.UUID, pkg *registry.Veri
 		h.t.Fatalf("resources: %v", err)
 	}
 	undo := &updateUndo{}
-	return undo, h.s.reconcileAssets(h.ctx, h.session, ipID, pkg, resources, "{}", &InstallResult{}, undo)
+	plan, err := h.s.planAssetUpdate(h.ctx, ipID, pkg, map[string]string{}, resources, nil)
+	if err != nil {
+		return undo, err
+	}
+	result := &InstallResult{}
+	if err := h.s.reconcileAssets(h.ctx, h.session, ipID, "{}", result, undo, plan, nil); err != nil {
+		return undo, err
+	}
+	return undo, h.s.applyAssetSettings(h.ctx, h.session, plan, nil, result, undo)
 }
 
 // TestSharedAssetSameBytes checks that a second package shipping the same bytes
@@ -272,7 +280,7 @@ func TestSharedAssetSameBytes(t *testing.T) {
 		t.Fatalf("second install with the same bytes: %v", err)
 	}
 	rs := h.resourcesOf(second, "asset")
-	if len(rs) != 1 || rs[0].InstalledContentHash != contentHash("ok()") {
+	if len(rs) != 1 || rs[0].InstalledContentHash != plainAssetFP("ok()") {
 		t.Fatalf("shared asset provenance = %+v", rs)
 	}
 	// an update of the second package that keeps the same bytes still works.
@@ -347,7 +355,7 @@ func TestSharedAssetOtherBytesRefusedOnUpdate(t *testing.T) {
 	if _, err := h.reconcileAssetPkg(second, assetPkg("css/a.css", "a{}")); err != nil {
 		t.Fatalf("update with the same bytes: %v", err)
 	}
-	if rs := h.resourcesOf(second, "asset"); len(rs) != 1 || rs[0].InstalledContentHash != contentHash("a{}") {
+	if rs := h.resourcesOf(second, "asset"); len(rs) != 1 || rs[0].InstalledContentHash != plainAssetFP("a{}") {
 		t.Fatalf("shared asset provenance = %+v", rs)
 	}
 	// uninstall order: the first owner leaves, the second keeps the asset, then
@@ -462,4 +470,9 @@ func TestAttachmentNameCollisionDoesNotOverwrite(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(shared, "invoice.pdf")); string(b) != "user pdf" {
 		t.Fatalf("user attachment changed by removing another: %q", b)
 	}
+}
+
+// plainAssetFP is the baseline of an asset with no settings of its own.
+func plainAssetFP(content string) string {
+	return assetFingerprint(contentHash(content), assetSettings{})
 }

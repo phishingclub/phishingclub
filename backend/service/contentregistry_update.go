@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -324,11 +325,12 @@ func needsChoice(it reconcileItem, cur reconcileCurrent) bool {
 	return cur.currentFP != cur.res.InstalledContentHash || it.rebindReason != ""
 }
 
-// noBothTypes are the resource types the "both" resolution cannot apply to: a
-// domain is not renamed by its update, an oauth provider never returns its
+// noBothTypes are the resource types the "both" resolution cannot apply to: an
+// asset is a file at a fixed path, a domain is not renamed by its update, an oauth provider never returns its
 // client secret, so neither can be set aside as a renamed local copy, and a
 // report template has one global slot per kind, so a second copy cannot exist.
 var noBothTypes = map[string]string{
+	"asset":          "asset",
 	"domain":         "domain",
 	"oauthprovider":  "OAuth provider",
 	"reporttemplate": "report template",
@@ -534,7 +536,8 @@ const outsideUsersCap = 3
 // r, using the same checks the uninstall preview does: another installed
 // package tracking it, campaign templates whose content the delete strips,
 // campaigns that reference it, api senders on an oauth provider, proxy domains a
-// proxy delete takes along, and assets on a domain the install did not add. own
+// proxy delete takes along, assets on a domain the install did not add, and
+// assets that use an allow deny list. own
 // is the install's current provenance; templates, api senders and assets it
 // tracks are not outside use. It returns nil when nothing outside uses it.
 func (s *ContentRegistry) outsideUsers(
@@ -634,6 +637,23 @@ func (s *ContentRegistry) outsideUsers(
 		}
 		if len(names) > 0 {
 			users = append(users, namedLabel("campaign", "campaigns", names))
+		}
+	}
+
+	// an asset that uses the list would lose its filter. An asset this install
+	// owns counts too: by now it uses the lists the new version sets for it, so a
+	// list it still uses is one it was kept with or one the version still names.
+	if r.ResourceType == "allowdeny" && s.Asset != nil && s.Asset.AssetRepository != nil {
+		assets, aerr := s.Asset.AssetRepository.GetByAllowDenyID(ctx, r.ResourceID)
+		if aerr != nil {
+			return nil, aerr
+		}
+		paths := make([]string, 0, len(assets))
+		for _, a := range assets {
+			paths = append(paths, assetLabel(a))
+		}
+		if len(paths) > 0 {
+			users = append(users, namedLabel("asset", "assets", paths))
 		}
 	}
 
@@ -1032,7 +1052,12 @@ func (s *ContentRegistry) prefetchUpdate(
 			if mp, merr := s.RegistryRepository.GetInstalledPackageByID(ctx, m); merr == nil && mp != nil {
 				linked[mp.PackageID] = true
 				current = append(current, mp)
-				_, _ = cache.getManifest(mp.PackageID)
+				// a list package is read in full to compare its lists.
+				if mp.PackageType == "allowdeny" {
+					_, _ = cache.get(mp.PackageID)
+				} else {
+					_, _ = cache.getManifest(mp.PackageID)
+				}
 			}
 		}
 	}
@@ -1054,7 +1079,11 @@ func (s *ContentRegistry) prefetchUpdate(
 		}
 		linked[d.ID] = true
 		if ex, err := s.RegistryRepository.GetInstalledPackage(ctx, ip.RegistryID, d.ID); err == nil && ex != nil {
-			_, _ = cache.getManifest(d.ID)
+			if ex.PackageType == "allowdeny" {
+				_, _ = cache.get(d.ID)
+			} else {
+				_, _ = cache.getManifest(d.ID)
+			}
 			continue
 		}
 		dp, err := cache.get(d.ID)
@@ -1067,6 +1096,8 @@ func (s *ContentRegistry) prefetchUpdate(
 				"referenced packages exceed the %d MiB install size limit", maxBundleBytes>>20,
 			))
 		}
+		// a package the update installs brings the list packages it depends on.
+		s.prefetchMemberDeps(ctx, ip.RegistryID, dp, cache)
 	}
 	s.prefetchSMTPBaseline(ctx, ip, cache)
 	return nil
@@ -1103,6 +1134,19 @@ type memberPlan struct {
 	linked map[string]*uuid.UUID
 	// dropped are members the new version no longer references.
 	dropped []*uuid.UUID
+	// nested are the package ids in toInstall that only a new member needs,
+	// installed for that member and linked to it, not to the bundle.
+	nested map[string]bool
+	// memberLinks link a new member to a package it depends on.
+	memberLinks []memberLink
+	// lists are the reused list packages whose lists are compared before writing.
+	lists []reusedList
+	// nestedReused maps an installed package a new member depends on, and that
+	// the bundle does not reference, to its installed row id.
+	nestedReused map[string]*uuid.UUID
+	// relinked are members the new version no longer references that a new
+	// member depends on. They stay installed; only the bundle's link goes.
+	relinked []*uuid.UUID
 }
 
 // planMembers diffs the packages the new version references against the
@@ -1122,8 +1166,32 @@ func (s *ContentRegistry) planMembers(
 	if len(deps) > maxBundleDependencies {
 		return nil, errs.NewValidationError(fmt.Errorf("package references too many packages"))
 	}
-	plan := &memberPlan{linked: map[string]*uuid.UUID{}}
+	plan := &memberPlan{
+		linked: map[string]*uuid.UUID{}, nested: map[string]bool{}, nestedReused: map[string]*uuid.UUID{},
+	}
 	memberByPkg := map[string]*uuid.UUID{}
+	// checkList checks an installed list package that the package or a member it
+	// installs depends on.
+	checkList := func(m *uuid.UUID) error {
+		mp, err := s.RegistryRepository.GetInstalledPackageByID(ctx, m)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		if mp.PackageType != "allowdeny" {
+			return nil
+		}
+		if fetch == nil {
+			return errs.NewValidationError(errNotDownloaded)
+		}
+		rl, err := s.checkReusedDep(ctx, mp, ip.PackageID, fetch)
+		if err != nil {
+			return err
+		}
+		if rl != nil {
+			plan.lists = append(plan.lists, *rl)
+		}
+		return nil
+	}
 	var memberOrder []string
 	for _, m := range members {
 		if m == nil {
@@ -1179,10 +1247,75 @@ func (s *ContentRegistry) planMembers(
 		}
 		plan.toInstall = append(plan.toInstall, dp)
 	}
-	for _, pid := range memberOrder {
-		if !wanted[pid] {
-			plan.dropped = append(plan.dropped, memberByPkg[pid])
+	// a new member brings the list packages it depends on, as install does.
+	if len(plan.toInstall) > 0 {
+		if fetch == nil {
+			return nil, errs.NewValidationError(errNotDownloaded)
 		}
+		known := map[string]*uuid.UUID{}
+		for id, m := range plan.linked {
+			known[id] = m
+		}
+		sub, serr := s.planMemberDeps(ctx, ip.RegistryID, plan.toInstall, known, fetch)
+		if serr != nil {
+			return nil, serr
+		}
+		for _, dp := range sub.install {
+			total += packageBytes(dp)
+			if total > maxBundleBytes {
+				return nil, errs.NewValidationError(fmt.Errorf(
+					"referenced packages exceed the %d MiB install size limit", maxBundleBytes>>20,
+				))
+			}
+			plan.toInstall = append(plan.toInstall, dp)
+			plan.nested[dp.Manifest.ID] = true
+		}
+		for id, m := range known {
+			if _, ok := plan.linked[id]; !ok {
+				plan.nestedReused[id] = m
+			}
+		}
+		plan.memberLinks = sub.links
+		plan.lists = append(plan.lists, sub.lists...)
+	}
+	// an installed list package the update keeps is checked only when a package
+	// whose assets the update writes depends on it: the package itself unless it
+	// is a bundle, which ships no assets, and each member the update installs.
+	// A list package nothing written uses never blocks the update.
+	needed := map[string]bool{}
+	if pkg.Manifest != nil && pkg.Manifest.Type != "bundle" {
+		for _, d := range deps {
+			needed[d.ID] = true
+		}
+	}
+	for _, dp := range plan.toInstall {
+		if dp.Manifest.Type == "bundle" {
+			continue
+		}
+		for _, d := range dp.Manifest.Dependencies {
+			needed[d.ID] = true
+		}
+	}
+	checked := map[string]bool{}
+	for _, d := range deps {
+		m, ok := plan.linked[d.ID]
+		if !ok || !needed[d.ID] || checked[d.ID] {
+			continue
+		}
+		checked[d.ID] = true
+		if cerr := checkList(m); cerr != nil {
+			return nil, cerr
+		}
+	}
+	for _, pid := range memberOrder {
+		if wanted[pid] {
+			continue
+		}
+		if _, ok := plan.nestedReused[pid]; ok {
+			plan.relinked = append(plan.relinked, memberByPkg[pid])
+			continue
+		}
+		plan.dropped = append(plan.dropped, memberByPkg[pid])
 	}
 	// install an oauth provider before the api sender that names it, as install does.
 	sort.SliceStable(plan.toInstall, func(i, j int) bool {
@@ -1301,6 +1434,13 @@ func (s *ContentRegistry) installMembersTracked(
 		undo.pushErr(func() error { return s.RegistryRepository.DeletePackageMember(ctx, bundle.ID, m) })
 		return nil
 	}
+	ipByPkg := map[string]*uuid.UUID{}
+	for id, m := range plan.linked {
+		ipByPkg[id] = m
+	}
+	for id, m := range plan.nestedReused {
+		ipByPkg[id] = m
+	}
 	for _, dp := range plan.toInstall {
 		depIP, err := s.RegistryRepository.InsertInstalledPackage(ctx, &database.InstalledPackage{
 			RegistryID: bundle.RegistryID, PackageID: dp.Manifest.ID, PackageType: dp.Manifest.Type,
@@ -1310,6 +1450,7 @@ func (s *ContentRegistry) installMembersTracked(
 		if err != nil {
 			return errs.Wrap(err)
 		}
+		ipByPkg[dp.Manifest.ID] = depIP
 		undo.pushErr(func() error {
 			if !s.rollbackInstall(ctx, session, depIP, false) {
 				return fmt.Errorf("referenced package %s was not fully removed", dp.Manifest.ID)
@@ -1323,6 +1464,9 @@ func (s *ContentRegistry) installMembersTracked(
 		if err := s.installCampaignTemplates(ctx, session, dp, depVars, depIP, boundVars, result); err != nil {
 			return err
 		}
+		if plan.nested[dp.Manifest.ID] {
+			continue
+		}
 		if err := link(depIP); err != nil {
 			return err
 		}
@@ -1331,6 +1475,16 @@ func (s *ContentRegistry) installMembersTracked(
 		if err := link(m); err != nil {
 			return err
 		}
+	}
+	for _, l := range plan.memberLinks {
+		parent, child := ipByPkg[l.parent], ipByPkg[l.child]
+		if parent == nil || child == nil {
+			return fmt.Errorf("could not link %s to %s", l.parent, l.child)
+		}
+		if err := s.RegistryRepository.InsertPackageMember(ctx, parent, child); err != nil {
+			return errs.Wrap(err)
+		}
+		undo.pushErr(func() error { return s.RegistryRepository.DeletePackageMember(ctx, parent, child) })
 	}
 	return nil
 }
@@ -1352,6 +1506,12 @@ func (s *ContentRegistry) unlinkDroppedMembers(
 	result *InstallResult,
 ) []string {
 	var keptIDs []string
+	// remove in the order uninstall does, so a list package goes after the
+	// packages whose assets use its lists.
+	dropped = slices.Clone(dropped)
+	sort.SliceStable(dropped, func(i, j int) bool {
+		return memberRemovePriority(ctx, s, dropped[i]) < memberRemovePriority(ctx, s, dropped[j])
+	})
 	for _, m := range dropped {
 		label := m.String()
 		removeMember, gone, kept := false, false, false
@@ -1392,7 +1552,7 @@ func (s *ContentRegistry) unlinkDroppedMembers(
 				s.Logger.Warnw("failed to remove a package the new bundle version no longer references",
 					"package", label, "error", rerr)
 				result.Skipped = append(result.Skipped, "referenced package "+label+
-					" is no longer in the bundle but could not be removed and stays installed")
+					" is no longer referenced but could not be removed and stays installed")
 				continue
 			}
 		}
@@ -1407,14 +1567,14 @@ func (s *ContentRegistry) unlinkDroppedMembers(
 		case gone:
 			// a link to a package that no longer exists, nothing to report.
 		case removeMember:
-			result.Skipped = append(result.Skipped, "referenced package "+label+" removed (no longer in bundle)")
+			result.Skipped = append(result.Skipped, "referenced package "+label+" removed (no longer referenced)")
 		case kept:
 			keptIDs = append(keptIDs, label)
 			result.Skipped = append(result.Skipped,
-				"referenced package "+label+" unlinked (no longer in bundle, kept installed on its own)")
+				"referenced package "+label+" unlinked (no longer referenced, kept installed on its own)")
 		default:
 			result.Skipped = append(result.Skipped,
-				"referenced package "+label+" unlinked (no longer in bundle, kept installed)")
+				"referenced package "+label+" unlinked (no longer referenced, kept installed)")
 		}
 	}
 	return keptIDs
@@ -1422,65 +1582,32 @@ func (s *ContentRegistry) unlinkDroppedMembers(
 
 // droppedMemberEntities lists the entities the members a bundle update drops
 // would remove, by resource type and id, each mapped to the package id that owns
-// it. It follows the rules of unlinkDroppedMembers and remove: a member is removed
-// only when no other bundle links it and it was installed as a dependency, and a
-// removed bundle member removes its own members by the same rule. A dropped
-// member keep reports true for stays installed and is left out. Identifiers and
-// assets are left out since removal keeps them or no template names them.
+// it. The packages are the ones droppedRemovalSet returns, which follows the
+// rules of unlinkDroppedMembers and remove. A dropped member keep reports true
+// for stays installed and is left out. Identifiers and assets are left out
+// since removal keeps them or no template names them.
 func (s *ContentRegistry) droppedMemberEntities(
 	ctx context.Context, bundleID *uuid.UUID, dropped []*uuid.UUID, keep func(packageID string) bool,
 ) (map[string]map[uuid.UUID]string, error) {
 	owned := map[string]map[uuid.UUID]string{}
-	seen := map[uuid.UUID]bool{}
-	var walk func(parent *uuid.UUID, members []*uuid.UUID) error
-	walk = func(parent *uuid.UUID, members []*uuid.UUID) error {
-		for _, m := range members {
-			if m == nil || seen[*m] {
-				continue
-			}
-			mp, gerr := s.RegistryRepository.GetInstalledPackageByID(ctx, m)
-			if errors.Is(gerr, gorm.ErrRecordNotFound) {
-				continue
-			}
-			if gerr != nil {
-				return errs.Wrap(gerr)
-			}
-			n, cerr := s.RegistryRepository.CountBundlesForMember(ctx, m, parent)
-			if cerr != nil {
-				return errs.Wrap(cerr)
-			}
-			if n != 0 || !mp.InstalledAsDependency {
-				continue
-			}
-			if parent == bundleID && keep != nil && keep(mp.PackageID) {
-				continue
-			}
-			seen[*m] = true
-			rows, rerr := s.RegistryRepository.GetInstalledResourcesByPackage(ctx, m)
-			if rerr != nil {
-				return errs.Wrap(rerr)
-			}
-			for _, r := range rows {
-				if r.ResourceID == nil || r.ResourceType == "identifier" || r.ResourceType == "asset" {
-					continue
-				}
-				if owned[r.ResourceType] == nil {
-					owned[r.ResourceType] = map[uuid.UUID]string{}
-				}
-				owned[r.ResourceType][*r.ResourceID] = mp.PackageID
-			}
-			sub, merr := s.RegistryRepository.GetPackageMembers(ctx, m)
-			if merr != nil {
-				return errs.Wrap(merr)
-			}
-			if err := walk(m, sub); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := walk(bundleID, dropped); err != nil {
+	removed, err := s.droppedRemovalSet(ctx, bundleID, dropped, keep)
+	if err != nil {
 		return nil, err
+	}
+	for _, mp := range removed {
+		rows, rerr := s.RegistryRepository.GetInstalledResourcesByPackage(ctx, mp.ID)
+		if rerr != nil {
+			return nil, errs.Wrap(rerr)
+		}
+		for _, r := range rows {
+			if r.ResourceID == nil || r.ResourceType == "identifier" || r.ResourceType == "asset" {
+				continue
+			}
+			if owned[r.ResourceType] == nil {
+				owned[r.ResourceType] = map[uuid.UUID]string{}
+			}
+			owned[r.ResourceType][*r.ResourceID] = mp.PackageID
+		}
 	}
 	return owned, nil
 }
@@ -1698,9 +1825,40 @@ func (s *ContentRegistry) applyUpdate(
 	for _, set := range sets {
 		conflicts = append(conflicts, reconcileConflicts(set.resourceType, set.items, set.currents)...)
 	}
+	// assets follow their own rules: shared or user owned paths fail here, and
+	// settings changed both upstream and locally, or new settings that take
+	// lists off an asset, wait for keep or overwrite.
+	// the package's own assets are filled with its own values only, as install
+	// fills them, so the value of a member can never replace a list pick.
+	rootVars := effectiveVarsFor(pkg, userMerged, share)
+	memberAssets := make([]assetTarget, 0, len(mplan.toInstall))
+	for _, dp := range mplan.toInstall {
+		memberAssets = append(memberAssets, assetTarget{pkg: dp, vars: effectiveVarsFor(dp, userMerged, share)})
+	}
+	// the list names of each package resolve through the list packages it
+	// depends on, see listScope.
+	sources := s.listSourcesFor(ctx, checkPkgs, userMerged, share, mplan.lists)
+	scopes, err := s.listScopes(
+		ip.RegistryID, append([]assetTarget{{pkg: pkg, vars: rootVars}}, memberAssets...), sources,
+	)
+	if err != nil {
+		return nil, err
+	}
+	result.listScopes = scopes
+	if err := s.checkListPicks(ctx, checkPkgs, userMerged, share); err != nil {
+		return nil, err
+	}
+	assetPlan, err := s.planAssetUpdate(ctx, installedPackageID, pkg, rootVars, resources, scopes[pkg.Manifest.ID])
+	if err != nil {
+		return nil, err
+	}
+	conflicts = append(conflicts, assetPlan.conflicts...)
+	keepMember := func(packageID string) bool { return resolutions[memberKey(packageID)] == resolveKeep }
 	// a dropped member whose content the user edited or uses outside the bundle
 	// is kept or removed only as the user chooses.
-	memberConflicts, err := s.droppedMemberConflicts(ctx, ip, mplan.dropped, fetch)
+	memberConflicts, err := s.droppedMemberConflicts(
+		ctx, ip, mplan.dropped, fetch, s.plannedLists(ctx, assetPlan, resolutions), keepMember,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1708,7 +1866,6 @@ func (s *ContentRegistry) applyUpdate(
 	if unresolved := unresolvedConflicts(conflicts, resolutions); len(unresolved) > 0 {
 		return nil, ErrUpdateConflicts{Conflicts: unresolved}
 	}
-	keepMember := func(packageID string) bool { return resolutions[memberKey(packageID)] == resolveKeep }
 	// a report template the install does not track yet overwrites the global one of
 	// its kind, which the user must confirm before anything is written.
 	if err := s.reportTemplateDeclsValid(checkPkgs); err != nil {
@@ -1789,6 +1946,16 @@ func (s *ContentRegistry) applyUpdate(
 	}
 	if len(assetConflicts) > 0 {
 		return nil, assetConflictErr(assetConflicts)
+	}
+	// every list an asset the update creates or rewrites names must resolve, and
+	// a package the update adds must ship a path the new version ships with the
+	// same bytes and settings.
+	assetSeenPaths := map[string]assetSeen{}
+	if err := s.checkAssetUpdate(ctx, assetPlan, resolutions, assetSeenPaths, packageLabel(pkg)); err != nil {
+		return nil, err
+	}
+	if err := s.checkAssetDecls(ctx, memberAssets, scopes, assetSeenPaths); err != nil {
+		return nil, err
 	}
 	// an email this update creates (new in the version, or the fresh copy of the
 	// "both" resolution) creates the attachments it nests that the install does not
@@ -1871,7 +2038,7 @@ func (s *ContentRegistry) applyUpdate(
 	// conflict), mirroring install order so a page's asset is on disk and a campaign
 	// template's identifier exists before the entities that reference them.
 	if aerr := s.reconcileAssets(
-		ctx, session, installedPackageID, pkg, resources, string(boundVars), result, undo,
+		ctx, session, installedPackageID, string(boundVars), result, undo, assetPlan, resolutions,
 	); aerr != nil {
 		return rollback(aerr)
 	}
@@ -1889,6 +2056,13 @@ func (s *ContentRegistry) applyUpdate(
 		); aerr != nil {
 			return rollback(aerr)
 		}
+	}
+
+	// every list of the update exists now, so the asset settings and the lists of
+	// the assets the update created are written. This runs before the removals, so
+	// a list the version drops that an asset still uses is seen as in use.
+	if aerr := s.applyAssetSettings(ctx, session, assetPlan, resolutions, result, undo); aerr != nil {
+		return rollback(aerr)
 	}
 
 	// attachments of an email that already existed are not reconciled in place
@@ -1932,7 +2106,9 @@ func (s *ContentRegistry) applyUpdate(
 	}
 	// packages the bundle no longer references go last, once its own content no
 	// longer names their entities.
-	if kept := s.unlinkDroppedMembers(ctx, session, ip.ID, mplan.dropped, keepMember, result); len(kept) > 0 {
+	// a relinked member is linked by a new member now, so it is only unlinked.
+	unlink := append(append([]*uuid.UUID{}, mplan.dropped...), mplan.relinked...)
+	if kept := s.unlinkDroppedMembers(ctx, session, ip.ID, unlink, keepMember, result); len(kept) > 0 {
 		ae.Details["membersKept"] = kept
 	}
 

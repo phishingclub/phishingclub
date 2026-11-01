@@ -81,7 +81,14 @@ func installedShare(ip *database.InstalledPackage, m *registry.Manifest) bool {
 	if ip != nil && ip.VariablesScoped {
 		return false
 	}
-	return m == nil || m.ShareVariables == nil || *m.ShareVariables
+	return sharesVariables(m)
+}
+
+// sharesVariables reports whether a package fills a variable name once for
+// itself and every package it installs with it. Only a bundle can turn that
+// off; for any other package shareVariables has no meaning and is ignored.
+func sharesVariables(m *registry.Manifest) bool {
+	return m == nil || m.Type != "bundle" || m.ShareVariables == nil || *m.ShareVariables
 }
 
 // ErrMissingVariables is returned by Install and Update so the UI can prompt for
@@ -107,6 +114,12 @@ type UpdateConflict struct {
 	ResourceType string `json:"resourceType"`
 	SourceName   string `json:"sourceName"`
 	CurrentName  string `json:"currentName"`
+	// Note is extra text shown with the choice, such as what overwrite replaces
+	// on an asset.
+	Note string `json:"note,omitempty"`
+	// FilterLoss is set on an asset conflict when applying the update would
+	// take allow/deny lists off the asset.
+	FilterLoss *AssetFilterLoss `json:"filterLoss,omitempty"`
 	// Reason says why the item needs a choice when it is not a local edit, such as
 	// an API sender the update would switch to another OAuth provider.
 	Reason string `json:"reason,omitempty"`
@@ -252,6 +265,25 @@ type InstallResult struct {
 	Assets    []string `json:"assets"`
 	Others    []string `json:"others"`
 	Skipped   []string `json:"skipped"`
+	// pendingLinks are created assets whose allow deny lists are set once every
+	// list of the install or update exists. Their files are written only then.
+	pendingLinks []pendingAssetLink
+	// createdAssets are the assets this install or update created, by path, so
+	// a second package of the same operation that ships the path is compared
+	// with what was created and not with the stored asset, whose lists and file
+	// may still be pending.
+	createdAssets map[string]createdAsset
+	// listScopes resolve the list names of the assets of each package of the
+	// install or update, by package id, see listScope.
+	listScopes map[string]*listScope
+}
+
+// listScope returns the list scope of the package id, nil when it has none.
+func (r *InstallResult) listScope(packageID string) *listScope {
+	if r == nil {
+		return nil
+	}
+	return r.listScopes[packageID]
 }
 
 // RegistryView is a registry connection for listing (token never serialized).

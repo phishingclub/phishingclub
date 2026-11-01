@@ -137,6 +137,8 @@ type installDataYAML struct {
 	} `yaml:"identifiers"`
 	Attachments       []installAttachmentYAML       `yaml:"attachments"`
 	CampaignTemplates []installCampaignTemplateYAML `yaml:"campaignTemplates"`
+	// Assets sets how files in the assets folder of the package are served.
+	Assets []installAssetYAML `yaml:"assets"`
 }
 
 // installAPISenderYAML is the request template for a third party send API. An
@@ -194,6 +196,8 @@ func installPriority(pkgType string) int {
 
 // memberRemovePriority is the reverse of installPriority, so a referencing package
 // (an api sender) is removed before the one it references (its oauth provider).
+// A list package goes last, after the packages whose assets use its lists, so
+// its lists are not kept for assets the same removal deletes.
 func memberRemovePriority(ctx context.Context, s *ContentRegistry, m *uuid.UUID) int {
 	if m == nil {
 		return 99
@@ -201,6 +205,9 @@ func memberRemovePriority(ctx context.Context, s *ContentRegistry, m *uuid.UUID)
 	mp, err := s.RegistryRepository.GetInstalledPackageByID(ctx, m)
 	if err != nil || mp == nil {
 		return 99
+	}
+	if mp.PackageType == "allowdeny" {
+		return 1
 	}
 	// negate install priority so a higher install priority removes first.
 	return -installPriority(mp.PackageType)
@@ -392,6 +399,26 @@ type installPlan struct {
 	share        bool
 	mergedVars   map[string]string
 	overwrites   []ReportTemplateOverwrite
+	// nested are the package ids in toInstall that only a member of the root
+	// needs, installed for that member and linked to it, not to the root.
+	nested map[string]bool
+	// memberLinks link a member of the root to a package it depends on.
+	memberLinks []memberLink
+	// reused maps the package id of each installed package the plan reuses to
+	// its installed row id.
+	reused map[string]*uuid.UUID
+	// rootVars are the values of the root alone, which its assets are filled
+	// with, so the value of a dependency can never replace the list a pick
+	// chose.
+	rootVars map[string]string
+	// listScopes resolve the list names of the assets of each package.
+	listScopes map[string]*listScope
+}
+
+// memberLink links the installed package parent to the package child it
+// depends on, both by package id.
+type memberLink struct {
+	parent, child string
 }
 
 // planInstall resolves a package and the packages it references through fetch
@@ -425,13 +452,22 @@ func (s *ContentRegistry) planInstall(
 	if len(root.Manifest.Dependencies) > maxBundleDependencies {
 		return nil, errs.NewValidationError(fmt.Errorf("package references too many packages"))
 	}
-	plan := &installPlan{root: root}
+	plan := &installPlan{root: root, nested: map[string]bool{}, reused: map[string]*uuid.UUID{}}
 	reusedByID := map[string]*uuid.UUID{}
+	var reusedLists []reusedList
 	bundleBytes := packageBytes(root)
 	for _, d := range root.Manifest.Dependencies {
 		if ex, _ := s.RegistryRepository.GetInstalledPackage(ctx, registryID, d.ID); ex != nil {
+			rl, rerr := s.checkReusedDep(ctx, ex, root.Manifest.ID, fetch)
+			if rerr != nil {
+				return nil, rerr
+			}
+			if rl != nil {
+				reusedLists = append(reusedLists, *rl)
+			}
 			plan.reuseMembers = append(plan.reuseMembers, ex.ID)
 			reusedByID[d.ID] = ex.ID
+			plan.reused[d.ID] = ex.ID
 			continue
 		}
 		dp, derr := fetch(d.ID)
@@ -446,6 +482,24 @@ func (s *ContentRegistry) planInstall(
 		}
 		plan.toInstall = append(plan.toInstall, dp)
 	}
+	// a package installed now for a bundle brings its own dependencies too, the
+	// list packages its assets use. They are installed for it and linked to it.
+	sub, err := s.planMemberDeps(ctx, registryID, plan.toInstall, plan.reused, fetch)
+	if err != nil {
+		return nil, err
+	}
+	for _, dp := range sub.install {
+		bundleBytes += packageBytes(dp)
+		if bundleBytes > maxBundleBytes {
+			return nil, errs.NewValidationError(fmt.Errorf(
+				"referenced packages exceed the %d MiB install size limit", maxBundleBytes>>20,
+			))
+		}
+		plan.toInstall = append(plan.toInstall, dp)
+		plan.nested[dp.Manifest.ID] = true
+	}
+	plan.memberLinks = sub.links
+	reusedLists = append(reusedLists, sub.lists...)
 	// install an oauth provider before the api sender that names it; the stable sort
 	// keeps the author's order within the same priority.
 	sort.SliceStable(plan.toInstall, func(i, j int) bool {
@@ -457,7 +511,7 @@ func (s *ContentRegistry) planInstall(
 	// name); the shareVariables flag is read for the per package option.
 	// a bundle shares variables by name across its packages unless the author turned
 	// it off; a plain package has one package, so the mode has no effect.
-	plan.share = root.Manifest.ShareVariables == nil || *root.Manifest.ShareVariables
+	plan.share = sharesVariables(root.Manifest)
 	varPkgs := append([]*registry.VerifiedPackage{root}, plan.toInstall...)
 	if err := checkSharedPicks(varPkgs, plan.share); err != nil {
 		return nil, err
@@ -515,6 +569,25 @@ func (s *ContentRegistry) planInstall(
 		for k, v := range mv {
 			plan.mergedVars[k] = v
 		}
+	}
+	// every assets block is checked, and every list an asset names resolves,
+	// before anything is written. The root's assets are filled with its own
+	// values only, the ones checkListPicks checks.
+	plan.rootVars = effectiveVarsFor(root, vars, plan.share)
+	assetTargets := make([]assetTarget, 0, len(plan.toInstall)+1)
+	for _, pk := range plan.toInstall {
+		assetTargets = append(assetTargets, assetTarget{pkg: pk, vars: effectiveVarsFor(pk, vars, plan.share)})
+	}
+	assetTargets = append(assetTargets, assetTarget{pkg: plan.root, vars: plan.rootVars})
+	sources := s.listSourcesFor(ctx, varPkgs, vars, plan.share, reusedLists)
+	if plan.listScopes, err = s.listScopes(registryID, assetTargets, sources); err != nil {
+		return nil, err
+	}
+	if err := s.checkListPicks(ctx, varPkgs, vars, plan.share); err != nil {
+		return nil, err
+	}
+	if err := s.checkAssetDecls(ctx, assetTargets, plan.listScopes, map[string]assetSeen{}); err != nil {
+		return nil, err
 	}
 	targets := make([]oauthCheckTarget, 0, len(plan.toInstall)+1)
 	for _, pk := range plan.toInstall {
@@ -611,18 +684,22 @@ func (s *ContentRegistry) applyInstall(
 	// reverse. reused (already installed) members are not listed; they are left in
 	// place on rollback.
 	installed := []*uuid.UUID{bundleIP}
-	result := &InstallResult{PackageID: root.Manifest.ID}
+	result := &InstallResult{PackageID: root.Manifest.ID, listScopes: plan.listScopes}
 	// fail unwinds the members first, then the bundle. When anything could not be
 	// removed the bundle row and its member links stay, so the leftover shows as
 	// installed and removing the bundle cleans up the rest.
 	fail := func(e error) (*InstallResult, error) {
 		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
 		defer cancel()
-		clean := true
+		// the assets go first, while the lists they use still exist.
+		clean := s.deleteCreatedAssets(rctx, session, result)
 		for i := len(installed) - 1; i >= 1; i-- {
 			if !s.rollbackInstall(rctx, session, installed[i], false) {
 				clean = false
+				continue
 			}
+			// the package is gone, so are the links to what it depends on.
+			_ = s.RegistryRepository.DeletePackageMembersByBundle(rctx, installed[i])
 		}
 		if !s.rollbackInstall(rctx, session, bundleIP, !clean) {
 			clean = false
@@ -641,6 +718,10 @@ func (s *ContentRegistry) applyInstall(
 	// install each referenced package as its own snapshot, then link it to the
 	// bundle so uninstall can ref count it. a leaf content package carries no
 	// campaign template, but the second pass is harmless if it does.
+	ipByPkg := map[string]*uuid.UUID{}
+	for id, m := range plan.reused {
+		ipByPkg[id] = m
+	}
 	for _, dp := range plan.toInstall {
 		depIP, derr := s.RegistryRepository.InsertInstalledPackage(ctx, &database.InstalledPackage{
 			RegistryID: registryID, PackageID: dp.Manifest.ID, PackageType: dp.Manifest.Type,
@@ -651,6 +732,7 @@ func (s *ContentRegistry) applyInstall(
 			return fail(errs.Wrap(derr))
 		}
 		installed = append(installed, depIP)
+		ipByPkg[dp.Manifest.ID] = depIP
 		depVars := effectiveVarsFor(dp, vars, share)
 		if e := s.installEntities(ctx, session, dp, depVars, depIP, string(boundVars), vars, result); e != nil {
 			return fail(e)
@@ -658,7 +740,19 @@ func (s *ContentRegistry) applyInstall(
 		if e := s.installCampaignTemplates(ctx, session, dp, depVars, depIP, string(boundVars), result); e != nil {
 			return fail(e)
 		}
+		if plan.nested[dp.Manifest.ID] {
+			continue
+		}
 		if e := s.RegistryRepository.InsertPackageMember(ctx, bundleIP, depIP); e != nil {
+			return fail(errs.Wrap(e))
+		}
+	}
+	for _, l := range plan.memberLinks {
+		parent, child := ipByPkg[l.parent], ipByPkg[l.child]
+		if parent == nil || child == nil {
+			return fail(fmt.Errorf("could not link %s to %s", l.parent, l.child))
+		}
+		if e := s.RegistryRepository.InsertPackageMember(ctx, parent, child); e != nil {
 			return fail(errs.Wrap(e))
 		}
 	}
@@ -672,9 +766,14 @@ func (s *ContentRegistry) applyInstall(
 	// template, which resolves its pieces by name against the entities installed
 	// above, using the merged values planInstall worked out. a plain package
 	// installs its own entities here with no dependencies.
-	if e := s.installEntities(
-		ctx, session, root, plan.mergedVars, bundleIP, string(boundVars), vars, result,
+	if e := s.installEntitiesWith(
+		ctx, session, root, plan.rootVars, plan.mergedVars, bundleIP, string(boundVars), vars, result,
 	); e != nil {
+		return fail(e)
+	}
+	// every list of the install exists now, the ones a referenced package or the
+	// bundle declares too, so the assets created above get their lists.
+	if e := s.linkPendingAssets(ctx, session, result, nil); e != nil {
 		return fail(e)
 	}
 	e := s.installCampaignTemplates(
@@ -759,19 +858,38 @@ func (s *ContentRegistry) installEntities(
 	picks map[string]string,
 	result *InstallResult,
 ) error {
+	return s.installEntitiesWith(ctx, session, pkg, vars, vars, ipID, boundVars, picks, result)
+}
+
+// installEntitiesWith is installEntities with the assets filled with
+// assetVars, the values of the package alone, and the rest with vars.
+func (s *ContentRegistry) installEntitiesWith(
+	ctx context.Context,
+	session *model.Session,
+	pkg *registry.VerifiedPackage,
+	assetVars map[string]string,
+	vars map[string]string,
+	ipID *uuid.UUID,
+	boundVars string,
+	picks map[string]string,
+	result *InstallResult,
+) error {
+	// every assets block is checked before the first asset is written.
+	decls, err := packageAssetDecls(pkg, assetVars)
+	if err != nil {
+		return s.assetDeclsErr(err)
+	}
+	if pkg.Manifest != nil {
+		scopeDecls(decls, result.listScope(pkg.Manifest.ID))
+	}
 	// assets first so page/email references resolve on disk.
-	for path, b := range pkg.Files {
-		if !strings.HasPrefix(path, "assets/") {
-			continue
-		}
-		rel := strings.TrimPrefix(path, "assets/")
-		if rel == "" {
-			continue
-		}
+	for _, rel := range assetFilePaths(pkg) {
 		if perr := checkAssetRel(rel); perr != nil {
 			return perr
 		}
-		id, created, err := s.installAsset(ctx, session, ipID, rel, b)
+		b := pkg.Files["assets/"+rel]
+		decl := assetDeclFor(decls, rel)
+		id, created, err := s.installAsset(ctx, session, ipID, rel, b, decl, result)
 		if err != nil {
 			return err
 		}
@@ -784,7 +902,8 @@ func (s *ContentRegistry) installEntities(
 			if created {
 				result.Assets = append(result.Assets, rel)
 			}
-			if err := s.recordResource(ctx, ipID, "asset", rel, id, contentHash(string(b)), boundVars); err != nil {
+			fp := assetFingerprint(contentHash(string(b)), decl.settings)
+			if err := s.recordResource(ctx, ipID, "asset", rel, id, fp, boundVars); err != nil {
 				// do not leave an untracked file this install just created.
 				if created {
 					s.cleanupUntracked(ctx, session, "asset", id)

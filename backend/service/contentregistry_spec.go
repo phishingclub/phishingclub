@@ -39,7 +39,8 @@ type entitySpec[T any] struct {
 	fingerprint func(m *T) string
 	// name is nil for a type whose entities carry no name.
 	name func(m *T) string
-	// resolve finds an entity by name, for the types a campaign template names.
+	// resolve finds an entity by name, for the types a campaign template or an
+	// asset names.
 	resolve func(s *ContentRegistry, ctx context.Context, name string) (*uuid.UUID, error)
 	// templates lists the campaign templates using an entity, for the types whose
 	// delete closes the campaigns of those templates.
@@ -354,6 +355,9 @@ var resourceSpecs = map[string]resourceSpec{
 // storedHash is the drift fingerprint of an installed entity, empty when the
 // type has none or the entity cannot be read.
 func (s *ContentRegistry) storedHash(ctx context.Context, resourceType string, id *uuid.UUID) string {
+	if resourceType == "asset" {
+		return s.storedAssetHash(ctx, id)
+	}
 	if sp, ok := resourceSpecs[resourceType]; ok {
 		return sp.storedHash(s, ctx, id)
 	}
@@ -650,6 +654,7 @@ var allowDenySpec = &entitySpec[model.AllowDeny]{
 	},
 	fingerprint: allowDenyFingerprint,
 	name:        func(m *model.AllowDeny) string { return optStr(m.Name) },
+	resolve:     (*ContentRegistry).resolveAllowDenyID,
 	rename:      renameOnly(vo.NewString127, func(m *model.AllowDeny, n vo.String127) { m.Name = nn(n) }),
 	decls: func(
 		s *ContentRegistry, ctx context.Context, session *model.Session,
@@ -658,8 +663,9 @@ var allowDenySpec = &entitySpec[model.AllowDeny]{
 		var out []entityDecl[model.AllowDeny]
 		for _, ad := range doc.dy.AllowDenies {
 			// every field is substituted, the name too, so the planned fingerprint
-			// matches what install stored and no false conflict appears.
-			name := substitute(ad.Name, vars)
+			// matches what install stored and no false conflict appears. The name is
+			// trimmed the same way an asset names the list.
+			name := strings.TrimSpace(substitute(ad.Name, vars))
 			cidrs, countryCodes := substitute(ad.Cidrs, vars), substitute(ad.CountryCodes, vars)
 			asns, ja4 := substitute(ad.Asns, vars), substitute(ad.JA4, vars)
 			headersJSON := allowDenyHeadersJSON(ad.Headers, vars)

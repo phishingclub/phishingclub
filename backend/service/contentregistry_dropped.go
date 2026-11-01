@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/database"
@@ -10,7 +9,6 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/registry"
 	"github.com/phishingclub/phishingclub/repository"
-	"gorm.io/gorm"
 )
 
 // memberConflictType is the conflict type of a referenced package a bundle
@@ -38,7 +36,7 @@ type DroppedMemberImpact struct {
 // content used outside the bundle.
 func (d *DroppedMemberImpact) inUse() bool {
 	return len(d.Edited) > 0 || d.TemplateCount > 0 || d.CampaignCount > 0 ||
-		d.KeepRunningCount > 0 || d.ChangedCount > 0 || d.UserAssetCount > 0
+		d.KeepRunningCount > 0 || d.ChangedCount > 0 || d.UserAssetCount > 0 || d.ChangedAssetCount > 0
 }
 
 // templatesOf returns the campaign templates the given packages track.
@@ -60,16 +58,43 @@ func (s *ContentRegistry) templatesOf(ctx context.Context, ids []*uuid.UUID, out
 	return nil
 }
 
+// droppedRemovalSet returns the packages a bundle update removes with the
+// members it drops, the same ones unlinkDroppedMembers removes: the link from
+// the bundle to a dropped member goes, and a dropped member keep reports true
+// for stays installed on its own.
+func (s *ContentRegistry) droppedRemovalSet(
+	ctx context.Context, bundleID *uuid.UUID, dropped []*uuid.UUID, keep func(packageID string) bool,
+) ([]*database.InstalledPackage, error) {
+	droppedSet := map[uuid.UUID]bool{}
+	for _, m := range dropped {
+		if m != nil {
+			droppedSet[*m] = true
+		}
+	}
+	linkGone := func(parent, child uuid.UUID) bool { return parent == *bundleID && droppedSet[child] }
+	keepPkg := func(mp *database.InstalledPackage) bool {
+		return keep != nil && droppedSet[*mp.ID] && keep(mp.PackageID)
+	}
+	return s.removalSet(ctx, nil, dropped, linkGone, keepPkg)
+}
+
 // droppedMemberConflicts returns a conflict for each referenced package the
-// update would uninstall (no other bundle links it and it was installed only as
-// a dependency) whose content the user edited or uses outside the bundle. A
-// package with neither is left out and is removed without asking. fetch reads
-// the installed version of a package, for its declared smtp headers.
+// update would uninstall whose content the user edited or uses outside the
+// bundle. The packages removed are worked out together, see droppedRemovalSet,
+// so a package another dropped package also links is removed and asked about
+// too. Each dropped member is reported with the packages only it brings along;
+// one with no edits and no outside use is left out and is removed without
+// asking. fetch reads the installed version of a package, for its declared
+// smtp headers. plannedLists maps each asset of the bundle whose lists the
+// update replaces to its new lists, so a list the update takes off the asset
+// anyway is not counted as lost with the package.
 func (s *ContentRegistry) droppedMemberConflicts(
 	ctx context.Context,
 	bundle *database.InstalledPackage,
 	dropped []*uuid.UUID,
 	fetch func(id string) (*registry.VerifiedPackage, error),
+	plannedLists map[uuid.UUID]*plannedAssetLists,
+	keep func(packageID string) bool,
 ) ([]UpdateConflict, error) {
 	if len(dropped) == 0 {
 		return nil, nil
@@ -95,38 +120,59 @@ func (s *ContentRegistry) droppedMemberConflicts(
 	declaredFor := func(p *database.InstalledPackage) func(string) ([]*model.SMTPHeader, bool) {
 		return s.boundSMTPHeaders(ctx, p, fetch)
 	}
-
-	var out []UpdateConflict
-	for _, m := range dropped {
-		if m == nil {
-			continue
-		}
-		mp, gerr := s.RegistryRepository.GetInstalledPackageByID(ctx, m)
-		if errors.Is(gerr, gorm.ErrRecordNotFound) {
-			continue
-		}
-		if gerr != nil {
-			return nil, errs.Wrap(gerr)
-		}
-		n, cerr := s.RegistryRepository.CountBundlesForMember(ctx, m, bundle.ID)
-		if cerr != nil {
-			return nil, errs.Wrap(cerr)
-		}
-		if n != 0 || !mp.InstalledAsDependency {
-			continue
-		}
-		pkgs := []*database.InstalledPackage{mp}
-		seen := map[uuid.UUID]bool{*bundle.ID: true, *m: true}
-		if err := s.collectRemovedMembers(ctx, m, seen, &pkgs); err != nil {
+	removed, err := s.droppedRemovalSet(ctx, bundle.ID, dropped, keep)
+	if err != nil {
+		return nil, err
+	}
+	removedOwned := map[uuid.UUID]bool{}
+	byID := map[uuid.UUID]*database.InstalledPackage{}
+	for _, p := range removed {
+		byID[*p.ID] = p
+		if err := s.templatesOf(ctx, []*uuid.UUID{p.ID}, removedOwned); err != nil {
 			return nil, err
 		}
-		removedOwned := map[uuid.UUID]bool{}
-		for _, p := range pkgs {
-			if err := s.templatesOf(ctx, []*uuid.UUID{p.ID}, removedOwned); err != nil {
-				return nil, err
+	}
+	direct := map[uuid.UUID]bool{}
+	for _, m := range dropped {
+		if m != nil && byID[*m] != nil {
+			direct[*m] = true
+		}
+	}
+	// each removed package is reported once: with the dropped member itself, or
+	// with the first dropped member that links it through removed packages.
+	assigned := map[uuid.UUID]bool{}
+	var out []UpdateConflict
+	for _, m := range dropped {
+		if m == nil || !direct[*m] || assigned[*m] {
+			continue
+		}
+		mp := byID[*m]
+		assigned[*m] = true
+		group := []*database.InstalledPackage{mp}
+		for i := 0; i < len(group); i++ {
+			sub, merr := s.RegistryRepository.GetPackageMembers(ctx, group[i].ID)
+			if merr != nil {
+				return nil, errs.Wrap(merr)
+			}
+			for _, c := range sub {
+				if c == nil || assigned[*c] || direct[*c] || byID[*c] == nil {
+					continue
+				}
+				assigned[*c] = true
+				group = append(group, byID[*c])
 			}
 		}
-		preview, closed, perr := s.previewRemoval(ctx, pkgs, declaredFor, own)
+		inGroup := map[uuid.UUID]bool{}
+		for _, p := range group {
+			inGroup[*p.ID] = true
+		}
+		var others []*database.InstalledPackage
+		for _, p := range removed {
+			if !inGroup[*p.ID] {
+				others = append(others, p)
+			}
+		}
+		preview, closed, perr := s.previewRemoval(ctx, group, others, declaredFor, own, plannedLists)
 		if perr != nil {
 			return nil, perr
 		}

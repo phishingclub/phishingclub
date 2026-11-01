@@ -94,6 +94,34 @@ var blockedAssetHeaders = map[string]bool{
 	"Content-Type":      true,
 }
 
+// MaxAssetHeaders is the most response headers one asset can have.
+const MaxAssetHeaders = 50
+
+// ValidateFilteredCacheControl checks a Cache-Control value a package sets on
+// an asset with allow deny lists. Such an asset is sent with
+// "private, no-store" unless it sets its own Cache-Control, so a package value
+// must keep the response out of shared caches: it must hold no-store or
+// private and must not hold public or s-maxage.
+func ValidateFilteredCacheControl(value string) error {
+	keeps, opens := false, false
+	for _, part := range strings.Split(value, ",") {
+		name, _, _ := strings.Cut(part, "=")
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "no-store", "private":
+			keeps = true
+		case "public", "s-maxage":
+			opens = true
+		}
+	}
+	if !keeps || opens {
+		return errs.NewValidationError(errors.New(
+			"an asset with allow/deny lists can only set a Cache-Control header that holds " +
+				"no-store or private and does not hold public or s-maxage",
+		))
+	}
+	return nil
+}
+
 // AssetHeader is a response header sent when a specific asset is served
 type AssetHeader struct {
 	ID        uuid.UUID                        `json:"id"`

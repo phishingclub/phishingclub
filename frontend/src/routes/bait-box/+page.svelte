@@ -177,7 +177,13 @@
 		page: (options) => api.page.getAll(options, null),
 		proxy: (options) => api.proxy.getAll(options, null),
 		apiSender: (options) => api.apiSender.getAllOverview(options, null),
-		oauthProvider: (options) => api.oauthProvider.getAll(options, null)
+		oauthProvider: (options) => api.oauthProvider.getAll(options, null),
+		allowDeny: (options) => api.allowDeny.getAllOverview(options, null)
+	};
+	// a list pick offers only global lists, of either kind; the install refuses a
+	// company list.
+	const PICK_FILTERS = {
+		allowDeny: (r) => !r.companyID
 	};
 	// readable name for a pick kind, used in the field label and the empty note.
 	const PICK_LABELS = {
@@ -187,7 +193,8 @@
 		page: 'page',
 		proxy: 'proxy',
 		apiSender: 'API sender',
-		oauthProvider: 'OAuth provider'
+		oauthProvider: 'OAuth provider',
+		allowDeny: 'allow/deny list'
 	};
 	function pickLabel(kind) {
 		return PICK_LABELS[kind] || kind;
@@ -201,7 +208,8 @@
 		page: '/page',
 		proxy: '/proxy',
 		apiSender: '/api-sender',
-		oauthProvider: '/oauth-provider'
+		oauthProvider: '/oauth-provider',
+		allowDeny: '/filter'
 	};
 	function pickRoute(kind) {
 		return PICK_ROUTES[kind] || '';
@@ -229,7 +237,14 @@
 					if (!loader) return [kind, []];
 					try {
 						const rows = await fetchAllRows((options) => loader(options));
-						return [kind, rows.map((r) => r.name).filter(Boolean)];
+						const keep = PICK_FILTERS[kind] || (() => true);
+						return [
+							kind,
+							rows
+								.filter(keep)
+								.map((r) => r.name)
+								.filter(Boolean)
+						];
 					} catch (e) {
 						return [kind, []];
 					}
@@ -288,10 +303,10 @@
 	const choiceLabel = (v) => CHOICE_LABELS[v] || 'Keep mine';
 	const labelToChoice = (label) =>
 		label === 'Overwrite' ? 'overwrite' : label === 'Keep both' ? 'both' : 'keep';
-	// a domain or oauth provider cannot be renamed to a local copy, and a report
-	// template has one global slot per kind, so the server rejects "both" for them
-	// and the choice is not offered.
-	const NO_BOTH_TYPES = ['domain', 'oauthprovider', 'reporttemplate'];
+	// a domain or oauth provider cannot be renamed to a local copy, a report
+	// template has one global slot per kind, and an asset is served at one path, so
+	// the server rejects "both" for them and the choice is not offered.
+	const NO_BOTH_TYPES = ['domain', 'oauthprovider', 'reporttemplate', 'asset'];
 	// keepOnly marks a conflict the server applies only with keep, such as an API
 	// sender the new version would bind to an OAuth provider it may not use.
 	const conflictOptions = (c) =>
@@ -301,13 +316,18 @@
 				? ['Keep mine', 'Overwrite']
 				: ['Keep mine', 'Overwrite', 'Keep both'];
 	// a referenced package the new bundle version drops while its content is edited
-	// or used outside the bundle: keep it installed on its own, or uninstall it.
+	// or used elsewhere: keep it installed on its own, or uninstall it.
 	const MEMBER_LABELS = { keep: 'Keep installed', remove: 'Uninstall' };
 	const isMemberConflict = (c) => c.resourceType === 'member';
 	$: fileConflicts = conflictList.filter((c) => !isMemberConflict(c));
 	// a conflict with a reason waits for a choice without any local edit.
 	$: conflictsHaveReason = fileConflicts.some((c) => c.reason);
+	// an asset conflict with filterLoss can wait for a choice without any local
+	// edit: the new version takes allow/deny lists off the asset.
+	$: conflictsHaveFilterLoss = fileConflicts.some((c) => c.filterLoss);
 	$: memberConflicts = conflictList.filter(isMemberConflict);
+	// the keep both note is only shown when one of the conflicts offers it.
+	$: conflictsOfferBoth = fileConflicts.some((c) => conflictOptions(c).includes('Keep both'));
 	function openConflicts(inst, variables, conflicts) {
 		conflictInst = inst;
 		conflictVariables = variables || {};
@@ -367,7 +387,11 @@
 		updateAllVisible = true;
 	}
 	async function confirmUpdateAll() {
-		const targets = installed.filter((i) => i.updateAvailable);
+		// allow/deny packages go first, since a page that uses a newer list is refused
+		// until its list package is updated.
+		const targets = installed
+			.filter((i) => i.updateAvailable)
+			.sort((a, b) => (b.packageType === 'allowdeny') - (a.packageType === 'allowdeny'));
 		const updated = [];
 		const kept = [];
 		const keptDropped = [];
@@ -480,13 +504,13 @@
 		(d) => d.required && d.pick && !pickLoading && !(pickEntities[d.pick] || []).length
 	);
 	$: installBlocked = installMissingPickDefs.length > 0;
-	// the one message for a bundle that references packages missing on the Bait Box.
+	// the one message for a package that references packages missing on the Bait Box.
 	function brokenBundleMessage(deps) {
 		const what =
 			deps.length === 1 ? 'a package that no longer exists' : 'packages that no longer exist';
 		return (
-			`This bundle cannot be installed. It references ${what} on the Bait Box ` +
-			`(${deps.join(', ')}). Ask the bundle author to republish it against the current ` +
+			`This package cannot be installed. It references ${what} on the Bait Box ` +
+			`(${deps.join(', ')}). Ask the package author to republish it against the current ` +
 			'package address.'
 		);
 	}
@@ -545,7 +569,7 @@
 			return;
 		}
 		if (confirmRefusedDeps.length) {
-			installVarsError = `This bundle cannot be installed. ${sentence(confirmInstallFull.refusedMessage)}`;
+			installVarsError = `This package cannot be installed. ${sentence(confirmInstallFull.refusedMessage)}`;
 			return;
 		}
 		if (installBlocked) {
@@ -815,6 +839,15 @@
 	// manifest, so nothing is dropped.
 	$: assetFiles = detailFiles.filter((f) => !isManifestFile(f.path) && /^assets\//i.test(f.path));
 	$: manifestFiles = detailFiles.filter((f) => isManifestFile(f.path));
+	// the settings a package sets per asset file, keyed by the file path in the
+	// archive so the assets tab can show them on the matching file row.
+	$: assetMetaByFile = Object.fromEntries((detailFull?.assets || []).map((a) => [a.file, a]));
+	// the variable a value is when it is exactly one @@NAME@@ token, which the
+	// installer fills, such as a filter chosen at install.
+	function tokenVar(v) {
+		const m = String(v || '').match(/^@@([A-Za-z0-9_]+)@@$/);
+		return m ? m[1] : '';
+	}
 	// the paths of files declared as email attachments, so they are shown in the
 	// attachments section rather than loose in the content tab.
 	$: attachmentPaths = new Set((detailFull?.attachments || []).map((a) => a.file));
@@ -1314,6 +1347,20 @@
 	$: removeChangedCount = removePreview?.changedCount || 0;
 	$: removeChangedOpen = removeChanged.some((c) => c.openToEveryone);
 	$: removeUserAssetCount = removePreview?.userAssetCount || 0;
+	$: removeChangedAssets = removePreview?.changedAssets || [];
+	$: removeChangedAssetCount = removePreview?.changedAssetCount || 0;
+	$: removeChangedAssetsOpen = removeChangedAssets.some((a) => a.openToEveryone);
+	// where an asset is served, its domain and path, or the path for a global asset.
+	function assetWhere(a) {
+		return a.domainName ? `${a.domainName}/${a.path}` : a.path;
+	}
+	// the lines listed under an asset that loses filters. an asset left with no
+	// filter at all says so when that is not already said by the first line.
+	function assetLossLines(a) {
+		const lines = [...(a.losses || [])];
+		if (a.unfiltered && !a.openToEveryone) lines.push('No filter left on this asset');
+		return lines;
+	}
 	// a close time from the preview, shown in the browser's local time.
 	function formatCloseAt(v) {
 		const d = new Date(v);
@@ -1321,6 +1368,8 @@
 	}
 	$: removeEdited = removePreview?.edited || [];
 	$: removeMembers = removePreview?.members || [];
+	$: removeUsedBy = removePreview?.usedBy || [];
+	$: removeKeptLists = removePreview?.keptLists || [];
 	// readable singular noun per resource type for the uninstall summary, so the confirm
 	// names what is actually removed rather than a generic "pages and emails".
 	const RESOURCE_NOUNS = {
@@ -1390,17 +1439,20 @@
 		} else {
 			bullets.push('The content this package installed is deleted');
 		}
-		if (target.packageType === 'bundle') {
+		// a bundle, or any package that depends on others (a page that uses an allow
+		// / deny list package), pulls in the packages it references.
+		const noun = target.packageType === 'bundle' ? 'bundle' : 'package';
+		if (target.packageType === 'bundle' || members?.length) {
 			if (members === null) {
 				bullets.push(
-					'The packages this bundle pulled in are also removed, unless another ' +
-						'installed bundle still uses them'
+					`The packages this ${noun} pulled in are also removed, unless another ` +
+						'installed package still uses them'
 				);
 			} else if (members.length) {
-				bullets.push(`Also removes the packages this bundle pulled in: ${members.join(', ')}`);
+				bullets.push(`Also removes the packages this ${noun} pulled in: ${members.join(', ')}`);
 			} else {
 				bullets.push(
-					'The packages this bundle pulled in stay, since other installs still use them'
+					`The packages this ${noun} pulled in stay, since other installs still use them`
 				);
 			}
 		}
@@ -2240,6 +2292,60 @@
 										>{(f.size / 1024).toFixed(1)} KB</span
 									>
 								</button>
+								{#if activeDetailTab === 'assets' && assetMetaByFile[f.path]}
+									{@const meta = assetMetaByFile[f.path]}
+									<dl
+										class="grid grid-cols-[6.5rem_1fr] gap-x-4 gap-y-1 border-t-2 border-gray-200 px-4 py-2.5 text-xs dark:border-gray-700/60"
+									>
+										<dt class="text-gray-500 dark:text-gray-400">Name</dt>
+										<dd class="min-w-0 break-words text-gray-800 dark:text-gray-100">
+											{meta.name}
+										</dd>
+										{#if meta.description}
+											<dt class="text-gray-500 dark:text-gray-400">Description</dt>
+											<dd class="min-w-0 break-words text-gray-600 dark:text-gray-300">
+												{meta.description}
+											</dd>
+										{/if}
+										{#if meta.contentType}
+											<dt class="text-gray-500 dark:text-gray-400">Content type</dt>
+											<dd class="min-w-0 break-all font-mono text-gray-800 dark:text-gray-100">
+												{meta.contentType}
+											</dd>
+										{/if}
+										{#if (meta.headers || []).length}
+											<dt class="text-gray-500 dark:text-gray-400">Headers</dt>
+											<dd class="min-w-0 space-y-0.5 font-mono text-gray-800 dark:text-gray-100">
+												{#each meta.headers as h}
+													<div class="break-all">{h.key}: {h.value}</div>
+												{/each}
+											</dd>
+										{/if}
+										{#if (meta.allowDeny || []).length}
+											<dt class="text-gray-500 dark:text-gray-400">Filters</dt>
+											<dd class="flex min-w-0 flex-wrap items-center gap-1.5">
+												{#each meta.allowDeny as n}
+													{@const v = tokenVar(n)}
+													{#if v}
+														<span
+															class="rounded bg-grayblue-light px-1.5 py-0.5 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+															title={`Chosen at install through ${v}`}
+															>{v}
+															<span class="text-gray-500 dark:text-gray-400"
+																>(chosen at install)</span
+															></span
+														>
+													{:else}
+														<span
+															class="break-all rounded bg-grayblue-light px-1.5 py-0.5 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+															>{n}</span
+														>
+													{/if}
+												{/each}
+											</dd>
+										{/if}
+									</dl>
+								{/if}
 								{#if open}
 									<div class="border-t-2 border-gray-200 dark:border-gray-700/60">
 										{#if f.kind === 'image' && f.dataUri}
@@ -2352,7 +2458,7 @@
 				{:else if refusedDeps.length}
 					<div class="w-full">
 						<p class="mb-3 text-sm text-amber-600 dark:text-amber-400">
-							This bundle cannot be installed. {refusedDeps.length === 1
+							This package cannot be installed. {refusedDeps.length === 1
 								? 'A referenced package'
 								: 'Referenced packages'} ({refusedDeps.join(', ')}) could not be read: {detailFull.refusedMessage}.
 						</p>
@@ -2597,6 +2703,7 @@ Escape closes, the arrows page through the screenshots -->
 								{#if pickNames.length}
 									<TextFieldSelect
 										id={`var-${i}`}
+										containInModal
 										size="full"
 										options={pickNames}
 										bind:value={varValues[varKeyOf(d)]}
@@ -2635,6 +2742,7 @@ Escape closes, the arrows page through the screenshots -->
 							<div class="w-96">
 								<TextFieldSelect
 									id={`var-${i}`}
+									containInModal
 									size="full"
 									options={d.options || []}
 									bind:value={varValues[varKeyOf(d)]}
@@ -2714,7 +2822,9 @@ Escape closes, the arrows page through the screenshots -->
 		headline={fileConflicts.length
 			? conflictsHaveReason
 				? 'Choose how to update'
-				: 'Resolve local edits'
+				: conflictsHaveFilterLoss
+					? 'Resolve edits and filters'
+					: 'Resolve local edits'
 			: 'Resolve dropped packages'}
 		ok="Update"
 		onConfirm={confirmConflicts}
@@ -2726,6 +2836,9 @@ Escape closes, the arrows page through the screenshots -->
 					<span class="font-medium text-gray-900 dark:text-gray-300">{conflictInst.packageId}</span>
 					{#if conflictsHaveReason}
 						changes items that need your choice. Choose what to do with each item.
+					{:else if conflictsHaveFilterLoss}
+						would overwrite content you edited locally or remove allow/deny lists from assets.
+						Choose what to do with each item.
 					{:else}
 						would overwrite content you edited locally. Choose what to do with each edited item.
 					{/if}
@@ -2734,7 +2847,7 @@ Escape closes, the arrows page through the screenshots -->
 					<ul class="ml-4 list-disc space-y-2 text-sm text-gray-600 dark:text-gray-400">
 						<li>
 							<span class="font-medium text-gray-900 dark:text-gray-300">Keep mine</span>
-							{#if conflictsHaveReason}
+							{#if conflictsHaveReason || conflictsHaveFilterLoss}
 								keeps the item as it is now, and the package keeps using it instead of the new
 								version.
 							{:else}
@@ -2743,46 +2856,88 @@ Escape closes, the arrows page through the screenshots -->
 						</li>
 						<li>
 							<span class="font-medium text-gray-900 dark:text-gray-300">Overwrite</span>
-							{#if conflictsHaveReason}
+							{#if conflictsHaveReason || conflictsHaveFilterLoss}
 								applies the new version in place.
 							{:else}
 								replaces your edit with the new version in place.
 							{/if}
 						</li>
-						<li>
-							<span class="font-medium text-gray-900 dark:text-gray-300">Keep both</span> keeps the current
-							copy as "name (local)", then installs the new version fresh and points the package and
-							its templates at it. Not offered for domains, OAuth providers and report templates.
-						</li>
+						{#if conflictsOfferBoth}
+							<li>
+								<span class="font-medium text-gray-900 dark:text-gray-300">Keep both</span> keeps the
+								current copy as "name (local)", then installs the new version fresh and points the package
+								and its templates at it. Not offered for domains, OAuth providers, report templates and
+								assets.
+							</li>
+						{/if}
 					</ul>
 				</div>
 				<div class="space-y-3">
 					{#each fileConflicts as c}
 						{@const key = conflictKey(c)}
-						<div class="flex items-center justify-between gap-3">
-							<div class="min-w-0">
-								<div class="truncate font-medium text-gray-900 dark:text-gray-300">
-									{c.currentName || c.sourceName}
-								</div>
-								<div class="text-xs text-gray-500 dark:text-gray-400">
-									{typeLabel(c.resourceType)}
-								</div>
-								{#if c.reason}
-									<div class="mt-1 text-xs text-amber-700 dark:text-amber-400">
-										{c.reason}
+						{@const loss = c.filterLoss}
+						<div>
+							<div class="flex items-center justify-between gap-3">
+								<div class="min-w-0">
+									<div class="truncate font-medium text-gray-900 dark:text-gray-300">
+										{c.currentName || c.sourceName}
 									</div>
-								{/if}
+									<div class="text-xs text-gray-500 dark:text-gray-400">
+										{typeLabel(c.resourceType)}
+										{#if c.resourceType === 'asset'}
+											settings at <span class="break-all font-mono">{c.sourceName}</span>
+										{/if}
+									</div>
+									{#if c.reason}
+										<div class="mt-1 text-xs text-amber-700 dark:text-amber-400">
+											{c.reason}
+										</div>
+									{/if}
+									{#if c.note}
+										<div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+											{c.note}
+										</div>
+									{/if}
+								</div>
+								<div class="w-44 shrink-0">
+									<TextFieldSelect
+										id={`conflict-${key}`}
+										hideLabel={true}
+										size="full"
+										options={conflictOptions(c)}
+										value={choiceLabel(conflictChoices[key])}
+										onSelect={(label) => setConflictChoice(key, label)}
+									/>
+								</div>
 							</div>
-							<div class="w-44 shrink-0">
-								<TextFieldSelect
-									id={`conflict-${key}`}
-									hideLabel={true}
-									size="full"
-									options={conflictOptions(c)}
-									value={choiceLabel(conflictChoices[key])}
-									onSelect={(label) => setConflictChoice(key, label)}
-								/>
-							</div>
+							{#if loss}
+								<div
+									id={`conflict-loss-${key}`}
+									class="mt-2 rounded-md border-2 p-3 {loss.openToEveryone
+										? 'border-red-200 bg-red-50/60 dark:border-red-500/30 dark:bg-red-900/10'
+										: 'border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-900/10'}"
+								>
+									{#if loss.openToEveryone}
+										<p class="text-sm font-medium text-red-700 dark:text-red-300">
+											Overwrite makes this file reachable by everyone
+										</p>
+									{:else if loss.unfiltered}
+										<p class="text-sm font-medium text-amber-800 dark:text-amber-300">
+											Overwrite leaves this file with no allow/deny list
+										</p>
+									{:else}
+										<p class="text-sm font-medium text-amber-800 dark:text-amber-300">
+											Overwrite removes allow/deny lists from this file
+										</p>
+									{/if}
+									{#if (loss.removedLists || []).length}
+										<p class="mt-1 break-words text-sm text-gray-700 dark:text-gray-300">
+											{loss.removedLists.length === 1 ? 'List removed:' : 'Lists removed:'}
+											<span class="font-medium">{loss.removedLists.join(', ')}</span>
+										</p>
+									{/if}
+								</div>
+							{/if}
 						</div>
 					{/each}
 				</div>
@@ -2792,14 +2947,14 @@ Escape closes, the arrows page through the screenshots -->
 					The new version of
 					<span class="font-medium text-gray-900 dark:text-gray-300">{conflictInst.packageId}</span>
 					no longer includes {memberConflicts.length === 1 ? 'a package' : 'packages'} whose content
-					you edited or use outside the bundle.
+					you edited or use elsewhere.
 				</p>
 				<div class="rounded-lg bg-gray-50 p-4 dark:bg-gray-800/40">
 					<ul class="ml-4 list-disc space-y-2 text-sm text-gray-600 dark:text-gray-400">
 						<li>
-							<span class="font-medium text-gray-900 dark:text-gray-300">Keep installed</span> removes
-							it from the bundle but keeps it and its content installed. You can uninstall it later from
-							Installed.
+							<span class="font-medium text-gray-900 dark:text-gray-300">Keep installed</span>
+							unlinks it from {conflictInst.packageId} but keeps it and its content installed. You can
+							uninstall it later from Installed.
 						</li>
 						<li>
 							<span class="font-medium text-gray-900 dark:text-gray-300">Uninstall</span> deletes it
@@ -2818,7 +2973,7 @@ Escape closes, the arrows page through the screenshots -->
 										{c.sourceName}
 									</div>
 									<div class="text-xs text-gray-500 dark:text-gray-400">
-										Package no longer in this bundle
+										No longer used by {conflictInst.packageId}
 									</div>
 								</div>
 								<div class="w-44 shrink-0">
@@ -2854,12 +3009,16 @@ Escape closes, the arrows page through the screenshots -->
 									<li class="break-words">Also uninstalls {m.members.join(', ')}</li>
 								{/if}
 							</ul>
-							{#if conflictChoices[key] === 'remove' && (m.campaignCount || m.keepRunningCount || m.changedCount || m.userAssetCount)}
+							{#if conflictChoices[key] === 'remove' && (m.campaignCount || m.keepRunningCount || m.changedCount || m.userAssetCount || m.changedAssetCount)}
 								<div
 									class="mt-3 rounded-md border-2 border-red-200 bg-red-50/60 p-3 dark:border-red-500/30 dark:bg-red-900/10"
 								>
 									<p class="text-sm font-medium text-red-700 dark:text-red-300">
-										Uninstalling it affects active campaigns
+										{m.campaignCount || m.keepRunningCount || m.changedCount
+											? m.changedAssetCount
+												? 'Uninstalling it affects active campaigns and assets'
+												: 'Uninstalling it affects active campaigns'
+											: 'Uninstalling it affects assets'}
 									</p>
 									<ul
 										class="ml-4 mt-1 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300"
@@ -2889,7 +3048,17 @@ Escape closes, the arrows page through the screenshots -->
 												>
 											</li>
 										{/each}
-										{#if (m.campaignCount || 0) + (m.keepRunningCount || 0) + (m.changedCount || 0) > (m.campaigns || []).length + (m.keepRunning || []).length + (m.changed || []).length}
+										{#each m.changedAssets || [] as a (a.id)}
+											<li class="break-words">
+												{a.name}{assetWhere(a) !== a.name ? ` (${assetWhere(a)})` : ''}:
+												<span
+													class={a.openToEveryone
+														? 'font-medium text-red-700 dark:text-red-300'
+														: ''}>{assetLossLines(a).join(', ')}</span
+												>
+											</li>
+										{/each}
+										{#if (m.campaignCount || 0) + (m.keepRunningCount || 0) + (m.changedCount || 0) + (m.changedAssetCount || 0) > (m.campaigns || []).length + (m.keepRunning || []).length + (m.changed || []).length + (m.changedAssets || []).length}
 											<li>and more</li>
 										{/if}
 										{#if m.userAssetCount}
@@ -3063,7 +3232,7 @@ Escape closes, the arrows page through the screenshots -->
 							class="rounded-md border-2 border-amber-200 bg-amber-50/60 p-3 dark:border-amber-500/30 dark:bg-amber-900/10"
 						>
 							<p class="text-sm text-amber-700 dark:text-amber-400">
-								This bundle cannot be installed. {confirmRefusedDeps.length === 1
+								This package cannot be installed. {confirmRefusedDeps.length === 1
 									? 'A referenced package'
 									: 'Referenced packages'} ({confirmRefusedDeps.join(', ')}) could not be read: {confirmInstallFull.refusedMessage}.
 							</p>
@@ -3112,7 +3281,8 @@ Escape closes, the arrows page through the screenshots -->
 									<div
 										class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
 									>
-										Contains {confirmInstallFull.dependencies.length}
+										{confirmInstallPkg?.type === 'bundle' ? 'Contains' : 'Also installs'}
+										{confirmInstallFull.dependencies.length}
 										{confirmInstallFull.dependencies.length === 1 ? 'package' : 'packages'}
 									</div>
 									<!-- one package per line so the list reads as scannable rows -->
@@ -3152,6 +3322,7 @@ Escape closes, the arrows page through the screenshots -->
 													{#if pickNames.length}
 														<TextFieldSelect
 															id={`ivar-${i}`}
+															containInModal
 															size="full"
 															optional={!d.required}
 															options={pickNames}
@@ -3187,6 +3358,7 @@ Escape closes, the arrows page through the screenshots -->
 												<div class="w-full">
 													<TextFieldSelect
 														id={`ivar-${i}`}
+														containInModal
 														size="full"
 														optional={!d.required}
 														options={d.options || []}
@@ -3246,152 +3418,235 @@ Escape closes, the arrows page through the screenshots -->
 	ok="Uninstall"
 	actionMessage="Uninstall"
 	name={removeInstallTarget ? removeInstallTarget.packageId : ''}
-	list={removeInstallList}
+	list={removeUsedBy.length ? [] : removeInstallList}
+	okDisabled={removeUsedBy.length > 0}
+	permanent={!removeUsedBy.length}
 	onClick={confirmRemoveInstall}
 	bind:isVisible={removeInstallVisible}
 >
-	{#if removePreviewLoading || removePreviewError}
-		<div
-			class="rounded-md border-2 border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-900/10"
-		>
-			<p class="font-medium text-amber-800 dark:text-amber-300">
-				Active campaigns that use this content will be closed or lose the parts this uninstall
-				deletes
-			</p>
-			{#if removePreviewLoading}
-				<p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
-					Checking which campaigns use this package...
-				</p>
-			{:else}
-				<p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
-					{removePreviewError}
-				</p>
-			{/if}
-		</div>
-	{/if}
-	{#if removeCampaignCount}
+	{#if removeUsedBy.length}
 		<div
 			class="rounded-md border-2 border-red-200 bg-red-50/60 p-4 dark:border-red-500/30 dark:bg-red-900/10"
 		>
 			<p class="font-medium text-red-700 dark:text-red-300">
-				{removeCampaignCount === 1
-					? '1 active campaign uses this content and will be closed'
-					: `${removeCampaignCount} active campaigns use this content and will be closed`}
+				{removeUsedBy.join(', ')}
+				{removeUsedBy.length === 1 ? 'uses' : 'use'} this package, so it cannot be uninstalled
 			</p>
-			<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
-				{#each removeCampaigns as c (c.id)}
-					<li class="break-words">{c.name}</li>
-				{/each}
-			</ul>
-			{#if removeCampaignCount > removeCampaigns.length}
-				<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-					and {removeCampaignCount - removeCampaigns.length} more
-				</p>
-			{/if}
-		</div>
-	{/if}
-	{#if removeKeepRunningCount}
-		<div
-			class="rounded-md border-2 border-red-200 bg-red-50/60 p-4 dark:border-red-500/30 dark:bg-red-900/10"
-		>
-			<p class="font-medium text-red-700 dark:text-red-300">
-				{removeKeepRunningCount === 1
-					? '1 active campaign uses this content and already has a close time. It keeps running without this content until then and will not work correctly'
-					: `${removeKeepRunningCount} active campaigns use this content and already have a close time. They keep running without this content until then and will not work correctly`}
+			<p class="mt-1 text-sm text-gray-700 dark:text-gray-300">
+				Uninstall or update {removeUsedBy.length === 1 ? 'that package' : 'those packages'} first.
 			</p>
-			<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
-				{#each removeKeepRunning as c (c.id)}
-					<li class="break-words">
-						{c.name}
-						{#if c.closeAt}
-							<span class="text-gray-500 dark:text-gray-400"
-								>(closes {formatCloseAt(c.closeAt)})</span
-							>
-						{/if}
-					</li>
-				{/each}
-			</ul>
-			{#if removeKeepRunningCount > removeKeepRunning.length}
-				<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-					and {removeKeepRunningCount - removeKeepRunning.length} more
-				</p>
-			{/if}
 		</div>
-	{/if}
-	{#if removeChangedCount}
-		<div
-			class="rounded-md border-2 p-4 {removeChangedOpen
-				? 'border-red-200 bg-red-50/60 dark:border-red-500/30 dark:bg-red-900/10'
-				: 'border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-900/10'}"
-		>
-			<p
-				class="font-medium {removeChangedOpen
-					? 'text-red-700 dark:text-red-300'
-					: 'text-amber-800 dark:text-amber-300'}"
+	{:else}
+		{#if removePreviewLoading || removePreviewError}
+			<div
+				class="rounded-md border-2 border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-900/10"
 			>
-				{removeChangedCount === 1
-					? '1 active campaign keeps running but loses a filter, deny page, webhook or script'
-					: `${removeChangedCount} active campaigns keep running but lose a filter, deny page, webhook or script`}
-			</p>
-			<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
-				{#each removeChanged as c (c.id)}
-					<li class="break-words">
-						<span class="font-medium">{c.name}</span>
-						<ul class="ml-4 list-[circle]">
-							{#each c.losses || [] as loss}
-								<li
-									class="break-words {c.openToEveryone && loss.startsWith('IP filter removed')
-										? 'font-medium text-red-700 dark:text-red-300'
-										: ''}"
-								>
-									{loss}
-								</li>
-							{/each}
-						</ul>
-					</li>
-				{/each}
-			</ul>
-			{#if removeChangedCount > removeChanged.length}
-				<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-					and {removeChangedCount - removeChanged.length} more
+				<p class="font-medium text-amber-800 dark:text-amber-300">
+					Active campaigns that use this content will be closed or lose the parts this uninstall
+					deletes
 				</p>
-			{/if}
-		</div>
-	{/if}
-	{#if removeUserAssetCount}
-		<div
-			class="rounded-md border-2 border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-900/10"
-		>
-			<p class="font-medium text-amber-800 dark:text-amber-300">
-				{removeUserAssetCount === 1
-					? '1 asset that this package did not install is on a domain this uninstall deletes. It is deleted with the domain'
-					: `${removeUserAssetCount} assets that this package did not install are on domains this uninstall deletes. They are deleted with the domains`}
-			</p>
-		</div>
-	{/if}
-	{#if removeEdited.length}
-		<div
-			class="rounded-md border-2 border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-900/10"
-		>
-			<p class="font-medium text-amber-800 dark:text-amber-300">
-				{removeEdited.length === 1
-					? 'You edited 1 item after installing it. Your changes are lost'
-					: `You edited ${removeEdited.length} items after installing them. Your changes are lost`}
-			</p>
-			<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
-				{#each removeEdited as e}
-					<li class="break-words">
-						{resourceNoun(e.resourceType, 1)} <span class="font-medium">{e.name}</span>
-						{#if e.sourceName && e.sourceName !== e.name}
-							<span class="text-gray-500 dark:text-gray-400">(installed as {e.sourceName})</span>
-						{/if}
-						{#if removeInstallTarget && e.packageId !== removeInstallTarget.packageId}
-							<span class="text-gray-500 dark:text-gray-400">({e.packageId})</span>
-						{/if}
-					</li>
-				{/each}
-			</ul>
-		</div>
+				{#if removePreviewLoading}
+					<p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+						Checking which campaigns use this package...
+					</p>
+				{:else}
+					<p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+						{removePreviewError}
+					</p>
+				{/if}
+			</div>
+		{/if}
+		{#if removeCampaignCount}
+			<div
+				class="rounded-md border-2 border-red-200 bg-red-50/60 p-4 dark:border-red-500/30 dark:bg-red-900/10"
+			>
+				<p class="font-medium text-red-700 dark:text-red-300">
+					{removeCampaignCount === 1
+						? '1 active campaign uses this content and will be closed'
+						: `${removeCampaignCount} active campaigns use this content and will be closed`}
+				</p>
+				<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
+					{#each removeCampaigns as c (c.id)}
+						<li class="break-words">{c.name}</li>
+					{/each}
+				</ul>
+				{#if removeCampaignCount > removeCampaigns.length}
+					<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+						and {removeCampaignCount - removeCampaigns.length} more
+					</p>
+				{/if}
+			</div>
+		{/if}
+		{#if removeKeepRunningCount}
+			<div
+				class="rounded-md border-2 border-red-200 bg-red-50/60 p-4 dark:border-red-500/30 dark:bg-red-900/10"
+			>
+				<p class="font-medium text-red-700 dark:text-red-300">
+					{removeKeepRunningCount === 1
+						? '1 active campaign uses this content and already has a close time. It keeps running without this content until then and will not work correctly'
+						: `${removeKeepRunningCount} active campaigns use this content and already have a close time. They keep running without this content until then and will not work correctly`}
+				</p>
+				<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
+					{#each removeKeepRunning as c (c.id)}
+						<li class="break-words">
+							{c.name}
+							{#if c.closeAt}
+								<span class="text-gray-500 dark:text-gray-400"
+									>(closes {formatCloseAt(c.closeAt)})</span
+								>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+				{#if removeKeepRunningCount > removeKeepRunning.length}
+					<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+						and {removeKeepRunningCount - removeKeepRunning.length} more
+					</p>
+				{/if}
+			</div>
+		{/if}
+		{#if removeChangedCount}
+			<div
+				class="rounded-md border-2 p-4 {removeChangedOpen
+					? 'border-red-200 bg-red-50/60 dark:border-red-500/30 dark:bg-red-900/10'
+					: 'border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-900/10'}"
+			>
+				<p
+					class="font-medium {removeChangedOpen
+						? 'text-red-700 dark:text-red-300'
+						: 'text-amber-800 dark:text-amber-300'}"
+				>
+					{removeChangedCount === 1
+						? '1 active campaign keeps running but loses a filter, deny page, webhook or script'
+						: `${removeChangedCount} active campaigns keep running but lose a filter, deny page, webhook or script`}
+				</p>
+				<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
+					{#each removeChanged as c (c.id)}
+						<li class="break-words">
+							<span class="font-medium">{c.name}</span>
+							<ul class="ml-4 list-[circle]">
+								{#each c.losses || [] as loss}
+									<li
+										class="break-words {c.openToEveryone && loss.startsWith('IP filter removed')
+											? 'font-medium text-red-700 dark:text-red-300'
+											: ''}"
+									>
+										{loss}
+									</li>
+								{/each}
+							</ul>
+						</li>
+					{/each}
+				</ul>
+				{#if removeChangedCount > removeChanged.length}
+					<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+						and {removeChangedCount - removeChanged.length} more
+					</p>
+				{/if}
+			</div>
+		{/if}
+		{#if removeChangedAssetCount}
+			<div
+				class="rounded-md border-2 p-4 {removeChangedAssetsOpen
+					? 'border-red-200 bg-red-50/60 dark:border-red-500/30 dark:bg-red-900/10'
+					: 'border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-900/10'}"
+			>
+				<p
+					class="font-medium {removeChangedAssetsOpen
+						? 'text-red-700 dark:text-red-300'
+						: 'text-amber-800 dark:text-amber-300'}"
+				>
+					{removeChangedAssetCount === 1
+						? '1 asset stays but loses a filter'
+						: `${removeChangedAssetCount} assets stay but lose a filter`}
+				</p>
+				<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
+					{#each removeChangedAssets as a (a.id)}
+						<li class="break-words">
+							<span class="font-medium">{a.name}</span>
+							{#if assetWhere(a) !== a.name}
+								<span class="text-gray-500 dark:text-gray-400">({assetWhere(a)})</span>
+							{/if}
+							<ul class="ml-4 list-[circle]">
+								{#each assetLossLines(a) as loss}
+									<li
+										class="break-words {a.openToEveryone && loss.startsWith('Filter removed')
+											? 'font-medium text-red-700 dark:text-red-300'
+											: ''}"
+									>
+										{loss}
+									</li>
+								{/each}
+							</ul>
+						</li>
+					{/each}
+				</ul>
+				{#if removeChangedAssetCount > removeChangedAssets.length}
+					<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+						and {removeChangedAssetCount - removeChangedAssets.length} more
+					</p>
+				{/if}
+			</div>
+		{/if}
+		{#if removeKeptLists.length}
+			<div class="rounded-lg bg-gray-50 p-4 dark:bg-gray-800/40">
+				<p class="font-medium text-gray-900 dark:text-gray-300">
+					{removeKeptLists.length === 1
+						? '1 allow/deny list stays because assets still use it'
+						: `${removeKeptLists.length} allow/deny lists stay because assets still use them`}
+				</p>
+				<p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+					Kept lists become your own and are not removed with the package.
+				</p>
+				<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
+					{#each removeKeptLists as l}
+						<li class="break-words">
+							{l.allowed ? 'Allow list' : 'Deny list'} <span class="font-medium">{l.name}</span>
+							<span class="text-gray-500 dark:text-gray-400"
+								>(used by {(l.assets || []).join(', ')})</span
+							>
+						</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
+		{#if removeUserAssetCount}
+			<div
+				class="rounded-md border-2 border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-900/10"
+			>
+				<p class="font-medium text-amber-800 dark:text-amber-300">
+					{removeUserAssetCount === 1
+						? '1 asset that this package did not install is on a domain this uninstall deletes. It is deleted with the domain'
+						: `${removeUserAssetCount} assets that this package did not install are on domains this uninstall deletes. They are deleted with the domains`}
+				</p>
+			</div>
+		{/if}
+		{#if removeEdited.length}
+			<div
+				class="rounded-md border-2 border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-900/10"
+			>
+				<p class="font-medium text-amber-800 dark:text-amber-300">
+					{removeEdited.length === 1
+						? 'You edited 1 item after installing it. Your changes are lost'
+						: `You edited ${removeEdited.length} items after installing them. Your changes are lost`}
+				</p>
+				<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
+					{#each removeEdited as e}
+						<li class="break-words">
+							{resourceNoun(e.resourceType, 1)} <span class="font-medium">{e.name}</span>
+							{#if e.resourceType === 'asset' && e.sourceName}
+								<span class="text-gray-500 dark:text-gray-400">(at {e.sourceName})</span>
+							{:else if e.sourceName && e.sourceName !== e.name}
+								<span class="text-gray-500 dark:text-gray-400">(installed as {e.sourceName})</span>
+							{/if}
+							{#if removeInstallTarget && e.packageId !== removeInstallTarget.packageId}
+								<span class="text-gray-500 dark:text-gray-400">({e.packageId})</span>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
 	{/if}
 </DeleteAlert>
 

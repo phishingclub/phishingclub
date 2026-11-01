@@ -34,12 +34,25 @@ func (s *ContentRegistry) releaseResourceEntity(
 // deleteResourceEntity removes one installed entity by its provenance type. Used
 // by install rollback, Remove and update undo so every type is handled in one
 // place. An entity that no longer exists counts as removed. An asset or
-// attachment whose file is already gone has its row removed directly.
+// attachment whose file is already gone has its row removed directly. An
+// allow/deny list an asset still uses is kept and counts as removed, since
+// deleting it would make that asset reachable by everyone; it stays as the
+// user's own list.
 func (s *ContentRegistry) deleteResourceEntity(
 	ctx context.Context, session *model.Session, resourceType string, id *uuid.UUID,
 ) error {
 	var err error
 	switch resourceType {
+	case "allowdeny":
+		used, uerr := s.listUsedByAssets(ctx, id)
+		if uerr != nil {
+			return uerr
+		}
+		if used {
+			s.Logger.Infow("allow/deny list kept, assets still use it", "id", id.String())
+			return nil
+		}
+		err = allowDenySpec.deleteByID(s, ctx, session, id)
 	case "asset":
 		err = s.Asset.DeleteByID(ctx, session, id)
 		if errors.Is(err, os.ErrNotExist) {
@@ -67,16 +80,20 @@ func (s *ContentRegistry) deleteResourceEntity(
 
 // removeInstalledResource deletes the entity behind one provenance row of the
 // install ipID. Identifiers are global shared values and stay. An asset another
-// installed package still references stays too. A global report template the
-// install overwrote gets its previous content back. It returns the error so
-// the caller can keep the provenance row of anything that was not removed.
+// installed package still references stays too, and so does an allow/deny list
+// an asset still uses, since deleting it would make that asset reachable by
+// everyone. A global report template the install overwrote gets its previous
+// content back. It returns the error so the caller can keep the provenance row
+// of anything that was not removed. An entity kept here has its provenance row
+// dropped by the caller, so it becomes the user's own.
 func (s *ContentRegistry) removeInstalledResource(
 	ctx context.Context, session *model.Session, ipID *uuid.UUID, r *database.InstalledResource,
 ) error {
 	if r.ResourceID == nil || r.ResourceType == "identifier" {
 		return nil
 	}
-	if r.ResourceType == "asset" {
+	switch r.ResourceType {
+	case "asset":
 		shared, err := s.assetOwnedByOtherInstall(ctx, r.ResourceID, ipID)
 		if err != nil {
 			return err
@@ -85,13 +102,30 @@ func (s *ContentRegistry) removeInstalledResource(
 			return nil
 		}
 	}
+	// an allow/deny list an asset still uses is kept, see deleteResourceEntity.
 	return s.releaseResourceEntity(ctx, session, r.ResourceType, r.ResourceID, r.ReplacedContent)
+}
+
+// listUsedByAssets reports whether any asset uses the allow/deny list. Removal
+// deletes the assets of the package before its lists, so an asset found here
+// is one the removal keeps.
+func (s *ContentRegistry) listUsedByAssets(ctx context.Context, listID *uuid.UUID) (bool, error) {
+	if s.Asset == nil || s.Asset.AssetRepository == nil {
+		return false, nil
+	}
+	assets, err := s.Asset.AssetRepository.GetByAllowDenyID(ctx, listID)
+	if err != nil {
+		return false, err
+	}
+	return len(assets) > 0, nil
 }
 
 // removeRank is the order a package's resources are deleted in, highest first.
 // A resource is deleted before the one it points at: a campaign template before
 // what it binds, an api sender before its oauth provider, a nested attachment
-// before its email. It matches the order update removes dropped resources in.
+// before its email, an asset before the allow/deny lists it uses, so a failed
+// asset delete never leaves the asset without its lists. It matches the order
+// update removes dropped resources in.
 func removeRank(resourceType string) int {
 	switch resourceType {
 	case "campaigntemplate":
@@ -100,7 +134,7 @@ func removeRank(resourceType string) int {
 		return 3
 	case "attachment":
 		return 2
-	case "oauthprovider":
+	case "oauthprovider", "allowdeny":
 		return 0
 	default:
 		return 1
@@ -176,9 +210,68 @@ func (s *ContentRegistry) Remove(
 		return err
 	}
 	defer unlock()
+	// a package another installed package links is still needed by it, for
+	// example a list package whose lists a page package uses. Removing it would
+	// take filters off that package's files, so the user removes or updates the
+	// package that uses it first.
+	if users, uerr := s.packageUsers(ctx, installedPackageID); uerr != nil || len(users) > 0 {
+		ae.Details["installedPackageId"] = installedPackageID.String()
+		if uerr != nil {
+			err = errs.Wrap(uerr)
+		} else {
+			err = packageInUseErr(users)
+		}
+		s.auditFailure(ae, &err)
+		return err
+	}
 	// once deleting starts it runs to the end even if the request ends, so an
 	// uninstall is never cut off halfway.
 	return s.remove(context.WithoutCancel(ctx), session, installedPackageID)
+}
+
+// packageUsers returns the package ids of the installed packages that link the
+// installed package id as a member, sorted.
+func (s *ContentRegistry) packageUsers(ctx context.Context, id *uuid.UUID) ([]string, error) {
+	parents, err := s.RegistryRepository.GetPackageParents(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, p := range parents {
+		pp, gerr := s.RegistryRepository.GetInstalledPackageByID(ctx, p)
+		if errors.Is(gerr, gorm.ErrRecordNotFound) {
+			// a link left by a package that is gone; it uses nothing.
+			continue
+		}
+		if gerr != nil {
+			return nil, gerr
+		}
+		if !slices.Contains(out, pp.PackageID) {
+			out = append(out, pp.PackageID)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// packageInUseErr refuses removing a package other installed packages use.
+func packageInUseErr(users []string) error {
+	verb := "uses"
+	if len(users) > 1 {
+		verb = "use"
+	}
+	return errs.NewValidationError(fmt.Errorf(
+		"%s %s this package; uninstall or update %s first",
+		strings.Join(users, ", "), verb, pronounFor(len(users)),
+	))
+}
+
+// pronounFor is "it" for one and "them" for more.
+func pronounFor(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "them"
 }
 
 // remove is Remove without the lock. The caller holds the lock. It calls itself for
@@ -353,6 +446,29 @@ type UninstallPreviewChanged struct {
 	OpenToEveryone bool     `json:"openToEveryone"`
 }
 
+// UninstallPreviewAsset is an asset that stays but loses allow or block lists
+// the uninstall deletes. Losses names each lost list as plain text.
+// OpenToEveryone is set when the asset loses its last allow list, so every
+// visitor can get it. Unfiltered is set when no list is left on it at all.
+type UninstallPreviewAsset struct {
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Path           string   `json:"path"`
+	DomainName     string   `json:"domainName,omitempty"`
+	Losses         []string `json:"losses"`
+	OpenToEveryone bool     `json:"openToEveryone"`
+	Unfiltered     bool     `json:"unfiltered"`
+}
+
+// UninstallPreviewKeptList is an allow or block list the uninstall keeps because
+// assets it does not delete still use it. Deleting it would make those assets
+// reachable by everyone, so it stays as the user's own list.
+type UninstallPreviewKeptList struct {
+	Name    string   `json:"name"`
+	Allowed bool     `json:"allowed"`
+	Assets  []string `json:"assets"`
+}
+
 // UninstallPreviewItem is an installed entity the user edited after install.
 // Uninstall deletes it, so those edits are lost. Name is the entity's current
 // name, SourceName the name the package gave it.
@@ -371,18 +487,26 @@ type UninstallPreviewItem struct {
 // Changed are active campaigns that lose a filter, deny page, webhook or script.
 // UserAssetCount counts the assets on domains the uninstall deletes that the
 // package did not install, which are deleted with the domain.
+// ChangedAssets are assets that stay but lose an allow or block list.
 // Members lists the referenced packages a bundle uninstall also removes, which
 // leaves out any still used by another bundle or installed by the user directly.
+// KeptLists are lists of the removed packages that stay because assets still
+// use them. UsedBy names the installed packages that use this one; while any
+// does, the uninstall is refused.
 type UninstallPreview struct {
-	Campaigns        []UninstallPreviewCampaign `json:"campaigns"`
-	CampaignCount    int                        `json:"campaignCount"`
-	KeepRunning      []UninstallPreviewCampaign `json:"keepRunning"`
-	KeepRunningCount int                        `json:"keepRunningCount"`
-	Changed          []UninstallPreviewChanged  `json:"changed"`
-	ChangedCount     int                        `json:"changedCount"`
-	UserAssetCount   int                        `json:"userAssetCount"`
-	Edited           []UninstallPreviewItem     `json:"edited"`
-	Members          []string                   `json:"members"`
+	Campaigns         []UninstallPreviewCampaign `json:"campaigns"`
+	CampaignCount     int                        `json:"campaignCount"`
+	KeepRunning       []UninstallPreviewCampaign `json:"keepRunning"`
+	KeepRunningCount  int                        `json:"keepRunningCount"`
+	Changed           []UninstallPreviewChanged  `json:"changed"`
+	ChangedCount      int                        `json:"changedCount"`
+	UserAssetCount    int                        `json:"userAssetCount"`
+	ChangedAssets     []UninstallPreviewAsset    `json:"changedAssets"`
+	ChangedAssetCount int                        `json:"changedAssetCount"`
+	Edited            []UninstallPreviewItem     `json:"edited"`
+	Members           []string                   `json:"members"`
+	KeptLists         []UninstallPreviewKeptList `json:"keptLists"`
+	UsedBy            []string                   `json:"usedBy"`
 }
 
 // campaignLoss is what one campaign loses from the deletes of an uninstall.
@@ -410,11 +534,11 @@ func (s *ContentRegistry) UninstallPreview(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	pkgs := []*database.InstalledPackage{root}
-	seen := map[uuid.UUID]bool{*root.ID: true}
-	if err := s.collectRemovedMembers(ctx, root.ID, seen, &pkgs); err != nil {
+	members, err := s.removalSet(ctx, []*uuid.UUID{root.ID}, nil, nil, nil)
+	if err != nil {
 		return nil, err
 	}
+	pkgs := append([]*database.InstalledPackage{root}, members...)
 	var clients []*registry.Client
 	defer func() {
 		for _, c := range clients {
@@ -424,29 +548,42 @@ func (s *ContentRegistry) UninstallPreview(
 	headersFor := func(p *database.InstalledPackage) func(string) ([]*model.SMTPHeader, bool) {
 		return s.previewSMTPHeaders(ctx, p, &clients)
 	}
-	out, _, err := s.previewRemoval(ctx, pkgs, headersFor, nil)
+	out, _, err := s.previewRemoval(ctx, pkgs, nil, headersFor, nil, nil)
 	if err != nil {
 		return nil, err
+	}
+	if out.UsedBy, err = s.packageUsers(ctx, installedPackageID); err != nil {
+		return nil, errs.Wrap(err)
+	}
+	if out.UsedBy == nil {
+		out.UsedBy = []string{}
 	}
 	return out, nil
 }
 
 // previewRemoval reports what removing pkgs would affect, the first being the
-// package removed and the rest the referenced packages removed with it.
+// package removed and the rest the referenced packages removed with it. others
+// are packages the same removal takes too that are reported on their own:
+// their assets and domains count as gone, nothing else of them is reported.
 // declaredFor returns the smtp header lookup of a package. A campaign template
 // in skipTemplates is left out, as if its campaigns do not use the content. It
 // also returns the campaign templates the removal closes campaigns of.
+// plannedLists is as for previewAssetLosses.
 func (s *ContentRegistry) previewRemoval(
 	ctx context.Context, pkgs []*database.InstalledPackage,
+	others []*database.InstalledPackage,
 	declaredFor func(p *database.InstalledPackage) func(string) ([]*model.SMTPHeader, bool),
 	skipTemplates map[uuid.UUID]bool,
+	plannedLists map[uuid.UUID]*plannedAssetLists,
 ) (*UninstallPreview, []uuid.UUID, error) {
 	out := &UninstallPreview{
-		Campaigns:   []UninstallPreviewCampaign{},
-		KeepRunning: []UninstallPreviewCampaign{},
-		Changed:     []UninstallPreviewChanged{},
-		Edited:      []UninstallPreviewItem{},
-		Members:     []string{},
+		Campaigns:     []UninstallPreviewCampaign{},
+		KeepRunning:   []UninstallPreviewCampaign{},
+		Changed:       []UninstallPreviewChanged{},
+		ChangedAssets: []UninstallPreviewAsset{},
+		Edited:        []UninstallPreviewItem{},
+		Members:       []string{},
+		KeptLists:     []UninstallPreviewKeptList{},
 	}
 	for _, p := range pkgs[1:] {
 		out.Members = append(out.Members, p.PackageID)
@@ -468,6 +605,41 @@ func (s *ContentRegistry) previewRemoval(
 	}
 	var domainIDs []uuid.UUID
 	trackedAssets := map[uuid.UUID]bool{}
+	removedLists := map[uuid.UUID]bool{}
+	// lists are judged once every asset and domain the removal deletes is known.
+	var listRows []*database.InstalledResource
+	removing := map[uuid.UUID]bool{}
+	for _, p := range pkgs {
+		removing[*p.ID] = true
+	}
+	// the domains of others delete their assets too, but are reported with them.
+	var otherDomains []uuid.UUID
+	for _, p := range others {
+		removing[*p.ID] = true
+		resources, rerr := s.RegistryRepository.GetInstalledResourcesByPackage(ctx, p.ID)
+		if rerr != nil {
+			return nil, nil, errs.Wrap(rerr)
+		}
+		for _, r := range resources {
+			if r.ResourceID == nil {
+				continue
+			}
+			switch r.ResourceType {
+			case "asset":
+				trackedAssets[*r.ResourceID] = true
+			case "domain":
+				otherDomains = append(otherDomains, *r.ResourceID)
+			case "proxy":
+				pds, perr := s.proxyDomainsOf(ctx, r.ResourceID)
+				if perr != nil {
+					return nil, nil, errs.Wrap(perr)
+				}
+				for _, pd := range pds {
+					otherDomains = append(otherDomains, pd.ID)
+				}
+			}
+		}
+	}
 	losses := map[uuid.UUID]*campaignLoss{}
 	var lossOrder []uuid.UUID
 	addLoss := func(c *model.Campaign, text string) *campaignLoss {
@@ -499,6 +671,9 @@ func (s *ContentRegistry) previewRemoval(
 			}
 			if r.ResourceType == "asset" {
 				trackedAssets[*r.ResourceID] = true
+			}
+			if r.ResourceType == "allowdeny" {
+				listRows = append(listRows, r)
 			}
 			if edited, name := s.resourceEdited(ctx, r, declared); edited {
 				if name == "" {
@@ -533,9 +708,29 @@ func (s *ContentRegistry) previewRemoval(
 					domainIDs = append(domainIDs, id)
 				}
 			}
+			if r.ResourceType == "allowdeny" {
+				continue
+			}
 			if lerr := s.collectCampaignLosses(ctx, r, addLoss); lerr != nil {
 				return nil, nil, errs.Wrap(lerr)
 			}
+		}
+	}
+	// a list an asset the removal keeps still uses stays, as remove keeps it, so
+	// neither the asset nor a campaign loses it.
+	gone := s.assetRemovedFunc(ctx, trackedAssets, removing, append(slices.Clone(domainIDs), otherDomains...))
+	for _, r := range listRows {
+		kept, kerr := s.keptListUsers(ctx, r.ResourceID, gone, plannedLists)
+		if kerr != nil {
+			return nil, nil, errs.Wrap(kerr)
+		}
+		if len(kept) > 0 {
+			out.KeptLists = append(out.KeptLists, s.previewKeptList(ctx, r, kept))
+			continue
+		}
+		removedLists[*r.ResourceID] = true
+		if lerr := s.collectCampaignLosses(ctx, r, addLoss); lerr != nil {
+			return nil, nil, errs.Wrap(lerr)
 		}
 	}
 
@@ -630,11 +825,243 @@ func (s *ContentRegistry) previewRemoval(
 			}
 		}
 	}
+	err := s.previewAssetLosses(ctx, out, removedLists, gone, plannedLists)
+	if err != nil {
+		return nil, nil, err
+	}
 	closed := make([]uuid.UUID, 0, len(templateIDs))
 	for _, id := range templateIDs {
 		closed = append(closed, *id)
 	}
 	return out, closed, nil
+}
+
+// assetRemovedFunc returns a check for whether a removal deletes an asset: one
+// on a domain the removal deletes, and one tracked by a removed package and by
+// no other install. removing holds the ids of the removed packages.
+func (s *ContentRegistry) assetRemovedFunc(
+	ctx context.Context,
+	trackedAssets map[uuid.UUID]bool,
+	removing map[uuid.UUID]bool,
+	domainIDs []uuid.UUID,
+) func(a *model.Asset) (bool, error) {
+	removedDomain := map[uuid.UUID]bool{}
+	for _, d := range domainIDs {
+		removedDomain[d] = true
+	}
+	return func(a *model.Asset) (bool, error) {
+		if did, derr := a.DomainID.Get(); derr == nil && removedDomain[did] {
+			return true, nil
+		}
+		id, err := a.ID.Get()
+		if err != nil || !trackedAssets[id] {
+			return false, nil
+		}
+		rows, err := s.RegistryRepository.GetInstalledResourcesByResource(ctx, "asset", &id)
+		if err != nil {
+			return false, err
+		}
+		for _, r := range rows {
+			if r.InstalledPackageID != nil && !removing[*r.InstalledPackageID] {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+}
+
+// keptListUsers returns the labels of the assets that keep a list in place
+// after a removal: assets that use it, that the removal does not delete (gone),
+// and that an update does not take it off first (plannedLists, as for
+// previewAssetLosses). An empty result means the removal deletes the list.
+func (s *ContentRegistry) keptListUsers(
+	ctx context.Context,
+	listID *uuid.UUID,
+	gone func(a *model.Asset) (bool, error),
+	plannedLists map[uuid.UUID]*plannedAssetLists,
+) ([]string, error) {
+	if s.Asset == nil || s.Asset.AssetRepository == nil {
+		return nil, nil
+	}
+	assets, err := s.Asset.AssetRepository.GetByAllowDenyID(ctx, listID)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, a := range assets {
+		removed, rerr := gone(a)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if removed {
+			continue
+		}
+		if aid, ierr := a.ID.Get(); ierr == nil {
+			if planned, replaced := plannedLists[aid]; replaced && !planned.ids[*listID] {
+				continue
+			}
+		}
+		out = append(out, assetLabel(a))
+	}
+	return out, nil
+}
+
+// previewKeptList describes a list the removal keeps for the assets in users.
+func (s *ContentRegistry) previewKeptList(
+	ctx context.Context, r *database.InstalledResource, users []string,
+) UninstallPreviewKeptList {
+	v := UninstallPreviewKeptList{Name: r.SourceName, Assets: users}
+	if s.AllowDeny != nil && s.AllowDeny.AllowDenyRepository != nil {
+		if l, err := s.AllowDeny.AllowDenyRepository.GetByID(ctx, r.ResourceID, &repository.AllowDenyOption{}); err == nil {
+			if n := optStr(l.Name); n != "" {
+				v.Name = n
+			}
+			v.Allowed, _ = l.Allowed.Get()
+		}
+	}
+	if len(v.Assets) > uninstallPreviewCampaignCap {
+		v.Assets = v.Assets[:uninstallPreviewCampaignCap]
+	}
+	return v
+}
+
+// previewAssetLosses adds to out each asset that stays after the removal but
+// loses one of removedLists. An asset the removal deletes (gone) is left out.
+// plannedLists maps an asset whose lists an update replaces before the removal
+// to its new lists: a list it uses now that is not among them is taken off by
+// the update and is not counted as lost.
+func (s *ContentRegistry) previewAssetLosses(
+	ctx context.Context,
+	out *UninstallPreview,
+	removedLists map[uuid.UUID]bool,
+	gone func(a *model.Asset) (bool, error),
+	plannedLists map[uuid.UUID]*plannedAssetLists,
+) error {
+	if len(removedLists) == 0 || s.Asset == nil || s.Asset.AssetRepository == nil {
+		return nil
+	}
+	repo := s.Asset.AssetRepository
+	listIDs := make([]uuid.UUID, 0, len(removedLists))
+	for id := range removedLists {
+		listIDs = append(listIDs, id)
+	}
+	sort.Slice(listIDs, func(i, j int) bool { return listIDs[i].String() < listIDs[j].String() })
+	assets := map[uuid.UUID]*model.Asset{}
+	var order []uuid.UUID
+	for _, lid := range listIDs {
+		id := lid
+		linked, err := repo.GetByAllowDenyID(ctx, &id)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		for _, a := range linked {
+			aid, ierr := a.ID.Get()
+			if ierr != nil {
+				continue
+			}
+			if _, ok := assets[aid]; ok {
+				continue
+			}
+			removed, gerr := gone(a)
+			if gerr != nil {
+				return errs.Wrap(gerr)
+			}
+			if removed {
+				continue
+			}
+			assets[aid] = a
+			order = append(order, aid)
+		}
+	}
+	for _, aid := range order {
+		a := assets[aid]
+		id := aid
+		lists, err := repo.GetAllowDenyByAssetID(ctx, &id)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		v := UninstallPreviewAsset{
+			ID: aid.String(), Name: optStr(a.Name), Path: optStr(a.Path),
+			DomainName: optStr(a.DomainName), Losses: []string{},
+		}
+		planned, replaced := plannedLists[aid]
+		lostAllow, leftAllow, left := false, false, 0
+		onAsset := map[uuid.UUID]bool{}
+		for _, l := range lists {
+			lid, ierr := l.ID.Get()
+			if ierr != nil {
+				continue
+			}
+			onAsset[lid] = true
+			// the update takes this list off the asset before the removal.
+			if replaced && !planned.ids[lid] {
+				continue
+			}
+			allowed, _ := l.Allowed.Get()
+			if removedLists[lid] {
+				kind := "block list"
+				if allowed {
+					kind = "allow list"
+					lostAllow = true
+				}
+				v.Losses = append(v.Losses, fmt.Sprintf("%s %q removed", kind, optStr(l.Name)))
+				continue
+			}
+			left++
+			if allowed {
+				leftAllow = true
+			}
+		}
+		if replaced {
+			if len(v.Losses) == 0 {
+				continue
+			}
+			// a list the update adds to the asset stays after the removal, unless
+			// the removal deletes it too.
+			for lid := range planned.ids {
+				if onAsset[lid] || removedLists[lid] {
+					continue
+				}
+				left++
+				id := lid
+				if s.AllowDeny == nil || s.AllowDeny.AllowDenyRepository == nil {
+					continue
+				}
+				l, gerr := s.AllowDeny.AllowDenyRepository.GetByID(ctx, &id, &repository.AllowDenyOption{})
+				if gerr != nil {
+					continue
+				}
+				if allowed, _ := l.Allowed.Get(); allowed {
+					leftAllow = true
+				}
+			}
+			for _, allowed := range planned.created {
+				left++
+				if allowed {
+					leftAllow = true
+				}
+			}
+		}
+		v.OpenToEveryone = lostAllow && !leftAllow
+		v.Unfiltered = left == 0
+		if v.OpenToEveryone {
+			v.Losses = append([]string{"Filter removed: asset will be reachable by everyone"}, v.Losses...)
+		}
+		out.ChangedAssetCount++
+		if len(out.ChangedAssets) < uninstallPreviewCampaignCap {
+			out.ChangedAssets = append(out.ChangedAssets, v)
+		}
+	}
+	return nil
+}
+
+// assetLabel names an asset by its path, with its domain when it has one.
+func assetLabel(a *model.Asset) string {
+	p := optStr(a.Path)
+	if d := optStr(a.DomainName); d != "" {
+		return d + "/" + p
+	}
+	return p
 }
 
 // previewCampaign is the id and name of a campaign for the preview.
@@ -795,45 +1222,88 @@ func campaignStillRunning(c *model.Campaign, now time.Time) bool {
 	return true
 }
 
-// collectRemovedMembers appends to out each referenced package that removing
-// bundleID would also remove, using the same rule as remove: no other bundle
-// links it and it was installed only as a dependency. It recurses the same way
-// remove does.
-func (s *ContentRegistry) collectRemovedMembers(
-	ctx context.Context, bundleID *uuid.UUID, seen map[uuid.UUID]bool, out *[]*database.InstalledPackage,
-) error {
-	members, err := s.RegistryRepository.GetPackageMembers(ctx, bundleID)
-	if err != nil {
-		return errs.Wrap(err)
-	}
-	for _, m := range members {
-		if m == nil || seen[*m] {
-			continue
-		}
-		n, err := s.RegistryRepository.CountBundlesForMember(ctx, m, bundleID)
-		if err != nil {
-			return errs.Wrap(err)
-		}
-		if n > 0 {
-			continue
-		}
-		mp, err := s.RegistryRepository.GetInstalledPackageByID(ctx, m)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			continue
-		}
-		if err != nil {
-			return errs.Wrap(err)
-		}
-		if !mp.InstalledAsDependency {
-			continue
-		}
-		seen[*m] = true
-		*out = append(*out, mp)
-		if err := s.collectRemovedMembers(ctx, m, seen, out); err != nil {
-			return err
+// removalSet returns the installed packages a removal takes with it besides
+// roots, the packages it removes anyway, using the rule remove follows: a
+// package installed only as a dependency goes once every link to it goes, a
+// link from a removed package or one linkGone reports. The members of roots
+// and candidates are considered, and the members of each package taken. A
+// package is taken only once all packages linking it are, and the passes
+// repeat until nothing changes, so the result does not depend on the order
+// links are read in: remove gets the same result by removing one member after
+// another. keep reports a package that stays whatever its links.
+func (s *ContentRegistry) removalSet(
+	ctx context.Context,
+	roots []*uuid.UUID,
+	candidates []*uuid.UUID,
+	linkGone func(parent, child uuid.UUID) bool,
+	keep func(mp *database.InstalledPackage) bool,
+) ([]*database.InstalledPackage, error) {
+	removed := map[uuid.UUID]bool{}
+	queued := map[uuid.UUID]bool{}
+	var order []*uuid.UUID
+	enqueue := func(ids []*uuid.UUID) {
+		for _, id := range ids {
+			if id != nil && !queued[*id] {
+				queued[*id] = true
+				order = append(order, id)
+			}
 		}
 	}
-	return nil
+	for _, r := range roots {
+		removed[*r] = true
+	}
+	for _, r := range roots {
+		members, err := s.RegistryRepository.GetPackageMembers(ctx, r)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		enqueue(members)
+	}
+	enqueue(candidates)
+	var out []*database.InstalledPackage
+	for changed := true; changed; {
+		changed = false
+		for i := 0; i < len(order); i++ {
+			c := order[i]
+			if removed[*c] {
+				continue
+			}
+			mp, err := s.RegistryRepository.GetInstalledPackageByID(ctx, c)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, errs.Wrap(err)
+			}
+			if !mp.InstalledAsDependency || (keep != nil && keep(mp)) {
+				continue
+			}
+			parents, err := s.RegistryRepository.GetPackageParents(ctx, c)
+			if err != nil {
+				return nil, errs.Wrap(err)
+			}
+			stays := false
+			for _, p := range parents {
+				if p == nil || removed[*p] || (linkGone != nil && linkGone(*p, *c)) {
+					continue
+				}
+				stays = true
+				break
+			}
+			if stays {
+				continue
+			}
+			removed[*c] = true
+			out = append(out, mp)
+			changed = true
+			members, err := s.RegistryRepository.GetPackageMembers(ctx, c)
+			if err != nil {
+				return nil, errs.Wrap(err)
+			}
+			enqueue(members)
+		}
+	}
+	return out, nil
 }
 
 // templatesClosedByDelete returns the campaign templates whose active campaigns

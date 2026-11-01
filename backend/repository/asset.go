@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
 )
@@ -469,6 +471,65 @@ func (r *Asset) RemoveHeader(
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+// ReplaceHeaders replaces every response header of an asset with the given
+// headers, kept in the given order. The times are written in the same text
+// form AddHeader writes, so headers added later sort after these. Each time is
+// a whole microsecond plus one nanosecond, so no time loses trailing zeros and
+// the text order is the order of the headers. It only writes inside the
+// transaction.
+func (r *Asset) ReplaceHeaders(
+	ctx context.Context,
+	assetID *uuid.UUID,
+	headers []*model.AssetHeader,
+) error {
+	base := time.Now().UTC().Truncate(time.Microsecond)
+	rows := make([]map[string]any, 0, len(headers))
+	for i, h := range headers {
+		row := h.ToDBMap()
+		row["id"] = uuid.New()
+		row["asset_id"] = assetID.String()
+		at := utils.RFC3339UTC(base.Add(time.Duration(i)*time.Microsecond + time.Nanosecond))
+		row["created_at"] = at
+		row["updated_at"] = at
+		rows = append(rows, row)
+	}
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("asset_id = ?", assetID).Delete(&database.AssetHeader{}).Error; err != nil {
+			return err
+		}
+		for _, row := range rows {
+			if err := tx.Model(&database.AssetHeader{}).Create(row).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// GetByAllowDenyID gets every asset linked to the allow deny list
+func (r *Asset) GetByAllowDenyID(
+	ctx context.Context,
+	allowDenyID *uuid.UUID,
+) ([]*model.Asset, error) {
+	rows := []*database.Asset{}
+	res := r.DB.WithContext(ctx).
+		Model(&database.Asset{}).
+		Select("assets.*, domains.name AS domain_name").
+		Joins("JOIN asset_allow_denies ON asset_allow_denies.asset_id = assets.id").
+		Joins("LEFT JOIN domains ON domains.id = assets.domain_id").
+		Where("asset_allow_denies.allow_deny_id = ?", allowDenyID).
+		Order("assets.path, assets.id").
+		Find(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	out := make([]*model.Asset, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ToAsset(row))
+	}
+	return out, nil
 }
 
 // assetServeRow is one row of the serve settings lookup, an asset joined with

@@ -122,16 +122,37 @@ func checkAssetRel(rel string) error {
 }
 
 // installAsset stores one bundled asset as a global asset (no company and no
-// domain). When a global asset already sits at the path it is reused only if
-// another installed package owns it and the file holds the same bytes, so the
-// asset is shared and ref counted. An asset the user added, or one with other
-// bytes, is never adopted and fails with a conflict error. Returns the asset id
-// and whether this call created it.
+// domain), named and served as decl sets. When a global asset already sits at
+// the path it is reused only if another installed package owns it and it has
+// the same bytes and settings, so the asset is shared and ref counted. An asset
+// this same install or update created is compared with what was created, as
+// recorded in result. An asset the user added, or one with other bytes or
+// settings, is never adopted and fails with a conflict error.
+//
+// The lists decl names are not set here, see linkPendingAssets. An asset with
+// lists gets its file only once its lists are linked, so it is never served
+// without them. Returns the asset id and whether this call created it.
 func (s *ContentRegistry) installAsset(
-	ctx context.Context, session *model.Session, ipID *uuid.UUID, rel string, content []byte,
+	ctx context.Context, session *model.Session, ipID *uuid.UUID, rel string, content []byte, decl *assetDecl,
+	result *InstallResult,
 ) (*uuid.UUID, bool, error) {
 	if err := checkAssetRel(rel); err != nil {
 		return nil, false, err
+	}
+	if decl == nil {
+		decl = defaultAssetDecl(rel)
+	}
+	cur := assetSeen{bytesHash: contentHash(string(content)), settingsHash: decl.settings.hash()}
+	if made, ok := result.createdAsset(rel); ok {
+		if made.bytesHash != cur.bytesHash || made.settingsHash != cur.settingsHash {
+			return nil, false, errs.NewValidationError(fmt.Errorf(
+				"asset path conflict: two packages of this install or update both ship %q with "+
+					"different content or settings",
+				rel,
+			))
+		}
+		id := *made.id
+		return &id, false, nil
 	}
 	existing, err := s.Asset.AssetRepository.GetGlobalByPath(ctx, rel)
 	if err != nil {
@@ -152,11 +173,26 @@ func (s *ContentRegistry) installAsset(
 		if err := s.checkSharedAssetBytes(ctx, &id, ipID, rel, content); err != nil {
 			return nil, false, err
 		}
+		if err := s.checkSharedAssetSettings(ctx, &id, ipID, rel, decl); err != nil {
+			return nil, false, err
+		}
 		return &id, false, nil
 	}
 	asset := &model.Asset{}
-	if name, err := vo.NewOptionalString127(filepath.Base(rel)); err == nil {
+	if name, err := vo.NewOptionalString127(decl.name); err == nil {
 		asset.Name = nullable.NewNullableWithValue(*name)
+	}
+	if decl.description != "" {
+		if d, err := vo.NewOptionalString255(decl.description); err == nil {
+			asset.Description = nullable.NewNullableWithValue(*d)
+		}
+	}
+	if decl.settings.contentType != "" {
+		ct, err := vo.NewOptionalString255(decl.settings.contentType)
+		if err != nil {
+			return nil, false, errs.NewValidationError(fmt.Errorf("asset %q: invalid content type: %w", rel, err))
+		}
+		asset.ContentType = nullable.NewNullableWithValue(*ct)
 	}
 	// the path is required: without it the row cannot be found or deleted later, so a
 	// bad path fails the install instead of inserting a row and orphaning the file.
@@ -165,14 +201,35 @@ func (s *ContentRegistry) installAsset(
 		return nil, false, errs.NewValidationError(fmt.Errorf("invalid asset path %q: %w", rel, err))
 	}
 	asset.Path = nullable.NewNullableWithValue(*path)
+	filtered := len(decl.settings.allowDeny) > 0
+	if filtered && result == nil {
+		return nil, false, errs.Wrap(fmt.Errorf("asset %q has lists but nothing links them", rel))
+	}
 	id, err := s.Asset.AssetRepository.Insert(ctx, asset)
 	if err != nil {
 		return nil, false, errs.Wrap(err)
 	}
-	// never write over a file already on disk; it belongs to someone else.
-	if err := s.writeAssetFile(rel, content, false); err != nil {
+	if len(decl.settings.headers) > 0 {
+		if herr := s.Asset.AssetRepository.ReplaceHeaders(ctx, id, decl.settings.headerModels()); herr != nil {
+			_ = s.Asset.AssetRepository.DeleteByID(ctx, id)
+			return nil, false, errs.Wrap(herr)
+		}
+	}
+	if filtered {
+		// the file is written by linkPendingAssets once the lists are linked.
+		result.pendingLinks = append(result.pendingLinks, pendingAssetLink{
+			assetID: id, path: rel, names: decl.settings.allowDeny, scope: decl.scope, body: content,
+		})
+	} else if err := s.writeAssetFile(rel, content, false); err != nil {
+		// never write over a file already on disk; it belongs to someone else.
 		_ = s.Asset.AssetRepository.DeleteByID(ctx, id)
 		return nil, false, errs.NewValidationError(fmt.Errorf("asset %q: %w", rel, err))
+	}
+	if result != nil {
+		if result.createdAssets == nil {
+			result.createdAssets = map[string]createdAsset{}
+		}
+		result.createdAssets[rel] = createdAsset{assetSeen: cur, id: id}
 	}
 	return id, true, nil
 }

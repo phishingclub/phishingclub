@@ -90,6 +90,26 @@ type InspectAttachment struct {
 	EmailName   string `json:"emailName,omitempty"`
 }
 
+// InspectAsset is an asset a package sets in an assets block, as the author
+// wrote it, so values can still hold @@VAR@@ tokens. Path is relative to the
+// assets folder and File is the path in the archive, to match the file entry.
+// An asset file without an entry is listed in Files only.
+type InspectAsset struct {
+	Path        string               `json:"path"`
+	File        string               `json:"file"`
+	Name        string               `json:"name"`
+	Description string               `json:"description,omitempty"`
+	ContentType string               `json:"contentType,omitempty"`
+	Headers     []InspectAssetHeader `json:"headers"`
+	AllowDeny   []string             `json:"allowDeny"`
+}
+
+// InspectAssetHeader is one response header an asset entry sets.
+type InspectAssetHeader struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // InspectVariable is a declared variable with the key and scope an install of the
 // package reads its value under, as MissingVariable has them.
 type InspectVariable struct {
@@ -120,6 +140,7 @@ type InspectResult struct {
 	RefusedDependencies []string            `json:"refusedDependencies,omitempty"`
 	RefusedMessage      string              `json:"refusedMessage,omitempty"`
 	Attachments         []InspectAttachment `json:"attachments"`
+	Assets              []InspectAsset      `json:"assets"`
 	Files               []InspectFile       `json:"files"`
 }
 
@@ -160,6 +181,7 @@ func (s *ContentRegistry) Inspect(
 		Description:  m.Description,
 		Variables:    make([]InspectVariable, 0, len(m.Variables)),
 		Dependencies: m.Dependencies,
+		Assets:       []InspectAsset{},
 		Files:        make([]InspectFile, 0, len(pkg.Files)),
 	}
 	share := installedShare(nil, m)
@@ -252,6 +274,20 @@ func (s *ContentRegistry) Inspect(
 			}
 			for _, a := range d.dy.Attachments {
 				add(a, "")
+			}
+			for _, a := range d.dy.Assets {
+				ia := InspectAsset{
+					Path: a.Path, File: "assets/" + a.Path, Name: a.Name, Description: a.Description,
+					ContentType: a.ContentType, Headers: []InspectAssetHeader{}, AllowDeny: []string{},
+				}
+				if ia.Name == "" {
+					ia.Name = path.Base(a.Path)
+				}
+				for _, h := range a.Headers {
+					ia.Headers = append(ia.Headers, InspectAssetHeader{Key: h.Key, Value: h.Value})
+				}
+				ia.AllowDeny = append(ia.AllowDeny, a.AllowDeny...)
+				out.Assets = append(out.Assets, ia)
 			}
 		}
 	}
