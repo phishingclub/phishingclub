@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.44.0] - 2026-11-01
+- Added Bait Box integration (beta)
+- Added campaign pause and resume
+- Added Remote Browser polling mode with fallback when websockets are blocked
+- Added asset allow/deny filters
+- Added asset response header control
+- Added asset edit, rename/move and replace
+- Added API Sender test variables
+- Added create recipient from group view
+- Added documentation links to each page
+- Added no-store headers to API responses
+- Added warning about browser impersonation stability in proxy editor
+- Improved JS editor support for scripts and Remote Browser
+- Fix enforce company scope on linked resources
+- Fix filters now match on any rule
+- Fix filters ignore spoofed JA4 fingerprints
+- Fix SQL connection pool could lose writes under load spikes
+- Fix self signed or supplied certificate could be overwritten
+- Fix default logo flashed before custom branding loaded
+- Fix harden previews against self XSS
+- Fix anonymize date must be after campaign end date
+- Bumped dependencies
+
 ## [1.43.0] - 2026-10-01
 - Added scripts feature with support in campaigns, AiTM proxy and Remote Browser
 - Added custom branding settings
