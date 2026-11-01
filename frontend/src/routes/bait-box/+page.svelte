@@ -383,7 +383,11 @@
 	// local edits and skipping packages that need variables or have conflicts with a
 	// reason (those are done one by one). no per package prompts during the loop.
 	let updateAllVisible = false;
-	function openUpdateAll() {
+	// updateAllRegistryId limits update all to one Bait Box; empty means every
+	// connected Bait Box.
+	let updateAllRegistryId = '';
+	function openUpdateAll(registryId = '') {
+		updateAllRegistryId = registryId;
 		updateAllVisible = true;
 	}
 	async function confirmUpdateAll() {
@@ -391,6 +395,7 @@
 		// until its list package is updated.
 		const targets = installed
 			.filter((i) => i.updateAvailable)
+			.filter((i) => !updateAllRegistryId || i.registryId === updateAllRegistryId)
 			.sort((a, b) => (b.packageType === 'allowdeny') - (a.packageType === 'allowdeny'));
 		const updated = [];
 		const kept = [];
@@ -622,6 +627,12 @@
 		return m;
 	})();
 	$: updatesCount = installed.filter((i) => i.updateAvailable).length;
+	$: registryUpdatesCount = installed.filter(
+		(i) => i.updateAvailable && i.registryId === selectedRegistryId
+	).length;
+	$: updateAllRegistryName = updateAllRegistryId
+		? registries.find((r) => r.id === updateAllRegistryId)?.name || ''
+		: '';
 	$: installedRows = [...installed].sort((a, b) =>
 		String(a.packageId || '').localeCompare(String(b.packageId || ''))
 	);
@@ -1618,7 +1629,7 @@
 						<Button
 							size="small"
 							css="!w-auto shrink-0 whitespace-nowrap px-5"
-							on:click={openUpdateAll}>Update all ({updatesCount})</Button
+							on:click={() => openUpdateAll()}>Update all ({updatesCount})</Button
 						>
 					</div>
 				{/if}
@@ -1750,11 +1761,12 @@
 								/>
 							</div>
 						{/if}
-						{#if updatesCount}
+						{#if registryUpdatesCount}
 							<Button
 								size="small"
 								css="!w-auto shrink-0 whitespace-nowrap px-5"
-								on:click={openUpdateAll}>Update all ({updatesCount})</Button
+								on:click={() => openUpdateAll(selectedRegistryId)}
+								>Update all ({registryUpdatesCount})</Button
 							>
 						{/if}
 					</div>
@@ -3131,7 +3143,11 @@ Escape closes, the arrows page through the screenshots -->
 	>
 		<div class="space-y-6">
 			<p class="text-gray-600 dark:text-gray-400">
-				Update every package that has an available update?
+				{#if updateAllRegistryName}
+					Update every package from {updateAllRegistryName} that has an available update?
+				{:else}
+					Update every package from every connected Bait Box that has an available update?
+				{/if}
 			</p>
 			<div class="rounded-lg bg-gray-50 p-4 dark:bg-gray-800/40">
 				<ul class="ml-4 list-disc space-y-2 text-gray-600 dark:text-gray-400">
