@@ -7,6 +7,7 @@
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import Headline from '$lib/components/Headline.svelte';
+	import BetaTag from '$lib/components/BetaTag.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Search from '$lib/components/Search.svelte';
 	import Select from '$lib/components/Select.svelte';
@@ -1543,7 +1544,10 @@
 <HeadTitle title="Bait Box" />
 <main>
 	<div class="flex flex-wrap items-start justify-between gap-4">
-		<Headline>Bait Box</Headline>
+		<div class="flex items-center">
+			<Headline>Bait Box</Headline>
+			<BetaTag />
+		</div>
 		<div class="flex flex-wrap items-end gap-3">
 			{#if registries.length && activeView === 'browse'}
 				<div class="w-56">

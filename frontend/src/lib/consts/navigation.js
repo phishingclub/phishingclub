@@ -9,7 +9,8 @@ export const route = {
 	},
 	baitBox: {
 		label: 'Bait Box',
-		route: '/bait-box/'
+		route: '/bait-box/',
+		beta: true
 	},
 	tools: {
 		label: 'Tools',

@@ -6,6 +6,7 @@
 	import { shouldHideMenuItem } from '$lib/utils/common';
 	import { AppStateService } from '$lib/service/appState';
 	import ConditionalDisplay from '../ConditionalDisplay.svelte';
+	import BetaTag from '../BetaTag.svelte';
 	export let logout;
 	export let visible = false;
 	export let toggleChangeCompanyModal;
@@ -148,6 +149,9 @@
 							{@html getTopMenuIcon(item.label)}
 						</div>
 						<span>{item.label}</span>
+						{#if item.beta}
+							<BetaTag onDark />
+						{/if}
 					</a>
 				</ConditionalDisplay>
 				{#if item.label === 'Settings' && isCompanyContext && companyID}

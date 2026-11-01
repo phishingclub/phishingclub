@@ -4,6 +4,7 @@
 	import { menu, mobileTopMenu } from '$lib/consts/navigation';
 	import { shouldHideMenuItem } from '$lib/utils/common';
 	import ConditionalDisplay from '../ConditionalDisplay.svelte';
+	import BetaTag from '../BetaTag.svelte';
 	import ThemeToggle from '../ThemeToggle.svelte';
 	import { branding, loadBranding, headerLogoSrc, brandingDisplayFor, BRANDING_SLOT } from '$lib/store/branding';
 	import BrandingImage from '$lib/components/BrandingImage.svelte';
@@ -246,7 +247,9 @@
 							<div class="flex-shrink-0 mr-3 text-white dark:text-highlight-blue">
 								{@html getTopMenuIcon(link.label)}
 							</div>
-							<span class="flex-1 text-left">{link.label}</span>
+							<span class="flex-1 text-left"
+								>{link.label}{#if link.beta}<BetaTag onDark />{/if}</span
+							>
 							{#if $page.url.pathname === link.route}
 								<div class="w-2 h-2 bg-white rounded-full"></div>
 							{/if}
