@@ -24,7 +24,7 @@ const utcDateString = (instant, addDays = 0) => {
 const parseLocalDate = (dateStr) => new Date(dateStr + 'T00:00:00');
 
 // a copy of a local date with a "HH:MM" local time set on it
-export const withLocalTime = (date, time) => {
+const withLocalTime = (date, time) => {
 	const d = new Date(date);
 	if (time) {
 		const [h, m] = time.split(':').map(Number);

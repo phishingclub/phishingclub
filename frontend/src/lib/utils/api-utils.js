@@ -74,57 +74,6 @@ export const local_yyyy_mm_dd = (date) => {
 	);
 };
 
-// converts a local time formatted as "HH:MM" to a UTC time formatted as "HH:MM"
-export function localTimeToUTC(localTime) {
-	// Split the local time string into hours and minutes
-	const [hours, minutes] = localTime.split(':').map(Number);
-
-	// Get the current date
-	const now = new Date();
-
-	// Create a new Date object with the current date and the local time
-	const localDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes);
-
-	// Get the UTC time components
-	const utcHours = localDate.getUTCHours();
-	const utcMinutes = localDate.getUTCMinutes();
-
-	// Format the UTC time as a string
-	const utcTime = `${String(utcHours).padStart(2, '0')}:${String(utcMinutes).padStart(2, '0')}`;
-
-	return utcTime;
-}
-
-/**
- * Converts a UTC time formatted as "HH:MM" to a local time formatted as "HH:MM"
- * @param {string} utcTime - The UTC time to convert
- * @returns {string} - The local time formatted as "HH:MM"
- */
-export function utcTimeToLocal(utcTime) {
-	if (!utcTime) {
-		return '';
-	}
-	// Split the UTC time string into hours and minutes
-	const [hours, minutes] = utcTime.split(':').map(Number);
-
-	// Get the current date
-	const now = new Date();
-
-	// Create a new Date object with the current date and the UTC time
-	const utcDate = new Date(
-		Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes)
-	);
-
-	// Get the local time components
-	const localHours = utcDate.getHours();
-	const localMinutes = utcDate.getMinutes();
-
-	// Format the local time as a string
-	const localTime = `${String(localHours).padStart(2, '0')}:${String(localMinutes).padStart(2, '0')}`;
-
-	return localTime;
-}
-
 /**
  * Compares two times formatted as "HH:MM" to determine if the first is larger than the second.
  * @param {string} time1 - The first time to compare
