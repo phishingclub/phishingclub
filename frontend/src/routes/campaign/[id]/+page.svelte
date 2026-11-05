@@ -7,7 +7,8 @@
 	import { addToast } from '$lib/store/toast';
 	import { BiMap } from '$lib/utils/maps';
 	import { openIsolatedHtml } from '$lib/utils/safePreview.js';
-	import { fetchAllRows, localTimeToUTC, isTimeLarger } from '$lib/utils/api-utils';
+	import { fetchAllRows, isTimeLarger } from '$lib/utils/api-utils';
+	import { dailySlotsToUTC, dailySlotsFromUTC, weekDaysToBinary } from '$lib/utils/dailySlots';
 	import { AppStateService } from '$lib/service/appState';
 	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
@@ -279,11 +280,6 @@
 			daysInRange.add(date.getDay());
 		}
 		return Array.from(daysInRange).sort((a, b) => a - b);
-	};
-	// pack the selected week days into the bitmask the backend expects
-	const weekDaysAvailableToBinary = (weekDays) => {
-		if (!weekDays?.length) return null;
-		return weekDays.reduce((binary, day) => binary | (1 << day), 0);
 	};
 	// keep the selectable week days in step with the chosen date range
 	$: {
@@ -1187,8 +1183,18 @@
 		isResumeModalVisible = true;
 	};
 
-	// the Daily Slots window: delivery runs from the start of the start date to the
-	// end of the end date. start is local midnight, end is 23:59 local of the end date.
+	// the Daily Slots choice in the UTC form the backend runs: first and last send
+	// time plus the week days and daily hours moved to UTC
+	const resumeDailySlotsUTC = () =>
+		dailySlotsToUTC({
+			startDate: resumeScheduledStartAt,
+			endDate: resumeScheduledEndAt,
+			weekDays: resumeConstraintWeekDays,
+			startTime: resumeConstraintStartTime,
+			endTime: resumeConstraintEndTime
+		});
+
+	// the chosen date range as local dates, used to check the range itself
 	const resumeDailyWindow = () => {
 		if (!resumeScheduledStartAt || !resumeScheduledEndAt) {
 			return { start: null, end: null };
@@ -1236,10 +1242,18 @@
 			if (isTimeLarger(resumeConstraintStartTime, resumeConstraintEndTime)) {
 				return 'The daily end time must be after the daily start time.';
 			}
-			if (end <= new Date()) {
-				return 'The end date must be in the future.';
+			const slotUTC = resumeDailySlotsUTC();
+			if (!slotUTC) {
+				return 'None of the selected days fall inside the date range.';
 			}
-			return resumeFinishBeforeLimits(end);
+			if (slotUTC.error) {
+				return slotUTC.error;
+			}
+			const lastSend = new Date(slotUTC.sendEndAt);
+			if (lastSend <= new Date()) {
+				return 'The last delivery slot must be in the future.';
+			}
+			return resumeFinishBeforeLimits(lastSend);
 		}
 		if (!resumeSendStartAt || !resumeSendEndAt) {
 			return 'Choose a delivery start and finish.';
@@ -1266,13 +1280,13 @@
 			if (resumeScheduleType === 'schedule') {
 				// Daily Slots: send the date range as the window plus the week day and
 				// daily hour constraints the backend applies inside it
-				const { start, end } = resumeDailyWindow();
+				const slotUTC = resumeDailySlotsUTC();
 				body = {
-					sendStartAt: start.toISOString(),
-					sendEndAt: end.toISOString(),
-					constraintWeekDays: weekDaysAvailableToBinary(resumeConstraintWeekDays),
-					constraintStartTime: localTimeToUTC(resumeConstraintStartTime),
-					constraintEndTime: localTimeToUTC(resumeConstraintEndTime),
+					sendStartAt: slotUTC.sendStartAt,
+					sendEndAt: slotUTC.sendEndAt,
+					constraintWeekDays: slotUTC.constraintWeekDays,
+					constraintStartTime: slotUTC.constraintStartTime,
+					constraintEndTime: slotUTC.constraintEndTime,
 					jitterMin: resumeJitterMin,
 					jitterMax: resumeJitterMax
 				};
@@ -2816,12 +2830,13 @@
 				</div>
 
 				{#if campaign.constraintWeekDays}
+					{@const localSlots = dailySlotsFromUTC(campaign)}
 					<div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
 						<div class="mb-3">
 							<span class="text-gray-600 dark:text-gray-400 text-sm font-medium">Schedule:</span>
 						</div>
 						<div class="flex gap-1.5 mb-3">
-							{#each formatWeekDays(campaign.constraintWeekDays).days as day}
+							{#each formatWeekDays(weekDaysToBinary(localSlots?.weekDays)).days as day}
 								<div
 									class="w-8 h-8 flex items-center justify-center rounded text-xs transition-all {day.isActive
 										? 'bg-cta-blue text-white font-medium'
@@ -2832,13 +2847,13 @@
 								</div>
 							{/each}
 						</div>
-						{#if campaign.constraintStartTime && campaign.constraintEndTime}
+						{#if localSlots}
 							<div class="flex items-center gap-2 text-sm">
 								<span
 									class="bg-cta-blue text-white px-2 py-1 rounded text-xs font-medium"
 									class:px-3={!$timeFormat}
 								>
-									{formatTimeConstraint(campaign.constraintStartTime, $timeFormat)}
+									{formatTimeConstraint(localSlots.startTime, $timeFormat)}
 								</span>
 								<svg
 									xmlns="http://www.w3.org/2000/svg"
@@ -2856,7 +2871,7 @@
 									class="bg-cta-blue text-white px-2 py-1 rounded text-xs font-medium"
 									class:px-3={!$timeFormat}
 								>
-									{formatTimeConstraint(campaign.constraintEndTime, $timeFormat)}
+									{formatTimeConstraint(localSlots.endTime, $timeFormat)}
 								</span>
 								<button
 									on:click={() => timeFormat.update((f) => !f)}

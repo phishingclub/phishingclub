@@ -14,16 +14,14 @@
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import { addToast } from '$lib/store/toast';
 	import { AppStateService } from '$lib/service/appState';
-	import { nextDay, previousDay, addDays, subDays } from 'date-fns';
+	import {
+		dailySlotWindow,
+		dailySlotsToUTC,
+		dailySlotsFromUTC
+	} from '$lib/utils/dailySlots';
 	import { getModalText } from '$lib/utils/common';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form';
-	import {
-		fetchAllRows,
-		isTimeLarger,
-		local_yyyy_mm_dd,
-		localTimeToUTC,
-		utcTimeToLocal
-	} from '$lib/utils/api-utils';
+	import { fetchAllRows, isTimeLarger, local_yyyy_mm_dd } from '$lib/utils/api-utils';
 	import { BiMap } from '$lib/utils/maps';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
@@ -301,6 +299,42 @@
 		spreadOption = SPREAD_MANUAL;
 	}
 
+	// Daily Slots: the local delivery window shown in the review step and its UTC
+	// form sent to the backend. sendStartAt and sendEndAt follow the window, so late
+	// schedule and the other send time checks work the same as for Time Box.
+	let dailySlotPreview = null;
+	let dailySlotUTC = null;
+	$: if (scheduleType === 'schedule') {
+		const slot = {
+			startDate: formValues.scheduledStartAt,
+			endDate: formValues.scheduledEndAt,
+			weekDays: formValues.constraintWeekDays,
+			startTime: formValues.contraintStartTime,
+			endTime: formValues.contraintEndTime
+		};
+		dailySlotUTC = dailySlotsToUTC(slot);
+		const win = dailySlotWindow(slot);
+		// show the start and end the backend will run, which can differ by an hour
+		// from the local end time when a clock change falls inside the range
+		dailySlotPreview =
+			win && dailySlotUTC && !dailySlotUTC.error
+				? {
+						...win,
+						start: new Date(dailySlotUTC.sendStartAt),
+						end: new Date(dailySlotUTC.sendEndAt)
+					}
+				: win;
+		const start = dailySlotUTC?.sendStartAt ?? null;
+		const end = dailySlotUTC?.sendEndAt ?? null;
+		if (formValues.sendStartAt !== start || formValues.sendEndAt !== end) {
+			formValues.sendStartAt = start;
+			formValues.sendEndAt = end;
+		}
+	} else {
+		dailySlotPreview = null;
+		dailySlotUTC = null;
+	}
+
 	// reactive statement to keep scheduleAt in sync when sendStartAt changes while late scheduling is enabled.
 	// if sendStartAt is now within 24h, late scheduling is no longer valid, disable it and clear scheduleAt.
 	$: if (lateScheduleEnabled) {
@@ -339,6 +373,11 @@
 			showAdvancedOptionsStep3 = true;
 			lateScheduleEnabled = true;
 			lateScheduleAutoSelected = true;
+			// the late schedule block has already run in this update, so set the
+			// schedule time here or it stays empty until the next form change
+			formValues.scheduleAt = new Date(
+				new Date(formValues.sendStartAt).getTime() - 24 * 60 * 60 * 1000
+			).toISOString();
 		}
 		prevLateScheduleEligible = eligible;
 	}
@@ -784,64 +823,6 @@
 	// Adding T00:00:00 (no offset) forces the spec to treat it as local time instead.
 	const parseLocalDate = (dateStr) => new Date(dateStr + 'T00:00:00');
 
-	// returns the first and last delivery day (local midnight) for daily slots,
-	// or null when the dates or week days are not set yet
-	const dailySlotDays = (scheduledStartAt, scheduledEndAt, weekDays) => {
-		if (!scheduledStartAt || !scheduledEndAt || !weekDays?.length) return null;
-		const startDateTime = parseLocalDate(scheduledStartAt);
-		const endDateTime = parseLocalDate(scheduledEndAt);
-		const startWeekday = startDateTime.getDay();
-		const firstWeekDay = weekDays.find((d) => d >= startWeekday) ?? weekDays[0];
-		const firstDay = nextDay(subDays(startDateTime, 1), firstWeekDay);
-		const endWeekday = endDateTime.getDay();
-		const reverseWeekDays = [...weekDays].reverse();
-		const lastWeekDay = reverseWeekDays.find((d) => d <= endWeekday) ?? reverseWeekDays[0];
-		const endDay = previousDay(addDays(endDateTime, 1), lastWeekDay);
-		return { firstDay, endDay };
-	};
-
-	// sets a HH:MM time on a copy of a local date
-	const withLocalTime = (date, time) => {
-		const d = new Date(date);
-		if (time) {
-			const [h, m] = time.split(':').map((v) => parseInt(v, 10));
-			d.setHours(h, m, 0, 0);
-		}
-		return d;
-	};
-
-	// daily slots summary for the review step: first send, last send and
-	// the number of days with delivery
-	$: dailySlotPreview = (() => {
-		const days = dailySlotDays(
-			formValues.scheduledStartAt,
-			formValues.scheduledEndAt,
-			formValues.constraintWeekDays
-		);
-		if (!days || days.firstDay > days.endDay) return null;
-		let deliveryDays = 0;
-		for (let d = new Date(days.firstDay); d <= days.endDay; d = addDays(d, 1)) {
-			if (formValues.constraintWeekDays.includes(d.getDay())) deliveryDays++;
-		}
-		return {
-			start: withLocalTime(days.firstDay, formValues.contraintStartTime),
-			end: withLocalTime(days.endDay, formValues.contraintEndTime),
-			deliveryDays
-		};
-	})();
-
-	const setScheduledAt = () => {
-		const days = dailySlotDays(
-			formValues.scheduledStartAt,
-			formValues.scheduledEndAt,
-			formValues.constraintWeekDays
-		);
-		if (days) {
-			formValues.sendStartAt = days.firstDay.toString();
-			formValues.sendEndAt = days.endDay.toString();
-		}
-	};
-
 	const setAllowDenyType = (allowDenyEntries) => {
 		let filteredEntries = [];
 		switch (allowDenyType) {
@@ -914,7 +895,11 @@
 	};
 
 	const save = async () => {
-		setScheduledAt();
+		if (scheduleType === 'schedule' && (!dailySlotUTC || dailySlotUTC.error)) {
+			modalError = dailySlotUTC?.error ?? 'Choose the delivery dates, days and hours.';
+			return;
+		}
+		const slotUTC = scheduleType === 'schedule' ? dailySlotUTC : null;
 		const recipientGroupIDs = formValues.recipientGroups.map((name) =>
 			recipientGroupMap.byValue(name)
 		);
@@ -934,12 +919,8 @@
 			const dataAnonymizeAtUTC = formValues.dataAnonymizeAt
 				? new Date(formValues.dataAnonymizeAt).toISOString()
 				: null;
-			const contraintStartTimeUTC = formValues.contraintStartTime
-				? localTimeToUTC(formValues.contraintStartTime)
-				: null;
-			const contraintEndTimeUTC = formValues.contraintEndTime
-				? localTimeToUTC(formValues.contraintEndTime)
-				: null;
+			const contraintStartTimeUTC = slotUTC?.constraintStartTime ?? null;
+			const contraintEndTimeUTC = slotUTC?.constraintEndTime ?? null;
 			const scheduleAtUTC = formValues.scheduleAt
 				? new Date(formValues.scheduleAt).toISOString()
 				: null;
@@ -964,7 +945,7 @@
 				allowDenyIDs: allowDenyIDs,
 				denyPageID: denyPageMap.byValueOrNull(formValues.denyPageValue),
 				evasionPageID: denyPageMap.byValueOrNull(formValues.evasionPageValue),
-				constraintWeekDays: weekDaysAvailableToBinary(formValues.constraintWeekDays),
+				constraintWeekDays: slotUTC?.constraintWeekDays ?? null,
 				constraintStartTime: contraintStartTimeUTC,
 				constraintEndTime: contraintEndTimeUTC,
 				webhooks: formValues.webhooks
@@ -1000,7 +981,11 @@
 	};
 
 	const update = async () => {
-		setScheduledAt();
+		if (scheduleType === 'schedule' && (!dailySlotUTC || dailySlotUTC.error)) {
+			modalError = dailySlotUTC?.error ?? 'Choose the delivery dates, days and hours.';
+			return;
+		}
+		const slotUTC = scheduleType === 'schedule' ? dailySlotUTC : null;
 		const recipientGroupIDs = formValues.recipientGroups.map((name) =>
 			recipientGroupMap.byValue(name)
 		);
@@ -1020,12 +1005,8 @@
 			const dataAnonymizeAtUTC = formValues.dataAnonymizeAt
 				? new Date(formValues.dataAnonymizeAt).toISOString()
 				: null;
-			const contraintStartTimeUTC = formValues.contraintStartTime
-				? localTimeToUTC(formValues.contraintStartTime)
-				: null;
-			const contraintEndTimeUTC = formValues.contraintEndTime
-				? localTimeToUTC(formValues.contraintEndTime)
-				: null;
+			const contraintStartTimeUTC = slotUTC?.constraintStartTime ?? null;
+			const contraintEndTimeUTC = slotUTC?.constraintEndTime ?? null;
 			const scheduleAtUTC = formValues.scheduleAt
 				? new Date(formValues.scheduleAt).toISOString()
 				: null;
@@ -1042,7 +1023,7 @@
 				isAnonymous: formValues.isAnonymous,
 				isTest: formValues.isTest,
 				obfuscate: formValues.obfuscate,
-				constraintWeekDays: weekDaysAvailableToBinary(formValues.constraintWeekDays),
+				constraintWeekDays: slotUTC?.constraintWeekDays ?? null,
 				constraintStartTime: contraintStartTimeUTC,
 				constraintEndTime: contraintEndTimeUTC,
 				sendEndAt: sendEndAtUTC,
@@ -1303,6 +1284,7 @@
 		if (campaign.constraintWeekDays) {
 			scheduleType = 'schedule';
 		}
+		const localSlots = dailySlotsFromUTC(campaign);
 
 		formValues = {
 			...formValues,
@@ -1314,18 +1296,16 @@
 			sendEndAt: copyMode ? null : campaign.sendEndAt,
 			scheduledStartAt: copyMode
 				? null
-				: campaign.sendStartAt
-					? local_yyyy_mm_dd(new Date(campaign.sendStartAt))
-					: null,
+				: (localSlots?.startDate ??
+					(campaign.sendStartAt ? local_yyyy_mm_dd(new Date(campaign.sendStartAt)) : null)),
 			scheduledEndAt: copyMode
 				? null
-				: campaign.sendEndAt
-					? local_yyyy_mm_dd(new Date(campaign.sendEndAt))
-					: null,
+				: (localSlots?.endDate ??
+					(campaign.sendEndAt ? local_yyyy_mm_dd(new Date(campaign.sendEndAt)) : null)),
 			scheduleAt: copyMode ? null : (campaign.scheduleAt ?? null),
-			constraintWeekDays: copyMode ? [] : weekDayBinaryToAvailable(campaign.constraintWeekDays),
-			contraintStartTime: copyMode ? null : utcTimeToLocal(campaign.constraintStartTime),
-			contraintEndTime: copyMode ? null : utcTimeToLocal(campaign.constraintEndTime),
+			constraintWeekDays: copyMode ? [] : (localSlots?.weekDays ?? []),
+			contraintStartTime: copyMode ? null : (localSlots?.startTime ?? null),
+			contraintEndTime: copyMode ? null : (localSlots?.endTime ?? null),
 			closeAt: copyMode ? null : campaign.closeAt,
 			anonymizeAt: copyMode ? null : campaign.anonymizeAt,
 			dataAnonymizeAt: copyMode ? null : campaign.dataAnonymizeAt,
@@ -1495,7 +1475,10 @@
 		console.log('all recipients loaded:', recipientGroupRecipients);
 	};
 
-	const refreshEndTimeBySendSpread = (milliseconds) => {
+	// only Time Box derives the end from the spread; without an argument the
+	// current spread option is used, and Manual leaves the end as it is
+	const refreshEndTimeBySendSpread = (milliseconds = getSpreadMilliseconds(spreadOption)) => {
+		if (scheduleType !== 'basic' || milliseconds === null || milliseconds === undefined) return;
 		if (formValues.selectedCount === 0 || !formValues.sendStartAt) return;
 
 		const startDate = new Date(formValues.sendStartAt);
@@ -1520,16 +1503,6 @@
 		}
 
 		return Array.from(daysInRange).sort((a, b) => a - b);
-	};
-
-	const weekDaysAvailableToBinary = (weekDays) => {
-		if (!weekDays?.length) return null;
-		return weekDays.reduce((binary, day) => binary | (1 << day), 0);
-	};
-
-	const weekDayBinaryToAvailable = (binary) => {
-		if (!binary) return [];
-		return Array.from({ length: 7 }, (_, i) => i).filter((day) => binary & (1 << day));
 	};
 
 	const validateConstraintTimes = (element) => {
@@ -2191,6 +2164,9 @@
 										/>
 									</div>
 								</div>
+								{#if dailySlotUTC?.error}
+									<p class="text-red-600 dark:text-red-400 text-sm mt-2">{dailySlotUTC.error}</p>
+								{/if}
 							{/if}
 
 							<div class="mt-6">
@@ -2903,6 +2879,10 @@
 												</span>
 											{/if}
 										{:else if scheduleType === 'schedule'}
+											{#if dailySlotUTC?.error}
+												<span class="text-grayblue-dark font-medium">Problem:</span>
+												<span class="text-red-600 dark:text-red-400">{dailySlotUTC.error}</span>
+											{/if}
 											{#if dailySlotPreview}
 												<span class="text-grayblue-dark font-medium">Start:</span>
 												<span
