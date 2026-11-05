@@ -49,6 +49,7 @@ type Services struct {
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
 	CompanyScimConfig   *service.CompanyScimConfig
 	CompanyReportConfig *service.CompanyReportConfig
+	ReportInbox         *service.ReportInbox
 	Scim                *service.Scim
 	RemoteBrowser       *service.RemoteBrowser
 	ReportTemplate      *service.ReportTemplate
@@ -313,6 +314,7 @@ func NewServices(
 		ScriptService:            scriptSvc,
 		AssetService:             asset,
 		CompanyRepository:        repositories.Company,
+		ReportInboxRepository:    repositories.ReportInbox,
 	}
 	versionService := &service.Version{Common: common}
 	ssoService := &service.SSO{
@@ -349,6 +351,7 @@ func NewServices(
 		Common:                  common,
 		OAuthProviderRepository: repositories.OAuthProvider,
 		OAuthStateRepository:    repositories.OAuthState,
+		ReportInboxRepository:   repositories.ReportInbox,
 	}
 
 	// inject oauth provider service into api sender
@@ -399,6 +402,7 @@ func NewServices(
 		ProxyRepository:             repositories.Proxy,
 		SMTPConfigurationRepository: repositories.SMTPConfiguration,
 		APISenderRepository:         repositories.APISender,
+		ReportInboxRepository:       repositories.ReportInbox,
 		OAuthProviderRepository:     repositories.OAuthProvider,
 		CampaignTemplateRepository:  repositories.CampaignTemplate,
 		IdentifierRepository:        repositories.Identifier,
@@ -409,6 +413,16 @@ func NewServices(
 		CompanyReportConfigRepository: repositories.CompanyReportConfig,
 		ReportSendLogRepository:       repositories.ReportSendLog,
 	}
+
+	reportInbox := &service.ReportInbox{
+		Common:                      common,
+		ReportInboxRepository:       repositories.ReportInbox,
+		CompanyRepository:           repositories.Company,
+		CampaignRecipientRepository: repositories.CampaignRecipient,
+		CampaignService:             campaign,
+		OAuthProviderService:        oauthProvider,
+	}
+	companyService.CancelReportInboxPoll = reportInbox.CancelPoll
 
 	brandingService := &service.Branding{
 		Common:           common,
@@ -421,6 +435,7 @@ func NewServices(
 		ContentRegistry:     contentRegistry,
 		CompanyScimConfig:   companyScimConfig,
 		CompanyReportConfig: companyReportConfig,
+		ReportInbox:         reportInbox,
 		Scim:                scim,
 		Asset:               asset,
 		Attachment:          attachment,

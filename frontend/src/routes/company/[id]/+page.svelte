@@ -18,6 +18,8 @@
 	import ScimModal from '$lib/components/modal/ScimModal.svelte';
 	import CompanyReportTemplateModal from '$lib/components/modal/CompanyReportTemplateModal.svelte';
 	import CompanyReportDeliveryModal from '$lib/components/modal/CompanyReportDeliveryModal.svelte';
+	import CompanyReportInboxModal from '$lib/components/modal/CompanyReportInboxModal.svelte';
+	import ReportInboxStatus from '$lib/components/company/ReportInboxStatus.svelte';
 	import CompanyReportDeliveryLog from '$lib/components/company/CompanyReportDeliveryLog.svelte';
 	import CompanyCustomStats from '$lib/components/company/CompanyCustomStats.svelte';
 
@@ -62,6 +64,9 @@
 	// SCIM status shown in the Integrations tab
 	let scimStatus = 'none'; // 'none' | 'disabled' | 'enabled'
 
+	// report inbox shown in the Reporting tab, null when not configured
+	let reportInbox = null;
+
 	// whether PDF report generation is enabled globally; gates the Reports tab
 	let reportPDFEnabled = false;
 
@@ -69,6 +74,7 @@
 	let isScimModalVisible = false;
 	let isReportTemplateModalVisible = false;
 	let isReportDeliveryModalVisible = false;
+	let isReportInboxModalVisible = false;
 	let isExportAlertVisible = false;
 	let isDeleteAlertVisible = false;
 
@@ -77,6 +83,7 @@
 		{ id: 'general', label: 'General' },
 		{ id: 'stats', label: 'Custom Stats' },
 		{ id: 'integrations', label: 'Integrations' },
+		{ id: 'reporting', label: 'Reporting' },
 		{ id: 'reports', label: 'Reports' },
 		{ id: 'data', label: 'Data' },
 		{ id: 'danger', label: 'Danger Zone' }
@@ -101,7 +108,13 @@
 	};
 
 	const load = async () => {
-		await Promise.all([loadCompany(), loadAutoPrune(), loadScimStatus(), loadReportPDFEnabled()]);
+		await Promise.all([
+			loadCompany(),
+			loadAutoPrune(),
+			loadScimStatus(),
+			loadReportInbox(),
+			loadReportPDFEnabled()
+		]);
 	};
 
 	const loadReportPDFEnabled = async () => {
@@ -136,6 +149,19 @@
 			autoPruneEnabled = res.success && res.data?.enabled === true;
 		} catch (_) {
 			autoPruneEnabled = false;
+		}
+	};
+
+	const loadReportInbox = async () => {
+		try {
+			const res = await api.company.reportInbox.getByCompanyID(companyId);
+			if (res && res.success && res.data) {
+				reportInbox = res.data;
+			} else if (res && res.statusCode === 404) {
+				reportInbox = null;
+			}
+		} catch (_) {
+			// keep the last known status
 		}
 	};
 
@@ -367,6 +393,22 @@
 						</div>
 					</SettingsCard>
 				</div>
+			{:else if active === 'reporting'}
+				<div class="flex flex-wrap gap-6">
+					<SettingsCard title="Reporting Inbox">
+						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
+							Set up automated report tracking with Microsoft 365.
+						</p>
+						<div class="mb-6">
+							<ReportInboxStatus inbox={reportInbox} />
+						</div>
+						<div class="mt-auto flex justify-end">
+							<FormButton size="medium" on:click={() => (isReportInboxModalVisible = true)}
+								>{reportInbox ? 'Manage' : 'Configure'}</FormButton
+							>
+						</div>
+					</SettingsCard>
+				</div>
 			{:else if active === 'reports'}
 				{#if !reportPDFEnabled}
 					<div
@@ -450,6 +492,11 @@
 	<ScimModal bind:visible={isScimModalVisible} {company} />
 	<CompanyReportTemplateModal bind:visible={isReportTemplateModalVisible} {company} />
 	<CompanyReportDeliveryModal bind:visible={isReportDeliveryModalVisible} {company} />
+	<CompanyReportInboxModal
+		bind:visible={isReportInboxModalVisible}
+		{company}
+		on:change={(e) => (reportInbox = e.detail)}
+	/>
 
 	<Alert
 		headline="Export Company Data"

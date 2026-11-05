@@ -492,6 +492,7 @@ func main() {
 		OptionService:       services.Option,
 		RecipientService:    services.Recipient,
 		ScimService:         services.Scim,
+		ReportInboxService:  services.ReportInbox,
 		Logger:              logger,
 	}
 
@@ -512,6 +513,7 @@ func main() {
 		daemonCtx,
 		systemSession,
 	)
+	go daemon.RunReportInboxes(daemonCtx)
 
 	// handle aborts and abort signals
 
@@ -567,6 +569,22 @@ func main() {
 			case <-drained:
 			case <-time.After(20 * time.Second):
 				logger.Warnw("script dispatcher drain exceeded its window, abandoning queued jobs")
+			}
+		}
+
+		// let reporting inbox polls finish their writes before the database closes.
+		// They stop on the cancelled daemon context, so this is short.
+		if services.ReportInbox != nil {
+			logger.Debugf("Stopping reporting inbox polls")
+			done := make(chan struct{})
+			go func() {
+				services.ReportInbox.Stop()
+				close(done)
+			}()
+			select {
+			case <-done:
+			case <-time.After(15 * time.Second):
+				logger.Warnw("reporting inbox polls did not stop in time")
 			}
 		}
 

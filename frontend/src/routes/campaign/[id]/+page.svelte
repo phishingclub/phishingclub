@@ -335,6 +335,11 @@
 	let lureCodeConflict = null;
 	let lureCodeSubmitting = false;
 	let lastPoll3399Nano = '';
+	// how far back a timeline refresh looks for events stored with an earlier time,
+	// and how often it does, so a busy campaign is not fetched again on every tick
+	const TIMELINE_LOOKBACK_MS = 30 * 60 * 1000;
+	const TIMELINE_LOOKBACK_EVERY_MS = 60 * 1000;
+	let lastLookbackAt = 0;
 
 	// live remote browser sessions
 	/** @type {Map<string, {crID: string, campaignID: string, recipientID: string, createdAt: string, victimConnected: boolean, canStream: boolean}>} */
@@ -347,6 +352,17 @@
 	let isTerminateSessionAlertVisible = false;
 	let terminateSessionCRID = '';
 
+	// reporting inbox that covers this campaign: the company inbox, or the global one
+	// for a campaign without a company. null when none is configured or not readable.
+	let reportInbox = null;
+	// checks run every 2 minutes and one can take up to 3 minutes, so a healthy
+	// inbox is checked within about 6 minutes. older than the first limit is a
+	// delay, older than the second means the checker is not running
+	const REPORT_INBOX_WARN_MINUTES = 8;
+	const REPORT_INBOX_STALE_MINUTES = 15;
+	let reportInboxNow = Date.now();
+	let reportInboxNowInterval = null;
+
 	// hooks
 	onMount(() => {
 		const context = appStateService.getContext();
@@ -358,6 +374,8 @@
 			const pdfOpt = await api.option.get('report_pdf_enabled');
 			isReportPDFEnabled = pdfOpt.success && pdfOpt.data?.value === 'true';
 			await refresh();
+			// not awaited, the indicator must not hold up the page
+			loadReportInbox();
 			if (isReportPDFEnabled) {
 				await loadReportDeliveryConfig();
 			}
@@ -373,12 +391,17 @@
 		liveSessionPollInterval = setInterval(refreshLiveSessions, 5000);
 		refreshLiveSessions();
 
+		// the inbox checks every 2 minutes, so reloading its status once a minute is
+		// enough. It also keeps the minutes since the last check current.
+		reportInboxNowInterval = setInterval(loadReportInbox, 60000);
+
 		// cleanup resource context when leaving page
 		return () => {
 			recipientTableUrlParams.unsubscribe();
 			eventsTableURLParams.unsubscribe();
 			resourceContext.clear();
 			clearInterval(liveSessionPollInterval);
+			clearInterval(reportInboxNowInterval);
 		};
 	});
 
@@ -659,16 +682,34 @@
 				sortOrder: 'asc',
 				search: ''
 			};
+			// events can be stored with an earlier time than when they are saved, such
+			// as reports found by the reporting inbox minutes later, so each fetch
+			// looks back a while. Events already shown are skipped by id below.
+			let since = lastPoll3399Nano;
+			const sinceMs = Date.parse(lastPoll3399Nano);
+			const createdMs = Date.parse(campaign.createdAt);
+			// only needed while a reporting inbox records reports for this campaign
+			if (
+				reportInbox?.enabled &&
+				!isNaN(sinceMs) &&
+				Date.now() - lastLookbackAt >= TIMELINE_LOOKBACK_EVERY_MS
+			) {
+				lastLookbackAt = Date.now();
+				const back = sinceMs - TIMELINE_LOOKBACK_MS;
+				since = new Date(isNaN(createdMs) ? back : Math.max(back, createdMs)).toISOString();
+			}
 			for (;;) {
 				const res = await api.campaign.getAllEventsByCampaignID(
 					$page.params.id,
 					options,
-					lastPoll3399Nano
+					since
 				);
 				if (res.data?.rows) {
 					rows = rows.concat(res.data.rows);
 				}
-				if (timelineEventsMap.size + rows.length > MAX_TIMELINE_POINTS) {
+				// only events not shown yet count, the look back fetches some again
+				const newRows = rows.filter((r) => !timelineEventsMap.has(`ev_${r.id}`)).length;
+				if (timelineEventsMap.size + newRows > MAX_TIMELINE_POINTS) {
 					timelineTooLarge = true;
 					timelineEventsMap = new Map();
 					timelineEvents = [];
@@ -1550,6 +1591,78 @@
 		}
 	};
 
+	// the read needs the same permission as managing the inbox, so a user who
+	// can see it can also open its settings
+	const loadReportInbox = async () => {
+		// a closed campaign shows no reporting inbox status
+		if (!campaign || campaign.closedAt) {
+			reportInbox = null;
+			return;
+		}
+		// wait until the campaign is loaded, so the right scope is asked for
+		if (!campaign.createdAt) {
+			return;
+		}
+		try {
+			const res = await api.company.reportInbox.getByCompanyID(campaign.companyID ?? null);
+			if (res && res.success && res.data) {
+				reportInbox = res.data;
+			} else if (res && res.statusCode === 404) {
+				// no inbox for this scope
+				reportInbox = null;
+			}
+			// any other failure keeps the last known status
+		} catch (e) {
+			// keep the last known status when one reload fails
+		}
+		reportInboxNow = Date.now();
+	};
+
+	// counts from the last check, or from when it was turned on if it never checked
+	$: reportInboxCheckedAt = reportInbox?.lastPolledAt || reportInbox?.readSince || null;
+	$: reportInboxAgeMinutes = reportInboxCheckedAt
+		? Math.max(0, Math.floor((reportInboxNow - new Date(reportInboxCheckedAt).getTime()) / 60000))
+		: null;
+	// gray when disabled, red on an error or no check for too long, yellow when
+	// checks are late or have not happened yet, green otherwise
+	$: reportInboxDot = !reportInbox
+		? null
+		: !reportInbox.enabled
+			? { color: 'bg-gray-400 dark:bg-gray-500', label: 'Disabled' }
+			: reportInbox.lastError
+				? { color: 'bg-red-500', label: 'Error' }
+				: reportInboxAgeMinutes === null
+					? { color: 'bg-yellow-400', label: 'Not checked yet' }
+					: reportInboxAgeMinutes > REPORT_INBOX_STALE_MINUTES
+						? { color: 'bg-red-500', label: 'Not checking' }
+						: reportInboxAgeMinutes >= REPORT_INBOX_WARN_MINUTES
+							? { color: 'bg-yellow-400', label: 'Delayed' }
+							: { color: 'bg-green-500', label: 'Active' };
+	$: reportInboxTitle = !reportInboxDot
+		? ''
+		: !reportInbox.enabled
+			? 'Reporting inbox is disabled'
+			: [
+					`Reporting inbox: ${reportInboxDot.label}.`,
+					reportInboxAgeMinutes === null
+						? 'Last check never'
+						: reportInboxAgeMinutes < 1
+							? 'Last check less than a minute ago'
+							: reportInboxAgeMinutes < 60
+								? `Last check ${reportInboxAgeMinutes} minute${reportInboxAgeMinutes !== 1 ? 's' : ''} ago`
+								: `Last check ${new Date(reportInboxCheckedAt).toLocaleString()}`,
+					reportInbox.lastError || ''
+				]
+					.filter(Boolean)
+					.join('\n');
+	// the global inbox is only managed in the global context, so a global campaign
+	// viewed in a company context gets no link
+	$: reportInboxSettingsHref = campaign.companyID
+		? `/company/${campaign.companyID}#reporting`
+		: contextCompanyID
+			? null
+			: '/settings#reporting';
+
 	const onClickSendReport = () => {
 		if (!isReportPDFEnabled) {
 			isReportPDFDisabledModalVisible = true;
@@ -2303,6 +2416,32 @@
 					}
 				]}
 			>
+				<!-- reports are not recorded for closed campaigns -->
+				<svelte:fragment slot="corner">
+					{#if reportInboxDot && !campaign.closedAt}
+						{#if reportInboxSettingsHref}
+							<a
+								data-report-inbox
+								href={reportInboxSettingsHref}
+								target="_blank"
+								title={reportInboxTitle}
+								aria-label={reportInboxTitle}
+								class="block p-1 rounded-full hover:opacity-80"
+							>
+								<span class="block h-2.5 w-2.5 rounded-full {reportInboxDot.color}"></span>
+							</a>
+						{:else}
+							<span
+								data-report-inbox
+								title={reportInboxTitle}
+								aria-label={reportInboxTitle}
+								class="block p-1"
+							>
+								<span class="block h-2.5 w-2.5 rounded-full {reportInboxDot.color}"></span>
+							</span>
+						{/if}
+					{/if}
+				</svelte:fragment>
 				<svg
 					slot="icon"
 					xmlns="http://www.w3.org/2000/svg"

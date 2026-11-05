@@ -218,6 +218,7 @@ type ContentRegistry struct {
 	ProxyRepository             *repository.Proxy
 	SMTPConfigurationRepository *repository.SMTPConfiguration
 	APISenderRepository         *repository.APISender
+	ReportInboxRepository       *repository.ReportInbox
 	OAuthProviderRepository     *repository.OAuthProvider
 	CampaignTemplateRepository  *repository.CampaignTemplate
 	IdentifierRepository        *repository.Identifier

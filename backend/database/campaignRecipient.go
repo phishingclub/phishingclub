@@ -70,6 +70,10 @@ type CampaignRecipient struct {
 	// LureCodeCustom marks a code the operator set by hand, which cannot be told
 	// apart from a generated one by shape.
 	LureCodeCustom bool `gorm:"not null;default:false"`
+
+	// MessageID is the Message-ID header of the email sent to this recipient,
+	// without angle brackets. A report inbox matches a reported email on it.
+	MessageID *string `gorm:"type:varchar(512);index"`
 }
 
 func (CampaignRecipient) TableName() string {

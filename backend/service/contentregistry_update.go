@@ -669,6 +669,15 @@ func (s *ContentRegistry) outsideUsers(
 		if len(names) > 0 {
 			users = append(users, namedLabel("API sender", "API senders", names))
 		}
+		if s.ReportInboxRepository != nil {
+			n, rerr := s.ReportInboxRepository.CountByOAuthProviderID(ctx, *r.ResourceID)
+			if rerr != nil {
+				return nil, rerr
+			}
+			if n > 0 {
+				users = append(users, "a reporting inbox")
+			}
+		}
 	}
 
 	// deleting a domain deletes every asset on it.

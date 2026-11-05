@@ -29,6 +29,7 @@ type OAuthProvider struct {
 	Common
 	OAuthProviderRepository *repository.OAuthProvider
 	OAuthStateRepository    *repository.OAuthState
+	ReportInboxRepository   *repository.ReportInbox
 
 	// refreshGroup ensures only one token refresh happens per provider at a time
 	// even if multiple goroutines request simultaneous token refreshes
@@ -296,6 +297,11 @@ func (o *OAuthProvider) DeleteByID(
 			return errs.Wrap(err)
 		}
 		return errs.Wrap(err)
+	}
+
+	// a reporting inbox that signs in with the provider holds a foreign key to it
+	if err := o.checkNotUsedByReportInbox(ctx, *id); err != nil {
+		return err
 	}
 
 	// delete
@@ -725,9 +731,14 @@ func (o *OAuthProvider) getValidAccessTokenInternal(
 	return newTokens.AccessToken, nil
 }
 
+// oauthTokenClient is used for token requests. The timeout keeps a token
+// endpoint that never answers from holding a caller, such as a reporting inbox
+// poll, forever.
+var oauthTokenClient = &http.Client{Timeout: 30 * time.Second}
+
 // requestTokens makes a request to the token endpoint
 func (o *OAuthProvider) requestTokens(tokenURL string, data url.Values) (*TokenResponse, error) {
-	resp, err := http.PostForm(tokenURL, data)
+	resp, err := oauthTokenClient.PostForm(tokenURL, data)
 	if err != nil {
 		return nil, err
 	}
@@ -982,3 +993,28 @@ func (o *OAuthProvider) CleanupExpiredStates(ctx context.Context) error {
 	return nil
 }
 **/
+
+// checkNotUsedByReportInbox refuses with a clear message when a reporting inbox
+// signs in with the provider
+func (o *OAuthProvider) checkNotUsedByReportInbox(ctx context.Context, id uuid.UUID) error {
+	return reportInboxUsesProvider(ctx, o.ReportInboxRepository, id, "delete")
+}
+
+// reportInboxUsesProvider returns a validation error when a reporting inbox signs
+// in with the provider. action is the verb in the message.
+func reportInboxUsesProvider(ctx context.Context, repo *repository.ReportInbox, id uuid.UUID, action string) error {
+	if repo == nil {
+		return nil
+	}
+	n, err := repo.CountByOAuthProviderID(ctx, id)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	if n == 0 {
+		return nil
+	}
+	return errs.NewValidationError(fmt.Errorf(
+		"cannot %s: this OAuth provider is used by a reporting inbox. Change the reporting inbox to another sign in method first",
+		action,
+	))
+}

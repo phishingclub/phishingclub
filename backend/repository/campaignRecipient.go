@@ -783,7 +783,9 @@ func (r *CampaignRecipient) Anonymize(
 	}
 
 	// release the lure code so the link stops resolving and the code can be reused.
-	lureRow := map[string]interface{}{"lure_code": nil}
+	// the message id goes too, as it is in the delivered email and would tie the
+	// mailbox copy back to this row.
+	lureRow := map[string]interface{}{"lure_code": nil, "message_id": nil}
 	AddUpdatedAt(lureRow)
 	if res := scope(r.DB.Model(&database.CampaignRecipient{})).Updates(lureRow); res.Error != nil {
 		return res.Error
@@ -973,4 +975,44 @@ func ToCampaignRecipient(row *database.CampaignRecipient) (*model.CampaignRecipi
 		LureCode:         lureCode,
 		LureCodeCustom:   nullable.NewNullableWithValue(row.LureCodeCustom),
 	}, nil
+}
+
+// SetMessageIDByID stores the Message-ID of the email sent to a campaign recipient
+func (r *CampaignRecipient) SetMessageIDByID(
+	ctx context.Context,
+	id *uuid.UUID,
+	messageID string,
+) error {
+	// only the first sent email's Message-ID is kept, a resend does not replace it
+	res := r.DB.WithContext(ctx).
+		Model(&database.CampaignRecipient{}).
+		Where("id = ?", id.String()).
+		Where("message_id IS NULL").
+		Update("message_id", messageID)
+	return res.Error
+}
+
+// GetByMessageID gets the campaign recipient that was sent the email with the
+// given Message-ID, without angle brackets
+func (r *CampaignRecipient) GetByMessageID(
+	ctx context.Context,
+	messageID string,
+) (*model.CampaignRecipient, error) {
+	if messageID == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	// a Message-ID shared by several recipients, for example a fixed one set by a
+	// custom SMTP header, can not tell them apart, so it does not match
+	var rows []database.CampaignRecipient
+	res := r.DB.WithContext(ctx).
+		Where("message_id = ?", messageID).
+		Limit(2).
+		Find(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if len(rows) != 1 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return ToCampaignRecipient(&rows[0])
 }

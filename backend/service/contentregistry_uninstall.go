@@ -295,6 +295,12 @@ func (s *ContentRegistry) remove(
 	if err != nil {
 		return errs.Wrap(err)
 	}
+	// a reporting inbox signing in with an OAuth provider of this package, or of a
+	// referenced package removed with it, blocks the removal before anything is
+	// deleted, so a bundle is never left half removed
+	if err := s.checkRemovalNotUsedByReportInbox(ctx, installedPackageID); err != nil {
+		return err
+	}
 	// the API senders this package itself installed are deleted in this same call,
 	// so they must not count as external users that block removing the package's own
 	// OAuth provider (a self contained package shipping both would never uninstall).
@@ -1388,4 +1394,38 @@ func (s *ContentRegistry) resourceName(ctx context.Context, r *database.Installe
 		return r.SourceName
 	}
 	return name
+}
+
+// checkRemovalNotUsedByReportInbox returns a validation error when a reporting
+// inbox signs in with an OAuth provider installed by the package or by a
+// referenced package that is removed with it
+func (s *ContentRegistry) checkRemovalNotUsedByReportInbox(ctx context.Context, installedPackageID *uuid.UUID) error {
+	if s.ReportInboxRepository == nil {
+		return nil
+	}
+	members, err := s.removalSet(ctx, []*uuid.UUID{installedPackageID}, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+	ids := []*uuid.UUID{installedPackageID}
+	for _, m := range members {
+		if m != nil && m.ID != nil {
+			ids = append(ids, m.ID)
+		}
+	}
+	for _, id := range ids {
+		resources, err := s.RegistryRepository.GetInstalledResourcesByPackage(ctx, id)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		for _, r := range resources {
+			if r.ResourceType != "oauthprovider" || r.ResourceID == nil {
+				continue
+			}
+			if err := reportInboxUsesProvider(ctx, s.ReportInboxRepository, *r.ResourceID, "uninstall"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

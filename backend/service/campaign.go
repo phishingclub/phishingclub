@@ -1966,7 +1966,6 @@ func (c *Campaign) SaveRecipientReported(
 	ctx *gin.Context,
 	campaignRecipientID *uuid.UUID,
 ) error {
-	// resolve the campaign recipient from the token
 	campaignRecipient, err := c.CampaignRecipientRepository.GetByCampaignRecipientID(
 		ctx.Request.Context(),
 		campaignRecipientID,
@@ -1979,105 +1978,28 @@ func (c *Campaign) SaveRecipientReported(
 		c.Logger.Errorw("failed to get campaign recipient by id", "error", err)
 		return errs.Wrap(err)
 	}
-	// an anonymized campaign recipient has no recipient id, which happens for a
-	// closed anonymous campaign whose link was severed. this public endpoint can be
-	// hit long after close from a token in a delivered email, so return quietly
-	// rather than dereferencing a null id.
-	if campaignRecipient.RecipientID.IsNull() {
-		c.Logger.Debugw("skipping report event: recipient is anonymized", "campaignRecipientID", campaignRecipientID.String())
-		return nil
-	}
-	recipientID := campaignRecipient.RecipientID.MustGet()
-	campaignID := campaignRecipient.CampaignID.MustGet()
-
-	// do not record events for SCIM-disabled (deprovisioned) recipients
-	if recipient, rErr := c.RecipientRepository.GetByID(ctx.Request.Context(), &recipientID, &repository.RecipientOption{}); rErr == nil && recipient.ScimSoftDeletedAt != nil {
-		c.Logger.Debugw("skipping report event: recipient is scim-disabled", "campaignRecipientID", campaignRecipientID.String())
-		return nil
+	campaign, ok, err := c.reportableCampaign(ctx.Request.Context(), campaignRecipient, time.Now())
+	if err != nil || !ok {
+		return err
 	}
 
-	campaign, err := c.CampaignRepository.GetByID(
-		ctx,
-		&campaignID,
-		&repository.CampaignOption{},
-	)
-	if err != nil {
-		c.Logger.Errorw("failed to get campaign by id", "error", err)
-		return errs.Wrap(err)
-	}
-	// do not record events for closed campaigns
-	if !campaign.IsActive() {
-		c.Logger.Debugw("skipping report event: campaign is closed", "campaignID", campaignID.String())
-		return nil
-	}
-
-	reportedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
-
-	// de-duplicate: a recipient that already reported is not recorded again so a
-	// button that fires more than once does not spam the timeline. an anonymous
-	// campaign's events carry the pseudonym rather than a recipient id, so dedup on
-	// that instead.
-	var alreadyReported bool
-	if aid, aErr := campaignRecipient.AnonymizedID.Get(); aErr == nil {
-		alreadyReported, err = c.CampaignRepository.HasEventByAnonymizedID(ctx.Request.Context(), &campaignID, &aid, reportedEventID)
-	} else {
-		alreadyReported, err = c.CampaignRepository.HasEvent(ctx.Request.Context(), &campaignID, &recipientID, reportedEventID)
-	}
-	if err != nil {
-		c.Logger.Errorw("failed to check existing reported event", "error", err)
-		return errs.Wrap(err)
-	}
-	if alreadyReported {
-		c.Logger.Debugw("recipient already reported", "campaignRecipientID", campaignRecipientID.String())
-		return nil
-	}
-
-	newEventID := uuid.New()
 	ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.TrustedProxies))
 	ua := ctx.Request.UserAgent()
 	if len(ua) > 255 {
 		ua = strings.TrimSpace(ua[:255])
 	}
-	userAgent := vo.NewOptionalString255Must(ua)
-	metadata := model.ExtractCampaignEventMetadata(ctx, campaign)
-	campaignEvent := &model.CampaignEvent{
-		ID:          &newEventID,
-		CampaignID:  &campaignID,
-		RecipientID: &recipientID,
-		IP:          ip,
-		UserAgent:   userAgent,
-		EventID:     reportedEventID,
-		Data:        vo.NewEmptyOptionalString1MB(),
-		Metadata:    metadata,
-	}
-	anonymizeEventForRecipient(campaignAnonymous(campaign), campaignRecipient, campaignEvent)
-	err = c.CampaignRepository.SaveEvent(ctx, campaignEvent)
-	if err != nil {
-		c.Logger.Errorw("failed to save reported event", "error", err)
-		return errs.Wrap(err)
-	}
-	// handle most notable event
-	err = c.SetNotableCampaignRecipientEvent(
+	_, err = c.recordReported(
 		ctx,
 		campaignRecipient,
-		data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
+		campaign,
+		reportedEventFields{
+			IP:        ip,
+			UserAgent: vo.NewOptionalString255Must(ua),
+			Data:      vo.NewEmptyOptionalString1MB(),
+			Metadata:  model.ExtractCampaignEventMetadata(ctx, campaign),
+		},
 	)
-	if err != nil {
-		// logging was done in the previous call
-		return errs.Wrap(err)
-	}
-	// handle webhooks
-	err = c.HandleWebhooks(
-		ctx,
-		&campaignID,
-		&recipientID,
-		data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
-		nil,
-	)
-	if err != nil {
-		return errs.Wrap(err)
-	}
-	return nil
+	return err
 }
 
 // UpdateByID updates a campaign by id
@@ -3554,6 +3476,12 @@ func (c *Campaign) sendCampaignMessages(
 		// deref 0 as only a single recipient in each mail
 		to := m.GetToString()[0]
 		campaignRecipient := mailToCampaignRecipient[to]
+		// only a message the server accepted has its Message-ID stored
+		if m.IsDelivered() {
+			if crID, crErr := campaignRecipient.ID.Get(); crErr == nil {
+				c.storeMessageID(ctx, &crID, sentMessageID(m, smtpConfig.Headers))
+			}
+		}
 		err := c.saveSendingResult(
 			ctx,
 			campaignRecipient,
@@ -5231,6 +5159,12 @@ func (c *Campaign) HandleWebhooks(
 		// use context.Background() so a cancelled request context does not
 		// abort the send - the goroutine outlives the originating request
 		go func(wh *model.Webhook, req *WebhookRequest) {
+			// a panic in a background send must never take down the server
+			defer func() {
+				if r := recover(); r != nil {
+					c.Logger.Errorw("recovered from panic while sending webhook", "panic", r)
+				}
+			}()
 			c.Logger.Debugw("sending webhook", "url", wh.URL.MustGet().String())
 			_, err := c.WebhookService.Send(context.Background(), wh, req)
 			if err != nil {
@@ -6296,6 +6230,9 @@ func (c *Campaign) sendSingleEmailSMTP(
 		c.Logger.Errorw("failed to send email", "error", err)
 		return errs.Wrap(err)
 	}
+	if crID, crErr := campaignRecipient.ID.Get(); crErr == nil {
+		c.storeMessageID(ctx, &crID, sentMessageID(m, smtpConfig.Headers))
+	}
 
 	return nil
 }
@@ -6341,11 +6278,9 @@ func (c *Campaign) SetNotableCampaignRecipientEvent(
 	) {
 		campaignRecipient.NotableEventID.Set(*notableEventID)
 		crid := campaignRecipient.ID.MustGet()
-		err := c.CampaignRecipientRepository.UpdateByID(
-			ctx,
-			&crid,
-			campaignRecipient,
-		)
+		// only the notable event is written, not the whole row as it was loaded,
+		// so a change made meanwhile, such as an anonymize, is never undone
+		err := c.CampaignRecipientRepository.UpdateNotableEventByID(ctx, &crid, notableEventID)
 		if err != nil {
 			c.Logger.Errorw("failed to save updating notable campaign recipient event", "error", err)
 			return errs.Wrap(err)

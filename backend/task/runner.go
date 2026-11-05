@@ -20,6 +20,11 @@ const MAX_PROCESSING_TICK_TIME = 10 * time.Minute
 const TASK_INTERVAL = 10 * time.Second
 const SYSTEM_TASK_INTERVAL = 1 * time.Hour
 
+// REPORT_INBOX_INTERVAL is how often the report inbox poller fills free poll
+// slots with inboxes that are due. Each inbox has its own poll interval and
+// backoff on top of this.
+const REPORT_INBOX_INTERVAL = 10 * time.Second
+
 // Daemon is for running tasks in the background
 // ex: sending emails etc..
 type Runner struct {
@@ -29,6 +34,7 @@ type Runner struct {
 	OptionService       *service.Option
 	RecipientService    *service.Recipient
 	ScimService         *service.Scim
+	ReportInboxService  *service.ReportInbox
 	Logger              *zap.SugaredLogger
 }
 
@@ -251,4 +257,32 @@ func (d *Runner) PruneOrphanedRecipients(
 		d.Logger.Debugw("pruned company orphaned recipients", "companyID", companyID, "count", count)
 	}
 	return nil
+}
+
+// RunReportInboxes polls report mailboxes in its own loop, so a slow mail
+// provider never delays campaign sending in the main task loop
+func (d *Runner) RunReportInboxes(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			stack := debug.Stack()
+			d.Logger.Errorw("reporting inbox poller panicked", "error", r, "stack", string(stack))
+			time.Sleep(5 * time.Second)
+			go d.RunReportInboxes(ctx)
+		}
+	}()
+	if d.ReportInboxService == nil {
+		return
+	}
+	ticker := time.NewTicker(REPORT_INBOX_INTERVAL)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.runTask("poll reporting inboxes", func() error {
+				return d.ReportInboxService.PollDue(ctx)
+			})
+		}
+	}
 }

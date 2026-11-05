@@ -3,6 +3,7 @@
 	import { onMount, tick } from 'svelte';
 	import { beforeNavigate } from '$app/navigation';
 	import { scrollBarClassesVertical } from '$lib/utils/scrollbar';
+	import { guideURL } from '$lib/consts/docs';
 
 	export let headerText = '';
 	export let description = '';
@@ -13,6 +14,9 @@
 	export let resetTabFocus = () => {};
 	export let noAutoFocus = false;
 	export let fullscreen = false;
+	// when set, a help icon next to the title links to the matching guide page
+	export let docSlug = '';
+	export let docAnchor = '';
 
 	let modalElement;
 	let previousActiveElement;
@@ -341,7 +345,21 @@
 						{fullscreen ? '' : 'rounded-t-md'}"
 				>
 					<div class="flex-1">
-						<h1 id="modal-title" class="uppercase mr-8 font-semibold text-2xl">{headerText}</h1>
+						{#if docSlug}
+							<div class="flex items-start gap-2 mr-8">
+								<h1 id="modal-title" class="uppercase font-semibold text-2xl">{headerText}</h1>
+								<a
+									class="mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-white/60 text-[10px] font-medium leading-none text-white/80 hover:border-white hover:text-white transition-colors duration-200"
+									href={guideURL(docSlug, docAnchor)}
+									target="_blank"
+									rel="noopener noreferrer"
+									title="Open the documentation"
+									aria-label="Open the documentation">?</a
+								>
+							</div>
+						{:else}
+							<h1 id="modal-title" class="uppercase mr-8 font-semibold text-2xl">{headerText}</h1>
+						{/if}
 						{#if description}
 							<p id="modal-description" class="mt-2 text-sm opacity-90 break-all">{description}</p>
 						{/if}

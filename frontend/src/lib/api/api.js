@@ -1560,6 +1560,61 @@ export class API {
 				return await postJSON(this.getPath(`/report-config/send/${campaignID}`), {});
 			}
 		},
+
+		reportInbox: {
+			// path for a scope: a company id, or the global inbox when companyID is null.
+			// the global inbox only covers global campaigns.
+			scopePath: (companyID) =>
+				companyID ? `/company/report-inbox/${companyID}` : `/report-inbox`,
+			// body shared by upsert and test. an empty clientSecret keeps the stored one.
+			body: ({
+				enabled,
+				authMode,
+				mailbox,
+				tenantID,
+				clientID,
+				clientSecret,
+				oauthProviderID
+			}) => ({
+				enabled: !!enabled,
+				authMode: authMode ?? 'app',
+				mailbox: mailbox ?? '',
+				tenantID: tenantID ?? '',
+				clientID: clientID ?? '',
+				clientSecret: clientSecret ?? '',
+				oauthProviderID: oauthProviderID ?? null
+			}),
+			// get the report inbox, 404 when none is configured
+			getByCompanyID: async (companyID) => {
+				return await getJSON(this.getPath(this.company.reportInbox.scopePath(companyID)));
+			},
+			// create or update the report inbox
+			upsert: async (companyID, inbox) => {
+				return await postJSON(
+					this.getPath(this.company.reportInbox.scopePath(companyID)),
+					this.company.reportInbox.body(inbox)
+				);
+			},
+			// delete the report inbox and its stored credentials
+			delete: async (companyID) => {
+				return await deleteJSON(this.getPath(this.company.reportInbox.scopePath(companyID)));
+			},
+			// test settings against Microsoft Graph without saving them.
+			// returns { ok, steps: [{ name, ok, message }], warnings: [] }
+			test: async (companyID, inbox) => {
+				return await postJSON(
+					this.getPath(`${this.company.reportInbox.scopePath(companyID)}/test`),
+					this.company.reportInbox.body(inbox)
+				);
+			},
+			// read the mailbox on the next poller round instead of waiting
+			pollNow: async (companyID) => {
+				return await postJSON(
+					this.getPath(`${this.company.reportInbox.scopePath(companyID)}/poll`),
+					{}
+				);
+			}
+		},
 		/**
 		 * Get the auto-prune orphaned recipients setting for a company.
 		 * Returns only the per-company enabled flag.

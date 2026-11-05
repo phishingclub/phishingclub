@@ -85,6 +85,12 @@ const (
 	ROUTE_V1_COMPANY_REPORT_CONFIG_LOG = "/api/v1/company/report-config/:companyID/log"
 	ROUTE_V1_REPORT_CONFIG_GLOBAL      = "/api/v1/report-config"
 	ROUTE_V1_REPORT_CONFIG_SEND        = "/api/v1/report-config/send/:id"
+	ROUTE_V1_COMPANY_REPORT_INBOX      = "/api/v1/company/report-inbox/:companyID"
+	ROUTE_V1_COMPANY_REPORT_INBOX_TEST = "/api/v1/company/report-inbox/:companyID/test"
+	ROUTE_V1_COMPANY_REPORT_INBOX_POLL = "/api/v1/company/report-inbox/:companyID/poll"
+	ROUTE_V1_REPORT_INBOX_GLOBAL       = "/api/v1/report-inbox"
+	ROUTE_V1_REPORT_INBOX_GLOBAL_TEST  = "/api/v1/report-inbox/test"
+	ROUTE_V1_REPORT_INBOX_GLOBAL_POLL  = "/api/v1/report-inbox/poll"
 	// scim v2 provisioning endpoints (public, authenticated via bearer token)
 	ROUTE_SCIM_V2_SERVICE_PROVIDER_CONFIG = "/api/v1/scim/v2/:companyID/ServiceProviderConfig"
 	ROUTE_SCIM_V2_RESOURCE_TYPES          = "/api/v1/scim/v2/:companyID/ResourceTypes"
@@ -435,6 +441,18 @@ func setupRoutes(
 		POST(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.UpsertGlobal).
 		DELETE(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.DeleteGlobal).
 		POST(ROUTE_V1_REPORT_CONFIG_SEND, middleware.SessionHandler, controllers.CompanyReportConfig.SendNow).
+		// company report inbox
+		GET(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.GetByCompanyID).
+		POST(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.Upsert).
+		DELETE(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.Delete).
+		POST(ROUTE_V1_COMPANY_REPORT_INBOX_TEST, middleware.SessionHandler, controllers.ReportInbox.Test).
+		POST(ROUTE_V1_COMPANY_REPORT_INBOX_POLL, middleware.SessionHandler, controllers.ReportInbox.PollNow).
+		// global report inbox, covers global campaigns only
+		GET(ROUTE_V1_REPORT_INBOX_GLOBAL, middleware.SessionHandler, controllers.ReportInbox.GetGlobal).
+		POST(ROUTE_V1_REPORT_INBOX_GLOBAL, middleware.SessionHandler, controllers.ReportInbox.UpsertGlobal).
+		DELETE(ROUTE_V1_REPORT_INBOX_GLOBAL, middleware.SessionHandler, controllers.ReportInbox.DeleteGlobal).
+		POST(ROUTE_V1_REPORT_INBOX_GLOBAL_TEST, middleware.SessionHandler, controllers.ReportInbox.TestGlobal).
+		POST(ROUTE_V1_REPORT_INBOX_GLOBAL_POLL, middleware.SessionHandler, controllers.ReportInbox.PollNowGlobal).
 		// options
 		GET(ROUTE_V1_OPTION_GET, middleware.SessionHandler, controllers.Option.Get).
 		POST(ROUTE_V1_OPTION, middleware.SessionHandler, middleware.SessionHandler, controllers.Option.Update).

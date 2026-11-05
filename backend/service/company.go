@@ -33,6 +33,10 @@ type Company struct {
 	ScriptService            *Script
 	AssetService             *Asset
 	CompanyRepository        *repository.Company
+	ReportInboxRepository    *repository.ReportInbox
+	// CancelReportInboxPoll stops a running poll of a reporting inbox that is
+	// deleted with its company
+	CancelReportInboxPoll func(uuid.UUID)
 }
 
 // Create creates a company
@@ -273,6 +277,29 @@ func (s *Company) DeleteByID(
 		s.AuditLogNotAuthorized(ae)
 		return 0, errs.ErrAuthorizationFailed
 	}
+	// delete the reporting inbox first, with its stored credentials, so nothing
+	// keeps reading the company's mailbox or records reports while the
+	// campaigns below are deleted
+	if s.ReportInboxRepository != nil {
+		inbox, inboxErr := s.ReportInboxRepository.GetByCompanyID(g, companyID)
+		switch {
+		case inboxErr == nil:
+			inboxID := inbox.ID.MustGet()
+			if err := s.ReportInboxRepository.DeleteByID(g, &inboxID); err != nil {
+				s.Logger.Errorw("failed to delete reporting inbox related to company", "error", err)
+				return 0, errs.Wrap(err)
+			}
+			// stopped after the delete, so a poll planned meanwhile is either
+			// stopped here or finds the inbox gone before it reads anything
+			if s.CancelReportInboxPoll != nil {
+				s.CancelReportInboxPoll(inboxID)
+			}
+		case !errors.Is(inboxErr, gorm.ErrRecordNotFound):
+			s.Logger.Errorw("failed to get reporting inbox related to company", "error", inboxErr)
+			return 0, errs.Wrap(inboxErr)
+		}
+	}
+
 	// deleting a company starts a big chain of deletion where all things related
 	// to the company is deleted
 	// delete domains owned by the company, this deletes assets owned by the domains

@@ -66,6 +66,8 @@ func initialInstallAndSeed(
 		&database.CompanyScimConfig{},
 		&database.CompanyReportConfig{},
 		&database.ReportSendLog{},
+		&database.ReportInbox{},
+		&database.ReportInboxMessage{},
 		&database.RemoteBrowser{},
 		&database.ReportTemplate{},
 		&database.Registry{},

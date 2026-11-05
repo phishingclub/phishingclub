@@ -34,6 +34,7 @@ type Repositories struct {
 	MicrosoftDeviceCode *repository.MicrosoftDeviceCode
 	CompanyScimConfig   *repository.CompanyScimConfig
 	CompanyReportConfig *repository.CompanyReportConfig
+	ReportInbox         *repository.ReportInbox
 	ReportSendLog       *repository.ReportSendLog
 	RemoteBrowser       *repository.RemoteBrowser
 	ReportTemplate      *repository.ReportTemplate
@@ -73,6 +74,7 @@ func NewRepositories(
 		MicrosoftDeviceCode: &repository.MicrosoftDeviceCode{DB: db},
 		CompanyScimConfig:   &repository.CompanyScimConfig{DB: db},
 		CompanyReportConfig: &repository.CompanyReportConfig{DB: db},
+		ReportInbox:         &repository.ReportInbox{DB: db},
 		ReportSendLog:       &repository.ReportSendLog{DB: db},
 		RemoteBrowser:       &repository.RemoteBrowser{DB: db},
 		ReportTemplate:      &repository.ReportTemplate{DB: db},

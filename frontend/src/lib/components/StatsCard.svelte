@@ -43,8 +43,14 @@
 </script>
 
 <div
-	class="h-full bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none border-l-[12px] {borderColor} hover:shadow-lg dark:hover:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
+	class="relative h-full bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none border-l-[12px] {borderColor} hover:shadow-lg dark:hover:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
 >
+	<!-- optional small indicator in the top right corner, positioned so the layout does not move -->
+	{#if $$slots.corner}
+		<div class="absolute top-2 right-2">
+			<slot name="corner" />
+		</div>
+	{/if}
 	<div
 		class="text-grayblue-dark dark:text-gray-500 text-sm font-semibold transition-colors duration-200"
 	>

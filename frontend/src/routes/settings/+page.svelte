@@ -13,8 +13,11 @@
 	import System from './panels/System.svelte';
 	import Branding from './panels/Branding.svelte';
 	import IPData from './panels/IPData.svelte';
+	import Reporting from './panels/Reporting.svelte';
 
-	// Red Team panel is only relevant in red team phishing (blackbox) mode
+	// Red Team panel is only relevant in red team phishing (blackbox) mode.
+	// Reporting holds the global reporting inbox, so it is only shown in the
+	// global context. A company's reporting inbox is in its company settings.
 	$: tabs = [
 		{ id: 'general', label: 'General', component: General },
 		{ id: 'access', label: 'Access', component: Access },
@@ -22,6 +25,9 @@
 		{ id: 'data', label: 'Data', component: Data },
 		{ id: 'ipdata', label: 'IP Data', component: IPData },
 		{ id: 'reports', label: 'Reports', component: Reports },
+		...(!companyContext.isCompany
+			? [{ id: 'reporting', label: 'Reporting', component: Reporting }]
+			: []),
 		...($displayMode === DISPLAY_MODE.BLACKBOX
 			? [{ id: 'redteam', label: 'Red Team', component: RedTeam }]
 			: []),
@@ -30,8 +36,11 @@
 	];
 
 	let active = 'general';
+	// a tab that is not shown in the current context, or not yet, is displayed
+	// as General without forgetting the requested tab
+	$: shown = tabs.some((t) => t.id === active) ? active : 'general';
 
-	$: ActiveComponent = (tabs.find((t) => t.id === active) || tabs[0]).component;
+	$: ActiveComponent = (tabs.find((t) => t.id === shown) || tabs[0]).component;
 
 	// company context: when viewing as a company, link to that company's settings
 	const appState = AppStateService.instance;
@@ -39,8 +48,10 @@
 	let unsubAppState;
 
 	onMount(() => {
+		// a tab that only appears once the mode or context is known is kept and
+		// shown as soon as it is there
 		const hash = window.location.hash.replace('#', '');
-		if (tabs.some((t) => t.id === hash)) {
+		if (hash) {
 			active = hash;
 		}
 		unsubAppState = appState.subscribe((s) => {
@@ -75,7 +86,7 @@
 					<button
 						on:click={() => selectTab(tab.id)}
 						class="px-6 py-3 text-sm font-medium border-b-2 transition-colors
-							{active === tab.id
+							{shown === tab.id
 							? 'border-cta-blue dark:border-highlight-blue text-cta-blue dark:text-highlight-blue'
 							: 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'}"
 					>
