@@ -784,26 +784,61 @@
 	// Adding T00:00:00 (no offset) forces the spec to treat it as local time instead.
 	const parseLocalDate = (dateStr) => new Date(dateStr + 'T00:00:00');
 
+	// returns the first and last delivery day (local midnight) for daily slots,
+	// or null when the dates or week days are not set yet
+	const dailySlotDays = (scheduledStartAt, scheduledEndAt, weekDays) => {
+		if (!scheduledStartAt || !scheduledEndAt || !weekDays?.length) return null;
+		const startDateTime = parseLocalDate(scheduledStartAt);
+		const endDateTime = parseLocalDate(scheduledEndAt);
+		const startWeekday = startDateTime.getDay();
+		const firstWeekDay = weekDays.find((d) => d >= startWeekday) ?? weekDays[0];
+		const firstDay = nextDay(subDays(startDateTime, 1), firstWeekDay);
+		const endWeekday = endDateTime.getDay();
+		const reverseWeekDays = [...weekDays].reverse();
+		const lastWeekDay = reverseWeekDays.find((d) => d <= endWeekday) ?? reverseWeekDays[0];
+		const endDay = previousDay(addDays(endDateTime, 1), lastWeekDay);
+		return { firstDay, endDay };
+	};
+
+	// sets a HH:MM time on a copy of a local date
+	const withLocalTime = (date, time) => {
+		const d = new Date(date);
+		if (time) {
+			const [h, m] = time.split(':').map((v) => parseInt(v, 10));
+			d.setHours(h, m, 0, 0);
+		}
+		return d;
+	};
+
+	// daily slots summary for the review step: first send, last send and
+	// the number of days with delivery
+	$: dailySlotPreview = (() => {
+		const days = dailySlotDays(
+			formValues.scheduledStartAt,
+			formValues.scheduledEndAt,
+			formValues.constraintWeekDays
+		);
+		if (!days || days.firstDay > days.endDay) return null;
+		let deliveryDays = 0;
+		for (let d = new Date(days.firstDay); d <= days.endDay; d = addDays(d, 1)) {
+			if (formValues.constraintWeekDays.includes(d.getDay())) deliveryDays++;
+		}
+		return {
+			start: withLocalTime(days.firstDay, formValues.contraintStartTime),
+			end: withLocalTime(days.endDay, formValues.contraintEndTime),
+			deliveryDays
+		};
+	})();
+
 	const setScheduledAt = () => {
-		if (
-			formValues.scheduledStartAt &&
-			formValues.scheduledEndAt &&
-			formValues.constraintWeekDays.length > 0
-		) {
-			const startDateTime = parseLocalDate(formValues.scheduledStartAt);
-			const endDateTime = parseLocalDate(formValues.scheduledEndAt);
-			const startWeekday = startDateTime.getDay();
-			const firstWeekDay =
-				formValues.constraintWeekDays.find((d) => d >= startWeekday) ??
-				formValues.constraintWeekDays[0];
-			const firstDay = nextDay(subDays(startDateTime, 1), firstWeekDay);
-			const endWeekday = endDateTime.getDay();
-			const reverseContaintWeekDays = [...formValues.constraintWeekDays].reverse();
-			const lastWeekDay =
-				reverseContaintWeekDays.find((d) => d <= endWeekday) ?? reverseContaintWeekDays[0];
-			const endDay = previousDay(addDays(endDateTime, 1), lastWeekDay);
-			formValues.sendStartAt = firstDay.toString();
-			formValues.sendEndAt = endDay.toString();
+		const days = dailySlotDays(
+			formValues.scheduledStartAt,
+			formValues.scheduledEndAt,
+			formValues.constraintWeekDays
+		);
+		if (days) {
+			formValues.sendStartAt = days.firstDay.toString();
+			formValues.sendEndAt = days.endDay.toString();
 		}
 	};
 
@@ -2868,6 +2903,34 @@
 												</span>
 											{/if}
 										{:else if scheduleType === 'schedule'}
+											{#if dailySlotPreview}
+												<span class="text-grayblue-dark font-medium">Start:</span>
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
+													<Datetime value={dailySlotPreview.start} />
+													<RelativeTime value={dailySlotPreview.start} />
+												</span>
+
+												<span class="text-grayblue-dark font-medium">End:</span>
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
+													<Datetime value={dailySlotPreview.end} />
+													<RelativeTime value={dailySlotPreview.end} />
+												</span>
+
+												<span class="text-grayblue-dark font-medium">Duration:</span>
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
+													{dailySlotPreview.deliveryDays} delivery day{dailySlotPreview.deliveryDays !==
+													1
+														? 's'
+														: ''}
+												</span>
+											{/if}
+
 											<span class="text-grayblue-dark font-medium">Active days:</span>
 											<span
 												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
