@@ -15,9 +15,12 @@
 	import { addToast } from '$lib/store/toast';
 	import { AppStateService } from '$lib/service/appState';
 	import {
+		browserTimeZone,
 		dailySlotWindow,
-		dailySlotsToUTC,
-		dailySlotsFromUTC
+		dailySlotsPayload,
+		dailySlotsFromCampaign,
+		formatInZone,
+		timeZoneLabel
 	} from '$lib/utils/dailySlots';
 	import { getModalText } from '$lib/utils/common';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form';
@@ -299,40 +302,32 @@
 		spreadOption = SPREAD_MANUAL;
 	}
 
-	// Daily Slots: the local delivery window shown in the review step and its UTC
-	// form sent to the backend. sendStartAt and sendEndAt follow the window, so late
-	// schedule and the other send time checks work the same as for Time Box.
+	// Daily Slots: the delivery window shown in the review step and the fields sent
+	// to the backend, which builds the same windows in the same zone. sendStartAt and
+	// sendEndAt follow the window, so late schedule and the other send time checks
+	// work the same as for Time Box.
 	let dailySlotPreview = null;
-	let dailySlotUTC = null;
+	let dailySlotData = null;
 	$: if (scheduleType === 'schedule') {
 		const slot = {
 			startDate: formValues.scheduledStartAt,
 			endDate: formValues.scheduledEndAt,
 			weekDays: formValues.constraintWeekDays,
 			startTime: formValues.contraintStartTime,
-			endTime: formValues.contraintEndTime
+			endTime: formValues.contraintEndTime,
+			timeZone: formValues.constraintTimeZone
 		};
-		dailySlotUTC = dailySlotsToUTC(slot);
-		const win = dailySlotWindow(slot);
-		// show the start and end the backend will run, which can differ by an hour
-		// from the local end time when a clock change falls inside the range
-		dailySlotPreview =
-			win && dailySlotUTC && !dailySlotUTC.error
-				? {
-						...win,
-						start: new Date(dailySlotUTC.sendStartAt),
-						end: new Date(dailySlotUTC.sendEndAt)
-					}
-				: win;
-		const start = dailySlotUTC?.sendStartAt ?? null;
-		const end = dailySlotUTC?.sendEndAt ?? null;
+		dailySlotData = dailySlotsPayload(slot);
+		dailySlotPreview = dailySlotData && !dailySlotData.error ? dailySlotWindow(slot) : null;
+		const start = dailySlotData?.sendStartAt ?? null;
+		const end = dailySlotData?.sendEndAt ?? null;
 		if (formValues.sendStartAt !== start || formValues.sendEndAt !== end) {
 			formValues.sendStartAt = start;
 			formValues.sendEndAt = end;
 		}
 	} else {
 		dailySlotPreview = null;
-		dailySlotUTC = null;
+		dailySlotData = null;
 	}
 
 	// reactive statement to keep scheduleAt in sync when sendStartAt changes while late scheduling is enabled.
@@ -518,6 +513,7 @@
 		constraintWeekDays: [],
 		contraintStartTime: null,
 		contraintEndTime: null,
+		constraintTimeZone: browserTimeZone(),
 		saveSubmittedData: true,
 		saveBrowserMetadata: false,
 		isAnonymous: false,
@@ -895,11 +891,11 @@
 	};
 
 	const save = async () => {
-		if (scheduleType === 'schedule' && (!dailySlotUTC || dailySlotUTC.error)) {
-			modalError = dailySlotUTC?.error ?? 'Choose the delivery dates, days and hours.';
+		if (scheduleType === 'schedule' && (!dailySlotData || dailySlotData.error)) {
+			modalError = dailySlotData?.error ?? 'Choose the delivery dates, days and hours.';
 			return;
 		}
-		const slotUTC = scheduleType === 'schedule' ? dailySlotUTC : null;
+		const slotData = scheduleType === 'schedule' ? dailySlotData : null;
 		const recipientGroupIDs = formValues.recipientGroups.map((name) =>
 			recipientGroupMap.byValue(name)
 		);
@@ -919,8 +915,6 @@
 			const dataAnonymizeAtUTC = formValues.dataAnonymizeAt
 				? new Date(formValues.dataAnonymizeAt).toISOString()
 				: null;
-			const contraintStartTimeUTC = slotUTC?.constraintStartTime ?? null;
-			const contraintEndTimeUTC = slotUTC?.constraintEndTime ?? null;
 			const scheduleAtUTC = formValues.scheduleAt
 				? new Date(formValues.scheduleAt).toISOString()
 				: null;
@@ -945,9 +939,10 @@
 				allowDenyIDs: allowDenyIDs,
 				denyPageID: denyPageMap.byValueOrNull(formValues.denyPageValue),
 				evasionPageID: denyPageMap.byValueOrNull(formValues.evasionPageValue),
-				constraintWeekDays: slotUTC?.constraintWeekDays ?? null,
-				constraintStartTime: contraintStartTimeUTC,
-				constraintEndTime: contraintEndTimeUTC,
+				constraintWeekDays: slotData?.constraintWeekDays ?? null,
+				constraintStartTime: slotData?.constraintStartTime ?? null,
+				constraintEndTime: slotData?.constraintEndTime ?? null,
+				constraintTimeZone: slotData?.constraintTimeZone ?? null,
 				webhooks: formValues.webhooks
 					.filter((wh) => wh.id)
 					.map((wh) => ({
@@ -981,11 +976,11 @@
 	};
 
 	const update = async () => {
-		if (scheduleType === 'schedule' && (!dailySlotUTC || dailySlotUTC.error)) {
-			modalError = dailySlotUTC?.error ?? 'Choose the delivery dates, days and hours.';
+		if (scheduleType === 'schedule' && (!dailySlotData || dailySlotData.error)) {
+			modalError = dailySlotData?.error ?? 'Choose the delivery dates, days and hours.';
 			return;
 		}
-		const slotUTC = scheduleType === 'schedule' ? dailySlotUTC : null;
+		const slotData = scheduleType === 'schedule' ? dailySlotData : null;
 		const recipientGroupIDs = formValues.recipientGroups.map((name) =>
 			recipientGroupMap.byValue(name)
 		);
@@ -1005,8 +1000,6 @@
 			const dataAnonymizeAtUTC = formValues.dataAnonymizeAt
 				? new Date(formValues.dataAnonymizeAt).toISOString()
 				: null;
-			const contraintStartTimeUTC = slotUTC?.constraintStartTime ?? null;
-			const contraintEndTimeUTC = slotUTC?.constraintEndTime ?? null;
 			const scheduleAtUTC = formValues.scheduleAt
 				? new Date(formValues.scheduleAt).toISOString()
 				: null;
@@ -1023,9 +1016,10 @@
 				isAnonymous: formValues.isAnonymous,
 				isTest: formValues.isTest,
 				obfuscate: formValues.obfuscate,
-				constraintWeekDays: slotUTC?.constraintWeekDays ?? null,
-				constraintStartTime: contraintStartTimeUTC,
-				constraintEndTime: contraintEndTimeUTC,
+				constraintWeekDays: slotData?.constraintWeekDays ?? null,
+				constraintStartTime: slotData?.constraintStartTime ?? null,
+				constraintEndTime: slotData?.constraintEndTime ?? null,
+				constraintTimeZone: slotData?.constraintTimeZone ?? null,
 				sendEndAt: sendEndAtUTC,
 				closeAt: closeAtUTC,
 				anonymizeAt: anonymizeAtUTC,
@@ -1192,6 +1186,7 @@
 			constraintWeekDays: [],
 			contraintStartTime: null,
 			contraintEndTime: null,
+			constraintTimeZone: browserTimeZone(),
 			saveSubmittedData: true,
 			saveBrowserMetadata: false,
 			isAnonymous: false,
@@ -1284,7 +1279,7 @@
 		if (campaign.constraintWeekDays) {
 			scheduleType = 'schedule';
 		}
-		const localSlots = dailySlotsFromUTC(campaign);
+		const localSlots = dailySlotsFromCampaign(campaign);
 
 		formValues = {
 			...formValues,
@@ -1306,6 +1301,7 @@
 			constraintWeekDays: copyMode ? [] : (localSlots?.weekDays ?? []),
 			contraintStartTime: copyMode ? null : (localSlots?.startTime ?? null),
 			contraintEndTime: copyMode ? null : (localSlots?.endTime ?? null),
+			constraintTimeZone: copyMode ? browserTimeZone() : (localSlots?.timeZone ?? browserTimeZone()),
 			closeAt: copyMode ? null : campaign.closeAt,
 			anonymizeAt: copyMode ? null : campaign.anonymizeAt,
 			dataAnonymizeAt: copyMode ? null : campaign.dataAnonymizeAt,
@@ -2164,8 +2160,14 @@
 										/>
 									</div>
 								</div>
-								{#if dailySlotUTC?.error}
-									<p class="text-red-600 dark:text-red-400 text-sm mt-2">{dailySlotUTC.error}</p>
+								{#if formValues.constraintTimeZone !== browserTimeZone()}
+									<!-- only when editing a campaign saved from a browser in another zone -->
+									<p class="text-sm text-slate-500 dark:text-gray-400 mt-2">
+										Days and hours are in {timeZoneLabel(formValues.constraintTimeZone)}
+									</p>
+								{/if}
+								{#if dailySlotData?.error}
+									<p class="text-red-600 dark:text-red-400 text-sm mt-2">{dailySlotData.error}</p>
 								{/if}
 							{/if}
 
@@ -2842,7 +2844,18 @@
 									</h3>
 									<div class="grid grid-cols-[120px_1fr] gap-y-3">
 										<span class="text-grayblue-dark font-medium">Type:</span>
-										<span class="text-pc-darkblue dark:text-white capitalize">{scheduleType}</span>
+										<span class="text-pc-darkblue dark:text-white"
+											>{scheduleOptions.find((o) => o.value === scheduleType)?.label ?? scheduleType}</span
+										>
+
+										{#if scheduleType === 'basic' || scheduleType === 'schedule'}
+											<span class="text-grayblue-dark font-medium">Timezone:</span>
+											<span class="text-pc-darkblue dark:text-white">
+												{scheduleType === 'schedule'
+													? timeZoneLabel(formValues.constraintTimeZone)
+													: browserTimeZone()}
+											</span>
+										{/if}
 
 										{#if scheduleType === 'basic'}
 											<span class="text-grayblue-dark font-medium">Start:</span>
@@ -2879,16 +2892,16 @@
 												</span>
 											{/if}
 										{:else if scheduleType === 'schedule'}
-											{#if dailySlotUTC?.error}
+											{#if dailySlotData?.error}
 												<span class="text-grayblue-dark font-medium">Problem:</span>
-												<span class="text-red-600 dark:text-red-400">{dailySlotUTC.error}</span>
+												<span class="text-red-600 dark:text-red-400">{dailySlotData.error}</span>
 											{/if}
 											{#if dailySlotPreview}
 												<span class="text-grayblue-dark font-medium">Start:</span>
 												<span
 													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 												>
-													<Datetime value={dailySlotPreview.start} />
+													{formatInZone(dailySlotPreview.start, formValues.constraintTimeZone)}
 													<RelativeTime value={dailySlotPreview.start} />
 												</span>
 
@@ -2896,7 +2909,7 @@
 												<span
 													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 												>
-													<Datetime value={dailySlotPreview.end} />
+													{formatInZone(dailySlotPreview.end, formValues.constraintTimeZone)}
 													<RelativeTime value={dailySlotPreview.end} />
 												</span>
 

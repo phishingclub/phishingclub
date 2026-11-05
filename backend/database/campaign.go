@@ -56,7 +56,9 @@ type Campaign struct {
 	// hh:mm
 	ConstraintStartTime *string `gorm:"index;"`
 	// hh:mm
-	ConstraintEndTime   *string `gorm:"index;"`
+	ConstraintEndTime *string `gorm:"index;"`
+	// IANA zone of the week days and hours, null means UTC
+	ConstraintTimeZone  *string `gorm:""`
 	SaveSubmittedData   bool    `gorm:"not null;default:false"`
 	SaveBrowserMetadata bool    `gorm:"not null;default:false"`
 	// IsAnonymous marks a campaign that records events against a stable pseudonym

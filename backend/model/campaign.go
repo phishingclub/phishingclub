@@ -1,7 +1,6 @@
 package model
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -36,6 +35,9 @@ type Campaign struct {
 	ConstraintWeekDays  nullable.Nullable[vo.CampaignWeekDays]       `json:"constraintWeekDays"`
 	ConstraintStartTime nullable.Nullable[vo.CampaignTimeConstraint] `json:"constraintStartTime"`
 	ConstraintEndTime   nullable.Nullable[vo.CampaignTimeConstraint] `json:"constraintEndTime"`
+	// ConstraintTimeZone is the IANA zone the week days and hours above are in.
+	// Null means they are UTC.
+	ConstraintTimeZone nullable.Nullable[vo.CampaignTimeZone] `json:"constraintTimeZone"`
 
 	// jitter is persisted to the database only when ScheduleAt is set (late-scheduling),
 	// so the task runner can apply it when schedule() is called hours later.
@@ -233,6 +235,14 @@ func (c *Campaign) validate(checkAnonymizeAfterEnd bool) error {
 		return err
 	}
 
+	// a time zone only belongs with Daily Slots week days and hours
+	if c.ConstraintTimeZone.IsSpecified() && !c.ConstraintTimeZone.IsNull() &&
+		(!c.ConstraintWeekDays.IsSpecified() || c.ConstraintWeekDays.IsNull()) {
+		return validate.WrapErrorWithField(
+			errors.New("a time zone is only used with daily slots"),
+			"constraintTimeZone",
+		)
+	}
 	// if ConstraintWeekDays or ConstraintStartTime or ConstraintEndTime is set, then this is a 'scheduled type'
 	// this requires that all fields are set and that end time is equal or after start time
 	if (c.ConstraintWeekDays.IsSpecified() && !c.ConstraintWeekDays.IsNull()) ||
@@ -266,16 +276,15 @@ func (c *Campaign) validate(checkAnonymizeAfterEnd bool) error {
 		startAt := c.SendStartAt.MustGet()
 		endAt := c.SendEndAt.MustGet()
 		//  check that selected weekdays are within the start and end date
-		isWithin := c.ConstraintWeekDays.MustGet().IsWithin(&startAt, &endAt)
-		if !isWithin {
-			return validate.WrapErrorWithField(
-				fmt.Errorf(
-					"constraint week days must be within the start (%s) and end date (%s)",
-					startAt.Format("2006-01-02"),
-					endAt.Format("2006-01-02"),
-				),
-				"ConstraintWeekDays",
-			)
+		if err := ValidateDailySlotWeekDays(
+			startAt,
+			endAt,
+			c.ConstraintWeekDays.MustGet(),
+			constraintStartTime,
+			constraintEndTime,
+			c.DailySlotTimeZone(),
+		); err != nil {
+			return err
 		}
 	}
 	// ensure closeAt and anonymize is correctly set after other dates if set
@@ -501,6 +510,12 @@ func (c *Campaign) ToDBMap() map[string]any {
 		m["constraint_end_time"] = nil
 		if v, err := c.ConstraintEndTime.Get(); err == nil {
 			m["constraint_end_time"] = v.String()
+		}
+	}
+	if c.ConstraintTimeZone.IsSpecified() {
+		m["constraint_time_zone"] = nil
+		if v, err := c.ConstraintTimeZone.Get(); err == nil {
+			m["constraint_time_zone"] = v.String()
 		}
 	}
 	if c.SendEndAt.IsSpecified() {

@@ -1,9 +1,18 @@
-// Daily Slots are picked in local time: a date range, week days and daily hours.
-// The backend runs them in UTC: it reads the week day and the daily hours of
-// every delivery day in UTC. These helpers convert between the two so the days
-// and hours the user picks are the ones that get sent.
+// Daily Slots are picked as a date range, week days and daily hours in a time
+// zone. The backend stores the zone with them and builds every delivery day's
+// window in that zone, so these helpers follow its rules: each delivery day
+// gets the hours on that local date, and an hour that does not exist or happens
+// twice because of a clock change on a delivery day is rejected.
+//
+// Campaigns saved before the zone was stored have their week days and hours in
+// UTC. They are read with fromLegacyUTC and saved again with a zone.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+// the longest delivery range in dates. The backend allows 3 x 366 days between
+// the first slot start and the last slot end; two days less here keeps a range
+// that passes in the browser from failing on the server.
+const MAX_RANGE_MS = (3 * 366 - 2) * DAY_MS;
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -12,36 +21,79 @@ const minutesOf = (time) => {
 	return h * 60 + m;
 };
 
-// "YYYY-MM-DD" of the UTC date of an instant, moved by a number of days
-const utcDateString = (instant, addDays = 0) => {
-	const d = new Date(
-		Date.UTC(instant.getUTCFullYear(), instant.getUTCMonth(), instant.getUTCDate() + addDays)
-	);
-	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-};
+export const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-// a "YYYY-MM-DD" string at local midnight
-const parseLocalDate = (dateStr) => new Date(dateStr + 'T00:00:00');
-
-// a copy of a local date with a "HH:MM" local time set on it
-const withLocalTime = (date, time) => {
-	const d = new Date(date);
-	if (time) {
-		const [h, m] = time.split(':').map(Number);
-		d.setHours(h, m, 0, 0);
+const formatters = new Map();
+const formatterFor = (timeZone) => {
+	if (!formatters.has(timeZone)) {
+		formatters.set(
+			timeZone,
+			new Intl.DateTimeFormat('en-US', {
+				timeZone,
+				hourCycle: 'h23',
+				year: 'numeric',
+				month: 'numeric',
+				day: 'numeric',
+				hour: 'numeric',
+				minute: 'numeric',
+				second: 'numeric'
+			})
+		);
 	}
-	return d;
+	return formatters.get(timeZone);
 };
 
-// how many days the UTC date of an instant is ahead of its local date: -1, 0 or 1
-const utcDayShift = (instant) => {
-	const local = Date.UTC(instant.getFullYear(), instant.getMonth(), instant.getDate());
-	const utc = Date.UTC(instant.getUTCFullYear(), instant.getUTCMonth(), instant.getUTCDate());
-	return Math.round((utc - local) / DAY_MS);
+// the wall clock of an instant in a zone
+const wallParts = (ms, timeZone) => {
+	const parts = {};
+	for (const p of formatterFor(timeZone).formatToParts(new Date(ms))) {
+		parts[p.type] = p.value;
+	}
+	return {
+		y: Number(parts.year),
+		m: Number(parts.month),
+		d: Number(parts.day),
+		h: Number(parts.hour),
+		mi: Number(parts.minute),
+		s: Number(parts.second)
+	};
 };
 
-const shiftWeekDays = (weekDays, shift) =>
-	[...new Set(weekDays.map((d) => (((d + shift) % 7) + 7) % 7))].sort((a, b) => a - b);
+// the zone's offset from UTC at an instant, in ms
+const offsetAt = (ms, timeZone) => {
+	const p = wallParts(ms, timeZone);
+	return Date.UTC(p.y, p.m - 1, p.d, p.h, p.mi, p.s) - Math.floor(ms / 1000) * 1000;
+};
+
+/**
+ * The instant of a wall clock time in a zone, or null when that wall time does
+ * not exist (the clock jumps forward) or exists twice (the clock goes back).
+ * Same rule as the backend.
+ */
+const zonedInstant = (y, m, d, h, mi, timeZone) => {
+	const wall = Date.UTC(y, m - 1, d, h, mi);
+	// offsets are within 14h of UTC, so every offset that can apply is in effect
+	// somewhere in the 36h around the wall time
+	const offsets = new Set();
+	for (let k = -6; k <= 6; k++) {
+		offsets.add(offsetAt(wall + k * 6 * 3600000, timeZone));
+	}
+	const found = [];
+	for (const offset of offsets) {
+		const candidate = wall - offset;
+		const p = wallParts(candidate, timeZone);
+		if (p.y === y && p.m === m && p.d === d && p.h === h && p.mi === mi) {
+			found.push(candidate);
+		}
+	}
+	return found.length === 1 ? new Date(found[0]) : null;
+};
+
+// "YYYY-MM-DD" of an instant's wall date in a zone
+const zonedDateString = (instant, timeZone) => {
+	const p = wallParts(new Date(instant).getTime(), timeZone);
+	return `${p.y}-${pad(p.m)}-${pad(p.d)}`;
+};
 
 export const weekDaysToBinary = (weekDays) => {
 	if (!weekDays?.length) return null;
@@ -54,114 +106,212 @@ export const binaryToWeekDays = (binary) => {
 };
 
 /**
- * The local delivery window for a Daily Slots choice.
- * start is the first selected day in the range at the daily start time, end is
- * the last selected day at the daily end time.
- * @returns {{start: Date, end: Date, firstDay: Date, lastDay: Date, deliveryDays: number} | null}
+ * The delivery window of a Daily Slots choice, built the same way as the backend.
+ * start is the first selected day at the start hour and end the last selected
+ * day at the end hour, both in the zone.
+ * Returns null while the choice is incomplete, and { error } when it can not run.
+ * @returns {{start: Date, end: Date, deliveryDays: number} | {error: string} | null}
  */
-export const dailySlotWindow = ({ startDate, endDate, weekDays, startTime, endTime }) => {
-	if (!startDate || !endDate || !weekDays?.length) return null;
-	const end = parseLocalDate(endDate);
-	let firstDay = null;
-	let lastDay = null;
-	let deliveryDays = 0;
-	for (let d = parseLocalDate(startDate); d <= end; d.setDate(d.getDate() + 1)) {
-		if (weekDays.includes(d.getDay())) {
-			if (!firstDay) firstDay = new Date(d);
-			lastDay = new Date(d);
-			deliveryDays++;
+let lastWindowKey = null;
+let lastWindow = null;
+export const dailySlotWindow = (slot) => {
+	// the wizard asks again on every form change; only rebuild when the choice changed
+	const key = JSON.stringify([
+		slot.startDate,
+		slot.endDate,
+		slot.weekDays,
+		slot.startTime,
+		slot.endTime,
+		slot.timeZone
+	]);
+	if (key !== lastWindowKey) {
+		try {
+			lastWindow = buildWindow(slot);
+		} catch (e) {
+			// Intl throws for a zone the browser does not know
+			lastWindow = { error: `The time zone ${slot.timeZone} is not known by this browser.` };
 		}
+		lastWindowKey = key;
 	}
-	if (!firstDay) return null;
-	return {
-		start: withLocalTime(firstDay, startTime),
-		end: withLocalTime(lastDay, endTime),
-		firstDay,
-		lastDay,
-		deliveryDays
-	};
+	return lastWindow;
+};
+
+const buildWindow = ({ startDate, endDate, weekDays, startTime, endTime, timeZone }) => {
+	if (!startDate || !endDate || !weekDays?.length || !startTime || !endTime || !timeZone) {
+		return null;
+	}
+	if (minutesOf(endTime) <= minutesOf(startTime)) {
+		return { error: 'The daily end time must be after the daily start time.' };
+	}
+	const [sy, sm, sd] = startDate.split('-').map(Number);
+	const [ey, em, ed] = endDate.split('-').map(Number);
+	const [sh, smi] = startTime.split(':').map(Number);
+	const [eh, emi] = endTime.split(':').map(Number);
+	// Date.UTC reads years below 100 as 19xx, and older years are typos anyway
+	if (sy < 1970 || ey < 1970) {
+		return { error: 'Choose valid delivery dates.' };
+	}
+	const first = Date.UTC(sy, sm - 1, sd);
+	const last = Date.UTC(ey, em - 1, ed);
+	if (last < first) {
+		return { error: 'The delivery end date must be on or after the start date.' };
+	}
+	if (last - first > MAX_RANGE_MS) {
+		return { error: 'The delivery dates can be at most 3 years apart.' };
+	}
+	let start = null;
+	let end = null;
+	let deliveryDays = 0;
+	// walk calendar dates in UTC, which has no clock changes
+	for (let day = first; day <= last; day += DAY_MS) {
+		const date = new Date(day);
+		if (!weekDays.includes(date.getUTCDay())) continue;
+		const y = date.getUTCFullYear();
+		const m = date.getUTCMonth() + 1;
+		const d = date.getUTCDate();
+		const dayStart = zonedInstant(y, m, d, sh, smi, timeZone);
+		const dayEnd = zonedInstant(y, m, d, eh, emi, timeZone);
+		if (!dayStart || !dayEnd || dayEnd <= dayStart) {
+			return {
+				error: `The daily hours ${startTime} to ${endTime} do not exist or happen twice on ${y}-${pad(m)}-${pad(d)} in ${timeZone} because of a clock change. Choose other hours or dates.`
+			};
+		}
+		if (!start) start = dayStart;
+		end = dayEnd;
+		deliveryDays++;
+	}
+	if (!start) {
+		return { error: 'None of the selected days fall inside the date range.' };
+	}
+	return { start, end, deliveryDays };
 };
 
 /**
- * The backend fields for a Daily Slots choice: the exact first and last send
- * time, and the week days and daily hours moved to UTC.
- * Returns { error } when the daily hours cross midnight in UTC, which the
- * backend can not run as one slot per day, or when a daily hour does not exist
- * on the first delivery day because the clock jumps forward that night.
+ * The backend fields for a Daily Slots choice, or null / { error } like
+ * dailySlotWindow
  */
-export const dailySlotsToUTC = (slot) => {
+export const dailySlotsPayload = (slot) => {
 	const win = dailySlotWindow(slot);
-	if (!win || !slot.startTime || !slot.endTime) return null;
-	const dayStart = win.start;
-	const dayEnd = withLocalTime(win.firstDay, slot.endTime);
-	const localMinutes = (d) => d.getHours() * 60 + d.getMinutes();
-	if (
-		localMinutes(dayStart) !== minutesOf(slot.startTime) ||
-		localMinutes(dayEnd) !== minutesOf(slot.endTime)
-	) {
-		return {
-			error:
-				'The daily hours do not exist on the first delivery day because of a clock change. Choose other hours or another start date.'
-		};
-	}
-	const shift = utcDayShift(dayStart);
-	if (utcDayShift(dayEnd) !== shift) {
-		return {
-			error:
-				'The daily hours cross midnight in UTC. Choose hours that start and end on the same UTC day.'
-		};
-	}
-	// the backend runs every day at the UTC hours of the first day, so the last
-	// send is the last day's UTC date at that UTC end time. Using the local end time
-	// instead would drop the last day when a clock change falls inside the range.
-	const lastSend = new Date(
-		Date.UTC(
-			win.lastDay.getFullYear(),
-			win.lastDay.getMonth(),
-			win.lastDay.getDate() + shift,
-			dayEnd.getUTCHours(),
-			dayEnd.getUTCMinutes()
-		)
-	);
+	if (!win || win.error) return win;
 	return {
-		sendStartAt: dayStart.toISOString(),
-		sendEndAt: lastSend.toISOString(),
-		constraintWeekDays: weekDaysToBinary(shiftWeekDays(slot.weekDays, shift)),
-		constraintStartTime: `${pad(dayStart.getUTCHours())}:${pad(dayStart.getUTCMinutes())}`,
-		constraintEndTime: `${pad(dayEnd.getUTCHours())}:${pad(dayEnd.getUTCMinutes())}`
+		sendStartAt: win.start.toISOString(),
+		sendEndAt: win.end.toISOString(),
+		constraintWeekDays: weekDaysToBinary(slot.weekDays),
+		constraintStartTime: slot.startTime,
+		constraintEndTime: slot.endTime,
+		constraintTimeZone: slot.timeZone
 	};
 };
 
-/**
- * The local week days and daily hours of a saved Daily Slots campaign.
- * The UTC fields are read against the campaign send start, so the shift and
- * the time zone offset are the ones of its first delivery day.
- * startDate and endDate are the first and last local delivery day. The end date
- * is read from the UTC date of the last send, as that is the day the backend
- * runs it on, so it stays the same when the last send falls after a clock change.
- * @returns {{weekDays: number[], startTime: string, endTime: string, startDate: string|null, endDate: string|null} | null}
- */
-export const dailySlotsFromUTC = ({
+// how many days the UTC date of an instant is ahead of its date in a zone: -1, 0 or 1
+const utcDayShift = (instant, timeZone) => {
+	const p = wallParts(instant.getTime(), timeZone);
+	const local = Date.UTC(p.y, p.m - 1, p.d);
+	const utc = Date.UTC(instant.getUTCFullYear(), instant.getUTCMonth(), instant.getUTCDate());
+	return Math.round((utc - local) / DAY_MS);
+};
+
+const shiftWeekDays = (weekDays, shift) =>
+	[...new Set(weekDays.map((d) => (((d + shift) % 7) + 7) % 7))].sort((a, b) => a - b);
+
+const wallTime = (instant, timeZone) => {
+	const p = wallParts(instant.getTime(), timeZone);
+	return `${pad(p.h)}:${pad(p.mi)}`;
+};
+
+const utcDateString = (instant, addDays = 0) => {
+	const d = new Date(
+		Date.UTC(instant.getUTCFullYear(), instant.getUTCMonth(), instant.getUTCDate() + addDays)
+	);
+	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+};
+
+// a campaign saved before the zone was stored: its UTC week days and hours read
+// in the browser's zone, against the send start so the offset is the one of its
+// first delivery day. The end date is the UTC date of the last send moved by the
+// same day shift, as that is the day the backend runs it on.
+const fromLegacyUTC = ({
 	sendStartAt,
 	sendEndAt,
 	constraintWeekDays,
 	constraintStartTime,
 	constraintEndTime
 }) => {
-	if (!constraintWeekDays || !constraintStartTime || !constraintEndTime) return null;
 	const ref = sendStartAt ? new Date(sendStartAt) : new Date();
 	const toLocal = (utcTime) => {
 		const [h, m] = utcTime.split(':').map(Number);
 		return new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate(), h, m));
 	};
+	// the wall clock is read from the zone name the campaign will be saved with
+	const timeZone = browserTimeZone();
 	const start = toLocal(constraintStartTime);
 	const end = toLocal(constraintEndTime);
-	const shift = utcDayShift(start);
+	const shift = utcDayShift(start, timeZone);
+	// hours that cross midnight in the browser's zone can not be one slot a day
+	// there, so keep them in UTC, which is how the backend runs them now
+	if (utcDayShift(end, timeZone) !== shift) {
+		return {
+			startDate: sendStartAt ? utcDateString(new Date(sendStartAt)) : null,
+			endDate: sendEndAt ? utcDateString(new Date(sendEndAt)) : null,
+			weekDays: binaryToWeekDays(constraintWeekDays),
+			startTime: constraintStartTime,
+			endTime: constraintEndTime,
+			timeZone: 'UTC',
+			legacy: true
+		};
+	}
 	return {
 		startDate: sendStartAt ? utcDateString(start, -shift) : null,
 		endDate: sendEndAt ? utcDateString(new Date(sendEndAt), -shift) : null,
 		weekDays: shiftWeekDays(binaryToWeekDays(constraintWeekDays), -shift),
-		startTime: `${pad(start.getHours())}:${pad(start.getMinutes())}`,
-		endTime: `${pad(end.getHours())}:${pad(end.getMinutes())}`
+		startTime: wallTime(start, timeZone),
+		endTime: wallTime(end, timeZone),
+		timeZone,
+		legacy: true
 	};
+};
+
+/**
+ * The Daily Slots choice of a saved campaign: dates, week days and hours in its
+ * zone. Campaigns without a zone are converted from UTC to the browser's zone.
+ * @returns {{startDate: string|null, endDate: string|null, weekDays: number[], startTime: string, endTime: string, timeZone: string, legacy: boolean} | null}
+ */
+export const dailySlotsFromCampaign = (campaign) => {
+	const { sendStartAt, sendEndAt, constraintWeekDays, constraintStartTime, constraintEndTime } =
+		campaign;
+	if (!constraintWeekDays || !constraintStartTime || !constraintEndTime) return null;
+	const timeZone = campaign.constraintTimeZone;
+	if (!timeZone) return fromLegacyUTC(campaign);
+	// Intl throws for a zone the browser does not know; fall back to the UTC dates
+	const dateIn = (instant) => {
+		try {
+			return zonedDateString(instant, timeZone);
+		} catch (e) {
+			return new Date(instant).toISOString().slice(0, 10);
+		}
+	};
+	return {
+		startDate: sendStartAt ? dateIn(sendStartAt) : null,
+		endDate: sendEndAt ? dateIn(sendEndAt) : null,
+		weekDays: binaryToWeekDays(constraintWeekDays),
+		startTime: constraintStartTime,
+		endTime: constraintEndTime,
+		timeZone,
+		legacy: false
+	};
+};
+
+// an instant as date and time in a zone, e.g. "11/16/2026, 9:00:00 AM"
+export const formatInZone = (instant, timeZone) => {
+	try {
+		return new Date(instant).toLocaleString(undefined, { timeZone });
+	} catch (e) {
+		return new Date(instant).toLocaleString();
+	}
+};
+
+// the zone name, with the browser's zone noted when it is a different one
+export const timeZoneLabel = (timeZone) => {
+	const browser = browserTimeZone();
+	return timeZone === browser ? timeZone : `${timeZone} (your browser is in ${browser})`;
 };

@@ -8,7 +8,13 @@
 	import { BiMap } from '$lib/utils/maps';
 	import { openIsolatedHtml } from '$lib/utils/safePreview.js';
 	import { fetchAllRows, isTimeLarger } from '$lib/utils/api-utils';
-	import { dailySlotsToUTC, dailySlotsFromUTC, weekDaysToBinary } from '$lib/utils/dailySlots';
+	import {
+		browserTimeZone,
+		dailySlotsPayload,
+		dailySlotsFromCampaign,
+		timeZoneLabel,
+		weekDaysToBinary
+	} from '$lib/utils/dailySlots';
 	import { AppStateService } from '$lib/service/appState';
 	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
@@ -83,6 +89,7 @@
 		constraintWeekDays: null,
 		constraintStartTime: null,
 		constraintEndTime: null,
+		constraintTimeZone: null,
 		saveSubmittedData: false,
 		saveBrowserMetadata: false,
 		isAnonymous: false,
@@ -498,6 +505,7 @@
 			campaign.constraintWeekDays = t.constraintWeekDays;
 			campaign.constraintStartTime = t.constraintStartTime;
 			campaign.constraintEndTime = t.constraintEndTime;
+			campaign.constraintTimeZone = t.constraintTimeZone;
 			campaign.saveSubmittedData = t.saveSubmittedData;
 			campaign.saveBrowserMetadata = t.saveBrowserMetadata;
 			campaign.isAnonymous = t.isAnonymous;
@@ -1183,15 +1191,17 @@
 		isResumeModalVisible = true;
 	};
 
-	// the Daily Slots choice in the UTC form the backend runs: first and last send
-	// time plus the week days and daily hours moved to UTC
-	const resumeDailySlotsUTC = () =>
-		dailySlotsToUTC({
+	// the Daily Slots fields sent to the backend, in the browser's time zone: first
+	// and last send time plus the week days, daily hours and zone. Only called once
+	// every field is filled in, so the result is the fields or { error }.
+	const resumeDailySlotsData = () =>
+		dailySlotsPayload({
 			startDate: resumeScheduledStartAt,
 			endDate: resumeScheduledEndAt,
 			weekDays: resumeConstraintWeekDays,
 			startTime: resumeConstraintStartTime,
-			endTime: resumeConstraintEndTime
+			endTime: resumeConstraintEndTime,
+			timeZone: browserTimeZone()
 		});
 
 	// the chosen date range as local dates, used to check the range itself
@@ -1242,14 +1252,11 @@
 			if (isTimeLarger(resumeConstraintStartTime, resumeConstraintEndTime)) {
 				return 'The daily end time must be after the daily start time.';
 			}
-			const slotUTC = resumeDailySlotsUTC();
-			if (!slotUTC) {
-				return 'None of the selected days fall inside the date range.';
+			const slotData = resumeDailySlotsData();
+			if (slotData.error) {
+				return slotData.error;
 			}
-			if (slotUTC.error) {
-				return slotUTC.error;
-			}
-			const lastSend = new Date(slotUTC.sendEndAt);
+			const lastSend = new Date(slotData.sendEndAt);
 			if (lastSend <= new Date()) {
 				return 'The last delivery slot must be in the future.';
 			}
@@ -1280,13 +1287,14 @@
 			if (resumeScheduleType === 'schedule') {
 				// Daily Slots: send the date range as the window plus the week day and
 				// daily hour constraints the backend applies inside it
-				const slotUTC = resumeDailySlotsUTC();
+				const slotData = resumeDailySlotsData();
 				body = {
-					sendStartAt: slotUTC.sendStartAt,
-					sendEndAt: slotUTC.sendEndAt,
-					constraintWeekDays: slotUTC.constraintWeekDays,
-					constraintStartTime: slotUTC.constraintStartTime,
-					constraintEndTime: slotUTC.constraintEndTime,
+					sendStartAt: slotData.sendStartAt,
+					sendEndAt: slotData.sendEndAt,
+					constraintWeekDays: slotData.constraintWeekDays,
+					constraintStartTime: slotData.constraintStartTime,
+					constraintEndTime: slotData.constraintEndTime,
+					constraintTimeZone: slotData.constraintTimeZone,
 					jitterMin: resumeJitterMin,
 					jitterMax: resumeJitterMax
 				};
@@ -2830,7 +2838,7 @@
 				</div>
 
 				{#if campaign.constraintWeekDays}
-					{@const localSlots = dailySlotsFromUTC(campaign)}
+					{@const localSlots = dailySlotsFromCampaign(campaign)}
 					<div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
 						<div class="mb-3">
 							<span class="text-gray-600 dark:text-gray-400 text-sm font-medium">Schedule:</span>
@@ -2880,6 +2888,9 @@
 									{$timeFormat ? '12h' : '24h'}
 								</button>
 							</div>
+							<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+								{timeZoneLabel(localSlots.timeZone)}
+							</p>
 						{/if}
 					</div>
 				{/if}

@@ -682,6 +682,7 @@ export class API {
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
+		 * @param {string} [campaign.constraintTimeZone]
 		 * @param {number} [campaign.jitterMin]
 		 * @param {number} [campaign.jitterMax]
 		 * @returns {Promise<ApiResponse>}
@@ -712,6 +713,7 @@ export class API {
 			constraintWeekDays,
 			constraintStartTime,
 			constraintEndTime,
+			constraintTimeZone,
 			jitterMin,
 			jitterMax
 		}) => {
@@ -741,6 +743,7 @@ export class API {
 				constraintWeekDays,
 				constraintStartTime,
 				constraintEndTime,
+				constraintTimeZone,
 				jitterMin,
 				jitterMax
 			});
@@ -772,6 +775,7 @@ export class API {
 		 * @param {Array} [campaign.constraintWeekDays]
 		 * @param {string} [campaign.constraintStartTime]
 		 * @param {string} [campaign.constraintEndTime]
+		 * @param {string} [campaign.constraintTimeZone]
 		 * @param {number} [campaign.jitterMin]
 		 * @param {number} [campaign.jitterMax]
 		 * @returns {Promise<ApiResponse>}
@@ -802,6 +806,7 @@ export class API {
 			constraintWeekDays,
 			constraintStartTime,
 			constraintEndTime,
+			constraintTimeZone,
 			jitterMin,
 			jitterMax
 		}) => {
@@ -830,6 +835,7 @@ export class API {
 				constraintWeekDays,
 				constraintStartTime,
 				constraintEndTime,
+				constraintTimeZone,
 				jitterMin,
 				jitterMax
 			});

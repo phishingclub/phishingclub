@@ -446,7 +446,7 @@ func TestResumeCampaignByID_DailySlots(t *testing.T) {
 	mustPause(t, svc, db, session, id)
 
 	// a two week window starting tomorrow, Mon..Fri, 09:00-17:00 UTC
-	start := time.Now().Add(24 * time.Hour).Truncate(24 * time.Hour)
+	start := time.Now().UTC().Add(24 * time.Hour).Truncate(24 * time.Hour)
 	end := start.Add(14 * 24 * time.Hour).Add(-time.Minute)
 	req := &model.Campaign{
 		SendStartAt:         nullable.NewNullableWithValue(start),

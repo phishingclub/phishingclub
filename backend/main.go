@@ -13,6 +13,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	// built in zone database so Daily Slots time zones load on any host
+	_ "time/tzdata"
 
 	_ "embed"
 

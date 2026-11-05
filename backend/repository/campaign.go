@@ -2484,6 +2484,14 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		}
 		constraintEndTime.Set(*t)
 	}
+	constraintTimeZone := nullable.NewNullNullable[vo.CampaignTimeZone]()
+	if row.ConstraintTimeZone != nil {
+		tz, err := vo.NewCampaignTimeZone(*row.ConstraintTimeZone)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		constraintTimeZone.Set(*tz)
+	}
 	// handle old single webhook (backward compatibility)
 	webhookID := nullable.NewNullNullable[uuid.UUID]()
 	if row.WebhookID != nil {
@@ -2541,6 +2549,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		ConstraintWeekDays:  constraintWeekDays,
 		ConstraintStartTime: constraintStartTime,
 		ConstraintEndTime:   constraintEndTime,
+		ConstraintTimeZone:  constraintTimeZone,
 		SaveSubmittedData:   saveSubmittedData,
 		SaveBrowserMetadata: saveBrowserMetadata,
 		IsAnonymous:         isAnonymous,

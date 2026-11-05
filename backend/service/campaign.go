@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -126,7 +125,9 @@ func (c *Campaign) Create(
 	}
 	// if the schedule type is scheduled, set the start time to start of day and end to the end of the last day
 	if campaign.ConstraintWeekDays.IsSpecified() && !campaign.ConstraintWeekDays.IsNull() {
-		if err := campaign.ValidateSendTimesSet(); err != nil {
+		// send times, week days and daily hours must all be set before the
+		// windows are built
+		if err := campaign.ValidateScheduledTimes(); err != nil {
 			return nil, errs.Wrap(err)
 		}
 		if err := c.updateSchedulesCampaignStartAndEndDates(campaign); err != nil {
@@ -929,78 +930,69 @@ func (c *Campaign) schedule(
 		c.Logger.Debugw("schedule campaign with contraints",
 			"campaignName", campaign.Name.MustGet(),
 		)
+		slots, err := model.DailySlots(
+			startAt,
+			endAt,
+			campaign.ConstraintWeekDays.MustGet().AsSlice(),
+			campaign.ConstraintStartTime.MustGet(),
+			campaign.ConstraintEndTime.MustGet(),
+			campaign.DailySlotTimeZone(),
+		)
+		if err != nil {
+			return errs.Wrap(err)
+		}
 		campaignDuration := time.Duration(0)
 		// first we calculate the diff, so we know the offset for we need to push between each in range moment
-		currentDate := startAt
-		toFind := campaign.ConstraintWeekDays.MustGet().AsSlice()
-		// iterate over each day in the period
-		for currentDate.Before(endAt) || currentDate.Equal(endAt) {
-			// check if the current day is in the week days
-			if slices.Contains(toFind, int(currentDate.Weekday())) {
-				// calculate the number of minutes the campaigns spans on this week day
-				dayStartTime := campaign.ConstraintStartTime.MustGet()
-				dayEndTime := campaign.ConstraintEndTime.MustGet()
-				diff := dayStartTime.DiffMinutes(dayEndTime)
-				campaignDuration += diff
-
-			}
-			currentDate = currentDate.AddDate(0, 0, 1)
+		for _, slot := range slots {
+			// the number of minutes the campaign spans on this delivery day
+			campaignDuration += slot.End.Sub(slot.Start)
 		}
 		//  interval is the minutes between each recipient schedule
 		//interval := int(campaignDuration.Minutes()) / (recipientsCount - 1) // -1 as the first send it placed at the start time
 		interval := time.Duration(campaignDuration.Nanoseconds() / int64(recipientsCount-1))
-		dayStartTime := campaign.ConstraintStartTime.MustGet()
-		dayEndTime := campaign.ConstraintEndTime.MustGet()
 		// schedule each recipient
 		// iterate through the time again and progess on each interval until all recipients are set
-		currentDate = startAt
 		c.Logger.Debugw("campaign interval", "interval", interval)
-		for currentDate.Before(endAt) || currentDate.Equal(endAt) {
-			c.Logger.Debugw("schedule check date", "currentDate", currentDate)
-			// check if the current day is in the week days
-			if slices.Contains(toFind, int(currentDate.Weekday())) {
-				c.Logger.Debugw("scheduling date", "currentDate", currentDate)
-				// iterate over the hours in the day and jump each interval
-				// if over the end time, break and skip to next day, saving the surplus of interval minutes
-				// to be added to next send
-				dayConstraintStart := currentDate.Truncate(24 * time.Hour).Add(dayStartTime.Minutes())
-				dayConstraintEnd := currentDate.Truncate(24 * time.Hour).Add(dayEndTime.Minutes())
-				currentDayStart := dayConstraintStart
-				for currentDayStart.Before(dayConstraintEnd) || currentDayStart.Equal(dayConstraintEnd) {
-					c.Logger.Debugw("scheduling date at", "currentDayStart", currentDayStart)
-					// check if we have any recipients left
-					if len(recipients) == 0 {
-						break
-					}
-					// get the next recipient
-					recipient := recipients[0]
-					recipients = recipients[1:]
-					// apply jitter to send time, clamped to daily constraint bounds
-					jitteredTime := applyJitter(currentDayStart, jitterMin, jitterMax, dayConstraintStart, dayConstraintEnd)
-					// save
-					campaignRecipient := &model.CampaignRecipient{
-						RecipientID:    recipient.ID,
-						CampaignID:     campaign.ID,
-						SendAt:         nullable.NewNullableWithValue(jitteredTime),
-						NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
-					}
-					c.applyAnonymousSnapshot(campaign, campaignRecipient, recipient)
-					if err := allocator.applyTo(campaignRecipient); err != nil {
-						c.Logger.Errorw("failed to allocate lure code", "error", err)
-						return err
-					}
-					err := c.insertScheduledRecipient(ctx, allocator, campaignRecipient)
-					if err != nil {
-						c.Logger.Errorw("failed to create campaign", "error", err)
-						return errs.Wrap(err)
-					}
-					// check if we are over the end time
-					currentDayStart = currentDayStart.Add(interval * time.Duration(1))
-
+		for _, slot := range slots {
+			c.Logger.Debugw("scheduling date", "slotStart", slot.Start)
+			// iterate over the hours in the day and jump each interval
+			// if over the end time, break and skip to next day, saving the surplus of interval minutes
+			// to be added to next send
+			dayConstraintStart := slot.Start
+			dayConstraintEnd := slot.End
+			currentDayStart := dayConstraintStart
+			for currentDayStart.Before(dayConstraintEnd) || currentDayStart.Equal(dayConstraintEnd) {
+				c.Logger.Debugw("scheduling date at", "currentDayStart", currentDayStart)
+				// check if we have any recipients left
+				if len(recipients) == 0 {
+					break
 				}
+				// get the next recipient
+				recipient := recipients[0]
+				recipients = recipients[1:]
+				// apply jitter to send time, clamped to daily constraint bounds
+				jitteredTime := applyJitter(currentDayStart, jitterMin, jitterMax, dayConstraintStart, dayConstraintEnd)
+				// save
+				campaignRecipient := &model.CampaignRecipient{
+					RecipientID:    recipient.ID,
+					CampaignID:     campaign.ID,
+					SendAt:         nullable.NewNullableWithValue(jitteredTime),
+					NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
+				}
+				c.applyAnonymousSnapshot(campaign, campaignRecipient, recipient)
+				if err := allocator.applyTo(campaignRecipient); err != nil {
+					c.Logger.Errorw("failed to allocate lure code", "error", err)
+					return err
+				}
+				err := c.insertScheduledRecipient(ctx, allocator, campaignRecipient)
+				if err != nil {
+					c.Logger.Errorw("failed to create campaign", "error", err)
+					return errs.Wrap(err)
+				}
+				// check if we are over the end time
+				currentDayStart = currentDayStart.Add(interval * time.Duration(1))
+
 			}
-			// check the next day within the start and end date range
-			currentDate = currentDate.AddDate(0, 0, 1)
 		}
 		err = c.setMostNotableCampaignEvent(
 			ctx,
@@ -2067,6 +2059,15 @@ func (c *Campaign) UpdateByID(
 			)
 		}
 	}
+	// a scheduled campaign can not be turned into a self managed one by an update:
+	// the merge keeps the stored send times and the scheduled recipients, so it
+	// would fail half way. Reject it before anything is written.
+	if incoming.IsSelfManaged() && !current.IsSelfManaged() {
+		return validate.WrapErrorWithField(
+			errors.New("a scheduled campaign can not be changed to self managed, create a new campaign instead"),
+			"sendStartAt",
+		)
+	}
 
 	// the company is never changed by an update, so the stored company decides
 	// which records the request may reference
@@ -2177,6 +2178,35 @@ func (c *Campaign) UpdateByID(
 	}
 	if v, err := incoming.ConstraintEndTime.Get(); err == nil {
 		current.ConstraintEndTime.Set(v)
+	}
+	// the zone belongs to the week days and hours it came with; new week days
+	// sent without a zone are UTC
+	if incoming.ConstraintWeekDays.IsSpecified() && !incoming.ConstraintWeekDays.IsNull() {
+		if v, err := incoming.ConstraintTimeZone.Get(); err == nil {
+			current.ConstraintTimeZone.Set(v)
+		} else {
+			current.ConstraintTimeZone.SetNull()
+		}
+	}
+	// week days sent as null switch the campaign away from Daily Slots (to Time
+	// Box or Self Managed), so the daily hours and zone go with them. Leaving the
+	// field out keeps the stored schedule as it is.
+	if incoming.ConstraintWeekDays.IsSpecified() && incoming.ConstraintWeekDays.IsNull() {
+		current.ConstraintWeekDays.SetNull()
+		current.ConstraintStartTime.SetNull()
+		current.ConstraintEndTime.SetNull()
+		current.ConstraintTimeZone.SetNull()
+	}
+	// new send times for a stored Daily Slots schedule are held to the same range
+	// limit as on create, so building the windows stays cheap
+	if v, err := current.ConstraintWeekDays.Get(); err == nil && v.Count() > 0 && !incoming.ConstraintWeekDays.IsSpecified() {
+		if start, err := current.SendStartAt.Get(); err == nil {
+			if end, err := current.SendEndAt.Get(); err == nil {
+				if err := model.ValidateDailySlotRange(start, end); err != nil {
+					return errs.Wrap(err)
+				}
+			}
+		}
 	}
 	if v, err := incoming.CloseAt.Get(); err == nil {
 		current.CloseAt.Set(v.Truncate(time.Minute))
@@ -2498,29 +2528,37 @@ func (c *Campaign) validateAllowDenyIsSameTypeByIDs(
 func (c *Campaign) updateSchedulesCampaignStartAndEndDates(
 	campaign *model.Campaign,
 ) error {
-	// get the first and last selected weekday
-	campaignWeekDays := campaign.ConstraintWeekDays.MustGet().AsSlice()
-	startAt := campaign.SendStartAt.MustGet()
-	endAt := campaign.SendEndAt.MustGet()
-	startTime := campaign.ConstraintStartTime.MustGet()
-	endTime := campaign.ConstraintEndTime.MustGet()
-	// find the first day and start time of sending
-	currentDate := startAt
-	startFound := false
-	startDay := time.Time{}
-	lastDay := time.Time{}
-	for currentDate.Before(endAt) || currentDate.Equal(endAt) {
-		if slices.Contains(campaignWeekDays, int(currentDate.Weekday())) {
-			if !startFound {
-				startDay = currentDate
-				startFound = true
-			}
-			lastDay = currentDate
-		}
-		currentDate = currentDate.AddDate(0, 0, 1)
+	// the send start becomes the first delivery day's start and the send end the
+	// last delivery day's end. The day and hour checks come first so their errors
+	// are the same as the later model validation gives.
+	if campaign.ConstraintWeekDays.MustGet().Count() == 0 {
+		return validate.WrapErrorWithField(errors.New("must have at least one day selected"), "ConstraintWeekDays")
 	}
-	campaign.SendStartAt.Set(startDay.Truncate(24 * time.Hour).Add(startTime.Minutes()))
-	campaign.SendEndAt.Set(lastDay.Truncate(24 * time.Hour).Add(endTime.Minutes()))
+	if !campaign.ConstraintStartTime.MustGet().IsBefore(campaign.ConstraintEndTime.MustGet()) {
+		return validate.WrapErrorWithField(errors.New("constraint end time must be after start time"), "ConstraintEndTime")
+	}
+	if err := model.ValidateDailySlotRange(campaign.SendStartAt.MustGet(), campaign.SendEndAt.MustGet()); err != nil {
+		return err
+	}
+	slots, err := model.DailySlots(
+		campaign.SendStartAt.MustGet(),
+		campaign.SendEndAt.MustGet(),
+		campaign.ConstraintWeekDays.MustGet().AsSlice(),
+		campaign.ConstraintStartTime.MustGet(),
+		campaign.ConstraintEndTime.MustGet(),
+		campaign.DailySlotTimeZone(),
+	)
+	if err != nil {
+		return err
+	}
+	if len(slots) == 0 {
+		return validate.WrapErrorWithField(
+			errors.New("no selected week day falls inside the delivery dates"),
+			"ConstraintWeekDays",
+		)
+	}
+	campaign.SendStartAt.Set(slots[0].Start)
+	campaign.SendEndAt.Set(slots[len(slots)-1].End)
 	return nil
 }
 
@@ -4058,6 +4096,9 @@ func (c *Campaign) ResumeCampaignByID(
 		if err := req.ValidateScheduledTimes(); err != nil {
 			return errs.Wrap(err)
 		}
+		if err := model.ValidateDailySlotRange(startAt, endAt); err != nil {
+			return errs.Wrap(err)
+		}
 		cStart := req.ConstraintStartTime.MustGet()
 		cEnd := req.ConstraintEndTime.MustGet()
 		if cStart.IsAfter(cEnd) || cStart.IsEqual(cEnd) {
@@ -4067,8 +4108,12 @@ func (c *Campaign) ResumeCampaignByID(
 		if wd.Count() == 0 {
 			return validate.WrapErrorWithField(errors.New("must have at least one day selected"), "constraintWeekDays")
 		}
-		if !wd.IsWithin(&startAt, &endAt) {
-			return validate.WrapErrorWithField(errors.New("selected week days must be within the delivery window"), "constraintWeekDays")
+		if req.DailySlotTimeZone() == nil {
+			if !wd.IsWithin(&startAt, &endAt) {
+				return validate.WrapErrorWithField(errors.New("selected week days must be within the delivery window"), "constraintWeekDays")
+			}
+		} else if err := model.ValidateDailySlotWeekDays(startAt, endAt, wd, cStart, cEnd, req.DailySlotTimeZone()); err != nil {
+			return errs.Wrap(err)
 		}
 	}
 	// read jitter from the request, both or neither
@@ -4109,17 +4154,18 @@ func (c *Campaign) ResumeCampaignByID(
 	})
 	var times []time.Time
 	if useConstraints {
-		wd := req.ConstraintWeekDays.MustGet()
-		times = constrainedSendTimes(
-			len(remaining),
+		slots, err := model.DailySlots(
 			startAt,
 			endAt,
-			wd.AsSlice(),
+			req.ConstraintWeekDays.MustGet().AsSlice(),
 			req.ConstraintStartTime.MustGet(),
 			req.ConstraintEndTime.MustGet(),
-			jitterMin,
-			jitterMax,
+			req.DailySlotTimeZone(),
 		)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		times = constrainedSendTimes(len(remaining), startAt, endAt, slots, jitterMin, jitterMax)
 	} else {
 		times = spreadSendTimes(len(remaining), startAt, endAt, jitterMin, jitterMax)
 	}
@@ -4180,20 +4226,17 @@ func spreadSendTimes(count int, startAt, endAt time.Time, jitterMin, jitterMax i
 func constrainedSendTimes(
 	count int,
 	startAt, endAt time.Time,
-	weekDays []int,
-	dayStartTime, dayEndTime vo.CampaignTimeConstraint,
+	slots []model.DailySlot,
 	jitterMin, jitterMax int,
 ) []time.Time {
 	times := make([]time.Time, 0, count)
 	if count <= 0 {
 		return times
 	}
-	// total sendable minutes across the matching week days in the range
+	// total sendable minutes across the delivery days in the range
 	campaignDuration := time.Duration(0)
-	for d := startAt; !d.After(endAt); d = d.AddDate(0, 0, 1) {
-		if slices.Contains(weekDays, int(d.Weekday())) {
-			campaignDuration += dayStartTime.DiffMinutes(dayEndTime)
-		}
+	for _, slot := range slots {
+		campaignDuration += slot.End.Sub(slot.Start)
 	}
 	if campaignDuration <= 0 {
 		return spreadSendTimes(count, startAt, endAt, jitterMin, jitterMax)
@@ -4205,15 +4248,22 @@ func constrainedSendTimes(
 	if interval <= 0 {
 		interval = time.Minute
 	}
-	for d := startAt; !d.After(endAt) && len(times) < count; d = d.AddDate(0, 0, 1) {
-		if !slices.Contains(weekDays, int(d.Weekday())) {
-			continue
+	for _, slot := range slots {
+		if len(times) >= count {
+			break
 		}
-		dayStart := d.Truncate(24 * time.Hour).Add(dayStartTime.Minutes())
-		dayEnd := d.Truncate(24 * time.Hour).Add(dayEndTime.Minutes())
-		lower := dayStart
+		// clamp the day to the resume window so nothing lands before the start or
+		// after the end, which the close and anonymize checks rely on
+		dayEnd := slot.End
+		if dayEnd.After(endAt) {
+			dayEnd = endAt
+		}
+		lower := slot.Start
 		if lower.Before(startAt) {
 			lower = startAt
+		}
+		if dayEnd.Before(lower) {
+			continue
 		}
 		for cur := lower; !cur.After(dayEnd) && len(times) < count; cur = cur.Add(interval) {
 			times = append(times, applyJitter(cur, jitterMin, jitterMax, lower, dayEnd))

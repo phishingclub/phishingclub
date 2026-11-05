@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 )
 
@@ -67,7 +68,11 @@ func TestConstrainedSendTimes(t *testing.T) {
 	dayStart := vo.NewCampaignTimeConstraintMust("09:00")
 	dayEnd := vo.NewCampaignTimeConstraintMust("17:00")
 
-	got := constrainedSendTimes(10, start, end, weekDays, *dayStart, *dayEnd, 0, 0)
+	slots, err := model.DailySlots(start, end, weekDays, *dayStart, *dayEnd, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := constrainedSendTimes(10, start, end, slots, 0, 0)
 	if len(got) != 10 {
 		t.Fatalf("want 10 times, got %d", len(got))
 	}
@@ -96,7 +101,11 @@ func TestConstrainedSendTimes_DegenerateFallsBack(t *testing.T) {
 	dayStart := vo.NewCampaignTimeConstraintMust("09:00")
 	dayEnd := vo.NewCampaignTimeConstraintMust("17:00")
 
-	got := constrainedSendTimes(5, start, end, weekDays, *dayStart, *dayEnd, 0, 0)
+	slots, err := model.DailySlots(start, end, weekDays, *dayStart, *dayEnd, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := constrainedSendTimes(5, start, end, slots, 0, 0)
 	if len(got) != 5 {
 		t.Fatalf("want 5 times from the fallback, got %d", len(got))
 	}
@@ -116,7 +125,11 @@ func TestConstrainedSendTimes_MidDayStartStaysInWindow(t *testing.T) {
 	dayStart := vo.NewCampaignTimeConstraintMust("09:00")
 	dayEnd := vo.NewCampaignTimeConstraintMust("17:00")
 
-	got := constrainedSendTimes(50, start, end, weekDays, *dayStart, *dayEnd, 0, 0)
+	slots, err := model.DailySlots(start, end, weekDays, *dayStart, *dayEnd, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := constrainedSendTimes(50, start, end, slots, 0, 0)
 	if len(got) != 50 {
 		t.Fatalf("want 50 times, got %d", len(got))
 	}
