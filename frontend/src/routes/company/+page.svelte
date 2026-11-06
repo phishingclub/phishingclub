@@ -138,7 +138,7 @@
 
 <HeadTitle title="Companies" />
 <main>
-	<Headline docSlug="settings">Companies</Headline>
+	<Headline docSlug="companies">Companies</Headline>
 	<div class="flex flex-wrap gap-3 mt-6 mb-10 [&>button]:m-0">
 		<BigButton on:click={openCreateModal}>New company</BigButton>
 		<BigButton variant="secondary" on:click={openExportSharedModal}>Export shared</BigButton>

@@ -231,7 +231,7 @@
 				class="rounded-md border border-amber-400 dark:border-amber-500/60 bg-amber-50 dark:bg-amber-900/20 p-4"
 			>
 				<p class="text-sm text-amber-700 dark:text-amber-400">
-					PDF report generation is disabled. Enable it under Settings → Reports before configuring
+					PDF report generation is disabled. Enable it under Settings → PDF Reports before configuring
 					automatic delivery.
 				</p>
 			</div>

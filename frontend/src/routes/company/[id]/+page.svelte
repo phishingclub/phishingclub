@@ -262,7 +262,7 @@
 		<SettingsLoading />
 	{:else}
 		<Breadcrumb crumbs={[{ label: 'Companies', href: '/company' }, { label: company?.name ?? '' }]} />
-		<Headline docSlug="settings" preserveCase>{company?.name ?? 'Company'}</Headline>
+		<Headline docSlug="companies" preserveCase>{company?.name ?? 'Company'}</Headline>
 
 		<TabBar items={tabs} {active} label="Company sections" on:select={(e) => selectTab(e.detail)} />
 
@@ -402,7 +402,7 @@
 						class="rounded-md border border-amber-400 dark:border-amber-500/60 bg-amber-50 dark:bg-amber-900/20 p-4 max-w-xl"
 					>
 						<p class="text-sm text-amber-700 dark:text-amber-400">
-							PDF report generation is disabled. Enable it under Settings → Reports to configure
+							PDF report generation is disabled. Enable it under Settings → PDF Reports to configure
 							report templates and delivery.
 						</p>
 					</div>

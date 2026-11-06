@@ -689,7 +689,7 @@
 		bind:visible={isNewAPIKeyModalVisible}
 	>
 		<SubHeadline>
-			<span>Creating a new API key will deactive the old one.</span>
+			<span>Creating a new API key will deactivate the old one.</span>
 		</SubHeadline>
 	</Alert>
 	<Alert
@@ -706,7 +706,7 @@
 	>
 		<SubHeadline>
 			<span class="font-bold">Copy this key and keep it safe.</span>
-			<br /><br />After closing this dialog it will no longer be possibe to see the API key again</SubHeadline
+			<br /><br />After closing this dialog it will no longer be possible to see the API key again</SubHeadline
 		>
 		<TextField
 			on:click={(e) => {

@@ -259,6 +259,13 @@ func testNewConfigInvalidAdministrationPortString(t *testing.T) {
 }
 
 func testNewConfigInvalidDatabase(t *testing.T) {
+	// postgres is not supported, only sqlite3
+	for _, engine := range []string{"foobar", "postgres"} {
+		testNewConfigWithDatabaseEngine(t, engine)
+	}
+}
+
+func testNewConfigWithDatabaseEngine(t *testing.T, engine string) {
 	_, err := NewConfig(
 		DEFAULT_ACME_EMAIL,
 		adminHost,
@@ -269,7 +276,7 @@ func testNewConfigInvalidDatabase(t *testing.T) {
 		DEFAULT_PHISHING_HTTP_ADDR,
 		DEFAULT_PHISHING_HTTPS_ADDR,
 		Database{
-			Engine: "foobar",
+			Engine: engine,
 			DSN:    "file:./data.db?cache=shared&mode=rwc&_fk=1",
 		}, &filemock.Writer{},
 		"",
@@ -280,9 +287,8 @@ func testNewConfigInvalidDatabase(t *testing.T) {
 			TrustedIPHeader: DefaultTrustedIPHeader,
 		},
 	)
-	if err == nil {
-		t.Errorf("expected %s but got %s", ErrInvalidDatabase, err)
-		return
+	if !errors.Is(err, ErrInvalidDatabase) {
+		t.Errorf("engine %q: expected %s but got %v", engine, ErrInvalidDatabase, err)
 	}
 }
 

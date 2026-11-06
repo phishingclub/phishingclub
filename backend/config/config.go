@@ -29,7 +29,6 @@ const (
 	DefaultACMEEmail    = ""
 	DefaultDevACMEEmail = ""
 
-	DatabaseUsePostgres            = "postgres"
 	DefaultAdministrationUseSqlite = "sqlite3"
 	DefaultDatabase                = DefaultAdministrationUseSqlite
 	DefaultAdministrationDSN       = "file:./db.sqlite3"
@@ -212,10 +211,8 @@ func NewConfig(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	switch database.Engine {
-	case DatabaseUsePostgres:
-	case DefaultAdministrationUseSqlite:
-	default:
+	// sqlite3 is the only supported database engine
+	if database.Engine != DefaultAdministrationUseSqlite {
 		return nil, ErrInvalidDatabase
 	}
 

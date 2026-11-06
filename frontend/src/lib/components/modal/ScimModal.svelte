@@ -345,7 +345,7 @@
 						</div>
 					{:else}
 						<p class="text-xs text-amber-600 dark:text-amber-400">
-							No SCIM domain is configured. Set a global SCIM domain under Settings → System before
+							No SCIM domain is configured. Set a global SCIM domain under Settings → SCIM before
 							connecting an identity provider.
 						</p>
 					{/if}

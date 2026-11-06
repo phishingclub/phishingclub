@@ -310,7 +310,7 @@ func (m *ConfigModel) createAdvancedInputs() []InputWithHelp {
 		{"ACME email", config.DefaultACMEEmail, config.DefaultACMEEmail, "email for Let's Encrypt notifications"},
 
 		// database configuration
-		{"Database engine", config.DefaultDatabase, "sqlite3/postgres", "database engine to use (sqlite3 or postgres)"},
+		{"Database engine", config.DefaultDatabase, "sqlite3", "database engine (only sqlite3 is supported)"},
 		{"Database DSN", config.DefaultAdministrationDSN, "file:./db.sqlite3", "database connection string"},
 
 		// tls configuration
@@ -418,8 +418,8 @@ func (m *ConfigModel) applyAdvancedConfig() error {
 	dbDSN := getValueOrDefault(m.inputs[7].Value(), config.DefaultAdministrationDSN)
 
 	// validate database engine
-	if dbEngine != config.DatabaseUsePostgres && dbEngine != config.DefaultAdministrationUseSqlite {
-		return fmt.Errorf("invalid database engine: %s (must be 'postgres' or 'sqlite3')", dbEngine)
+	if dbEngine != config.DefaultAdministrationUseSqlite {
+		return fmt.Errorf("invalid database engine: %s (only 'sqlite3' is supported)", dbEngine)
 	}
 
 	// set database config

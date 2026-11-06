@@ -256,7 +256,7 @@
 			mapToSelectableRecipients = new BiMap({});
 			closeAddRecipientModal();
 		} catch (err) {
-			addToast('Failed to /dd recipient to group', 'Error');
+			addToast('Failed to add recipient to group', 'Error');
 			console.error('failed to add recipient to group', err);
 		} finally {
 			isSubmitting = false;

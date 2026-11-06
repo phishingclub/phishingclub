@@ -298,12 +298,18 @@
 	 * Opens the allow-listing modal for a given campaign template ID.
 	 * Fetches the template, SMTP config, and fills allowListingData.
 	 */
+	// the policy wants the domain of the envelope sender, not the full address
+	const envelopeDomain = (from) => {
+		const at = (from || '').lastIndexOf('@');
+		return at === -1 ? '' : from.slice(at + 1).replace(/[>\s].*$/, '');
+	};
+
 	async function openAllowListingModal(templateId) {
 		isAllowListingVisible = true;
 		allowListingLoading = true;
 		allowListingError = '';
 		allowListingData = {
-			senderIP: 'Add email sender IP here',
+			senderIP: '',
 			smtpSenderDomain: '',
 			simulationUrl: ''
 		};
@@ -318,7 +324,7 @@
 
 			allowListingData = {
 				...allowListingData,
-				smtpSenderDomain: emailRes.data.mailEnvelopeFrom,
+				smtpSenderDomain: envelopeDomain(emailRes.data.mailEnvelopeFrom),
 				simulationUrl: `${domainRes.data.name}/*`
 			};
 		} catch (e) {
@@ -942,9 +948,15 @@
 				</div>
 				<div>
 					<b>Sending IP</b>
-					<CopyCell text={allowListingData.senderIP}>
-						{allowListingData.senderIP}
-					</CopyCell>
+					{#if allowListingData.senderIP}
+						<CopyCell text={allowListingData.senderIP}>
+							{allowListingData.senderIP}
+						</CopyCell>
+					{:else}
+						<div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+							Use the public IP address of the mail server that sends this campaign.
+						</div>
+					{/if}
 				</div>
 				<div>
 					<b>Simulation URLs to allow</b>

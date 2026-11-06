@@ -233,7 +233,7 @@
 		Functions: [
 			{ label: 'URL as QR HTML', text: '{{qr .URL 4}}' },
 			{ label: 'URL escape', text: '{{urlEscape "content" }}' },
-			{ label: 'Random alphanumeric', text: '{{randAlpha 8}}' },
+			{ label: 'Random letters', text: '{{randAlpha 8}}' },
 			{ label: 'Random number', text: '{{randInt 1 4}}' },
 			{ label: 'Date', text: '{{date "Y-m-d H:i:s" 0}}' },
 			{ label: 'Base64', text: '{{base64 "text"}}' },

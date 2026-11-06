@@ -872,8 +872,7 @@ func TemplateFuncs() template.FuncMap {
 				offset = offsetSeconds[0]
 			}
 			targetTime := time.Now().Add(time.Duration(offset) * time.Second)
-			goFormat := convertDateFormat(format)
-			return targetTime.Format(goFormat)
+			return formatDate(targetTime, format)
 		},
 		"base64": func(s string) string {
 			return base64.StdEncoding.EncodeToString([]byte(s))
@@ -1279,37 +1278,48 @@ func (q *QRHTMLWriter) Close() error {
 	return nil
 }
 
-// convertDateFormat converts readable date format (YmdHis) to Go's reference format
-func convertDateFormat(dateFormat string) string {
-	goFormat := dateFormat
-
-	// year formats
-	goFormat = strings.ReplaceAll(goFormat, "Y", "2006") // 4-digit year
-	goFormat = strings.ReplaceAll(goFormat, "y", "06")   // 2-digit year
-
-	// month formats
-	goFormat = strings.ReplaceAll(goFormat, "m", "01")      // 2-digit month
-	goFormat = strings.ReplaceAll(goFormat, "n", "1")       // month without leading zero
-	goFormat = strings.ReplaceAll(goFormat, "M", "Jan")     // short month name
-	goFormat = strings.ReplaceAll(goFormat, "F", "January") // full month name
-
-	// day formats
-	goFormat = strings.ReplaceAll(goFormat, "d", "02") // 2-digit day
-	goFormat = strings.ReplaceAll(goFormat, "j", "2")  // day without leading zero
-
-	// hour formats
-	goFormat = strings.ReplaceAll(goFormat, "H", "15") // 24-hour format
-	goFormat = strings.ReplaceAll(goFormat, "h", "03") // 12-hour format
-	goFormat = strings.ReplaceAll(goFormat, "G", "15") // 24-hour without leading zero (Go doesn't support this exactly)
-	goFormat = strings.ReplaceAll(goFormat, "g", "3")  // 12-hour without leading zero
-
-	// minute and second formats
-	goFormat = strings.ReplaceAll(goFormat, "i", "04") // minutes
-	goFormat = strings.ReplaceAll(goFormat, "s", "05") // seconds
-
-	// am/pm formats
-	goFormat = strings.ReplaceAll(goFormat, "A", "PM") // uppercase AM/PM
-	goFormat = strings.ReplaceAll(goFormat, "a", "pm") // lowercase am/pm
-
-	return goFormat
+// formatDate formats t with a readable format (YmdHis style). Each letter is mapped on
+// its own, so output of one token is never read as another token, and any other
+// character is written as is.
+func formatDate(t time.Time, format string) string {
+	var b strings.Builder
+	for _, r := range format {
+		switch r {
+		case 'Y': // 4 digit year
+			b.WriteString(t.Format("2006"))
+		case 'y': // 2 digit year
+			b.WriteString(t.Format("06"))
+		case 'm': // 2 digit month
+			b.WriteString(t.Format("01"))
+		case 'n': // month without leading zero
+			b.WriteString(t.Format("1"))
+		case 'M': // short month name
+			b.WriteString(t.Format("Jan"))
+		case 'F': // full month name
+			b.WriteString(t.Format("January"))
+		case 'd': // 2 digit day
+			b.WriteString(t.Format("02"))
+		case 'j': // day without leading zero
+			b.WriteString(t.Format("2"))
+		case 'H': // 24 hour, 2 digits
+			b.WriteString(t.Format("15"))
+		case 'G': // 24 hour without leading zero
+			b.WriteString(strconv.Itoa(t.Hour()))
+		case 'h': // 12 hour, 2 digits
+			b.WriteString(t.Format("03"))
+		case 'g': // 12 hour without leading zero
+			b.WriteString(t.Format("3"))
+		case 'i': // minutes
+			b.WriteString(t.Format("04"))
+		case 's': // seconds
+			b.WriteString(t.Format("05"))
+		case 'A': // AM or PM
+			b.WriteString(t.Format("PM"))
+		case 'a': // am or pm
+			b.WriteString(t.Format("pm"))
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

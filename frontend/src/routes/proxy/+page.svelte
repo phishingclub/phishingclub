@@ -812,7 +812,7 @@ portal.example.com:
 									minLength={3}
 									bind:value={formValues.startURL}
 									placeholder="https://login.example.com/auth"
-									toolTipText="Domain must match a phishing domain in the hosts configuration"
+									toolTipText="Domain must be one of the target domains in the hosts configuration"
 									>Start URL</TextField
 								>
 							</div>
