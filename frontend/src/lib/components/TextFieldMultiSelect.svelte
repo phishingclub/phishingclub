@@ -1,6 +1,6 @@
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
-	import ToolTip from './ToolTip.svelte';
+	import FieldLabel from './form/FieldLabel.svelte';
 	import { activeFormElementSubscribe } from '$lib/store/activeFormElement';
 
 	export let _id = Symbol();
@@ -18,6 +18,8 @@
 	export let hidden = false;
 	export let size = 'normal';
 	export let inline = false;
+	// 'full' fills the parent instead of the fixed width from sm
+	export let width = 'medium';
 
 	// Ensure options is always an array
 	$: optionsArray = Array.isArray(options) ? options : Array.from(options);
@@ -273,38 +275,23 @@
 </script>
 
 <div
-	class="flex justify-start textfield-select-container"
+	class="flex justify-start py-2 textfield-select-container"
 	class:hidden
 	class:flex-col={!inline}
 	class:flex-row={inline}
+	class:w-full={!inline && size !== 'small'}
+	class:sm:w-auto={!inline && size === 'normal' && width !== 'full'}
 >
-	<label class="flex flex-col py-2 relative" class:py-2={!inline} class:pr-2={inline}>
-		<div class="flex items-center">
-			<p
-				id={labelId}
-				class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
-			>
-				<slot />
-			</p>
-			{#if toolTipText.length > 0}
-				<ToolTip>
-					{toolTipText}
-				</ToolTip>
-			{/if}
-			{#if optional === true}
-				<div
-					class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-				>
-					<p class="text-slate-600 dark:text-gray-400 text-xs">optional</p>
-				</div>
-			{/if}
-		</div>
+	<label class="flex flex-col relative" class:pr-2={inline}>
+		<FieldLabel id={labelId} {toolTipText} {optional}><slot /></FieldLabel>
 	</label>
 	<div class="relative">
 		<div
 			class="flex items-center relative"
 			class:w-28={size == 'small'}
-			class:w-60={size == 'normal'}
+			class:w-full={size == 'normal' && !inline}
+			class:sm:w-60={size == 'normal' && !inline && width !== 'full'}
+			class:w-60={size == 'normal' && inline}
 		>
 			<input
 				bind:this={inputElement}
@@ -323,9 +310,9 @@
 				on:keydown={handleKeyDown}
 				on:click={handleClick}
 				autocomplete="off"
-				class="w-full relative rounded-md py-2 pr-10 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
+				class="w-full relative rounded-md py-2 pr-10 text-slate-800 dark:text-gray-300 border border-transparent focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 bg-grayblue-light dark:bg-gray-900/60 dark:border-gray-700 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
 				class:pl-10={showDropdown}
-				class:pl-4={!showDropdown}
+				class:pl-3={!showDropdown}
 				placeholder={!hasValue && !showDropdown && value.length === 0
 					? placeholder
 					: showDropdown
@@ -420,12 +407,12 @@
 						on:click|preventDefault={removeSelectedOption}
 						on:keypress|preventDefault={removeSelectedOption}
 						data-value={option}
-						class="flex flex-row items-center bg-gray-100 dark:bg-gray-800/60 hover:bg-gray-200 dark:hover:bg-gray-700/80 px-2 py-1 rounded-md text-gray-900 dark:text-gray-300 text-xs transition-colors duration-200 flex-shrink-0"
+						class="flex flex-row items-center bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 px-2 py-1 rounded-md text-gray-900 dark:text-gray-300 text-sm transition-colors duration-200 flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue"
 						aria-label="Remove {option}"
 						style="max-width: 280px;"
 					>
 						<span class="truncate block" style="max-width: 250px;">{option}</span>
-						<img class="w-3 ml-1 pointer-events-none flex-shrink-0" src="/delete2.svg" alt="" />
+						<img class="w-3.5 ml-1.5 pointer-events-none flex-shrink-0" src="/delete2.svg" alt="" />
 					</button>
 				{/each}
 			</div>

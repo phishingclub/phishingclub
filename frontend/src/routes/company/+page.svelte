@@ -1,10 +1,8 @@
 <script>
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
 	import Headline from '$lib/components/Headline.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
-	import TableCell from '$lib/components/table/TableCell.svelte';
 	import FormError from '$lib/components/FormError.svelte';
 	import { addToast } from '$lib/store/toast';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
@@ -15,6 +13,12 @@
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import Alert from '$lib/components/Alert.svelte';
+	import FormGrid from '$lib/components/FormGrid.svelte';
+	import FormColumns from '$lib/components/FormColumns.svelte';
+	import FormColumn from '$lib/components/FormColumn.svelte';
+	import TextField from '$lib/components/TextField.svelte';
+	import TextareaField from '$lib/components/TextareaField.svelte';
+	import TableCell from '$lib/components/table/TableCell.svelte';
 
 	// bindings
 	let form = null;
@@ -65,7 +69,7 @@
 			}
 			throw new res.error();
 		} catch (e) {
-			addToast('Failed to getcompanies', 'Error');
+			addToast('Failed to get companies', 'Error');
 			console.error('failed to get companies', e);
 		}
 		return [];
@@ -132,12 +136,15 @@
 	};
 </script>
 
-<HeadTitle title="companies" />
+<HeadTitle title="Companies" />
 <main>
 	<Headline docSlug="settings">Companies</Headline>
-	<BigButton on:click={openCreateModal}>New company</BigButton>
-	<BigButton on:click={openExportSharedModal}>Export shared</BigButton>
+	<div class="flex flex-wrap gap-3 mt-6 mb-10 [&>button]:m-0">
+		<BigButton on:click={openCreateModal}>New company</BigButton>
+		<BigButton variant="secondary" on:click={openExportSharedModal}>Export shared</BigButton>
+	</div>
 	<Table
+		reserveSelect
 		columns={[{ column: 'Name', size: 'large' }]}
 		sortable={['name']}
 		hasData={!!companies.length}
@@ -149,76 +156,64 @@
 	>
 		{#each companies as company}
 			<TableRow>
-				<TableCell>
-					<button
-						on:click={() => goto(`/company/${company.id}`)}
-						class="block w-full py-1 text-left"
+				<TableCell wrap>
+					<a
+						class="pc-cell-link group w-full !flex items-center justify-between gap-2 min-h-10"
+						href={`/company/${company.id}`}
+						title="Open {company.name}"
 					>
-						{company.name}
-					</button>
+						<span class="truncate">{company.name}</span>
+						<svg
+							class="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500 group-hover:text-slate-600 dark:group-hover:text-gray-200"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							aria-hidden="true"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.17 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z"
+								clip-rule="evenodd"
+							/>
+						</svg>
+					</a>
 				</TableCell>
 			</TableRow>
 		{/each}
 	</Table>
 
 	<Modal headerText="New company" visible={isModalVisible} onClose={closeModal} {isSubmitting}>
-		<div class="w-[1000px] p-6">
-			<form on:submit|preventDefault={onSubmit} bind:this={form}>
-				<div class="space-y-6">
-					<div>
-						<label
-							for="company-name"
-							class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-						>
-							Company Name
-						</label>
-						<input
+		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
+			<FormColumns>
+				<FormColumn>
+					<div class="w-full sm:w-[28rem]">
+						<TextField
 							id="company-name"
-							type="text"
 							required
-							minlength="1"
-							maxlength="64"
-							placeholder="Alices Enterprise Solutions"
+							minLength={1}
+							maxLength={64}
+							width="full"
 							bind:value={formValues.name}
-							class="w-96 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-						/>
-					</div>
-
-					<div>
-						<div class="flex items-center mb-2">
-							<label
-								for="company-comment"
-								class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-							>
-								Comment
-							</label>
-							<div
-								class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-							>
-								<p class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200">
-									optional
-								</p>
-							</div>
-						</div>
-						<textarea
+							placeholder="e.g. Alice's Enterprise Solutions">Name</TextField
+						>
+						<TextareaField
 							id="company-comment"
+							optional
+							fullWidth
+							height="large"
+							maxLength={1000000}
 							bind:value={formValues.comment}
-							maxlength={1000000}
-							rows="8"
-							placeholder="Add notes about this company..."
-							class="w-full p-4 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-						/>
+							placeholder="Notes about this company">Comment</TextareaField
+						>
 					</div>
-				</div>
-
-				<FormError message={modalError} />
-				<FormFooter {closeModal} {isSubmitting} />
-			</form>
-		</div>
+				</FormColumn>
+			</FormColumns>
+			<FormError message={modalError} />
+			<FormFooter {closeModal} {isSubmitting} />
+		</FormGrid>
 	</Modal>
 
 	<Alert
-		headline="Export Shared Data"
+		headline="Export shared data"
 		bind:visible={isExportSharedModalVisible}
 		onConfirm={onConfirmExportShared}
 	>

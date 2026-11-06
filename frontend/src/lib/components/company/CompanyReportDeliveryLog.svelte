@@ -6,6 +6,7 @@
 	import Table from '$lib/components/table/Table.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 
 	// the company whose delivery log is shown
 	export let companyId;
@@ -74,15 +75,12 @@
 			<TableCell value={triggerLabel(row.trigger)} />
 			<TableCell>
 				<div>
-					<span
-						class="inline-block text-xs font-semibold px-2 py-1 rounded-full
-							{row.status === 'sent'
-							? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-							: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'}"
+					<StatusBadge
+						tone={row.status === 'sent' ? 'success' : 'danger'}
 						title={row.status !== 'sent' ? row.errorMessage : ''}
 					>
 						{row.status === 'sent' ? 'Sent' : 'Failed'}
-					</span>
+					</StatusBadge>
 				</div>
 			</TableCell>
 			<TableCell>

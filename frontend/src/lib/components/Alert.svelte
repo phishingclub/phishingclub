@@ -1,3 +1,7 @@
+<script context="module">
+	let alertCounter = 0;
+</script>
+
 <script>
 	import { fade } from 'svelte/transition';
 	import { onMount, tick } from 'svelte';
@@ -22,6 +26,7 @@
 	export let tone = 'destructive';
 	$: isDestructive = tone !== 'affirmative';
 
+	const alertID = `alert-${++alertCounter}`;
 	let isLoading = false;
 	let error = '';
 	// typed value when verification is required before confirming
@@ -43,7 +48,7 @@
 		} else if (!visible && alertInitialized) {
 			window.removeEventListener('keydown', keyHandler);
 			// restore body scrolling when alert is closed
-			document.body.style.overflow = 'auto';
+			document.body.style.overflow = '';
 			handleAlertClose();
 			alertInitialized = false;
 		}
@@ -53,17 +58,12 @@
 		if (e.key === 'Escape') {
 			close();
 		} else if (e.key === 'Tab') {
-			// Check if the focused element is an input field or within a complex component
 			const focusedElement = document.activeElement;
-			const isInputField =
-				focusedElement?.tagName === 'INPUT' || focusedElement?.tagName === 'TEXTAREA';
-			const isWithinTextField = focusedElement?.closest('.relative');
-
-			if (isInputField || isWithinTextField) {
-				// Allow normal tab behavior within input fields and TextFields
+			const isDropdownOption =
+				focusedElement?.closest('[role="listbox"]') && focusedElement?.role === 'option';
+			if (isDropdownOption) {
 				return;
 			}
-
 			handleTabKey(e);
 		}
 	};
@@ -204,7 +204,7 @@
 		return () => {
 			window.removeEventListener('keydown', keyHandler);
 			// Ensure body scrolling is restored when component is destroyed
-			document.body.style.overflow = 'auto';
+			document.body.style.overflow = '';
 			// Restore focus if alert was open when component was destroyed
 			if (visible && previousActiveElement && typeof previousActiveElement.focus === 'function') {
 				previousActiveElement.focus();
@@ -260,37 +260,39 @@
 		visible = false;
 		window.removeEventListener('keydown', keyHandler);
 		// Restore body scrolling when alert is closed
-		document.body.style.overflow = 'auto';
+		document.body.style.overflow = '';
 	};
 </script>
 
 {#if visible}
 	<div
 		transition:fade={{ duration: 150 }}
-		class="fixed top-0 left-0 w-full h-full bg-overlay/[0.92] z-[19]"
+		class="fixed top-0 left-0 w-full h-full bg-overlay/[0.92] z-[55]"
 	/>
 	<div
-		class="fixed top-0 left-0 w-full h-full flex justify-center items-center z-20"
-		role="dialog"
+		class="fixed top-0 left-0 w-full h-full flex justify-center items-center z-[60] p-3 sm:p-4"
+		role="alertdialog"
 		aria-modal="true"
-		aria-labelledby="alert-title"
-		aria-describedby="alert-description"
+		aria-labelledby="{alertID}-title"
+		aria-describedby="{alertID}-description"
+		data-alert-dialog
 	>
 		<section
 			bind:this={alertElement}
-			class="ring-1 ring-white/10 w-[32rem] bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-colors duration-200"
+			class="ring-1 ring-white/10 w-full max-w-lg max-h-full bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col shadow-xl transition-colors duration-200"
 		>
 			<!-- Header -->
 			<div
 				class="{isDestructive
 					? 'bg-red-700 dark:bg-red-700/90'
-					: 'bg-cta-blue dark:bg-cta-blue'} text-white rounded-t-md py-4 px-8 flex items-center justify-between flex-shrink-0 transition-colors duration-200"
+					: 'bg-cta-blue dark:bg-cta-blue'} text-white rounded-t-md py-3 px-4 sm:py-4 sm:px-8 flex items-center justify-between gap-3 flex-shrink-0 transition-colors duration-200"
 			>
-				<div class="flex items-center">
+				<div class="flex items-center min-w-0">
 					{#if isDestructive}
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
-							class="h-6 w-6 text-white mr-4"
+							class="h-6 w-6 shrink-0 text-white mr-3 sm:mr-4"
+							aria-hidden="true"
 							fill="none"
 							viewBox="0 0 24 24"
 							stroke="currentColor"
@@ -303,23 +305,25 @@
 							/>
 						</svg>
 					{/if}
-					<h1 id="alert-title" class="uppercase mr-8 font-semibold text-2xl">{headline}</h1>
+					<h2 id="{alertID}-title" class="uppercase font-semibold text-xl sm:text-2xl break-words min-w-0">
+						{headline}
+					</h2>
 				</div>
 				<button
-					class="w-4 hover:scale-110"
+					type="button"
+					class="-mr-2 inline-flex items-center justify-center w-10 h-10 shrink-0 rounded-md hover:bg-white/15 transition-colors duration-200 pc-focus-dark disabled:opacity-50"
 					on:click={close}
 					disabled={isLoading}
 					data-close-button
 					aria-label="Close alert"
 				>
-					<img class="w-full" src="/close-white.svg" alt="" />
+					<img class="w-4 h-4" src="/close-white.svg" alt="" />
 				</button>
 			</div>
 
-			<!-- Content -->
-			<div class="px-8 py-6">
+			<div class="px-4 py-5 sm:px-8 sm:py-6 overflow-y-auto min-h-0 select-text">
 				<div
-					id="alert-description"
+					id="{alertID}-description"
 					class="text-gray-600 dark:text-gray-400 transition-colors duration-200"
 				>
 					{#if $$slots.default}
@@ -352,20 +356,24 @@
 				{/if}
 			</div>
 
-			<!-- Footer -->
 			<div
-				class="py-4 row-span-2 col-start-1 col-span-3 border-t-2 border-gray-200 dark:border-gray-700/60 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end px-8 bg-gray-50 dark:bg-gray-800/40 rounded-b-md transition-colors duration-200"
+				class="py-4 border-t-2 border-gray-200 dark:border-gray-700/60 w-full flex flex-row flex-wrap justify-end items-center gap-2 px-4 sm:px-8 bg-gray-50 dark:bg-gray-800/40 rounded-b-md flex-shrink-0 transition-colors duration-200"
 			>
 				{#if !noCancel}
 					<button
 						type="reset"
 						on:click={close}
-						class="bg-slate-400 hover:bg-slate-300 dark:bg-slate-600 dark:hover:bg-slate-500 text-sm mr-2 uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
+						class="pc-focus min-w-[6rem] bg-transparent hover:bg-gray-100 border border-gray-300 text-slate-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:border-gray-500 dark:text-gray-100 text-sm uppercase font-bold px-4 py-2 rounded-md transition-colors duration-200"
 					>
 						{cancel}
 					</button>
 				{/if}
-				<FormButton isSubmitting={isLoading} disabled={okDisabled} on:click={onClickConfirm}>{ok}</FormButton>
+				<FormButton
+					isSubmitting={isLoading}
+					disabled={okDisabled}
+					variant={isDestructive ? 'danger' : 'primary'}
+					on:click={onClickConfirm}>{ok}</FormButton
+				>
 			</div>
 		</section>
 	</div>

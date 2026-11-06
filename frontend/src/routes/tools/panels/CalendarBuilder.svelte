@@ -1,10 +1,13 @@
 <script>
+	import Button from '$lib/components/Button.svelte';
 	import { onMount } from 'svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TextareaField from '$lib/components/TextareaField.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import { addToast } from '$lib/store/toast';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
+	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
 
 	let icsSummary = 'IT Portal Access Validation';
 	let icsOrganizerName = 'IT Department';
@@ -16,6 +19,8 @@
 	let icsTime = '09:00';
 	let icsDuration = '30';
 	let icsTimezone = 'UTC';
+	// below xl the preview sits under the long form, so a link jumps to it
+	let previewEl = null;
 	let icsAddReminder = false;
 	let icsReminder = '15';
 	// uid stays stable while editing; regenerate explicitly with the button
@@ -65,12 +70,29 @@
 		{ value: 'Australia/Sydney', label: 'Sydney' }
 	];
 
-	const selectClass =
-		'rounded-md py-2 pl-2 pr-8 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer transition-colors duration-200';
+	// same look as TextField so the native date, time and number inputs match the rest
 	const inputClass =
-		'rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200';
-	const labelHeadClass =
-		'font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200';
+		'w-full rounded-md py-2 px-3 border font-normal text-slate-800 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 border-transparent dark:border-gray-700/60 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 transition-colors duration-200';
+	const classOptions = [
+		{ value: 'PUBLIC', label: 'Public' },
+		{ value: 'PRIVATE', label: 'Private' },
+		{ value: 'CONFIDENTIAL', label: 'Confidential' }
+	];
+	const partstatOptions = [
+		{ value: 'NEEDS-ACTION', label: 'Needs action (default)' },
+		{ value: 'ACCEPTED', label: 'Accepted' },
+		{ value: 'TENTATIVE', label: 'Tentative' },
+		{ value: 'DECLINED', label: 'Declined' }
+	];
+	const busyStatusOptions = [
+		{ value: '', label: 'Default' },
+		{ value: 'FREE', label: 'Free' },
+		{ value: 'BUSY', label: 'Busy' },
+		{ value: 'TENTATIVE', label: 'Tentative' },
+		{ value: 'OOF', label: 'Out of office' }
+	];
+	const sectionClass =
+		'text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide';
 
 	const pad = (n) => n.toString().padStart(2, '0');
 
@@ -234,151 +256,172 @@
 	});
 </script>
 
-<div class="flex flex-wrap gap-6">
-<SettingsCard title="Calendar Invitation Builder" widthClass="w-full sm:w-[640px]">
-<div class="space-y-2">
-	<TextField bind:value={icsSummary} width="full" placeholder="Meeting title">Title</TextField>
-
-	<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-		<TextField bind:value={icsOrganizerName} width="full" placeholder="IT Department">Organizer name</TextField>
-		<TextField bind:value={icsOrganizerEmail} width="full" placeholder="it@example.com">Organizer email</TextField>
-	</div>
-
-	<TextField bind:value={icsAttendee} width="full" toolTipText="Resolves per recipient when the attachment uses embedded content.">Attendee</TextField>
-
-	<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
-		<label class="flex flex-col py-2">
-			<p class={labelHeadClass}>Start date</p>
-			<input type="date" bind:value={icsDate} autocomplete="off" class={inputClass} />
-		</label>
-		<label class="flex flex-col py-2">
-			<p class={labelHeadClass}>Start time</p>
-			<input type="time" bind:value={icsTime} autocomplete="off" class={inputClass} />
-		</label>
-		<label class="flex flex-col py-2">
-			<p class={labelHeadClass}>Duration</p>
-			<select bind:value={icsDuration} class={selectClass}>
-				{#each durationOptions as opt}
-					<option value={opt.value}>{opt.label}</option>
-				{/each}
-			</select>
-		</label>
-		<label class="flex flex-col py-2">
-			<p class={labelHeadClass}>Timezone</p>
-			<select bind:value={icsTimezone} class={selectClass}>
-				{#each timezoneOptions as opt}
-					<option value={opt.value}>{opt.label}</option>
-				{/each}
-			</select>
-		</label>
-	</div>
-
-	<TextField bind:value={icsLocation} width="full" placeholder={'{{.URL}} or a meeting link'}>Location</TextField>
-
-	<TextareaField bind:value={icsDescription} fullWidth height="small">Description</TextareaField>
-
-	<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 items-center">
-		<CheckboxField bind:value={icsAddReminder} inline>Add reminder</CheckboxField>
-		{#if icsAddReminder}
-			<label class="flex flex-col py-2">
-				<select bind:value={icsReminder} class={selectClass}>
-					{#each reminderOptions as opt}
-						<option value={opt.value}>{opt.label}</option>
-					{/each}
-				</select>
-			</label>
-		{/if}
-	</div>
-
-	<div class="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
-		<p class="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Event</p>
-		<div class="grid grid-cols-2 gap-x-3">
-			<label class="flex flex-col py-1">
-				<p class={labelHeadClass}>Class</p>
-				<select bind:value={icsClass} class={selectClass}>
-					<option value="PUBLIC">Public</option>
-					<option value="PRIVATE">Private</option>
-					<option value="CONFIDENTIAL">Confidential</option>
-				</select>
-			</label>
-			<label class="flex flex-col py-1">
-				<p class={labelHeadClass}>Sequence</p>
-				<input type="number" min="0" bind:value={icsSequence} autocomplete="off" class={inputClass} />
-			</label>
-		</div>
-		<label class="flex flex-col py-1">
-			<p class={labelHeadClass}>Attendee initial response</p>
-			<select bind:value={icsAttendeePartstat} class={selectClass}>
-				<option value="NEEDS-ACTION">Needs action (default)</option>
-				<option value="ACCEPTED">Accepted</option>
-				<option value="TENTATIVE">Tentative</option>
-				<option value="DECLINED">Declined</option>
-			</select>
-		</label>
-	</div>
-
-	<div class="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
-		<p class="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Microsoft / Outlook</p>
-		<TextField bind:value={icsMsTeamsUrl} width="full" placeholder="https://teams.microsoft.com/l/meetup-join/..." toolTipText="Renders a Join button in Outlook and Teams. Any URL works.">
-			Teams meeting URL
-		</TextField>
-		<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 items-center">
-			<CheckboxField bind:value={icsMsSuppressRsvp} inline toolTipText="Prevents Outlook from sending RSVP replies to the organizer.">
-				Suppress RSVP replies
-			</CheckboxField>
-			<CheckboxField bind:value={icsMsDisallowCounter} inline>Disallow counter proposals</CheckboxField>
-		</div>
-		<label class="flex flex-col py-1">
-			<p class={labelHeadClass}>Show as</p>
-			<select bind:value={icsMsBusyStatus} class={selectClass}>
-				<option value="">Default</option>
-				<option value="FREE">Free</option>
-				<option value="BUSY">Busy</option>
-				<option value="TENTATIVE">Tentative</option>
-				<option value="OOF">Out of office</option>
-			</select>
-		</label>
-	</div>
-
-	<div class="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
-		<p class="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Google</p>
-		<TextField bind:value={icsGoogleConference} width="full" placeholder="https://meet.google.com/..." toolTipText="Renders a Meet button. Restricted to meet.google.com. Use Location for other URLs.">
-			Conference URL
-		</TextField>
-	</div>
-
-	<div class="border-t border-gray-200 dark:border-gray-700 pt-4">
-		<div class="flex items-center justify-between mb-2">
-			<p class="text-xs text-gray-600 dark:text-gray-400">Preview (.ics)</p>
-			<button
-				type="button"
-				class="text-xs text-blue-600 dark:text-blue-400 hover:underline transition-colors duration-200"
-				on:click={newICSUID}
-			>
-				Regenerate UID
-			</button>
-		</div>
-		{#if icsResult}
-			<pre class="text-xs font-mono text-gray-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 rounded-md p-3 max-h-48 overflow-y-auto whitespace-pre-wrap break-all transition-colors duration-200">{icsResult}</pre>
-			<div class="flex flex-row justify-end items-center gap-2 mt-3">
+<div class="grid grid-cols-1 xl:grid-cols-[42rem_minmax(0,1fr)] gap-6 items-start">
+	<SettingsCard title="Calendar Invitation Builder" description="Build an .ics meeting invitation to attach to an email." widthClass="w-full max-w-2xl min-w-0">
+		<div class="space-y-2">
+			<div class="xl:hidden">
 				<button
 					type="button"
-					on:click={copyICS}
-					class="bg-slate-400 hover:bg-slate-300 dark:bg-slate-600 dark:hover:bg-slate-500 text-sm uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
+					class="pc-focus rounded-sm inline-flex items-center min-h-10 sm:min-h-0 text-xs text-cta-blue dark:text-highlight-blue hover:underline"
+					on:click={() => previewEl?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
 				>
-					Copy
-				</button>
-				<button
-					type="button"
-					on:click={downloadICS}
-					class="bg-cta-blue hover:opacity-80 dark:hover:opacity-90 text-sm uppercase font-bold px-4 py-2 text-white rounded-md transition-all duration-200"
-				>
-					Download
+					Jump to preview
 				</button>
 			</div>
+			<TextField bind:value={icsSummary} width="full" placeholder="Meeting title">Title</TextField>
+
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+				<TextField bind:value={icsOrganizerName} width="full" placeholder="IT Department"
+					>Organizer name</TextField
+				>
+				<TextField bind:value={icsOrganizerEmail} width="full" placeholder="it@example.com"
+					>Organizer email</TextField
+				>
+			</div>
+
+			<TextField
+				bind:value={icsAttendee}
+				width="full"
+				toolTipText="Resolves per recipient when the attachment uses embedded content."
+				>Attendee</TextField
+			>
+
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+				<label class="flex flex-col py-2">
+					<FieldLabel>Start date</FieldLabel>
+					<input type="date" bind:value={icsDate} autocomplete="off" class={inputClass} />
+				</label>
+				<label class="flex flex-col py-2">
+					<FieldLabel>Start time</FieldLabel>
+					<input type="time" bind:value={icsTime} autocomplete="off" class={inputClass} />
+				</label>
+				<TextFieldSelect
+					id="icsDuration"
+					size="full"
+					bind:value={icsDuration}
+					options={durationOptions}>Duration</TextFieldSelect
+				>
+				<TextFieldSelect
+					id="icsTimezone"
+					size="full"
+					bind:value={icsTimezone}
+					options={timezoneOptions}>Timezone</TextFieldSelect
+				>
+			</div>
+
+			<TextField bind:value={icsLocation} width="full" placeholder={'{{.URL}} or a meeting link'}
+				>Location</TextField
+			>
+
+			<TextareaField bind:value={icsDescription} fullWidth height="small">Description</TextareaField>
+
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 items-center">
+				<CheckboxField bind:value={icsAddReminder} inline>Add reminder</CheckboxField>
+				{#if icsAddReminder}
+					<TextFieldSelect
+						id="icsReminder"
+						size="full"
+						hideLabel
+						placeholder="Reminder"
+						bind:value={icsReminder}
+						options={reminderOptions}
+					/>
+				{/if}
+			</div>
+
+			<div class="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+				<p class={sectionClass}>Event</p>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3">
+					<TextFieldSelect id="icsClass" size="full" bind:value={icsClass} options={classOptions}
+						>Class</TextFieldSelect
+					>
+					<label class="flex flex-col py-2">
+						<FieldLabel>Sequence</FieldLabel>
+						<input
+							type="number"
+							min="0"
+							bind:value={icsSequence}
+							autocomplete="off"
+							class={inputClass}
+						/>
+					</label>
+				</div>
+				<TextFieldSelect
+					id="icsAttendeePartstat"
+					size="full"
+					bind:value={icsAttendeePartstat}
+					options={partstatOptions}>Attendee initial response</TextFieldSelect
+				>
+			</div>
+
+			<div class="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+				<p class={sectionClass}>Microsoft / Outlook</p>
+				<TextField
+					bind:value={icsMsTeamsUrl}
+					width="full"
+					placeholder="https://teams.microsoft.com/l/meetup-join/..."
+					toolTipText="Renders a Join button in Outlook and Teams. Any URL works."
+				>
+					Teams meeting URL
+				</TextField>
+				<div class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 items-center">
+					<CheckboxField
+						bind:value={icsMsSuppressRsvp}
+						inline
+						toolTipText="Prevents Outlook from sending RSVP replies to the organizer."
+					>
+						Suppress RSVP replies
+					</CheckboxField>
+					<CheckboxField bind:value={icsMsDisallowCounter} inline
+						>Disallow counter proposals</CheckboxField
+					>
+				</div>
+				<TextFieldSelect
+					id="icsMsBusyStatus"
+					size="full"
+					placeholder="Default"
+					bind:value={icsMsBusyStatus}
+					options={busyStatusOptions}>Show as</TextFieldSelect
+				>
+			</div>
+
+			<div class="border-t border-gray-200 dark:border-gray-700 pt-3 space-y-2">
+				<p class={sectionClass}>Google</p>
+				<TextField
+					bind:value={icsGoogleConference}
+					width="full"
+					placeholder="https://meet.google.com/..."
+					toolTipText="Renders a Meet button. Restricted to meet.google.com. Use Location for other URLs."
+				>
+					Conference URL
+				</TextField>
+			</div>
+		</div>
+	</SettingsCard>
+
+	<!-- on wide screens the result stays in view next to the form -->
+	<SettingsCard title="Preview (.ics)" widthClass="w-full max-w-2xl xl:max-w-none min-w-0 xl:sticky xl:top-20">
+		<div bind:this={previewEl} class="scroll-mt-36"></div>
+		{#if icsResult}
+			<pre
+				class="text-xs font-mono text-gray-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 rounded-md p-3 sm:max-h-80 xl:max-h-[32rem] overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] sm:whitespace-pre sm:[overflow-wrap:normal] transition-colors duration-200">{icsResult}</pre>
 		{:else}
-			<p class="text-xs text-gray-500 dark:text-gray-500">Pick a start date and time to generate the invitation.</p>
+			<p class="text-sm text-gray-500 dark:text-gray-400">
+				Pick a start date and time to generate the invitation.
+			</p>
 		{/if}
-	</div>
-</SettingsCard>
+		<svelte:fragment slot="footer">
+			{#if icsResult}
+				<div class="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:flex-wrap sm:justify-end sm:items-center">
+					<Button variant="secondary" type="button" size="large" css="col-span-2" on:click={newICSUID}
+						>Regenerate UID</Button
+					>
+					<Button variant="secondary" type="button" size="large" on:click={copyICS}>Copy</Button>
+					<Button type="button" size="large" on:click={downloadICS}
+						>Download</Button
+					>
+				</div>
+			{/if}
+		</svelte:fragment>
+	</SettingsCard>
 </div>

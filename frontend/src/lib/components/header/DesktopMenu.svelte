@@ -21,6 +21,7 @@
 	let menuElement;
 	let menuItemsElement;
 	let hasScrollbar = false;
+	let atBottom = true;
 	let instantCollapse = false;
 	let context = {
 		current: '',
@@ -36,10 +37,14 @@
 	const checkScrollbar = () => {
 		if (menuItemsElement) {
 			hasScrollbar = menuItemsElement.scrollHeight > menuItemsElement.clientHeight;
+			atBottom =
+				menuItemsElement.scrollTop + menuItemsElement.clientHeight >=
+				menuItemsElement.scrollHeight - 4;
 		}
 	};
 
-	$: if (isPinned && menuItemsElement) {
+	$: if (menuItemsElement) {
+		isExpanded, isPinned;
 		checkScrollbar();
 	}
 
@@ -60,9 +65,7 @@
 
 		// check scrollbar on resize
 		const resizeObserver = new ResizeObserver(() => {
-			if (isPinned) {
-				checkScrollbar();
-			}
+			checkScrollbar();
 		});
 
 		if (menuItemsElement) {
@@ -122,10 +125,11 @@
 <div class="flex">
 	<nav
 		bind:this={menuElement}
-		class="hidden lg:flex flex-col fixed top-16 z-10 bg-gradient-to-b from-pc-darkblue to-indigo-400 dark:from-gray-900 dark:to-gray-800 rounded-br-lg overflow-x-hidden min-h-0 max-h-[calc(100vh-4rem)] box-content border-r-[1px] border-pc-darkblue dark:border-highlight-blue/40"
+		class="hidden lg:flex flex-col fixed top-16 z-10 bg-gradient-to-b from-pc-darkblue to-cta-blue dark:from-gray-900 dark:to-gray-800 rounded-br-lg overflow-x-hidden min-h-0 max-h-[calc(100vh-4rem)] box-content border-r-[1px] border-pc-darkblue dark:border-highlight-blue/40"
 		class:transition-all={!instantCollapse}
 		class:w-40={isExpanded}
 		class:w-12={!isExpanded}
+		class:shadow-xl={isExpanded && !isPinned}
 		class:!top-[100px]={hasCompanySelected}
 		class:!max-h-[calc(100vh-100px)]={hasCompanySelected}
 	>
@@ -135,9 +139,11 @@
 			>
 				<div class="flex items-center w-full">
 					<button
-						class="flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-highlight-blue/20 transition-colors group px-3 py-2"
+						class="flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-highlight-blue/20 transition-colors group px-3 py-2 pc-focus-dark"
 						on:click={() => (isExpanded = !isExpanded)}
 						type="button"
+						aria-label={isExpanded ? 'Collapse menu' : 'Expand menu'}
+						aria-expanded={isExpanded}
 					>
 						<svg
 							class="text-blue-100 dark:text-highlight-blue duration-200 w-4 h-4 transition-colors"
@@ -157,8 +163,10 @@
 					</button>
 					{#if isExpanded}
 						<button
-							class="flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-highlight-blue/20 transition-colors group px-3 py-2"
+							class="flex items-center justify-center rounded-md hover:bg-blue-600/30 dark:hover:bg-highlight-blue/20 transition-colors group px-3 py-2 pc-focus-dark"
 							title={isPinned ? 'Unpin menu' : 'Pin menu'}
+							aria-label={isPinned ? 'Unpin menu' : 'Pin menu'}
+							aria-pressed={isPinned}
 							on:click={() => dispatch('pinToggle')}
 							type="button"
 						>
@@ -203,6 +211,8 @@
 				class:right-5={hasScrollbar}
 				class:right-2={!hasScrollbar}
 				title="Unpin menu"
+				aria-label="Unpin menu"
+				aria-pressed="true"
 				on:click={() => dispatch('pinToggle')}
 				type="button"
 			>
@@ -230,11 +240,13 @@
 			bind:this={menuItemsElement}
 			class="flex flex-col flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] {scrollBarClassesVertical} [&::-webkit-scrollbar-track]:bg-cta-blue dark:[&::-webkit-scrollbar-track]:bg-gray-800"
 			class:py-4={!isPinned}
+			class:menu-fade={hasScrollbar && !atBottom}
+			on:scroll={checkScrollbar}
 		>
 			{#each menu as link}
 				{#if link.type === 'submenu'}
 					<ConditionalDisplay show={link.whitebox ? 'whitebox' : link.blackbox ? 'blackbox' : 'both'}>
-					<div class="py-1 mt-4 first:mt-0">
+					<div class="py-1 first:mt-0 {isExpanded ? 'mt-4' : 'mt-2'}">
 						{#if isExpanded}
 							<div
 								class="px-3 py-2 text-xs font-semibold text-blue-100 dark:text-highlight-blue uppercase tracking-wider transition-colors duration-200"
@@ -247,7 +259,15 @@
 							{#each link.items as item, i (i)}
 								<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
 									<a
-										class="flex items-center py-2 text-sm transition-all duration-150 relative group
+										aria-current={(
+											item.route === '/dashboard/'
+												? $page.url.pathname.startsWith('/dashboard')
+												: $page.url.pathname === item.route
+										)
+											? 'page'
+											: undefined}
+										aria-label={isExpanded ? undefined : item.label}
+										class="flex items-center py-1.5 text-sm transition-all duration-150 relative group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white
                                         {(
 											item.route === '/dashboard/'
 												? $page.url.pathname.startsWith('/dashboard')
@@ -292,7 +312,9 @@
 					</ConditionalDisplay>
 				{:else}
 					<a
-						class="flex items-center py-2 text-sm transition-all duration-150 relative group
+						aria-current={$page.url.pathname === link.route ? 'page' : undefined}
+						aria-label={isExpanded ? undefined : link.label}
+						class="flex items-center py-1.5 text-sm transition-all duration-150 relative group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white
                             {$page.url.pathname === link.route
 							? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
 							: 'text-blue-100 dark:text-gray-200 hover:text-white dark:hover:text-gray-100 hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20'}"
@@ -311,7 +333,7 @@
 						{:else}
 							<div
 								class="absolute left-14 rounded bg-gray-900 dark:bg-gray-800 text-white dark:text-highlight-blue px-2 py-1 ml-6 text-sm
-	                                invisible opacity-0 -translate-x-3 group-hover:visible group-hover:opacity-100 group-hover:translate-x-0
+	                                invisible opacity-0 -translate-x-3 group-hover:visible group-hover:opacity-100 group-hover:translate-x-0 group-focus-visible:visible group-focus-visible:opacity-100 group-focus-visible:translate-x-0
 	                                transition-all duration-150 whitespace-nowrap z-50 shadow-lg border dark:border-highlight-blue/40"
 							>
 								{link.label}
@@ -332,3 +354,11 @@
 		<slot />
 	</div>
 </div>
+
+<style>
+	/* fade the last items so a clipped list reads as scrollable */
+	.menu-fade {
+		-webkit-mask-image: linear-gradient(to bottom, black calc(100% - 3rem), transparent);
+		mask-image: linear-gradient(to bottom, black calc(100% - 3rem), transparent);
+	}
+</style>

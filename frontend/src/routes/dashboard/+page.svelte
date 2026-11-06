@@ -11,25 +11,13 @@
 	import CampaignCalender from '$lib/components/CampaignCalendar.svelte';
 	import CampaignTrendChart from '$lib/components/CampaignTrendChart.svelte';
 	import { fetchAllRows } from '$lib/utils/api-utils';
-	import { tick, onDestroy } from 'svelte';
-	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
-	import { autoRefreshStore, setPageAutoRefresh, getPageAutoRefresh } from '$lib/store/autoRefresh';
-	import { BiMap } from '$lib/utils/maps';
+	import { tick } from 'svelte';
+	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import { goto } from '$app/navigation';
 	import DashboardNav from '$lib/components/DashboardNav.svelte';
-	import { activeFormElement } from '$lib/store/activeFormElement';
 
 	// services
 	const appStateService = AppStateService.instance;
-
-	// auto-refresh options
-	const autoRefreshOptions = new BiMap({
-		Disabled: '0',
-		'5s': '5000',
-		'30s': '30000',
-		'1m': '60000',
-		'5m': '300000'
-	});
 
 	// local state
 	let contextCompanyID = null;
@@ -56,41 +44,11 @@
 	let calendarEndDate = null;
 
 	let includeTestCampaigns = false;
-	let autoRefreshIntervalId = null;
 
 	// handler for when toggle changes
 	const handleToggleChange = async () => {
 		await tick();
 		await refresh(false);
-	};
-
-	const handleAutoRefreshChange = (optKey) => {
-		const value = Number(autoRefreshOptions.byKey(optKey));
-		// batch the update to prevent multiple reactive triggers
-		autoRefreshStore.set({
-			enabled: value > 0,
-			interval: value
-		});
-		setPageAutoRefresh('dashboard', $autoRefreshStore);
-		startAutoRefresh();
-	};
-
-	const startAutoRefresh = () => {
-		stopAutoRefresh();
-		if ($autoRefreshStore.enabled && $autoRefreshStore.interval > 0) {
-			autoRefreshIntervalId = setInterval(async () => {
-				// skip refresh if disabled or a dropdown is open
-				if (!$autoRefreshStore.enabled || $activeFormElement !== null) return;
-				await refresh(false);
-			}, $autoRefreshStore.interval);
-		}
-	};
-
-	const stopAutoRefresh = () => {
-		if (autoRefreshIntervalId) {
-			clearInterval(autoRefreshIntervalId);
-			autoRefreshIntervalId = null;
-		}
 	};
 
 	// hooks
@@ -100,17 +58,7 @@
 			contextCompanyID = context.companyID;
 			contextCompanyName = context.companyName;
 		}
-		// load saved auto-refresh settings for this page
-		const savedSettings = getPageAutoRefresh('dashboard');
-		if (savedSettings) {
-			autoRefreshStore.set(savedSettings);
-		}
 		refresh();
-		startAutoRefresh();
-	});
-
-	onDestroy(() => {
-		stopAutoRefresh();
 	});
 
 	const refresh = async (showLoading = true) => {
@@ -202,9 +150,9 @@
 
 	<DashboardNav />
 
-	<div class="flex justify-between items-center mb-6">
+	<div class="flex flex-wrap justify-between items-center gap-x-6 gap-y-3 mb-6">
 		<SubHeadline>Overview</SubHeadline>
-		<div class="flex items-center gap-4">
+		<div class="flex flex-wrap items-center gap-x-6 gap-y-3">
 			<label class="flex items-center gap-2 cursor-pointer">
 				<span class="font-semibold text-slate-600 dark:text-gray-300 whitespace-nowrap">
 					Include test campaigns
@@ -218,7 +166,7 @@
 						class="peer sr-only"
 					/>
 					<div
-						class="w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
+						class="peer-focus-visible:ring-2 peer-focus-visible:ring-cta-blue dark:peer-focus-visible:ring-highlight-blue peer-focus-visible:ring-offset-2 dark:peer-focus-visible:ring-offset-gray-900 w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
 						       peer-checked:border-cta-blue dark:peer-checked:border-highlight-blue/80 peer-checked:bg-cta-blue dark:peer-checked:bg-highlight-blue/80
 						       peer-focus:border-slate-400 dark:peer-focus:border-highlight-blue/80 peer-focus:bg-gray-100 dark:peer-focus:bg-gray-700/60
 						       transition-all duration-200 ease-in-out
@@ -226,7 +174,13 @@
 						       bg-slate-50 dark:bg-gray-900/60"
 					>
 						{#if includeTestCampaigns}
-							<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<svg
+								class="w-3 h-3 text-white"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+								aria-hidden="true"
+							>
 								<path
 									stroke-linecap="round"
 									stroke-linejoin="round"
@@ -238,21 +192,7 @@
 					</div>
 				</div>
 			</label>
-			<div class="flex items-center gap-2">
-				<span class="font-semibold text-slate-600 dark:text-gray-300 whitespace-nowrap">
-					Auto-Refresh
-				</span>
-				<TextFieldSelect
-					id="autoRefresh"
-					value={$autoRefreshStore.enabled
-						? autoRefreshOptions.byValue($autoRefreshStore.interval.toString())
-						: 'Disabled'}
-					onSelect={handleAutoRefreshChange}
-					options={autoRefreshOptions.keys()}
-					inline={true}
-					size={'small'}
-				/>
-			</div>
+			<AutoRefresh isLoading={false} pageId="dashboard" onRefresh={() => refresh(false)} />
 		</div>
 	</div>
 
@@ -260,8 +200,8 @@
 		<SubHeadline>{contextCompanyName}</SubHeadline>
 	{/if}
 
-	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8 mt-4">
-		<a href="/dashboard/campaigns" class="block h-full">
+	<div class="pc-stats-grid grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 xl:gap-6 mb-8 mt-4">
+		<a href="/dashboard/campaigns" class="pc-focus rounded-lg block h-full min-w-0">
 			<StatsCard
 				title="Active campaigns"
 				value={active}
@@ -286,7 +226,7 @@
 			</StatsCard>
 		</a>
 
-		<a href="/dashboard/campaigns" class="block h-full">
+		<a href="/dashboard/campaigns" class="pc-focus rounded-lg block h-full min-w-0">
 			<StatsCard
 				title="Upcoming campaigns"
 				value={scheduled}
@@ -311,7 +251,7 @@
 			</StatsCard>
 		</a>
 
-		<a href="/dashboard/campaigns" class="block h-full">
+		<a href="/dashboard/campaigns" class="pc-focus rounded-lg block h-full min-w-0">
 			<StatsCard
 				title="Completed campaigns"
 				value={finished}
@@ -336,7 +276,7 @@
 			</StatsCard>
 		</a>
 
-		<a href="/recipient" class="block h-full">
+		<a href="/recipient" class="pc-focus rounded-lg block h-full min-w-0">
 			<StatsCard
 				title="Repeat offenders"
 				value={repeatOffenders}
@@ -361,7 +301,7 @@
 			</StatsCard>
 		</a>
 
-		<a href="/campaign" class="block h-full">
+		<a href="/campaign" class="pc-focus rounded-lg block h-full min-w-0 col-span-2 lg:col-span-1">
 			<StatsCard
 				title="Trainings completed"
 				value={trainingCompleted}

@@ -1,4 +1,5 @@
 <script>
+	import CsvColumnsHelp from '../../CsvColumnsHelp.svelte';
 	import { onMount } from 'svelte';
 	import DynamicLabel from '$lib/components/DynamicLabel.svelte';
 	import { api } from '$lib/api/apiProxy.js';
@@ -7,7 +8,7 @@
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
 	import { BiMap } from '$lib/utils/maps';
 	import Headline from '$lib/components/Headline.svelte';
-	import SubHeadline from '$lib/components/SubHeadline.svelte';
+	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
@@ -35,6 +36,8 @@
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import FileField from '$lib/components/FileField.svelte';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
+	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
+	import { goto } from '$app/navigation';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 
 	// services
@@ -42,6 +45,14 @@
 
 	// local state
 	let contextCompanyID = '';
+	// display names for the dynamic group filter fields
+	const filterFieldLabels = {
+		position: 'Position',
+		department: 'Department',
+		city: 'City',
+		country: 'Country',
+		misc: 'Miscellaneous'
+	};
 
 	// bindings
 	let groupValues = {
@@ -474,23 +485,30 @@
 		selectedRecipientsImportPaginatedChunk = [];
 		tableImportParams.reset();
 	};
+	// split on the last @ so on phones the domain moves to the second line as one piece
+	/** @param {string} email */
+	const emailParts = (email) => {
+		const at = email.lastIndexOf('@');
+		return at < 0 ? [email, ''] : [email.slice(0, at + 1), email.slice(at + 1)];
+	};
 </script>
 
-<HeadTitle title="Group ({groupValues.name}" />
+<HeadTitle title={groupValues.name ? `Group ${groupValues.name}` : 'Group'} />
 <main>
-	<Headline docSlug="groups">Group Recipients</Headline>
-	<SubHeadline>
+	<Breadcrumb
+		crumbs={[{ label: 'Groups', href: '/recipient/group/' }, { label: groupValues.name ?? '' }]}
+	/>
+	<div class="flex flex-wrap items-center gap-x-1">
+		<Headline docSlug="groups" preserveCase>{groupValues.name ?? 'Group'}</Headline>
 		{#if groupValues.isDynamic}
 			<DynamicLabel />
 		{/if}
-		{groupValues.name}
-	</SubHeadline>
+	</div>
 	{#if groupValues.isDynamic}
-		<p class="text-sm font-semibold text-slate-600 dark:text-gray-400 mt-2">Dynamic group</p>
-		<p class="text-sm text-gray-500 dark:text-gray-400 mb-8">
+		<p class="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-8">
 			Recipients where
-			<span class="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded"
-				>{groupValues.filterField}</span
+			<span class="font-medium text-gray-700 dark:text-gray-200"
+				>{filterFieldLabels[groupValues.filterField] ?? groupValues.filterField}</span
 			>
 			equals
 			<span class="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded"
@@ -499,28 +517,35 @@
 			are included automatically.
 		</p>
 	{:else}
-		<BigButton
-			on:click={openCreateRecipientModal}
-			{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>New Recipient</BigButton
+		<div
+			class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3 mt-6 mb-10 [&>button]:m-0 [&>button:first-child]:col-span-2"
 		>
-		<BigButton
-			on:click={openAddRecipientsModal}
-			{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Add Recipients</BigButton
-		>
-		<BigButton
-			on:click={openImportModal}
-			{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Import from CSV</BigButton
-		>
+			<BigButton
+				on:click={openCreateRecipientModal}
+				{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>New recipient</BigButton
+			>
+			<BigButton
+				variant="secondary"
+				on:click={openAddRecipientsModal}
+				{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Add recipients</BigButton
+			>
+			<BigButton
+				variant="secondary"
+				on:click={openImportModal}
+				{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Import from CSV</BigButton
+			>
+		</div>
 	{/if}
 	<Table
+		reserveSelect
 		columns={[
-			{ column: 'Email', size: 'large' },
+			{ column: 'Email', size: 'xlarge' },
 			{ column: 'First name', size: 'small' },
 			{ column: 'Last name', size: 'small' },
-			{ column: 'Phone', size: 'small' },
-			{ column: 'Extra identifier', size: 'small' },
 			{ column: 'Position', size: 'small' },
 			{ column: 'Department', size: 'small' },
+			{ column: 'Phone', size: 'small' },
+			{ column: 'Extra identifier', title: 'Extra ID', size: 'small' },
 			{ column: 'City', size: 'small' },
 			{ column: 'Country', size: 'small' },
 			{ column: 'Misc', size: 'small' }
@@ -549,38 +574,36 @@
 					? 'Disabled: deprovisioned in the identity provider. Excluded from campaigns and email delivery, pending removal.'
 					: ''}
 			>
-				<TableCell>
-					<span class="inline-flex items-center gap-2">
-						<span class="truncate">{recipient.email ?? ''}</span>
-						{#if recipient.scimSoftDeletedAt}
-							<span
-								class="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-							>
-								Disabled
-							</span>
-						{/if}
-					</span>
-				</TableCell>
-				<TableCellLink href="/recipient/{recipient.id}" title={recipient.firstName}>
-					{recipient.firstName}
+				<TableCellLink href="/recipient/{recipient.id}" title={recipient.email} wrap>
+					{#if recipient.email}
+						{emailParts(recipient.email)[0]}<span class="max-sm:inline-block max-sm:max-w-full"
+							>{emailParts(recipient.email)[1]}</span
+						>
+					{/if}
+					{#if recipient.scimSoftDeletedAt}
+						<span
+							class="ml-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase align-middle bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+						>
+							Disabled
+						</span>
+					{/if}
 				</TableCellLink>
-				<TableCellLink href="/recipient/{recipient.id}" title={recipient.lastName}>
-					{recipient.lastName}
-				</TableCellLink>
-				<TableCell value={recipient.phone} />
-				<TableCellLink href="/recipient/{recipient.id}" title={recipient.extraIdentifier}>
-					{recipient.extraIdentifier}
-				</TableCellLink>
+				<TableCell value={recipient.firstName} />
+				<TableCell value={recipient.lastName} />
 				<TableCell value={recipient.position} />
 				<TableCell value={recipient.department} />
+				<TableCell value={recipient.phone} />
+				<TableCell value={recipient.extraIdentifier} />
 				<TableCell value={recipient.city} />
 				<TableCell value={recipient.country} />
 				<TableCell value={recipient.misc} />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
+						<TableViewButton on:click={() => goto(`/recipient/${recipient.id}`)} />
 						{#if !groupValues.isDynamic}
 							<TableDeleteButton
+								name="Remove from group"
 								on:click={() => openDeleteAlert(recipient)}
 								{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}
 							></TableDeleteButton>
@@ -610,74 +633,74 @@
 						maxLength={255}
 						type="email"
 						bind:value={createRecipientValues.email}
-						placeholder="bob@example.test">Email</TextField
+						placeholder="e.g. bob@example.test">Email</TextField
 					>
 					<TextField
 						minLength={1}
 						maxLength={127}
 						bind:value={createRecipientValues.firstName}
-						placeholder="Bob"
+						placeholder="e.g. Bob"
 						optional>First name</TextField
 					>
 					<TextField
 						minLength={1}
 						maxLength={127}
 						bind:value={createRecipientValues.lastName}
-						placeholder="Bob"
+						placeholder="e.g. Jensen"
 						optional>Last name</TextField
 					>
 					<TextField
 						minLength={1}
 						maxLength={127}
-						bind:value={createRecipientValues.phone}
-						placeholder="+45 555 555 5555"
-						optional>Phone</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={createRecipientValues.extraIdentifier}
-						placeholder="4982347283947"
-						optional
-						toolTipText="Optional extra identifier">Extra identifier</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
 						bind:value={createRecipientValues.position}
-						placeholder="CEO"
+						placeholder="e.g. CEO"
 						optional>Position</TextField
+					>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.department}
+						placeholder="e.g. Sales"
+						optional>Department</TextField
 					>
 				</FormColumn>
 				<FormColumn>
 					<TextField
 						minLength={1}
 						maxLength={127}
-						bind:value={createRecipientValues.department}
-						placeholder="Sales"
-						optional>Department</TextField
+						bind:value={createRecipientValues.phone}
+						placeholder="e.g. +45 555 555 5555"
+						optional>Phone</TextField
+					>
+					<TextField
+						minLength={1}
+						maxLength={127}
+						bind:value={createRecipientValues.extraIdentifier}
+						placeholder="e.g. 4982347283947"
+						toolTipText="Optional extra identifier"
+						optional>Extra identifier</TextField
 					>
 					<TextField
 						minLength={1}
 						maxLength={127}
 						bind:value={createRecipientValues.city}
-						optional
-						placeholder="Copenhagen">City</TextField
+						placeholder="e.g. Copenhagen"
+						optional>City</TextField
 					>
 					<TextField
 						minLength={1}
 						maxLength={127}
 						bind:value={createRecipientValues.country}
-						optional
-						placeholder="Denmark">Country</TextField
+						placeholder="e.g. Denmark"
+						optional>Country</TextField
 					>
 					<TextField
 						minLength={1}
 						maxLength={127}
 						bind:value={createRecipientValues.misc}
-						optional
-						placeholder="VIP"
-						toolTipText="Any extra information">Miscallaneous</TextField
+						placeholder="e.g. VIP"
+						toolTipText="Any extra information"
+						optional>Miscellaneous</TextField
 					>
 				</FormColumn>
 			</FormColumns>
@@ -687,52 +710,67 @@
 	</Modal>
 	<Modal
 		headerText={'Add recipients'}
+		width="xl"
 		visible={isAddRecipientModalVisible}
 		onClose={closeAddRecipientModal}
 		{isSubmitting}
 	>
 		<FormGrid on:submit={onClickAddRecipients} bind:bindTo={addRecipientForm} {isSubmitting}>
 			<FormColumns>
-				<FormColumn>
+				<!-- one stacked column: search on top, picked recipients below -->
+				<FormColumn stretch>
 					<TextFieldSearchSelect
 						id="recipientSearch"
+						width="full"
 						placeholder={'Type to search'}
 						onKeyUp={searchRecipients}
 						onSelect={onSelectAddRecipient}
 						options={searchOptions}
 						bind:value={recipientSearch}>Recipients</TextFieldSearchSelect
 					>
-				</FormColumn>
-				<FormColumn>
-					<Table
-						columns={['Email', 'First name', 'Last name', 'Department']}
-						sortable={['Email', 'First name', 'Last name', 'Department']}
-						hasData={!!selectedAddRecipients.length}
-						plural="recipients"
-						pagination={tableParams}
-					>
-						{#each selectedAddRecipientsPaginatedChunk as recipient}
-							<TableRow>
-								<TableCell value={recipient.email} />
-								<TableCell value={recipient.firstName} />
-								<TableCell value={recipient.lastName} />
-								<TableCell value={recipient.department} />
-								<TableCellEmpty />
-								<TableCellAction>
-									<TableDropDownEllipsis>
-										<TableDeleteButton
-											on:click={() => onClickDeselectAddRecipient(recipient.id)}
-											{...globalButtonDisabledAttributes(recipient, contextCompanyID)}
-										></TableDeleteButton>
-									</TableDropDownEllipsis>
-								</TableCellAction>
-							</TableRow>
-						{/each}
-					</Table>
+					<div class="mt-4 min-w-0">
+						{#if selectedAddRecipients.length}
+							<Table
+								columns={['Email', 'First name', 'Last name', 'Department']}
+								sortable={['Email', 'First name', 'Last name', 'Department']}
+								hasData={!!selectedAddRecipients.length}
+								plural="recipients"
+								pagination={tableParams}
+							>
+								{#each selectedAddRecipientsPaginatedChunk as recipient}
+									<TableRow>
+										<TableCell value={recipient.email} />
+										<TableCell value={recipient.firstName} />
+										<TableCell value={recipient.lastName} />
+										<TableCell value={recipient.department} />
+										<TableCellEmpty />
+										<TableCellAction>
+											<TableDropDownEllipsis>
+												<TableDeleteButton
+													on:click={() => onClickDeselectAddRecipient(recipient.id)}
+													{...globalButtonDisabledAttributes(recipient, contextCompanyID)}
+												></TableDeleteButton>
+											</TableDropDownEllipsis>
+										</TableCellAction>
+									</TableRow>
+								{/each}
+							</Table>
+						{:else}
+							<div
+								class="w-full min-h-[6rem] flex items-center justify-center rounded-md border border-dashed border-gray-300 dark:border-gray-600 bg-pleasant-gray dark:bg-gray-900/40 px-4 py-6 text-center text-sm text-slate-600 dark:text-gray-300 transition-colors duration-200"
+							>
+								Search and pick recipients to add to this group.
+							</div>
+						{/if}
+					</div>
 				</FormColumn>
 			</FormColumns>
 			<FormError message={addRecipientError} />
-			<FormFooter closeModal={closeAddRecipientModal} {isSubmitting} />
+			<FormFooter
+				closeModal={closeAddRecipientModal}
+				{isSubmitting}
+				disabled={!selectedAddRecipients.length}
+			/>
 		</FormGrid>
 	</Modal>
 	<Modal
@@ -744,7 +782,7 @@
 		<FormGrid on:submit={onClickImport} bind:bindTo={importForm} {isSubmitting}>
 			<FormColumns>
 				<FormColumn>
-					<label for="file" class="flex flex-col py-2 w-60">
+					<div class="flex flex-col py-2 w-full sm:w-72">
 						<FileField
 							accept=".csv"
 							toolTipText="Select a CSV file to import recipients"
@@ -758,69 +796,83 @@
 						>
 							Append data
 						</CheckboxField>
-					</label>
+						<p class="-mt-1 text-xs text-slate-600 dark:text-gray-400">
+							When ticked, empty cells in the file keep the current values of existing recipients.
+						</p>
+					</div>
 				</FormColumn>
 				<FormColumn overflowX={true}>
-					<Table
-						columns={[
-							{ column: 'Email', size: 'large' },
-							{ column: 'First name', size: 'small' },
-							{ column: 'Last name', size: 'small' },
-							{ column: 'Phone', size: 'small' },
-							{ column: 'Extra identifier', size: 'small' },
-							{ column: 'Position', size: 'small' },
-							{ column: 'Department', size: 'small' },
-							{ column: 'City', size: 'small' },
-							{ column: 'Country', size: 'small' },
-							{ column: 'Misc', size: 'small' }
-						]}
-						sortable={[
-							'email',
-							'first name',
-							'last name',
-							'phone',
-							'extra identifier',
-							'position',
-							'department',
-							'city',
-							'country',
-							'misc'
-						]}
-						hasData={!!importFormValues.recipients.length}
-						plural="recipients"
-						pagination={tableImportParams}
-					>
-						{#each selectedRecipientsImportPaginatedChunk as recipient}
-							<TableRow>
-								<TableCell value={recipient.email} />
-								<TableCell value={recipient.firstName} />
-								<TableCell value={recipient.lastName} />
-								<TableCell value={recipient.phone} />
-								<TableCell value={recipient.extraIdentifier} />
-								<TableCell value={recipient.position} />
-								<TableCell value={recipient.department} />
-								<TableCell value={recipient.city} />
-								<TableCell value={recipient.country} />
-								<TableCell value={recipient.misc} />
-								<TableCellEmpty />
-								<TableCellAction>
-									<TableDropDownEllipsis>
-										<TableDeleteButton
-											on:click={() => onClickRemoveImportRecipient(recipient.email)}
-											{...globalButtonDisabledAttributes(recipient, contextCompanyID)}
-										></TableDeleteButton>
-									</TableDropDownEllipsis>
-								</TableCellAction>
-							</TableRow>
-						{/each}
-					</Table>
+					{#if importFormValues.recipients.length}
+						<Table
+							columns={[
+								{ column: 'Email', size: 'large' },
+								{ column: 'First name', size: 'small' },
+								{ column: 'Last name', size: 'small' },
+								{ column: 'Phone', size: 'small' },
+								{ column: 'Extra identifier', size: 'small' },
+								{ column: 'Position', size: 'small' },
+								{ column: 'Department', size: 'small' },
+								{ column: 'City', size: 'small' },
+								{ column: 'Country', size: 'small' },
+								{ column: 'Misc', size: 'small' }
+							]}
+							sortable={[
+								'email',
+								'first name',
+								'last name',
+								'phone',
+								'extra identifier',
+								'position',
+								'department',
+								'city',
+								'country',
+								'misc'
+							]}
+							hasData={!!importFormValues.recipients.length}
+							plural="recipients"
+							pagination={tableImportParams}
+						>
+							{#each selectedRecipientsImportPaginatedChunk as recipient}
+								<TableRow>
+									<TableCell value={recipient.email} />
+									<TableCell value={recipient.firstName} />
+									<TableCell value={recipient.lastName} />
+									<TableCell value={recipient.phone} />
+									<TableCell value={recipient.extraIdentifier} />
+									<TableCell value={recipient.position} />
+									<TableCell value={recipient.department} />
+									<TableCell value={recipient.city} />
+									<TableCell value={recipient.country} />
+									<TableCell value={recipient.misc} />
+									<TableCellEmpty />
+									<TableCellAction>
+										<TableDropDownEllipsis>
+											<TableDeleteButton
+												on:click={() => onClickRemoveImportRecipient(recipient.email)}
+												{...globalButtonDisabledAttributes(recipient, contextCompanyID)}
+											></TableDeleteButton>
+										</TableDropDownEllipsis>
+									</TableCellAction>
+								</TableRow>
+							{/each}
+						</Table>
+					{:else}
+						<CsvColumnsHelp />
+					{/if}
 				</FormColumn>
 			</FormColumns>
 			<FormError message={importError} />
-			<FormFooter closeModal={closeImportModal} {isSubmitting} />
+			<FormFooter
+				closeModal={closeImportModal}
+				{isSubmitting}
+				disabled={!importFormValues.recipients.length}
+			/>
 		</FormGrid>
 	</Modal>
 	<DeleteAlert
+		title="Remove from group"
+		actionMessage="Remove from this group"
+		permanent={false}
 		list={['The recipient will only be removed from the group and not deleted']}
 		name={deleteValues.email}
 		onClick={() => onClickRemoveRecipient(deleteValues.id)}

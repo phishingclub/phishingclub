@@ -110,11 +110,8 @@
 
 {#if loaded}
 <div class="flex flex-wrap gap-6">
-	<SettingsCard title="Display Mode">
-		<div class="space-y-4">
-			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-				Select which features are available
-			</p>
+	<SettingsCard title="Display Mode" description="Choose which features are available. A change applies immediately.">
+		<div class="mt-2 space-y-4">
 			<div class="space-y-3">
 				<RadioOption
 					checked={currentDisplayMode === DISPLAY_MODE.WHITEBOX}
@@ -128,7 +125,7 @@
 				/>
 				<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
 					Read about the difference between <a
-						class="white underline"
+						class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue underline hover:no-underline"
 						href="https://phishing.club/blog/phishing-simulation-vs-red-team-phishing/"
 						target="_blank"
 						rel="noopener noreferrer">phishing simulation and red team phishing</a
@@ -139,7 +136,7 @@
 		</div>
 	</SettingsCard>
 
-	<SettingsCard title="General Settings">
+	<SettingsCard title="General Settings" description="Upload limits and how long repeat offenders are remembered.">
 		<Form on:submit={onClickUpdateSettings} fullWidth>
 			<TextField required width="full" type="number" min="1" bind:value={formValues.maxFileSize}
 				>Upload max file size (MB)</TextField
@@ -150,11 +147,11 @@
 				type="number"
 				min={1}
 				max={1000}
-				bind:value={formValues.repeatOffenderMonths}>Repeat Offender Memory (Months)</TextField
+				bind:value={formValues.repeatOffenderMonths}>Repeat offender memory (months)</TextField
 			>
 			<FormError message={updateSettingsError} />
 			<div class="mt-6 flex justify-end">
-				<FormButton size={'medium'}>Save Changes</FormButton>
+				<FormButton size={'large'}>Save Changes</FormButton>
 			</div>
 		</Form>
 	</SettingsCard>

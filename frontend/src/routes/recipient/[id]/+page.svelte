@@ -1,9 +1,11 @@
 <script>
+	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import { onMount } from 'svelte';
 	import CellCopy from '$lib/components/table/CopyCell.svelte';
 	import Headline from '$lib/components/Headline.svelte';
+	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import { addToast } from '$lib/store/toast';
@@ -15,7 +17,7 @@
 	import SubHeadline from '$lib/components/SubHeadline.svelte';
 	import { goto } from '$app/navigation';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
-	import BigButton from '$lib/components/BigButton.svelte';
+	import ActionButton from '$lib/components/ActionButton.svelte';
 	import { toEvent } from '$lib/utils/events';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
@@ -45,6 +47,11 @@
 	};
 	let isGroupsLoading = false;
 	let isEventsLoading = false;
+
+	// heading email split at the last "@" so phones break there
+	$: emailAt = (recipient.email || '').lastIndexOf('@');
+	$: emailLocal = emailAt > 0 ? recipient.email.slice(0, emailAt) : recipient.email || '';
+	$: emailDomain = emailAt > 0 ? recipient.email.slice(emailAt + 1) : '';
 
 	// hooks
 	onMount(() => {
@@ -139,28 +146,41 @@
 	};
 </script>
 
-<HeadTitle title="Recipients" />
+<HeadTitle title={recipient.email ? `Recipient ${recipient.email}` : 'Recipient'} />
 <section>
-	<div class="flex justify-between">
-		<Headline docSlug="recipients">
-			<span class="select-text">{recipient.email}</span>
-		</Headline>
-		<AutoRefresh
-			isLoading={false}
-			onRefresh={() => {
-				refresh(false);
-			}}
-		/>
+	<Breadcrumb crumbs={[{ label: 'Recipients', href: '/recipient/' }, { label: 'Recipient' }]} />
+	<div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+		<div class="min-w-0">
+			<Headline docSlug="recipients" preserveCase>
+				<!-- break after "@" first, inside a part only when it does not fit -->
+				<span class="select-text [overflow-wrap:anywhere]"
+					>{emailLocal}{#if emailDomain}@<wbr />{emailDomain}{/if}</span
+				>
+			</Headline>
+			{#if recipient.firstName || recipient.lastName}
+				<SubHeadline preserveCase>
+					{recipient.firstName}
+					{recipient.lastName}
+				</SubHeadline>
+			{/if}
+		</div>
+		<div class="flex flex-nowrap items-center gap-x-3 sm:gap-x-4">
+			<ActionButton variant="secondary" icon="export" on:click={onClickExport}>
+				<!-- short label on phones keeps the toolbar on one row -->
+				<span class="sm:hidden">Export</span><span class="hidden sm:inline">Export Events</span>
+			</ActionButton>
+			<div class="sm:pl-4 sm:border-l sm:border-gray-200 dark:sm:border-gray-700">
+				<AutoRefresh
+					isLoading={false}
+					onRefresh={() => {
+						refresh(false);
+					}}
+				/>
+			</div>
+		</div>
 	</div>
-	{#if recipient.firstName || recipient.lastName}
-		<SubHeadline>
-			{recipient.firstName}
-			{recipient.lastName}
-		</SubHeadline>
-	{/if}
-	<BigButton on:click={onClickExport}>Export events</BigButton>
 	<div>
-		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-6 mb-8 mt-4">
+		<div class="pc-stats-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-6 mb-8 mt-8">
 			<!-- Campaigns card -->
 			<StatsCard
 				title="Campaigns"
@@ -267,13 +287,13 @@
 			<StatsCard
 				title="Reported"
 				value={stats.campaignsReported}
-				borderColor="border-reported"
-				iconColor="text-reported"
+				borderColor="border-reported dark:border-slate-400"
+				iconColor="text-reported dark:text-slate-300"
 			>
 				<svg
 					slot="icon"
 					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2 text-reported"
+					class="h-5 w-5 ml-2 text-reported dark:text-slate-300"
 					fill="none"
 					viewBox="0 0 24 24"
 					stroke="currentColor"
@@ -312,28 +332,30 @@
 			</StatsCard>
 
 			<!-- Repeat submissions card -->
-			<StatsCard
-				title="Repeat submissions"
-				value={stats.repeatSubmissions}
-				borderColor="border-repeart-submissions"
-				iconColor="text-repeart-submissions"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2 text-repeart-submissions"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
+			<div class="sm:col-span-3 lg:col-span-1">
+				<StatsCard
+					title="Repeat submissions"
+					value={stats.repeatSubmissions}
+					borderColor="border-repeart-submissions"
+					iconColor="text-repeart-submissions"
 				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-					/>
-				</svg>
-			</StatsCard>
+					<svg
+						slot="icon"
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-5 w-5 ml-2 text-repeart-submissions"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+						/>
+					</svg>
+				</StatsCard>
+			</div>
 		</div>
 
 		{#if stats.trainingsAssigned > 0}
@@ -347,13 +369,15 @@
 		<Table
 			columns={['Name']}
 			sortable={[]}
-			hasData={!!recipient.groups}
-			plural="events"
+			hasData={!!recipient.groups?.length}
+			plural="groups"
 			isGhost={isGroupsLoading}
 		>
 			{#each recipient.groups as group}
 				<TableRow>
-					<TableCell value={group.name} />
+					<TableCellLink href={`/recipient/group/${group.id}/`} title={group.name}>
+						{group.name}
+					</TableCellLink>
 					<TableCellEmpty />
 					<TableCellAction>
 						<TableDropDownEllipsis>
@@ -368,9 +392,19 @@
 				</TableRow>
 			{/each}
 		</Table>
-		<SubHeadline>Events</SubHeadline>
+		<div class="mb-2">
+			<SubHeadline>Events</SubHeadline>
+		</div>
 		<Table
-			columns={['Event', 'Created', 'Campaign', 'Details', 'User-Agent', 'IP', 'Metadata']}
+			columns={[
+				{ column: 'Event', size: 'medium' },
+				{ column: 'Created', size: 'medium' },
+				{ column: 'Campaign', size: 'medium' },
+				{ column: 'Details', size: 'large' },
+				{ column: 'User-Agent', size: 'large' },
+				{ column: 'IP', size: 'small' },
+				{ column: 'Metadata', size: 'large' }
+			]}
 			sortable={['Event', 'Created', 'Campaign', 'Details', 'User-Agent', 'IP', 'Metadata']}
 			hasData={!!events?.length}
 			hasNextPage={eventsHasNextPage}

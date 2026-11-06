@@ -1,6 +1,10 @@
+<script context="module">
+	let instanceCount = 0;
+</script>
+
 <script>
 	import { afterUpdate, onDestroy } from 'svelte';
-	import ToolTip from './ToolTip.svelte';
+	import FieldLabel from './form/FieldLabel.svelte';
 	import { addToast } from '$lib/store/toast';
 	import { utc_yyyy_mm_dd } from '$lib/utils/api-utils';
 
@@ -20,6 +24,8 @@
 	export let labelWidth = 'large';
 	export let inputWidth = 'medium';
 	export let textAlign = 'left';
+
+	const labelId = `date-label-${++instanceCount}`;
 
 	// bind to parent form element, if there is one
 	let parentForm = null;
@@ -52,34 +58,16 @@
 </script>
 
 {#if !noLabel}
-	<label
+	<div
 		class="flex flex-col py-2"
 		class:w-20={labelWidth === 'small'}
 		class:w-32={labelWidth === 'medium'}
 		class:w-60={labelWidth === 'large'}
 	>
-		<div class="flex items-center">
-			<p
-				class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
-			>
-				<slot />
-			</p>
-			{#if toolTipText.length > 0}
-				<ToolTip>
-					{toolTipText}
-				</ToolTip>
-			{/if}
-			{#if optional === true}
-				<div
-					class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-				>
-					<p class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200">
-						optional
-					</p>
-				</div>
-			{/if}
-		</div>
-	</label>
+		<FieldLabel id={labelId} {toolTipText} {optional}><slot /></FieldLabel>
+	</div>
+{:else}
+	<span id={labelId} class="sr-only"><slot /></span>
 {/if}
 <div class="flex flex-row">
 	<input
@@ -92,11 +80,11 @@
 		{required}
 		{disabled}
 		autocomplete="off"
-		class="date-field-input rounded-md text-center py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+		aria-labelledby={labelId}
+		class="date-field-input rounded-md py-2 px-2 text-slate-800 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 border border-transparent dark:border-gray-700 font-normal transition-colors duration-200 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 disabled:opacity-60 disabled:cursor-not-allowed"
 		class:text-left={textAlign == 'left'}
 		class:text-center={textAlign == 'center'}
 		class:text-right={textAlign == 'right'}
-		class:w-30={inputWidth === 'small'}
 		class:w-44={inputWidth === 'medium'}
 		class:w-60={inputWidth === 'large'}
 	/>

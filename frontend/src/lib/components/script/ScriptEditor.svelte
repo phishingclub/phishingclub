@@ -1,4 +1,5 @@
 <script>
+	import { pcDarkTheme } from '$lib/components/editor/monacoTheme.js';
 	import { onMount } from 'svelte';
 	import * as monaco from 'monaco-editor';
 	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
@@ -12,6 +13,8 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import SimpleCodeEditor from '$lib/components/editor/SimpleCodeEditor.svelte';
+	import VimToggle from '$lib/components/editor/VimToggle.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { eventDisplayLabel } from '$lib/consts/events.js';
 
@@ -320,7 +323,7 @@ if (username) {
 			const newIsDark = document.documentElement.classList.contains('dark');
 			if (newIsDark !== isDark) {
 				isDark = newIsDark;
-				if (editor) monaco.editor.setTheme(isDark ? 'vs-dark' : 'vs-light');
+				if (editor) monaco.editor.setTheme(isDark ? pcDarkTheme(monaco) : 'vs-light');
 			}
 		});
 		observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
@@ -359,7 +362,10 @@ if (username) {
 		editor = monaco.editor.create(editorContainer, {
 			value: script,
 			language: 'javascript',
-			theme: isDark ? 'vs-dark' : 'vs-light',
+			theme: isDark ? pcDarkTheme(monaco) : 'vs-light',
+			overviewRulerBorder: false,
+			overviewRulerLanes: 0,
+			hideCursorInOverviewRuler: true,
 			minimap: { enabled: false },
 			wordWrap: 'off',
 			folding: false,
@@ -396,31 +402,28 @@ if (username) {
 
 <div class="flex h-full min-h-0 flex-col gap-3">
 	<!-- top bar: name + view toggle -->
-	<div class="flex items-end gap-3">
-		<div class="min-w-0 flex-1">
-			<TextField bind:value={name} placeholder="my-script">Name</TextField>
+	<div class="flex flex-wrap items-end gap-x-3 gap-y-1">
+		<div class="min-w-0 w-full sm:max-w-md">
+			<TextField bind:value={name} width="full" placeholder="my-script">Name</TextField>
 		</div>
 		<div
-			class="mb-2 inline-flex overflow-hidden rounded-md border border-gray-300 text-sm dark:border-gray-600"
+			role="group"
+			aria-label="Editor view"
+			class="mb-2 sm:ml-auto inline-flex overflow-hidden rounded-md border border-gray-300 text-sm dark:border-gray-600"
 		>
-			<button
-				type="button"
-				on:click={() => (view = 'script')}
-				class="px-3 py-1.5 font-medium transition-colors {view === 'script'
-					? 'bg-blue-500 text-white'
-					: 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'}"
-			>
-				Script
-			</button>
-			<button
-				type="button"
-				on:click={() => (view = 'test')}
-				class="px-3 py-1.5 font-medium transition-colors {view === 'test'
-					? 'bg-blue-500 text-white'
-					: 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'}"
-			>
-				Test run
-			</button>
+			{#each [{ value: 'script', label: 'Script' }, { value: 'test', label: 'Test run' }] as option}
+				<button
+					type="button"
+					aria-pressed={view === option.value}
+					on:click={() => (view = option.value)}
+					class="h-[42px] px-3 font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue {view ===
+					option.value
+						? 'bg-cta-blue text-white'
+						: 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'}"
+				>
+					{option.label}
+				</button>
+			{/each}
 		</div>
 	</div>
 
@@ -435,33 +438,12 @@ if (username) {
 				class="flex items-center justify-between px-3 py-1 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
 			>
 				<span class="text-xs font-mono text-gray-500 dark:text-gray-400">JavaScript</span>
-				<button
-					type="button"
-					title="Toggle vim mode"
-					on:click={() => vimModeEnabled.update((v) => !v)}
-					class="h-8 border-2 rounded-md w-20 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
-					class:font-bold={localVimMode}
-					class:bg-blue-600={localVimMode}
-					class:dark:bg-blue-500={localVimMode}
-					class:text-white={localVimMode}
-					class:border-blue-600={localVimMode}
-					class:dark:border-blue-500={localVimMode}
-					class:text-gray-700={!localVimMode}
-					class:dark:text-gray-200={!localVimMode}
-					class:bg-white={!localVimMode}
-					class:dark:bg-gray-700={!localVimMode}
-					class:border-gray-300={!localVimMode}
-					class:dark:border-gray-600={!localVimMode}
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-						<path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h6v2H7v-2z" />
-					</svg>
-					<span class="text-xs">Vim</span>
-				</button>
+				<VimToggle />
 			</div>
 			<div bind:this={editorContainer} class="flex-1" style="min-height: 0;"></div>
 			<div
 				bind:this={vimStatusBarEl}
+				class:hidden={!$vimModeEnabled}
 				class="h-5 bg-gray-100 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400 px-2"
 			></div>
 		</div>
@@ -489,7 +471,7 @@ if (username) {
 						     other events have no data attached -->
 						{#if eventHasData}
 							<div class="flex w-full flex-col py-2">
-								<p class="py-1 font-semibold text-slate-600 dark:text-gray-400">Event data (JSON)</p>
+								<FieldLabel>Event data (JSON)</FieldLabel>
 								<SimpleCodeEditor
 									bind:value={testDataText}
 									language="json"
@@ -513,11 +495,11 @@ if (username) {
 						type="button"
 						on:click={runTest}
 						disabled={testing}
-						class="mt-3 flex w-full flex-none items-center justify-center gap-2 rounded-md bg-gradient-to-b from-blue-500 to-indigo-400 px-4 py-2 text-sm font-semibold text-white transition-all duration-200 hover:from-blue-400 hover:to-indigo-400 disabled:cursor-not-allowed disabled:opacity-60 dark:from-blue-600 dark:to-indigo-500"
+						class="pc-focus mt-3 flex w-full flex-none items-center justify-center gap-2 rounded-md bg-cta-blue px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-active-blue disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-highlight-blue"
 					>
 						{#if testing}
 							<span class="inline-block h-2 w-2 animate-pulse rounded-full bg-white"></span>
-							Running…
+							Running...
 						{:else}
 							Run test
 						{/if}

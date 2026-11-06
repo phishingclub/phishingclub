@@ -17,7 +17,7 @@
 <div class="text-gray-900 dark:text-gray-100 transition-colors duration-200">
 	{#if date}
 		{#if !hideHours}
-			{date.toLocaleString()}
+			{date.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
 		{:else}
 			{date.toLocaleDateString()}
 		{/if}

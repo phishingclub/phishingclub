@@ -1,7 +1,6 @@
 <script>
 	import { goto } from '$app/navigation';
 	import Input from '../../lib/components/Input.svelte';
-	import CTAbutton from '../../lib/components/CTAbutton.svelte';
 	import { AppStateService } from '$lib/service/appState';
 	import { onMount } from 'svelte';
 	import { UserService } from '$lib/service/user';
@@ -64,8 +63,8 @@
 	let loginError = '';
 	let mfaError = '';
 	let mfaRecoveryLoginError = '';
-	let inputType = 'password';
-	let isPasswordVisible = true;
+	let isPasswordShown = false;
+	$: inputType = isPasswordShown ? 'text' : 'password';
 	let isSSOEnabled = false;
 	let ssoProviderType = 'entra';
 	let exclusiveLogin = false;
@@ -230,17 +229,7 @@
 
 	const handleClick = (e) => {
 		e.preventDefault();
-		// bug - this fixes a bug where if a user
-		// clicks enter inside the button field, the password is shown
-		if (e.target.tagName === 'BUTTON') {
-			return;
-		}
-		isPasswordVisible = !isPasswordVisible;
-		if (isPasswordVisible) {
-			inputType = 'password';
-		} else {
-			inputType = 'text';
-		}
+		isPasswordShown = !isPasswordShown;
 	};
 
 	const closeMFAModal = () => {
@@ -278,7 +267,7 @@
 			alt="phishing club logo"
 			display={loginLogoDisplay}
 			ready={$branding.loaded}
-			boxClass="fixed top-6 left-4 z-40 w-1/4 md:w-1/4 lg:w-1/6 h-24"
+			boxClass="fixed top-6 left-4 z-40 h-24 w-36 sm:w-48 lg:w-60"
 		/>
 		<div
 			class="flex flex-col items-center justify-center p-4 w-full sm:w-full md:w-3/4 lg:w-2/3 xl:w-2/3 2xl:w-2/3 {sideImageRemoved
@@ -296,7 +285,8 @@
 			<div class="flex flex-col items-center justify-center w-full p-px md:p-px lg:p-4">
 				{#if loginError}
 					<div
-						class="flex justify-center w-9/10 bg-message-red dark:bg-red-900 border-pc-red dark:border-red-700 border text-center py-4 font-titilium text-gray-900 dark:text-white transition-colors duration-200"
+						role="alert"
+						class="mx-4 w-[calc(100%-2rem)] rounded-md bg-message-red dark:bg-red-900/60 border-pc-red dark:border-red-700 border text-center px-4 py-3 font-titilium text-gray-900 dark:text-white transition-colors duration-200"
 					>
 						{loginError}
 					</div>
@@ -331,7 +321,7 @@
 							type="text"
 							id="Username"
 							name="Username"
-							class="w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
+							class="w-full p-2 rounded-md border-2 border-transparent bg-pc-lightblue text-pc-darkblue dark:bg-gray-800 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 						/>
 					</div>
 					<div class="flex flex-col w-full p-4 h-24">
@@ -343,20 +333,21 @@
 						<div class="relative flex items-center justify-end">
 							<button
 								type="button"
-								class="absolute h-10 w-8 z-10 mr-2 hover:opacity-70"
-								tabindex="-1"
+								class="pc-focus absolute h-8 w-8 z-10 mr-2 p-1 rounded hover:opacity-70"
+								aria-label={isPasswordShown ? 'Hide password' : 'Show password'}
+								aria-pressed={isPasswordShown}
 								on:click={handleClick}
 							>
-								{#if isPasswordVisible}
+								{#if isPasswordShown}
 									<img
-										src="/view.svg"
-										alt="view"
+										src="/toggle-view.svg"
+										alt=""
 										class="dark:filter dark:brightness-0 dark:invert transition-all duration-200"
 									/>
 								{:else}
 									<img
-										src="/toggle-view.svg"
-										alt="toggle view"
+										src="/view.svg"
+										alt=""
 										class="dark:filter dark:brightness-0 dark:invert transition-all duration-200"
 									/>
 								{/if}
@@ -378,13 +369,20 @@
 								type={inputType}
 								id="Password"
 								name="Password"
-								class="relative w-full p-2 rounded bg-pc-lightblue dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border-2 transition-colors duration-200"
+								class="relative w-full p-2 pr-12 rounded-md border-2 border-transparent bg-pc-lightblue text-pc-darkblue dark:bg-gray-800 dark:border-gray-600 dark:text-white focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 							/>
 						</div>
 					</div>
 					{/if}
 					{#if !exclusiveLogin}
-						<CTAbutton disabled={isSubmitting} />
+						<div class="flex flex-col items-center justify-center w-full p-4 mt-8 h-16">
+							<button
+								type="submit"
+								disabled={isSubmitting}
+								class="pc-focus w-full p-2 text-white text-2xl bg-cta-blue hover:bg-active-blue dark:hover:bg-highlight-blue rounded-lg font-phudu font-bold transition-colors duration-200 disabled:opacity-50 dark:disabled:opacity-60 disabled:cursor-not-allowed"
+								>Login</button
+							>
+						</div>
 					{/if}
 					{#if isSSOEnabled}
 						<div class="flex justify-center w-full p-4 {exclusiveLogin ? 'mt-8' : 'mt-2'}">
@@ -418,10 +416,10 @@
 									<p
 										class="text-sm text-gray-700 dark:text-gray-300 transition-colors duration-200"
 									>
-										Forgot your MFA code? Recover your code <button
+										No access to your authenticator app? Use a recovery code <button
 											type="button"
 											on:click={showMFARecoveryModal}
-											class="text-cta-blue dark:text-blue-400 underline hover:text-blue-700 dark:hover:text-blue-300 transition-colors duration-200"
+											class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline"
 											>here</button
 										>
 									</p>
@@ -448,11 +446,11 @@
 					>
 						<FormColumns>
 							<FormColumn>
-								<div class="px-16 py-8">
+								<div class="sm:px-8 py-4">
 									<p
 										class="text-center text-lg text-gray-900 dark:text-white transition-colors duration-200"
 									>
-										Please enter the MFA recovery code
+										Enter one of your MFA recovery codes
 									</p>
 									<Input
 										fieldName={'MFA Recovery Code'}

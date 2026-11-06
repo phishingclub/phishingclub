@@ -5,11 +5,10 @@
 <button
 	type="button"
 	on:click={toggleVimMode}
-	class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
-	class:font-bold={$vimModeEnabled}
-	class:bg-cta-blue={$vimModeEnabled}
-	class:dark:bg-indigo-600={$vimModeEnabled}
-	class:text-white={$vimModeEnabled}
+	aria-pressed={$vimModeEnabled}
+	class="h-8 inline-flex items-center justify-center gap-2 px-3 rounded-md border text-sm whitespace-nowrap cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue {$vimModeEnabled
+		? 'bg-cta-blue text-white border-cta-blue font-semibold hover:bg-active-blue'
+		: 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'}"
 	title={$vimModeEnabled ? 'Disable vim mode' : 'Enable vim mode'}
 >
 	<span>Vim</span>

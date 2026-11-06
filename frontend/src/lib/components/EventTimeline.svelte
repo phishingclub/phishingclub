@@ -1107,10 +1107,14 @@
 			<div class="absolute top-2 right-2 flex gap-2">
 				<div class="relative filter-dropdown">
 					<button
+						type="button"
+						aria-label="Filter events"
+						title="Filter events"
+						aria-expanded={showFilterDropdown}
 						on:click|stopPropagation={() => (showFilterDropdown = !showFilterDropdown)}
 						class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 focus:outline-none focus:border-slate-400 dark:focus:border-highlight-blue/80 transition-colors duration-200"
 					>
-						<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
 							<path
 								stroke-linecap="round"
 								stroke-linejoin="round"
@@ -1140,7 +1144,7 @@
 														type="checkbox"
 														bind:checked={eventFilters[key]}
 														on:change={invalidateCacheAndUpdate}
-														class="rounded border-slate-300 dark:border-gray-700/60"
+														class="pc-checkbox"
 													/>
 													<span
 														class="w-2.5 h-2.5 rounded-full flex-shrink-0"
@@ -1178,7 +1182,8 @@
 										on:click={() => (showFilterDropdown = false)}
 										class="px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
 									>
-										✕
+										<span aria-hidden="true">✕</span>
+										<span class="sr-only">Close filter</span>
 									</button>
 								</div>
 							</div>
@@ -1191,7 +1196,7 @@
 						: 'border-slate-300 dark:border-gray-700/60 text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60'}"
 				>
 					Follow:
-					<input type="checkbox" bind:checked={followCurrentTime} class="accent-blue-600" />
+					<input type="checkbox" bind:checked={followCurrentTime} class="pc-checkbox" />
 				</label>
 				<button
 					on:click={resetZoom}
@@ -1207,9 +1212,9 @@
 				</button>
 			</div>
 			<div
-				class="absolute top-2 left-2 text-xs text-slate-600 dark:text-gray-400 bg-grayblue-light dark:bg-gray-900/60 px-2 py-1 rounded border border-slate-300 dark:border-gray-700/60"
+				class="hidden sm:block absolute top-2 left-2 text-xs text-slate-600 dark:text-gray-400 bg-grayblue-light dark:bg-gray-900/60 px-2 py-1 rounded border border-slate-300 dark:border-gray-700/60"
 			>
-				{currentCenterDate.toLocaleString()} &middot; {filteredCount}/{processedEvents.length}
+				{currentCenterDate.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })} &middot; {filteredCount}/{processedEvents.length}
 			</div>
 		{/if}
 	</div>

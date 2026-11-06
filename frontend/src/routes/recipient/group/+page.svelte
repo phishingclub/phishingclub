@@ -44,6 +44,32 @@
 
 	// the recipient fields that can be used as a dynamic filter
 	const dynamicFilterFields = ['position', 'department', 'city', 'country', 'misc'];
+	const dynamicFilterFieldLabels = {
+		position: 'Position',
+		department: 'Department',
+		city: 'City',
+		country: 'Country',
+		misc: 'Miscellaneous'
+	};
+	// example value per filter field, shown as the Filter value placeholder
+	const dynamicFilterValueExamples = {
+		position: 'e.g. Engineer',
+		department: 'e.g. Engineering',
+		city: 'e.g. Copenhagen',
+		country: 'e.g. Denmark',
+		misc: 'e.g. VIP'
+	};
+	const filterValuePlaceholder = (field) =>
+		dynamicFilterValueExamples[field] ??
+		dynamicFilterValueExamples[
+			Object.keys(dynamicFilterFieldLabels).find((k) => dynamicFilterFieldLabels[k] === field)
+		] ??
+		'e.g. Engineer';
+	// labels for display only, the values sent to the API stay the raw field keys
+	const dynamicFilterFieldOptions = dynamicFilterFields.map((value) => ({
+		value,
+		label: dynamicFilterFieldLabels[value]
+	}));
 
 	// data
 	let form = null;
@@ -369,9 +395,9 @@
 <HeadTitle title="Groups" />
 <main>
 	<Headline docSlug="groups">Groups</Headline>
-	<div class="flex gap-3">
+	<div class="flex flex-wrap gap-3 mt-6 mb-10 [&>button]:m-0">
 		<BigButton on:click={openCreateModal}>New group</BigButton>
-		<BigButton on:click={openDynamicCreateModal}>New dynamic group</BigButton>
+		<BigButton variant="secondary" on:click={openDynamicCreateModal}>New dynamic group</BigButton>
 	</div>
 	<BulkActionBar
 		count={$selection.size}
@@ -385,7 +411,7 @@
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
-			{ column: 'Count', size: 'small' },
+			{ column: 'Count', size: 'small', alignText: 'center' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={['Name', ...(contextCompanyID ? ['scope'] : [])]}
@@ -404,7 +430,7 @@
 						on:change={() => selection.toggle(group.id)}
 					/>
 				{/if}
-				<TableCellLink href={`/recipient/group/${group.id}`} title={group.name}>
+				<TableCellLink href={`/recipient/group/${group.id}`} title={group.name} wrap>
 					{#if group.isDynamic}
 						<DynamicLabel />
 					{/if}
@@ -419,7 +445,7 @@
 				</TableCellLink>
 
 				<TableCellLink href={`/recipient/group/${group.id}`} title={group.recipientCount}>
-					{group.recipientCount}
+					<span class="block text-center">{group.recipientCount}</span>
 				</TableCellLink>
 
 				{#if contextCompanyID}
@@ -464,7 +490,7 @@
 						minLength={1}
 						maxLength={127}
 						bind:value={formValues.name}
-						placeholder="Marketing">Name</TextField
+						placeholder="e.g. Marketing">Name</TextField
 					>
 				</FormColumn>
 			</FormColumns>
@@ -488,13 +514,13 @@
 						minLength={1}
 						maxLength={127}
 						bind:value={dynamicFormValues.name}
-						placeholder="Marketing">Name</TextField
+						placeholder="e.g. Marketing">Name</TextField
 					>
 					<TextFieldSelect
 						id="dynamic-group-filter-field"
 						required
 						bind:value={dynamicFormValues.filterField}
-						options={dynamicFilterFields}
+						options={dynamicFilterFieldOptions}
 					>
 						Filter field
 					</TextFieldSelect>
@@ -503,7 +529,8 @@
 						minLength={1}
 						maxLength={127}
 						bind:value={dynamicFormValues.filterValue}
-						placeholder="e.g. Engineering">Filter value</TextField
+						toolTipText="Recipients whose field equals this value are included automatically"
+						placeholder={filterValuePlaceholder(dynamicFormValues.filterField)}>Filter value</TextField
 					>
 				</FormColumn>
 			</FormColumns>
@@ -527,13 +554,13 @@
 						minLength={1}
 						maxLength={127}
 						bind:value={dynamicUpdateValues.name}
-						placeholder="Marketing">Name</TextField
+						placeholder="e.g. Marketing">Name</TextField
 					>
 					<TextFieldSelect
 						id="dynamic-group-filter-field-a"
 						required
 						bind:value={dynamicUpdateValues.filterField}
-						options={dynamicFilterFields}
+						options={dynamicFilterFieldOptions}
 					>
 						Filter field
 					</TextFieldSelect>
@@ -542,7 +569,8 @@
 						minLength={1}
 						maxLength={127}
 						bind:value={dynamicUpdateValues.filterValue}
-						placeholder="e.g. Engineering">Filter value</TextField
+						toolTipText="Recipients whose field equals this value are included automatically"
+						placeholder={filterValuePlaceholder(dynamicUpdateValues.filterField)}>Filter value</TextField
 					>
 				</FormColumn>
 			</FormColumns>

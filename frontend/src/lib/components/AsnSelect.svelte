@@ -1,7 +1,7 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
 	import { api } from '$lib/api/apiProxy.js';
-	import ToolTip from './ToolTip.svelte';
+	import FieldLabel from './form/FieldLabel.svelte';
 
 	// value is an array of ASN number strings, for example ["15169", "13335"]
 	export let value = [];
@@ -9,6 +9,10 @@
 	export let installed = true;
 	export let disabled = false;
 	export let placeholder = 'Search by number or name...';
+	// 'full' fills the parent instead of the fixed width from sm
+	export let width = 'medium';
+
+	const inputId = `asn-select-${Math.random().toString(36).slice(2, 8)}`;
 
 	let inputValue = '';
 	let inputElement;
@@ -223,26 +227,10 @@
 	$: displayValue = value.length > 0 ? `${value.length} selected` : '';
 </script>
 
-<div class="flex justify-start flex-col asn-select-container">
-	<div class="flex flex-col py-2 relative">
-		<div class="flex items-center">
-			<p
-				class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
-			>
-				ASNs
-			</p>
-			{#if toolTipText.length > 0}
-				<ToolTip>
-					{toolTipText}
-				</ToolTip>
-			{/if}
-			<div
-				class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-			>
-				<p class="text-slate-600 dark:text-gray-400 text-xs">optional</p>
-			</div>
-		</div>
-	</div>
+<div class="flex justify-start flex-col w-full {width === 'full' ? '' : 'sm:w-auto'} asn-select-container">
+	<label for={inputId} class="flex flex-col pt-2 relative">
+		<FieldLabel {toolTipText} optional>ASNs</FieldLabel>
+	</label>
 
 	{#if !installed}
 		<p class="text-sm text-slate-500 dark:text-gray-400">
@@ -253,8 +241,9 @@
 		</p>
 	{:else}
 		<div class="relative">
-			<div class="flex items-center relative w-60">
+			<div class="flex items-center relative w-full {width === 'full' ? '' : 'sm:w-60'}">
 				<input
+					id={inputId}
 					bind:this={inputElement}
 					type="text"
 					autocomplete="off"
@@ -263,9 +252,9 @@
 					on:keydown={handleKeyDown}
 					on:blur={handleBlur}
 					{disabled}
-					class="w-full relative rounded-md py-2 pr-10 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+					class="w-full relative rounded-md py-2 pr-10 text-slate-800 dark:text-gray-300 border border-transparent bg-grayblue-light dark:bg-gray-900/60 dark:border-gray-700 font-normal transition-colors duration-200 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 disabled:opacity-60 disabled:cursor-not-allowed"
 					class:pl-10={showDropdown}
-					class:pl-4={!showDropdown}
+					class:pl-3={!showDropdown}
 					placeholder={showDropdown ? '' : value.length > 0 ? displayValue : placeholder}
 				/>
 				{#if showDropdown}

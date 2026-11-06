@@ -6,10 +6,12 @@
 	import TextField from '../TextField.svelte';
 	import TextFieldSelect from '../TextFieldSelect.svelte';
 	import FormButton from '../FormButton.svelte';
+	import Button from '../Button.svelte';
 	import FormError from '../FormError.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { fetchAllRows } from '$lib/utils/api-utils.js';
 	import ReportInboxStatus from '../company/ReportInboxStatus.svelte';
+	import StatusBadge from '../StatusBadge.svelte';
 
 	// change fires with the saved inbox, or null after delete, so cards can update their status
 	const dispatch = createEventDispatcher();
@@ -283,12 +285,12 @@
 </script>
 
 <Modal
-	headerText={isGlobal ? 'Global Reporting Inbox' : 'Reporting Inbox'}
+	headerText={isGlobal ? 'Global reporting inbox' : 'Reporting inbox'}
 	docSlug="reporting"
 	docAnchor="report-inbox"
 	bind:visible
 >
-	<div class="w-[640px] p-6 space-y-6">
+	<div class="w-[640px] max-w-full py-4 sm:p-6 space-y-6">
 		{#if isLoading}
 			<div class="flex items-center justify-center py-10">
 				<p class="text-gray-500 dark:text-gray-400">Loading...</p>
@@ -459,19 +461,15 @@
 					<div
 						class="rounded-md border border-gray-200 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-800/40 p-4 space-y-2"
 					>
-						<p
-							class="text-sm font-semibold {testResult.ok
-								? 'text-green-600 dark:text-green-400'
-								: 'text-red-600 dark:text-red-400'}"
-						>
+						<StatusBadge tone={testResult.ok ? 'success' : 'danger'}>
 							{testResult.ok ? 'Test passed' : 'Test failed'}
-						</p>
+						</StatusBadge>
 						<ul class="space-y-2">
 							{#each testResult.steps ?? [] as step}
 								<li class="flex gap-2 text-sm">
 									<span
 										class="font-bold w-4 flex-shrink-0 {step.ok
-											? 'text-green-600 dark:text-green-400'
+											? 'text-green-700 dark:text-green-400'
 											: 'text-red-600 dark:text-red-400'}"
 										aria-label={step.ok ? 'passed' : 'failed'}>{step.ok ? '✓' : '✗'}</span
 									>
@@ -507,14 +505,14 @@
 				class="border-t border-gray-200 dark:border-gray-700/60 pt-4 flex gap-3 justify-end items-center"
 			>
 				{#if config}
-					<button
-						type="button"
+					<Button
+						size="medium"
+						variant="danger-outline"
 						disabled={isBusy}
 						on:click={() => (isDeleteAlertVisible = true)}
-						class="bg-red-600 dark:bg-red-700/80 hover:bg-red-500 dark:hover:bg-red-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 transition-colors duration-200"
 					>
 						Delete
-					</button>
+					</Button>
 				{/if}
 				<FormButton size="medium" isSubmitting={isSaving} disabled={isBusy} on:click={onSave}
 					>Save</FormButton

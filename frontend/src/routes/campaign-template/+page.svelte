@@ -20,6 +20,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
+	import PageFlow from '$lib/components/PageFlow.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
@@ -36,7 +37,7 @@
 	import { page } from '$app/stores';
 	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
-	import TrainingLabel from '$lib/components/TrainingLabel.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
 	import {
 		createTableSelection,
@@ -657,10 +658,10 @@
 	};
 </script>
 
-<HeadTitle title="Campaigns templates" />
+<HeadTitle title="Campaign templates" />
 
 <main>
-	<Headline docSlug="templates">Campaigns templates</Headline>
+	<Headline docSlug="templates">Campaign templates</Headline>
 	<BigButton on:click={openCreateModal}>New template</BigButton>
 
 	<BulkActionBar
@@ -675,25 +676,25 @@
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
-			{ column: 'Domain', size: 'small' },
+			{ column: 'Domain', size: 'medium' },
+			{ column: 'Email', size: 'medium' },
+			{ column: 'Landing Page', title: 'Landing', size: 'medium' },
 			{ column: 'SMTP', size: 'small' },
 			{ column: 'API Sender', size: 'small' },
-			{ column: 'Email', size: 'small' },
-			{ column: 'Before Landing Page', size: 'small' },
-			{ column: 'Landing Page', size: 'small' },
-			{ column: 'After Landing Page', size: 'small' },
-			{ column: 'After landing page redirect URL', size: 'small' },
+			{ column: 'Before Landing Page', title: 'Before page', size: 'small' },
+			{ column: 'After Landing Page', title: 'After page', size: 'small' },
+			{ column: 'After landing page redirect URL', title: 'Redirect URL', size: 'small' },
 			{ column: 'Is complete', size: 'small', alignText: 'center' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={[
 			'Name',
 			'Domain',
+			'Email',
+			'Landing Page',
 			'SMTP',
 			'API Sender',
-			'Email',
 			'Before Landing Page',
-			'Landing Page',
 			'After Landing Page',
 			'After landing page redirect URL',
 			'Is complete',
@@ -721,11 +722,11 @@
 						title={template.name}
 						class="block w-full py-1 text-left"
 					>
-						<span class="flex items-center gap-2">
+						<span class="flex items-center gap-2 min-w-0">
+							<span class="truncate">{template.name}</span>
 							{#if template.isTraining}
-								<TrainingLabel />
+								<span class="shrink-0"><StatusBadge tone="success" title="Awareness training">training</StatusBadge></span>
 							{/if}
-							{template.name}
 						</span>
 					</button>
 				</TableCell>
@@ -738,28 +739,8 @@
 						>
 							{domainMap.byKey(template.domainID)}
 						</a>
-					{/if}
-				</TableCell>
-				<TableCell>
-					{#if template.smtpConfigurationID}
-						<a
-							href={`/smtp-configuration/?edit=${template.smtpConfigurationID}`}
-							class="block w-full py-1"
-							title={smtpConfigurationMap.byKey(template.smtpConfigurationID)}
-						>
-							{smtpConfigurationMap.byKey(template.smtpConfigurationID)}
-						</a>
-					{/if}
-				</TableCell>
-				<TableCell>
-					{#if template.apiSenderID}
-						<a
-							href={`/api-sender/?edit=${template.apiSenderID}`}
-							class="block w-full py-1"
-							title={apiSenderMap.byKey(template.apiSenderID)}
-						>
-							{apiSenderMap.byKey(template.apiSenderID)}
-						</a>
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
 					{/if}
 				</TableCell>
 				<TableCell>
@@ -771,28 +752,8 @@
 						>
 							{emailMap.byKey(template.emailID)}
 						</a>
-					{/if}
-				</TableCell>
-				<TableCell>
-					{#if template.beforeLandingPageID}
-						<a
-							href={`/page/?edit=${template.beforeLandingPageID}`}
-							class="block w-full py-1"
-							title={beforeLandingPageMap.byKey(template.beforeLandingPageID)}
-						>
-							{beforeLandingPageMap.byKey(template.beforeLandingPageID)}
-						</a>
-					{:else if template.beforeLandingProxyID}
-						<a
-							href={`/proxy/?edit=${template.beforeLandingProxyID}`}
-							class="block w-full py-1"
-							title={beforeLandingProxyMap.byKey(template.beforeLandingProxyID)}
-						>
-							<span class="flex items-center gap-1">
-								<ProxySvgIcon size="w-4 h-4" />
-								{beforeLandingProxyMap.byKey(template.beforeLandingProxyID)}
-							</span>
-						</a>
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
 					{/if}
 				</TableCell>
 				<TableCell>
@@ -810,11 +771,63 @@
 							class="block w-full py-1"
 							title={landingProxyMap.byKey(template.landingProxyID)}
 						>
-							<span class="flex items-center gap-1">
-								<ProxySvgIcon size="w-4 h-4" />
-								{landingProxyMap.byKey(template.landingProxyID)}
+							<span class="flex items-center gap-1 min-w-0">
+								<span class="shrink-0"><ProxySvgIcon size="w-4 h-4" /></span>
+								<span class="truncate">{landingProxyMap.byKey(template.landingProxyID)}</span>
 							</span>
 						</a>
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
+					{/if}
+				</TableCell>
+				<TableCell>
+					{#if template.smtpConfigurationID}
+						<a
+							href={`/smtp-configuration/?edit=${template.smtpConfigurationID}`}
+							class="block w-full py-1"
+							title={smtpConfigurationMap.byKey(template.smtpConfigurationID)}
+						>
+							{smtpConfigurationMap.byKey(template.smtpConfigurationID)}
+						</a>
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
+					{/if}
+				</TableCell>
+				<TableCell>
+					{#if template.apiSenderID}
+						<a
+							href={`/api-sender/?edit=${template.apiSenderID}`}
+							class="block w-full py-1"
+							title={apiSenderMap.byKey(template.apiSenderID)}
+						>
+							{apiSenderMap.byKey(template.apiSenderID)}
+						</a>
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
+					{/if}
+				</TableCell>
+				<TableCell>
+					{#if template.beforeLandingPageID}
+						<a
+							href={`/page/?edit=${template.beforeLandingPageID}`}
+							class="block w-full py-1"
+							title={beforeLandingPageMap.byKey(template.beforeLandingPageID)}
+						>
+							{beforeLandingPageMap.byKey(template.beforeLandingPageID)}
+						</a>
+					{:else if template.beforeLandingProxyID}
+						<a
+							href={`/proxy/?edit=${template.beforeLandingProxyID}`}
+							class="block w-full py-1"
+							title={beforeLandingProxyMap.byKey(template.beforeLandingProxyID)}
+						>
+							<span class="flex items-center gap-1 min-w-0">
+								<span class="shrink-0"><ProxySvgIcon size="w-4 h-4" /></span>
+								<span class="truncate">{beforeLandingProxyMap.byKey(template.beforeLandingProxyID)}</span>
+							</span>
+						</a>
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
 					{/if}
 				</TableCell>
 				<TableCell>
@@ -832,11 +845,13 @@
 							class="block w-full py-1"
 							title={afterLandingProxyMap.byKey(template.afterLandingProxyID)}
 						>
-							<span class="flex items-center gap-1">
-								<ProxySvgIcon size="w-4 h-4" />
-								{afterLandingProxyMap.byKey(template.afterLandingProxyID)}
+							<span class="flex items-center gap-1 min-w-0">
+								<span class="shrink-0"><ProxySvgIcon size="w-4 h-4" /></span>
+								<span class="truncate">{afterLandingProxyMap.byKey(template.afterLandingProxyID)}</span>
 							</span>
 						</a>
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
 					{/if}
 				</TableCell>
 				<TableCell>
@@ -857,6 +872,8 @@
 								{template.afterLandingPageRedirectURL}
 							</span>
 						{/if}
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
 					{/if}
 				</TableCell>
 				<TableCellCheck value={template.isUsable} />
@@ -942,7 +959,7 @@
 							Go to <a
 								href="https://security.microsoft.com/advanceddelivery"
 								target="_blank"
-								class="text-blue-600 underline">Microsoft Defender Advanced Delivery</a
+								class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline">Microsoft Defender Advanced Delivery</a
 							>
 						</li>
 						<li>Select the <b>Phishing simulation</b> tab</li>
@@ -958,7 +975,7 @@
 						For more details, see the <a
 							href="https://learn.microsoft.com/en-us/defender-office-365/advanced-delivery-policy-configure?view=o365-worldwide"
 							target="_blank"
-							class="text-blue-600 underline">official Microsoft documentation</a
+							class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline">official Microsoft documentation</a
 						>.
 					</div>
 				</div>
@@ -984,22 +1001,23 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 			<InstalledResourceBadge resourceType="campaigntemplate" resourceId={formValues.id} variant="notice" />
 		{/if}
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
-			<div class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-8">
+			<div class="w-full lg:w-[56rem] max-w-full py-6 space-y-8">
 				<!-- Basic Information Section -->
 				<div class="w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+					<h3 class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">
 						Basic Information
 					</h3>
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-						<div>
-							<TextField required minLength={1} maxLength={64} bind:value={formValues.name}
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+						<div class="md:max-w-xs">
+							<TextField required minLength={1} maxLength={64} width="full" bind:value={formValues.name}
 								>Name</TextField
 							>
 						</div>
-						<div>
+						<div class="md:max-w-xs">
 							<TextFieldSelect
 								required
 								id="domain"
+								size="full"
 								bind:value={formValues.domain}
 								options={domainMap.values()}>Domain</TextFieldSelect
 							>
@@ -1018,31 +1036,33 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 				<!-- Delivery Configuration Section -->
 				<!-- Email/API Configuration -->
 				<div class="w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+					<h3 class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">
 						Email Configuration
 					</h3>
-					<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
 						{#if formValues.templateType === 'Email' || !formValues.templateType}
-							<div>
+							<div class="md:max-w-xs">
 								<TextFieldSelect
 									required
 									id="smtpConfiguration"
+									size="full"
 									bind:value={formValues.smtpConfiguration}
 									options={smtpConfigurationMap.values()}>SMTP Configuration</TextFieldSelect
 								>
 							</div>
 						{:else if formValues.templateType === 'External API'}
-							<div>
+							<div class="md:max-w-xs">
 								<TextFieldSelect
 									required
 									id="apiSender"
+									size="full"
 									bind:value={formValues.apiSender}
 									options={apiSenderMap.values()}>API Sender</TextFieldSelect
 								>
 							</div>
 						{/if}
-						<div>
-							<TextFieldSelect id="email" bind:value={formValues.email} options={emailMap.values()}
+						<div class="md:max-w-xs">
+							<TextFieldSelect id="email" size="full" bind:value={formValues.email} options={emailMap.values()}
 								>Email</TextFieldSelect
 							>
 						</div>
@@ -1051,14 +1071,15 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 
 				<!-- Page Flow Section -->
 				<div class="w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Page Flow</h3>
+					<h3 class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">Page Flow</h3>
 					<div class="grid grid-cols-1 md:grid-cols-5 gap-6">
-						<div class="md:col-span-2 flex flex-col space-y-6">
+						<div class="md:col-span-2 flex flex-col w-full md:max-w-xs">
 							<!-- Before Landing Page -->
 							<TextFieldSelect
 								id="beforeLandingPage"
 								bind:value={formValues.beforeLandingPage}
 								options={beforeLandingPageMap.values()}
+								size="full"
 								optional>Before Landing</TextFieldSelect
 							>
 
@@ -1078,6 +1099,7 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 									id="landingPage"
 									bind:value={formValues.landingPage}
 									options={landingPageMap.values()}
+									size="full"
 									required>Landing</TextFieldSelect
 								>
 							</ConditionalDisplay>
@@ -1087,136 +1109,26 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 								id="afterLandingPage"
 								bind:value={formValues.afterLandingPage}
 								options={afterLandingPageMap.values()}
+								size="full"
 								optional>After Landing</TextFieldSelect
 							>
 						</div>
 
-						<!-- Visualization - Takes 2 columns on larger screens -->
-						<div class="md:col-span-2 pl-20 flex justify-center">
-							<!-- Dynamic Page Flow Visualization -->
-							<div class="flex flex-col space-y-3 w-full justify-center sm:hidden md:flex">
-								<!-- Before Landing Page -->
-								<div class="flex items-center">
-									<div
-										class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3 transition-colors duration-200
-                                    ${formValues.beforeLandingPage ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-300 dark:border-blue-500' : 'bg-gray-100 dark:bg-gray-800/60 border-gray-300 dark:border-gray-600'}`}
-									>
-										<span
-											class={`text-xl transition-colors duration-200 ${formValues.beforeLandingPage ? 'text-blue-500 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500'}`}
-											>1</span
-										>
-									</div>
-									<div class="flex-1">
-										<p
-											class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
-										>
-											Before Landing Page
-										</p>
-										<p
-											class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
-										>
-											{formValues.beforeLandingPage || 'Not selected'}
-										</p>
-									</div>
-								</div>
-
-								<!-- Down Arrow -->
-								<div class="flex">
-									<div
-										class="ml-5 w-0.5 h-4 bg-gray-300 dark:bg-gray-600 transition-colors duration-200"
-									></div>
-								</div>
-
-								<!-- Main Landing Page -->
-								<div class="flex items-center">
-									<div
-										class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center border border-blue-400 dark:border-blue-500 mr-3 transition-colors duration-200"
-									>
-										<span
-											class="text-xl text-blue-600 dark:text-blue-300 transition-colors duration-200"
-											>2</span
-										>
-									</div>
-									<div class="flex-1">
-										<p
-											class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
-										>
-											Landing {formValues.landingPageType === 'proxy' ? 'Proxy' : 'Page'}
-										</p>
-										<p
-											class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
-										>
-											{formValues.landingPage || 'Required'}
-										</p>
-									</div>
-								</div>
-
-								<!-- Down Arrow -->
-								<div class="flex">
-									<div
-										class="ml-5 w-0.5 h-4 bg-gray-300 dark:bg-gray-600 transition-colors duration-200"
-									></div>
-								</div>
-
-								<!-- After Landing Page -->
-								<div class="flex items-center">
-									<div
-										class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3 transition-colors duration-200
-                                    ${formValues.afterLandingPage ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-300 dark:border-blue-500' : 'bg-gray-100 dark:bg-gray-800/60 border-gray-300 dark:border-gray-600'}`}
-									>
-										<span
-											class={`text-xl transition-colors duration-200 ${formValues.afterLandingPage ? 'text-blue-500 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500'}`}
-											>3</span
-										>
-									</div>
-									<div class="flex-1">
-										<p
-											class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
-										>
-											After Landing Page
-										</p>
-										<p
-											class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
-										>
-											{formValues.afterLandingPage || 'Not selected'}
-										</p>
-									</div>
-								</div>
-
-								{#if showAdvancedOptions}
-									<!-- Down Arrow -->
-									<div class="flex">
-										<div
-											class="ml-5 w-0.5 h-4 bg-gray-300 dark:bg-gray-600 transition-colors duration-200"
-										></div>
-									</div>
-
-									<!-- Final Redirect -->
-									<div class="flex items-center">
-										<div
-											class={`w-10 h-10 rounded-lg flex items-center justify-center border mr-3 transition-colors duration-200
-			                                    ${formValues.afterLandingPageRedirectURL ? 'bg-blue-50 dark:bg-blue-900/40 border-blue-300 dark:border-blue-500' : 'bg-gray-100 dark:bg-gray-800/60 border-gray-300 dark:border-gray-600'}`}
-										>
-											<span
-												class={`text-xl transition-colors duration-200 ${formValues.afterLandingPageRedirectURL ? 'text-blue-500 dark:text-blue-300' : 'text-gray-400 dark:text-gray-500'}`}
-												>4</span
-											>
-										</div>
-										<div class="flex-1">
-											<p
-												class="text-xs font-medium text-gray-900 dark:text-gray-300 transition-colors duration-200"
-											>
-												POST Redirect URL
-											</p>
-											<p
-												class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[180px] transition-colors duration-200"
-											>
-												{formValues.afterLandingPageRedirectURL || 'Not set'}
-											</p>
-										</div>
-									</div>
-								{/if}
-							</div>
+						<div
+							class="md:col-span-3 md:border-l md:border-gray-200 md:dark:border-gray-700 md:pl-8 flex items-center"
+						>
+							<PageFlow
+								direction="vertical"
+								deliveryType={formValues.templateType === 'External API' ? 'api' : 'email'}
+								deliveryName={formValues.templateType === 'External API'
+									? formValues.apiSender
+									: formValues.email}
+								beforeName={formValues.beforeLandingPage}
+								landingName={formValues.landingPage}
+								landingIsProxy={formValues.landingPageType === 'proxy'}
+								afterName={formValues.afterLandingPage}
+								redirectURL={formValues.afterLandingPageRedirectURL}
+							/>
 						</div>
 					</div>
 				</div>
@@ -1225,20 +1137,24 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 
 				<!-- Advanced Options Section -->
 				{#if !showAdvancedOptions}
-					<div class="mt-6 text-center">
+					<div>
 						<button
 							type="button"
-							class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200 underline"
+							class="pc-focus inline-flex items-center gap-1 rounded-sm text-sm font-medium text-cta-blue dark:text-highlight-blue hover:underline"
+							aria-expanded={false}
 							on:click={() => (showAdvancedOptions = true)}
 						>
 							Show advanced options
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"
+								><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg
+							>
 						</button>
 					</div>
 				{/if}
 
 				{#if showAdvancedOptions}
-					<div class="w-full border-t pt-6 mt-6">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+					<div class="w-full">
+						<h3 class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">
 							Advanced Options
 						</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-6">

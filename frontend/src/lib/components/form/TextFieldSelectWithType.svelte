@@ -1,6 +1,6 @@
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
-	import ToolTip from '../ToolTip.svelte';
+	import FieldLabel from './FieldLabel.svelte';
 	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
 	import { activeFormElement, activeFormElementSubscribe } from '$lib/store/activeFormElement';
 
@@ -231,55 +231,50 @@
 </script>
 
 <div
-	class="flex justify-start textfield-select-container"
+	class="flex justify-start py-2 textfield-select-container"
 	class:hidden
 	class:flex-col={!inline}
 	class:flex-row={inline}
+	class:w-full={!inline && size !== 'small'}
+	class:sm:w-auto={!inline && size === 'normal'}
 >
-	<label class="flex flex-col py-2 relative" class:py-2={!inline} class:pr-2={inline}>
-		<div class="flex items-center">
-			<p
-				id={labelId}
-				class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
-			>
-				<slot />
-			</p>
-			{#if toolTipText.length > 0}
-				<ToolTip>
-					{toolTipText}
-				</ToolTip>
-			{/if}
-			{#if optional === true}
-				<div
-					class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200"
-				>
-					<p class="text-slate-600 dark:text-gray-400 text-xs">optional</p>
-				</div>
-			{/if}
-		</div>
+	<label class="flex flex-col relative" class:pr-2={inline}>
+		<FieldLabel id={labelId} {toolTipText} {optional}><slot /></FieldLabel>
 	</label>
 	<div class="relative">
 		{#if !isFocused}
 			<div class="absolute left-1 top-1/2 transform -translate-y-1/2 flex bg-transparent z-10">
 				<button
 					type="button"
-					class="w-8 h-8 text-base transition-all duration-200 rounded-lg border flex items-center justify-center {type ===
-					'page'
-						? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-800/40 text-green-700 dark:text-green-300'
-						: 'border-gray-200 dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-800/60 text-gray-700 dark:text-gray-300 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
+					class="w-8 h-8 rounded-md border flex items-center justify-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue {type === 'page' ? 'border-cta-blue bg-blue-50 text-cta-blue dark:border-highlight-blue dark:bg-highlight-blue/20 dark:text-white' : 'border-gray-200 dark:border-gray-700/60 bg-white dark:bg-gray-800/60 text-gray-600 dark:text-gray-300 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
 					on:click={() => handleTypeChange('page')}
 					title="Page"
+					aria-label="Page"
+					aria-pressed={type === 'page'}
 				>
-					📄
+					<svg
+						class="w-4 h-4"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+						<polyline points="14 2 14 8 20 8" />
+						<line x1="8" y1="13" x2="16" y2="13" />
+						<line x1="8" y1="17" x2="13" y2="17" />
+					</svg>
 				</button>
 				<button
 					type="button"
-					class="w-8 h-8 text-base transition-all duration-200 rounded-lg border flex items-center justify-center ml-0.5 {type ===
-					'proxy'
-						? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-800/40 text-green-700 dark:text-green-300'
-						: 'border-gray-200 dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-800/60 text-gray-700 dark:text-gray-300 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
+					class="ml-0.5 w-8 h-8 rounded-md border flex items-center justify-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue {type === 'proxy' ? 'border-cta-blue bg-blue-50 text-cta-blue dark:border-highlight-blue dark:bg-highlight-blue/20 dark:text-white' : 'border-gray-200 dark:border-gray-700/60 bg-white dark:bg-gray-800/60 text-gray-600 dark:text-gray-300 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
 					on:click={() => handleTypeChange('proxy')}
 					title="Proxy"
+					aria-label="Proxy"
+					aria-pressed={type === 'proxy'}
 				>
 					<ProxySvgIcon size="w-5 h-5" />
 				</button>
@@ -289,7 +284,9 @@
 		<div
 			class="flex items-center relative"
 			class:w-28={size == 'small'}
-			class:w-60={size == 'normal'}
+			class:w-full={size == 'normal' && !inline}
+			class:sm:w-80={size == 'normal' && !inline}
+			class:w-60={size == 'normal' && inline}
 		>
 			<input
 				bind:this={inputElement}
@@ -309,7 +306,7 @@
 				on:click={handleFocus}
 				autocomplete="off"
 				style={optional && hasValue ? 'padding-right: 4rem;' : 'padding-right: 2.5rem;'}
-				class="w-full relative rounded-md py-2 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer focus:cursor-text transition-colors duration-200 overflow-hidden text-ellipsis whitespace-nowrap"
+				class="w-full relative rounded-md py-2 text-slate-800 dark:text-gray-300 border border-transparent focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 bg-grayblue-light dark:bg-gray-900/60 dark:border-gray-700 font-normal cursor-pointer focus:cursor-text transition-colors duration-200 overflow-hidden text-ellipsis whitespace-nowrap"
 				class:pl-10={isFocused && showDropdown}
 				class:pl-20={!isFocused}
 				class:pl-4={isFocused && !showDropdown}
@@ -356,7 +353,8 @@
 				bind:this={dropdownElement}
 				class="absolute top-10 z-50"
 				class:w-28={size == 'small'}
-				class:w-60={size == 'normal'}
+				class:w-full={size == 'normal'}
+				class:sm:w-80={size == 'normal'}
 			>
 				<ul
 					id={listboxId}

@@ -53,15 +53,17 @@
 
 <HeadTitle title="Assets" />
 <main>
-	<Headline docSlug="assets">Asset by domains</Headline>
+	<Headline docSlug="assets">Assets by domain</Headline>
 	{#if !contextCompanyID}
 		<BigButton
+			variant="secondary"
 			on:click={() => {
 				goto('/asset/shared/');
 			}}>Open shared assets</BigButton
 		>
 	{:else}
 		<BigButton
+			variant="secondary"
 			on:click={() => {
 				goto('/asset/company/');
 			}}>Open company assets</BigButton
@@ -75,12 +77,31 @@
 		plural="domains"
 		pagination={tableURLParams}
 		hasActions={false}
+		reserveSelect
 		isGhost={isTableLoading}
 	>
 		{#each domains as domain}
 			<TableRow>
-				<TableCell>
-					<a class="w-full flex" href="/asset/{domain.name}">{domain.name}</a>
+				<TableCell wrap>
+					<a
+						class="pc-cell-link group w-full !flex items-center justify-between gap-2 min-h-10"
+						href="/asset/{domain.name}"
+						title="Open assets for {domain.name}"
+					>
+						<span class="truncate">{domain.name}</span>
+						<svg
+							class="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500 group-hover:text-slate-600 dark:group-hover:text-gray-200"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							aria-hidden="true"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M7.21 14.77a.75.75 0 0 1 .02-1.06L11.17 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.5 4.25a.75.75 0 0 1 0 1.08l-4.5 4.25a.75.75 0 0 1-1.06-.02Z"
+								clip-rule="evenodd"
+							/>
+						</svg>
+					</a>
 				</TableCell>
 			</TableRow>
 		{/each}

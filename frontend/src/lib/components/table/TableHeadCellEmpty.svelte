@@ -1,4 +1,4 @@
 <th
-	class="pl-4 bg-white dark:bg-gray-900 min-w-4 w-4 py-4 border-hidden transition-colors duration-200"
->
-</th>
+	aria-hidden="true"
+	class="w-0 p-0 bg-grayblue-light dark:bg-gray-800/60 border-hidden transition-colors duration-200"
+></th>

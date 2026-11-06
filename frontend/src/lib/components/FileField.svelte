@@ -1,6 +1,6 @@
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
-	import ToolTip from './ToolTip.svelte';
+	import FieldLabel from './form/FieldLabel.svelte';
 
 	// bind a element to this component input field
 	// use like <TextField bind:bindTo={varYouWantToBindTheInputFieldTo} />
@@ -15,6 +15,10 @@
 	export let name = 'files';
 	export let accept = '*';
 	export let disabled = false;
+	// pages look up the input by this id, so the default stays 'files'
+	export let id = 'files';
+	// fills the column on every screen size instead of a fixed width from sm up
+	export let fullWidth = false;
 	// bind to parent form element, if there is one
 	let parentForm = null;
 	// listen to parent form reset event, if one exists
@@ -41,30 +45,12 @@
 	});
 </script>
 
-<label class="flex flex-col py-2 w-56">
+<label class="flex flex-col py-2 w-full" class:sm:w-60={!fullWidth}>
 	{#if $$slots.default || toolTipText.length > 0 || optional === true}
-		<div class="flex items-center">
-			<p
-				class="font-semibold text-slate-600 dark:text-gray-300 py-2 transition-colors duration-200"
-			>
-				<slot />
-			</p>
-			{#if toolTipText.length > 0}
-				<ToolTip>
-					{toolTipText}
-				</ToolTip>
-			{/if}
-			{#if optional === true}
-				<div
-					class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-				>
-					<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
-				</div>
-			{/if}
-		</div>
+		<FieldLabel {toolTipText} {optional}><slot /></FieldLabel>
 	{/if}
 	<input
-		id="files"
+		{id}
 		type="file"
 		{name}
 		{accept}
@@ -75,6 +61,9 @@
 		{required}
 		{placeholder}
 		{disabled}
-		class="border-solid border-2 border-gray-300 dark:border-gray-600 py-2 px-2 rounded-md file:px-4 file:py-2 file:text-white file:cursor-pointer file:text-sm file:font-semibold bg-white dark:bg-gray-700 file:bg-cta-blue hover:cursor-pointer file:hover:bg-blue-600 dark:file:bg-indigo-600 dark:file:hover:bg-indigo-700 file:border-hidden file:rounded-md text-gray-900 dark:text-white transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed file:disabled:cursor-not-allowed"
+		class="w-full min-w-0 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 p-1.5 cursor-pointer transition-colors duration-200
+			file:mr-3 file:px-4 file:py-1.5 file:rounded-md file:border-0 file:text-sm file:font-semibold file:text-white file:bg-cta-blue hover:file:bg-active-blue file:cursor-pointer
+			focus:outline-none focus-visible:border-cta-blue focus-visible:ring-2 focus-visible:ring-cta-blue/30 dark:focus-visible:border-highlight-blue dark:focus-visible:ring-highlight-blue/30
+			disabled:opacity-50 disabled:cursor-not-allowed file:disabled:cursor-not-allowed"
 	/>
 </label>

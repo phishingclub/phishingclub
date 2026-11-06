@@ -243,16 +243,19 @@
 <HeadTitle title="Users" />
 <main>
 	<Headline docSlug="settings">Users</Headline>
-	<BigButton on:click={openCreateModal}>New user</BigButton>
+	<div class="flex flex-wrap gap-3 mt-6 mb-10 [&>button]:m-0">
+		<BigButton on:click={openCreateModal}>New user</BigButton>
+	</div>
 
 	<Table
+		reserveSelect
 		columns={[
 			{ column: 'Username', size: 'medium' },
+			{ column: 'Name', size: 'large' },
 			{ column: 'Email', size: 'large' },
-			{ column: 'Name', size: 'medium' },
 			{ column: 'SSO', size: 'small', alignText: 'center' }
 		]}
-		sortable={['Username', 'Email', 'Name']}
+		sortable={['Username', 'Name', 'Email']}
 		hasData={!!users.length}
 		hasNextPage={usersHasNextPage}
 		plural="users"
@@ -261,7 +264,7 @@
 	>
 		{#each users as user}
 			<TableRow>
-				<TableCell>
+				<TableCell wrap>
 					<button
 						on:click={() => {
 							showEditModal(user.id);
@@ -271,8 +274,8 @@
 						{user.username}
 					</button></TableCell
 				>
-				<TableCell value={user.email} />
 				<TableCell value={user.name} />
+				<TableCell value={user.email} />
 				<TableCellCheck value={!!user.ssoID} />
 				<TableCellEmpty />
 				<TableCellAction>
@@ -295,10 +298,18 @@
 				<FormColumn>
 					<TextField
 						required
+						minLength={5}
+						maxLength={255}
+						toolTipText="5 to 255 characters"
+						bind:value={formValues.username}
+						placeholder="e.g. alice">Username</TextField
+					>
+					<TextField
+						required
 						minLength={1}
 						maxLength={64}
 						bind:value={formValues.fullname}
-						placeholder="Alice">Name</TextField
+						placeholder="e.g. Alice">Name</TextField
 					>
 					<TextField
 						required
@@ -306,21 +317,16 @@
 						maxLength={64}
 						type="email"
 						bind:value={formValues.email}
-						placeholder="alice@example.com">Email</TextField
-					>
-					<TextField
-						minLength={5}
-						maxLength={255}
-						bind:value={formValues.username}
-						placeholder="alice">Username</TextField
+						placeholder="e.g. alice@example.com">Email</TextField
 					>
 					{#if modalMode === 'create'}
 						<PasswordField
 							required
 							minLength={16}
 							maxLength={64}
+							toolTipText="16 to 64 characters"
 							bind:value={formValues.password}
-							placeholder="********">Password</PasswordField
+							placeholder="At least 16 characters">Password</PasswordField
 						>
 					{/if}
 				</FormColumn>

@@ -1,7 +1,7 @@
 <script>
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import { safeExternalHref } from '$lib/utils/url.js';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
@@ -9,6 +9,7 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import FormError from '$lib/components/FormError.svelte';
@@ -41,6 +42,14 @@
 	} from '$lib/service/tableSelection.js';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import TextareaField from '$lib/components/TextareaField.svelte';
+	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
+	import FormButton from '$lib/components/FormButton.svelte';
+
+	const secondaryButtonClass =
+		'pc-focus inline-flex items-center justify-center gap-2 px-4 py-2 rounded-md border border-gray-300 dark:border-gray-500 bg-white dark:bg-gray-700 text-sm font-medium text-slate-700 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer transition-colors duration-200';
+	const tokenTextareaClass =
+		'w-full h-72 sm:h-96 px-3 py-2 text-sm font-mono rounded-md border bg-grayblue-light dark:bg-gray-900/60 text-slate-800 dark:text-gray-300 border-transparent dark:border-gray-700/60 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 resize-y transition-colors duration-200';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -314,10 +323,13 @@
 		isModalVisible = true;
 	};
 
-	const openImportModal = () => {
+	const openImportModal = async () => {
 		importTokensText = '';
 		importFormError = '';
 		isImportModalVisible = true;
+		// start on the JSON field, not the hidden file input behind "Load from file"
+		await tick();
+		document.getElementById('import-token-textarea')?.focus();
 	};
 
 	const closeImportModal = () => {
@@ -597,14 +609,28 @@
 			hideIsLoading();
 		}
 	};
+
+	// shown as the import placeholder and copied by "Copy format example"
+	const tokenFormatExample = `[
+  {
+    "refresh_token": "1.AXkAwC...",
+    "client_id": "1fec8e78-bce4-4aaf-ab1b-5451cc387264",
+    "name": "optional: auto-generated if omitted",
+    "token_url": "optional: defaults to Microsoft",
+    "user": "optional: for display only",
+    "scope": "optional: populated from refresh",
+    "access_token": "optional: refreshed automatically",
+    "expires_at": 0
+  }
+]`;
 </script>
 
 <HeadTitle title="OAuth" />
 <main>
 	<Headline docSlug="oauth-providers">OAuth</Headline>
-	<div class="flex gap-2 mb-4">
+	<div class="flex flex-wrap gap-2 sm:gap-3 mt-6 mb-10 [&>button]:m-0">
 		<BigButton on:click={openCreateModal}>New OAuth</BigButton>
-		<BigButton on:click={openImportModal}>Import Token</BigButton>
+		<BigButton variant="secondary" on:click={openImportModal}>Import Token</BigButton>
 	</div>
 	<BulkActionBar
 		count={$selection.size}
@@ -616,7 +642,10 @@
 		selectable
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
-		columns={['Name', 'Status']}
+		columns={[
+			{ column: 'Name', size: 'large' },
+			{ column: 'Status', size: 'medium' }
+		]}
 		sortable={['name', 'is_authorized']}
 		pagination={tableURLParams}
 		hasData={isProviderTableLoading || providers.length > 0}
@@ -634,7 +663,7 @@
 						on:change={() => selection.toggle(provider.id)}
 					/>
 				{/if}
-				<TableCell>
+				<TableCell wrap>
 					<button
 						on:click={() => {
 							openUpdateModal(provider.id);
@@ -643,64 +672,47 @@
 						title={provider.name}
 						class="block w-full py-1 text-left"
 					>
-						{provider.name}
+						<span class="block truncate">{provider.name}</span>
+						<span class="block sm:hidden mt-1">
+							<StatusBadge tone={provider.isAuthorized ? 'success' : 'warning'}>
+								{provider.isAuthorized ? 'Authorized' : 'Not Authorized'}
+							</StatusBadge>
+						</span>
 					</button>
 				</TableCell>
 				<TableCell>
-					{#if provider.isAuthorized}
-						<span class="text-green-600 dark:text-green-400">Authorized</span>
-					{:else}
-						<span class="text-yellow-600 dark:text-yellow-400">Not Authorized</span>
-					{/if}
+					<div>
+						{#if provider.isAuthorized}
+							<StatusBadge tone="success">Authorized</StatusBadge>
+						{:else}
+							<StatusBadge tone="warning">Not Authorized</StatusBadge>
+						{/if}
+					</div>
 				</TableCell>
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
+						<TableUpdateButton
+							on:click={() => openUpdateModal(provider.id)}
+							{...globalButtonDisabledAttributes(provider, contextCompanyID)}
+						/>
 						{#if !provider.isImported}
 							<TableCopyButton
 								title="Copy"
 								on:click={() => openCopyModal(provider.id)}
 								{...globalButtonDisabledAttributes(provider, contextCompanyID)}
 							/>
-						{/if}
-						<TableUpdateButton
-							on:click={() => openUpdateModal(provider.id)}
-							{...globalButtonDisabledAttributes(provider, contextCompanyID)}
-						/>
-						{#if provider.isAuthorized}
-							<button
-								type="button"
-								on:click={() => onClickExport(provider.id)}
-								class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
-							>
-								<p class="ml-2 text-left">Read Token</p>
-							</button>
-						{/if}
-						{#if !provider.isImported}
 							{#if !provider.isAuthorized}
-								<button
-									type="button"
-									on:click={() => onClickAuthorize(provider.id)}
-									class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
-								>
-									<p class="ml-2 text-left">Authorize</p>
-								</button>
+								<TableDropDownButton name="Authorize" on:click={() => onClickAuthorize(provider.id)} />
 							{:else}
-								<button
-									type="button"
-									on:click={() => onClickAuthorize(provider.id)}
-									class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
-								>
-									<p class="ml-2 text-left">Authorize again</p>
-								</button>
-								<button
-									type="button"
-									on:click={() => openRemoveAuthAlert(provider)}
-									class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
-								>
-									<p class="ml-2 text-left">Remove Authorization</p>
-								</button>
+								<TableDropDownButton name="Authorize again" on:click={() => onClickAuthorize(provider.id)} />
 							{/if}
+						{/if}
+						{#if provider.isAuthorized}
+							<TableDropDownButton name="Read Token" on:click={() => onClickExport(provider.id)} />
+						{/if}
+						{#if !provider.isImported && provider.isAuthorized}
+							<TableDropDownButton name="Remove Authorization" on:click={() => openRemoveAuthAlert(provider)} />
 						{/if}
 						<TableDeleteButton
 							on:click={() => openDeleteAlert(provider)}
@@ -713,242 +725,199 @@
 	</Table>
 
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
-		{#if modalMode === 'update'}
-			<InstalledResourceBadge resourceType="oauthprovider" resourceId={formValues.id} variant="notice" />
-		{/if}
-		<FormGrid on:submit={onClickSubmit} bind:bindTo={form} {isSubmitting}>
-			<FormColumns>
-				<FormColumn>
-					<TextField
-						required
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.name}
-						placeholder="My OAuth Provider"
-					>
-						Name
-					</TextField>
-					{#if modalMode === 'update' && formValues.isImported}
-						<p class="text-sm text-gray-600 dark:text-gray-400 italic">
-							This is an imported provider. Only the name can be edited.
-						</p>
-					{:else}
-						<TextField
-							required
-							minLength={1}
-							maxLength={255}
-							bind:value={formValues.clientID}
-							placeholder="your-client-id"
-						>
-							Client ID
-						</TextField>
-						<PasswordField
-							required={modalMode === 'create' || modalMode === 'copy'}
-							minLength={modalMode === 'update' ? 0 : 1}
-							maxLength={255}
-							bind:value={formValues.clientSecret}
-							placeholder={modalMode === 'update'
-								? 'Leave empty to keep existing secret'
-								: 'your-client-secret'}
-						>
-							Client Secret
-						</PasswordField>
-						<TextField
-							required
-							minLength={1}
-							maxLength={512}
-							bind:value={formValues.authURL}
-							placeholder="https://example.com/oauth2/v2/auth"
-						>
-							Authorization URL
-						</TextField>
-						<TextField
-							required
-							minLength={1}
-							maxLength={512}
-							bind:value={formValues.tokenURL}
-							placeholder="https://example.com/oauth2/token"
-						>
-							Token URL
-						</TextField>
-						<TextareaField
-							required
-							minLength={1}
-							maxLength={512}
-							bind:value={formValues.scopes}
-							placeholder="https://example.com/auth/mail.send"
-							height="small"
-							toolTipText="Space-separated list of OAuth scopes">Scopes</TextareaField
-						>
-					{/if}
-				</FormColumn>
-			</FormColumns>
+		<div class="max-w-full sm:max-w-[40rem]">
+			<FormGrid on:submit={onClickSubmit} bind:bindTo={form} {isSubmitting}>
+				<FormColumns>
+					<FormColumn>
+						<div class="flex flex-col w-full sm:w-[28rem]">
+							{#if modalMode === 'update'}
+								<InstalledResourceBadge resourceType="oauthprovider" resourceId={formValues.id} variant="notice" />
+							{/if}
+							<TextField
+								width="full"
+								required
+								minLength={1}
+								maxLength={127}
+								bind:value={formValues.name}
+								placeholder="My OAuth Provider"
+							>
+								Name
+							</TextField>
+							{#if modalMode === 'update' && formValues.isImported}
+								<p class="text-sm text-gray-600 dark:text-gray-400 italic">
+									This is an imported provider. Only the name can be edited.
+								</p>
+							{:else}
+								<TextField
+									required
+									minLength={1}
+									maxLength={255}
+									width="full"
+									bind:value={formValues.clientID}
+									placeholder="your-client-id"
+								>
+									Client ID
+								</TextField>
+								<PasswordField
+									width="full"
+									required={modalMode === 'create' || modalMode === 'copy'}
+									minLength={modalMode === 'update' ? 0 : 1}
+									maxLength={255}
+									bind:value={formValues.clientSecret}
+									placeholder={modalMode === 'update'
+										? 'Leave empty to keep existing secret'
+										: 'your-client-secret'}
+								>
+									Client Secret
+								</PasswordField>
+								<TextField
+									required
+									minLength={1}
+									maxLength={512}
+									width="full"
+									bind:value={formValues.authURL}
+									placeholder="https://example.com/oauth2/v2/auth"
+								>
+									Authorization URL
+								</TextField>
+								<TextField
+									required
+									minLength={1}
+									maxLength={512}
+									width="full"
+									bind:value={formValues.tokenURL}
+									placeholder="https://example.com/oauth2/token"
+								>
+									Token URL
+								</TextField>
+								<TextareaField
+									required
+									minLength={1}
+									maxLength={512}
+									bind:value={formValues.scopes}
+									placeholder="https://example.com/auth/mail.send"
+									height="small"
+									fullWidth
+									toolTipText="OAuth scopes separated by spaces">Scopes</TextareaField
+								>
+							{/if}
+						</div>
+					</FormColumn>
+				</FormColumns>
 
-			<FormError message={formError} />
-			<FormFooter {closeModal} {isSubmitting} />
-		</FormGrid>
+				<FormError message={formError} />
+				<FormFooter {closeModal} {isSubmitting} />
+			</FormGrid>
+		</div>
 	</Modal>
 
 	<Modal
-		headerText="Import Token"
+		headerText="Import token"
 		visible={isImportModalVisible}
 		onClose={closeImportModal}
 		{isSubmitting}
+		noAutoFocus
 	>
-		<div class="mt-4 min-w-[800px]">
-			<div class="mb-4 flex gap-2">
-				<label
-					for="import-file-input"
-					class="inline-flex items-center px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md font-medium text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer transition-colors"
-				>
-					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-						></path>
-					</svg>
-					Load from file
-				</label>
-				<input
-					id="import-file-input"
-					type="file"
-					accept=".json"
-					on:change={onSetImportFile}
-					class="hidden"
-				/>
-				<button
-					type="button"
-					class="inline-flex items-center px-4 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md font-medium text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
-					on:click={() => {
-						navigator.clipboard.writeText(`[
-  {
-    "refresh_token": "1.AXkAwC...",
-    "client_id": "1fec8e78-bce4-4aaf-ab1b-5451cc387264",
-    "name": "optional: auto-generated if omitted",
-    "token_url": "optional: defaults to Microsoft",
-    "user": "optional: for display only",
-    "scope": "optional: populated from refresh",
-    "access_token": "optional: refreshed automatically"
-  }
-]`);
-						addToast('Copied format example to clipboard', 'Success');
-					}}
-				>
-					<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-						></path>
-					</svg>
-					Copy format example
-				</button>
-			</div>
-
-			<div class="mb-4">
-				<label
-					for="import-token-textarea"
-					class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-				>
-					Token JSON
-				</label>
-				<textarea
-					id="import-token-textarea"
-					bind:value={importTokensText}
-					required
-					placeholder={`[
-  {
-    "refresh_token": "1.AXkAwC...",
-    "client_id": "1fec8e78-bce4-4aaf-ab1b-5451cc387264",
-    "name": "optional: auto-generated if omitted",
-    "token_url": "optional: defaults to Microsoft",
-    "user": "optional: for display only",
-    "scope": "optional: populated from refresh",
-    "access_token": "optional: refreshed automatically",
-    "expires_at": 0
-  }
-]`}
-					class="w-full h-96 px-3 py-2 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-gray-200 resize-none"
-				></textarea>
-			</div>
-		</div>
 		<FormGrid on:submit={onClickImport} {isSubmitting}>
 			<FormColumns>
-				<FormColumn>
-					<!-- Empty form column for structure -->
+				<FormColumn stretch>
+					<div class="w-full md:w-[48rem] max-w-full">
+						<div class="mb-2 flex flex-wrap gap-2">
+							<input
+								id="import-file-input"
+								type="file"
+								accept=".json"
+								on:change={onSetImportFile}
+								class="peer sr-only"
+							/>
+							<label
+								for="import-file-input"
+								class="{secondaryButtonClass} peer-focus-visible:ring-2 peer-focus-visible:ring-cta-blue"
+							>
+								<svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+									></path>
+								</svg>
+								Load from file
+							</label>
+							<button
+								type="button"
+								class={secondaryButtonClass}
+								on:click={() => {
+									navigator.clipboard.writeText(tokenFormatExample);
+									addToast('Copied format example to clipboard', 'Success');
+								}}
+							>
+								<svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+									></path>
+								</svg>
+								Copy format example
+							</button>
+						</div>
+						<label for="import-token-textarea" class="block">
+							<FieldLabel>Token JSON</FieldLabel>
+						</label>
+						<textarea
+							id="import-token-textarea"
+							bind:value={importTokensText}
+							required
+							placeholder={tokenFormatExample}
+							wrap={importTokensText ? 'off' : 'soft'}
+							class={tokenTextareaClass}
+						></textarea>
+					</div>
 				</FormColumn>
 			</FormColumns>
 
 			<FormError message={importFormError} />
-			<FormFooter closeModal={closeImportModal} {isSubmitting} />
+			<FormFooter closeModal={closeImportModal} {isSubmitting} okText="Import" />
 		</FormGrid>
 	</Modal>
 
-	<Modal headerText="Export Token" visible={isExportModalVisible} onClose={closeExportModal}>
-		<div class="mt-4 min-w-[800px]">
-			<!-- Expiration Info Section -->
-			<div class="mb-4">
-				<h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300">Token Information</h3>
-				<p class="text-gray-600 dark:text-gray-400 mt-2">
-					<span class="font-medium">Expires at:</span>
-					<span class="text-pc-darkblue dark:text-white font-semibold ml-2"
-						>{exportTokenExpiry}</span
-					>
-				</p>
-			</div>
-
-			<!-- Token JSON Section -->
-			<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
-				<div class="mb-3">
-					<label
-						for="export-token-textarea"
-						class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
-					>
-						Token JSON
-					</label>
-					<textarea
-						id="export-token-textarea"
-						readonly
-						value={exportTokensText}
-						class="w-full h-96 px-3 py-2 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:text-gray-200 resize-none"
-					/>
-				</div>
-				<button
-					type="button"
-					class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
-					on:click={onClickCopyExport}
-				>
-					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-						></path>
-					</svg>
-					Copy to clipboard
-				</button>
-			</div>
-		</div>
+	<Modal headerText="Export token" visible={isExportModalVisible} onClose={closeExportModal}>
 		<FormGrid on:submit={closeExportModal}>
-			<FormColumns>
-				<FormColumn>
-					<!-- Empty form column for structure -->
-				</FormColumn>
-			</FormColumns>
+			<div class="w-full md:w-[48rem] max-w-full pt-4">
+				<p class="text-gray-600 dark:text-gray-400">
+					<span class="font-semibold text-slate-600 dark:text-gray-400">Expires at:</span>
+					<span class="text-pc-darkblue dark:text-white font-semibold ml-2">{exportTokenExpiry}</span>
+				</p>
+				<div class="mt-2 flex items-end justify-between gap-2">
+					<label for="export-token-textarea" class="block">
+						<FieldLabel>Token JSON</FieldLabel>
+					</label>
+					<button type="button" class="{secondaryButtonClass} mb-2" on:click={onClickCopyExport}>
+						<svg class="w-4 h-4" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+							></path>
+						</svg>
+						Copy to clipboard
+					</button>
+				</div>
+				<textarea
+					id="export-token-textarea"
+					readonly
+					value={exportTokensText}
+					wrap="off"
+					class={tokenTextareaClass}
+				/>
+			</div>
 			<div
-				class="py-4 row-span-2 col-start-1 col-span-3 border-t-2 border-gray-200 dark:border-gray-700 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+				class="form-footer py-4 border-t-2 border-gray-200 dark:border-gray-700 w-full flex justify-end bg-white dark:bg-gray-800 transition-colors duration-200"
 			>
-				<button
-					type="button"
-					on:click={closeExportModal}
-					class="bg-blue-600 hover:bg-blue-500 dark:bg-blue-500 dark:hover:bg-blue-400 text-sm uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
-				>
-					Close
-				</button>
+				<FormButton type="button" on:click={closeExportModal}>Close</FormButton>
 			</div>
 		</FormGrid>
 	</Modal>

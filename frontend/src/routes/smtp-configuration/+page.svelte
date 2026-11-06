@@ -12,6 +12,7 @@
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import FormError from '$lib/components/FormError.svelte';
 	import { addToast } from '$lib/store/toast';
+	import FormSection from '$lib/components/form/FormSection.svelte';
 	import PasswordField from '$lib/components/PasswordField.svelte';
 	import { AppStateService } from '$lib/service/appState';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
@@ -22,6 +23,7 @@
 	import BigButton from '$lib/components/BigButton.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
@@ -102,6 +104,8 @@
 	let modalMode = null;
 	let modalText = '';
 	let isDeleteAlertVisible = false;
+	// phones show each header as one key and value cell so the value stays visible
+	let isPhone = false;
 	let deleteValues = {
 		id: null,
 		name: null
@@ -116,6 +120,10 @@
 		if (appStateService.getContext()) {
 			contextCompanyID = appStateService.getContext().companyID;
 		}
+		const phoneQuery = window.matchMedia('(max-width: 639.98px)');
+		const onPhoneChange = () => (isPhone = phoneQuery.matches);
+		onPhoneChange();
+		phoneQuery.addEventListener('change', onPhoneChange);
 		refreshConfigurations();
 		tableURLParams.onChange(refreshConfigurations);
 
@@ -127,6 +135,7 @@
 		})();
 
 		return () => {
+			phoneQuery.removeEventListener('change', onPhoneChange);
 			tableURLParams.unsubscribe();
 		};
 	});
@@ -465,10 +474,10 @@
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
-			{ column: 'Name', size: 'large' },
-			{ column: 'Host', size: 'small' },
+			{ column: 'Name' },
+			{ column: 'Host' },
 			{ column: 'Port', size: 'small' },
-			{ column: 'Username', size: 'small' },
+			{ column: 'Username', size: 'medium' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={['Name', 'Host', 'Port', 'Username', ...(contextCompanyID ? ['scope'] : [])]}
@@ -487,7 +496,7 @@
 						on:change={() => selection.toggle(conf.id)}
 					/>
 				{/if}
-				<TableCell>
+				<TableCell wrap>
 					<button
 						on:click={() => {
 							openUpdateModal(conf.id);
@@ -512,17 +521,17 @@
 							on:click={() => openUpdateModal(conf.id)}
 							{...globalButtonDisabledAttributes(conf, contextCompanyID)}
 						/>
-						<TableUpdateButton
-							name={'Update headers'}
-							on:click={() => openHeaderModal(conf.id)}
-							{...globalButtonDisabledAttributes(conf, contextCompanyID)}
-						/>
 						<TableCopyButton
 							title={'Copy'}
 							on:click={() => openCopyModal(conf.id)}
 							{...globalButtonDisabledAttributes(conf, contextCompanyID)}
 						/>
-						<TableViewButton name="Perform test" on:click={() => onClickShowTestModal(conf.id)} />
+						<TableUpdateButton
+							name={'Update headers'}
+							on:click={() => openHeaderModal(conf.id)}
+							{...globalButtonDisabledAttributes(conf, contextCompanyID)}
+						/>
+						<TableViewButton name="Send test" on:click={() => onClickShowTestModal(conf.id)} />
 						<TableDeleteButton
 							on:click={() => openDeleteAlert(conf)}
 							{...globalButtonDisabledAttributes(conf, contextCompanyID)}
@@ -534,99 +543,100 @@
 	</Table>
 
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
-		{#if modalMode === 'update'}
-			<InstalledResourceBadge resourceType="smtp" resourceId={formValues.id} variant="notice" />
-		{/if}
-		<FormGrid on:submit={onClickSubmit} bind:bindTo={form} {isSubmitting}>
-			<FormColumns>
-				<FormColumn>
-					<!-- Basic Configuration Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							Basic Configuration
-						</h3>
-						<div class="space-y-6">
-							<TextField
-								required
-								minLength={1}
-								maxLength={127}
-								bind:value={formValues.name}
-								placeholder="Example Mailer">Name</TextField
-							>
-							<TextField
-								required
-								minLength={1}
-								maxLength={255}
-								bind:value={formValues.host}
-								placeholder="smtp.example.test">Host</TextField
-							>
-							<TextField
-								required
-								type="number"
-								min={1}
-								max={65535}
-								bind:value={formValues.port}
-								placeholder="587">Port</TextField
-							>
-							<TextField
-								minLength={0}
-								maxLength={255}
-								bind:value={formValues.helo}
-								placeholder="mail.example.test"
-								optional={true}
-								toolTipText="Hostname sent in the SMTP HELO/EHLO greeting. Leave empty to use the server's own hostname."
-								>HELO/EHLO Hostname</TextField
-							>
-						</div>
-					</div>
+		<div class="max-w-full sm:max-w-[40rem]">
+			<FormGrid on:submit={onClickSubmit} bind:bindTo={form} {isSubmitting}>
+				<FormColumns>
+					<FormColumn>
+						<div class="flex flex-col w-full sm:w-[26rem]">
+							{#if modalMode === 'update'}
+								<InstalledResourceBadge resourceType="smtp" resourceId={formValues.id} variant="notice" />
+							{/if}
+							<FormSection title="Basic Configuration" css="pt-4">
+								<div>
+									<TextField
+										width="full"
+										required
+										minLength={1}
+										maxLength={127}
+										bind:value={formValues.name}
+										placeholder="Example Mailer">Name</TextField
+									>
+									<TextField
+										width="full"
+										required
+										minLength={1}
+										maxLength={255}
+										bind:value={formValues.host}
+										placeholder="smtp.example.test">Host</TextField
+									>
+									<TextField
+										width="small"
+										required
+										type="number"
+										min={1}
+										max={65535}
+										bind:value={formValues.port}
+										placeholder="587">Port</TextField
+									>
+									<TextField
+										width="full"
+										minLength={0}
+										maxLength={255}
+										bind:value={formValues.helo}
+										placeholder="mail.example.test"
+										optional={true}
+										toolTipText="Hostname sent in the SMTP HELO/EHLO greeting. Leave empty to use the server's own hostname."
+										>HELO/EHLO Hostname</TextField
+									>
+								</div>
+							</FormSection>
 
-					<!-- Authentication Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							Authentication
-						</h3>
-						<div class="space-y-6">
-							<TextField
-								minLength={1}
-								maxLength={255}
-								bind:value={formValues.username}
-								placeholder="mail-user"
-								optional={true}>Username</TextField
-							>
-							<PasswordField
-								minLength={1}
-								maxLength={255}
-								bind:value={formValues.password}
-								optional={true}>Password</PasswordField
-							>
-						</div>
-					</div>
+							<FormSection title="Authentication">
+								<div>
+									<TextField
+										width="full"
+										minLength={1}
+										maxLength={255}
+										bind:value={formValues.username}
+										placeholder="mail-user"
+										optional={true}>Username</TextField
+									>
+									<PasswordField
+										width="full"
+										minLength={1}
+										maxLength={255}
+										bind:value={formValues.password}
+										optional={true}>Password</PasswordField
+									>
+								</div>
+							</FormSection>
 
-					<!-- Security Settings -->
-					<div class="pt-4 pb-2 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							Security Settings
-						</h3>
-						<div>
-							<SelectSquare
-								label="TLS Certificate Validation"
-								options={[
-									{ value: true, label: 'Ignore TLS Errors' },
-									{ value: false, label: 'Validate Certificates' }
-								]}
-								bind:value={formValues.ignoreCertErrors}
-							/>
+							<FormSection title="Security Settings">
+								<div>
+									<SelectSquare
+										label="TLS Certificate Validation"
+										options={[
+											{ value: true, label: 'Ignore TLS Errors' },
+											{ value: false, label: 'Validate Certificates' }
+										]}
+										bind:value={formValues.ignoreCertErrors}
+									/>
+									{#if formValues.ignoreCertErrors !== true && formValues.ignoreCertErrors !== false}
+										<p class="-mt-1 text-xs text-gray-500 dark:text-gray-400">Pick Ignore TLS Errors or Validate Certificates.</p>
+									{/if}
+								</div>
+							</FormSection>
 						</div>
-					</div>
-				</FormColumn>
-			</FormColumns>
-			<FormError message={formError} />
-			<FormFooter {closeModal} {isSubmitting} />
-		</FormGrid>
+					</FormColumn>
+				</FormColumns>
+				<FormError message={formError} />
+				<FormFooter {closeModal} {isSubmitting} />
+			</FormGrid>
+		</div>
 	</Modal>
 	<!-- TEST MODAL -->
 	<Modal
-		headerText={'Test Configuration'}
+		headerText={'SMTP test'}
 		visible={isTestModalVisible}
 		onClose={closeTestModal}
 		{isSubmitting}
@@ -634,12 +644,12 @@
 		<FormGrid on:submit={onClickSubmitTestModal} bind:bindTo={testForm} {isSubmitting}>
 			<FormColumns>
 				<FormColumn>
-					<TextField bind:value={testFormValues.mailFrom} placeholder="from@domain.tld"
+					<TextField bind:value={testFormValues.mailFrom} placeholder="sender@example.com"
 						>Mail From</TextField
 					>
 				</FormColumn>
 				<FormColumn>
-					<TextField bind:value={testFormValues.email} placeholder="reciever@domain.tld"
+					<TextField bind:value={testFormValues.email} placeholder="receiver@example.com"
 						>Email</TextField
 					>
 				</FormColumn>
@@ -670,10 +680,11 @@
 	></DeleteAlert>
 	<!-- HEADER MODAL -->
 	<Modal
-		headerText={'SMPT headers'}
+		headerText={'SMTP headers'}
 		visible={isHeaderModalVisible}
 		onClose={closeHeaderModal}
 		{isSubmitting}
+		width="xl"
 	>
 		<FormGrid on:submit={onClickCreateHeader} bind:bindTo={headerForm} {isSubmitting}>
 			<FormColumns>
@@ -687,19 +698,34 @@
 						>Value</TextField
 					>
 				</FormColumn>
-				<FormColumn>
+				<FormColumn stretch>
+					<!-- same top offset as the TextField labels in the left column -->
+					<div class="pt-2"><FieldLabel>Added headers</FieldLabel></div>
 					<Table
-						columns={[
-							{ column: 'Key', size: 'medium' },
-							{ column: 'Value', size: 'medium' }
-						]}
+						columns={isPhone
+							? [{ column: 'Header' }]
+							: [
+									{ column: 'Key', size: 'medium' },
+									{ column: 'Value', size: 'medium' }
+								]}
 						hasData={!!headers.length}
 						plural="headers"
 					>
 						{#each headers as header}
 							<TableRow>
-								<TableCell value={header.key} />
-								<TableCell value={header.value} />
+								{#if isPhone}
+									<TableCell>
+										<div title="{header.key}: {header.value}">
+											<div class="truncate font-medium">{header.key}</div>
+											<div class="truncate text-xs text-slate-500 dark:text-gray-400">
+												{header.value}
+											</div>
+										</div>
+									</TableCell>
+								{:else}
+									<TableCell value={header.key} />
+									<TableCell value={header.value} />
+								{/if}
 								<TableCellEmpty />
 								<TableCellAction>
 									<TableDropDownEllipsis>
@@ -714,7 +740,12 @@
 				</FormColumn>
 			</FormColumns>
 			<FormError message={headerError} />
-			<FormFooter closeText={'Close'} closeModal={closeHeaderModal} {isSubmitting} />
+			<FormFooter
+				closeText="Close"
+				okText="Add header"
+				closeModal={closeHeaderModal}
+				{isSubmitting}
+			/>
 		</FormGrid>
 	</Modal>
 	<!-- /HEADER MODAL -->

@@ -438,7 +438,7 @@
 			addToast('Email sent', 'Success');
 			refreshEmails();
 		} catch (err) {
-			addToast('Failed to sent test email', 'Error');
+			addToast('Failed to send test email', 'Error');
 			console.error('failed to send test email:', err);
 		}
 	};
@@ -460,9 +460,9 @@
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
-			{ column: 'From', size: 'medium' },
-			{ column: 'Subject', size: 'medium' },
-			{ column: 'Tracking Pixel', size: 'small', alignText: 'center' },
+			{ column: 'From', size: 'large' },
+			{ column: 'Subject', size: 'large' },
+			{ column: 'Tracking Pixel', title: 'Tracking', size: 'small', alignText: 'center' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={['Name', 'From', 'Subject', 'Tracking Pixel', ...(contextCompanyID ? ['scope'] : [])]}
@@ -481,7 +481,7 @@
 						on:change={() => selection.toggle(email.id)}
 					/>
 				{/if}
-				<TableCell>
+				<TableCell wrap>
 					<button
 						on:click={() => {
 							openUpdateModal(email.id);
@@ -508,11 +508,11 @@
 							{...globalButtonDisabledAttributes(email, contextCompanyID)}
 						/>
 						<TableCopyButton title={'Copy'} on:click={() => openCopyModal(email.id)} />
+						<TableViewButton name="Send test" on:click={() => openSendTestModal(email.id)} />
 						<TableDeleteButton
 							on:click={() => openDeleteAlert(email)}
 							{...globalButtonDisabledAttributes(email, contextCompanyID)}
 						/>
-						<TableViewButton name="Send test" on:click={() => openSendTestModal(email.id)} />
 					</TableDropDownEllipsis>
 				</TableCellAction>
 			</TableRow>
@@ -527,26 +527,39 @@
 				contentType="email"
 				{domainMap}
 				bind:value={formValues.content}
+				height="max(16rem, min(50vh, calc(100dvh - 34rem)))"
 				attachments={formValues.attachments}
 			>
-				<div class="flex flex-row flex-wrap items-start gap-x-6 gap-y-2 w-full pl-4">
+				<div class="grid w-full grid-cols-1 items-start gap-x-6 md:grid-cols-2">
 					<TextField
 						minLength={1}
 						maxLength={64}
 						required
+						width="full"
 						bind:value={formValues.name}
 						placeholder="Verify login information"
 					>
 						Name
 					</TextField>
 					<TextField
+						required
+						minLength={1}
+						maxLength={255}
+						width="full"
+						bind:value={formValues.mailHeaderSubject}
+						placeholder="Important: Verification required"
+					>
+						Subject
+					</TextField>
+					<TextField
 						minLength={5}
 						maxLength={254}
 						type="email"
 						required
+						width="full"
 						bind:value={formValues.mailEnvelopeFrom}
 						placeholder="alice@example.test"
-						toolTipText="Envelope From. ex. 'a@example.test"
+						toolTipText="Envelope sender address, for example a@example.test"
 					>
 						Envelope From
 					</TextField>
@@ -554,26 +567,21 @@
 						minLength={5}
 						maxLength={254}
 						required
+						width="full"
 						bind:value={formValues.mailHeaderFrom}
 						placeholder="Alice <a@example.test>"
-						toolTipText="Header From. ex. '<a@example.test>'"
+						toolTipText="From header shown to the recipient, for example Alice <a@example.test>"
 					>
 						From
 					</TextField>
-					<TextField
-						required
-						minLength={1}
-						maxLength={255}
-						bind:value={formValues.mailHeaderSubject}
-						placeholder="Important: Verification required"
-					>
-						Subject
-					</TextField>
-					<CheckboxField
-						bind:value={formValues.addTrackingPixel}
-						defaultValue={true}
-						toolTipText="Adds a tracking pixel to the email">Add tracking pixel</CheckboxField
-					>
+					<div class="md:col-span-2">
+						<CheckboxField
+							inline
+							bind:value={formValues.addTrackingPixel}
+							defaultValue={true}
+							toolTipText="Adds a tracking pixel to the email">Add tracking pixel</CheckboxField
+						>
+					</div>
 				</div>
 			</Editor>
 			<FormError message={modalError} />

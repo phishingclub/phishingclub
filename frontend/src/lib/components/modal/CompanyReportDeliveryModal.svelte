@@ -5,6 +5,7 @@
 	import TextField from '../TextField.svelte';
 	import TextFieldSelect from '../TextFieldSelect.svelte';
 	import FormButton from '../FormButton.svelte';
+	import Button from '../Button.svelte';
 	import SimpleCodeEditor from '../editor/SimpleCodeEditor.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { fetchAllRows } from '$lib/utils/api-utils.js';
@@ -219,8 +220,8 @@
 	$: isBusy = isSaving || isDeleting;
 </script>
 
-<Modal headerText={isGlobal ? 'Default Report Delivery' : 'Report Delivery'} bind:visible>
-	<div class="w-[640px] p-6 space-y-6">
+<Modal headerText={isGlobal ? 'Default report delivery' : 'Report delivery'} bind:visible>
+	<div class="w-[640px] max-w-full py-4 sm:p-6 space-y-6">
 		{#if isLoading}
 			<div class="flex items-center justify-center py-10">
 				<p class="text-gray-500 dark:text-gray-400">Loading...</p>
@@ -355,14 +356,14 @@
 				class="border-t border-gray-200 dark:border-gray-700/60 pt-4 flex gap-3 justify-end items-center"
 			>
 				{#if config}
-					<button
-						type="button"
+					<Button
+						size="medium"
+						variant="danger-outline"
 						disabled={isBusy}
 						on:click={() => (isDeleteAlertVisible = true)}
-						class="bg-red-600 dark:bg-red-700/80 hover:bg-red-500 dark:hover:bg-red-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md disabled:opacity-50 transition-colors duration-200"
 					>
 						Delete
-					</button>
+					</Button>
 				{/if}
 				<FormButton size="medium" isSubmitting={isSaving} on:click={onSave}>Save</FormButton>
 			</div>

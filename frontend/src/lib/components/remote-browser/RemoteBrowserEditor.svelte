@@ -1,4 +1,5 @@
 <script>
+	import { pcDarkTheme } from '$lib/components/editor/monacoTheme.js';
 	import { onMount, afterUpdate, createEventDispatcher } from 'svelte';
 	import * as monaco from 'monaco-editor';
 	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
@@ -10,6 +11,9 @@
 	} from '$lib/utils/vimClipboard.js';
 	import * as vimModule from 'monaco-vim';
 	import TextField from '$lib/components/TextField.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
+	import VimToggle from '$lib/components/editor/VimToggle.svelte';
+
 	import { api } from '$lib/api/apiProxy.js';
 	import RemoteBrowserStream from '$lib/components/remote-browser/RemoteBrowserStream.svelte';
 
@@ -1076,7 +1080,7 @@ declare var Infinity: number;
 			const newIsDark = document.documentElement.classList.contains('dark');
 			if (newIsDark !== isDark) {
 				isDark = newIsDark;
-				if (editor) monaco.editor.setTheme(isDark ? 'vs-dark' : 'vs-light');
+				if (editor) monaco.editor.setTheme(isDark ? pcDarkTheme(monaco) : 'vs-light');
 			}
 		});
 		observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
@@ -1114,7 +1118,10 @@ declare var Infinity: number;
 		editor = monaco.editor.create(editorContainer, {
 			value: script,
 			language: 'javascript',
-			theme: isDark ? 'vs-dark' : 'vs-light',
+			theme: isDark ? pcDarkTheme(monaco) : 'vs-light',
+			overviewRulerBorder: false,
+			overviewRulerLanes: 0,
+			hideCursorInOverviewRuler: true,
 			minimap: { enabled: false },
 			wordWrap: 'off',
 			folding: false,
@@ -1165,10 +1172,10 @@ declare var Infinity: number;
 	}
 </script>
 
-<div class="flex flex-col h-full">
+<div class="flex flex-col lg:flex-1 lg:min-h-0">
 	<!-- Top metadata row -->
-	<div class="flex gap-3 mb-3">
-		<div class="flex-1">
+	<div class="flex flex-col sm:flex-row sm:gap-3 mb-3">
+		<div class="flex-1 min-w-0 sm:max-w-md">
 			<TextField
 				width="full"
 				bind:value={name}
@@ -1176,68 +1183,55 @@ declare var Infinity: number;
 				placeholder="my-remote-browser">Name</TextField
 			>
 		</div>
-		<div class="flex-1">
+		<div class="flex-1 min-w-0">
 			<TextField
 				width="full"
 				bind:value={description}
 				on:change={() => dispatch('change', getModel())}
-				placeholder="Optional description">Description</TextField
+				optional={true}
+				placeholder="What this browser flow does">Description</TextField
 			>
 		</div>
 	</div>
 
 	<!-- Main split: editor + right panel -->
 	<div
-		class="flex flex-1 gap-0 min-h-0 border border-gray-200 dark:border-gray-700 rounded-md overflow-hidden"
+		class="flex flex-col lg:flex-row lg:flex-1 gap-0 lg:min-h-0 border border-gray-200 dark:border-gray-700 rounded-md lg:overflow-hidden"
 	>
-		<!-- JS editor (60%) -->
-		<div class="flex flex-col" style="flex: 6; min-width: 0;">
+		<!-- JS editor, 60% beside the panel on wide screens, fixed height when stacked -->
+		<div class="flex flex-col min-w-0 flex-none h-[50vh] overflow-hidden lg:h-auto lg:flex-[6_6_0%]">
 			<div
 				class="flex items-center justify-between px-3 py-1 bg-gray-100 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700"
 			>
 				<span class="text-xs font-mono text-gray-500 dark:text-gray-400">JavaScript</span>
-				<button
-					type="button"
-					title="Toggle vim mode (Ctrl+Alt+V)"
-						on:click={() => vimModeEnabled.update((v) => !v)}
-					class="h-8 border-2 rounded-md w-20 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
-					class:font-bold={localVimMode}
-					class:bg-blue-600={localVimMode}
-					class:dark:bg-blue-500={localVimMode}
-					class:text-white={localVimMode}
-					class:border-blue-600={localVimMode}
-					class:dark:border-blue-500={localVimMode}
-					class:text-gray-700={!localVimMode}
-					class:dark:text-gray-200={!localVimMode}
-					class:bg-white={!localVimMode}
-					class:dark:bg-gray-700={!localVimMode}
-					class:border-gray-300={!localVimMode}
-					class:dark:border-gray-600={!localVimMode}
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-						<path d="M3 3h18v18H3V3zm2 2v14h14V5H5zm2 2h10v2H7V7zm0 4h10v2H7v-2zm0 4h6v2H7v-2z" />
-					</svg>
-					<span class="text-xs">Vim</span>
-				</button>
+				<VimToggle />
 			</div>
 			<div bind:this={editorContainer} class="flex-1" style="min-height: 0;"></div>
 			<div
 				bind:this={vimStatusBarEl}
+				class:hidden={!$vimModeEnabled}
 				class="h-5 bg-gray-100 dark:bg-gray-800 text-xs text-gray-500 dark:text-gray-400 px-2"
 			></div>
 		</div>
 
 		<!-- Divider -->
-		<div class="w-px bg-gray-200 dark:border-gray-700 flex-shrink-0"></div>
+		<div class="h-px w-full lg:h-auto lg:w-px bg-gray-200 dark:bg-gray-700 flex-shrink-0"></div>
 
-		<!-- Right panel (40%) -->
-		<div class="flex flex-col" style="flex: 4; min-width: 0;">
+		<!-- Right panel -->
+		<div class="flex flex-col min-w-0 flex-none lg:flex-[4_4_0%] lg:min-h-0">
 			<!-- Tab bar -->
-			<div class="flex border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+			<div
+				role="tablist"
+				aria-label="Panel"
+				class="sticky -top-4 z-10 lg:static flex border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
+			>
 				<button
 					type="button"
-					class="px-4 py-2 text-sm font-medium transition-colors {activeTab === 'config'
-						? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-500'
+					role="tab"
+					aria-selected={activeTab === 'config'}
+					class="px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue {activeTab ===
+					'config'
+						? 'text-cta-blue dark:text-highlight-blue border-b-2 border-cta-blue dark:border-highlight-blue'
 						: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}"
 					on:click={() => (activeTab = 'config')}
 				>
@@ -1245,8 +1239,11 @@ declare var Infinity: number;
 				</button>
 				<button
 					type="button"
-					class="px-4 py-2 text-sm font-medium transition-colors {activeTab === 'run'
-						? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-500'
+					role="tab"
+					aria-selected={activeTab === 'run'}
+					class="px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue {activeTab ===
+					'run'
+						? 'text-cta-blue dark:text-highlight-blue border-b-2 border-cta-blue dark:border-highlight-blue'
 						: 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}"
 					on:click={() => (activeTab = 'run')}
 				>
@@ -1260,46 +1257,39 @@ declare var Infinity: number;
 			</div>
 
 			<!-- Tab content -->
-			<div class="flex-1 overflow-y-auto p-4 min-h-0">
+			<div class="flex-1 lg:overflow-y-auto px-4 pb-4 pt-7 lg:pt-5 min-h-0">
 				{#if activeTab === 'config'}
 					<div class="space-y-4">
 						<div>
-							<p class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-								Browser Mode
-							</p>
-							<div class="flex gap-2">
-								<button
-									type="button"
-									class="flex-1 py-1.5 text-sm rounded border transition-colors {cfgMode === 'local'
-										? 'bg-blue-600 text-white border-blue-600'
-										: 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-blue-400'}"
-									on:click={() => {
-										cfgMode = 'local';
-										dispatch('change', getModel());
-									}}
-								>
-									Local
-								</button>
-								<button
-									type="button"
-									class="flex-1 py-1.5 text-sm rounded border transition-colors {cfgMode ===
-									'remote'
-										? 'bg-blue-600 text-white border-blue-600'
-										: 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-blue-400'}"
-									on:click={() => {
-										cfgMode = 'remote';
-										dispatch('change', getModel());
-									}}
-								>
-									Remote
-								</button>
+							<FieldLabel id="rb-browser-mode-label">Browser Mode</FieldLabel>
+							<div
+								class="flex overflow-hidden rounded-md border border-gray-300 text-sm dark:border-gray-600"
+								role="group"
+								aria-labelledby="rb-browser-mode-label"
+							>
+								{#each [{ value: 'local', label: 'Local' }, { value: 'remote', label: 'Remote' }] as option}
+									<button
+										type="button"
+										aria-pressed={cfgMode === option.value}
+										class="flex-1 py-1.5 font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue {cfgMode ===
+										option.value
+											? 'bg-cta-blue text-white'
+											: 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'}"
+										on:click={() => {
+											cfgMode = option.value;
+											dispatch('change', getModel());
+										}}
+									>
+										{option.label}
+									</button>
+								{/each}
 							</div>
 
-							<p class="text-xs text-gray-400 dark:text-gray-500 mt-2">
+							<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
 								{#if cfgMode === 'local'}
 									Spawns an isolated Chrome process per session.
 								{:else}
-									Connect to a Chrome you launched yourself - real OS fingerprint, GPU, profile, and extensions. Best for bypassing bot detection.
+									Connect to a Chrome you launched yourself, with its real OS fingerprint, GPU, profile and extensions. Best for bypassing bot detection.
 								{/if}
 							</p>
 						</div>
@@ -1308,17 +1298,18 @@ declare var Infinity: number;
 							<TextField
 								bind:value={cfgRemote}
 								on:keyup={() => dispatch('change', getModel())}
-								placeholder="http://localhost:9222">Remote DevTools URL</TextField
+								placeholder="e.g. http://localhost:9222">Remote DevTools URL</TextField
 							>
-							<p class="text-xs text-gray-400 dark:text-gray-500 -mt-2">
+							<p class="text-xs text-gray-500 dark:text-gray-400 -mt-2">
 								Start Chrome with <code class="font-mono">--remote-debugging-port=9222</code> then enter the host:port or full URL here.
 							</p>
 						{:else}
-								<TextField
+							<TextField
 								bind:value={cfgProxy}
 								on:keyup={() => dispatch('change', getModel())}
 								optional={true}
-								placeholder="socks5://127.0.0.1:1080">Proxy</TextField
+								width="full"
+								placeholder="e.g. socks5://127.0.0.1:1080">Proxy</TextField
 							>
 							<div>
 								<label class="flex items-center gap-2 cursor-pointer select-none">
@@ -1326,7 +1317,7 @@ declare var Infinity: number;
 										type="checkbox"
 										bind:checked={cfgHeadless}
 										on:change={() => dispatch('change', getModel())}
-										class="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+										class="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-cta-blue focus:ring-cta-blue"
 									/>
 									<span class="text-sm text-gray-700 dark:text-gray-300">Headless</span>
 								</label>
@@ -1335,18 +1326,24 @@ declare var Infinity: number;
 								bind:value={cfgLang}
 								on:keyup={() => dispatch('change', getModel())}
 								optional={true}
-								placeholder="en-US">Language</TextField
+								width="full"
+								placeholder="e.g. en-US">Language</TextField
 							>
 							<div class="flex flex-col">
-								<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200 text-sm">
-									Flags <span class="font-normal text-xs">(one per line, <code class="font-mono">--flag</code> adds/overrides, <code class="font-mono">!--flag</code> removes)</span>
+								<label for="rb-flags">
+									<FieldLabel optional>Flags</FieldLabel>
+								</label>
+								<p class="-mt-1 mb-2 text-xs text-gray-500 dark:text-gray-400">
+									One per line. <code class="font-mono">--flag</code> adds or overrides,
+									<code class="font-mono">!--flag</code> removes.
 								</p>
 								<textarea
+									id="rb-flags"
 									bind:value={cfgExtraFlags}
 									on:keyup={() => dispatch('change', getModel())}
 									rows="3"
-									placeholder="--use-gl=egl"
-									class="font-mono rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border focus:outline-none focus:border-solid focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 transition-colors duration-200 border-transparent dark:border-gray-700/60 focus:border-slate-400 dark:focus:border-highlight-blue/80 resize-y w-full text-sm"
+									placeholder="e.g. --use-gl=egl"
+									class="font-mono rounded-md py-2 px-3 text-slate-800 dark:text-gray-300 border bg-grayblue-light dark:bg-gray-900/60 transition-colors duration-200 border-transparent dark:border-gray-700/60 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 resize-y w-full text-sm"
 								></textarea>
 							</div>
 						{/if}
@@ -1355,14 +1352,14 @@ declare var Infinity: number;
 							type="number"
 							bind:value={cfgTimeout}
 							on:keyup={() => dispatch('change', getModel())}
-							placeholder="5">Timeout (minutes)</TextField
+							placeholder="e.g. 5">Timeout (minutes)</TextField
 						>
 
 					</div>
 				{:else}
 					<div class="flex flex-col h-full gap-3">
 						{#if isScriptDirty}
-							<p class="text-xs text-orange-400">Unsaved changes - save before running.</p>
+							<p class="text-xs text-orange-600 dark:text-orange-400">Unsaved changes. Save before running.</p>
 						{/if}
 						<!-- Action buttons -->
 						<div class="flex gap-2">
@@ -1417,7 +1414,7 @@ declare var Infinity: number;
 							{#if streamSessionID}
 								<button
 									type="button"
-									class="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+									class="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-cta-blue hover:bg-active-blue text-white rounded transition-colors"
 									on:click={() => { streamControlMode = false; streamVisible = true; }}
 								>
 									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
@@ -1444,7 +1441,7 @@ declare var Infinity: number;
 							bind:this={logContainer}
 							on:wheel={onLogWheel}
 							on:scroll={onLogScroll}
-							class="flex-1 overflow-y-auto font-mono text-xs bg-gray-900 dark:bg-gray-950 text-gray-200 rounded p-2 space-y-0.5 min-h-0 select-text"
+							class="flex-1 overflow-y-auto font-mono text-xs bg-gray-900 dark:bg-gray-950 text-gray-200 rounded p-2 space-y-0.5 min-h-[12rem] lg:min-h-0 select-text"
 							style="max-height: calc(100vh - 18rem);"
 						>
 							{#if runLog.length === 0}

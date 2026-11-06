@@ -19,7 +19,6 @@
 		dailySlotWindow,
 		dailySlotsPayload,
 		dailySlotsFromCampaign,
-		formatInZone,
 		timeZoneLabel
 	} from '$lib/utils/dailySlots';
 	import { getModalText } from '$lib/utils/common';
@@ -35,11 +34,12 @@
 	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
-	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import DateField from '$lib/components/DateField.svelte';
 	import FormError from '$lib/components/FormError.svelte';
+	import FormButton from '$lib/components/FormButton.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import TableCopyButton from '$lib/components/table/TableCopyButton.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
@@ -48,7 +48,6 @@
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TestLabel from '$lib/components/TestLabel.svelte';
-	import TrainingLabel from '$lib/components/TrainingLabel.svelte';
 	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
 	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
 	import {
@@ -57,10 +56,12 @@
 		runBulkDelete
 	} from '$lib/service/tableSelection.js';
 	import BigButton from '$lib/components/BigButton.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import ToIcon from '$lib/components/ToIcon.svelte';
 	import Datetime from '$lib/components/Datetime.svelte';
 	import JitterSlider from '$lib/components/JitterSlider.svelte';
 	import RelativeTime from '$lib/components/RelativeTime.svelte';
+	import { shortRelative } from '$lib/utils/shortRelative.js';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
@@ -75,6 +76,11 @@
 		{ name: 'Miscellaneous' },
 		{ name: 'Review' }
 	];
+
+	const wizardSecondaryButtonClass =
+		'pc-focus min-w-[6rem] inline-flex items-center justify-center gap-1 px-4 py-2 rounded-md border border-gray-300 bg-transparent hover:bg-gray-100 text-slate-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:border-gray-500 dark:text-gray-100 text-sm font-bold uppercase transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed';
+	const quickTimeButtonClass =
+		'pc-focus inline-flex items-center h-8 px-2.5 rounded-md border border-slate-300 dark:border-gray-700/60 text-xs font-medium text-slate-600 dark:text-gray-300 bg-white dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200';
 
 	const testOptions = [
 		{
@@ -623,43 +629,77 @@
 		};
 	});
 
+	// relative dates tick every minute, the full date is in the title
+	let relativeNow = Date.now();
+	onMount(() => {
+		const id = setInterval(() => (relativeNow = Date.now()), 60000);
+		return () => clearInterval(id);
+	});
+
+	// same tones as the campaign detail header
+	const statusTone = (c) => {
+		if (c.closedAt || ['campaign_closed', 'campaign_pending_schedule'].includes(c.notableEventName)) {
+			return 'neutral';
+		}
+		return c.notableEventName === 'campaign_active' ? 'success' : 'info';
+	};
+
+	// "HH:MM" in the same locale clock format as the Start and End values
+	const formatClock = (hhmm) => {
+		const [h, m] = String(hhmm).split(':').map(Number);
+		if (Number.isNaN(h) || Number.isNaN(m)) return hhmm;
+		return new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { timeStyle: 'short' });
+	};
+
+	// splits "Name <address>" so name and address get a line each
+	const splitFromHeader = (value) => {
+		const match = /^(.*?)\s*<([^<>]+)>\s*$/.exec(value || '');
+		return match && match[1] ? { name: match[1], address: match[2] } : null;
+	};
+
+	// roving tabindex options use tabindex -1, so focus lands on the selected option
+	const stepFocusSelector =
+		'button:not([disabled]):not([tabindex="-1"]):not([data-tooltip-trigger]), input:not([disabled]):not([tabindex="-1"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]):not([data-tooltip-trigger])';
+
+	// after a step change, start the modal body at the top; step 1 focuses its
+	// first field, later steps focus the step itself so nothing looks preselected
+	const focusStep = () => {
+		setTimeout(() => {
+			const currentStepContainer = document.querySelector(`#step-${currentStep}`);
+			if (!currentStepContainer) {
+				return;
+			}
+			const scroller =
+				currentStepContainer.closest('.modal-body') ?? currentStepContainer.closest('.overflow-y-auto');
+			if (scroller) {
+				scroller.scrollTop = 0;
+			}
+			if (currentStep > 1 && currentStepContainer instanceof HTMLElement) {
+				currentStepContainer.setAttribute('tabindex', '-1');
+				currentStepContainer.style.outline = 'none';
+				currentStepContainer.focus({ preventScroll: true });
+				return;
+			}
+			const firstFocusable = currentStepContainer.querySelector(stepFocusSelector);
+			if (firstFocusable && firstFocusable instanceof HTMLElement) {
+				firstFocusable.focus({ preventScroll: true });
+			}
+		}, 0);
+	};
+
 	const nextStep = async () => {
 		if (await validateCurrentStep()) {
 			currentStep = Math.min(currentStep + 1, campaignSteps.length);
 			modalError = '';
-			// reset tab focus after dom update - only for explicit step navigation
 			await tick();
-			// focus first element in current step
-			setTimeout(() => {
-				const currentStepContainer = document.querySelector(`#step-${currentStep}`);
-				if (currentStepContainer) {
-					const firstFocusable = currentStepContainer.querySelector(
-						'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-					);
-					if (firstFocusable && firstFocusable instanceof HTMLElement) {
-						firstFocusable.focus();
-					}
-				}
-			}, 0);
+			focusStep();
 		}
 	};
 
 	const previousStep = async () => {
 		currentStep = Math.max(currentStep - 1, 1);
-		// reset tab focus after dom update - only for explicit step navigation
 		await tick();
-		// focus first element in current step
-		setTimeout(() => {
-			const currentStepContainer = document.querySelector(`#step-${currentStep}`);
-			if (currentStepContainer) {
-				const firstFocusable = currentStepContainer.querySelector(
-					'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-				);
-				if (firstFocusable && firstFocusable instanceof HTMLElement) {
-					firstFocusable.focus();
-				}
-			}
-		}, 0);
+		focusStep();
 	};
 
 	const validateCurrentStep = async () => {
@@ -1644,9 +1684,9 @@
 <HeadTitle title="Campaigns" />
 
 <main>
-	<div class="flex justify-between">
+	<div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
 		<Headline docSlug="campaigns">Campaigns</Headline>
-		<div class="flex gap-4 items-center">
+		<div class="flex flex-wrap items-center gap-x-6 gap-y-2">
 			<CheckboxField
 				bind:value={includeTestCampaigns}
 				on:change={handleIncludeTestToggleChange}
@@ -1678,8 +1718,8 @@
 			{ column: 'Name', size: 'large' },
 			{ column: 'Status', size: 'small' },
 			{ column: 'Template', size: 'medium' },
-			{ column: 'Send start at', title: 'Delivery start', size: 'small' },
-			{ column: 'Send end at', title: 'Delivery finish', size: 'small' },
+			{ column: 'Send start at', title: 'Delivery start', size: 'medium' },
+			{ column: 'Send end at', title: 'Delivery finish', size: 'medium' },
 			{ column: 'Close at', size: 'small' }
 		]}
 		sortable={['Name', 'Template', 'Send start at', 'Send end at', 'Close at']}
@@ -1703,27 +1743,71 @@
 						<TestLabel />
 					{/if}
 					{#if campaign.isTraining}
-						<TrainingLabel />
+						<StatusBadge tone="success" title="Awareness training">training</StatusBadge>
 					{/if}
 					{campaign.name}
+					<!-- the Status column is off screen on phones, so the status shows under the name -->
+					{#if campaign.pausedAt && !campaign.closedAt}
+						<span class="block sm:hidden mt-1"
+							><StatusBadge tone="warning" title="Sending paused">Paused</StatusBadge></span
+						>
+					{:else if campaign.notableEventName}
+						<span class="block sm:hidden mt-1"
+							><StatusBadge tone={statusTone(campaign)}>{toEvent(campaign.notableEventName).name}</StatusBadge></span
+						>
+					{/if}
 				</TableCellLink>
 				<TableCell>
 					<!-- paused is just another status word like Active or Closed -->
 					{#if campaign.pausedAt && !campaign.closedAt}
-						<span data-paused-badge title="Sending paused">Paused</span>
-					{:else}
-						{toEvent(campaign.notableEventName).name}
+						<span data-paused-badge
+							><StatusBadge tone="warning" title="Sending paused">Paused</StatusBadge></span
+						>
+					{:else if campaign.notableEventName}
+						<span><StatusBadge tone={statusTone(campaign)}>{toEvent(campaign.notableEventName).name}</StatusBadge></span>
 					{/if}
 				</TableCell>
-				<TableCellLink
-					href={`/campaign-template/?edit=${campaign.templateID}`}
-					title={templateMap.byKey(campaign.templateID)}
-				>
-					{templateMap.byKey(campaign.templateID)}
-				</TableCellLink>
-				<TableCell value={campaign.sendStartAt} isDate isRelative />
-				<TableCell value={campaign.sendEndAt} isDate isRelative />
-				<TableCell value={campaign.closeAt ?? ''} isDate isRelative />
+				{#if campaign.templateID}
+					<TableCellLink
+						href={`/campaign-template/?edit=${campaign.templateID}`}
+						title={templateMap.byKey(campaign.templateID)}
+					>
+						{templateMap.byKey(campaign.templateID)}
+					</TableCellLink>
+				{:else}
+					<TableCell>
+						<span class="italic text-gray-500 dark:text-gray-400" title="The template was deleted"
+							>Deleted</span
+						>
+					</TableCell>
+				{/if}
+				{#if campaign.sendStartAt}
+					<TableCell>
+						<span title={new Date(campaign.sendStartAt).toLocaleString()}
+							>{shortRelative(campaign.sendStartAt, relativeNow)}</span
+						>
+					</TableCell>
+				{:else}
+					<TableCell />
+				{/if}
+				{#if campaign.sendEndAt}
+					<TableCell>
+						<span title={new Date(campaign.sendEndAt).toLocaleString()}
+							>{shortRelative(campaign.sendEndAt, relativeNow)}</span
+						>
+					</TableCell>
+				{:else}
+					<TableCell />
+				{/if}
+				{#if campaign.closeAt}
+					<TableCell>
+						<span title={new Date(campaign.closeAt).toLocaleString()}
+							>{shortRelative(campaign.closeAt, relativeNow)}</span
+						>
+					</TableCell>
+				{:else}
+					<TableCell />
+				{/if}
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
@@ -1740,10 +1824,6 @@
 							on:click={() => openCopyModal(campaign.id)}
 							{...globalButtonDisabledAttributes(campaign, contextCompanyID)}
 						/>
-						<TableDeleteButton
-							on:click={() => openDeleteAlert(campaign)}
-							{...globalButtonDisabledAttributes(campaign, contextCompanyID)}
-						/>
 						<ConditionalDisplay show="blackbox">
 							<TableDropDownButton
 								name="Clear device codes"
@@ -1751,6 +1831,10 @@
 								{...globalButtonDisabledAttributes(campaign, contextCompanyID)}
 							/>
 						</ConditionalDisplay>
+						<TableDeleteButton
+							on:click={() => openDeleteAlert(campaign)}
+							{...globalButtonDisabledAttributes(campaign, contextCompanyID)}
+						/>
 					</TableDropDownEllipsis>
 				</TableCellAction>
 			</TableRow>
@@ -1763,740 +1847,672 @@
 		onClose={closeModal}
 		isSubmitting={isSubmitting || isRecipientModalVisible}
 	>
-		<div class="relative flex justify-between items-center mb-8 w-full px-4">
-			<!-- Connector Line -->
-			<div
-				class="absolute h-[2px] bg-gray-200 dark:bg-gray-600 top-1/2 left-0 right-0 -translate-y-1/2 -z-10 transition-colors duration-200"
-			/>
-
-			{#each campaignSteps as step, index}
-				<div class="flex flex-col items-center w-20 sm:w-32">
-					<!-- Step Circle -->
-					<div
-						class={`
-          w-8 h-8 mt-8 rounded-full flex items-center justify-center text-sm font-medium
-          transition-colors duration-200
-          ${
-						currentStep > index + 1
-							? 'bg-blue-300 dark:bg-indigo-700 text-white'
-							: currentStep === index + 1
-								? 'bg-blue-600 dark:bg-indigo-600 text-white'
-								: 'bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-300 border-2 border-gray-300 dark:border-gray-600'
-					}
-        `}
-						role="tab"
-						aria-selected={currentStep === index + 1}
-						aria-label={`Step ${index + 1}: ${step.name}`}
-					>
-						{#if currentStep > index + 1}
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								class="h-4 w-4"
-								viewBox="0 0 20 20"
-								fill="currentColor"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-									clip-rule="evenodd"
+		<div
+			class="w-full sm:w-[34rem] md:w-[40rem] lg:w-[56rem] max-w-full grid grid-rows-[auto_1fr] sm:h-[min(52rem,calc(100dvh-8rem))]"
+		>
+			<nav
+				aria-label="Campaign steps"
+				class="sticky top-0 z-20 -mx-4 sm:-mx-8 px-4 sm:px-8 pt-4 pb-3 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200"
+			>
+				<ol class="flex items-start">
+					{#each campaignSteps as step, index}
+						{@const stepNumber = index + 1}
+						{@const isDone = currentStep > stepNumber}
+						{@const isCurrent = currentStep === stepNumber}
+						<li
+							class="relative flex-1 flex flex-col items-center min-w-0"
+							aria-current={isCurrent ? 'step' : undefined}
+						>
+							{#if index < campaignSteps.length - 1}
+								<span
+									aria-hidden="true"
+									class="absolute top-4 left-[calc(50%+1.25rem)] right-[calc(-50%+1.25rem)] h-0.5 -translate-y-1/2 rounded-full transition-colors duration-200 {isDone
+										? 'bg-cta-blue dark:bg-highlight-blue'
+										: 'bg-gray-200 dark:bg-gray-600'}"
 								/>
-							</svg>
-						{:else}
-							{index + 1}
-						{/if}
-					</div>
-
-					<!-- Step Label -->
-					<span
-						class={`
-          mt-2 text-xs sm:text-sm font-medium text-center
-          ${
-						currentStep > index + 1 || currentStep === index + 1
-							? 'text-blue-600 dark:text-blue-400'
-							: 'text-gray-500 dark:text-gray-400'
-					}
-        `}
-					>
-						<span>{step.name}</span>
-					</span>
-				</div>
-			{/each}
-		</div>
-		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
-			{#if currentStep === 1}
-				<!-- Basic Information Step -->
-				<FormColumns id={'step-1'}>
-					<FormColumn>
-						<TextField
-							id={'campaignName'}
-							required
-							minLength={1}
-							maxLength={64}
-							bind:value={formValues.name}
-							on:keydown={(e) => {
-								/** @type {HTMLInputElement}  */
-								const ele = document.querySelector('#campaignName');
-								ele.setCustomValidity('');
-							}}
-						>
-							Name
-						</TextField>
-						<TextFieldSelect
-							required
-							id="template"
-							bind:value={formValues.template}
-							options={Array.from(templateMap.values())}>Template</TextFieldSelect
-						>
-					</FormColumn>
-				</FormColumns>
-			{:else if currentStep === 2}
-				<!-- Recipients Step -->
-				<FormColumns id={'step-2'}>
-					<FormColumn>
-						<div class="mb-6">
-							<TextFieldMultiSelect
-								id="recipientGroupIDs"
-								bind:value={formValues.recipientGroups}
-								required
-								onSelect={onAddReceipientGroup}
-								onRemove={onRemoveReceipientGroup}
-								options={recipientGroupMap.values()}>Recipient Groups</TextFieldMultiSelect
+							{/if}
+							<span
+								class="relative z-10 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-colors duration-200 {isDone
+									? 'bg-blue-100 text-cta-blue dark:bg-highlight-blue/20 dark:text-blue-200'
+									: isCurrent
+										? 'bg-cta-blue text-white ring-4 ring-blue-100 dark:bg-highlight-blue dark:ring-highlight-blue/25'
+										: 'bg-white text-gray-500 border-2 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600'}"
 							>
-						</div>
-
-						{#if formValues.recipientGroups.length > 0}
-							<div>
-								<button
-									type="button"
-									class="text-sm font-medium text-white dark:text-white hover:text-gray-200 dark:hover:text-gray-300 flex items-center gap-1"
-									on:click={() => {
-										loadAllSelectedRecipients();
-										isRecipientModalVisible = true;
-									}}
-								>
-									<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								{#if isDone}
+									<svg
+										xmlns="http://www.w3.org/2000/svg"
+										class="h-4 w-4"
+										viewBox="0 0 20 20"
+										fill="currentColor"
+										aria-hidden="true"
+									>
 										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-										/>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+											fill-rule="evenodd"
+											d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+											clip-rule="evenodd"
 										/>
 									</svg>
-									<span>View All Recipients</span>
-								</button>
+									<span class="sr-only">Step {stepNumber}, {step.name}, done</span>
+								{:else}
+									<span aria-hidden="true">{stepNumber}</span>
+									<span class="sr-only">Step {stepNumber}, {step.name}</span>
+								{/if}
+							</span>
+							<span
+								class="mt-1.5 text-xs sm:text-sm text-center whitespace-nowrap transition-colors duration-200 {isCurrent
+									? 'font-semibold text-cta-blue dark:text-blue-300'
+									: isDone
+										? 'text-slate-600 dark:text-gray-300'
+										: 'text-gray-500 dark:text-gray-400'}"
+								class:hidden={!isCurrent}
+								class:sm:block={!isCurrent}
+								aria-hidden="true"
+							>
+								{step.name}
+							</span>
+						</li>
+					{/each}
+				</ol>
+			</nav>
+			<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
+				{#if currentStep === 1}
+					<!-- Basic Information Step -->
+					<FormColumns id={'step-1'}>
+						<div class="w-full max-w-2xl min-w-0 flex flex-col items-start">
+							<div class="w-full max-w-lg">
+								<TextField
+									id={'campaignName'}
+									required
+									minLength={1}
+									maxLength={64}
+									width="full"
+									bind:value={formValues.name}
+									on:keydown={(e) => {
+										/** @type {HTMLInputElement}  */
+										const ele = document.querySelector('#campaignName');
+										ele.setCustomValidity('');
+									}}
+								>
+									Name
+								</TextField>
+								<TextFieldSelect
+									required
+									id="template"
+									size="full"
+									bind:value={formValues.template}
+									options={Array.from(templateMap.values())}>Template</TextFieldSelect
+								>
 							</div>
-						{/if}
-					</FormColumn>
-				</FormColumns>
-			{:else if currentStep === 3}
-				<FormColumns id={'step-3'}>
-					<FormColumn>
-						<div class="mb-6">
-							<div class="mb-6">
-								<SelectSquare
-									label="Delivery Method"
-									options={scheduleOptions}
-									onChange={onChangeScheduleType}
-									bind:value={scheduleType}
-								/>
+						</div>
+					</FormColumns>
+				{:else if currentStep === 2}
+					<!-- Recipients Step -->
+					<FormColumns id={'step-2'}>
+						<div class="w-full max-w-2xl min-w-0 flex flex-col items-start">
+							<div class="w-full max-w-lg">
+								<div class="mb-6 w-full">
+									<TextFieldMultiSelect
+										id="recipientGroupIDs"
+										size="full"
+										bind:value={formValues.recipientGroups}
+										required
+										onSelect={onAddReceipientGroup}
+										onRemove={onRemoveReceipientGroup}
+										options={recipientGroupMap.values()}>Recipient Groups</TextFieldMultiSelect
+									>
+								</div>
 							</div>
 
-							{#if scheduleType === 'basic'}
-								<div class="flex items-center gap-2">
-									<DateTimeField
-										bind:value={formValues.sendStartAt}
-										min={new Date()}
-										labelWidth={'medium'}
-										required
+							{#if formValues.recipientGroups.length > 0}
+								<div>
+									<button
+										type="button"
+										class="pc-focus inline-flex items-center gap-1.5 rounded-sm text-sm font-medium text-cta-blue dark:text-highlight-blue hover:underline"
+										on:click={() => {
+											loadAllSelectedRecipients();
+											isRecipientModalVisible = true;
+										}}
 									>
-										Delivery start
-									</DateTimeField>
-									<div class="flex items-center gap-1">
-										<button
-											type="button"
-											class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
-											on:click|preventDefault={() =>
-												(formValues.sendStartAt = new Date().toISOString())}
-										>
-											Now
-										</button>
-										<button
-											type="button"
-											class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
-											on:click|preventDefault={() =>
-												(formValues.sendStartAt = new Date(Date.now() + 86400000).toISOString())}
-										>
-											+1 Day
-										</button>
-										<button
-											type="button"
-											class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
-											on:click|preventDefault={() =>
-												(formValues.sendStartAt = new Date(Date.now() + 604800000).toISOString())}
-										>
-											+1 Week
-										</button>
-									</div>
+										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+											/>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+											/>
+										</svg>
+										<span>View All Recipients</span>
+									</button>
+								</div>
+							{/if}
+						</div>
+					</FormColumns>
+				{:else if currentStep === 3}
+					<FormColumns id={'step-3'}>
+						<div class="w-full max-w-2xl min-w-0 flex flex-col items-start">
+							<div class="mb-6 w-full">
+								<div class="mb-2">
+									<SelectSquare
+										label="Delivery Method"
+										options={scheduleOptions}
+										onChange={onChangeScheduleType}
+										bind:value={scheduleType}
+									/>
 								</div>
 
-								{#if formValues.sendStartAt && !hasDynamicGroup}
-									<div class="pt-4 pb-6">
-										<div class="flex flex-col gap-2">
-											<p
-												class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
+								{#if scheduleType === 'basic'}
+									<div class="flex flex-wrap items-end gap-x-3 gap-y-2">
+										<div>
+											<DateTimeField
+												bind:value={formValues.sendStartAt}
+												min={new Date()}
+												labelWidth={'large'}
+												required
 											>
-												Distribution Speed
-
-												<span class="italic font-normal">
-													(
-													{#if spreadOption === SPREAD_MANUAL}
-														Manual timing
-													{:else if spreadOption === SPREAD_1MIN}
-														1 minute apart
-													{:else if spreadOption === SPREAD_2MIN}
-														2 minutes apart
-													{:else if spreadOption === SPREAD_5MIN}
-														5 minutes apart
-													{:else if spreadOption === SPREAD_10MIN}
-														10 minutes apart
-													{:else if spreadOption === SPREAD_20MIN}
-														20 minutes apart
-													{:else if spreadOption === SPREAD_30MIN}
-														30 minutes apart
-													{:else if spreadOption === SPREAD_1HOUR}
-														1 hour apart
-													{:else if spreadOption === SPREAD_2HOUR}
-														2 hours apart
-													{:else if spreadOption === SPREAD_5HOUR}
-														5 hours apart
-													{:else if spreadOption === SPREAD_12HOUR}
-														12 hours apart
-													{:else if spreadOption === SPREAD_24HOUR}
-														24 hours apart
-													{/if}
-													)
-												</span>
-											</p>
-											<div class="flex items-center">
-												<input
-													type="range"
-													min="0"
-													max="11"
-													bind:value={speedIndex}
-													class="w-96 h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:cursor-pointer hover:[&::-webkit-slider-thumb]:bg-blue-700 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-blue-600 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer hover:[&::-moz-range-thumb]:bg-blue-700 transition-colors duration-200"
-													on:input={(event) => {
-														const index = parseInt(event.currentTarget.value);
-														const speeds = [
-															SPREAD_MANUAL,
-															SPREAD_1MIN,
-															SPREAD_2MIN,
-															SPREAD_5MIN,
-															SPREAD_10MIN,
-															SPREAD_20MIN,
-															SPREAD_30MIN,
-															SPREAD_1HOUR,
-															SPREAD_2HOUR,
-															SPREAD_5HOUR,
-															SPREAD_12HOUR,
-															SPREAD_24HOUR
-														];
-														spreadOption = speeds[index];
-														const milliseconds = getSpreadMilliseconds(spreadOption);
-														if (milliseconds !== null) {
-															refreshEndTimeBySendSpread(milliseconds);
-														}
-													}}
-												/>
-											</div>
+												Delivery start
+											</DateTimeField>
 										</div>
-									</div>
-								{/if}
-
-								<div class="flex items-center gap-2">
-									<DateTimeField
-										bind:value={formValues.sendEndAt}
-										min={formValues.sendStartAt ? new Date(formValues.sendStartAt) : new Date()}
-										labelWidth={'medium'}
-										required
-										disabled={spreadOption !== SPREAD_MANUAL}
-									>
-										Delivery end
-									</DateTimeField>
-									{#if spreadOption === SPREAD_MANUAL}
-										<div class="flex items-center gap-1">
+										<div class="flex flex-wrap items-center gap-1 pb-1">
 											<button
 												type="button"
-												class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+												class={quickTimeButtonClass}
 												on:click|preventDefault={() =>
-													(formValues.sendEndAt = new Date().toISOString())}
+													(formValues.sendStartAt = new Date().toISOString())}
 											>
 												Now
 											</button>
 											<button
 												type="button"
-												class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+												class={quickTimeButtonClass}
 												on:click|preventDefault={() =>
-													(formValues.sendEndAt = new Date(Date.now() + 86400000).toISOString())}
+													(formValues.sendStartAt = new Date(Date.now() + 86400000).toISOString())}
 											>
 												+1 Day
 											</button>
 											<button
 												type="button"
-												class="inline-flex items-center px-2 py-1 border border-slate-300 dark:border-gray-700/60 rounded-md text-xs font-medium text-slate-600 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 hover:bg-gray-100 dark:hover:bg-gray-700/60 transition-colors duration-200"
+												class={quickTimeButtonClass}
 												on:click|preventDefault={() =>
-													(formValues.sendEndAt = new Date(Date.now() + 604800000).toISOString())}
+													(formValues.sendStartAt = new Date(Date.now() + 604800000).toISOString())}
 											>
 												+1 Week
 											</button>
 										</div>
-									{/if}
-								</div>
-							{:else if scheduleType === 'schedule'}
-								<p class="font-semibold text-slate-600 py-4">Delivery start and end</p>
-								<div class="flex">
-									<DateField
-										noLabel
-										inputWidth="small"
-										bind:value={formValues.scheduledStartAt}
-										onChange={() => {
-											formValues.constraintWeekDays = [];
-											formValues.contraintStartTime = null;
-										}}
-										required>Start</DateField
-									>
-									<div class="self-center px-4">
-										<ToIcon />
 									</div>
 
-									<DateField
-										noLabel
-										inputWidth="small"
-										bind:value={formValues.scheduledEndAt}
-										onChange={() => {
-											formValues.constraintWeekDays = [];
-											formValues.contraintStartTime = null;
-										}}
-										required>End</DateField
-									>
-								</div>
+									{#if formValues.sendStartAt && !hasDynamicGroup}
+										<div class="pt-4 pb-4 w-full">
+											<div class="flex flex-col gap-2">
+												<p
+													class="font-semibold text-slate-600 dark:text-gray-400 leading-6 transition-colors duration-200"
+												>
+													Distribution Speed
 
-								<div class="mt-4">
-									<p class="font-semibold text-slate-600 py-2">Delivery days</p>
-									<div class="grid grid-cols-4 gap-2">
-										{#each Object.entries(dayMap) as [dayNum, dayName]}
-											{@const dayInt = parseInt(dayNum)}
-											<label
-												class:opacity-10={!weekDaysAvailable.includes(dayInt)}
-												class="flex items-center gap-2 p-2 border border-gray-300 rounded"
-											>
-												<input
-													type="checkbox"
-													on:invalid={(e) => {
-														const t = e.currentTarget;
-														t.setCustomValidity('Please select atleast one day for delivery.');
-													}}
-													required={!formValues.sendEndAt && !formValues.constraintWeekDays.length}
-													on:change={() => {
-														if (formValues.constraintWeekDays.includes(dayInt)) {
-															formValues.constraintWeekDays = formValues.constraintWeekDays.filter(
-																(d) => d !== dayInt
-															);
-														} else {
-															formValues.constraintWeekDays = [
-																...formValues.constraintWeekDays,
-																dayInt
+													<span class="font-normal text-slate-500 dark:text-gray-400">
+														(
+														{#if spreadOption === SPREAD_MANUAL}
+															Manual timing
+														{:else if spreadOption === SPREAD_1MIN}
+															1 minute apart
+														{:else if spreadOption === SPREAD_2MIN}
+															2 minutes apart
+														{:else if spreadOption === SPREAD_5MIN}
+															5 minutes apart
+														{:else if spreadOption === SPREAD_10MIN}
+															10 minutes apart
+														{:else if spreadOption === SPREAD_20MIN}
+															20 minutes apart
+														{:else if spreadOption === SPREAD_30MIN}
+															30 minutes apart
+														{:else if spreadOption === SPREAD_1HOUR}
+															1 hour apart
+														{:else if spreadOption === SPREAD_2HOUR}
+															2 hours apart
+														{:else if spreadOption === SPREAD_5HOUR}
+															5 hours apart
+														{:else if spreadOption === SPREAD_12HOUR}
+															12 hours apart
+														{:else if spreadOption === SPREAD_24HOUR}
+															24 hours apart
+														{/if}
+														)
+													</span>
+												</p>
+												<div class="flex items-center">
+													<input
+														type="range"
+														min="0"
+														max="11"
+														aria-label="Distribution speed"
+														bind:value={speedIndex}
+														class="w-full max-w-sm h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-600 [&::-webkit-slider-thumb]:cursor-pointer hover:[&::-webkit-slider-thumb]:bg-blue-700 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-blue-600 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer hover:[&::-moz-range-thumb]:bg-blue-700 transition-colors duration-200"
+														on:input={(event) => {
+															const index = parseInt(event.currentTarget.value);
+															const speeds = [
+																SPREAD_MANUAL,
+																SPREAD_1MIN,
+																SPREAD_2MIN,
+																SPREAD_5MIN,
+																SPREAD_10MIN,
+																SPREAD_20MIN,
+																SPREAD_30MIN,
+																SPREAD_1HOUR,
+																SPREAD_2HOUR,
+																SPREAD_5HOUR,
+																SPREAD_12HOUR,
+																SPREAD_24HOUR
 															];
-														}
-														formValues.constraintWeekDays.sort();
-													}}
-													checked={formValues.constraintWeekDays.includes(dayInt)}
-													disabled={!weekDaysAvailable.includes(dayInt)}
-													title={!weekDaysAvailable.includes(dayInt)
-														? 'Delivery start and end must be set first'
-														: ''}
-												/>
-												<span>{dayName}</span>
-											</label>
-										{/each}
+															spreadOption = speeds[index];
+															const milliseconds = getSpreadMilliseconds(spreadOption);
+															if (milliseconds !== null) {
+																refreshEndTimeBySendSpread(milliseconds);
+															}
+														}}
+													/>
+												</div>
+											</div>
+										</div>
+									{/if}
+
+									<div class="flex flex-wrap items-end gap-x-3 gap-y-2">
+										<div>
+											<DateTimeField
+												bind:value={formValues.sendEndAt}
+												min={formValues.sendStartAt ? new Date(formValues.sendStartAt) : new Date()}
+												labelWidth={'large'}
+												required
+												disabled={spreadOption !== SPREAD_MANUAL}
+											>
+												Delivery end
+											</DateTimeField>
+										</div>
+										{#if spreadOption === SPREAD_MANUAL}
+											<div class="flex flex-wrap items-center gap-1 pb-1">
+												<button
+													type="button"
+													class={quickTimeButtonClass}
+													on:click|preventDefault={() =>
+														(formValues.sendEndAt = new Date().toISOString())}
+												>
+													Now
+												</button>
+												<button
+													type="button"
+													class={quickTimeButtonClass}
+													on:click|preventDefault={() =>
+														(formValues.sendEndAt = new Date(Date.now() + 86400000).toISOString())}
+												>
+													+1 Day
+												</button>
+												<button
+													type="button"
+													class={quickTimeButtonClass}
+													on:click|preventDefault={() =>
+														(formValues.sendEndAt = new Date(Date.now() + 604800000).toISOString())}
+												>
+													+1 Week
+												</button>
+											</div>
+										{/if}
 									</div>
-								</div>
+								{:else if scheduleType === 'schedule'}
+									<FieldLabel>Delivery start and end</FieldLabel>
+									<div
+										class="grid grid-cols-2 gap-3 w-full sm:w-auto sm:flex sm:flex-wrap sm:items-center sm:gap-y-2 [&_input]:w-full sm:[&_input]:w-44"
+									>
+										<DateField
+											noLabel
+											inputWidth="medium"
+											bind:value={formValues.scheduledStartAt}
+											onChange={() => {
+												formValues.constraintWeekDays = [];
+												formValues.contraintStartTime = null;
+											}}
+											required>Start</DateField
+										>
+										<span class="hidden sm:block"><ToIcon /></span>
+										<DateField
+											noLabel
+											inputWidth="medium"
+											bind:value={formValues.scheduledEndAt}
+											onChange={() => {
+												formValues.constraintWeekDays = [];
+												formValues.contraintStartTime = null;
+											}}
+											required>End</DateField
+										>
+									</div>
 
-								<p class="font-semibold text-slate-600 py-4">Delivery hours</p>
+									<fieldset class="mt-4 w-full">
+										<legend class="contents">
+											<FieldLabel>Delivery days</FieldLabel>
+										</legend>
+										{#if !weekDaysAvailable.length}
+											<p class="text-sm text-slate-500 dark:text-gray-400 -mt-1 mb-2">
+												Set the start and end dates to pick days.
+											</p>
+										{/if}
+										<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 lg:gap-1.5 max-w-lg">
+											{#each Object.entries(dayMap) as [dayNum, dayName]}
+												{@const dayInt = parseInt(dayNum)}
+												{@const dayAvailable = weekDaysAvailable.includes(dayInt)}
+												<label
+													class="flex items-center gap-2 lg:gap-1.5 min-h-[44px] px-3 lg:px-2 lg:justify-center rounded-md border text-sm transition-colors duration-200 {dayAvailable
+														? 'cursor-pointer border-gray-300 text-slate-700 hover:border-cta-blue hover:bg-blue-50 dark:border-gray-700/60 dark:text-gray-200 dark:hover:border-highlight-blue dark:hover:bg-highlight-blue/10'
+														: 'cursor-not-allowed opacity-40 border-gray-200 text-slate-500 dark:border-gray-700/60 dark:text-gray-400'} {formValues.constraintWeekDays.includes(
+														dayInt
+													)
+														? 'border-cta-blue bg-blue-50 dark:border-highlight-blue dark:bg-highlight-blue/20'
+														: ''}"
+													title={!dayAvailable ? 'Delivery start and end must be set first' : ''}
+												>
+													<input
+														type="checkbox"
+														class="pc-checkbox disabled:cursor-not-allowed"
+														on:invalid={(e) => {
+															const t = e.currentTarget;
+															t.setCustomValidity('Please select at least one day for delivery.');
+														}}
+														required={!formValues.sendEndAt && !formValues.constraintWeekDays.length}
+														on:change={() => {
+															if (formValues.constraintWeekDays.includes(dayInt)) {
+																formValues.constraintWeekDays = formValues.constraintWeekDays.filter(
+																	(d) => d !== dayInt
+																);
+															} else {
+																formValues.constraintWeekDays = [
+																	...formValues.constraintWeekDays,
+																	dayInt
+																];
+															}
+															formValues.constraintWeekDays.sort();
+														}}
+														checked={formValues.constraintWeekDays.includes(dayInt)}
+														disabled={!dayAvailable}
+														title={!dayAvailable ? 'Delivery start and end must be set first' : ''}
+													/>
+													<span class="lg:sr-only">{dayName}</span>
+													<span class="hidden lg:inline" aria-hidden="true">{dayName.slice(0, 3)}</span>
+												</label>
+											{/each}
+										</div>
+									</fieldset>
 
-								<div class="flex">
-									<div>
+									<div class="mt-4">
+										<FieldLabel>Delivery hours</FieldLabel>
+									</div>
+									<div class="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-y-2">
 										<input
-											class="rounded-md py-2 text-gray-600 text-center border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 focus:bg-gray-100 bg-grayblue-light font-normal"
+											class="w-full sm:w-auto rounded-md py-2 px-2 text-slate-800 dark:text-gray-300 text-left border border-transparent dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30"
 											id="constraintStartTime"
 											type="time"
 											required
 											autocomplete="off"
+											aria-label="Delivery hours start"
 											on:change={() => {
 												validateConstraintTimes(document.querySelector('#constraintStartTime'));
 											}}
 											bind:value={formValues.contraintStartTime}
 										/>
-									</div>
-									<div class="self-center px-4">
-										<ToIcon />
-									</div>
-									<div>
+										<span class="hidden sm:block"><ToIcon /></span>
 										<input
-											class="rounded-md py-2 text-gray-600 text-center border border-transparent focus:outline-none focus:border-solid focus:border-slate-400 focus:bg-gray-100 bg-grayblue-light font-normal"
+											class="w-full sm:w-auto rounded-md py-2 px-2 text-slate-800 dark:text-gray-300 text-left border border-transparent dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30"
 											id="constraintEndTime"
 											type="time"
 											required
 											autocomplete="off"
+											aria-label="Delivery hours end"
 											on:change={() => {
 												validateConstraintTimes(document.querySelector('#constraintEndTime'));
 											}}
 											bind:value={formValues.contraintEndTime}
 										/>
 									</div>
-								</div>
-								{#if formValues.constraintTimeZone !== browserTimeZone()}
-									<!-- only when editing a campaign saved from a browser in another zone -->
-									<p class="text-sm text-slate-500 dark:text-gray-400 mt-2">
-										Days and hours are in {timeZoneLabel(formValues.constraintTimeZone)}
-									</p>
-								{/if}
-								{#if dailySlotData?.error}
-									<p class="text-red-600 dark:text-red-400 text-sm mt-2">{dailySlotData.error}</p>
-								{/if}
-							{/if}
-
-							<div class="mt-6">
-								{#if !showAdvancedOptionsStep3}
-									<div class="mt-4">
-										<button
-											type="button"
-											class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200 underline"
-											on:click={() => (showAdvancedOptionsStep3 = true)}
-										>
-											Show advanced options
-										</button>
-									</div>
+									{#if formValues.constraintTimeZone !== browserTimeZone()}
+										<!-- only when editing a campaign saved from a browser in another zone -->
+										<p class="text-sm text-slate-600 dark:text-gray-300 mt-2">
+											Days and hours are in {timeZoneLabel(formValues.constraintTimeZone)}
+										</p>
+									{/if}
+									{#if dailySlotData?.error}
+										<p class="text-red-600 dark:text-red-400 text-sm mt-2">{dailySlotData.error}</p>
+									{/if}
 								{/if}
 
-								{#if showAdvancedOptionsStep3}
-									<CheckboxField
-										bind:value={lateScheduleEnabled}
-										disabled={!lateScheduleAvailable(formValues.sendStartAt)}
-										toolTipText={lateScheduleToolTip}
-										on:change={(e) => {
-											// read the new state from the event target, the component binding to
-											// lateScheduleEnabled has not propagated yet when this handler runs
-											const checked = e.target?.checked ?? lateScheduleEnabled;
-											// a manual toggle is an explicit choice; it is no longer SCIM-driven
-											lateScheduleAutoSelected = false;
-											if (checked && formValues.sendStartAt) {
-												formValues.scheduleAt = new Date(
-													new Date(formValues.sendStartAt).getTime() - 24 * 60 * 60 * 1000
-												).toISOString();
-											} else {
-												formValues.scheduleAt = null;
-											}
-										}}>Late Schedule</CheckboxField
-									>
-
-									<TextFieldSelect
-										id="sortField"
-										bind:value={formValues.sortField}
-										required
-										toolTipText="Choose which recipient field determines the delivery order"
-										options={Array.from(sortField.keys())}>Delivery sort by</TextFieldSelect
-									>
-
-									<TextFieldSelect
-										id="sortOrder"
-										bind:value={formValues.sortOrder}
-										toolTipText="Choose how recipients will be ordered for delivery"
-										required
-										options={Array.from(sortOrder.keys())}>Delivery order</TextFieldSelect
-									>
-
-									<JitterSlider
-										id="jitter-slider"
-										bind:valueMin={formValues.jitterMin}
-										bind:valueMax={formValues.jitterMax}
-									>
-										Jitter
-									</JitterSlider>
-
-									<DateTimeField
-										bind:value={formValues.closeAt}
-										min={formValues.sendEndAt
-											? new Date(formValues.sendEndAt)
-											: formValues.sendStartAt
-												? new Date(formValues.sendStartAt)
-												: new Date()}
-										optional
-										toolTipText="After this time, no more events are saved."
-										>Close Campaign</DateTimeField
-									>
-
-									{#if formValues.isAnonymous}
-										<div
-											class="bg-blue-50 dark:bg-blue-900/30 p-3 rounded-md text-sm text-blue-700 dark:text-blue-200 transition-colors duration-200"
-										>
-											<strong>Auto-anonymized at close.</strong><br /> Set a date only to anonymize
-											earlier.
+								<div class="mt-6">
+									{#if !showAdvancedOptionsStep3}
+										<div class="mt-4">
+											<button
+												type="button"
+												class="pc-focus inline-flex items-center gap-1 rounded-sm text-sm font-medium text-cta-blue dark:text-highlight-blue hover:underline"
+												aria-expanded={false}
+												on:click={() => (showAdvancedOptionsStep3 = true)}
+											>
+												Show advanced options
+												<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"
+													><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg
+												>
+											</button>
 										</div>
 									{/if}
-									<DateTimeField
-										bind:value={formValues.anonymizeAt}
-										min={formValues.closeAt
-											? new Date(formValues.closeAt)
-											: formValues.sendEndAt
-												? new Date(formValues.sendEndAt)
-												: new Date()}
-										optional
-										toolTipText="When reached, the campaign closes and all data is anonymized, including the recipient relation."
-										>Anonymize All Data</DateTimeField
-									>
 
-									{#if !formValues.isAnonymous}
+									{#if showAdvancedOptionsStep3}
+										<CheckboxField
+											bind:value={lateScheduleEnabled}
+											disabled={!lateScheduleAvailable(formValues.sendStartAt)}
+											toolTipText={lateScheduleToolTip}
+											on:change={(e) => {
+												// read the new state from the event target, the component binding to
+												// lateScheduleEnabled has not propagated yet when this handler runs
+												const checked = e.target?.checked ?? lateScheduleEnabled;
+												// a manual toggle is an explicit choice; it is no longer SCIM-driven
+												lateScheduleAutoSelected = false;
+												if (checked && formValues.sendStartAt) {
+													formValues.scheduleAt = new Date(
+														new Date(formValues.sendStartAt).getTime() - 24 * 60 * 60 * 1000
+													).toISOString();
+												} else {
+													formValues.scheduleAt = null;
+												}
+											}}>Late Schedule</CheckboxField
+										>
+
+										<TextFieldSelect
+											id="sortField"
+											bind:value={formValues.sortField}
+											required
+											toolTipText="Choose which recipient field determines the delivery order"
+											options={Array.from(sortField.keys())}>Delivery sort by</TextFieldSelect
+										>
+
+										<TextFieldSelect
+											id="sortOrder"
+											bind:value={formValues.sortOrder}
+											toolTipText="Choose how recipients will be ordered for delivery"
+											required
+											options={Array.from(sortOrder.keys())}>Delivery order</TextFieldSelect
+										>
+
+										<JitterSlider
+											id="jitter-slider"
+											bind:valueMin={formValues.jitterMin}
+											bind:valueMax={formValues.jitterMax}
+										>
+											Jitter
+										</JitterSlider>
+
 										<DateTimeField
-											bind:value={formValues.dataAnonymizeAt}
+											bind:value={formValues.closeAt}
+											min={formValues.sendEndAt
+												? new Date(formValues.sendEndAt)
+												: formValues.sendStartAt
+													? new Date(formValues.sendStartAt)
+													: new Date()}
+											optional
+											toolTipText="After this time, no more events are saved."
+											>Close Campaign</DateTimeField
+										>
+
+										{#if formValues.isAnonymous}
+											<div
+												class="bg-blue-50 dark:bg-blue-900/30 p-3 rounded-md text-sm text-blue-700 dark:text-blue-200 transition-colors duration-200"
+											>
+												<strong>Auto-anonymized at close.</strong><br /> Set a date only to anonymize
+												earlier.
+											</div>
+										{/if}
+										<DateTimeField
+											bind:value={formValues.anonymizeAt}
 											min={formValues.closeAt
 												? new Date(formValues.closeAt)
 												: formValues.sendEndAt
 													? new Date(formValues.sendEndAt)
 													: new Date()}
 											optional
-											toolTipText="When reached, only the submitted data, user agent, ip and browser metadata are anonymized. The recipient relation is kept."
-											>Anonymize Data</DateTimeField
+											toolTipText="When reached, the campaign closes and all data is anonymized, including the recipient relation."
+											>Anonymize All Data</DateTimeField
 										>
+
+										{#if !formValues.isAnonymous}
+											<DateTimeField
+												bind:value={formValues.dataAnonymizeAt}
+												min={formValues.closeAt
+													? new Date(formValues.closeAt)
+													: formValues.sendEndAt
+														? new Date(formValues.sendEndAt)
+														: new Date()}
+												optional
+												toolTipText="When reached, only the submitted data, user agent, ip and browser metadata are anonymized. The recipient relation is kept."
+												>Anonymize Data</DateTimeField
+											>
+										{/if}
 									{/if}
-								{/if}
+								</div>
 							</div>
 						</div>
-					</FormColumn>
-				</FormColumns>
-			{:else if currentStep === 4}
-				<FormColumns id={'step-4'}>
-					<FormColumn>
-						<div class="mb-6">
-							<SelectSquare
-								label="Type"
-								width="small"
-								toolTipText={'Tests are not included in statistics'}
-								options={testOptions}
-								bind:value={formValues.isTest}
-							/>
-						</div>
-
-						<div class="mb-6">
-							<SelectSquare
-								optional
-								disabled={modalMode === 'update'}
-								toolTipText="No names, emails, IPs or entered data are stored."
-								label="Anonymous campaign?"
-								options={saveSubbmitedDataOptions}
-								bind:value={formValues.isAnonymous}
-							/>
-							{#if modalMode === 'update'}
-								<p class="text-xs text-slate-500 dark:text-gray-400">
-									Anonymous mode is fixed once the campaign is created and cannot be changed.
-								</p>
-							{/if}
-						</div>
-
-						{#if formValues.isAnonymous}
-							<div
-								class="mb-6 bg-blue-50 dark:bg-blue-900/30 p-3 rounded-md text-sm text-blue-700 dark:text-blue-200 transition-colors duration-200"
-							>
-								<strong>Data collection disabled.</strong><br /> Submitted data and browser metadata
-								are never stored for anonymous campaigns.
-							</div>
-						{:else}
-							<div class="mb-6">
+					</FormColumns>
+				{:else if currentStep === 4}
+					<FormColumns id={'step-4'}>
+						<div class="w-full max-w-2xl min-w-0 flex flex-col items-start">
+							<div class="w-full">
 								<SelectSquare
-									optional
-									toolTipText="Consider privacy when saving data."
-									label="Save submitted data?"
-									options={saveSubbmitedDataOptions}
-									bind:value={formValues.saveSubmittedData}
+									label="Type"
+									toolTipText={'Tests are not included in statistics'}
+									options={testOptions}
+									bind:value={formValues.isTest}
 								/>
 							</div>
 
-							<ConditionalDisplay show="blackbox">
-								<div class="mb-6">
+							<div class="w-full">
+								<SelectSquare
+									disabled={modalMode === 'update'}
+									toolTipText="No names, emails, IPs or entered data are stored."
+									label="Anonymous campaign?"
+									options={saveSubbmitedDataOptions}
+									bind:value={formValues.isAnonymous}
+								/>
+								{#if modalMode === 'update'}
+									<p class="flex items-start gap-1.5 mb-4 text-sm text-slate-600 dark:text-gray-300">
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											class="h-4 w-4 mt-0.5 flex-shrink-0"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke="currentColor"
+											aria-hidden="true"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+											/>
+										</svg>
+										Anonymous mode is fixed once the campaign is created and cannot be changed.
+									</p>
+								{/if}
+							</div>
+
+							{#if formValues.isAnonymous}
+								<div
+									class="mt-2 mb-4 bg-blue-50 dark:bg-blue-900/30 p-3 rounded-md text-sm text-blue-700 dark:text-blue-200 transition-colors duration-200"
+								>
+									<strong>Data collection disabled.</strong><br /> Submitted data and browser metadata
+									are never stored for anonymous campaigns.
+								</div>
+							{:else}
+								<div class="w-full">
 									<SelectSquare
-										optional
-										toolTipText="Saves JA4 fingerprint, Sec-CH-UA-Platform header, and Accept-Language header."
-										label="Save browser metadata?"
+										toolTipText="Consider privacy when saving data."
+										label="Save submitted data?"
 										options={saveSubbmitedDataOptions}
-										bind:value={formValues.saveBrowserMetadata}
+										bind:value={formValues.saveSubmittedData}
 									/>
 								</div>
-							</ConditionalDisplay>
-						{/if}
 
-						{#if !showAdvancedOptionsStep4}
-							<div class="mt-4">
-								<button
-									type="button"
-									class="text-cta-blue hover:text-blue-700 dark:text-white dark:hover:text-gray-200 text-sm transition-colors duration-200 underline"
-									on:click={() => (showAdvancedOptionsStep4 = true)}
-								>
-									Show advanced options
-								</button>
-							</div>
-						{/if}
-
-						{#if showAdvancedOptionsStep4}
-							<div class="mb-6 pt-4">
-								<div class="flex flex-col">
-									<div class="flex items-center py-2">
-										<p class="font-semibold text-slate-600 dark:text-gray-400">Webhooks</p>
-										<ToolTip>
-											Configure multiple webhooks to receive campaign event notifications. Each
-											webhook can have its own data level and event filters.
-										</ToolTip>
-										<div
-											class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-										>
-											<p
-												class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200"
-											>
-												optional
-											</p>
-										</div>
+								<ConditionalDisplay show="blackbox">
+									<div class="w-full">
+										<SelectSquare
+											toolTipText="Saves JA4 fingerprint, Sec-CH-UA-Platform header, and Accept-Language header."
+											label="Save browser metadata?"
+											options={saveSubbmitedDataOptions}
+											bind:value={formValues.saveBrowserMetadata}
+										/>
 									</div>
-									<div class="space-y-3 max-w-lg">
-										{#each formValues.webhooks as webhook, index}
-											<div
-												class="flex flex-col gap-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800/50 dark:to-gray-800/30 rounded-lg border border-gray-300 dark:border-gray-600/50 shadow-sm hover:shadow-md transition-all duration-200"
-											>
-												<div class="flex gap-2 items-start">
-													<div class="flex-1">
-														<TextFieldSelect
-															id="webhook-{index}"
-															bind:value={webhook.id}
-															optional
-															options={webhookMap
-																.keys()
-																.map((k) => ({ value: k, label: webhookMap.byKey(k) }))}
-														>
-															Endpoint
-														</TextFieldSelect>
-													</div>
-													<div class="flex items-end pb-4">
-														<button
-															type="button"
-															class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
-															on:click={() => removeWebhook(index)}
-															title="Remove this webhook"
-															aria-label="Remove webhook"
-														>
-															<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
-														</button>
-													</div>
-												</div>
+								</ConditionalDisplay>
+							{/if}
 
-												<div>
-													<SelectSquare
-														bind:value={webhook.includeData}
-														options={webhookDataLevelOptions}
-														label="Data Level"
-													/>
-												</div>
-
-												<div class="pt-1">
-													<div class="flex items-center gap-2 mb-2">
-														<p class="text-xs font-semibold text-gray-700 dark:text-gray-300">
-															Events
-														</p>
-														<span
-															class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
-														>
-															{webhook.events.length === webhookEventOptions.length
-																? 'All'
-																: webhook.events.length} / {webhookEventOptions.length}
-														</span>
-													</div>
-													<div
-														class="flex flex-row flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-white/50 dark:bg-gray-900/30 rounded border border-gray-200 dark:border-gray-700/50"
-													>
-														{#each webhookEventDisplayOptions as eventOption}
-															{@const isSelected = webhook.events.includes(eventOption.value)}
-															<button
-																type="button"
-																on:click={() => toggleWebhookEvent(index, eventOption.value)}
-																class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors duration-200 {isSelected
-																	? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 border border-green-400 dark:border-green-500 hover:bg-green-100 dark:hover:bg-green-900/40'
-																	: 'bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
-															>
-																{eventOption.label}
-															</button>
-														{/each}
-													</div>
-												</div>
-											</div>
-										{/each}
-										<button
-											type="button"
-											class="px-4 py-2 bg-gradient-to-b from-blue-500 to-indigo-400 dark:from-blue-600 dark:to-indigo-500 hover:from-blue-400 hover:to-indigo-400 dark:hover:from-blue-500 dark:hover:to-indigo-400 text-white font-semibold rounded-md transition-all duration-200"
-											on:click={addWebhook}
+							{#if !showAdvancedOptionsStep4}
+								<div class="mt-4">
+									<button
+										type="button"
+										class="pc-focus inline-flex items-center gap-1 rounded-sm text-sm font-medium text-cta-blue dark:text-highlight-blue hover:underline"
+										aria-expanded={false}
+										on:click={() => (showAdvancedOptionsStep4 = true)}
+									>
+										Show advanced options
+										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"
+											><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg
 										>
-											+ Add Webhook
-										</button>
-									</div>
+									</button>
 								</div>
-							</div>
+							{/if}
 
-							<ConditionalDisplay show="blackbox">
-							{#if scriptsEnabled}
+							{#if showAdvancedOptionsStep4}
 								<div class="mb-6 pt-4">
 									<div class="flex flex-col">
-										<div class="flex items-center py-2">
-											<p class="font-semibold text-slate-600 dark:text-gray-400">Scripts</p>
-											<ToolTip>
-												Run a script when a campaign event fires. Each script has its own
-												data level and event filters, the same as webhooks.
-											</ToolTip>
-											<div
-												class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-											>
-												<p
-													class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200"
-												>
-													optional
-												</p>
-											</div>
-										</div>
+										<FieldLabel optional toolTipText="Configure multiple webhooks to receive campaign event notifications. Each webhook can have its own data level and event filters.">Webhooks</FieldLabel>
 										<div class="space-y-3 max-w-lg">
-											{#each formValues.scripts as script, index}
+											{#each formValues.webhooks as webhook, index}
 												<div
 													class="flex flex-col gap-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800/50 dark:to-gray-800/30 rounded-lg border border-gray-300 dark:border-gray-600/50 shadow-sm hover:shadow-md transition-all duration-200"
 												>
 													<div class="flex gap-2 items-start">
 														<div class="flex-1">
 															<TextFieldSelect
-																id="script-{index}"
-																bind:value={script.id}
+																id="webhook-{index}"
+																bind:value={webhook.id}
 																optional
-																options={scriptMap
+																options={webhookMap
 																	.keys()
-																	.map((k) => ({ value: k, label: scriptMap.byKey(k) }))}
+																	.map((k) => ({ value: k, label: webhookMap.byKey(k) }))}
 															>
-																Script
+																Endpoint
 															</TextFieldSelect>
 														</div>
 														<div class="flex items-end pb-4">
 															<button
 																type="button"
 																class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
-																on:click={() => removeScript(index)}
-																title="Remove this script"
-																aria-label="Remove script"
+																on:click={() => removeWebhook(index)}
+																title="Remove this webhook"
+																aria-label="Remove webhook"
 															>
 																<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
 															</button>
@@ -2505,7 +2521,7 @@
 
 													<div>
 														<SelectSquare
-															bind:value={script.includeData}
+															bind:value={webhook.includeData}
 															options={webhookDataLevelOptions}
 															label="Data Level"
 														/>
@@ -2519,21 +2535,22 @@
 															<span
 																class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
 															>
-																{script.events.length === webhookEventOptions.length
+																{webhook.events.length === webhookEventOptions.length
 																	? 'All'
-																	: script.events.length} / {webhookEventOptions.length}
+																	: webhook.events.length} / {webhookEventOptions.length}
 															</span>
 														</div>
 														<div
 															class="flex flex-row flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-white/50 dark:bg-gray-900/30 rounded border border-gray-200 dark:border-gray-700/50"
 														>
 															{#each webhookEventDisplayOptions as eventOption}
-																{@const isSelected = script.events.includes(eventOption.value)}
+																{@const isSelected = webhook.events.includes(eventOption.value)}
 																<button
 																	type="button"
-																	on:click={() => toggleScriptEvent(index, eventOption.value)}
+																	on:click={() => toggleWebhookEvent(index, eventOption.value)}
+															aria-pressed={isSelected}
 																	class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors duration-200 {isSelected
-																		? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 border border-green-400 dark:border-green-500 hover:bg-green-100 dark:hover:bg-green-900/40'
+																		? 'bg-blue-50 dark:bg-highlight-blue/20 text-cta-blue dark:text-white border border-cta-blue dark:border-highlight-blue hover:bg-blue-100 dark:hover:bg-highlight-blue/30'
 																		: 'bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
 																>
 																	{eventOption.label}
@@ -2545,647 +2562,731 @@
 											{/each}
 											<button
 												type="button"
-												class="px-4 py-2 bg-gradient-to-b from-blue-500 to-indigo-400 dark:from-blue-600 dark:to-indigo-500 hover:from-blue-400 hover:to-indigo-400 dark:hover:from-blue-500 dark:hover:to-indigo-400 text-white font-semibold rounded-md transition-all duration-200"
-												on:click={addScript}
+												class="pc-focus inline-flex items-center px-4 py-2 rounded-md border border-cta-blue text-cta-blue bg-white hover:bg-blue-50 dark:bg-gray-800 dark:border-highlight-blue dark:text-blue-200 dark:hover:bg-highlight-blue/20 text-sm font-semibold transition-colors duration-200"
+												on:click={addWebhook}
 											>
-												+ Add Script
+												+ Add Webhook
 											</button>
 										</div>
 									</div>
 								</div>
-							{/if}
-							</ConditionalDisplay>
 
-							<ConditionalDisplay show="blackbox">
+								<ConditionalDisplay show="blackbox">
+								{#if scriptsEnabled}
+									<div class="mb-6 pt-4">
+										<div class="flex flex-col">
+											<FieldLabel optional toolTipText="Run a script when a campaign event fires. Each script has its own data level and event filters, the same as webhooks.">Scripts</FieldLabel>
+											<div class="space-y-3 max-w-lg">
+												{#each formValues.scripts as script, index}
+													<div
+														class="flex flex-col gap-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800/50 dark:to-gray-800/30 rounded-lg border border-gray-300 dark:border-gray-600/50 shadow-sm hover:shadow-md transition-all duration-200"
+													>
+														<div class="flex gap-2 items-start">
+															<div class="flex-1">
+																<TextFieldSelect
+																	id="script-{index}"
+																	bind:value={script.id}
+																	optional
+																	options={scriptMap
+																		.keys()
+																		.map((k) => ({ value: k, label: scriptMap.byKey(k) }))}
+																>
+																	Script
+																</TextFieldSelect>
+															</div>
+															<div class="flex items-end pb-4">
+																<button
+																	type="button"
+																	class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
+																	on:click={() => removeScript(index)}
+																	title="Remove this script"
+																	aria-label="Remove script"
+																>
+																	<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
+																</button>
+															</div>
+														</div>
+
+														<div>
+															<SelectSquare
+																bind:value={script.includeData}
+																options={webhookDataLevelOptions}
+																label="Data Level"
+															/>
+														</div>
+
+														<div class="pt-1">
+															<div class="flex items-center gap-2 mb-2">
+																<p class="text-xs font-semibold text-gray-700 dark:text-gray-300">
+																	Events
+																</p>
+																<span
+																	class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
+																>
+																	{script.events.length === webhookEventOptions.length
+																		? 'All'
+																		: script.events.length} / {webhookEventOptions.length}
+																</span>
+															</div>
+															<div
+																class="flex flex-row flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-white/50 dark:bg-gray-900/30 rounded border border-gray-200 dark:border-gray-700/50"
+															>
+																{#each webhookEventDisplayOptions as eventOption}
+																	{@const isSelected = script.events.includes(eventOption.value)}
+																	<button
+																		type="button"
+																		on:click={() => toggleScriptEvent(index, eventOption.value)}
+															aria-pressed={isSelected}
+																		class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors duration-200 {isSelected
+																			? 'bg-blue-50 dark:bg-highlight-blue/20 text-cta-blue dark:text-white border border-cta-blue dark:border-highlight-blue hover:bg-blue-100 dark:hover:bg-highlight-blue/30'
+																			: 'bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
+																	>
+																		{eventOption.label}
+																	</button>
+																{/each}
+															</div>
+														</div>
+													</div>
+												{/each}
+												<button
+													type="button"
+													class="pc-focus inline-flex items-center px-4 py-2 rounded-md border border-cta-blue text-cta-blue bg-white hover:bg-blue-50 dark:bg-gray-800 dark:border-highlight-blue dark:text-blue-200 dark:hover:bg-highlight-blue/20 text-sm font-semibold transition-colors duration-200"
+													on:click={addScript}
+												>
+													+ Add Script
+												</button>
+											</div>
+										</div>
+									</div>
+								{/if}
+								</ConditionalDisplay>
+
+								<ConditionalDisplay show="blackbox">
+									<div class="mb-6">
+										<SelectSquare
+											label="Security Configuration"
+											options={[
+												{ value: false, label: 'Disabled' },
+												{ value: true, label: 'Enabled' }
+											]}
+											bind:value={showSecurityOptions}
+											onChange={() => {
+												if (!showSecurityOptions) {
+													formValues.denyPageValue = '';
+													formValues.evasionPageValue = '';
+													allowDenyType = 'none';
+													formValues.allowDeny = [];
+												}
+											}}
+										/>
+									</div>
+								</ConditionalDisplay>
+							{/if}
+
+							{#if showAdvancedOptionsStep4 && showSecurityOptions}
 								<div class="mb-6">
 									<SelectSquare
-										optional
-										label="Security Configuration"
+										label="Obfuscation"
+										toolTipText="Obfuscate html pages to avoid fingerprinting of static content."
 										options={[
 											{ value: false, label: 'Disabled' },
 											{ value: true, label: 'Enabled' }
 										]}
-										bind:value={showSecurityOptions}
-										onChange={() => {
-											if (!showSecurityOptions) {
-												formValues.denyPageValue = '';
-												formValues.evasionPageValue = '';
-												allowDenyType = 'none';
-												formValues.allowDeny = [];
-											}
-										}}
+										bind:value={formValues.obfuscate}
 									/>
 								</div>
-							</ConditionalDisplay>
-						{/if}
 
-						{#if showAdvancedOptionsStep4 && showSecurityOptions}
-							<div class="mb-6">
-								<SelectSquare
-									optional
-									label="Obfuscation"
-									toolTipText="Obfuscate html pages to avoid fingerprinting of static content."
-									options={[
-										{ value: false, label: 'Disabled' },
-										{ value: true, label: 'Enabled' }
-									]}
-									bind:value={formValues.obfuscate}
-								/>
-							</div>
-
-							<div class="mb-6">
-								<TextFieldSelect
-									id="deny-page"
-									bind:value={formValues.denyPageValue}
-									optional
-									toolTipText="Page to show when access is denied. Required for evasion pages and filtering."
-									onSelect={(page) => {
-										formValues.denyPageValue = page;
-									}}
-									options={Array.from(denyPageMap.values())}>Deny Page</TextFieldSelect
-								>
-							</div>
-
-							<div class="mb-6">
-								{#if formValues.denyPageValue}
+								<div class="mb-6">
 									<TextFieldSelect
-										id="evasion-page"
-										bind:value={formValues.evasionPageValue}
+										id="deny-page"
+										bind:value={formValues.denyPageValue}
 										optional
-										toolTipText="Select an anti-bot/evasion page to be served before the first real page. If evasion fails, the deny page will be shown instead."
+										toolTipText="Page to show when access is denied. Required for evasion pages and filtering."
 										onSelect={(page) => {
-											formValues.evasionPageValue = page;
+											formValues.denyPageValue = page;
 										}}
-										options={Array.from(denyPageMap.values())}
-										>Anti-bot / Evasion Page</TextFieldSelect
+										options={Array.from(denyPageMap.values())}>Deny Page</TextFieldSelect
 									>
-								{:else}
-									<div
-										class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600"
-									>
-										<p class="text-gray-600 dark:text-gray-400 text-sm">
-											<strong>Anti-bot / Evasion Page</strong><br />
-											You must select a deny page first to use evasion pages.
-										</p>
-									</div>
-								{/if}
-							</div>
+								</div>
 
-							<div class="mb-6">
-								{#if formValues.denyPageValue}
-									<SelectSquare
-										label="Filtering"
-										toolTipText="Filter access based on allow / deny lists"
-										options={filteringOptions}
-										width="small"
-										bind:value={allowDenyType}
-										onChange={() => {
-											onChangeAllowDenyType();
-										}}
-									/>
-
-									{#if allowDenyType !== 'none'}
-										<div class="mt-4">
-											<TextFieldMultiSelect
-												id="allowDenyIDs"
-												toolTipText="Select the alloy / deny filters"
-												bind:value={formValues.allowDeny}
-												options={Array.from(allowDenyMap.values())}>Lists</TextFieldMultiSelect
-											>
+								<div class="mb-6">
+									{#if formValues.denyPageValue}
+										<TextFieldSelect
+											id="evasion-page"
+											bind:value={formValues.evasionPageValue}
+											optional
+											toolTipText="Select an anti-bot/evasion page to be served before the first real page. If evasion fails, the deny page will be shown instead."
+											onSelect={(page) => {
+												formValues.evasionPageValue = page;
+											}}
+											options={Array.from(denyPageMap.values())}
+											>Anti-bot / Evasion Page</TextFieldSelect
+										>
+									{:else}
+										<div
+											class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600"
+										>
+											<p class="text-gray-600 dark:text-gray-400 text-sm">
+												<strong>Anti-bot / Evasion Page</strong><br />
+												You must select a deny page first to use evasion pages.
+											</p>
 										</div>
 									{/if}
-								{:else}
-									<div
-										class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600"
-									>
-										<p class="text-gray-600 dark:text-gray-400 text-sm">
-											<strong>Filtering mode</strong><br />
-											You must select a deny page first to use filtering.
-										</p>
-									</div>
-								{/if}
-							</div>
-						{/if}
-					</FormColumn>
-				</FormColumns>
-			{:else if currentStep === 5}
-				<!-- Review Step -->
-				<FormColumns id={'step-5'}>
-					<FormColumn>
-						<div class="space-y-6 w-full">
-							<!-- First Row: Basic Info and Recipients -->
-							<div class="grid grid-cols-2 gap-6">
-								<!-- Basic Information -->
-								<div
-									class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm transition-colors duration-200"
-								>
-									<h3
-										class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b dark:border-gray-600 pb-2 transition-colors duration-200"
-									>
-										Basic Information
-									</h3>
-									<div class="grid grid-cols-[120px_1fr] gap-y-3">
-										<span class="text-grayblue-dark font-medium">Name:</span>
-										<span class="text-pc-darkblue dark:text-white"
-											>{formValues.name || 'Not set'}</span
-										>
-
-										<span class="text-grayblue-dark font-medium">Template:</span>
-										<span class="text-pc-darkblue dark:text-white"
-											>{formValues.template || 'Not set'}</span
-										>
-
-										<span class="text-grayblue-dark font-medium">Type:</span>
-										<span class="text-pc-darkblue dark:text-white"
-											>{formValues.isTest ? 'Test' : 'Production'}</span
-										>
-									</div>
 								</div>
 
-								<!-- Recipients -->
-								<div
-									class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm transition-colors duration-200"
-								>
-									<h3
-										class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b dark:border-gray-600 pb-2 transition-colors duration-200"
-									>
-										Recipients
-									</h3>
-									<div class="space-y-4">
-										<div class="grid grid-cols-[120px_1fr] gap-y-3">
-											<span class="text-grayblue-dark font-medium">Groups:</span>
-											<span
-												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-											>
-												{formValues.recipientGroups.length
-													? formValues.recipientGroups.join(', ')
-													: 'None selected'}
-											</span>
+								<div class="mb-6">
+									{#if formValues.denyPageValue}
+										<SelectSquare
+											label="Filtering"
+											toolTipText="Filter access based on allow / deny lists"
+											options={filteringOptions}
+											width="small"
+											bind:value={allowDenyType}
+											onChange={() => {
+												onChangeAllowDenyType();
+											}}
+										/>
 
-											{#if !lateScheduleEnabled}
-												<span class="text-grayblue-dark font-medium">Total:</span>
-												<span class="text-pc-darkblue dark:text-white"
-													>{formValues.selectedCount} recipients</span
+										{#if allowDenyType !== 'none'}
+											<div class="mt-4">
+												<TextFieldMultiSelect
+													id="allowDenyIDs"
+													toolTipText="Select the alloy / deny filters"
+													bind:value={formValues.allowDeny}
+													options={Array.from(allowDenyMap.values())}>Lists</TextFieldMultiSelect
 												>
-											{/if}
-										</div>
-
-										{#if lateScheduleEnabled}
-											<p class="text-sm text-amber-600 dark:text-amber-400">
-												Recipients will be resolved when the campaign is scheduled.<br />
-												Campaign is scheduled 24 hours before send start.
-											</p>
-										{:else if formValues.recipientGroups.length > 0}
-											<button
-												type="button"
-												class="text-xs font-medium text-white dark:text-white hover:text-gray-200 dark:hover:text-gray-300 flex items-center gap-1"
-												on:click={() => {
-													loadAllSelectedRecipients();
-													isRecipientModalVisible = true;
-												}}
-											>
-												<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-													/>
-													<path
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														stroke-width="2"
-														d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-													/>
-												</svg>
-												<span>View All Recipients</span>
-											</button>
+											</div>
 										{/if}
-									</div>
+									{:else}
+										<div
+											class="p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600"
+										>
+											<p class="text-gray-600 dark:text-gray-400 text-sm">
+												<strong>Filtering mode</strong><br />
+												You must select a deny page first to use filtering.
+											</p>
+										</div>
+									{/if}
 								</div>
-							</div>
-
-							<!-- Second Row: Email and Schedule -->
-							<div class="grid grid-cols-2 gap-6">
-								<!-- Email/API Sender Information -->
-								<div
-									class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm transition-colors duration-200"
-								>
-									<h3
-										class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b dark:border-gray-600 pb-2 transition-colors duration-200"
+							{/if}
+						</div>
+					</FormColumns>
+				{:else if currentStep === 5}
+					<!-- Review Step -->
+					<FormColumns id={'step-5'}>
+						<div class="w-full max-w-2xl min-w-0">
+							<div class="space-y-4 w-full">
+								<!-- First Row: Basic Info and Recipients -->
+								<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+									<!-- Basic Information -->
+									<div
+										class="min-w-0 bg-white dark:bg-gray-900/40 p-4 sm:p-5 rounded-lg ring-1 ring-gray-200 dark:ring-gray-700 transition-colors duration-200"
 									>
-										Delivery Details
-									</h3>
-									{#await getTemplateDetails(formValues.template)}
-										<div class="text-gray-500">Loading delivery details...</div>
-									{:then template}
-										{#if template?.apiSender}
-											<div class="grid grid-cols-[120px_1fr] gap-y-3">
-												<span class="text-grayblue-dark font-medium">Type:</span>
-												<span class="text-pc-darkblue dark:text-white font-semibold"
-													>API Sender</span
-												>
+										<h3
+											class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 border-b border-gray-200 dark:border-gray-700 pb-2 transition-colors duration-200"
+										>
+											Basic Information
+										</h3>
+										<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+											<span class="text-slate-500 dark:text-gray-400 font-medium">Name:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.name || 'Not set'}</span
+											>
 
-												<span class="text-grayblue-dark font-medium">Name:</span>
-												<span class="text-pc-darkblue dark:text-white"
-													>{template.apiSender.name || 'Not set'}</span
-												>
+											<span class="text-slate-500 dark:text-gray-400 font-medium">Template:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.template || 'Not set'}</span
+											>
 
-												{#if template?.email}
-													<span class="text-grayblue-dark font-medium">Email:</span>
+											<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.isTest ? 'Test' : 'Production'}</span
+											>
+										</div>
+									</div>
+
+									<!-- Recipients -->
+									<div
+										class="min-w-0 bg-white dark:bg-gray-900/40 p-4 sm:p-5 rounded-lg ring-1 ring-gray-200 dark:ring-gray-700 transition-colors duration-200"
+									>
+										<h3
+											class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 border-b border-gray-200 dark:border-gray-700 pb-2 transition-colors duration-200"
+										>
+											Recipients
+										</h3>
+										<div class="space-y-4">
+											<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Groups:</span>
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
+													{formValues.recipientGroups.length
+														? formValues.recipientGroups.join(', ')
+														: 'None selected'}
+												</span>
+
+												{#if !lateScheduleEnabled}
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Total:</span>
 													<span class="text-pc-darkblue dark:text-white"
-														>{template.email.name || 'Not set'}</span
+														>{formValues.selectedCount} recipients</span
 													>
 												{/if}
 											</div>
-										{:else if template?.email}
-											<div class="grid grid-cols-[120px_1fr] gap-y-3">
-												<span class="text-grayblue-dark font-medium">Type:</span>
-												<span class="text-pc-darkblue dark:text-white font-semibold">SMTP</span>
 
-												<span class="text-grayblue-dark font-medium">Name:</span>
-												<span class="text-pc-darkblue dark:text-white"
-													>{template.email.name || 'Not set'}</span
+											{#if lateScheduleEnabled}
+												<p class="text-sm text-amber-600 dark:text-amber-400">
+													Recipients will be resolved when the campaign is scheduled.<br />
+													Campaign is scheduled 24 hours before send start.
+												</p>
+											{:else if formValues.recipientGroups.length > 0}
+												<button
+													type="button"
+													class="pc-focus inline-flex items-center gap-1.5 rounded-sm text-sm font-medium text-cta-blue dark:text-highlight-blue hover:underline"
+													on:click={() => {
+														loadAllSelectedRecipients();
+														isRecipientModalVisible = true;
+													}}
 												>
-
-												<span class="text-grayblue-dark font-medium">From:</span>
-												<span class="text-pc-darkblue dark:text-white"
-													>{template.email.mailHeaderFrom || 'Not set'}</span
-												>
-
-												<span class="text-grayblue-dark font-medium">Mail from:</span>
-												<span class="text-pc-darkblue dark:text-white"
-													>{template.email.mailEnvelopeFrom || 'Not set'}</span
-												>
-
-												<span class="text-grayblue-dark font-medium">Subject:</span>
-												<span class="text-pc-darkblue dark:text-white"
-													>{template.email.mailHeaderSubject || 'Not set'}</span
-												>
-											</div>
-										{:else}
-											<div class="text-gray-500">
-												No email or API sender configured for this template
-											</div>
-										{/if}
-									{:catch error}
-										<div class="text-red-500">Failed to load delivery details</div>
-									{/await}
-								</div>
-
-								<!-- Schedule -->
-								<div
-									class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm transition-colors duration-200"
-								>
-									<h3
-										class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b dark:border-gray-600 pb-2 transition-colors duration-200"
-									>
-										Schedule
-									</h3>
-									<div class="grid grid-cols-[120px_1fr] gap-y-3">
-										<span class="text-grayblue-dark font-medium">Type:</span>
-										<span class="text-pc-darkblue dark:text-white"
-											>{scheduleOptions.find((o) => o.value === scheduleType)?.label ?? scheduleType}</span
-										>
-
-										{#if scheduleType === 'basic' || scheduleType === 'schedule'}
-											<span class="text-grayblue-dark font-medium">Timezone:</span>
-											<span class="text-pc-darkblue dark:text-white">
-												{scheduleType === 'schedule'
-													? timeZoneLabel(formValues.constraintTimeZone)
-													: browserTimeZone()}
-											</span>
-										{/if}
-
-										{#if scheduleType === 'basic'}
-											<span class="text-grayblue-dark font-medium">Start:</span>
-											<span
-												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-											>
-												<Datetime value={formValues.sendStartAt} />
-												<RelativeTime value={formValues.sendStartAt} />
-											</span>
-
-											<span class="text-grayblue-dark font-medium">End:</span>
-											<span
-												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-											>
-												<Datetime value={formValues.sendEndAt} />
-												<RelativeTime value={formValues.sendEndAt} />
-											</span>
-
-											{#if spreadOption && spreadOption !== SPREAD_MANUAL}
-												<span class="text-grayblue-dark font-medium">Spread:</span>
-												<span
-													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-												>
-													{spreadOptionMap.byValue(spreadOption)}
-												</span>
+													<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															stroke-width="2"
+															d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+														/>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															stroke-width="2"
+															d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+														/>
+													</svg>
+													<span>View All Recipients</span>
+												</button>
 											{/if}
-
-											{#if formValues.jitterMin !== 0 || formValues.jitterMax !== 0}
-												<span class="text-grayblue-dark font-medium">Jitter:</span>
-												<span
-													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-												>
-													{formValues.jitterMin} to {formValues.jitterMax} minutes
-												</span>
-											{/if}
-										{:else if scheduleType === 'schedule'}
-											{#if dailySlotData?.error}
-												<span class="text-grayblue-dark font-medium">Problem:</span>
-												<span class="text-red-600 dark:text-red-400">{dailySlotData.error}</span>
-											{/if}
-											{#if dailySlotPreview}
-												<span class="text-grayblue-dark font-medium">Start:</span>
-												<span
-													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-												>
-													{formatInZone(dailySlotPreview.start, formValues.constraintTimeZone)}
-													<RelativeTime value={dailySlotPreview.start} />
-												</span>
-
-												<span class="text-grayblue-dark font-medium">End:</span>
-												<span
-													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-												>
-													{formatInZone(dailySlotPreview.end, formValues.constraintTimeZone)}
-													<RelativeTime value={dailySlotPreview.end} />
-												</span>
-
-												<span class="text-grayblue-dark font-medium">Duration:</span>
-												<span
-													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-												>
-													{dailySlotPreview.deliveryDays} delivery day{dailySlotPreview.deliveryDays !==
-													1
-														? 's'
-														: ''}
-												</span>
-											{/if}
-
-											<span class="text-grayblue-dark font-medium">Active days:</span>
-											<span
-												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-											>
-												{formValues.constraintWeekDays.map((d) => dayMap[d]).join(', ') ||
-													'None selected'}
-											</span>
-
-											{#if formValues.contraintStartTime && formValues.contraintEndTime}
-												<span class="text-grayblue-dark font-medium">Hours:</span>
-												<span class="text-pc-darkblue dark:text-white">
-													{formValues.contraintStartTime} - {formValues.contraintEndTime}
-												</span>
-											{/if}
-
-											{#if formValues.jitterMin !== 0 || formValues.jitterMax !== 0}
-												<span class="text-grayblue-dark font-medium">Jitter:</span>
-												<span
-													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-												>
-													{formValues.jitterMin} to {formValues.jitterMax} minutes
-												</span>
-											{/if}
-										{/if}
-
-										{#if formValues.scheduleAt}
-											<span class="text-grayblue-dark font-medium">Schedule at:</span>
-											<span
-												class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
-											>
-												<Datetime value={formValues.scheduleAt} />
-												<RelativeTime value={formValues.scheduleAt} />
-											</span>
-										{/if}
-
-										{#if formValues.closeAt}
-											<span class="text-grayblue-dark font-medium">Close at:</span>
-											<span class="text-pc-darkblue dark:text-white">
-												<Datetime value={formValues.closeAt} />
-												<RelativeTime value={formValues.closeAt} />
-											</span>
-										{/if}
+										</div>
 									</div>
 								</div>
-							</div>
 
-							<!-- Third Row: Security & Privacy -->
-							<div class="grid grid-cols-1 gap-6">
-								<div
-									class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm transition-colors duration-200"
-								>
-									<h3
-										class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b dark:border-gray-600 pb-2 transition-colors duration-200"
+								<!-- Second Row: Email and Schedule -->
+								<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+									<!-- Email/API Sender Information -->
+									<div
+										class="min-w-0 bg-white dark:bg-gray-900/40 p-4 sm:p-5 rounded-lg ring-1 ring-gray-200 dark:ring-gray-700 transition-colors duration-200"
 									>
-										Security & Privacy
-									</h3>
-									<div class="grid grid-cols-[120px_1fr] gap-y-3">
-										<ConditionalDisplay show="blackbox">
-											<span class="text-grayblue-dark font-medium">Filtering:</span>
-											<span class="text-pc-darkblue dark:text-white">
-												{#if allowDenyType === 'none'}
-													None
-												{:else}
-													{allowDenyType === 'allow' ? 'Allow-list' : 'Deny-list'}:
-													{formValues.allowDeny.length
-														? formValues.allowDeny.join(', ')
-														: 'No groups selected'}
+										<h3
+											class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 border-b border-gray-200 dark:border-gray-700 pb-2 transition-colors duration-200"
+										>
+											Delivery Details
+										</h3>
+										{#await getTemplateDetails(formValues.template)}
+											<div class="text-sm text-gray-500 dark:text-gray-400">Loading delivery details...</div>
+										{:then template}
+											{#if template?.apiSender}
+												<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
+													<span class="text-pc-darkblue dark:text-white"
+														>API Sender</span
+													>
+
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Name:</span>
+													<span class="text-pc-darkblue dark:text-white"
+														>{template.apiSender.name || 'Not set'}</span
+													>
+
+													{#if template?.email}
+														<span class="text-slate-500 dark:text-gray-400 font-medium">Email:</span>
+														<span class="text-pc-darkblue dark:text-white"
+															>{template.email.name || 'Not set'}</span
+														>
+													{/if}
+												</div>
+											{:else if template?.email}
+												{@const fromParts = splitFromHeader(template.email.mailHeaderFrom)}
+												<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
+													<span class="text-pc-darkblue dark:text-white">SMTP</span>
+
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Name:</span>
+													<span class="text-pc-darkblue dark:text-white"
+														>{template.email.name || 'Not set'}</span
+													>
+
+													<span class="text-slate-500 dark:text-gray-400 font-medium">From:</span>
+													<span class="text-pc-darkblue dark:text-white"
+														>{#if fromParts}<span class="block">{fromParts.name}</span><span
+																class="block">{fromParts.address}</span
+															>{:else}{template.email.mailHeaderFrom || 'Not set'}{/if}</span
+													>
+
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Mail from:</span>
+													<span class="text-pc-darkblue dark:text-white"
+														>{template.email.mailEnvelopeFrom || 'Not set'}</span
+													>
+
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Subject:</span>
+													<span class="text-pc-darkblue dark:text-white"
+														>{template.email.mailHeaderSubject || 'Not set'}</span
+													>
+												</div>
+											{:else}
+												<div class="text-sm text-gray-500 dark:text-gray-400">
+													No email or API sender configured for this template
+												</div>
+											{/if}
+										{:catch error}
+											<div class="text-sm text-red-600 dark:text-red-400">Failed to load delivery details</div>
+										{/await}
+									</div>
+
+									<!-- Schedule -->
+									<div
+										class="min-w-0 bg-white dark:bg-gray-900/40 p-4 sm:p-5 rounded-lg ring-1 ring-gray-200 dark:ring-gray-700 transition-colors duration-200"
+									>
+										<h3
+											class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 border-b border-gray-200 dark:border-gray-700 pb-2 transition-colors duration-200"
+										>
+											Schedule
+										</h3>
+										<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+											<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{scheduleOptions.find((o) => o.value === scheduleType)?.label ?? scheduleType}</span
+											>
+
+											{#if scheduleType === 'basic'}
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Timezone:</span>
+												<span class="text-pc-darkblue dark:text-white">{browserTimeZone()}</span>
+											{/if}
+
+											{#if scheduleType === 'basic'}
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Start:</span>
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
+													<Datetime value={formValues.sendStartAt} />
+													<span class="block text-xs"><RelativeTime value={formValues.sendStartAt} /></span>
+												</span>
+
+												<span class="text-slate-500 dark:text-gray-400 font-medium">End:</span>
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
+													<Datetime value={formValues.sendEndAt} />
+													<span class="block text-xs"><RelativeTime value={formValues.sendEndAt} /></span>
+												</span>
+
+												{#if spreadOption && spreadOption !== SPREAD_MANUAL}
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Spread:</span>
+													<span
+														class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+													>
+														{spreadOptionMap.byValue(spreadOption)}
+													</span>
 												{/if}
-											</span>
-										</ConditionalDisplay>
 
-										<span class="text-grayblue-dark font-medium">Anonymous:</span>
-										<span class="text-pc-darkblue dark:text-white"
-											>{formValues.isAnonymous ? 'Enabled' : 'Disabled'}</span
+												{#if formValues.jitterMin !== 0 || formValues.jitterMax !== 0}
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Jitter:</span>
+													<span
+														class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+													>
+														{formValues.jitterMin} to {formValues.jitterMax} minutes
+													</span>
+												{/if}
+											{:else if scheduleType === 'schedule'}
+												{#if dailySlotData?.error}
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Problem:</span>
+													<span class="text-red-600 dark:text-red-400">{dailySlotData.error}</span>
+												{/if}
+												{#if dailySlotPreview}
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Start:</span>
+													<span
+														class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+													>
+														<Datetime value={dailySlotPreview.start} />
+														<span class="block text-xs"><RelativeTime value={dailySlotPreview.start} /></span>
+													</span>
+
+													<span class="text-slate-500 dark:text-gray-400 font-medium">End:</span>
+													<span
+														class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+													>
+														<Datetime value={dailySlotPreview.end} />
+														<span class="block text-xs"><RelativeTime value={dailySlotPreview.end} /></span>
+													</span>
+
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Duration:</span>
+													<span
+														class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+													>
+														{dailySlotPreview.deliveryDays} delivery day{dailySlotPreview.deliveryDays !==
+														1
+															? 's'
+															: ''}
+													</span>
+												{/if}
+
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Active days:</span>
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
+													{formValues.constraintWeekDays.map((d) => dayMap[d]).join(', ') ||
+														'None selected'}
+												</span>
+
+												{#if formValues.contraintStartTime && formValues.contraintEndTime}
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Hours:</span>
+													<span class="text-pc-darkblue dark:text-white">
+														{formatClock(formValues.contraintStartTime)} - {formatClock(formValues.contraintEndTime)}
+													</span>
+												{/if}
+
+												<!-- hours above are in this zone; start and end are in the browser zone -->
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Timezone:</span>
+												<span class="text-pc-darkblue dark:text-white">
+													{formValues.constraintTimeZone}
+													{#if formValues.constraintTimeZone !== browserTimeZone()}
+														<span class="block text-xs text-gray-500 dark:text-gray-400"
+															>your browser is in {browserTimeZone()}</span
+														>
+													{/if}
+												</span>
+
+												{#if formValues.jitterMin !== 0 || formValues.jitterMax !== 0}
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Jitter:</span>
+													<span
+														class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+													>
+														{formValues.jitterMin} to {formValues.jitterMax} minutes
+													</span>
+												{/if}
+											{/if}
+
+											{#if formValues.scheduleAt}
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Schedule at:</span>
+												<span
+													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+												>
+													<Datetime value={formValues.scheduleAt} />
+													<span class="block text-xs"><RelativeTime value={formValues.scheduleAt} /></span>
+												</span>
+											{/if}
+
+											{#if formValues.closeAt}
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Close at:</span>
+												<span class="text-pc-darkblue dark:text-white">
+													<Datetime value={formValues.closeAt} />
+													<span class="block text-xs"><RelativeTime value={formValues.closeAt} /></span>
+												</span>
+											{/if}
+										</div>
+									</div>
+								</div>
+
+								<!-- Third Row: Data and privacy -->
+								<div class="grid grid-cols-1 gap-4">
+									<div
+										class="min-w-0 bg-white dark:bg-gray-900/40 p-4 sm:p-5 rounded-lg ring-1 ring-gray-200 dark:ring-gray-700 transition-colors duration-200"
+									>
+										<h3
+											class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 border-b border-gray-200 dark:border-gray-700 pb-2 transition-colors duration-200"
 										>
+											Data and Privacy
+										</h3>
+										<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+											<ConditionalDisplay show="blackbox">
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Filtering:</span>
+												<span class="text-pc-darkblue dark:text-white">
+													{#if allowDenyType === 'none'}
+														None
+													{:else}
+														{allowDenyType === 'allow' ? 'Allow-list' : 'Deny-list'}:
+														{formValues.allowDeny.length
+															? formValues.allowDeny.join(', ')
+															: 'No groups selected'}
+													{/if}
+												</span>
+											</ConditionalDisplay>
 
-										<span class="text-grayblue-dark font-medium">Save Data:</span>
-										<span class="text-pc-darkblue dark:text-white"
-											>{formValues.isAnonymous
-												? 'Disabled'
-												: formValues.saveSubmittedData
-													? 'Enabled'
-													: 'Disabled'}</span
-										>
+											<span class="text-slate-500 dark:text-gray-400 font-medium">Anonymous:</span>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.isAnonymous ? 'Enabled' : 'Disabled'}</span
+											>
 
-										<ConditionalDisplay show="blackbox">
-											<span class="text-grayblue-dark font-medium">Save Metadata:</span>
+											<span class="text-slate-500 dark:text-gray-400 font-medium">Save Data:</span>
 											<span class="text-pc-darkblue dark:text-white"
 												>{formValues.isAnonymous
 													? 'Disabled'
-													: formValues.saveBrowserMetadata
+													: formValues.saveSubmittedData
 														? 'Enabled'
 														: 'Disabled'}</span
 											>
-										</ConditionalDisplay>
 
-										{#if formValues.webhooks.length > 0}
-											<span class="text-grayblue-dark font-medium">Webhooks:</span>
-											<div class="text-pc-darkblue dark:text-white space-y-2">
-												{#each formValues.webhooks as webhook, index}
-													<div class="border-l-2 border-blue-400 pl-3 py-1">
-														<div class="font-medium">
-															{webhookMap.byKey(webhook.id) || 'Not selected'}
-														</div>
-														<div class="text-sm text-gray-600 dark:text-gray-400">
-															Data Level: <span class="capitalize">{webhook.includeData}</span>
-														</div>
-														<div class="text-sm text-gray-600 dark:text-gray-400">
-															Events: {webhook.events.length === webhookEventOptions.length
-																? 'All Events'
-																: webhook.events.length + ' selected'}
-														</div>
-													</div>
-												{/each}
-											</div>
-										{/if}
+											<ConditionalDisplay show="blackbox">
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Save Metadata:</span>
+												<span class="text-pc-darkblue dark:text-white"
+													>{formValues.isAnonymous
+														? 'Disabled'
+														: formValues.saveBrowserMetadata
+															? 'Enabled'
+															: 'Disabled'}</span
+												>
+											</ConditionalDisplay>
 
-										<ConditionalDisplay show="blackbox">
-										{#if scriptsEnabled && formValues.scripts.length > 0}
-											<span class="text-grayblue-dark font-medium">Scripts:</span>
-											<div class="text-pc-darkblue dark:text-white space-y-2">
-												{#each formValues.scripts as script, index}
-													<div class="border-l-2 border-blue-400 pl-3 py-1">
-														<div class="font-medium">
-															{scriptMap.byKey(script.id) || 'Not selected'}
+											{#if formValues.webhooks.length > 0}
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Webhooks:</span>
+												<div class="text-pc-darkblue dark:text-white space-y-2">
+													{#each formValues.webhooks as webhook, index}
+														<div class="border-l-2 border-blue-400 pl-3 py-1">
+															<div class="font-medium">
+																{webhookMap.byKey(webhook.id) || 'Not selected'}
+															</div>
+															<div class="text-sm text-gray-600 dark:text-gray-400">
+																Data Level: <span class="capitalize">{webhook.includeData}</span>
+															</div>
+															<div class="text-sm text-gray-600 dark:text-gray-400">
+																Events: {webhook.events.length === webhookEventOptions.length
+																	? 'All Events'
+																	: webhook.events.length + ' selected'}
+															</div>
 														</div>
-														<div class="text-sm text-gray-600 dark:text-gray-400">
-															Data Level: <span class="capitalize">{script.includeData}</span>
+													{/each}
+												</div>
+											{/if}
+
+											<ConditionalDisplay show="blackbox">
+											{#if scriptsEnabled && formValues.scripts.length > 0}
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Scripts:</span>
+												<div class="text-pc-darkblue dark:text-white space-y-2">
+													{#each formValues.scripts as script, index}
+														<div class="border-l-2 border-blue-400 pl-3 py-1">
+															<div class="font-medium">
+																{scriptMap.byKey(script.id) || 'Not selected'}
+															</div>
+															<div class="text-sm text-gray-600 dark:text-gray-400">
+																Data Level: <span class="capitalize">{script.includeData}</span>
+															</div>
+															<div class="text-sm text-gray-600 dark:text-gray-400">
+																Events: {script.events.length === webhookEventOptions.length
+																	? 'All Events'
+																	: script.events.length + ' selected'}
+															</div>
 														</div>
-														<div class="text-sm text-gray-600 dark:text-gray-400">
-															Events: {script.events.length === webhookEventOptions.length
-																? 'All Events'
-																: script.events.length + ' selected'}
-														</div>
-													</div>
-												{/each}
-											</div>
-										{/if}
-										</ConditionalDisplay>
+													{/each}
+												</div>
+											{/if}
+											</ConditionalDisplay>
 
-										{#if formValues.denyPageValue}
-											<span class="text-grayblue-dark font-medium">Deny Page:</span>
-											<span class="text-pc-darkblue dark:text-white"
-												>{formValues.denyPageValue}</span
-											>
-										{/if}
+											{#if formValues.denyPageValue}
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Deny Page:</span>
+												<span class="text-pc-darkblue dark:text-white"
+													>{formValues.denyPageValue}</span
+												>
+											{/if}
 
-										{#if formValues.evasionPageValue}
-											<span class="text-grayblue-dark font-medium">Evasion Page:</span>
-											<span class="text-pc-darkblue dark:text-white"
-												>{formValues.evasionPageValue}</span
-											>
-										{/if}
+											{#if formValues.evasionPageValue}
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Evasion Page:</span>
+												<span class="text-pc-darkblue dark:text-white"
+													>{formValues.evasionPageValue}</span
+												>
+											{/if}
 
-										{#if formValues.anonymizeAt}
-											<span class="text-grayblue-dark font-medium">Anonymize all data at:</span>
-											<span class="text-pc-darkblue dark:text-white">
-												<Datetime value={formValues.anonymizeAt} />
-												<RelativeTime value={formValues.anonymizeAt} />
-											</span>
-										{/if}
+											{#if formValues.anonymizeAt}
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Anonymize all data at:</span>
+												<span class="text-pc-darkblue dark:text-white">
+													<Datetime value={formValues.anonymizeAt} />
+													<span class="block text-xs"><RelativeTime value={formValues.anonymizeAt} /></span>
+												</span>
+											{/if}
 
-										{#if formValues.dataAnonymizeAt}
-											<span class="text-grayblue-dark font-medium"
-												>Anonymize data at:</span
-											>
-											<span class="text-pc-darkblue dark:text-white">
-												<Datetime value={formValues.dataAnonymizeAt} />
-												<RelativeTime value={formValues.dataAnonymizeAt} />
-											</span>
-										{/if}
+											{#if formValues.dataAnonymizeAt}
+												<span class="text-slate-500 dark:text-gray-400 font-medium"
+													>Anonymize data at:</span
+												>
+												<span class="text-pc-darkblue dark:text-white">
+													<Datetime value={formValues.dataAnonymizeAt} />
+													<span class="block text-xs"><RelativeTime value={formValues.dataAnonymizeAt} /></span>
+												</span>
+											{/if}
+										</div>
 									</div>
 								</div>
 							</div>
 						</div>
-					</FormColumn>
-				</FormColumns>
-			{/if}
-			<FormError message={modalError} />
-			<div
-				class="col-span-3 flex justify-between items-center w-full mt-2 border-t dark:border-gray-600 py-6 transition-colors duration-200"
-			>
-				{#if currentStep > 1}
-					<button
-						type="button"
-						class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-						on:click={previousStep}
-					>
-						<svg
-							class="mr-2 h-4 w-4"
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M15 19l-7-7 7-7"
-							/>
-						</svg>
-						Previous
-					</button>
-				{:else}
-					<div></div>
+					</FormColumns>
 				{/if}
-
-				{#if currentStep < 5}
-					<button
-						type="button"
-						class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-						disabled={isValidatingName}
-						on:click={nextStep}
-					>
-						{#if isValidatingName}
-							Checking...
-						{:else}
-							Next
-						{/if}
-						<svg
-							class="ml-2 h-4 w-4"
-							xmlns="http://www.w3.org/2000/svg"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
+				<FormError message={modalError} />
+				<div
+					class="sticky bottom-0 z-20 -mx-4 sm:-mx-8 px-4 sm:px-8 py-4 mt-2 flex flex-wrap items-center justify-between gap-2 border-t-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 transition-colors duration-200"
+				>
+					{#if currentStep > 1}
+						<button
+							type="button"
+							class="{wizardSecondaryButtonClass} max-sm:min-w-0 max-sm:px-3"
+							on:click={previousStep}
 						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M9 5l7 7-7 7"
-							/>
-						</svg>
-					</button>
-				{:else}
-					<button
-						type="submit"
-						class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-						disabled={isSubmitting}
-					>
-						{modalMode === 'create' || modalMode === 'copy' ? 'Create' : 'Update'}
-						{#if !isSubmitting}
 							<svg
-								class="ml-2 h-4 w-4"
+								class="h-4 w-4"
 								xmlns="http://www.w3.org/2000/svg"
 								fill="none"
 								viewBox="0 0 24 24"
 								stroke="currentColor"
+								aria-hidden="true"
 							>
 								<path
 									stroke-linecap="round"
 									stroke-linejoin="round"
 									stroke-width="2"
-									d="M5 13l4 4L19 7"
+									d="M15 19l-7-7 7-7"
 								/>
 							</svg>
+							Previous
+						</button>
+					{:else}
+						<div></div>
+					{/if}
+
+					<div class="flex items-center gap-2 ml-auto">
+						<button
+							type="button"
+							class="{wizardSecondaryButtonClass} max-sm:min-w-0 max-sm:px-3"
+							disabled={isSubmitting}
+							on:click={closeModal}
+						>
+							Cancel
+						</button>
+						{#if currentStep < 5}
+							<FormButton type="button" size="large" disabled={isValidatingName} on:click={nextStep}>
+								{#if isValidatingName}
+									Checking...
+								{:else}
+									Next
+									<svg
+										class="ml-1 h-4 w-4"
+										xmlns="http://www.w3.org/2000/svg"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+										aria-hidden="true"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M9 5l7 7-7 7"
+										/>
+									</svg>
+								{/if}
+							</FormButton>
+						{:else}
+							<FormButton size="large" {isSubmitting}>
+								{modalMode === 'create' || modalMode === 'copy' ? 'Create' : 'Update'}
+							</FormButton>
 						{/if}
-					</button>
-				{/if}
-			</div>
-		</FormGrid>
+					</div>
+				</div>
+			</FormGrid>
+		</div>
 	</Modal>
 
 	<!-- Recipient Preview Modal -->

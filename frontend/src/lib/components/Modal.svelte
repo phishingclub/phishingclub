@@ -1,3 +1,7 @@
+<script context="module">
+	let modalCounter = 0;
+</script>
+
 <script>
 	import { fade } from 'svelte/transition';
 	import { onMount, tick } from 'svelte';
@@ -14,10 +18,20 @@
 	export let resetTabFocus = () => {};
 	export let noAutoFocus = false;
 	export let fullscreen = false;
+	// a fixed width so the modal never grows sideways from its content
+	// '' sizes to the content, 'md' 42rem, 'lg' 48rem, 'xl' 64rem
+	export let width = '';
 	// when set, a help icon next to the title links to the matching guide page
 	export let docSlug = '';
 	export let docAnchor = '';
 
+	const widthClasses = {
+		md: 'sm:max-w-2xl',
+		lg: 'sm:max-w-3xl',
+		xl: 'sm:max-w-5xl'
+	};
+
+	const modalID = `modal-${++modalCounter}`;
 	let modalElement;
 	let previousActiveElement;
 	let focusableElements = [];
@@ -26,6 +40,11 @@
 
 	let modalInitialized = false;
 	let wasVisible = false;
+
+	// a modal that fills the phone screen gets an opaque backdrop so no page rows show at its edges
+	let sectionHeight = 0;
+	let viewportHeight = 0;
+	$: isTall = sectionHeight > 0 && viewportHeight > 0 && sectionHeight >= viewportHeight - 24;
 
 	$: {
 		// only handle focus when modal visibility actually changes and not during submission
@@ -41,7 +60,7 @@
 		} else if (!visible && modalInitialized) {
 			window.removeEventListener('keydown', keyHandler);
 			// restore body scrolling when modal is closed
-			document.body.style.overflow = 'auto';
+			document.body.style.overflow = '';
 			handleModalClose();
 			modalInitialized = false;
 			wasVisible = false;
@@ -49,6 +68,10 @@
 	}
 
 	const keyHandler = (e) => {
+		// a confirm alert opened above this modal handles its own keys
+		if (document.querySelector('[data-alert-dialog]')) {
+			return;
+		}
 		if (e.key === 'Escape') {
 			// don't close modal during submission
 			if (!isSubmitting) {
@@ -256,9 +279,26 @@
 
 		updateFocusableElements();
 
-		// focus the first focusable element (excluding close button)
-		if (!noAutoFocus && firstFocusableElement) {
-			firstFocusableElement.focus();
+		// focus the first field the user can change, skipping tooltip triggers,
+		// readonly and disabled fields and options outside the tab order
+		const autoFocusTarget =
+			focusableElements.find(
+				(el) =>
+					!el.hasAttribute('data-tooltip-trigger') &&
+					!el.readOnly &&
+					!el.disabled &&
+					el.getAttribute('aria-disabled') !== 'true' &&
+					el.getAttribute('tabindex') !== '-1'
+			) || firstFocusableElement;
+		if (noAutoFocus) return;
+		const closeButton = modalElement?.querySelector('[data-close-button]');
+		// a view only modal has no fields, so a button would get the ring before any key press
+		const hasFields = focusableElements.some((el) => el.matches('input, select, textarea, [contenteditable="true"]'));
+		if (autoFocusTarget && autoFocusTarget !== closeButton && hasFields) {
+			autoFocusTarget.focus();
+		} else {
+			// nothing to fill in, so focus the panel and keep the ring off the close button
+			modalElement?.focus();
 		}
 	};
 
@@ -287,7 +327,7 @@
 		return () => {
 			window.removeEventListener('keydown', keyHandler);
 			// ensure body scrolling is restored when component is destroyed
-			document.body.style.overflow = 'auto';
+			document.body.style.overflow = '';
 			// restore focus if modal was open when component was destroyed
 			if (visible && previousActiveElement && typeof previousActiveElement.focus === 'function') {
 				previousActiveElement.focus();
@@ -313,43 +353,57 @@
 		visible = false;
 		window.removeEventListener('keydown', keyHandler);
 		// restore body scrolling when modal is closed
-		document.body.style.overflow = 'auto';
+		document.body.style.overflow = '';
 		onClose();
 	};
 </script>
+
+<svelte:window bind:innerHeight={viewportHeight} />
 
 {#if visible}
 	<div bind:this={bindTo}>
 		<div
 			transition:fade={{ duration: 150 }}
-			class="fixed top-0 left-0 w-full h-full bg-overlay/[0.92]"
-			style="z-index: 19;"
+			class="fixed top-0 left-0 w-full h-full z-40 {isTall || fullscreen
+				? 'bg-overlay sm:bg-overlay/[0.92]'
+				: 'bg-overlay/[0.92]'}"
 		/>
 		<div
-			class="fixed top-0 left-0 w-full h-full flex justify-center items-center z-20"
+			class="fixed top-0 left-0 w-full h-full flex justify-center items-center z-50 {fullscreen
+				? ''
+				: 'p-2 sm:p-4 lg:p-6'}"
 			role="dialog"
 			aria-modal="true"
-			aria-labelledby="modal-title"
-			aria-describedby={description ? 'modal-description' : undefined}
+			aria-labelledby="{modalID}-title"
+			aria-describedby={description ? `${modalID}-description` : undefined}
 		>
 			<section
 				bind:this={modalElement}
-				class="ring-1 ring-white/10 bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col transition-all duration-200
+				bind:offsetHeight={sectionHeight}
+				tabindex="-1"
+				class="focus:outline-none ring-1 ring-white/10 bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col shadow-2xl transition-all duration-200
 					{fullscreen
 					? 'fixed inset-0 w-full h-full max-w-none max-h-none rounded-none'
-					: 'w-auto ml-20 mr-8 max-h-[90vh]'}"
+					: widthClasses[width]
+						? `w-full min-w-0 max-w-full ${widthClasses[width]} max-h-full`
+						: 'w-full sm:w-auto min-w-0 sm:min-w-[24rem] max-w-full xl:max-w-[80rem] max-h-full'}"
 			>
 				<div
 					class:opacity-20={isSubmitting}
-					class="bg-cta-blue dark:bg-cta-blue text-white py-4 px-8 flex justify-between flex-shrink-0 transition-colors duration-200
+					class="bg-cta-blue dark:bg-cta-blue text-white py-3 pl-4 pr-2 sm:py-4 sm:pl-8 sm:pr-4 flex items-start justify-between gap-3 flex-shrink-0 transition-colors duration-200
 						{fullscreen ? '' : 'rounded-t-md'}"
 				>
-					<div class="flex-1">
+					<div class="flex-1 min-w-0 self-center">
 						{#if docSlug}
-							<div class="flex items-start gap-2 mr-8">
-								<h1 id="modal-title" class="uppercase font-semibold text-2xl">{headerText}</h1>
+							<div class="flex items-start gap-2">
+								<h2
+									id="{modalID}-title"
+									class="uppercase font-semibold text-xl sm:text-2xl break-words min-w-0"
+								>
+									{headerText}
+								</h2>
 								<a
-									class="mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-white/60 text-[10px] font-medium leading-none text-white/80 hover:border-white hover:text-white transition-colors duration-200"
+									class="mt-1.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-white/60 text-[10px] font-medium leading-none text-white/80 hover:border-white hover:text-white transition-colors duration-200 pc-focus-dark"
 									href={guideURL(docSlug, docAnchor)}
 									target="_blank"
 									rel="noopener noreferrer"
@@ -358,25 +412,32 @@
 								>
 							</div>
 						{:else}
-							<h1 id="modal-title" class="uppercase mr-8 font-semibold text-2xl">{headerText}</h1>
+							<h2
+								id="{modalID}-title"
+								class="uppercase font-semibold text-xl sm:text-2xl break-words"
+							>
+								{headerText}
+							</h2>
 						{/if}
 						{#if description}
-							<p id="modal-description" class="mt-2 text-sm opacity-90 break-all">{description}</p>
+							<p id="{modalID}-description" class="mt-1 text-sm opacity-90 break-words">
+								{description}
+							</p>
 						{/if}
 					</div>
 					<button
 						type="button"
-						class="w-4 hover:scale-110 flex-shrink-0"
+						class="inline-flex items-center justify-center w-10 h-10 flex-shrink-0 rounded-md hover:bg-white/15 transition-colors duration-200 pc-focus-dark disabled:opacity-50"
 						on:click={close}
 						disabled={isSubmitting}
 						data-close-button
 						aria-label="Close modal"
 					>
-						<img class="w-full" src="/close-white.svg" alt="" />
+						<img class="w-4 h-4" src="/close-white.svg" alt="" />
 					</button>
 				</div>
 				<div
-					class="px-8 overflow-y-auto overflow-x-visible select-text {scrollBarClassesVertical} {fullscreen
+					class="modal-body px-4 sm:px-8 overflow-y-auto overflow-x-auto min-h-0 select-text {scrollBarClassesVertical} {fullscreen
 						? 'flex-1'
 						: ''}"
 				>

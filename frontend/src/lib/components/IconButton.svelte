@@ -6,12 +6,12 @@
 
 	// color mappings for variants
 	const variantClasses = {
-		blue: 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500',
-		green: 'bg-green-700 hover:bg-green-800 focus:ring-green-600',
-		orange: 'bg-orange-600 hover:bg-orange-700 focus:ring-orange-500',
-		red: 'bg-red-600 hover:bg-red-700 focus:ring-red-500',
-		gray: 'bg-gray-600 hover:bg-gray-700 focus:ring-gray-500',
-		amber: 'bg-amber-500 hover:bg-amber-600 focus:ring-amber-400'
+		blue: 'bg-cta-blue hover:bg-active-blue focus-visible:ring-cta-blue',
+		green: 'bg-green-700 hover:bg-green-800 focus-visible:ring-green-600',
+		orange: 'bg-orange-600 hover:bg-orange-700 focus-visible:ring-orange-500',
+		red: 'bg-red-600 hover:bg-red-700 focus-visible:ring-red-500',
+		gray: 'bg-gray-600 hover:bg-gray-700 focus-visible:ring-gray-500',
+		amber: 'bg-amber-500 hover:bg-amber-600 focus-visible:ring-amber-400'
 	};
 
 	$: colorClass = variantClasses[variant] || variantClasses.blue;
@@ -21,7 +21,7 @@
 	{type}
 	{disabled}
 	on:click
-	class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white {colorClass} focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+	class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white {colorClass} focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
 >
 	{#if icon === 'edit'}
 		<svg

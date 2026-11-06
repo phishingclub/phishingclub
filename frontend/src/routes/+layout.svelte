@@ -79,7 +79,8 @@
 		setupOSThemeListener();
 
 		const pinned = getCookie('menuPinned');
-		isMenuPinned = pinned === 'true';
+		// expanded until the user picks otherwise, easier for new users
+		isMenuPinned = pinned === null ? true : pinned === 'true';
 
 		// Ctrl+Alt+V (Cmd+Alt+V on macOS) toggles vim mode in every editor at once.
 		// Uses e.code so it works regardless of keyboard layout, and the capture
@@ -288,7 +289,7 @@
 	}
 </script>
 
-<div class="flex flex-col min-w-[768px]">
+<div class="flex flex-col min-w-0">
 	<!-- global components -->
 	<Loader />
 	<Toast />
@@ -308,7 +309,9 @@
 				on:pinToggle={handlePinToggle}
 			/>
 		{/if}
-		<div class={`grid grid-cols-12 mr-10 mt-4 ${isMenuPinned ? 'menu-pinned ml-52' : 'ml-24'}`}>
+		<div
+			class={`grid grid-cols-12 min-w-0 mx-4 mt-4 lg:mr-10 ${isMenuPinned ? 'lg:ml-52' : 'lg:ml-24'}`}
+		>
 			{#if installState === AppStateService.INSTALL.INSTALLED}
 				<MobileMenu
 					bind:visible={isMobileMenuVisible}
@@ -317,7 +320,7 @@
 				/>
 				<ProfileMenu {logout} bind:visible={isProfileMenuVisible} {toggleChangeCompanyModal} />
 			{/if}
-			<div class="col-start-1 col-end-13 row-start-1">
+			<div class="col-start-1 col-end-13 row-start-1 min-w-0">
 				<slot />
 			</div>
 		</div>
@@ -325,11 +328,6 @@
 </div>
 
 <style>
-	:global(body) {
-		min-width: 768px;
-		overflow-x: auto;
-	}
-
 	:global(body, table th) {
 		user-select: none;
 
@@ -338,8 +336,5 @@
 	}
 	:global(table) {
 		user-select: text;
-	}
-	.menu-pinned {
-		grid-template-columns: 10rem 1fr !important;
 	}
 </style>

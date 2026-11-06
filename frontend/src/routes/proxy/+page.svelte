@@ -1,4 +1,5 @@
 <script>
+	import FormSection from '$lib/components/form/FormSection.svelte';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
@@ -24,6 +25,7 @@
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import { getModalText } from '$lib/utils/common';
 	import TableCopyButton from '$lib/components/table/TableCopyButton.svelte';
+	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
@@ -115,6 +117,9 @@
 	let ipAllowListEntries = [];
 	let selectedProxyForIPList = null;
 	let isLoadingIPAllowList = false;
+	let isClearIPAllowListAlertVisible = false;
+	// phones show only IP and expiry so both fit without a sideways scroll
+	let isPhone = false;
 
 	// counter to force ProxyConfigBuilder recreation when modal opens
 	let modalOpenCounter = 0;
@@ -339,6 +344,10 @@ portal.example.com:
 		if (context) {
 			contextCompanyID = context.companyID;
 		}
+		const phoneQuery = window.matchMedia('(max-width: 639.98px)');
+		const onPhoneChange = () => (isPhone = phoneQuery.matches);
+		onPhoneChange();
+		phoneQuery.addEventListener('change', onPhoneChange);
 		refreshProxies();
 		tableURLParams.onChange(refreshProxies);
 		(async () => {
@@ -348,6 +357,7 @@ portal.example.com:
 			}
 		})();
 		return () => {
+			phoneQuery.removeEventListener('change', onPhoneChange);
 			tableURLParams.unsubscribe();
 		};
 	});
@@ -620,11 +630,8 @@ portal.example.com:
 		isLoadingIPAllowList = true;
 		isIPAllowListModalVisible = true;
 
-		console.log('Opening IP allow list for proxy:', proxy.id);
-
 		try {
 			const res = await api.ipAllowList.getForProxyConfig(proxy.id);
-			console.log('API response:', res);
 			if (res.success) {
 				ipAllowListEntries = res.data || [];
 			} else {
@@ -658,6 +665,7 @@ portal.example.com:
 			} else {
 				addToast('Failed to clear IP allow list', 'Error');
 			}
+			return res;
 		} catch (e) {
 			addToast('Failed to clear IP allow list', 'Error');
 			console.error('failed to clear IP allow list', e);
@@ -667,8 +675,9 @@ portal.example.com:
 
 <HeadTitle title="Proxies" />
 <main>
-	<div class="flex justify-between">
-		<div class="flex items-center gap-2">
+	<!-- fixed row height on wide screens so the taller refresh select does not push the title down -->
+	<div class="flex flex-wrap items-center justify-between gap-3 md:h-[2.625rem] md:flex-nowrap">
+		<div class="min-w-0 w-full sm:w-auto">
 			<Headline docSlug="proxies">Proxies</Headline>
 		</div>
 		<AutoRefresh
@@ -691,14 +700,14 @@ portal.example.com:
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
-			{ column: 'Name', size: 'large' },
-			{ column: 'Start URL', size: 'medium' },
+			{ column: 'Name' },
+			{ column: 'Start URL' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={['Name', 'Start URL', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!proxies.length}
 		hasNextPage={proxiesHasNextPage}
-		plural="Proxies"
+		plural="proxies"
 		pagination={tableURLParams}
 		isGhost={isProxyTableLoading}
 	>
@@ -711,7 +720,7 @@ portal.example.com:
 						on:change={() => selection.toggle(proxy.id)}
 					/>
 				{/if}
-				<TableCell>
+				<TableCell wrap>
 					<button
 						on:click={() => {
 							openUpdateModal(proxy.id);
@@ -736,13 +745,7 @@ portal.example.com:
 							{...globalButtonDisabledAttributes(proxy, contextCompanyID)}
 						/>
 						<TableCopyButton title={'Copy'} on:click={() => openCopyModal(proxy.id)} />
-						<button
-							class="w-full px py-1 text-slate-600 dark:text-gray-200 hover:bg-highlight-blue dark:hover:bg-highlight-blue/50 hover:text-white cursor-pointer text-left transition-colors duration-200"
-							on:click={() => openIPAllowListModal(proxy)}
-							title="View IP Allow List"
-						>
-							<p class="ml-2 text-left">View IP Allow List</p>
-						</button>
+						<TableViewButton name="View IP allow list" on:click={() => openIPAllowListModal(proxy)} />
 						<TableDeleteButton
 							on:click={() => openDeleteAlert(proxy)}
 							{...globalButtonDisabledAttributes(proxy, contextCompanyID)}
@@ -758,24 +761,23 @@ portal.example.com:
 		onClose={closeModal}
 		{isSubmitting}
 		fullscreen={isModalFullscreen}
+		width="lg"
 	>
-		{#if modalMode === 'update'}
-			<InstalledResourceBadge resourceType="proxy" resourceId={formValues.id} variant="notice" />
-		{/if}
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<div
-				class="col-span-3 w-full px-6 py-4 {isModalFullscreen
+				class="w-full py-4 {isModalFullscreen
 					? 'flex flex-col min-h-0 overflow-hidden'
 					: 'overflow-y-auto space-y-8'}"
 			>
+				{#if modalMode === 'update'}
+					<!-- zero width so the notice wraps to the form width instead of setting it -->
+					<div class="w-0 min-w-full {isModalFullscreen ? '' : '-mb-6'}">
+						<InstalledResourceBadge resourceType="proxy" resourceId={formValues.id} variant="notice" />
+					</div>
+				{/if}
 				{#if editorMode === 'yaml'}
-					<!-- Basic Information Section - only shown in YAML mode -->
-					<div class="w-full mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600">
-						<div class="flex justify-between items-center mb-3">
-							<h3 class="text-base font-medium text-pc-darkblue dark:text-white">
-								Basic Information
-							</h3>
-						</div>
+					<!-- only shown in YAML mode -->
+					<FormSection title="Basic Information" css="pt-4">
 						<input
 							type="file"
 							accept=".yaml,.yml"
@@ -783,9 +785,10 @@ portal.example.com:
 							on:change={handleYamlImportFile}
 							class="hidden"
 						/>
-						<div class="grid grid-cols-1 md:grid-cols-[1fr_2fr_2fr] gap-4">
-							<div>
+						<div class="grid grid-cols-1 md:grid-cols-2 md:gap-x-4">
+							<div class="min-w-0">
 								<TextField
+									width="full"
 									required
 									minLength={1}
 									maxLength={64}
@@ -793,13 +796,18 @@ portal.example.com:
 									placeholder="Company Auth Proxy">Name</TextField
 								>
 							</div>
-							<div>
-								<TextField optional maxLength={255} bind:value={formValues.description}
-									>Description</TextField
+							<div class="min-w-0">
+								<TextField
+									width="full"
+									optional
+									maxLength={255}
+									bind:value={formValues.description}
+									placeholder="What this proxy is for">Description</TextField
 								>
 							</div>
-							<div class="flex justify-end">
+							<div class="min-w-0 md:col-span-2">
 								<TextField
+									width="full"
 									required
 									minLength={3}
 									bind:value={formValues.startURL}
@@ -825,7 +833,7 @@ portal.example.com:
 								>
 							</div>
 						{/if}
-					</div>
+					</FormSection>
 				{/if}
 
 				<!-- Proxy Configuration Section -->
@@ -833,16 +841,16 @@ portal.example.com:
 					class="w-full {isModalFullscreen ? 'flex-1 flex flex-col min-h-0 overflow-hidden' : ''}"
 				>
 					<div class={isModalFullscreen ? 'flex flex-col h-full min-h-0' : 'space-y-4'}>
-						<div class="flex items-center justify-between mb-4">
-							<h3 class="text-base font-medium text-pc-darkblue dark:text-white">
+						<div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 mb-4">
+							<h3 class="text-base font-semibold text-pc-darkblue dark:text-white">
 								Proxy Configuration
 							</h3>
-							<div class="flex items-center gap-3">
+							<div class="flex flex-wrap items-center gap-2 sm:gap-3">
 								<!-- Import/Export Buttons -->
 								<div class="flex gap-2">
 									<button
 										type="button"
-										class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-gray-400 bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-md hover:bg-slate-200 dark:hover:bg-gray-700 transition-colors"
+										class="pc-focus flex items-center gap-1.5 h-9 px-3 text-sm font-medium text-slate-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
 										on:click={() =>
 											editorMode === 'yaml'
 												? triggerYamlImport()
@@ -851,6 +859,7 @@ portal.example.com:
 									>
 										<svg
 											class="w-4 h-4"
+											aria-hidden="true"
 											viewBox="0 0 24 24"
 											fill="none"
 											stroke="currentColor"
@@ -864,7 +873,7 @@ portal.example.com:
 									</button>
 									<button
 										type="button"
-										class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-gray-400 bg-slate-100 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-md hover:bg-slate-200 dark:hover:bg-gray-700 transition-colors"
+										class="pc-focus flex items-center gap-1.5 h-9 px-3 text-sm font-medium text-slate-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
 										on:click={() =>
 											editorMode === 'yaml'
 												? exportYamlConfig()
@@ -873,6 +882,7 @@ portal.example.com:
 									>
 										<svg
 											class="w-4 h-4"
+											aria-hidden="true"
 											viewBox="0 0 24 24"
 											fill="none"
 											stroke="currentColor"
@@ -887,34 +897,29 @@ portal.example.com:
 								</div>
 								<!-- Editor Mode Tabs -->
 								<div
-									class="flex border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden"
+									role="group"
+									aria-label="Editor mode"
+									class="flex border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden"
 								>
-									<button
-										type="button"
-										class="px-4 py-2 text-sm font-medium transition-colors duration-200 {editorMode ===
-										'yaml'
-											? 'bg-blue-600 text-white'
-											: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
-										on:click={() => (editorMode = 'yaml')}
-									>
-										YAML
-									</button>
-									<button
-										type="button"
-										class="px-4 py-2 text-sm font-medium transition-colors duration-200 {editorMode ===
-										'gui'
-											? 'bg-blue-600 text-white'
-											: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}"
-										on:click={() => (editorMode = 'gui')}
-									>
-										Visual
-									</button>
+									{#each [{ value: 'yaml', label: 'YAML' }, { value: 'gui', label: 'Visual' }] as option}
+										<button
+											type="button"
+											aria-pressed={editorMode === option.value}
+											class="h-9 px-4 text-sm font-medium transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue {editorMode ===
+											option.value
+												? 'bg-cta-blue text-white'
+												: 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'}"
+											on:click={() => (editorMode = option.value)}
+										>
+											{option.label}
+										</button>
+									{/each}
 								</div>
 							</div>
 						</div>
 
 						{#if editorMode === 'yaml'}
-							<div class="w-80vw">
+							<div class="w-full min-w-0">
 								<SimpleCodeEditor
 									bind:value={formValues.proxyConfig}
 									height="large"
@@ -976,52 +981,74 @@ portal.example.com:
 		bind:isVisible={isBulkDeleteAlertVisible}
 	></DeleteAlert>
 
-	<!-- IP Allow List Modal -->
 	<Modal
-		headerText={`IP Allow List - ${selectedProxyForIPList?.name || ''}`}
+		headerText={`IP allow list: ${selectedProxyForIPList?.name || ''}`}
 		visible={isIPAllowListModalVisible}
 		onClose={closeIPAllowListModal}
 		isSubmitting={false}
+		width="lg"
 	>
-		<FormGrid>
-			<div class="col-span-3 w-full overflow-y-auto px-6 py-4 space-y-6">
-				<div class="flex justify-between items-center">
-					{#if !isLoadingIPAllowList && ipAllowListEntries && ipAllowListEntries.length > 0}
-						<BigButton on:click={clearIPAllowList}>Clear All</BigButton>
-					{/if}
-				</div>
-
-				{#if isLoadingIPAllowList}
-					<div class="flex items-center justify-center py-8">
-						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-						<span class="ml-2 text-gray-600 dark:text-gray-400">Loading...</span>
-					</div>
-				{:else if !ipAllowListEntries || ipAllowListEntries.length === 0}
-					<div class="text-center py-8 text-gray-500 dark:text-gray-400">
-						No IP addresses are allow listed
-					</div>
-				{:else}
-					<Table
-						columns={[
-							{ column: 'IP Address', size: 'medium' },
-							{ column: 'Added At', size: 'medium' },
-							{ column: 'Expires At', size: 'medium' }
-						]}
-						hasData={ipAllowListEntries.length > 0}
-						plural="entries"
+		<div class="w-full py-4 space-y-4">
+			{#if !isLoadingIPAllowList && ipAllowListEntries?.length > 0}
+				<div class="flex justify-end">
+					<BigButton
+						variant="danger-outline"
+						on:click={() => (isClearIPAllowListAlertVisible = true)}>Clear all</BigButton
 					>
-						{#each ipAllowListEntries as entry}
-							<TableRow>
-								<TableCell>{entry.ip}</TableCell>
-								<TableCell>{new Date(entry.createdAt).toLocaleString()}</TableCell>
-								<TableCell>{new Date(entry.expiresAt).toLocaleString()}</TableCell>
-								<TableCellEmpty />
-								<TableCellEmpty />
-							</TableRow>
-						{/each}
-					</Table>
-				{/if}
-			</div>
-		</FormGrid>
+				</div>
+			{/if}
+			{#if isLoadingIPAllowList}
+				<div class="flex items-center justify-center py-8">
+					<div
+						class="animate-spin rounded-full h-8 w-8 border-b-2 border-cta-blue dark:border-highlight-blue"
+					></div>
+					<span class="ml-2 text-gray-600 dark:text-gray-400">Loading...</span>
+				</div>
+			{:else}
+				<Table
+					columns={isPhone
+						? [
+								{ column: 'IP Address', size: 'small' },
+								{ column: 'Expires At', size: 'small' }
+							]
+						: [
+								{ column: 'IP Address', size: 'medium' },
+								{ column: 'Added At', size: 'medium' },
+								{ column: 'Expires At', size: 'medium' }
+							]}
+					hasData={ipAllowListEntries?.length > 0}
+					hasActions={false}
+					plural="entries"
+				>
+					{#each ipAllowListEntries as entry}
+						<TableRow>
+							<TableCell value={entry.ip} />
+							{#if !isPhone}
+								<TableCell value={entry.createdAt} isDate />
+							{/if}
+							<TableCell value={entry.expiresAt} isDate />
+						</TableRow>
+					{/each}
+				</Table>
+			{/if}
+		</div>
+		<!-- same sticky footer row and close button as FormFooter, without a submit button -->
+		<div
+			class="sticky bottom-0 z-10 -mx-4 sm:-mx-8 px-4 sm:px-8 py-4 border-t-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex justify-end transition-colors duration-200"
+		>
+			<button
+				type="button"
+				on:click={closeIPAllowListModal}
+				class="pc-focus min-w-[6rem] bg-transparent hover:bg-gray-100 border border-gray-300 text-slate-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:border-gray-500 dark:text-gray-100 text-sm uppercase font-bold px-4 py-2 rounded-md transition-colors duration-200"
+				>Close</button
+			>
+		</div>
 	</Modal>
+	<DeleteAlert
+		title="Clear IP allow list"
+		name={selectedProxyForIPList?.name || ''}
+		actionMessage="Clear every allow listed IP for"
+		onClick={clearIPAllowList}
+		bind:isVisible={isClearIPAllowListAlertVisible}
+	></DeleteAlert>
 </main>

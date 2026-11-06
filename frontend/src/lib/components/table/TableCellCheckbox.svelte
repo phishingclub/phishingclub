@@ -5,7 +5,7 @@
 
 <td class="pl-4 w-12 text-center border-hidden align-middle">
 	<label
-		class="relative inline-flex items-center"
+		class="relative flex items-center justify-center"
 		class:cursor-pointer={!disabled}
 		class:cursor-not-allowed={disabled}
 		class:opacity-50={disabled}

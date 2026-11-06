@@ -2,6 +2,7 @@
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
+	import BetaTag from '$lib/components/BetaTag.svelte';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
@@ -283,44 +284,47 @@ s.keepAlive();
 
 <HeadTitle title="Remote Browsers" />
 
-<div class="col-start-1 col-end-13 row-start-1 px-4">
-	<div class="flex justify-between items-center">
-		<div class="flex items-center gap-3">
+<main>
+	<!-- fixed row height on wide screens so the taller refresh select does not push the title down -->
+	<div class="flex flex-wrap items-center justify-between gap-3 md:h-[2.625rem] md:flex-nowrap">
+		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
 			<Headline docSlug="remote-browser">Remote Browsers</Headline>
-			<span
-				class="px-2 py-0.5 text-xs font-medium rounded bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400"
-				>Experimental</span
-			>
+			<BetaTag label="Experimental" />
 		</div>
 		<AutoRefresh isLoading={false} onRefresh={() => refreshItems(false)} />
 	</div>
 
 	{#if featureDisabled}
-		<div class="mt-6 rounded-lg border border-slate-700 bg-slate-800/50 px-6 py-8 max-w-xl">
-			<p class="text-sm font-semibold text-white mb-1">Remote Browser is not enabled</p>
-			<p class="text-sm text-slate-400 mb-3">
+		<div
+			class="mt-6 rounded-lg border border-gray-200 bg-gray-50 px-6 py-8 max-w-xl dark:border-slate-700 dark:bg-slate-800/50"
+		>
+			<p class="text-sm font-semibold text-gray-800 dark:text-white mb-1">
+				Remote Browser is not enabled
+			</p>
+			<p class="text-sm text-gray-600 dark:text-slate-400 mb-3">
 				This feature is disabled by default for security reasons. When enabled, the server runs a
 				browser under the application process. Any operator with access to the script editor can
 				execute arbitrary commands on the host.
 			</p>
-			<p class="text-sm text-slate-400 mb-4">
-				To enable it, set <code class="text-slate-200 bg-slate-700 px-1 rounded">enabled: true</code
+			<p class="text-sm text-gray-600 dark:text-slate-400 mb-4">
+				To enable it, set <code class="rounded bg-gray-200 px-1 text-gray-800 dark:bg-slate-700 dark:text-slate-200">enabled: true</code
 				>
-				in the <code class="text-slate-200 bg-slate-700 px-1 rounded">remote_browser</code> block of
-				<code class="text-slate-200 bg-slate-700 px-1 rounded">config.json</code> and restart the service.
+				in the <code class="rounded bg-gray-200 px-1 text-gray-800 dark:bg-slate-700 dark:text-slate-200">remote_browser</code> block of
+				<code class="rounded bg-gray-200 px-1 text-gray-800 dark:bg-slate-700 dark:text-slate-200">config.json</code> and restart the service.
 			</p>
 			<a
 				href="https://phishing.club/guide/remote-browser/#enabling"
 				target="_blank"
 				rel="noopener noreferrer"
-				class="text-sm text-blue-400 hover:text-blue-300 underline">Read the setup guide</a
+				class="pc-focus rounded-sm text-sm text-cta-blue dark:text-highlight-blue hover:underline">Read the setup guide</a
 			>
 		</div>
 	{:else}
 		<BigButton on:click={openCreateModal}>New Remote Browser</BigButton>
 
 		<Table
-			columns={[{ column: 'Name', size: 'large' }, { column: 'Description' }]}
+			reserveSelect
+			columns={[{ column: 'Name', size: 'large' }, { column: 'Description', size: 'large' }]}
 			sortable={['Name']}
 			hasData={!!items.length}
 			{hasNextPage}
@@ -330,12 +334,12 @@ s.keepAlive();
 		>
 			{#each items as item (item.id)}
 				<TableRow>
-					<TableCell>
+					<TableCell wrap>
 						<button class="block w-full py-1 text-left" on:click={() => openUpdateModal(item.id)}
 							>{item.name}</button
 						>
 					</TableCell>
-					<TableCell>{item.description || ''}</TableCell>
+					<TableCell value={item.description} />
 					<TableCellEmpty />
 					<TableCellAction>
 						<TableDropDownEllipsis>
@@ -353,7 +357,7 @@ s.keepAlive();
 			{/each}
 		</Table>
 	{/if}
-</div>
+</main>
 
 <!-- Editor modal (always fullscreen) -->
 <Modal
@@ -363,11 +367,18 @@ s.keepAlive();
 	onClose={closeModal}
 	{isSubmitting}
 >
-	{#if modalMode === 'update'}
-		<InstalledResourceBadge resourceType="remotebrowser" resourceId={formValues.id} variant="notice" />
-	{/if}
 	<FormGrid on:submit={onSubmit} {isSubmitting} {modalMode}>
-		<div class="col-span-3 flex flex-col min-h-0 overflow-hidden px-4 py-4">
+		<!-- one scroll area when stacked; on wide screens the editor fills the height -->
+		<div class="flex flex-col min-h-0 overflow-y-auto lg:overflow-hidden py-4">
+			{#if modalMode === 'update'}
+				<div class="flex-none mb-3">
+					<InstalledResourceBadge
+						resourceType="remotebrowser"
+						resourceId={formValues.id}
+						variant="notice"
+					/>
+				</div>
+			{/if}
 			<RemoteBrowserEditor
 				bind:name={formValues.name}
 				bind:description={formValues.description}
@@ -381,7 +392,7 @@ s.keepAlive();
 
 		<FormError message={formError} />
 
-		<FormFooter {closeModal} {isSubmitting} okText={modalMode === 'create' ? 'Create' : 'Update'} />
+		<FormFooter {closeModal} {isSubmitting} />
 	</FormGrid>
 </Modal>
 

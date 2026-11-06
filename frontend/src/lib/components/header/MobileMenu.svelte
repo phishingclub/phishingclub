@@ -1,5 +1,5 @@
 <script>
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import { menu, mobileTopMenu } from '$lib/consts/navigation';
 	import { shouldHideMenuItem } from '$lib/utils/common';
@@ -16,6 +16,63 @@
 	export let visible = false;
 	export let onClickLogout;
 	export let toggleChangeCompanyModal;
+
+	let closeButton;
+	let opener = null;
+	let lastPointerAt = -Infinity;
+	let wasVisible = false;
+
+	$: handleVisibility(visible);
+
+	const handleVisibility = async (isVisible) => {
+		if (typeof window === 'undefined') return;
+		if (isVisible && !wasVisible) {
+			wasVisible = true;
+			opener = document.activeElement;
+			const byPointer = performance.now() - lastPointerAt < 1000;
+			await tick();
+			// a tap opens the menu without a focus ring, keyboard puts focus on close
+			if (byPointer) {
+				panel?.focus();
+			} else {
+				closeButton?.focus();
+			}
+		} else if (!isVisible && wasVisible) {
+			wasVisible = false;
+			if (opener && typeof opener.focus === 'function' && document.contains(opener)) {
+				opener.focus();
+			}
+			opener = null;
+		}
+	};
+
+	let panel;
+
+	const onKeydown = (e) => {
+		if (!visible) return;
+		if (e.key === 'Escape') {
+			visible = false;
+			return;
+		}
+		if (e.key === 'Tab' && panel) {
+			const items = Array.from(
+				panel.querySelectorAll('a[href], button:not([disabled]), input, [tabindex]:not([tabindex="-1"])')
+			).filter((el) => el.offsetWidth > 0 || el.offsetHeight > 0);
+			if (!items.length) return;
+			const first = items[0];
+			const last = items[items.length - 1];
+			if (!panel.contains(document.activeElement) || document.activeElement === panel) {
+				e.preventDefault();
+				(e.shiftKey ? last : first).focus();
+			} else if (e.shiftKey && document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		}
+	};
 
 	const icons = {
 		dashboard: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
@@ -97,7 +154,7 @@
 </svg>`,
 
 		companies: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
-  <path stroke-linecap="round" stroke-linejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+  <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008Zm0 3h.008v.008h-.008v-.008Zm0 3h.008v.008h-.008v-.008Z" />
 </svg>`,
 
 		settings: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
@@ -105,21 +162,25 @@
 	  <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
 	</svg>`,
 
-		remote_browser: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+		remote_browser: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
   <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0H3" />
 </svg>
 `,
 
-		script: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-6">
+		script: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
   <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z" />
 </svg>
 `,
+
+		baitBox: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
+  <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+</svg>`,
 
 		tools: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
 	  <path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437 1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008Z" />
 	</svg>`,
 
-		'user guide': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-4">
+		'user guide': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="size-5">
   <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
 </svg>`,
 
@@ -159,6 +220,12 @@
 		return icons[iconMap[route] || 'dashboard'];
 	};
 
+	$: isCurrent = (route) => $page.url.pathname === route;
+	const singleOf = (link) => (link.type === 'submenu' ? link.items[0] : link);
+	const currentClass = 'bg-active-blue text-white shadow-lg';
+	const idleClass =
+		'text-white/90 dark:text-gray-300 hover:bg-highlight-blue/30 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-white';
+
 	const getTopMenuIcon = (label) => {
 		const iconMap = {
 			Profile: 'profile',
@@ -166,6 +233,7 @@
 			Users: 'users',
 			Companies: 'companies',
 			Settings: 'settings',
+			'Bait Box': 'baitBox',
 			Tools: 'tools',
 			'User Guide': 'user guide',
 			'Change Company': 'change company'
@@ -175,42 +243,70 @@
 	};
 </script>
 
+<svelte:window
+	on:keydown={onKeydown}
+	on:pointerdown|capture={() => (lastPointerAt = performance.now())}
+/>
+
 {#if visible}
-	<!-- Overlay -->
 	<button
 		class="fixed inset-0 bg-black bg-opacity-50 z-40 cursor-default"
+		tabindex="-1"
 		on:click={() => (visible = false)}
-		aria-label="Close mobile menu"
+		aria-label="Close menu"
 	></button>
 
 	<!-- Mobile Menu -->
 	<div
-		class="mobile-menu-content fixed top-0 left-0 w-full h-full bg-gradient-to-b from-pc-darkblue to-slate-900 dark:from-gray-900 dark:to-gray-950 z-50 overflow-y-auto shadow-xl"
+		class="mobile-menu-content fixed top-0 left-0 w-full h-full bg-gradient-to-b from-pc-darkblue to-slate-900 dark:from-gray-900 dark:to-gray-950 z-50 overflow-y-auto overflow-x-hidden shadow-xl focus:outline-none"
+		bind:this={panel}
+		tabindex="-1"
+		role="dialog"
+		aria-modal="true"
+		aria-label="Main menu"
 	>
 		<!-- Header -->
 		<div
-			class="mobile-menu-header flex justify-between h-20 items-center bg-pc-darkblue/90 dark:bg-gray-900/90 px-6 border-b border-white/10 dark:border-gray-700/50"
+			class="mobile-menu-header sticky top-0 z-10 flex justify-between gap-2 h-16 sm:h-20 items-center bg-pc-darkblue dark:bg-gray-900 px-4 sm:px-6 border-b border-white/10 dark:border-gray-700/50"
 		>
-			<BrandingImage src={logoSrc} alt="logo" display={logoDisplay} ready={$branding.loaded} boxClass="h-12 w-40" />
-			<div class="flex items-center gap-2">
-				<div
-					class="flex items-center justify-center w-12 h-12 rounded-lg hover:bg-white/10 dark:hover:bg-gray-600/30 transition-all duration-200"
-				>
-					<ThemeToggle />
-				</div>
+			<div class="min-w-0 shrink">
+				<BrandingImage
+					src={logoSrc}
+					alt="logo"
+					display={logoDisplay}
+					ready={$branding.loaded}
+					boxClass="h-10 w-32 sm:h-12 sm:w-40"
+				/>
+			</div>
+			<div class="flex items-center gap-2 shrink-0">
+				<ThemeToggle />
 				<button
-					class="flex items-center justify-center w-12 h-12 rounded-lg hover:bg-white/10 dark:hover:bg-gray-600/30 transition-all duration-200"
+					bind:this={closeButton}
+					type="button"
+					class="flex items-center justify-center w-10 h-10 rounded-full border border-white/20 text-white hover:bg-white/10 dark:hover:bg-gray-600/30 transition-colors duration-200 pc-focus-dark"
 					on:click={() => (visible = false)}
+					aria-label="Close menu"
 				>
-					<img class="w-6 h-6" src="/mob-menu-close.svg" alt="close mobile menu" />
+					<svg
+						class="w-5 h-5"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						aria-hidden="true"
+					>
+						<path d="M6 6l12 12M18 6L6 18" />
+					</svg>
 				</button>
 			</div>
 		</div>
 
 		<!-- Switch Company Section -->
-		<div class="px-6 py-4 border-b border-white/20 dark:border-highlight-blue/30">
+		<div class="px-4 sm:px-6 py-4 border-b border-white/20 dark:border-highlight-blue/30">
 			<button
-				class="flex items-center w-full py-3 px-4 text-white bg-active-blue dark:bg-slate-800 rounded-lg transition-all duration-200 hover:bg-active-blue/80 dark:hover:bg-slate-700 font-medium"
+				type="button"
+				class="pc-focus-dark flex items-center w-full py-3 px-4 text-white bg-white/10 border border-white/15 dark:border-transparent dark:bg-slate-800 rounded-lg transition-colors duration-200 hover:bg-white/15 dark:hover:bg-slate-700 font-medium"
 				on:click={() => {
 					visible = false;
 					toggleChangeCompanyModal();
@@ -223,115 +319,114 @@
 			</button>
 		</div>
 
-		<!-- Quick Actions Section -->
-		<div class="p-6 border-b border-white/20 dark:border-highlight-blue/30">
+		<!-- Main Navigation -->
+		<div class="p-4 sm:p-6 border-b border-white/20 dark:border-highlight-blue/30">
 			<h2
-				class="text-white/80 dark:text-highlight-blue text-lg font-semibold uppercase tracking-wider mb-4 text-left"
+				class="px-4 text-xs font-semibold uppercase tracking-wider text-white/60 dark:text-gray-400 mb-2 text-left"
+			>
+				Navigation
+			</h2>
+			<div class="space-y-1">
+				{#each menu as link}
+					{#if link.type === 'submenu' && link.items.length > 1}
+						<ConditionalDisplay show={link.whitebox ? 'whitebox' : link.blackbox ? 'blackbox' : 'both'}>
+							<h3
+								class="pt-5 pb-1.5 px-4 text-xs font-semibold uppercase tracking-wider text-white/60 dark:text-gray-400 text-left"
+							>
+								{link.label}
+							</h3>
+							<div class="space-y-1">
+								{#each link.items as item, i (i)}
+									<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
+										<a
+											aria-current={isCurrent(item.route) ? 'page' : undefined}
+											class="pc-focus-dark flex items-center w-full py-2.5 px-4 text-base font-medium rounded-lg transition-colors duration-200 {isCurrent(
+												item.route
+											)
+												? currentClass
+												: idleClass}"
+											href={item.route}
+											on:click={() => (visible = false)}
+										>
+											<div class="flex-shrink-0 mr-3">
+												{@html getIconForRoute(item.route)}
+											</div>
+											<span class="text-left">
+												{#if i === 0}
+													Overview
+												{:else if item.singleLabel}
+													{item.singleLabel}
+												{:else}
+													{item.label}
+												{/if}
+											</span>
+										</a>
+									</ConditionalDisplay>
+								{/each}
+							</div>
+						</ConditionalDisplay>
+					{:else}
+						<ConditionalDisplay show={link.whitebox ? 'whitebox' : link.blackbox ? 'blackbox' : 'both'}>
+							<a
+								aria-current={isCurrent(singleOf(link).route) ? 'page' : undefined}
+								class="pc-focus-dark mt-1 flex items-center w-full py-2.5 px-4 text-base font-medium rounded-lg transition-colors duration-200 {isCurrent(singleOf(link).route)
+									? currentClass
+									: idleClass}"
+								href={singleOf(link).route}
+								on:click={() => (visible = false)}
+							>
+								<div class="flex-shrink-0 mr-3">
+									{@html getIconForRoute(singleOf(link).route)}
+								</div>
+								<span class="text-left">{link.label}</span>
+							</a>
+						</ConditionalDisplay>
+					{/if}
+				{/each}
+			</div>
+		</div>
+
+		<!-- Quick Actions Section -->
+		<div class="p-4 sm:p-6">
+			<h2
+				class="px-4 text-xs font-semibold uppercase tracking-wider text-white/60 dark:text-gray-400 mb-2 text-left"
 			>
 				Quick Access
 			</h2>
-			<div class="space-y-2">
+			<div class="space-y-1">
 				{#each mobileTopMenu as link}
 					<ConditionalDisplay show={link.blackbox ? 'blackbox' : 'both'}>
 						<a
-							class="flex items-center w-full py-3 px-4 text-white text-lg font-medium rounded-lg transition-all duration-200 group {$page
-								.url.pathname === link.route
-								? 'bg-active-blue shadow-lg dark:bg-active-blue'
-								: 'hover:bg-highlight-blue/30 hover:shadow-md dark:hover:bg-highlight-blue/20'}"
+							aria-current={$page.url.pathname === link.route ? 'page' : undefined}
+							class="pc-focus-dark flex items-center w-full py-2.5 px-4 text-base font-medium rounded-lg transition-colors duration-200 {isCurrent(
+								link.route
+							)
+								? currentClass
+								: idleClass}"
 							class:hidden={shouldHideMenuItem(link.route)}
 							on:click={() => (visible = false)}
 							target={link.external ? '_blank' : undefined}
 							rel={link.external ? 'noreferrer' : undefined}
 							href={link.route}
 						>
-							<div class="flex-shrink-0 mr-3 text-white dark:text-highlight-blue">
+							<div class="flex-shrink-0 mr-3">
 								{@html getTopMenuIcon(link.label)}
 							</div>
 							<span class="flex-1 text-left"
 								>{link.label}{#if link.beta}<BetaTag onDark />{/if}</span
 							>
-							{#if $page.url.pathname === link.route}
-								<div class="w-2 h-2 bg-white rounded-full"></div>
-							{/if}
 						</a>
 					</ConditionalDisplay>
 				{/each}
 			</div>
 		</div>
 
-		<!-- Main Navigation -->
-		<div class="p-6">
-			<h2
-				class="text-white/80 dark:text-highlight-blue text-lg font-semibold uppercase tracking-wider mb-4 text-left"
-			>
-				Navigation
-			</h2>
-			<div class="space-y-1">
-				{#each menu as link}
-					{#if link.type === 'submenu'}
-						<ConditionalDisplay show={link.whitebox ? 'whitebox' : link.blackbox ? 'blackbox' : 'both'}>
-						<!-- section header -->
-						<div class="pt-4 pb-2 first:pt-0">
-							<div class="py-2 px-4 border-l-2 border-cta-blue/60 dark:border-highlight-blue/60">
-								<h3
-									class="text-white dark:text-highlight-blue font-bold text-lg uppercase tracking-wide text-left"
-								>
-									{link.label}
-								</h3>
-							</div>
-						</div>
-						<!-- submenu items -->
-						<div class="ml-4 space-y-1">
-							{#each link.items as item, i (i)}
-								<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
-									<a
-										class="flex items-center w-full py-2.5 px-4 text-white/90 dark:text-gray-300 text-base font-medium rounded-lg transition-all duration-200 group hover:bg-highlight-blue/30 dark:hover:bg-highlight-blue/20 hover:text-white dark:hover:text-white"
-										href={item.route}
-										on:click={() => (visible = false)}
-									>
-										<div
-											class="flex-shrink-0 mr-3 text-white/70 dark:text-highlight-blue/80 group-hover:text-white"
-										>
-											{@html getIconForRoute(item.route)}
-										</div>
-										<span class="text-left">
-											{#if i === 0}
-												Overview
-											{:else if item.singleLabel}
-												{item.singleLabel}
-											{:else}
-												{item.label}
-											{/if}
-										</span>
-									</a>
-								</ConditionalDisplay>
-							{/each}
-						</div>
-						</ConditionalDisplay>
-					{:else}
-						<!-- standalone menu item -->
-						<div class="pt-4 pb-2 first:pt-0">
-							<a
-								class="flex items-center w-full py-3 px-4 text-white text-lg font-bold rounded-lg transition-all duration-200 group hover:bg-highlight-blue/30 dark:hover:bg-highlight-blue/20"
-								href={link.route}
-								on:click={() => (visible = false)}
-							>
-								<div class="flex-shrink-0 mr-3 text-white dark:text-highlight-blue">
-									{@html getIconForRoute(link.route)}
-								</div>
-								<span class="text-left">{link.label}</span>
-							</a>
-						</div>
-					{/if}
-				{/each}
-			</div>
-		</div>
-
 		<!-- Logout Section -->
-		<div class="p-6 border-t border-white/20 dark:border-highlight-blue/30 mt-auto">
+		<div class="p-4 sm:p-6 border-t border-white/20 dark:border-highlight-blue/30 mt-auto">
 			<button
+				type="button"
 				on:click={onClickLogout}
-				class="w-full border-2 border-white/30 dark:border-highlight-blue/50 hover:border-highlight-blue/60 dark:hover:border-highlight-blue hover:bg-highlight-blue/20 dark:hover:bg-highlight-blue/20 uppercase font-medium py-2.5 px-6 rounded-lg transition-all duration-200 text-sm text-white/90 dark:text-highlight-blue hover:text-white dark:hover:text-white"
+				class="pc-focus-dark w-full border-2 border-white/30 dark:border-highlight-blue/50 hover:border-highlight-blue/60 dark:hover:border-highlight-blue hover:bg-highlight-blue/20 dark:hover:bg-highlight-blue/20 uppercase font-medium py-2.5 px-6 rounded-lg transition-all duration-200 text-sm text-white/90 dark:text-highlight-blue hover:text-white dark:hover:text-white"
 			>
 				Log Out
 			</button>
@@ -359,10 +454,10 @@
 
 	/* hide scrollbar but keep functionality */
 	.mobile-menu-content::-webkit-scrollbar {
-		display: none;
+		display: none !important;
 	}
 	.mobile-menu-content {
 		-ms-overflow-style: none;
-		scrollbar-width: none;
+		scrollbar-width: none !important;
 	}
 </style>

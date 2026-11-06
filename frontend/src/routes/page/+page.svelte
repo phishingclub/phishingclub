@@ -338,7 +338,7 @@
 
 <HeadTitle title="Pages" />
 <main>
-	<div class="flex justify-between">
+	<div class="flex flex-wrap items-center justify-between gap-3">
 		<Headline docSlug="pages">Pages</Headline>
 		<AutoRefresh
 			isLoading={false}
@@ -378,7 +378,7 @@
 						on:change={() => selection.toggle(page.id)}
 					/>
 				{/if}
-				<TableCell>
+				<TableCell wrap>
 					<button
 						on:click={() => {
 							openUpdateModal(page.id);
@@ -416,11 +416,12 @@
 		{/if}
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<Editor contentType="page" {domainMap} bind:value={formValues.content}>
-				<div class="pl-4">
+				<div class="grid w-full grid-cols-1 gap-x-6 md:grid-cols-2">
 					<TextField
 						minLength={1}
 						maxLength={64}
 						required
+						width="full"
 						bind:value={formValues.name}
 						placeholder="Intranet login">Name</TextField
 					>
@@ -433,7 +434,7 @@
 	<DeleteAlert
 		list={[
 			'Templates using this page will become unusable',
-			'Scheduled or active campaigns using this domain will be cancelled'
+			'Scheduled or active campaigns using this page will be cancelled'
 		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}

@@ -37,12 +37,11 @@
 			Installed
 		</span>
 	{:else}
-		<!-- the muted panel used for in form messages (matches the form field and
-		FormError surfaces), with a small blue accent icon rather than a caution colour.
-		mt-6 gives a gap below the modal header; mx-6 insets it to line up with the form
-		fields, which sit inside a FormColumn with the same px-6 inset. -->
+		<!-- muted panel for in form messages. w-0 min-w-full makes it take the width
+		of its container without adding to it, so long package names wrap instead of
+		widening the modal. -->
 		<div
-			class="mx-6 mt-6 flex items-start gap-2.5 rounded-md border border-gray-200 bg-grayblue-light px-3 py-2.5 dark:border-gray-700/60 dark:bg-gray-800/40"
+			class="mt-4 mb-2 flex w-0 min-w-full items-start gap-2.5 rounded-md border border-gray-200 bg-grayblue-light px-3 py-2.5 dark:border-gray-700/60 dark:bg-gray-800/40"
 		>
 			<svg
 				class="mt-0.5 h-4 w-4 shrink-0 text-cta-blue dark:text-highlight-blue"
@@ -58,7 +57,7 @@
 				<polyline points="3.27 6.96 12 12.01 20.73 6.96" />
 				<line x1="12" y1="22.08" x2="12" y2="12" />
 			</svg>
-			<p class="text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+			<p class="min-w-0 break-words text-sm leading-relaxed text-gray-600 dark:text-gray-300">
 				Installed from <span class="font-semibold text-gray-800 dark:text-gray-100">{info.packageId}</span>. Edits here may be flagged as a conflict when the package is updated.
 			</p>
 		</div>

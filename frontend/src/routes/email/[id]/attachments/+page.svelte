@@ -161,7 +161,7 @@
 			showAddAttachmentModal = false;
 		} catch (e) {
 			addToast('Failed to add attachment', 'Error');
-			console.error('failed to add attchment', e);
+			console.error('failed to add attachment', e);
 		} finally {
 			isSubmitting = false;
 		}
@@ -178,7 +178,7 @@
 				refreshData();
 			})
 			.catch((e) => {
-				console.error('failed to remove attchment', e);
+				console.error('failed to remove attachment', e);
 			});
 		return action;
 	};
@@ -206,20 +206,42 @@
 
 <HeadTitle title="Email attachment ({emailName})" />
 <main>
-	<Headline docSlug="attachments">Attachments: {emailName}</Headline>
-	<BigButton on:click={openModal}>Add attachement</BigButton>
+	<a
+		href="/email/"
+		class="pc-focus mb-2 inline-flex items-center gap-1 rounded-sm text-sm text-cta-blue dark:text-highlight-blue hover:underline"
+	>
+		<svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+			<path
+				fill-rule="evenodd"
+				d="M12.79 5.23a.75.75 0 0 1-.02 1.06L8.83 10l3.94 3.71a.75.75 0 1 1-1.04 1.08l-4.5-4.25a.75.75 0 0 1 0-1.08l4.5-4.25a.75.75 0 0 1 1.06.02Z"
+				clip-rule="evenodd"
+			/>
+		</svg>
+		Back to emails
+	</a>
+	<Headline docSlug="attachments" preserveCase>
+		<span class="uppercase">Attachments:</span>
+		{emailName}
+	</Headline>
+	<BigButton on:click={openModal}>Add attachment</BigButton>
 	<Table
-		columns={['Name', 'Description', 'Filename', { column: 'Inline', alignText: 'center' }]}
+		reserveSelect
+		columns={[
+			{ column: 'Name', size: 'large' },
+			{ column: 'Description', size: 'large' },
+			{ column: 'Filename', size: 'large' },
+			{ column: 'Inline', size: 'small', alignText: 'center' }
+		]}
 		sortable={['Name', 'Description', 'Filename', 'Inline']}
 		pagination={tableParams}
-		hasData={!!allSelectedAttachmentsChunk}
+		hasData={!!allSelectedAttachmentsChunk?.length}
 		{hasNextPage}
 		plural="attachments"
 		isGhost={isTableLoading}
 	>
 		{#each allSelectedAttachmentsChunk as attachment}
 			<TableRow>
-				<TableCell value={attachment.name} />
+				<TableCell wrap value={attachment.name} />
 				<TableCell value={attachment.description} />
 				<TableCell value={attachment.fileName} />
 				<TableCellCheck value={attachment.isInline} />
@@ -227,6 +249,7 @@
 				<TableCellAction>
 					<TableDropDownEllipsis>
 						<TableDeleteButton
+							name="Remove"
 							on:click={() => openDeleteAlert(attachment)}
 							{...globalButtonDisabledAttributes(attachment, contextCompanyID)}
 						></TableDeleteButton>
@@ -244,16 +267,18 @@
 		<FormGrid on:submit={onClickAddAttachment} {isSubmitting}>
 			<FormColumns>
 				<FormColumn>
-					<TextFieldMultiSelect
-						required
-						id="attachmentIDs"
-						bind:value={formValues.attachmentIDs}
-						options={availableAttachmentMap.values()}
-						>Attachment
-					</TextFieldMultiSelect>
-				</FormColumn>
-				<FormColumn>
+					<div class="w-full sm:w-80">
+						<TextFieldMultiSelect
+							required
+							width="full"
+							id="attachmentIDs"
+							bind:value={formValues.attachmentIDs}
+							options={availableAttachmentMap.values()}
+							>Attachment
+						</TextFieldMultiSelect>
+					</div>
 					<CheckboxField
+						inline
 						bind:value={formValues.isInline}
 						toolTipText="Inline attachments can be referenced in email HTML using cid:filename.jpg"
 						>Inline (for images)</CheckboxField
@@ -265,7 +290,7 @@
 		</FormGrid>
 	</Modal>
 	<DeleteAlert
-		list={['This will remove the attachmen from the email']}
+		list={['The attachment is removed from this email only']}
 		name={`${deleteValues.name}`}
 		onClick={() => onClickRemoveAttachment(deleteValues.id)}
 		permanent={false}

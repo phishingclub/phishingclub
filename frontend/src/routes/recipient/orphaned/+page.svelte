@@ -12,6 +12,7 @@
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
+	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import { AppStateService } from '$lib/service/appState';
@@ -113,36 +114,39 @@
 	const openDeleteAllAlert = () => {
 		isDeleteAllAlertVisible = true;
 	};
+	// split on the last @ so on phones the domain moves to the second line as one piece
+	/** @param {string} email */
+	const emailParts = (email) => {
+		const at = email.lastIndexOf('@');
+		return at < 0 ? [email, ''] : [email.slice(0, at + 1), email.slice(at + 1)];
+	};
 </script>
 
-<HeadTitle title="Orphaned Recipients" />
+<HeadTitle title="Orphaned recipients" />
 
 <section>
-	<Headline docSlug="recipients">Orphaned Recipients</Headline>
+	<Breadcrumb crumbs={[{ label: 'Recipients', href: '/recipient/' }, { label: 'Orphaned' }]} />
+	<Headline docSlug="recipients">Orphaned recipients</Headline>
+	<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Recipients that are not in any group.</p>
 
-	<div class="flex gap-4 mb-4">
-		<BigButton on:click={() => goto('/recipient/')}>View recipients</BigButton>
+	<div class="flex flex-wrap gap-3 mt-6 mb-10 [&>button]:m-0">
 		{#if recipients.length > 0}
-			<button
-				on:click={openDeleteAllAlert}
-				class="self-start mt-6 bg-gradient-to-b from-red-500 to-red-600 dark:from-red-600 dark:to-red-700 px-4 w-64 py-2 hover:from-red-400 hover:to-red-500 dark:hover:from-red-500 dark:hover:to-red-600 text-white font-bold uppercase rounded-md mb-10 transition-all duration-200"
-			>
-				Delete All Orphans
-			</button>
+			<BigButton variant="danger-outline" on:click={openDeleteAllAlert}>Delete all orphans</BigButton>
 		{/if}
 	</div>
 
 	<Table
 		isGhost={isRecipientsTableLoading}
+		reserveSelect
 		columns={[
-			{ column: 'Email', size: 'small' },
+			{ column: 'Email', size: 'xlarge' },
+			{ column: 'Repeat offender', title: 'Repeat', size: 'small', alignText: 'center' },
 			{ column: 'First name', size: 'small' },
 			{ column: 'Last name', size: 'small' },
-			{ column: 'Phone', size: 'small' },
-			{ column: 'Extra identifier', size: 'small' },
 			{ column: 'Position', size: 'small' },
-			{ column: 'Repeat offender', size: 'small', alignText: 'center' },
 			{ column: 'Department', size: 'small' },
+			{ column: 'Phone', size: 'small' },
+			{ column: 'Extra identifier', title: 'Extra ID', size: 'small' },
 			{ column: 'City', size: 'small' },
 			{ column: 'Country', size: 'small' },
 			{ column: 'Misc', size: 'small' }
@@ -166,18 +170,20 @@
 	>
 		{#each recipients as recipient}
 			<TableRow>
-				<TableCellLink href={`/recipient/${recipient.id}`} title={recipient.email}>
+				<TableCellLink href={`/recipient/${recipient.id}`} title={recipient.email} wrap>
 					{#if recipient.email}
-						{recipient.email}
+						{emailParts(recipient.email)[0]}<span class="max-sm:inline-block max-sm:max-w-full"
+							>{emailParts(recipient.email)[1]}</span
+						>
 					{/if}
 				</TableCellLink>
+				<TableCellCheck value={recipient.isRepeatOffender} />
 				<TableCell value={recipient.firstName} />
 				<TableCell value={recipient.lastName} />
+				<TableCell value={recipient.position} />
+				<TableCell value={recipient.department} />
 				<TableCell value={recipient.phone} />
 				<TableCell value={recipient.extraIdentifier} />
-				<TableCell value={recipient.position} />
-				<TableCellCheck value={recipient.isRepeatOffender} />
-				<TableCell value={recipient.department} />
 				<TableCell value={recipient.city} />
 				<TableCell value={recipient.country} />
 				<TableCell value={recipient.misc} />
@@ -207,7 +213,7 @@
 		bind:isVisible={isDeleteAllAlertVisible}
 		name="all orphaned recipients"
 		onClick={onDeleteAllOrphaned}
-		title="Delete All Orphaned Recipients"
+		title="Delete all orphaned recipients"
 		list={[
 			'This will permanently delete all recipients not assigned to any group',
 			'This action cannot be undone',

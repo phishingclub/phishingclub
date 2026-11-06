@@ -67,12 +67,9 @@
 </script>
 
 <div class="flex flex-wrap gap-6">
-	<SettingsCard title="Obfuscation Template">
-		<div class="space-y-4">
-			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-				Customize the template used when obfuscation is enabled to.
-			</p>
-			<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md transition-colors duration-200">
+	<SettingsCard title="Obfuscation Template" description="Customize the template used when obfuscation is enabled.">
+		<div class="mt-2 space-y-4">
+			<div class="bg-gray-50 dark:bg-gray-900/40 p-3 rounded-md transition-colors duration-200">
 				<p class="text-sm text-gray-700 dark:text-gray-300 mb-2">
 					<strong>Internal obfuscation variable:</strong>
 				</p>

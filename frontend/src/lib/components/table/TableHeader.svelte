@@ -22,8 +22,24 @@
 	// controls whether the select all control is actually shown, so an empty or
 	// loading table reserves the gutter without a dangling control
 	export let showSelect = false;
+	// pixel width for the first column, set by Table on phones and for a
+	// fixed first column that holds the reserved select gutter
+	/** @type {number|null} */
+	export let firstColumnWidth = null;
 
 	$: sortableMap = {};
+
+	const sizeOf = (column) =>
+		typeof column === 'object' && columns.length > 1 ? column.size || '' : '';
+	// unsized, large and xlarge columns hold long text, so they share the free
+	// space; when every column is small or medium, all columns of the widest
+	// size share it, so the checkbox never stretches
+	const SIZE_RANK = { small: 1, medium: 2, large: 3, xlarge: 4 };
+	const isLong = (column) => ['', 'large', 'xlarge'].includes(sizeOf(column));
+	$: hasLong = columns.some(isLong);
+	$: widestRank = Math.max(0, ...columns.map((column) => SIZE_RANK[sizeOf(column)] ?? 0));
+	$: isFluid = (column) =>
+		hasLong ? isLong(column) : (SIZE_RANK[sizeOf(column)] ?? 0) === widestRank;
 
 	onMount(() => {
 		sortable.forEach((column) => {
@@ -42,17 +58,22 @@
 				<TableHeadCell
 					{...column}
 					{...columns.length === 1 ? { size: '' } : {}}
+					fluid={isFluid(column)}
 					{pagination}
 					{isGhost}
 					sortable={sortableMap[column.column.toLowerCase()]}
-					last={i === columns.length - 1}
+					last={!hasActions && i === columns.length - 1}
+					width={i === 0 ? firstColumnWidth : null}
 				/>
 			{:else}
 				<TableHeadCell
 					{column}
+					fluid
 					{pagination}
+					{isGhost}
 					sortable={sortableMap[column.toLowerCase()]}
-					last={i === columns.length - 1}
+					last={!hasActions && i === columns.length - 1}
+					width={i === 0 ? firstColumnWidth : null}
 				/>
 			{/if}
 		{/each}

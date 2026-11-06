@@ -1,11 +1,13 @@
 <script>
 	import { onMount, tick } from 'svelte';
 	import * as monaco from 'monaco-editor';
+	import { pcDarkTheme } from './monacoTheme.js';
 	import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 	import jsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 	import * as vimModule from 'monaco-vim';
 
 	import { vimModeEnabled } from '$lib/store/vimMode.js';
+	import VimToggle from './VimToggle.svelte';
 	import {
 		setupVimClipboardIntegration,
 		destroyVimClipboardIntegration
@@ -54,7 +56,7 @@
 			if (newIsDark !== isDark) {
 				isDark = newIsDark;
 				if (editor) {
-					monaco.editor.setTheme(isDark ? 'vs-dark' : 'vs-light');
+					monaco.editor.setTheme(isDark ? pcDarkTheme(monaco) : 'vs');
 				}
 			}
 		});
@@ -87,7 +89,7 @@
 		const editorOptions = {
 			value: value || '',
 			language: language,
-			theme: 'vs-dark',
+			theme: isDark ? pcDarkTheme(monaco) : 'vs',
 			readOnly: readOnly,
 			automaticLayout: true,
 			minimap: {
@@ -99,8 +101,13 @@
 			folding: true,
 			wordWrap: 'on',
 			contextmenu: true,
+			overviewRulerBorder: false,
+			overviewRulerLanes: 0,
+			hideCursorInOverviewRuler: true,
 			scrollbar: {
-				horizontal: 'hidden'
+				horizontal: 'hidden',
+				// at the end of the code the wheel scrolls the page or modal
+				alwaysConsumeMouseWheel: false
 			},
 			// Enable suggestions for YAML with proxy completion
 			quickSuggestions: enableProxyCompletion && language === 'yaml' ? true : false,
@@ -218,6 +225,7 @@
 	}
 
 	let showExample = false;
+	$: hasToolbar = showVimToggle || showExpandButton || enableProxyCompletion || !!placeholder;
 
 	const loadExample = () => {
 		if (editor && placeholder) {
@@ -243,6 +251,8 @@
 		class:flex={isExpanded}
 		class:flex-col={isExpanded}
 		role={isExpanded ? 'dialog' : undefined}
+		aria-modal={isExpanded ? 'true' : undefined}
+		aria-label={isExpanded ? 'Editor' : undefined}
 		on:keydown={(e) => {
 			if (isExpanded && e.key === 'Escape') {
 				e.stopPropagation();
@@ -250,38 +260,19 @@
 			}
 		}}
 	>
-		{#if showVimToggle || showExpandButton || enableProxyCompletion}
+		{#if hasToolbar}
 			<div
-				class="flex items-center flex-wrap gap-2 bg-slate-900 w-full justify-start p-4 rounded-t-md"
+				class="flex items-center flex-wrap gap-2 w-full p-2 sm:p-3 rounded-t-md border border-b-0 border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 transition-colors duration-200"
 			>
 				{#if showVimToggle}
-					<button
-						type="button"
-						on:click={() => {
-							vimModeEnabled.update((v) => !v);
-						}}
-						class="h-8 border-2 rounded-md w-36 px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 transition-colors duration-200"
-						class:font-bold={localVimMode}
-						class:bg-blue-600={localVimMode}
-						class:dark:bg-blue-500={localVimMode}
-						class:text-white={localVimMode}
-						class:border-blue-600={localVimMode}
-						class:dark:border-blue-500={localVimMode}
-						class:text-gray-700={!localVimMode}
-						class:dark:text-gray-200={!localVimMode}
-						class:bg-white={!localVimMode}
-						class:dark:bg-gray-700={!localVimMode}
-						class:border-gray-300={!localVimMode}
-						class:dark:border-gray-600={!localVimMode}
-					>
-						<span>Vim</span>
-					</button>
+					<VimToggle />
 				{/if}
 				{#if showExpandButton}
 					<button
 						type="button"
 						on:click={() => (isExpanded = !isExpanded)}
-						class="h-8 border-2 border-gray-300 dark:border-gray-600 rounded-md px-3 text-center cursor-pointer hover:opacity-80 flex items-center justify-center gap-2 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+						aria-expanded={isExpanded}
+						class="h-8 inline-flex items-center justify-center gap-2 px-3 rounded-md border text-sm whitespace-nowrap cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600"
 					>
 						{#if !isExpanded}
 							<!-- Expand icon -->
@@ -320,15 +311,29 @@
 						{/if}
 					</button>
 				{/if}
+				{#if placeholder && !isExpanded}
+					<button
+						type="button"
+						on:click={() => (showExample = !showExample)}
+						aria-expanded={showExample}
+						class="h-8 inline-flex items-center justify-center gap-2 px-3 rounded-md border text-sm whitespace-nowrap cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue {showExample
+							? 'bg-cta-blue text-white border-cta-blue font-semibold hover:bg-active-blue'
+							: 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'}"
+					>
+						<span>{showExample ? 'Hide example' : 'Example'}</span>
+					</button>
+				{/if}
 				{#if enableProxyCompletion}
-					<div class="flex items-center text-xs text-gray-500 dark:text-gray-400">
-						<span>Ctrl+Space for suggestions • Tab to accept</span>
+					<div class="hidden sm:flex items-center text-xs text-gray-500 dark:text-gray-400">
+						<span>Ctrl+Space for suggestions, Tab to accept</span>
 					</div>
 				{/if}
 			</div>
 		{/if}
 		<div
-			class="border-2 border-gray-800 w-full rounded-lg overflow-hidden"
+			class="border border-gray-300 dark:border-gray-700 w-full overflow-hidden {hasToolbar
+				? 'rounded-b-md'
+				: 'rounded-md'}"
 			class:flex-1={isExpanded}
 			class:flex={isExpanded}
 			class:flex-col={isExpanded}
@@ -355,18 +360,11 @@
 			{/if}
 		</div>
 	</div>
-	{#if placeholder}
+	{#if placeholder && showExample}
 		<div class="mt-2">
-			<button
-				type="button"
-				on:click={() => (showExample = !showExample)}
-				class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline focus:outline-none transition-colors duration-200"
-			>
-				{showExample ? 'Hide' : 'Show'} example
-			</button>
 			{#if showExample}
 				<div
-					class="mt-2 p-3 bg-gray-900 dark:bg-black border border-gray-600 dark:border-gray-700 rounded-md transition-colors duration-200"
+					class="p-3 bg-gray-900 dark:bg-black border border-gray-600 dark:border-gray-700 rounded-md transition-colors duration-200"
 				>
 					<div class="flex justify-between items-start mb-2">
 						<span
@@ -376,7 +374,7 @@
 						<button
 							type="button"
 							on:click={loadExample}
-							class="text-xs text-blue-400 dark:text-blue-300 hover:text-blue-300 dark:hover:text-blue-200 underline transition-colors duration-200"
+							class="pc-focus rounded-sm text-xs text-highlight-blue hover:underline"
 						>
 							Load example
 						</button>

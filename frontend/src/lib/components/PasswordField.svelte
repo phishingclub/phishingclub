@@ -1,6 +1,6 @@
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
-	import ToolTip from './ToolTip.svelte';
+	import FieldLabel from './form/FieldLabel.svelte';
 
 	// use like <PasswordField bind:bindTo={varYouWantToBindTheInputFieldTo} />
 	export let bindTo = null;
@@ -14,6 +14,8 @@
 	export let minLength = null;
 	export let maxLength = null;
 	export let id = null;
+	/** @type {'medium'|'large'|'full'} */
+	export let width = 'medium';
 
 	let parentForm = null;
 	let parentFormResetListener = null;
@@ -41,43 +43,18 @@
 			parentForm.removeEventListener('reset', parentFormResetListener);
 		}
 	});
-	var handleClick = (e) => {
-		e.preventDefault();
-		// if this is a key event and the key is not enter
-		if (e.key && (e.key === 'Enter' || e.key === ' ')) {
-			viewPassword = !viewPassword;
-			return;
-		}
-		// bug - this fixes a bug where if a user
-		// clicks enter inside the button field, the password is shown
-		if (e.target.tagName === 'BUTTON') {
-			return;
-		}
+	const toggleView = () => {
 		viewPassword = !viewPassword;
 	};
 </script>
 
-<label class="flex flex-col py-2 w-60">
-	<div class="flex items-center">
-		<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
-			<slot />
-		</p>
-		{#if toolTipText.length > 0}
-			<ToolTip>
-				{toolTipText}
-			</ToolTip>
-		{/if}
-		{#if optional === true}
-			<div
-				class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-			>
-				<p class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200">
-					optional
-				</p>
-			</div>
-		{/if}
-	</div>
-	<div class="relative flex items-center justify-end">
+<label
+	class="flex flex-col py-2 w-full"
+	class:sm:w-60={width === 'medium'}
+	class:sm:w-80={width === 'large'}
+>
+	<FieldLabel {toolTipText} {optional}><slot /></FieldLabel>
+	<div class="relative flex items-center">
 		{#if viewPassword}
 			<input
 				{id}
@@ -90,7 +67,7 @@
 				minlength={minLength}
 				maxlength={maxLength}
 				{required}
-				class="text-ellipsis w-60 rounded-md py-2 pl-4 pr-12 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+				class="text-ellipsis w-full rounded-md py-2 pl-3 pr-11 text-slate-800 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 border border-transparent dark:border-gray-700 font-normal transition-colors duration-200 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30"
 			/>
 		{:else}
 			<input
@@ -104,27 +81,23 @@
 				{placeholder}
 				autocomplete="off"
 				{required}
-				class="text-ellipsis w-60 rounded-md py-2 pl-4 pr-12 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
+				class="text-ellipsis w-full rounded-md py-2 pl-3 pr-11 text-slate-800 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 border border-transparent dark:border-gray-700 font-normal transition-colors duration-200 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30"
 			/>
 		{/if}
 		<button
-			class="absolute w-8 mr-2 hover:opacity-70 transition-opacity duration-200"
-			on:click={handleClick}
-			on:keyup={handleClick}
+			type="button"
+			aria-label={viewPassword ? 'Show value' : 'Hide value'}
+			aria-pressed={!viewPassword}
+			title={viewPassword ? 'Show value' : 'Hide value'}
+			class="absolute right-1 inline-flex h-8 w-8 items-center justify-center rounded-md opacity-60 hover:opacity-100 focus:outline-none focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue transition-opacity duration-200"
+			on:click|preventDefault={toggleView}
 		>
-			{#if viewPassword}
-				<img
-					src="/view.svg"
-					alt="view"
-					class="dark:filter dark:brightness-0 dark:invert transition-all duration-200"
-				/>
-			{:else}
-				<img
-					src="/toggle-view.svg"
-					alt="toggle view"
-					class="dark:filter dark:brightness-0 dark:invert transition-all duration-200"
-				/>
-			{/if}
+			<img
+				src={viewPassword ? '/view.svg' : '/toggle-view.svg'}
+				alt=""
+				aria-hidden="true"
+				class="w-6 h-auto dark:filter dark:brightness-0 dark:invert"
+			/>
 		</button>
 	</div>
 </label>

@@ -45,6 +45,56 @@
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import VimToggle from '$lib/components/editor/VimToggle.svelte';
 	import FormButton from '$lib/components/FormButton.svelte';
+	import PasswordField from '$lib/components/PasswordField.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import FormSection from '$lib/components/form/FormSection.svelte';
+
+	const requestHeadersPlaceholder = [
+		'Content-Type: application/json',
+		'Authorization: Bearer {{.APIKey}}',
+		'X-Custom-Header: Hello Friend'
+	].join('\n');
+
+	const requestBodyPlaceholder = JSON.stringify(
+		{
+			to: '{{.Email}}',
+			from: '{{.FromEmail}}',
+			fromName: '{{.FromName}}',
+			subject: '{{.Subject}}',
+			body: '{{.Content}}',
+			recipientInfo: {
+				firstName: '{{.FirstName}}',
+				lastName: '{{.LastName}}',
+				email: '{{.Email}}',
+				phone: '{{.Phone}}',
+				position: '{{.Position}}',
+				department: '{{.Department}}',
+				city: '{{.City}}',
+				country: '{{.Country}}',
+				extraIdentifier: '{{.ExtraIdentifier}}',
+				misc: '{{.Misc}}'
+			},
+			campaignInfo: {
+				url: '{{.URL}}',
+				baseUrl: '{{.BaseURL}}',
+				trackingUrl: '{{.TrackingURL}}',
+				tracker: '{{.Tracker}}'
+			},
+			apiSenderInfo: {
+				apiKey: '{{.APIKey}}',
+				customField1: '{{.CustomField1}}',
+				customField2: '{{.CustomField2}}',
+				customField3: '{{.CustomField3}}',
+				customField4: '{{.CustomField4}}'
+			}
+		},
+		null,
+		2
+	);
+
+	// methods accepted by the server
+	const httpMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD', 'TRACE', 'CONNECT'];
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -459,7 +509,7 @@
 		sortable={['Name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!apiSenders.length}
 		hasNextPage={apiSendersHasNextPage}
-		plural="api senders"
+		plural="API senders"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}
 	>
@@ -472,7 +522,7 @@
 						on:change={() => selection.toggle(apiSender.id)}
 					/>
 				{/if}
-				<TableCell>
+				<TableCell wrap>
 					<button
 						on:click={() => {
 							openEditModal(apiSender.id);
@@ -499,7 +549,7 @@
 							on:click={() => openCopyModal(apiSender.id)}
 							{...globalButtonDisabledAttributes(apiSender, contextCompanyID)}
 						/>
-						<TableViewButton name="Perform test" on:click={() => openTestModal(apiSender.id)} />
+						<TableViewButton name="Send test" on:click={() => openTestModal(apiSender.id)} />
 						<TableDeleteButton
 							on:click={() => openDeleteAlert(apiSender)}
 							{...globalButtonDisabledAttributes(apiSender, contextCompanyID)}
@@ -509,248 +559,209 @@
 			</TableRow>
 		{/each}
 	</Table>
-	<Modal headerText={modalText} visible={isModalVisible} onClose={closeCreateModal} {isSubmitting}>
-		{#if modalMode === 'update'}
-			<InstalledResourceBadge resourceType="apisender" resourceId={formValues.id} variant="notice" />
-		{/if}
-		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
-			<FormColumns>
-				<FormColumn>
-					<!-- Basic Information Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							Basic Information
-						</h3>
-						<TextField
-							required
-							minLength={1}
-							maxLength={64}
-							bind:value={formValues.name}
-							placeholder="PhishingClub">Name</TextField
-						>
-					</div>
-
-					<!-- API Configuration Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							API Configuration
-						</h3>
-						<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-							<div class="md:col-span-2">
-								<TextField
-									required
-									minLength={1}
-									maxLength={255}
-									type="url"
-									width="full"
-									bind:value={formValues.requestURL}
-									placeholder="https://api.example.com/v1/send">Request URL</TextField
-								>
+	<Modal
+		headerText={modalText}
+		visible={isModalVisible}
+		onClose={closeCreateModal}
+		{isSubmitting}
+		width="lg"
+	>
+		<div class="w-full">
+			<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
+				<FormColumns>
+					<FormColumn stretch>
+						{#if modalMode === 'update'}
+							<div class="w-full">
+								<InstalledResourceBadge resourceType="apisender" resourceId={formValues.id} variant="notice" />
 							</div>
-							<div>
+						{/if}
+						<FormSection title="Basic Information">
+							<div class="w-full">
 								<TextField
+									width="full"
 									required
 									minLength={1}
 									maxLength={64}
-									bind:value={formValues.requestMethod}
-									placeholder="POST">Request Method</TextField
+									bind:value={formValues.name}
+									placeholder="PhishingClub">Name</TextField
 								>
 							</div>
-							<div>
-								<TextField
-									bind:value={formValues.apiKey}
-									minLength={1}
-									maxLength={255}
-									optional={true}
-									toolTipText="Use as {'{{.APIKey}}'}"
-									placeholder="your-api-key">API Key</TextField
-								>
-							</div>
-							<div>
-								<TextFieldSelect
-									id="oauthProvider"
-									bind:value={formValues.oauthProvider}
-									options={oauthProviderMap.values()}
-									optional={true}
-									toolTipText="OAuth provider for token-based authentication. Access token available as {'{{.OAuthAccessToken}}'}"
-									>OAuth Provider (Optional)</TextFieldSelect
-								>
-							</div>
-						</div>
-					</div>
+						</FormSection>
 
-					<!-- Headers and Body Section -->
-					<div class="mb-6 pt-4 pb-2 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							Request Details
-						</h3>
-						<div class="space-y-5">
-							<TextareaField
-								optional={true}
-								height={'medium'}
-								fullWidth
-								bind:value={formValues.requestHeaders}
-								placeholder={`Content-Type: application/json
-Authorization: Bearer {{.APIKey}}
-X-Custom-Header: Hello Friend"
-								`}
-								toolTipText="Each header should be on a new line in the format 'key: value'"
-								>Request Headers</TextareaField
-							>
-							<div class="flex flex-col py-2 w-full">
-								<div class="flex items-center">
-									<p class="font-bold text-slate-600 dark:text-gray-300 py-2">Request Body</p>
-									<div class="bg-gray-100 dark:bg-gray-700 ml-2 px-2 rounded-md">
-										<p class="text-slate-600 dark:text-gray-300 text-xs">optional</p>
-									</div>
+						<FormSection title="API Configuration">
+							<div class="grid grid-cols-1 md:grid-cols-2 gap-x-4">
+								<div class="md:col-span-2">
+									<TextField
+										required
+										minLength={1}
+										maxLength={255}
+										type="url"
+										width="full"
+										bind:value={formValues.requestURL}
+										placeholder="https://api.example.com/v1/send">Request URL</TextField
+									>
 								</div>
-								<SimpleCodeEditor
-									bind:value={formValues.requestBody}
-									height="medium"
-									language="json"
-									showVimToggle={true}
-									showExpandButton={false}
-									placeholder={`{
-  "to": "{{.Email}}",
-  "from": "{{.FromEmail}}",
-  "fromName": "{{.FromName}}",
-  "subject": "{{.Subject}}",
-  "body": "{{.Content}}",
-  "recipientInfo": {
-    "firstName": "{{.FirstName}}",
-    "lastName": "{{.LastName}}",
-    "email": "{{.Email}}",
-    "phone": "{{.Phone}}",
-    "position": "{{.Position}}",
-    "department": "{{.Department}}",
-    "city": "{{.City}}",
-    "country": "{{.Country}}",
-    "extraIdentifier": "{{.ExtraIdentifier}}",
-    "misc": "{{.Misc}}"
-  },
-  "campaignInfo": {
-    "url": "{{.URL}}",
-    "baseUrl": "{{.BaseURL}}",
-    "trackingUrl": "{{.TrackingURL}}",
-    "tracker": "{{.Tracker}}"
-  },
-  "apiSenderInfo": {
-    "apiKey": "{{.APIKey}}",
-    "customField1": "{{.CustomField1}}",
-    "customField2": "{{.CustomField2}}",
-    "customField3": "{{.CustomField3}}",
-    "customField4": "{{.CustomField4}}"
-  }
-}`}
-								/>
+								<div>
+									<TextFieldSelect
+										id="requestMethod"
+										size="full"
+										required
+										bind:value={formValues.requestMethod}
+										options={httpMethods}
+										placeholder="POST">Request Method</TextFieldSelect
+									>
+								</div>
+								<div>
+									<PasswordField
+										width="full"
+										bind:value={formValues.apiKey}
+										minLength={1}
+										maxLength={255}
+										optional={true}
+										toolTipText="Use as {'{{.APIKey}}'}"
+										placeholder="your-api-key">API Key</PasswordField
+									>
+								</div>
+								<div>
+									<TextFieldSelect
+										id="oauthProvider"
+										size="full"
+										bind:value={formValues.oauthProvider}
+										options={oauthProviderMap.values()}
+										optional={true}
+										toolTipText="OAuth provider for token-based authentication. Access token available as {'{{.OAuthAccessToken}}'}"
+										>OAuth Provider</TextFieldSelect
+									>
+								</div>
 							</div>
-						</div>
-					</div>
+						</FormSection>
 
-					<!-- Response Validation Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							Response Validation
-						</h3>
-						<div class="space-y-5">
+						<FormSection title="Request Details">
 							<div>
-								<TextField
-									toolTipText="The HTTP status code that indicates a successful request"
-									required
-									type="number"
-									width="small"
-									bind:value={formValues.expectedResponseStatusCode}
-									placeholder="200">Expected response code</TextField
+								<TextareaField
+									optional={true}
+									height={'medium'}
+									fullWidth
+									bind:value={formValues.requestHeaders}
+									placeholder={requestHeadersPlaceholder}
+									toolTipText="Each header should be on a new line in the format 'key: value'"
+									>Request Headers</TextareaField
 								>
+								<div class="flex flex-col py-2 w-full">
+									<FieldLabel optional>Request Body</FieldLabel>
+									<SimpleCodeEditor
+										bind:value={formValues.requestBody}
+										height="medium"
+										language="json"
+										showVimToggle={true}
+										showExpandButton={false}
+										placeholder={requestBodyPlaceholder}
+									/>
+								</div>
 							</div>
-							<TextareaField
-								bind:value={formValues.expectedResponseHeaders}
-								height={'medium'}
-								fullWidth
-								minLength={1}
-								maxLength={4096}
-								optional
-								toolTipText="Headers must match, values must contain the expected value."
-								placeholder="X-Operation-Status: OK">Header matches</TextareaField
-							>
-							<TextareaField
-								minLength={1}
-								maxLength={4096}
-								height={'medium'}
-								fullWidth
-								optional
-								bind:value={formValues.expectedResponseBody}
-								defaultValue={null}
-								placeholder="message sent"
-								toolTipText="Text that should be present in the response body"
-								>Response contains</TextareaField
-							>
-						</div>
-					</div>
+						</FormSection>
 
-					<!-- Custom Fields Section -->
-					<div class="pt-4 pb-2 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							Custom Fields
-						</h3>
-						<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+						<FormSection title="Response Validation">
 							<div>
-								<TextField
-									bind:value={formValues.customField1}
+								<div>
+									<TextField
+										toolTipText="The HTTP status code that indicates a successful request"
+										required
+										type="number"
+										width="small"
+										bind:value={formValues.expectedResponseStatusCode}
+										placeholder="200">Expected response code</TextField
+									>
+								</div>
+								<TextareaField
+									bind:value={formValues.expectedResponseHeaders}
+									height={'medium'}
+									fullWidth
 									minLength={1}
-									maxLength={255}
-									optional={true}
-									placeholder="Value 1"
-									toolTipText="Use as {'{{.CustomField1}}'}">Custom field 1</TextField
+									maxLength={4096}
+									optional
+									toolTipText="Headers must match, values must contain the expected value."
+									placeholder="e.g. X-Operation-Status: OK">Header matches</TextareaField
+								>
+								<TextareaField
+									minLength={1}
+									maxLength={4096}
+									height={'medium'}
+									fullWidth
+									optional
+									bind:value={formValues.expectedResponseBody}
+									defaultValue={null}
+									placeholder="e.g. message sent"
+									toolTipText="Text that should be present in the response body"
+									>Response contains</TextareaField
 								>
 							</div>
-							<div>
-								<TextField
-									bind:value={formValues.customField2}
-									minLength={1}
-									maxLength={255}
-									optional={true}
-									placeholder="Value 2"
-									toolTipText="Use as {'{{.CustomField2}}'}">Custom field 2</TextField
-								>
+						</FormSection>
+
+						<FormSection title="Custom Fields">
+							<div class="grid grid-cols-1 md:grid-cols-2 gap-x-4">
+								<div>
+									<TextField
+										width="full"
+										bind:value={formValues.customField1}
+										minLength={1}
+										maxLength={255}
+										optional={true}
+										placeholder="Value 1"
+										toolTipText="Use as {'{{.CustomField1}}'}">Custom field 1</TextField
+									>
+								</div>
+								<div>
+									<TextField
+										width="full"
+										bind:value={formValues.customField2}
+										minLength={1}
+										maxLength={255}
+										optional={true}
+										placeholder="Value 2"
+										toolTipText="Use as {'{{.CustomField2}}'}">Custom field 2</TextField
+									>
+								</div>
+								<div>
+									<TextField
+										width="full"
+										bind:value={formValues.customField3}
+										minLength={1}
+										maxLength={255}
+										optional={true}
+										placeholder="Value 3"
+										toolTipText="Use as {'{{.CustomField3}}'}">Custom field 3</TextField
+									>
+								</div>
+								<div>
+									<TextField
+										width="full"
+										bind:value={formValues.customField4}
+										minLength={1}
+										maxLength={255}
+										optional={true}
+										placeholder="Value 4"
+										toolTipText="Use as {'{{.CustomField4}}'}">Custom field 4</TextField
+									>
+								</div>
 							</div>
-							<div>
-								<TextField
-									bind:value={formValues.customField3}
-									minLength={1}
-									maxLength={255}
-									optional={true}
-									placeholder="Value 3"
-									toolTipText="Use as {'{{.CustomField3}}'}">Custom field 3</TextField
-								>
-							</div>
-							<div>
-								<TextField
-									bind:value={formValues.customField4}
-									minLength={1}
-									maxLength={255}
-									optional={true}
-									placeholder="Value 4"
-									toolTipText="Use as {'{{.CustomField4}}'}">Custom field 4</TextField
-								>
-							</div>
-						</div>
-					</div>
-				</FormColumn>
-			</FormColumns>
-			<FormError message={modalError} />
-			<FormFooter closeModal={closeCreateModal} {isSubmitting} />
-		</FormGrid>
+						</FormSection>
+					</FormColumn>
+				</FormColumns>
+				<FormError message={modalError} />
+				<FormFooter closeModal={closeCreateModal} {isSubmitting} />
+			</FormGrid>
+		</div>
 	</Modal>
 
-	<Modal headerText="API Sender Test" visible={isTestModalVisible} onClose={closeTestModal}>
+	<Modal headerText="API sender test" visible={isTestModalVisible} onClose={closeTestModal}>
 		<div
 			class="col-span-3 w-[800px] max-w-full overflow-y-auto px-6 py-4 space-y-6 select-text overflow-x-hidden"
 		>
 			<!-- Test values, empty fields fall back to the defaults -->
 			<form on:submit|preventDefault={runTest}>
 				<div class="pt-4 pb-2 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Test values</h3>
+					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">Test values</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<TextField
 							type="email"
@@ -845,7 +856,7 @@ X-Custom-Header: Hello Friend"
 				{#if !testResponse.error}
 				<!-- Successful Test -->
 				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">
 						Request Details
 					</h3>
 					<div
@@ -859,7 +870,7 @@ X-Custom-Header: Hello Friend"
 				</div>
 
 				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">
 						Request Headers
 					</h3>
 					<div
@@ -875,7 +886,7 @@ X-Custom-Header: Hello Friend"
 				</div>
 
 				<div class="pt-4 pb-2 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Request Body</h3>
+					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">Request Body</h3>
 					<div
 						class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 					>
@@ -889,7 +900,7 @@ X-Custom-Header: Hello Friend"
 				</div>
 				<!-- response -->
 				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">
 						Response Status
 					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -897,14 +908,13 @@ X-Custom-Header: Hello Friend"
 							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 						>
 							<div class="text-sm font-medium mb-1">Received:</div>
-							<div
-								class={testResponse.response?.code ==
-								testResponse.apiSender?.expectedResponseStatusCode
-									? 'text-green-600 font-medium'
-									: 'text-red-600 font-medium'}
+							<StatusBadge
+								tone={testResponse.response?.code == testResponse.apiSender?.expectedResponseStatusCode
+									? 'success'
+									: 'danger'}
 							>
 								{testResponse.response?.code}
-							</div>
+							</StatusBadge>
 						</div>
 						<div
 							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
@@ -916,7 +926,7 @@ X-Custom-Header: Hello Friend"
 				</div>
 
 				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">
 						Response Headers
 					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -946,7 +956,7 @@ X-Custom-Header: Hello Friend"
 				</div>
 
 				<div class="pt-4 pb-2 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">Response Body</h3>
+					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">Response Body</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 						<div
 							class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
@@ -975,7 +985,7 @@ X-Custom-Header: Hello Friend"
 			{:else}
 				<!-- Error Case -->
 				<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-					<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
+					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">
 						Request Details
 					</h3>
 					<div
@@ -988,9 +998,13 @@ X-Custom-Header: Hello Friend"
 					</div>
 				</div>
 				<div class="pt-4 pb-2 w-full">
-					<h3 class="text-base font-medium text-red-600 mb-3">Error</h3>
-					<div class="p-4 bg-red-50 rounded-md border border-red-200 overflow-hidden">
-						<div class="text-red-600 whitespace-pre-wrap break-words">{testResponse.error}</div>
+					<h3 class="text-lg font-semibold text-red-600 dark:text-red-400 mb-3">Error</h3>
+					<div
+						class="p-4 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-800 overflow-hidden"
+					>
+						<div class="text-red-600 dark:text-red-400 whitespace-pre-wrap break-words">
+							{testResponse.error}
+						</div>
 					</div>
 				</div>
 				{/if}
@@ -1012,8 +1026,8 @@ X-Custom-Header: Hello Friend"
 	</Modal>
 	<DeleteAlert
 		list={[
-			'Templates using this api sender will become unusable',
-			'Scheduled or active campaigns using this api sender will be closed'
+			'Templates using this API sender will become unusable',
+			'Scheduled or active campaigns using this API sender will be closed'
 		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
@@ -1022,8 +1036,8 @@ X-Custom-Header: Hello Friend"
 	<DeleteAlert
 		title="Delete API senders"
 		list={[
-			'Templates using these api senders will become unusable',
-			'Scheduled or active campaigns using these api senders will be closed'
+			'Templates using these API senders will become unusable',
+			'Scheduled or active campaigns using these API senders will be closed'
 		]}
 		name={`${$selection.size} API sender${$selection.size === 1 ? '' : 's'}`}
 		onClick={onClickBulkDelete}

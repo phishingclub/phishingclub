@@ -3,6 +3,7 @@
 	import { api } from '$lib/api/apiProxy.js';
 	import { addToast } from '$lib/store/toast';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading';
 
@@ -13,11 +14,13 @@
 	const meta = {
 		geoip: {
 			title: 'Geo IP Data',
-			blurb: 'Maps visitor IPs to a country for country filters. Built in, download to refresh.'
+			blurb: 'Maps visitor IPs to a country for country filters.',
+			hint: 'Built in, download to refresh.'
 		},
 		asn: {
 			title: 'ASN Data',
-			blurb: 'Maps visitor IPs to their network operator for ASN filters. Download to enable.'
+			blurb: 'Maps visitor IPs to their network operator for ASN filters.',
+			hint: 'Download to enable.'
 		}
 	};
 
@@ -95,38 +98,34 @@
 {#if loaded}
 	<div class="flex flex-wrap gap-6">
 		{#each packages as p (p.kind)}
-			<SettingsCard title={meta[p.kind]?.title || p.kind}>
-				<div class="space-y-4">
-					<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-						{meta[p.kind]?.blurb || ''}
-					</p>
+			<SettingsCard
+				title={meta[p.kind]?.title || p.kind}
+				description={[
+					meta[p.kind]?.blurb || '',
+					!(p.info && p.info.downloaded) && meta[p.kind]?.hint ? meta[p.kind].hint : ''
+				]
+					.filter(Boolean)
+					.join(' ')}
+			>
+				<div class="mt-2 space-y-4">
 					<div class="space-y-1">
-						<p
-							class="text-sm font-medium transition-colors duration-200"
-							class:text-green-600={p.info && p.info.downloaded}
-							class:dark:text-green-400={p.info && p.info.downloaded}
-							class:text-gray-500={!(p.info && p.info.downloaded)}
-							class:dark:text-gray-400={!(p.info && p.info.downloaded)}
-						>
+						<div class="flex flex-wrap items-center gap-2">
+							<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
 							{#if p.info && p.info.downloaded}
-								Downloaded
+								<StatusBadge tone="success">Downloaded</StatusBadge>
 							{:else if p.info}
-								Built in
+								<StatusBadge tone="warning">Built in</StatusBadge>
 							{:else}
-								Not downloaded
+								<StatusBadge tone="neutral">Not downloaded</StatusBadge>
 							{/if}
-						</p>
+							{#if p.updateAvailable}
+								<StatusBadge tone="info">Update available</StatusBadge>
+							{/if}
+						</div>
 						{#if p.info}
 							<p class="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-200">
 								{#if p.info.created}{fmtDate(p.info.created)} ·
 								{/if}{(p.info.ipv4Prefixes + p.info.ipv6Prefixes).toLocaleString()} prefixes
-							</p>
-						{/if}
-						{#if p.updateAvailable}
-							<p
-								class="text-sm text-cta-blue dark:text-highlight-blue transition-colors duration-200"
-							>
-								Update available
 							</p>
 						{/if}
 					</div>
@@ -145,15 +144,19 @@
 					<div class="flex gap-3">
 						{#if p.info && p.info.downloaded}
 							<Button
-								size="medium"
-								backgroundColor="bg-red-600"
+								size="large"
+								variant="danger-outline"
 								disabled={busy[p.kind]}
 								on:click={() => remove(p.kind)}
 							>
 								Remove
 							</Button>
 						{/if}
-						<Button size="medium" disabled={busy[p.kind]} on:click={() => download(p.kind)}>
+						<Button
+							size="large"
+							disabled={busy[p.kind]}
+							on:click={() => download(p.kind)}
+						>
 							{p.info && p.info.downloaded ? 'Update' : 'Download'}
 						</Button>
 					</div>

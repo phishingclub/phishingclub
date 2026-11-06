@@ -1,5 +1,4 @@
 <script>
-	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { branding, loadBranding, headerLogoSrc, brandingDisplayFor, BRANDING_SLOT } from '$lib/store/branding';
 	import BrandingImage from '$lib/components/BrandingImage.svelte';
@@ -9,27 +8,17 @@
 	$: display = brandingDisplayFor($branding, BRANDING_SLOT.headerLogo);
 </script>
 
-<div
-	on:click={() => goto('/dashboard/')}
-	on:keydown={(e) => e.key === 'Enter' && goto('/dashboard/')}
-	tabindex="0"
-	role="button"
-	class="flex items-center w-40 sm:w-40 md:w-42 lg:w-56 justify-center py-4 my-6 ml-4 cursor-pointer"
+<a
+	href="/dashboard/"
+	aria-label="Go to dashboard"
+	class="logo-link flex items-center min-w-0 w-32 sm:w-40 lg:w-56 justify-center py-2 ml-3 sm:ml-4 rounded pc-focus-dark"
 >
 	<BrandingImage src={logoSrc} alt="logo" {display} ready={$branding.loaded} boxClass="h-12 w-full rounded" />
-</div>
+</a>
 
 <style>
-	div {
+	.logo-link,
+	.logo-link:hover {
 		background: none !important;
-	}
-	div:hover {
-		background: none !important;
-		background-color: transparent !important;
-	}
-	div:focus {
-		background: none !important;
-		background-color: transparent !important;
-		outline: none !important;
 	}
 </style>

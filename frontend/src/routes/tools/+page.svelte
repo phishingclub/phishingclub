@@ -2,21 +2,28 @@
 	import { onMount } from 'svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import Headline from '$lib/components/Headline.svelte';
+	import TabBar from '$lib/components/TabBar.svelte';
 	import JA4Builder from './panels/JA4Builder.svelte';
 	import CalendarBuilder from './panels/CalendarBuilder.svelte';
 	import GeoIP from './panels/GeoIP.svelte';
 	import ASN from './panels/ASN.svelte';
 
 	const tabs = [
-		{ id: 'calendar', label: 'Calendar Invitation Builder', component: CalendarBuilder },
-		{ id: 'ja4', label: 'JA4 Fingerprint Builder', component: JA4Builder },
-		{ id: 'geoip', label: 'GeoIP Lookup', component: GeoIP },
-		{ id: 'asn', label: 'ASN Lookup', component: ASN }
+		{
+			id: 'calendar',
+			label: 'Calendar Invitation',
+			component: CalendarBuilder,
+			doc: ['attachments', 'calendar-invites']
+		},
+		{ id: 'ja4', label: 'JA4 Fingerprint', component: JA4Builder, doc: ['filtering', 'ja4-fingerprints'] },
+		{ id: 'geoip', label: 'Geo IP Lookup', component: GeoIP, doc: ['filtering', 'geoip-asn'] },
+		{ id: 'asn', label: 'ASN Lookup', component: ASN, doc: ['filtering', 'geoip-asn'] }
 	];
 
 	let active = 'calendar';
 
-	$: ActiveComponent = (tabs.find((t) => t.id === active) || tabs[0]).component;
+	$: activeTab = tabs.find((t) => t.id === active) || tabs[0];
+	$: ActiveComponent = activeTab.component;
 
 	onMount(() => {
 		const hash = window.location.hash.replace('#', '');
@@ -33,25 +40,12 @@
 
 <HeadTitle title="Tools" />
 <main class="pb-8">
-	<Headline>Tools</Headline>
+	<!-- the guide has no tools page, so help links to where each tool is described -->
+	<Headline docSlug={activeTab.doc[0]} docAnchor={activeTab.doc[1]}>Tools</Headline>
 
-	<nav class="mt-4 mb-6 border-b border-gray-200 dark:border-gray-700">
-		<div class="flex">
-			{#each tabs as tab}
-				<button
-					on:click={() => selectTab(tab.id)}
-					class="px-6 py-3 text-sm font-medium border-b-2 transition-colors
-						{active === tab.id
-						? 'border-cta-blue dark:border-highlight-blue text-cta-blue dark:text-highlight-blue'
-						: 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'}"
-				>
-					{tab.label}
-				</button>
-			{/each}
-		</div>
-	</nav>
+	<TabBar items={tabs} {active} label="Tools" on:select={(e) => selectTab(e.detail)} />
 
-	<div class="max-w-7xl">
+	<div>
 		<svelte:component this={ActiveComponent} />
 	</div>
 </main>

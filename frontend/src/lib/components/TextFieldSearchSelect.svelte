@@ -1,6 +1,6 @@
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
-	import ToolTip from './ToolTip.svelte';
+	import FieldLabel from './form/FieldLabel.svelte';
 
 	export let id;
 	// bind a element to this component input field
@@ -11,6 +11,8 @@
 	export let options = [];
 	export let toolTipText = '';
 	export let placeholder = '';
+	// 'medium' is a fixed width from sm, 'full' fills the parent
+	export let width = 'medium';
 
 	// (string) => void
 	export let onKeyUp;
@@ -68,22 +70,12 @@
 	});
 </script>
 
-<label class="flex flex-col py-2 relative">
-	<div class="flex items-center">
-		<p
-			class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
-		>
-			<slot />
-		</p>
-		{#if toolTipText.length > 0}
-			<ToolTip>
-				{toolTipText}
-			</ToolTip>
-		{/if}
-	</div>
-</label>
-<div class="relative">
-		<div class="flex items-center relative w-60">
+<div class="flex flex-col py-2 w-full {width === 'full' ? '' : 'sm:w-auto'}">
+	<label for={id} class="flex flex-col relative">
+		<FieldLabel {toolTipText}><slot /></FieldLabel>
+	</label>
+	<div class="relative">
+		<div class="flex items-center relative w-full {width === 'full' ? '' : 'sm:w-60'}">
 			<input
 				type="text"
 				{placeholder}
@@ -98,24 +90,30 @@
 				on:keyup={_onKeyUp}
 				on:click|stopPropagation={() => {}}
 				autocomplete="off"
-				class="w-full relative rounded-md py-2 pl-4 focus:pl-10 text-gray-600 dark:text-gray-100 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
+				class="w-full relative rounded-md py-2 {showSelection ? 'pl-10' : 'pl-3'} pr-10 text-slate-800 dark:text-gray-300 bg-grayblue-light dark:bg-gray-900/60 border border-transparent dark:border-gray-700 font-normal cursor-pointer focus:cursor-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30"
 				{id}
 				{required}
 			/>
 			{#if showSelection}
-				<img class="absolute w-4 left-4" src="/search-icon.svg" alt="search" />
+				<img class="absolute w-4 left-4" src="/search-icon.svg" alt="" aria-hidden="true" />
 			{/if}
-			<img class="absolute pointer-events-none w-4 right-4" src="/arrow.svg" alt="drop down" />
+			<img
+				class="absolute pointer-events-none w-4 right-4"
+				src="/arrow.svg"
+				alt=""
+				aria-hidden="true"
+			/>
 		</div>
 		{#if options.length && showSelection}
-			<div class="w-96 absolute top-10 z-50">
+			<div class="w-full {width === 'full' ? '' : 'sm:w-96'} absolute top-10 z-50">
 				<ul
-					class="bg-gray-100 dark:bg-gray-700 list-none mt-4 rounded-md min-w-fit shadow-md dark:shadow-gray-900/50 border border-gray-200 dark:border-gray-600 max-h-40 overflow-y-scroll transition-colors duration-200"
+					class="bg-gray-100 dark:bg-gray-900 list-none mt-4 rounded-md min-w-fit shadow-md dark:shadow-gray-900/50 border border-gray-200 dark:border-gray-700/60 max-h-40 overflow-y-auto transition-colors duration-200"
 				>
 					{#each options as option}
 						<li class="break-words">
 							<button
-								class="w-full text-left bg-slate-100 dark:bg-gray-700 rounded-md text-gray-600 dark:text-gray-200 hover:bg-grayblue-dark dark:hover:bg-gray-600 hover:text-white py-2 px-2 cursor-pointer transition-colors duration-200"
+								type="button"
+								class="w-full text-left bg-slate-100 dark:bg-gray-900 rounded-md text-gray-600 dark:text-gray-300 hover:bg-grayblue-dark dark:hover:bg-highlight-blue/40 hover:text-white focus:bg-grayblue-dark dark:focus:bg-highlight-blue/40 focus:text-white focus:outline-none py-2 px-2 cursor-pointer transition-colors duration-200"
 								on:click|preventDefault={() => {
 									value = '';
 									showSelection = false;
@@ -130,3 +128,4 @@
 			</div>
 		{/if}
 	</div>
+</div>

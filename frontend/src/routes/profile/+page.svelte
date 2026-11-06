@@ -4,6 +4,8 @@
 	import { onMount } from 'svelte';
 	import { UserService } from '$lib/service/user';
 	import FormButton from '$lib/components/FormButton.svelte';
+	import SettingsCard from '$lib/components/SettingsCard.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import Form from '$lib/components/Form.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import SubHeadline from '$lib/components/SubHeadline.svelte';
@@ -21,6 +23,11 @@
 	import Alert from '$lib/components/Alert.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import { onClickCopy } from '$lib/utils/common';
+
+	// same footer row as SettingsCard so profile and settings buttons line up
+	const footerClass = 'mt-auto pt-6 flex justify-end';
+	const noteClass =
+		'bg-gray-50 dark:bg-gray-900/40 p-4 rounded-md text-sm text-gray-600 dark:text-gray-300';
 
 	// services
 	const userService = UserService.instance;
@@ -356,18 +363,11 @@
 	{#if isInitiallyLoaded}
 		<div class="max-w-7xl pt-4 space-y-8">
 			<!-- Profile and Password Section -->
-			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-				<!-- Profile Settings -->
-				<div
-					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
-				>
-					<h2
-						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
-					>
-						Account Details
-					</h2>
+			<div class="flex flex-wrap gap-6">
+				<SettingsCard title="Account Details" description="Your username and display name.">
 					<Form
 						fullHeight
+						fullWidth
 						on:submit={async () => {
 							const res = await Promise.all([onClickChangeUsername(), onClickChangeFullname()]);
 							if (res.some((r) => !r)) {
@@ -377,167 +377,150 @@
 							addToast('Profile updated', 'Success');
 						}}
 					>
-						<div class="flex flex-col h-full">
-							<div>
-								<TextField
-									required
-									minLength={1}
-									maxLength={64}
-									pattern="[a-zA-Z0-9]+"
-									bind:value={changeUsernameFormValues.username}>Username</TextField
-								>
-								<TextField
-									required
-									minLength={1}
-									maxLength={64}
-									bind:value={changeNameFormValues.fullname}>Name</TextField
-								>
-								<FormError message={changeUsernameError} />
-								<FormError message={changeNameError} />
-							</div>
-							<div class="mt-auto pt-4 flex">
-								<FormButton size={'large'}>Save Changes</FormButton>
-							</div>
+						<div>
+							<TextField
+								required
+								minLength={1}
+								maxLength={64}
+								width="full"
+								pattern="[a-zA-Z0-9]+"
+								bind:value={changeUsernameFormValues.username}>Username</TextField
+							>
+							<TextField
+								required
+								minLength={1}
+								maxLength={64}
+								width="full"
+								bind:value={changeNameFormValues.fullname}>Name</TextField
+							>
+							<FormError message={changeUsernameError} />
+							<FormError message={changeNameError} />
+						</div>
+						<div class={footerClass}>
+							<FormButton size={'large'}>Save Changes</FormButton>
 						</div>
 					</Form>
-				</div>
+				</SettingsCard>
 
-				<!-- Password Settings -->
-				<div
-					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
+				<SettingsCard
+					title="Password Settings"
+					description={hasPassword ? 'Change the password you sign in with.' : ''}
 				>
-					<h2
-						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
-					>
-						Password Settings
-					</h2>
 					{#if hasPassword}
-						<Form on:submit={onClickChangePassword}>
-							<div class="flex flex-col h-full">
-								<div>
-									<PasswordField
-										required
-										minLength={16}
-										maxLength={64}
-										bind:value={changePasswordFormValues.currentPassword}
-										>Current password</PasswordField
-									>
-									<PasswordField
-										required
-										minLength={16}
-										maxLength={64}
-										bind:value={changePasswordFormValues.newPassword}>New password</PasswordField
-									>
-									<PasswordField
-										minLength={16}
-										maxLength={64}
-										required
-										bind:value={changePasswordFormValues.repeatNewPassword}
-										>Repeat new password</PasswordField
-									>
-									<FormError message={changePasswordError} />
-								</div>
-								<div class="mt-auto pt-4 flex">
-									<FormButton size={'large'}>Update Password</FormButton>
-								</div>
+						<Form fullHeight fullWidth on:submit={onClickChangePassword}>
+							<div>
+								<PasswordField
+									required
+									minLength={16}
+									maxLength={64}
+									width="full"
+									bind:value={changePasswordFormValues.currentPassword}
+									>Current password</PasswordField
+								>
+								<PasswordField
+									required
+									minLength={16}
+									maxLength={64}
+									width="full"
+									bind:value={changePasswordFormValues.newPassword}>New password</PasswordField
+								>
+								<PasswordField
+									minLength={16}
+									maxLength={64}
+									required
+									width="full"
+									bind:value={changePasswordFormValues.repeatNewPassword}
+									>Repeat new password</PasswordField
+								>
+								<FormError message={changePasswordError} />
+							</div>
+							<div class={footerClass}>
+								<FormButton size={'large'}>Update Password</FormButton>
 							</div>
 						</Form>
 					{:else}
-						<div
-							class="bg-gray-50 dark:bg-gray-800 p-4 rounded-md text-gray-600 dark:text-gray-300"
-						>
-							This account has no password set and signs in via SSO.
-						</div>
+						<p class={noteClass}>This account has no password set and signs in via SSO.</p>
 					{/if}
-				</div>
-				<!-- MFA Section -->
-				<div
-					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
+				</SettingsCard>
+
+				<SettingsCard
+					title="Multi-Factor Authentication"
+					description={!hasPassword
+						? ''
+						: isMFAEnabled
+							? 'Sign in asks for a code from your authenticator app.'
+							: 'Confirm your password to set up an authenticator app.'}
 				>
-					<h2
-						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
-					>
-						Multi-Factor Authentication
-					</h2>
 					{#if hasPassword}
 						{#if isMFAEnabled}
-							<div class="flex flex-col h-full pt-5 w-60">
-								<div class="flex items-center justify-between bg-green-50 p-4 rounded-md">
-									<div class="flex items-center">
-										<div class="w-2 h-2 bg-green-500 rounded-full mr-3" />
-										<span class="text-green-700 font-medium">MFA is currently enabled</span>
-									</div>
-								</div>
-								<div class="mt-auto pt-4 flex">
-									<FormButton
-										size={'large'}
-										on:click={() => {
-											isDisableMFAModalVisible = true;
-										}}>Disable MFA</FormButton
-									>
-								</div>
+							<div class="flex items-center gap-2 mt-2">
+								<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
+								<StatusBadge tone="success">MFA is enabled</StatusBadge>
+							</div>
+							<div class={footerClass}>
+								<Button
+									size={'large'}
+									type="button"
+									variant="danger-outline"
+									on:click={() => {
+										isDisableMFAModalVisible = true;
+									}}>Disable MFA</Button
+								>
 							</div>
 						{:else}
-							<Form on:submit={onClickSetupTOTPMFA} fullHeight>
-								<div class="flex flex-col h-full">
-									<div>
-										<PasswordField
-											required
-											minLength={16}
-											maxLength={64}
-											bind:value={mfaSetupFormValues.password}>Password</PasswordField
-										>
-										<FormError message={mfaSetupError} />
+							<Form on:submit={onClickSetupTOTPMFA} fullHeight fullWidth>
+								<div>
+									<div class="flex items-center gap-2 mt-2 mb-2">
+										<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
+										<StatusBadge tone="warning">MFA is not enabled</StatusBadge>
 									</div>
-									<div class="mt-auto pt-4 flex">
-										<FormButton size={'large'}>Setup MFA</FormButton>
-									</div>
+									<PasswordField
+										required
+										minLength={16}
+										maxLength={64}
+										width="full"
+										bind:value={mfaSetupFormValues.password}>Password</PasswordField
+									>
+									<FormError message={mfaSetupError} />
+								</div>
+								<div class={footerClass}>
+									<FormButton size={'large'}>Set up MFA</FormButton>
 								</div>
 							</Form>
 						{/if}
 					{:else}
-						<div
-							class="bg-gray-50 dark:bg-gray-800 p-4 rounded-md text-gray-600 dark:text-gray-300"
-						>
-							MFA is managed through your SSO provider.
-						</div>
+						<p class={noteClass}>MFA is managed through your SSO provider.</p>
 					{/if}
-				</div>
+				</SettingsCard>
 
-				<!-- API Key Section -->
-				<div
-					class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 min-h-[300px] flex flex-col transition-colors duration-200"
-				>
-					<h2
-						class="text-xl font-semibold text-gray-700 dark:text-gray-200 mb-6 transition-colors duration-200"
-					>
-						API Access
-					</h2>
-					<Form fullHeight on:submit={onClickCreateAPIKey}>
-						<div class="flex flex-col h-full">
-							{#if !!apiKey.length}
-								<div>
-									<TextField readonly bind:value={apiKey}>
-										Access key {apiKey.length ? '(masked)' : ''}
-									</TextField>
-									<FormError message={apiKeyError} />
-								</div>
-								<div class="mt-auto pt-4">
-									<Button size={'large'} on:click={openShowRemoveAPIKeyModal}>Delete Key</Button>
-								</div>
-							{:else}
-								<div
-									class="bg-gray-50 dark:bg-gray-800 p-4 rounded-md text-gray-600 dark:text-gray-300 mb-4"
+				<SettingsCard title="API Access">
+					<Form fullHeight fullWidth on:submit={onClickCreateAPIKey}>
+						{#if !!apiKey.length}
+							<div>
+								<TextField readonly width="full" bind:value={apiKey}>
+									Access key {apiKey.length ? '(masked)' : ''}
+								</TextField>
+								<FormError message={apiKeyError} />
+							</div>
+							<div class={footerClass}>
+								<Button
+									size={'large'}
+									variant="danger-outline"
+									type="button"
+									on:click={openShowRemoveAPIKeyModal}>Delete Key</Button
 								>
-									No API key currently exists.
-								</div>
-								<div class="mt-auto pt-4">
-									<FormButton size={'large'}>Create API Key</FormButton>
-								</div>
-							{/if}
-						</div>
+							</div>
+						{:else}
+							<p class="mb-3 text-sm text-gray-600 dark:text-gray-300">
+								An API key lets scripts and integrations call the API with your permissions.
+							</p>
+							<p class={noteClass}>No API key exists.</p>
+							<div class={footerClass}>
+								<FormButton size={'large'}>Create API Key</FormButton>
+							</div>
+						{/if}
 					</Form>
-				</div>
+				</SettingsCard>
 			</div>
 		</div>
 		<!-- Modals -->
@@ -610,10 +593,10 @@
 									<button
 										type="button"
 										on:click|preventDefault={() => onClickCopy(mfaValues.totpCode)}
-										class="flex items-center bg-gray-100 hover:bg-gray-200 py-2 px-4 rounded-md text-gray-700 transition-colors"
+										class="pc-focus flex items-center bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 py-2 px-4 rounded-md text-gray-700 dark:text-gray-100 transition-colors"
 									>
 										<span class="totp-code font-mono">{mfaValues.totpCode}</span>
-										<img class="ml-2 w-4 h-4" src="/icon-copy.svg" alt="copy code" />
+										<img class="ml-2 w-4 h-4 invert dark:invert-0" src="/icon-copy.svg" alt="copy code" />
 									</button>
 								</div>
 
@@ -642,13 +625,8 @@
 					<FormColumns>
 						<FormColumn>
 							<div class="space-y-6 w-full">
-								<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
-									<div class="flex items-center">
-										<div class="w-2 h-2 bg-green-500 rounded-full mr-3" />
-										<span class="text-gray-900 dark:text-white font-medium"
-											>MFA Setup Successful</span
-										>
-									</div>
+								<div>
+									<StatusBadge tone="success">MFA Setup Successful</StatusBadge>
 								</div>
 
 								<div>
@@ -661,10 +639,10 @@
 									</p>
 									<button
 										on:click|preventDefault={() => onClickCopy(mfaValues.totpRecoveryCode)}
-										class="flex items-center bg-gray-100 hover:bg-gray-200 py-3 px-4 rounded-md text-gray-700 w-full mb-4 transition-colors"
+										class="pc-focus flex items-center bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 py-3 px-4 rounded-md text-gray-700 dark:text-gray-100 w-full mb-4 transition-colors"
 									>
 										<span class="totp-recoveryCode font-mono">{mfaValues.totpRecoveryCode}</span>
-										<img class="ml-2 w-4 h-4" src="/icon-copy.svg" alt="copy code" />
+										<img class="ml-2 w-4 h-4 invert dark:invert-0" src="/icon-copy.svg" alt="copy code" />
 									</button>
 
 									<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md mb-6">

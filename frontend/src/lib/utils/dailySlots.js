@@ -304,9 +304,9 @@ export const dailySlotsFromCampaign = (campaign) => {
 // an instant as date and time in a zone, e.g. "11/16/2026, 9:00:00 AM"
 export const formatInZone = (instant, timeZone) => {
 	try {
-		return new Date(instant).toLocaleString(undefined, { timeZone });
+		return new Date(instant).toLocaleString(undefined, { timeZone, dateStyle: 'short', timeStyle: 'short' });
 	} catch (e) {
-		return new Date(instant).toLocaleString();
+		return new Date(instant).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
 	}
 };
 

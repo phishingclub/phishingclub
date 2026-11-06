@@ -6,6 +6,7 @@
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
+	import PasswordField from '$lib/components/PasswordField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
@@ -19,6 +20,8 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
+	import Button from '$lib/components/Button.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
@@ -224,8 +227,8 @@
 			}
 			const res = await api.webhook.test(id);
 			testResponse.url = webhook.data.url;
-			testResponse.status = `${res.data.status}`;
-			testResponse.body = res.data.body;
+			testResponse.status = res.data?.status != null ? `${res.data.status}` : '';
+			testResponse.body = res.data?.body;
 			isTestModalVisible = true;
 		} catch (e) {
 			addToast('Failed to test web hook', 'Error');
@@ -326,7 +329,7 @@
 		sortable={['name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!webhooks.length}
 		hasNextPage={webhooksHasNextPage}
-		plural="Webhooks"
+		plural="webhooks"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}
 	>
@@ -339,8 +342,9 @@
 						on:change={() => selection.toggle(webhook.id)}
 					/>
 				{/if}
-				<TableCell>
+				<TableCell wrap>
 					<button
+						class="block w-full py-1 text-left"
 						on:click={() => {
 							openEditModal(webhook.id);
 						}}
@@ -356,7 +360,6 @@
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
-						<TableViewButton name="Perform test" on:click={() => openTestModal(webhook.id)} />
 						<TableUpdateButton
 							on:click={() => openEditModal(webhook.id)}
 							{...globalButtonDisabledAttributes(webhook, contextCompanyID)}
@@ -366,6 +369,7 @@
 							on:click={() => openCopyModal(webhook.id)}
 							{...globalButtonDisabledAttributes(webhook, contextCompanyID)}
 						/>
+						<TableViewButton name="Send test" on:click={() => openTestModal(webhook.id)} />
 						<TableDeleteButton
 							on:click={() => openDeleteAlert(webhook)}
 							{...globalButtonDisabledAttributes(webhook, contextCompanyID)}
@@ -377,71 +381,86 @@
 	</Table>
 
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeCreateModal} {isSubmitting}>
-		{#if modalMode === 'update'}
-			<InstalledResourceBadge resourceType="webhook" resourceId={formValues.id} variant="notice" />
-		{/if}
-		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
-			<FormColumns>
-				<FormColumn>
-					<TextField
-						required
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.name}
-						placeholder="My webhook">Name</TextField
-					>
-					<TextField
-						bind:value={formValues.url}
-						type="url"
-						required
-						minLength={1}
-						maxLength={1024}
-						toolTipText="The URL to send the webhook to, including the protocol (http/https)"
-						placeholder="https://notify-me.test/api/webhook">URL</TextField
-					>
-					<TextField
-						bind:value={formValues.secret}
-						optional={true}
-						minLength={1}
-						maxLength={1024}
-						toolTipText="Secret used to sign the webhook payload"
-						placeholder="9fYKWxLMPwIJjM0foQRAQOH0DO3FbPR4">Secret</TextField
-					>
-				</FormColumn>
-			</FormColumns>
-			<FormError message={modalError} />
-			<FormFooter closeModal={closeCreateModal} {isSubmitting} />
-		</FormGrid>
+		<div class="max-w-full sm:max-w-[36rem]">
+			<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
+				<FormColumns>
+					<FormColumn>
+						<div class="flex flex-col w-full sm:w-[26rem]">
+							{#if modalMode === 'update'}
+								<InstalledResourceBadge resourceType="webhook" resourceId={formValues.id} variant="notice" />
+							{/if}
+							<TextField
+								width="full"
+								required
+								minLength={1}
+								maxLength={127}
+								bind:value={formValues.name}
+								placeholder="My webhook">Name</TextField
+							>
+							<TextField
+								bind:value={formValues.url}
+								type="url"
+								width="full"
+								required
+								minLength={1}
+								maxLength={1024}
+								toolTipText="The URL to send the webhook to, including the protocol (http/https)"
+								placeholder="https://notify-me.test/api/webhook">URL</TextField
+							>
+							<PasswordField
+								width="full"
+								bind:value={formValues.secret}
+								optional={true}
+								minLength={1}
+								maxLength={1024}
+								toolTipText="Secret used to sign the webhook payload"
+								placeholder="Shared secret for the signature">Secret</PasswordField
+							>
+						</div>
+					</FormColumn>
+				</FormColumns>
+				<FormError message={modalError} />
+				<FormFooter closeModal={closeCreateModal} {isSubmitting} />
+			</FormGrid>
+		</div>
 	</Modal>
 	<Modal headerText="Webhook test" visible={isTestModalVisible} onClose={closeTestModal}>
-		<FormColumns>
-			<FormColumn>
-				<Table
-					columns={[
-						{ column: 'Key', size: 'small' },
-						{ column: 'Value', size: 'large' }
-					]}
-					hasData={true}
-					plural="Webhook test"
-					hasActions={false}
+		<div class="w-[640px] max-w-full pt-4 space-y-6 select-text overflow-x-hidden">
+			<section class="pb-4 border-b border-gray-200 dark:border-gray-600 w-full">
+				<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">Request</h3>
+				<div
+					class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
 				>
-					<TableRow>
-						<TableCell value="URL" />
-						<TableCell value={`POST ${testResponse.url}`} />
-					</TableRow>
-					<TableRow>
-						<TableCell value="Status" />
-						<TableCell value={testResponse.status} />
-					</TableRow>
-					<TableRow>
-						<TableCell value="Body" />
-						<TableCell>
-							{testResponse.body}
-						</TableCell>
-					</TableRow>
-				</Table>
-			</FormColumn>
-		</FormColumns>
+					<div class="font-medium break-all">POST {testResponse.url ?? ''}</div>
+				</div>
+			</section>
+			<section class="pb-4 border-b border-gray-200 dark:border-gray-600 w-full">
+				<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">Response status</h3>
+				{#if testResponse.status}
+					<StatusBadge tone={testResponse.status.startsWith('2') ? 'success' : 'danger'}
+						>{testResponse.status}</StatusBadge
+					>
+				{:else}
+					<StatusBadge tone="neutral">No response</StatusBadge>
+				{/if}
+			</section>
+			<section class="pb-4 w-full">
+				<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-3">Response body</h3>
+				<div
+					class="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-600 overflow-hidden"
+				>
+					<pre
+						class="text-xs whitespace-pre-wrap break-all max-h-80 overflow-y-auto font-mono"
+						style="overflow-wrap: anywhere;">{testResponse.body || 'Empty response'}</pre>
+				</div>
+			</section>
+		</div>
+		<!-- same sticky footer row as FormFooter, without a submit button -->
+		<div
+			class="sticky bottom-0 z-10 -mx-4 sm:-mx-8 px-4 sm:px-8 py-4 border-t-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex justify-end transition-colors duration-200"
+		>
+			<Button variant="secondary" type="button" on:click={closeTestModal}>Close</Button>
+		</div>
 	</Modal>
 	<DeleteAlert
 		name={deleteValues.name}

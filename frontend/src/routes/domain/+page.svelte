@@ -23,6 +23,7 @@
 	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
+	import FormSection from '$lib/components/form/FormSection.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
@@ -643,24 +644,23 @@
 
 <HeadTitle title="Domains" />
 <main>
-	<div class="flex justify-between">
-		<Headline docSlug="domains">Domains</Headline>
-	</div>
+	<Headline docSlug="domains">Domains</Headline>
 	<BigButton on:click={openCreateModal}>New domain</BigButton>
 	<Table
+		reserveSelect
 		columns={[
 			{ column: 'Name', size: 'large' },
-			{ column: 'Hosting website', size: 'small', alignText: 'center' },
+			{ column: 'Hosting Website', title: 'Hosting', size: 'small', alignText: 'center' },
 			{ column: 'Redirects', size: 'small', alignText: 'center' },
 			{ column: 'Managed TLS', size: 'small', alignText: 'center' },
-			{ column: 'Custom Certificates', size: 'small', alignText: 'center' },
+			{ column: 'Custom Certificates', title: 'Custom Certs', size: 'small', alignText: 'center' },
 			{ column: 'Type', size: 'small', alignText: 'center' },
-			{ column: 'Target Domain', size: 'small' },
+			{ column: 'Target Domain', size: 'large' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={[
 			'Name',
-			'Hosting website',
+			'Hosting Website',
 			'Redirects',
 			'Type',
 			...(contextCompanyID ? ['scope'] : [])
@@ -673,7 +673,7 @@
 	>
 		{#each domains as domain}
 			<TableRow>
-				<TableCell>
+				<TableCell wrap>
 					<button
 						on:click={() => {
 							openUpdateModal(domain.id);
@@ -682,8 +682,7 @@
 						title={domain.name}
 						class="block w-full py-1 text-left"
 					>
-						{#if domain.type === 'proxy'}<ProxySvgIcon size="w-4 h-4" className="inline mr-1" />
-						{/if}{domain.name}
+						{domain.name}
 					</button>
 				</TableCell>
 				<TableCellCheck value={domain.hostWebsite} />
@@ -691,15 +690,19 @@
 				<TableCellCheck value={domain.managedTLS} />
 				<TableCellCheck value={domain.ownManagedTLS || domain.selfSignedTLS} />
 				<TableCell alignText="center">
-					<span title={domain.type === 'proxy' ? 'Proxy Domain' : 'Regular Domain'}>
-						{#if domain.type === 'proxy'}
-							<ProxySvgIcon size="w-5 h-5" className="mx-auto" />
-						{:else}
-							📄
-						{/if}
-					</span>
+					{#if domain.type === 'proxy'}
+						<span
+							class="!flex items-center justify-center gap-1 text-gray-700 dark:text-gray-200"
+							title="Proxy domain"
+						>
+							<ProxySvgIcon size="w-4 h-4" />
+							Proxy
+						</span>
+					{:else}
+						<span class="text-gray-500 dark:text-gray-400" title="Regular domain">Regular</span>
+					{/if}
 				</TableCell>
-				<TableCell>{domain.type === 'proxy' ? domain.proxyTargetDomain : ''}</TableCell>
+				<TableCell value={domain.type === 'proxy' ? domain.proxyTargetDomain : ''} />
 				{#if contextCompanyID}
 					<TableCellScope companyID={domain.companyID} />
 				{/if}
@@ -729,10 +732,6 @@
 								{...globalButtonDisabledAttributes(domain, contextCompanyID)}
 							/>
 							<TableCopyButton title={'Copy'} on:click={() => openCopyModal(domain.id)} />
-							<TableDeleteButton
-								on:click={() => openDeleteAlert(domain)}
-								{...globalButtonDisabledAttributes(domain, contextCompanyID)}
-							></TableDeleteButton>
 						{:else}
 							<TableUpdateButton
 								name={'Update page'}
@@ -745,12 +744,19 @@
 								title="Proxy domains can only be edited through proxy configuration"
 							/>
 							<TableCopyButton disabled={true} title="Proxy domains cannot be copied" />
+						{/if}
+						<TableDropDownButton name={'Assets'} on:click={() => gotoDomainAssets(domain.name)} />
+						{#if domain.type !== 'proxy'}
+							<TableDeleteButton
+								on:click={() => openDeleteAlert(domain)}
+								{...globalButtonDisabledAttributes(domain, contextCompanyID)}
+							></TableDeleteButton>
+						{:else}
 							<TableDeleteButton
 								disabled={true}
 								title="Proxy domains can only be deleted by deleting the proxy"
 							></TableDeleteButton>
 						{/if}
-						<TableDropDownButton name={'Assets'} on:click={() => gotoDomainAssets(domain.name)} />
 					</TableDropDownEllipsis>
 				</TableCellAction>
 			</TableRow>
@@ -769,103 +775,95 @@
 		<FormGrid novalidate on:submit={onSubmit} bind:bindTo={form} {isSubmitting} {modalMode}>
 			<FormColumns>
 				<FormColumn>
-					<!-- Domain Information Section -->
-					<div class="mb-6 pt-4 pb-2 border-b border-gray-200 dark:border-gray-600 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							Domain Information
-						</h3>
-						<div class="space-y-6">
-							<TextField
-								minLength={3}
-								maxLength={255}
-								required
-								readonly={modalMode === 'update'}
-								bind:value={formValues.name}
-								placeholder="example.com">Domain</TextField
-							>
+					<FormSection title="Domain information" css="sm:w-[21rem]">
+						<TextField
+							minLength={3}
+							maxLength={255}
+							required
+							width="full"
+							readonly={modalMode === 'update'}
+							bind:value={formValues.name}
+							placeholder="example.com">Domain</TextField
+						>
 
-							{#if !isProxyDomain}
-								<SelectSquare
-									label="Website Hosting"
-									options={[
-										{ value: true, label: 'Host Website' },
-										{ value: false, label: 'Redirect Only' }
-									]}
-									bind:value={formValues.hostWebsite}
-								/>
+						{#if !isProxyDomain}
+							<SelectSquare
+								label="Website Hosting"
+								options={[
+									{ value: true, label: 'Host Website' },
+									{ value: false, label: 'Redirect Only' }
+								]}
+								bind:value={formValues.hostWebsite}
+							/>
 
-								{#if !formValues.hostWebsite}
-									<TextField
-										bind:value={formValues.redirectURL}
-										optional
-										type="url"
-										minLength={8}
-										maxLength={1024}
-										placeholder="https://example.com"
-										toolTipText="Redirect to another website when visiting domain &#13 (except for landing page or asset)"
-										>Redirect URL</TextField
-									>
-								{/if}
+							{#if !formValues.hostWebsite}
+								<TextField
+									bind:value={formValues.redirectURL}
+									optional
+									type="url"
+									width="full"
+									minLength={8}
+									maxLength={1024}
+									placeholder="https://example.com"
+									toolTipText="Visitors to the domain are redirected here, except for landing pages and assets"
+									>Redirect URL</TextField
+								>
 							{/if}
-						</div>
-					</div>
+						{/if}
+					</FormSection>
 
-					<!-- TLS Configuration Section -->
-					<div class="pt-4 pb-2 w-full">
-						<h3 class="text-base font-medium text-pc-darkblue dark:text-white mb-3">
-							TLS Configuration
-						</h3>
-						<div class="space-y-6">
-							<SelectSquare
-								label="Managed TLS"
-								options={[
-									{ value: true, label: 'Enable' },
-									{ value: false, label: 'Disable' }
-								]}
-								bind:value={formValues.managedTLS}
-								toolTipText="Managed TLS via. public certificate authority"
-							/>
+					<FormSection title="TLS configuration" css="sm:w-[21rem]">
+						<SelectSquare
+							label="Managed TLS"
+							options={[
+								{ value: true, label: 'Enable' },
+								{ value: false, label: 'Disable' }
+							]}
+							bind:value={formValues.managedTLS}
+							toolTipText="Certificates issued and renewed by a public certificate authority"
+						/>
 
-							<SelectSquare
-								label="Self signed certificates"
-								options={[
-									{ value: true, label: 'Enable' },
-									{ value: false, label: 'Disable' }
-								]}
-								bind:value={formValues.selfSignedTLS}
-								toolTipText="Automatically generate self-signed certificates for TLS"
-							/>
+						<SelectSquare
+							label="Self Signed Certificates"
+							options={[
+								{ value: true, label: 'Enable' },
+								{ value: false, label: 'Disable' }
+							]}
+							bind:value={formValues.selfSignedTLS}
+							toolTipText="Generate self signed certificates for TLS"
+						/>
 
-							<SelectSquare
-								label="Custom Certificates"
-								options={[
-									{ value: true, label: 'Enable' },
-									{ value: false, label: 'Disable' }
-								]}
-								bind:value={formValues.ownManagedTLS}
-								toolTipText="Upload own certificates for TLS"
-							/>
+						<SelectSquare
+							label="Custom Certificates"
+							options={[
+								{ value: true, label: 'Enable' },
+								{ value: false, label: 'Disable' }
+							]}
+							bind:value={formValues.ownManagedTLS}
+							toolTipText="Upload your own certificate and key for TLS"
+						/>
 
-							{#if formValues.ownManagedTLS}
-								<div class="space-y-4">
-									<FileField
-										bind:bindTo={ownManagedTLSKeyElement}
-										name="certKey"
-										accept=".key"
-										on:change={(e) => onSetFile(e, 'ownManagedTLSKey')}
-										>Private key (.key)</FileField
-									>
-									<FileField
-										bind:bindTo={ownManagedPemKeyElement}
-										name="certPem"
-										accept=".pem,.crt"
-										on:change={(e) => onSetFile(e, 'ownManagedTLSPem')}
-										>Certificate (.pem, .crt)</FileField
-									>
-								</div>
-							{/if}
-						</div>
-					</div>
+						{#if formValues.ownManagedTLS}
+							<div class="space-y-1">
+								<FileField
+									id="domain-cert-key"
+									bind:bindTo={ownManagedTLSKeyElement}
+									name="certKey"
+									accept=".key"
+									on:change={(e) => onSetFile(e, 'ownManagedTLSKey')}
+									>Private key (.key)</FileField
+								>
+								<FileField
+									id="domain-cert-pem"
+									bind:bindTo={ownManagedPemKeyElement}
+									name="certPem"
+									accept=".pem,.crt"
+									on:change={(e) => onSetFile(e, 'ownManagedTLSPem')}
+									>Certificate (.pem, .crt)</FileField
+								>
+							</div>
+						{/if}
+					</FormSection>
 
 					<FormError message={modalError} />
 				</FormColumn>
@@ -877,6 +875,7 @@
 	{#if isUpdateContentModalVisible}
 		<Modal
 			headerText={'Domain content'}
+			description={formValues.name}
 			bind:visible={isUpdateContentModalVisible}
 			onClose={closeAllModals}
 			{isSubmitting}
@@ -900,6 +899,7 @@
 	<!-- Domain Not Found Editor -->
 	<Modal
 		headerText={'Domain not found content'}
+		description={formValues.name}
 		bind:visible={isUpdateNotFoundModalVisible}
 		onClose={closeAllModals}
 		{isSubmitting}

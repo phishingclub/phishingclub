@@ -4,6 +4,7 @@
 	import { AppStateService } from '$lib/service/appState';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import Headline from '$lib/components/Headline.svelte';
+	import TabBar from '$lib/components/TabBar.svelte';
 	import General from './panels/General.svelte';
 	import Access from './panels/Access.svelte';
 	import Scim from './panels/Scim.svelte';
@@ -24,9 +25,9 @@
 		{ id: 'scim', label: 'SCIM', component: Scim },
 		{ id: 'data', label: 'Data', component: Data },
 		{ id: 'ipdata', label: 'IP Data', component: IPData },
-		{ id: 'reports', label: 'Reports', component: Reports },
+		{ id: 'reports', label: 'PDF Reports', component: Reports },
 		...(!companyContext.isCompany
-			? [{ id: 'reporting', label: 'Reporting', component: Reporting }]
+			? [{ id: 'reporting', label: 'Reporting Inbox', component: Reporting }]
 			: []),
 		...($displayMode === DISPLAY_MODE.BLACKBOX
 			? [{ id: 'redteam', label: 'Red Team', component: RedTeam }]
@@ -79,25 +80,12 @@
 <main class="pb-8">
 	<Headline docSlug="settings">Settings</Headline>
 
-	<nav class="mt-4 mb-6 border-b border-gray-200 dark:border-gray-700">
-		<div class="flex items-center justify-between">
-			<div class="flex">
-				{#each tabs as tab}
-					<button
-						on:click={() => selectTab(tab.id)}
-						class="px-6 py-3 text-sm font-medium border-b-2 transition-colors
-							{shown === tab.id
-							? 'border-cta-blue dark:border-highlight-blue text-cta-blue dark:text-highlight-blue'
-							: 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'}"
-					>
-						{tab.label}
-					</button>
-				{/each}
-			</div>
+	<TabBar items={tabs} active={shown} label="Settings sections" on:select={(e) => selectTab(e.detail)}>
+		<svelte:fragment slot="end">
 			{#if companyContext.isCompany}
 				<a
 					href="/company/{companyContext.companyID}"
-					class="flex items-center gap-1.5 px-4 py-3 text-sm font-medium text-cta-blue dark:text-highlight-blue hover:opacity-80 transition-opacity whitespace-nowrap"
+					class="pc-focus rounded-md flex items-center gap-1.5 px-2 sm:px-4 py-3 text-sm font-medium text-cta-blue dark:text-highlight-blue hover:underline whitespace-nowrap"
 				>
 					Company settings
 					<svg
@@ -116,8 +104,8 @@
 					</svg>
 				</a>
 			{/if}
-		</div>
-	</nav>
+		</svelte:fragment>
+	</TabBar>
 
 	<div class="max-w-7xl">
 		<svelte:component this={ActiveComponent} />

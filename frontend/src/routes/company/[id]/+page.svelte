@@ -8,11 +8,19 @@
 	import { companyColorOverride } from '$lib/store/companyColor';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import SettingsLoading from '$lib/components/SettingsLoading.svelte';
 	import RadioOption from '$lib/components/RadioOption.svelte';
 	import FormButton from '$lib/components/FormButton.svelte';
 	import FormError from '$lib/components/FormError.svelte';
 	import TextField from '$lib/components/TextField.svelte';
+	import TextareaField from '$lib/components/TextareaField.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
+	import Headline from '$lib/components/Headline.svelte';
+	import SubHeadline from '$lib/components/SubHeadline.svelte';
+	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
+	import TabBar from '$lib/components/TabBar.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import Alert from '$lib/components/Alert.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import ScimModal from '$lib/components/modal/ScimModal.svelte';
@@ -253,98 +261,84 @@
 	{#if !loaded}
 		<SettingsLoading />
 	{:else}
-		<nav class="mt-2 mb-1 text-sm">
-			<a
-				href="/company"
-				class="text-gray-500 dark:text-gray-400 hover:text-cta-blue dark:hover:text-highlight-blue transition-colors"
-			>
-				Companies
-			</a>
-			<span class="text-gray-400 dark:text-gray-600 mx-2">/</span>
-			<span class="text-gray-700 dark:text-gray-300">{company?.name}</span>
-		</nav>
+		<Breadcrumb crumbs={[{ label: 'Companies', href: '/company' }, { label: company?.name ?? '' }]} />
+		<Headline docSlug="settings" preserveCase>{company?.name ?? 'Company'}</Headline>
 
-		<nav class="mt-4 mb-6 border-b border-gray-200 dark:border-gray-700">
-			<div class="flex">
-				{#each tabs as tab}
-					<button
-						on:click={() => selectTab(tab.id)}
-						class="px-6 py-3 text-sm font-medium border-b-2 transition-colors
-							{active === tab.id
-							? 'border-cta-blue dark:border-highlight-blue text-cta-blue dark:text-highlight-blue'
-							: 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600'}"
-					>
-						{tab.label}
-					</button>
-				{/each}
-			</div>
-		</nav>
+		<TabBar items={tabs} {active} label="Company sections" on:select={(e) => selectTab(e.detail)} />
 
 		<div class="pb-8">
 			{#if active === 'general'}
-				<div class="flex flex-wrap gap-6">
+				<div class="flex flex-wrap items-start gap-6">
 					<SettingsCard title="Company Details" widthClass="w-full lg:w-[34rem]">
 						<form on:submit|preventDefault={onSaveGeneral} class="flex flex-col flex-1">
 							<TextField
+								id="company-name"
 								required
 								width="full"
 								minLength={1}
 								maxLength={64}
-								bind:value={formValues.name}>Company Name</TextField
+								bind:value={formValues.name}>Company name</TextField
+							>
+							<TextareaField
+								id="company-comment"
+								optional
+								fullWidth
+								height="large"
+								maxLength={1000000}
+								bind:value={formValues.comment}
+								placeholder="Notes about this company">Comment</TextareaField
 							>
 							<div class="flex flex-col py-2">
-								<p class="font-semibold text-slate-600 dark:text-gray-400 py-2">Comment</p>
-								<textarea
-									bind:value={formValues.comment}
-									maxlength={1000000}
-									rows="6"
-									placeholder="Add notes about this company..."
-									class="w-full p-3 rounded-md text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 focus:outline-none focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 resize-y transition-colors duration-200"
-								/>
-							</div>
-							<div class="flex flex-col py-2">
-								<p class="font-semibold text-slate-600 dark:text-gray-400 py-2">Banner Color</p>
+								<label for="company-color" class="flex">
+									<FieldLabel optional>Banner color</FieldLabel>
+								</label>
 								<p class="text-gray-600 dark:text-gray-300 text-sm mb-3">
 									Tints the banner and frame shown while viewing as this company, making it easier to
 									recognize which company you are working in.
 								</p>
-								<div class="flex items-center gap-3">
+								<div class="flex flex-wrap items-center gap-3">
 									<input
 										type="color"
-										aria-label="Company banner color"
+										aria-label="Pick banner color"
 										value={formValues.color || DEFAULT_COMPANY_COLOR}
 										on:input={(e) => (formValues.color = e.currentTarget.value)}
-										class="h-9 w-12 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent cursor-pointer"
+										class="pc-focus h-9 w-12 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent cursor-pointer"
 									/>
 									<input
+										id="company-color"
 										type="text"
 										bind:value={formValues.color}
 										placeholder={DEFAULT_COMPANY_COLOR}
 										maxlength="7"
-										class="w-32 p-2 rounded-md text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 focus:outline-none focus:border-slate-400 dark:focus:border-highlight-blue/80 transition-colors duration-200"
+										aria-describedby={formValues.color ? undefined : 'company-color-state'}
+										class="w-32 py-2 px-3 rounded-md font-mono text-sm text-slate-800 dark:text-gray-300 border border-transparent dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 transition-colors duration-200"
 									/>
 									{#if formValues.color}
 										<button
 											type="button"
 											on:click={() => (formValues.color = '')}
-											class="text-sm text-gray-500 dark:text-gray-400 hover:text-cta-blue dark:hover:text-highlight-blue transition-colors"
+											class="pc-focus rounded text-sm text-gray-500 dark:text-gray-400 hover:text-cta-blue dark:hover:text-highlight-blue transition-colors"
 										>
 											Reset to default
 										</button>
+									{:else}
+										<span
+											id="company-color-state"
+											class="inline-flex items-center h-6 px-2 rounded text-xs bg-gray-100 text-slate-600 dark:bg-gray-700 dark:text-gray-300"
+										>
+											Default color
+										</span>
 									{/if}
 								</div>
 							</div>
 							<FormError message={generalError} />
 							<div class="mt-6 flex justify-end">
-								<FormButton size="medium" isSubmitting={isSaving}>Save Changes</FormButton>
+								<FormButton size="medium" isSubmitting={isSaving}>Save changes</FormButton>
 							</div>
 						</form>
 					</SettingsCard>
 
-					<SettingsCard title="Automatically prune orphaned recipients">
-						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
-							Choose whether orphaned recipients are removed automatically.
-						</p>
+					<SettingsCard title="Automatically Prune Orphaned Recipients" description="Choose whether orphaned recipients are removed automatically. Changes are saved right away.">
 						<div class="space-y-2">
 							<RadioOption
 								checked={autoPruneEnabled}
@@ -365,48 +359,41 @@
 				<CompanyCustomStats {companyId} />
 			{:else if active === 'integrations'}
 				<div class="flex flex-wrap gap-6">
-					<SettingsCard title="SCIM Provisioning">
-						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
-							Automatically provision recipients from your identity provider.
-						</p>
-						<div class="flex items-center gap-2 mb-6">
+					<SettingsCard title="SCIM Provisioning" description="Automatically provision recipients from your identity provider.">
+						<div class="flex items-center gap-2 mt-2">
 							<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
-							<span
-								class="text-xs font-semibold px-2 py-1 rounded-full
-									{scimStatus === 'enabled'
-									? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+							<StatusBadge
+								tone={scimStatus === 'enabled'
+									? 'success'
 									: scimStatus === 'disabled'
-										? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
-										: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}"
+										? 'warning'
+										: 'neutral'}
 							>
 								{scimStatus === 'enabled'
 									? 'Enabled'
 									: scimStatus === 'disabled'
 										? 'Disabled'
 										: 'Not configured'}
-							</span>
+							</StatusBadge>
 						</div>
-						<div class="mt-auto flex justify-end">
+						<svelte:fragment slot="footer">
 							<FormButton size="medium" on:click={() => (isScimModalVisible = true)}
 								>Configure SCIM</FormButton
 							>
-						</div>
+						</svelte:fragment>
 					</SettingsCard>
 				</div>
 			{:else if active === 'reporting'}
 				<div class="flex flex-wrap gap-6">
-					<SettingsCard title="Reporting Inbox">
-						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
-							Set up automated report tracking with Microsoft 365.
-						</p>
-						<div class="mb-6">
+					<SettingsCard title="Reporting Inbox" description="Set up automated report tracking with Microsoft 365.">
+						<div class="mt-2">
 							<ReportInboxStatus inbox={reportInbox} />
 						</div>
-						<div class="mt-auto flex justify-end">
+						<svelte:fragment slot="footer">
 							<FormButton size="medium" on:click={() => (isReportInboxModalVisible = true)}
 								>{reportInbox ? 'Manage' : 'Configure'}</FormButton
 							>
-						</div>
+						</svelte:fragment>
 					</SettingsCard>
 				</div>
 			{:else if active === 'reports'}
@@ -420,35 +407,27 @@
 						</p>
 					</div>
 				{:else}
-				<div class="flex flex-wrap gap-6">
-					<SettingsCard title="Report Template">
-						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
-							Override the global report template for this company.
-						</p>
-						<div class="mt-auto flex justify-end">
-							<FormButton size="medium" on:click={() => (isReportTemplateModalVisible = true)}
-								>Edit template</FormButton
-							>
-						</div>
-					</SettingsCard>
+					<div class="flex flex-wrap gap-6">
+						<SettingsCard title="Report Template" description="Override the global report template for this company.">
+							<svelte:fragment slot="footer">
+								<FormButton size="medium" on:click={() => (isReportTemplateModalVisible = true)}
+									>Edit template</FormButton
+								>
+							</svelte:fragment>
+						</SettingsCard>
 
-					<SettingsCard title="Report Delivery">
-						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
-							Email the campaign report PDF to a recipient group, on demand or when a campaign is
-							closed.
-						</p>
-						<div class="mt-auto flex justify-end">
-							<FormButton size="medium" on:click={() => (isReportDeliveryModalVisible = true)}
-								>Configure</FormButton
-							>
-						</div>
-					</SettingsCard>
-
-				</div>
+						<SettingsCard title="Report Delivery" description="Email the campaign report PDF to a recipient group, on demand or when a campaign is closed.">
+							<svelte:fragment slot="footer">
+								<FormButton size="medium" on:click={() => (isReportDeliveryModalVisible = true)}
+									>Configure</FormButton
+								>
+							</svelte:fragment>
+						</SettingsCard>
+					</div>
 
 					<div class="mt-8">
-						<h3 class="text-lg font-semibold text-gray-700 dark:text-gray-200">Delivery Log</h3>
-						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
+						<SubHeadline>Delivery log</SubHeadline>
+						<p class="text-gray-600 dark:text-gray-300 text-sm mt-1 mb-4">
 							Reports sent for this company, including automatic and on demand deliveries.
 						</p>
 						<CompanyReportDeliveryLog companyId={companyId} />
@@ -456,33 +435,25 @@
 				{/if}
 			{:else if active === 'data'}
 				<div class="flex flex-wrap gap-6">
-					<SettingsCard title="Export">
-						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
-							Download a ZIP with all company data, recipients, and campaign events.
-						</p>
-						<div class="mt-auto flex justify-end">
+					<SettingsCard title="Export" description="Download a ZIP with all company data, recipients, and campaign events.">
+						<svelte:fragment slot="footer">
 							<FormButton size="medium" on:click={() => (isExportAlertVisible = true)}
 								>Export data</FormButton
 							>
-						</div>
+						</svelte:fragment>
 					</SettingsCard>
 				</div>
 			{:else if active === 'danger'}
 				<div class="flex flex-wrap gap-6">
-					<SettingsCard title="Delete Company">
-						<p class="text-gray-600 dark:text-gray-300 text-sm mb-4">
-							Permanently removes this company and all of its domains, campaigns, and recipients.
-							This cannot be undone.
-						</p>
-						<div class="mt-auto flex justify-end">
-							<button
+					<SettingsCard title="Delete Company" description="Permanently removes this company and all of its domains, campaigns, and recipients. This cannot be undone.">
+						<svelte:fragment slot="footer">
+							<Button
+								variant="danger-outline"
 								type="button"
 								on:click={() => (isDeleteAlertVisible = true)}
-								class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold uppercase rounded-md transition-colors duration-200"
+								>Delete</Button
 							>
-								Delete
-							</button>
-						</div>
+						</svelte:fragment>
 					</SettingsCard>
 				</div>
 			{/if}
@@ -499,7 +470,7 @@
 	/>
 
 	<Alert
-		headline="Export Company Data"
+		headline="Export company data"
 		bind:visible={isExportAlertVisible}
 		onConfirm={onConfirmExport}
 	>

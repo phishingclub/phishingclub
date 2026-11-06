@@ -4,6 +4,8 @@
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import TextFieldMultiSelect from '$lib/components/TextFieldMultiSelect.svelte';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
+	import Button from '$lib/components/Button.svelte';
+	import { addToast } from '$lib/store/toast';
 
 	let ja4Protocol = 't';
 	let ja4Version = '13';
@@ -303,78 +305,91 @@
 			'00': '00 - No ALPN', '*': '* - Match Any'
 		}[a] || 'h2 - HTTP/2 (h2)';
 	}
+
+	function copyJA4() {
+		if (!ja4Result) return;
+		navigator.clipboard.writeText(ja4Result);
+		addToast('Copied JA4 fingerprint to clipboard', 'Success');
+	}
 </script>
 
-<div class="flex flex-wrap gap-6">
-<SettingsCard title="JA4 Fingerprint Builder" widthClass="w-full sm:w-[640px]">
-<div class="space-y-3">
-	{#if ja4Result}
-		<div
-			class="p-3 rounded-md bg-blue-50 dark:bg-blue-900/20 transition-colors duration-200 mb-4 cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/30"
-			on:click={() => navigator.clipboard.writeText(ja4Result)}
-			role="button"
-			tabindex="0"
-			on:keypress={(e) => { if (e.key === 'Enter' || e.key === ' ') navigator.clipboard.writeText(ja4Result); }}
-		>
-			<p class="text-xs text-gray-600 dark:text-gray-400 mb-1">JA4 Fingerprint (click to copy):</p>
-			<p class="text-sm font-mono font-medium text-blue-700 dark:text-blue-300 break-all select-all">
-				{ja4Result}
-			</p>
-			<p class="text-xs text-gray-500 dark:text-gray-500 mt-2 font-mono">
-				[protocol][version][sni][cipher_count][ext_count][alpn]_[sorted_cipher_hash]_[sorted_ext+sigalg_hash]
-			</p>
-		</div>
-	{/if}
-
-	<div class="grid grid-cols-2 gap-3">
-		<TextFieldSelect id="ja4-protocol" value={getProtocolDisplayValue(ja4Protocol)} options={protocolOptions} onSelect={handleProtocolSelect}>Protocol</TextFieldSelect>
-		<TextFieldSelect id="ja4-version" value={getVersionDisplayValue(ja4Version)} options={versionOptions} onSelect={handleVersionSelect}>TLS Version</TextFieldSelect>
+<div class="grid grid-cols-1 xl:grid-cols-[42rem_minmax(0,1fr)] gap-6 items-start">
+<SettingsCard title="JA4 Fingerprint Builder" widthClass="w-full max-w-2xl min-w-0">
+<!-- same look as a card description, with the link inside the line -->
+<p class="text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200">
+	Build a JA4 TLS fingerprint from client hello details.
+	<a
+		href="https://github.com/FoxIO-LLC/ja4"
+		target="_blank"
+		rel="noopener noreferrer"
+		class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline"
+	>
+		Learn more about JA4
+	</a>
+</p>
+<div class="mt-2 space-y-3">
+	<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+		<TextFieldSelect id="ja4-protocol" size="full" value={getProtocolDisplayValue(ja4Protocol)} options={protocolOptions} onSelect={handleProtocolSelect}>Protocol</TextFieldSelect>
+		<TextFieldSelect id="ja4-version" size="full" value={getVersionDisplayValue(ja4Version)} options={versionOptions} onSelect={handleVersionSelect}>TLS Version</TextFieldSelect>
 	</div>
 
-	<div class="grid grid-cols-2 gap-3">
-		<TextFieldSelect id="ja4-sni" value={getSniDisplayValue(ja4Sni)} options={sniOptions} onSelect={handleSniSelect}>SNI</TextFieldSelect>
-		<TextFieldSelect id="ja4-alpn" value={getAlpnDisplayValue(ja4Alpn)} options={alpnOptions} onSelect={handleAlpnSelect}>ALPN</TextFieldSelect>
+	<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+		<TextFieldSelect id="ja4-sni" size="full" value={getSniDisplayValue(ja4Sni)} options={sniOptions} onSelect={handleSniSelect}>SNI</TextFieldSelect>
+		<TextFieldSelect id="ja4-alpn" size="full" value={getAlpnDisplayValue(ja4Alpn)} options={alpnOptions} onSelect={handleAlpnSelect}>ALPN</TextFieldSelect>
 	</div>
 
-	<TextFieldMultiSelect id="ja4-ciphers" bind:value={selectedCiphers} options={cipherSuites} onSelect={handleCipherSelect}>
-		Cipher Suites ({selectedCiphers.length} selected)
+	<TextFieldMultiSelect id="ja4-ciphers" size="full" bind:value={selectedCiphers} options={cipherSuites} onSelect={handleCipherSelect}>
+		Cipher Suites
 	</TextFieldMultiSelect>
 
 	{#if selectedCiphers.some((c) => c.startsWith('custom'))}
-		<TextField type="text" bind:value={customCipherInput} placeholder="e.g., 1301,c02b,009c">
+		<TextField type="text" width="full" bind:value={customCipherInput} placeholder="e.g., 1301,c02b,009c">
 			Custom Cipher Hex Codes (comma-separated)
 		</TextField>
 	{/if}
 
-	<TextFieldMultiSelect id="ja4-extensions" bind:value={selectedExtensions} options={extensions} onSelect={handleExtensionSelect}>
-		Extensions ({selectedExtensions.length} selected)
+	<TextFieldMultiSelect id="ja4-extensions" size="full" bind:value={selectedExtensions} options={extensions} onSelect={handleExtensionSelect}>
+		Extensions
 	</TextFieldMultiSelect>
 
 	{#if selectedExtensions.some((e) => e.startsWith('custom'))}
-		<TextField type="text" bind:value={customExtensionInput} placeholder="e.g., 0000,000a,000d">
+		<TextField type="text" width="full" bind:value={customExtensionInput} placeholder="e.g., 0000,000a,000d">
 			Custom Extension Hex Codes (comma-separated)
 		</TextField>
 	{/if}
 
-	<TextFieldMultiSelect id="ja4-signature-algorithms" bind:value={selectedSignatureAlgorithms} options={signatureAlgorithms} onSelect={handleSignatureAlgorithmSelect}>
-		Signature Algorithms ({selectedSignatureAlgorithms.length} selected)
+	<TextFieldMultiSelect id="ja4-signature-algorithms" size="full" bind:value={selectedSignatureAlgorithms} options={signatureAlgorithms} onSelect={handleSignatureAlgorithmSelect}>
+		Signature Algorithms
 	</TextFieldMultiSelect>
 
 	{#if selectedSignatureAlgorithms.some((s) => s.startsWith('custom'))}
-		<TextField type="text" bind:value={customSignatureAlgorithmInput} placeholder="e.g., 0403,0804,0401">
+		<TextField type="text" width="full" bind:value={customSignatureAlgorithmInput} placeholder="e.g., 0403,0804,0401">
 			Custom Signature Algorithm Hex Codes (comma-separated)
 		</TextField>
 	{/if}
+</div>
+</SettingsCard>
 
-	<div class="pt-2">
-		<a
-			href="https://github.com/FoxIO-LLC/ja4"
-			target="_blank"
-			rel="noopener noreferrer"
-			class="text-xs text-blue-600 dark:text-blue-400 hover:underline transition-colors duration-200"
+<!-- on wide screens the result stays in view next to the form, on smaller ones it sits above it -->
+<SettingsCard title="Fingerprint" widthClass="w-full max-w-2xl xl:max-w-none min-w-0 order-first xl:order-none xl:sticky xl:top-20">
+	{#if ja4Result}
+		<p
+			class="text-sm font-mono font-medium text-slate-800 dark:text-gray-100 bg-grayblue-light dark:bg-gray-900/60 rounded-md p-3 break-all select-all transition-colors duration-200"
 		>
-			Learn more about JA4
-		</a>
-	</div>
+			{ja4Result}
+		</p>
+		<p class="text-xs text-gray-500 dark:text-gray-400 mt-2 font-mono break-all">
+			[protocol][version][sni][cipher_count][ext_count][alpn]_[sorted_cipher_hash]_[sorted_ext+sigalg_hash]
+		</p>
+	{:else}
+		<p class="text-sm text-gray-500 dark:text-gray-400">
+			Pick the client settings to build the fingerprint.
+		</p>
+	{/if}
+	<svelte:fragment slot="footer">
+		{#if ja4Result}
+			<Button variant="secondary" type="button" size="large" on:click={copyJA4}>Copy</Button>
+		{/if}
+	</svelte:fragment>
 </SettingsCard>
 </div>

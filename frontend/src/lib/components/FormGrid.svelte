@@ -41,10 +41,18 @@
 
 <form
 	on:submit|preventDefault
-	class="grid grid-cols-3 grid-rows-1 w-full h-full flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+	class="form-grid flex flex-col w-full h-full min-w-0 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 	class:opacity-70={isSubmitting}
 	bind:this={formElement}
 	{novalidate}
 >
 	<slot />
 </form>
+
+<style>
+	/* the first block fills spare height, which fullscreen editors rely on */
+	.form-grid > :global(:first-child) {
+		flex: 1 1 auto;
+		min-height: 0;
+	}
+</style>

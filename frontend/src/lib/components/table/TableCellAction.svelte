@@ -1,5 +1,5 @@
-<td class="text-center border-hidden">
-	<p class="font-regular text-slate-600 dark:text-gray-200 transition-colors duration-200">
+<td class="pc-sticky-action text-center border-hidden px-1">
+	<div class="flex justify-center text-slate-600 dark:text-gray-200 transition-colors duration-200">
 		<slot />
-	</p>
+	</div>
 </td>

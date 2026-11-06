@@ -56,13 +56,13 @@
 						{#if name?.length > 30}
 							<br />
 						{/if}
-						<span class="font-medium text-gray-900 dark:text-gray-300">"{name}"</span>?
+						<span class="font-medium text-gray-900 dark:text-gray-300 break-words">"{name}"</span>?
 					{:else}
 						Are you sure you want to delete
 						{#if name?.length > 30}
 							<br />
 						{/if}
-						<span class="font-medium text-gray-900 dark:text-gray-300">"{name}"</span>?
+						<span class="font-medium text-gray-900 dark:text-gray-300 break-words">"{name}"</span>?
 					{/if}
 				</p>
 			</div>

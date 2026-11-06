@@ -53,6 +53,7 @@
 	// the 'company' route shows the company asset folder, which is stored under
 	// the shared directory keyed by the company assets slug
 	const isCompanyFolder = $page.params.domain === 'company';
+	$: domainParts = ($page.params.domain || '').split('.');
 	let domainContext =
 		$page.params.domain === 'shared' || isCompanyFolder ? '' : $page.params.domain;
 	// the company assets slug, fetched on mount for company folder view
@@ -288,7 +289,7 @@
 
 	const create = async () => {
 		/** @type {HTMLInputElement} */
-		let fileInput = document.querySelector('#files');
+		let fileInput = document.querySelector('#asset-files');
 		let formData = new FormData();
 		for (let file of fileInput.files) {
 			formData.append('files', file);
@@ -499,7 +500,7 @@
 		try {
 			isReplacing = true;
 			/** @type {HTMLInputElement} */
-			const fileInput = document.querySelector('#replaceFile');
+			const fileInput = document.querySelector('#asset-replace-file');
 			if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
 				replaceError = 'Select a file';
 				return;
@@ -872,11 +873,26 @@
 
 <HeadTitle title="Assets ({isCompanyFolder ? 'company' : $page.params.domain})" />
 <main>
-	<Headline docSlug="assets">
+	<a
+		href="/asset/"
+		class="pc-focus mb-2 inline-flex items-center gap-1 rounded-sm text-sm text-cta-blue dark:text-highlight-blue hover:underline"
+	>
+		<svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+			<path
+				fill-rule="evenodd"
+				d="M12.79 5.23a.75.75 0 0 1-.02 1.06L8.83 10l3.94 3.71a.75.75 0 1 1-1.04 1.08l-4.5-4.25a.75.75 0 0 1 0-1.08l4.5-4.25a.75.75 0 0 1 1.06.02Z"
+				clip-rule="evenodd"
+			/>
+		</svg>
+		Back to assets
+	</a>
+	<Headline docSlug="assets" preserveCase>
 		{#if isCompanyFolder}
-			Company assets
+			<span class="uppercase">Company assets</span>
 		{:else}
-			Assets: <span class="select-all">{$page.params.domain}</span>
+			<span class="uppercase whitespace-nowrap">Assets:</span>
+			<!-- the host moves to its own line as a whole and only breaks when it is wider than the line -->
+			<span class="inline-block max-w-full select-all [overflow-wrap:anywhere]">{domainParts.join('.')}</span>
 		{/if}
 	</Headline>
 	<BigButton on:click={openCreateModal}>New asset</BigButton>
@@ -891,10 +907,10 @@
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
-			{ column: 'Preview', size: 'small' },
 			{ column: 'Name', size: 'large' },
-			{ column: 'Description', size: 'medium' },
-			{ column: 'Path', size: 'medium' }
+			{ column: 'Preview', size: 'small' },
+			{ column: 'Description', size: 'large' },
+			{ column: 'Path', size: 'large' }
 		]}
 		sortable={['Name', 'Description', 'Path']}
 		hasData={!!assets.length}
@@ -912,50 +928,10 @@
 						on:change={() => selection.toggle(asset.id)}
 					/>
 				{/if}
-				<TableCell>
-					{#if isImageFile(asset.path)}
-						{#await getImagePreviewUrl(asset.path)}
-							<div class="w-12 h-12 animate-pulse rounded"></div>
-						{:then imageUrl}
-							{#if imageUrl}
-								<button
-									type="button"
-									class="w-12 h-12 rounded cursor-pointer hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-blue-500"
-									on:click={() => onClickPreview(asset.path)}
-									on:mouseenter={(e) => handleImageMouseEnter(e, asset.path, asset.name)}
-									on:mouseleave={handleImageMouseLeave}
-								>
-									<img
-										src={imageUrl}
-										alt={asset.name}
-										class="w-12 h-12 object-cover rounded"
-										on:error={() => console.error('Failed to load image preview')}
-									/>
-								</button>
-							{:else}
-								<div
-									class="w-12 h-12 rounded !flex items-center justify-center text-xs text-gray-600"
-								>
-									No preview
-								</div>
-							{/if}
-						{:catch}
-							<div class="w-12 h-12 rounded !flex items-center justify-center text-xs text-red-600">
-								Error
-							</div>
-						{/await}
-					{:else}
-						<div
-							class="w-12 h-12 rounded !flex items-center justify-center text-2xl leading-none text-gray-500"
-						>
-							📄
-						</div>
-					{/if}
-				</TableCell>
-				<TableCell>
+				<TableCell wrap>
 					<div class="!flex items-center">
 						<button
-							class="truncate"
+							class="pc-cell-link truncate py-1 text-left"
 							on:click={() => {
 								onClickPreview(asset.path);
 							}}
@@ -986,6 +962,53 @@
 							</span>
 						{/if}
 					</div>
+				</TableCell>
+				<TableCell>
+					{#if isImageFile(asset.path)}
+						{#await getImagePreviewUrl(asset.path)}
+							<div class="w-8 h-8 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></div>
+						{:then imageUrl}
+							{#if imageUrl}
+								<button
+									type="button"
+									class="w-8 h-8 rounded cursor-pointer hover:opacity-80 pc-focus"
+									on:click={() => onClickPreview(asset.path)}
+									on:mouseenter={(e) => handleImageMouseEnter(e, asset.path, asset.name)}
+									on:mouseleave={handleImageMouseLeave}
+								>
+									<img
+										src={imageUrl}
+										alt={asset.name}
+										class="w-8 h-8 object-cover rounded"
+										on:error={() => console.error('Failed to load image preview')}
+									/>
+								</button>
+							{:else}
+								<span class="text-xs text-gray-600 dark:text-gray-400">No preview</span>
+							{/if}
+						{:catch}
+							<span class="text-xs text-red-600 dark:text-red-400">Error</span>
+						{/await}
+					{:else}
+						<div
+							class="w-8 h-8 rounded !flex items-center justify-center text-gray-400 dark:text-gray-500"
+							title="No image preview"
+						>
+							<svg
+								class="h-6 w-6"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.5"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+								<path d="M14 3v5h5" />
+							</svg>
+						</div>
+					{/if}
 				</TableCell>
 				<TableCell value={asset.description} />
 				<TableCell>
@@ -1043,31 +1066,35 @@
 					baseURL={domainContext || 'example.test'}
 					bind:value={editContent.value}
 				>
-					<div class="flex w-full flex-row flex-wrap items-start gap-x-6 gap-y-2 pl-4">
+					<div class="grid w-full grid-cols-1 gap-x-6 md:grid-cols-2 xl:grid-cols-4">
 						<TextField
+							width="full"
 							minLength={1}
 							maxLength={127}
 							bind:value={formValues.name}
 							optional={true}
-							placeholder={'Candidate CV'}>Name</TextField
+							placeholder={'Download page'}>Name</TextField
 						>
 						<TextField
+							width="full"
 							bind:value={formValues.description}
 							optional={true}
 							minLength={1}
 							maxLength={255}
-							placeholder="Fake CV with embedded link">Description</TextField
+							placeholder="Page linked from the email">Description</TextField
 						>
 						<TextField
+							width="full"
 							bind:value={formValues.path}
 							minLength={2}
 							maxLength={512}
 							pattern="[a-zA-Z0-9\._\/\-]+"
-							placeholder={'profile/alice/cv.html'}
+							placeholder={'download/index.html'}
 							toolTipText="Full path including filename. Change it to rename or move the file on save."
 							>Path</TextField
 						>
 						<TextField
+							width="full"
 							bind:value={formValues.contentType}
 							optional={true}
 							maxLength={255}
@@ -1079,32 +1106,36 @@
 				</Editor>
 			{:else if modalMode === 'update' && editContentEditable}
 				<!-- non-HTML text asset: plain code editor, no preview -->
-				<div class="col-start-1 col-end-4 flex w-[70vw] flex-col gap-4">
-					<div class="flex w-full flex-row flex-wrap items-start gap-x-6 gap-y-2">
+				<div class="flex w-full flex-col gap-4">
+					<div class="grid w-full grid-cols-1 gap-x-6 md:grid-cols-2 xl:grid-cols-4">
 						<TextField
+							width="full"
 							minLength={1}
 							maxLength={127}
 							bind:value={formValues.name}
 							optional={true}
-							placeholder={'Candidate CV'}>Name</TextField
+							placeholder={'Shared styles'}>Name</TextField
 						>
 						<TextField
+							width="full"
 							bind:value={formValues.description}
 							optional={true}
 							minLength={1}
 							maxLength={255}
-							placeholder="Fake CV with embedded link">Description</TextField
+							placeholder="Styles for the landing pages">Description</TextField
 						>
 						<TextField
+							width="full"
 							bind:value={formValues.path}
 							minLength={2}
 							maxLength={512}
 							pattern="[a-zA-Z0-9\._\/\-]+"
-							placeholder={'profile/alice/app.css'}
+							placeholder={'css/app.css'}
 							toolTipText="Full path including filename. Change it to rename or move the file on save."
 							>Path</TextField
 						>
 						<TextField
+							width="full"
 							bind:value={formValues.contentType}
 							optional={true}
 							maxLength={255}
@@ -1123,42 +1154,47 @@
 				<FormColumns>
 					<FormColumn>
 						<TextField
+							width="large"
 							minLength={1}
 							maxLength={127}
 							bind:value={formValues.name}
 							optional={true}
-							placeholder={'Candidate CV'}>Name</TextField
+							placeholder={'Company logo'}>Name</TextField
 						>
 						<TextField
+							width="large"
 							bind:value={formValues.description}
 							optional={true}
 							minLength={1}
 							maxLength={255}
-							placeholder="Fake CV with embedded link">Description</TextField
+							placeholder="Logo shown on the login page">Description</TextField
 						>
 						{#if modalMode === 'create'}
 							<TextField
+								width="large"
 								bind:value={formValues.path}
 								minLength={2}
 								maxLength={512}
 								pattern="[a-zA-Z0-9\._\/\-]+"
 								optional={true}
-								placeholder={'profile/alice'}
+								placeholder={'images'}
 								toolTipText={pathTooltip}>Path</TextField
 							>
 
-							<FileField name="files" multiple={true}>Files</FileField>
+							<FileField id="asset-files" name="files" multiple={true} fullWidth>Files</FileField>
 						{:else}
 							<TextField
+								width="large"
 								bind:value={formValues.path}
 								minLength={2}
 								maxLength={512}
 								pattern="[a-zA-Z0-9\._\/\-]+"
-								placeholder={'profile/alice/cv.pdf'}
+								placeholder={'images/logo.png'}
 								toolTipText="Full path including filename. Change it to rename or move the file on save."
 								>Path</TextField
 							>
 							<TextField
+								width="large"
 								bind:value={formValues.contentType}
 								optional={true}
 								maxLength={255}
@@ -1184,7 +1220,7 @@
 		<FormGrid on:submit={submitReplace} bind:bindTo={replaceForm} isSubmitting={isReplacing}>
 			<FormColumns>
 				<FormColumn>
-					<FileField name="replaceFile" multiple={false}>File</FileField>
+					<FileField id="asset-replace-file" name="replaceFile" multiple={false}>File</FileField>
 				</FormColumn>
 			</FormColumns>
 			<FormError message={replaceError} />

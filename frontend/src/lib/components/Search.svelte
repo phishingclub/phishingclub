@@ -3,6 +3,7 @@
 
 	/** @type {*|null} */
 	export let pagination = null;
+	export let plural = '';
 	let value = pagination?.search;
 	let searchTimeoutID = null;
 
@@ -29,17 +30,23 @@
 	});
 </script>
 
-<div class="relative flex items-center">
-	<img class="ml-2 w-4 h-4 absolute z-10" src="/search-icon.svg" alt="search icon" />
+<div class="relative flex items-center w-full sm:w-64">
+	<img
+		class="pointer-events-none w-4 h-4 absolute left-3 z-10 dark:invert"
+		src="/search-icon.svg"
+		alt=""
+		aria-hidden="true"
+	/>
 	<input
-		type="text"
+		type="search"
+		aria-label={plural ? `Search ${plural}` : 'Search'}
 		bind:value
-		on:keyup={() => {
+		on:input={() => {
 			if (pagination && pagination.search !== null) {
 				setSearch();
 			}
 		}}
-		class="bg-grayblue-light dark:bg-gray-900/60 w-56 border text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-700/60 pl-8 py-2 relative rounded-lg focus:outline-none focus:ring-0 focus:border-cta-blue dark:focus:border-highlight-blue/80 focus:border transition-colors duration-200"
+		class="w-full h-10 pl-9 pr-3 bg-grayblue-light dark:bg-gray-900/60 border text-slate-800 dark:text-gray-200 border-gray-300 dark:border-gray-700 placeholder:text-slate-500 dark:placeholder:text-gray-400 rounded-lg focus:outline-none focus:border-cta-blue focus:ring-2 focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 transition-colors duration-200"
 		placeholder="Search"
 	/>
 </div>

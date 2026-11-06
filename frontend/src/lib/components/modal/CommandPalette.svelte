@@ -265,13 +265,12 @@
 {#if visible}
 	<div
 		transition:fade={{ duration: 150 }}
-		class="fixed inset-0 bg-overlay/[0.92]"
-		style="z-index: 49;"
+		class="fixed inset-0 bg-overlay/[0.92] z-[56]"
 	/>
 	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 	<div
-		class="fixed inset-0 z-50 flex items-start justify-center pt-20"
+		class="fixed inset-0 z-[57] flex items-start justify-center pt-16 sm:pt-20"
 		on:click|self={close}
 		on:keydown={handleKeydown}
 		role="dialog"
@@ -280,7 +279,7 @@
 		tabindex="-1"
 	>
 		<div
-			class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-lg mx-4 overflow-hidden transition-colors duration-200"
+			class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-lg mx-3 sm:mx-4 overflow-hidden transition-colors duration-200"
 			role="presentation"
 		>
 			<!-- search input -->
@@ -289,48 +288,55 @@
 					bind:this={searchInput}
 					bind:value={searchQuery}
 					type="text"
-					placeholder="search pages..."
-					class="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 transition-colors duration-200"
+					placeholder="Search pages..."
+					aria-label="Search pages"
+					class="w-full h-10 px-3 bg-grayblue-light dark:bg-gray-900/60 border border-gray-300 dark:border-gray-700 text-slate-800 dark:text-gray-200 placeholder:text-slate-500 dark:placeholder:text-gray-400 rounded-lg focus:outline-none focus:border-cta-blue focus:ring-2 focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 transition-colors duration-200"
 				/>
 			</div>
 
 			<!-- results list -->
-			<div class="max-h-96 overflow-y-auto">
+			<!-- the height cuts a row in half so it is clear the list scrolls -->
+			<div class="max-h-[20.5rem] overflow-y-auto">
 				{#if filteredItems.length === 0}
 					<div
 						class="p-4 text-center text-gray-500 dark:text-gray-400 transition-colors duration-200"
 					>
-						no pages found
+						No pages found
 					</div>
 				{:else}
 					{#each filteredItems as item, index}
 						<button
 							type="button"
-							class="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center justify-between transition-colors duration-200 {selectedIndex ===
+							class="w-full px-4 py-3 text-left border-l-2 hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center justify-between gap-3 transition-colors duration-200 {selectedIndex ===
 							index
-								? 'bg-blue-50 dark:bg-blue-900/30 border-r-2 border-blue-500'
-								: ''}"
+								? 'bg-blue-50 dark:bg-blue-900/30 border-cta-blue dark:border-highlight-blue'
+								: 'border-transparent'}"
 							on:click={() => navigateToItem(item)}
 							on:mouseenter={() => (selectedIndex = index)}
 						>
-							<div class="flex flex-col">
+							<span
+								class="min-w-0 truncate text-gray-900 dark:text-gray-100 font-medium transition-colors duration-200"
+							>
+								{item.label}
+								{#if item.external}
+									<span class="text-xs text-gray-500 dark:text-gray-400 ml-1">↗</span>
+								{/if}
+							</span>
+							{#if item.category && item.category !== item.label}
 								<span
-									class="text-gray-900 dark:text-gray-100 font-medium transition-colors duration-200"
-								>
-									{item.label}
-									{#if item.external}
-										<span class="text-xs text-gray-500 dark:text-gray-400 ml-1">↗</span>
-									{/if}
-								</span>
-								<span
-									class="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-200"
+									class="shrink-0 text-xs text-gray-500 dark:text-gray-400 transition-colors duration-200"
 								>
 									{item.category}
 								</span>
-							</div>
+							{/if}
 						</button>
 					{/each}
 				{/if}
+			</div>
+			<div
+				class="hidden sm:block px-4 py-2 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 transition-colors duration-200"
+			>
+				Enter to open, arrows to move, Esc to close
 			</div>
 		</div>
 	</div>

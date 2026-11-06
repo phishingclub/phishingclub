@@ -2,6 +2,7 @@
 	import { addToast } from '$lib/store/toast';
 	import Modal from '../Modal.svelte';
 	import Alert from '../Alert.svelte';
+	import Button from '../Button.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 
 	// external
@@ -252,7 +253,7 @@
 </script>
 
 <Modal headerText={`SCIM`} bind:visible>
-	<div class="w-[780px] p-6 space-y-6">
+	<div class="w-[780px] max-w-full py-4 sm:p-6 space-y-6">
 		{#if isLoading}
 			<div class="flex items-center justify-center py-10">
 				<p class="text-gray-500 dark:text-gray-400 transition-colors duration-200">Loading...</p>
@@ -337,7 +338,7 @@
 							<button
 								type="button"
 								on:click={() => copyToClipboard(scimBaseURL)}
-								class="px-3 py-2 text-sm bg-slate-500 hover:bg-slate-400 dark:bg-gray-700/80 dark:hover:bg-gray-600/80 text-white rounded-md transition-colors duration-200"
+								class="pc-focus px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-100 text-slate-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:border-gray-500 dark:text-gray-100 transition-colors duration-200"
 							>
 								Copy
 							</button>
@@ -379,42 +380,46 @@
 
 			<!-- actions -->
 			<div
-				class="border-t border-gray-200 dark:border-gray-700/60 pt-4 flex gap-3 justify-end transition-colors duration-200"
+				class="border-t border-gray-200 dark:border-gray-700/60 pt-4 flex flex-wrap gap-3 justify-end transition-colors duration-200"
 			>
-				<button
-					type="button"
+				<Button
+					size="auto"
+					variant="secondary"
+					css="whitespace-nowrap"
 					disabled={isBusy}
 					on:click={() => (isRestoreAlertVisible = true)}
 					title="Clear the disabled mark from this company's disabled recipients"
-					class="bg-slate-400 dark:bg-gray-700/80 hover:bg-slate-300 dark:hover:bg-gray-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 				>
 					{isRestoring ? 'Removing...' : 'Remove Disabled Mark'}
-				</button>
-				<button
-					type="button"
+				</Button>
+				<Button
+					size="auto"
+					variant="danger-outline"
+					css="whitespace-nowrap"
 					disabled={isBusy}
 					on:click={() => (isPruneAlertVisible = true)}
 					title="Permanently delete this company's disabled users"
-					class="bg-slate-400 dark:bg-gray-700/80 hover:bg-slate-300 dark:hover:bg-gray-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 				>
 					{isPruning ? 'Pruning...' : 'Prune Disabled Users'}
-				</button>
-				<button
-					type="button"
+				</Button>
+				<Button
+					size="auto"
+					variant="secondary"
+					css="whitespace-nowrap"
 					disabled={isBusy}
 					on:click={() => (isRotateAlertVisible = true)}
-					class="bg-slate-400 dark:bg-gray-700/80 hover:bg-slate-300 dark:hover:bg-gray-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 				>
 					Rotate Token
-				</button>
-				<button
-					type="button"
+				</Button>
+				<Button
+					size="auto"
+					variant="danger-outline"
+					css="whitespace-nowrap"
 					disabled={isBusy}
 					on:click={() => (isDeleteAlertVisible = true)}
-					class="bg-red-600 dark:bg-red-700/80 hover:bg-red-500 dark:hover:bg-red-600/80 text-sm uppercase font-bold px-4 py-2 text-white rounded-md whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
 				>
 					Delete
-				</button>
+				</Button>
 			</div>
 		{/if}
 	</div>

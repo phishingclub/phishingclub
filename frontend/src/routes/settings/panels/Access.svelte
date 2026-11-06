@@ -3,6 +3,7 @@
 	import { api } from '$lib/api/apiProxy.js';
 	import { addToast } from '$lib/store/toast';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading';
 	import Button from '$lib/components/Button.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -159,30 +160,27 @@
 
 {#if loaded}
 	<div class="flex flex-wrap gap-6">
-		<SettingsCard title="Single Sign-On">
-			<div class="bg-gray-50 rounded-md p-3">
+		<SettingsCard title="Single Sign-On" description="Let users sign in with your identity provider.">
+			<div class="flex items-center gap-2 mt-2">
+				<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
 				{#if isSSOEnabled}
-					<p class="text-sm font-medium text-green-600">
-						<span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-2"></span>
-						Enabled
-					</p>
+					<StatusBadge tone="success">Enabled</StatusBadge>
 				{:else}
-					<p class="text-sm text-gray-600">
-						<span class="inline-block w-2 h-2 rounded-full bg-gray-400 mr-2"></span>
-						Disabled
-					</p>
+					<StatusBadge tone="neutral">Disabled</StatusBadge>
 				{/if}
 			</div>
 			<svelte:fragment slot="footer">
 				{#if isSSOEnabled}
 					<div class="flex gap-2">
-						<Button size={'medium'} on:click={openEditSSO}>Edit SSO</Button>
 						<Button
-							size={'medium'}
-							backgroundColor="bg-red-600"
+							size={'large'}
+							variant="danger-outline"
 							on:click={() => {
 								isSSODeleteAlertVisible = true;
 							}}>Disable SSO</Button
+						>
+						<Button size={'large'} on:click={openEditSSO}
+							>Edit SSO</Button
 						>
 					</div>
 				{:else}

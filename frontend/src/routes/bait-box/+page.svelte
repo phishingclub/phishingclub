@@ -8,7 +8,9 @@
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import Headline from '$lib/components/Headline.svelte';
 	import BetaTag from '$lib/components/BetaTag.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import BigButton from '$lib/components/BigButton.svelte';
 	import Search from '$lib/components/Search.svelte';
 	import Select from '$lib/components/Select.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
@@ -1543,14 +1545,14 @@
 
 <HeadTitle title="Bait Box" />
 <main>
-	<div class="flex flex-wrap items-start justify-between gap-4">
+	<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
 		<div class="flex items-center">
-			<Headline>Bait Box</Headline>
+			<Headline docSlug="bait-box">Bait Box</Headline>
 			<BetaTag />
 		</div>
-		<div class="flex flex-wrap items-end gap-3">
-			{#if registries.length && activeView === 'browse'}
-				<div class="w-56">
+		{#if registries.length && activeView === 'browse'}
+			<div class="flex w-full items-center gap-3 sm:w-auto">
+				<div class="min-w-0 flex-1 sm:w-56 sm:flex-none">
 					<TextFieldSelect
 						id="registry"
 						size="full"
@@ -1563,34 +1565,23 @@
 				</div>
 				{#if selectedStatus}
 					<!-- reachability of the selected Bait Box, filled in after the list shows -->
-					<span
-						id="registry-status"
-						title={selectedStatus.reason || ''}
-						class="flex h-10 shrink-0 items-center gap-1.5 text-sm {selectedStatus.state === 'ok' ||
-						selectedStatus.state === 'checking'
-							? 'text-gray-500 dark:text-gray-400'
-							: 'text-red-600 dark:text-red-400'}"
-					>
-						<span
-							class="inline-block h-2 w-2 rounded-full {selectedStatus.state === 'ok'
-								? 'bg-green-500'
+					<span id="registry-status" class="flex h-10 shrink-0 items-center">
+						<StatusBadge
+							tone={selectedStatus.state === 'ok'
+								? 'success'
 								: selectedStatus.state === 'checking'
-									? 'animate-pulse bg-gray-400'
-									: 'bg-red-500'}"
-						></span>
-						{STATUS_LABELS[selectedStatus.state] || 'Checking'}
+									? 'neutral'
+									: 'danger'}
+							title={selectedStatus.reason || ''}
+						>
+							{STATUS_LABELS[selectedStatus.state] || 'Checking'}
+						</StatusBadge>
 					</span>
 				{/if}
-				<!-- adding a Bait Box stays a visible primary action so a second one is discoverable -->
-				<Button
-					size="small"
-					css="!w-auto shrink-0 whitespace-nowrap px-5"
-					on:click={openAddRegistry}>Add Bait Box</Button
-				>
 				<!-- edit and remove act on the selected Bait Box, so they stay in an overflow menu next to it -->
 				{#if selectedRegistry}
 					<div
-						class="h-10 w-10 rounded-md transition-colors hover:bg-grayblue-light dark:hover:bg-gray-800/60"
+						class="h-10 w-10 shrink-0 rounded-md transition-colors hover:bg-grayblue-light dark:hover:bg-gray-800/60"
 					>
 						<TableDropDownEllipsis>
 							<TableDropDownButton name="Edit" on:click={openEditRegistry} />
@@ -1598,11 +1589,15 @@
 						</TableDropDownEllipsis>
 					</div>
 				{/if}
-			{/if}
-		</div>
+			</div>
+		{/if}
 	</div>
+	{#if registries.length}
+		<!-- adding a Bait Box stays a visible primary action so a second one is discoverable -->
+		<BigButton on:click={openAddRegistry}>Add Bait Box</BigButton>
+	{/if}
 
-	<nav class="mt-6 border-b border-gray-200 dark:border-gray-700">
+	<nav class="border-b border-gray-200 dark:border-gray-700" class:mt-6={!registries.length}>
 		<div class="flex flex-wrap" role="tablist" aria-label="Bait Box views">
 			{#each [{ id: 'browse', label: 'Browse' }, { id: 'installed', label: installed.length ? `Installed (${installed.length})` : 'Installed' }] as view (view.id)}
 				<button
@@ -1648,6 +1643,7 @@
 					hasData={!!installedRows.length}
 					hasNextPage={false}
 					plural="installed packages"
+					reserveSelect
 					isGhost={installedLoading}
 				>
 					{#each installedRows as i (i.id)}
@@ -1684,8 +1680,9 @@
 				</Table>
 			</div>
 		{:else}
-			<!-- a failed package load shows its reason in the card below instead -->
-			{#if browseError}{:else if selectedStatus?.state === 'refused'}
+			{#if browseError}
+				<!-- a failed package load shows its reason in the card below instead -->
+			{:else if selectedStatus?.state === 'refused'}
 				<p
 					id="registry-status-reason"
 					class="mt-2 text-right text-sm text-red-600 dark:text-red-400 break-words"
@@ -1731,7 +1728,7 @@
 				<div
 					class="mt-8 flex flex-wrap items-center justify-between gap-4 border-b-2 border-gray-100 pb-4 dark:border-gray-800"
 				>
-					<div class="flex items-center gap-4">
+					<div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3">
 						<Select pagination={tableURLParams}></Select>
 						<div class="flex items-center gap-1.5">
 							<label
@@ -1774,7 +1771,9 @@
 							>
 						{/if}
 					</div>
-					<Search pagination={tableURLParams}></Search>
+					<div class="w-full sm:w-auto">
+						<Search pagination={tableURLParams}></Search>
+					</div>
 				</div>
 
 				{#if browseError}
@@ -1835,12 +1834,13 @@
 										tabindex="-1"
 										aria-hidden="true"
 										on:click={() => openDetail(p)}
-										class="relative block h-32 w-full overflow-hidden border-b-2 border-gray-100 focus:outline-none dark:border-gray-800"
+										class="relative block h-36 w-full overflow-hidden border-b-2 border-gray-100 bg-gray-50 focus:outline-none dark:border-gray-800 dark:bg-gray-800/60"
 									>
+										<!-- contain keeps logos and screenshots whole inside the same box -->
 										<img
 											src={previewSrc(p)}
 											alt={displayName(p)}
-											class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+											class="h-full w-full object-contain px-3 pb-2 pt-8 transition-transform duration-200 group-hover:scale-[1.03]"
 											on:error={(e) => (e.currentTarget.style.display = 'none')}
 										/>
 										<span
@@ -1877,20 +1877,21 @@
 										tabindex="-1"
 										aria-hidden="true"
 										on:click={() => openDetail(p)}
-										class="flex h-32 w-full flex-col items-center justify-center gap-2 border-b-2 border-gray-100 bg-grayblue-light/50 px-4 text-center focus:outline-none dark:border-gray-800 dark:bg-gray-800/40"
+										class="relative flex h-36 w-full items-center justify-center border-b-2 border-gray-100 bg-grayblue-light/50 px-4 text-center focus:outline-none dark:border-gray-800 dark:bg-gray-800/40"
 									>
 										<span
 											class="flex h-12 w-12 items-center justify-center rounded-md bg-white text-cta-blue shadow-sm dark:bg-gray-900 dark:text-highlight-blue [&_svg]:h-7 [&_svg]:w-7"
 											>{@html typeIconSvg(p.type)}</span
 										>
+										<!-- same corner chips as cards with a preview image -->
 										<span
-											class="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
+											class="absolute left-2 top-2 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-700 shadow-sm dark:bg-gray-900/80 dark:text-gray-200"
+											>{typeLabel(p.type)}</span
 										>
-											<span>{typeLabel(p.type)}</span>
-											<span class="tabular-nums text-gray-400 dark:text-gray-500"
-												>v{p.version || '?'}</span
-											>
-										</span>
+										<span
+											class="absolute right-2 top-2 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-white"
+											>v{p.version || '?'}</span
+										>
 									</button>
 								{/if}
 								<div class="flex flex-1 flex-col p-4">
@@ -1908,11 +1909,10 @@
 											{p.description}
 										</p>
 									{/if}
-									<!-- tags sit under the name with a comfortable gap, and mb-4 keeps a minimum
-							gap to the footer below so they never touch the divider; the footer stays
-							bottom aligned so the Install buttons line up across the row -->
+									<!-- tags sit under the name; the spacer keeps a minimum gap to the footer
+							and pushes it to the bottom so footers line up across the row -->
 									{#if p.tags && p.tags.length}
-										<div class="mb-4 mt-3 flex flex-wrap gap-1">
+										<div class="mt-3 flex flex-wrap gap-1">
 											{#each p.tags as t}
 												<span class="rounded px-1.5 py-0.5 text-[10px] {tagChipClass(tagColors[t])}"
 													>{t}</span
@@ -1920,12 +1920,15 @@
 											{/each}
 										</div>
 									{/if}
-									<div class="mt-auto border-t-2 border-gray-100 pt-3 dark:border-gray-800">
+									<div class="min-h-4 flex-1" aria-hidden="true"></div>
+									<!-- every footer is one row of the same height: state on the left, actions on the right -->
+									<div
+										class="flex min-h-[3.5rem] items-center justify-between gap-2 border-t-2 border-gray-100 pt-3 dark:border-gray-800"
+									>
 										{#if st.kind === 'update'}
+											<StatusBadge tone="info">Update available</StatusBadge>
 											<div class="flex items-center gap-2">
-												<Button size="full" css="flex-1" on:click={() => openUpdate(inst)}
-													>Update</Button
-												>
+												<Button on:click={() => openUpdate(inst)}>Update</Button>
 												<!-- remove stays quiet in an overflow menu so update is the only prominent action -->
 												<TableDropDownEllipsis>
 													<TableDeleteButton
@@ -1935,28 +1938,17 @@
 												</TableDropDownEllipsis>
 											</div>
 										{:else if st.kind === 'installed'}
-											<div class="flex items-center justify-between gap-2">
-												<span
-													class="inline-flex min-w-0 items-center gap-1.5 text-xs font-semibold text-green-600 dark:text-green-400"
-												>
-													<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"></span>
-													Installed
-												</span>
-												<!-- remove stays quiet in an overflow menu rather than a loud red button -->
-												<TableDropDownEllipsis>
-													<TableDeleteButton
-														name="Uninstall"
-														on:click={() => openRemoveInstall(inst)}
-													/>
-												</TableDropDownEllipsis>
-											</div>
+											<StatusBadge tone="success">Installed</StatusBadge>
+											<!-- remove stays quiet in an overflow menu rather than a loud red button -->
+											<TableDropDownEllipsis>
+												<TableDeleteButton
+													name="Uninstall"
+													on:click={() => openRemoveInstall(inst)}
+												/>
+											</TableDropDownEllipsis>
 										{:else}
-											<!-- install is the card's primary action, sized to match Update on installed cards -->
-											<div class="flex items-center gap-2">
-												<Button size="full" css="flex-1" on:click={() => openInstall(p)}
-													>Install</Button
-												>
-											</div>
+											<span></span>
+											<Button on:click={() => openInstall(p)}>Install</Button>
 										{/if}
 									</div>
 								</div>
@@ -2114,11 +2106,7 @@
 										</dt>
 										<dd class="mt-0.5">
 											{#if statusOf(detail).kind === 'installed'}
-												<span
-													class="inline-flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-400"
-													><span class="h-1.5 w-1.5 rounded-full bg-green-500"
-													></span>Installed</span
-												>
+												<StatusBadge tone="success">Installed</StatusBadge>
 											{:else if statusOf(detail).kind === 'update'}
 												<span
 													class="inline-flex items-center gap-1.5 text-sm font-medium text-cta-blue dark:text-highlight-blue"
@@ -2588,7 +2576,7 @@ Escape closes, the arrows page through the screenshots -->
 >
 	<FormGrid on:submit={submitAddRegistry} bind:bindTo={addForm} isSubmitting={addSubmitting}>
 		<div class="col-span-3 mx-auto w-full max-w-md">
-			<div class="space-y-3">
+			<div>
 				<TextField
 					required
 					minLength={1}
@@ -2605,17 +2593,15 @@ Escape closes, the arrows page through the screenshots -->
 				<TextField type="password" width="full" bind:value={regToken} placeholder="Read token"
 					>Token</TextField
 				>
-				<p class="-mt-2 text-xs text-gray-500 dark:text-gray-400">
+				<p class="-mt-1 mb-1 text-xs text-gray-500 dark:text-gray-400">
 					Only leave this empty when the Bait Box runs in public mode.
 				</p>
-				<TextFieldSelect
+				<CheckboxField
 					id="insecure"
-					size="full"
-					options={[
-						{ value: 'false', label: 'No' },
-						{ value: 'true', label: 'Yes' }
-					]}
-					bind:value={regInsecure}>Allow self signed TLS</TextFieldSelect
+					inline
+					value={regInsecure === 'true'}
+					on:change={(e) => (regInsecure = e.currentTarget.checked ? 'true' : 'false')}
+					>Allow self signed TLS</CheckboxField
 				>
 			</div>
 			<FormError message={addError} />
@@ -2637,7 +2623,7 @@ Escape closes, the arrows page through the screenshots -->
 >
 	<FormGrid on:submit={submitEditRegistry} bind:bindTo={editForm} isSubmitting={editSubmitting}>
 		<div class="col-span-3 mx-auto w-full max-w-md">
-			<div class="space-y-3">
+			<div>
 				<TextField
 					required
 					minLength={1}
@@ -2665,14 +2651,12 @@ Escape closes, the arrows page through the screenshots -->
 						>Remove token</CheckboxField
 					>
 				{/if}
-				<TextFieldSelect
+				<CheckboxField
 					id="editInsecure"
-					size="full"
-					options={[
-						{ value: 'false', label: 'No' },
-						{ value: 'true', label: 'Yes' }
-					]}
-					bind:value={editInsecure}>Allow self signed TLS</TextFieldSelect
+					inline
+					value={editInsecure === 'true'}
+					on:change={(e) => (editInsecure = e.currentTarget.checked ? 'true' : 'false')}
+					>Allow self signed TLS</CheckboxField
 				>
 			</div>
 			<FormError message={editError} />

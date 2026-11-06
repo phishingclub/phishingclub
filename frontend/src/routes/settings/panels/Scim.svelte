@@ -100,14 +100,11 @@
 
 {#if loaded}
 	<div class="flex flex-wrap gap-6">
-		<SettingsCard title="SCIM Provisioning">
-			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-				Global domain that serves SCIM provisioning. Must be publicly reachable on 443 with a valid
-				certificate; prefer a dedicated domain not used for campaigns.
-			</p>
+		<SettingsCard title="SCIM Provisioning" description="Global domain that serves SCIM provisioning. Must be publicly reachable on 443 with a valid certificate; prefer a dedicated domain not used for campaigns.">
 			<Form on:submit={saveScim} fullWidth>
 				<TextFieldSelect
 					id="scimDomain"
+					size="full"
 					bind:value={scimDomain}
 					options={scimDomainOptions}>SCIM domain</TextFieldSelect
 				>
@@ -116,16 +113,15 @@
 					type="number"
 					min="0"
 					width="small"
-					bind:value={scimRetentionDays}
-					toolTipText="Days a disabled recipient is kept before removal. 0 removes on the next prune."
-					>Retention (days)</TextField
+					bind:value={scimRetentionDays}>Retention (days)</TextField
 				>
 				<p class="mt-2 text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
 					How long deprovisioned recipients are kept (disabled) before being permanently removed.
+					0 removes them on the next prune.
 				</p>
 				<FormError message={scimError} />
 				<div class="mt-6 flex justify-end">
-					<FormButton size={'medium'} isSubmitting={isSaving}>Save Changes</FormButton>
+					<FormButton size={'large'} isSubmitting={isSaving}>Save Changes</FormButton>
 				</div>
 			</Form>
 		</SettingsCard>

@@ -1,6 +1,10 @@
+<script context="module">
+	let instanceCount = 0;
+</script>
+
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
-	import ToolTip from './ToolTip.svelte';
+	import FieldLabel from './form/FieldLabel.svelte';
 	import { addToast } from '$lib/store/toast';
 	import { local_yyyy_mm_dd } from '$lib/utils/api-utils';
 
@@ -26,6 +30,11 @@
 	/** @type {'small'|'medium'|'large'} */
 	export let labelWidth = 'large';
 	let minDate = '';
+	const labelId = `datetime-label-${++instanceCount}`;
+	const editableClass =
+		'bg-grayblue-light dark:bg-gray-900/60 text-slate-800 dark:text-gray-300 border-transparent dark:border-gray-700 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30';
+	const readonlyClass =
+		'cursor-default bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-dashed border-gray-300 dark:border-gray-600 focus:ring-gray-300/40 dark:focus:ring-gray-600/40';
 	let minTime = '';
 
 	// bind to parent form element, if there is one
@@ -102,31 +111,17 @@
 	};
 </script>
 
-<label
+<div
 	class="flex flex-col py-2"
 	class:w-20={labelWidth === 'small'}
 	class:w-32={labelWidth === 'medium'}
 	class:w-60={labelWidth === 'large'}
 >
-	<div class="flex items-center">
-		<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
-			<slot />
-		</p>
-		{#if toolTipText.length > 0}
-			<ToolTip>
-				{toolTipText}
-			</ToolTip>
-		{/if}
-		{#if optional === true}
-			<div
-				class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-			>
-				<p class="text-slate-600 dark:text-gray-400 text-xs">optional</p>
-			</div>
-		{/if}
-	</div>
-</label>
-<div class="flex flex-row">
+	<FieldLabel id={labelId} {toolTipText} {optional}><slot /></FieldLabel>
+</div>
+<div class="flex flex-row flex-wrap gap-2">
+	<span id="{labelId}-date" class="sr-only">date</span>
+	<span id="{labelId}-time" class="sr-only">time</span>
 	<input
 		type="date"
 		min={minDate}
@@ -138,8 +133,8 @@
 		{readonly}
 		{required}
 		autocomplete="off"
-		class="date-input w-44 rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
-		class:opacity-90={readonly}
+		aria-labelledby="{labelId} {labelId}-date"
+		class="date-input w-44 rounded-md py-2 px-2 border font-normal transition-colors duration-200 focus:outline-none focus:ring-2 disabled:opacity-60 disabled:cursor-not-allowed {readonly ? readonlyClass : editableClass}"
 	/>
 	<input
 		type="time"
@@ -152,8 +147,7 @@
 		{readonly}
 		{required}
 		autocomplete="off"
-		class="time-input ml-2 rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 text-center border border-transparent dark:border-gray-700/60 focus:outline-none focus:border-solid focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200"
-		class:bg-yellow-200={readonly}
-		class:dark:bg-yellow-700={readonly}
+		aria-labelledby="{labelId} {labelId}-time"
+		class="time-input text-center rounded-md py-2 px-2 border font-normal transition-colors duration-200 focus:outline-none focus:ring-2 disabled:opacity-60 disabled:cursor-not-allowed {readonly ? readonlyClass : editableClass}"
 	/>
 </div>

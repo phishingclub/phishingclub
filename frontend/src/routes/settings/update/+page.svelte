@@ -76,7 +76,7 @@
 	<Headline docSlug="management">Update</Headline>
 	<div class="pt-4">
 		<div
-			class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 transition-colors duration-200"
+			class="max-w-xl bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm dark:shadow-gray-900/50 border border-gray-100 dark:border-gray-700 transition-colors duration-200"
 		>
 			<div class="grid grid-cols-1 gap-6">
 				<div>
@@ -91,15 +91,16 @@
 										<a
 											href="https://github.com/phishingclub/phishingclub/releases"
 											target="_blank"
-											class="text-blue-600 dark:text-white hover:text-blue-700 dark:hover:text-gray-200 underline transition-colors duration-200"
+											rel="noopener noreferrer"
+											class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue underline hover:no-underline"
 										>
 											View release notes
 										</a>
 									</p>
 									{#if !isUpdateLocal}
 										<p class="mt-4 text-gray-600 dark:text-gray-300 transition-colors duration-200">
-											This instance is was not setup using the <code>systemd install</code> and must
-											be updated manually.
+											This instance was not set up with the <code>systemd install</code> and must be
+											updated manually.
 										</p>
 									{/if}
 									<p
@@ -114,7 +115,8 @@
 								<button
 									on:click={installUpdate}
 									disabled={isUpdating}
-									class="px-4 py-2 bg-cta-blue hover:bg-active-blue text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+									type="button"
+									class="pc-focus px-6 py-2 bg-cta-blue hover:bg-active-blue text-white text-sm font-semibold uppercase rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
 								>
 									{#if !isUpdateLocal}
 										Download
@@ -143,16 +145,17 @@
 							<h3
 								class="mt-2 text-lg font-medium text-gray-900 dark:text-gray-100 transition-colors duration-200"
 							>
-								System up to date!
+								System is up to date
 							</h3>
 							<p class="mt-1 text-gray-600 dark:text-gray-300 transition-colors duration-200">
-								An update notification is visible when a update is ready.
+								You will see a notification here when an update is ready.
 							</p>
 							<p class="mt-3">
 								<a
 									href="https://github.com/phishingclub/phishingclub/releases"
 									target="_blank"
-									class="text-sm text-blue-600 dark:text-white hover:text-blue-700 dark:hover:text-gray-200 transition-colors duration-200"
+									rel="noopener noreferrer"
+									class="pc-focus rounded-sm text-sm text-cta-blue dark:text-highlight-blue hover:underline"
 								>
 									View previous release information
 								</a>
@@ -165,6 +168,6 @@
 	</div>
 	<Alert onConfirm={runUpdate} visible={isUpdateAlertVisible}>
 		<p class="">Updating will make the application unavailable for a short time.</p>
-		<p class="mt-4">Click <b>YES, PROCEEED</b> to continue</p>
+		<p class="mt-4">Select <b>Yes, proceed</b> to continue.</p>
 	</Alert>
 </main>

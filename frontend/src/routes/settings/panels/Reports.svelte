@@ -4,6 +4,7 @@
 	import { addToast } from '$lib/store/toast';
 	import { hideIsLoading, showIsLoading } from '$lib/store/loading';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
@@ -172,25 +173,19 @@
 
 {#if loaded}
 <div class="flex flex-wrap gap-6">
-	<SettingsCard title="PDF Reports">
-		<div class="space-y-4">
-			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-				Generate PDF reports for campaigns. Requires Chromium and system dependencies.
-			</p>
-			<p
-				class="text-sm font-medium transition-colors duration-200"
-				class:text-green-600={isReportPDFEnabled}
-				class:dark:text-green-400={isReportPDFEnabled}
-				class:text-gray-500={!isReportPDFEnabled}
-				class:dark:text-gray-400={!isReportPDFEnabled}
-			>
-				{isReportPDFEnabled ? 'Enabled' : 'Disabled'}
-			</p>
+	<SettingsCard title="PDF Reports" description="Generate PDF reports for campaigns. Requires Chromium and system dependencies.">
+		<div class="mt-2 space-y-4">
+			<div class="flex items-center gap-2">
+				<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
+				<StatusBadge tone={isReportPDFEnabled ? 'success' : 'neutral'}>
+					{isReportPDFEnabled ? 'Enabled' : 'Disabled'}
+				</StatusBadge>
+			</div>
 		</div>
 		<svelte:fragment slot="footer">
 			<Button
 				size={'large'}
-				backgroundColor={isReportPDFEnabled ? 'bg-red-600' : 'bg-cta-blue'}
+				variant={isReportPDFEnabled ? 'danger-outline' : 'primary'}
 				disabled={isTogglingReportPDF}
 				on:click={onClickReportPDFToggle}
 			>
@@ -200,21 +195,13 @@
 	</SettingsCard>
 
 	{#if isReportPDFEnabled}
-		<SettingsCard title="Report Template">
-			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-				Default HTML template used when generating campaign PDF reports. Companies without their own
-				template fall back to this.
-			</p>
+		<SettingsCard title="Report Template" description="Default HTML template used when generating campaign PDF reports. Companies without their own template fall back to this.">
 			<svelte:fragment slot="footer">
 				<Button size={'large'} on:click={openReportTemplateModal}>Edit Template</Button>
 			</svelte:fragment>
 		</SettingsCard>
 
-		<SettingsCard title="Report Delivery">
-			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-				Default delivery settings used to email campaign reports. Companies without their own
-				configuration fall back to this.
-			</p>
+		<SettingsCard title="Report Delivery" description="Default delivery settings used to email campaign reports. Companies without their own configuration fall back to this.">
 			<svelte:fragment slot="footer">
 				<Button size={'large'} on:click={() => (isReportDeliveryModalVisible = true)}
 					>Configure</Button

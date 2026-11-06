@@ -3,6 +3,7 @@
 	class="h-5 w-5 text-slate-400 dark:text-gray-400 transition-colors duration-200"
 	viewBox="0 0 20 20"
 	fill="currentColor"
+	aria-hidden="true"
 >
 	<path
 		fill-rule="evenodd"

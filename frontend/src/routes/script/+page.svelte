@@ -271,23 +271,26 @@
 	<Headline docSlug="scripts">Scripts</Headline>
 
 	{#if featureDisabled}
-		<div class="mt-6 max-w-xl rounded-lg border border-slate-700 bg-slate-800/50 px-6 py-8">
-			<p class="mb-1 text-sm font-semibold text-white">Scripts are not enabled</p>
-			<p class="mb-3 text-sm text-slate-400">
+		<div
+			class="mt-6 max-w-xl rounded-lg border border-gray-200 bg-gray-50 px-6 py-8 dark:border-slate-700 dark:bg-slate-800/50"
+		>
+			<p class="mb-1 text-sm font-semibold text-gray-800 dark:text-white">Scripts are not enabled</p>
+			<p class="mb-3 text-sm text-gray-600 dark:text-slate-400">
 				This feature is disabled by default for security reasons. When enabled, any operator with
 				access can write scripts that run on the server when campaign events fire, including
 				making outbound HTTP requests. Only enable it on instances where every operator is trusted
 				as a server admin.
 			</p>
-			<p class="mb-4 text-sm text-slate-400">
-				To enable it, set <code class="rounded bg-slate-700 px-1 text-slate-200">enabled: true</code>
-				in the <code class="rounded bg-slate-700 px-1 text-slate-200">script</code> block of
-				<code class="rounded bg-slate-700 px-1 text-slate-200">config.json</code> and restart the service.
+			<p class="mb-4 text-sm text-gray-600 dark:text-slate-400">
+				To enable it, set <code class="rounded bg-gray-200 px-1 text-gray-800 dark:bg-slate-700 dark:text-slate-200">enabled: true</code>
+				in the <code class="rounded bg-gray-200 px-1 text-gray-800 dark:bg-slate-700 dark:text-slate-200">script</code> block of
+				<code class="rounded bg-gray-200 px-1 text-gray-800 dark:bg-slate-700 dark:text-slate-200">config.json</code> and restart the service.
 			</p>
 		</div>
 	{:else}
 		<BigButton on:click={openCreateModal}>New script</BigButton>
 		<Table
+		reserveSelect
 		columns={[
 			{ column: 'Name', size: 'large' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
@@ -295,19 +298,20 @@
 		sortable={['name', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!scripts.length}
 		hasNextPage={scriptsHasNextPage}
-		plural="Scripts"
+		plural="scripts"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}
 	>
 		{#each scripts as script}
 			<TableRow>
-				<TableCell>
+				<TableCell wrap>
 					<button
 						on:click={() => {
 							openEditModal(script.id);
 						}}
 						{...globalButtonDisabledAttributes(script, contextCompanyID)}
 						title={script.name}
+						class="block w-full py-1 text-left"
 					>
 						{script.name}
 					</button>
@@ -345,19 +349,27 @@
 		onClose={closeModal}
 		{isSubmitting}
 	>
-		{#if modalMode === 'update'}
-			<InstalledResourceBadge resourceType="script" resourceId={formValues.id} variant="notice" />
-		{/if}
 		<FormGrid on:submit={onSubmit} {isSubmitting} {modalMode}>
-			<div class="col-span-3 flex flex-col min-h-0 overflow-hidden px-4 py-4">
-				{#key editorKey}
-					<ScriptEditor bind:name={formValues.name} bind:script={formValues.script} />
-				{/key}
+			<div class="flex flex-col min-h-0 overflow-hidden py-4">
+				{#if modalMode === 'update'}
+					<div class="flex-none mb-3">
+						<InstalledResourceBadge
+							resourceType="script"
+							resourceId={formValues.id}
+							variant="notice"
+						/>
+					</div>
+				{/if}
+				<div class="flex-1 min-h-0">
+					{#key editorKey}
+						<ScriptEditor bind:name={formValues.name} bind:script={formValues.script} />
+					{/key}
+				</div>
 			</div>
 
 			<FormError message={modalError} />
 
-			<FormFooter {closeModal} {isSubmitting} okText={modalMode === 'create' ? 'Create' : 'Update'} />
+			<FormFooter {closeModal} {isSubmitting} />
 		</FormGrid>
 	</Modal>
 

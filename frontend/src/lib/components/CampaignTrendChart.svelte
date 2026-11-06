@@ -39,6 +39,8 @@
 	let chartContainer;
 	let sizingContainer;
 	let width = 300;
+	// width the svg is drawn at, never wider than the chart container
+	let chartWidth = 300;
 	let height = 240; // Increased height for better label spacing
 	let containerReady = false;
 	let tooltip;
@@ -199,18 +201,15 @@
 	}
 
 	// Responsive margins based on container width
+	// on narrow screens the legend goes under the plot in two columns
+	$: compactLegend = width < 520;
 	$: margin = {
 		top: 15,
-		right: Math.min(180, Math.max(160, width * 0.28)), // 28% of width, min 160px, max 180px
+		right: compactLegend ? 16 : Math.min(180, Math.max(160, width * 0.28)),
 		bottom: 50, // Increased bottom margin for better label spacing
 		left: 50
 	};
 
-	// Responsive: width is always 100% of container, SVG uses viewBox for scaling
-	$: {
-		// width is set by ResizeObserver below
-		innerWidth = width - margin.left - margin.right;
-	}
 
 	let chartData = [];
 	let xScale, yScale;
@@ -322,7 +321,7 @@
 		{
 			key: 'reportRate',
 			label: 'Report Rate',
-			color: '#1e40af',
+			color: '#4c6ef5',
 			suffix: '%',
 			mavg: { color: '#60a5fa', label: 'Report MA' }
 		}
@@ -431,6 +430,7 @@
 
 	function createChart() {
 		if (!chartContainer || chartData.length < 2) return;
+		chartWidth = Math.min(width, chartContainer.clientWidth || width);
 
 		// Remove all children (safer than innerHTML)
 		while (chartContainer.firstChild) {
@@ -439,10 +439,11 @@
 
 		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 		svg.setAttribute('width', '100%');
-		svg.setAttribute('height', height.toString());
+		const svgHeight = height + compactLegendHeight();
+		svg.setAttribute('height', svgHeight.toString());
 		svg.setAttribute(
 			'viewBox',
-			`0 0 ${Math.min(width, chartContainer.clientWidth || width)} ${height}`
+			`0 0 ${chartWidth} ${svgHeight}`
 		);
 		svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
 		svg.style.maxWidth = '100%';
@@ -466,7 +467,7 @@
 		// Map 0-100% directly to chart boundaries so 0% aligns with X-axis
 		const yExtent = [0, 100];
 
-		xScale = createLinearScale(xExtent, [margin.left, width - margin.right]);
+		xScale = createLinearScale(xExtent, [margin.left, chartWidth - margin.right]);
 		yScale = useLogScale
 			? createLogScale(yExtent, [height - margin.bottom, margin.top])
 			: createLinearScale(yExtent, [height - margin.bottom, margin.top]);
@@ -658,7 +659,7 @@
 			if (y < margin.top || y > height - margin.bottom) return;
 			const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
 			line.setAttribute('x1', margin.left.toString());
-			line.setAttribute('x2', (width - margin.right).toString());
+			line.setAttribute('x2', (chartWidth - margin.right).toString());
 			line.setAttribute('y1', y.toString());
 			line.setAttribute('y2', y.toString());
 			line.setAttribute(
@@ -686,7 +687,7 @@
 
 		const xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
 		xAxis.setAttribute('x1', margin.left.toString());
-		xAxis.setAttribute('x2', (width - margin.right).toString());
+		xAxis.setAttribute('x2', (chartWidth - margin.right).toString());
 		xAxis.setAttribute('y1', (height - margin.bottom).toString());
 		xAxis.setAttribute('y2', (height - margin.bottom).toString());
 		xAxis.setAttribute(
@@ -722,10 +723,28 @@
 			svg.appendChild(text);
 		});
 
-		// Show labels for EVERY campaign with valid dates
+		// on narrow charts only some date labels are drawn so they do not overlap
+		const plotWidth = Math.max(1, chartWidth - margin.left - margin.right);
+		const labelStep = Math.max(1, Math.ceil((chartData.length * 40) / plotWidth));
+		// short ranges show day and month, longer ranges month and year
+		const times = chartData
+			.map((d) => (d.date instanceof Date ? d.date.getTime() : NaN))
+			.filter((t) => !isNaN(t));
+		const spanDays = times.length ? (Math.max(...times) - Math.min(...times)) / 86400000 : 0;
+		const labelFormat =
+			spanDays < 60 ? { day: 'numeric', month: 'short' } : { month: 'short', year: '2-digit' };
+		// the last point always gets a label, the step label before it is dropped when too close
+		const lastIndex = chartData.length - 1;
+		const lastStepIndex = lastIndex - (lastIndex % labelStep);
+		const dropLastStep = lastStepIndex !== lastIndex && lastIndex - lastStepIndex < labelStep * 0.6;
+		let lastLabel = '';
 		chartData.forEach((d, i) => {
-			// Show label for every campaign that has a valid date
+			if (i !== lastIndex && i % labelStep !== 0) return;
+			if (dropLastStep && i === lastStepIndex && i !== 0) return;
 			if (d.date instanceof Date && !isNaN(d.date.getTime())) {
+				const label = d.date.toLocaleDateString(undefined, labelFormat);
+				if (label === lastLabel) return;
+				lastLabel = label;
 				const x = xScale(i);
 				const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
 				text.setAttribute('x', x.toString());
@@ -737,13 +756,10 @@
 					document.documentElement.classList.contains('dark') ? '#f3f4f6' : '#000'
 				);
 				text.setAttribute('alignment-baseline', 'middle');
-				// Show mm-yy format
 				const labelSpan = document.createElementNS('http://www.w3.org/2000/svg', 'tspan');
 				labelSpan.setAttribute('x', x.toString());
 				labelSpan.setAttribute('dy', '0');
-				const month = String(d.date.getMonth() + 1).padStart(2, '0');
-				const year = String(d.date.getFullYear()).slice(-2);
-				labelSpan.textContent = `${month}-${year}`;
+				labelSpan.textContent = label;
 				text.appendChild(labelSpan);
 
 				svg.appendChild(text);
@@ -907,12 +923,8 @@
 		});
 	}
 
-	function createLegend(svg, svgRoot) {
-		const legendY = margin.top + 5; // Align with chart top area
-		const legendX = width - margin.right + 10;
-		const legendSpacing = 18; // More spacing between legend items
-
-		// Build a flat list of legend items (main and moving averages)
+	// flat list of legend items (main and moving averages)
+	function buildLegendItems() {
 		const legendItems = [];
 		metrics.forEach((metric) => {
 			// in moving average only mode the drawn line is the average, so the entry
@@ -938,6 +950,8 @@
 					key: metric.key,
 					label: metric.mavg.label,
 					color: metric.mavg.color,
+					// the light MA colors are hard to read as text, so the label keeps the series color
+					textColor: metric.color,
 					class: `legend-line legend-mavg legend-mavg-${metric.key}`,
 					labelClass: `legend-label legend-mavg legend-mavg-${metric.key}`,
 					dataMetric: `mavg-${metric.key}`,
@@ -947,9 +961,27 @@
 				});
 			}
 		});
+		return legendItems;
+	}
+
+	// rows of the legend when it sits under the plot
+	const legendRowHeight = 18;
+	const compactLegendHeight = () =>
+		compactLegend ? Math.ceil(buildLegendItems().length / 2) * legendRowHeight + 12 : 0;
+
+	function createLegend(svg, svgRoot) {
+		const legendY = margin.top + 5;
+		const legendX = chartWidth - margin.right + 10;
+		const legendSpacing = legendRowHeight;
+		const colWidth = Math.max(120, (chartWidth - margin.left - margin.right) / 2);
+
+		const legendItems = buildLegendItems();
 
 		legendItems.forEach((item, i) => {
-			const y = legendY + i * legendSpacing;
+			const y = compactLegend
+				? height + 4 + Math.floor(i / 2) * legendSpacing
+				: legendY + i * legendSpacing;
+			const x = compactLegend ? margin.left - 30 + (i % 2) * colWidth : legendX;
 
 			// Create clickable group for legend item
 			const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
@@ -958,11 +990,11 @@
 			group.style.cursor = 'pointer';
 
 			const isVisible = visibleMetrics[item.dataMetric];
-			const opacity = isVisible ? '1' : '0.3';
+			const opacity = isVisible ? '1' : '0.45';
 
 			const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-			line.setAttribute('x1', legendX.toString());
-			line.setAttribute('x2', (legendX + 18).toString());
+			line.setAttribute('x1', x.toString());
+			line.setAttribute('x2', (x + 18).toString());
 			line.setAttribute('y1', y.toString());
 			line.setAttribute('y2', y.toString());
 			line.setAttribute('stroke', item.color);
@@ -972,12 +1004,12 @@
 			line.setAttribute('class', item.class);
 
 			const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-			text.setAttribute('x', (legendX + 24).toString());
+			text.setAttribute('x', (x + 24).toString());
 			text.setAttribute('y', y.toString());
 			text.setAttribute('font-size', '11');
 			text.setAttribute('font-weight', '500');
-			text.setAttribute('fill', item.color);
-			text.setAttribute('opacity', opacity);
+			// hidden series get gray text so the entry reads as off, not as faded color
+			text.setAttribute('fill', isVisible ? item.textColor || item.color : '#9ca3af');
 			text.setAttribute('alignment-baseline', 'middle');
 			text.setAttribute('class', item.labelClass);
 			text.textContent = item.label;
@@ -1370,7 +1402,7 @@
 		<div>
 			{#if hasAttemptedLoad && !isLoading && campaignStats.length < 2}
 				<div
-					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200"
+					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4 sm:p-6 transition-colors duration-200"
 				>
 					<!-- Match the height structure of the data container -->
 					<div class="flex flex-row items-center justify-between mb-2 pb-0 flex-wrap gap-2">
@@ -1414,7 +1446,7 @@
 				</div>
 			{:else}
 				<div
-					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200"
+					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4 sm:p-6 transition-colors duration-200"
 				>
 					<!-- Trendline stats and controls above chart -->
 					<div class="flex flex-row items-center justify-between mb-2 pb-0 flex-wrap gap-2">
@@ -1454,8 +1486,7 @@
 								Time range:
 								<select
 									bind:value={selectedTimeRange}
-									class="border border-gray-300 dark:border-gray-600 rounded px-1 py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
-									style="height: 1.5rem;"
+									class="pc-select h-6 py-0"
 								>
 									{#each timeRanges as range}
 										<option value={range.value}>{range.label}</option>
@@ -1473,7 +1504,7 @@
 										max={campaignStats.length}
 										bind:value={trendN}
 										on:input={() => (userHasSetTrendN = true)}
-										class="h-6 w-8 px-2 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
+										class="h-6 w-12 px-1 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 									/>
 								</label>
 							{/if}
@@ -1487,14 +1518,14 @@
 									max={campaignStats.length}
 									bind:value={movingAvgN}
 									on:input={() => (userHasSetMovingAvgN = true)}
-									class="h-6 w-8 px-2 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
+									class="h-6 w-12 px-1 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
 								/>
 							</label>
 							<label
 								class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
 							>
 								Log scale:
-								<input type="checkbox" bind:checked={useLogScale} class="accent-blue-600" />
+								<input type="checkbox" bind:checked={useLogScale} class="pc-checkbox" />
 							</label>
 							{#if densePossible}
 								<label
@@ -1504,7 +1535,7 @@
 									<input
 										type="checkbox"
 										bind:checked={showRawOverride}
-										class="accent-blue-600"
+										class="pc-checkbox"
 									/>
 								</label>
 							{/if}
@@ -1516,7 +1547,7 @@
 									<input
 										type="checkbox"
 										bind:checked={useRelativeMetrics}
-										class="accent-blue-600"
+										class="pc-checkbox"
 									/>
 								</label>
 							</div>
@@ -1524,12 +1555,9 @@
 					</div>
 					<div class="mb-8"></div>
 					{#if campaignStats.length > 0}
-						<div
-							class="grid gap-2 sm:gap-4"
-							style="grid-template-columns: repeat({metrics.length}, minmax(0, 1fr));"
-						>
+						<div class="flex flex-wrap justify-around gap-x-4 gap-y-4">
 							{#each metrics as metric}
-								<div class="text-center">
+								<div class="text-center min-w-[7rem]">
 									<div class="flex items-center justify-center">
 										<div
 											class="w-3 h-3 rounded-full mr-2"
@@ -1565,8 +1593,8 @@
 							<div class="relative">
 								<div
 									bind:this={chartContainer}
-									class="min-h-[220px] max-h-[280px] w-full box-border relative rounded-md bg-white dark:bg-gray-900 m-1 transition-colors duration-200"
-									style="contain: layout style;"
+									class="min-h-[220px] w-full box-border relative rounded-md bg-white dark:bg-gray-900 m-1 transition-colors duration-200"
+									style="contain: layout style; max-height: {compactLegend ? 'none' : '280px'};"
 								></div>
 								<div
 									bind:this={tooltip}

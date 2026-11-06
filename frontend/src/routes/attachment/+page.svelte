@@ -28,6 +28,7 @@
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import FileField from '$lib/components/FileField.svelte';
@@ -195,7 +196,7 @@
 	const onClickCreate = async () => {
 		try {
 			/** @type {HTMLInputElement} */
-			let fileInput = document.querySelector('#files');
+			let fileInput = document.querySelector('#attachment-files');
 			let formData = new FormData();
 			for (let file of fileInput.files) {
 				formData.append('files', file);
@@ -308,11 +309,11 @@
 		{headerState}
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
-			'Name',
-			'Description',
-			'Filename',
-			{ column: 'Embedded Content', alignText: 'center' },
-			{ column: 'Send As Calendar', alignText: 'center' },
+			{ column: 'Name', size: 'large' },
+			{ column: 'Description', size: 'large' },
+			{ column: 'Filename', size: 'large' },
+			{ column: 'Embedded Content', title: 'Embedded', size: 'small', alignText: 'center' },
+			{ column: 'Send As Calendar', title: 'Calendar', size: 'small', alignText: 'center' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={[
@@ -337,19 +338,17 @@
 						on:change={() => selection.toggle(attachment.id)}
 					/>
 				{/if}
-				<TableCell>
-					{#if attachment.name}
-						<button
-							on:click={() => {
-								openUpdateModal(attachment.id);
-							}}
-							{...globalButtonDisabledAttributes(attachment, contextCompanyID)}
-							title={attachment.name}
-							class="block w-full py-1 text-left"
-						>
-							{attachment.name}
-						</button>
-					{/if}
+				<TableCell wrap>
+					<button
+						on:click={() => {
+							openUpdateModal(attachment.id);
+						}}
+						{...globalButtonDisabledAttributes(attachment, contextCompanyID)}
+						title={attachment.name || attachment.fileName}
+						class="block w-full py-1 text-left"
+					>
+						{attachment.name || attachment.fileName}
+					</button>
 				</TableCell>
 				<TableCell>
 					{#if attachment.description}
@@ -358,11 +357,13 @@
 								openUpdateModal(attachment.id);
 							}}
 							{...globalButtonDisabledAttributes(attachment, contextCompanyID)}
-							title={attachment.name}
+							title={attachment.description}
 							class="block w-full py-1 text-left"
 						>
 							{attachment.description}
 						</button>
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
 					{/if}
 				</TableCell>
 				<TableCell>
@@ -372,11 +373,13 @@
 								openUpdateModal(attachment.id);
 							}}
 							{...globalButtonDisabledAttributes(attachment, contextCompanyID)}
-							title={attachment.name}
+							title={attachment.fileName}
 							class="block w-full py-1 text-left"
 						>
 							{attachment.fileName}
 						</button>
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
 					{/if}
 				</TableCell>
 				<TableCellCheck value={attachment.embeddedContent} />
@@ -405,7 +408,14 @@
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
 			<FormColumns>
 				<FormColumn>
+					{#if modalMode === 'update' && formValues.fileName}
+						<div class="flex flex-col py-2">
+							<FieldLabel>File</FieldLabel>
+							<p class="text-sm text-gray-700 dark:text-gray-300 break-all">{formValues.fileName}</p>
+						</div>
+					{/if}
 					<TextField
+						width="large"
 						minLength={1}
 						maxLength={127}
 						bind:value={formValues.name}
@@ -413,6 +423,7 @@
 						placeholder={'Candidate CV'}>Name</TextField
 					>
 					<TextField
+						width="large"
 						minLength={1}
 						maxLength={255}
 						bind:value={formValues.description}
@@ -420,21 +431,23 @@
 						placeholder="Fake CV with embedded link">Description</TextField
 					>
 					<CheckboxField
+						inline
 						bind:value={formValues.embeddedContent}
 						defaultValue={false}
-						optional
-						toolTipText="File contains template variables">Embedded content</CheckboxField
+						toolTipText="File contains template variables">Embedded Content</CheckboxField
 					>
 					{#if showCalendarOption}
 						<CheckboxField
+							inline
 							bind:value={formValues.sendAsCalendar}
 							defaultValue={false}
-							optional
-							toolTipText="Send ics files as a calendar invitation so Outlook shows Accept, Tentative and Decline">Send as calendar</CheckboxField
+							toolTipText="Send ics files as a calendar invitation so Outlook shows Accept, Tentative and Decline">Send As Calendar</CheckboxField
 						>
 					{/if}
 					{#if modalMode === 'create'}
-						<FileField name="files" multiple on:change={onFilesSelected}>Files</FileField>
+						<FileField id="attachment-files" name="files" multiple fullWidth on:change={onFilesSelected}
+							>Files</FileField
+						>
 					{/if}
 				</FormColumn>
 			</FormColumns>

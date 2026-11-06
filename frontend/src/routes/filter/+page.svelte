@@ -1,4 +1,5 @@
 <script>
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
@@ -7,6 +8,8 @@
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import ToolTip from '$lib/components/ToolTip.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
@@ -370,7 +373,7 @@
 			const r = globalButtonDisabledAttributes(allowDeny, contextCompanyID);
 			if (r.disabled) {
 				hideIsLoading();
-				console.log(r.title);
+				addToast(r.title, 'Info');
 				return;
 			}
 			assignAllowDeny(allowDeny);
@@ -482,13 +485,13 @@
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
-			{ column: 'Allowed', size: 'small', alignText: 'center' },
+			{ column: 'Allowed', title: 'Type', size: 'small', alignText: 'center' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={['Name', 'Allowed', ...(contextCompanyID ? ['scope'] : [])]}
 		hasData={!!allowDenyList.length}
 		hasNextPage={allowDenyListHasNextPage}
-		plural="Allow deny entries"
+		plural="filters"
 		pagination={tableURLParams}
 		isGhost={isTableLoading}
 	>
@@ -501,28 +504,49 @@
 						on:change={() => selection.toggle(entry.id)}
 					/>
 				{/if}
-				<TableCell>
+				<TableCell wrap>
 					<button
 						on:click={() => {
 							openUpdateModal(entry.id);
 						}}
 						{...globalButtonDisabledAttributes(entry, contextCompanyID)}
 						title={entry.name}
+						class="pc-cell-link py-1 text-left max-w-full truncate align-middle"
 					>
 						{entry.name}
 					</button>
 					{#if entry.asns && entry.asns.trim() && !asnAvailable}
-						<span
-							class="ml-2 inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium uppercase text-amber-700 dark:bg-amber-500/20 dark:text-amber-400"
+						<StatusBadge
+							tone="warning"
+							class="ml-2 align-middle"
 							title={asnOnlyAllow(entry)
 								? 'This filter lists ASNs but ASN data is not downloaded, so it blocks every visitor. Download it under Settings, IP Data.'
 								: 'This filter lists ASNs but ASN data is not downloaded, so its ASN rule has no effect. Download it under Settings, IP Data.'}
+							>ASN data missing</StatusBadge
 						>
-							ASN data missing
-						</span>
 					{/if}
+					<!-- the Type column is off screen on phones -->
+					<span class="flex sm:hidden pb-1">
+						<span
+							class="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold {entry.allowed
+								? 'bg-cta-light-blue text-active-blue dark:bg-highlight-blue/20 dark:text-pc-dusty-light-blue'
+								: 'bg-gray-200 text-slate-700 dark:bg-gray-700 dark:text-gray-200'}"
+						>
+							{entry.allowed ? 'Allow' : 'Deny'}
+						</span>
+					</span>
 				</TableCell>
-				<TableCellCheck value={entry.allowed} />
+				<TableCell alignText="center">
+					<span class="leading-none">
+						<span
+							class="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold {entry.allowed
+								? 'bg-cta-light-blue text-active-blue dark:bg-highlight-blue/20 dark:text-pc-dusty-light-blue'
+								: 'bg-gray-200 text-slate-700 dark:bg-gray-700 dark:text-gray-200'}"
+						>
+							{entry.allowed ? 'Allow' : 'Deny'}
+						</span>
+					</span>
+				</TableCell>
 				{#if contextCompanyID}
 					<TableCellScope companyID={entry.companyID} />
 				{/if}
@@ -549,161 +573,212 @@
 		{/each}
 	</Table>
 
-	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
-		{#if modalMode === 'update'}
-			<InstalledResourceBadge resourceType="allowdeny" resourceId={formValues.id} variant="notice" />
-		{/if}
-		<FormGrid on:submit={onClickSubmit} bind:bindTo={form} {isSubmitting}>
-			<FormColumns>
-				<FormColumn>
-					<TextField
-						required
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.name}
-						placeholder="Company allow range">Name</TextField
-					>
-					{#if modalMode === 'create' || modalMode === 'copy'}
-						<SelectSquare
-							label="Filter Type"
-							options={[
-								{ value: true, label: 'Allow' },
-								{ value: false, label: 'Deny' }
-							]}
-							bind:value={formValues.allowed}
-						/>
-					{/if}
-					<p class="text-sm text-gray-600 dark:text-gray-400 mb-4 transition-colors duration-200">
-						A visitor matches this filter when it matches any one of its rules.
-						{#if formValues.allowed === true}
-							Matching visitors are let in.
-						{:else if formValues.allowed === false}
-							Matching visitors are blocked.
+	<Modal
+		headerText={modalText}
+		visible={isModalVisible}
+		onClose={closeModal}
+		{isSubmitting}
+		width="lg"
+	>
+		<div class="w-full">
+			<FormGrid on:submit={onClickSubmit} bind:bindTo={form} {isSubmitting}>
+				<FormColumns>
+					<FormColumn stretch>
+						{#if modalMode === 'update'}
+							<!-- zero width so the notice wraps to the form width instead of setting it -->
+							<div class="w-0 min-w-full">
+								<InstalledResourceBadge resourceType="allowdeny" resourceId={formValues.id} variant="notice" />
+							</div>
 						{/if}
-					</p>
-					{#if asnAllowBlocksAll}
-						<div
-							class="rounded-md border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 mb-4 transition-colors duration-200"
-						>
-							<p class="text-sm text-amber-800 dark:text-amber-200">
-								This allow filter only lists ASNs and no ASN data is downloaded, so it will
-								block every visitor. Download the ASN data under
-								<a
-									class="text-cta-blue dark:text-highlight-blue hover:opacity-80"
-									href="/settings#ipdata">Settings, IP Data</a
-								>
-								or remove the ASN rules.
-							</p>
+						<div class="w-full">
+							<TextField
+								width="full"
+								required
+								minLength={1}
+								maxLength={127}
+								bind:value={formValues.name}
+								placeholder="Company allow range">Name</TextField
+							>
 						</div>
-					{/if}
-					{#if asnRuleNoEffect}
-						<div
-							class="rounded-md border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 mb-4 transition-colors duration-200"
-						>
-							<p class="text-sm text-amber-800 dark:text-amber-200">
-								This filter lists ASNs but no ASN data is downloaded, so its ASN rule has no
-								effect (no visitor can be matched by ASN). Download the ASN data under
-								<a
-									class="text-cta-blue dark:text-highlight-blue hover:opacity-80"
-									href="/settings#ipdata">Settings, IP Data</a
-								>.
-							</p>
-						</div>
-					{/if}
-					<div class="mb-6 pt-4">
-						<label class="flex flex-col">
-							<div class="flex items-center py-2">
-								<p class="font-semibold text-slate-600 dark:text-gray-400">Header Rules</p>
-								<ToolTip>
-									Add header key/value regex patterns to match. Both key and value must match for
-									the rule to trigger.
-								</ToolTip>
-								<div
-									class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
+						{#if modalMode === 'create' || modalMode === 'copy'}
+							<SelectSquare
+								label="Filter Type"
+								options={[
+									{ value: true, label: 'Allow' },
+									{ value: false, label: 'Deny' }
+								]}
+								bind:value={formValues.allowed}
+							/>
+						{:else}
+							<div class="flex flex-col py-2">
+								<FieldLabel>Filter Type</FieldLabel>
+								<span
+									class="self-start inline-flex items-center rounded px-2 py-0.5 text-sm font-semibold {formValues.allowed
+										? 'bg-cta-light-blue text-active-blue dark:bg-highlight-blue/20 dark:text-pc-dusty-light-blue'
+										: 'bg-gray-200 text-slate-700 dark:bg-gray-700 dark:text-gray-200'}"
 								>
-									<p
-										class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200"
+									{formValues.allowed ? 'Allow' : 'Deny'}
+								</span>
+							</div>
+						{/if}
+						<p class="text-sm text-gray-600 dark:text-gray-400 mb-4 transition-colors duration-200">
+							A visitor matches this filter when it matches any one of its rules.
+							{#if formValues.allowed === true}
+								Matching visitors are let in.
+							{:else if formValues.allowed === false}
+								Matching visitors are blocked.
+							{:else}
+								Pick Allow or Deny.
+							{/if}
+						</p>
+						{#if asnAllowBlocksAll}
+							<div
+								role="note"
+								class="mb-4 flex w-0 min-w-full items-start gap-2.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-700/50 dark:bg-amber-900/20"
+							>
+								<svg
+									class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+									<line x1="12" y1="9" x2="12" y2="13" />
+									<line x1="12" y1="17" x2="12.01" y2="17" />
+								</svg>
+								<p class="min-w-0 break-words text-sm leading-relaxed text-amber-800 dark:text-amber-200">
+									This allow filter only lists ASNs and no ASN data is downloaded, so it will
+									block every visitor. Download the ASN data under
+									<a
+										class="font-medium text-cta-blue dark:text-highlight-blue underline-offset-2 hover:underline"
+										href="/settings#ipdata">Settings, IP Data</a
 									>
-										optional
-									</p>
+									or remove the ASN rules.
+								</p>
+							</div>
+						{/if}
+						{#if asnRuleNoEffect}
+							<div
+								role="note"
+								class="mb-4 flex w-0 min-w-full items-start gap-2.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-700/50 dark:bg-amber-900/20"
+							>
+								<svg
+									class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+									<line x1="12" y1="9" x2="12" y2="13" />
+									<line x1="12" y1="17" x2="12.01" y2="17" />
+								</svg>
+								<p class="min-w-0 break-words text-sm leading-relaxed text-amber-800 dark:text-amber-200">
+									This filter lists ASNs but no ASN data is downloaded, so its ASN rule has no
+									effect (no visitor can be matched by ASN). Download the ASN data under
+									<a
+										class="font-medium text-cta-blue dark:text-highlight-blue underline-offset-2 hover:underline"
+										href="/settings#ipdata">Settings, IP Data</a
+									>.
+								</p>
+							</div>
+						{/if}
+						<div class="mb-6 pt-4">
+							<div class="flex flex-col" role="group" aria-labelledby="filter-header-rules-label">
+								<FieldLabel
+									id="filter-header-rules-label"
+									optional
+									toolTipText="Add header key/value regex patterns to match. Both key and value must match for the rule to trigger."
+									>Header Rules</FieldLabel
+								>
+								<div class="space-y-3 w-full">
+									{#each formValues.headers as header, index}
+										<div
+											class="flex flex-col sm:flex-row sm:gap-2 border-b border-gray-200 dark:border-gray-700 pb-2 sm:border-0 sm:pb-0"
+										>
+											<div class="flex-1 min-w-0">
+												<TextField
+													bind:value={header.keyRegex}
+													placeholder="e.g. user-agent"
+													width="full"
+													required={false}>Key Regex</TextField
+												>
+											</div>
+											<div class="flex-1 min-w-0">
+												<TextField
+													bind:value={header.valueRegex}
+													placeholder="e.g. .*bot.*"
+													width="full"
+													required={false}>Value Regex</TextField
+												>
+											</div>
+											<div class="flex items-end sm:pb-3">
+												<button
+													type="button"
+													class="pc-focus inline-flex items-center gap-2 h-9 px-2 text-sm text-slate-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
+													on:click={() => removeHeaderRule(index)}
+													title="Remove this header rule"
+													aria-label="Remove header rule"
+												>
+													<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
+													<span class="sm:hidden">Remove rule</span>
+												</button>
+											</div>
+										</div>
+									{/each}
+									<Button type="button" variant="secondary" css="w-auto" size="" on:click={addHeaderRule}>
+										+ Add Header Rule
+									</Button>
 								</div>
 							</div>
-							<div class="space-y-3 min-w-[700px]">
-								{#each formValues.headers as header, index}
-									<div class="flex gap-2">
-										<div class="flex-1">
-											<TextField
-												bind:value={header.keyRegex}
-												placeholder="user-agent"
-												width="full"
-												required={false}>Key Regex</TextField
-											>
-										</div>
-										<div class="flex-1">
-											<TextField
-												bind:value={header.valueRegex}
-												placeholder=".*bot.*"
-												width="full"
-												required={false}>Value Regex</TextField
-											>
-										</div>
-										<div class="flex items-end pb-4">
-											<button
-												type="button"
-												class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
-												on:click={() => removeHeaderRule(index)}
-												title="Remove this header rule"
-												aria-label="Remove header rule"
-											>
-												<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
-											</button>
-										</div>
-									</div>
-								{/each}
-								<button
-									type="button"
-									class="px-4 py-2 bg-gradient-to-b from-blue-500 to-indigo-400 dark:from-blue-600 dark:to-indigo-500 hover:from-blue-400 hover:to-indigo-400 dark:hover:from-blue-500 dark:hover:to-indigo-400 text-white font-semibold rounded-md transition-all duration-200"
-									on:click={addHeaderRule}
-								>
-									+ Add Header Rule
-								</button>
-							</div>
-						</label>
-					</div>
-					<TextareaField
-						optional
-						bind:value={formValues.ja4Fingerprints}
-						placeholder="t13d1715h2_8daaf6152771_02713d6af862"
-						toolTipText="Newlines separated JA4 fingerprints (does not work behind Reverse Proxy)"
-						fullWidth>JA4 Fingerprints</TextareaField
-					>
-					<TextareaField
-						optional
-						bind:value={formValues.cidrs}
-						placeholder="192.168.1.0/24"
-						toolTipText="Newlines seperated CIDRs"
-						fullWidth>CIDRs</TextareaField
-					>
-					<TextFieldMultiSelect
-						id="country-codes"
-						optional
-						bind:value={formValues.countryCodes}
-						options={availableCountryCodes}
-						placeholder="Select countries..."
-						toolTipText="Filter based on GeoIP country code lookup"
-					>
-						GeoIP Country Codes
-					</TextFieldMultiSelect>
-					<AsnSelect
-						bind:value={formValues.asns}
-						installed={asnAvailable}
-						toolTipText="Filter based on the autonomous system that announces the visitor IP. Requires the ASN data package under Settings."
-					/>
-				</FormColumn>
-			</FormColumns>
-			<FormError message={formError} />
-			<FormFooter {closeModal} {isSubmitting} />
-		</FormGrid>
+						</div>
+						<TextareaField
+							optional
+							bind:value={formValues.ja4Fingerprints}
+							placeholder="e.g. t13d1715h2_8daaf6152771_..."
+							toolTipText="One JA4 fingerprint per line. Does not work behind a reverse proxy."
+							fullWidth>JA4 Fingerprints</TextareaField
+						>
+						<TextareaField
+							optional
+							bind:value={formValues.cidrs}
+							placeholder="e.g. 192.168.1.0/24"
+							toolTipText="One CIDR per line"
+							fullWidth>CIDRs</TextareaField
+						>
+						<div class="w-full">
+							<TextFieldMultiSelect
+								id="country-codes"
+								width="full"
+								optional
+								bind:value={formValues.countryCodes}
+								options={availableCountryCodes}
+								placeholder="Select countries..."
+								toolTipText="Filter based on Geo IP country code lookup"
+							>
+								Geo IP Country Codes
+							</TextFieldMultiSelect>
+							<AsnSelect
+								width="full"
+								bind:value={formValues.asns}
+								placeholder="Number or name..."
+								installed={asnAvailable}
+								toolTipText="Filter based on the autonomous system that announces the visitor IP. Requires the ASN data package under Settings."
+							/>
+						</div>
+					</FormColumn>
+				</FormColumns>
+				<FormError message={formError} />
+				<FormFooter {closeModal} {isSubmitting} />
+			</FormGrid>
+		</div>
 	</Modal>
 	<DeleteAlert
 		list={[

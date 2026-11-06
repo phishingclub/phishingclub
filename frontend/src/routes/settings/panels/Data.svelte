@@ -220,15 +220,32 @@
 
 {#if loaded}
 <div class="flex flex-wrap gap-6">
-	<SettingsCard title="Import">
+	<SettingsCard title="Import" description="Import templates and assets from a Phishing Club ZIP export.">
 		<div class="space-y-4">
-			<FileField name="importFile" accept=".zip" on:change={(e) => onSetImportFile(e)}>
+			<FileField fullWidth name="importFile" accept=".zip" on:change={(e) => onSetImportFile(e)}>
 				Select ZIP file to import
 			</FileField>
-			<label class="flex items-center gap-2 mt-2">
-				<input type="checkbox" bind:checked={importForCompany} disabled={!isCompanyContext} />
-				Import pages and emails as company templates
-			</label>
+			<div class="mt-2">
+				<label
+					class="flex items-center gap-2 text-sm {isCompanyContext
+						? 'text-gray-700 dark:text-gray-200'
+						: 'cursor-not-allowed text-gray-500 dark:text-gray-400'}"
+				>
+					<input
+						type="checkbox"
+						class="pc-checkbox disabled:cursor-not-allowed"
+						bind:checked={importForCompany}
+						disabled={!isCompanyContext}
+						aria-describedby={isCompanyContext ? undefined : 'importForCompanyHint'}
+					/>
+					Import pages and emails as company templates
+				</label>
+				{#if !isCompanyContext}
+					<p id="importForCompanyHint" class="mt-1 ml-6 text-xs text-gray-500 dark:text-gray-400">
+						Select a company to import as company templates.
+					</p>
+				{/if}
+			</div>
 			{#if importForCompany}
 				<div
 					class="bg-blue-50 dark:bg-blue-900/30 p-3 rounded-md text-sm text-blue-700 dark:text-blue-200 transition-colors duration-200"
@@ -238,7 +255,7 @@
 				</div>
 			{:else}
 				<div
-					class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200"
+					class="bg-gray-50 dark:bg-gray-900/40 p-3 rounded-md text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200"
 				>
 					<strong>Global Import:</strong> All templates and assets will be imported as shared resources.
 				</div>
@@ -260,14 +277,10 @@
 		</svelte:fragment>
 	</SettingsCard>
 
-	<SettingsCard title="Backup">
-		<div class="space-y-4">
-			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-				Create a backup of database, assets, attachments and certificates.
-			</p>
-
+	<SettingsCard title="Backup" description="Create a backup of database, assets, attachments and certificates.">
+		<div class="mt-2 space-y-4">
 			{#if availableBackups.length > 0}
-				<div class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md transition-colors duration-200">
+				<div class="bg-gray-50 dark:bg-gray-900/40 p-3 rounded-md transition-colors duration-200">
 					<h4
 						class="font-medium text-gray-900 dark:text-gray-100 mb-2 transition-colors duration-200"
 					>
@@ -300,24 +313,26 @@
 				</div>
 			{:else if !isLoadingBackups}
 				<div
-					class="bg-gray-50 dark:bg-gray-700 p-3 rounded-md text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200"
+					class="bg-gray-50 dark:bg-gray-900/40 p-3 rounded-md text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200"
 				>
 					No backups available yet.
 				</div>
 			{/if}
 		</div>
 		<svelte:fragment slot="footer">
-			<Button size={'large'} on:click={openBackupModal} disabled={isCreatingBackup}>
+			<FormButton
+				type="button"
+				size={'large'}
+				on:click={openBackupModal}
+				disabled={isCreatingBackup}
+			>
 				Create Backup
-			</Button>
+			</FormButton>
 		</svelte:fragment>
 	</SettingsCard>
 
-	<SettingsCard title="Automatically prune recipients">
-		<div class="space-y-4">
-			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-				Automatically delete orphaned recipients (not in any group) on a hourly schedule.
-			</p>
+	<SettingsCard title="Automatically Prune Recipients" description="Automatically delete orphaned recipients (not in any group) on an hourly schedule.">
+		<div class="mt-2 space-y-4">
 			<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
 				Applies to shared recipients that do not belong to any company. Each company controls its
 				own pruning from its company settings.
@@ -339,7 +354,7 @@
 			<FormError message={autoPruneError} />
 		</div>
 		<svelte:fragment slot="footer">
-			<FormButton size={'medium'} isSubmitting={isSavingAutoPrune} on:click={saveAutoPrune}
+			<FormButton size={'large'} isSubmitting={isSavingAutoPrune} on:click={saveAutoPrune}
 				>Save Changes</FormButton
 			>
 		</svelte:fragment>
@@ -350,11 +365,11 @@
 {#if isImportResultModalVisible && importResult}
 	<Modal headerText="Import Summary" bind:visible={isImportResultModalVisible}>
 		<div
-			class="p-6 max-h-[80vh] overflow-y-auto bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+			class="p-2 sm:p-6 max-h-[80vh] overflow-y-auto bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 			bind:this={importModalContent}
 		>
 			<div class="space-y-6">
-				<div class="grid grid-cols-3 gap-6">
+				<div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
 					<div>
 						<h3
 							class="font-semibold text-gray-900 dark:text-gray-100 mb-2 transition-colors duration-200"
@@ -400,19 +415,19 @@
 					</div>
 				</div>
 
-				<div class="border-t pt-6">
+				<div class="border-t border-gray-200 dark:border-gray-700 pt-6">
 					<div class="space-y-6">
 						{#if importResult.assets_skipped_list?.length > 0}
 							<div>
-								<h3 class="font-semibold text-gray-900 mb-2">Assets (Global/Shared)</h3>
-								<p class="text-sm text-gray-500 mb-3">
+								<h3 class="font-semibold text-gray-900 dark:text-gray-100 mb-2">Assets (Global/Shared)</h3>
+								<p class="text-sm text-gray-500 dark:text-gray-400 mb-3">
 									All assets are imported as global resources regardless of import context
 								</p>
 								<div class="space-y-4">
 									{#if importResult.assets_skipped_list?.length > 0}
 										<div>
-											<p class="text-sm text-gray-600 font-medium mb-1">Skipped:</p>
-											<ul class="list-disc list-inside text-sm text-gray-600 ml-2">
+											<p class="text-sm text-gray-600 dark:text-gray-300 font-medium mb-1">Skipped:</p>
+											<ul class="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 ml-2">
 												{#each importResult.assets_skipped_list || [] as asset}
 													<li>{asset}</li>
 												{/each}
@@ -423,9 +438,9 @@
 							</div>
 						{/if}
 						{#if importResult.assets_errors_list?.length > 0}
-							<div class="mt-6 border-t pt-6">
-								<h4 class="font-semibold text-red-600 mb-1">Errors:</h4>
-								<ul class="list-disc list-inside text-red-700 text-sm">
+							<div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+								<h4 class="font-semibold text-red-600 dark:text-red-400 mb-1">Errors:</h4>
+								<ul class="list-disc list-inside text-red-700 dark:text-red-300 text-sm">
 									{#each importResult.assets_errors_list as err}
 										<li>
 											<strong>{err.type}:</strong>
@@ -438,12 +453,12 @@
 
 						{#if importResult.pages_created_list?.length > 0 || importResult.pages_updated_list?.length > 0 || importResult.pages_skipped_list?.length > 0 || importResult.pages_errors_list?.length > 0}
 							<div>
-								<h3 class="font-semibold text-gray-900 mb-2">Pages</h3>
+								<h3 class="font-semibold text-gray-900 dark:text-gray-100 mb-2">Pages</h3>
 								<div class="space-y-4">
 									{#if importResult.pages_created_list?.length > 0}
 										<div>
-											<p class="text-sm text-gray-600 font-medium mb-1">Created:</p>
-											<ul class="list-disc list-inside text-sm text-gray-600 ml-2">
+											<p class="text-sm text-gray-600 dark:text-gray-300 font-medium mb-1">Created:</p>
+											<ul class="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 ml-2">
 												{#each importResult.pages_created_list || [] as page}
 													<li>{page}</li>
 												{/each}
@@ -452,8 +467,8 @@
 									{/if}
 									{#if importResult.pages_updated_list?.length > 0}
 										<div>
-											<p class="text-sm text-gray-600 font-medium mb-1">Updated:</p>
-											<ul class="list-disc list-inside text-sm text-gray-600 ml-2">
+											<p class="text-sm text-gray-600 dark:text-gray-300 font-medium mb-1">Updated:</p>
+											<ul class="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 ml-2">
 												{#each importResult.pages_updated_list || [] as page}
 													<li>{page}</li>
 												{/each}
@@ -462,8 +477,8 @@
 									{/if}
 									{#if importResult.pages_skipped_list?.length > 0}
 										<div>
-											<p class="text-sm text-gray-600 font-medium mb-1">Skipped:</p>
-											<ul class="list-disc list-inside text-sm text-gray-600 ml-2">
+											<p class="text-sm text-gray-600 dark:text-gray-300 font-medium mb-1">Skipped:</p>
+											<ul class="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 ml-2">
 												{#each importResult.pages_skipped_list || [] as page}
 													<li>{page}</li>
 												{/each}
@@ -471,9 +486,9 @@
 										</div>
 									{/if}
 									{#if importResult.pages_errors_list?.length > 0}
-										<div class="mt-6 border-t pt-6">
-											<h4 class="font-semibold text-red-600 mb-1">Errors:</h4>
-											<ul class="list-disc list-inside text-red-700 text-sm">
+										<div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+											<h4 class="font-semibold text-red-600 dark:text-red-400 mb-1">Errors:</h4>
+											<ul class="list-disc list-inside text-red-700 dark:text-red-300 text-sm">
 												{#each importResult.pages_errors_list as err}
 													<li>
 														<strong>{err.type}:</strong>
@@ -489,12 +504,12 @@
 
 						{#if importResult.emails_created_list?.length > 0 || importResult.emails_updated_list?.length > 0 || importResult.emails_errors_list?.length > 0 || importResult.emails_skipped_list?.length > 0}
 							<div>
-								<h3 class="font-semibold text-gray-900 mb-2">Emails</h3>
+								<h3 class="font-semibold text-gray-900 dark:text-gray-100 mb-2">Emails</h3>
 								<div class="space-y-4">
 									{#if importResult.emails_created_list?.length > 0}
 										<div>
-											<p class="text-sm text-gray-600 font-medium mb-1">Created:</p>
-											<ul class="list-disc list-inside text-sm text-gray-600 ml-2">
+											<p class="text-sm text-gray-600 dark:text-gray-300 font-medium mb-1">Created:</p>
+											<ul class="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 ml-2">
 												{#each importResult.emails_created_list || [] as email}
 													<li>{email}</li>
 												{/each}
@@ -503,8 +518,8 @@
 									{/if}
 									{#if importResult.emails_updated_list?.length > 0}
 										<div>
-											<p class="text-sm text-gray-600 font-medium mb-1">Updated:</p>
-											<ul class="list-disc list-inside text-sm text-gray-600 ml-2">
+											<p class="text-sm text-gray-600 dark:text-gray-300 font-medium mb-1">Updated:</p>
+											<ul class="list-disc list-inside text-sm text-gray-600 dark:text-gray-300 ml-2">
 												{#each importResult.emails_updated_list || [] as email}
 													<li>{email}</li>
 												{/each}
@@ -512,9 +527,9 @@
 										</div>
 									{/if}
 									{#if importResult.emails_errors_list?.length > 0}
-										<div class="mt-6 border-t pt-6">
-											<h4 class="font-semibold text-red-600 mb-1">Errors:</h4>
-											<ul class="list-disc list-inside text-red-700 text-sm">
+										<div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+											<h4 class="font-semibold text-red-600 dark:text-red-400 mb-1">Errors:</h4>
+											<ul class="list-disc list-inside text-red-700 dark:text-red-300 text-sm">
 												{#each importResult.emails_errors_list as err}
 													<li>
 														<strong>{err.type}:</strong>
@@ -531,9 +546,9 @@
 				</div>
 			</div>
 			{#if importResult.errors && importResult.errors.length > 0}
-				<div class="mt-6 border-t pt-6">
-					<h4 class="font-semibold text-red-600 mb-1">Errors:</h4>
-					<ul class="list-disc list-inside text-red-700 text-sm">
+				<div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
+					<h4 class="font-semibold text-red-600 dark:text-red-400 mb-1">Errors:</h4>
+					<ul class="list-disc list-inside text-red-700 dark:text-red-300 text-sm">
 						{#each importResult.errors as err}
 							<li>
 								<strong>{err.type}:</strong>
@@ -566,7 +581,7 @@
 							<strong>Note:</strong> This is not a substitute for having proper automated and tested backup
 							and recovery plans at the operating system level.
 						</p>
-						<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
+						<div class="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-md">
 							<h3 class="font-semibold text-gray-900 dark:text-white mb-2">What will be backed up:</h3>
 							<ul class="text-sm text-gray-700 dark:text-gray-300 space-y-1">
 								<li>• SQLite database (including WAL files)</li>
@@ -576,7 +591,7 @@
 							</ul>
 						</div>
 
-						<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md">
+						<div class="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-md">
 							<h3 class="font-semibold text-gray-900 dark:text-white mb-2">Important:</h3>
 							<ul class="text-sm text-gray-700 dark:text-gray-300 space-y-1">
 								<li>• Large databases may take significant time to backup</li>

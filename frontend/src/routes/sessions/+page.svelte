@@ -10,11 +10,11 @@
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
-	import TableCellCheck from '$lib/components/table/TableCellCheck.svelte';
 	import Headline from '$lib/components/Headline.svelte';
 	import { newTableURLParams } from '$lib/service/tableURLParams';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
 
 	// services
@@ -126,23 +126,38 @@
 <HeadTitle title="Sessions" />
 <main>
 	<Headline docSlug="settings">Sessions</Headline>
-	<BigButton on:click={openDeleteAllSessionsAlert}>Delete all sessions</BigButton>
+	<BigButton variant="danger-outline" on:click={openDeleteAllSessionsAlert}>Delete all sessions</BigButton>
 	<Table
 		columns={[
 			{ column: 'IP address', size: 'small' },
-			{ column: 'Current session', size: 'small', alignText: 'center' }
+			{ column: 'Created at', size: 'small' },
+			{ column: 'Last active', size: 'small' }
 		]}
-		sortable={['IP address']}
+		sortable={['IP address', 'Created at']}
 		hasData={!!sessions.length}
 		hasNextPage={sessionsHasNextPage}
-		plural="Sessions"
+		plural="sessions"
+		reserveSelect
 		pagination={tableURLParams}
 		isGhost={isTableLoading}
 	>
 		{#each sessions as session}
 			<TableRow>
-				<TableCell value={session.ip} />
-				<TableCellCheck value={session.current} />
+				<TableCell>
+					<!-- the IP truncates so the badge stays on the same line and rows keep one height -->
+					<span class="flex min-w-0 items-center gap-2">
+						<span class="min-w-0 truncate" title={session.ip}>{session.ip}</span>
+						{#if session.current}
+							<StatusBadge tone="info" class="shrink-0" title="Current session"
+								><span class="sm:hidden">Current</span><span class="hidden sm:inline"
+									>Current session</span
+								></StatusBadge
+							>
+						{/if}
+					</span>
+				</TableCell>
+				<TableCell value={session.createdAt} isDate isRelative />
+				<TableCell value={session.updatedAt} isDate isRelative />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

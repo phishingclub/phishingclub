@@ -116,18 +116,35 @@
 			<div class="hidden lg:flex flex-row items-center px-8 h-full justify-self-end">
 				{#if isUpdateAvailable}
 					<a
-						class="flex items-center gap-2 mr-8 text-lg font-medium text-white bg-gradient-to-r from-indigo-500 to-purple-500 dark:from-active-blue dark:to-highlight-blue rounded-md px-4 py-2 transition-all duration-300 transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 dark:focus:ring-offset-gray-800 active:scale-95 fixed bottom-4 right-2 shadow-md shadow-black dark:shadow-gray-900"
+						class="flex items-center gap-2 text-sm font-semibold text-white bg-cta-blue hover:bg-active-blue dark:bg-active-blue dark:hover:bg-cta-blue rounded-md px-4 py-2 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-highlight-blue focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-800 fixed bottom-4 right-4 z-30 shadow-lg shadow-black/30"
 						href={'/settings/update'}
 					>
-						<span class="">✨</span>
-						<span>Update Available</span>
+						<svg
+							class="w-4 h-4"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							viewBox="0 0 24 24"
+							aria-hidden="true"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
+							/>
+						</svg>
+						<span>Update available</span>
 					</a>
 				{/if}
 				<div class="relative ml-10 flex items-center gap-4">
 					<ThemeToggle />
 					<button
 						id="toggle-profile-menu"
-						class="group flex items-center"
+						type="button"
+						class="group flex items-center rounded-full pc-focus-dark"
+						aria-label="Account menu"
+						aria-haspopup="menu"
+						aria-expanded={isProfileMenuVisible}
 						on:click={() => (isProfileMenuVisible = !isProfileMenuVisible)}
 					>
 						<!-- main circle with initials -->
@@ -141,7 +158,10 @@
 
 						<!-- dropdown indicator -->
 						<svg
-							class="w-4 h-4 ml-2 text-gray-300 dark:text-highlight-blue transition-transform duration-200 group-hover:text-white"
+							class="w-4 h-4 ml-2 text-gray-300 dark:text-highlight-blue transition-transform duration-200 group-hover:text-white {isProfileMenuVisible
+								? 'rotate-180'
+								: ''}"
+							aria-hidden="true"
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
@@ -157,18 +177,18 @@
 				</div>
 			</div>
 
-			<div class="flex lg:hidden items-center mr-4 gap-4">
-				<div
-					class="flex items-center justify-center w-10 h-10 rounded-lg hover:bg-white/10 dark:hover:bg-white/10 transition-colors duration-200"
-				>
-					<ThemeToggle />
-				</div>
+			<div class="flex lg:hidden items-center mr-2 sm:mr-4 gap-2 sm:gap-4 shrink-0">
+				<ThemeToggle />
 
 				<button
-					class="flex items-center justify-center w-10 h-10 rounded-lg hover:bg-white/10 dark:hover:bg-white/10 transition-colors duration-200"
+					type="button"
+					class="flex items-center justify-center w-11 h-11 rounded-lg hover:bg-white/10 dark:hover:bg-white/10 transition-colors duration-200 pc-focus-dark"
+					aria-label="Open menu"
+					aria-haspopup="dialog"
+					aria-expanded={isMobileMenuVisible}
 					on:click={() => (isMobileMenuVisible = !isMobileMenuVisible)}
 				>
-					<img class="w-6 h-6" src="/mob-menu-button.svg" alt="toggle mobile menu" />
+					<img class="w-6 h-6" src="/mob-menu-button.svg" alt="" />
 				</button>
 			</div>
 		{/if}

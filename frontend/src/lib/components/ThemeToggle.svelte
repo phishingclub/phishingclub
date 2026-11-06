@@ -10,8 +10,9 @@
 </script>
 
 <button
+	type="button"
 	on:click={handleToggle}
-	class="relative inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/10 dark:bg-gray-800/80 border border-gray-200/50 dark:border-gray-600/50 hover:bg-white/20 dark:hover:bg-gray-700/80 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 shadow-lg"
+	class="relative inline-flex shrink-0 items-center justify-center w-10 h-10 rounded-full bg-white/10 dark:bg-gray-800/80 border border-gray-300/60 dark:border-gray-600/50 hover:bg-white/20 dark:hover:bg-gray-700/80 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-highlight-blue shadow-sm"
 	title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
 	aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
 >

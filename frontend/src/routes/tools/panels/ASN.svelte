@@ -88,26 +88,39 @@
 </script>
 
 <div class="flex flex-wrap gap-6">
-	<SettingsCard title="ASN Lookup">
+	<SettingsCard title="ASN Lookup" description="Look up the network operator for an IP, ASN or name." widthClass="w-full max-w-2xl">
 		<div class="space-y-4">
-			<TextField
-				type="text"
-				bind:value={query}
-				placeholder="IP, ASN number, or name (e.g. 8.8.8.8, 3292, M247)"
-				on:keyup={handleKey}
-			>
-				Search
-			</TextField>
+			<div class="flex items-end gap-2">
+				<div class="flex-1 min-w-0">
+					<TextField
+						type="text"
+						width="full"
+						bind:value={query}
+						placeholder="IP, ASN or name"
+						on:keyup={handleKey}
+					>
+						Search
+					</TextField>
+				</div>
+				<Button
+					size={'large'}
+					css="!min-w-0 w-auto shrink-0 px-5 mb-2 py-2.5 border border-transparent"
+					on:click={handleLookup}
+					disabled={isSubmitting}
+				>
+					{#if isSubmitting}Looking up...{:else}Lookup{/if}
+				</Button>
+			</div>
 
 			<FormError message={lookupError} />
 
-			<div class="text-xs text-gray-500 dark:text-gray-400 transition-colors duration-200">
+			<div class="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-200">
 				Data from
 				<a
 					href="https://github.com/ipverse/asn-ip"
 					target="_blank"
 					rel="noopener noreferrer"
-					class="text-blue-600 dark:text-blue-400 hover:underline"
+					class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline"
 				>
 					ipverse/asn-ip
 				</a>
@@ -147,10 +160,5 @@
 				{/if}
 			{/if}
 		</div>
-		<svelte:fragment slot="footer">
-			<Button size={'large'} on:click={handleLookup} disabled={isSubmitting}>
-				{#if isSubmitting}Looking up...{:else}Lookup{/if}
-			</Button>
-		</svelte:fragment>
 	</SettingsCard>
 </div>

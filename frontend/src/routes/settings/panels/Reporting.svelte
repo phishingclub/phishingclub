@@ -34,11 +34,10 @@
 
 {#if loaded}
 <div class="flex flex-wrap gap-6">
-	<SettingsCard title="Reporting Inbox">
-		<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200 mb-4">
-			Set up automated report tracking for global campaigns with Microsoft 365.
-		</p>
-		<ReportInboxStatus inbox={reportInbox} />
+	<SettingsCard title="Reporting Inbox" description="Set up automated report tracking for global campaigns with Microsoft 365.">
+		<div class="mt-2">
+			<ReportInboxStatus inbox={reportInbox} />
+		</div>
 		<svelte:fragment slot="footer">
 			<Button size={'large'} on:click={() => (isReportInboxModalVisible = true)}
 				>{reportInbox ? 'Manage' : 'Configure'}</Button

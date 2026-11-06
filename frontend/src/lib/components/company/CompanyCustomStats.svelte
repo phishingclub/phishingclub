@@ -277,17 +277,20 @@
 <p class="text-gray-600 dark:text-gray-300 text-sm mb-2">
 	Manually recorded campaign results for reporting on activity run outside the platform.
 </p>
-<BigButton on:click={openCreateModal}>Add</BigButton>
+<!-- no table toolbar here, so pull the table up to a normal gap under the button -->
+<div class="flex -mb-8">
+	<BigButton on:click={openCreateModal}>Add custom stats</BigButton>
+</div>
 
 <Table
 	columns={[
-		{ column: 'Campaign Name', size: 'large' },
+		{ column: 'Campaign name', size: 'large' },
 		{ column: 'Sent', size: 'small', alignText: 'center' },
 		{ column: 'Read', size: 'small', alignText: 'center' },
 		{ column: 'Clicked', size: 'small', alignText: 'center' },
 		{ column: 'Submitted', size: 'small', alignText: 'center' },
 		{ column: 'Reported', size: 'small', alignText: 'center' },
-		{ column: 'Time ago', size: 'small', alignText: 'center' }
+		{ column: 'Started', size: 'small', alignText: 'center' }
 	]}
 	sortable={[]}
 	hasData={!!customStats.length}
@@ -340,33 +343,33 @@
 					maxLength={64}
 					required
 					bind:value={formValues.campaignName}
-					placeholder="Campaign Name">Campaign Name</TextField
+					placeholder="Q1 awareness test">Campaign name</TextField
 				>
 				<TextField
 					type="number"
 					min="0"
 					required
 					bind:value={formValues.totalRecipients}
-					placeholder="0">Total Recipients</TextField
+					placeholder="0">Total recipients</TextField
 				>
 
 				<TextField type="number" min="0" bind:value={formValues.emailsSent} placeholder="0"
-					>Emails Sent</TextField
+					>Emails sent</TextField
 				>
 				<TextField type="number" min="0" bind:value={formValues.trackingPixelLoaded} placeholder="0"
-					>Email Opens (Read)</TextField
+					>Emails read</TextField
 				>
 			</FormColumn>
 			<FormColumn>
 				<TextField type="number" min="0" bind:value={formValues.websiteVisits} placeholder="0"
-					>Links Clicked</TextField
+					>Links clicked</TextField
 				>
 				<TextField type="number" min="0" bind:value={formValues.dataSubmissions} placeholder="0"
-					>Data Submissions</TextField
+					>Data submissions</TextField
 				>
 
 				<TextField type="number" min="0" bind:value={formValues.reported} placeholder="0"
-					>Reported as Phishing</TextField
+					>Reported as phishing</TextField
 				>
 				<TextField type="datetime-local" required bind:value={formValues.date}>Date</TextField>
 			</FormColumn>

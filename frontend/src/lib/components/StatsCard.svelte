@@ -43,7 +43,7 @@
 </script>
 
 <div
-	class="relative h-full bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none border-l-[12px] {borderColor} hover:shadow-lg dark:hover:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
+	class="relative h-full min-w-0 bg-white dark:bg-gray-900/80 p-4 sm:p-6 rounded-lg shadow-md dark:shadow-none border-l-8 {borderColor} hover:shadow-lg dark:hover:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
 >
 	<!-- optional small indicator in the top right corner, positioned so the layout does not move -->
 	{#if $$slots.corner}
@@ -51,15 +51,18 @@
 			<slot name="corner" />
 		</div>
 	{/if}
+	<!-- two line title box so values in a row of cards line up when one title wraps -->
 	<div
-		class="text-grayblue-dark dark:text-gray-500 text-sm font-semibold transition-colors duration-200"
+		class="text-slate-500 dark:text-gray-400 text-sm leading-5 min-h-[2.5rem] line-clamp-2 font-semibold break-words transition-colors duration-200"
+		class:pr-6={$$slots.corner}
+		{title}
 	>
 		{title}
 	</div>
 	<div class="flex items-center justify-between">
 		<div class="flex items-center">
 			<span
-				class="text-3xl font-bold text-pc-darkblue dark:text-gray-300 transition-colors duration-200 {flash
+				class="text-2xl sm:text-3xl font-bold tabular-nums text-pc-darkblue dark:text-gray-100 transition-colors duration-200 {flash
 					? 'flash'
 					: ''}"
 			>
@@ -73,6 +76,8 @@
 						fill="none"
 						viewBox="0 0 24 24"
 						stroke="currentColor"
+				
+						aria-hidden="true"
 					>
 						<path
 							stroke-linecap="round"
@@ -86,39 +91,46 @@
 		</div>
 	</div>
 
-	{#if validPercentages.length > 0}
+	{#if validPercentages.length > 1}
 		<button
-			class="mt-2 text-sm text-gray-600 dark:text-gray-500 flex items-center transition-colors duration-200"
+			type="button"
+			class="pc-focus -mx-1 mt-2 px-1 rounded text-sm text-slate-600 dark:text-gray-400 flex items-center text-left cursor-pointer hover:text-slate-800 dark:hover:text-gray-200 transition-colors duration-200"
+			aria-label="{validPercentages[currentPercentageIndex].value}% {validPercentages[currentPercentageIndex]
+				.relativeTo}. Show next comparison"
+			title="Show next comparison"
 			on:click={cyclePercentage}
-			class:cursor-pointer={validPercentages.length > 1}
 		>
-			<div class="flex items-center">
-				<span
-					class="text-pc-darkblue dark:text-gray-400 font-semibold transition-colors duration-200"
-				>
+			<span>
+				<span class="text-pc-darkblue dark:text-gray-200 font-semibold transition-colors duration-200">
 					{validPercentages[currentPercentageIndex].value}%
 				</span>
 				<span class="ml-1">
 					{validPercentages[currentPercentageIndex].relativeTo}
 				</span>
-			</div>
-			{#if validPercentages.length > 1}
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-4 w-4 ml-1 text-gray-400 dark:text-gray-600 transition-colors duration-200"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
-					/>
-				</svg>
-			{/if}
+			</span>
+			<svg
+				xmlns="http://www.w3.org/2000/svg"
+				class="h-4 w-4 ml-1 flex-shrink-0 text-slate-400 dark:text-gray-500 transition-colors duration-200"
+				fill="none"
+				viewBox="0 0 24 24"
+				stroke="currentColor"
+				aria-hidden="true"
+			>
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+				/>
+			</svg>
 		</button>
+	{:else if validPercentages.length === 1}
+		<p class="mt-2 text-sm text-slate-600 dark:text-gray-400 transition-colors duration-200">
+			<span class="text-pc-darkblue dark:text-gray-200 font-semibold transition-colors duration-200">
+				{validPercentages[0].value}%
+			</span>
+			<span class="ml-1">{validPercentages[0].relativeTo}</span>
+		</p>
 	{/if}
 </div>
 

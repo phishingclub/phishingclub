@@ -3,6 +3,7 @@
 	import { onMount, tick } from 'svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import Headline from '$lib/components/Headline.svelte';
+	import Breadcrumb from '$lib/components/Breadcrumb.svelte';
 	import SubHeadline from '$lib/components/SubHeadline.svelte';
 	import { addToast } from '$lib/store/toast';
 	import { BiMap } from '$lib/utils/maps';
@@ -16,7 +17,7 @@
 		weekDaysToBinary
 	} from '$lib/utils/dailySlots';
 	import { AppStateService } from '$lib/service/appState';
-	import ProxySvgIcon from '$lib/components/ProxySvgIcon.svelte';
+	import PageFlow from '$lib/components/PageFlow.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import { formatWeekDays, formatTimeConstraint, timeFormat } from '$lib/utils/date.js';
@@ -40,6 +41,9 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import RelativeTime from '$lib/components/RelativeTime.svelte';
+	import ToolTip from '$lib/components/ToolTip.svelte';
 	import TestLabel from '$lib/components/TestLabel.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import { autoRefreshStore } from '$lib/store/autoRefresh';
@@ -55,9 +59,8 @@
 	import EventName from '$lib/components/table/EventName.svelte';
 	import { goto } from '$app/navigation';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form';
-	import FileField from '$lib/components/FileField.svelte';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
-	import IconButton from '$lib/components/IconButton.svelte';
+	import ActionButton from '$lib/components/ActionButton.svelte';
 	import papaparse from 'papaparse';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import TextField from '$lib/components/TextField.svelte';
@@ -311,6 +314,8 @@
 	let isGenerateReportModalVisible = false;
 	let isReportPDFEnabled = false;
 	let reportedCSVFile = null;
+	/** @type {HTMLInputElement} */
+	let reportedCSVInput;
 	let reportedCSVHeaders = [];
 	let reportedCSVPreview = [];
 	let reportedEmailColumn = '';
@@ -1660,23 +1665,22 @@
 						: reportInboxAgeMinutes >= REPORT_INBOX_WARN_MINUTES
 							? { color: 'bg-yellow-400', label: 'Delayed' }
 							: { color: 'bg-green-500', label: 'Active' };
-	$: reportInboxTitle = !reportInboxDot
-		? ''
-		: !reportInbox.enabled
-			? 'Reporting inbox is disabled'
-			: [
-					`Reporting inbox: ${reportInboxDot.label}.`,
-					reportInboxAgeMinutes === null
-						? 'Last check never'
-						: reportInboxAgeMinutes < 1
-							? 'Last check less than a minute ago'
-							: reportInboxAgeMinutes < 60
-								? `Last check ${reportInboxAgeMinutes} minute${reportInboxAgeMinutes !== 1 ? 's' : ''} ago`
-								: `Last check ${new Date(reportInboxCheckedAt).toLocaleString()}`,
-					reportInbox.lastError || ''
-				]
-					.filter(Boolean)
-					.join('\n');
+	$: reportInboxTone = !reportInboxDot
+		? 'neutral'
+		: { Active: 'success', Delayed: 'warning', 'Not checked yet': 'warning', Error: 'danger', 'Not checking': 'danger' }[
+				reportInboxDot.label
+			] ?? 'neutral';
+	$: reportInboxLastCheck =
+		!reportInboxDot || !reportInbox.enabled
+			? ''
+			: reportInboxAgeMinutes === null
+				? 'Last check never'
+				: `Last check ${shortDateTime(reportInboxCheckedAt)}`;
+	// the inbox row shows only when the inbox for this campaign's scope is enabled;
+	// the inbox skips closed campaigns
+	$: showReportInboxRow = !!(reportInbox?.enabled && reportInboxDot && !campaign.closedAt);
+	$: showImportReportedRow =
+		!campaign.anonymizedAt && campaign.notableEventName !== 'campaign_pending_schedule';
 	// the global inbox is only managed in the global context, so a global campaign
 	// viewed in a company context gets no link
 	$: reportInboxSettingsHref = campaign.companyID
@@ -1824,6 +1828,28 @@
 		}
 
 		return { disabled: false, title: '' };
+	};
+
+	// compact date and time in the browser zone, so it fits a table cell
+	const shortDateTime = (instant) =>
+		instant
+			? new Date(instant).toLocaleString(undefined, {
+					year: '2-digit',
+					month: 'numeric',
+					day: 'numeric',
+					hour: 'numeric',
+					minute: '2-digit'
+				})
+			: '';
+
+	// why the campaign actions are disabled in the current view, empty when they are not
+	const contextTitle = (c) => {
+		if (!c || !isContextMismatch()) {
+			return '';
+		}
+		return c.companyID
+			? 'Switch to company view to perform this action'
+			: 'Switch to global view to perform this action';
 	};
 
 	const onClickUpdateCampaign = () => {
@@ -2055,58 +2081,161 @@
 			return eventData;
 		}
 	};
+
+
+	// Update is hidden when the campaign state rules it out, not when only the context is wrong
+	const isUpdateBlockedByState = (c) =>
+		c.closedAt != null ||
+		(c.sendStartAt != null && new Date(c.sendStartAt) <= new Date(Date.now() + 5 * 60 * 1000));
+
+	const campaignStatus = (c) => {
+		if (c.pausedAt && !c.closedAt) return { label: 'Paused', tone: 'warning' };
+		const name = toEvent(c.notableEventName).name;
+		if (c.closedAt || c.notableEventName === 'campaign_closed') return { label: name, tone: 'neutral' };
+		if (c.notableEventName === 'campaign_pending_schedule') return { label: name, tone: 'neutral' };
+		if (c.notableEventName === 'campaign_active') return { label: name, tone: 'success' };
+		return { label: name, tone: 'info' };
+	};
+
+	const timelineRows = (c, selfManaged) => [
+		{ label: 'Created', value: c.createdAt },
+		...(selfManaged
+			? []
+			: [
+					...(c.scheduleAt ? [{ label: 'Schedules at', value: c.scheduleAt }] : []),
+					{ label: 'Delivery start', value: c.sendStartAt },
+					{ label: 'Delivery finish', value: c.sendEndAt }
+				]),
+		{ label: 'Close at', value: c.closeAt },
+		{ label: 'Closed', value: c.closedAt }
+	];
 </script>
 
 <HeadTitle title="Campaign {campaign.name ? ` - ${campaign.name}` : ''}" />
 
 <main>
 	{#if initialPageLoadComplete}
-		<div class="relative">
-			<div class="flex justify-between">
-				<Headline docSlug="campaigns">
-					<span class="select-text">Campaign: {campaign.name ?? ''}</span>
+		<Breadcrumb
+			crumbs={[{ label: 'Campaigns', href: '/campaign/' }, { label: campaign.name ?? '' }]}
+		/>
+		<div class="mb-6 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+			<div class="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1">
+				<Headline docSlug="campaigns" preserveCase>
+					<span class="select-text">{campaign.name ?? ''}</span>
 					{#if campaign.isTest}
 						<TestLabel />
 					{/if}
 				</Headline>
+				{#if campaignStatus(campaign).label}
+					<StatusBadge tone={campaignStatus(campaign).tone}>
+						{campaignStatus(campaign).label}
+					</StatusBadge>
+				{/if}
 			</div>
-			<AutoRefresh
-				isLoading={false}
-				onRefresh={async () => {
-					try {
-						await setResults();
-						await setCampaign();
-						// results by group is on demand; only refresh it if the user opened it
-						if (showGroupedStats) {
-							await setGroupedStats();
-						}
-						// await refreshCampaignRecipients();
-
-						const res = await api.campaign.getAllCampaignRecipients(
-							$page.params.id,
-							recipientTableUrlParams
-						);
-						if (!res.success) {
-							console.error('failed to refresh campaign recipients', res.error);
-							return;
-						}
-						// bug: svelte does not rerender the usage of campaignRecipients without
-						// clearing the ref and a tick
-						campaignRecipients = [];
-						await tick();
-						campaignRecipients = res.data?.rows ?? [];
-						await getEvents();
-						await refreshCampaignEventsSince();
-					} catch (e) {
-						console.error('failed to auto-refresh campaign data', e);
-						// don't show toast on auto-refresh errors to avoid spam
-					}
-				}}
-			/>
+			<div class="flex flex-wrap items-center gap-x-4 gap-y-3">
+				<div class="flex flex-wrap items-center gap-2" role="group" aria-label="Campaign actions">
+					{#if !isUpdateBlockedByState(campaign)}
+						<div title={campaignUpdateDisabledAndTitle(campaign).title}>
+							<ActionButton
+								variant={canResume ? 'secondary' : 'primary'}
+								icon="edit"
+								disabled={campaignUpdateDisabledAndTitle(campaign).disabled}
+								on:click={onClickUpdateCampaign}
+							>
+								Update
+							</ActionButton>
+						</div>
+					{/if}
+					{#if canPause}
+						<div title={contextTitle(campaign)}>
+							<ActionButton
+								variant="secondary"
+								icon="pause"
+								disabled={isContextMismatch()}
+								on:click={showPauseModal}
+							>
+								Pause
+							</ActionButton>
+						</div>
+					{/if}
+					{#if canResume}
+						<div title={contextTitle(campaign)}>
+							<ActionButton
+								variant="primary"
+								icon="play"
+								disabled={isContextMismatch()}
+								on:click={showResumeModal}
+							>
+								Resume
+							</ActionButton>
+						</div>
+					{/if}
+					<TableDropDownEllipsis text="Export" label="Export campaign data">
+						<TableDropDownButton name="Report" on:click={onClickGenerateReport} />
+						{#if canSendReport}
+							<TableDropDownButton name="Send Report" on:click={onClickSendReport} />
+						{/if}
+						<TableDropDownButton name="Events" on:click={onClickExportEvents} />
+						<TableDropDownButton name="Submitters" on:click={onClickExportSubmissions} />
+					</TableDropDownEllipsis>
+					{#if !campaign.closedAt && !campaign.anonymizedAt}
+						<div title={contextTitle(campaign)}>
+							<ActionButton
+								variant="danger-outline"
+								icon="close"
+								disabled={isContextMismatch()}
+								on:click={showCloseCampaignModal}
+							>
+								Close
+							</ActionButton>
+						</div>
+					{/if}
+				</div>
+				<div class="sm:pl-4 sm:border-l sm:border-gray-200 dark:sm:border-gray-700">
+					<AutoRefresh
+						isLoading={false}
+						onRefresh={async () => {
+							try {
+								await setResults();
+								await setCampaign();
+								// results by group is on demand; only refresh it if the user opened it
+								if (showGroupedStats) {
+									await setGroupedStats();
+								}
+								// await refreshCampaignRecipients();
+	
+								const res = await api.campaign.getAllCampaignRecipients(
+									$page.params.id,
+									recipientTableUrlParams
+								);
+								if (!res.success) {
+									console.error('failed to refresh campaign recipients', res.error);
+									return;
+								}
+								// bug: svelte does not rerender the usage of campaignRecipients without
+								// clearing the ref and a tick
+								campaignRecipients = [];
+								await tick();
+								campaignRecipients = res.data?.rows ?? [];
+								await getEvents();
+								await refreshCampaignEventsSince();
+							} catch (e) {
+								console.error('failed to auto-refresh campaign data', e);
+								// don't show toast on auto-refresh errors to avoid spam
+							}
+						}}
+					/>
+				</div>
+			</div>
 		</div>
+		{#if contextTitle(campaign)}
+			<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+				{contextTitle(campaign)} to change this campaign.
+			</p>
+		{/if}
 
 		<div
-			class="grid grid-row-1 grid-cols-1 md:grid-cols-2 gap-6 mb-8 mt-4 lg:grid-cols-3 2xl:grid-cols-6"
+			class="grid grid-cols-2 gap-3 sm:gap-6 mb-8 mt-4 lg:grid-cols-3 2xl:grid-cols-6"
 		>
 			<StatsCard
 				title="Recipients"
@@ -2132,7 +2261,7 @@
 			</StatsCard>
 
 			<StatsCard
-				title="Emails Sent"
+				title="Emails sent"
 				value={result.emailsSent}
 				borderColor="border-message-sent"
 				iconColor="text-message-sent"
@@ -2161,7 +2290,7 @@
 				</svg>
 			</StatsCard>
 			<StatsCard
-				title="Emails Read"
+				title="Emails read"
 				value={result.trackingPixelLoaded}
 				borderColor="border-message-read"
 				iconColor="text-message-read"
@@ -2202,7 +2331,7 @@
 
 			{#if campaign.isTraining}
 				<StatsCard
-					title="Training Started"
+					title="Training started"
 					value={result.trainingStarted}
 					borderColor="border-training-started"
 					iconColor="text-training-started"
@@ -2242,7 +2371,7 @@
 				</StatsCard>
 			{:else}
 				<StatsCard
-					title="Website Visits"
+					title="Clicked link"
 					value={result.websiteLoaded}
 					borderColor="border-page-visited"
 					iconColor="text-page-visited"
@@ -2318,7 +2447,7 @@
 				</StatsCard>
 			{:else}
 				<StatsCard
-					title="Data Submitted"
+					title="Data submitted"
 					value={result.submittedData}
 					borderColor="border-submitted-data"
 					iconColor="text-submitted-data"
@@ -2366,7 +2495,7 @@
 
 			{#if campaign.isTraining}
 				<StatsCard
-					title="Training Completed"
+					title="Training completed"
 					value={result.trainingCompleted}
 					borderColor="border-training-completed"
 					iconColor="text-training-completed"
@@ -2413,8 +2542,8 @@
 				<StatsCard
 					title="Reported"
 					value={result.reported}
-					borderColor="border-reported"
-					iconColor="text-reported"
+					borderColor="border-reported dark:border-slate-400"
+					iconColor="text-reported dark:text-slate-300"
 				percentages={[
 					{
 						value: Math.round((result.reported / result.recipients) * 100),
@@ -2438,32 +2567,6 @@
 					}
 				]}
 			>
-				<!-- reports are not recorded for closed campaigns -->
-				<svelte:fragment slot="corner">
-					{#if reportInboxDot && !campaign.closedAt}
-						{#if reportInboxSettingsHref}
-							<a
-								data-report-inbox
-								href={reportInboxSettingsHref}
-								target="_blank"
-								title={reportInboxTitle}
-								aria-label={reportInboxTitle}
-								class="block p-1 rounded-full hover:opacity-80"
-							>
-								<span class="block h-2.5 w-2.5 rounded-full {reportInboxDot.color}"></span>
-							</a>
-						{:else}
-							<span
-								data-report-inbox
-								title={reportInboxTitle}
-								aria-label={reportInboxTitle}
-								class="block p-1"
-							>
-								<span class="block h-2.5 w-2.5 rounded-full {reportInboxDot.color}"></span>
-							</span>
-						{/if}
-					{/if}
-				</svelte:fragment>
 				<svg
 					slot="icon"
 					xmlns="http://www.w3.org/2000/svg"
@@ -2485,11 +2588,12 @@
 
 		{#if hasGroupData}
 			<div class="mb-6">
-				<div class="mb-3 flex items-center gap-3">
+				<!-- Show sits next to the heading and starts at the left edge when it wraps -->
+				<div class="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
 					<SubHeadline>Results by position or department</SubHeadline>
 					<button
 						type="button"
-						class="text-sm font-medium text-cta-blue hover:text-blue-700 dark:text-highlight-blue dark:hover:text-blue-300 transition-colors duration-200"
+						class="text-sm font-medium text-cta-blue hover:underline dark:text-highlight-blue transition-colors duration-200"
 						on:click={() => (showGroupedStats ? (showGroupedStats = false) : showGroupedResults())}
 						>{showGroupedStats ? 'Hide' : 'Show'}</button
 					>
@@ -2612,25 +2716,34 @@
 				<div class="space-y-2.5 text-sm">
 					<div class="flex justify-between">
 						<span class="text-gray-600 dark:text-gray-400">Status:</span>
-						<span class="text-pc-darkblue dark:text-white font-semibold">
-							{#if campaign.pausedAt && !campaign.closedAt}
-								<span data-paused-badge title="Sending paused">Paused</span>
-							{:else}
-								{toEvent(campaign.notableEventName).name}
+						<span data-paused-badge={campaign.pausedAt && !campaign.closedAt ? '' : undefined}>
+							{#if campaignStatus(campaign).label}
+								<StatusBadge
+									tone={campaignStatus(campaign).tone}
+									title={campaign.pausedAt && !campaign.closedAt ? 'Sending paused' : ''}
+								>
+									{campaignStatus(campaign).label}
+								</StatusBadge>
 							{/if}
 						</span>
 					</div>
 
 					<div class="flex justify-between">
 						<span class="text-gray-600 dark:text-gray-400">Template:</span>
-						<button
-							class="text-cta-blue dark:text-blue-400 hover:underline text-right"
-							on:click={() => {
-								openTemplateModal(campaign.template?.id);
-							}}
-						>
-							{campaign.template?.name}
-						</button>
+						{#if campaign.template?.id}
+							<button
+								class="text-cta-blue dark:text-highlight-blue hover:underline text-right"
+								on:click={() => {
+									openTemplateModal(campaign.template?.id);
+								}}
+							>
+								{campaign.template?.name}
+							</button>
+						{:else}
+							<span class="italic text-gray-500 dark:text-gray-400" title="The template was deleted"
+								>Deleted</span
+							>
+						{/if}
 					</div>
 
 					<div class="flex justify-between">
@@ -2638,7 +2751,7 @@
 						<div class="text-right">
 							{#each campaign.recipientGroups as group, i}
 								<a
-									class="text-cta-blue dark:text-blue-400 hover:underline"
+									class="text-cta-blue dark:text-highlight-blue hover:underline"
 									href="/recipient/group/{recipientGroupMap.byValue(group)}"
 									target="_blank">{group}</a
 								>{#if i !== (campaign.recipientGroups?.length ?? 0) - 1},&nbsp;{/if}
@@ -2647,9 +2760,9 @@
 					</div>
 
 					<div class="flex justify-between">
-						<span class="text-gray-600 dark:text-gray-400">Type:</span>
+						<span class="text-gray-600 dark:text-gray-400">Delivery:</span>
 						<span class="text-pc-darkblue dark:text-white"
-							>{isSelfManaged ? 'Self Managed' : 'Scheduled'}</span
+							>{isSelfManaged ? 'Self managed' : 'Scheduled'}</span
 						>
 					</div>
 
@@ -2659,14 +2772,14 @@
 							{#if campaign.webhooks?.length}
 								{#each campaign.webhooks as wh, i}
 									<a
-										class="text-cta-blue dark:text-blue-400 hover:underline"
+										class="text-cta-blue dark:text-highlight-blue hover:underline"
 										href="/webhook?edit={wh.webhookID}"
 										target="_blank">{webhookMap.byKey(wh.webhookID) || wh.webhookID}</a
 									>{#if i < campaign.webhooks.length - 1},&nbsp;{/if}
 								{/each}
 							{:else if campaign.webhookID}
 								<a
-									class="text-cta-blue dark:text-blue-400 hover:underline"
+									class="text-cta-blue dark:text-highlight-blue hover:underline"
 									href="/webhook?edit={campaign.webhookID}"
 									target="_blank">{webhookMap.byKey(campaign.webhookID) || 'Yes'}</a
 								>
@@ -2682,7 +2795,7 @@
 							<div class="text-right">
 								{#each campaign.scripts as s, i}
 									<a
-										class="text-cta-blue dark:text-blue-400 hover:underline"
+										class="text-cta-blue dark:text-highlight-blue hover:underline"
 										href="/script?edit={s.scriptID}"
 										target="_blank">{scriptMap.byKey(s.scriptID) || s.scriptID}</a
 									>{#if i < campaign.scripts.length - 1},&nbsp;{/if}
@@ -2714,7 +2827,7 @@
 									{#each campaign.allowDeny as allowDeny, i}
 										<a
 											href="/filter/?edit={allowDeny.id}"
-											class="text-cta-blue dark:text-blue-400 hover:underline"
+											class="text-cta-blue dark:text-highlight-blue hover:underline"
 											target="_blank"
 										>
 											{allowDeny.name}
@@ -2762,79 +2875,18 @@
 					Timeline
 				</h3>
 				<div class="space-y-2.5 text-sm">
-					<div class="flex justify-between">
-						<span class="text-gray-600 dark:text-gray-400">Created:</span>
-						<span class="text-pc-darkblue dark:text-white text-right"
-							><Datetime value={campaign.createdAt} /></span
-						>
-					</div>
-
-					{#if !isSelfManaged}
-						{#if campaign.scheduleAt}
-							<div class="flex justify-between">
-								<span class="text-gray-600 dark:text-gray-400">Schedules at:</span>
+					{#each timelineRows(campaign, isSelfManaged) as row (row.label)}
+						<div class="flex justify-between gap-4">
+							<span class="text-gray-600 dark:text-gray-400">{row.label}:</span>
+							{#if row.value}
 								<span class="text-pc-darkblue dark:text-white text-right"
-									><Datetime value={campaign.scheduleAt} /></span
+									>{shortDateTime(row.value)}</span
 								>
-							</div>
-						{/if}
-
-						<div class="flex justify-between">
-							<span class="text-gray-600 dark:text-gray-400">Delivery start:</span>
-							<span class="text-pc-darkblue dark:text-white text-right"
-								><Datetime value={campaign.sendStartAt} /></span
-							>
+							{:else}
+								<span class="text-gray-400 dark:text-gray-500 text-right">Not set</span>
+							{/if}
 						</div>
-
-						<div class="flex justify-between">
-							<span class="text-gray-600 dark:text-gray-400">Delivery finish:</span>
-							<span class="text-pc-darkblue dark:text-white text-right"
-								><Datetime value={campaign.sendEndAt} /></span
-							>
-						</div>
-					{/if}
-
-					<div class="flex justify-between">
-						<span class="text-gray-600 dark:text-gray-400">Close At:</span>
-						<span class="text-pc-darkblue dark:text-white text-right"
-							><Datetime value={campaign.closeAt} /></span
-						>
-					</div>
-
-					<div class="flex justify-between">
-						<span class="text-gray-600 dark:text-gray-400">Closed:</span>
-						<span class="text-pc-darkblue dark:text-white text-right"
-							><Datetime value={campaign.closedAt} /></span
-						>
-					</div>
-
-					<div class="flex justify-between">
-						<span class="text-gray-600 dark:text-gray-400">Anonymize At:</span>
-						<span class="text-pc-darkblue dark:text-white text-right"
-							><Datetime value={campaign.anonymizeAt} /></span
-						>
-					</div>
-
-					<div class="flex justify-between">
-						<span class="text-gray-600 dark:text-gray-400">Anonymized:</span>
-						<span class="text-pc-darkblue dark:text-white text-right"
-							><Datetime value={campaign.anonymizedAt} /></span
-						>
-					</div>
-
-					<div class="flex justify-between">
-						<span class="text-gray-600 dark:text-gray-400">Anonymize Data At:</span>
-						<span class="text-pc-darkblue dark:text-white text-right"
-							><Datetime value={campaign.dataAnonymizeAt} /></span
-						>
-					</div>
-
-					<div class="flex justify-between">
-						<span class="text-gray-600 dark:text-gray-400">Data Anonymized:</span>
-						<span class="text-pc-darkblue dark:text-white text-right"
-							><Datetime value={campaign.dataAnonymizedAt} /></span
-						>
-					</div>
+					{/each}
 				</div>
 
 				{#if campaign.constraintWeekDays}
@@ -2842,13 +2894,18 @@
 					<div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
 						<div class="mb-3">
 							<span class="text-gray-600 dark:text-gray-400 text-sm font-medium">Schedule:</span>
+							{#if localSlots?.timeZone && localSlots.timeZone !== browserTimeZone()}
+								<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+									Days and hours are in {timeZoneLabel(localSlots.timeZone)}
+								</p>
+							{/if}
 						</div>
 						<div class="flex gap-1.5 mb-3">
 							{#each formatWeekDays(weekDaysToBinary(localSlots?.weekDays)).days as day}
 								<div
 									class="w-8 h-8 flex items-center justify-center rounded text-xs transition-all {day.isActive
 										? 'bg-cta-blue text-white font-medium'
-										: 'bg-gray-100 dark:bg-gray-800 text-gray-400 border border-gray-200 dark:border-gray-700'}"
+										: 'bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}"
 									title={day.full}
 								>
 									{day.short}
@@ -2888,177 +2945,170 @@
 									{$timeFormat ? '12h' : '24h'}
 								</button>
 							</div>
-							<p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
-								{timeZoneLabel(localSlots.timeZone)}
-							</p>
 						{/if}
 					</div>
 				{/if}
 			</div>
 
-			<!-- actions card -->
-			<div
-				class="bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
-			>
-				<h3
-					class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+			<div class="flex flex-col gap-6">
+				<!-- reporting card, hidden when it has no rows -->
+				{#if showReportInboxRow || showImportReportedRow}
+				<div
+					class="bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
 				>
-					Actions
-				</h3>
-				<div class="space-y-3">
-					<!-- management actions -->
-					<div>
-						<p class="text-xs text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
-							Manage
-						</p>
-						<div class="flex flex-wrap gap-2">
-							<div title={campaignUpdateDisabledAndTitle(campaign).title}>
-								<IconButton
-									variant="blue"
-									icon="edit"
-									disabled={campaignUpdateDisabledAndTitle(campaign).disabled}
-									on:click={onClickUpdateCampaign}
-								>
-									Update
-								</IconButton>
-							</div>
-							{#if canPause}
-								<div
-									title={isContextMismatch()
-										? campaign.companyID
-											? 'Switch to company view to perform this action'
-											: 'Switch to global view to perform this action'
-										: ''}
-								>
-									<IconButton
-										variant="amber"
-										icon="pause"
-										disabled={isContextMismatch()}
-										on:click={showPauseModal}
+					<h3
+						class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+					>
+						Reporting
+					</h3>
+					<div class="divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+						{#if showReportInboxRow}
+							<div class="py-3 first:pt-0 last:pb-0">
+								<div class="flex items-center justify-between gap-x-4">
+									<div class="min-w-0">
+										<p class="flex items-center text-gray-600 dark:text-gray-400">
+											Reporting inbox
+											<ToolTip>Reports sent to the Reporting Inbox are matched to recipients automatically.</ToolTip>
+										</p>
+										{#if reportInboxLastCheck}
+											<p class="text-xs text-gray-500 dark:text-gray-400">{reportInboxLastCheck}</p>
+										{/if}
+									</div>
+									<div class="flex shrink-0 items-center gap-x-3">
+										<span data-report-inbox>
+											<StatusBadge tone={reportInboxTone}>{reportInboxDot.label}</StatusBadge>
+										</span>
+										{#if reportInboxSettingsHref}
+											<a
+												href={reportInboxSettingsHref}
+												class="pc-focus rounded-sm text-xs text-cta-blue dark:text-highlight-blue hover:underline"
+												>Settings</a
+											>
+										{/if}
+									</div>
+								</div>
+								{#if reportInbox.lastError}
+									<p
+										class="mt-1 text-xs text-red-700 dark:text-red-400 line-clamp-2 break-words"
+										title={reportInbox.lastError}
 									>
-										Pause
-									</IconButton>
+										{reportInbox.lastError}
+									</p>
+								{/if}
+							</div>
+						{/if}
+						{#if showImportReportedRow}
+							<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
+								<p class="flex items-center text-gray-600 dark:text-gray-400">
+									Reported emails
+									<ToolTip
+										>Mark recipients as reported from a CSV with an email column and a report date
+										column.</ToolTip
+									>
+								</p>
+								<div title={contextTitle(campaign)}>
+									<input
+										bind:this={reportedCSVInput}
+										type="file"
+										accept=".csv"
+										class="hidden"
+										tabindex="-1"
+										aria-hidden="true"
+										on:change={onUploadReportedCSV}
+									/>
+									<ActionButton
+										variant="secondary"
+										icon="upload"
+										disabled={isContextMismatch()}
+										on:click={() => reportedCSVInput?.click()}
+									>
+										Import Reported
+									</ActionButton>
+								</div>
+							</div>
+						{/if}
+					</div>
+				</div>
+				{/if}
+
+				<!-- data and privacy card -->
+				<div
+					class="lg:flex-1 bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
+				>
+					<h3
+						class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+					>
+						Data and Privacy
+					</h3>
+					<div class="divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+						<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-3">
+							<div class="min-w-0">
+								<p class="flex items-center text-gray-600 dark:text-gray-400">
+									Recipients
+									<ToolTip>Closes the campaign and replaces recipients with anonymous IDs. Permanent.</ToolTip>
+								</p>
+								{#if campaign.anonymizedAt}
+									<p class="text-xs text-gray-500 dark:text-gray-400">
+										{shortDateTime(campaign.anonymizedAt)}
+									</p>
+								{:else if campaign.anonymizeAt}
+									<p class="text-xs text-gray-500 dark:text-gray-400">
+										Scheduled {shortDateTime(campaign.anonymizeAt)}
+									</p>
+								{/if}
+							</div>
+							{#if campaign.anonymizedAt}
+								<StatusBadge tone="success">Anonymized</StatusBadge>
+							{:else}
+								<div title={contextTitle(campaign)}>
+									<ActionButton
+										variant="danger-outline"
+										icon="anonymize"
+										disabled={isContextMismatch()}
+										on:click={showAnonymizeModal}
+									>
+										Anonymize All
+									</ActionButton>
 								</div>
 							{/if}
-							{#if canResume}
-								<div
-									title={isContextMismatch()
-										? campaign.companyID
-											? 'Switch to company view to perform this action'
-											: 'Switch to global view to perform this action'
-										: ''}
-								>
-									<IconButton
-										variant="green"
-										icon="play"
-										disabled={isContextMismatch()}
-										on:click={showResumeModal}
+						</div>
+						<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-3">
+							<div class="min-w-0">
+								<p class="flex items-center text-gray-600 dark:text-gray-400">
+									Collected data
+									<ToolTip
+										>Anonymizes submitted data, IPs, user agents and browser metadata. Recipients stay
+										linked. Permanent.</ToolTip
 									>
-										Resume
-									</IconButton>
+								</p>
+								{#if !campaign.anonymizedAt && (campaign.dataAnonymizeAt || campaign.dataAnonymizedAt)}
+									<p class="text-xs text-gray-500 dark:text-gray-400">
+										{#if campaign.dataAnonymizeAt && !campaign.dataAnonymizedAt}
+											Scheduled {shortDateTime(campaign.dataAnonymizeAt)}
+										{:else if campaign.closedAt}
+											{shortDateTime(campaign.dataAnonymizedAt)}
+										{:else}
+											Last run {shortDateTime(campaign.dataAnonymizedAt)}
+										{/if}
+									</p>
+								{/if}
+							</div>
+							{#if campaign.anonymizedAt}
+								<StatusBadge tone="success">Anonymized</StatusBadge>
+							{:else if campaign.dataAnonymizedAt && campaign.closedAt}
+								<StatusBadge tone="success">Data anonymized</StatusBadge>
+							{:else}
+								<div title={contextTitle(campaign)}>
+									<ActionButton
+										variant="danger-outline"
+										icon="anonymize"
+										disabled={isContextMismatch()}
+										on:click={showAnonymizeDataModal}
+									>
+										Anonymize Data
+									</ActionButton>
 								</div>
 							{/if}
-							<div
-								title={isContextMismatch()
-									? campaign.companyID
-										? 'Switch to company view to perform this action'
-										: 'Switch to global view to perform this action'
-									: campaign.closedAt
-										? 'Campaign is already closed'
-										: ''}
-							>
-								<IconButton
-									variant="orange"
-									icon="close"
-									disabled={!!campaign.closedAt || isContextMismatch()}
-									on:click={showCloseCampaignModal}
-								>
-									Close
-								</IconButton>
-							</div>
-							<div
-								title={isContextMismatch()
-									? campaign.companyID
-										? 'Switch to company view to perform this action'
-										: 'Switch to global view to perform this action'
-									: campaign.anonymizedAt
-										? 'Campaign is already anonymized'
-										: ''}
-							>
-								<IconButton
-									variant="red"
-									icon="anonymize"
-									disabled={!!campaign.anonymizedAt || isContextMismatch()}
-									on:click={showAnonymizeModal}
-								>
-									Anonymize All
-								</IconButton>
-							</div>
-							<div
-								title={isContextMismatch()
-									? campaign.companyID
-										? 'Switch to company view to perform this action'
-										: 'Switch to global view to perform this action'
-									: campaign.anonymizedAt
-										? 'Campaign is already anonymized'
-										: campaign.dataAnonymizedAt && campaign.closedAt
-											? 'Data is already anonymized'
-											: ''}
-							>
-								<IconButton
-									variant="red"
-									icon="anonymize"
-									disabled={!!campaign.anonymizedAt ||
-										(!!campaign.dataAnonymizedAt && !!campaign.closedAt) ||
-										isContextMismatch()}
-									on:click={showAnonymizeDataModal}
-								>
-									Anonymize Data
-								</IconButton>
-							</div>
-						</div>
-					</div>
-
-					<!-- export actions -->
-					<div class="pt-3 border-t border-gray-200 dark:border-gray-700">
-						<p class="text-xs text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
-							Export
-						</p>
-						<div class="flex flex-wrap gap-2">
-							<IconButton variant="blue" icon="export" on:click={onClickGenerateReport}>
-								Report
-							</IconButton>
-							{#if canSendReport}
-								<IconButton variant="blue" icon="export" on:click={onClickSendReport}>
-									Send Report
-								</IconButton>
-							{/if}
-							<IconButton variant="green" icon="export" on:click={onClickExportEvents}>
-								Events
-							</IconButton>
-							<IconButton variant="green" icon="export" on:click={onClickExportSubmissions}>
-								Submitters
-							</IconButton>
-						</div>
-					</div>
-
-					<!-- import section -->
-					<div class="pt-3 border-t border-gray-200 dark:border-gray-700">
-						<p class="text-xs text-gray-500 dark:text-gray-400 mb-1 uppercase tracking-wide">
-							Import
-						</p>
-						<div
-							title={isContextMismatch()
-								? campaign.companyID
-									? 'Switch to company view to perform this action'
-									: 'Switch to global view to perform this action'
-								: ''}
-						>
-							<FileField
-								accept=".csv"
-								on:change={onUploadReportedCSV}
-								disabled={isContextMismatch()}>Reported CSV</FileField
-							>
 						</div>
 					</div>
 				</div>
@@ -3069,14 +3119,14 @@
 			<SubHeadline>Events</SubHeadline>
 			<Table
 				columns={[
-					{ column: 'Created at', size: 'small' },
-					{ column: 'First name', size: 'medium' },
-					{ column: 'Last name', size: 'medium' },
-					{ column: 'Email', size: 'medium' },
-					{ column: 'Event', size: 'small' },
+					{ column: 'Created at', size: 'medium' },
+					{ column: 'First name', size: 'small' },
+					{ column: 'Last name', size: 'small' },
+					{ column: 'Email', size: 'large' },
+					{ column: 'Event', size: 'large' },
 					{ column: 'Details', size: 'small' },
 					{ column: 'User-Agent', size: 'small' },
-					{ column: 'Ip', size: 'small' },
+					{ title: 'IP', column: 'Ip', size: 'small' },
 					{ column: 'Metadata', size: 'small' }
 				]}
 				sortable={[
@@ -3101,23 +3151,32 @@
 						<TableCell isDate value={event.createdAt} />
 						<TableCell>
 							{#if event.recipient?.firstName}
-								<a href={`/recipient/${event.recipient.id}`} class="block w-full py-1">
+								<a href={`/recipient/${event.recipient.id}`} class="pc-cell-link block w-full py-1">
 									{event.recipient.firstName}
 								</a>
 							{/if}
 						</TableCell>
 						<TableCell>
 							{#if event.recipient?.lastName}
-								<a href={`/recipient/${event.recipient.id}`} class="block w-full py-1">
+								<a href={`/recipient/${event.recipient.id}`} class="pc-cell-link block w-full py-1">
 									{event.recipient.lastName}
 								</a>
 							{/if}
 						</TableCell>
 						<TableCell>
 							{#if event.recipient?.email}
-								<a href={`/recipient/${event.recipient.id}`} class="block w-full py-1">
-									{event.recipient.email}
-								</a>
+								<div class="min-w-0">
+									<a
+										href={`/recipient/${event.recipient.id}`}
+										class="pc-cell-link block w-full truncate py-1"
+										title={event.recipient.email}
+									>
+										{event.recipient.email}
+									</a>
+									<span class="block sm:hidden pb-1"
+										><EventName eventName={campaign.eventTypesIDToNameMap[event.eventID]} /></span
+									>
+								</div>
 							{/if}
 						</TableCell>
 						<TableCell>
@@ -3178,10 +3237,11 @@
 			<Table
 				columns={[
 					...(liveSessions.size > 0 ? [{ column: 'Remote', size: 'small' }] : []),
+					{ column: 'Email', size: 'large' },
+					// large fits the longest status, Evasion Page Visited
+					{ column: 'Status', size: 'large' },
 					{ column: 'First name', size: 'small' },
 					{ column: 'Last name', size: 'small' },
-					{ column: 'Email', size: 'large' },
-					{ column: 'Status', size: 'small' },
 					{ column: 'Send at', title: 'Scheduled', size: 'small' },
 					{ column: 'Sent at', title: 'Delivered', size: 'small' },
 					{ column: 'Cancelled at', size: 'small' },
@@ -3234,6 +3294,51 @@
 						{/if}
 						{#if !recp?.recipient}
 							<TableCell value={'anonymized'} />
+						{:else}
+							<TableCell>
+								{#if recp?.recipient?.email}
+									<button
+										on:click={() => openEventsModal(recp.recipientID)}
+										class="block w-full py-1 text-left"
+										title={recp.recipient.email}
+									>
+										<span class="flex min-w-0 items-center gap-2">
+											<span class="min-w-0 truncate">{recp.recipient.email}</span>
+											{#if recp.recipient.scimSoftDeletedAt}
+												<span
+													class="inline-block shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+												>
+													Disabled
+												</span>
+											{/if}
+										</span>
+										<!-- the Status column is off screen on phones -->
+										{#if !campaign.isAnonymous}
+											<span class="flex sm:hidden mt-1 min-w-0 items-center gap-2"
+												><EventName eventName={recp?.notableEventName} />{#if recp?.sentAt || (recp?.sendAt && !recp?.cancelledAt)}<span
+														class="min-w-0 truncate text-xs"
+														><RelativeTime value={recp.sentAt || recp.sendAt} short /></span
+													>{/if}</span
+											>
+										{/if}
+									</button>
+								{/if}
+							</TableCell>
+						{/if}
+						<TableCell>
+							<div>
+								{#if campaign.isAnonymous}
+									<span
+										class="text-sm italic text-gray-400 dark:text-gray-500"
+										title="Per recipient outcomes are hidden for anonymous campaigns. See Results by position or department."
+										>Hidden</span
+									>
+								{:else}
+									<EventName eventName={recp?.notableEventName} />
+								{/if}
+							</div>
+						</TableCell>
+						{#if !recp?.recipient}
 							<TableCell value={'anonymized'} />
 							<TableCell value={'anonymized'} />
 						{:else}
@@ -3253,37 +3358,7 @@
 									{recp.recipient?.lastName ?? ''}
 								</button>
 							</TableCell>
-							<TableCell>
-								{#if recp?.recipient?.email}
-									<button
-										on:click={() => openEventsModal(recp.recipientID)}
-										class="block w-full py-1 text-left"
-									>
-										<span class="inline-flex items-center gap-2">
-											<span class="truncate">{recp.recipient.email}</span>
-											{#if recp.recipient.scimSoftDeletedAt}
-												<span
-													class="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-												>
-													Disabled
-												</span>
-											{/if}
-										</span>
-									</button>
-								{/if}
-							</TableCell>
 						{/if}
-						<TableCell>
-							{#if campaign.isAnonymous}
-								<span
-									class="text-sm italic text-gray-400 dark:text-gray-500"
-									title="Per recipient outcomes are hidden for anonymous campaigns. See Results by position or department."
-									>Hidden</span
-								>
-							{:else}
-								<EventName eventName={recp?.notableEventName} />
-							{/if}
-						</TableCell>
 						{#if campaign.isAnonymous}
 							<!-- exact per recipient timing is withheld so it cannot be matched against
 							the anonymized event stream; a coarse sent indicator keeps self-managed usable -->
@@ -3297,11 +3372,11 @@
 										: 'text-gray-400 dark:text-gray-500'}">{recp?.sent ? 'Sent' : '-'}</span
 								>
 							</TableCell>
-							<TableCell value={recp?.cancelledAt} isDate />
+							<TableCell isDate isRelative value={recp?.cancelledAt} />
 						{:else}
-							<TableCell value={recp?.sendAt} isDate />
-							<TableCell value={recp?.sentAt} isDate />
-							<TableCell value={recp?.cancelledAt} isDate />
+							<TableCell isDate isRelative value={recp?.sendAt} />
+							<TableCell isDate isRelative value={recp?.sentAt} />
+							<TableCell isDate isRelative value={recp?.cancelledAt} />
 						{/if}
 						{#if showLureCodeColumn}
 							<TableCell value={recp?.lureCode || ''} />
@@ -3484,11 +3559,11 @@
 		<div class="mt-8"></div>
 		<Table
 			columns={[
-				{ column: 'Created at', size: 'small' },
-				{ column: 'Event', size: 'small' },
-				{ column: 'Details', size: 'small' },
+				{ column: 'Created at', size: 'medium' },
+				{ column: 'Event', size: 'large' },
+				{ column: 'Details' },
 				{ column: 'User-Agent', size: 'small' },
-				{ column: 'Ip', size: 'small' },
+				{ title: 'IP', column: 'Ip', size: 'small' },
 				{ column: 'Metadata', size: 'small' }
 			]}
 			sortable={['Created at', 'Event', 'Details', 'User-Agent', 'Ip', 'Metadata']}
@@ -3559,106 +3634,32 @@
 		onClose={closeTemplateModal}
 	>
 		<div class="space-y-6">
-			<!-- Full-width Landing Page Flow -->
 			<div class="p-6 rounded-lg">
-				<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+				<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-5 pb-2 border-b border-gray-200 dark:border-gray-700">
 					Phishing Flow
 				</h3>
-
-				<!-- Enhanced Flow Visualization -->
-				<div class="flex items-center justify-center mb-6 text-sm">
-					<div class="flex items-center flex-wrap justify-center gap-2">
-						<!-- First block is always the delivery method -->
-						<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
-							<div class="font-medium text-gray-800 dark:text-white">
-								{#if campaign.template?.email}
-									Email
-								{:else}
-									API
-								{/if}
-							</div>
-						</div>
-
-						<!-- Only show arrow if there's a destination -->
-						{#if campaign.template?.beforeLandingPage || campaign.template?.beforeLandingProxy || campaign.template?.landingPage || campaign.template?.landingProxy}
-							<div class="mx-2">→</div>
-						{/if}
-
-						<!-- Before Landing -->
-						{#if campaign.template?.beforeLandingPage}
-							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
-								<div class="font-medium text-gray-800 dark:text-white">Before Landing</div>
-							</div>
-							<!-- Only show arrow if there's a next step -->
-							{#if campaign.template?.landingPage || campaign.template?.landingProxy}
-								<div class="mx-2">→</div>
-							{/if}
-						{:else if campaign.template?.beforeLandingProxy}
-							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
-								<div
-									class="font-medium text-gray-800 dark:text-white flex items-center justify-center gap-1"
-								>
-									<ProxySvgIcon size="w-4 h-4" /> Before
-								</div>
-							</div>
-							<!-- Only show arrow if there's a next step -->
-							{#if campaign.template?.landingPage || campaign.template?.landingProxy}
-								<div class="mx-2">→</div>
-							{/if}
-						{/if}
-
-						<!-- Main Landing -->
-						{#if campaign.template?.landingPage}
-							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
-								<div class="font-medium text-gray-800 dark:text-white">Main Landing</div>
-							</div>
-							<!-- Only show arrow if there's a next step -->
-							{#if campaign.template?.afterLandingPage || campaign.template?.afterLandingProxy || campaign.template?.afterLandingPageRedirectURL}
-								<div class="mx-2">→</div>
-							{/if}
-						{:else if campaign.template?.landingProxy}
-							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
-								<div
-									class="font-medium text-gray-800 dark:text-white flex items-center justify-center gap-1"
-								>
-									<ProxySvgIcon size="w-4 h-4" /> Main
-								</div>
-							</div>
-							<!-- Only show arrow if there's a next step -->
-							{#if campaign.template?.afterLandingPage || campaign.template?.afterLandingProxy || campaign.template?.afterLandingPageRedirectURL}
-								<div class="mx-2">→</div>
-							{/if}
-						{/if}
-
-						<!-- After Landing or Redirect -->
-						{#if campaign.template?.afterLandingPage}
-							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
-								<div class="font-medium text-gray-800 dark:text-white">After Landing</div>
-							</div>
-						{:else if campaign.template?.afterLandingProxy}
-							<div class="text-center px-3 py-2 bg-pc-lightblue dark:bg-blue-600 rounded">
-								<div
-									class="font-medium text-gray-800 dark:text-white flex items-center justify-center gap-1"
-								>
-									<ProxySvgIcon size="w-4 h-4" /> After
-								</div>
-							</div>
-						{/if}
-						{#if campaign.template?.afterLandingPageRedirectURL}
-							<div class="mx-2">→</div>
-							<div class="text-center px-3 py-2 bg-pc-lightorange dark:bg-orange-600 rounded">
-								<div class="font-medium text-gray-800 dark:text-white">Redirect</div>
-							</div>
-						{/if}
-					</div>
-				</div>
+				<PageFlow
+					deliveryType={campaign.template?.email ? 'email' : 'api'}
+					deliveryName={campaign.template?.email
+						? campaign.template.email.name
+						: campaign.template?.apiSender?.name}
+					beforeName={campaign.template?.beforeLandingPage?.name ??
+						campaign.template?.beforeLandingProxy?.name}
+					beforeIsProxy={!campaign.template?.beforeLandingPage && !!campaign.template?.beforeLandingProxy}
+					landingName={campaign.template?.landingPage?.name ?? campaign.template?.landingProxy?.name}
+					landingIsProxy={!campaign.template?.landingPage && !!campaign.template?.landingProxy}
+					afterName={campaign.template?.afterLandingPage?.name ??
+						campaign.template?.afterLandingProxy?.name}
+					afterIsProxy={!campaign.template?.afterLandingPage && !!campaign.template?.afterLandingProxy}
+					redirectURL={campaign.template?.afterLandingPageRedirectURL}
+				/>
 			</div>
 
 			<!-- Basic Info and Email Config -->
-			<div class="grid grid-cols-2 gap-6">
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 				<!-- Basic Info Section -->
 				<div class="p-6 rounded-lg">
-					<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
 						Basic Information
 					</h3>
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
@@ -3675,7 +3676,7 @@
 							>{campaign.template?.stateIdentifier?.name ?? ''}</span
 						>
 
-						<span class="text-grayblue-dark font-medium">Delivery :</span>
+						<span class="text-grayblue-dark font-medium">Delivery:</span>
 						<span class="text-pc-darkblue dark:text-white">
 							{#if campaign.template?.email}
 								Email ({campaign.template.email.name ?? ''})
@@ -3683,60 +3684,13 @@
 								API Sender ({campaign.template?.apiSender?.name ?? ''})
 							{/if}
 						</span>
-
-						<span class="text-grayblue-dark font-medium">Before Page:</span>
-						<span class="text-pc-darkblue dark:text-white">
-							{#if campaign.template?.beforeLandingPage}
-								{campaign.template.beforeLandingPage.name}
-							{:else if campaign.template?.beforeLandingProxy}
-								<span class="flex items-center gap-1">
-									<ProxySvgIcon size="w-4 h-4" />
-									{campaign.template.beforeLandingProxy.name}
-								</span>
-							{:else}
-								N/A
-							{/if}
-						</span>
-
-						<span class="text-grayblue-dark font-medium">Main Page:</span>
-						<span class="text-pc-darkblue dark:text-white">
-							{#if campaign.template?.landingPage}
-								{campaign.template.landingPage.name}
-							{:else if campaign.template?.landingProxy}
-								<span class="flex items-center gap-1">
-									<ProxySvgIcon size="w-4 h-4" />
-									{campaign.template.landingProxy.name}
-								</span>
-							{:else}
-								N/A
-							{/if}
-						</span>
-
-						<span class="text-grayblue-dark font-medium">After Page:</span>
-						<span class="text-pc-darkblue dark:text-white">
-							{#if campaign.template?.afterLandingPage}
-								{campaign.template.afterLandingPage.name}
-							{:else if campaign.template?.afterLandingProxy}
-								<span class="flex items-center gap-1">
-									<ProxySvgIcon size="w-4 h-4" />
-									{campaign.template.afterLandingProxy.name}
-								</span>
-							{:else}
-								N/A
-							{/if}
-						</span>
-
-						<span class="text-grayblue-dark font-medium">Redirect URL:</span>
-						<span class="text-pc-darkblue dark:text-white"
-							>{campaign.template?.afterLandingPageRedirectURL ?? 'N/A'}</span
-						>
 					</div>
 				</div>
 
 				<!-- Email Configuration -->
 				{#if campaign.template?.email}
 					<div class="p-6 rounded-lg">
-						<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+						<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
 							Email
 						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
@@ -3771,7 +3725,7 @@
 			<div class="grid grid-cols-2 gap-6">
 				<!-- Domain Configuration -->
 				<div class="p-6 rounded-lg">
-					<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
 						Domain
 					</h3>
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
@@ -3786,7 +3740,7 @@
 								href="https://{campaign.template?.domain?.name}"
 								target="_blank"
 								rel="noopener noreferrer"
-								class="text-cta-blue dark:text-white hover:underline"
+								class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline"
 							>
 								{campaign.template?.domain?.name}
 							</a>
@@ -3809,7 +3763,7 @@
 				<!-- SMTP/API Configuration -->
 				{#if campaign.template?.smtpConfiguration || campaign.template?.apiSender}
 					<div class="p-6 rounded-lg">
-						<h3 class="text-xl font-semibold text-pc-darkblue dark:text-white mb-4 border-b pb-2">
+						<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
 							{campaign.template?.smtpConfiguration ? 'Email SMTP' : 'API Sender'}
 						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
@@ -3855,9 +3809,9 @@
 			<ul
 				class="list-disc ml-8 mt-4 mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 			>
-				<li class="list-tem">Stop any pending delivery</li>
-				<li class="list-tem">Links in e-mails and landing pages will stop working</li>
-				<li class="list-tem">Campaign will be set as completed</li>
+				<li>Stop any pending delivery</li>
+				<li>Links in emails and landing pages will stop working</li>
+				<li>Campaign will be set as completed</li>
 			</ul>
 		</div>
 	</Alert>
@@ -3876,9 +3830,9 @@
 			<ul
 				class="list-disc ml-8 mt-4 mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 			>
-				<li class="list-tem">Emails already sent are not affected</li>
-				<li class="list-tem">Landing pages and tracking stay live</li>
-				<li class="list-tem">You can resume later by choosing a new delivery window</li>
+				<li>Emails already sent are not affected</li>
+				<li>Landing pages and tracking stay live</li>
+				<li>You can resume later by choosing a new delivery window</li>
 			</ul>
 		</div>
 	</Alert>
@@ -4051,10 +4005,10 @@
 			<ul
 				class="list-disc ml-8 mt-4 mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 			>
-				<li class="list-tem">Stop any pending delivery</li>
-				<li class="list-tem">Links in e-mails and landing pages will stop working</li>
-				<li class="list-tem">Anonymization is permanent and not reversable</li>
-				<li class="list-tem">Campaign will be set as completed</li>
+				<li>Stop any pending delivery</li>
+				<li>Links in emails and landing pages will stop working</li>
+				<li>Anonymization is permanent and not reversible</li>
+				<li>Campaign will be set as completed</li>
 			</ul>
 		</div>
 	</Alert>
@@ -4069,13 +4023,13 @@
 			<ul
 				class="list-disc ml-8 mt-4 mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 			>
-				<li class="list-tem">
+				<li>
 					Submitted data, user agent, ip and browser metadata will be anonymized
 				</li>
-				<li class="list-tem">The recipient relation is kept</li>
-				<li class="list-tem">Anonymization is permanent and not reversable</li>
+				<li>The recipient relation is kept</li>
+				<li>Anonymization is permanent and not reversible</li>
 				{#if !campaign.closedAt}
-					<li class="list-tem">The campaign stays open and keeps tracking events</li>
+					<li>The campaign stays open and keeps tracking events</li>
 				{/if}
 			</ul>
 		</div>
@@ -4108,10 +4062,8 @@
 							Sender type: {campaign.template?.smtpConfigurationID ? 'SMTP' : 'API Sender'}
 						</p>
 						{#if recipient.sentAt}
-							<p
-								class="text-sm text-amber-600 dark:text-amber-500 mt-1 transition-colors duration-200"
-							>
-								⚠️ Previously sent on {new Date(recipient.sentAt).toLocaleString()}
+							<p class="mt-2 rounded-md px-3 py-2 text-sm bg-yellow-50 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200">
+								Previously sent on {shortDateTime(recipient.sentAt)}
 							</p>
 						{/if}
 					</div>
@@ -4155,8 +4107,8 @@
 				</p>
 
 				{#if lureCodeRecipient.sentAt}
-					<p class="mt-4 text-sm text-amber-600 dark:text-amber-500">
-						Already sent on {new Date(lureCodeRecipient.sentAt).toLocaleString()}. Changing this
+					<p class="mt-4 rounded-md px-3 py-2 text-sm bg-yellow-50 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200">
+						Already sent on {shortDateTime(lureCodeRecipient.sentAt)}. Changing this
 						stops the link the recipient is holding from working.
 					</p>
 				{/if}
@@ -4242,10 +4194,8 @@
 							{setAsSentRecipient.email}
 						</p>
 						{#if recipient.sentAt}
-							<p
-								class="text-sm text-amber-600 dark:text-amber-500 mt-1 transition-colors duration-200"
-							>
-								⚠️ Already marked as sent on {new Date(recipient.sentAt).toLocaleString()}
+							<p class="mt-2 rounded-md px-3 py-2 text-sm bg-yellow-50 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200">
+								Already marked as sent on {shortDateTime(recipient.sentAt)}
 							</p>
 						{/if}
 					</div>
@@ -4267,7 +4217,7 @@
 				<!-- token capture introduction section -->
 				<div>
 					<h3
-						class="text-xl font-semibold text-gray-700 dark:text-gray-200 transition-colors duration-200"
+						class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200"
 					>
 						Import tokens
 					</h3>
@@ -4276,7 +4226,7 @@
 							href="https://github.com/phishingclub/session-sushi"
 							target="_blank"
 							rel="noopener noreferrer"
-							class="text-blue-600 dark:text-white hover:underline">Session Sushi</a
+							class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline">Session Sushi</a
 						> to hijack the captured session.
 					</p>
 				</div>
@@ -4284,7 +4234,7 @@
 				<!-- token copy section -->
 				<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md transition-colors duration-200">
 					<button
-						class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
+						class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline font-medium inline-flex items-center gap-2"
 						on:click={onClickCopyTokens}
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4302,7 +4252,7 @@
 				<!-- cookie capture introduction section -->
 				<div>
 					<h3
-						class="text-xl font-semibold text-gray-700 dark:text-gray-200 transition-colors duration-200"
+						class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200"
 					>
 						Import cookie
 					</h3>
@@ -4311,7 +4261,7 @@
 							href="https://github.com/phishingclub/session-sushi"
 							target="_blank"
 							rel="noopener noreferrer"
-							class="text-blue-600 dark:text-white hover:underline">Session Sushi</a
+							class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline">Session Sushi</a
 						> extension.
 					</p>
 				</div>
@@ -4319,7 +4269,7 @@
 				<!-- cookie copy section -->
 				<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md transition-colors duration-200">
 					<button
-						class="text-blue-600 dark:text-white hover:text-blue-800 dark:hover:text-gray-300 font-medium inline-flex items-center gap-2"
+						class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline font-medium inline-flex items-center gap-2"
 						on:click={onClickCopyCookies}
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4369,7 +4319,7 @@
 	</Alert>
 
 	<Modal
-		headerText="Upload Reported CSV"
+		headerText="Import reported emails"
 		visible={isReportedCSVModalVisible}
 		onClose={closeReportedCSVModal}
 		isSubmitting={isReportedCSVSubmitting}
@@ -4379,7 +4329,7 @@
 			<FormColumns>
 				<FormColumn>
 					<p class="text-sm text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
-						Select which columns contain the email addresses and report dates:
+						Pick the columns with the email address and the report date.
 					</p>
 
 					<TextFieldSelect

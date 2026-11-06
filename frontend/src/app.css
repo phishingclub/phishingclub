@@ -217,23 +217,19 @@ body {
 	background: #9ca3af;
 }
 
-/* native date picker dark mode styling */
-.dark input[type='date']::-webkit-calendar-picker-indicator,
-.dark input[type='time']::-webkit-calendar-picker-indicator,
-.dark input[type='datetime-local']::-webkit-calendar-picker-indicator {
-	filter: invert(1);
-}
-
+/* native date and time inputs in dark mode: color-scheme dark below already
+draws light picker icons, so no filter here */
 .dark input[type='date']::-webkit-datetime-edit,
 .dark input[type='time']::-webkit-datetime-edit,
 .dark input[type='datetime-local']::-webkit-datetime-edit {
 	color: rgb(209 213 219);
 }
 
-.dark input[type='date']::-webkit-datetime-edit-fields-wrapper,
-.dark input[type='time']::-webkit-datetime-edit-fields-wrapper,
-.dark input[type='datetime-local']::-webkit-datetime-edit-fields-wrapper {
-	background: rgb(55 65 81);
+.dark input[type='date']::-webkit-calendar-picker-indicator,
+.dark input[type='time']::-webkit-calendar-picker-indicator,
+.dark input[type='datetime-local']::-webkit-calendar-picker-indicator {
+	opacity: 0.8;
+	cursor: pointer;
 }
 
 /* force date picker to use system dark theme */
@@ -271,17 +267,74 @@ body {
 	transition: none !important;
 }
 
-/* global placeholder styling for consistency */
+/* placeholders must stay readable but lighter than typed values */
 input::placeholder,
 textarea::placeholder,
 select::placeholder {
-	color: #9ca3af; /* gray-400 */
-	opacity: 0.6;
+	color: #6b7280; /* gray-500 */
+	opacity: 1;
 }
 
 .dark input::placeholder,
 .dark textarea::placeholder,
 .dark select::placeholder {
 	color: #6b7280; /* gray-500 */
-	opacity: 0.6;
+	opacity: 1;
+}
+
+/* default keyboard focus ring for controls without their own focus style */
+@layer base {
+	:where(a, button, summary, [role='button'], [role='tab'], [role='menuitem'], [tabindex]):focus-visible {
+		outline: 2px solid #445ecc; /* cta-blue */
+		outline-offset: 2px;
+	}
+
+	:where(.dark) :where(a, button, summary, [role='button'], [role='tab'], [role='menuitem'], [tabindex]):focus-visible {
+		outline-color: #6887ea; /* highlight-blue */
+	}
+}
+
+@layer components {
+	/* focus ring for controls on light or gray surfaces */
+	.pc-focus {
+		@apply focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-blue focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-highlight-blue dark:focus-visible:ring-offset-gray-800;
+	}
+
+	/* focus ring for controls on the dark blue header, menus and modal title bars */
+	.pc-focus-dark {
+		@apply focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-0;
+	}
+
+	/* small select for chart, calendar and editor toolbars, same caret as the Show select */
+	.pc-select {
+		@apply appearance-none cursor-pointer rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-200 pl-2 pr-7 text-xs transition-colors duration-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:outline-none focus-visible:ring-2 focus-visible:ring-cta-blue dark:focus-visible:ring-highlight-blue;
+		background-image: url('/arrow.svg');
+		background-repeat: no-repeat;
+		background-position: right 0.6rem center;
+		background-size: 0.6rem auto;
+	}
+
+	/* native checkbox in the house blue that turns dark with the theme */
+	.pc-checkbox {
+		@apply h-4 w-4 shrink-0 cursor-pointer rounded accent-cta-blue dark:accent-highlight-blue pc-focus;
+	}
+}
+
+/* native controls follow the theme so they do not render as white boxes in dark mode */
+.dark .pc-select,
+.dark .pc-checkbox {
+	color-scheme: dark;
+}
+
+/* two column stat card grid on phones: an odd last card takes the full row */
+@media (max-width: 639.98px) {
+	.pc-stats-grid > :last-child:nth-child(odd) {
+		grid-column: span 2 / span 2;
+	}
+}
+
+/* contain absolutely positioned helpers such as sr-only labels inside the table
+   scroller, so they cannot widen the page on narrow screens */
+.pc-table-scroll {
+	position: relative;
 }

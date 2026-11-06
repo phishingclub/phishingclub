@@ -1,9 +1,12 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
+	import { shortRelative } from '$lib/utils/shortRelative.js';
 
 	/** @type {String | Date} */
 	export let value;
 	export let updateInterval = 60000; // default to 1 minute updates
+	// compact form such as "3h 5m ago" for dense tables
+	export let short = false;
 
 	let formattedTime = '';
 	let intervalId;
@@ -61,7 +64,7 @@
 			return;
 		}
 
-		formattedTime = formatRelativeTime(date);
+		formattedTime = short ? shortRelative(date) : formatRelativeTime(date);
 	}
 
 	$: {

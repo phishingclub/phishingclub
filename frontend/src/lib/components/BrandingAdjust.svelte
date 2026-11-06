@@ -59,35 +59,35 @@
 	};
 
 	const labelClass =
-		'text-xs font-semibold text-slate-500 dark:text-gray-400 mb-1 transition-colors duration-200';
+		'text-sm font-semibold text-slate-500 dark:text-gray-400 mb-1 transition-colors duration-200';
 </script>
 
 <div class="mt-3 space-y-1">
 	<div class="grid grid-cols-2 gap-3">
 		<TextFieldSelect
 			id="{uid}-fit"
-			size="small"
+			size="full"
 			bind:value={fit}
 			options={fitOptions}
 			onSelect={selectChanged}>Fit</TextFieldSelect
 		>
 		<TextFieldSelect
 			id="{uid}-bg"
-			size="small"
+			size="full"
 			bind:value={background}
 			options={backgroundOptions}
 			onSelect={selectChanged}>Background</TextFieldSelect
 		>
 		<TextFieldSelect
 			id="{uid}-px"
-			size="small"
+			size="full"
 			bind:value={positionX}
 			options={positionXOptions}
 			onSelect={selectChanged}>Horizontal</TextFieldSelect
 		>
 		<TextFieldSelect
 			id="{uid}-py"
-			size="small"
+			size="full"
 			bind:value={positionY}
 			options={positionYOptions}
 			onSelect={selectChanged}>Vertical</TextFieldSelect
@@ -114,7 +114,7 @@
 			type="button"
 			{disabled}
 			on:click={() => dispatch('reset')}
-			class="text-xs font-semibold text-cta-blue dark:text-highlight-blue hover:underline disabled:opacity-50 transition-colors duration-200"
+			class="text-sm font-semibold text-cta-blue dark:text-highlight-blue hover:underline disabled:opacity-50 transition-colors duration-200"
 		>
 			Reset adjustments
 		</button>

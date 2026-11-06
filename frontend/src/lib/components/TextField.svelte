@@ -1,6 +1,6 @@
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
-	import ToolTip from './ToolTip.svelte';
+	import FieldLabel from './form/FieldLabel.svelte';
 
 	// bind a element to this component input field
 	// use like <TextField bind:bindTo={varYouWantToBindTheInputFieldTo} />
@@ -58,26 +58,12 @@
 	});
 </script>
 
-<label class="flex flex-col py-2">
-	<div class="flex items-center">
-		<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
-			<slot />
-		</p>
-		{#if toolTipText.length > 0}
-			<ToolTip>
-				{toolTipText}
-			</ToolTip>
-		{/if}
-		{#if optional === true}
-			<div
-				class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-			>
-				<p class="text-slate-600 dark:text-gray-400 text-xs transition-colors duration-200">
-					optional
-				</p>
-			</div>
-		{/if}
-	</div>
+<label
+	class="flex flex-col py-2"
+	class:w-full={width !== 'small'}
+	class:sm:w-auto={width === 'medium' || width === 'large'}
+>
+	<FieldLabel {toolTipText} {optional}><slot /></FieldLabel>
 	<input
 		{...{ type: inputType }}
 		{id}
@@ -98,18 +84,19 @@
 		{required}
 		{placeholder}
 		{pattern}
-		class="text-ellipsis row-start-1 row-span-3 justify-self-center rounded-md py-2 pl-2 text-gray-600 dark:text-gray-300 border focus:outline-none focus:border-solid focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200 {error
-			? 'border-red-500 dark:border-red-400'
-			: 'border-transparent dark:border-gray-700/60 focus:border-slate-400 dark:focus:border-highlight-blue/80'}"
+		aria-invalid={error ? 'true' : undefined}
+		class="text-ellipsis rounded-md py-2 px-3 border font-normal transition-colors duration-200 focus:outline-none focus:ring-2 disabled:opacity-60 disabled:cursor-not-allowed {readonly
+			? 'cursor-default bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-dashed border-gray-300 dark:border-gray-600 focus:ring-gray-300/40 dark:focus:ring-gray-600/40'
+			: 'bg-grayblue-light dark:bg-gray-900/60 text-slate-800 dark:text-gray-300'} {error
+			? 'border-red-500 dark:border-red-400 focus:border-red-500 focus:ring-red-500/30 dark:focus:ring-red-400/30'
+			: readonly
+				? ''
+				: 'border-transparent dark:border-gray-700 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30'}"
 		class:w-24={width === 'small'}
-		class:w-60={width === 'medium'}
-		class:w-95={width === 'large'}
-		class:w-full={width === 'full'}
+		class:w-full={width === 'full' || width === 'large' || width === 'medium'}
+		class:sm:w-60={width === 'medium'}
+		class:sm:w-80={width === 'large'}
+		class:max-w-full={width === 'large'}
 		class:readonly
-		class:cursor-not-allowed={readonly}
-		class:bg-gray-200={readonly}
-		class:dark:bg-gray-800={readonly}
-		class:text-gray-500={readonly}
-		class:dark:text-gray-500={readonly}
 	/>
 </label>

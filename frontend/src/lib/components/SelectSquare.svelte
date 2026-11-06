@@ -1,9 +1,14 @@
+<script context="module">
+	let instanceCount = 0;
+</script>
+
 <script>
-	import ToolTip from './ToolTip.svelte';
+	import FieldLabel from './form/FieldLabel.svelte';
 
 	export let options = [];
 	export let value = null;
 	export let label = '';
+	// centers the options when there is no label above them
 	export let center = true;
 	export let optional = false;
 	export let toolTipText = '';
@@ -11,67 +16,109 @@
 	export let disabled = false;
 	/** @type {*} */
 	export let onChange = () => {};
+
+	const labelId = `select-square-label-${++instanceCount}`;
+	let buttons = [];
+
+	$: selectedIndex = options.findIndex((o) => o.value === value);
+	$: focusIndex = selectedIndex >= 0 ? selectedIndex : 0;
+	// with descriptions the cards can differ in height, so titles start at the top to line up,
+	// and on phones each card takes its own row so none is left alone at a different width
+	$: hasDescription = options.some((o) => o.description);
+
+	const select = (option) => {
+		if (disabled) return;
+		value = option.value;
+		onChange();
+	};
+
+	// arrow keys move the selection like a native radio group
+	const onKeyDown = (e, index) => {
+		if (disabled || !options.length) return;
+		let next = -1;
+		if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+			next = (index + 1) % options.length;
+		} else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+			next = (index - 1 + options.length) % options.length;
+		}
+		if (next < 0) return;
+		e.preventDefault();
+		select(options[next]);
+		buttons[next]?.focus();
+	};
 </script>
 
-<div class="flex flex-col gap-2 py-2">
+<div class="flex flex-col py-2 w-full sm:w-auto">
 	{#if label}
-		<div class="flex flex-row items-center">
-			<div class="font-semibold text-slate-600 dark:text-gray-400 transition-colors duration-200">
-				{label}
-			</div>
-			{#if toolTipText.length > 0}
-				<ToolTip>
-					{toolTipText}
-				</ToolTip>
-			{/if}
-			{#if optional}
-				<div
-					class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-				>
-					<p class="text-slate-600 dark:text-gray-400 text-xs">optional</p>
-				</div>
-			{/if}
-		</div>
+		<FieldLabel id={labelId} {toolTipText} {optional}>{label}</FieldLabel>
 	{/if}
 
-	<div class="flex gap-4 py-2" class:justify-center={center}>
-		{#each options as option}
+	<div
+		role="radiogroup"
+		aria-labelledby={label ? labelId : undefined}
+		aria-disabled={disabled ? 'true' : undefined}
+		class="flex flex-wrap gap-3 sm:gap-4 py-2"
+		class:sm:justify-center={center && !label}
+	>
+		{#each options as option, index}
+			{@const selected = value === option.value}
 			<button
+				bind:this={buttons[index]}
 				type="button"
+				role="radio"
+				aria-checked={selected}
+				tabindex={index === focusIndex ? 0 : -1}
 				{disabled}
-				class:h32={option.icon && option.description}
-				class:h16={!option.icon && !option.description}
-				class:w-28={width === 'small'}
-				class:w-40={width === 'medium'}
-				class:w-64={width === 'large'}
-				class:opacity-50={disabled}
-				class:cursor-not-allowed={disabled}
-				class={`
-          p-3 rounded-lg border-2 transition-all duration-200
-          flex flex-col items-center justify-center text-center
-          w-40
-          ${disabled ? '' : 'hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}
-          ${
-						value === option.value
-							? 'border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-800/40 text-green-700 dark:text-green-300'
-							: 'border-gray-200 dark:border-gray-700/60 bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300'
-					}
-        `}
-				on:click={() => {
-					if (disabled) return;
-					value = option.value;
-					onChange();
-				}}
+				class="relative flex-1 min-w-[7rem] sm:flex-none p-3 rounded-lg border-2 transition-colors duration-200 flex focus:outline-none {hasDescription
+					? 'flex-row items-center text-left pr-8 sm:pr-3 sm:flex-col sm:justify-start sm:text-center basis-full sm:basis-auto'
+					: 'flex-col items-center text-center justify-center'} focus-visible:ring-2 focus-visible:ring-cta-blue focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-highlight-blue dark:focus-visible:ring-offset-gray-800 {disabled
+					? 'opacity-50 cursor-not-allowed'
+					: 'cursor-pointer'} {selected
+					? 'border-cta-blue bg-blue-50 text-cta-blue font-semibold dark:border-highlight-blue dark:bg-highlight-blue/20 dark:text-white'
+					: 'border-gray-200 bg-white text-gray-700 dark:border-gray-700/60 dark:bg-gray-900/60 dark:text-gray-300'} {!disabled &&
+				!selected
+					? 'hover:border-blue-300 hover:bg-blue-50 dark:hover:border-highlight-blue/80 dark:hover:bg-highlight-blue/10'
+					: ''}"
+				class:sm:min-h-32={option.icon && option.description}
+				class:min-h-12={!option.icon && !option.description}
+				class:sm:w-28={width === 'small'}
+				class:sm:w-40={width === 'medium'}
+				class:sm:w-64={width === 'large'}
+				on:click={() => select(option)}
+				on:keydown={(e) => onKeyDown(e, index)}
 			>
-				{#if option.icon}
-					<span class="text-xl mb-2">{option.icon}</span>
+				{#if selected}
+					<svg
+						class="absolute top-1 right-1 w-4 h-4 text-cta-blue dark:text-highlight-blue"
+						viewBox="0 0 20 20"
+						fill="currentColor"
+						aria-hidden="true"
+					>
+						<path
+							fill-rule="evenodd"
+							d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+							clip-rule="evenodd"
+						/>
+					</svg>
 				{/if}
-				<span class="font-medium text-sm">{option.label}</span>
-				{#if option.description}
-					<span class="text-xs text-gray-500 dark:text-gray-400 mt-1 transition-colors duration-200"
-						>{option.description}</span
+				{#if option.icon}
+					<span
+						class="text-xl {hasDescription ? 'mr-3 sm:mr-0 sm:mb-2' : 'mb-2'}"
+						aria-hidden="true">{option.icon}</span
 					>
 				{/if}
+				<!-- on phones cards with a description lay out as a compact row, from sm up as a square -->
+				<span
+					class="flex flex-col min-w-0 {hasDescription ? 'items-start sm:items-center' : 'items-center'}"
+				>
+					<span class="text-sm" class:font-medium={!selected}>{option.label}</span>
+					{#if option.description}
+						<span
+							class="text-xs font-normal text-gray-500 dark:text-gray-400 mt-1 transition-colors duration-200"
+							>{option.description}</span
+						>
+					{/if}
+				</span>
 			</button>
 		{/each}
 	</div>

@@ -5,6 +5,7 @@
 	import { addToast } from '$lib/store/toast';
 	import { onClickCopy } from '$lib/utils/common';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading';
 	import Button from '$lib/components/Button.svelte';
 	import Alert from '$lib/components/Alert.svelte';
@@ -140,10 +141,11 @@
 
 {#if loaded}
 <div class="flex flex-wrap gap-6">
-	<SettingsCard title="Logging">
+	<SettingsCard title="Logging" description="How much the server writes to its logs.">
 		<Form on:submit={saveLogLevel} fullWidth>
 			<TextFieldSelect
 				id="appLogLevel"
+				size="full"
 				required
 				bind:value={logLevel}
 				options={logLevels}>Application log level</TextFieldSelect
@@ -151,26 +153,23 @@
 
 			<TextFieldSelect
 				id="dbLogLevel"
+				size="full"
 				required
 				bind:value={dbLogLevel}
 				options={dbLogLevels}>Database log level</TextFieldSelect
 			>
 			<FormError message={logError} />
 			<div class="mt-6 flex justify-end">
-				<FormButton size={'medium'} isSubmitting={isSavingLog}>Save Changes</FormButton>
+				<FormButton size={'large'} isSubmitting={isSavingLog}>Save Changes</FormButton>
 			</div>
 		</Form>
 	</SettingsCard>
 
-	<SettingsCard title="Browser Cache">
-		<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
-			Chromium is downloaded and cached for PDF reports and remote browser sessions. Wipe to force a
-			fresh download.
-		</p>
+	<SettingsCard title="Browser Cache" description="Chromium is downloaded and cached for PDF reports and remote browser sessions. Wipe to force a fresh download.">
 		<svelte:fragment slot="footer">
 			<Button
 				size={'large'}
-				backgroundColor="bg-red-600"
+				variant="danger-outline"
 				disabled={isWipingBrowserCache}
 				on:click={() => (isWipeAlertVisible = true)}
 			>
@@ -184,31 +183,43 @@
 			<div class="flex items-center justify-between gap-2">
 				<span class="text-gray-500 dark:text-gray-400 transition-colors duration-200">Version</span>
 				<button
+					type="button"
 					on:click|preventDefault={() => onClickCopy(version)}
-					class="flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-700 py-1 px-2 rounded-md text-gray-700 dark:text-gray-200 transition-colors duration-200"
+					aria-label="Copy version"
+					title="Copy version"
+					class="pc-focus flex min-w-0 items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-700 py-1 px-2 rounded-md text-gray-700 dark:text-gray-200 transition-colors duration-200"
 				>
-					<span class="font-mono">{version}</span>
-					<img class="w-4 h-4" src="/icon-copy.svg" alt="copy version" />
+					<span class="font-mono truncate">{version}</span>
+					<svg
+						class="h-4 w-4 shrink-0 text-gray-500 dark:text-gray-400"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+						><rect x="9" y="9" width="11" height="11" rx="1.5" /><path
+							d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5"
+						/></svg
+					>
 				</button>
 			</div>
 			<div class="flex items-center justify-between gap-2">
 				<span class="text-gray-500 dark:text-gray-400 transition-colors duration-200">Status</span>
 				{#if updateAvailable}
-					<a
-						href="/settings/update/"
-						class="text-blue-600 dark:text-white hover:underline transition-colors duration-200"
-						>Update available</a
-					>
+					<a href="/settings/update/" class="pc-focus rounded-full hover:underline">
+						<StatusBadge tone="info">Update available</StatusBadge>
+					</a>
 				{:else}
-					<span class="text-gray-700 dark:text-gray-200 transition-colors duration-200">Up to date</span
-					>
+					<StatusBadge tone="success">Up to date</StatusBadge>
 				{/if}
 			</div>
 			<div class="flex items-center justify-between gap-2">
 				<span class="text-gray-500 dark:text-gray-400 transition-colors duration-200">Licenses</span>
 				<a
 					href="/licenses.txt"
-					class="text-blue-600 dark:text-white hover:underline transition-colors duration-200"
+					class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline"
 					>View licenses</a
 				>
 			</div>

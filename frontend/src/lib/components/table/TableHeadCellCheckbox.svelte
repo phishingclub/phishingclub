@@ -22,7 +22,7 @@
 	class="pl-4 w-12 bg-grayblue-light dark:bg-gray-800/60 py-4 border-hidden rounded-tl-lg rounded-bl-lg transition-colors duration-200"
 >
 	<label
-		class="relative inline-flex items-center"
+		class="relative flex items-center justify-center"
 		class:cursor-pointer={!disabled}
 		class:opacity-0={disabled}
 	>

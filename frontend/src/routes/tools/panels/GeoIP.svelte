@@ -8,6 +8,8 @@
 	let isSubmitting = false;
 	let lookupError = '';
 	let lookupResult = null;
+	// same height as the input and sits on its baseline row
+	const lookupButtonCss = '!min-w-0 w-auto shrink-0 px-5 mb-2 py-2.5 border border-transparent';
 
 	async function handleGeoIPLookup() {
 		if (!ipAddress.trim()) {
@@ -43,27 +45,40 @@
 </script>
 
 <div class="flex flex-wrap gap-6">
-	<SettingsCard title="GeoIP Lookup">
+	<SettingsCard title="Geo IP Lookup" description="Look up the country for an IP address." widthClass="w-full max-w-2xl">
 		<div class="space-y-4">
-			<TextField
-				type="text"
-				bind:value={ipAddress}
-				placeholder="e.g., 8.8.8.8"
-				on:keypress={handleKeyPress}
-				disabled={isSubmitting}
-			>
-				IP Address
-			</TextField>
+			<div class="flex items-end gap-2">
+				<div class="flex-1 min-w-0">
+					<TextField
+						type="text"
+						width="full"
+						bind:value={ipAddress}
+						placeholder="e.g., 8.8.8.8"
+						on:keydown={handleKeyPress}
+						disabled={isSubmitting}
+					>
+						IP Address
+					</TextField>
+				</div>
+				<Button
+					size={'large'}
+					css={lookupButtonCss}
+					on:click={handleGeoIPLookup}
+					disabled={isSubmitting}
+				>
+					{#if isSubmitting}Looking up...{:else}Lookup{/if}
+				</Button>
+			</div>
 
 			<FormError message={lookupError} />
 
-			<div class="text-xs text-gray-500 dark:text-gray-400 transition-colors duration-200">
+			<div class="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-200">
 				Data from
 				<a
 					href="https://github.com/ipverse/rir-ip"
 					target="_blank"
 					rel="noopener noreferrer"
-					class="text-blue-600 dark:text-blue-400 hover:underline"
+					class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline"
 				>
 					ipverse/rir-ip
 				</a>
@@ -85,10 +100,5 @@
 				</div>
 			{/if}
 		</div>
-		<svelte:fragment slot="footer">
-			<Button size={'large'} on:click={handleGeoIPLookup} disabled={isSubmitting}>
-				{#if isSubmitting}Looking up...{:else}Lookup{/if}
-			</Button>
-		</svelte:fragment>
 	</SettingsCard>
 </div>

@@ -19,6 +19,7 @@
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import BrandingImage from '$lib/components/BrandingImage.svelte';
 	import BrandingAdjust from '$lib/components/BrandingAdjust.svelte';
+	import { theme } from '$lib/theme.js';
 
 	let loaded = false;
 	// per slot busy flag so controls disable during a request
@@ -58,7 +59,9 @@
 	$: loginPreview =
 		$branding.loginLogo === 'custom'
 			? brandingImageURL(BRANDING_SLOT.loginLogo, $branding.version)
-			: BRANDING_DEFAULTS.loginLogoLight;
+			: $theme === 'dark'
+				? BRANDING_DEFAULTS.loginLogoDark
+				: BRANDING_DEFAULTS.loginLogoLight;
 	$: sidePreview =
 		$branding.loginSideImage === 'custom'
 			? brandingImageURL(BRANDING_SLOT.loginSideImage, $branding.version)
@@ -176,19 +179,19 @@
 
 {#if loaded}
 	<div class="flex flex-wrap gap-6">
-		<SettingsCard title="Header logo">
-			<p class="text-gray-600 dark:text-gray-300 text-sm mb-4 transition-colors duration-200">
-				Shown in the top navigation. Upload a PNG, ideally with a transparent background.
-			</p>
-			<div class="h-24 rounded-md bg-gray-400 dark:bg-gray-900 mb-2 overflow-hidden">
+		<SettingsCard title="Header Logo" description="Shown in the top navigation. Upload a PNG, ideally with a transparent background.">
+			<!-- same surface and shape as the logo slot in the top navigation -->
+			<div
+				class="mb-2 flex h-28 items-center justify-center rounded-md border border-pc-darkblue bg-pc-darkblue p-3 dark:border-gray-700 dark:bg-gray-800"
+			>
 				<BrandingImage
 					src={headerPreview}
 					alt="header logo preview"
 					display={forms['header-logo']}
-					boxClass="h-full w-full"
+					boxClass="aspect-[14/3] w-full rounded"
 				/>
 			</div>
-			<FileField
+			<FileField fullWidth
 				accept="image/png"
 				resets={false}
 				disabled={busy['header-logo']}
@@ -214,19 +217,19 @@
 			</svelte:fragment>
 		</SettingsCard>
 
-		<SettingsCard title="Login logo">
-			<p class="text-gray-600 dark:text-gray-300 text-sm mb-4 transition-colors duration-200">
-				Shown on the login screen. Upload a PNG, ideally with a transparent background.
-			</p>
-			<div class="h-24 rounded-md bg-gray-400 dark:bg-gray-900 mb-2 overflow-hidden">
+		<SettingsCard title="Login Logo" description="Shown on the login screen. Upload a PNG, ideally with a transparent background.">
+			<!-- same surface and shape as the logo slot on the login screen, which sits top left -->
+			<div
+				class="mb-2 flex h-28 items-center justify-start rounded-md border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900"
+			>
 				<BrandingImage
 					src={loginPreview}
 					alt="login logo preview"
 					display={forms['login-logo']}
-					boxClass="h-full w-full"
+					boxClass="aspect-[5/2] h-full max-w-full"
 				/>
 			</div>
-			<FileField
+			<FileField fullWidth
 				accept="image/png"
 				resets={false}
 				disabled={busy['login-logo']}
@@ -252,11 +255,8 @@
 			</svelte:fragment>
 		</SettingsCard>
 
-		<SettingsCard title="Login side image">
-			<p class="text-gray-600 dark:text-gray-300 text-sm mb-4 transition-colors duration-200">
-				The image beside the login form. Upload a PNG, or hide it to center the login box.
-			</p>
-			<div class="relative h-24 rounded-md bg-gray-400 dark:bg-gray-900 mb-2 overflow-hidden">
+		<SettingsCard title="Login Side Image" description="The image beside the login form. Upload a PNG, or hide it to center the login box.">
+			<div class="relative h-28 rounded-md bg-gray-400 dark:bg-gray-900 mb-2 overflow-hidden">
 				<BrandingImage
 					src={sidePreview}
 					alt="login side image preview"
@@ -271,7 +271,7 @@
 					</span>
 				{/if}
 			</div>
-			<FileField
+			<FileField fullWidth
 				accept="image/png"
 				resets={false}
 				disabled={busy['login-side-image']}

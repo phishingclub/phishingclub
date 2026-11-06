@@ -13,22 +13,10 @@
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import { tick } from 'svelte';
 	import EventName from '$lib/components/table/EventName.svelte';
-	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
-	import { autoRefreshStore, setPageAutoRefresh } from '$lib/store/autoRefresh';
-	import { BiMap } from '$lib/utils/maps';
 	import DashboardNav from '$lib/components/DashboardNav.svelte';
 
 	// services
 	const appStateService = AppStateService.instance;
-
-	// auto-refresh options
-	const autoRefreshOptions = new BiMap({
-		Disabled: '0',
-		'5s': '5000',
-		'30s': '30000',
-		'1m': '60000',
-		'5m': '300000'
-	});
 
 	// local state
 	let contextCompanyID = null;
@@ -52,16 +40,6 @@
 	const handleToggleChange = async () => {
 		await tick();
 		await refreshEvents(true);
-	};
-
-	const handleAutoRefreshChange = (optKey) => {
-		const value = Number(autoRefreshOptions.byKey(optKey));
-		// batch the update to prevent multiple reactive triggers
-		autoRefreshStore.set({
-			enabled: value > 0,
-			interval: value
-		});
-		setPageAutoRefresh('dashboard-events', $autoRefreshStore);
 	};
 
 	// hooks
@@ -130,9 +108,9 @@
 
 	<DashboardNav />
 
-	<div class="flex justify-between items-center mb-6">
+	<div class="flex flex-wrap justify-between items-center gap-x-6 gap-y-3 mb-6">
 		<SubHeadline>Recent Events</SubHeadline>
-		<div class="flex items-center gap-4">
+		<div class="flex flex-wrap items-center gap-x-6 gap-y-3">
 			<label class="flex items-center gap-2 cursor-pointer">
 				<span class="font-semibold text-slate-600 dark:text-gray-300 whitespace-nowrap">
 					Include test campaigns
@@ -146,7 +124,7 @@
 						class="peer sr-only"
 					/>
 					<div
-						class="w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
+						class="peer-focus-visible:ring-2 peer-focus-visible:ring-cta-blue dark:peer-focus-visible:ring-highlight-blue peer-focus-visible:ring-offset-2 dark:peer-focus-visible:ring-offset-gray-900 w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
 						       peer-checked:border-cta-blue dark:peer-checked:border-highlight-blue/80 peer-checked:bg-cta-blue dark:peer-checked:bg-highlight-blue/80
 						       peer-focus:border-slate-400 dark:peer-focus:border-highlight-blue/80 peer-focus:bg-gray-100 dark:peer-focus:bg-gray-700/60
 						       transition-all duration-200 ease-in-out
@@ -154,7 +132,13 @@
 						       bg-slate-50 dark:bg-gray-900/60"
 					>
 						{#if includeTestCampaigns}
-							<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<svg
+								class="w-3 h-3 text-white"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+								aria-hidden="true"
+							>
 								<path
 									stroke-linecap="round"
 									stroke-linejoin="round"
@@ -166,52 +150,37 @@
 					</div>
 				</div>
 			</label>
-			<div class="flex items-center gap-2">
-				<span class="font-semibold text-slate-600 dark:text-gray-300 whitespace-nowrap">
-					Auto-Refresh
-				</span>
-				<TextFieldSelect
-					id="autoRefresh"
-					value={$autoRefreshStore.enabled
-						? autoRefreshOptions.byValue($autoRefreshStore.interval.toString())
-						: 'Disabled'}
-					onSelect={handleAutoRefreshChange}
-					options={autoRefreshOptions.keys()}
-					inline={true}
-					size={'small'}
-				/>
-			</div>
+			<AutoRefresh
+				isLoading={false}
+				pageId="dashboard-events"
+				onRefresh={async () => {
+					const eventsOptions = {
+						page: eventsTableURLParams.currentPage,
+						perPage: eventsTableURLParams.perPage,
+						sortBy: eventsTableURLParams.sortBy,
+						sortOrder: eventsTableURLParams.sortOrder,
+						search: eventsTableURLParams.search,
+						includeTest: includeTestCampaigns
+					};
+					const eventsRes = await api.campaign.getAllEvents(eventsOptions, contextCompanyID);
+					if (eventsRes.success) {
+						events = eventsRes.data?.rows ?? [];
+						eventsHasNextPage = eventsRes.data?.hasNextPage ?? false;
+					}
+				}}
+			/>
 		</div>
 	</div>
 
-	<AutoRefresh
-		isLoading={false}
-		pageId="dashboard-events"
-		onRefresh={async () => {
-			const eventsOptions = {
-				page: eventsTableURLParams.currentPage,
-				perPage: eventsTableURLParams.perPage,
-				sortBy: eventsTableURLParams.sortBy,
-				sortOrder: eventsTableURLParams.sortOrder,
-				search: eventsTableURLParams.search,
-				includeTest: includeTestCampaigns
-			};
-			const eventsRes = await api.campaign.getAllEvents(eventsOptions, contextCompanyID);
-			if (eventsRes.success) {
-				events = eventsRes.data?.rows ?? [];
-				eventsHasNextPage = eventsRes.data?.hasNextPage ?? false;
-			}
-		}}
-	/>
-
 	<div class="min-h-[300px] mb-8">
 		<Table
+			reserveSelect
 			columns={[
-				{ column: 'Time', size: 'large' },
-				{ column: 'Event', size: 'large' },
+				{ column: 'Time', size: 'small' },
+				{ column: 'Event', size: 'medium' },
 				{ column: 'Campaign', size: 'large' },
 				{ column: 'Email', size: 'large' },
-				...(contextCompanyID ? [] : [{ column: 'Company', size: 'large' }])
+				...(contextCompanyID ? [] : [{ column: 'Company', size: 'medium' }])
 			]}
 			pagination={eventsTableURLParams}
 			plural="events"
@@ -229,14 +198,14 @@
 					</TableCell>
 					<TableCell>
 						{#if event.campaign?.name}
-							<a href={`/campaign/${event.campaignID}`} class="block w-full py-1">
+							<a href={`/campaign/${event.campaignID}`} class="pc-cell-link block w-full py-1">
 								{event.campaign.name}
 							</a>
 						{/if}
 					</TableCell>
 					<TableCell>
 						{#if event.recipient?.email}
-							<a href={`/recipient/${event.recipient.id}`} class="block w-full py-1">
+							<a href={`/recipient/${event.recipient.id}`} class="pc-cell-link block w-full py-1">
 								{event.recipient.email}
 							</a>
 						{/if}
@@ -245,6 +214,8 @@
 						<TableCell>
 							{#if event.campaign?.company?.name}
 								{event.campaign.company.name}
+							{:else}
+								<span class="text-slate-400 dark:text-gray-500">Shared</span>
 							{/if}
 						</TableCell>
 					{/if}

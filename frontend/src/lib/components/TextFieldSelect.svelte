@@ -1,6 +1,6 @@
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
-	import ToolTip from './ToolTip.svelte';
+	import FieldLabel from './form/FieldLabel.svelte';
 	import { activeFormElement, activeFormElementSubscribe } from '$lib/store/activeFormElement';
 
 	export let _id = Symbol();
@@ -309,32 +309,16 @@
 
 <div
 	class="flex justify-start textfield-select-container"
+	class:py-2={!hideLabel}
 	class:hidden
 	class:flex-col={!inline}
 	class:flex-row={inline}
+	class:w-full={!inline && size !== 'small'}
+	class:sm:w-auto={!inline && size === 'normal'}
 >
 	{#if !hideLabel}
-		<label class="flex flex-col py-2 relative" class:py-2={!inline} class:pr-2={inline}>
-			<div class="flex items-center">
-				<p
-					id={labelId}
-					class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
-				>
-					<slot />
-				</p>
-				{#if toolTipText.length > 0}
-					<ToolTip>
-						{toolTipText}
-					</ToolTip>
-				{/if}
-				{#if optional === true}
-					<div
-						class="bg-gray-100 dark:bg-gray-800/60 ml-2 px-2 rounded-md transition-colors duration-200 h-6 flex items-center"
-					>
-						<p class="text-slate-600 dark:text-gray-400 text-xs">optional</p>
-					</div>
-				{/if}
-			</div>
+		<label class="flex flex-col relative" class:pr-2={inline}>
+			<FieldLabel id={labelId} {toolTipText} {optional}><slot /></FieldLabel>
 		</label>
 	{/if}
 	<div class="relative">
@@ -342,8 +326,9 @@
 			class="flex items-center relative"
 			class:w-28={size == 'small'}
 			class:w-44={size == 'medium'}
-			class:w-60={size == 'normal'}
-			class:w-full={size == 'full'}
+			class:w-full={(size == 'normal' && !inline) || size == 'full'}
+			class:sm:w-60={size == 'normal' && !inline}
+			class:w-60={size == 'normal' && inline}
 		>
 			<input
 				bind:this={inputElement}
@@ -365,9 +350,9 @@
 				on:click={handleFocus}
 				autocomplete="off"
 				style={optional && hasValue ? 'padding-right: 4rem;' : 'padding-right: 2.5rem;'}
-				class="w-full relative rounded-md py-2 text-gray-600 dark:text-gray-300 border border-transparent focus:outline-none focus:border-solid focus:border focus:border-slate-400 dark:focus:border-highlight-blue/80 focus:bg-gray-100 dark:focus:bg-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal cursor-pointer focus:cursor-text transition-colors duration-200 overflow-hidden text-ellipsis whitespace-nowrap"
+				class="w-full relative rounded-md py-2 text-slate-800 dark:text-gray-300 border border-transparent focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 bg-grayblue-light dark:bg-gray-900/60 dark:border-gray-700 font-normal cursor-pointer focus:cursor-text transition-colors duration-200 overflow-hidden text-ellipsis whitespace-nowrap"
 				class:pl-10={showDropdown}
-				class:pl-4={!showDropdown}
+				class:pl-3={!showDropdown}
 				placeholder={!hasValue && !showDropdown ? placeholder : ''}
 				{required}
 			/>
