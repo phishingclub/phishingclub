@@ -487,8 +487,11 @@ func main() {
 	if err != nil {
 		logger.Fatalw("Failed to load system user", "error", err)
 	}
+	// the program scheduler runs as the system session, like the send batch
+	services.Program.SystemSession = systemSession
 	daemon := task.Runner{
 		CampaignService:     services.Campaign,
+		ProgramService:      services.Program,
 		UpdateService:       services.Update,
 		MicrosoftDeviceCode: services.MicrosoftDeviceCode,
 		OptionService:       services.Option,

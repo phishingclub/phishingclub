@@ -100,6 +100,7 @@
 		const iconMap = {
 			'/dashboard/': 'dashboard',
 			'/campaign/': 'campaigns_overview',
+			'/program/': 'programs',
 			'/campaign-template/': 'campaign_templates',
 			'/filter/': 'filters',
 			'/webhook/': 'webhooks',

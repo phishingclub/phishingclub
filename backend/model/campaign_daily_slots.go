@@ -38,7 +38,8 @@ type DailySlot struct {
 //
 // Without a time zone the week days and hours are UTC. The days are walked from
 // startAt in steps of one day while not after endAt, and each window is the UTC
-// day of that step plus the hours. Campaigns saved before the time zone was
+// day of that step plus the hours. The times are read in UTC whatever location
+// they arrive with. Campaigns saved before the time zone was
 // stored run this way, so it must not change.
 //
 // With a time zone the week days and hours are local to it. Every local date
@@ -55,6 +56,8 @@ func DailySlots(
 ) ([]DailySlot, error) {
 	slots := []DailySlot{}
 	if tz == nil {
+		// days are cut at UTC midnight, so the week day is read in UTC too
+		startAt, endAt = startAt.UTC(), endAt.UTC()
 		for d := startAt; !d.After(endAt); d = d.AddDate(0, 0, 1) {
 			if slices.Contains(weekDays, int(d.Weekday())) {
 				day := d.Truncate(24 * time.Hour)

@@ -25,6 +25,7 @@ type Repositories struct {
 	Campaign            *repository.Campaign
 	CampaignRecipient   *repository.CampaignRecipient
 	CampaignTemplate    *repository.CampaignTemplate
+	Program             *repository.Program
 	APISender           *repository.APISender
 	AllowDeny           *repository.AllowDeny
 	Webhook             *repository.Webhook
@@ -65,6 +66,7 @@ func NewRepositories(
 		Campaign:            &repository.Campaign{DB: db},
 		CampaignRecipient:   &repository.CampaignRecipient{DB: db},
 		CampaignTemplate:    &repository.CampaignTemplate{DB: db},
+		Program:             &repository.Program{DB: db},
 		APISender:           &repository.APISender{DB: db},
 		AllowDeny:           &repository.AllowDeny{DB: db},
 		Webhook:             &repository.Webhook{DB: db},

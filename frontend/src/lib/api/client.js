@@ -173,6 +173,46 @@ export const deleteReq = async (url) => {
 };
 
 /**
+ * Fetches a file with the GET method and saves it in the browser.
+ * The file name comes from the Content-Disposition header when present.
+ * @param {string} url - The URL of the file.
+ * @param {string} fallbackName - The file name used when the response has none.
+ * @param {string} fallbackError - The error used when the error body has no message.
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export const downloadFile = async (url, fallbackName, fallbackError) => {
+	const response = await fetch(url, {
+		method: 'GET',
+		credentials: 'same-origin'
+	});
+	if (!response.ok) {
+		let error = fallbackError;
+		try {
+			const body = await response.json();
+			if (body?.error) {
+				error = body.error;
+			}
+		} catch (_) {
+			// the error body was not JSON, keep the default message
+		}
+		return { success: false, error };
+	}
+	const blob = await response.blob();
+	const disposition = response.headers.get('Content-Disposition') || '';
+	const match = disposition.match(/filename="?([^"]+)"?/);
+	const filename = match ? match[1] : fallbackName;
+	const objectURL = URL.createObjectURL(blob);
+	const link = document.createElement('a');
+	link.href = objectURL;
+	link.download = filename;
+	document.body.appendChild(link);
+	link.click();
+	link.remove();
+	URL.revokeObjectURL(objectURL);
+	return { success: true };
+};
+
+/**
  * Creates a new response object.
  * @param {boolean} success - Indicates whether the request was successful.
  * @param {number} statusCode - The status code of the response.

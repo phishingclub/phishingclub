@@ -24,6 +24,7 @@
 	export let labelWidth = 'large';
 	export let inputWidth = 'medium';
 	export let textAlign = 'left';
+	export let id = null;
 
 	const labelId = `date-label-${++instanceCount}`;
 
@@ -72,6 +73,7 @@
 <div class="flex flex-row">
 	<input
 		type="date"
+		{id}
 		{min}
 		bind:this={bindTo}
 		bind:value

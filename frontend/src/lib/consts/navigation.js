@@ -84,6 +84,10 @@ export const route = {
 		label: 'Campaigns',
 		route: '/campaign/'
 	},
+	programs: {
+		label: 'Programs',
+		route: '/program/'
+	},
 	users: {
 		label: 'Users',
 		route: '/user/'
@@ -128,7 +132,7 @@ export const menu = [
 	{
 		label: 'Campaigns',
 		type: 'submenu',
-		items: [route.campaigns, route.campaignTemplates, route.allowDeny, route.webhook]
+		items: [route.campaigns, route.programs, route.campaignTemplates, route.allowDeny, route.webhook]
 	},
 
 	{

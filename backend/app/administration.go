@@ -212,6 +212,22 @@ const (
 	ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED    = "/api/v1/campaign/:id/upload/reported"
 	ROUTE_V1_CAMPAIGN_DEVICE_CODES       = "/api/v1/campaign/:id/device-codes"
 	ROUTE_V1_CAMPAIGN_REPORT             = "/api/v1/campaign/:id/report"
+	// program
+	ROUTE_V1_PROGRAM              = "/api/v1/program"
+	ROUTE_V1_PROGRAM_ID           = "/api/v1/program/:id"
+	ROUTE_V1_PROGRAM_PAUSE        = "/api/v1/program/:id/pause"
+	ROUTE_V1_PROGRAM_RESUME       = "/api/v1/program/:id/resume"
+	ROUTE_V1_PROGRAM_START        = "/api/v1/program/:id/start"
+	ROUTE_V1_PROGRAM_CLONE        = "/api/v1/program/:id/clone"
+	ROUTE_V1_PROGRAM_CLOSE        = "/api/v1/program/:id/close"
+	ROUTE_V1_PROGRAM_RESULTS      = "/api/v1/program/:id/results"
+	ROUTE_V1_PROGRAM_AUDIENCE     = "/api/v1/program/audience"
+	ROUTE_V1_PROGRAM_RESULT_STATS = "/api/v1/program/:id/statistics"
+	ROUTE_V1_PROGRAM_RECIPIENTS   = "/api/v1/program/:id/recipients"
+	ROUTE_V1_PROGRAM_EXPORT       = "/api/v1/program/:id/export.csv"
+	ROUTE_V1_PROGRAM_REPORT       = "/api/v1/program/:id/report.pdf"
+	ROUTE_V1_PROGRAM_REPORTED     = "/api/v1/program/:id/reported"
+	ROUTE_V1_RECIPIENT_PROGRAMS   = "/api/v1/recipient/:id/programs"
 	// report templates
 	ROUTE_V1_REPORT_TEMPLATE          = "/api/v1/report-template"
 	ROUTE_V1_REPORT_TEMPLATE_ID       = "/api/v1/report-template/:id"
@@ -617,6 +633,25 @@ func setupRoutes(
 		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA, middleware.SessionHandler, controllers.Campaign.AnonymizeDataByID).
 		DELETE(ROUTE_V1_CAMPAIGN_DEVICE_CODES, middleware.SessionHandler, controllers.Campaign.DeleteDeviceCodesByCampaignID).
 		DELETE(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.DeleteByID).
+		// programs
+		GET(ROUTE_V1_PROGRAM, middleware.SessionHandler, controllers.Program.GetAll).
+		GET(ROUTE_V1_PROGRAM_RESULT_STATS, middleware.SessionHandler, controllers.Program.GetResultStats).
+		GET(ROUTE_V1_PROGRAM_RESULTS, middleware.SessionHandler, controllers.Program.GetResults).
+		GET(ROUTE_V1_PROGRAM_RECIPIENTS, middleware.SessionHandler, controllers.Program.GetRecipients).
+		GET(ROUTE_V1_PROGRAM_EXPORT, middleware.SessionHandler, controllers.Program.ExportCSV).
+		GET(ROUTE_V1_PROGRAM_REPORT, middleware.SessionHandler, controllers.Program.ReportPDF).
+		POST(ROUTE_V1_PROGRAM_REPORTED, middleware.SessionHandler, controllers.Program.UploadReportedCSV).
+		GET(ROUTE_V1_RECIPIENT_PROGRAMS, middleware.SessionHandler, controllers.Program.GetRecipientPrograms).
+		GET(ROUTE_V1_PROGRAM_ID, middleware.SessionHandler, controllers.Program.GetByID).
+		POST(ROUTE_V1_PROGRAM, middleware.SessionHandler, controllers.Program.Create).
+		POST(ROUTE_V1_PROGRAM_AUDIENCE, middleware.SessionHandler, controllers.Program.CountAudience).
+		POST(ROUTE_V1_PROGRAM_ID, middleware.SessionHandler, controllers.Program.UpdateByID).
+		POST(ROUTE_V1_PROGRAM_PAUSE, middleware.SessionHandler, controllers.Program.Pause).
+		POST(ROUTE_V1_PROGRAM_RESUME, middleware.SessionHandler, controllers.Program.Resume).
+		POST(ROUTE_V1_PROGRAM_START, middleware.SessionHandler, controllers.Program.Start).
+		POST(ROUTE_V1_PROGRAM_CLONE, middleware.SessionHandler, controllers.Program.Clone).
+		POST(ROUTE_V1_PROGRAM_CLOSE, middleware.SessionHandler, controllers.Program.Close).
+		DELETE(ROUTE_V1_PROGRAM_ID, middleware.SessionHandler, controllers.Program.DeleteByID).
 		// campaign PDF report, ExtendedTimeout required for headless browser rendering
 		GET(ROUTE_V1_CAMPAIGN_REPORT, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.ReportTemplate.GeneratePDFByCampaignID).
 		// report templates

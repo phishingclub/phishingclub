@@ -66,6 +66,7 @@
 				bind:this={buttons[index]}
 				type="button"
 				role="radio"
+				id={option.id}
 				aria-checked={selected}
 				tabindex={index === focusIndex ? 0 : -1}
 				{disabled}

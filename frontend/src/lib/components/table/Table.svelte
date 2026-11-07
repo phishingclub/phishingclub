@@ -87,6 +87,20 @@
 		COLUMN_WIDTHS[typeof column === 'object' && columns.length > 1 ? column.size || '' : ''] ??
 		COLUMN_WIDTHS[''];
 
+	// below md a column with hideBelow is not shown and a compact column has no
+	// fixed width, so neither counts its full size toward the table min width
+	const COMPACT_WIDTH = 96;
+	let isBelowMd = false;
+	$: effectiveWidthOf = (column) => {
+		if (isBelowMd && typeof column === 'object' && column.hideBelow === 'md') {
+			return 0;
+		}
+		if (isBelowMd && typeof column === 'object' && column.compact) {
+			return COMPACT_WIDTH;
+		}
+		return widthOf(column);
+	};
+
 	// below sm the empty checkbox gutter only costs space, so it is not reserved
 	let isPhone = false;
 	// visible width of the scroll box
@@ -96,7 +110,7 @@
 	$: selectWidth = selectColumn ? SELECT_WIDTH : 0;
 	$: actionsWidth = hasActions ? ACTIONS_WIDTH : 0;
 	$: columnsMinWidth =
-		columns.reduce((sum, column) => sum + widthOf(column), 0) + selectWidth + actionsWidth;
+		columns.reduce((sum, column) => sum + effectiveWidthOf(column), 0) + selectWidth + actionsWidth;
 	// the reserved gutter of a table without checkboxes is first column padding
 	$: reserveGutter = reserveSelect && !selectable && !isPhone;
 	// same rule as TableHeader: long columns share the free space, else the
@@ -112,7 +126,7 @@
 			? !isLong(columns[0])
 			: rankOf(columns[0]) < Math.max(...columns.map(rankOf)));
 	// a fixed first column is widened by the gutter, so its text keeps its room
-	$: gutterColumnWidth = reserveGutter && firstIsFixed ? widthOf(columns[0]) + SELECT_WIDTH : null;
+	$: gutterColumnWidth = reserveGutter && firstIsFixed ? effectiveWidthOf(columns[0]) + SELECT_WIDTH : null;
 	// for a fluid first column the gutter is not counted while the columns fit,
 	// so a fitting table keeps fitting; it is counted once the table scrolls
 	// anyway, so the first column keeps its width
@@ -129,7 +143,7 @@
 		isPhone && hasActions && columns.length > 1 && boxWidth > 0 && baseMinWidth > boxWidth
 			? Math.max(120, boxWidth - selectWidth - actionsWidth)
 			: gutterColumnWidth;
-	$: minTableWidth = baseMinWidth + (firstColumnWidth ? firstColumnWidth - widthOf(columns[0]) : 0);
+	$: minTableWidth = baseMinWidth + (firstColumnWidth ? firstColumnWidth - effectiveWidthOf(columns[0]) : 0);
 	// on desktop an empty table fits the box, so no header label is cut or hides
 	// behind the pinned actions column and no edge fade shows; on phones it keeps
 	// its width like a table with rows, or fixed columns squeeze the others to nothing
@@ -139,11 +153,11 @@
 	// (at least two) and fits the box with a round right end
 	$: phoneEmptyFit =
 		isPhone && isEmptyView && !hasActions && columns.length > 1 && boxWidth > 0 && baseMinWidth > boxWidth;
-	const fitCount = (available) => {
+	$: fitCount = (available) => {
 		let used = 0;
 		let count = 0;
 		for (const column of columns) {
-			used += widthOf(column);
+			used += effectiveWidthOf(column);
 			if (used > available) {
 				break;
 			}
@@ -223,7 +237,14 @@
 		};
 		onPhoneChange();
 		phoneQuery.addEventListener('change', onPhoneChange);
+		const mdQuery = window.matchMedia('(max-width: 767.98px)');
+		const onMdChange = () => {
+			isBelowMd = mdQuery.matches;
+		};
+		onMdChange();
+		mdQuery.addEventListener('change', onMdChange);
 		return () => {
+			mdQuery.removeEventListener('change', onMdChange);
 			mutationObserver.disconnect();
 			resizeObserver.disconnect();
 			phoneQuery.removeEventListener('change', onPhoneChange);
@@ -289,7 +310,7 @@
 								<TableCellEmpty />
 							{/if}
 							{#each columns as column, col}
-								<TableCell>
+								<TableCell hideBelow={typeof column === 'object' ? column.hideBelow || '' : ''}>
 									<GhostText index={row * columns.length + col} />
 								</TableCell>
 							{/each}

@@ -18,6 +18,13 @@
 	export let hideLabel = false;
 	export let size = 'normal';
 	export let inline = false;
+	// marks the field as invalid with a red border
+	export let error = false;
+	// id of the help or error text that describes the field
+	export let ariaDescribedBy = null;
+	export let disabled = false;
+	// show the clear button without the optional tag
+	export let clearable = false;
 	export let onSelect = (value) => {};
 	// keep the open list inside the enclosing modal box instead of the screen, so a
 	// field near the bottom of a short modal opens upward rather than hanging past
@@ -341,6 +348,8 @@
 				aria-controls={listboxId}
 				aria-autocomplete="list"
 				aria-haspopup="listbox"
+				aria-invalid={error ? 'true' : undefined}
+				aria-describedby={ariaDescribedBy || undefined}
 				value={showDropdown ? value : displayValue}
 				title={displayValue}
 				on:focus={handleFocus}
@@ -349,12 +358,17 @@
 				on:keydown={handleKeyDown}
 				on:click={handleFocus}
 				autocomplete="off"
-				style={optional && hasValue ? 'padding-right: 4rem;' : 'padding-right: 2.5rem;'}
-				class="w-full relative rounded-md py-2 text-slate-800 dark:text-gray-300 border border-transparent focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 bg-grayblue-light dark:bg-gray-900/60 dark:border-gray-700 font-normal cursor-pointer focus:cursor-text transition-colors duration-200 overflow-hidden text-ellipsis whitespace-nowrap"
+				style={(optional || clearable) && hasValue && !disabled
+					? 'padding-right: 4rem;'
+					: 'padding-right: 2.5rem;'}
+				class="w-full relative rounded-md py-2 text-slate-800 dark:text-gray-300 border border-transparent focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 bg-grayblue-light dark:bg-gray-900/60 dark:border-gray-700 font-normal cursor-pointer focus:cursor-text transition-colors duration-200 overflow-hidden text-ellipsis whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60 {error
+					? '!border-red-500 dark:!border-red-400'
+					: ''}"
 				class:pl-10={showDropdown}
 				class:pl-3={!showDropdown}
 				placeholder={!hasValue && !showDropdown ? placeholder : ''}
 				{required}
+				{disabled}
 			/>
 			<!-- Search icon - visible when dropdown is open -->
 			{#if showDropdown}
@@ -366,7 +380,7 @@
 				/>
 			{/if}
 			<!-- Clear button for optional fields -->
-			{#if optional === true && hasValue}
+			{#if (optional === true || clearable) && hasValue && !disabled}
 				<button
 					class="absolute right-8 z-10 hover:opacity-70 transition-opacity"
 					type="button"

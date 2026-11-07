@@ -26,6 +26,7 @@ type Webhook struct {
 	Common
 	CampaignRepository *repository.Campaign
 	WebhookRepository  *repository.Webhook
+	ProgramRepository  *repository.Program
 }
 
 func (w *Webhook) Create(
@@ -290,6 +291,13 @@ func (w *Webhook) DeleteByID(
 	if err != nil {
 		w.Logger.Errorw("failed to remove webhook from campaign_webhooks junction", "error", err)
 		return err
+	}
+	// remove the webhook from programs using it
+	if w.ProgramRepository != nil {
+		if err := w.ProgramRepository.RemoveWebhookFromPrograms(ctx, id); err != nil {
+			w.Logger.Errorw("failed to remove webhook from programs", "error", err)
+			return err
+		}
 	}
 	// delete
 	err = w.WebhookRepository.DeleteByID(ctx, id)

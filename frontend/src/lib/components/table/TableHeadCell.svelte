@@ -17,6 +17,10 @@
 	// fixed pixel width, wins over size and fluid
 	/** @type {number|null} */
 	export let width = null;
+	// hideBelow 'md' hides the column on small screens
+	export let hideBelow = '';
+	// compact drops the fixed widths below md so columns share small screens
+	export let compact = false;
 
 	let sortBy = pagination?.sortBy;
 	let sortOrder = pagination?.sortOrder;
@@ -43,11 +47,18 @@
 	class="px-4 bg-grayblue-light dark:bg-gray-800/60 py-3 border-hidden first:rounded-tl-lg first:rounded-bl-lg transition-colors duration-200 align-middle"
 	class:rounded-br-lg={last}
 	class:rounded-tr-lg={last}
-	class:w-40={!fluid && size === ''}
-	class:w-32={!fluid && size === 'small'}
-	class:w-44={!fluid && size === 'medium'}
-	class:w-64={!fluid && size === 'large'}
-	class:w-72={!fluid && size === 'xlarge'}
+	class:w-40={!fluid && !compact && size === ''}
+	class:w-32={!fluid && !compact && size === 'small'}
+	class:w-44={!fluid && !compact && size === 'medium'}
+	class:w-64={!fluid && !compact && size === 'large'}
+	class:w-72={!fluid && !compact && size === 'xlarge'}
+	class:md:w-40={!fluid && compact && size === ''}
+	class:md:w-32={!fluid && compact && size === 'small'}
+	class:md:w-44={!fluid && compact && size === 'medium'}
+	class:md:w-64={!fluid && compact && size === 'large'}
+	class:md:w-72={!fluid && compact && size === 'xlarge'}
+	class:hidden={hideBelow === 'md'}
+	class:md:table-cell={hideBelow === 'md'}
 	style:width={width ? `${width}px` : null}
 	aria-sort={sortable && !isGhost && sortBy && column.toLowerCase() === sortBy.toLowerCase()
 		? sortOrder === 'asc'

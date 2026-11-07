@@ -18,12 +18,22 @@
 	import { goto } from '$app/navigation';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
 	import ActionButton from '$lib/components/ActionButton.svelte';
-	import { toEvent } from '$lib/utils/events';
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import StatsCard from '$lib/components/StatsCard.svelte';
 	import EventName from '$lib/components/table/EventName.svelte';
+	import RelativeTime from '$lib/components/RelativeTime.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import { shortRelative } from '$lib/utils/shortRelative.js';
+	import {
+		NONE_YET,
+		RISK_NONE_TIP,
+		RISK_TIP,
+		capitalize,
+		formatDateTime,
+		riskTone
+	} from '$lib/utils/programText.js';
 
 	// @ts-ignore
 	const tableURLParams = newTableURLParams({
@@ -46,6 +56,7 @@
 		trainingsCompleted: 0
 	};
 	let isGroupsLoading = false;
+	let programs = [];
 	let isEventsLoading = false;
 
 	// heading email split at the last "@" so phones break there
@@ -57,6 +68,7 @@
 	onMount(() => {
 		getRecipient();
 		getStats();
+		getPrograms();
 		getRecipientEvents();
 		tableURLParams.onChange(getRecipientEvents);
 
@@ -74,6 +86,7 @@
 			}
 			await getRecipient();
 			await getStats();
+			await getPrograms();
 			await getRecipientEvents(showLoading);
 		} finally {
 			if (showLoading) {
@@ -133,6 +146,65 @@
 		}
 	};
 
+	const getPrograms = async () => {
+		try {
+			const res = await api.recipient.getPrograms($page.params.id);
+			if (!res.success) {
+				throw res.error;
+			}
+			programs = res.data ?? [];
+		} catch (e) {
+			addToast('failed to get recipient programs', 'Error');
+			console.error(e);
+		}
+	};
+
+	// program and enrollment states as StatusBadge text and tone
+	const programStates = {
+		draft: ['Draft', 'neutral'],
+		scheduled: ['Scheduled', 'info'],
+		active: ['Active', 'success'],
+		paused: ['Paused', 'warning'],
+		closed: ['Closed', 'neutral']
+	};
+	const enrollmentStates = {
+		active: ['Active', 'success'],
+		completed: ['Completed', 'info'],
+		exited: ['Removed', 'neutral'],
+		// still active when the program closed
+		stopped: ['Closed', 'neutral']
+	};
+	const sendColumns = [
+		{ column: 'Template', size: 'large', compact: true },
+		{ column: 'Sent', size: 'small', compact: true },
+		{ column: 'Opened', size: 'small', compact: true, hideBelow: 'md' },
+		{ column: 'Clicked', size: 'small', compact: true },
+		{ column: 'Submitted', size: 'small', compact: true, hideBelow: 'md' },
+		{ column: 'Reported', size: 'small', compact: true },
+		{ column: 'Training done', title: 'Trained', size: 'small', compact: true, hideBelow: 'md' }
+	];
+	// one line summary of the template emails of a program
+	const sendSummary = (sends) => {
+		const list = (sends ?? []).filter((x) => x.kind !== 'training');
+		const n = (key) => list.filter((x) => x[key]).length;
+		return `${list.length} ${list.length === 1 ? 'email' : 'emails'}, ${n('clickedAt')} clicked, ${n('reportedAt')} reported.`;
+	};
+	// event column, phones hide it below md, and its mark colour
+	const sendEvents = [
+		['openedAt', 'md', 'text-slate-600 dark:text-gray-300'],
+		['clickedAt', '', 'text-red-700 dark:text-red-400'],
+		['submittedAt', 'md', 'text-red-700 dark:text-red-400'],
+		['reportedAt', '', 'text-green-700 dark:text-green-400'],
+		['trainingCompletedAt', 'md', 'text-green-700 dark:text-green-400']
+	];
+	const programCard =
+		'bg-white dark:bg-gray-900/80 rounded-lg shadow-md dark:shadow-none dark:ring-1 dark:ring-gray-600/30 p-4 sm:p-6 transition-colors duration-200';
+	let relativeNow = Date.now();
+	onMount(() => {
+		const id = setInterval(() => (relativeNow = Date.now()), 60000);
+		return () => clearInterval(id);
+	});
+
 	const onClickExport = async () => {
 		try {
 			showIsLoading();
@@ -180,7 +252,13 @@
 		</div>
 	</div>
 	<div>
-		<div class="pc-stats-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-6 mb-8 mt-8">
+		<p
+			class="mt-8 text-xs font-semibold text-gray-600 dark:text-gray-400"
+			title="These counters cover campaigns. Programs are shown below."
+		>
+			Campaigns only
+		</p>
+		<div class="pc-stats-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-6 mb-8 mt-2">
 			<!-- Campaigns card -->
 			<StatsCard
 				title="Campaigns"
@@ -361,8 +439,132 @@
 		{#if stats.trainingsAssigned > 0}
 			<div class="flex flex-wrap items-center gap-x-6 gap-y-2 mb-8 text-sm">
 				<span class="font-semibold text-grayblue-dark dark:text-gray-400">Training</span>
-				<span class="text-grayblue-dark dark:text-gray-400">Assigned <span class="font-semibold text-pc-darkblue dark:text-gray-200">{stats.trainingsAssigned}</span></span>
-				<span class="text-grayblue-dark dark:text-gray-400">Completed <span class="font-semibold text-training-completed">{stats.trainingsCompleted}</span></span>
+				<span class="text-grayblue-dark dark:text-gray-400"
+					>Assigned <span class="font-semibold text-pc-darkblue dark:text-gray-200"
+						>{stats.trainingsAssigned}</span
+					></span
+				>
+				<span class="text-grayblue-dark dark:text-gray-400"
+					>Completed <span class="font-semibold text-training-completed"
+						>{stats.trainingsCompleted}</span
+					></span
+				>
+			</div>
+		{/if}
+		{#if programs.length}
+			<SubHeadline>Programs</SubHeadline>
+			<div class="space-y-4 mt-3 mb-8">
+				{#each programs as p (p.programID)}
+					{@const ps = programStates[p.programStatus] ?? [p.programStatus, 'neutral']}
+					{@const es = enrollmentStates[p.enrollmentStatus] ?? [p.enrollmentStatus, 'neutral']}
+					<div class={programCard}>
+						<div
+							class="flex flex-wrap items-center gap-x-3 gap-y-2 pb-2 border-b border-gray-200 dark:border-gray-700"
+						>
+							<a
+								href="/program/{p.programID}"
+								class="pc-focus rounded-sm text-lg font-semibold text-pc-darkblue dark:text-white hover:underline underline-offset-2 break-words"
+								>{p.name}</a
+							>
+							<StatusBadge tone={ps[1]} title="Program status">{ps[0]}</StatusBadge>
+							<StatusBadge tone={es[1]} title="This person in the program">{es[0]}</StatusBadge>
+							{#if !p.anonymous}
+								<span class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 sm:ml-auto">
+									Risk
+									{#if p.riskLevel && p.riskScore != null}
+										<span class="cursor-help"
+											><StatusBadge
+												tone={riskTone[p.riskLevel] ?? 'neutral'}
+												title="Risk score {Math.round(p.riskScore)} of 100. {RISK_TIP}"
+												>{capitalize(p.riskLevel)} {Math.round(p.riskScore)}</StatusBadge
+											></span
+										>
+									{:else}
+										<span class="cursor-help text-gray-400 dark:text-gray-500" title={RISK_NONE_TIP}
+											>{NONE_YET}</span
+										>
+									{/if}
+								</span>
+							{/if}
+						</div>
+						{#if p.anonymous}
+							<p class="mt-3 text-sm text-gray-600 dark:text-gray-400">
+								Anonymous program. Results are not shown per person.
+							</p>
+						{:else}
+							<p class="mt-3 text-sm text-gray-600 dark:text-gray-400 tabular-nums">
+								{#if p.sends?.length}{sendSummary(p.sends)}{:else}No emails sent yet.{/if}
+								{#if p.nextDueAt && p.programStatus === 'active'}
+									Next email <RelativeTime value={p.nextDueAt} short />.
+								{/if}
+							</p>
+							{#if p.sends?.length}
+								<div class="mt-3">
+									<Table
+										columns={sendColumns}
+										pagination={null}
+										noSearch
+										hasActions={false}
+										plural="emails"
+										hasData={p.sends.length > 0}
+										hasNextPage={false}
+									>
+										{#each p.sends as s}
+											<TableRow>
+												<TableCell wrap>
+													<span class="flex items-center gap-2 min-w-0" title={s.template}>
+														<span class="truncate">{s.template || 'Unknown'}</span>
+														{#if s.kind === 'training'}
+															<span class="shrink-0"
+																><StatusBadge tone="info">Training</StatusBadge></span
+															>
+														{/if}
+													</span>
+												</TableCell>
+												<TableCell>
+													<span title={formatDateTime(s.sentAt)}
+														>{shortRelative(s.sentAt, relativeNow)}</span
+													>
+												</TableCell>
+												{#each sendEvents as [key, hide, color]}
+													<TableCell hideBelow={hide}>
+														{#if s[key]}
+															<span
+																class="inline-flex items-center gap-1 {color}"
+																title={formatDateTime(s[key])}
+															>
+																<svg
+																	class="w-4 h-4 shrink-0"
+																	viewBox="0 0 20 20"
+																	fill="currentColor"
+																	aria-hidden="true"
+																>
+																	<path
+																		fill-rule="evenodd"
+																		d="M16.7 5.3a1 1 0 010 1.4l-8 8a1 1 0 01-1.4 0l-4-4a1 1 0 011.4-1.4L8 12.6l7.3-7.3a1 1 0 011.4 0z"
+																		clip-rule="evenodd"
+																	/>
+																</svg>
+																<span class="sr-only">Yes,</span>
+																<span class="text-xs tabular-nums"
+																	>{shortRelative(s[key], relativeNow)}</span
+																>
+															</span>
+														{:else}
+															<span class="text-gray-400 dark:text-gray-500"
+																><span aria-hidden="true">-</span><span class="sr-only">No</span></span
+															>
+														{/if}
+													</TableCell>
+												{/each}
+											</TableRow>
+										{/each}
+									</Table>
+								</div>
+							{/if}
+						{/if}
+					</div>
+				{/each}
 			</div>
 		{/if}
 		<SubHeadline>Groups</SubHeadline>

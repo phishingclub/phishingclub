@@ -22,6 +22,7 @@ type Page struct {
 	CampaignTemplateService *CampaignTemplate
 	TemplateService         *Template
 	DomainRepository        *repository.Domain
+	ProgramRepository       *repository.Program
 }
 
 // Create creates a new page
@@ -311,6 +312,13 @@ func (p *Page) DeleteByID(
 		ctx,
 		[]*uuid.UUID{id},
 	)
+	// clear the page from programs using it as deny or evasion page
+	if p.ProgramRepository != nil {
+		if err := p.ProgramRepository.RemovePageFromPrograms(ctx, id); err != nil {
+			p.Logger.Errorw("failed to remove page from programs", "error", err)
+			return err
+		}
+	}
 	// delete the relation from campaign templates
 	err = p.CampaignTemplateService.RemovePagesByPageID(
 		ctx,

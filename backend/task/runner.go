@@ -29,6 +29,7 @@ const REPORT_INBOX_INTERVAL = 10 * time.Second
 // ex: sending emails etc..
 type Runner struct {
 	CampaignService     *service.Campaign
+	ProgramService      *service.Program
 	UpdateService       *service.Update
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
 	OptionService       *service.Option
@@ -162,6 +163,14 @@ func (d *Runner) Process(
 			ctx,
 			session,
 		)
+	})
+	// advance programs: enroll recipients and schedule their next step into the
+	// hidden campaigns, whose rows the send task below then delivers
+	d.runTask("advance programs", func() error {
+		if d.ProgramService == nil {
+			return nil
+		}
+		return d.ProgramService.Tick(ctx, session)
 	})
 	// send the next batch of messages
 	d.runTask("send messages", func() error {

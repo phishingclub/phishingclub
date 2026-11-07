@@ -1,12 +1,15 @@
 <script>
 	import { tweened } from 'svelte/motion';
 	import { cubicOut } from 'svelte/easing';
+	import ToolTip from './ToolTip.svelte';
 
 	export let title = '';
 	export let value = 0;
 	export let borderColor = 'border-cta-blue';
 	export let iconColor = 'text-cta-blue';
 	export let percentages = [];
+	// optional help text shown in a ToolTip after the title
+	export let tip = '';
 
 	let initialValueSet = false;
 	let previousValue = 0;
@@ -57,17 +60,26 @@
 		class:pr-6={$$slots.corner}
 		{title}
 	>
-		{title}
+		{title}{#if tip}<ToolTip>{tip}</ToolTip>{/if}
 	</div>
 	<div class="flex items-center justify-between">
 		<div class="flex items-center">
-			<span
-				class="text-2xl sm:text-3xl font-bold tabular-nums text-pc-darkblue dark:text-gray-100 transition-colors duration-200 {flash
-					? 'flash'
-					: ''}"
-			>
-				{Math.floor($displayValue)}
-			</span>
+			<!-- the value slot shows a text value such as a rate in place of the counted number -->
+			{#if $$slots.value}
+				<span
+					class="text-2xl sm:text-3xl font-bold tabular-nums text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
+				>
+					<slot name="value" />
+				</span>
+			{:else}
+				<span
+					class="text-2xl sm:text-3xl font-bold tabular-nums text-pc-darkblue dark:text-gray-100 transition-colors duration-200 {flash
+						? 'flash'
+						: ''}"
+				>
+					{Math.floor($displayValue)}
+				</span>
+			{/if}
 			<div class="ml-2">
 				<slot name="icon">
 					<svg
@@ -124,6 +136,11 @@
 				/>
 			</svg>
 		</button>
+	{:else if $$slots.sub}
+		<!-- a free text line under the value, used when there are no percentages -->
+		<div class="mt-2 text-sm text-slate-600 dark:text-gray-400 transition-colors duration-200">
+			<slot name="sub" />
+		</div>
 	{:else if validPercentages.length === 1}
 		<p class="mt-2 text-sm text-slate-600 dark:text-gray-400 transition-colors duration-200">
 			<span class="text-pc-darkblue dark:text-gray-200 font-semibold transition-colors duration-200">

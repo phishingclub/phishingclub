@@ -6,7 +6,8 @@ import {
 	deleteJSON,
 	deleteReq,
 	newResponse,
-	putJSON
+	putJSON,
+	downloadFile
 } from './client.js';
 /**
  * Represents the response object returned by the API functions.
@@ -624,35 +625,11 @@ export class API {
 		 * @param {string} campaignID
 		 */
 		generateReport: async (campaignID) => {
-			const response = await fetch(this.getPath(`/campaign/${campaignID}/report`), {
-				method: 'GET',
-				credentials: 'same-origin'
-			});
-			if (!response.ok) {
-				let error = 'Failed to generate campaign report';
-				try {
-					const body = await response.json();
-					if (body?.error) {
-						error = body.error;
-					}
-				} catch (_) {
-					// the error body was not JSON, keep the default message
-				}
-				return { success: false, error };
-			}
-			const blob = await response.blob();
-			const disposition = response.headers.get('Content-Disposition') || '';
-			const match = disposition.match(/filename="?([^"]+)"?/);
-			const filename = match ? match[1] : 'report.pdf';
-			const url = URL.createObjectURL(blob);
-			const link = document.createElement('a');
-			link.href = url;
-			link.download = filename;
-			document.body.appendChild(link);
-			link.click();
-			link.remove();
-			URL.revokeObjectURL(url);
-			return { success: true };
+			return await downloadFile(
+				this.getPath(`/campaign/${campaignID}/report`),
+				'report.pdf',
+				'Failed to generate campaign report'
+			);
 		},
 
 		/**
@@ -1217,6 +1194,137 @@ export class API {
 		 */
 		deleteStats: async (statsID) => {
 			return await deleteJSON(this.getPath(`/campaign/stats/${statsID}`));
+		}
+	};
+
+	/**
+	 * program is the API for continuous, self running programs.
+	 *
+	 * @type {Object}
+	 */
+	program = {
+		getAll: async (options, companyID) => {
+			return await getJSON(
+				this.getPath(`/program?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`)
+			);
+		},
+		getByID: async (id) => {
+			return await getJSON(this.getPath(`/program/${id}`));
+		},
+		create: async (program) => {
+			return await postJSON(this.getPath('/program'), program);
+		},
+		update: async (id, program) => {
+			return await postJSON(this.getPath(`/program/${id}`), program);
+		},
+		delete: async (id) => {
+			return await deleteJSON(this.getPath(`/program/${id}`));
+		},
+		pause: async (id) => {
+			return await postJSON(this.getPath(`/program/${id}/pause`), {});
+		},
+		resume: async (id) => {
+			return await postJSON(this.getPath(`/program/${id}/resume`), {});
+		},
+		close: async (id) => {
+			return await postJSON(this.getPath(`/program/${id}/close`), {});
+		},
+		/**
+		 * Start a draft or scheduled program now.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		start: async (id) => {
+			return await postJSON(this.getPath(`/program/${id}/start`), {});
+		},
+		/**
+		 * Copy a program as a new draft. Another company drops the groups and
+		 * any template, filter, page or webhook that company may not use; the
+		 * response lists them in data.dropped as {kind, id, name}.
+		 *
+		 * @param {string} id
+		 * @param {string} name
+		 * @param {string|null} companyID target company, null for a global program
+		 * @returns {Promise<ApiResponse>} data: {id, dropped}
+		 */
+		clone: async (id, name, companyID) => {
+			return await postJSON(this.getPath(`/program/${id}/clone`), {
+				name,
+				companyID: companyID || null
+			});
+		},
+		statistics: async (id) => {
+			return await getJSON(this.getPath(`/program/${id}/statistics`));
+		},
+		results: async (id) => {
+			return await getJSON(this.getPath(`/program/${id}/results`));
+		},
+		audience: async (recipientGroupIDs, companyID) => {
+			return await postJSON(this.getPath('/program/audience'), {
+				recipientGroupIDs,
+				companyID: companyID || null
+			});
+		},
+		/**
+		 * Get one page of the people of a program. Sort by email, name, risk,
+		 * status or next_due_at, search on email and name.
+		 *
+		 * @param {string} id
+		 * @param {TableURLParams} [options]
+		 */
+		recipients: async (id, options) => {
+			return await getJSON(this.getPath(`/program/${id}/recipients?${appendQuery(options)}`));
+		},
+		/**
+		 * Download the program results as CSV
+		 *
+		 * @param {string} id
+		 */
+		exportCSV: async (id) => {
+			return await downloadFile(
+				this.getPath(`/program/${id}/export.csv`),
+				'program-results.csv',
+				'Failed to export the program results'
+			);
+		},
+		/**
+		 * Download the program report PDF for an optional period
+		 *
+		 * @param {string} id
+		 * @param {string} [from] YYYY-MM-DD or RFC 3339
+		 * @param {string} [to] YYYY-MM-DD or RFC 3339
+		 */
+		reportPDF: async (id, from, to) => {
+			const q = new URLSearchParams();
+			if (from) {
+				q.set('from', from);
+			}
+			if (to) {
+				q.set('to', to);
+			}
+			return await downloadFile(
+				this.getPath(`/program/${id}/report.pdf?${q.toString()}`),
+				'program-report.pdf',
+				'Failed to generate program report'
+			);
+		},
+		/**
+		 * Upload a reported CSV for a program
+		 *
+		 * @param {string} id
+		 * @param {File} file
+		 * @param {number} emailColumn zero based column index of the email
+		 * @param {number|null} [dateColumn] zero based column index of the report time
+		 */
+		uploadReportedCSV: async (id, file, emailColumn, dateColumn) => {
+			const data = new FormData();
+			data.append('file', file);
+			let q = `emailColumn=${emailColumn}`;
+			if (dateColumn !== null && dateColumn !== undefined && dateColumn !== '') {
+				q += `&dateColumn=${dateColumn}`;
+			}
+			return await postMultipart(this.getPath(`/program/${id}/reported?${q}`), data);
 		}
 	};
 
@@ -2844,6 +2952,17 @@ export class API {
 		 */
 		getStatsByID: async (id) => {
 			return await getJSON(this.getPath(`/recipient/${id}/stats`));
+		},
+
+		/**
+		 * Get the programs a recipient is enrolled in with their activity there.
+		 * Anonymous programs only give the name and enrollment status.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getPrograms: async (id) => {
+			return await getJSON(this.getPath(`/recipient/${id}/programs`));
 		},
 
 		/**

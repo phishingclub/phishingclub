@@ -4378,6 +4378,7 @@
 		bind:visible={isGenerateReportModalVisible}
 		onConfirm={onConfirmGenerateReport}
 		ok="Generate"
+		tone="affirmative"
 	>
 		<div class="mt-4 text-gray-700 dark:text-gray-200">
 			Generate a PDF report for <strong>{campaign?.name}</strong>. <br />The report will download

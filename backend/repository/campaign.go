@@ -16,6 +16,7 @@ import (
 	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var allowedCampaignColumns = []string{
@@ -65,6 +66,9 @@ type CampaignOption struct {
 	WithWebhooks            bool
 	WithScripts             bool
 	IncludeTestCampaigns    bool
+	// IncludeProgramManaged includes the hidden campaigns a program creates.
+	// Off by default so program campaigns never surface in the campaign UI.
+	IncludeProgramManaged bool
 }
 
 // CampaignEventOption is options for preloading
@@ -78,9 +82,10 @@ type CampaignEventOption struct {
 // CampaignEventAllOption is options for preloading events across all campaigns
 type CampaignEventAllOption struct {
 	*vo.QueryArgs
-	WithCampaign         bool
-	WithUser             bool
-	IncludeTestCampaigns bool
+	WithCampaign          bool
+	WithUser              bool
+	IncludeTestCampaigns  bool
+	IncludeProgramManaged bool
 }
 
 // Campaign is a Campaign repository
@@ -92,6 +97,10 @@ type Campaign struct {
 func (r *Campaign) applyTestCampaignFilter(db *gorm.DB, options *CampaignOption) *gorm.DB {
 	if !options.IncludeTestCampaigns {
 		db = db.Where("is_test = false")
+	}
+	// hidden campaigns a program manages must never surface in a campaign listing
+	if !options.IncludeProgramManaged {
+		db = db.Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: nil})
 	}
 	return db
 }
@@ -942,6 +951,11 @@ func (r *Campaign) GetAllEvents(
 		db = db.Where(TableColumn(database.CAMPAIGN_TABLE, "is_test")+" = ?", false)
 	}
 
+	// hide events belonging to a program's hidden campaigns
+	if !options.IncludeProgramManaged {
+		db = db.Where(clause.Eq{Column: programColumn(database.CAMPAIGN_TABLE), Value: nil})
+	}
+
 	res := db.Find(&dbCampaignEvents)
 
 	if res.Error != nil {
@@ -1278,6 +1292,99 @@ func (r *Campaign) GetResultStats(
 	return stats, nil
 }
 
+// GetProgramResultStats computes a result funnel across the hidden campaigns a
+// program owns. It counts unique people across the whole program, so a recipient
+// who progressed through several steps or loops is counted once. The campaign
+// set is selected with a subquery on program_campaigns rather than a bound id
+// list, so the number of campaigns never bumps into the SQLite bind parameter
+// ceiling.
+func (r *Campaign) GetProgramResultStats(
+	ctx context.Context,
+	programID *uuid.UUID,
+) (*model.CampaignResultView, error) {
+	stats := &model.CampaignResultView{}
+	if programID == nil {
+		return stats, nil
+	}
+	// programCampaigns selects the ids of the hidden campaigns the program owns,
+	// only the phishing ones when phishingOnly is set
+	programCampaigns := func(phishingOnly bool) *gorm.DB {
+		db := r.DB.Model(&database.Campaign{}).
+			Select("id").
+			Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID})
+		if phishingOnly {
+			db = db.Where(clause.Eq{Column: clause.Column{Name: "is_training"}, Value: false})
+		}
+		return db
+	}
+	// countUniqueIn counts the distinct people in the rows of model that belong to
+	// the program's campaigns. A row names a person by its pseudonym when it has
+	// one and by its recipient id otherwise. A live anonymous row carries both, so
+	// counting either column on its own would count that person twice. An
+	// anonymous program uses one pseudonym per person across all its campaigns.
+	countUniqueIn := func(model any, phishingOnly bool, filter func(*gorm.DB) *gorm.DB) (int64, error) {
+		var count int64
+		res := filter(r.DB.WithContext(ctx).Model(model).
+			Where("campaign_id IN (?)", programCampaigns(phishingOnly)).
+			Where(clause.Or(
+				clause.Neq{Column: clause.Column{Name: "anonymized_id"}, Value: nil},
+				clause.Neq{Column: clause.Column{Name: "recipient_id"}, Value: nil},
+			))).
+			Select("COUNT(DISTINCT COALESCE(anonymized_id, recipient_id))").
+			Scan(&count)
+		return count, res.Error
+	}
+
+	// countUnique counts the distinct people that have any of the given events.
+	// The phishing funnel only reads phishing campaigns, so opening a training
+	// page never counts as a click.
+	countUnique := func(phishingOnly bool, eventIDs []any) (int64, error) {
+		return countUniqueIn(&database.CampaignEvent{}, phishingOnly, func(db *gorm.DB) *gorm.DB {
+			return db.Where(clause.IN{Column: clause.Column{Name: "event_id"}, Values: eventIDs})
+		})
+	}
+
+	eid := func(name string) any { return cache.EventIDByName[name] }
+
+	// recipients: unique people materialized across the program
+	recipients, err := countUniqueIn(&database.CampaignRecipient{}, false, func(db *gorm.DB) *gorm.DB {
+		return db
+	})
+	if err != nil {
+		return nil, err
+	}
+	stats.Recipients = recipients
+
+	if stats.EmailsSent, err = countUnique(true, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT)}); err != nil {
+		return nil, err
+	}
+	if stats.TrackingPixelLoaded, err = countUnique(true, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ)}); err != nil {
+		return nil, err
+	}
+	if stats.WebsiteLoaded, err = countUnique(true, []any{
+		eid(data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED),
+		eid(data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED),
+		eid(data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED),
+	}); err != nil {
+		return nil, err
+	}
+	if stats.SubmittedData, err = countUnique(true, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA)}); err != nil {
+		return nil, err
+	}
+	if stats.Reported, err = countUnique(true, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_REPORTED)}); err != nil {
+		return nil, err
+	}
+	// a program mixes phishing and training steps, so always count the training
+	// funnel across the set; it stays zero where no training step ran
+	if stats.TrainingStarted, err = countUnique(false, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED)}); err != nil {
+		return nil, err
+	}
+	if stats.TrainingCompleted, err = countUnique(false, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED)}); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
 // GetAll gets all campaigns with pagination
 func (r *Campaign) GetAll(
 	ctx context.Context,
@@ -1401,6 +1508,9 @@ func (r *Campaign) GetAllByCompanyID(
 	result := model.NewEmptyResult[model.Campaign]()
 	db := r.load(r.DB, options)
 	db = whereCompany(db, database.CAMPAIGN_TABLE, companyID)
+	if !options.IncludeProgramManaged {
+		db = db.Where(clause.Eq{Column: programColumn(database.CAMPAIGN_TABLE), Value: nil})
+	}
 	db, err := useQuery(db, database.CAMPAIGN_TABLE, options.QueryArgs, allowedCampaignColumns...)
 	if err != nil {
 		return result, errs.Wrap(err)
@@ -1435,7 +1545,7 @@ func (r *Campaign) GetByID(
 	id *uuid.UUID,
 	options *CampaignOption,
 ) (*model.Campaign, error) {
-	db := r.load(r.DB, options)
+	db := r.load(r.DB.WithContext(ctx), options)
 	var dbCampaign database.Campaign
 	res := db.
 		Where("campaigns.id = ?", id.String()).
@@ -2246,7 +2356,8 @@ func (r *Campaign) AnonymizeCampaignEventsByRecipientID(
 }
 
 // GetActiveCount get the number running campaigns
-// if no company ID is selected it gets the global count including all companies
+// if no company ID is selected it gets the global count including all companies.
+// The hidden campaigns of a program are not counted.
 func (r *Campaign) GetActiveCount(ctx context.Context, companyID *uuid.UUID, includeTestCampaigns bool) (int64, error) {
 	var c int64
 	db := r.DB
@@ -2262,13 +2373,15 @@ func (r *Campaign) GetActiveCount(ctx context.Context, companyID *uuid.UUID, inc
 	res := db.
 		Model(&database.Campaign{}).
 		Where(whereClause, utils.NowRFC3339UTC()).
+		Where(notProgramCampaign).
 		Count(&c)
 
 	return c, res.Error
 }
 
 // GetUpcomingCount get the upcoming campaign count
-// if no company ID is selected it gets the global count including all companies
+// if no company ID is selected it gets the global count including all companies.
+// The hidden campaigns of a program are not counted.
 func (r *Campaign) GetUpcomingCount(ctx context.Context, companyID *uuid.UUID, includeTestCampaigns bool) (int64, error) {
 	var c int64
 	db := r.DB
@@ -2284,13 +2397,15 @@ func (r *Campaign) GetUpcomingCount(ctx context.Context, companyID *uuid.UUID, i
 	res := db.
 		Model(&database.Campaign{}).
 		Where(whereClause, utils.NowRFC3339UTC()).
+		Where(notProgramCampaign).
 		Count(&c)
 
 	return c, res.Error
 }
 
 // GetFinishedCount get the finished campaign count
-// if no company ID is selected it gets the global count including all companies
+// if no company ID is selected it gets the global count including all companies.
+// The hidden campaigns of a program are not counted.
 func (r *Campaign) GetFinishedCount(ctx context.Context, companyID *uuid.UUID, includeTestCampaigns bool) (int64, error) {
 	var c int64
 	db := r.DB
@@ -2306,6 +2421,7 @@ func (r *Campaign) GetFinishedCount(ctx context.Context, companyID *uuid.UUID, i
 	res := db.
 		Model(&database.Campaign{}).
 		Where(whereClause).
+		Where(notProgramCampaign).
 		Count(&c)
 
 	return c, res.Error
@@ -2403,6 +2519,12 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		if err != nil {
 			return nil, errs.Wrap(err)
 		}
+	}
+	programID := nullable.NewNullNullable[uuid.UUID]()
+	if row.ProgramID != nil {
+		programID.Set(*row.ProgramID)
+	} else {
+		programID.SetNull()
 	}
 	recipientGroups := []*model.RecipientGroup{}
 	recipientGroupIDs := []*uuid.UUID{}
@@ -2560,6 +2682,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		WebhookEvents:       webhookEvents,
 		TemplateID:          templateID,
 		Template:            template,
+		ProgramID:           programID,
 		RecipientGroups:     recipientGroups,
 		RecipientGroupIDs:   nullable.NewNullableWithValue(recipientGroupIDs),
 		AllowDeny:           allowDeny,
@@ -2953,4 +3076,25 @@ func (r *Campaign) GetGroupedResultStats(
 		})
 	}
 	return result, nil
+}
+
+// HasEventByRecipientID reports whether a recipient has the given event on a
+// campaign
+func (r *Campaign) HasEventByRecipientID(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientID *uuid.UUID,
+	eventID *uuid.UUID,
+) (bool, error) {
+	var count int64
+	res := r.DB.WithContext(ctx).
+		Model(&database.CampaignEvent{}).
+		Where(clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: campaignID}).
+		Where(clause.Eq{Column: clause.Column{Name: "event_id"}, Value: eventID}).
+		Where(clause.Eq{Column: clause.Column{Name: "recipient_id"}, Value: recipientID}).
+		Count(&count)
+	if res.Error != nil {
+		return false, errs.Wrap(res.Error)
+	}
+	return count > 0, nil
 }

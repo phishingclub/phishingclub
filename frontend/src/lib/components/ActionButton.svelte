@@ -4,6 +4,8 @@
 	export let icon = 'edit';
 	export let disabled = false;
 	export let type = 'button';
+	// optional hover text, opt in
+	export let title = '';
 
 	const variantClasses = {
 		primary:
@@ -20,6 +22,7 @@
 <button
 	{type}
 	{disabled}
+	title={title || undefined}
 	on:click
 	class="pc-focus inline-flex items-center justify-center min-h-[2.625rem] px-3.5 py-2 border rounded-md text-sm font-medium transition-colors duration-200 {colorClass} disabled:opacity-50 disabled:cursor-not-allowed"
 >

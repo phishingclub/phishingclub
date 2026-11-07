@@ -89,6 +89,11 @@ type Campaign struct {
 	CampaignTemplateID *uuid.UUID `gorm:"index;type:uuid;"`
 	CampaignTemplate   *CampaignTemplate
 
+	// ProgramID is set on hidden campaigns a program creates to carry its step
+	// sends. Null means an ordinary user campaign. A non-null value hides the
+	// campaign from the campaign listings and locks it from user edits.
+	ProgramID *uuid.UUID `gorm:"type:uuid;index;"`
+
 	// can has one
 	CompanyID     *uuid.UUID `gorm:"index;type:uuid;index;uniqueIndex:idx_campaigns_unique_name_and_company_id;"`
 	Company       *Company

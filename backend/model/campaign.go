@@ -63,8 +63,11 @@ type Campaign struct {
 	WebhookEvents      nullable.Nullable[int]       `json:"webhookEvents,omitempty"`
 	WebhookID          nullable.Nullable[uuid.UUID] `json:"webhookID,omitempty"`
 
-	TemplateID        nullable.Nullable[uuid.UUID]    `json:"templateID"`
-	Template          *CampaignTemplate               `json:"template"`
+	TemplateID nullable.Nullable[uuid.UUID] `json:"templateID"`
+	Template   *CampaignTemplate            `json:"template"`
+	// ProgramID is set on a hidden campaign a program creates to carry its step
+	// sends. Null on ordinary user campaigns.
+	ProgramID         nullable.Nullable[uuid.UUID]    `json:"programID,omitempty"`
 	CompanyID         nullable.Nullable[uuid.UUID]    `json:"companyID"`
 	Company           *Company                        `json:"company"`
 	RecipientGroups   []*RecipientGroup               `json:"recipientGroups"`
@@ -608,6 +611,12 @@ func (c *Campaign) ToDBMap() map[string]any {
 			m["campaign_template_id"] = v.String()
 		}
 	}
+	if c.ProgramID.IsSpecified() {
+		m["program_id"] = nil
+		if v, err := c.ProgramID.Get(); err == nil {
+			m["program_id"] = v.String()
+		}
+	}
 	if c.CompanyID.IsSpecified() {
 		if c.CompanyID.IsNull() {
 			m["company_id"] = nil
@@ -732,6 +741,11 @@ func (c *Campaign) IsSelfManaged() bool {
 // IsPaused returns true if sending is paused
 func (c *Campaign) IsPaused() bool {
 	return c.PausedAt.IsSpecified() && !c.PausedAt.IsNull()
+}
+
+// IsProgramManaged returns true if a program owns this hidden campaign
+func (c *Campaign) IsProgramManaged() bool {
+	return c.ProgramID.IsSpecified() && !c.ProgramID.IsNull()
 }
 
 // IsStarted returns true if the send start time has passed. A self managed

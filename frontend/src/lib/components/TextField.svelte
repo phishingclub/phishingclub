@@ -24,6 +24,8 @@
 	export let id = null;
 	export let onBlur = () => {};
 	export let error = false;
+	// id of the help or error text that describes the field
+	export let ariaDescribedBy = null;
 	// type can only be set initially
 	export let type = 'text';
 	let inputType = 'text';
@@ -67,6 +69,8 @@
 	<input
 		{...{ type: inputType }}
 		{id}
+		aria-invalid={error ? 'true' : undefined}
+		aria-describedby={ariaDescribedBy || undefined}
 		bind:this={bindTo}
 		bind:value
 		autocomplete="off"
@@ -84,7 +88,6 @@
 		{required}
 		{placeholder}
 		{pattern}
-		aria-invalid={error ? 'true' : undefined}
 		class="text-ellipsis rounded-md py-2 px-3 border font-normal transition-colors duration-200 focus:outline-none focus:ring-2 disabled:opacity-60 disabled:cursor-not-allowed {readonly
 			? 'cursor-default bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-dashed border-gray-300 dark:border-gray-600 focus:ring-gray-300/40 dark:focus:ring-gray-600/40'
 			: 'bg-grayblue-light dark:bg-gray-900/60 text-slate-800 dark:text-gray-300'} {error

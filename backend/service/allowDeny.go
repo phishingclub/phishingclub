@@ -17,6 +17,7 @@ type AllowDeny struct {
 	Common
 	AllowDenyRepository *repository.AllowDeny
 	CampaignRepository  *repository.Campaign
+	ProgramRepository   *repository.Program
 	AssetRepository     *repository.Asset
 }
 
@@ -307,6 +308,13 @@ func (s *AllowDeny) DeleteByID(
 	if err != nil {
 		s.Logger.Errorw("failed to remove allow / deny lists from campaigns", "error", err)
 		return err
+	}
+	// remove allow deny list from programs using it
+	if s.ProgramRepository != nil {
+		if err := s.ProgramRepository.RemoveAllowDenyFromPrograms(ctx, id); err != nil {
+			s.Logger.Errorw("failed to remove allow / deny lists from programs", "error", err)
+			return err
+		}
 	}
 	// remove allow deny list from assets using it, those assets are no
 	// longer filtered by it

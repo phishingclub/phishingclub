@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{.Name}}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Helvetica, Arial, sans-serif; color: #1f2430; font-size: 11px; line-height: 1.45; margin: 0; }
+  h1 { font-size: 22px; margin: 0 0 4px 0; }
+  h2 { font-size: 14px; margin: 22px 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid #d6d9e0; }
+  .meta { color: #5b6170; margin-bottom: 6px; }
+  .note { color: #5b6170; font-size: 10px; margin-top: 6px; }
+  .grid { display: table; width: 100%; border-collapse: collapse; }
+  .line { display: table-row; }
+  .line span { display: table-cell; padding: 4px 6px; border-bottom: 1px solid #eef0f4; }
+  .line span:first-child { color: #5b6170; width: 45%; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-weight: 600; color: #5b6170; border-bottom: 1px solid #d6d9e0; padding: 4px 6px; }
+  td { padding: 4px 6px; border-bottom: 1px solid #eef0f4; }
+  td.num, th.num { text-align: right; }
+  .section { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+  <h1>{{.Name}}</h1>
+  <div class="meta">Program report. Period: {{.Period}}. Generated {{.Generated}}.</div>
+  {{if .Anonymous}}<div class="note">Anonymous program. Groups and counts under {{.MinGroup}} people are hidden.</div>{{end}}
+
+  <div class="section">
+    <h2>Program Details</h2>
+    <div class="grid">{{range .Details}}<div class="line"><span>{{.Label}}</span><span>{{.Value}}</span></div>{{end}}</div>
+  </div>
+
+  <div class="section">
+    <h2>Key Results</h2>
+    <div class="grid">{{range .Headline}}<div class="line"><span>{{.Label}}</span><span>{{.Value}}</span></div>{{end}}</div>
+  </div>
+
+  <div class="section">
+    <h2>Results in This Period</h2>
+    <div class="grid">{{range .Funnel}}<div class="line"><span>{{.Label}}</span><span>{{.Value}}</span></div>{{end}}</div>
+    <div class="note">Counted per email sent in the period. A submit counts as a click.</div>
+  </div>
+
+  {{if .Resilience}}
+  <div class="section">
+    <h2>Reporting</h2>
+    <div class="grid">{{range .Resilience}}<div class="line"><span>{{.Label}}</span><span>{{.Value}}</span></div>{{end}}</div>
+  </div>
+  {{end}}
+
+  {{if .HasExposure}}
+  <div class="section">
+    <h2>By Email Number</h2>
+    <table>
+      <tr><th>Email number</th><th class="num">Sent</th><th class="num">Click rate</th><th class="num">Report rate</th></tr>
+      {{range .Exposure}}<tr>{{range $i, $c := .Cells}}<td{{if $i}} class="num"{{end}}>{{$c}}</td>{{end}}</tr>{{end}}
+    </table>
+    <div class="note">The same people across their 1st, 2nd and later emails. The last 3 days are not counted.</div>
+  </div>
+  {{end}}
+
+  <div class="section">
+    <h2>Results by Template</h2>
+    {{if .Templates}}
+    <table>
+      <tr><th>Template</th><th class="num">Sent</th><th class="num">Clicked</th><th class="num">Submitted</th><th class="num">Reported</th><th>Difficulty</th></tr>
+      {{range .Templates}}<tr>{{range $i, $c := .Cells}}<td{{if and $i (lt $i 5)}} class="num"{{end}}>{{$c}}</td>{{end}}</tr>{{end}}
+    </table>
+    {{else}}<div class="note">Nothing was sent in this period.</div>{{end}}
+  </div>
+
+  <div class="section">
+    <h2>Trend by Month</h2>
+    {{if .Months}}
+    <table>
+      <tr><th>Month</th><th class="num">Sent</th><th class="num">Clicked</th><th class="num">Submitted</th><th class="num">Reported</th></tr>
+      {{range .Months}}<tr>{{range $i, $c := .Cells}}<td{{if $i}} class="num"{{end}}>{{$c}}</td>{{end}}</tr>{{end}}
+    </table>
+    {{else}}<div class="note">Nothing was sent in this period.</div>{{end}}
+  </div>
+</body>
+</html>

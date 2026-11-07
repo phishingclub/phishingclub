@@ -245,9 +245,12 @@
 				// close button goes last
 				return;
 			} else if (
-				el instanceof HTMLButtonElement &&
-				(el.textContent?.trim() === 'Next' || el.textContent?.trim() === 'Previous')
+				el.hasAttribute('data-modal-nav') ||
+				(el instanceof HTMLButtonElement &&
+					(el.textContent?.trim() === 'Next' || el.textContent?.trim() === 'Previous'))
 			) {
+				// wizard navigation is marked with data-modal-nav, the text match covers
+				// older wizards
 				navigationButtons.push(el);
 			} else {
 				// all other elements (form fields, form control buttons, etc.) go first

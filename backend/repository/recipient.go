@@ -20,6 +20,7 @@ import (
 
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var allowdCols = []string{
@@ -100,6 +101,7 @@ func (r *Recipient) GetRepeatOffenderCount(
 	}
 	repeatOffenderTimeThreshold := time.Now().AddDate(0, -months, 0)
 
+	// a program's hidden campaigns are left out, as in the recipient stats
 	query := fmt.Sprintf(`
         SELECT COUNT(*) FROM (
             SELECT %s.id
@@ -112,6 +114,7 @@ func (r *Recipient) GetRepeatOffenderCount(
                 AND ce.created_at >= ?
                 AND c.is_test = false
                 AND c.is_training = false
+                AND c.program_id IS NULL
                 GROUP BY ce.recipient_id
                 HAVING COUNT(DISTINCT CASE
                     WHEN ce.event_id IN (?, ?, ?) THEN ce.campaign_id
@@ -172,7 +175,8 @@ func (r *Recipient) GetAll(
 	}
 	repeatOffenderTimeThreshold := time.Now().AddDate(0, -months, 0)
 
-	// Create view query with repeat offender computation
+	// Create view query with repeat offender computation, leaving out a
+	// program's hidden campaigns as the recipient stats do
 	query := fmt.Sprintf(`
         %s.*,
         EXISTS (
@@ -183,6 +187,7 @@ func (r *Recipient) GetAll(
             AND ce.created_at >= ?
             AND c.is_test = false
             AND c.is_training = false
+            AND c.program_id IS NULL
             GROUP BY ce.recipient_id
             HAVING COUNT(DISTINCT CASE
                 WHEN ce.event_id IN (?, ?, ?) THEN ce.campaign_id
@@ -308,6 +313,10 @@ func (r *Recipient) GetAll(
 	return result, nil
 }
 
+// notProgramCampaign leaves out the hidden campaigns a program owns, which are
+// reported through the program and may be anonymous
+var notProgramCampaign = clause.Eq{Column: programColumn(database.CAMPAIGN_TABLE), Value: nil}
+
 // GetAllCampaignEvents gets events by a recipient id
 // if campaignID is nil, it retrieves all events
 func (r *Recipient) GetAllCampaignEvents(
@@ -346,6 +355,8 @@ func (r *Recipient) GetAllCampaignEvents(
 			campaignID.String(),
 		)
 	}
+	// a program's hidden campaigns are reported through the program
+	db = db.Where(notProgramCampaign)
 	res := db.InnerJoins(LeftJoinOn(
 		database.CAMPAIGN_EVENT_TABLE,
 		"event_id",
@@ -555,6 +566,7 @@ func (r *Recipient) GetStatsByID(
 	// get phishing campaign count, training campaigns are counted separately below
 	r.DB.Model(&database.CampaignRecipient{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_recipients.campaign_id").
+		Where(notProgramCampaign).
 		Where("campaign_recipients.recipient_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?", id, false, false).
 		Distinct("campaign_recipients.campaign_id").
 		Count(&stats.CampaignsParticiated)
@@ -562,6 +574,7 @@ func (r *Recipient) GetStatsByID(
 	// get training campaigns the recipient was scheduled in
 	r.DB.Model(&database.CampaignRecipient{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_recipients.campaign_id").
+		Where(notProgramCampaign).
 		Where("campaign_recipients.recipient_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?", id, false, true).
 		Distinct("campaign_recipients.campaign_id").
 		Count(&stats.TrainingsAssigned)
@@ -569,6 +582,7 @@ func (r *Recipient) GetStatsByID(
 	// get training campaigns the recipient completed
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
+		Where(notProgramCampaign).
 		Where(
 			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
@@ -582,6 +596,7 @@ func (r *Recipient) GetStatsByID(
 	// get unique tracking pixels loaded
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
+		Where(notProgramCampaign).
 		Where(
 			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
@@ -595,6 +610,7 @@ func (r *Recipient) GetStatsByID(
 	// get any phishing page loaded distinct by recipient and campaign
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
+		Where(notProgramCampaign).
 		Where(
 			"campaign_events.recipient_id = ? AND campaign_events.event_id IN (?,?,?) AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
@@ -610,6 +626,7 @@ func (r *Recipient) GetStatsByID(
 	// get unique submits
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
+		Where(notProgramCampaign).
 		Where(
 			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
@@ -623,6 +640,7 @@ func (r *Recipient) GetStatsByID(
 	// get unique reported campaigns
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
+		Where(notProgramCampaign).
 		Where(
 			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
 			id,
@@ -637,6 +655,7 @@ func (r *Recipient) GetStatsByID(
 	var linkClickCount int64
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
+		Where(notProgramCampaign).
 		Select("COUNT(DISTINCT campaign_events.campaign_id)").
 		Where(
 			"campaign_events.recipient_id = ? AND campaign_events.event_id IN (?,?,?) AND campaign_events.created_at >= ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
@@ -661,6 +680,7 @@ func (r *Recipient) GetStatsByID(
 	var submitCount int64
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
+		Where(notProgramCampaign).
 		Select("COUNT(DISTINCT campaign_events.campaign_id)").
 		Where(
 			"campaign_events.recipient_id = ? AND campaign_events.event_id = ? AND campaign_events.created_at >= ? AND campaigns.is_test = ? AND campaigns.is_training = ?",
@@ -1112,4 +1132,38 @@ func ToRecipient(row *database.Recipient) (*model.Recipient, error) {
 		Company:           company,
 		Groups:            nullable.NewNullableWithValue(groups),
 	}, nil
+}
+
+// GetByIDs batch loads recipients by id, chunked to stay under the SQLite bind
+// parameter ceiling. Used to enrich program enrollment rows with names.
+func (r *Recipient) GetByIDs(
+	ctx context.Context,
+	ids []*uuid.UUID,
+) ([]*model.Recipient, error) {
+	out := []*model.Recipient{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	const chunkSize = 800
+	for start := 0; start < len(ids); start += chunkSize {
+		end := start + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		var rows []database.Recipient
+		res := r.DB.WithContext(ctx).
+			Where("id IN ?", ids[start:end]).
+			Find(&rows)
+		if res.Error != nil {
+			return nil, errs.Wrap(res.Error)
+		}
+		for i := range rows {
+			m, err := ToRecipient(&rows[i])
+			if err != nil {
+				return nil, errs.Wrap(err)
+			}
+			out = append(out, m)
+		}
+	}
+	return out, nil
 }

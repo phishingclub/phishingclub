@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/go-errors/errors"
 
@@ -23,6 +24,7 @@ type CampaignTemplate struct {
 	CampaignTemplateRepository *repository.CampaignTemplate
 	CampaignRepository         *repository.Campaign
 	IdentifierRepository       *repository.Identifier
+	ProgramRepository          *repository.Program
 }
 
 // Create creates a new campaign template
@@ -810,6 +812,20 @@ func (c *CampaignTemplate) DeleteByID(
 		return errs.ErrAuthorizationFailed
 	}
 
+	// a program step needs its template, so the step must be removed first
+	if c.ProgramRepository != nil {
+		programNames, err := c.ProgramRepository.GetNamesByCampaignTemplateID(ctx, id)
+		if err != nil {
+			c.Logger.Errorw("failed to get programs using the campaign template", "error", err)
+			return errs.Wrap(err)
+		}
+		if len(programNames) > 0 {
+			return errs.NewValidationError(errors.Errorf(
+				"template is used by program: %s. Remove it from the program steps first",
+				strings.Join(programNames, ", "),
+			))
+		}
+	}
 	// all active campaigns that use this template ID which is becoming unusable due to
 	// the domain being removed will be set to close on the next schedule tick.
 	campaignsAffected, err := c.CampaignRepository.GetByTemplateIDs(

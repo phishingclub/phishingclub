@@ -28,6 +28,7 @@ type Company struct {
 	RecipientGroupService    *RecipientGroup
 	CampaignService          *Campaign
 	CampaignTemplate         *CampaignTemplate
+	ProgramService           *Program
 	AllowDenyService         *AllowDeny
 	WebhookService           *Webhook
 	ScriptService            *Script
@@ -302,6 +303,26 @@ func (s *Company) DeleteByID(
 
 	// deleting a company starts a big chain of deletion where all things related
 	// to the company is deleted
+	// delete programs first, they own hidden campaigns and reference templates and
+	// groups that are deleted below
+	if s.ProgramService != nil {
+		programIDs, err := s.ProgramService.ProgramRepository.GetIDsByCompanyID(g, companyID)
+		if err != nil {
+			s.Logger.Errorw("failed to get programs that should be deleted due to company deletion",
+				"error", err,
+			)
+			return 0, errs.Wrap(err)
+		}
+		for _, programID := range programIDs {
+			if err := s.ProgramService.DeleteByID(g, session, programID); err != nil {
+				s.Logger.Errorw("failed to delete program due to company deletion",
+					"programID", programID.String(),
+					"error", err,
+				)
+				return 0, errs.Wrap(err)
+			}
+		}
+	}
 	// delete domains owned by the company, this deletes assets owned by the domains
 	affectedDomains, err := s.DomainService.GetByCompanyID(
 		g,

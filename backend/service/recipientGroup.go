@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/go-errors/errors"
 
@@ -22,6 +23,7 @@ type RecipientGroup struct {
 	RecipientGroupRepository    *repository.RecipientGroup
 	RecipientRepository         *repository.Recipient
 	RecipientService            *Recipient
+	ProgramRepository           *repository.Program
 	DB                          *gorm.DB
 }
 
@@ -566,6 +568,20 @@ func (r *RecipientGroup) DeleteByID(
 	if !isAuthorized {
 		r.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
+	}
+	// a program enrolls from its groups, so the group must be removed from it first
+	if r.ProgramRepository != nil {
+		programNames, err := r.ProgramRepository.GetNamesByRecipientGroupID(ctx, id)
+		if err != nil {
+			r.Logger.Errorw("failed to get programs using the recipient group", "error", err)
+			return errs.Wrap(err)
+		}
+		if len(programNames) > 0 {
+			return errs.NewValidationError(errors.Errorf(
+				"group is used by program: %s. Remove it from the program first",
+				strings.Join(programNames, ", "),
+			))
+		}
 	}
 	// get all recipients in group; for dynamic groups the junction table is empty so we
 	// must resolve members via the filter query before anonymizing campaign data

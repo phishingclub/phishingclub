@@ -262,6 +262,11 @@ func companyColumn(tableName string) clause.Column {
 	return clause.Column{Table: tableName, Name: "company_id"}
 }
 
+// programColumn is the program_id column of a table
+func programColumn(tableName string) clause.Column {
+	return clause.Column{Table: tableName, Name: "program_id"}
+}
+
 // withCompanyIncludingNullContext limits rows to the company and global rows
 // if companyID is nil only global rows are used
 func withCompanyIncludingNullContext(db *gorm.DB, companyID *uuid.UUID, tableName string) *gorm.DB {

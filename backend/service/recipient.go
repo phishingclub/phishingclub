@@ -23,6 +23,10 @@ type Recipient struct {
 	RecipientGroupRepository    *repository.RecipientGroup
 	CampaignRepository          *repository.Campaign
 	CampaignRecipientRepository *repository.CampaignRecipient
+	ProgramRepository           *repository.Program
+	// ProgramService gives the program lifecycle lock, so a scheduler tick can
+	// not add a program send for a recipient that is being deleted
+	ProgramService *Program
 }
 
 // Create creates a new recipient
@@ -684,6 +688,14 @@ func (r *Recipient) deleteRecipientByID(
 	ctx context.Context,
 	id *uuid.UUID,
 ) error {
+	// the program scheduler waits while the sends are cancelled and the
+	// enrollments are removed, so it can not add a send in between
+	if r.ProgramService != nil {
+		if err := r.ProgramService.lifecycleMu.LockContext(ctx); err != nil {
+			return errs.Wrap(err)
+		}
+		defer r.ProgramService.lifecycleMu.Unlock()
+	}
 	// remove recipient from all groups
 	err := r.RecipientGroupRepository.RemoveRecipientByIDFromAllGroups(ctx, id)
 	if err != nil {
@@ -730,6 +742,13 @@ func (r *Recipient) deleteRecipientByID(
 	if err != nil {
 		r.Logger.Errorw("failed to remove recipient id from campaign recipient", "error", err)
 		return err
+	}
+	// remove the recipient from every program it is enrolled in
+	if r.ProgramRepository != nil {
+		if err := r.ProgramRepository.DeleteEnrollmentsByRecipientID(ctx, id); err != nil {
+			r.Logger.Errorw("failed to delete program enrollments of recipient", "error", err)
+			return err
+		}
 	}
 	// delete recipient
 	err = r.RecipientRepository.DeleteByID(

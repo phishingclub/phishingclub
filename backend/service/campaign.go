@@ -78,6 +78,9 @@ func (c *Campaign) Create(
 	session *model.Session,
 	campaign *model.Campaign,
 ) (*uuid.UUID, error) {
+	// program_id is owned by the program feature; a client campaign request can
+	// never set it, or it would hide and lock a campaign no program owns
+	campaign.ProgramID = nullable.Nullable[uuid.UUID]{}
 	ae := NewAuditEvent("Campaign.Create", session)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -851,9 +854,10 @@ func (c *Campaign) schedule(
 	if err := campaign.ValidateSendTimesSet(); err != nil {
 		return errs.Wrap(err)
 	}
-	// set schedule with a even spread between startAt and end time
-	startAt := campaign.SendStartAt.MustGet()
-	endAt := campaign.SendEndAt.MustGet()
+	// set schedule with a even spread between startAt and end time. Days are cut
+	// at UTC midnight, so the week day is read in UTC too
+	startAt := campaign.SendStartAt.MustGet().UTC()
+	endAt := campaign.SendEndAt.MustGet().UTC()
 	recipientsCount := len(recipients)
 	// no recipients, no schedule
 	if recipientsCount == 0 {
@@ -1243,6 +1247,11 @@ func (c *Campaign) GetByID(
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return nil, errs.Wrap(err)
 	}
+	// a program owns its hidden campaigns; a client campaign read never sees one,
+	// so knowing its id cannot resurface it
+	if !options.IncludeProgramManaged && campaign.IsProgramManaged() {
+		return nil, errs.Wrap(gorm.ErrRecordNotFound)
+	}
 	// the recipient table is paginated, so this cannot be derived from one page
 	hasCustom, err := c.CampaignRecipientRepository.HasCustomLureCodesByCampaignID(ctx, id)
 	if err != nil {
@@ -1278,6 +1287,10 @@ func (c *Campaign) GetByName(
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign by name", "error", err)
 		return nil, errs.Wrap(err)
+	}
+	// a program owns its hidden campaigns; a client campaign read never sees one
+	if !options.IncludeProgramManaged && campaign.IsProgramManaged() {
+		return nil, errs.Wrap(gorm.ErrRecordNotFound)
 	}
 	// no audit on read
 	return campaign, nil
@@ -1374,6 +1387,10 @@ func (c *Campaign) GetResultStats(
 		c.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
+	// a program's hidden campaigns are read through the program
+	if err := c.rejectProgramCampaign(ctx, campaignID); err != nil {
+		return nil, err
+	}
 	// get stats
 	stats, err := c.CampaignRepository.GetResultStats(ctx, campaignID)
 	if err != nil {
@@ -1411,6 +1428,10 @@ func (c *Campaign) GetGroupedResultStats(
 	if !isAuthorized {
 		c.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
+	}
+	// a program's hidden campaigns are read through the program
+	if err := c.rejectProgramCampaign(ctx, campaignID); err != nil {
+		return nil, err
 	}
 	// the position/department breakdown is available for every campaign that has
 	// the data, matching the report. the grouping value falls back to the
@@ -1451,6 +1472,10 @@ func (c *Campaign) HasGroupData(
 	}
 	if !isAuthorized {
 		return false, errs.ErrAuthorizationFailed
+	}
+	// a program's hidden campaigns are read through the program
+	if err := c.rejectProgramCampaign(ctx, campaignID); err != nil {
+		return false, err
 	}
 	return c.CampaignRepository.HasGroupDataByCampaignID(ctx, campaignID)
 }
@@ -1546,6 +1571,10 @@ func (c *Campaign) GetRecipientsByCampaignID(
 	if !isAuthorized {
 		c.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
+	}
+	// a program's hidden campaigns are read through the program
+	if err := c.rejectProgramCampaign(ctx, campaignID); err != nil {
+		return nil, err
 	}
 	// an anonymous campaign keeps identity but withholds each outcome and timing
 	// (below). force an identity neutral order first so those withheld values cannot
@@ -1649,6 +1678,10 @@ func (c *Campaign) GetEventsByCampaignID(
 	if !isAuthorized {
 		c.AuditLogNotAuthorized(ae)
 		return result, errs.ErrAuthorizationFailed
+	}
+	// a program's hidden campaigns are read through the program
+	if err := c.rejectProgramCampaign(ctx, campaignID); err != nil {
+		return result, err
 	}
 	result, err = c.CampaignRepository.GetEventsByCampaignID(
 		ctx,
@@ -2001,6 +2034,9 @@ func (c *Campaign) UpdateByID(
 	id *uuid.UUID,
 	incoming *model.Campaign,
 ) error {
+	// program_id is owned by the program feature; a client campaign request can
+	// never set or change it
+	incoming.ProgramID = nullable.Nullable[uuid.UUID]{}
 	ae := NewAuditEvent("Campaign.UpdateById", session)
 	ae.Details["id"] = id.String()
 	// check permissions
@@ -2040,6 +2076,11 @@ func (c *Campaign) UpdateByID(
 	if err != nil {
 		c.Logger.Errorw("failed to campaign by id", "error", err)
 		return errs.Wrap(err)
+	}
+	// a program owns its hidden campaigns; they cannot be edited through the
+	// campaign endpoints and answer as not found, so their existence is not told
+	if current.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
 	// check if the campaign is within the allowed time frame for editing
 	// we allow editing up until 5 minutes before the campaigns start time
@@ -2568,6 +2609,17 @@ func (c *Campaign) DeleteByID(
 	session *model.Session,
 	id *uuid.UUID,
 ) error {
+	return c.deleteByID(ctx, session, id, false)
+}
+
+// deleteByID is DeleteByID with a switch that lets a program delete the hidden
+// campaigns it owns
+func (c *Campaign) deleteByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	allowProgramManaged bool,
+) error {
 	ae := NewAuditEvent("Campaign.DeleteById", session)
 	ae.Details["id"] = id.String()
 	// check permissions
@@ -2579,6 +2631,17 @@ func (c *Campaign) DeleteByID(
 	if !isAuthorized {
 		c.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
+	}
+	// a program owns its hidden campaigns; they cannot be deleted through the
+	// campaign endpoints, only by removing the program
+	existing, err := c.CampaignRepository.GetByID(ctx, id, &repository.CampaignOption{})
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return errs.Wrap(err)
+	}
+	// a program owns its hidden campaigns, they answer as not found here
+	if !allowProgramManaged && existing.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
 	// delete all campaign-webhook junction records
 	err = c.CampaignRepository.RemoveWebhooksByCampaignID(ctx, id)
@@ -2678,6 +2741,10 @@ func (c *Campaign) DeleteEventByID(
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign", "error", err, "campaignID", event.CampaignID.String())
 		return errs.Wrap(err)
+	}
+	// a program owns its hidden campaigns, they are only changed through the program
+	if campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
 
 	// check if campaign is closed
@@ -2829,6 +2896,8 @@ func (c *Campaign) sendCampaignMessages(
 		&campaignID,
 		&repository.CampaignOption{
 			WithCampaignTemplate: false,
+			// the send batch also delivers a program's hidden campaigns
+			IncludeProgramManaged: true,
 		},
 	)
 	if err != nil {
@@ -3004,7 +3073,7 @@ func (c *Campaign) sendCampaignMessages(
 			}
 			// generate custom campaign URL if first page is MITM
 			recipientID := campaignRecipient.ID.MustGet()
-			customCampaignURL, urlErr := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+			customCampaignURL, urlErr := c.getLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
 			if urlErr != nil {
 				c.Logger.Errorw("failed to get campaign url for API sender", "error", urlErr)
 				customCampaignURL = ""
@@ -3238,7 +3307,7 @@ func (c *Campaign) sendCampaignMessages(
 
 		// generate custom campaign URL if first page is MITM
 		recipientID := campaignRecipient.ID.MustGet()
-		customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+		customCampaignURL, err := c.getLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
 		if err != nil {
 			c.Logger.Errorw("failed to get campaign url", "error", err)
 			return errs.Wrap(err)
@@ -3338,7 +3407,7 @@ func (c *Campaign) sendCampaignMessages(
 					)
 					// generate custom campaign URL for attachment
 					recipientID := campaignRecipient.ID.MustGet()
-					customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+					customCampaignURL, err := c.getLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
 					if err != nil {
 						c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
 						return errs.Wrap(err)
@@ -3406,7 +3475,7 @@ func (c *Campaign) sendCampaignMessages(
 				)
 				// generate custom campaign URL for attachment
 				attachmentRecipientID := campaignRecipient.ID.MustGet()
-				customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &attachmentRecipientID)
+				customCampaignURL, err := c.getLandingPageURLByCampaignRecipientID(ctx, session, &attachmentRecipientID)
 				if err != nil {
 					c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
 					return errs.Wrap(err)
@@ -3789,7 +3858,7 @@ func (c *Campaign) HandleAnonymizeCampaigns(
 		campaignID := campaign.ID.MustGet()
 		affectedIds = append(affectedIds, campaignID.String())
 		c.Logger.Debugw("anonymizing campaign with id", "campaignID", campaignID)
-		err = c.AnonymizeByID(ctx, session, &campaignID)
+		err = c.anonymizeByID(ctx, session, &campaignID, true)
 
 		if err != nil && !errors.Is(err, errs.ErrCampaignAlreadyClosed) {
 			c.Logger.Errorw("failed to anonymize campaign by id", "error", err)
@@ -3840,7 +3909,7 @@ func (c *Campaign) HandleDataAnonymizeCampaigns(
 		campaignID := campaign.ID.MustGet()
 		affectedIds = append(affectedIds, campaignID.String())
 		c.Logger.Debugw("anonymizing campaign data with id", "campaignID", campaignID)
-		err = c.AnonymizeDataByID(ctx, session, &campaignID)
+		err = c.anonymizeDataByID(ctx, session, &campaignID, true)
 		if errors.Is(err, errs.ErrCampaignDataAlreadyAnonymized) {
 			c.Logger.Debugw("campaign data already anonymized", "error", err)
 			continue
@@ -3937,6 +4006,15 @@ func (c *Campaign) DeleteDeviceCodesByCampaignID(
 		c.AuditLogNotAuthorized(ae)
 		return errs.Wrap(errs.ErrAuthorizationFailed)
 	}
+	campaign, err := c.CampaignRepository.GetByID(ctx, id, &repository.CampaignOption{})
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return errs.Wrap(err)
+	}
+	// a program owns its hidden campaigns, they are only changed through the program
+	if campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
+	}
 	if c.MicrosoftDeviceCodeRepository == nil {
 		return nil
 	}
@@ -3976,6 +4054,10 @@ func (c *Campaign) PauseCampaignByID(
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return errs.Wrap(err)
+	}
+	// a program owns its hidden campaigns, they are only changed through the program
+	if campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
 	// a closed campaign has no sending left to pause
 	if campaign.ClosedAt.IsSpecified() && !campaign.ClosedAt.IsNull() {
@@ -4048,6 +4130,10 @@ func (c *Campaign) ResumeCampaignByID(
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return errs.Wrap(err)
+	}
+	// a program owns its hidden campaigns, they are only changed through the program
+	if campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
 	if campaign.ClosedAt.IsSpecified() && !campaign.ClosedAt.IsNull() {
 		return errs.Wrap(errs.ErrCampaignAlreadyClosed)
@@ -4343,6 +4429,10 @@ func (c *Campaign) CloseCampaignByID(
 		c.Logger.Errorw("failed to get campaign by id: %s", err)
 		return errs.Wrap(err)
 	}
+	// a program owns its hidden campaigns, they are only changed through the program
+	if campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
+	}
 	err = c.closeCampaign(ctx, session, id, campaign, "Manually closed")
 	if err != nil {
 		c.Logger.Errorw("failed to close campaign by id", "error", err)
@@ -4436,8 +4526,9 @@ func (c *Campaign) closeCampaign(
 		return errs.Wrap(err)
 	}
 
-	// Generate campaign statistics when closing (skip test campaigns)
-	if !campaign.IsTest.MustGet() {
+	// Generate campaign statistics when closing (skip test campaigns and the
+	// hidden campaigns of a program, which report through the program)
+	if !campaign.IsTest.MustGet() && !campaign.IsProgramManaged() {
 		c.Logger.Debugf("generating campaign statistics", "campaignID", id.String())
 		err = c.GenerateCampaignStats(ctx, session, id)
 		if err != nil {
@@ -4476,8 +4567,8 @@ func (c *Campaign) closeCampaign(
 	// rendering the PDF and sending mail can take seconds, so it runs in the
 	// background with its own context to avoid blocking the close path and the
 	// sender loop. failures are logged and a panic is recovered so it can never
-	// crash the process.
-	if !campaign.IsTest.MustGet() {
+	// crash the process. a program's hidden campaigns get no report of their own.
+	if !campaign.IsTest.MustGet() && !campaign.IsProgramManaged() {
 		reportCampaignID := *id
 		go func() {
 			defer func() {
@@ -4513,6 +4604,10 @@ func (c *Campaign) GetCampaignEmailBody(
 	if !isAuthorized {
 		c.AuditLogNotAuthorized(ae)
 		return "", errs.ErrAuthorizationFailed
+	}
+	// a program's hidden campaigns are read through the program
+	if err := c.rejectProgramCampaignRecipient(ctx, campaignRecipientID); err != nil {
+		return "", err
 	}
 	// check recipient is in a active campaign
 	campaignRecipient, err := c.CampaignRecipientRepository.GetByID(
@@ -4607,7 +4702,7 @@ func (c *Campaign) GetCampaignEmailBody(
 	urlPath := cTemplate.URLPath.MustGet().String()
 
 	// generate custom campaign URL if first page is MITM
-	customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, campaignRecipientID)
+	customCampaignURL, err := c.getLandingPageURLByCampaignRecipientID(ctx, session, campaignRecipientID)
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign url", "error", err)
 		return "", errs.Wrap(err)
@@ -4627,10 +4722,51 @@ func (c *Campaign) GetCampaignEmailBody(
 	)
 }
 
-// GetLandingPageURLByCampaignRecipientID generates the lure URL for a campaign recipient.
+// GetLandingPageURLByCampaignRecipientID returns the landing page URL of a
+// campaign recipient for a client request
+func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
+	ctx context.Context,
+	session *model.Session,
+	campaignRecipientID *uuid.UUID,
+) (string, error) {
+	// a program's hidden campaigns are read through the program
+	if err := c.rejectProgramCampaignRecipient(ctx, campaignRecipientID); err != nil {
+		return "", err
+	}
+	return c.getLandingPageURLByCampaignRecipientID(ctx, session, campaignRecipientID)
+}
+
+// rejectProgramCampaign returns not found for a campaign a program owns
+func (c *Campaign) rejectProgramCampaign(ctx context.Context, campaignID *uuid.UUID) error {
+	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{})
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	if campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
+	}
+	return nil
+}
+
+// rejectProgramCampaignRecipient returns not found for a recipient of a
+// campaign a program owns
+func (c *Campaign) rejectProgramCampaignRecipient(ctx context.Context, campaignRecipientID *uuid.UUID) error {
+	cr, err := c.CampaignRecipientRepository.GetByID(ctx, campaignRecipientID, &repository.CampaignRecipientOption{
+		WithCampaign: true,
+	})
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	if cr.Campaign != nil && cr.Campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
+	}
+	return nil
+}
+
+// getLandingPageURLByCampaignRecipientID generates the lure URL for a campaign recipient.
 // if the first page in the campaign flow is a mitm proxy, the url goes directly to the
 // mitm domain instead of redirecting through the template domain.
-func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
+func (c *Campaign) getLandingPageURLByCampaignRecipientID(
 	ctx context.Context,
 	session *model.Session,
 	campaignRecipientID *uuid.UUID,
@@ -4909,6 +5045,10 @@ func (c *Campaign) SetLureCodeByCampaignRecipientID(
 		return nil, errs.Wrap(err)
 	}
 	campaign := campaignRecipient.Campaign
+	// a program owns its hidden campaigns, they are only changed through the program
+	if campaign != nil && campaign.IsProgramManaged() {
+		return nil, errs.Wrap(gorm.ErrRecordNotFound)
+	}
 	if campaign == nil || !campaign.IsActive() {
 		return nil, errs.NewValidationError(errors.New("campaign is closed"))
 	}
@@ -4996,6 +5136,10 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 		return errs.Wrap(err)
 	}
 	campaign := campaignRecipient.Campaign
+	// a program owns its hidden campaigns, they are only changed through the program
+	if campaign != nil && campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
+	}
 	// check if the campaign recipient is in a active campaign
 	if !campaign.IsActive() {
 		c.Logger.Debugw("failed to cancel campaign recipient by id: campaign is inactive",
@@ -5560,6 +5704,17 @@ func (c *Campaign) AnonymizeByID(
 	session *model.Session,
 	id *uuid.UUID,
 ) error {
+	return c.anonymizeByID(ctx, session, id, false)
+}
+
+// anonymizeByID is AnonymizeByID with a switch that lets the anonymize task
+// include campaigns a program owns
+func (c *Campaign) anonymizeByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	allowProgramManaged bool,
+) error {
 	ae := NewAuditEvent("Campaign.AnonymizeByID", session)
 	ae.Details["id"] = id.String()
 	// check permissions
@@ -5580,6 +5735,10 @@ func (c *Campaign) AnonymizeByID(
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return errs.Wrap(err)
+	}
+	// a program owns its hidden campaigns, only the anonymize task may touch them
+	if !allowProgramManaged && campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
 	// check if campaign is active, cause then it should be closed before continueing
 	if campaign.IsActive() {
@@ -5610,6 +5769,17 @@ func (c *Campaign) AnonymizeDataByID(
 	session *model.Session,
 	id *uuid.UUID,
 ) error {
+	return c.anonymizeDataByID(ctx, session, id, false)
+}
+
+// anonymizeDataByID is AnonymizeDataByID with a switch that lets the anonymize
+// task include campaigns a program owns
+func (c *Campaign) anonymizeDataByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	allowProgramManaged bool,
+) error {
 	ae := NewAuditEvent("Campaign.AnonymizeDataByID", session)
 	ae.Details["id"] = id.String()
 	// check permissions
@@ -5631,6 +5801,10 @@ func (c *Campaign) AnonymizeDataByID(
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return errs.Wrap(err)
+	}
+	// a program owns its hidden campaigns, only the anonymize task may touch them
+	if !allowProgramManaged && campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
 	// a fully anonymized campaign has already had its data scrubbed
 	if campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull() {
@@ -5698,6 +5872,10 @@ func (c *Campaign) SendEmailByCampaignRecipientID(
 	campaign := campaignRecipient.Campaign
 	if campaign == nil {
 		return errors.New("campaign recipient has no campaign loaded")
+	}
+	// a program owns its hidden campaigns, they are only changed through the program
+	if campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
 
 	// check if campaign is active
@@ -5842,7 +6020,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 	if isAPISenderCampaign {
 		// generate custom campaign URL if first page is MITM
 		recipientID := campaignRecipient.ID.MustGet()
-		customCampaignURL, urlErr := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+		customCampaignURL, urlErr := c.getLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
 		if urlErr != nil {
 			c.Logger.Errorw("failed to get campaign url for API sender", "error", urlErr)
 			customCampaignURL = ""
@@ -6023,7 +6201,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 	urlPath := cTemplate.URLPath.MustGet().String()
 
 	// generate custom campaign URL if first page is MITM
-	customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+	customCampaignURL, err := c.getLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign url", "error", err)
 		return errs.Wrap(err)
@@ -6116,7 +6294,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 				)
 				// generate custom campaign URL for attachment
 				recipientID := campaignRecipient.ID.MustGet()
-				customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+				customCampaignURL, err := c.getLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
 				if err != nil {
 					c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
 					return errs.Wrap(err)
@@ -6184,7 +6362,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 			)
 			// generate custom campaign URL for attachment
 			recipientID := campaignRecipient.ID.MustGet()
-			customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+			customCampaignURL, err := c.getLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
 			if err != nil {
 				c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
 				return errs.Wrap(err)
@@ -6467,6 +6645,10 @@ func (c *Campaign) GetCampaignStats(ctx context.Context, session *model.Session,
 	if !isAuthorized {
 		return nil, errs.ErrAuthorizationFailed
 	}
+	// a program's hidden campaigns are read through the program
+	if err := c.rejectProgramCampaign(ctx, campaignID); err != nil {
+		return nil, err
+	}
 
 	return c.CampaignRepository.GetCampaignStats(ctx, campaignID)
 }
@@ -6696,6 +6878,10 @@ func (c *Campaign) ProcessReportedCSV(
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return 0, 0, errs.Wrap(err)
 	}
+	// a program owns its hidden campaigns, they are only changed through the program
+	if campaign.IsProgramManaged() {
+		return 0, 0, errs.Wrap(gorm.ErrRecordNotFound)
+	}
 
 	if len(records) < 2 {
 		return 0, 0, errs.NewValidationError(errors.New("CSV must have at least a header row and one data row"))
@@ -6718,7 +6904,6 @@ func (c *Campaign) ProcessReportedCSV(
 
 	processed := 0
 	skipped := 0
-	reportedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
 
 	// process each row
 	for i, record := range records[1:] { // skip header
@@ -6736,43 +6921,10 @@ func (c *Campaign) ProcessReportedCSV(
 			c.Logger.Debugw("skipping row with empty email", "row", i+2)
 			continue
 		}
-		// parse date - try multiple formats and handle timezone
-		var parsedDate time.Time
-		dateFormats := []string{
-			// iso 8601 with fractional seconds (microsoft format)
-			"2006-01-02T15:04:05.999999999Z",
-			"2006-01-02T15:04:05.999999999-07:00",
-			"2006-01-02T15:04:05.999999999+02:00",
-			"2006-01-02T15:04:05.999999999+01:00",
-			// iso 8601 without fractional seconds
-			"2006-01-02T15:04:05Z",
-			"2006-01-02T15:04:05-07:00",
-			"2006-01-02T15:04:05+02:00",
-			"2006-01-02T15:04:05+01:00",
-			"2006-01-02T15:04:05",
-			// other common formats
-			"2006-01-02 15:04:05",
-			"2006-01-02",
-			"01/02/2006 15:04:05",
-			"01/02/2006",
-			"02-01-2006 15:04:05",
-			"02-01-2006",
-			"2006/01/02 15:04:05",
-			"2006/01/02",
-		}
-
-		dateParseError := true
-		for _, format := range dateFormats {
-			if pd, err := time.Parse(format, dateReported); err == nil {
-				parsedDate = pd
-				dateParseError = false
-				break
-			}
-		}
-
-		if dateParseError {
+		parsedDate, ok := parseReportedDate(dateReported)
+		if !ok {
 			skipped++
-			c.Logger.Debugw("skipping row with invalid date format", "row", i+2, "date", dateReported, "tried_formats", dateFormats)
+			c.Logger.Debugw("skipping row with invalid date format", "row", i+2, "date", dateReported)
 			continue
 		}
 
@@ -6815,77 +6967,17 @@ func (c *Campaign) ProcessReportedCSV(
 			continue
 		}
 
-		// check if already reported (to avoid duplicates). an anonymous campaign's
-		// events carry the pseudonym rather than a recipient id, so dedup on that.
-		alreadyReported := false
-		if aid, aErr := campaignRecipient.AnonymizedID.Get(); aErr == nil {
-			alreadyReported, err = c.CampaignRepository.HasEventByAnonymizedID(ctx, campaignID, &aid, reportedEventID)
-			if err != nil {
-				c.Logger.Errorw("failed to check existing reported event", "error", err)
-				skipped++
-				continue
-			}
-		} else {
-			existingEvent, gErr := c.CampaignRepository.GetEventsByCampaignID(
-				ctx,
-				campaignID,
-				&repository.CampaignEventOption{
-					QueryArgs: &vo.QueryArgs{
-						Limit: 1,
-					},
-					EventTypeIDs: []string{reportedEventID.String()},
-				},
-				nil,
-			)
-			if gErr == nil && existingEvent != nil {
-				for _, event := range existingEvent.Rows {
-					if event.RecipientID != nil && *event.RecipientID == recipientID {
-						alreadyReported = true
-						break
-					}
-				}
-			}
+		recorded, err := c.recordReportedEvent(ctx, campaign, campaignRecipient, parsedDate)
+		if err != nil {
+			c.Logger.Errorw("failed to record reported event", "error", err, "email", reportedByEmail)
+			skipped++
+			continue
 		}
-
-		if alreadyReported {
+		if !recorded {
 			skipped++
 			c.Logger.Debugw("recipient already reported", "email", reportedByEmail, "campaignID", campaignID.String())
 			continue
 		}
-
-		// create campaign event for reported
-		eventID := uuid.New()
-
-		campaignEvent := &model.CampaignEvent{
-			ID:          &eventID,
-			CampaignID:  campaignID,
-			RecipientID: &recipientID,
-			IP:          vo.NewEmptyOptionalString64(),
-			UserAgent:   vo.NewEmptyOptionalString255(),
-			EventID:     reportedEventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
-		anonymizeEventForRecipient(campaignAnonymous(campaign), campaignRecipient, campaignEvent)
-
-		// save the event with custom timestamp
-		err = c.saveReportedEvent(campaignEvent, parsedDate)
-		if err != nil {
-			c.Logger.Errorw("failed to save reported event", "error", err, "email", reportedByEmail)
-			skipped++
-			continue
-		}
-
-		// update most notable event for campaign recipient
-		err = c.SetNotableCampaignRecipientEvent(
-			ctx,
-			campaignRecipient,
-			data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
-		)
-		if err != nil {
-			c.Logger.Errorw("failed to update notable event", "error", err)
-		}
-
 		processed++
 	}
 
@@ -6894,6 +6986,101 @@ func (c *Campaign) ProcessReportedCSV(
 	c.AuditLogAuthorized(ae)
 
 	return processed, skipped, nil
+}
+
+// reportedDateFormats are the time formats a reported CSV date may use
+var reportedDateFormats = []string{
+	// iso 8601 with fractional seconds (microsoft format)
+	"2006-01-02T15:04:05.999999999Z",
+	"2006-01-02T15:04:05.999999999-07:00",
+	"2006-01-02T15:04:05.999999999+02:00",
+	"2006-01-02T15:04:05.999999999+01:00",
+	// iso 8601 without fractional seconds
+	"2006-01-02T15:04:05Z",
+	"2006-01-02T15:04:05-07:00",
+	"2006-01-02T15:04:05+02:00",
+	"2006-01-02T15:04:05+01:00",
+	"2006-01-02T15:04:05",
+	// other common formats
+	"2006-01-02 15:04:05",
+	"2006-01-02",
+	"01/02/2006 15:04:05",
+	"01/02/2006",
+	"02-01-2006 15:04:05",
+	"02-01-2006",
+	"2006/01/02 15:04:05",
+	"2006/01/02",
+}
+
+// parseReportedDate parses a reported CSV date in any of the known formats
+func parseReportedDate(v string) (time.Time, bool) {
+	for _, format := range reportedDateFormats {
+		if pd, err := time.Parse(format, v); err == nil {
+			return pd, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// recordReportedEvent records a report on a campaign recipient at reportedAt and
+// raises its notable event. It returns false when the recipient already has a
+// report on the campaign. An anonymous campaign's events carry the pseudonym
+// rather than a recipient id, so the duplicate check uses that.
+func (c *Campaign) recordReportedEvent(
+	ctx context.Context,
+	campaign *model.Campaign,
+	campaignRecipient *model.CampaignRecipient,
+	reportedAt time.Time,
+) (bool, error) {
+	campaignID := campaign.ID.MustGet()
+	reportedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
+	var recipientID *uuid.UUID
+	if rid, err := campaignRecipient.RecipientID.Get(); err == nil {
+		recipientID = &rid
+	}
+	alreadyReported := false
+	if aid, aErr := campaignRecipient.AnonymizedID.Get(); aErr == nil {
+		has, err := c.CampaignRepository.HasEventByAnonymizedID(ctx, &campaignID, &aid, reportedEventID)
+		if err != nil {
+			return false, errs.Wrap(err)
+		}
+		alreadyReported = has
+	} else if recipientID != nil {
+		has, err := c.CampaignRepository.HasEventByRecipientID(ctx, &campaignID, recipientID, reportedEventID)
+		if err != nil {
+			return false, errs.Wrap(err)
+		}
+		alreadyReported = has
+	} else {
+		// no identity left to tie a report to
+		return false, nil
+	}
+	if alreadyReported {
+		return false, nil
+	}
+	eventID := uuid.New()
+	campaignEvent := &model.CampaignEvent{
+		ID:          &eventID,
+		CampaignID:  &campaignID,
+		RecipientID: recipientID,
+		IP:          vo.NewEmptyOptionalString64(),
+		UserAgent:   vo.NewEmptyOptionalString255(),
+		EventID:     reportedEventID,
+		Data:        vo.NewEmptyOptionalString1MB(),
+		Metadata:    vo.NewEmptyOptionalString1MB(),
+	}
+	anonymizeEventForRecipient(campaignAnonymous(campaign), campaignRecipient, campaignEvent)
+	if err := c.saveReportedEvent(campaignEvent, reportedAt); err != nil {
+		return false, errs.Wrap(err)
+	}
+	if err := c.SetNotableCampaignRecipientEvent(
+		ctx,
+		campaignRecipient,
+		data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
+	); err != nil {
+		c.Logger.Errorw("failed to update notable event", "error", err)
+	}
+	return true, nil
 }
 
 // saveReportedEvent saves a reported event with custom timestamp
@@ -6959,6 +7146,10 @@ func (c *Campaign) buildReportHTMLWithData(
 	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{WithCompany: true})
 	if err != nil {
 		return "", nil, "", errs.Wrap(err)
+	}
+	// a program's hidden campaigns report through the program only
+	if campaign.IsProgramManaged() {
+		return "", nil, "", errs.Wrap(gorm.ErrRecordNotFound)
 	}
 
 	stats, err := c.CampaignRepository.GetResultStats(ctx, campaignID)
@@ -7160,6 +7351,10 @@ func (c *Campaign) SendCampaignReport(
 		c.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
+	// a program's hidden campaigns report through the program only
+	if err := c.rejectProgramCampaign(ctx, campaignID); err != nil {
+		return err
+	}
 	// global PDF report generation must be enabled
 	opt, _ := c.OptionService.GetOptionWithoutAuth(ctx, data.OptionKeyReportPDFEnabled)
 	if opt == nil || opt.Value.String() != "true" {
@@ -7284,7 +7479,7 @@ func (c *Campaign) SendCampaignReport(
 		c.Logger.Errorw("failed to render report PDF", "error", err)
 		writeReportSendLog("failed", nil, fmt.Errorf("failed to render report PDF: %w", err))
 		if onDemand {
-			return errs.NewCustomError(fmt.Errorf("could not generate the report PDF: %w", err))
+			return reportPDFError(err)
 		}
 		return errs.Wrap(err)
 	}

@@ -31,6 +31,7 @@ type Services struct {
 	Email               *service.Email
 	CampaignTemplate    *service.CampaignTemplate
 	Campaign            *service.Campaign
+	Program             *service.Program
 	Template            *service.Template
 	APISender           *service.APISender
 	AllowDeny           *service.AllowDeny
@@ -156,6 +157,7 @@ func NewServices(
 		RecipientGroupRepository:    repositories.RecipientGroup,
 		CampaignRepository:          repositories.Campaign,
 		CampaignRecipientRepository: repositories.CampaignRecipient,
+		ProgramRepository:           repositories.Program,
 	}
 
 	recipientGroup := &service.RecipientGroup{
@@ -165,12 +167,14 @@ func NewServices(
 		RecipientGroupRepository:    repositories.RecipientGroup,
 		RecipientRepository:         repositories.Recipient,
 		RecipientService:            recipient,
+		ProgramRepository:           repositories.Program,
 		DB:                          db,
 	}
 	webhook := &service.Webhook{
 		Common:             common,
 		CampaignRepository: repositories.Campaign,
 		WebhookRepository:  repositories.Webhook,
+		ProgramRepository:  repositories.Program,
 	}
 	// a standalone runner powers the editor test panel (capture mode)
 	var scriptTestRunner *script.Runner
@@ -193,6 +197,7 @@ func NewServices(
 		CampaignTemplateRepository: repositories.CampaignTemplate,
 		CampaignRepository:         repositories.Campaign,
 		IdentifierRepository:       repositories.Identifier,
+		ProgramRepository:          repositories.Program,
 	}
 	apiSender := &service.APISender{
 		Common:                  common,
@@ -212,6 +217,7 @@ func NewServices(
 		CampaignTemplateService: campaignTemplate,
 		TemplateService:         templateService,
 		DomainRepository:        repositories.Domain,
+		ProgramRepository:       repositories.Program,
 	}
 	domain := &service.Domain{
 		Common:                    common,
@@ -288,10 +294,26 @@ func NewServices(
 	}
 	// wire campaign service into microsoft device code service now that campaign is constructed
 	microsoftDeviceCodeService.CampaignService = campaign
+	program := &service.Program{
+		Common:                      common,
+		ProgramRepository:           repositories.Program,
+		CampaignRepository:          repositories.Campaign,
+		CampaignRecipientRepository: repositories.CampaignRecipient,
+		RecipientRepository:         repositories.Recipient,
+		RecipientGroupRepository:    repositories.RecipientGroup,
+		CampaignTemplateService:     campaignTemplate,
+		CampaignService:             campaign,
+		AllowDenyRepository:         repositories.AllowDeny,
+		WebhookRepository:           repositories.Webhook,
+		PageRepository:              repositories.Page,
+		CompanyRepository:           repositories.Company,
+	}
+	recipient.ProgramService = program
 	allowDeny := &service.AllowDeny{
 		Common:              common,
 		AllowDenyRepository: repositories.AllowDeny,
 		CampaignRepository:  repositories.Campaign,
+		ProgramRepository:   repositories.Program,
 		AssetRepository:     repositories.Asset,
 	}
 	identifier := &service.Identifier{
@@ -309,6 +331,7 @@ func NewServices(
 		RecipientGroupService:    recipientGroup,
 		CampaignService:          campaign,
 		CampaignTemplate:         campaignTemplate,
+		ProgramService:           program,
 		AllowDenyService:         allowDeny,
 		WebhookService:           webhook,
 		ScriptService:            scriptSvc,
@@ -455,6 +478,7 @@ func NewServices(
 		Template:            templateService,
 		CampaignTemplate:    campaignTemplate,
 		Campaign:            campaign,
+		Program:             program,
 		APISender:           apiSender,
 		AllowDeny:           allowDeny,
 		Webhook:             webhook,

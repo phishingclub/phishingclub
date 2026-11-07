@@ -20,6 +20,10 @@
 	export let inline = false;
 	// 'full' fills the parent instead of the fixed width from sm
 	export let width = 'medium';
+	// marks the field as invalid with a red border
+	export let error = false;
+	// id of the help or error text that describes the field
+	export let ariaDescribedBy = null;
 
 	// Ensure options is always an array
 	$: optionsArray = Array.isArray(options) ? options : Array.from(options);
@@ -289,7 +293,7 @@
 		<div
 			class="flex items-center relative"
 			class:w-28={size == 'small'}
-			class:w-full={size == 'normal' && !inline}
+			class:w-full={(size == 'normal' && !inline) || size == 'full'}
 			class:sm:w-60={size == 'normal' && !inline && width !== 'full'}
 			class:w-60={size == 'normal' && inline}
 		>
@@ -303,6 +307,8 @@
 				aria-controls={listboxId}
 				aria-autocomplete="list"
 				aria-haspopup="listbox"
+				aria-invalid={error ? 'true' : undefined}
+				aria-describedby={ariaDescribedBy || undefined}
 				bind:value={inputValue}
 				on:focus={handleFocus}
 				on:blur={handleBlur}
@@ -310,7 +316,9 @@
 				on:keydown={handleKeyDown}
 				on:click={handleClick}
 				autocomplete="off"
-				class="w-full relative rounded-md py-2 pr-10 text-slate-800 dark:text-gray-300 border border-transparent focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 bg-grayblue-light dark:bg-gray-900/60 dark:border-gray-700 font-normal cursor-pointer focus:cursor-text transition-colors duration-200"
+				class="w-full relative rounded-md py-2 pr-10 text-slate-800 dark:text-gray-300 border border-transparent focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30 bg-grayblue-light dark:bg-gray-900/60 dark:border-gray-700 font-normal cursor-pointer focus:cursor-text transition-colors duration-200 {error
+					? '!border-red-500 dark:!border-red-400'
+					: ''}"
 				class:pl-10={showDropdown}
 				class:pl-3={!showDropdown}
 				placeholder={!hasValue && !showDropdown && value.length === 0

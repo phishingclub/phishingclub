@@ -11,6 +11,8 @@
 	export let alignText = '';
 	/** on phones show the text on up to two lines; use only on the main name column */
 	export let wrap = false;
+	// hideBelow 'md' hides the cell on small screens
+	export let hideBelow = '';
 
 	$: hasValue = value !== null && value !== undefined && value !== '' && value !== false;
 </script>
@@ -22,6 +24,8 @@
 	class:text-left={alignText === 'left'}
 	class:text-center={alignText === 'center'}
 	class:text-right={alignText === 'right'}
+	class:hidden={hideBelow === 'md'}
+	class:md:table-cell={hideBelow === 'md'}
 >
 	{#if hasValue}
 		{#if isDate}
