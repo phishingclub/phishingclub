@@ -45,6 +45,8 @@ func newRegFixture(t *testing.T) *regFixture {
 	if err := db.AutoMigrate(
 		&database.Page{},
 		&database.Campaign{},
+		&database.CampaignTemplatePool{},
+		&database.CampaignRecipient{},
 		&database.CampaignTemplate{},
 		&database.Registry{},
 		&database.InstalledPackage{},

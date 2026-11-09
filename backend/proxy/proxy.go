@@ -383,16 +383,28 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 
 		reqCtx.Campaign = campaign
 
-		// preload campaign template if available
-		if templateID, err := campaign.TemplateID.Get(); err == nil {
-			cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
-				WithDomain:     true,
-				WithIdentifier: true,
-				WithEmail:      true,
-			})
-			if err == nil {
-				reqCtx.CampaignTemplate = cTemplate
-			}
+		// preload the recipient's own template. a recipient whose template was
+		// deleted is not served, like on the phishing server.
+		templateID, err := cRecipient.EffectiveTemplateID(campaign)
+		if err != nil {
+			m.logger.Debugw("campaign recipient has no template",
+				"campaignID", campaignID.String(),
+			)
+			return nil, nil
+		}
+		cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+			WithDomain:     true,
+			WithIdentifier: true,
+			WithEmail:      true,
+		})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			m.logger.Debugw("campaign recipient template was deleted",
+				"campaignID", campaignID.String(),
+			)
+			return nil, nil
+		}
+		if err == nil {
+			reqCtx.CampaignTemplate = cTemplate
 		}
 	}
 
@@ -1453,6 +1465,7 @@ func (m *ProxyHandler) createNewSession(
 		CampaignID:          campaignID,
 		RecipientID:         recipientID,
 		Campaign:            campaign,
+		CampaignTemplateID:  m.recipientTemplateID(reqCtx),
 		Domain:              reqCtx.Domain,
 		TargetDomain:        reqCtx.TargetDomain,
 		UserAgent:           userAgent, // store original user-agent before any modifications
@@ -3644,7 +3657,7 @@ func (m *ProxyHandler) handleCampaignFlowProgression(session *service.ProxySessi
 	}
 
 	ctx := req.Context()
-	templateID, err := session.Campaign.TemplateID.Get()
+	templateID, err := m.sessionTemplateID(ctx, session)
 	if err != nil {
 		m.logger.Errorw("failed to get template ID for campaign flow progression", "error", err)
 		return
@@ -3756,13 +3769,12 @@ func (m *ProxyHandler) buildCampaignFlowRedirectURL(session *service.ProxySessio
 		return ""
 	}
 
-	templateID, err := session.Campaign.TemplateID.Get()
+	ctx := context.Background()
+	templateID, err := m.sessionTemplateID(ctx, session)
 	if err != nil {
 		m.logger.Errorw("failed to get template ID for redirect URL", "error", err)
 		return ""
 	}
-
-	ctx := context.Background()
 	cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
 		WithDomain:     true,
 		WithIdentifier: true,
@@ -4567,7 +4579,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 	ctx := req.Context()
 
 	// get campaign template to determine page type
-	templateID, err := session.Campaign.TemplateID.Get()
+	templateID, err := m.sessionTemplateID(ctx, session)
 	if err != nil {
 		m.logger.Errorw("failed to get template ID for page visit event", "error", err)
 		return
@@ -4760,13 +4772,7 @@ func (m *ProxyHandler) checkAndServeEvasionPage(req *http.Request, reqCtx *Reque
 		return nil
 	}
 
-	// check if evasion page is configured for this template
-	_, err = campaign.TemplateID.Get()
-	if err != nil {
-		return nil
-	}
-
-	// use cached campaign template
+	// use the recipient's cached template
 	if reqCtx.CampaignTemplate == nil {
 		return nil
 	}
@@ -4881,12 +4887,7 @@ func (m *ProxyHandler) checkAndServeDenyPage(req *http.Request, reqCtx *RequestC
 	}
 	campaign := reqCtx.Campaign
 
-	// check if campaign has a template
-	if _, err := campaign.TemplateID.Get(); err != nil {
-		return nil
-	}
-
-	// use cached campaign template
+	// use the recipient's cached template
 	if reqCtx.CampaignTemplate == nil {
 		return nil
 	}
@@ -4998,6 +4999,7 @@ func (m *ProxyHandler) serveDenyPageResponseDirect(req *http.Request, reqCtx *Re
 				CampaignRecipientID: reqCtx.CampaignRecipientID,
 				Campaign:            campaign,
 				CampaignID:          &campaignID,
+				CampaignTemplateID:  m.recipientTemplateID(reqCtx),
 			}, "deny")
 			if redirectURL != "" {
 				resp := &http.Response{
@@ -5088,7 +5090,7 @@ func (m *ProxyHandler) renderDenyPageTemplate(req *http.Request, reqCtx *Request
 	}
 
 	// get email for template
-	templateID, err := campaign.TemplateID.Get()
+	templateID, err := cRecipient.EffectiveTemplateID(campaign)
 	if err != nil {
 		return "", fmt.Errorf("failed to get template ID: %w", err)
 	}
@@ -5198,7 +5200,7 @@ func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *Requ
 	}
 
 	// get email for template
-	templateID, err := campaign.TemplateID.Get()
+	templateID, err := cRecipient.EffectiveTemplateID(campaign)
 	if err != nil {
 		return "", fmt.Errorf("failed to get template ID: %w", err)
 	}
@@ -5475,7 +5477,7 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 			// load campaign template if not already loaded
 			cTemplate := reqCtx.CampaignTemplate
 			if cTemplate == nil {
-				templateID, err := campaign.TemplateID.Get()
+				templateID, err := m.recipientOrCampaignTemplateID(reqCtx, campaign)
 				if err == nil {
 					cTemplate, err = m.CampaignTemplateRepository.GetByID(req.Context(), &templateID, &repository.CampaignTemplateOption{
 						WithDomain:     true,
@@ -5638,4 +5640,54 @@ func (m *ProxyHandler) getHostConfig(session *service.ProxySession, host string)
 		return service.ProxyServiceDomainConfig{}, false
 	}
 	return hostConfigInterface.(service.ProxyServiceDomainConfig), true
+}
+
+// recipientTemplateID returns the id of the template preloaded for the request's
+// recipient, or nil when none was loaded
+func (m *ProxyHandler) recipientTemplateID(reqCtx *RequestContext) *uuid.UUID {
+	if reqCtx == nil {
+		return nil
+	}
+	if reqCtx.CampaignTemplate != nil {
+		if id, err := reqCtx.CampaignTemplate.ID.Get(); err == nil {
+			return &id
+		}
+	}
+	if reqCtx.CampaignRecipient != nil && reqCtx.Campaign != nil {
+		if id, err := reqCtx.CampaignRecipient.EffectiveTemplateID(reqCtx.Campaign); err == nil {
+			return &id
+		}
+	}
+	return nil
+}
+
+// recipientOrCampaignTemplateID returns the request recipient's template, or the
+// campaign's first template when no recipient is known
+func (m *ProxyHandler) recipientOrCampaignTemplateID(reqCtx *RequestContext, campaign *model.Campaign) (uuid.UUID, error) {
+	if id := m.recipientTemplateID(reqCtx); id != nil {
+		return *id, nil
+	}
+	return campaign.TemplateID.Get()
+}
+
+// sessionTemplateID returns the template of the session's recipient
+func (m *ProxyHandler) sessionTemplateID(ctx context.Context, session *service.ProxySession) (uuid.UUID, error) {
+	if session.CampaignTemplateID != nil {
+		return *session.CampaignTemplateID, nil
+	}
+	if session.CampaignRecipientID != nil {
+		cRecipient, err := m.CampaignRecipientRepository.GetByID(
+			ctx,
+			session.CampaignRecipientID,
+			&repository.CampaignRecipientOption{},
+		)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return cRecipient.EffectiveTemplateID(session.Campaign)
+	}
+	if session.Campaign != nil {
+		return session.Campaign.TemplateID.Get()
+	}
+	return uuid.Nil, errors.New("session has no campaign")
 }

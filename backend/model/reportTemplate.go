@@ -161,4 +161,7 @@ type CampaignGroupStat struct {
 	TrainingStarted   int    `json:"trainingStarted"`
 	TrainingCompleted int    `json:"trainingCompleted"`
 	Suppressed        bool   `json:"suppressed"`
+
+	// GroupID is set when the group is a record, such as a template
+	GroupID string `json:"groupID,omitempty"`
 }

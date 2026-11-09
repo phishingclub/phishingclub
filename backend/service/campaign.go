@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 
 	"sort"
 	"strings"
@@ -44,6 +46,10 @@ import (
 // Campaign is the Campaign service
 type Campaign struct {
 	Common
+	// templateLocks holds one mutex per campaign. A manual send and a template
+	// pool change of the same campaign take it, so a recipient is never moved
+	// to another template while its email is being sent.
+	templateLocks                 sync.Map
 	LureCodeService               *LureCode
 	CampaignRepository            *repository.Campaign
 	CampaignRecipientRepository   *repository.CampaignRecipient
@@ -70,6 +76,8 @@ type Campaign struct {
 	OptionService                 *Option
 	RemoteBrowserExecPath         string
 	TrustedProxies                []string
+	// TemplateRand spreads pool templates over recipients, nil uses math/rand
+	TemplateRand TemplateRand
 }
 
 // Create creates a new campaign
@@ -161,6 +169,8 @@ func (c *Campaign) Create(
 			}
 		}
 	}
+	// a request with only templateID gets a pool of that one template
+	campaign.NormalizeTemplatePool()
 	// validate
 	if err := campaign.Validate(); err != nil {
 		return nil, errs.Wrap(err)
@@ -174,22 +184,13 @@ func (c *Campaign) Create(
 	); err != nil {
 		return nil, err
 	}
-	// check the template is usable
-	templateID := campaign.TemplateID.MustGet()
-	cTemplate, err := c.CampaignTemplateService.GetByID(
-		ctx,
-		session,
-		&templateID,
-		&repository.CampaignTemplateOption{
-			UsableOnly: true,
-		},
-	)
+	// every pool template must exist, be usable and share the settings the
+	// campaign copies from its first template
+	poolTemplates, err := c.validateTemplatePool(ctx, campaign)
 	if err != nil {
-		return nil, errs.Wrap(err)
+		return nil, err
 	}
-	if cTemplate == nil {
-		return nil, errors.New("attempted to create campaign with unusable template")
-	}
+	cTemplate := poolTemplates[0]
 	// the training nature is owned by the template, never the client. Set it from
 	// the template so the campaign row carries it from creation, before any
 	// schedule snapshot, and a crafted request cannot flip it.
@@ -296,9 +297,9 @@ func (c *Campaign) Create(
 		return nil, errs.Wrap(err)
 	}
 	if createdCampaign.ScheduleAt.IsSpecified() && !createdCampaign.ScheduleAt.IsNull() {
-		// Late-scheduling: persist jitter to the DB so the task runner can apply it
-		// when schedule() is called hours later. The in-memory copy on createdCampaign
-		// is set too so setMostNotableCampaignEvent's UpdateByID writes the columns.
+		// Late scheduling: the jitter is already saved by Insert, so the task runner
+		// can apply it when schedule() is called hours later. The in memory copy on
+		// createdCampaign is set too for code that reads it before then.
 		createdCampaign.JitterMin = campaign.JitterMin
 		createdCampaign.JitterMax = campaign.JitterMax
 		err = c.setMostNotableCampaignEvent(ctx, createdCampaign, data.EVENT_CAMPAIGN_PENDING_SCHEDULE)
@@ -317,6 +318,8 @@ func (c *Campaign) Create(
 		}
 	}
 	ae.Details["id"] = id.String()
+	ae.Details["templateIDs"] = uuidStrings(campaign.TemplatePool())
+	ae.Details["templateMixBy"] = campaign.TemplateMixField()
 	c.AuditLogAuthorized(ae)
 	return id, nil
 }
@@ -461,6 +464,30 @@ func campaignAnonymous(campaign *model.Campaign) bool {
 		return true
 	}
 	return isAnon
+}
+
+// errRecipientTemplateHidden is returned by per recipient views that would show
+// which template a person got on an anonymous campaign with several templates
+var errRecipientTemplateHidden = errs.NewCustomError(
+	errors.New("not available on an anonymous campaign with several templates"),
+)
+
+// recipientTemplateHidden reports whether per recipient views must not show which
+// template a recipient got. That is an anonymous campaign that uses more than one
+// template. It fails closed when the template use can not be read.
+func (c *Campaign) recipientTemplateHidden(ctx context.Context, campaign *model.Campaign) (bool, error) {
+	if !campaignAnonymous(campaign) {
+		return false, nil
+	}
+	campaignID, err := campaign.ID.Get()
+	if err != nil {
+		return true, nil
+	}
+	many, err := c.CampaignRepository.HasTemplateGroupDataByCampaignID(ctx, &campaignID)
+	if err != nil {
+		return true, errs.Wrap(err)
+	}
+	return many, nil
 }
 
 // applyAnonymousSnapshot assigns the stable random pseudonym and snapshots the
@@ -613,6 +640,8 @@ func (c *Campaign) snapshotLureSettings(
 	length := lure.DefaultLength
 	isTraining := false
 
+	// the first template stands for the whole pool, since pool templates must
+	// agree on these settings
 	templateID, err := campaign.TemplateID.Get()
 	if err != nil {
 		// the template is gone, so the defaults below would be a guess that
@@ -787,6 +816,10 @@ func (c *Campaign) schedule(
 		if err != nil {
 			return errs.Wrap(err)
 		}
+		pool, err := c.templatePool(ctx, campaign)
+		if err != nil {
+			return errs.Wrap(err)
+		}
 		// c.Logger.Debugw("keeping recpient IDs", recipientIDs)
 		err = c.CampaignRecipientRepository.DeleteRecipientsNotIn(
 			ctx,
@@ -797,9 +830,9 @@ func (c *Campaign) schedule(
 			c.Logger.Errorw("failed to delete campaign recipients", "error", err)
 			return errs.Wrap(err)
 		}
-		// insert campaign-recipients that are not already in the schedule
-		campaignRecipients := make([]*model.CampaignRecipient, len(recipients))
-		for i, recipient := range recipients {
+		// find the recipients that are not already in the schedule
+		newRecipients := []*model.Recipient{}
+		for _, recipient := range recipients {
 			// check if already exists
 			rid := recipient.ID.MustGet()
 			_, err := c.CampaignRecipientRepository.GetByCampaignAndRecipientID(
@@ -818,19 +851,63 @@ func (c *Campaign) schedule(
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
 			}
+			newRecipients = append(newRecipients, recipient)
+		}
+		// each new recipient gets the pool template its "Balance per" group has
+		// least of so far, then the one least used in the campaign, so a group
+		// stays mixed also after a template is added.
+		mixBy := campaign.TemplateMixField()
+		templateCounts := map[uuid.UUID]int{}
+		groupCounts := map[string]map[uuid.UUID]int{}
+		if len(pool) > 1 && len(newRecipients) > 0 {
+			existing, err := c.CampaignRecipientRepository.GetTemplateAssignments(ctx, &campaignID)
+			if err != nil {
+				return errs.Wrap(err)
+			}
+			var fallback *uuid.UUID
+			if v, err := campaign.TemplateID.Get(); err == nil {
+				fallback = &v
+			}
+			for _, row := range existing {
+				tid := row.TemplateID
+				if tid == nil {
+					tid = fallback
+				}
+				if tid == nil {
+					continue
+				}
+				templateCounts[*tid]++
+				key := assignmentMixValue(row, mixBy)
+				if groupCounts[key] == nil {
+					groupCounts[key] = map[uuid.UUID]int{}
+				}
+				groupCounts[key][*tid]++
+			}
+		}
+		keys := make([]string, len(newRecipients))
+		for i, recipient := range newRecipients {
+			keys[i] = recipientMixValue(recipient, mixBy)
+			if groupCounts[keys[i]] == nil {
+				groupCounts[keys[i]] = map[uuid.UUID]int{}
+			}
+		}
+		rng := c.templateRand()
+		for _, i := range groupByKey(keys, rng) {
+			recipient := newRecipients[i]
 			recpID := nullable.NewNullableWithValue(recipient.ID.MustGet())
-			campaignRecipients[i] = &model.CampaignRecipient{
+			campaignRecipient := &model.CampaignRecipient{
 				RecipientID: recpID,
 				CampaignID:  nullable.NewNullableWithValue(campaignID),
 				SelfManaged: nullable.NewNullableWithValue(true),
+				TemplateID:  nullable.NewNullableWithValue(pickForGroup(groupCounts[keys[i]], templateCounts, pool, rng)),
 			}
-			c.applyAnonymousSnapshot(campaign, campaignRecipients[i], recipient)
-			if err := allocator.applyTo(campaignRecipients[i]); err != nil {
+			c.applyAnonymousSnapshot(campaign, campaignRecipient, recipient)
+			if err := allocator.applyTo(campaignRecipient); err != nil {
 				c.Logger.Errorw("failed to allocate lure code", "error", err)
 				return err
 			}
 			// save campaign-recipient
-			err = c.insertScheduledRecipient(ctx, allocator, campaignRecipients[i])
+			err = c.insertScheduledRecipient(ctx, allocator, campaignRecipient)
 			if err != nil {
 				c.Logger.Errorw("failed to create campaign", "error", err)
 				return errs.Wrap(err)
@@ -877,6 +954,28 @@ func (c *Campaign) schedule(
 		return errs.Wrap(err)
 	}
 
+	// give each recipient a template from the pool. recipients are already in
+	// schedule order, so ones scheduled one after another rarely share a
+	// template. sends due in the same sender run go out together, and jitter
+	// can swap close neighbours.
+	pool, err := c.templatePool(ctx, campaign)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	mixBy := campaign.TemplateMixField()
+	keys := make([]string, len(recipients))
+	for i, recipient := range recipients {
+		keys[i] = recipientMixValue(recipient, mixBy)
+	}
+	assigned := assignTemplates(keys, pool, c.templateRand())
+	templateByRecipient := make(map[uuid.UUID]uuid.UUID, len(recipients))
+	for i, recipient := range recipients {
+		templateByRecipient[recipient.ID.MustGet()] = assigned[i]
+	}
+	templateFor := func(recipient *model.Recipient) nullable.Nullable[uuid.UUID] {
+		return nullable.NewNullableWithValue(templateByRecipient[recipient.ID.MustGet()])
+	}
+
 	// get jitter values if specified
 	jitterMin := 0
 	jitterMax := 0
@@ -902,6 +1001,7 @@ func (c *Campaign) schedule(
 			CampaignID:     campaignID,
 			SendAt:         nullable.NewNullableWithValue(jitteredStartAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
+			TemplateID:     templateFor(recipients[0]),
 		}
 		c.applyAnonymousSnapshot(campaign, campaignRecipient, recipients[0])
 		if err := allocator.applyTo(campaignRecipient); err != nil {
@@ -978,6 +1078,7 @@ func (c *Campaign) schedule(
 					CampaignID:     campaign.ID,
 					SendAt:         nullable.NewNullableWithValue(jitteredTime),
 					NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
+					TemplateID:     templateFor(recipient),
 				}
 				c.applyAnonymousSnapshot(campaign, campaignRecipient, recipient)
 				if err := allocator.applyTo(campaignRecipient); err != nil {
@@ -1026,6 +1127,7 @@ func (c *Campaign) schedule(
 			CampaignID:     campaign.ID,
 			SendAt:         nullable.NewNullableWithValue(jitteredSentAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
+			TemplateID:     templateFor(recipient),
 		}
 		c.applyAnonymousSnapshot(campaign, campaignRecipients[i], recipient)
 		if err := allocator.applyTo(campaignRecipients[i]); err != nil {
@@ -1250,6 +1352,10 @@ func (c *Campaign) GetByID(
 	} else {
 		campaign.HasCustomLureCodes = hasCustom
 	}
+	if err := c.attachTemplatePools(ctx, campaign); err != nil {
+		c.Logger.Errorw("failed to get campaign template pool", "error", err)
+		return nil, errs.Wrap(err)
+	}
 	// no audit on read
 	return campaign, nil
 }
@@ -1309,6 +1415,12 @@ func (c *Campaign) GetByCompanyID(
 	if err != nil {
 		c.Logger.Errorw("failed to get campaigns by company id", "error", err)
 		return nil, errs.Wrap(err)
+	}
+	if result != nil {
+		if err := c.attachTemplatePools(ctx, result.Rows...); err != nil {
+			c.Logger.Errorw("failed to get campaign template pools", "error", err)
+			return result, errs.Wrap(err)
+		}
 	}
 	// no audit on read
 	return result, nil
@@ -1455,6 +1567,24 @@ func (c *Campaign) HasGroupData(
 	return c.CampaignRepository.HasGroupDataByCampaignID(ctx, campaignID)
 }
 
+// HasTemplateGroupData reports whether results can be grouped by template, which
+// is when the campaign uses more than one template
+func (c *Campaign) HasTemplateGroupData(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+) (bool, error) {
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return false, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		return false, errs.ErrAuthorizationFailed
+	}
+	return c.CampaignRepository.HasTemplateGroupDataByCampaignID(ctx, campaignID)
+}
+
 // hasNamedGroups reports whether any group has a real attribute value rather than
 // the "(unspecified)" or Other placeholder.
 func hasNamedGroups(stats []model.CampaignGroupStat) bool {
@@ -1574,12 +1704,36 @@ func (c *Campaign) GetRecipientsByCampaignID(
 		c.Logger.Errorw("failed to get recipients by campaign id", "error", err)
 		return result, errs.Wrap(err)
 	}
+	// rows created before template pools have no template and use the
+	// campaign's first template, which the client reads from the campaign
+	poolCampaign := &model.Campaign{ID: nullable.NewNullableWithValue(*campaignID)}
+	if err := c.attachTemplatePools(ctx, poolCampaign); err != nil {
+		c.Logger.Errorw("failed to get campaign template pool", "error", err)
+		return result, errs.Wrap(err)
+	}
 	if isAnon {
+		// which person got which template is not shown for an anonymous campaign
+		for _, row := range result.Rows {
+			row.TemplateID.SetNull()
+			row.Template = nil
+		}
+	} else if err := c.attachRecipientTemplates(ctx, poolCampaign, result.Rows); err != nil {
+		c.Logger.Errorw("failed to get recipient templates", "error", err)
+		return result, errs.Wrap(err)
+	}
+	if isAnon {
+		// with several templates, people left unsent together could be people on
+		// the same template, so the sent indicator is withheld as well
+		manyTemplates, err := c.CampaignRepository.HasTemplateGroupDataByCampaignID(ctx, campaignID)
+		if err != nil {
+			c.Logger.Errorw("failed to check campaign template use", "error", err)
+			return result, errs.Wrap(err)
+		}
 		for _, row := range result.Rows {
 			row.NotableEventID.SetNull()
 			row.NotableEventName = ""
 			// replace exact timing with a coarse sent indicator
-			row.Sent = row.SentAt.IsSpecified() && !row.SentAt.IsNull()
+			row.Sent = !manyTemplates && row.SentAt.IsSpecified() && !row.SentAt.IsNull()
 			row.SendAt.SetNull()
 			row.SentAt.SetNull()
 			row.LastAttemptAt.SetNull()
@@ -1699,6 +1853,12 @@ func (c *Campaign) GetAll(
 		c.Logger.Errorw("failed to get all campaigns", "error", err)
 		return result, errs.Wrap(err)
 	}
+	if result != nil {
+		if err := c.attachTemplatePools(ctx, result.Rows...); err != nil {
+			c.Logger.Errorw("failed to get campaign template pools", "error", err)
+			return result, errs.Wrap(err)
+		}
+	}
 	// no audit on read
 	return result, nil
 }
@@ -1738,6 +1898,12 @@ func (c *Campaign) GetAllWithinDates(
 		c.Logger.Errorw("failed to get all campaigns between dates", "error", err)
 		return result, errs.Wrap(err)
 	}
+	if result != nil {
+		if err := c.attachTemplatePools(ctx, result.Rows...); err != nil {
+			c.Logger.Errorw("failed to get campaign template pools", "error", err)
+			return result, errs.Wrap(err)
+		}
+	}
 	// no audit on read
 	return result, nil
 }
@@ -1772,6 +1938,12 @@ func (c *Campaign) GetAllActive(
 	if err != nil {
 		c.Logger.Errorw("failed to get all active campaigns", "error", err)
 		return result, errs.Wrap(err)
+	}
+	if result != nil {
+		if err := c.attachTemplatePools(ctx, result.Rows...); err != nil {
+			c.Logger.Errorw("failed to get campaign template pools", "error", err)
+			return result, errs.Wrap(err)
+		}
 	}
 	// no audit on read
 	return result, nil
@@ -1808,6 +1980,12 @@ func (c *Campaign) GetAllUpcoming(
 		c.Logger.Errorw("failed to get all upcoming campaigns", "error", err)
 		return result, errs.Wrap(err)
 	}
+	if result != nil {
+		if err := c.attachTemplatePools(ctx, result.Rows...); err != nil {
+			c.Logger.Errorw("failed to get campaign template pools", "error", err)
+			return result, errs.Wrap(err)
+		}
+	}
 	// no audit on read
 	return result, nil
 }
@@ -1842,6 +2020,12 @@ func (c *Campaign) GetAllFinished(
 	if err != nil {
 		c.Logger.Errorw("failed to get all finished campaigns", "error", err)
 		return result, errs.Wrap(err)
+	}
+	if result != nil {
+		if err := c.attachTemplatePools(ctx, result.Rows...); err != nil {
+			c.Logger.Errorw("failed to get campaign template pools", "error", err)
+			return result, errs.Wrap(err)
+		}
 	}
 	// no audit on read
 	return result, nil
@@ -2016,6 +2200,18 @@ func (c *Campaign) UpdateByID(
 	if len(incoming.RecipientGroupIDs) == 0 {
 		return validate.WrapErrorWithField(errors.New("no groups provided"), "Recipient Groups")
 	}
+	// a request with only templateID gets a pool of that one template, unless
+	// it names the stored first template, see below
+	onlyTemplateID := incoming.TemplateID.IsSpecified() && !incoming.TemplateIDs.IsSpecified()
+	if incoming.TemplateID.IsSpecified() || incoming.TemplateIDs.IsSpecified() {
+		incoming.NormalizeTemplatePool()
+	}
+	// the pool size and duplicates are checked before any query uses the ids
+	if incoming.TemplateIDs.IsSpecified() {
+		if err := incoming.ValidateTemplatePool(); err != nil {
+			return err
+		}
+	}
 	// if the schedule type is scheduled, set the start time to start of day and end to the end of the last day
 	if incoming.ConstraintWeekDays.IsSpecified() && !incoming.ConstraintWeekDays.IsNull() {
 		if err := incoming.ValidateScheduledTimes(); err != nil {
@@ -2086,6 +2282,28 @@ func (c *Campaign) UpdateByID(
 		c.Logger.Errorw("failed to get campaign references", "error", err)
 		return errs.Wrap(err)
 	}
+	storedPool, err := c.CampaignRepository.GetTemplatePoolIDs(ctx, id)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign template pool", "error", err)
+		return errs.Wrap(err)
+	}
+	if len(storedPool) == 0 {
+		if v, err := stored.TemplateID.Get(); err == nil {
+			storedPool = []uuid.UUID{v}
+		}
+	}
+	storedPoolRefs := make([]*uuid.UUID, len(storedPool))
+	for i := range storedPool {
+		storedPoolRefs[i] = &storedPool[i]
+	}
+	stored.TemplateIDs = nullable.NewNullableWithValue(storedPoolRefs)
+	// a client that only knows templateID and sends the stored first template
+	// keeps the whole pool
+	if onlyTemplateID && len(storedPool) > 0 {
+		if v, err := incoming.TemplateID.Get(); err == nil && v == storedPool[0] {
+			incoming.TemplateIDs = nullable.NewNullableWithValue(storedPoolRefs)
+		}
+	}
 	if err := ValidateCompanyRefs(
 		ctx,
 		c.CampaignRepository.DB,
@@ -2152,11 +2370,45 @@ func (c *Campaign) UpdateByID(
 	if v, err := incoming.Obfuscate.Get(); err == nil {
 		current.Obfuscate.Set(v)
 	}
+	if v, err := incoming.TemplateMixBy.Get(); err == nil {
+		if !model.IsValidTemplateMixBy(v) {
+			return validate.WrapErrorWithField(errors.New("unknown field to mix templates by"), "templateMixBy")
+		}
+		if previous := current.TemplateMixField(); previous != v && !(previous == model.TemplateMixDepartment && v == "") {
+			ae.Details["previousTemplateMixBy"] = previous
+			ae.Details["templateMixBy"] = v
+		}
+		current.TemplateMixBy.Set(v)
+	}
 	// deprecated: webhookIncludeData and webhookEvents on the campaign root are not
 	// written back - they are only read for backward-compat in HandleWebhooks.
 	// per-webhook settings are managed via the webhooks array and campaign_webhooks table.
-	if v, err := incoming.TemplateID.Get(); err == nil {
-		current.TemplateID.Set(v)
+	var previousTemplateID *uuid.UUID
+	if v, err := current.TemplateID.Get(); err == nil {
+		previousTemplateID = &v
+	}
+	poolChanged := false
+	newPool := incoming.TemplatePool()
+	if incoming.TemplateIDs.IsSpecified() && len(newPool) > 0 {
+		poolChanged = !slices.Equal(newPool, storedPool)
+		// an unchanged pool was checked when it was set
+		if poolChanged {
+			templates, err := c.validateTemplatePool(ctx, incoming)
+			if err != nil {
+				return err
+			}
+			// a scheduled campaign drops its recipients and copies the settings
+			// again below, so only a self managed one keeps them
+			if incoming.IsSelfManaged() {
+				if err := c.checkPoolKeepsTraining(ctx, id, current, templates[0]); err != nil {
+					return err
+				}
+			}
+			ae.Details["previousTemplateIDs"] = uuidStrings(storedPool)
+			ae.Details["templateIDs"] = uuidStrings(newPool)
+		}
+		current.TemplateID.Set(newPool[0])
+		current.TemplateIDs = incoming.TemplateIDs
 	}
 	if v, err := incoming.SortField.Get(); err == nil {
 		current.SortField.Set(v)
@@ -2377,9 +2629,41 @@ func (c *Campaign) UpdateByID(
 			}
 		}
 	}
+	// an anonymous self managed campaign uses one template, see
+	// model.Campaign.ValidateAnonymousSelfManagedPool
+	finalPool := storedPool
+	if incoming.TemplateIDs.IsSpecified() && len(newPool) > 0 {
+		finalPool = newPool
+	}
+	if campaignAnonymous(current) && current.IsSelfManaged() && len(finalPool) > 1 {
+		return validate.WrapErrorWithField(
+			errors.New("an anonymous self managed campaign can use only one template"),
+			"templateIDs",
+		)
+	}
 	// validate and update
 	if err := current.ValidateUpdate(storedDates); err != nil {
 		return errs.Wrap(err)
+	}
+	// a self managed campaign keeps its recipients. the moves are worked out
+	// before the campaign row points at the new pool, so a recipient without a
+	// template is judged by the template it was given until now. the moves, the
+	// pool and the campaign's first template are then written in one transaction.
+	if poolChanged {
+		movedCount, err := c.applyPoolChange(ctx, id, current, incoming, previousTemplateID, newPool)
+		if err != nil {
+			c.Logger.Errorw("failed to update campaign template pool", "error", err)
+			return errs.Wrap(err)
+		}
+		// the pool is saved now, so it is audited now, even if a later step of
+		// this update fails
+		poolAE := NewAuditEvent("Campaign.UpdateTemplatePool", session)
+		poolAE.Details["id"] = id.String()
+		poolAE.Details["previousTemplateIDs"] = uuidStrings(storedPool)
+		poolAE.Details["templateIDs"] = uuidStrings(newPool)
+		// planned moves; a move skipped because of a send in between is counted
+		poolAE.Details["plannedMoves"] = movedCount
+		c.AuditLogAuthorized(poolAE)
 	}
 	err = c.CampaignRepository.UpdateByID(ctx, id, current)
 	if err != nil {
@@ -2845,12 +3129,67 @@ func (c *Campaign) sendCampaignMessages(
 		)
 		return errors.New("skipping send, campaign is not active")
 	}
-	// fetch the campaign cTemplate to get the sender and message to send
-	templateID, err := campaign.TemplateID.Get()
-	if err != nil {
-		c.Logger.Infow("campaign has no template", "error", err)
-		return errs.Wrap(errors.New("skipping send, campaign has no template"))
+	// send each template's recipients together, so a template is loaded once per
+	// batch and an SMTP connection is shared by recipients with the same sender
+	byTemplate := map[uuid.UUID][]*model.CampaignRecipient{}
+	order := []uuid.UUID{}
+	for _, campaignRecipient := range campaignRecipients {
+		templateID, err := campaignRecipient.EffectiveTemplateID(campaign)
+		if err != nil {
+			c.Logger.Infow("campaign has no template", "error", err)
+			return errs.Wrap(errors.New("skipping send, campaign has no template"))
+		}
+		if _, ok := byTemplate[templateID]; !ok {
+			order = append(order, templateID)
+		}
+		byTemplate[templateID] = append(byTemplate[templateID], campaignRecipient)
 	}
+	return c.sendTemplateGroups(campaign, order, func(templateID uuid.UUID) error {
+		return c.sendCampaignMessagesWithTemplate(
+			ctx,
+			session,
+			campaign,
+			templateID,
+			byTemplate[templateID],
+		)
+	})
+}
+
+// sendTemplateGroups sends each template's group in order. A group that fails
+// with an error is logged and the next group is still tried, and the errors are
+// returned together. A template missing its domain, email or sender, or with an
+// email that does not parse, closes the whole campaign, which stops the groups
+// after it.
+func (c *Campaign) sendTemplateGroups(
+	campaign *model.Campaign,
+	order []uuid.UUID,
+	send func(templateID uuid.UUID) error,
+) error {
+	var sendErrs []error
+	for _, templateID := range order {
+		if !campaign.IsActive() {
+			break
+		}
+		if err := send(templateID); err != nil {
+			c.Logger.Errorw("failed to send campaign messages for template",
+				"templateID", templateID.String(),
+				"error", err,
+			)
+			sendErrs = append(sendErrs, err)
+		}
+	}
+	return errors.Join(sendErrs...)
+}
+
+// sendCampaignMessagesWithTemplate sends to recipients that share one template
+func (c *Campaign) sendCampaignMessagesWithTemplate(
+	ctx context.Context,
+	session *model.Session,
+	campaign *model.Campaign,
+	templateID uuid.UUID,
+	campaignRecipients []*model.CampaignRecipient,
+) error {
+	campaignID := campaign.ID.MustGet()
 	cTemplate, err := c.CampaignTemplateService.GetByID(
 		ctx,
 		session,
@@ -2864,6 +3203,39 @@ func (c *Campaign) sendCampaignMessages(
 			WithLandingProxy:       true,
 		},
 	)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// unsent recipients point at a deleted template. deleting a template
+		// closes the campaigns using it, so this only happens before that close
+		// is done or when a save raced the delete. the campaign is closed here
+		// too, so it can never keep running with recipients it can not send to.
+		c.Logger.Warnw("template was deleted, closing campaign",
+			"campaignID", campaignID.String(),
+			"templateID", templateID.String(),
+		)
+		// the campaign is read again, as the delete may have moved its first
+		// template
+		fresh, readErr := c.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{})
+		if readErr != nil {
+			return errs.Wrap(errors.Join(errors.New("template was deleted"), readErr))
+		}
+		var closeErr error
+		if fresh.IsActive() {
+			closeErr = c.closeCampaign(
+				ctx,
+				session,
+				&campaignID,
+				fresh,
+				"template was deleted",
+			)
+		}
+		if closeErr == nil || errors.Is(closeErr, errs.ErrCampaignAlreadyClosed) {
+			// the campaign is closed, so the other template groups of this run
+			// must not send from the recipients loaded before the close
+			_ = campaign.Closed()
+			closeErr = nil
+		}
+		return errs.Wrap(errors.Join(errors.New("template was deleted"), closeErr))
+	}
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign template by id", "error", err)
 		closeErr := c.closeCampaign(
@@ -3003,8 +3375,7 @@ func (c *Campaign) sendCampaignMessages(
 				)
 			}
 			// generate custom campaign URL if first page is MITM
-			recipientID := campaignRecipient.ID.MustGet()
-			customCampaignURL, urlErr := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+			customCampaignURL, urlErr := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
 			if urlErr != nil {
 				c.Logger.Errorw("failed to get campaign url for API sender", "error", urlErr)
 				customCampaignURL = ""
@@ -3237,8 +3608,7 @@ func (c *Campaign) sendCampaignMessages(
 		urlPath := cTemplate.URLPath.MustGet().String()
 
 		// generate custom campaign URL if first page is MITM
-		recipientID := campaignRecipient.ID.MustGet()
-		customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+		customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
 		if err != nil {
 			c.Logger.Errorw("failed to get campaign url", "error", err)
 			return errs.Wrap(err)
@@ -3337,8 +3707,7 @@ func (c *Campaign) sendCampaignMessages(
 						*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 					)
 					// generate custom campaign URL for attachment
-					recipientID := campaignRecipient.ID.MustGet()
-					customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+					customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
 					if err != nil {
 						c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
 						return errs.Wrap(err)
@@ -3405,8 +3774,7 @@ func (c *Campaign) sendCampaignMessages(
 					*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 				)
 				// generate custom campaign URL for attachment
-				attachmentRecipientID := campaignRecipient.ID.MustGet()
-				customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &attachmentRecipientID)
+				customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
 				if err != nil {
 					c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
 					return errs.Wrap(err)
@@ -3694,12 +4062,23 @@ func (c *Campaign) HandleCloseCampaigns(
 	}
 	// close the campaigns
 	closedCampaignIDs := []string{}
+	failedCampaignIDs := []string{}
+	// only a campaign that really closed is audited as closed
+	recordClose := func(id uuid.UUID, err error) {
+		switch {
+		case err == nil:
+			closedCampaignIDs = append(closedCampaignIDs, id.String())
+		case !errors.Is(err, errs.ErrCampaignAlreadyClosed):
+			failedCampaignIDs = append(failedCampaignIDs, id.String())
+		}
+	}
 	for _, campaign := range campaigns.Rows {
 		campaignID := campaign.ID.MustGet()
-		closedCampaignIDs = append(closedCampaignIDs, campaignID.String())
 		c.Logger.Debugw("closing campaign with id", "campaignID", campaignID)
 		var err error
-		// if there is no campaign template closing is due to missing template
+		// if there is no campaign template closing is due to missing template.
+		// the first template only picks the close reason, the campaign closes
+		// either way.
 		campaignTemplateID, err := campaign.TemplateID.Get()
 		if err != nil {
 			err = c.closeCampaign(
@@ -3709,8 +4088,10 @@ func (c *Campaign) HandleCloseCampaigns(
 				campaign,
 				"Campaign closed due to missing campaign template",
 			)
+			// one failed close must not hold up the other campaigns due now
 			c.handleCloseError(err, &campaignID)
-			return errs.Wrap(err)
+			recordClose(campaignID, err)
+			continue
 		}
 		// check if the template is unusable
 		cTemplate, err := c.CampaignTemplateService.GetByID(
@@ -3728,7 +4109,8 @@ func (c *Campaign) HandleCloseCampaigns(
 				"Campaign closed due to unusable template",
 			)
 			c.handleCloseError(err, &campaignID)
-			return errs.Wrap(err)
+			recordClose(campaignID, err)
+			continue
 		}
 		err = c.closeCampaign(
 			ctx,
@@ -3737,9 +4119,14 @@ func (c *Campaign) HandleCloseCampaigns(
 			campaign,
 			"Campaign closed due to over close time",
 		)
+		c.handleCloseError(err, &campaignID)
+		recordClose(campaignID, err)
 	}
-	if len(closedCampaignIDs) > 0 {
+	if len(closedCampaignIDs) > 0 || len(failedCampaignIDs) > 0 {
 		ae.Details["closedCampaignIds"] = closedCampaignIDs
+		if len(failedCampaignIDs) > 0 {
+			ae.Details["failedCampaignIds"] = failedCampaignIDs
+		}
 		c.AuditLogAuthorized(ae)
 	}
 	return nil
@@ -4407,7 +4794,9 @@ func (c *Campaign) closeCampaign(
 		c.Logger.Errorw("failed to close campaign by id", "error", err)
 		return errs.Wrap(err)
 	}
-	err = c.CampaignRepository.UpdateByID(ctx, id, campaign)
+	// only the close time is written, the campaign may have been loaded before
+	// other changes such as a template delete
+	err = c.CampaignRepository.SetClosedAtByID(ctx, id, campaign.ClosedAt.MustGet())
 	if err != nil {
 		c.Logger.Errorw("failed to close campaign by id", "error", err)
 		return errs.Wrap(err)
@@ -4541,7 +4930,15 @@ func (c *Campaign) GetCampaignEmailBody(
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return "", errs.Wrap(err)
 	}
-	templateID, err := campaign.TemplateID.Get()
+	// the email shows which template the person got
+	if hidden, err := c.recipientTemplateHidden(ctx, campaign); err != nil || hidden {
+		if err != nil {
+			c.Logger.Errorw("failed to check campaign template use", "error", err)
+			return "", errs.Wrap(err)
+		}
+		return "", errRecipientTemplateHidden
+	}
+	templateID, err := campaignRecipient.EffectiveTemplateID(campaign)
 	if err != nil {
 		c.Logger.Errorw("failed to get template from campaign, has no template", "error", err)
 		return "", errs.Wrap(err)
@@ -4556,6 +4953,15 @@ func (c *Campaign) GetCampaignEmailBody(
 			WithLandingProxy:       true,
 		},
 	)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", errs.NewValidationError(
+			errors.New("the recipient's campaign template no longer exists"),
+		)
+	}
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign template", "error", err)
+		return "", errs.Wrap(err)
+	}
 	emailID, err := cTemplate.EmailID.Get()
 	if err != nil {
 		c.Logger.Infow("failed email from template - template ID", "templateID", templateID)
@@ -4607,7 +5013,7 @@ func (c *Campaign) GetCampaignEmailBody(
 	urlPath := cTemplate.URLPath.MustGet().String()
 
 	// generate custom campaign URL if first page is MITM
-	customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, campaignRecipientID)
+	customCampaignURL, err := c.lureURLByCampaignRecipientID(ctx, session, campaignRecipientID, false)
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign url", "error", err)
 		return "", errs.Wrap(err)
@@ -4634,6 +5040,19 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 	ctx context.Context,
 	session *model.Session,
 	campaignRecipientID *uuid.UUID,
+) (string, error) {
+	return c.lureURLByCampaignRecipientID(ctx, session, campaignRecipientID, true)
+}
+
+// lureURLByCampaignRecipientID generates the lure URL for a campaign recipient.
+// With checkHidden set it refuses when the URL would show an admin which template
+// a person got on an anonymous campaign. Sending passes false, as the URL goes
+// only into the email.
+func (c *Campaign) lureURLByCampaignRecipientID(
+	ctx context.Context,
+	session *model.Session,
+	campaignRecipientID *uuid.UUID,
+	checkHidden bool,
 ) (string, error) {
 	ae := NewAuditEvent("Campaign.GetLandingPageURLByCampaignRecipientID", session)
 	ae.Details["campaignRecipientId"] = campaignRecipientID.String()
@@ -4666,7 +5085,16 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return "", errs.Wrap(err)
 	}
-	templateID, err := campaign.TemplateID.Get()
+	if checkHidden {
+		if hidden, err := c.recipientTemplateHidden(ctx, campaign); err != nil || hidden {
+			if err != nil {
+				c.Logger.Errorw("failed to check campaign template use", "error", err)
+				return "", errs.Wrap(err)
+			}
+			return "", errRecipientTemplateHidden
+		}
+	}
+	templateID, err := campaignRecipient.EffectiveTemplateID(campaign)
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign template, campaign has no template", "error", err)
 		return "", errs.Wrap(err)
@@ -4681,6 +5109,22 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 			WithLandingProxy:       true,
 		},
 	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign template", "error", err)
+		return "", errs.Wrap(err)
+	}
+	return c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
+}
+
+// landingPageURL builds the lure URL for a campaign recipient from its template.
+// The template must be loaded with its identifier and proxies.
+func (c *Campaign) landingPageURL(
+	ctx context.Context,
+	session *model.Session,
+	cTemplate *model.CampaignTemplate,
+	campaignRecipient *model.CampaignRecipient,
+) (string, error) {
+	templateID, _ := cTemplate.ID.Get()
 	// determine if we should use mitm domain for first page
 	var baseURL string
 	var urlPath string
@@ -4733,6 +5177,15 @@ func (c *Campaign) GetLandingPageURLByCampaignRecipientID(
 
 	// build final url
 	// no audit on read
+	// the lure code is read again, so a code set or released after this row was
+	// loaded, such as during a long send batch, is the one used
+	if rid, err := campaignRecipient.ID.Get(); err == nil {
+		fresh, err := c.CampaignRecipientRepository.GetByID(ctx, &rid, &repository.CampaignRecipientOption{})
+		if err != nil {
+			return "", errs.Wrap(err)
+		}
+		campaignRecipient = fresh
+	}
 	return BuildLureURL(baseURL, urlPath, idIdentifier, campaignRecipient), nil
 }
 
@@ -5695,31 +6148,10 @@ func (c *Campaign) SendEmailByCampaignRecipientID(
 		return errs.Wrap(err)
 	}
 
+	if err := manualSendAllowed(campaignRecipient); err != nil {
+		return err
+	}
 	campaign := campaignRecipient.Campaign
-	if campaign == nil {
-		return errors.New("campaign recipient has no campaign loaded")
-	}
-
-	// check if campaign is active
-	if !campaign.IsActive() {
-		return errors.New("campaign is not active")
-	}
-
-	// check if recipient exists (not anonymized)
-	if campaignRecipient.Recipient == nil {
-		return errors.New("recipient is anonymized or deleted")
-	}
-
-	// do not send to a SCIM-disabled (deprovisioned) recipient, even manually
-	if campaignRecipient.Recipient.ScimSoftDeletedAt != nil {
-		return errors.New("recipient is disabled in the identity provider and cannot be sent to")
-	}
-
-	// check if cancelled
-	if !campaignRecipient.CancelledAt.IsNull() {
-		return errors.New("recipient has been cancelled")
-	}
-
 	campaignID := campaign.ID.MustGet()
 
 	// add resend information to audit log
@@ -5730,10 +6162,16 @@ func (c *Campaign) SendEmailByCampaignRecipientID(
 	}
 
 	// send the email using existing logic from sendCampaignMessages
-	err = c.sendSingleCampaignMessage(ctx, session, &campaignID, campaignRecipient)
+	// under the lock the recipient is read again, so a template change that
+	// finished while waiting is the one used
+	campaignRecipient, err = c.sendUnderTemplateLock(ctx, session, campaignID, campaignRecipientID)
 	if err != nil {
 		// the failure is already logged in the campaign event with reason
 		c.Logger.Warnw("failed to send campaign message", "reason", err)
+		// the reason can name the recipient's template, sender or domain
+		if hidden, hiddenErr := c.recipientTemplateHidden(ctx, campaign); hiddenErr != nil || hidden {
+			return errors.New("the message could not be sent")
+		}
 		// don't wrap error, return as-is so controller can handle it as bad request
 		return errs.Wrap(err)
 	}
@@ -5760,7 +6198,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 		return errs.Wrap(err)
 	}
 
-	templateID, err := campaign.TemplateID.Get()
+	templateID, err := campaignRecipient.EffectiveTemplateID(campaign)
 	if err != nil {
 		return errors.New("campaign has no template")
 	}
@@ -5841,8 +6279,7 @@ func (c *Campaign) sendSingleCampaignMessage(
 
 	if isAPISenderCampaign {
 		// generate custom campaign URL if first page is MITM
-		recipientID := campaignRecipient.ID.MustGet()
-		customCampaignURL, urlErr := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+		customCampaignURL, urlErr := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
 		if urlErr != nil {
 			c.Logger.Errorw("failed to get campaign url for API sender", "error", urlErr)
 			customCampaignURL = ""
@@ -6005,7 +6442,6 @@ func (c *Campaign) sendSingleEmailSMTP(
 	// build per recipient template funcs so that {{MicrosoftDeviceCode}} resolves correctly.
 	// use the actual recipient id (not the campaign recipient row id) so the
 	// lookup key matches what the landing page path uses.
-	recipientID := campaignRecipient.ID.MustGet()
 	actualRecipientID := campaignRecipient.RecipientID.MustGet()
 	recipientDeviceFuncs := c.TemplateService.TemplateFuncsWithDeviceCode(ctx, &campaignID, &actualRecipientID)
 
@@ -6023,7 +6459,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 	urlPath := cTemplate.URLPath.MustGet().String()
 
 	// generate custom campaign URL if first page is MITM
-	customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+	customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign url", "error", err)
 		return errs.Wrap(err)
@@ -6115,8 +6551,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 					*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 				)
 				// generate custom campaign URL for attachment
-				recipientID := campaignRecipient.ID.MustGet()
-				customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+				customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
 				if err != nil {
 					c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
 					return errs.Wrap(err)
@@ -6183,8 +6618,7 @@ func (c *Campaign) sendSingleEmailSMTP(
 				*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
 			)
 			// generate custom campaign URL for attachment
-			recipientID := campaignRecipient.ID.MustGet()
-			customCampaignURL, err := c.GetLandingPageURLByCampaignRecipientID(ctx, session, &recipientID)
+			customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
 			if err != nil {
 				c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
 				return errs.Wrap(err)
@@ -6301,11 +6735,9 @@ func (c *Campaign) setMostNotableCampaignEvent(
 	) {
 		campaign.NotableEventID.Set(*notableEventID)
 		cid := campaign.ID.MustGet()
-		err := c.CampaignRepository.UpdateByID(
-			ctx,
-			&cid,
-			campaign,
-		)
+		// only the event is written, the campaign may have been loaded before
+		// other changes such as a template delete
+		err := c.CampaignRepository.SetNotableEventByID(ctx, &cid, notableEventID)
 		if err != nil {
 			c.Logger.Errorw("failed to update notable campaign event", "error", err)
 			return errs.Wrap(err)
@@ -6381,12 +6813,23 @@ func (c *Campaign) GenerateCampaignStats(ctx context.Context, session *model.Ses
 		isTrainingCampaign = v
 	}
 
-	// Get template name with proper session
+	// the names of the templates recipients were given, including ones since
+	// removed from the pool or deleted
 	templateName := ""
-	templateID := campaign.TemplateID.MustGet()
-	template, err := c.CampaignTemplateService.GetByID(ctx, session, &templateID, &repository.CampaignTemplateOption{})
-	if err == nil && template != nil && !template.Name.IsNull() {
-		templateName = template.Name.MustGet().String()
+	if names, err := c.CampaignRepository.GetUsedTemplateNames(ctx, campaignID, model.MaxCampaignTemplates); err == nil {
+		templateName = strings.Join(names, ", ")
+	} else {
+		c.Logger.Errorw("failed to get template names for campaign stats", "error", err)
+	}
+	// a campaign without recipients is named by its own template
+	if templateName == "" {
+		if tid, err := campaign.TemplateID.Get(); err == nil {
+			names, err := c.CampaignRepository.GetTemplateNamesByIDs(ctx, []*uuid.UUID{&tid})
+			if err != nil {
+				c.Logger.Errorw("failed to get template name for campaign stats", "error", err)
+			}
+			templateName = names[tid]
+		}
 	}
 
 	// Create time pointers
@@ -7561,4 +8004,105 @@ func htmlEscapeReportData(rd *model.ReportData) *model.ReportData {
 	cp.DepartmentGroups = escapeGroups(rd.DepartmentGroups)
 	cp.PositionGroups = escapeGroups(rd.PositionGroups)
 	return &cp
+}
+
+// lockCampaignTemplates locks the campaign's template mutex and returns the unlock
+func (c *Campaign) lockCampaignTemplates(campaignID uuid.UUID) func() {
+	v, _ := c.templateLocks.LoadOrStore(campaignID, &sync.Mutex{})
+	m := v.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
+}
+
+// applyPoolChange writes a new template pool. For a self managed campaign the
+// recipient moves are planned and written under the campaign's template lock,
+// so no manual send runs in between.
+func (c *Campaign) applyPoolChange(
+	ctx context.Context,
+	id *uuid.UUID,
+	current *model.Campaign,
+	incoming *model.Campaign,
+	previousTemplateID *uuid.UUID,
+	newPool []uuid.UUID,
+) (int, error) {
+	unlock := c.lockCampaignTemplates(*id)
+	defer unlock()
+	var stamps, moves map[uuid.UUID][]uuid.UUID
+	// recipients of a scheduled campaign are made again after this, so only a
+	// self managed one has rows to fill and move
+	var fillEmpty *uuid.UUID
+	if incoming.IsSelfManaged() {
+		fillEmpty = previousTemplateID
+		// an anonymous self managed campaign holds one template, so everyone
+		// moves with it, as a single template switch always did
+		keepSent := !campaignAnonymous(current)
+		var err error
+		stamps, moves, err = c.planTemplateMoves(ctx, id, previousTemplateID, newPool, current.TemplateMixField(), keepSent)
+		if err != nil {
+			return 0, err
+		}
+	}
+	// the planned number; a guarded move skipped for a late send is still counted
+	moved := 0
+	for _, ids := range moves {
+		moved += len(ids)
+	}
+	for _, ids := range stamps {
+		moved += len(ids)
+	}
+	return moved, c.CampaignRepository.ReplaceTemplatePool(ctx, id, newPool, fillEmpty, stamps, moves)
+}
+
+// sendUnderTemplateLock reads the recipient again and sends its email while
+// holding the campaign's template lock. The deferred unlock also runs on a panic.
+func (c *Campaign) sendUnderTemplateLock(
+	ctx context.Context,
+	session *model.Session,
+	campaignID uuid.UUID,
+	campaignRecipientID *uuid.UUID,
+) (*model.CampaignRecipient, error) {
+	unlock := c.lockCampaignTemplates(campaignID)
+	defer unlock()
+	campaignRecipient, err := c.CampaignRecipientRepository.GetByID(
+		ctx,
+		campaignRecipientID,
+		&repository.CampaignRecipientOption{
+			WithRecipient: true,
+			WithCampaign:  true,
+		},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to read campaign recipient before send", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	// the checks run again, the recipient or campaign may have changed while
+	// waiting for the lock
+	if err := manualSendAllowed(campaignRecipient); err != nil {
+		return nil, err
+	}
+	return campaignRecipient, c.sendSingleCampaignMessage(ctx, session, &campaignID, campaignRecipient)
+}
+
+// manualSendAllowed checks a campaign recipient loaded with its campaign and
+// recipient can be sent to by hand
+func manualSendAllowed(campaignRecipient *model.CampaignRecipient) error {
+	campaign := campaignRecipient.Campaign
+	if campaign == nil {
+		return errors.New("campaign recipient has no campaign loaded")
+	}
+	if !campaign.IsActive() {
+		return errors.New("campaign is not active")
+	}
+	// the recipient is gone when anonymized or deleted
+	if campaignRecipient.Recipient == nil {
+		return errors.New("recipient is anonymized or deleted")
+	}
+	// no sending to a recipient disabled in the identity provider, even by hand
+	if campaignRecipient.Recipient.ScimSoftDeletedAt != nil {
+		return errors.New("recipient is disabled in the identity provider and cannot be sent to")
+	}
+	if !campaignRecipient.CancelledAt.IsNull() {
+		return errors.New("recipient has been cancelled")
+	}
+	return nil
 }

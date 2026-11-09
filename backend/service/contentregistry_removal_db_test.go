@@ -47,6 +47,8 @@ func newForeignKeyRegFixture(t *testing.T) *regFixture {
 		&database.APISenderHeader{},
 		&database.CampaignTemplate{},
 		&database.Campaign{},
+		&database.CampaignTemplatePool{},
+		&database.CampaignRecipient{},
 		&database.Registry{},
 		&database.InstalledPackage{},
 		&database.InstalledResource{},

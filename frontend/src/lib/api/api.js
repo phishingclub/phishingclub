@@ -659,7 +659,9 @@ export class API {
 		 *
 		 * @param {object} campaign
 		 * @param {string} [campaign.companyID]   uuid
-		 * @param {string} campaign.templateID  uuid
+		 * @param {string} campaign.templateID  uuid, the first entry of templateIDs
+		 * @param {string[]} [campaign.templateIDs] []uuid, ordered template pool
+		 * @param {string} [campaign.templateMixBy] recipient field templates are mixed by
 		 * @param {string} campaign.name
 		 * @param {boolean} [campaign.saveSubmittedData]
 		 * @param {boolean} [campaign.saveBrowserMetadata]
@@ -690,6 +692,8 @@ export class API {
 		create: async ({
 			companyID,
 			templateID,
+			templateIDs,
+			templateMixBy,
 			name,
 			saveSubmittedData,
 			saveBrowserMetadata,
@@ -720,6 +724,8 @@ export class API {
 			return await postJSON(this.getPath('/campaign'), {
 				companyID,
 				templateID,
+				templateIDs,
+				templateMixBy,
 				name,
 				isAnonymous,
 				isTest,
@@ -766,7 +772,9 @@ export class API {
 		 * @param {string} [campaign.anonymizeAt]
 		 * @param {string} [campaign.dataAnonymizeAt]
 		 * @param {string} [campaign.scheduleAt]
-		 * @param {string} campaign.templateID uuid
+		 * @param {string} campaign.templateID uuid, the first entry of templateIDs
+		 * @param {string[]} [campaign.templateIDs] []uuid, ordered template pool
+		 * @param {string} [campaign.templateMixBy] recipient field templates are mixed by
 		 * @param {string[]} campaign.recipientGroupIDs []uuid
 		 * @param {string[]} campaign.allowDenyIDs []uuid
 		 * @param {string} campaign.denyPageID uuid
@@ -783,6 +791,8 @@ export class API {
 		update: async ({
 			id,
 			templateID,
+			templateIDs,
+			templateMixBy,
 			name,
 			saveSubmittedData,
 			saveBrowserMetadata,
@@ -812,6 +822,8 @@ export class API {
 		}) => {
 			return await postJSON(this.getPath(`/campaign/${id}`), {
 				templateID,
+				templateIDs,
+				templateMixBy,
 				name,
 				isAnonymous,
 				isTest,
@@ -1015,7 +1027,7 @@ export class API {
 		/**
 		 * Get campaign outcome stats grouped by a recipient attribute.
 		 * @param {string} campaignID
-		 * @param {'position'|'department'} by
+		 * @param {'position'|'department'|'template'} by
 		 * @returns {Promise<ApiResponse>}
 		 */
 		getGroupedResultStats: async (campaignID, by = 'position') => {

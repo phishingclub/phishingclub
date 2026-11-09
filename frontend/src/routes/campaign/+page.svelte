@@ -266,6 +266,10 @@
 		return { success: true };
 	};
 	let templateMap = new BiMap({});
+	// template rows by id, used to compare the lure settings of a pool
+	let templateRowsByID = {};
+	// names of pool templates that are no longer usable when editing or copying
+	let missingPoolTemplates = [];
 	let recipientGroupsByID = {};
 	let recipientGroupMap = new BiMap({});
 	let recipientGroupRecipients = {}; // stores actual recipients for each group
@@ -296,6 +300,8 @@
 	// applied only on the transition into eligibility (an edge), never continuously
 	let prevLateScheduleEligible = false;
 
+	// self managed with a pool, which an anonymous campaign can not have
+	$: selfManagedPool = scheduleType === 'self-managed' && formValues.templates.length > 1;
 	// reactive: true when at least one selected recipient group is dynamic
 	$: hasDynamicGroup = formValues.recipientGroups.some((label) => {
 		const id = recipientGroupMap.byValue(label);
@@ -421,6 +427,17 @@
 		'Extra ID': 'extraID'
 	});
 
+	// recipient field that decides how a template pool is mixed
+	const defaultTemplateMixBy = 'Department';
+	const templateMixBy = new BiMap({
+		Department: 'department',
+		Position: 'position',
+		City: 'city',
+		Country: 'country',
+		Misc: 'misc',
+		Everyone: 'none'
+	});
+
 	const sortOrder = new BiMap({
 		'A to Z (ascending)': 'asc',
 		'Z to A (descending)': 'desc',
@@ -509,7 +526,8 @@
 		closeAt: null,
 		anonymizeAt: null,
 		dataAnonymizeAt: null,
-		template: null,
+		templates: [],
+		templateMixBy: defaultTemplateMixBy,
 		sortField: defaultSendField,
 		sortOrder: defaultSendOrder,
 		recipientGroups: [],
@@ -550,25 +568,61 @@
 		modalText = getModalText('campaign', modalMode);
 	}
 
-	const getTemplateDetails = async (templateName) => {
-		if (!templateName) return null;
-
-		try {
-			const templateID = templateMap.byValue(templateName);
-			if (!templateID) return null;
-
-			// fetch template with full details including email and api sender
-			const templateRes = await api.campaignTemplate.getByID(templateID, true);
-			if (!templateRes.success) {
-				console.error('Failed to fetch template details:', templateRes.error);
-				return null;
-			}
-
-			return templateRes.data;
-		} catch (error) {
-			console.error('Error fetching template details:', error);
-			return null;
+	// full template details for the review step, fetched at most once per template
+	// and cleared when the templates are loaded again
+	let templateDetailsCache = {};
+	// ids whose details fetch failed. they stay cached while the review step is
+	// open so form changes do not fetch again, and are dropped when it is left
+	let failedTemplateDetailIDs = new Set();
+	const dropFailedTemplateDetails = () => {
+		for (const id of failedTemplateDetailIDs) {
+			delete templateDetailsCache[id];
 		}
+		failedTemplateDetailIDs.clear();
+	};
+	// leaving the review step, or the wizard opening again on step 1, lets the
+	// next visit retry a failed fetch
+	$: if (currentStep !== 5) {
+		dropFailedTemplateDetails();
+	}
+
+	/**
+	 * gives the template row when it already has the email or api sender, else one
+	 * cached fetch, so the review step does not fetch again on every form change
+	 */
+	const getTemplateDetails = (templateName) => {
+		if (!templateName) return null;
+		const templateID = templateMap.byValue(templateName);
+		if (!templateID) return null;
+		const row = templateRowsByID[templateID];
+		if (row && (row.email || row.apiSender)) {
+			return row;
+		}
+		if (!templateDetailsCache[templateID]) {
+			const pending = api.campaignTemplate
+				.getByID(templateID, true)
+				.then((res) => {
+					if (!res.success) {
+						throw new Error(res.error);
+					}
+					return res.data;
+				})
+				.catch((e) => {
+					// failing after the review step was left, the entry is dropped
+					// at once so the next visit retries
+					// an entry replaced meanwhile is left alone
+					if (templateDetailsCache[templateID] === pending) {
+						if (currentStep !== 5) {
+							delete templateDetailsCache[templateID];
+						} else {
+							failedTemplateDetailIDs.add(templateID);
+						}
+					}
+					throw e;
+				});
+			templateDetailsCache[templateID] = pending;
+		}
+		return templateDetailsCache[templateID];
 	};
 
 	const tableURLParams = newTableURLParams();
@@ -736,6 +790,9 @@
 		if (!checkCurrentStepValidity()) {
 			return false;
 		}
+		if (!checkTemplatePool([templatePoolError])) {
+			return false;
+		}
 
 		// check if campaign name exists
 		if (formValues.name?.length) {
@@ -773,10 +830,16 @@
 			const element = currentStepElements[i];
 			element.setCustomValidity('');
 		}
+		if (!checkTemplatePool([anonymousPoolError])) {
+			return false;
+		}
 		return checkCurrentStepValidity();
 	};
 
 	const validateMisc = () => {
+		if (!checkTemplatePool([anonymousPoolError])) {
+			return false;
+		}
 		// validate that deny page is selected if evasion page or filtering is used
 		if (formValues.evasionPageValue && !formValues.denyPageValue) {
 			modalError = 'Deny page is required when using an evasion page';
@@ -796,6 +859,70 @@
 			return api.campaignTemplate.getAll(options, contextCompanyID, true);
 		});
 		templateMap = BiMap.FromArrayOfObjects(templates);
+		templateRowsByID = Object.fromEntries(templates.map((t) => [t.id, t]));
+		templateDetailsCache = {};
+	};
+
+	// same limit as the server
+	const maxPoolTemplates = 50;
+
+	/**
+	 * shows the first error from the given checks and returns false when there is one
+	 * @param {Array<() => string>} checks
+	 */
+	const checkTemplatePool = (checks) => {
+		const poolError = checks.map((check) => check()).find((e) => e);
+		if (poolError) {
+			modalError = poolError;
+			return false;
+		}
+		return true;
+	};
+
+	// settings the campaign copies from its templates, every pool template must
+	// agree on them. defaults mirror the server when a template leaves one unset
+	const poolSettingFields = [
+		{ label: 'lure URL mode', get: (t) => t.lureURLMode || 'query' },
+		{ label: 'lure code algorithm', get: (t) => t.lureCodeAlgo || 'crockford32' },
+		{ label: 'lure code length', get: (t) => t.lureCodeLength || 12 },
+		{ label: 'training setting', get: (t) => !!t.isTraining }
+	];
+
+	/** @returns {string} empty when every picked template is still available */
+	const missingTemplateError = () => {
+		const missing = formValues.templates.find((name) => !templateMap.byValue(name));
+		return missing ? `Template '${missing}' is no longer available, remove it.` : '';
+	};
+
+	/** @returns {string} empty when the picked templates can share one campaign */
+	const templatePoolError = () => {
+		const names = formValues.templates;
+		const missingError = missingTemplateError();
+		if (missingError) {
+			return missingError;
+		}
+		if (names.length > maxPoolTemplates) {
+			return `A campaign can not have more than ${maxPoolTemplates} templates.`;
+		}
+		const rows = names.map((name) => templateRowsByID[templateMap.byValue(name)]);
+		if (rows.length < 2 || rows.some((r) => !r)) {
+			return '';
+		}
+		for (const row of rows.slice(1)) {
+			const field = poolSettingFields.find((f) => f.get(row) !== f.get(rows[0]));
+			if (field) {
+				return `All templates must have the same ${field.label}, '${row.name}' differs from '${rows[0].name}'.`;
+			}
+		}
+		return '';
+	};
+
+	/** @returns {string} empty unless an anonymous self managed campaign has a pool */
+	const anonymousPoolError = () => {
+		if (formValues.isAnonymous && scheduleType === 'self-managed' && formValues.templates.length > 1) {
+			return 'An anonymous self managed campaign can use only one template.';
+		}
+		return '';
 	};
 
 	const refreshCampaignDependencyData = async () => {
@@ -940,6 +1067,13 @@
 			recipientGroupMap.byValue(name)
 		);
 		const allowDenyIDs = formValues.allowDeny.map((name) => allowDenyMap.byValue(name));
+		// selection order is kept, the first template is the primary one
+		const missingError = missingTemplateError();
+		if (missingError) {
+			modalError = missingError;
+			return;
+		}
+		const templateIDs = formValues.templates.map((name) => templateMap.byValue(name));
 
 		try {
 			const sendStartAtUTC = formValues.sendStartAt
@@ -962,7 +1096,9 @@
 			const res = await api.campaign.create({
 				name: formValues.name,
 				companyID: contextCompanyID,
-				templateID: templateMap.byValue(formValues.template),
+				templateID: templateIDs[0],
+				templateIDs: templateIDs,
+				templateMixBy: templateMixBy.byKey(formValues.templateMixBy) || 'department',
 				sendStartAt: sendStartAtUTC,
 				sendEndAt: sendEndAtUTC,
 				sortField: sortField.byKey(formValues.sortField),
@@ -1025,6 +1161,13 @@
 			recipientGroupMap.byValue(name)
 		);
 		const allowDenyIDs = formValues.allowDeny.map((name) => allowDenyMap.byValue(name));
+		// selection order is kept, the first template is the primary one
+		const missingError = missingTemplateError();
+		if (missingError) {
+			modalError = missingError;
+			return;
+		}
+		const templateIDs = formValues.templates.map((name) => templateMap.byValue(name));
 
 		try {
 			const sendStartAtUTC = formValues.sendStartAt
@@ -1047,7 +1190,9 @@
 			const res = await api.campaign.update({
 				id: formValues.id,
 				name: formValues.name,
-				templateID: templateMap.byValue(formValues.template),
+				templateID: templateIDs[0],
+				templateIDs: templateIDs,
+				templateMixBy: templateMixBy.byKey(formValues.templateMixBy) || 'department',
 				sortField: sortField.byKey(formValues.sortField),
 				sortOrder: sortOrder.byKey(formValues.sortOrder),
 				sendStartAt: sendStartAtUTC,
@@ -1101,6 +1246,9 @@
 	};
 
 	const onSubmit = async () => {
+		if (!checkTemplatePool([templatePoolError, anonymousPoolError])) {
+			return;
+		}
 		if (!validateAllSteps()) {
 			addToast('Please review all sections before submitting', 'Error');
 			return;
@@ -1207,6 +1355,7 @@
 	};
 
 	const resetFormValues = () => {
+		missingPoolTemplates = [];
 		formValues = {
 			name: null,
 			sendStartAt: null,
@@ -1216,7 +1365,8 @@
 			closeAt: null,
 			anonymizeAt: null,
 			dataAnonymizeAt: null,
-			template: null,
+			templates: [],
+			templateMixBy: defaultTemplateMixBy,
 			sortField: defaultSendField,
 			sortOrder: defaultSendOrder,
 			recipientGroups: [],
@@ -1316,6 +1466,13 @@
 	};
 
 	const assignCampaign = (campaign, copyMode = false) => {
+		// pool templates that are deleted or no longer usable are not in templateMap.
+		// they are named in step 1 so they are never dropped from the pool unnoticed
+		const poolIDs = campaign.templateIDs?.length ? campaign.templateIDs : [campaign.templateID];
+		missingPoolTemplates = poolIDs
+			.filter((id) => id && !templateMap.byKey(id))
+			.map((id) => campaign.templates?.find((t) => t.id === id)?.name)
+			.filter(Boolean);
 		if (campaign.constraintWeekDays) {
 			scheduleType = 'schedule';
 		}
@@ -1327,6 +1484,8 @@
 			name: copyMode ? `${campaign.name} (Copy)` : campaign.name,
 			sortField: sortField.byValue(campaign.sortField),
 			sortOrder: sortOrder.byValue(campaign.sortOrder),
+			// empty or missing means department
+			templateMixBy: templateMixBy.byValue(campaign.templateMixBy) || defaultTemplateMixBy,
 			sendStartAt: copyMode ? null : campaign.sendStartAt,
 			sendEndAt: copyMode ? null : campaign.sendEndAt,
 			scheduledStartAt: copyMode
@@ -1350,7 +1509,10 @@
 			isAnonymous: campaign.isAnonymous ?? false,
 			isTest: campaign.isTest,
 			obfuscate: campaign.obfuscate || false,
-			template: templateMap.byKey(campaign.templateID),
+			// rows from before template pools have only templateID
+			templates: (campaign.templateIDs?.length ? campaign.templateIDs : [campaign.templateID])
+				.map((id) => templateMap.byKey(id))
+				.filter(Boolean),
 			webhooks: (() => {
 				// handle new webhooks array format
 				if (campaign.webhooks && campaign.webhooks.length > 0) {
@@ -1768,11 +1930,19 @@
 					{/if}
 				</TableCell>
 				{#if campaign.templateID}
+					{@const poolNames = campaign.templates?.length
+						? campaign.templates.map((t) => t.name)
+						: [templateMap.byKey(campaign.templateID)]}
 					<TableCellLink
 						href={`/campaign-template/?edit=${campaign.templateID}`}
-						title={templateMap.byKey(campaign.templateID)}
+						title={poolNames.join(', ')}
 					>
-						{templateMap.byKey(campaign.templateID)}
+						{poolNames[0]}{#if poolNames.length > 1}<span
+								class="ml-1.5 text-slate-500 dark:text-gray-400"
+								><span aria-hidden="true">+{poolNames.length - 1}</span><span class="sr-only"
+									>and {poolNames.length - 1} more templates</span
+								></span
+							>{/if}
 					</TableCellLink>
 				{:else}
 					<TableCell>
@@ -1935,13 +2105,36 @@
 								>
 									Name
 								</TextField>
-								<TextFieldSelect
+								<TextFieldMultiSelect
 									required
 									id="template"
-									size="full"
-									bind:value={formValues.template}
-									options={Array.from(templateMap.values())}>Template</TextFieldSelect
+									width="full"
+									bind:value={formValues.templates}
+									onSelect={() => (missingPoolTemplates = [])}
+									onRemove={() => (missingPoolTemplates = [])}
+									options={Array.from(templateMap.values())}>Templates</TextFieldMultiSelect
 								>
+								{#if formValues.templates.length > 1}
+									<p class="text-sm text-slate-500 dark:text-gray-400 transition-colors duration-200">
+										Each recipient gets one of these templates, spread evenly.
+									</p>
+									<TextFieldSelect
+										id="templateMixBy"
+										bind:value={formValues.templateMixBy}
+										required
+										toolTipText="Recipients who share this value get an even mix of the templates."
+										options={Array.from(templateMixBy.keys())}>Balance per</TextFieldSelect
+									>
+								{/if}
+								{#if missingPoolTemplates.length}
+									<p class="mt-2 text-sm text-amber-600 dark:text-amber-400" data-missing-pool-templates>
+										{modalMode === 'copy'
+											? 'No longer usable and left out of the new campaign'
+											: 'These templates are no longer usable and were removed from the list'}: {missingPoolTemplates.join(
+											', '
+										)}.
+									</p>
+								{/if}
 							</div>
 						</div>
 					</FormColumns>
@@ -2411,12 +2604,18 @@
 
 							<div class="w-full">
 								<SelectSquare
-									disabled={modalMode === 'update'}
+									disabled={modalMode === 'update' || (selfManagedPool && !formValues.isAnonymous)}
 									toolTipText="No names, emails, IPs or entered data are stored."
 									label="Anonymous campaign?"
 									options={saveSubbmitedDataOptions}
 									bind:value={formValues.isAnonymous}
 								/>
+								{#if selfManagedPool && (formValues.isAnonymous || modalMode !== 'update')}
+									<p class="mb-4 text-sm text-slate-600 dark:text-gray-300">
+										Anonymous self managed campaigns can use only one template, because you send each
+										email yourself.
+									</p>
+								{/if}
 								{#if modalMode === 'update'}
 									<p class="flex items-start gap-1.5 mb-4 text-sm text-slate-600 dark:text-gray-300">
 										<svg
@@ -2793,10 +2992,17 @@
 												>{formValues.name || 'Not set'}</span
 											>
 
-											<span class="text-slate-500 dark:text-gray-400 font-medium">Template:</span>
-											<span class="text-pc-darkblue dark:text-white"
-												>{formValues.template || 'Not set'}</span
+											<span class="text-slate-500 dark:text-gray-400 font-medium"
+												>{formValues.templates.length > 1 ? 'Templates:' : 'Template:'}</span
 											>
+											<span class="text-pc-darkblue dark:text-white"
+												>{formValues.templates.length ? formValues.templates.join(', ') : 'Not set'}</span
+											>
+
+											{#if formValues.templates.length > 1}
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Balanced per:</span>
+												<span class="text-pc-darkblue dark:text-white">{formValues.templateMixBy}</span>
+											{/if}
 
 											<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
 											<span class="text-pc-darkblue dark:text-white"
@@ -2879,64 +3085,91 @@
 										>
 											Delivery Details
 										</h3>
-										{#await getTemplateDetails(formValues.template)}
-											<div class="text-sm text-gray-500 dark:text-gray-400">Loading delivery details...</div>
-										{:then template}
-											{#if template?.apiSender}
-												<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
-													<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
-													<span class="text-pc-darkblue dark:text-white"
-														>API Sender</span
-													>
-
-													<span class="text-slate-500 dark:text-gray-400 font-medium">Name:</span>
-													<span class="text-pc-darkblue dark:text-white"
-														>{template.apiSender.name || 'Not set'}</span
-													>
-
-													{#if template?.email}
-														<span class="text-slate-500 dark:text-gray-400 font-medium">Email:</span>
-														<span class="text-pc-darkblue dark:text-white"
-															>{template.email.name || 'Not set'}</span
-														>
+										<!-- one section per pool template, the name heading shows only for a pool -->
+										<div
+											class="space-y-4"
+											class:max-h-96={formValues.templates.length > 1}
+											class:overflow-y-auto={formValues.templates.length > 1}
+											tabindex={formValues.templates.length > 1 ? 0 : undefined}
+											role={formValues.templates.length > 1 ? 'region' : undefined}
+											aria-label={formValues.templates.length > 1
+												? 'Delivery details per template'
+												: undefined}
+										>
+											{#each formValues.templates.length ? formValues.templates : [null] as templateName, i}
+												<div
+													class:pt-4={i > 0}
+													class:border-t={i > 0}
+													class="border-gray-200 dark:border-gray-700"
+												>
+													{#if formValues.templates.length > 1}
+														<h4 class="text-sm font-semibold text-pc-darkblue dark:text-white mb-2 [overflow-wrap:anywhere]">
+															{templateName}
+														</h4>
 													{/if}
+													{#await getTemplateDetails(templateName)}
+														<div class="text-sm text-gray-500 dark:text-gray-400">Loading delivery details...</div>
+													{:then template}
+														{#if template?.apiSender}
+															<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+																<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
+																<span class="text-pc-darkblue dark:text-white"
+																	>API Sender</span
+																>
+
+																<span class="text-slate-500 dark:text-gray-400 font-medium">Name:</span>
+																<span class="text-pc-darkblue dark:text-white"
+																	>{template.apiSender.name || 'Not set'}</span
+																>
+
+																{#if template?.email}
+																	<span class="text-slate-500 dark:text-gray-400 font-medium">Email:</span>
+																	<span class="text-pc-darkblue dark:text-white"
+																		>{template.email.name || 'Not set'}</span
+																	>
+																{/if}
+															</div>
+														{:else if template?.email}
+															{@const fromParts = splitFromHeader(template.email.mailHeaderFrom)}
+															<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+																<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
+																<span class="text-pc-darkblue dark:text-white">SMTP</span>
+
+																<span class="text-slate-500 dark:text-gray-400 font-medium">Name:</span>
+																<span class="text-pc-darkblue dark:text-white"
+																	>{template.email.name || 'Not set'}</span
+																>
+
+																<span class="text-slate-500 dark:text-gray-400 font-medium">From:</span>
+																<span class="text-pc-darkblue dark:text-white"
+																	>{#if fromParts}<span class="block">{fromParts.name}</span><span
+																			class="block">{fromParts.address}</span
+																		>{:else}{template.email.mailHeaderFrom || 'Not set'}{/if}</span
+																>
+
+																<span class="text-slate-500 dark:text-gray-400 font-medium">Mail from:</span>
+																<span class="text-pc-darkblue dark:text-white"
+																	>{template.email.mailEnvelopeFrom || 'Not set'}</span
+																>
+
+																<span class="text-slate-500 dark:text-gray-400 font-medium">Subject:</span>
+																<span class="text-pc-darkblue dark:text-white"
+																	>{template.email.mailHeaderSubject || 'Not set'}</span
+																>
+															</div>
+														{:else}
+															<div class="text-sm text-gray-500 dark:text-gray-400">
+																No email or API sender configured for this template
+															</div>
+														{/if}
+													{:catch error}
+														<div class="text-sm text-red-600 dark:text-red-400">
+															Failed to load delivery details, go back a step to retry
+														</div>
+													{/await}
 												</div>
-											{:else if template?.email}
-												{@const fromParts = splitFromHeader(template.email.mailHeaderFrom)}
-												<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
-													<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
-													<span class="text-pc-darkblue dark:text-white">SMTP</span>
-
-													<span class="text-slate-500 dark:text-gray-400 font-medium">Name:</span>
-													<span class="text-pc-darkblue dark:text-white"
-														>{template.email.name || 'Not set'}</span
-													>
-
-													<span class="text-slate-500 dark:text-gray-400 font-medium">From:</span>
-													<span class="text-pc-darkblue dark:text-white"
-														>{#if fromParts}<span class="block">{fromParts.name}</span><span
-																class="block">{fromParts.address}</span
-															>{:else}{template.email.mailHeaderFrom || 'Not set'}{/if}</span
-													>
-
-													<span class="text-slate-500 dark:text-gray-400 font-medium">Mail from:</span>
-													<span class="text-pc-darkblue dark:text-white"
-														>{template.email.mailEnvelopeFrom || 'Not set'}</span
-													>
-
-													<span class="text-slate-500 dark:text-gray-400 font-medium">Subject:</span>
-													<span class="text-pc-darkblue dark:text-white"
-														>{template.email.mailHeaderSubject || 'Not set'}</span
-													>
-												</div>
-											{:else}
-												<div class="text-sm text-gray-500 dark:text-gray-400">
-													No email or API sender configured for this template
-												</div>
-											{/if}
-										{:catch error}
-											<div class="text-sm text-red-600 dark:text-red-400">Failed to load delivery details</div>
-										{/await}
+											{/each}
+										</div>
 									</div>
 
 									<!-- Schedule -->
