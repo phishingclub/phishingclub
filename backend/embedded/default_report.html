@@ -573,5 +573,77 @@
 </div>
 {{end}}
 
+{{if .EmailScreenshot}}
+<!-- EMAIL SCREENSHOT (rendered with a synthetic recipient, never a real one) -->
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Email Sent</span>
+    {{if .CompanyName}}<span class="company">{{.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Email Sent</div>
+  <img src="{{.EmailScreenshot}}" style="display:block;width:100%;max-height:900px;object-fit:contain;object-position:top;border:1px solid var(--border);border-radius:4px" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+
+{{if .BeforeLandingPageScreenshot}}
+<!-- BEFORE-LANDING PAGE SCREENSHOT (rendered with a synthetic recipient, never a real one) -->
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Before-Landing Page</span>
+    {{if .CompanyName}}<span class="company">{{.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Before-Landing Page</div>
+  <img src="{{.BeforeLandingPageScreenshot}}" style="display:block;width:100%;max-height:900px;object-fit:contain;object-position:top;border:1px solid var(--border);border-radius:4px" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+
+{{if .LandingPageScreenshot}}
+<!-- LANDING PAGE SCREENSHOT (rendered with a synthetic recipient, never a real one) -->
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Landing Page</span>
+    {{if .CompanyName}}<span class="company">{{.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Landing Page</div>
+  <img src="{{.LandingPageScreenshot}}" style="display:block;width:100%;max-height:900px;object-fit:contain;object-position:top;border:1px solid var(--border);border-radius:4px" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+
+{{if .AfterLandingPageScreenshot}}
+<!-- AFTER-LANDING PAGE SCREENSHOT (rendered with a synthetic recipient, never a real one) -->
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">After-Landing Page</span>
+    {{if .CompanyName}}<span class="company">{{.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">After-Landing Page</div>
+  <img src="{{.AfterLandingPageScreenshot}}" style="display:block;width:100%;max-height:900px;object-fit:contain;object-position:top;border:1px solid var(--border);border-radius:4px" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+
 </body>
 </html>

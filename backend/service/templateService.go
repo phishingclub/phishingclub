@@ -253,6 +253,110 @@ func (t *Template) ApplyPageMock(content string) (*bytes.Buffer, error) {
 	)
 }
 
+// reportMockRecipient is a synthetic, non-identifying recipient used only to
+// render the email and landing page screenshots embedded in a campaign PDF
+// report. It never carries data from a real campaign recipient, so a report
+// screenshot cannot leak one.
+func reportMockRecipient() *model.Recipient {
+	return &model.Recipient{
+		FirstName: nullable.NewNullableWithValue(
+			*vo.NewOptionalString127Must("Jane"),
+		),
+		LastName: nullable.NewNullableWithValue(
+			*vo.NewOptionalString127Must("Doe"),
+		),
+		Email: nullable.NewNullableWithValue(
+			*vo.NewEmailMust("jane.doe@example.test"),
+		),
+	}
+}
+
+// CreateMailBodyForReport renders an email's content for the campaign report
+// screenshot. It uses the synthetic reportMockRecipient and a neutral example
+// domain, the same privacy boundary ApplyPageMock already uses for template
+// previews, so the render never touches a real recipient or a real tracking
+// link.
+func (t *Template) CreateMailBodyForReport(email *model.Email) (string, error) {
+	content, err := email.Content.Get()
+	if err != nil {
+		return "", fmt.Errorf("no email content set to render: %w", err)
+	}
+	recipient := reportMockRecipient()
+	baseURL := "https://example.test"
+	recipientID := uuid.Nil.String()
+	trackingPixelPath := fmt.Sprintf("%s/wf/open?upn=%s", baseURL, recipientID)
+	trackingPixel := fmt.Sprintf(
+		`<img src="%s" alt="" width="1" height="1" border="0" style="height:1px !important;width:1px" />`,
+		trackingPixelPath,
+	)
+	data := t.newTemplateDataMap(
+		recipientID,
+		baseURL,
+		baseURL+"/report-preview",
+		recipient,
+		trackingPixelPath,
+		trackingPixel,
+		email,
+		nil, // no API sender context in a report screenshot render
+	)
+	tmpl, err := template.New("reportEmailMock").Funcs(TemplateFuncs()).Parse(content.String())
+	if err != nil {
+		return "", fmt.Errorf("failed to parse email template: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute email template: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// CreatePageMockForReport renders a landing page's content for the campaign
+// report screenshot, reusing the same synthetic recipient and neutral example
+// domain/identifiers ApplyPageMock already uses for template previews. email
+// supplies sender placeholders the page may reference (e.g. {{.FromName}})
+// and may be nil, in which case a placeholder email stands in for it.
+func (t *Template) CreatePageMockForReport(page *model.Page, email *model.Email) (*bytes.Buffer, error) {
+	content, err := page.Content.Get()
+	if err != nil {
+		return nil, fmt.Errorf("no page content set to render: %w", err)
+	}
+	if email == nil {
+		email = model.NewEmailExample()
+	}
+	domain := &database.Domain{
+		Name: "example.test",
+	}
+	campaignRecipientID := uuid.New()
+	recipient := reportMockRecipient()
+	urlIdentifier := &model.Identifier{
+		Name: nullable.NewNullableWithValue(
+			"id",
+		),
+	}
+	stateIdentifier := &model.Identifier{
+		Name: nullable.NewNullableWithValue(
+			"state",
+		),
+	}
+	campaignTemplate := &model.CampaignTemplate{
+		URLIdentifier:   urlIdentifier,
+		StateIdentifier: stateIdentifier,
+	}
+	return t.CreatePhishingPageWithCampaign(
+		context.Background(),
+		domain,
+		email,
+		&campaignRecipientID,
+		recipient,
+		content.String(),
+		campaignTemplate,
+		"stateParam",
+		"urlPath",
+		nil,
+		nil, // no company context for a report screenshot render
+	)
+}
+
 // CreateMailBody returns a rendered mail body to string
 func (t *Template) CreateMailBody(
 	ctx context.Context,

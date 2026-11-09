@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	htmltemplate "html/template"
 	"math/rand"
 	"net/url"
 	"os"
@@ -7040,6 +7042,11 @@ func (c *Campaign) buildReportHTMLWithData(
 
 	rd := buildReportData(name, companyName, campaign, stats, recipients, groups, groupsBy, departmentGroups, positionGroups)
 
+	// screenshots are a best effort addition: any failure here is logged and
+	// leaves the corresponding field empty, the report still generates with
+	// everything else exactly as it does today.
+	c.attachReportScreenshots(ctx, session, campaign, templateContent, rd)
+
 	var buf bytes.Buffer
 	tmpl, err := template.New("report").Funcs(TemplateFuncs()).Parse(templateContent)
 	if err != nil {
@@ -7054,6 +7061,150 @@ func (c *Campaign) buildReportHTMLWithData(
 	}
 	// no audit on read
 	return buf.String(), rd, name, nil
+}
+
+// attachReportScreenshots renders the campaign's email and up to three of its
+// pages (before-landing, landing, after-landing) with a synthetic recipient
+// (see service.reportMockRecipient) and captures each as a PNG screenshot,
+// embedded in rd as a data: URI for the report pages added in
+// default_report.html. It opens one guarded browser session shared by every
+// capture, so a report pays for at most one extra browser launch regardless
+// of how many of the four are produced.
+//
+// The configured report template is scanned first: if it references none of
+// the four screenshot fields, this returns immediately without loading the
+// campaign template or touching the browser at all, so a report template
+// that was never updated to use this feature never pays for it.
+//
+// A page configured as an AITM proxy (CampaignTemplate.*Proxy, as opposed to
+// a stored *Page) is deliberately not captured: unlike a stored page, a proxy
+// has no content of its own to render in isolation, capturing it would mean
+// actually driving the headless browser through the proxy against whatever
+// real third-party site it fronts. That is a materially different, more
+// sensitive operation than rendering stored content with a synthetic
+// recipient, so it is out of scope here.
+//
+// Screenshots are a best effort addition: a campaign with no template, no
+// email, or no matching page simply gets fewer screenshots, and any render or
+// capture error is logged and leaves the corresponding field empty. Nothing
+// here can fail report generation itself.
+func (c *Campaign) attachReportScreenshots(
+	ctx context.Context,
+	session *model.Session,
+	campaign *model.Campaign,
+	reportTemplateContent string,
+	rd *model.ReportData,
+) {
+	// checked as ".Name" (how every one of these is actually written in a Go
+	// template, e.g. "{{if .LandingPageScreenshot}}") rather than bare "Name":
+	// "LandingPageScreenshot" alone is a substring of "BeforeLandingPageScreenshot"
+	// and "AfterLandingPageScreenshot", which would make a template using only
+	// one of those two always look like it wants the main landing page too.
+	wantsAny := strings.Contains(reportTemplateContent, ".EmailScreenshot") ||
+		strings.Contains(reportTemplateContent, ".BeforeLandingPageScreenshot") ||
+		strings.Contains(reportTemplateContent, ".LandingPageScreenshot") ||
+		strings.Contains(reportTemplateContent, ".AfterLandingPageScreenshot")
+	if !wantsAny {
+		return
+	}
+
+	templateID, err := campaign.TemplateID.Get()
+	if err != nil {
+		// campaigns always have a template in practice, but a campaign draft
+		// or a malformed row should degrade, not break the report
+		return
+	}
+	campaignTemplate, err := c.CampaignTemplateService.GetByID(
+		ctx,
+		session,
+		&templateID,
+		&repository.CampaignTemplateOption{
+			WithEmail:             true,
+			WithBeforeLandingPage: true,
+			WithLandingPage:       true,
+			WithAfterLandingPage:  true,
+		},
+	)
+	if err != nil {
+		c.Logger.Warnw("failed to load campaign template for report screenshots", "error", err)
+		return
+	}
+
+	// the browser is only launched once the first screenshot is actually
+	// attempted, so a campaign whose configured pages the report template
+	// does not even ask for never pays for a launch.
+	var browserSession *remotebrowser.Session
+	openSession := func() *remotebrowser.Session {
+		if browserSession != nil {
+			return browserSession
+		}
+		s, sErr := remotebrowser.NewSession(ctx, c.RemoteBrowserExecPath)
+		if sErr != nil {
+			c.Logger.Warnw("failed to start browser for report screenshots", "error", sErr)
+			return nil
+		}
+		browserSession = s
+		return s
+	}
+	defer func() {
+		if browserSession != nil {
+			browserSession.Close()
+		}
+	}()
+
+	// viewport widths per the design: ~600px mirrors a typical email client
+	// width, 794px mirrors the report PDF's own A4-at-96dpi width. Height is
+	// just a starting viewport; RenderPNG captures the full scrollable page
+	// regardless, and the report template caps the display height so a long
+	// capture shrinks to fit its page instead of overflowing it.
+	const emailViewportWidth = 600
+	const emailViewportHeight = 800
+	const pageViewportWidth = 794
+	const pageViewportHeight = 1000
+
+	if campaignTemplate.Email != nil && strings.Contains(reportTemplateContent, ".EmailScreenshot") {
+		emailHTML, mailErr := c.TemplateService.CreateMailBodyForReport(campaignTemplate.Email)
+		if mailErr != nil {
+			c.Logger.Warnw("failed to render email for report screenshot", "error", mailErr)
+		} else if s := openSession(); s != nil {
+			png, pngErr := s.RenderPNG(emailHTML, emailViewportWidth, emailViewportHeight)
+			if pngErr != nil {
+				c.Logger.Warnw("failed to capture email screenshot for report", "error", pngErr)
+			} else {
+				rd.EmailScreenshot = htmltemplate.HTML(
+					"data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
+				)
+			}
+		}
+	}
+
+	capturePage := func(name string, page *model.Page, dest *htmltemplate.HTML) {
+		// see the ".EmailScreenshot" comment above: checked as ".Name", not
+		// bare "Name", so "LandingPageScreenshot" does not also match inside
+		// "BeforeLandingPageScreenshot" or "AfterLandingPageScreenshot".
+		if page == nil || !strings.Contains(reportTemplateContent, "."+name) {
+			return
+		}
+		pageBuf, pageErr := c.TemplateService.CreatePageMockForReport(page, campaignTemplate.Email)
+		if pageErr != nil {
+			c.Logger.Warnw("failed to render page for report screenshot", "page", name, "error", pageErr)
+			return
+		}
+		s := openSession()
+		if s == nil {
+			return
+		}
+		png, pngErr := s.RenderPNG(pageBuf.String(), pageViewportWidth, pageViewportHeight)
+		if pngErr != nil {
+			c.Logger.Warnw("failed to capture page screenshot for report", "page", name, "error", pngErr)
+			return
+		}
+		*dest = htmltemplate.HTML("data:image/png;base64," + base64.StdEncoding.EncodeToString(png))
+	}
+
+	capturePage("BeforeLandingPageScreenshot", campaignTemplate.BeforeLandingePage, &rd.BeforeLandingPageScreenshot)
+	capturePage("LandingPageScreenshot", campaignTemplate.LandingPage, &rd.LandingPageScreenshot)
+	capturePage("AfterLandingPageScreenshot", campaignTemplate.AfterLandingPage, &rd.AfterLandingPageScreenshot)
 }
 
 const defaultReportEmailSubject = "Campaign report: {{.CampaignName}}"

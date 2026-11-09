@@ -15,19 +15,24 @@ import (
 	"github.com/go-rod/rod/lib/launcher"
 )
 
+// findChromeBin returns a system chrome/chromium binary path, or "" if none
+// is installed. Shared by every test below that needs a real browser.
+func findChromeBin() string {
+	for _, cand := range []string{"/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium"} {
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+	}
+	return ""
+}
+
 // TestRenderHTMLToPDFRoutesThroughGuard drives the real production entrypoint and
 // asserts that a report embedding a loopback resource cannot reach it. This is the
 // only test that exercises RenderHTMLToPDF itself, so it catches removal of the
 // guard wiring from the real render path (not just flag drift). Skips without a
 // browser. The produced PDF is the positive control that the render actually ran.
 func TestRenderHTMLToPDFRoutesThroughGuard(t *testing.T) {
-	bin := ""
-	for _, cand := range []string{"/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium"} {
-		if _, err := os.Stat(cand); err == nil {
-			bin = cand
-			break
-		}
-	}
+	bin := findChromeBin()
 	if bin == "" {
 		t.Skip("no chrome/chromium binary available")
 	}
@@ -55,6 +60,78 @@ func TestRenderHTMLToPDFRoutesThroughGuard(t *testing.T) {
 	defer mu.Unlock()
 	if hits != 0 {
 		t.Fatalf("loopback resource reached %d times through RenderHTMLToPDF; guard wiring missing", hits)
+	}
+}
+
+// TestRenderHTMLToPNGRoutesThroughGuard is the PNG counterpart of
+// TestRenderHTMLToPDFRoutesThroughGuard above: it drives RenderHTMLToPNG, the
+// entrypoint added for campaign report screenshots, and asserts a loopback
+// resource embedded in the rendered page still cannot be reached. RenderPNG
+// shares NewSession/applyGuardFlags with RenderPDF, so this guards against
+// that sharing being broken later. Skips without a browser.
+func TestRenderHTMLToPNGRoutesThroughGuard(t *testing.T) {
+	bin := findChromeBin()
+	if bin == "" {
+		t.Skip("no chrome/chromium binary available")
+	}
+
+	var hits int
+	var mu sync.Mutex
+	victim := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+	}))
+	defer victim.Close()
+
+	html := `<html><body>Report<img src="` + victim.URL + `/ssrf"></body></html>`
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	png, err := RenderHTMLToPNG(ctx, html, bin, 600, 800)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if len(png) == 0 {
+		t.Fatalf("no PNG produced; render did not run so the guard was not exercised")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 0 {
+		t.Fatalf("loopback resource reached %d times through RenderHTMLToPNG; guard wiring missing", hits)
+	}
+}
+
+// TestSessionRendersPDFAndPNGOnOneLaunch exercises the actual use case a
+// campaign report needs: one Session producing both a PNG screenshot and a
+// PDF without relaunching the browser in between. Skips without a browser.
+func TestSessionRendersPDFAndPNGOnOneLaunch(t *testing.T) {
+	bin := findChromeBin()
+	if bin == "" {
+		t.Skip("no chrome/chromium binary available")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	s, err := NewSession(ctx, bin)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	defer s.Close()
+
+	png, err := s.RenderPNG(`<html><body>Email</body></html>`, 600, 800)
+	if err != nil {
+		t.Fatalf("render png: %v", err)
+	}
+	if len(png) == 0 {
+		t.Fatalf("no PNG produced")
+	}
+
+	pdf, err := s.RenderPDF(`<html><body>Report</body></html>`)
+	if err != nil {
+		t.Fatalf("render pdf: %v", err)
+	}
+	if len(pdf) == 0 {
+		t.Fatalf("no PDF produced")
 	}
 }
 
