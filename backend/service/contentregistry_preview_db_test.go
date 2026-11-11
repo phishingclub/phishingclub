@@ -348,3 +348,48 @@ func (s *ContentRegistry) createAllowDeny(
 func (s *ContentRegistry) storedAllowDenyHash(ctx context.Context, id *uuid.UUID) string {
 	return s.storedHash(ctx, "allowdeny", id)
 }
+
+// TestUninstallPreviewDeletedTemplateClosesNow checks a campaign whose template
+// the removal deletes is listed as closed, also when it already has a later close
+// time, and that remove then closes it now
+func TestUninstallPreviewDeletedTemplateClosesNow(t *testing.T) {
+	h := newOwnershipFixture(t)
+	if err := h.db.AutoMigrate(&database.InstalledPackageMember{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	h.s.CampaignTemplateRepository = &repository.CampaignTemplate{DB: h.db}
+	h.s.CampaignTemplate = h.s.Page.CampaignTemplateService
+
+	now := time.Now()
+	tplID := uuid.New()
+	identID := uuid.New()
+	if err := h.db.Create(&database.CampaignTemplate{
+		ID: &tplID, CreatedAt: &now, UpdatedAt: &now, Name: "Pkg tpl",
+		URLIdentifierID: &identID, StateIdentifierID: &identID,
+	}).Error; err != nil {
+		t.Fatalf("insert template: %v", err)
+	}
+	ipID := h.newInstall("acme/tpl")
+	if err := h.s.recordResource(h.ctx, ipID, "campaigntemplate", "Pkg tpl", &tplID, "x", "{}"); err != nil {
+		t.Fatalf("record resource: %v", err)
+	}
+	future := now.Add(72 * time.Hour).UTC().Truncate(time.Second)
+	laterID := insertCampaign(t, h, "Later", &tplID, nil, &future)
+
+	preview, err := h.s.UninstallPreview(h.ctx, h.session, ipID)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if preview.CampaignCount != 1 || len(preview.Campaigns) != 1 || preview.Campaigns[0].Name != "Later" {
+		t.Fatalf("expected Later to be listed as closed, got %+v", preview.Campaigns)
+	}
+	if preview.KeepRunningCount != 0 {
+		t.Fatalf("expected nothing to keep running, got %+v", preview.KeepRunning)
+	}
+	if err := h.s.Remove(h.ctx, h.session, ipID); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if row := campaignRow(t, h, laterID); row.CloseAt == nil || !row.CloseAt.Before(now.Add(time.Hour)) {
+		t.Fatalf("Later should close now, close at is %v", row.CloseAt)
+	}
+}

@@ -92,6 +92,11 @@ func ValidateCompanyRefs(
 func campaignCompanyRefs(c *model.Campaign) []CompanyRef {
 	refs := companyRefs{}
 	refs.add(database.CAMPAIGN_TEMPLATE_TABLE, "templateID", c.TemplateID)
+	if ids, err := c.TemplateIDs.Get(); err == nil {
+		for _, id := range ids {
+			refs.addPtr(database.CAMPAIGN_TEMPLATE_TABLE, "templateIDs", id)
+		}
+	}
 	if ids, err := c.RecipientGroupIDs.Get(); err == nil {
 		for _, id := range ids {
 			refs.addPtr(database.RECIPIENT_GROUP_TABLE, "recipientGroupIDs", id)

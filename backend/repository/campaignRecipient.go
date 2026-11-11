@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -125,6 +126,10 @@ func (r *CampaignRecipient) Insert(
 	}
 	if custom, err := campaignRecipient.LureCodeCustom.Get(); err == nil {
 		row["lure_code_custom"] = custom
+	}
+	// ToDBMap omits the template, so it is carried here
+	if templateID, err := campaignRecipient.TemplateID.Get(); err == nil {
+		row["campaign_template_id"] = templateID.String()
 	}
 
 	res := r.DB.
@@ -368,29 +373,16 @@ func (r *CampaignRecipient) GetByLureCodeOnDomain(
 	var dbCampaignRecipient database.CampaignRecipient
 	query := r.DB.
 		Model(&database.CampaignRecipient{}).
-		Joins(fmt.Sprintf(
-			"JOIN `%s` ON %s = %s",
-			database.CAMPAIGN_TABLE,
-			TableColumnID(database.CAMPAIGN_TABLE),
-			TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "campaign_id"),
-		)).
-		Joins(fmt.Sprintf(
-			"JOIN `%s` ON %s = %s",
-			database.CAMPAIGN_TEMPLATE_TABLE,
-			TableColumnID(database.CAMPAIGN_TEMPLATE_TABLE),
-			TableColumn(database.CAMPAIGN_TABLE, "campaign_template_id"),
-		)).
-		Where(
-			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "lure_code")),
-			code,
-		).
+		Joins("JOIN campaigns ON campaigns.id = campaign_recipients.campaign_id").
+		// the recipient's own template decides the domain, so a pool spread over
+		// several domains matches each code only on its recipient's domain
+		Joins("JOIN campaign_templates ON campaign_templates.id = COALESCE(campaign_recipients.campaign_template_id, campaigns.campaign_template_id)").
+		Where("campaign_recipients.lure_code = ?", code).
 		// restating the index predicate. equality already excludes nulls, so no
 		// result changes, but the planner matches the partial unique index without
 		// deriving it. this sits on the request path, where a scan is paid on
 		// every visit.
-		Where(
-			fmt.Sprintf("%s IS NOT NULL", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "lure_code")),
-		)
+		Where("campaign_recipients.lure_code IS NOT NULL")
 
 	if domain.ProxyID != nil {
 		// a proxy domain serves whichever template routes a page through that
@@ -400,27 +392,18 @@ func (r *CampaignRecipient) GetByLureCodeOnDomain(
 		// regardless of the rest of the clause, and it is what confines a guessed
 		// code to one domain.
 		query = query.Where(
-			fmt.Sprintf(
-				"(%s = ? OR %s = ? OR %s = ? OR %s = ?)",
-				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "domain_id"),
-				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "before_landing_proxy_id"),
-				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "landing_proxy_id"),
-				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "after_landing_proxy_id"),
-			),
+			"(campaign_templates.domain_id = ? OR campaign_templates.before_landing_proxy_id = ? OR campaign_templates.landing_proxy_id = ? OR campaign_templates.after_landing_proxy_id = ?)",
 			domain.ID,
 			domain.ProxyID,
 			domain.ProxyID,
 			domain.ProxyID,
 		)
 	} else {
-		query = query.Where(
-			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "domain_id")),
-			domain.ID,
-		)
+		query = query.Where("campaign_templates.domain_id = ?", domain.ID)
 	}
 
 	res := query.
-		Select(TableColumnAll(database.CAMPAIGN_RECIPIENT_TABLE_NAME)).
+		Select("campaign_recipients.*").
 		First(&dbCampaignRecipient)
 
 	if res.Error != nil {
@@ -956,6 +939,11 @@ func ToCampaignRecipient(row *database.CampaignRecipient) (*model.CampaignRecipi
 	}
 	position := nullable.NewNullableWithValue(row.Position)
 	department := nullable.NewNullableWithValue(row.Department)
+	var templateID nullable.Nullable[uuid.UUID]
+	templateID.SetNull()
+	if row.CampaignTemplateID != nil {
+		templateID = nullable.NewNullableWithValue(*row.CampaignTemplateID)
+	}
 	return &model.CampaignRecipient{
 		ID:               id,
 		CancelledAt:      cancelledAt,
@@ -974,6 +962,7 @@ func ToCampaignRecipient(row *database.CampaignRecipient) (*model.CampaignRecipi
 		NotableEventName: notableEventName,
 		LureCode:         lureCode,
 		LureCodeCustom:   nullable.NewNullableWithValue(row.LureCodeCustom),
+		TemplateID:       templateID,
 	}, nil
 }
 
@@ -1015,4 +1004,113 @@ func (r *CampaignRecipient) GetByMessageID(
 		return nil, gorm.ErrRecordNotFound
 	}
 	return ToCampaignRecipient(&rows[0])
+}
+
+// TemplateAssignment is a campaign recipient's stored template and the fields
+// templates can be mixed by. Sent is true once the recipient was sent an email
+// or has any event.
+type TemplateAssignment struct {
+	ID         uuid.UUID
+	TemplateID *uuid.UUID
+	Department string
+	Position   string
+	City       string
+	Country    string
+	Misc       string
+	Sent       bool
+}
+
+// GetTemplateAssignments returns every recipient of a campaign with its stored
+// template, the fields templates can be mixed by (department, position, city,
+// country, misc) and whether it was already sent to, in one query
+func (r *CampaignRecipient) GetTemplateAssignments(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) ([]TemplateAssignment, error) {
+	var rows []TemplateAssignment
+	res := r.DB.WithContext(ctx).
+		Table("campaign_recipients AS cr").
+		Select(`cr.id AS id, cr.campaign_template_id AS template_id,
+			COALESCE(NULLIF(cr.department, ''), r.department, '') AS department,
+			COALESCE(NULLIF(cr.position, ''), r.position, '') AS position,
+			COALESCE(r.city, '') AS city,
+			COALESCE(r.country, '') AS country,
+			COALESCE(r.misc, '') AS misc,
+			CASE WHEN cr.sent_at IS NOT NULL OR cr.recipient_id IN (
+				SELECT e.recipient_id FROM campaign_events e
+				WHERE e.campaign_id = ? AND e.event_id <> ? AND e.recipient_id IS NOT NULL
+			) THEN 1 ELSE 0 END AS sent`, campaignID.String(), failedSendEventID()).
+		Joins("LEFT JOIN recipients r ON r.id = cr.recipient_id").
+		Where("cr.campaign_id = ?", campaignID.String()).
+		Order("cr.id ASC").
+		Scan(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return rows, nil
+}
+
+// templateMove is one recipient and its new template, sent to sqlite as json
+type templateMove struct {
+	ID         string `json:"i"`
+	TemplateID string `json:"t"`
+}
+
+// setTemplateForIDsTx gives each listed recipient of the campaign the template
+// it is keyed under. Only the template column is touched. The whole list goes
+// in as one bound json value, so one update writes it all. With onlyUnsent a
+// recipient already sent to or with any event other than a failed send is left
+// alone; the events of the campaign are then read once for the whole list.
+func setTemplateForIDsTx(
+	tx *gorm.DB,
+	campaignID *uuid.UUID,
+	idsByTemplate map[uuid.UUID][]uuid.UUID,
+	onlyUnsent bool,
+) error {
+	list := []templateMove{}
+	for templateID, ids := range idsByTemplate {
+		for _, id := range ids {
+			list = append(list, templateMove{ID: id.String(), TemplateID: templateID.String()})
+		}
+	}
+	if len(list) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	// the unary plus keeps sqlite on the primary key for each listed id
+	// instead of walking every row of the campaign or every unsent row
+	if onlyUnsent {
+		return tx.Exec(`UPDATE campaign_recipients
+			SET campaign_template_id = j.value->>'t', updated_at = ?
+			FROM json_each(?) AS j
+			WHERE campaign_recipients.id = j.value->>'i'
+			AND +campaign_recipients.campaign_id = ?
+			AND +campaign_recipients.sent_at IS NULL
+			AND (campaign_recipients.recipient_id IS NULL OR campaign_recipients.recipient_id NOT IN (
+				SELECT e.recipient_id FROM campaign_events e
+				WHERE e.campaign_id = ? AND e.event_id <> ? AND e.recipient_id IS NOT NULL
+			))`,
+			utils.NowRFC3339UTC(), string(payload), campaignID.String(),
+			campaignID.String(), failedSendEventID(),
+		).Error
+	}
+	return tx.Exec(`UPDATE campaign_recipients
+		SET campaign_template_id = j.value->>'t', updated_at = ?
+		FROM json_each(?) AS j
+		WHERE campaign_recipients.id = j.value->>'i'
+		AND +campaign_recipients.campaign_id = ?`,
+		utils.NowRFC3339UTC(), string(payload), campaignID.String(),
+	).Error
+}
+
+// failedSendEventID is the id of the failed send event. A failed send is not a
+// delivery, so it does not keep a recipient on its template.
+func failedSendEventID() string {
+	if id := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_FAILED]; id != nil {
+		return id.String()
+	}
+	return ""
 }

@@ -329,8 +329,8 @@ func (c *Campaign) GetResultStats(g *gin.Context) {
 }
 
 // GetGroupedResultStats returns outcome counts grouped by a recipient attribute.
-// The group is chosen with the `by` query parameter and is restricted to the
-// snapshot columns position and department; small groups are suppressed by the
+// The group is chosen with the `by` query parameter and is restricted to
+// position, department and template; small groups are suppressed by the
 // service so an individual cannot be identified.
 func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
@@ -342,7 +342,7 @@ func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
 		return
 	}
 	groupBy := g.DefaultQuery("by", "position")
-	if groupBy != "position" && groupBy != "department" {
+	if groupBy != "position" && groupBy != "department" && groupBy != repository.GroupedStatByTemplate {
 		c.Response.BadRequest(g)
 		return
 	}
@@ -359,7 +359,8 @@ func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
 }
 
 // GetHasGroupData reports whether the campaign has any position or department data
-// to group on, so the UI can decide whether to offer the grouped breakdown.
+// to group on, and whether it uses more than one template, so the UI can decide
+// which grouped breakdowns to offer.
 func (c *Campaign) GetHasGroupData(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
@@ -373,7 +374,11 @@ func (c *Campaign) GetHasGroupData(g *gin.Context) {
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	c.Response.OK(g, gin.H{"hasGroupData": has})
+	hasTemplate, err := c.CampaignService.HasTemplateGroupData(g.Request.Context(), session, id)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{"hasGroupData": has, "hasTemplateGroupData": hasTemplate})
 }
 
 // GetCampaignStats get campaign stats

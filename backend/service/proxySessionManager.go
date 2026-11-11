@@ -37,6 +37,9 @@ type ProxySession struct {
 	// session is stored, and read on every following request to build the
 	// outbound client. Empty means use the proxy from the yaml config.
 	UpstreamProxy string
+
+	// CampaignTemplateID is the template of the session's recipient
+	CampaignTemplateID *uuid.UUID
 }
 
 // ProxySessionManager manages proxy session lifecycle and storage

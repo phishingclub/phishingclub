@@ -1119,7 +1119,7 @@ func (s *Server) checkAndServePhishingPage(
 		)
 		return false, nil
 	}
-	templateID, err := campaign.TemplateID.Get()
+	templateID, err := campaignRecipient.EffectiveTemplateID(campaign)
 	if err != nil {
 		s.logger.Debugw("campaign has no template",
 			"error", err,
@@ -1133,6 +1133,13 @@ func (s *Server) checkAndServePhishingPage(
 			WithIdentifier: true,
 		},
 	)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// the recipient's template was deleted, which is the same as no template
+		s.logger.Debugw("campaign template not found",
+			"templateID", templateID.String(),
+		)
+		return false, nil
+	}
 	if err != nil {
 		s.logger.Debugw("failed to get campaign template",
 			"templateID", templateID.String(),
@@ -2254,7 +2261,7 @@ func (s *Server) renderDenyPage(
 	}
 
 	// get campaign template with email and nil check
-	templateID, err := campaign.TemplateID.Get()
+	templateID, err := campaignRecipient.EffectiveTemplateID(campaign)
 	if err != nil {
 		return fmt.Errorf("campaign has no template ID: %s", err)
 	}
@@ -2266,6 +2273,11 @@ func (s *Server) renderDenyPage(
 			WithIdentifier: true,
 		},
 	)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// the recipient's template was deleted, so there is nothing to render
+		c.AbortWithStatus(http.StatusNotFound)
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("failed to get campaign template: %s", err)
 	}

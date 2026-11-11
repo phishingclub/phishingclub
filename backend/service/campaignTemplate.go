@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/go-errors/errors"
 
@@ -337,6 +339,14 @@ func (c *CampaignTemplate) RemoveDomainByDomainID(
 		return err
 	}
 
+	affectedIDs := []string{}
+	for _, campaign := range campaignsAffected {
+		if v, err := campaign.ID.Get(); err == nil {
+			affectedIDs = append(affectedIDs, v.String())
+		}
+	}
+	// the campaigns closed by this removal
+	ae.Details["campaignIDs"] = affectedIDs
 	for _, campaign := range campaignsAffected {
 		if !campaign.IsActive() {
 			continue
@@ -624,6 +634,7 @@ func (c *CampaignTemplate) UpdateByID(
 	if v, err := incoming.AfterLandingPageRedirectURL.Get(); err == nil {
 		storedRedirectURL = v.String()
 	}
+	storedMode, storedAlgorithm, storedLength, storedTraining := lureSettingsOf(incoming)
 	// the company is never changed by an update, so the stored company decides
 	// which records the request may reference
 	companyID := companyIDPtr(incoming.CompanyID)
@@ -772,6 +783,32 @@ func (c *CampaignTemplate) UpdateByID(
 	if v, err := campaignTemplate.IsTraining.Get(); err == nil {
 		incoming.IsTraining.Set(v)
 	}
+	// templates in one pool must keep the same lure and training settings
+	mode, algorithm, length, training := lureSettingsOf(incoming)
+	if mode != storedMode || algorithm != storedAlgorithm || length != storedLength || training != storedTraining {
+		names, err := c.CampaignRepository.GetOpenCampaignNamesSharingTemplate(ctx, id, 4)
+		if err != nil {
+			c.Logger.Errorw("failed to check campaign template pools", "error", err)
+			return err
+		}
+		if len(names) > 0 {
+			listed := names
+			if len(listed) > 3 {
+				listed = listed[:3]
+			}
+			text := strings.Join(listed, ", ")
+			if len(names) > 3 {
+				text += " and more"
+			}
+			return validate.WrapErrorWithField(
+				fmt.Errorf(
+					"the lure and training settings can not change while the template shares a pool with other templates in open campaigns: %s",
+					text,
+				),
+				"lureURLMode",
+			)
+		}
+	}
 	// validate
 	if err := incoming.ValidateUpdate(storedRedirectURL); err != nil {
 		c.Logger.Errorw("failed to validate campaign template", "error", err)
@@ -821,35 +858,63 @@ func (c *CampaignTemplate) DeleteByID(
 			"failed to get campaign affected by template deletion",
 			"error", err,
 		)
+		ae.Details["error"] = "failed to find the campaigns using the template"
+		c.AuditLogAuthorized(ae)
 		return err
 	}
+	affectedIDs := []string{}
+	for _, campaign := range campaignsAffected {
+		if v, err := campaign.ID.Get(); err == nil {
+			affectedIDs = append(affectedIDs, v.String())
+		}
+	}
+	// the campaigns closed here or changed by the pool removal below
+	ae.Details["campaignIDs"] = affectedIDs
 	for _, campaign := range campaignsAffected {
 		if !campaign.IsActive() {
 			continue
 		}
-		err := campaign.Close()
+		// a campaign that loses a template closes now, also when it already
+		// had a later close time
+		err := campaign.CloseNow()
 		if err != nil {
 			c.Logger.Errorw("failed to close campaign", "error", err)
 		}
 		campaignID := campaign.ID.MustGet()
-		err = c.CampaignRepository.UpdateByID(
-			ctx,
-			&campaignID,
-			campaign,
-		)
+		// only the close time is written, so a sender or pool change that ran
+		// since this campaign was loaded is not undone
+		closeAt, getErr := campaign.CloseAt.Get()
+		if getErr != nil {
+			continue
+		}
+		err = c.CampaignRepository.SetCloseAtByID(ctx, &campaignID, closeAt)
 		if err != nil {
+			// the template stays, so no campaign keeps running on a deleted one
 			c.Logger.Errorw("failed to update closed campaign", "error", err)
+			ae.Details["error"] = "failed to close a campaign using the template"
+			c.AuditLogAuthorized(ae)
+			return err
 		}
 	}
-	// remove the campaign template id from campaigns
-	err = c.CampaignRepository.RemoveCampaignTemplateIDFromCampaigns(
+	// remove the template from every campaign pool. a campaign whose first
+	// template it was moves to the next one in its pool, or has none.
+	err = c.CampaignRepository.RemoveTemplateFromPools(
 		ctx,
 		id,
 	)
+	if err != nil {
+		c.Logger.Errorw("failed to remove template from campaign pools", "error", err)
+		// the campaigns above are already closed, so that is audited
+		ae.Details["error"] = "failed to remove the template from campaign pools"
+		c.AuditLogAuthorized(ae)
+		return err
+	}
 	// delete the campaign template
 	err = c.CampaignTemplateRepository.DeleteByID(ctx, id)
 	if err != nil {
 		c.Logger.Errorw("failed to delete campaign template by id", "error", err)
+		ae.Details["error"] = "failed to delete the template"
+		c.AuditLogAuthorized(ae)
 		return err
 	}
 	c.AuditLogAuthorized(ae)
