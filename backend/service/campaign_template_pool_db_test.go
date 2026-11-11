@@ -425,6 +425,74 @@ func TestScheduleSelfManagedPicksLeastUsed(t *testing.T) {
 	}
 }
 
+// TestGroupedStatsByTemplateKeepsSmallGroups checks templates used by fewer than
+// three people are shown on their own, not merged into Other (small)
+func TestGroupedStatsByTemplateKeepsSmallGroups(t *testing.T) {
+	for _, anonymous := range []bool{false, true} {
+		f := newPoolFixture(t)
+		a := f.template(templateOpts{nameSuffix: " a"})
+		b := f.template(templateOpts{nameSuffix: " b"})
+		campaignID := f.campaign([]uuid.UUID{a, b}, false, anonymous)
+		onA := f.seedCampaignRecipient(campaignID, &a, true, "")
+		f.seedCampaignRecipient(campaignID, &b, true, "")
+		f.event(campaignID, onA, data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED)
+
+		stats, err := f.svc.GetGroupedResultStats(f.ctx, f.session, &campaignID, repository.GroupedStatByTemplate)
+		if err != nil {
+			t.Fatalf("grouped stats: %v", err)
+		}
+		if len(stats) != 2 {
+			t.Fatalf("anonymous=%v: want 2 template rows, got %d", anonymous, len(stats))
+		}
+		byID := map[string]model.CampaignGroupStat{}
+		for _, s := range stats {
+			if s.Group == OTHER_GROUP_LABEL || s.Suppressed {
+				t.Fatalf("anonymous=%v: template merged into a small group row", anonymous)
+			}
+			byID[s.GroupID] = s
+		}
+		ga, gb := byID[a.String()], byID[b.String()]
+		if ga.Total != 1 || gb.Total != 1 {
+			t.Fatalf("anonymous=%v: totals a=%d b=%d, want 1 and 1", anonymous, ga.Total, gb.Total)
+		}
+		if anonymous {
+			if ga.Clicked != -1 || gb.Clicked != -1 {
+				t.Fatalf("anonymous campaign shows outcomes: a=%d b=%d", ga.Clicked, gb.Clicked)
+			}
+		} else if ga.Clicked != 1 || gb.Clicked != 0 {
+			t.Fatalf("clicked a=%d b=%d, want 1 and 0", ga.Clicked, gb.Clicked)
+		}
+	}
+}
+
+// TestDepartmentGroupsMergeOnlyWhenAnonymous checks small departments are merged
+// into Other (small) on an anonymous campaign and shown as they are on a normal one
+func TestDepartmentGroupsMergeOnlyWhenAnonymous(t *testing.T) {
+	for _, anonymous := range []bool{false, true} {
+		f := newPoolFixture(t)
+		a := f.template(templateOpts{})
+		campaignID := f.campaign([]uuid.UUID{a}, false, anonymous)
+		for _, dept := range []string{"Economy", "Economy", "Marketing", "Marketing"} {
+			f.seedCampaignRecipient(campaignID, &a, true, dept)
+		}
+		stats, err := f.svc.GetGroupedResultStats(f.ctx, f.session, &campaignID, "department")
+		if err != nil {
+			t.Fatalf("grouped stats: %v", err)
+		}
+		names := map[string]int{}
+		for _, s := range stats {
+			names[s.Group] = s.Total
+		}
+		if anonymous {
+			if len(stats) != 1 || names[OTHER_GROUP_LABEL] != 4 {
+				t.Fatalf("anonymous: want one merged group of 4, got %v", names)
+			}
+		} else if len(stats) != 2 || names["Economy"] != 2 || names["Marketing"] != 2 {
+			t.Fatalf("normal: want Economy and Marketing of 2, got %v", names)
+		}
+	}
+}
+
 // TestGroupedStatsByTemplate checks results group by each recipient's template,
 // that rows without one count under the first template, and that an anonymous
 // campaign shows group sizes only

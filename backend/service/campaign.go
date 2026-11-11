@@ -1546,7 +1546,40 @@ func (c *Campaign) GetGroupedResultStats(
 		return nil, errs.Wrap(err)
 	}
 	// no audit on read
-	return suppressSmallGroups(stats, isAnon || isAnonymized), nil
+	if groupColumn == repository.GroupedStatByTemplate {
+		return templateGroupStats(stats, isAnon || isAnonymized), nil
+	}
+	return groupStats(stats, isAnon || isAnonymized), nil
+}
+
+// groupStats prepares results per position or department. An anonymous or
+// anonymized campaign merges small groups and shows sizes only, so no one can be
+// singled out. A normal campaign already lists each recipient's result, in the
+// app and in the report, so its groups are shown as they are.
+func groupStats(stats []model.CampaignGroupStat, anonymous bool) []model.CampaignGroupStat {
+	if !anonymous {
+		return stats
+	}
+	return suppressSmallGroups(stats, true)
+}
+
+// templateGroupStats returns results per template without merging small groups.
+// A template says nothing about the person who got it, and a normal campaign
+// already lists each recipient's template, so a small template group singles no
+// one out. An anonymous campaign never shows which person got which template, and
+// with hideOutcomes set only the group sizes are shown.
+func templateGroupStats(stats []model.CampaignGroupStat, hideOutcomes bool) []model.CampaignGroupStat {
+	if !hideOutcomes {
+		return stats
+	}
+	for i := range stats {
+		stats[i].Clicked = -1
+		stats[i].Submitted = -1
+		stats[i].Reported = -1
+		stats[i].TrainingStarted = -1
+		stats[i].TrainingCompleted = -1
+	}
+	return stats
 }
 
 // HasGroupData reports whether the campaign's recipients carry any position or
@@ -1599,11 +1632,9 @@ func hasNamedGroups(stats []model.CampaignGroupStat) bool {
 // suppressSmallGroups merges groups below the floor into an "Other" bucket, then
 // absorbs the smallest shown groups until that bucket also reaches the floor, so a
 // small group cannot be recovered by subtracting the shown groups from the total.
-// When hideOutcomes is set (anonymized campaigns) every per group outcome is withheld
-// and only the group sizes are shown: publishing per group outcomes alongside the
-// campaign wide totals lets a shown or dashed column be back solved to an
-// individual's result, so anonymized campaigns expose group sizes only. Normal and
-// training campaigns keep exact counts.
+// When hideOutcomes is set every per group outcome is withheld and only the group
+// sizes are shown: publishing per group outcomes alongside the campaign wide totals
+// lets a shown or dashed column be back solved to an individual's result.
 func suppressSmallGroups(stats []model.CampaignGroupStat, hideOutcomes bool) []model.CampaignGroupStat {
 	shown := []model.CampaignGroupStat{}
 	var other model.CampaignGroupStat
@@ -7463,12 +7494,12 @@ func (c *Campaign) buildReportHTMLWithData(
 	if raw, gErr := c.CampaignRepository.GetGroupedResultStats(ctx, campaignID, "department"); gErr != nil {
 		c.Logger.Warnw("failed to get department grouped stats for report", "error", gErr)
 	} else {
-		departmentGroups = suppressSmallGroups(raw, isAnon || isAnonymized)
+		departmentGroups = groupStats(raw, isAnon || isAnonymized)
 	}
 	if raw, gErr := c.CampaignRepository.GetGroupedResultStats(ctx, campaignID, "position"); gErr != nil {
 		c.Logger.Warnw("failed to get position grouped stats for report", "error", gErr)
 	} else {
-		positionGroups = suppressSmallGroups(raw, isAnon || isAnonymized)
+		positionGroups = groupStats(raw, isAnon || isAnonymized)
 	}
 	if hasNamedGroups(departmentGroups) {
 		groups, groupsBy = departmentGroups, "Department"
