@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/cache"
@@ -305,4 +307,282 @@ func sameCompanyScope(a, b *uuid.UUID) bool {
 		return a == nil && b == nil
 	}
 	return *a == *b
+}
+
+// reportedCSVMaxErrors is how many failed rows an import lists. The rest are
+// only counted.
+const reportedCSVMaxErrors = 5
+
+// reportedCSVMaxValueRunes caps how much of a cell is quoted back in a reason
+const reportedCSVMaxValueRunes = 64
+
+// reportedDateLayouts are the date formats a reported CSV may use, tried in
+// order. A value without a time zone is read as UTC.
+var reportedDateLayouts = []string{
+	// ISO 8601 with Z or an offset such as +02:00, fractional seconds optional
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"2006-01-02 15:04",
+	"2006-01-02",
+	// month first, leading zeros optional
+	"1/2/2006 15:04:05",
+	"1/2/2006 15:04",
+	"1/2/2006",
+	// day first, leading zeros optional
+	"2-1-2006 15:04:05",
+	"2-1-2006 15:04",
+	"2-1-2006",
+	"2006/01/02 15:04:05",
+	"2006/01/02 15:04",
+	"2006/01/02",
+}
+
+// parseReportedDate reads a report date in one of reportedDateLayouts
+func parseReportedDate(value string) (time.Time, error) {
+	for _, layout := range reportedDateLayouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, errors.New("unsupported date format")
+}
+
+// ReportedCSVRow is one data row of a reported CSV and the line it starts on
+type ReportedCSVRow struct {
+	Line   int
+	Fields []string
+}
+
+// ReportedCSVRowError is why a row of a reported CSV was not imported
+type ReportedCSVRowError struct {
+	Line   int    `json:"line"`
+	Reason string `json:"reason"`
+}
+
+// ReportedCSVResult is the outcome of a reported CSV import
+type ReportedCSVResult struct {
+	// Processed is the number of rows marked as reported
+	Processed int `json:"processed"`
+	// Skipped is every row that was not marked, failed or already reported
+	Skipped int `json:"skipped"`
+	// AlreadyReported is the number of rows whose recipient had already
+	// reported. Always 0 for an anonymous campaign, where those rows count as
+	// processed so the import does not tell who reported.
+	AlreadyReported int `json:"alreadyReported"`
+	// Failed is the number of rows that could not be imported
+	Failed int `json:"failed"`
+	// Errors are the first failed rows, at most reportedCSVMaxErrors
+	Errors []ReportedCSVRowError `json:"errors"`
+}
+
+func (r *ReportedCSVResult) fail(line int, reason string) {
+	r.Failed++
+	r.Skipped++
+	if len(r.Errors) < reportedCSVMaxErrors {
+		r.Errors = append(r.Errors, ReportedCSVRowError{Line: line, Reason: reason})
+	}
+}
+
+// quoteCSVValue quotes a cell for a reason, cut to a readable length
+func quoteCSVValue(value string) string {
+	if utf8.RuneCountInString(value) > reportedCSVMaxValueRunes {
+		value = string([]rune(value)[:reportedCSVMaxValueRunes]) + "..."
+	}
+	return strconv.Quote(value)
+}
+
+// reportedCSVRecipients finds the campaign recipient for an email. An exact
+// match wins, otherwise a match that ignores case is used when only one
+// recipient has that email.
+type reportedCSVRecipients struct {
+	exact  map[string]*model.CampaignRecipient
+	folded map[string][]*model.CampaignRecipient
+}
+
+// ambiguous is true when no exact match exists and more than one recipient
+// has the email in another case.
+func (r *reportedCSVRecipients) find(email string) (cr *model.CampaignRecipient, ambiguous bool) {
+	if cr, ok := r.exact[email]; ok {
+		return cr, false
+	}
+	crs := r.folded[strings.ToLower(email)]
+	if len(crs) == 1 {
+		return crs[0], false
+	}
+	return nil, len(crs) > 1
+}
+
+// ProcessReportedCSV marks the campaign recipients in a CSV as reported at the
+// date in the row. Rows that can not be imported are counted and the first of
+// them are returned with the reason, the other rows are still imported.
+func (c *Campaign) ProcessReportedCSV(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+	header []string,
+	rows []ReportedCSVRow,
+	emailColumnIndex int,
+	dateColumnIndex int,
+) (*ReportedCSVResult, error) {
+	ae := NewAuditEvent("Campaign.ProcessReportedCSV", session)
+	ae.Details["campaignID"] = campaignID.String()
+
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+
+	campaign, err := c.CampaignRepository.GetByID(ctx, campaignID, &repository.CampaignOption{})
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	// anonymizing removes the link from campaign recipients to recipients, so no
+	// row could be matched
+	if campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull() {
+		return nil, errs.NewValidationError(errors.New("the campaign is anonymized, reports can not be imported"))
+	}
+
+	if len(rows) == 0 {
+		return nil, errs.NewValidationError(errors.New("CSV must have at least a header row and one data row"))
+	}
+	if emailColumnIndex < 0 || emailColumnIndex >= len(header) {
+		return nil, errs.NewValidationError(errors.New("invalid email column index"))
+	}
+	if dateColumnIndex < 0 || dateColumnIndex >= len(header) {
+		return nil, errs.NewValidationError(errors.New("invalid date column index"))
+	}
+
+	campaignRecipients, err := c.CampaignRecipientRepository.GetByCampaignID(
+		ctx,
+		campaignID,
+		&repository.CampaignRecipientOption{WithRecipient: true},
+	)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign recipients", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	recipients := reportedCSVRecipients{
+		exact:  map[string]*model.CampaignRecipient{},
+		folded: map[string][]*model.CampaignRecipient{},
+	}
+	for _, cr := range campaignRecipients.Rows {
+		if cr.RecipientID.IsNull() || cr.Recipient == nil {
+			continue
+		}
+		email, err := cr.Recipient.Email.Get()
+		if err != nil {
+			continue
+		}
+		e := email.String()
+		recipients.exact[e] = cr
+		folded := strings.ToLower(e)
+		recipients.folded[folded] = append(recipients.folded[folded], cr)
+	}
+
+	anonymous := campaignAnonymous(campaign)
+	reportedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
+	result := &ReportedCSVResult{Errors: []ReportedCSVRowError{}}
+
+	for _, row := range rows {
+		if len(row.Fields) <= emailColumnIndex || len(row.Fields) <= dateColumnIndex {
+			result.fail(row.Line, "Missing email or date column")
+			continue
+		}
+		reportedByEmail := strings.TrimSpace(row.Fields[emailColumnIndex])
+		dateReported := strings.TrimSpace(row.Fields[dateColumnIndex])
+		if reportedByEmail == "" {
+			result.fail(row.Line, "Email is empty")
+			continue
+		}
+		if dateReported == "" {
+			result.fail(row.Line, "Date is empty")
+			continue
+		}
+		parsedDate, err := parseReportedDate(dateReported)
+		if err != nil {
+			result.fail(row.Line, "Invalid date "+quoteCSVValue(dateReported))
+			continue
+		}
+		if _, err := vo.NewEmail(reportedByEmail); err != nil {
+			result.fail(row.Line, "Invalid email "+quoteCSVValue(reportedByEmail))
+			continue
+		}
+		campaignRecipient, ambiguous := recipients.find(reportedByEmail)
+		if ambiguous {
+			result.fail(row.Line, quoteCSVValue(reportedByEmail)+" matches more than one recipient, use the exact case")
+			continue
+		}
+		if campaignRecipient == nil {
+			result.fail(row.Line, quoteCSVValue(reportedByEmail)+" is not a recipient of this campaign")
+			continue
+		}
+		recipientID := campaignRecipient.RecipientID.MustGet()
+
+		// an anonymous campaign's events carry the pseudonym rather than a
+		// recipient id, so dedup on that
+		var alreadyReported bool
+		if aid, aErr := campaignRecipient.AnonymizedID.Get(); aErr == nil {
+			alreadyReported, err = c.CampaignRepository.HasEventByAnonymizedID(ctx, campaignID, &aid, reportedEventID)
+		} else {
+			alreadyReported, err = c.CampaignRepository.HasEvent(ctx, campaignID, &recipientID, reportedEventID)
+		}
+		if err != nil {
+			c.Logger.Errorw("failed to check existing reported event", "error", err, "line", row.Line)
+			result.fail(row.Line, "Could not be saved")
+			continue
+		}
+		if alreadyReported {
+			if anonymous {
+				result.Processed++
+			} else {
+				result.AlreadyReported++
+				result.Skipped++
+			}
+			continue
+		}
+
+		eventID := uuid.New()
+		campaignEvent := &model.CampaignEvent{
+			ID:          &eventID,
+			CampaignID:  campaignID,
+			RecipientID: &recipientID,
+			IP:          vo.NewEmptyOptionalString64(),
+			UserAgent:   vo.NewEmptyOptionalString255(),
+			EventID:     reportedEventID,
+			Data:        vo.NewEmptyOptionalString1MB(),
+			Metadata:    vo.NewEmptyOptionalString1MB(),
+		}
+		anonymizeEventForRecipient(anonymous, campaignRecipient, campaignEvent)
+		if err := c.saveReportedEvent(campaignEvent, parsedDate); err != nil {
+			c.Logger.Errorw("failed to save reported event", "error", err, "line", row.Line)
+			result.fail(row.Line, "Could not be saved")
+			continue
+		}
+		if err := c.SetNotableCampaignRecipientEvent(
+			ctx,
+			campaignRecipient,
+			data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
+		); err != nil {
+			c.Logger.Errorw("failed to update notable event", "error", err)
+		}
+		result.Processed++
+	}
+
+	ae.Details["processed"] = result.Processed
+	ae.Details["skipped"] = result.Skipped
+	ae.Details["failed"] = result.Failed
+	if !anonymous {
+		ae.Details["alreadyReported"] = result.AlreadyReported
+	}
+	c.AuditLogAuthorized(ae)
+
+	return result, nil
 }

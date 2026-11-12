@@ -554,6 +554,28 @@ export class API {
 	 */
 	campaign = {
 		/**
+		 * Import who reported the campaign email from a CSV file. Column indexes
+		 * are zero based and point at the email and report date columns.
+		 * @param {string} campaignID
+		 * @param {File} file
+		 * @param {number} emailColumn
+		 * @param {number} dateColumn
+		 * @returns {Promise<ApiResponse>}
+		 */
+		uploadReported: async (campaignID, file, emailColumn, dateColumn) => {
+			const formData = new FormData();
+			formData.append('file', file);
+			const params = new URLSearchParams({
+				emailColumn: String(Number(emailColumn)),
+				dateColumn: String(Number(dateColumn))
+			});
+			return await postMultipart(
+				this.getPath(`/campaign/${campaignID}/upload/reported?${params.toString()}`),
+				formData
+			);
+		},
+
+		/**
 		 * @param {string} campaignID
 		 * @returns {Promise<ApiResponse>}
 		 */

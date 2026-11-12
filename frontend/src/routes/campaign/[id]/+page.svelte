@@ -66,6 +66,7 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import FormError from '$lib/components/FormError.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import { resourceContext } from '$lib/store/resourceContext';
 	import RemoteBrowserStream from '$lib/components/remote-browser/RemoteBrowserStream.svelte';
 	import LiveSessionBadgeDropdown from '$lib/components/remote-browser/LiveSessionBadgeDropdown.svelte';
@@ -448,6 +449,22 @@
 	let reportedCSVPreview = [];
 	let reportedEmailColumn = '';
 	let reportedDateColumn = '';
+	// option labels for the column selects, one per column in file order, so the
+	// label position is the column index sent to the server
+	let reportedCSVColumnLabels = [];
+	// set when an import finished with failed rows, switches the modal to a result view
+	let reportedCSVResult = null;
+	// whole file error from the server, shown in the form
+	let reportedCSVError = '';
+	$: reportedCSVErrorsHeading = (() => {
+		if (!reportedCSVResult) return '';
+		const shown = reportedCSVResult.errors.length;
+		const total = reportedCSVResult.failed;
+		if (total > shown) {
+			return `Some rows could not be imported. First ${shown} of ${total} errors:`;
+		}
+		return `Some rows could not be imported. ${total === 1 ? 'Error' : 'Errors'}:`;
+	})();
 	let pendingEmailPreviewRecipient = null;
 	let storedCookieData = '';
 	let storedTokenData = '';
@@ -2113,6 +2130,8 @@
 		papaparse.parse(file, {
 			preview: 5, // preview first 5 rows
 			skipEmptyLines: true,
+			// the server only splits on commas, so the preview must too
+			delimiter: ',',
 			complete: (results) => {
 				if (!results.data || results.data.length < 2) {
 					addToast('CSV file must have headers and at least one data row', 'Error');
@@ -2123,8 +2142,11 @@
 				reportedCSVFile = file;
 				reportedCSVHeaders = results.data[0]; // first row is headers
 				reportedCSVPreview = results.data.slice(1); // remaining rows are data preview
+				reportedCSVColumnLabels = toReportedColumnLabels(reportedCSVHeaders);
 				reportedEmailColumn = '';
 				reportedDateColumn = '';
+				reportedCSVResult = null;
+				reportedCSVError = '';
 				isReportedCSVModalVisible = true;
 
 				// clear the file input
@@ -2137,62 +2159,96 @@
 		});
 	};
 
+	// build one unique label per column. Empty or repeated headers get the
+	// column number added so each label points at exactly one column.
+	const toReportedColumnLabels = (headers) => {
+		const counts = {};
+		for (const h of headers) {
+			const name = String(h ?? '').trim();
+			counts[name] = (counts[name] || 0) + 1;
+		}
+		const used = new Set();
+		return headers.map((h, i) => {
+			const name = String(h ?? '').trim();
+			let label = name;
+			if (!name) {
+				label = `(column ${i + 1})`;
+			} else if (counts[name] > 1) {
+				label = `${name} (column ${i + 1})`;
+			}
+			// a header could already look like a generated label, keep labels unique
+			while (used.has(label)) {
+				label = `${label} (column ${i + 1})`;
+			}
+			used.add(label);
+			return label;
+		});
+	};
+
 	const closeReportedCSVModal = () => {
 		isReportedCSVModalVisible = false;
 		reportedCSVFile = null;
 		reportedCSVHeaders = [];
 		reportedCSVPreview = [];
+		reportedCSVColumnLabels = [];
 		reportedEmailColumn = '';
 		reportedDateColumn = '';
+		reportedCSVResult = null;
+		reportedCSVError = '';
 	};
 
 	const onConfirmUploadReportedCSV = async () => {
 		if (!reportedCSVFile) return;
+		reportedCSVError = '';
 
-		// validate that columns are selected
-		if (!reportedEmailColumn || !reportedDateColumn) {
-			addToast('Please select both email and date columns', 'Error');
+		// the selected label maps back to its column index
+		const emailColIndex = reportedCSVColumnLabels.indexOf(reportedEmailColumn);
+		const dateColIndex = reportedCSVColumnLabels.indexOf(reportedDateColumn);
+		if (emailColIndex < 0 || dateColIndex < 0) {
+			reportedCSVError = 'Select both the email and the date column from the list';
 			return;
 		}
-
-		const formData = new FormData();
-		formData.append('file', reportedCSVFile);
-
-		// build URL with column indices
-		const emailColIndex = reportedCSVHeaders.indexOf(reportedEmailColumn);
-		const dateColIndex = reportedCSVHeaders.indexOf(reportedDateColumn);
-
-		let url = `/api/v1/campaign/${$page.params.id}/upload/reported?emailColumn=${emailColIndex}&dateColumn=${dateColIndex}`;
 
 		try {
 			isReportedCSVSubmitting = true;
 			showIsLoading();
-			const response = await fetch(url, {
-				method: 'POST',
-				body: formData,
-				credentials: 'include'
-			});
-
-			const result = await response.json();
-
-			if (response.ok && result.success) {
-				addToast(
-					`Processed ${result.data.processed} reported entries${result.data.skipped > 0 ? `, skipped ${result.data.skipped} invalid entries` : ''}`,
-					'Success'
-				);
-				// refresh the stats, events, and recipients table
-				await setResults();
-				await refreshCampaignRecipients();
-				await getEvents();
-				closeReportedCSVModal();
-			} else {
-				// handle validation errors
-				const errorMessage = result.error || `HTTP ${response.status}`;
-				addToast(`Upload failed: ${errorMessage}`, 'Error');
+			const res = await api.campaign.uploadReported(
+				$page.params.id,
+				reportedCSVFile,
+				emailColIndex,
+				dateColIndex
+			);
+			if (!res.success) {
+				reportedCSVError = res.error || `Import failed (HTTP ${res.statusCode})`;
+				return;
 			}
+			const data = res.data || {};
+			// refresh the stats, events, and recipients table
+			await setResults();
+			await refreshCampaignRecipients();
+			await getEvents();
+
+			const processed = data.processed || 0;
+			const already = data.alreadyReported || 0;
+			const failed = data.failed || 0;
+			if (failed === 0) {
+				let msg = `Marked ${processed} ${processed === 1 ? 'recipient' : 'recipients'} as reported`;
+				if (already > 0) {
+					msg += `, ${already} already reported`;
+				}
+				addToast(msg, 'Success');
+				closeReportedCSVModal();
+				return;
+			}
+			reportedCSVResult = {
+				processed,
+				alreadyReported: already,
+				failed,
+				errors: Array.isArray(data.errors) ? data.errors : []
+			};
 		} catch (error) {
 			console.error('Upload error:', error);
-			addToast('Network error: Failed to upload CSV', 'Error');
+			reportedCSVError = 'Network error: failed to upload the CSV file';
 		} finally {
 			isReportedCSVSubmitting = false;
 			hideIsLoading();
@@ -4699,48 +4755,137 @@
 		isSubmitting={isReportedCSVSubmitting}
 		noAutoFocus={true}
 	>
-		<FormGrid on:submit={onConfirmUploadReportedCSV} isSubmitting={isReportedCSVSubmitting}>
-			<FormColumns>
-				<FormColumn>
-					<p class="text-sm text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
-						Pick the columns with the email address and the report date.
-					</p>
+		{#if reportedCSVResult}
+			<div class="p-6 max-h-[80vh] overflow-y-auto text-gray-700 dark:text-gray-300">
+				<div class="space-y-6">
+					<ul class="space-y-1">
+						<li>Marked as reported: {reportedCSVResult.processed}</li>
+						{#if reportedCSVResult.alreadyReported > 0}
+							<li>Already reported: {reportedCSVResult.alreadyReported}</li>
+						{/if}
+						<li>Could not be imported: {reportedCSVResult.failed}</li>
+					</ul>
 
-					<TextFieldSelect
-						required
-						id="reported-email-column"
-						bind:value={reportedEmailColumn}
-						options={reportedCSVHeaders}
-						placeholder="Select email column...">Email Column</TextFieldSelect
-					>
-
-					<TextFieldSelect
-						required
-						id="reported-date-column"
-						bind:value={reportedDateColumn}
-						options={reportedCSVHeaders}
-						placeholder="Select date column...">Date Column</TextFieldSelect
-					>
-				</FormColumn>
-				<FormColumn overflowX={true}>
-					<Table
-						columns={reportedCSVHeaders.map((h) => ({ column: h, size: 'small' }))}
-						hasData={!!reportedCSVPreview.length}
-						plural="rows"
-					>
-						{#each reportedCSVPreview as row}
-							<TableRow>
-								{#each row as cell}
-									<TableCell value={cell} />
+					<div class="border-t border-gray-200 dark:border-gray-700 pt-6">
+						{#if reportedCSVResult.errors.length > 0}
+							<p class="text-sm">{reportedCSVErrorsHeading}</p>
+							<div
+								class="mt-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 space-y-1"
+							>
+								{#each reportedCSVResult.errors as err}
+									<div class="py-2 px-3 text-sm text-gray-900 dark:text-gray-100 break-words">
+										<span class="font-semibold">Line {err.line}:</span>
+										{err.reason}
+									</div>
 								{/each}
-								<TableCellEmpty />
-							</TableRow>
-						{/each}
-					</Table>
-				</FormColumn>
-			</FormColumns>
-			<FormFooter closeModal={closeReportedCSVModal} isSubmitting={isReportedCSVSubmitting} />
-		</FormGrid>
+							</div>
+						{:else}
+							<p class="text-sm">Some rows could not be imported.</p>
+						{/if}
+						<p class="mt-3 text-sm text-gray-500 dark:text-gray-400">
+							Fix these rows in the file and import it again. Rows already marked as
+							reported are not counted twice.
+						</p>
+					</div>
+				</div>
+				<div class="mt-6 flex justify-end">
+					<Button on:click={closeReportedCSVModal}>Close</Button>
+				</div>
+			</div>
+		{:else}
+			<FormGrid on:submit={onConfirmUploadReportedCSV} isSubmitting={isReportedCSVSubmitting}>
+				<FormColumns>
+					<FormColumn>
+						<p class="text-sm text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
+							Pick the columns with the email address and the report date.
+						</p>
+
+						<TextFieldSelect
+							required
+							id="reported-email-column"
+							bind:value={reportedEmailColumn}
+							options={reportedCSVColumnLabels}
+							placeholder="Select email column...">Email Column</TextFieldSelect
+						>
+
+						<TextFieldSelect
+							required
+							id="reported-date-column"
+							bind:value={reportedDateColumn}
+							options={reportedCSVColumnLabels}
+							placeholder="Select date column...">Date Column</TextFieldSelect
+						>
+					</FormColumn>
+					<FormColumn overflowX={true}>
+						<Table
+							columns={reportedCSVColumnLabels.map((h) => ({ column: h, size: 'small' }))}
+							hasData={!!reportedCSVPreview.length}
+							plural="rows"
+						>
+							{#each reportedCSVPreview as row}
+								<TableRow>
+									{#each row as cell}
+										<TableCell value={cell} />
+									{/each}
+									<TableCellEmpty />
+								</TableRow>
+							{/each}
+						</Table>
+					</FormColumn>
+				</FormColumns>
+				<div class="px-1 sm:px-6 pb-4">
+					<details class="text-sm text-gray-600 dark:text-gray-300 group">
+						<summary
+							class="cursor-pointer select-none font-semibold text-pc-darkblue dark:text-white list-none flex items-center gap-2"
+						>
+							<svg
+								class="w-4 h-4 transition-transform group-open:rotate-90"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+								aria-hidden="true"
+							>
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+							</svg>
+							Supported date formats
+						</summary>
+						<ul class="mt-2 ml-6 space-y-1 list-disc">
+							<li>
+								ISO 8601: <code>2024-03-05T14:30:00Z</code>,
+								<code>2024-03-05T14:30:00+02:00</code> or <code>2024-03-05T14:30:00</code>.
+								Fractional seconds are fine.
+							</li>
+							<li>
+								<code>YYYY-MM-DD HH:MM:SS</code>, <code>YYYY-MM-DD HH:MM</code>,
+								<code>YYYY-MM-DD</code>
+							</li>
+							<li>
+								<code>MM/DD/YYYY</code> month first, e.g. <code>3/5/2024 9:05</code>
+							</li>
+							<li><code>DD-MM-YYYY</code> day first</li>
+							<li><code>YYYY/MM/DD</code></li>
+						</ul>
+						<p class="mt-2">
+							The last three take an optional <code>HH:MM</code> or <code>HH:MM:SS</code> time.
+							Leading zeros are optional in <code>MM/DD/YYYY</code> and <code>DD-MM-YYYY</code>.
+							A time without a zone is read as UTC.
+							<code>DD/MM/YYYY</code> with slashes is read month first, so use dashes for day
+							first.
+						</p>
+					</details>
+				</div>
+				{#if reportedCSVError}
+					<div class="mt-4">
+						<FormError message={reportedCSVError} />
+					</div>
+				{/if}
+				<FormFooter
+					closeModal={closeReportedCSVModal}
+					isSubmitting={isReportedCSVSubmitting}
+					okText="Import"
+				/>
+			</FormGrid>
+		{/if}
 	</Modal>
 	<DeleteAlert
 		name={`${deleteEventValues.eventName} event for ${deleteEventValues.name}`}
