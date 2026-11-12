@@ -57,3 +57,17 @@ func TestReportRendersUsePlainRecipientEmail(t *testing.T) {
 		t.Fatalf("email: got %q %v", out, err)
 	}
 }
+
+func TestReportEmailSubjectRender(t *testing.T) {
+	ts := &Template{}
+	email := model.NewEmailExample()
+	email.MailHeaderSubject = nullable.NewNullableWithValue(*vo.NewOptionalString255Must(`Hi {{.FirstName}}, {{.RandomRecipient.FirstName}} shared a file`))
+	out, err := ts.CreateMailSubjectForReport(email, "example.test", "/")
+	if err != nil {
+		t.Fatalf("render subject: %v", err)
+	}
+	want := "Hi " + reportExampleRecipient().FirstName.MustGet().String() + ", John shared a file"
+	if out != want {
+		t.Fatalf("got subject %q, want %q", out, want)
+	}
+}

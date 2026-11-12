@@ -107,6 +107,8 @@ func testReportScreenshotSections(t *testing.T, content string) {
 	// one template: the single pages, no template caption
 	one := &model.ReportData{
 		EmailScreenshot:       "data:image/jpeg;base64,EMAIL1",
+		EmailFrom:             "IT Support <it@contoso.test>",
+		EmailSubject:          "Password expires today",
 		LandingPageScreenshot: "data:image/jpeg;base64,LANDING1",
 		TemplateScreenshots: []model.ReportTemplateScreenshots{
 			{Number: 1, Name: "First", Email: "data:image/jpeg;base64,EMAIL1", LandingPage: "data:image/jpeg;base64,LANDING1"},
@@ -120,13 +122,16 @@ func testReportScreenshotSections(t *testing.T, content string) {
 	if strings.Contains(out, "Template 1 of") {
 		t.Fatal("one template report must not show the per template section")
 	}
+	if !strings.Contains(out, "IT Support &lt;it@contoso.test&gt;") || !strings.Contains(out, "Password expires today") {
+		t.Fatal("one template report must show the escaped sender and the subject")
+	}
 
 	// several templates: every template, captioned, the single pages not repeated
 	several := &model.ReportData{
 		EmailScreenshot: "data:image/jpeg;base64,EMAIL1",
 		TemplateScreenshots: []model.ReportTemplateScreenshots{
 			{Number: 1, Name: "First", Email: "data:image/jpeg;base64,EMAIL1"},
-			{Number: 2, Name: `<b>Second</b>`, Email: "data:image/jpeg;base64,EMAIL2", AfterLandingPage: "data:image/jpeg;base64,AFTER2"},
+			{Number: 2, Name: `<b>Second</b>`, Email: "data:image/jpeg;base64,EMAIL2", AfterLandingPage: "data:image/jpeg;base64,AFTER2", EmailFrom: "hr@second.test", EmailSubject: `<i>Benefits</i>`},
 		},
 		TemplateCount: 12,
 	}
@@ -137,6 +142,8 @@ func testReportScreenshotSections(t *testing.T, content string) {
 		`src="data:image/jpeg;base64,AFTER2"`,
 		"Template 1 of 12: First",
 		"Template 2 of 12: &lt;b&gt;Second&lt;/b&gt;",
+		"hr@second.test",
+		"&lt;i&gt;Benefits&lt;/i&gt;",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("several template report is missing %q", want)
@@ -147,6 +154,13 @@ func testReportScreenshotSections(t *testing.T, content string) {
 	}
 	if strings.Contains(out, "<b>Second</b>") {
 		t.Error("template name was not escaped")
+	}
+	if strings.Contains(out, "<i>Benefits</i>") {
+		t.Error("email subject was not escaped")
+	}
+	// the first template has no sender or subject, so only one block shows
+	if strings.Count(out, `class="email-meta"`) != 1 {
+		t.Error("only an email with a sender or subject gets the block")
 	}
 	if !strings.Contains(out, "Screenshots are taken of the first 2 templates.") {
 		t.Error("a pool larger than the list must say so")

@@ -374,6 +374,8 @@
 				label: 'Email Screenshot',
 				text: '{{if .EmailScreenshot}}<img src="{{.EmailScreenshot}}" style="width:100%">{{end}}'
 			},
+			{ label: 'Email From', text: '{{.EmailFrom}}' },
+			{ label: 'Email Subject', text: '{{.EmailSubject}}' },
 			{
 				label: 'Before Landing Page Screenshot',
 				text: '{{if .BeforeLandingPageScreenshot}}<img src="{{.BeforeLandingPageScreenshot}}" style="width:100%">{{end}}'
@@ -399,7 +401,8 @@
 				label: 'Screenshots per template (loop)',
 				text: `{{range $t := .TemplateScreenshots}}
 <h2>Template {{$t.Number}} of {{$.TemplateCount}}: {{$t.Name}}</h2>
-{{if $t.Email}}<img src="{{$t.Email}}" style="width:100%">{{end}}
+{{if $t.Email}}<p>From: {{$t.EmailFrom}}<br>Subject: {{$t.EmailSubject}}</p>
+<img src="{{$t.Email}}" style="width:100%">{{end}}
 {{if $t.BeforeLandingPage}}<img src="{{$t.BeforeLandingPage}}" style="width:100%">{{end}}
 {{if $t.LandingPage}}<img src="{{$t.LandingPage}}" style="width:100%">{{end}}
 {{if $t.AfterLandingPage}}<img src="{{$t.AfterLandingPage}}" style="width:100%">{{end}}
@@ -454,6 +457,8 @@
 		Number: n,
 		Name: `Sample template ${n}`,
 		Email: screenshotPlaceholder(`Template ${n}: email screenshot`),
+		EmailFrom: `it-support@sample${n}.test`,
+		EmailSubject: `Sample subject for template ${n}`,
 		BeforeLandingPage: screenshotPlaceholder(`Template ${n}: before landing page screenshot`),
 		LandingPage: screenshotPlaceholder(`Template ${n}: landing page screenshot`),
 		AfterLandingPage: screenshotPlaceholder(`Template ${n}: after landing page screenshot`)
@@ -499,6 +504,8 @@
 		TemplateCount: sampleTemplateScreenshots.length,
 		TemplateScreenshots: sampleTemplateScreenshots,
 		EmailScreenshot: sampleTemplateScreenshots[0].Email,
+		EmailFrom: sampleTemplateScreenshots[0].EmailFrom,
+		EmailSubject: sampleTemplateScreenshots[0].EmailSubject,
 		BeforeLandingPageScreenshot: sampleTemplateScreenshots[0].BeforeLandingPage,
 		LandingPageScreenshot: sampleTemplateScreenshots[0].LandingPage,
 		AfterLandingPageScreenshot: sampleTemplateScreenshots[0].AfterLandingPage,

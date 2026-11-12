@@ -7793,6 +7793,8 @@ func (c *Campaign) attachReportScreenshots(
 		name                          string
 		loaded                        bool
 		email, before, landing, after *reportCaptureJob
+		// the From header and rendered subject shown with the email
+		emailFrom, emailSubject string
 	}
 
 	// prepareTemplate renders the wanted email and pages of one template
@@ -7837,6 +7839,15 @@ func (c *Campaign) attachReportScreenshots(
 				c.Logger.Warnw("failed to render email for report screenshot", "error", mailErr)
 			} else {
 				t.email = addJob(fmt.Sprintf("template %d email", number), emailHTML, emailCapture)
+			}
+			if from, fromErr := tmpl.Email.MailHeaderFrom.Get(); fromErr == nil {
+				t.emailFrom = from.String()
+			}
+			subject, subjectErr := c.TemplateService.CreateMailSubjectForReport(tmpl.Email, domainName, urlPath)
+			if subjectErr != nil {
+				c.Logger.Warnw("failed to render email subject for report", "error", subjectErr)
+			} else {
+				t.emailSubject = subject
 			}
 		}
 		preparePage := func(name string, wanted bool, page *model.Page) *reportCaptureJob {
@@ -7907,9 +7918,16 @@ func (c *Campaign) attachReportScreenshots(
 			LandingPage:       uriOf(t.landing),
 			AfterLandingPage:  uriOf(t.after),
 		}
+		// the sender and subject go with the email screenshot
+		if shots.Email != "" {
+			shots.EmailFrom = t.emailFrom
+			shots.EmailSubject = t.emailSubject
+		}
 		if i == 0 && t.loaded {
 			if single.email {
 				rd.EmailScreenshot = shots.Email
+				rd.EmailFrom = shots.EmailFrom
+				rd.EmailSubject = shots.EmailSubject
 			}
 			if single.before {
 				rd.BeforeLandingPageScreenshot = shots.BeforeLandingPage
@@ -8479,6 +8497,8 @@ func htmlEscapeReportData(rd *model.ReportData) *model.ReportData {
 		cp.Recipients[i] = r
 	}
 	cp.GroupsBy = template.HTMLEscapeString(rd.GroupsBy)
+	cp.EmailFrom = template.HTMLEscapeString(rd.EmailFrom)
+	cp.EmailSubject = template.HTMLEscapeString(rd.EmailSubject)
 	escapeGroups := func(in []model.ReportGroupStat) []model.ReportGroupStat {
 		out := make([]model.ReportGroupStat, len(in))
 		for i, g := range in {
@@ -8493,6 +8513,8 @@ func htmlEscapeReportData(rd *model.ReportData) *model.ReportData {
 	cp.TemplateScreenshots = make([]model.ReportTemplateScreenshots, len(rd.TemplateScreenshots))
 	for i, ts := range rd.TemplateScreenshots {
 		ts.Name = template.HTMLEscapeString(ts.Name)
+		ts.EmailFrom = template.HTMLEscapeString(ts.EmailFrom)
+		ts.EmailSubject = template.HTMLEscapeString(ts.EmailSubject)
 		cp.TemplateScreenshots[i] = ts
 	}
 	return &cp

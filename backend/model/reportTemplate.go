@@ -122,6 +122,11 @@ type ReportData struct {
 	BeforeLandingPageScreenshot string
 	LandingPageScreenshot       string
 	AfterLandingPageScreenshot  string
+	// EmailFrom and EmailSubject are the From header and the subject of the
+	// first template's email, the subject rendered with the example
+	// recipient. Empty when the email screenshot is not taken.
+	EmailFrom    string
+	EmailSubject string
 
 	// TemplateScreenshots holds the screenshots of each template in the
 	// campaign's template pool, in pool order, up to ten templates.
@@ -140,6 +145,10 @@ type ReportTemplateScreenshots struct {
 	BeforeLandingPage string
 	LandingPage       string
 	AfterLandingPage  string
+	// EmailFrom and EmailSubject are the From header and the rendered subject
+	// of the template's email, empty when its screenshot is not taken.
+	EmailFrom    string
+	EmailSubject string
 }
 
 // ReportGroupStat is one row of the report's grouped outcome breakdown, with

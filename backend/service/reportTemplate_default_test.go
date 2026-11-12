@@ -31,8 +31,8 @@ func TestIsDefaultReportContent(t *testing.T) {
 // report template changed: move its old hash into previousDefaultReportHashes,
 // so installs still on it keep counting as the default, then update it here.
 const (
-	currentDefaultReportHash         = "015af55d53580a230f71684fc3962f3c0d45d2e66fec920595c61e114eef9231"
-	currentDefaultTrainingReportHash = "98a90ff4c0780b680d48cdab2d10fcf753db6930857f5851d9466090e68a591d"
+	currentDefaultReportHash         = "00033fa9a2dedbbbd21063492b7026c106892b67203abd9ab5a64e6290cfb254"
+	currentDefaultTrainingReportHash = "50148b306a64f67ebebcbf0657a20ae7e224b493bf3fcb0960b78ad99a61adb1"
 )
 
 func TestDefaultReportHashesAreKept(t *testing.T) {

@@ -297,6 +297,22 @@ func (t *Template) CreateMailBodyForReport(email *model.Email, domainName string
 	if err != nil {
 		return "", fmt.Errorf("no email content set to render: %w", err)
 	}
+	return t.renderMailForReport(email, content.String(), domainName, urlPath)
+}
+
+// CreateMailSubjectForReport renders an email's subject for a campaign report
+// the same way CreateMailBodyForReport renders its content.
+func (t *Template) CreateMailSubjectForReport(email *model.Email, domainName string, urlPath string) (string, error) {
+	subject, err := email.MailHeaderSubject.Get()
+	if err != nil {
+		return "", fmt.Errorf("no email subject set to render: %w", err)
+	}
+	return t.renderMailForReport(email, subject.String(), domainName, urlPath)
+}
+
+// renderMailForReport renders text, the content or subject of email, with
+// reportExampleRecipient and reportMockRandomRecipient.
+func (t *Template) renderMailForReport(email *model.Email, text string, domainName string, urlPath string) (string, error) {
 	recipient := reportExampleRecipient()
 	baseURL := "https://" + domainName
 	recipientID := uuid.Nil.String()
@@ -316,7 +332,7 @@ func (t *Template) CreateMailBodyForReport(email *model.Email, domainName string
 		nil, // no API sender context in a report screenshot render
 	)
 	(*data)["RandomRecipient"] = reportMockRandomRecipient()
-	tmpl, err := template.New("reportEmailMock").Funcs(TemplateFuncs()).Parse(content.String())
+	tmpl, err := template.New("reportEmailMock").Funcs(TemplateFuncs()).Parse(text)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse email template: %w", err)
 	}
