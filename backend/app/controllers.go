@@ -260,7 +260,6 @@ func NewControllers(
 		ReportTemplateService: services.ReportTemplate,
 		CampaignService:       services.Campaign,
 		OptionService:         services.Option,
-		ExecPath:              conf.RemoteBrowser.ExecPath,
 	}
 	branding := &controller.Branding{
 		Common:          common,

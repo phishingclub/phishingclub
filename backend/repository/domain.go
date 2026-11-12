@@ -98,6 +98,25 @@ func (r *Domain) GetAll(
 	return result, nil
 }
 
+// DomainNameCompany is the name of a domain and the company it belongs to.
+type DomainNameCompany struct {
+	Name      string
+	CompanyID *uuid.UUID
+}
+
+// GetAllNames gets the name and company of every domain
+func (r *Domain) GetAllNames(ctx context.Context) ([]DomainNameCompany, error) {
+	var rows []DomainNameCompany
+	res := r.DB.WithContext(ctx).
+		Model(&database.Domain{}).
+		Select("name", "company_id").
+		Find(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return rows, nil
+}
+
 // GetAllByCompanyID gets domains by company ID
 func (r *Domain) GetAllByCompanyID(
 	ctx context.Context,

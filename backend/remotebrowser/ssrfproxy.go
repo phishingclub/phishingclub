@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -33,6 +34,9 @@ type guardedProxy struct {
 	srv       *http.Server
 	transport *http.Transport
 	blocked   atomic.Int64 // requests refused by policy (observability and tests)
+	// refuseHost, when set, names hosts the proxy never connects to.
+	refuseHost func(host string) bool
+	refused    atomic.Int64 // requests refused by refuseHost
 }
 
 // blockedCIDRs are ranges that must never be reached from the report browser.
@@ -189,12 +193,19 @@ func (e blockedError) Error() string { return string(e) }
 
 // startGuardedProxy starts the proxy on an ephemeral loopback port.
 func startGuardedProxy() (*guardedProxy, error) {
+	return startGuardedProxyRefusing(nil)
+}
+
+// startGuardedProxyRefusing starts the proxy like startGuardedProxy, also
+// refusing every host refuseHost names when refuseHost is set.
+func startGuardedProxyRefusing(refuseHost func(host string) bool) (*guardedProxy, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
 	p := &guardedProxy{
-		ln: ln,
+		ln:         ln,
+		refuseHost: refuseHost,
 		transport: &http.Transport{
 			DialContext:           dialGuarded,
 			ForceAttemptHTTP2:     false,
@@ -223,6 +234,24 @@ func (p *guardedProxy) close() {
 // blockedRequests is the number of requests refused by policy so far.
 func (p *guardedProxy) blockedRequests() int64 { return p.blocked.Load() }
 
+// refusedHost reports whether hostport names a host refuseHost refuses, and
+// counts it.
+func (p *guardedProxy) refusedHost(hostport string) bool {
+	if p.refuseHost == nil {
+		return false
+	}
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	if !p.refuseHost(host) {
+		return false
+	}
+	p.refused.Add(1)
+	return true
+}
+
 // hopByHopHeaders are removed before forwarding in either direction per RFC 7230.
 var hopByHopHeaders = []string{
 	"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
@@ -242,6 +271,10 @@ func (p *guardedProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !r.URL.IsAbs() {
 		http.Error(w, "proxy requires absolute URI", http.StatusBadRequest)
+		return
+	}
+	if p.refusedHost(r.URL.Host) {
+		http.Error(w, "blocked by policy", http.StatusForbidden)
 		return
 	}
 	out := r.Clone(r.Context())
@@ -276,6 +309,10 @@ const tunnelIdleTimeout = 30 * time.Second
 // handleConnect gates and tunnels a CONNECT (used for https). The target host is
 // resolved and pinned by dialGuarded; the tunnel then streams opaque bytes.
 func (p *guardedProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
+	if p.refusedHost(r.Host) {
+		http.Error(w, "blocked by policy", http.StatusForbidden)
+		return
+	}
 	upstream, err := dialGuarded(r.Context(), "tcp", r.Host)
 	if err != nil {
 		if errors.Is(err, errBlocked) {

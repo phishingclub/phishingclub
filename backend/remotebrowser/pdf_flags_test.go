@@ -15,19 +15,28 @@ import (
 	"github.com/go-rod/rod/lib/launcher"
 )
 
-// TestRenderHTMLToPDFRoutesThroughGuard drives the real production entrypoint and
-// asserts that a report embedding a loopback resource cannot reach it. This is the
-// only test that exercises RenderHTMLToPDF itself, so it catches removal of the
-// guard wiring from the real render path (not just flag drift). Skips without a
-// browser. The produced PDF is the positive control that the render actually ran.
-func TestRenderHTMLToPDFRoutesThroughGuard(t *testing.T) {
-	bin := ""
+// findChromeBin returns a chrome/chromium binary path, or "" if none is
+// installed. TEST_CHROME_BIN wins when set. Shared by every test that needs a
+// real browser.
+func findChromeBin() string {
+	if bin := os.Getenv("TEST_CHROME_BIN"); bin != "" {
+		return bin
+	}
 	for _, cand := range []string{"/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium"} {
 		if _, err := os.Stat(cand); err == nil {
-			bin = cand
-			break
+			return cand
 		}
 	}
+	return ""
+}
+
+// TestRenderPDFRoutesThroughGuard drives the PDF render a report uses, NewSession
+// and RenderPDF, and asserts that a report embedding a loopback resource cannot
+// reach it. It catches removal of the guard wiring from the real render path,
+// not just flag drift. Skips without a browser. The produced PDF is the
+// positive control that the render actually ran.
+func TestRenderPDFRoutesThroughGuard(t *testing.T) {
+	bin := findChromeBin()
 	if bin == "" {
 		t.Skip("no chrome/chromium binary available")
 	}
@@ -44,7 +53,12 @@ func TestRenderHTMLToPDFRoutesThroughGuard(t *testing.T) {
 	html := `<html><body>Report<img src="` + victim.URL + `/ssrf"></body></html>`
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	pdf, err := RenderHTMLToPDF(ctx, html, bin)
+	s, err := NewSession(ctx, bin)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	defer s.Close()
+	pdf, err := s.RenderPDF(html)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -54,7 +68,7 @@ func TestRenderHTMLToPDFRoutesThroughGuard(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	if hits != 0 {
-		t.Fatalf("loopback resource reached %d times through RenderHTMLToPDF; guard wiring missing", hits)
+		t.Fatalf("loopback resource reached %d times through RenderPDF; guard wiring missing", hits)
 	}
 }
 

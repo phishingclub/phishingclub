@@ -2,12 +2,12 @@ package controller
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/model"
-	"github.com/phishingclub/phishingclub/remotebrowser"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/service"
 )
@@ -18,7 +18,6 @@ type ReportTemplate struct {
 	ReportTemplateService *service.ReportTemplate
 	CampaignService       *service.Campaign
 	OptionService         *service.Option
-	ExecPath              string
 }
 
 // Create creates a report template
@@ -79,6 +78,29 @@ func (r *ReportTemplate) GetByID(g *gin.Context) {
 	r.Response.OK(g, tmpl)
 }
 
+// GetDefault returns the built in default report template content. The
+// training query parameter picks the training report.
+func (r *ReportTemplate) GetDefault(g *gin.Context) {
+	session, _, ok := r.handleSession(g)
+	if !ok {
+		return
+	}
+	isTraining := false
+	if v := g.Query("training"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			r.Response.BadRequestMessage(g, "training must be true or false")
+			return
+		}
+		isTraining = b
+	}
+	content, err := r.ReportTemplateService.GetDefaultContent(session, isTraining)
+	if ok := r.handleErrors(g, err); !ok {
+		return
+	}
+	r.Response.OK(g, gin.H{"content": content})
+}
+
 // UpdateByID updates a report template
 func (r *ReportTemplate) UpdateByID(g *gin.Context) {
 	session, _, ok := r.handleSession(g)
@@ -132,15 +154,11 @@ func (r *ReportTemplate) GeneratePDFByCampaignID(g *gin.Context) {
 	if !ok {
 		return
 	}
-	htmlContent, campaignName, err := r.CampaignService.BuildReportHTML(
+	pdfBytes, campaignName, err := r.CampaignService.BuildReportPDF(
 		g.Request.Context(),
 		session,
 		id,
 	)
-	if ok := r.handleErrors(g, err); !ok {
-		return
-	}
-	pdfBytes, err := remotebrowser.RenderHTMLToPDF(g.Request.Context(), htmlContent, r.ExecPath)
 	if ok := r.handleErrors(g, err); !ok {
 		return
 	}

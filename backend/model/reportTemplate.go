@@ -113,6 +113,33 @@ type ReportData struct {
 	Groups           []ReportGroupStat
 	DepartmentGroups []ReportGroupStat
 	PositionGroups   []ReportGroupStat
+
+	// Screenshots of the first template's email and pages, rendered with an
+	// example recipient. Each is a data URI to use as an img src, empty when
+	// the template has no such stage, the stage is an AiTM proxy, or the
+	// screenshot could not be taken.
+	EmailScreenshot             string
+	BeforeLandingPageScreenshot string
+	LandingPageScreenshot       string
+	AfterLandingPageScreenshot  string
+
+	// TemplateScreenshots holds the screenshots of each template in the
+	// campaign's template pool, in pool order, up to ten templates.
+	TemplateScreenshots []ReportTemplateScreenshots
+	// TemplateCount is the number of templates in the campaign's template pool.
+	TemplateCount int
+}
+
+// ReportTemplateScreenshots are the screenshots of one campaign template, each
+// a data URI, empty when the template has no such stage or it was not captured.
+type ReportTemplateScreenshots struct {
+	// Number is the template's place in the pool, starting at 1.
+	Number            int
+	Name              string
+	Email             string
+	BeforeLandingPage string
+	LandingPage       string
+	AfterLandingPage  string
 }
 
 // ReportGroupStat is one row of the report's grouped outcome breakdown, with

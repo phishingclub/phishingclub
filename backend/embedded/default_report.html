@@ -294,6 +294,18 @@
     color: var(--muted);
   }
 
+  /* Screenshots of the email and pages */
+  .screenshot {
+    display: block;
+    width: 100%;
+    max-height: 900px;
+    object-fit: contain;
+    object-position: top;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .screenshot-caption { font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+
   @media print {
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .cover, .page { page-break-after: always; }
@@ -571,6 +583,163 @@
     <span>{{.CampaignName}}</span>
   </div>
 </div>
+{{end}}
+
+<!-- SCREENSHOTS, rendered with a fake recipient, never a real one. A campaign
+     with more than one template gets the screenshots of each template. -->
+{{if gt .TemplateCount 1}}
+{{range $t := .TemplateScreenshots}}
+{{if not (or $t.Email $t.BeforeLandingPage $t.LandingPage $t.AfterLandingPage)}}
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Screenshots</span>
+    {{if $.CompanyName}}<span class="company">{{$.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Screenshots</div>
+  <div class="screenshot-caption">Template {{$t.Number}} of {{$.TemplateCount}}{{if $t.Name}}: {{$t.Name}}{{end}}</div>
+  <p class="screenshot-caption">No screenshots are available for this template.</p>
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{$.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+{{if $t.Email}}
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Email Sent</span>
+    {{if $.CompanyName}}<span class="company">{{$.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Email Sent</div>
+  <div class="screenshot-caption">Template {{$t.Number}} of {{$.TemplateCount}}: {{$t.Name}}{{if gt $.TemplateCount (len $.TemplateScreenshots)}}. Screenshots are taken of the first {{len $.TemplateScreenshots}} templates.{{end}}</div>
+  <img class="screenshot" src="{{$t.Email}}" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{$.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+{{if $t.BeforeLandingPage}}
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Before Landing Page</span>
+    {{if $.CompanyName}}<span class="company">{{$.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Before Landing Page</div>
+  <div class="screenshot-caption">Template {{$t.Number}} of {{$.TemplateCount}}: {{$t.Name}}{{if gt $.TemplateCount (len $.TemplateScreenshots)}}. Screenshots are taken of the first {{len $.TemplateScreenshots}} templates.{{end}}</div>
+  <img class="screenshot" src="{{$t.BeforeLandingPage}}" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{$.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+{{if $t.LandingPage}}
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Landing Page</span>
+    {{if $.CompanyName}}<span class="company">{{$.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Landing Page</div>
+  <div class="screenshot-caption">Template {{$t.Number}} of {{$.TemplateCount}}: {{$t.Name}}{{if gt $.TemplateCount (len $.TemplateScreenshots)}}. Screenshots are taken of the first {{len $.TemplateScreenshots}} templates.{{end}}</div>
+  <img class="screenshot" src="{{$t.LandingPage}}" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{$.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+{{if $t.AfterLandingPage}}
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">After Landing Page</span>
+    {{if $.CompanyName}}<span class="company">{{$.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">After Landing Page</div>
+  <div class="screenshot-caption">Template {{$t.Number}} of {{$.TemplateCount}}: {{$t.Name}}{{if gt $.TemplateCount (len $.TemplateScreenshots)}}. Screenshots are taken of the first {{len $.TemplateScreenshots}} templates.{{end}}</div>
+  <img class="screenshot" src="{{$t.AfterLandingPage}}" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{$.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+{{end}}
+{{else}}
+{{if .EmailScreenshot}}
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Email Sent</span>
+    {{if $.CompanyName}}<span class="company">{{$.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Email Sent</div>
+  <img class="screenshot" src="{{.EmailScreenshot}}" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{$.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+{{if .BeforeLandingPageScreenshot}}
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Before Landing Page</span>
+    {{if $.CompanyName}}<span class="company">{{$.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Before Landing Page</div>
+  <img class="screenshot" src="{{.BeforeLandingPageScreenshot}}" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{$.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+{{if .LandingPageScreenshot}}
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">Landing Page</span>
+    {{if $.CompanyName}}<span class="company">{{$.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">Landing Page</div>
+  <img class="screenshot" src="{{.LandingPageScreenshot}}" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{$.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
+{{if .AfterLandingPageScreenshot}}
+<div class="page">
+  <div class="page-header">
+    <span class="section-label">After Landing Page</span>
+    {{if $.CompanyName}}<span class="company">{{$.CompanyName}}</span>{{end}}
+  </div>
+
+  <div class="section-title">After Landing Page</div>
+  <img class="screenshot" src="{{.AfterLandingPageScreenshot}}" />
+
+  <div class="page-footer">
+    <span>Phishing Simulation</span>
+    <span>{{$.CampaignName}}</span>
+  </div>
+</div>
+{{end}}
 {{end}}
 
 </body>

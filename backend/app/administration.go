@@ -215,6 +215,7 @@ const (
 	// report templates
 	ROUTE_V1_REPORT_TEMPLATE          = "/api/v1/report-template"
 	ROUTE_V1_REPORT_TEMPLATE_ID       = "/api/v1/report-template/:id"
+	ROUTE_V1_REPORT_TEMPLATE_DEFAULT  = "/api/v1/report-template/default"
 	ROUTE_V1_REPORT_PDF_BROWSER_CACHE = "/api/v1/report-pdf/browser-cache"
 	// campaign-recipient
 	ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL      = "/api/v1/campaign/recipient/:id/email"
@@ -440,7 +441,8 @@ func setupRoutes(
 		GET(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.GetGlobal).
 		POST(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.UpsertGlobal).
 		DELETE(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.DeleteGlobal).
-		POST(ROUTE_V1_REPORT_CONFIG_SEND, middleware.SessionHandler, controllers.CompanyReportConfig.SendNow).
+		// sends a report now, ExtendedTimeout required for headless browser rendering
+		POST(ROUTE_V1_REPORT_CONFIG_SEND, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.CompanyReportConfig.SendNow).
 		// company report inbox
 		GET(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.GetByCompanyID).
 		POST(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.Upsert).
@@ -622,6 +624,7 @@ func setupRoutes(
 		// report templates
 		GET(ROUTE_V1_REPORT_TEMPLATE, middleware.SessionHandler, controllers.ReportTemplate.GetAll).
 		POST(ROUTE_V1_REPORT_TEMPLATE, middleware.SessionHandler, controllers.ReportTemplate.Create).
+		GET(ROUTE_V1_REPORT_TEMPLATE_DEFAULT, middleware.SessionHandler, controllers.ReportTemplate.GetDefault).
 		GET(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.GetByID).
 		PATCH(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.UpdateByID).
 		DELETE(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.DeleteByID).
