@@ -271,6 +271,23 @@ func reportMockRecipient() *model.Recipient {
 	}
 }
 
+// reportMockRandomRecipient is the fixed stand in for {{.RandomRecipient}} in
+// report screenshot renders, so a capture never reads a real recipient.
+func reportMockRandomRecipient() map[string]string {
+	return map[string]string{
+		"FirstName":       "John",
+		"LastName":        "Smith",
+		"Email":           "john.smith@example.test",
+		"Phone":           "+1 555 0100",
+		"Position":        "Finance Manager",
+		"Department":      "Finance",
+		"City":            "Springfield",
+		"Country":         "United States",
+		"ExtraIdentifier": "",
+		"Misc":            "",
+	}
+}
+
 // CreateMailBodyForReport renders an email's content for the campaign report
 // screenshot. It uses the synthetic reportMockRecipient and a neutral example
 // domain, the same privacy boundary ApplyPageMock already uses for template
@@ -299,6 +316,7 @@ func (t *Template) CreateMailBodyForReport(email *model.Email) (string, error) {
 		email,
 		nil, // no API sender context in a report screenshot render
 	)
+	(*data)["RandomRecipient"] = reportMockRandomRecipient()
 	tmpl, err := template.New("reportEmailMock").Funcs(TemplateFuncs()).Parse(content.String())
 	if err != nil {
 		return "", fmt.Errorf("failed to parse email template: %w", err)
@@ -342,11 +360,12 @@ func (t *Template) CreatePageMockForReport(page *model.Page, email *model.Email)
 		URLIdentifier:   urlIdentifier,
 		StateIdentifier: stateIdentifier,
 	}
-	return t.CreatePhishingPageWithCampaign(
+	return t.createPhishingPage(
 		context.Background(),
 		domain,
 		email,
 		&campaignRecipientID,
+		nil,
 		recipient,
 		content.String(),
 		campaignTemplate,
@@ -354,6 +373,7 @@ func (t *Template) CreatePageMockForReport(page *model.Page, email *model.Email)
 		"urlPath",
 		nil,
 		nil, // no company context for a report screenshot render
+		reportMockRandomRecipient(),
 	)
 }
 
@@ -528,6 +548,26 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 	campaign *model.Campaign,
 	companyID *uuid.UUID,
 ) (*bytes.Buffer, error) {
+	return t.createPhishingPage(ctx, domain, email, campaignRecipientID, recipientID, recipient, contentToRender, campaignTemplate, stateParam, urlPath, campaign, companyID, nil)
+}
+
+// createPhishingPage renders a phishing page. When randomRecipient is set it
+// is used as {{.RandomRecipient}} and no recipient is read from the database.
+func (t *Template) createPhishingPage(
+	ctx context.Context,
+	domain *database.Domain,
+	email *model.Email,
+	campaignRecipientID *uuid.UUID,
+	recipientID *uuid.UUID,
+	recipient *model.Recipient,
+	contentToRender string,
+	campaignTemplate *model.CampaignTemplate,
+	stateParam string,
+	urlPath string,
+	campaign *model.Campaign,
+	companyID *uuid.UUID,
+	randomRecipient map[string]string,
+) (*bytes.Buffer, error) {
 	w := bytes.NewBuffer([]byte{})
 	id := campaignRecipientID.String()
 	baseURL := "https://" + domain.Name
@@ -664,7 +704,9 @@ func (t *Template) CreatePhishingPageWithCampaignAndRecipient(
 
 	// add random recipient data only when the page template uses it (the lookup is
 	// costly), excluding the current recipient
-	if usesRandomRecipient(contentToRender) {
+	if randomRecipient != nil {
+		(*data)["RandomRecipient"] = randomRecipient
+	} else if usesRandomRecipient(contentToRender) {
 		var excludeRecipientID *uuid.UUID
 		if rid, err := recipient.ID.Get(); err == nil {
 			excludeRecipientID = &rid
