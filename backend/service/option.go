@@ -102,6 +102,28 @@ func (o *Option) MaskSSOSecret(opt *model.Option) (*model.Option, error) {
 	return opt, nil
 }
 
+// auditOptionValue returns the option value safe to write to the audit log.
+// the SSO option holds the client secret, so it is replaced before logging.
+// if the SSO value can not be parsed the whole value is withheld.
+func auditOptionValue(key string, value string) string {
+	if key != data.OptionKeyAdminSSOLogin {
+		return value
+	}
+	const redacted = "[redacted]"
+	a, err := model.NewSSOOptionFromJSON([]byte(value))
+	if err != nil {
+		return redacted
+	}
+	if a.ClientSecret.String() != "" {
+		a.ClientSecret = *vo.NewOptionalString1024Must(redacted)
+	}
+	b, err := a.ToJSON()
+	if err != nil {
+		return redacted
+	}
+	return string(b)
+}
+
 // SetOptionByKey sets an option
 func (o *Option) SetOptionByKey(
 	ctx context.Context,
@@ -110,7 +132,7 @@ func (o *Option) SetOptionByKey(
 ) error {
 	ae := NewAuditEvent("Option.SetOptionByKey", session)
 	ae.Details["key"] = option.Key.String()
-	ae.Details["value"] = option.Value.String()
+	ae.Details["value"] = auditOptionValue(option.Key.String(), option.Value.String())
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
