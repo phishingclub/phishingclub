@@ -128,8 +128,18 @@ func (t *Template) ValidatePageTemplate(content string) error {
 		return fmt.Errorf("failed to parse page template: %s", err)
 	}
 
-	// also try to execute with mock data to catch runtime errors
-	_, err = t.ApplyPageMock(content)
+	// also try to execute with mock data to catch runtime errors. the fixed mock
+	// stands in for {{.RandomRecipient}} so a save never reads a real recipient
+	_, err = t.pageMock(
+		context.Background(),
+		content,
+		model.NewEmailExample(),
+		model.NewRecipientExample(),
+		"example.test",
+		"urlPath",
+		nil,
+		reportMockRandomRecipient(),
+	)
 	if err != nil {
 		return fmt.Errorf("failed to execute page template: %s", utils.RedactCredentialsFromString(err.Error()))
 	}
@@ -167,7 +177,7 @@ func (t *Template) ValidateEmailTemplate(content string) error {
 	apiSender := model.NewAPISenderExample()
 
 	_, err = t.CreateMailBody(
-		context.Background(),
+		withMockRandomRecipient(context.Background()),
 		"id",
 		"/test",
 		domain,
@@ -215,10 +225,11 @@ func (t *Template) ValidateDomainTemplate(content string) error {
 	return nil
 }
 
-// ApplyPageMock renders page content with example data, for previews and
-// validation.
-func (t *Template) ApplyPageMock(content string) (*bytes.Buffer, error) {
-	return t.pageMock(context.Background(), content, model.NewEmailExample(), model.NewRecipientExample(), "example.test", "urlPath", nil)
+// ApplyPageMock renders page content with example data for an admin preview.
+// companyID is the company of the page, nil for a global page, so
+// {{.RandomRecipient}} is a recipient of that same company.
+func (t *Template) ApplyPageMock(ctx context.Context, content string, companyID *uuid.UUID) (*bytes.Buffer, error) {
+	return t.pageMock(ctx, content, model.NewEmailExample(), model.NewRecipientExample(), "example.test", "urlPath", companyID, nil)
 }
 
 // reportExampleRecipient is the example recipient with a plain email address,
@@ -230,8 +241,9 @@ func reportExampleRecipient() *model.Recipient {
 }
 
 // pageMock renders page content for recipient with example identifiers on
-// domainName and urlPath. When randomRecipient is set it is
-// used as {{.RandomRecipient}} and no recipient is read from the database.
+// domainName and urlPath. companyID scopes the template functions and the
+// {{.RandomRecipient}} lookup. When randomRecipient is set it is used as
+// {{.RandomRecipient}} and no recipient is read from the database.
 func (t *Template) pageMock(
 	ctx context.Context,
 	content string,
@@ -239,6 +251,7 @@ func (t *Template) pageMock(
 	recipient *model.Recipient,
 	domainName string,
 	urlPath string,
+	companyID *uuid.UUID,
 	randomRecipient map[string]string,
 ) (*bytes.Buffer, error) {
 	domain := &database.Domain{
@@ -265,7 +278,7 @@ func (t *Template) pageMock(
 		"stateParam",
 		urlPath,
 		nil,
-		nil, // no company context for a mock
+		companyID,
 		randomRecipient,
 	)
 }
@@ -363,7 +376,7 @@ func (t *Template) CreatePageMockForReport(
 	if email == nil {
 		email = model.NewEmailExample()
 	}
-	return t.pageMock(ctx, content.String(), email, reportExampleRecipient(), domainName, urlPath, reportMockRandomRecipient())
+	return t.pageMock(ctx, content.String(), email, reportExampleRecipient(), domainName, urlPath, nil, reportMockRandomRecipient())
 }
 
 // CreateMailBody returns a rendered mail body to string
@@ -1136,8 +1149,21 @@ func usesRandomRecipient(texts ...string) bool {
 	return false
 }
 
+// mockRandomRecipientKey marks a context whose renders use the fixed mock for
+// {{.RandomRecipient}} instead of reading a real recipient
+type mockRandomRecipientKey struct{}
+
+// withMockRandomRecipient returns a context in which getRandomRecipientData
+// returns reportMockRandomRecipient, used when a template is only checked
+func withMockRandomRecipient(ctx context.Context) context.Context {
+	return context.WithValue(ctx, mockRandomRecipientKey{}, true)
+}
+
 // getRandomRecipientData gets a random recipient from a company and returns a map of their data
 func (t *Template) getRandomRecipientData(ctx context.Context, companyID *uuid.UUID, excludeRecipientID *uuid.UUID) map[string]string {
+	if ctx.Value(mockRandomRecipientKey{}) != nil {
+		return reportMockRandomRecipient()
+	}
 	data := map[string]string{
 		"FirstName":       "",
 		"LastName":        "",

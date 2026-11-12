@@ -71,3 +71,20 @@ func TestReportEmailSubjectRender(t *testing.T) {
 		t.Fatalf("got subject %q, want %q", out, want)
 	}
 }
+
+// Checking a template on save uses the fixed mock for {{.RandomRecipient}}, so
+// no real recipient is read.
+
+func TestValidatePageTemplateUsesFakeRandomRecipient(t *testing.T) {
+	ts := &Template{}
+	if err := ts.ValidatePageTemplate(randomRecipientContent); err != nil {
+		t.Fatalf("validate page: %v", err)
+	}
+}
+
+func TestValidateEmailTemplateUsesFakeRandomRecipient(t *testing.T) {
+	ts := &Template{}
+	if err := ts.ValidateEmailTemplate(randomRecipientContent); err != nil {
+		t.Fatalf("validate email: %v", err)
+	}
+}
