@@ -267,7 +267,7 @@
 											? 'page'
 											: undefined}
 										aria-label={isExpanded ? undefined : item.label}
-										class="flex items-center py-1.5 text-sm transition-all duration-150 relative group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white
+										class="flex items-center py-1.5 text-sm transition duration-150 relative group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white
                                         {(
 											item.route === '/dashboard/'
 												? $page.url.pathname.startsWith('/dashboard')
@@ -314,7 +314,7 @@
 					<a
 						aria-current={$page.url.pathname === link.route ? 'page' : undefined}
 						aria-label={isExpanded ? undefined : link.label}
-						class="flex items-center py-1.5 text-sm transition-all duration-150 relative group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white
+						class="flex items-center py-1.5 text-sm transition duration-150 relative group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white
                             {$page.url.pathname === link.route
 							? 'text-white font-medium bg-active-blue dark:bg-active-blue shadow-md'
 							: 'text-blue-100 dark:text-gray-200 hover:text-white dark:hover:text-gray-100 hover:bg-highlight-blue/80 dark:hover:bg-highlight-blue/20'}"

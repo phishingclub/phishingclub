@@ -426,7 +426,7 @@
 			<button
 				type="button"
 				on:click={onClickLogout}
-				class="pc-focus-dark w-full border-2 border-white/30 dark:border-highlight-blue/50 hover:border-highlight-blue/60 dark:hover:border-highlight-blue hover:bg-highlight-blue/20 dark:hover:bg-highlight-blue/20 uppercase font-medium py-2.5 px-6 rounded-lg transition-all duration-200 text-sm text-white/90 dark:text-highlight-blue hover:text-white dark:hover:text-white"
+				class="pc-focus-dark w-full border-2 border-white/30 dark:border-highlight-blue/50 hover:border-highlight-blue/60 dark:hover:border-highlight-blue hover:bg-highlight-blue/20 dark:hover:bg-highlight-blue/20 uppercase font-medium py-2.5 px-6 rounded-lg transition duration-200 text-sm text-white/90 dark:text-highlight-blue hover:text-white dark:hover:text-white"
 			>
 				Log Out
 			</button>
