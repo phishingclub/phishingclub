@@ -487,11 +487,9 @@ func (c *User) Login(g *gin.Context) {
 		req.Password,
 		g.ClientIP(),
 	)
-	if errors.Is(err, errs.ErrUserWrongPasword) {
-		c.Response.BadRequestMessage(g, "Invalid password")
-		return
-	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	// return one identical message whether the username is unknown or the
+	// password is wrong, so the response cannot be used to enumerate usernames
+	if errors.Is(err, errs.ErrUserWrongPasword) || errors.Is(err, gorm.ErrRecordNotFound) {
 		c.Response.BadRequestMessage(g, "Invalid credentials")
 		return
 	}
