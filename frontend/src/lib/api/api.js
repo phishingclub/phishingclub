@@ -4085,6 +4085,12 @@ export class API {
 		getByID: async (id) => {
 			return await getJSON(this.getPath(`/report-template/${id}`));
 		},
+		// the built in default template content for the phishing or training report
+		getDefault: async (isTraining) => {
+			return await getJSON(
+				this.getPath(`/report-template/default?training=${isTraining ? 'true' : 'false'}`)
+			);
+		},
 		create: async (data) => {
 			return await postJSON(this.getPath('/report-template'), data);
 		},
