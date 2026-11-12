@@ -440,7 +440,8 @@ func setupRoutes(
 		GET(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.GetGlobal).
 		POST(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.UpsertGlobal).
 		DELETE(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.DeleteGlobal).
-		POST(ROUTE_V1_REPORT_CONFIG_SEND, middleware.SessionHandler, controllers.CompanyReportConfig.SendNow).
+		// sends a report now, ExtendedTimeout required for headless browser rendering
+		POST(ROUTE_V1_REPORT_CONFIG_SEND, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.CompanyReportConfig.SendNow).
 		// company report inbox
 		GET(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.GetByCompanyID).
 		POST(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.Upsert).

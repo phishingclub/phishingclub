@@ -7401,15 +7401,26 @@ func (c *Campaign) saveReportedEvent(
 	return nil
 }
 
-// BuildReportHTML renders a report HTML string for a campaign using the resolved
-// report template (company-specific, then global, then built-in default).
-func (c *Campaign) BuildReportHTML(
+// BuildReportPDF renders the report PDF for a campaign using the resolved
+// report template (company specific, then global, then built in default). The
+// screenshots and the PDF share one browser launch.
+func (c *Campaign) BuildReportPDF(
 	ctx context.Context,
 	session *model.Session,
 	campaignID *uuid.UUID,
-) (htmlContent string, campaignName string, err error) {
-	html, _, name, err := c.buildReportHTMLWithData(ctx, session, campaignID)
-	return html, name, err
+) (pdf []byte, campaignName string, err error) {
+	rb := newReportBrowser(ctx, c.RemoteBrowserExecPath, c.Logger)
+	defer rb.close()
+	html, _, name, err := c.buildReportHTMLWithData(ctx, session, campaignID, rb)
+	if err != nil {
+		return nil, "", err
+	}
+	pdf, err = rb.renderPDF(html)
+	if err != nil {
+		c.Logger.Errorw("failed to render report PDF", "error", err)
+		return nil, "", err
+	}
+	return pdf, name, nil
 }
 
 // buildReportHTMLWithData renders the report HTML and also returns the report data
@@ -7419,6 +7430,7 @@ func (c *Campaign) buildReportHTMLWithData(
 	ctx context.Context,
 	session *model.Session,
 	campaignID *uuid.UUID,
+	rb *reportBrowser,
 ) (htmlContent string, reportData *model.ReportData, campaignName string, err error) {
 	ae := NewAuditEvent("Campaign.BuildReportHTML", session)
 	ae.Details["campaignId"] = campaignID.String()
@@ -7519,7 +7531,7 @@ func (c *Campaign) buildReportHTMLWithData(
 	// screenshots are a best effort addition: any failure here is logged and
 	// leaves the corresponding field empty, the report still generates with
 	// everything else exactly as it does today.
-	c.attachReportScreenshots(ctx, session, campaign, templateContent, rd)
+	c.attachReportScreenshots(ctx, session, campaign, templateContent, rd, rb)
 
 	var buf bytes.Buffer
 	tmpl, err := template.New("report").Funcs(TemplateFuncs()).Parse(templateContent)
@@ -7575,6 +7587,7 @@ func (c *Campaign) attachReportScreenshots(
 	campaign *model.Campaign,
 	reportTemplateContent string,
 	rd *model.ReportData,
+	rb *reportBrowser,
 ) {
 	// checked as ".Name" (how every one of these is actually written in a Go
 	// template, e.g. "{{if .LandingPageScreenshot}}") rather than bare "Name":
@@ -7639,28 +7652,7 @@ func (c *Campaign) attachReportScreenshots(
 
 	// the browser is only launched once the first screenshot is actually
 	// attempted, so a campaign whose configured pages the report template
-	// does not even ask for never pays for a launch. A failed launch is not
-	// retried for the next capture.
-	var browserSession *remotebrowser.Session
-	launchFailed := false
-	openSession := func() *remotebrowser.Session {
-		if browserSession != nil || launchFailed {
-			return browserSession
-		}
-		s, sErr := remotebrowser.NewSession(ctx, c.RemoteBrowserExecPath)
-		if sErr != nil {
-			c.Logger.Warnw("failed to start browser for report screenshots", "error", sErr)
-			launchFailed = true
-			return nil
-		}
-		browserSession = s
-		return s
-	}
-	defer func() {
-		if browserSession != nil {
-			browserSession.Close()
-		}
-	}()
+	// does not even ask for never pays for a launch here.
 
 	// every capture has its own time limit, and all captures together share
 	// one budget, so a slow or stuck page can not use up the time the report
@@ -7671,7 +7663,7 @@ func (c *Campaign) attachReportScreenshots(
 			c.Logger.Warnw("report screenshot skipped, time budget used up", "capture", what)
 			return ""
 		}
-		s := openSession()
+		s := rb.forScreenshots()
 		if s == nil {
 			return ""
 		}
@@ -8010,13 +8002,17 @@ func (c *Campaign) SendCampaignReport(
 		}
 	}
 
-	// build the report and render it to PDF
-	htmlContent, reportData, _, err := c.buildReportHTMLWithData(ctx, session, campaignID)
+	// build the report and render it to PDF, on one browser launch
+	rb := newReportBrowser(ctx, c.RemoteBrowserExecPath, c.Logger)
+	defer rb.close()
+	htmlContent, reportData, _, err := c.buildReportHTMLWithData(ctx, session, campaignID, rb)
 	if err != nil {
 		writeReportSendLog("failed", nil, fmt.Errorf("failed to build report: %w", err))
 		return errs.Wrap(err)
 	}
-	pdfBytes, err := remotebrowser.RenderHTMLToPDF(ctx, htmlContent, c.RemoteBrowserExecPath)
+	pdfBytes, err := rb.renderPDF(htmlContent)
+	// the browser is not needed while the email is sent
+	rb.close()
 	if err != nil {
 		c.Logger.Errorw("failed to render report PDF", "error", err)
 		writeReportSendLog("failed", nil, fmt.Errorf("failed to render report PDF: %w", err))

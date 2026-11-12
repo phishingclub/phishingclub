@@ -18,7 +18,7 @@ import (
 )
 
 // WipeBrowserCache removes the automatically downloaded Chromium directory.
-// The next call to RenderHTMLToPDF will trigger a fresh download.
+// The next report browser launch will trigger a fresh download.
 func WipeBrowserCache() error {
 	dir, err := resolveBrowserRootDir()
 	if err != nil {
@@ -58,7 +58,7 @@ func applyGuardFlags(l *launcher.Launcher, proxyAddr string) *launcher.Launcher 
 // Session is one launched, guarded headless Chromium instance that can take
 // several screenshots and render several PDFs on one browser launch. Callers
 // must call Close to release the browser process, its temp dirs and the egress
-// guard proxy. RenderHTMLToPDF renders one PDF on a Session of its own.
+// guard proxy.
 type Session struct {
 	browser *rod.Browser
 	proxy   *guardedProxy
@@ -155,17 +155,6 @@ func (s *Session) Close() {
 	s.l.Kill()
 	s.l.Cleanup()
 	s.proxy.close()
-}
-
-// RenderHTMLToPDF renders an HTML string to PDF bytes using a headless Chromium instance.
-// If execPath is empty the browser binary is resolved automatically using the same path as the runner.
-func RenderHTMLToPDF(ctx context.Context, htmlContent string, execPath string) ([]byte, error) {
-	s, err := NewSession(ctx, execPath)
-	if err != nil {
-		return nil, err
-	}
-	defer s.Close()
-	return s.RenderPDF(htmlContent)
 }
 
 // RenderPDF renders an HTML string to PDF bytes on this session's browser.

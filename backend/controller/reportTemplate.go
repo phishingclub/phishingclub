@@ -7,7 +7,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/model"
-	"github.com/phishingclub/phishingclub/remotebrowser"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/service"
 )
@@ -18,7 +17,6 @@ type ReportTemplate struct {
 	ReportTemplateService *service.ReportTemplate
 	CampaignService       *service.Campaign
 	OptionService         *service.Option
-	ExecPath              string
 }
 
 // Create creates a report template
@@ -132,15 +130,11 @@ func (r *ReportTemplate) GeneratePDFByCampaignID(g *gin.Context) {
 	if !ok {
 		return
 	}
-	htmlContent, campaignName, err := r.CampaignService.BuildReportHTML(
+	pdfBytes, campaignName, err := r.CampaignService.BuildReportPDF(
 		g.Request.Context(),
 		session,
 		id,
 	)
-	if ok := r.handleErrors(g, err); !ok {
-		return
-	}
-	pdfBytes, err := remotebrowser.RenderHTMLToPDF(g.Request.Context(), htmlContent, r.ExecPath)
 	if ok := r.handleErrors(g, err); !ok {
 		return
 	}
