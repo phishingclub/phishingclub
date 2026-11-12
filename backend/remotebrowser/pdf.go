@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -61,6 +63,10 @@ type Session struct {
 	browser *rod.Browser
 	proxy   *guardedProxy
 	l       *launcher.Launcher
+	// captureBlocked and captureRefused add up what the egress guards of
+	// this session's captures blocked and refused
+	captureBlocked atomic.Int64
+	captureRefused atomic.Int64
 }
 
 // NewSession launches a headless Chromium instance behind the egress guard.
@@ -224,10 +230,32 @@ type CaptureOptions struct {
 	DisableScripts bool
 	// Timeout bounds the whole capture.
 	Timeout time.Duration
+	// Local, when set, is asked about every request that is not a document.
+	// When it reports the request as local, the file it returns is the
+	// response, or 404 when it returns no file, and the request never reaches
+	// the network.
+	Local func(u *url.URL) (file *LocalFile, local bool)
+	// LocalHost, when set, names the hosts Local answers for. The egress
+	// guard refuses them, so a request the browser makes without asking the
+	// Fetch handler, such as a prefetch, still never reaches them.
+	LocalHost func(host string) bool
+}
+
+// LocalFile is a response a capture gives without using the network.
+type LocalFile struct {
+	Body        []byte
+	ContentType string
 }
 
 // captureJPEGQuality keeps report screenshots readable at a small size.
 const captureJPEGQuality = 85
+
+// captureLocalBudget is the most bytes of local files one capture is given,
+// later local requests get 404.
+const captureLocalBudget = 64 << 20
+
+// captureLocalReads is the most local files one capture reads at the same time.
+const captureLocalReads = 4
 
 // CaptureCloseTimeout is the longest Capture takes after its Timeout to close
 // its browser context.
@@ -240,7 +268,10 @@ const captureSettleTimeout = 5 * time.Second
 // The page can not leave the given content: every document request, from a
 // redirect, a form post or a frame, is answered with 204 No Content, which
 // makes the browser keep the current document. JavaScript dialogs are
-// dismissed. All other requests go through the egress guard as usual.
+// dismissed and WebSockets are blocked. Requests opts.Local reports as local
+// are answered from Go, up to captureLocalBudget bytes in all. All other
+// requests go through an egress guard of the capture's own, which also
+// refuses the hosts opts.LocalHost names.
 func (s *Session) Capture(htmlContent string, opts CaptureOptions) ([]byte, error) {
 	if opts.Width <= 0 || opts.Height <= 0 || opts.MaxHeight <= 0 || opts.Timeout <= 0 {
 		return nil, fmt.Errorf("reportcapture: width, height, max height and timeout must be above zero")
@@ -248,12 +279,23 @@ func (s *Session) Capture(htmlContent string, opts CaptureOptions) ([]byte, erro
 	ctx, cancel := context.WithTimeout(s.browser.GetContext(), opts.Timeout)
 	defer cancel()
 
+	proxy, err := startGuardedProxyRefusing(opts.LocalHost)
+	if err != nil {
+		return nil, fmt.Errorf("reportcapture: egress guard start failed: %w", err)
+	}
+	// closed after the browser context below is disposed
+	defer func() {
+		proxy.close()
+		s.captureBlocked.Add(proxy.blocked.Load())
+		s.captureRefused.Add(proxy.refused.Load())
+	}()
+
 	// each capture gets its own browser context with the egress guard set on
 	// it, so cookies and storage do not carry over and any popup the page
 	// manages to open is closed with it. It is disposed through the browser
 	// process, which works even when the page renderer is stuck in a script.
 	bc, err := proto.TargetCreateBrowserContext{
-		ProxyServer:     s.proxy.addr(),
+		ProxyServer:     proxy.addr(),
 		ProxyBypassList: "<-loopback>",
 	}.Call(s.browser.Context(ctx))
 	if err != nil {
@@ -278,6 +320,9 @@ func (s *Session) Capture(htmlContent string, opts CaptureOptions) ([]byte, erro
 		return nil, fmt.Errorf("reportcapture: page attach failed: %w", err)
 	}
 
+	var localBytes atomic.Int64
+	localReads := make(chan struct{}, captureLocalReads)
+
 	// subscribing enables the Fetch and Page domains before any content loads,
 	// so no request or dialog is missed
 	waitEvents := tab.EachEvent(
@@ -287,6 +332,25 @@ func (s *Session) Capture(htmlContent string, opts CaptureOptions) ([]byte, erro
 					// an empty body must be set, a nil one is sent as null and refused
 					_ = proto.FetchFulfillRequest{RequestID: e.RequestID, ResponseCode: 204, Body: []byte{}}.Call(tab)
 					return
+				}
+				if opts.Local != nil {
+					if u, err := url.Parse(e.Request.URL); err == nil {
+						// once the budget is spent a local host gets 404 without a read
+						if opts.LocalHost != nil && localBytes.Load() >= captureLocalBudget && opts.LocalHost(u.Hostname()) {
+							_ = fulfillLocal(tab, e.RequestID, nil)
+							return
+						}
+						localReads <- struct{}{}
+						file, local := opts.Local(u)
+						<-localReads
+						if local {
+							if file != nil && localBytes.Add(int64(len(file.Body))) > captureLocalBudget {
+								file = nil
+							}
+							_ = fulfillLocal(tab, e.RequestID, file)
+							return
+						}
+					}
 				}
 				_ = proto.FetchContinueRequest{RequestID: e.RequestID}.Call(tab)
 			}()
@@ -298,6 +362,14 @@ func (s *Session) Capture(htmlContent string, opts CaptureOptions) ([]byte, erro
 		},
 	)
 	go waitEvents()
+
+	// WebSockets are not seen by the Fetch handler above, so they are blocked
+	if err := (proto.NetworkEnable{}).Call(tab); err != nil {
+		return nil, fmt.Errorf("reportcapture: network enable failed: %w", err)
+	}
+	if err := (proto.NetworkSetBlockedURLs{Urls: []string{"ws://*", "wss://*"}}).Call(tab); err != nil {
+		return nil, fmt.Errorf("reportcapture: block websockets failed: %w", err)
+	}
 
 	if opts.DisableScripts {
 		if err := (proto.EmulationSetScriptExecutionDisabled{Value: true}).Call(tab); err != nil {
@@ -359,4 +431,23 @@ func (s *Session) Capture(htmlContent string, opts CaptureOptions) ([]byte, erro
 		return nil, fmt.Errorf("reportcapture: screenshot failed: %w", err)
 	}
 	return shot.Data, nil
+}
+
+// fulfillLocal answers a paused request with file, or with 404 when file is nil.
+func fulfillLocal(tab *rod.Page, id proto.FetchRequestID, file *LocalFile) error {
+	if file == nil {
+		return proto.FetchFulfillRequest{RequestID: id, ResponseCode: 404, Body: []byte{}}.Call(tab)
+	}
+	body := file.Body
+	if body == nil {
+		body = []byte{}
+	}
+	return proto.FetchFulfillRequest{
+		RequestID:    id,
+		ResponseCode: 200,
+		ResponseHeaders: []*proto.FetchHeaderEntry{
+			{Name: "Content-Type", Value: file.ContentType},
+		},
+		Body: body,
+	}.Call(tab)
 }

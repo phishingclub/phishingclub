@@ -19,7 +19,7 @@ func TestReportPageRenderUsesFakeRandomRecipient(t *testing.T) {
 	page := &model.Page{
 		Content: nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(randomRecipientContent)),
 	}
-	buf, err := ts.CreatePageMockForReport(page, nil)
+	buf, err := ts.CreatePageMockForReport(page, nil, "example.test", "/")
 	if err != nil {
 		t.Fatalf("render page: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestReportEmailRenderUsesFakeRandomRecipient(t *testing.T) {
 	ts := &Template{}
 	email := model.NewEmailExample()
 	email.Content = nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(randomRecipientContent))
-	out, err := ts.CreateMailBodyForReport(email)
+	out, err := ts.CreateMailBodyForReport(email, "example.test", "/")
 	if err != nil {
 		t.Fatalf("render email: %v", err)
 	}

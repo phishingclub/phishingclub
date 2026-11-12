@@ -289,17 +289,18 @@ func reportMockRandomRecipient() map[string]string {
 }
 
 // CreateMailBodyForReport renders an email's content for the campaign report
-// screenshot. It uses the synthetic reportMockRecipient and a neutral example
-// domain, the same privacy boundary ApplyPageMock already uses for template
-// previews, so the render never touches a real recipient or a real tracking
-// link.
-func (t *Template) CreateMailBodyForReport(email *model.Email) (string, error) {
+// screenshot with the fake reportMockRecipient, so the render never touches a
+// real recipient.
+//
+// domainName and urlPath are the campaign domain and path the links and asset
+// URLs point at.
+func (t *Template) CreateMailBodyForReport(email *model.Email, domainName string, urlPath string) (string, error) {
 	content, err := email.Content.Get()
 	if err != nil {
 		return "", fmt.Errorf("no email content set to render: %w", err)
 	}
 	recipient := reportMockRecipient()
-	baseURL := "https://example.test"
+	baseURL := "https://" + domainName
 	recipientID := uuid.Nil.String()
 	trackingPixelPath := fmt.Sprintf("%s/wf/open?upn=%s", baseURL, recipientID)
 	trackingPixel := fmt.Sprintf(
@@ -309,7 +310,7 @@ func (t *Template) CreateMailBodyForReport(email *model.Email) (string, error) {
 	data := t.newTemplateDataMap(
 		recipientID,
 		baseURL,
-		baseURL+"/report-preview",
+		baseURL+urlPath,
 		recipient,
 		trackingPixelPath,
 		trackingPixel,
@@ -329,11 +330,12 @@ func (t *Template) CreateMailBodyForReport(email *model.Email) (string, error) {
 }
 
 // CreatePageMockForReport renders a landing page's content for the campaign
-// report screenshot, reusing the same synthetic recipient and neutral example
-// domain/identifiers ApplyPageMock already uses for template previews. email
-// supplies sender placeholders the page may reference (e.g. {{.FromName}})
-// and may be nil, in which case a placeholder email stands in for it.
-func (t *Template) CreatePageMockForReport(page *model.Page, email *model.Email) (*bytes.Buffer, error) {
+// report screenshot with the fake reportMockRecipient. email supplies the
+// sender values the page may use, such as {{.FromName}}, and may be nil, in
+// which case an example email stands in for it.
+//
+// domainName and urlPath are the campaign domain and path the page is served on.
+func (t *Template) CreatePageMockForReport(page *model.Page, email *model.Email, domainName string, urlPath string) (*bytes.Buffer, error) {
 	content, err := page.Content.Get()
 	if err != nil {
 		return nil, fmt.Errorf("no page content set to render: %w", err)
@@ -342,7 +344,7 @@ func (t *Template) CreatePageMockForReport(page *model.Page, email *model.Email)
 		email = model.NewEmailExample()
 	}
 	domain := &database.Domain{
-		Name: "example.test",
+		Name: domainName,
 	}
 	campaignRecipientID := uuid.New()
 	recipient := reportMockRecipient()
@@ -370,7 +372,7 @@ func (t *Template) CreatePageMockForReport(page *model.Page, email *model.Email)
 		content.String(),
 		campaignTemplate,
 		"stateParam",
-		"urlPath",
+		urlPath,
 		nil,
 		nil, // no company context for a report screenshot render
 		reportMockRandomRecipient(),

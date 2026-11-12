@@ -7600,6 +7600,7 @@ func (c *Campaign) attachReportScreenshots(
 		session,
 		&templateID,
 		&repository.CampaignTemplateOption{
+			WithDomain:            true,
 			WithEmail:             true,
 			WithBeforeLandingPage: true,
 			WithLandingPage:       true,
@@ -7610,6 +7611,31 @@ func (c *Campaign) attachReportScreenshots(
 		c.Logger.Warnw("failed to load campaign template for report screenshots", "error", err)
 		return
 	}
+
+	var companyID *uuid.UUID
+	if id, idErr := campaign.CompanyID.Get(); idErr == nil {
+		companyID = &id
+	}
+	// links and asset URLs point at the campaign domain, and its requests are
+	// answered from the asset folder, as the public server would serve them
+	domainName := "example.test"
+	if campaignTemplate.Domain != nil {
+		if n, nErr := campaignTemplate.Domain.Name.Get(); nErr == nil {
+			domainName = n.String()
+		}
+	}
+	urlPath := "/"
+	if p, pErr := campaignTemplate.URLPath.Get(); pErr == nil && p.String() != "" {
+		urlPath = p.String()
+	}
+	// without the domain list, requests to the campaign domain could not be
+	// kept from the live server, so no screenshots are taken
+	names, err := c.DomainService.DomainRepository.GetAllNames(ctx)
+	if err != nil {
+		c.Logger.Warnw("failed to load domains for report screenshots", "error", err)
+		return
+	}
+	assets := newReportAssets(c.DomainService.AssetService.RootFolder, names, companyID)
 
 	// the browser is only launched once the first screenshot is actually
 	// attempted, so a campaign whose configured pages the report template
@@ -7679,9 +7705,13 @@ func (c *Campaign) attachReportScreenshots(
 		Height:    1000,
 		MaxHeight: reportScreenshotMaxHeight,
 	}
+	emailCapture.Local = assets.lookup
+	pageCapture.Local = assets.lookup
+	emailCapture.LocalHost = assets.isLocalHost
+	pageCapture.LocalHost = assets.isLocalHost
 
 	if campaignTemplate.Email != nil && strings.Contains(reportTemplateContent, ".EmailScreenshot") {
-		emailHTML, mailErr := c.TemplateService.CreateMailBodyForReport(campaignTemplate.Email)
+		emailHTML, mailErr := c.reportEmailHTML(ctx, session, campaignTemplate.Email, companyID, domainName, urlPath)
 		if mailErr != nil {
 			c.Logger.Warnw("failed to render email for report screenshot", "error", mailErr)
 		} else {
@@ -7696,17 +7726,71 @@ func (c *Campaign) attachReportScreenshots(
 		if page == nil || !strings.Contains(reportTemplateContent, "."+name) {
 			return
 		}
-		pageBuf, pageErr := c.TemplateService.CreatePageMockForReport(page, campaignTemplate.Email)
+		pageBuf, pageErr := c.TemplateService.CreatePageMockForReport(page, campaignTemplate.Email, domainName, urlPath)
 		if pageErr != nil {
 			c.Logger.Warnw("failed to render page for report screenshot", "page", name, "error", pageErr)
 			return
 		}
-		*dest = htmltemplate.HTML(capture(name, pageBuf.String(), pageCapture))
+		pageHTML := withBaseURL(pageBuf.String(), "https://"+domainName+urlPath)
+		*dest = htmltemplate.HTML(capture(name, pageHTML, pageCapture))
 	}
 
 	capturePage("BeforeLandingPageScreenshot", campaignTemplate.BeforeLandingePage, &rd.BeforeLandingPageScreenshot)
 	capturePage("LandingPageScreenshot", campaignTemplate.LandingPage, &rd.LandingPageScreenshot)
 	capturePage("AfterLandingPageScreenshot", campaignTemplate.AfterLandingPage, &rd.AfterLandingPageScreenshot)
+}
+
+// reportEmailHTML renders the email body for a report screenshot with its
+// inline attachments shown in place of their cid: references.
+func (c *Campaign) reportEmailHTML(
+	ctx context.Context,
+	session *model.Session,
+	email *model.Email,
+	companyID *uuid.UUID,
+	domainName string,
+	urlPath string,
+) (string, error) {
+	body, err := c.TemplateService.CreateMailBodyForReport(email, domainName, urlPath)
+	if err != nil {
+		return "", err
+	}
+	emailID, err := email.ID.Get()
+	if err != nil {
+		return body, nil
+	}
+	// loaded the same way sending does, so only attachments the campaign
+	// company can use are included
+	withAttachments, err := c.MailService.GetByID(ctx, session, &emailID, companyID)
+	if err != nil {
+		c.Logger.Warnw("failed to load email attachments for report screenshot", "error", err)
+		return body, nil
+	}
+	images := map[string][]byte{}
+	for _, ea := range withAttachments.Attachments {
+		if !ea.IsInline || ea.Attachment == nil {
+			continue
+		}
+		p, pErr := c.MailService.AttachmentService.GetPath(ea.Attachment)
+		if pErr != nil {
+			continue
+		}
+		content, rErr := readFileLimited(p, reportAssetMaxSize)
+		if rErr != nil {
+			continue
+		}
+		if embedded, eErr := ea.Attachment.EmbeddedContent.Get(); eErr == nil && embedded {
+			// a templated inline attachment is rendered like the body
+			asEmail := *email
+			asEmail.Content = nullable.NewNullableWithValue(*vo.NewUnsafeOptionalString1MB(string(content)))
+			rendered, tErr := c.TemplateService.CreateMailBodyForReport(&asEmail, domainName, urlPath)
+			if tErr != nil {
+				continue
+			}
+			content = []byte(rendered)
+		}
+		images[filepath.Base(p)] = content
+	}
+	return withInlineImages(body, images), nil
 }
 
 const defaultReportEmailSubject = "Campaign report: {{.CampaignName}}"

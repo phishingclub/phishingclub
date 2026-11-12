@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -75,7 +76,7 @@ func TestCaptureRoutesThroughGuard(t *testing.T) {
 		t.Fatalf("loopback resource reached %d times through Capture; guard wiring missing", hits)
 	}
 	// positive control: the image request reached the guard and was refused there
-	if s.proxy.blocked.Load() == 0 {
+	if s.captureBlocked.Load() == 0 {
 		t.Fatalf("the guard refused nothing, the request did not go through it")
 	}
 }
@@ -199,6 +200,45 @@ func TestCaptureCanDisableScripts(t *testing.T) {
 	}
 }
 
+func TestCaptureAnswersLocalRequests(t *testing.T) {
+	s := newTestSession(t)
+	var mu sync.Mutex
+	asked := map[string]bool{}
+	opts := testCaptureOptions()
+	opts.Local = func(u *url.URL) (*LocalFile, bool) {
+		mu.Lock()
+		asked[u.String()] = true
+		mu.Unlock()
+		if u.Hostname() != "phish.test" {
+			return nil, false
+		}
+		if u.Path == "/style.css" {
+			return &LocalFile{Body: []byte(`body{background:#ff0000}`), ContentType: "text/css"}, true
+		}
+		return nil, true
+	}
+	// phish.test does not resolve, so the red background can only come from
+	// the local answer
+	html := `<html><head><link rel="stylesheet" href="https://phish.test/style.css"></head>` +
+		`<body style="margin:0"><img src="https://phish.test/missing.png">` +
+		`<iframe src="https://phish.test/frame"></iframe></body></html>`
+	shot, err := s.Capture(html, opts)
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if !isRed(decodeJPEG(t, shot), 200, 200) {
+		t.Fatalf("local stylesheet was not applied")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !asked["https://phish.test/missing.png"] {
+		t.Fatalf("local was not asked about the image request")
+	}
+	if asked["https://phish.test/frame"] {
+		t.Fatalf("local was asked about a document request, which must get 204")
+	}
+}
+
 func TestCaptureKeepsPageWhenFrameOrPopupNavigates(t *testing.T) {
 	s := newTestSession(t)
 	pages := map[string]string{
@@ -274,5 +314,85 @@ func TestCaptureRejectsMissingOptions(t *testing.T) {
 		if _, err := s.Capture(`<html></html>`, opts); err == nil {
 			t.Fatalf("options %+v were accepted", opts)
 		}
+	}
+}
+
+func TestCaptureLocalRequestsNeverReachNetwork(t *testing.T) {
+	s := newTestSession(t)
+	var hits int
+	var mu sync.Mutex
+	victim := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+	}))
+	defer victim.Close()
+	victimURL, _ := url.Parse(victim.URL)
+
+	opts := testCaptureOptions()
+	opts.Local = func(u *url.URL) (*LocalFile, bool) {
+		return nil, u.Host == victimURL.Host
+	}
+	html := `<html><body><img src="` + victim.URL + `/a.png"><script>fetch("` + victim.URL + `/b")</script></body></html>`
+	if _, err := s.Capture(html, opts); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	// a request that left the browser would have been refused by the guard
+	if hits != 0 || s.captureBlocked.Load() != 0 {
+		t.Fatalf("local requests reached the network: %d hits, %d refused by the guard", hits, s.captureBlocked.Load())
+	}
+}
+
+func TestCaptureBlocksWebSockets(t *testing.T) {
+	s := newTestSession(t)
+	html := `<html><body><script>new WebSocket("ws://127.0.0.1:9/x");new WebSocket("wss://example.com/x")</script></body></html>`
+	if _, err := s.Capture(html, testCaptureOptions()); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	// a WebSocket that left the browser would have reached the guard
+	if n := s.captureBlocked.Load(); n != 0 {
+		t.Fatalf("websocket requests reached the guard %d times", n)
+	}
+}
+
+func TestCaptureGuardRefusesLocalHosts(t *testing.T) {
+	s := newTestSession(t)
+	var hits int
+	var mu sync.Mutex
+	victim := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		mu.Unlock()
+	}))
+	defer victim.Close()
+	victimURL, _ := url.Parse(victim.URL)
+
+	opts := testCaptureOptions()
+	var asked []string
+	opts.Local = func(u *url.URL) (*LocalFile, bool) {
+		mu.Lock()
+		asked = append(asked, u.Path)
+		mu.Unlock()
+		return nil, u.Host == victimURL.Host
+	}
+	opts.LocalHost = func(host string) bool { return host == victimURL.Hostname() }
+	// a prefetch is made by the browser without asking the Fetch handler
+	html := `<html><head><link rel="prefetch" href="` + victim.URL + `/prefetch"></head><body>Report</body></html>`
+	if _, err := s.Capture(html, opts); err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if hits != 0 {
+		t.Fatalf("a local host was reached %d times", hits)
+	}
+	if s.captureBlocked.Load() != 0 {
+		t.Fatalf("a local request reached the address check, %d blocked", s.captureBlocked.Load())
+	}
+	// positive control: the prefetch reached the guard and was refused there
+	if s.captureRefused.Load() == 0 {
+		t.Fatalf("the guard refused nothing, asked locally for %v", asked)
 	}
 }
