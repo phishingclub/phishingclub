@@ -143,7 +143,7 @@ func (a *Attachment) Create(
 	}
 	// save uploaded files to the database
 	for _, attachment := range attachments {
-		_, err := a.AttachmentRepository.Insert(
+		id, err := a.AttachmentRepository.Insert(
 			g,
 			attachment,
 		)
@@ -155,6 +155,7 @@ func (a *Attachment) Create(
 			// repeatedly to burn the server
 			return createdIDs, errs.Wrap(err)
 		}
+		createdIDs = append(createdIDs, id)
 	}
 	strIds := []string{}
 	for _, id := range createdIDs {
