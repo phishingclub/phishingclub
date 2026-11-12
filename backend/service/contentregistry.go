@@ -370,39 +370,7 @@ func (s *ContentRegistry) auditFailure(ae *AuditEvent, errp *error) {
 	if errors.As(err, &mv) || errors.As(err, &uc) || errors.As(err, &ro) {
 		return
 	}
-	ae.Details["result"] = "failed"
-	ae.Details["errorClass"] = auditErrorClass(err)
-	s.AuditLogAuthorized(ae)
-}
-
-// auditErrorClass names the kind of a failure for the audit log. The error text
-// is not logged: it can carry values the user supplied, such as a substituted
-// secret variable inside a header, a url or a template, and those must not end
-// up in the audit log. The full error still goes back to the caller.
-func auditErrorClass(err error) string {
-	var ve errs.ValidationError
-	var se errs.SyntaxError
-	var ce errs.ConflictError
-	var oe errs.OperationalError
-	var cu errs.CustomError
-	switch {
-	case errors.As(err, &ve):
-		return "validation"
-	case errors.As(err, &se):
-		return "syntax"
-	case errors.As(err, &ce):
-		return "conflict"
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		return "not found"
-	case errors.As(err, &oe):
-		return "operational"
-	case errors.As(err, &cu):
-		return "custom"
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return "canceled"
-	default:
-		return "internal"
-	}
+	s.AuditLogFailed(ae, err)
 }
 
 func (s *ContentRegistry) clientFor(reg *database.Registry) *registry.Client {
@@ -460,7 +428,7 @@ func (s *ContentRegistry) AddRegistry(
 	defer s.auditFailure(ae, &err)
 	name = strings.TrimSpace(name)
 	url = strings.TrimSpace(url)
-	ae.Details["url"] = url
+	ae.Details["url"] = auditURL(url)
 	token = strings.TrimSpace(token)
 	if name == "" || url == "" {
 		return nil, errs.NewValidationError(fmt.Errorf("name and URL are required"))
@@ -537,7 +505,7 @@ func (s *ContentRegistry) UpdateRegistry(
 		return err
 	}
 	url = strings.TrimRight(url, "/")
-	ae.Details["url"] = url
+	ae.Details["url"] = auditURL(url)
 	token, err := effectiveToken(reg, in)
 	if err != nil {
 		return err

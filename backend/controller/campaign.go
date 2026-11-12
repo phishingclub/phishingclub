@@ -705,14 +705,14 @@ func (c *Campaign) ExportEventsAsCSV(g *gin.Context) {
 	// get all rows
 	queryArgs.Limit = 0
 	queryArgs.Offset = 0
-	// get events by campaign id
-	events, err := c.CampaignService.GetEventsByCampaignID(
+	// get events by campaign id, the export is audited
+	events, err := c.CampaignService.ExportEventsByCampaignID(
 		g.Request.Context(),
 		session,
 		id,
 		queryArgs,
 		nil,
-		nil,
+		"events",
 	)
 	if ok := c.handleErrors(g, err); !ok {
 		return
@@ -798,14 +798,14 @@ func (c *Campaign) ExportSubmissionsAsCSV(g *gin.Context) {
 	submissionEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
 	eventTypeFilter := []string{submissionEventID.String()}
 
-	// get submission events by campaign id
-	events, err := c.CampaignService.GetEventsByCampaignID(
+	// get submission events by campaign id, the export is audited
+	events, err := c.CampaignService.ExportEventsByCampaignID(
 		g.Request.Context(),
 		session,
 		id,
 		queryArgs,
-		nil,
 		eventTypeFilter,
+		"submissions",
 	)
 	if ok := c.handleErrors(g, err); !ok {
 		return

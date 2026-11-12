@@ -95,8 +95,9 @@ func (s *RemoteBrowser) Create(
 	ctx context.Context,
 	session *model.Session,
 	rb *model.RemoteBrowser,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("RemoteBrowser.Create", session)
+	defer s.auditDone(ae, &err)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
@@ -224,8 +225,9 @@ func (s *RemoteBrowser) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	rb *model.RemoteBrowser,
-) error {
+) (err error) {
 	ae := NewAuditEvent("RemoteBrowser.UpdateByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -286,8 +288,9 @@ func (s *RemoteBrowser) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("RemoteBrowser.DeleteByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -304,4 +307,52 @@ func (s *RemoteBrowser) DeleteByID(
 	}
 	s.AuditLogAuthorized(ae)
 	return nil
+}
+
+// AuthorizeLiveSession checks the session may use live victim sessions. A
+// denied attempt is audited. Listing is polled by the page, so an allowed list
+// writes no event, watching and closing are audited by the caller with
+// AuditLiveSession.
+func (r *RemoteBrowser) AuthorizeLiveSession(session *model.Session, action string) error {
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		r.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		ae := NewAuditEvent("RemoteBrowser."+action, session)
+		r.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	return nil
+}
+
+// AuditLiveSession writes a successful watch or close of a live victim
+// session. mode is view or control for a watch, empty for a close.
+func (r *RemoteBrowser) AuditLiveSession(
+	session *model.Session,
+	action string,
+	campaignRecipientID string,
+	campaignID string,
+	mode string,
+) {
+	ae := NewAuditEvent("RemoteBrowser."+action, session)
+	ae.Details["campaignRecipientId"] = campaignRecipientID
+	if campaignID != "" {
+		ae.Details["campaignId"] = campaignID
+	}
+	if mode != "" {
+		ae.Details["mode"] = mode
+	}
+	r.AuditLogAuthorized(ae)
+}
+
+// AuditRun writes the start of an operator test run of a saved remote browser
+// script. The permission was checked by the lookup of the remote browser.
+func (r *RemoteBrowser) AuditRun(session *model.Session, id *uuid.UUID) {
+	ae := NewAuditEvent("RemoteBrowser.Run", session)
+	if id != nil {
+		ae.Details["id"] = id.String()
+	}
+	r.AuditLogAuthorized(ae)
 }

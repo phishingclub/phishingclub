@@ -32,8 +32,9 @@ func (s *ReportTemplate) Create(
 	ctx context.Context,
 	session *model.Session,
 	tmpl *model.ReportTemplate,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("ReportTemplate.Create", session)
+	defer s.auditDone(ae, &err)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
@@ -51,6 +52,9 @@ func (s *ReportTemplate) Create(
 	if err != nil {
 		s.Logger.Errorw("failed to insert report template", "error", err)
 		return nil, errs.Wrap(err)
+	}
+	if id != nil {
+		ae.Details["id"] = id.String()
 	}
 	s.AuditLogAuthorized(ae)
 	return id, nil
@@ -117,8 +121,9 @@ func (s *ReportTemplate) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	tmpl *model.ReportTemplate,
-) error {
+) (err error) {
 	ae := NewAuditEvent("ReportTemplate.UpdateByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -143,8 +148,9 @@ func (s *ReportTemplate) UpdateByID(
 // WipeBrowserCache removes the auto-downloaded Chromium binary used for PDF generation.
 func (s *ReportTemplate) WipeBrowserCache(
 	session *model.Session,
-) error {
+) (err error) {
 	ae := NewAuditEvent("ReportTemplate.WipeBrowserCache", session)
+	defer s.auditDone(ae, &err)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
@@ -167,8 +173,9 @@ func (s *ReportTemplate) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("ReportTemplate.DeleteByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {

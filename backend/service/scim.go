@@ -695,7 +695,7 @@ func (s *Scim) CreateGroup(
 		s.Logger.Errorw("scim create group: failed to reload group", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	s.auditScim("Scim.CreateGroup", config, map[string]any{"groupID": groupID.String()})
+	s.auditScim("Scim.CreateGroup", config, map[string]any{"groupId": groupID.String()})
 	g := recipientGroupToScimGroup(created, baseURL)
 	return &g, nil
 }
@@ -748,7 +748,7 @@ func (s *Scim) ReplaceGroup(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	s.auditScim("Scim.ReplaceGroup", config, map[string]any{"groupID": groupID.String()})
+	s.auditScim("Scim.ReplaceGroup", config, map[string]any{"groupId": groupID.String()})
 	g := recipientGroupToScimGroup(updated, baseURL)
 	return &g, nil
 }
@@ -806,7 +806,7 @@ func (s *Scim) PatchGroup(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	s.auditScim("Scim.PatchGroup", config, map[string]any{"groupID": groupID.String()})
+	s.auditScim("Scim.PatchGroup", config, map[string]any{"groupId": groupID.String()})
 	g := recipientGroupToScimGroup(updated, baseURL)
 	return &g, nil
 }
@@ -841,7 +841,7 @@ func (s *Scim) DeleteGroup(
 		s.Logger.Errorw("scim delete group: failed to delete group", "error", err)
 		return errs.Wrap(err)
 	}
-	s.auditScim("Scim.DeleteGroup", config, map[string]any{"groupID": groupID.String()})
+	s.auditScim("Scim.DeleteGroup", config, map[string]any{"groupId": groupID.String()})
 	return nil
 }
 
@@ -1049,7 +1049,7 @@ func (s *Scim) CreateUser(
 			if err != nil {
 				return nil, errs.Wrap(err)
 			}
-			s.auditScim("Scim.CreateUser", config, map[string]any{"recipientID": existingID.String(), "revived": true})
+			s.auditScim("Scim.CreateUser", config, map[string]any{"recipientId": existingID.String(), "revived": true})
 			u := recipientToScimUser(revived, baseURL)
 			return &u, nil
 		}
@@ -1082,7 +1082,7 @@ func (s *Scim) CreateUser(
 	// note: active=false on create is not separately representable, a recipient
 	// either exists (active) or is deprovisioned (deleted). the resource is still
 	// created so the IdP receives a retrievable 201 response.
-	s.auditScim("Scim.CreateUser", config, map[string]any{"recipientID": recipientID.String()})
+	s.auditScim("Scim.CreateUser", config, map[string]any{"recipientId": recipientID.String()})
 	u := recipientToScimUser(created, baseURL)
 	return &u, nil
 }
@@ -1127,7 +1127,7 @@ func (s *Scim) ReplaceUser(
 		if err := s.deprovisionRecipient(ctx, recipientID); err != nil {
 			return nil, errs.Wrap(err)
 		}
-		s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientID": recipientID.String(), "via": "replace"})
+		s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientId": recipientID.String(), "via": "replace"})
 		return deprovisionedUserResponse(existing, baseURL), nil
 	}
 	// active=true: revive a previously soft-deleted recipient
@@ -1149,7 +1149,7 @@ func (s *Scim) ReplaceUser(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	s.auditScim("Scim.ReplaceUser", config, map[string]any{"recipientID": recipientID.String()})
+	s.auditScim("Scim.ReplaceUser", config, map[string]any{"recipientId": recipientID.String()})
 	u := recipientToScimUser(updated, baseURL)
 	return &u, nil
 }
@@ -1188,7 +1188,7 @@ func (s *Scim) PatchUser(
 			// active=false marks the recipient disabled; return 200 with active=false
 			// so the IdP records the disable as a success instead of retrying
 			if deactivated {
-				s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientID": recipientID.String(), "via": "patch"})
+				s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientId": recipientID.String(), "via": "patch"})
 				return deprovisionedUserResponse(existing, baseURL), nil
 			}
 		case "remove":
@@ -1197,7 +1197,7 @@ func (s *Scim) PatchUser(
 				if err := s.deprovisionRecipient(ctx, recipientID); err != nil {
 					return nil, errs.Wrap(err)
 				}
-				s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientID": recipientID.String(), "via": "patch"})
+				s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientId": recipientID.String(), "via": "patch"})
 				return deprovisionedUserResponse(existing, baseURL), nil
 			}
 		}
@@ -1207,7 +1207,7 @@ func (s *Scim) PatchUser(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	s.auditScim("Scim.PatchUser", config, map[string]any{"recipientID": recipientID.String()})
+	s.auditScim("Scim.PatchUser", config, map[string]any{"recipientId": recipientID.String()})
 	u := recipientToScimUser(updated, baseURL)
 	return &u, nil
 }
@@ -1237,29 +1237,57 @@ func (s *Scim) DeprovisionUser(
 	if err := s.deprovisionRecipient(ctx, recipientID); err != nil {
 		return errs.Wrap(err)
 	}
-	s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientID": recipientID.String(), "via": "delete"})
+	s.auditScim("Scim.DeprovisionUser", config, map[string]any{"recipientId": recipientID.String(), "via": "delete"})
 	return nil
 }
 
 // VerifyAndLoadConfig authenticates the bearer token against the stored hash
 // for the given company and returns the active SCIM config.
 // returns (config, authed, error). authed is false when the token is wrong.
+// A refused token for a company with SCIM set up is audited. A company
+// without SCIM writes no event, so random requests do not fill the log.
 func (s *Scim) VerifyAndLoadConfig(
 	ctx context.Context,
 	companyID *uuid.UUID,
 	plainToken string,
+	ip string,
 ) (*model.CompanyScimConfig, bool, error) {
 	ok, config, err := s.CompanyScimConfigService.VerifyToken(ctx, companyID, plainToken)
 	if err != nil {
 		return nil, false, err
 	}
 	if !ok {
+		s.auditScimAuthFailed(companyID, ip, "wrongToken")
 		return nil, false, nil
 	}
 	if config == nil || !config.Enabled {
+		s.auditScimAuthFailed(companyID, ip, "disabled")
 		return config, false, nil
 	}
 	return config, true, nil
+}
+
+// scimAuthFailedThrottle limits Scim.AuthFailed events to one per company per
+// interval. SCIM is served on the public phishing server, so a stream of wrong
+// tokens must not fill the audit log. Refusals in between are counted in the
+// next event.
+var scimAuthFailedThrottle = newAuditThrottle(time.Minute)
+
+// auditScimAuthFailed writes a denied Scim.AuthFailed event, at most one per
+// company per scimAuthFailedInterval.
+func (s *Scim) auditScimAuthFailed(companyID *uuid.UUID, ip string, reason string) {
+	key := companyID.String()
+	write, suppressed, lastSuppressedIP := scimAuthFailedThrottle.allow(key, ip)
+	if !write {
+		return
+	}
+	ae := NewAuditEvent("Scim.AuthFailed", nil)
+	ae.IP = ip
+	ae.Details["actor"] = "scim"
+	ae.Details["companyId"] = key
+	ae.Details["reason"] = reason
+	addThrottleDetails(ae, suppressed, lastSuppressedIP)
+	s.AuditLogNotAuthorized(ae)
 }
 
 // UpdateLastSync stamps the last sync time for the config
@@ -1361,10 +1389,11 @@ func (s *Scim) PruneSoftDeletedAuthorized(
 	ctx context.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
-) (int, error) {
+) (_ int, err error) {
 	ae := NewAuditEvent("Scim.PruneSoftDeletedAuthorized", session)
+	defer s.auditDone(ae, &err)
 	if companyID != nil {
-		ae.Details["companyID"] = companyID.String()
+		ae.Details["companyId"] = companyID.String()
 	}
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -1391,10 +1420,11 @@ func (s *Scim) RestoreSoftDeletedAuthorized(
 	ctx context.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
-) (int, error) {
+) (_ int, err error) {
 	ae := NewAuditEvent("Scim.RestoreSoftDeletedAuthorized", session)
+	defer s.auditDone(ae, &err)
 	if companyID != nil {
-		ae.Details["companyID"] = companyID.String()
+		ae.Details["companyId"] = companyID.String()
 	}
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -1444,7 +1474,7 @@ func (s *Scim) auditScim(name string, config *model.CompanyScimConfig, details m
 	ae.Details["actor"] = "scim"
 	if config != nil {
 		if cid, err := config.CompanyID.Get(); err == nil {
-			ae.Details["companyID"] = cid.String()
+			ae.Details["companyId"] = cid.String()
 		}
 		if tp, err := config.TokenPrefix.Get(); err == nil {
 			ae.Details["scimTokenPrefix"] = tp

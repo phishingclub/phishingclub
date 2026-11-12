@@ -106,6 +106,7 @@ func NewControllers(
 		PasswordHasher:    *utillities.PasswordHasher,
 		DB:                db,
 		ImportService:     services.Import,
+		InstallService:    services.InstallSetup,
 	}
 	health := &controller.Health{}
 	log := &controller.Log{
@@ -240,8 +241,9 @@ func NewControllers(
 		ReportInboxService: services.ReportInbox,
 	}
 	scim := &controller.Scim{
-		Common:      common,
-		ScimService: services.Scim,
+		Common:         common,
+		ScimService:    services.Scim,
+		TrustedProxies: conf.IPSecurity.TrustedProxies,
 	}
 	remoteBrowser := &controller.RemoteBrowserController{
 		Common:                      common,

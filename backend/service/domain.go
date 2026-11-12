@@ -142,8 +142,9 @@ func (d *Domain) createDomain(
 	session *model.Session,
 	domain *model.Domain,
 	allowProxyCreation bool,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("Domain.Create", session)
+	defer d.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -544,8 +545,9 @@ func (d *Domain) updateDomain(
 	id *uuid.UUID,
 	incoming *model.Domain,
 	allowProxyUpdate bool,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Domain.UpdateByID", session)
+	defer d.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -787,8 +789,9 @@ func (d *Domain) deleteDomain(
 	session *model.Session,
 	id *uuid.UUID,
 	allowProxyDeletion bool,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Domain.DeleteByID", session)
+	defer d.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -1314,7 +1317,7 @@ func (d *Domain) GetByProxyID(
 	proxyID *uuid.UUID,
 ) (*model.Result[model.Domain], error) {
 	ae := NewAuditEvent("Domain.GetByProxyID", session)
-	ae.Details["proxyID"] = proxyID.String()
+	ae.Details["proxyId"] = proxyID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {

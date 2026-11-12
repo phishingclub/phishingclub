@@ -44,8 +44,9 @@ func (s *Company) Create(
 	ctx context.Context,
 	session *model.Session,
 	company *model.Company,
-) (*model.Company, error) {
+) (_ *model.Company, err error) {
 	ae := NewAuditEvent("Company.Create", session)
+	defer s.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -177,8 +178,9 @@ func (s *Company) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	company *model.Company,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Company.UpdateByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -264,8 +266,9 @@ func (s *Company) DeleteByID(
 	g *gin.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
-) (int, error) {
+) (_ int, err error) {
 	ae := NewAuditEvent("Company.DeleteByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["companyId"] = companyID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -612,4 +615,17 @@ func (s *Company) DeleteByID(
 	}
 	s.AuditLogAuthorized(ae)
 	return affectedRows, nil
+}
+
+// AuthorizeExport checks the session may export company data and audits the
+// export. A nil companyID is the export of shared data that belongs to no
+// company. The caller builds the file after this returns nil.
+func (c *Company) AuthorizeExport(session *model.Session, companyID *uuid.UUID) error {
+	ae := NewAuditEvent("Company.Export", session)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	} else {
+		ae.Details["shared"] = true
+	}
+	return c.authorizeAndAudit(session, ae)
 }

@@ -51,7 +51,7 @@ func (s *CompanyScimConfig) GetByCompanyID(
 	companyID *uuid.UUID,
 ) (*model.CompanyScimConfig, error) {
 	ae := NewAuditEvent("CompanyScimConfig.GetByCompanyID", session)
-	ae.Details["companyID"] = companyID.String()
+	ae.Details["companyId"] = companyID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -81,9 +81,10 @@ func (s *CompanyScimConfig) Upsert(
 	session *model.Session,
 	companyID *uuid.UUID,
 	enabled bool,
-) (*model.CompanyScimConfig, error) {
+) (_ *model.CompanyScimConfig, err error) {
 	ae := NewAuditEvent("CompanyScimConfig.Upsert", session)
-	ae.Details["companyID"] = companyID.String()
+	defer s.auditDone(ae, &err)
+	ae.Details["companyId"] = companyID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -160,9 +161,10 @@ func (s *CompanyScimConfig) RotateToken(
 	ctx context.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
-) (*model.CompanyScimConfig, error) {
+) (_ *model.CompanyScimConfig, err error) {
 	ae := NewAuditEvent("CompanyScimConfig.RotateToken", session)
-	ae.Details["companyID"] = companyID.String()
+	defer s.auditDone(ae, &err)
+	ae.Details["companyId"] = companyID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -218,9 +220,10 @@ func (s *CompanyScimConfig) DeleteByCompanyID(
 	ctx context.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("CompanyScimConfig.DeleteByCompanyID", session)
-	ae.Details["companyID"] = companyID.String()
+	defer s.auditDone(ae, &err)
+	ae.Details["companyId"] = companyID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/time/rate"
 )
 
@@ -42,9 +43,11 @@ func NewIPRateLimiterMiddleware(limit float64, burst int) gin.HandlerFunc {
 func NewScimRateLimiterMiddleware(limit float64, burst int) gin.HandlerFunc {
 	companyLimiter := NewKeyRateLimiter(rate.Limit(limit), burst, 10*time.Minute)
 	return func(c *gin.Context) {
-		key := c.Param("companyID")
-		if key == "" {
-			key = c.ClientIP()
+		// key on the parsed id, so other spellings of the same id such as
+		// upper case or a urn:uuid: prefix share one bucket
+		key := c.ClientIP()
+		if id, err := uuid.Parse(c.Param("companyID")); err == nil {
+			key = id.String()
 		}
 		limiter := companyLimiter.GetLimiter(key)
 		if !limiter.Allow() {

@@ -67,7 +67,7 @@ func (s *Session) GetSessionsByUserID(
 ) (*model.Result[model.Session], error) {
 	result := model.NewEmptyResult[model.Session]()
 	ae := NewAuditEvent("Session.GetSessionsByUserID", session)
-	ae.Details["userID"] = userID.String()
+	ae.Details["userId"] = userID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -145,9 +145,9 @@ func (s *Session) validateAndExtendSession(g *gin.Context) (*model.Session, erro
 		}
 		// audit log - session invliad due to IP change
 		ae := NewAuditEvent("Session.Renew", session)
-		ae.Details["reason"] = "IP changed"
-		ae.Details["previousIP"] = sessionIP
-		ae.Details["newIP"] = clientIP
+		ae.Details["reason"] = "ipChanged"
+		ae.Details["previousIp"] = sessionIP
+		ae.Details["newIp"] = clientIP
 		s.AuditLogNotAuthorized(ae)
 		return nil, fmt.Errorf(
 			"session IP changed (%s != %s)",
@@ -207,6 +207,8 @@ func (s *Session) Create(
 	// a session is only created after all login checks have passed,
 	// including MFA and SSO, so this event marks a fully completed login
 	ae := NewAuditEvent("User.Login", createdSession)
+	// matches the sessionIdPrefix of the User.Logout event for this session
+	ae.Details["sessionIdPrefix"] = sessionIDPrefix(sessionID)
 	if username, err := user.Username.Get(); err == nil {
 		ae.Details["username"] = username.String()
 	}
@@ -227,14 +229,96 @@ func (s *Session) Expire(
 	return nil
 }
 
+// sessionIDPrefix returns the first 8 characters of a session id. The full id
+// is the session cookie, so it is never written to the audit log. The prefix
+// is enough to match an event to a session in the session list.
+func sessionIDPrefix(id *uuid.UUID) string {
+	if id == nil {
+		return ""
+	}
+	return id.String()[:8]
+}
+
+// Logout expires the session of a user who logs out and audits it. An id that
+// is not an active session is expired without an event.
+func (s *Session) Logout(
+	ctx context.Context,
+	sessionID *uuid.UUID,
+	ip string,
+) error {
+	// the session is expired even when the lookup fails, logout must not
+	// leave a session active. The lookup only names the user in the event
+	existing, lookupErr := s.SessionRepository.GetByID(
+		ctx,
+		sessionID,
+		&repository.SessionOption{WithUser: true},
+	)
+	if lookupErr != nil && !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+		s.Logger.Errorw("failed to get session on logout", "error", lookupErr)
+	}
+	if err := s.SessionRepository.Expire(ctx, sessionID); err != nil {
+		s.Logger.Errorw("failed to expire session on logout", "error", err)
+		return errs.Wrap(err)
+	}
+	if lookupErr == nil && existing != nil {
+		ae := NewAuditEvent("User.Logout", existing)
+		ae.IP = ip
+		ae.Details["sessionIdPrefix"] = sessionIDPrefix(sessionID)
+		s.AuditLogAuthorized(ae)
+	}
+	return nil
+}
+
+// ExpireByID expires any session as an administrator and audits it.
+func (s *Session) ExpireByID(
+	ctx context.Context,
+	session *model.Session,
+	sessionID *uuid.UUID,
+) (err error) {
+	ae := NewAuditEvent("Session.Expire", session)
+	defer s.auditDone(ae, &err)
+	ae.Details["sessionIdPrefix"] = sessionIDPrefix(sessionID)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		s.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		s.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	// the lookup only names the owner in the event, a failed lookup does not
+	// stop the expire
+	target, err := s.SessionRepository.GetByID(
+		ctx,
+		sessionID,
+		&repository.SessionOption{WithUser: true},
+	)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		s.Logger.Errorw("failed to get session to expire", "error", err)
+	}
+	if err == nil && target != nil && target.User != nil {
+		if id, err := target.User.ID.Get(); err == nil {
+			ae.Details["userId"] = id.String()
+		}
+	}
+	if err := s.SessionRepository.Expire(ctx, sessionID); err != nil {
+		s.Logger.Errorw("failed to expire session", "error", err)
+		return errs.Wrap(err)
+	}
+	s.AuditLogAuthorized(ae)
+	return nil
+}
+
 // ExpireAllByUserID expires all sessions by user ID
 func (s *Session) ExpireAllByUserID(
 	ctx context.Context,
 	session *model.Session,
 	userID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Session.ExpireAllByUserID", session)
-	ae.Details["userID"] = userID.String()
+	defer s.auditDone(ae, &err)
+	ae.Details["userId"] = userID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {

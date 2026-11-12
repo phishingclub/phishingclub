@@ -30,8 +30,9 @@ func (r *Recipient) Create(
 	ctx context.Context,
 	session *model.Session,
 	recipient *model.Recipient,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("Recipient.Create", session)
+	defer r.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -83,8 +84,9 @@ func (r *Recipient) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	incoming *model.Recipient,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Recipient.UpdateByID", session)
+	defer r.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -401,8 +403,12 @@ func (r *Recipient) DeleteAllOrphaned(
 	ctx context.Context,
 	companyID *uuid.UUID, // can be null
 	session *model.Session,
-) (int64, error) {
+) (_ int64, err error) {
 	ae := NewAuditEvent("Recipient.DeleteAllOrphaned", session)
+	defer r.auditDone(ae, &err)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -427,6 +433,8 @@ func (r *Recipient) DeleteAllOrphaned(
 
 	// delete each orphaned recipient using core deletion logic
 	var count int64
+	// runs before auditDone, so a failure part way records what was deleted
+	defer func() { ae.Details["count"] = count }()
 	for _, recipient := range orphanedRecipients.Rows {
 		recipientID := recipient.ID.MustGet()
 		err = r.deleteRecipientByID(ctx, &recipientID)
@@ -438,6 +446,11 @@ func (r *Recipient) DeleteAllOrphaned(
 	}
 
 	ae.Details["count"] = count
+	// the hourly prune writes only when it deleted something
+	if ae.system && count == 0 {
+		ae.skip()
+		return count, nil
+	}
 	r.AuditLogAuthorized(ae)
 	return count, nil
 }
@@ -527,8 +540,13 @@ func (r *Recipient) Import(
 	recipients []*model.Recipient,
 	ignoreOverwriteEmptyFields bool,
 	companyID *uuid.UUID,
-) (*RecipientImportResult, error) {
+) (_ *RecipientImportResult, err error) {
 	ae := NewAuditEvent("Recipient.Import", session)
+	defer r.auditDone(ae, &err)
+	ae.Details["count"] = len(recipients)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	result := &RecipientImportResult{
 		SuccessIDs:        []*uuid.UUID{},
 		CreatedRecipients: []RecipientImportSuccess{},
@@ -749,8 +767,9 @@ func (r *Recipient) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Recipient.DeleteByID", session)
+	defer r.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -770,4 +789,14 @@ func (r *Recipient) DeleteByID(
 
 	r.AuditLogAuthorized(ae)
 	return nil
+}
+
+// AuthorizeExport checks the session may export a recipient with their events
+// and audits the export. The caller builds the file after this returns nil.
+func (r *Recipient) AuthorizeExport(session *model.Session, recipientID *uuid.UUID) error {
+	ae := NewAuditEvent("Recipient.Export", session)
+	if recipientID != nil {
+		ae.Details["id"] = recipientID.String()
+	}
+	return r.authorizeAndAudit(session, ae)
 }

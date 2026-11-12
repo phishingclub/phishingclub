@@ -155,7 +155,8 @@ func (r *ReportTemplate) GeneratePDFByCampaignID(g *gin.Context) {
 	if !ok {
 		return
 	}
-	pdfBytes, campaignName, err := r.CampaignService.BuildReportPDF(
+	// the download is audited, the report names each recipient
+	pdfBytes, campaignName, err := r.CampaignService.ExportReportPDF(
 		g.Request.Context(),
 		session,
 		id,

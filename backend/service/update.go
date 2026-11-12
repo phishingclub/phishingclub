@@ -270,12 +270,13 @@ func (u *Update) GetUpdateDetails(
 func (u *Update) RunUpdate(
 	ctx context.Context,
 	session *model.Session,
-) error {
+) (err error) {
 	// Prevent concurrent updates
 	u.updateMutex.Lock()
 	defer u.updateMutex.Unlock()
 
 	ae := NewAuditEvent("Update.Run", session)
+	defer u.auditDone(ae, &err)
 
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {

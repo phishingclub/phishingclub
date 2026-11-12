@@ -33,8 +33,9 @@ func (s *SMTPConfiguration) Create(
 	ctx context.Context,
 	session *model.Session,
 	conf *model.SMTPConfiguration,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("SMTPConfiguration.Create", session)
+	defer s.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -164,10 +165,11 @@ func (s *SMTPConfiguration) SendTestEmail(
 	id *uuid.UUID,
 	to *vo.Email,
 	from *vo.Email,
-) error {
+) (err error) {
 	ae := NewAuditEvent("SMTPConfiguration.SendTestEmail", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
-	ae.Details["to-email"] = to.String()
+	ae.Details["toEmail"] = to.String()
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -400,8 +402,9 @@ func (s *SMTPConfiguration) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	incoming *model.SMTPConfiguration,
-) error {
+) (err error) {
 	ae := NewAuditEvent("SMTPConfiguration.UpdateByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -497,8 +500,9 @@ func (s *SMTPConfiguration) AddHeader(
 	session *model.Session,
 	smtpID *uuid.UUID,
 	header *model.SMTPHeader,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("SMTPConfiguration.AddHeader", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = smtpID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -550,8 +554,9 @@ func (s *SMTPConfiguration) RemoveHeader(
 	session *model.Session,
 	smtpID *uuid.UUID,
 	headerID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("SMTPConfiguration.RemoveHeader", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["smtpId"] = smtpID.String()
 	ae.Details["headerId"] = headerID.String()
 	// check permissions
@@ -598,8 +603,9 @@ func (s *SMTPConfiguration) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("SMTPConfiguration.DeleteByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

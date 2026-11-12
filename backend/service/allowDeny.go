@@ -24,8 +24,9 @@ func (s *AllowDeny) Create(
 	ctx context.Context,
 	session *model.Session,
 	allowDeny *model.AllowDeny,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("AllowDeny.Create", session)
+	defer s.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -79,9 +80,10 @@ func (s *AllowDeny) Update(
 	session *model.Session,
 	id *uuid.UUID,
 	incoming *model.AllowDeny,
-) error {
+) (err error) {
 	ae := NewAuditEvent("AllowDeny.Update", session)
-	ae.Details["updateID"] = id.String()
+	defer s.auditDone(ae, &err)
+	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -261,8 +263,9 @@ func (s *AllowDeny) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("AllowDeny.DeleteByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

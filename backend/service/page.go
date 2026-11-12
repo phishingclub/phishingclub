@@ -29,8 +29,9 @@ func (p *Page) Create(
 	ctx context.Context,
 	session *model.Session,
 	page *model.Page,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("Page.Create", session)
+	defer p.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -208,8 +209,9 @@ func (p *Page) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	page *model.Page,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Page.UpdateByID", session)
+	defer p.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -293,8 +295,9 @@ func (p *Page) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Page.DeleteByID", session)
+	defer p.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

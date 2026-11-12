@@ -33,8 +33,9 @@ func (a *Attachment) Create(
 	g *gin.Context,
 	session *model.Session,
 	attachments []*model.Attachment,
-) ([]*uuid.UUID, error) {
+) (_ []*uuid.UUID, err error) {
 	ae := NewAuditEvent("Attachment.Create", session)
+	defer a.auditDone(ae, &err)
 	createdIDs := []*uuid.UUID{}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -265,8 +266,9 @@ func (a *Attachment) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	attachment *model.Attachment,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Attachment.UpdateById", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -324,8 +326,9 @@ func (a *Attachment) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Attachment.DeleteById", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

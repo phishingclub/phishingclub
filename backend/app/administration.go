@@ -402,9 +402,9 @@ func setupRoutes(
 		GET(ROUTE_V1_SSO_ENABLED, controllers.SSO.IsEnabled).
 		POST(ROUTE_V1_SSO, middleware.SessionHandler, controllers.SSO.Upsert).
 		GET(ROUTE_V1_SSO_ENTRA_ID_LOGIN, controllers.SSO.EntreIDLogin).
-		GET(ROUTE_V1_SSO_ENTRA_ID_CALLBACK, controllers.SSO.EntreIDCallBack).
+		GET(ROUTE_V1_SSO_ENTRA_ID_CALLBACK, middleware.SSOCallbackRateLimiter, controllers.SSO.EntreIDCallBack).
 		GET(ROUTE_V1_SSO_OIDC_LOGIN, controllers.SSO.OIDCLogin).
-		GET(ROUTE_V1_SSO_OIDC_CALLBACK, controllers.SSO.OIDCCallback).
+		GET(ROUTE_V1_SSO_OIDC_CALLBACK, middleware.SSOCallbackRateLimiter, controllers.SSO.OIDCCallback).
 		// user mfa
 		GET(ROUTE_V1_USER_MFA_TOTP, middleware.SessionHandler, controllers.User.IsTOTPEnabled).
 		POST(ROUTE_V1_USER_MFA_TOTP_SETUP, middleware.LoginRateLimiter, middleware.SessionHandler, controllers.User.SetupTOTP).
@@ -562,7 +562,7 @@ func setupRoutes(
 		POST(ROUTE_V1_OAUTH_PROVIDER_REMOVE_AUTH, middleware.SessionHandler, controllers.OAuthProvider.RemoveAuthorization).
 		GET(ROUTE_V1_OAUTH_AUTHORIZE, middleware.SessionHandler, controllers.OAuthProvider.GetAuthorizationURL).
 		GET(ROUTE_V1_OAUTH_AUTHORIZE_STATUS, middleware.SessionHandler, controllers.OAuthProvider.GetAuthorizationStatus).
-		GET(ROUTE_V1_OAUTH_CALLBACK, controllers.OAuthProvider.HandleCallback).
+		GET(ROUTE_V1_OAUTH_CALLBACK, middleware.SSOCallbackRateLimiter, controllers.OAuthProvider.HandleCallback).
 		POST(ROUTE_V1_OAUTH_IMPORT_TOKENS, middleware.SessionHandler, controllers.OAuthProvider.ImportAuthorizedTokens).
 		GET(ROUTE_V1_OAUTH_EXPORT_TOKENS, middleware.SessionHandler, controllers.OAuthProvider.ExportAuthorizedTokens).
 		// emails

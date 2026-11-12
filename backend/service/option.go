@@ -146,10 +146,10 @@ func (o *Option) SetOptionByKey(
 	ctx context.Context,
 	session *model.Session,
 	option *model.Option,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Option.SetOptionByKey", session)
+	defer o.auditDone(ae, &err)
 	ae.Details["key"] = option.Key.String()
-	ae.Details["value"] = auditOptionValue(option.Key.String(), option.Value.String())
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -257,6 +257,9 @@ func (o *Option) SetOptionByKey(
 			"key",
 		)
 	}
+	// the value is only recorded for a known key, a value pasted into a wrong
+	// key could be a secret
+	ae.Details["value"] = auditOptionValue(k, v)
 	// update options
 	err = o.OptionRepository.UpdateByKey(
 		ctx,
@@ -286,7 +289,7 @@ func (o *Option) GetAutoPruneOption(
 		o.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
-	o.AuditLogAuthorized(ae)
+	// no audit on read
 	return o.getAutoPruneOption(ctx)
 }
 
@@ -297,8 +300,13 @@ func (o *Option) SetAutoPruneOption(
 	ctx context.Context,
 	session *model.Session,
 	autoPruneOpt *model.AutoPruneOption,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Option.SetAutoPruneOption", session)
+	defer o.auditDone(ae, &err)
+	if autoPruneOpt != nil {
+		ae.Details["enabled"] = autoPruneOpt.Enabled
+		ae.Details["companyIds"] = autoPruneOpt.Companies
+	}
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		o.LogAuthError(err)
@@ -323,7 +331,7 @@ func (o *Option) GetCompanyAutoPruneOption(
 	companyID *uuid.UUID,
 ) (bool, error) {
 	ae := NewAuditEvent("Option.GetCompanyAutoPruneOption", session)
-	ae.Details["companyID"] = companyID.String()
+	ae.Details["companyId"] = companyID.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		o.LogAuthError(err)
@@ -337,7 +345,7 @@ func (o *Option) GetCompanyAutoPruneOption(
 	if err != nil {
 		return false, err
 	}
-	o.AuditLogAuthorized(ae)
+	// no audit on read
 	return opt.IsCompanyEnabled(companyID), nil
 }
 
@@ -348,9 +356,11 @@ func (o *Option) SetCompanyAutoPruneOption(
 	session *model.Session,
 	companyID *uuid.UUID,
 	enabled bool,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Option.SetCompanyAutoPruneOption", session)
-	ae.Details["companyID"] = companyID.String()
+	defer o.auditDone(ae, &err)
+	ae.Details["companyId"] = companyID.String()
+	ae.Details["enabled"] = enabled
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		o.LogAuthError(err)
@@ -479,8 +489,9 @@ func (o *Option) SetScimDomain(
 	ctx context.Context,
 	session *model.Session,
 	domain string,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Option.SetScimDomain", session)
+	defer o.auditDone(ae, &err)
 	ae.Details["domain"] = domain
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -617,8 +628,9 @@ func (o *Option) SetScimSoftDeleteRetentionDays(
 	ctx context.Context,
 	session *model.Session,
 	days int,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Option.SetScimSoftDeleteRetentionDays", session)
+	defer o.auditDone(ae, &err)
 	ae.Details["days"] = days
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {

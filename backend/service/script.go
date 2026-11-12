@@ -31,8 +31,9 @@ func (a *Script) Test(
 	session *model.Session,
 	script string,
 	event script.EventContext,
-) (*script.TestResult, error) {
+) (_ *script.TestResult, err error) {
 	ae := NewAuditEvent("Script.Test", session)
+	defer a.auditDone(ae, &err)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
 		a.LogAuthError(err)
@@ -84,8 +85,9 @@ func (a *Script) Create(
 	ctx context.Context,
 	session *model.Session,
 	script *model.Script,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("Script.Create", session)
+	defer a.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -162,7 +164,7 @@ func (a *Script) GetAll(
 		a.Logger.Errorw("failed to get scripts", "error", err)
 		return result, errs.Wrap(err)
 	}
-	a.AuditLogAuthorized(ae)
+	// no audit on read
 
 	return result, nil
 }
@@ -232,8 +234,9 @@ func (a *Script) Update(
 	session *model.Session,
 	id *uuid.UUID,
 	script *model.Script,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Script.Update", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -293,8 +296,12 @@ func (a *Script) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Script.DeleteByID", session)
+	defer a.auditDone(ae, &err)
+	if id != nil {
+		ae.Details["id"] = id.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {

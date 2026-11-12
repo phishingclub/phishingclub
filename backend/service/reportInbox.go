@@ -148,6 +148,9 @@ func (s *ReportInbox) GetByCompanyID(
 ) (*model.ReportInbox, error) {
 	ae := NewAuditEvent("ReportInbox.GetByCompanyID", session)
 	ae.Details["scope"] = reportInboxScope(companyID)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	if err := s.authorize(session, ae); err != nil {
 		return nil, err
 	}
@@ -268,9 +271,13 @@ func (s *ReportInbox) Upsert(
 	session *model.Session,
 	companyID *uuid.UUID,
 	incoming *model.ReportInbox,
-) (*model.ReportInbox, error) {
+) (_ *model.ReportInbox, err error) {
 	ae := NewAuditEvent("ReportInbox.Upsert", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["scope"] = reportInboxScope(companyID)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	if err := s.authorize(session, ae); err != nil {
 		return nil, err
 	}
@@ -337,9 +344,13 @@ func (s *ReportInbox) DeleteByCompanyID(
 	ctx context.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("ReportInbox.DeleteByCompanyID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["scope"] = reportInboxScope(companyID)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	if err := s.authorize(session, ae); err != nil {
 		return err
 	}
@@ -370,9 +381,13 @@ func (s *ReportInbox) PollNow(
 	ctx context.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("ReportInbox.PollNow", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["scope"] = reportInboxScope(companyID)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	if err := s.authorize(session, ae); err != nil {
 		return err
 	}
@@ -408,9 +423,13 @@ func (s *ReportInbox) Test(
 	session *model.Session,
 	companyID *uuid.UUID,
 	incoming *model.ReportInbox,
-) (*ReportInboxTestResult, error) {
+) (_ *ReportInboxTestResult, err error) {
 	ae := NewAuditEvent("ReportInbox.Test", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["scope"] = reportInboxScope(companyID)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	if err := s.authorize(session, ae); err != nil {
 		return nil, err
 	}

@@ -424,9 +424,10 @@ func (c *Campaign) ProcessReportedCSV(
 	rows []ReportedCSVRow,
 	emailColumnIndex int,
 	dateColumnIndex int,
-) (*ReportedCSVResult, error) {
+) (_ *ReportedCSVResult, err error) {
 	ae := NewAuditEvent("Campaign.ProcessReportedCSV", session)
-	ae.Details["campaignID"] = campaignID.String()
+	defer c.auditDone(ae, &err)
+	ae.Details["campaignId"] = campaignID.String()
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

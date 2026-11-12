@@ -91,8 +91,9 @@ func (c *Campaign) Create(
 	ctx context.Context,
 	session *model.Session,
 	campaign *model.Campaign,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("Campaign.Create", session)
+	defer c.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -324,7 +325,7 @@ func (c *Campaign) Create(
 		}
 	}
 	ae.Details["id"] = id.String()
-	ae.Details["templateIDs"] = uuidStrings(campaign.TemplatePool())
+	ae.Details["templateIds"] = uuidStrings(campaign.TemplatePool())
 	ae.Details["templateMixBy"] = campaign.TemplateMixField()
 	c.AuditLogAuthorized(ae)
 	return id, nil
@@ -1442,7 +1443,7 @@ func (c *Campaign) GetStats(
 ) (*model.CampaignsStatView, error) {
 	ae := NewAuditEvent("Campaign.GetStats", session)
 	if companyID != nil {
-		ae.Details["companyID"] = companyID.String()
+		ae.Details["companyId"] = companyID.String()
 	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -1859,6 +1860,68 @@ func (c *Campaign) GetEventsByCampaignID(
 	return result, nil
 }
 
+// ExportReportPDF builds the campaign report PDF for a download and audits
+// it. The report lists each recipient with their outcome, so a download is
+// recorded like the event exports.
+func (c *Campaign) ExportReportPDF(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+) (_ []byte, _ string, err error) {
+	ae := NewAuditEvent("Campaign.ExportReport", session)
+	defer c.auditDone(ae, &err)
+	ae.Details["campaignId"] = campaignID.String()
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return nil, "", errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return nil, "", errs.ErrAuthorizationFailed
+	}
+	pdf, name, err := c.BuildReportPDF(ctx, session, campaignID)
+	if err != nil {
+		return nil, "", err
+	}
+	c.AuditLogAuthorized(ae)
+	return pdf, name, nil
+}
+
+// ExportEventsByCampaignID returns every event of a campaign for a file export
+// and audits it. Events hold captured data, so unlike viewing them in the
+// page an export is always written to the audit log. kind is events or
+// submissions.
+func (c *Campaign) ExportEventsByCampaignID(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+	queryArgs *vo.QueryArgs,
+	eventTypeIDs []string,
+	kind string,
+) (_ *model.Result[model.CampaignEvent], err error) {
+	ae := NewAuditEvent("Campaign.ExportEvents", session)
+	defer c.auditDone(ae, &err)
+	ae.Details["campaignId"] = campaignID.String()
+	ae.Details["kind"] = kind
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+	result, err := c.GetEventsByCampaignID(ctx, session, campaignID, queryArgs, nil, eventTypeIDs)
+	if err != nil {
+		return nil, err
+	}
+	ae.Details["rows"] = len(result.Rows)
+	c.AuditLogAuthorized(ae)
+	return result, nil
+}
+
 // GetAll gets all campaigns using pagination
 func (c *Campaign) GetAll(
 	ctx context.Context,
@@ -1869,7 +1932,7 @@ func (c *Campaign) GetAll(
 	result := model.NewEmptyResult[model.Campaign]()
 	ae := NewAuditEvent("Campaign.GetAll", session)
 	if companyID != nil {
-		ae.Details["companyID"] = companyID.String()
+		ae.Details["companyId"] = companyID.String()
 	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -1912,7 +1975,7 @@ func (c *Campaign) GetAllWithinDates(
 	result := model.NewEmptyResult[model.Campaign]()
 	ae := NewAuditEvent("Campaign.GetAllWithinDates", session)
 	if companyID != nil {
-		ae.Details["companyID"] = companyID.String()
+		ae.Details["companyId"] = companyID.String()
 	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -1955,7 +2018,7 @@ func (c *Campaign) GetAllActive(
 	result := model.NewEmptyResult[model.Campaign]()
 	ae := NewAuditEvent("Campaign.GetAllActive", session)
 	if companyID != nil {
-		ae.Details["companyID"] = companyID.String()
+		ae.Details["companyId"] = companyID.String()
 	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -2221,8 +2284,9 @@ func (c *Campaign) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	incoming *model.Campaign,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.UpdateById", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -2441,8 +2505,8 @@ func (c *Campaign) UpdateByID(
 					return err
 				}
 			}
-			ae.Details["previousTemplateIDs"] = uuidStrings(storedPool)
-			ae.Details["templateIDs"] = uuidStrings(newPool)
+			ae.Details["previousTemplateIds"] = uuidStrings(storedPool)
+			ae.Details["templateIds"] = uuidStrings(newPool)
 		}
 		current.TemplateID.Set(newPool[0])
 		current.TemplateIDs = incoming.TemplateIDs
@@ -2696,8 +2760,8 @@ func (c *Campaign) UpdateByID(
 		// this update fails
 		poolAE := NewAuditEvent("Campaign.UpdateTemplatePool", session)
 		poolAE.Details["id"] = id.String()
-		poolAE.Details["previousTemplateIDs"] = uuidStrings(storedPool)
-		poolAE.Details["templateIDs"] = uuidStrings(newPool)
+		poolAE.Details["previousTemplateIds"] = uuidStrings(storedPool)
+		poolAE.Details["templateIds"] = uuidStrings(newPool)
 		// planned moves; a move skipped because of a send in between is counted
 		poolAE.Details["plannedMoves"] = movedCount
 		c.AuditLogAuthorized(poolAE)
@@ -2888,8 +2952,9 @@ func (c *Campaign) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.DeleteById", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -2967,9 +3032,10 @@ func (c *Campaign) DeleteEventByID(
 	ctx context.Context,
 	session *model.Session,
 	eventID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.DeleteEventByID", session)
-	ae.Details["eventID"] = eventID.String()
+	defer c.auditDone(ae, &err)
+	ae.Details["eventId"] = eventID.String()
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -2989,9 +3055,9 @@ func (c *Campaign) DeleteEventByID(
 		return errs.Wrap(err)
 	}
 
-	ae.Details["campaignID"] = event.CampaignID.String()
+	ae.Details["campaignId"] = event.CampaignID.String()
 	if event.RecipientID != nil {
-		ae.Details["recipientID"] = event.RecipientID.String()
+		ae.Details["recipientId"] = event.RecipientID.String()
 	}
 
 	// get the campaign to check if it's closed
@@ -4159,7 +4225,10 @@ func (c *Campaign) HandleCloseCampaigns(
 		c.handleCloseError(err, &campaignID)
 		recordClose(campaignID, err)
 	}
-	if len(closedCampaignIDs) > 0 || len(failedCampaignIDs) > 0 {
+	// written only when a campaign was closed. A campaign that keeps failing is
+	// retried on every run and is in the error log, an event per run would
+	// fill the audit log
+	if len(closedCampaignIDs) > 0 {
 		ae.Details["closedCampaignIds"] = closedCampaignIDs
 		if len(failedCampaignIDs) > 0 {
 			ae.Details["failedCampaignIds"] = failedCampaignIDs
@@ -4208,25 +4277,36 @@ func (c *Campaign) HandleAnonymizeCampaigns(
 		return errs.Wrap(err)
 	}
 	// close and anonymize the campaigns
-	affectedIds := []string{}
+	anonymizedIDs := []string{}
+	failedIDs := []string{}
 	for _, campaign := range campaigns.Rows {
 		campaignID := campaign.ID.MustGet()
-		affectedIds = append(affectedIds, campaignID.String())
 		c.Logger.Debugw("anonymizing campaign with id", "campaignID", campaignID)
 		err = c.AnonymizeByID(ctx, session, &campaignID)
 
-		if err != nil && !errors.Is(err, errs.ErrCampaignAlreadyClosed) {
-			c.Logger.Errorw("failed to anonymize campaign by id", "error", err)
-			continue
-		}
 		if errors.Is(err, errs.ErrCampaignAlreadyAnonymized) {
 			c.Logger.Debugw("campaign already anonymized", "error", err)
 			continue
 		}
+		if errors.Is(err, errs.ErrCampaignAlreadyClosed) {
+			// the campaign is closed by another run, it is anonymized on a later run
+			c.Logger.Debugw("campaign closed elsewhere, not anonymized in this run", "campaignID", campaignID)
+			continue
+		}
+		if err != nil {
+			c.Logger.Errorw("failed to anonymize campaign by id", "error", err)
+			failedIDs = append(failedIDs, campaignID.String())
+			continue
+		}
+		anonymizedIDs = append(anonymizedIDs, campaignID.String())
 		c.Logger.Debugw("anonymized campaign with id", "campaignID", campaignID)
 	}
-	if len(affectedIds) > 0 {
-		ae.Details["anonymizedCampaignIds"] = affectedIds
+	// written only when a campaign was anonymized, see HandleCloseCampaigns
+	if len(anonymizedIDs) > 0 {
+		ae.Details["anonymizedCampaignIds"] = anonymizedIDs
+		if len(failedIDs) > 0 {
+			ae.Details["failedCampaignIds"] = failedIDs
+		}
 		c.AuditLogAuthorized(ae)
 	}
 	return nil
@@ -4259,10 +4339,10 @@ func (c *Campaign) HandleDataAnonymizeCampaigns(
 		return errs.Wrap(err)
 	}
 	// anonymize the submitted data of the campaigns
-	affectedIds := []string{}
+	anonymizedIDs := []string{}
+	failedIDs := []string{}
 	for _, campaign := range campaigns.Rows {
 		campaignID := campaign.ID.MustGet()
-		affectedIds = append(affectedIds, campaignID.String())
 		c.Logger.Debugw("anonymizing campaign data with id", "campaignID", campaignID)
 		err = c.AnonymizeDataByID(ctx, session, &campaignID)
 		if errors.Is(err, errs.ErrCampaignDataAlreadyAnonymized) {
@@ -4271,12 +4351,18 @@ func (c *Campaign) HandleDataAnonymizeCampaigns(
 		}
 		if err != nil {
 			c.Logger.Errorw("failed to anonymize campaign data by id", "error", err)
+			failedIDs = append(failedIDs, campaignID.String())
 			continue
 		}
+		anonymizedIDs = append(anonymizedIDs, campaignID.String())
 		c.Logger.Debugw("anonymized campaign data with id", "campaignID", campaignID)
 	}
-	if len(affectedIds) > 0 {
-		ae.Details["dataAnonymizedCampaignIds"] = affectedIds
+	// written only when a campaign was anonymized, see HandleCloseCampaigns
+	if len(anonymizedIDs) > 0 {
+		ae.Details["dataAnonymizedCampaignIds"] = anonymizedIDs
+		if len(failedIDs) > 0 {
+			ae.Details["failedCampaignIds"] = failedIDs
+		}
 		c.AuditLogAuthorized(ae)
 	}
 	return nil
@@ -4309,6 +4395,8 @@ func (c *Campaign) SchedulePendingCampaigns(
 		c.Logger.Errorw("failed to get campaigns ready for late scheduling", "error", err)
 		return errs.Wrap(err)
 	}
+	scheduledIDs := []string{}
+	failedIDs := []string{}
 	for _, campaign := range pending.Rows {
 		campaignID := campaign.ID.MustGet()
 		// Clear schedule_at BEFORE calling schedule() so that a concurrent task runner tick
@@ -4325,9 +4413,11 @@ func (c *Campaign) SchedulePendingCampaigns(
 		// Jitter is loaded from the DB columns (persisted at creation/update time).
 		if err := c.schedule(ctx, session, campaign); err != nil {
 			c.Logger.Errorw("failed to late-schedule campaign", "campaignID", campaignID, "error", err)
+			failedIDs = append(failedIDs, campaignID.String())
 			// continue to next, don't abort the whole run
 			continue
 		}
+		scheduledIDs = append(scheduledIDs, campaignID.String())
 		// Clear persisted jitter now that scheduling is done, it is no longer needed.
 		clearJitter := model.Campaign{}
 		clearJitter.JitterMin.SetNull()
@@ -4337,6 +4427,19 @@ func (c *Campaign) SchedulePendingCampaigns(
 			// non-fatal, jitter columns being non-null is harmless after scheduling
 		}
 		c.Logger.Infow("late-scheduled campaign", "campaignID", campaignID)
+	}
+	// a campaign is taken off the pending list before it is scheduled, so a
+	// failure is not retried and is written once
+	if len(scheduledIDs) > 0 || len(failedIDs) > 0 {
+		ae.Details["scheduledCampaignIds"] = scheduledIDs
+		if len(failedIDs) > 0 {
+			ae.Details["failedCampaignIds"] = failedIDs
+		}
+		if len(scheduledIDs) == 0 {
+			c.AuditLogFailed(ae, errs.NewCustomError(errors.New("no campaign scheduled")))
+		} else {
+			c.AuditLogAuthorized(ae)
+		}
 	}
 	return nil
 }
@@ -4348,8 +4451,9 @@ func (c *Campaign) DeleteDeviceCodesByCampaignID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.DeleteDeviceCodesByCampaignID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -4384,8 +4488,9 @@ func (c *Campaign) PauseCampaignByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.PauseCampaignByID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -4452,8 +4557,9 @@ func (c *Campaign) ResumeCampaignByID(
 	session *model.Session,
 	id *uuid.UUID,
 	req *model.Campaign,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.ResumeCampaignByID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -4740,8 +4846,9 @@ func (c *Campaign) CloseCampaignByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.CloseCampaignByID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -5359,8 +5466,9 @@ func (c *Campaign) SetLureCodeByCampaignRecipientID(
 	campaignRecipientID *uuid.UUID,
 	code string,
 	reclaim bool,
-) (*LureCodeConflict, error) {
+) (_ *LureCodeConflict, err error) {
 	ae := NewAuditEvent("Campaign.SetLureCodeByCampaignRecipientID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["campaignRecipientId"] = campaignRecipientID.String()
 	ae.Details["lureCode"] = code
 	ae.Details["reclaim"] = fmt.Sprintf("%t", reclaim)
@@ -5430,6 +5538,8 @@ func (c *Campaign) SetLureCodeByCampaignRecipientID(
 			}
 		}
 		if !reclaim {
+			// the user is asked to reclaim, that answer is the audited action
+			ae.skip()
 			return conflict, ErrLureCodeTaken
 		}
 		holderID := holder.ID.MustGet()
@@ -5456,8 +5566,9 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 	ctx context.Context,
 	session *model.Session,
 	campaignRecipientID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.SetSentAtByCampaignRecipientID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["campaignRecipientId"] = campaignRecipientID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -6045,8 +6156,9 @@ func (c *Campaign) AnonymizeByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.AnonymizeByID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -6095,8 +6207,9 @@ func (c *Campaign) AnonymizeDataByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.AnonymizeDataByID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -6153,8 +6266,9 @@ func (c *Campaign) SendEmailByCampaignRecipientID(
 	ctx context.Context,
 	session *model.Session,
 	campaignRecipientID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.SendEmailByCampaignRecipientID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["campaignRecipientId"] = campaignRecipientID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -6980,7 +7094,9 @@ func (c *Campaign) GetAllCampaignStats(ctx context.Context, session *model.Sessi
 }
 
 // CreateManualCampaignStats creates campaign statistics manually without requiring a campaign
-func (c *Campaign) CreateManualCampaignStats(ctx context.Context, session *model.Session, req *database.CampaignStats) (*database.CampaignStats, error) {
+func (c *Campaign) CreateManualCampaignStats(ctx context.Context, session *model.Session, req *database.CampaignStats) (_ *database.CampaignStats, err error) {
+	ae := NewAuditEvent("Campaign.CreateManualCampaignStats", session)
+	defer c.auditDone(ae, &err)
 	// Check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -6988,6 +7104,7 @@ func (c *Campaign) CreateManualCampaignStats(ctx context.Context, session *model
 		return nil, errs.Wrap(err)
 	}
 	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
 
@@ -7013,6 +7130,11 @@ func (c *Campaign) CreateManualCampaignStats(ctx context.Context, session *model
 	}
 
 	c.Logger.Debugf("successfully inserted manual campaign stats", "statsID", req.ID.String())
+	ae.Details["id"] = req.ID.String()
+	if req.CompanyID != nil {
+		ae.Details["companyId"] = req.CompanyID.String()
+	}
+	c.AuditLogAuthorized(ae)
 	return req, nil
 }
 
@@ -7049,7 +7171,15 @@ func (c *Campaign) GetManualCampaignStats(ctx context.Context, session *model.Se
 }
 
 // UpdateManualCampaignStats updates manual campaign statistics
-func (c *Campaign) UpdateManualCampaignStats(ctx context.Context, session *model.Session, req *database.CampaignStats) (*database.CampaignStats, error) {
+func (c *Campaign) UpdateManualCampaignStats(ctx context.Context, session *model.Session, req *database.CampaignStats) (_ *database.CampaignStats, err error) {
+	ae := NewAuditEvent("Campaign.UpdateManualCampaignStats", session)
+	defer c.auditDone(ae, &err)
+	if req != nil && req.ID != nil {
+		ae.Details["id"] = req.ID.String()
+	}
+	if req != nil && req.CompanyID != nil {
+		ae.Details["companyId"] = req.CompanyID.String()
+	}
 	// Check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -7057,6 +7187,7 @@ func (c *Campaign) UpdateManualCampaignStats(ctx context.Context, session *model
 		return nil, errs.Wrap(err)
 	}
 	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
 
@@ -7106,11 +7237,17 @@ func (c *Campaign) UpdateManualCampaignStats(ctx context.Context, session *model
 	}
 
 	c.Logger.Debugf("successfully updated manual campaign stats", "statsID", req.ID.String())
+	c.AuditLogAuthorized(ae)
 	return req, nil
 }
 
 // DeleteManualCampaignStats deletes manual campaign statistics by ID
-func (c *Campaign) DeleteManualCampaignStats(ctx context.Context, session *model.Session, statsID *uuid.UUID) error {
+func (c *Campaign) DeleteManualCampaignStats(ctx context.Context, session *model.Session, statsID *uuid.UUID) (err error) {
+	ae := NewAuditEvent("Campaign.DeleteManualCampaignStats", session)
+	defer c.auditDone(ae, &err)
+	if statsID != nil {
+		ae.Details["id"] = statsID.String()
+	}
 	// Check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -7118,6 +7255,7 @@ func (c *Campaign) DeleteManualCampaignStats(ctx context.Context, session *model
 		return errs.Wrap(err)
 	}
 	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
 
@@ -7140,6 +7278,7 @@ func (c *Campaign) DeleteManualCampaignStats(ctx context.Context, session *model
 	}
 
 	c.Logger.Debugf("successfully deleted manual campaign stats", "statsID", statsID.String())
+	c.AuditLogAuthorized(ae)
 	return nil
 }
 
@@ -7859,8 +7998,9 @@ func (c *Campaign) SendCampaignReport(
 	session *model.Session,
 	campaignID *uuid.UUID,
 	onDemand bool,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Campaign.SendCampaignReport", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["campaignId"] = campaignID.String()
 	isAuthorized, authErr := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if authErr != nil && !errors.Is(authErr, errs.ErrAuthorizationFailed) {
@@ -7914,7 +8054,16 @@ func (c *Campaign) SendCampaignReport(
 	defer func() {
 		ae.Details["outcome"] = deliveryOutcome
 		ae.Details["onDemand"] = onDemand
-		c.AuditLogAuthorized(ae)
+		switch {
+		case err != nil:
+			c.AuditLogFailed(ae, err)
+		case deliveryOutcome != "sent":
+			// a path that stops without an error, such as an empty recipient
+			// group on an automatic send
+			c.AuditLogFailed(ae, errs.NewCustomError(errors.New("report not delivered")))
+		default:
+			c.AuditLogAuthorized(ae)
+		}
 	}()
 	// the global config supplies default delivery fields the company has not set
 	var globalConfig *model.CompanyReportConfig

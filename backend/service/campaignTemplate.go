@@ -32,8 +32,9 @@ func (c *CampaignTemplate) Create(
 	ctx context.Context,
 	session *model.Session,
 	campaignTemplate *model.CampaignTemplate,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("CampaignTemplate.Create", session)
+	defer c.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -230,8 +231,9 @@ func (c *CampaignTemplate) removeAPISenderIDBySenderID(
 	ctx context.Context,
 	session *model.Session,
 	apiSenderID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("CampaignTemplate.RemoveAPISenderIDBySenderID", session)
+	defer c.auditDone(ae, &err)
 	if apiSenderID != nil {
 		ae.Details["apiSenderId"] = apiSenderID.String()
 	}
@@ -268,6 +270,8 @@ func (c *CampaignTemplate) removeAPISenderIDBySenderID(
 		return err
 	}
 
+	closedIDs := []string{}
+	closeFailedIDs := []string{}
 	for _, campaign := range campaignsAffected {
 		if !campaign.IsActive() {
 			continue
@@ -284,7 +288,16 @@ func (c *CampaignTemplate) removeAPISenderIDBySenderID(
 		)
 		if err != nil {
 			c.Logger.Errorw("failed to update closed campagin", "error", err)
+			closeFailedIDs = append(closeFailedIDs, campaignID.String())
+			continue
 		}
+		closedIDs = append(closedIDs, campaignID.String())
+	}
+	// the campaigns this removal closed, set before the next step so a
+	// failure after this point still names them
+	ae.Details["closedCampaignIds"] = closedIDs
+	if len(closeFailedIDs) > 0 {
+		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
 	}
 	// remove the domain id from the templates
 	err = c.CampaignTemplateRepository.RemoveAPISenderIDFromAll(ctx, apiSenderID)
@@ -292,6 +305,7 @@ func (c *CampaignTemplate) removeAPISenderIDBySenderID(
 		c.Logger.Errorw("failed to remove domain ID from all campaign templates", "error", err)
 		return err
 	}
+	c.AuditLogAuthorized(ae)
 	return nil
 }
 
@@ -301,10 +315,11 @@ func (c *CampaignTemplate) RemoveDomainByDomainID(
 	ctx context.Context,
 	session *model.Session,
 	domainID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("CampaignTemplate.RemoveDomainByDomainID", session)
+	defer c.auditDone(ae, &err)
 	if domainID != nil {
-		ae.Details["domainID"] = domainID.String()
+		ae.Details["domainId"] = domainID.String()
 	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -339,14 +354,8 @@ func (c *CampaignTemplate) RemoveDomainByDomainID(
 		return err
 	}
 
-	affectedIDs := []string{}
-	for _, campaign := range campaignsAffected {
-		if v, err := campaign.ID.Get(); err == nil {
-			affectedIDs = append(affectedIDs, v.String())
-		}
-	}
-	// the campaigns closed by this removal
-	ae.Details["campaignIDs"] = affectedIDs
+	closedIDs := []string{}
+	closeFailedIDs := []string{}
 	for _, campaign := range campaignsAffected {
 		if !campaign.IsActive() {
 			continue
@@ -363,7 +372,16 @@ func (c *CampaignTemplate) RemoveDomainByDomainID(
 		)
 		if err != nil {
 			c.Logger.Errorw("failed to update closed campaign", "error", err)
+			closeFailedIDs = append(closeFailedIDs, campaignID.String())
+			continue
 		}
+		closedIDs = append(closedIDs, campaignID.String())
+	}
+	// the campaigns this removal closed, set before the next step so a
+	// failure after this point still names them
+	ae.Details["closedCampaignIds"] = closedIDs
+	if len(closeFailedIDs) > 0 {
+		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
 	}
 	// remove the domain id from the templates
 	err = c.CampaignTemplateRepository.RemoveDomainIDFromAll(ctx, domainID)
@@ -371,6 +389,7 @@ func (c *CampaignTemplate) RemoveDomainByDomainID(
 		c.Logger.Errorw("failed to remove domain ID from all campaign templates", "error", err)
 		return err
 	}
+	c.AuditLogAuthorized(ae)
 	return nil
 }
 
@@ -380,9 +399,12 @@ func (c *CampaignTemplate) RemoveSmtpBySmtpID(
 	ctx context.Context,
 	session *model.Session,
 	smtpID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("CampaignTemplate.RemoveSmtpBySmtpID", session)
-	ae.Details["smtpId"] = smtpID.String()
+	defer c.auditDone(ae, &err)
+	if smtpID != nil {
+		ae.Details["smtpId"] = smtpID.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -416,6 +438,8 @@ func (c *CampaignTemplate) RemoveSmtpBySmtpID(
 		return err
 	}
 
+	closedIDs := []string{}
+	closeFailedIDs := []string{}
 	for _, campaign := range campaignsAffected {
 		if !campaign.IsActive() {
 			continue
@@ -432,7 +456,16 @@ func (c *CampaignTemplate) RemoveSmtpBySmtpID(
 		)
 		if err != nil {
 			c.Logger.Errorw("failed to update closed campaign", "error", err)
+			closeFailedIDs = append(closeFailedIDs, campaignID.String())
+			continue
 		}
+		closedIDs = append(closedIDs, campaignID.String())
+	}
+	// the campaigns this removal closed, set before the next step so a
+	// failure after this point still names them
+	ae.Details["closedCampaignIds"] = closedIDs
+	if len(closeFailedIDs) > 0 {
+		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
 	}
 	// remove the domain id from the templates
 	err = c.CampaignTemplateRepository.RemoveSmtpIDFromAll(ctx, smtpID)
@@ -440,6 +473,7 @@ func (c *CampaignTemplate) RemoveSmtpBySmtpID(
 		c.Logger.Errorw("failed to remove domain ID from all campaign templates", "error", err)
 		return err
 	}
+	c.AuditLogAuthorized(ae)
 	return nil
 }
 
@@ -449,9 +483,12 @@ func (c *CampaignTemplate) RemoveEmailByEmailID(
 	ctx context.Context,
 	session *model.Session,
 	emailID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("CampaignTemplate.RemoveEmailByEmailID", session)
-	ae.Details["emailId"] = emailID.String()
+	defer c.auditDone(ae, &err)
+	if emailID != nil {
+		ae.Details["emailId"] = emailID.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -483,6 +520,8 @@ func (c *CampaignTemplate) RemoveEmailByEmailID(
 		c.Logger.Errorw("failed to get affected campaigns", "error", err)
 		return err
 	}
+	closedIDs := []string{}
+	closeFailedIDs := []string{}
 	for _, campaign := range campaignsAffected {
 		if !campaign.IsActive() {
 			continue
@@ -499,7 +538,16 @@ func (c *CampaignTemplate) RemoveEmailByEmailID(
 		)
 		if err != nil {
 			c.Logger.Errorw("failed to update closed campaign", "error", err)
+			closeFailedIDs = append(closeFailedIDs, campaignID.String())
+			continue
 		}
+		closedIDs = append(closedIDs, campaignID.String())
+	}
+	// the campaigns this removal closed, set before the next step so a
+	// failure after this point still names them
+	ae.Details["closedCampaignIds"] = closedIDs
+	if len(closeFailedIDs) > 0 {
+		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
 	}
 	// remove the email id from all affected templates
 	err = c.CampaignTemplateRepository.RemoveEmailIDFromAll(ctx, emailID)
@@ -507,6 +555,7 @@ func (c *CampaignTemplate) RemoveEmailByEmailID(
 		c.Logger.Errorw("failed to remove email ID from all campaign templates", "error", err)
 		return err
 	}
+	c.AuditLogAuthorized(ae)
 	return nil
 }
 
@@ -516,9 +565,12 @@ func (c *CampaignTemplate) RemovePagesByPageID(
 	ctx context.Context,
 	session *model.Session,
 	pageID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("CampaignTemplate.RemovePagesByPageID", session)
-	ae.Details["pageId"] = pageID.String()
+	defer c.auditDone(ae, &err)
+	if pageID != nil {
+		ae.Details["pageId"] = pageID.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -552,6 +604,8 @@ func (c *CampaignTemplate) RemovePagesByPageID(
 		return err
 	}
 
+	closedIDs := []string{}
+	closeFailedIDs := []string{}
 	for _, campaign := range campaignsAffected {
 		if !campaign.IsActive() {
 			continue
@@ -568,7 +622,16 @@ func (c *CampaignTemplate) RemovePagesByPageID(
 		)
 		if err != nil {
 			c.Logger.Errorw("failed to update closed campaign", "error", err)
+			closeFailedIDs = append(closeFailedIDs, campaignID.String())
+			continue
 		}
+		closedIDs = append(closedIDs, campaignID.String())
+	}
+	// the campaigns this removal closed, set before the next step so a
+	// failure after this point still names them
+	ae.Details["closedCampaignIds"] = closedIDs
+	if len(closeFailedIDs) > 0 {
+		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
 	}
 	// remove the domain id from the templates
 	err = c.CampaignTemplateRepository.RemovePageIDFromAll(ctx, pageID)
@@ -576,6 +639,7 @@ func (c *CampaignTemplate) RemovePagesByPageID(
 		c.Logger.Errorw("failed to remove page ID from all campaign templates", "error", err)
 		return err
 	}
+	c.AuditLogAuthorized(ae)
 	return nil
 }
 
@@ -585,8 +649,9 @@ func (c *CampaignTemplate) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	campaignTemplate *model.CampaignTemplate,
-) error {
+) (err error) {
 	ae := NewAuditEvent("CampaignTemplate.UpdateByID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -833,8 +898,9 @@ func (c *CampaignTemplate) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("CampaignTemplate.DeleteByID", session)
+	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -858,8 +924,8 @@ func (c *CampaignTemplate) DeleteByID(
 			"failed to get campaign affected by template deletion",
 			"error", err,
 		)
-		ae.Details["error"] = "failed to find the campaigns using the template"
-		c.AuditLogAuthorized(ae)
+		ae.Details["step"] = "failed to find the campaigns using the template"
+		c.AuditLogFailed(ae, err)
 		return err
 	}
 	affectedIDs := []string{}
@@ -869,7 +935,7 @@ func (c *CampaignTemplate) DeleteByID(
 		}
 	}
 	// the campaigns closed here or changed by the pool removal below
-	ae.Details["campaignIDs"] = affectedIDs
+	ae.Details["campaignIds"] = affectedIDs
 	for _, campaign := range campaignsAffected {
 		if !campaign.IsActive() {
 			continue
@@ -891,8 +957,8 @@ func (c *CampaignTemplate) DeleteByID(
 		if err != nil {
 			// the template stays, so no campaign keeps running on a deleted one
 			c.Logger.Errorw("failed to update closed campaign", "error", err)
-			ae.Details["error"] = "failed to close a campaign using the template"
-			c.AuditLogAuthorized(ae)
+			ae.Details["step"] = "failed to close a campaign using the template"
+			c.AuditLogFailed(ae, err)
 			return err
 		}
 	}
@@ -905,16 +971,16 @@ func (c *CampaignTemplate) DeleteByID(
 	if err != nil {
 		c.Logger.Errorw("failed to remove template from campaign pools", "error", err)
 		// the campaigns above are already closed, so that is audited
-		ae.Details["error"] = "failed to remove the template from campaign pools"
-		c.AuditLogAuthorized(ae)
+		ae.Details["step"] = "failed to remove the template from campaign pools"
+		c.AuditLogFailed(ae, err)
 		return err
 	}
 	// delete the campaign template
 	err = c.CampaignTemplateRepository.DeleteByID(ctx, id)
 	if err != nil {
 		c.Logger.Errorw("failed to delete campaign template by id", "error", err)
-		ae.Details["error"] = "failed to delete the template"
-		c.AuditLogAuthorized(ae)
+		ae.Details["step"] = "failed to delete the template"
+		c.AuditLogFailed(ae, err)
 		return err
 	}
 	c.AuditLogAuthorized(ae)
@@ -926,9 +992,12 @@ func (c *CampaignTemplate) RemoveProxiesByProxyID(
 	ctx context.Context,
 	session *model.Session,
 	proxyID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("CampaignTemplate.RemoveProxiesByProxyID", session)
-	ae.Details["proxyId"] = proxyID.String()
+	defer c.auditDone(ae, &err)
+	if proxyID != nil {
+		ae.Details["proxyId"] = proxyID.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -958,6 +1027,8 @@ func (c *CampaignTemplate) RemoveProxiesByProxyID(
 		templateIDs = append(templateIDs, &id)
 	}
 
+	closedIDs := []string{}
+	closeFailedIDs := []string{}
 	if len(templateIDs) > 0 {
 		campaignsAffected, err := c.CampaignRepository.GetByTemplateIDs(ctx, templateIDs)
 		if err != nil {
@@ -981,8 +1052,17 @@ func (c *CampaignTemplate) RemoveProxiesByProxyID(
 			)
 			if err != nil {
 				c.Logger.Errorw("failed to update closed campaign", "error", err)
+				closeFailedIDs = append(closeFailedIDs, campaignID.String())
+				continue
 			}
+			closedIDs = append(closedIDs, campaignID.String())
 		}
+	}
+	// the campaigns this removal closed, set before the next step so a
+	// failure after this point still names them
+	ae.Details["closedCampaignIds"] = closedIDs
+	if len(closeFailedIDs) > 0 {
+		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
 	}
 
 	// remove the Proxy id from the templates
@@ -991,5 +1071,6 @@ func (c *CampaignTemplate) RemoveProxiesByProxyID(
 		c.Logger.Errorw("failed to remove Proxy ID from all campaign templates", "error", err)
 		return err
 	}
+	c.AuditLogAuthorized(ae)
 	return nil
 }
