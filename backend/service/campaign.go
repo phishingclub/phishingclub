@@ -7537,9 +7537,16 @@ func (c *Campaign) buildReportHTMLWithData(
 	return buf.String(), rd, name, nil
 }
 
+// limits for the screenshots in a campaign report
+const (
+	reportScreenshotTimeout   = 15 * time.Second
+	reportScreenshotBudget    = 60 * time.Second
+	reportScreenshotMaxHeight = 2000
+)
+
 // attachReportScreenshots renders the campaign's email and up to three of its
 // pages (before-landing, landing, after-landing) with a synthetic recipient
-// (see service.reportMockRecipient) and captures each as a PNG screenshot,
+// (see service.reportMockRecipient) and captures each as a JPEG screenshot,
 // embedded in rd as a data: URI for the report pages added in
 // default_report.html. It opens one guarded browser session shared by every
 // capture, so a report pays for at most one extra browser launch regardless
@@ -7606,15 +7613,18 @@ func (c *Campaign) attachReportScreenshots(
 
 	// the browser is only launched once the first screenshot is actually
 	// attempted, so a campaign whose configured pages the report template
-	// does not even ask for never pays for a launch.
+	// does not even ask for never pays for a launch. A failed launch is not
+	// retried for the next capture.
 	var browserSession *remotebrowser.Session
+	launchFailed := false
 	openSession := func() *remotebrowser.Session {
-		if browserSession != nil {
+		if browserSession != nil || launchFailed {
 			return browserSession
 		}
 		s, sErr := remotebrowser.NewSession(ctx, c.RemoteBrowserExecPath)
 		if sErr != nil {
 			c.Logger.Warnw("failed to start browser for report screenshots", "error", sErr)
+			launchFailed = true
 			return nil
 		}
 		browserSession = s
@@ -7626,29 +7636,56 @@ func (c *Campaign) attachReportScreenshots(
 		}
 	}()
 
-	// viewport widths per the design: ~600px mirrors a typical email client
-	// width, 794px mirrors the report PDF's own A4-at-96dpi width. Height is
-	// just a starting viewport; RenderPNG captures the full scrollable page
-	// regardless, and the report template caps the display height so a long
-	// capture shrinks to fit its page instead of overflowing it.
-	const emailViewportWidth = 600
-	const emailViewportHeight = 800
-	const pageViewportWidth = 794
-	const pageViewportHeight = 1000
+	// every capture has its own time limit, and all captures together share
+	// one budget, so a slow or stuck page can not use up the time the report
+	// itself needs
+	budgetEnd := time.Now().Add(reportScreenshotBudget)
+	capture := func(what string, html string, opts remotebrowser.CaptureOptions) string {
+		if time.Until(budgetEnd) <= 0 {
+			c.Logger.Warnw("report screenshot skipped, time budget used up", "capture", what)
+			return ""
+		}
+		s := openSession()
+		if s == nil {
+			return ""
+		}
+		// counted after the launch, and leaving room for the capture to close
+		remaining := time.Until(budgetEnd) - remotebrowser.CaptureCloseTimeout
+		if remaining <= 0 {
+			c.Logger.Warnw("report screenshot skipped, time budget used up", "capture", what)
+			return ""
+		}
+		opts.Timeout = min(reportScreenshotTimeout, remaining)
+		jpeg, err := s.Capture(html, opts)
+		if err != nil {
+			c.Logger.Warnw("failed to capture report screenshot", "capture", what, "error", err)
+			return ""
+		}
+		return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(jpeg)
+	}
+
+	// an email is captured 600px wide like a typical mail client, with
+	// scripts off as mail clients do not run them, and starts short so a
+	// short email is not padded. A page is captured at the report's own
+	// width, A4 at 96 dpi, and a window tall enough for full height layouts.
+	emailCapture := remotebrowser.CaptureOptions{
+		Width:          600,
+		Height:         150,
+		MaxHeight:      reportScreenshotMaxHeight,
+		DisableScripts: true,
+	}
+	pageCapture := remotebrowser.CaptureOptions{
+		Width:     794,
+		Height:    1000,
+		MaxHeight: reportScreenshotMaxHeight,
+	}
 
 	if campaignTemplate.Email != nil && strings.Contains(reportTemplateContent, ".EmailScreenshot") {
 		emailHTML, mailErr := c.TemplateService.CreateMailBodyForReport(campaignTemplate.Email)
 		if mailErr != nil {
 			c.Logger.Warnw("failed to render email for report screenshot", "error", mailErr)
-		} else if s := openSession(); s != nil {
-			png, pngErr := s.RenderPNG(emailHTML, emailViewportWidth, emailViewportHeight)
-			if pngErr != nil {
-				c.Logger.Warnw("failed to capture email screenshot for report", "error", pngErr)
-			} else {
-				rd.EmailScreenshot = htmltemplate.HTML(
-					"data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
-				)
-			}
+		} else {
+			rd.EmailScreenshot = htmltemplate.HTML(capture("email", emailHTML, emailCapture))
 		}
 	}
 
@@ -7664,16 +7701,7 @@ func (c *Campaign) attachReportScreenshots(
 			c.Logger.Warnw("failed to render page for report screenshot", "page", name, "error", pageErr)
 			return
 		}
-		s := openSession()
-		if s == nil {
-			return
-		}
-		png, pngErr := s.RenderPNG(pageBuf.String(), pageViewportWidth, pageViewportHeight)
-		if pngErr != nil {
-			c.Logger.Warnw("failed to capture page screenshot for report", "page", name, "error", pngErr)
-			return
-		}
-		*dest = htmltemplate.HTML("data:image/png;base64," + base64.StdEncoding.EncodeToString(png))
+		*dest = htmltemplate.HTML(capture(name, pageBuf.String(), pageCapture))
 	}
 
 	capturePage("BeforeLandingPageScreenshot", campaignTemplate.BeforeLandingePage, &rd.BeforeLandingPageScreenshot)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -28,10 +29,14 @@ func WipeBrowserCache() error {
 // browser's own ways to leave the box around it: it routes all requests through
 // the proxy, removes the implicit loopback and link local proxy bypass (without
 // which 127.0.0.1 and 169.254.169.254 are reached directly), blocks the WebRTC
-// and QUIC UDP paths, and disables the browser's background network calls. It is
+// and QUIC UDP paths, keeps popups blocked, and disables the browser's
+// background network calls. It is
 // the single definition used by both the renderer and its tests so the guard
 // configuration cannot silently drift out of the real render path.
 func applyGuardFlags(l *launcher.Launcher, proxyAddr string) *launcher.Launcher {
+	// the launcher turns popup blocking off by default, popups would escape a
+	// capture's request handling
+	l.Delete("disable-popup-blocking")
 	return l.
 		Set("proxy-server", proxyAddr).
 		Set("proxy-bypass-list", "<-loopback>").
@@ -48,15 +53,10 @@ func applyGuardFlags(l *launcher.Launcher, proxyAddr string) *launcher.Launcher 
 		Set("disable-quic")
 }
 
-// Session is one launched, guarded headless Chromium instance that can render
-// several pages (PDF and/or PNG) without paying the browser launch cost again
-// for each one. Callers must call Close to release the browser process, its
-// temp dirs and the egress guard proxy.
-//
-// It exists so a campaign report that needs several renders (an email
-// screenshot, a landing page screenshot, then the final PDF) can share one
-// browser launch instead of three. RenderHTMLToPDF below is the original,
-// single-shot entrypoint, now a thin wrapper over a one-render Session.
+// Session is one launched, guarded headless Chromium instance that can take
+// several screenshots and render several PDFs on one browser launch. Callers
+// must call Close to release the browser process, its temp dirs and the egress
+// guard proxy. RenderHTMLToPDF renders one PDF on a Session of its own.
 type Session struct {
 	browser *rod.Browser
 	proxy   *guardedProxy
@@ -66,7 +66,7 @@ type Session struct {
 // NewSession launches a headless Chromium instance behind the egress guard.
 // If execPath is empty the browser binary is resolved automatically using the
 // same path as the runner. This is the single launch path shared by every
-// report render (PDF or PNG) so the guard configuration cannot drift between
+// report render (PDF or screenshot) so the guard configuration cannot drift between
 // them.
 func NewSession(ctx context.Context, execPath string) (*Session, error) {
 	rootDir, err := resolveBrowserRootDir()
@@ -213,54 +213,150 @@ func (s *Session) RenderPDF(htmlContent string) ([]byte, error) {
 	return data, nil
 }
 
-// RenderHTMLToPNG renders an HTML string to a full page PNG screenshot using a
-// headless Chromium instance. If execPath is empty the browser binary is
-// resolved automatically using the same path as the runner. width and height
-// set the layout viewport (in CSS pixels); the capture then extends to the
-// full scrollable page height, so a tall page produces a tall image rather
-// than being cropped.
-func RenderHTMLToPNG(ctx context.Context, htmlContent string, execPath string, width, height int) ([]byte, error) {
-	s, err := NewSession(ctx, execPath)
-	if err != nil {
-		return nil, err
-	}
-	defer s.Close()
-	return s.RenderPNG(htmlContent, width, height)
+// CaptureOptions controls one screenshot taken by Session.Capture.
+type CaptureOptions struct {
+	// Width and Height set the starting viewport in CSS pixels.
+	Width  int
+	Height int
+	// MaxHeight is the tallest capture in CSS pixels. Content below it is cut off.
+	MaxHeight int
+	// DisableScripts turns JavaScript off for the page.
+	DisableScripts bool
+	// Timeout bounds the whole capture.
+	Timeout time.Duration
 }
 
-// RenderPNG renders an HTML string to a full page PNG screenshot on this
-// session's browser. width and height set the layout viewport (in CSS
-// pixels); the capture then extends to the full scrollable page height.
-func (s *Session) RenderPNG(htmlContent string, width, height int) ([]byte, error) {
-	page, err := s.browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
-	if err != nil {
-		return nil, fmt.Errorf("reportpng: page create failed: %w", err)
-	}
-	defer page.Close() //nolint:errcheck
+// captureJPEGQuality keeps report screenshots readable at a small size.
+const captureJPEGQuality = 85
 
-	if err := page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-		Width:             width,
-		Height:            height,
+// CaptureCloseTimeout is the longest Capture takes after its Timeout to close
+// its browser context.
+const CaptureCloseTimeout = 2 * time.Second
+
+// captureSettleTimeout is the longest wait for a page to finish loading.
+const captureSettleTimeout = 5 * time.Second
+
+// Capture renders htmlContent in a new tab and returns a JPEG screenshot of it.
+// The page can not leave the given content: every document request, from a
+// redirect, a form post or a frame, is answered with 204 No Content, which
+// makes the browser keep the current document. JavaScript dialogs are
+// dismissed. All other requests go through the egress guard as usual.
+func (s *Session) Capture(htmlContent string, opts CaptureOptions) ([]byte, error) {
+	if opts.Width <= 0 || opts.Height <= 0 || opts.MaxHeight <= 0 || opts.Timeout <= 0 {
+		return nil, fmt.Errorf("reportcapture: width, height, max height and timeout must be above zero")
+	}
+	ctx, cancel := context.WithTimeout(s.browser.GetContext(), opts.Timeout)
+	defer cancel()
+
+	// each capture gets its own browser context with the egress guard set on
+	// it, so cookies and storage do not carry over and any popup the page
+	// manages to open is closed with it. It is disposed through the browser
+	// process, which works even when the page renderer is stuck in a script.
+	bc, err := proto.TargetCreateBrowserContext{
+		ProxyServer:     s.proxy.addr(),
+		ProxyBypassList: "<-loopback>",
+	}.Call(s.browser.Context(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("reportcapture: browser context create failed: %w", err)
+	}
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), CaptureCloseTimeout)
+		defer closeCancel()
+		_ = proto.TargetDisposeBrowserContext{BrowserContextID: bc.BrowserContextID}.Call(s.browser.Context(closeCtx))
+	}()
+
+	// created directly, rod's Browser.Page would put it in the default context
+	target, err := proto.TargetCreateTarget{
+		URL:              "about:blank",
+		BrowserContextID: bc.BrowserContextID,
+	}.Call(s.browser.Context(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("reportcapture: page create failed: %w", err)
+	}
+	tab, err := s.browser.Context(ctx).PageFromTarget(target.TargetID)
+	if err != nil {
+		return nil, fmt.Errorf("reportcapture: page attach failed: %w", err)
+	}
+
+	// subscribing enables the Fetch and Page domains before any content loads,
+	// so no request or dialog is missed
+	waitEvents := tab.EachEvent(
+		func(e *proto.FetchRequestPaused) {
+			go func() {
+				if e.ResourceType == proto.NetworkResourceTypeDocument {
+					// an empty body must be set, a nil one is sent as null and refused
+					_ = proto.FetchFulfillRequest{RequestID: e.RequestID, ResponseCode: 204, Body: []byte{}}.Call(tab)
+					return
+				}
+				_ = proto.FetchContinueRequest{RequestID: e.RequestID}.Call(tab)
+			}()
+		},
+		func(e *proto.PageJavascriptDialogOpening) {
+			go func() {
+				_ = proto.PageHandleJavaScriptDialog{Accept: false}.Call(tab)
+			}()
+		},
+	)
+	go waitEvents()
+
+	if opts.DisableScripts {
+		if err := (proto.EmulationSetScriptExecutionDisabled{Value: true}).Call(tab); err != nil {
+			return nil, fmt.Errorf("reportcapture: disable scripts failed: %w", err)
+		}
+	}
+
+	if err := tab.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+		Width:             opts.Width,
+		Height:            opts.Height,
 		DeviceScaleFactor: 1,
 		Mobile:            false,
 	}); err != nil {
-		return nil, fmt.Errorf("reportpng: set viewport failed: %w", err)
+		return nil, fmt.Errorf("reportcapture: set viewport failed: %w", err)
 	}
 
-	if err := page.SetDocumentContent(htmlContent); err != nil {
-		return nil, fmt.Errorf("reportpng: set content failed: %w", err)
+	// wait until the page has made no request for a short while, images and
+	// fonts included, but never longer than captureSettleTimeout. This watches
+	// the network only, so it also works with scripts off or a blocked redirect.
+	settle := tab.Timeout(captureSettleTimeout).WaitRequestIdle(
+		300*time.Millisecond,
+		nil,
+		nil,
+		[]proto.NetworkResourceType{
+			proto.NetworkResourceTypeWebSocket,
+			proto.NetworkResourceTypeEventSource,
+			proto.NetworkResourceTypeMedia,
+		},
+	)
+	if err := tab.SetDocumentContent(htmlContent); err != nil {
+		return nil, fmt.Errorf("reportcapture: set content failed: %w", err)
 	}
+	settle()
 
-	// not fatal: lets inline resources settle before capturing
-	_ = page.WaitIdle(3 * time.Second)
-
-	// full page: Chrome measures the actual scrollable content size and
-	// captures all of it, regardless of the viewport height set above.
-	data, err := page.Screenshot(true, &proto.PageCaptureScreenshot{
-		Format: proto.PageCaptureScreenshotFormatPng,
-	})
+	// capture the content up to MaxHeight. The viewport is kept as it is, so
+	// a layout sized on the window height looks as it does on screen.
+	metrics, err := proto.PageGetLayoutMetrics{}.Call(tab)
 	if err != nil {
-		return nil, fmt.Errorf("reportpng: screenshot failed: %w", err)
+		return nil, fmt.Errorf("reportcapture: layout metrics failed: %w", err)
 	}
-	return data, nil
+	height := opts.Height
+	if metrics.CSSContentSize != nil {
+		height = int(math.Ceil(metrics.CSSContentSize.Height))
+	}
+	height = max(1, min(height, opts.MaxHeight))
+
+	quality := captureJPEGQuality
+	shot, err := proto.PageCaptureScreenshot{
+		Format:                proto.PageCaptureScreenshotFormatJpeg,
+		Quality:               &quality,
+		CaptureBeyondViewport: true,
+		Clip: &proto.PageViewport{
+			Width:  float64(opts.Width),
+			Height: float64(height),
+			Scale:  1,
+		},
+	}.Call(tab)
+	if err != nil {
+		return nil, fmt.Errorf("reportcapture: screenshot failed: %w", err)
+	}
+	return shot.Data, nil
 }
