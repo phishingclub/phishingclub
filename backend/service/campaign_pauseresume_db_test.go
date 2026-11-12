@@ -196,14 +196,16 @@ func TestPauseCampaignByID_Guards(t *testing.T) {
 		}
 	})
 
-	t.Run("not started is rejected", func(t *testing.T) {
+	t.Run("not started is allowed", func(t *testing.T) {
 		svc, db := newPauseResumeService(t)
 		start := time.Now().Add(1 * time.Hour) // starts in the future
 		id := seedCampaign(t, db, &start, &future, nil, nil)
 		seedRecipient(t, db, id, future, false)
-		err := svc.PauseCampaignByID(ctx, authorizedSession(t), &id)
-		if !errors.Is(err, errs.ErrCampaignCannotPause) {
-			t.Fatalf("want ErrCampaignCannotPause, got %v", err)
+		if err := svc.PauseCampaignByID(ctx, authorizedSession(t), &id); err != nil {
+			t.Fatalf("pause before start: %v", err)
+		}
+		if pausedAtOf(t, db, id) == nil {
+			t.Fatalf("paused_at not set")
 		}
 	})
 

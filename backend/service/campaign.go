@@ -4377,9 +4377,9 @@ func (c *Campaign) DeleteDeviceCodesByCampaignID(
 // so this is distinct from closing. A paused campaign is resumed with a fresh
 // delivery window.
 //
-// Pause applies only to a started campaign that still has recipients to send to
-// and is not self managed, since a self managed campaign has no scheduled
-// sending to pause.
+// Pause applies to a campaign, started or not yet started, that still has
+// recipients to send to and is not self managed, since a self managed campaign
+// has no scheduled sending to pause.
 func (c *Campaign) PauseCampaignByID(
 	ctx context.Context,
 	session *model.Session,
@@ -4410,10 +4410,6 @@ func (c *Campaign) PauseCampaignByID(
 	}
 	// self managed campaigns send on manual action, there is no schedule to pause
 	if campaign.IsSelfManaged() {
-		return errs.Wrap(errs.ErrCampaignCannotPause)
-	}
-	// nothing to pause before sending has started
-	if !campaign.IsStarted() {
 		return errs.Wrap(errs.ErrCampaignCannotPause)
 	}
 	// nothing to pause if every recipient is already sent, cancelled or attempted

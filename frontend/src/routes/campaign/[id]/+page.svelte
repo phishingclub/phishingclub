@@ -1587,15 +1587,15 @@
 		return res;
 	};
 
-	// the pause action shows only while there is still delivery to stop: a scheduled
-	// campaign that has started, is not already paused or closed, and still has emails
-	// left to send
+	// the pause action shows while there is still delivery to stop: a scheduled
+	// campaign, started or not, that is not already paused or closed, has its
+	// recipients queued and still has emails left to send
 	$: canPause =
 		!campaign.closedAt &&
 		!campaign.pausedAt &&
 		!isSelfManaged &&
 		!!campaign.sendStartAt &&
-		new Date(campaign.sendStartAt) <= new Date() &&
+		campaign.notableEventName !== 'campaign_pending_schedule' &&
 		result.recipients - result.emailsSent > 0;
 	// the resume action shows while a campaign is paused and not closed
 	$: canResume = !!campaign.pausedAt && !campaign.closedAt;

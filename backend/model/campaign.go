@@ -900,12 +900,3 @@ func (c *Campaign) IsPaused() bool {
 	return c.PausedAt.IsSpecified() && !c.PausedAt.IsNull()
 }
 
-// IsStarted returns true if the send start time has passed. A self managed
-// campaign has no send window and is never started in this sense.
-func (c *Campaign) IsStarted() bool {
-	v, err := c.SendStartAt.Get()
-	if err != nil {
-		return false
-	}
-	return !v.After(time.Now())
-}
