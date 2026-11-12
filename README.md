@@ -35,6 +35,8 @@ Phishing Club provides a lot of features for simulation and red teaming, such as
 - **Multiple domains** - Auto TLS, custom sites and asset management
 - **Advanced delivery** - SMTP configs or custom API Sender with OAuth support
 - **Recipient tracking** - Groups, CSV import, SCIM provisioning, repeat offender metrics
+- **Multiple templates per campaign** - Up to 50 templates in one campaign, mixed evenly per department or any recipient field
+- **Report tracking** - Reads the Microsoft 365 mailbox the Outlook Report button sends to and marks recipients as reported, or import reports from CSV
 - **Awareness training** - Run training campaigns that record started and completed, kept separate from phishing risk
 - **Campaign reports** - PDF export with customizable HTML templates for phishing and training, automatically emailed on completion
 - **Analytics** - Timelines, dashboards, per-user event history
