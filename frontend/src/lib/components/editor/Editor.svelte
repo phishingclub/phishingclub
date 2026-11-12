@@ -196,6 +196,22 @@
 	let editorContainer = null;
 	let isExpanded = false;
 
+	// reports are printed by Chromium on A4 portrait with no margins, laid out
+	// at 794px wide (210mm at 96 dpi). the report preview lays the document out
+	// at that width and scales it to fit the pane, so lines wrap like in the PDF.
+	// page breaks are not drawn because only Chromium knows where they fall.
+	const A4_WIDTH_PX = 794;
+	$: isA4Preview = contentType === 'report';
+	let pageViewWidth = 0;
+	let pageViewHeight = 0;
+	$: pageGap = pageViewWidth < 480 ? 8 : 16;
+	$: pageScale =
+		pageViewWidth > 0
+			? Math.min(1.5, Math.max(0.1, (pageViewWidth - pageGap * 2) / A4_WIDTH_PX))
+			: 1;
+	$: pageShownWidth = A4_WIDTH_PX * pageScale;
+	$: pageShownHeight = Math.max(0, pageViewHeight - pageGap * 2);
+
 	const apiTemplates = [
 		{ label: 'Custom Field 1', text: '{{.CustomField1}}' },
 		{ label: 'Custom Field 2', text: '{{.CustomField2}}' },
@@ -1192,7 +1208,30 @@
 		const content = await replaceTemplateVariables(v);
 		// open the current content isolated in a new tab through the backend so it
 		// gets its own sandbox policy and loads its own external resources
-		submitPreviewForm(content, '_blank');
+		submitPreviewForm(isA4Preview ? wrapA4Page(content) : content, '_blank');
+	};
+
+	// a page that shows the report at A4 width on a neutral backdrop. the report
+	// sits in a sandboxed srcdoc frame inside the sandboxed preview response, so
+	// it stays isolated and its own html and body styles are untouched
+	const wrapA4Page = (html) => {
+		const isDark = document.documentElement.classList.contains('dark');
+		const backdrop = isDark ? '#4b5563' : '#e5e7eb';
+		const srcdoc = String(html ?? '')
+			.replace(/&/g, '&amp;')
+			.replace(/"/g, '&quot;');
+		return (
+			'<!doctype html><html><head><meta charset="utf-8">' +
+			'<meta name="viewport" content="width=device-width, initial-scale=1">' +
+			'<title>Report Preview</title><style>' +
+			`html,body{margin:0;height:100%;background:${backdrop}}` +
+			'body{box-sizing:border-box;padding:24px 0}' +
+			`iframe{display:block;width:${A4_WIDTH_PX}px;height:100%;margin:0 auto;border:0;` +
+			'background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2),0 4px 16px rgba(0,0,0,.12)}' +
+			'</style></head><body>' +
+			'<iframe title="Report" sandbox="allow-forms allow-modals allow-popups allow-scripts" ' +
+			`srcdoc="${srcdoc}"></iframe></body></html>`
+		);
 	};
 
 	const triggerFileInput = () => {
@@ -1482,11 +1521,37 @@
 			</div>
 			{#if isPreviewVisible}
 				<div
-					class="w-full md:w-1/2 min-w-0 border border-gray-300 dark:border-gray-600 bg-white transition-colors duration-200 {isExpanded
+					class="w-full md:w-1/2 min-w-0 border border-gray-300 dark:border-gray-600 transition-colors duration-200 {isA4Preview
+						? 'bg-gray-200 dark:bg-gray-600'
+						: 'bg-white'} {isExpanded
 						? 'flex-1 min-h-0 md:h-full'
 						: 'h-[var(--editor-h)] max-sm:h-60 md:h-full'}"
 				>
-					<div bind:this={shadowContainer} class="h-full w-full"></div>
+					{#if isA4Preview}
+						<!-- the page keeps its A4 width and is scaled to the pane; it
+						scrolls inside its own frame -->
+						<div
+							class="relative h-full w-full overflow-hidden"
+							bind:clientWidth={pageViewWidth}
+							bind:clientHeight={pageViewHeight}
+						>
+							<div
+								class="absolute bg-white shadow-md ring-1 ring-black/5 dark:shadow-black/40 overflow-hidden"
+								style="top: {pageGap}px; left: {Math.max(
+									0,
+									(pageViewWidth - pageShownWidth) / 2
+								)}px; width: {pageShownWidth}px; height: {pageShownHeight}px;"
+							>
+								<div
+									bind:this={shadowContainer}
+									style="width: {A4_WIDTH_PX}px; height: {pageShownHeight /
+										pageScale}px; transform: scale({pageScale}); transform-origin: 0 0;"
+								></div>
+							</div>
+						</div>
+					{:else}
+						<div bind:this={shadowContainer} class="h-full w-full"></div>
+					{/if}
 				</div>
 			{/if}
 		</div>

@@ -247,3 +247,30 @@ func TestRunReportCapturesSizeLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestReportPreviewRendersDefaults(t *testing.T) {
+	for _, isTraining := range []bool{false, true} {
+		out, err := renderReportPreview(defaultReportContent(isTraining), isTraining)
+		if err != nil {
+			t.Fatalf("training %v: %v", isTraining, err)
+		}
+		for _, want := range []string{"Q1 ", "Template 2 of 2: Sample template 2", "it-support@sample1.test", "data:image/svg+xml,"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("training %v: preview is missing %q", isTraining, want)
+			}
+		}
+	}
+}
+
+func TestReportPreviewTemplateErrors(t *testing.T) {
+	if _, err := renderReportPreview(`{{.Nope`, false); err == nil {
+		t.Fatal("a template that does not parse must fail")
+	}
+	if _, err := renderReportPreview(`{{.NotAField}}`, false); err == nil {
+		t.Fatal("a template that does not run must fail")
+	}
+	out, err := renderReportPreview(`{{range .Recipients}}{{.FirstName}} {{end}}{{.CompanyName}}`, false)
+	if err != nil || out != "Alice Bob Carol World Corp" {
+		t.Fatalf("got %q %v", out, err)
+	}
+}

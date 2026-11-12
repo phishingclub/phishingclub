@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -164,6 +165,41 @@ func (r *ReportTemplate) GeneratePDFByCampaignID(g *gin.Context) {
 	}
 	filename := fmt.Sprintf("report-%s.pdf", sanitizeFilename(campaignName))
 	r.responseWithPDF(g, pdfBytes, filename)
+}
+
+// PreviewPDFRequest is the template content a PDF preview is rendered from
+type PreviewPDFRequest struct {
+	Content    string `json:"content"`
+	IsTraining bool   `json:"isTraining"`
+}
+
+// PreviewPDF renders the posted report template with sample data to a PDF
+func (r *ReportTemplate) PreviewPDF(g *gin.Context) {
+	session, _, ok := r.handleSession(g)
+	if !ok {
+		return
+	}
+	opt, _ := r.OptionService.GetOptionWithoutAuth(g.Request.Context(), data.OptionKeyReportPDFEnabled)
+	if opt == nil || opt.Value.String() != "true" {
+		r.Response.NotFound(g)
+		return
+	}
+	// a 1MB template, as stored templates allow, with room for JSON escaping
+	g.Request.Body = http.MaxBytesReader(g.Writer, g.Request.Body, 2<<20)
+	var req PreviewPDFRequest
+	if ok := r.handleParseRequest(g, &req); !ok {
+		return
+	}
+	pdfBytes, err := r.ReportTemplateService.PreviewPDF(
+		g.Request.Context(),
+		session,
+		req.Content,
+		req.IsTraining,
+	)
+	if ok := r.handleErrors(g, err); !ok {
+		return
+	}
+	r.responseWithPDF(g, pdfBytes, "report-preview.pdf")
 }
 
 // WipeBrowserCache deletes the auto-downloaded Chromium binary used for PDF generation.

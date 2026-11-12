@@ -4102,6 +4102,32 @@ export class API {
 		},
 		wipeBrowserCache: async () => {
 			return await deleteJSON(this.getPath('/report-pdf/browser-cache'));
+		},
+		// renders unsaved template content with sample data to a real PDF.
+		// returns the PDF as a Blob, typed as PDF whatever the response header says
+		previewPDF: async (content, isTraining) => {
+			const response = await fetch(this.getPath('/report-template/preview-pdf'), {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ content, isTraining: !!isTraining })
+			});
+			if (!response.ok) {
+				let error =
+					response.status === 404 ? 'PDF reports are not enabled' : 'Failed to render the PDF';
+				try {
+					const body = await response.json();
+					if (body?.error) {
+						error = body.error;
+					}
+				} catch (_) {
+					// the error body was not JSON, keep the default message
+				}
+				return { success: false, statusCode: response.status, error };
+			}
+			const bytes = await response.arrayBuffer();
+			const blob = new Blob([bytes], { type: 'application/pdf' });
+			return { success: true, data: blob };
 		}
 	};
 

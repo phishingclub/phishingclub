@@ -375,6 +375,7 @@ func NewServices(
 	reportTemplate := &service.ReportTemplate{
 		Common:                   common,
 		ReportTemplateRepository: repositories.ReportTemplate,
+		RemoteBrowserExecPath:    remoteBrowserExecPath,
 	}
 
 	contentRegistry := &service.ContentRegistry{

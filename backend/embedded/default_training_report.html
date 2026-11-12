@@ -314,7 +314,12 @@
     padding: 10px 14px;
     font-size: 12px;
   }
-  .email-meta div { overflow-wrap: anywhere; }
+  /* one line each, so a long subject can not push the page past A4 */
+  .email-meta div {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .email-meta div + div { margin-top: 4px; }
   .email-meta-label {
     display: inline-block;

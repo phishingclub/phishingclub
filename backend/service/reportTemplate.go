@@ -22,6 +22,9 @@ import (
 type ReportTemplate struct {
 	Common
 	ReportTemplateRepository *repository.ReportTemplate
+	// RemoteBrowserExecPath is the browser binary report previews render
+	// with, found automatically when empty
+	RemoteBrowserExecPath string
 }
 
 // Create creates a report template

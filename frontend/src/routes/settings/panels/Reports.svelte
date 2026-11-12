@@ -15,6 +15,7 @@
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import CompanyReportDeliveryModal from '$lib/components/modal/CompanyReportDeliveryModal.svelte';
+	import ReportPreviewPDF from '$lib/components/ReportPreviewPDF.svelte';
 
 	let loaded = false;
 
@@ -261,9 +262,9 @@
 			modalMode="update"
 		>
 			<div
-				class="w-80vw col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+				class="w-80vw max-w-full col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 			>
-				<div class="flex items-center gap-2 mb-4">
+				<div class="flex flex-wrap items-center gap-2 mb-4">
 					<span class="text-sm font-semibold text-gray-600 dark:text-gray-300">Report for</span>
 					<div
 						class="flex items-center rounded overflow-hidden border border-gray-300 dark:border-gray-600 text-sm"
@@ -287,10 +288,14 @@
 							Training
 						</button>
 					</div>
-					<div class="ml-auto">
+					<div class="ml-auto flex flex-wrap items-center justify-end gap-2">
+						<ReportPreviewPDF
+							content={reportTemplateContent}
+							isTraining={reportKind === 'training'}
+						/>
 						<ActionButton
 							variant="secondary"
-							icon=""
+							icon="reset"
 							on:click={() => (isUseDefaultAlertVisible = true)}
 						>
 							Use Latest Default
