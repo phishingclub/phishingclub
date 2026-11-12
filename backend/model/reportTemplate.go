@@ -1,7 +1,6 @@
 package model
 
 import (
-	"html/template"
 	"time"
 
 	"github.com/google/uuid"
@@ -115,16 +114,14 @@ type ReportData struct {
 	DepartmentGroups []ReportGroupStat
 	PositionGroups   []ReportGroupStat
 
-	// Screenshots of the email and of up to three pages (before-landing,
-	// landing, after-landing) as rendered with a synthetic recipient (see
-	// service.reportMockRecipient), each a data: URI ready to use directly as
-	// an <img> src. Empty when the campaign has no such content, that page is
-	// an AITM proxy rather than a stored page, or the screenshot could not be
-	// captured; the report renders without that page then.
-	EmailScreenshot             template.HTML
-	BeforeLandingPageScreenshot template.HTML
-	LandingPageScreenshot       template.HTML
-	AfterLandingPageScreenshot  template.HTML
+	// Screenshots of the first template's email and pages, rendered with an
+	// example recipient. Each is a data URI to use as an img src, empty when
+	// the template has no such stage, the stage is an AiTM proxy, or the
+	// screenshot could not be taken.
+	EmailScreenshot             string
+	BeforeLandingPageScreenshot string
+	LandingPageScreenshot       string
+	AfterLandingPageScreenshot  string
 
 	// TemplateScreenshots holds the screenshots of each template in the
 	// campaign's template pool, in pool order, up to ten templates.

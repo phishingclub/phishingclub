@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -19,7 +20,7 @@ func TestReportPageRenderUsesFakeRandomRecipient(t *testing.T) {
 	page := &model.Page{
 		Content: nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(randomRecipientContent)),
 	}
-	buf, err := ts.CreatePageMockForReport(page, nil, "example.test", "/")
+	buf, err := ts.CreatePageMockForReport(context.Background(), page, nil, "example.test", "/")
 	if err != nil {
 		t.Fatalf("render page: %v", err)
 	}
@@ -38,5 +39,21 @@ func TestReportEmailRenderUsesFakeRandomRecipient(t *testing.T) {
 	}
 	if !strings.Contains(out, "John Smith john.smith@example.test") {
 		t.Fatalf("unexpected email output %q", out)
+	}
+}
+
+func TestReportRendersUsePlainRecipientEmail(t *testing.T) {
+	ts := &Template{}
+	content := `{{.Email}}`
+	page := &model.Page{Content: nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(content))}
+	buf, err := ts.CreatePageMockForReport(context.Background(), page, nil, "example.test", "/")
+	if err != nil || buf.String() != "rick@company.test" {
+		t.Fatalf("page: got %q %v", buf.String(), err)
+	}
+	email := model.NewEmailExample()
+	email.Content = nullable.NewNullableWithValue(*vo.NewOptionalString1MBMust(content))
+	out, err := ts.CreateMailBodyForReport(email, "example.test", "/")
+	if err != nil || out != "rick@company.test" {
+		t.Fatalf("email: got %q %v", out, err)
 	}
 }

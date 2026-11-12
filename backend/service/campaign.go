@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	htmltemplate "html/template"
 	"math/rand"
 	"net/url"
 	"os"
@@ -7844,7 +7843,7 @@ func (c *Campaign) attachReportScreenshots(
 			if !wanted || page == nil {
 				return nil
 			}
-			pageBuf, pageErr := c.TemplateService.CreatePageMockForReport(page, tmpl.Email, domainName, urlPath)
+			pageBuf, pageErr := c.TemplateService.CreatePageMockForReport(ctx, page, tmpl.Email, domainName, urlPath)
 			if pageErr != nil {
 				c.Logger.Warnw("failed to render page for report screenshot", "page", name, "error", pageErr)
 				return nil
@@ -7910,16 +7909,16 @@ func (c *Campaign) attachReportScreenshots(
 		}
 		if i == 0 && t.loaded {
 			if single.email {
-				rd.EmailScreenshot = htmltemplate.HTML(shots.Email)
+				rd.EmailScreenshot = shots.Email
 			}
 			if single.before {
-				rd.BeforeLandingPageScreenshot = htmltemplate.HTML(shots.BeforeLandingPage)
+				rd.BeforeLandingPageScreenshot = shots.BeforeLandingPage
 			}
 			if single.landing {
-				rd.LandingPageScreenshot = htmltemplate.HTML(shots.LandingPage)
+				rd.LandingPageScreenshot = shots.LandingPage
 			}
 			if single.after {
-				rd.AfterLandingPageScreenshot = htmltemplate.HTML(shots.AfterLandingPage)
+				rd.AfterLandingPageScreenshot = shots.AfterLandingPage
 			}
 		}
 		// a template that failed to load is kept in the list, so the report
