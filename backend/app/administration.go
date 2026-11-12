@@ -231,6 +231,8 @@ const (
 	// report templates
 	ROUTE_V1_REPORT_TEMPLATE          = "/api/v1/report-template"
 	ROUTE_V1_REPORT_TEMPLATE_ID       = "/api/v1/report-template/:id"
+	ROUTE_V1_REPORT_TEMPLATE_DEFAULT  = "/api/v1/report-template/default"
+	ROUTE_V1_REPORT_TEMPLATE_PREVIEW  = "/api/v1/report-template/preview-pdf"
 	ROUTE_V1_REPORT_PDF_BROWSER_CACHE = "/api/v1/report-pdf/browser-cache"
 	// campaign-recipient
 	ROUTE_V1_CAMPAIGN_RECIPIENT_EMAIL      = "/api/v1/campaign/recipient/:id/email"
@@ -416,9 +418,9 @@ func setupRoutes(
 		GET(ROUTE_V1_SSO_ENABLED, controllers.SSO.IsEnabled).
 		POST(ROUTE_V1_SSO, middleware.SessionHandler, controllers.SSO.Upsert).
 		GET(ROUTE_V1_SSO_ENTRA_ID_LOGIN, controllers.SSO.EntreIDLogin).
-		GET(ROUTE_V1_SSO_ENTRA_ID_CALLBACK, controllers.SSO.EntreIDCallBack).
+		GET(ROUTE_V1_SSO_ENTRA_ID_CALLBACK, middleware.SSOCallbackRateLimiter, controllers.SSO.EntreIDCallBack).
 		GET(ROUTE_V1_SSO_OIDC_LOGIN, controllers.SSO.OIDCLogin).
-		GET(ROUTE_V1_SSO_OIDC_CALLBACK, controllers.SSO.OIDCCallback).
+		GET(ROUTE_V1_SSO_OIDC_CALLBACK, middleware.SSOCallbackRateLimiter, controllers.SSO.OIDCCallback).
 		// user mfa
 		GET(ROUTE_V1_USER_MFA_TOTP, middleware.SessionHandler, controllers.User.IsTOTPEnabled).
 		POST(ROUTE_V1_USER_MFA_TOTP_SETUP, middleware.LoginRateLimiter, middleware.SessionHandler, controllers.User.SetupTOTP).
@@ -456,7 +458,8 @@ func setupRoutes(
 		GET(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.GetGlobal).
 		POST(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.UpsertGlobal).
 		DELETE(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.DeleteGlobal).
-		POST(ROUTE_V1_REPORT_CONFIG_SEND, middleware.SessionHandler, controllers.CompanyReportConfig.SendNow).
+		// sends a report now, ExtendedTimeout required for headless browser rendering
+		POST(ROUTE_V1_REPORT_CONFIG_SEND, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.CompanyReportConfig.SendNow).
 		// company report inbox
 		GET(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.GetByCompanyID).
 		POST(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.Upsert).
@@ -575,7 +578,7 @@ func setupRoutes(
 		POST(ROUTE_V1_OAUTH_PROVIDER_REMOVE_AUTH, middleware.SessionHandler, controllers.OAuthProvider.RemoveAuthorization).
 		GET(ROUTE_V1_OAUTH_AUTHORIZE, middleware.SessionHandler, controllers.OAuthProvider.GetAuthorizationURL).
 		GET(ROUTE_V1_OAUTH_AUTHORIZE_STATUS, middleware.SessionHandler, controllers.OAuthProvider.GetAuthorizationStatus).
-		GET(ROUTE_V1_OAUTH_CALLBACK, controllers.OAuthProvider.HandleCallback).
+		GET(ROUTE_V1_OAUTH_CALLBACK, middleware.SSOCallbackRateLimiter, controllers.OAuthProvider.HandleCallback).
 		POST(ROUTE_V1_OAUTH_IMPORT_TOKENS, middleware.SessionHandler, controllers.OAuthProvider.ImportAuthorizedTokens).
 		GET(ROUTE_V1_OAUTH_EXPORT_TOKENS, middleware.SessionHandler, controllers.OAuthProvider.ExportAuthorizedTokens).
 		// emails
@@ -657,6 +660,8 @@ func setupRoutes(
 		// report templates
 		GET(ROUTE_V1_REPORT_TEMPLATE, middleware.SessionHandler, controllers.ReportTemplate.GetAll).
 		POST(ROUTE_V1_REPORT_TEMPLATE, middleware.SessionHandler, controllers.ReportTemplate.Create).
+		GET(ROUTE_V1_REPORT_TEMPLATE_DEFAULT, middleware.SessionHandler, controllers.ReportTemplate.GetDefault).
+		POST(ROUTE_V1_REPORT_TEMPLATE_PREVIEW, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.ReportTemplate.PreviewPDF).
 		GET(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.GetByID).
 		PATCH(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.UpdateByID).
 		DELETE(ROUTE_V1_REPORT_TEMPLATE_ID, middleware.SessionHandler, controllers.ReportTemplate.DeleteByID).

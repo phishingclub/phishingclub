@@ -68,9 +68,10 @@ func (a *Asset) Create(
 	g *gin.Context,
 	session *model.Session,
 	assets []*model.Asset,
-) ([]*uuid.UUID, error) {
+) (_ []*uuid.UUID, err error) {
 	ids := []*uuid.UUID{}
 	ae := NewAuditEvent("Asset.Create", session)
+	defer a.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -303,7 +304,7 @@ func (a *Asset) Create(
 		ids = append(ids, id)
 		idsStr = append(idsStr, id.String())
 	}
-	ae.Details["assetIDs"] = idsStr
+	ae.Details["assetIds"] = idsStr
 	a.AuditLogAuthorized(ae)
 
 	return ids, nil
@@ -320,10 +321,10 @@ func (a *Asset) GetAll(
 	result := model.NewEmptyResult[model.Asset]()
 	ae := NewAuditEvent("Asset.GetAll", session)
 	if domainID != nil {
-		ae.Details["domainID"] = domainID.String()
+		ae.Details["domainId"] = domainID.String()
 	}
 	if companyID != nil {
-		ae.Details["companyID"] = companyID.String()
+		ae.Details["companyId"] = companyID.String()
 	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -465,8 +466,9 @@ func (a *Asset) SetAllowDenyByID(
 	session *model.Session,
 	assetID *uuid.UUID,
 	allowDenyIDs []uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Asset.SetAllowDeny", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = assetID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -528,7 +530,7 @@ func (a *Asset) SetAllowDenyByID(
 		a.Logger.Errorw("failed to set asset allow deny lists", "id", assetID.String(), "error", err)
 		return errs.Wrap(err)
 	}
-	ae.Details["allowDenyIDs"] = idsStr
+	ae.Details["allowDenyIds"] = idsStr
 	a.AuditLogAuthorized(ae)
 	return nil
 }
@@ -572,8 +574,9 @@ func (a *Asset) UpdateByID(
 	name nullable.Nullable[vo.OptionalString127],
 	description nullable.Nullable[vo.OptionalString255],
 	contentType nullable.Nullable[vo.OptionalString255],
-) error {
+) (err error) {
 	ae := NewAuditEvent("Asset.UpdateById", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -633,8 +636,9 @@ func (a *Asset) AddHeader(
 	session *model.Session,
 	assetID *uuid.UUID,
 	header *model.AssetHeader,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("Asset.AddHeader", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = assetID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -683,8 +687,9 @@ func (a *Asset) RemoveHeader(
 	session *model.Session,
 	assetID *uuid.UUID,
 	headerID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Asset.RemoveHeader", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = assetID.String()
 	ae.Details["headerId"] = headerID.String()
 	// check permissions
@@ -745,8 +750,9 @@ func (a *Asset) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Asset.DeleteById", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -784,10 +790,11 @@ func (a *Asset) DeleteAllByCompanyID(
 	ctx context.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Asset.DeleteAllByCompanyID", session)
+	defer a.auditDone(ae, &err)
 	if companyID != nil {
-		ae.Details["companyID"] = companyID
+		ae.Details["companyId"] = companyID
 	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -813,6 +820,14 @@ func (a *Asset) DeleteAllByCompanyID(
 			return err
 		}
 	}
+	// remove the company asset folder once it is empty
+	if companyID != nil {
+		if company, err := a.CompanyRepository.GetByID(ctx, companyID); err == nil {
+			if key, err := company.AssetsKey.Get(); err == nil && key.String() != "" {
+				a.removeEmptyContextFolder(filepath.Join(data.ASSET_GLOBAL_FOLDER, key.String()))
+			}
+		}
+	}
 	a.AuditLogAuthorized(ae)
 	return nil
 }
@@ -822,8 +837,9 @@ func (a *Asset) DeleteAllByDomainID(
 	ctx context.Context,
 	session *model.Session,
 	domainID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Asset.DeleteAllByDomainID", session)
+	defer a.auditDone(ae, &err)
 	if domainID != nil {
 		ae.Details["domainId"] = domainID.String()
 	}
@@ -855,8 +871,41 @@ func (a *Asset) DeleteAllByDomainID(
 			return err
 		}
 	}
+	// remove the domain asset folder once it is empty
+	if domainID != nil {
+		if domain, err := a.DomainRepository.GetByID(ctx, domainID, &repository.DomainOption{}); err == nil {
+			if name, err := domain.Name.Get(); err == nil {
+				a.removeEmptyContextFolder(name.String())
+			}
+		}
+	}
 	a.AuditLogAuthorized(ae)
 	return nil
+}
+
+// removeEmptyContextFolder removes the asset folder of a domain or a company
+// when it is empty. A folder that still holds files is kept. The shared folder
+// itself is never removed, it holds the global assets.
+func (a *Asset) removeEmptyContextFolder(folder string) {
+	folder = filepath.Clean(folder)
+	if folder == "." || folder == data.ASSET_GLOBAL_FOLDER || filepath.IsAbs(folder) {
+		return
+	}
+	root, err := os.OpenRoot(a.RootFolder)
+	if err != nil {
+		a.Logger.Debugw("failed to open asset root folder", "error", err)
+		return
+	}
+	defer root.Close()
+	// only a real folder, a link of that name is left as it is
+	info, err := root.Lstat(folder)
+	if err != nil || !info.IsDir() {
+		return
+	}
+	// a folder that still holds files fails to remove and is kept
+	if err := root.Remove(folder); err != nil {
+		a.Logger.Debugw("asset folder not removed", "folder", folder, "error", err)
+	}
 }
 
 // deleteAssetFileAndRow deletes the file of an asset and then its row. An
@@ -1026,8 +1075,9 @@ func (a *Asset) SaveContentByID(
 	session *model.Session,
 	id *uuid.UUID,
 	content []byte,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Asset.SaveContentById", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -1086,8 +1136,9 @@ func (a *Asset) MoveByID(
 	session *model.Session,
 	id *uuid.UUID,
 	newPath nullable.Nullable[vo.RelativeFilePath],
-) error {
+) (err error) {
 	ae := NewAuditEvent("Asset.MoveById", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -1200,8 +1251,9 @@ func (a *Asset) ReplaceFileByID(
 	session *model.Session,
 	id *uuid.UUID,
 	file *multipart.FileHeader,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Asset.ReplaceFileById", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {

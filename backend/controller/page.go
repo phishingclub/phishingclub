@@ -2,6 +2,7 @@ package controller
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
@@ -82,7 +83,12 @@ func (p *Page) GetContentByID(g *gin.Context) {
 		return
 	}
 	// build response
-	phishingPage, err := p.TemplateService.ApplyPageMock(content.String())
+	// preview a company page with that company's recipients for {{.RandomRecipient}}
+	var companyID *uuid.UUID
+	if cid, err := page.CompanyID.Get(); err == nil {
+		companyID = &cid
+	}
+	phishingPage, err := p.TemplateService.ApplyPageMock(g.Request.Context(), content.String(), companyID)
 	if ok := p.handleErrors(g, err); !ok {
 		return
 	}

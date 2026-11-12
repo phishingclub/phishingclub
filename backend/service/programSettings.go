@@ -622,9 +622,10 @@ func (s *Program) Clone(
 	id *uuid.UUID,
 	name vo.String64,
 	targetCompanyID *uuid.UUID,
-) (*ProgramCloneResult, error) {
+) (_ *ProgramCloneResult, err error) {
 	ae := NewAuditEvent("Program.Clone", session)
-	ae.Details["sourceID"] = id.String()
+	defer s.auditDone(ae, &err)
+	ae.Details["sourceId"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
@@ -684,8 +685,8 @@ func (s *Program) Clone(
 		return nil, errs.Wrap(err)
 	}
 	ae.Details["id"] = newID.String()
-	ae.Details["sourceCompanyID"] = companyIDString(optionalID(src.Program.CompanyID))
-	ae.Details["targetCompanyID"] = companyIDString(targetCompanyID)
+	ae.Details["sourceCompanyId"] = companyIDString(optionalID(src.Program.CompanyID))
+	ae.Details["targetCompanyId"] = companyIDString(targetCompanyID)
 	ae.Details["dropped"] = len(dropped)
 	s.AuditLogAuthorized(ae)
 	return &ProgramCloneResult{ID: newID, Dropped: dropped}, nil

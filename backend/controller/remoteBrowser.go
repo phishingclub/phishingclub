@@ -688,6 +688,8 @@ func (m *RemoteBrowserController) RunByID(g *gin.Context) {
 		m.Logger.Warnw("websocket upgrade failed", "error", err)
 		return
 	}
+	// the run starts a browser on the server and runs the saved script
+	m.RemoteBrowserService.AuditRun(session, id)
 	defer conn.Close()
 	conn.SetReadLimit(64 * 1024)
 
@@ -1507,10 +1509,7 @@ func (m *RemoteBrowserController) ListLiveSessions(g *gin.Context) {
 	if !ok {
 		return
 	}
-	if authorized, err := service.IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL); err != nil || !authorized {
-		if err != nil {
-			m.Logger.Warnw("IsAuthorized error in ListLiveSessions", "error", err)
-		}
+	if err := m.RemoteBrowserService.AuthorizeLiveSession(session, "ListLiveSessions"); err != nil {
 		m.Response.Forbidden(g)
 		return
 	}
@@ -1589,10 +1588,7 @@ func (m *RemoteBrowserController) CloseLiveSession(g *gin.Context) {
 	if !ok {
 		return
 	}
-	if authorized, err := service.IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL); err != nil || !authorized {
-		if err != nil {
-			m.Logger.Warnw("IsAuthorized error in CloseLiveSession", "error", err)
-		}
+	if err := m.RemoteBrowserService.AuthorizeLiveSession(session, "CloseLiveSession"); err != nil {
 		m.Response.Forbidden(g)
 		return
 	}
@@ -1610,6 +1606,11 @@ func (m *RemoteBrowserController) CloseLiveSession(g *gin.Context) {
 		return
 	}
 	val.Cancel()
+	campaignID := ""
+	if sess, ok := val.(*activeSession); ok && !sess.isTest {
+		campaignID = sess.CampaignID.String()
+	}
+	m.RemoteBrowserService.AuditLiveSession(session, "CloseLiveSession", crID, campaignID, "")
 	m.Response.OK(g, map[string]string{"message": "live session closed"})
 }
 
@@ -1626,10 +1627,7 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 	if !ok {
 		return
 	}
-	if authorized, err := service.IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL); err != nil || !authorized {
-		if err != nil {
-			m.Logger.Warnw("IsAuthorized error in StreamLiveSession", "error", err)
-		}
+	if err := m.RemoteBrowserService.AuthorizeLiveSession(session, "WatchLiveSession"); err != nil {
 		m.Response.Forbidden(g)
 		return
 	}
@@ -1667,11 +1665,21 @@ func (m *RemoteBrowserController) StreamLiveSession(g *gin.Context) {
 		return
 	}
 	controlMode := g.Query("mode") == "control"
+	// the audit is written on the server only, the victim side is not changed
+	mode := "view"
+	if controlMode {
+		mode = "control"
+	}
+	campaignID := ""
+	if !sess.isTest {
+		campaignID = sess.CampaignID.String()
+	}
 
 	conn, err := wsUpgrader.Upgrade(g.Writer, g.Request, nil)
 	if err != nil {
 		return
 	}
+	m.RemoteBrowserService.AuditLiveSession(session, "WatchLiveSession", crIDStr, campaignID, mode)
 	defer conn.Close()
 	conn.SetReadLimit(64 * 1024)
 

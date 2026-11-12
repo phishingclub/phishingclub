@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/model"
-	"go.uber.org/zap"
 )
 
 // ProxySession represents an active MITM proxy session
@@ -37,6 +36,9 @@ type ProxySession struct {
 	// session is stored, and read on every following request to build the
 	// outbound client. Empty means use the proxy from the yaml config.
 	UpstreamProxy string
+
+	// CampaignTemplateID is the template of the session's recipient
+	CampaignTemplateID *uuid.UUID
 }
 
 // ProxySessionManager manages proxy session lifecycle and storage
@@ -49,11 +51,9 @@ type ProxySessionManager struct {
 }
 
 // NewProxySessionManager creates a new proxy session manager
-func NewProxySessionManager(logger *zap.SugaredLogger) *ProxySessionManager {
+func NewProxySessionManager(common Common) *ProxySessionManager {
 	return &ProxySessionManager{
-		Common: Common{
-			Logger: logger,
-		},
+		Common: common,
 	}
 }
 

@@ -62,8 +62,9 @@ func (s *SSO) Upsert(
 	ctx context.Context,
 	session *model.Session,
 	ssoOpt *model.SSOOption,
-) error {
+) (err error) {
 	ae := NewAuditEvent("SSO.Upsert", session)
+	defer s.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -219,17 +220,20 @@ func (s *SSO) HandlEntraIDCallback(
 		[]string{"User.Read"},
 	)
 	if err != nil {
+		s.auditSSOFailure(data.SSOProviderEntra, g.ClientIP(), "exchangeFailed")
 		return nil, errs.Wrap(err)
 	}
 	userInfo, err := s.getMsGraphMe(g, result.AccessToken)
 	if err != nil {
 		s.Logger.Debugw("failed to get /me graph info", "error", err)
+		s.auditSSOFailure(data.SSOProviderEntra, g.ClientIP(), "userInfoFailed")
 		return nil, err
 	}
 	// validate required fields
 	if userInfo.Email == "" && userInfo.UserPrincipalName == "" {
 		err := errors.New("no email provided from SSO")
 		s.Logger.Debugw("no email or userPrincipalName from SSO", "error", err)
+		s.auditSSOFailure(data.SSOProviderEntra, g.ClientIP(), "noEmail")
 		return nil, errs.Wrap(err)
 	}
 	// determine email (prefer mail over UPN)
@@ -246,7 +250,7 @@ func (s *SSO) HandlEntraIDCallback(
 		// Fallback to email prefix if no name available
 		name = strings.Split(email, "@")[0]
 	}
-	userID, err := s.UserService.CreateFromSSO(g, name, email, userInfo.ID)
+	userID, err := s.UserService.CreateFromSSO(g, name, email, userInfo.ID, g.ClientIP())
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
@@ -358,7 +362,7 @@ func (s *SSO) IsLocalLoginBlocked(ctx context.Context, breakglass bool, ip strin
 		return false, nil
 	}
 	ae := NewAuditEvent("User.LocalLoginDenied", nil)
-	ae.Details["ip"] = ip
+	ae.IP = ip
 	s.AuditLogNotAuthorized(ae)
 	return true, nil
 }
@@ -384,6 +388,30 @@ func (s *SSO) OIDCAuthCodeURL(
 	return s.OIDCClient.AuthCodeURL(state, nonce, verifier), nil
 }
 
+// oidcFailureReason names why an OIDC exchange was refused for the audit log.
+func oidcFailureReason(err error) string {
+	switch {
+	case errors.Is(err, errs.ErrSSOEmailNotVerified):
+		return "emailNotVerified"
+	case errors.Is(err, errs.ErrSSONoEmail):
+		return "noEmail"
+	case errors.Is(err, errs.ErrSSOMFARequired):
+		return "mfaRequired"
+	default:
+		return "exchangeFailed"
+	}
+}
+
+// auditSSOFailure writes a denied User.SSOLogin event for a callback that
+// failed before the user was looked up. The user lookup writes its own event.
+func (s *SSO) auditSSOFailure(provider string, ip string, reason string) {
+	ae := NewAuditEvent("User.SSOLogin", nil)
+	ae.IP = ip
+	ae.Details["provider"] = provider
+	ae.Details["reason"] = reason
+	s.AuditLogNotAuthorized(ae)
+}
+
 // HandleOIDCCallback verifies the OIDC callback, resolves the pre provisioned
 // user by their verified email and creates a session.
 func (s *SSO) HandleOIDCCallback(
@@ -405,13 +433,14 @@ func (s *SSO) HandleOIDCCallback(
 	userInfo, err := s.OIDCClient.Exchange(g, code, nonce, verifier)
 	if err != nil {
 		s.Logger.Warnw("OIDC code exchange failed", "error", err)
+		s.auditSSOFailure(data.SSOProviderOIDC, g.ClientIP(), oidcFailureReason(err))
 		return nil, err
 	}
 	name := userInfo.Name
 	if name == "" {
 		name = strings.Split(userInfo.Email, "@")[0]
 	}
-	userID, err := s.UserService.CreateFromSSO(g, name, userInfo.Email, userInfo.Subject)
+	userID, err := s.UserService.CreateFromSSO(g, name, userInfo.Email, userInfo.Subject, g.ClientIP())
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}

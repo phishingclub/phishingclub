@@ -145,6 +145,10 @@ func (r *Recipient) Export(g *gin.Context) {
 	if ok := r.handleErrors(g, err); !ok {
 		return
 	}
+	// the export holds the recipient and their events, so it is audited
+	if ok := r.handleErrors(g, r.RecipientService.AuthorizeExport(session, recipientID)); !ok {
+		return
+	}
 	recipientBuffer := &bytes.Buffer{}
 	recipientWriter := csv.NewWriter(recipientBuffer)
 	recpHeaders := []string{

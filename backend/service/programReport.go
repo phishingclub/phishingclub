@@ -15,7 +15,6 @@ import (
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
-	"github.com/phishingclub/phishingclub/remotebrowser"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/validate"
 	"gorm.io/gorm"
@@ -393,7 +392,9 @@ func (s *Program) BuildReportPDF(
 	if err != nil {
 		return nil, "", err
 	}
-	pdf, err := remotebrowser.RenderHTMLToPDF(ctx, htmlContent, s.CampaignService.RemoteBrowserExecPath)
+	rb := newReportBrowser(ctx, s.CampaignService.RemoteBrowserExecPath, s.Logger)
+	defer rb.close()
+	pdf, err := rb.renderPDF(htmlContent)
 	if err != nil {
 		s.Logger.Errorw("failed to render program report PDF", "error", err)
 		return nil, "", reportPDFError(err)

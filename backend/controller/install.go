@@ -143,6 +143,7 @@ type Install struct {
 	DB                *gorm.DB
 	PasswordHasher    password.Argon2Hasher
 	ImportService     *service.Import
+	InstallService    *service.InstallSetup
 }
 
 // Install completes the installation by setting the initial administrators and options
@@ -156,12 +157,17 @@ func (in *Install) Install(g *gin.Context) {
 			}
 		}
 	}()
-	ok := in.install(g, tx)
+	session := sessionFromContext(g)
+	denied := false
+	ok := in.install(g, tx, &denied)
 	if !ok {
 		if err := tx.Rollback().Error; err != nil {
 			in.Logger.Errorw("failed to install - could not rollback transaction",
 				"error", err,
 			)
+		}
+		if !denied && session != nil {
+			in.InstallService.AuditInstall(session, errs.NewCustomError(errors.New("install not completed")))
 		}
 		return
 	}
@@ -170,10 +176,12 @@ func (in *Install) Install(g *gin.Context) {
 		in.Logger.Errorw("failed to install - could not commit transaction",
 			"error", result.Error,
 		)
+		in.InstallService.AuditInstall(session, result.Error)
 		in.Response.ServerError(g)
 		return
 	}
 	committed = true
+	in.InstallService.AuditInstall(session, nil)
 	// the admin user changed username and password
 	// however as the install process is a special case, we wont
 	// require re-authentication
@@ -182,9 +190,9 @@ func (in *Install) Install(g *gin.Context) {
 
 // Install completes the installation by setting the initial administrators
 // username, password, email, name and company name
-func (in *Install) install(g *gin.Context, tx *gorm.DB) bool {
+func (in *Install) install(g *gin.Context, tx *gorm.DB, denied *bool) bool {
 	// handle session
-	_, user, ok := in.handleSession(g)
+	session, user, ok := in.handleSession(g)
 	if !ok {
 		return false
 	}
@@ -196,7 +204,8 @@ func (in *Install) install(g *gin.Context, tx *gorm.DB) bool {
 	}
 	if !role.IsSuperAdministrator() {
 		in.Logger.Info("failed to install - not super admin")
-		// TODO add audit log
+		*denied = true
+		in.InstallService.AuditInstall(session, errs.ErrAuthorizationFailed)
 		in.Response.Forbidden(g)
 		return false
 	}
@@ -489,4 +498,14 @@ func (in *Install) InstallTemplates(g *gin.Context) {
 	)
 
 	in.Response.OK(g, summary)
+}
+
+// sessionFromContext returns the session the session middleware stored, or nil
+func sessionFromContext(g *gin.Context) *model.Session {
+	v, ok := g.Get("session")
+	if !ok {
+		return nil
+	}
+	s, _ := v.(*model.Session)
+	return s
 }

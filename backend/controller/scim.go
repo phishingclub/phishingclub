@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/service"
+	"github.com/phishingclub/phishingclub/utils"
 	"gorm.io/gorm"
 )
 
@@ -23,6 +25,10 @@ const (
 type Scim struct {
 	Common
 	ScimService *service.Scim
+	// TrustedProxies is the phishing server proxy list. SCIM is served there,
+	// where gin trusts every forwarding header, so the client IP is read the
+	// same way the phishing server reads it
+	TrustedProxies []string
 }
 
 // scimError writes a SCIM-compliant error response
@@ -62,7 +68,12 @@ func (c *Scim) authenticate(g *gin.Context, companyID *uuid.UUID) (*service.Scim
 		return nil, false
 	}
 
-	config, authed, err := c.ScimService.VerifyAndLoadConfig(g.Request.Context(), companyID, token)
+	config, authed, err := c.ScimService.VerifyAndLoadConfig(
+		g.Request.Context(),
+		companyID,
+		token,
+		scimClientIP(g, c.TrustedProxies),
+	)
 	if err != nil {
 		// a missing config is reported with the same generic 401 as a bad token so
 		// the response does not reveal whether a company has SCIM configured
@@ -676,4 +687,19 @@ func parseIntQuery(g *gin.Context, key string, defaultVal int) int {
 		return defaultVal
 	}
 	return v
+}
+
+// scimClientIP returns the client IP for the SCIM audit event. A forwarding
+// header that does not hold an IP is ignored and the connection address is
+// used, so the audit log only ever gets an IP.
+func scimClientIP(g *gin.Context, trustedProxies []string) string {
+	ip := utils.ExtractClientIP(g.Request, trustedProxies)
+	if net.ParseIP(ip) != nil {
+		return ip
+	}
+	host, _, err := net.SplitHostPort(g.Request.RemoteAddr)
+	if err != nil {
+		return g.Request.RemoteAddr
+	}
+	return host
 }

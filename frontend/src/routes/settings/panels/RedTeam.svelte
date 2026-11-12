@@ -96,7 +96,7 @@
 			modalMode="update"
 		>
 			<div
-				class="w-80vw col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+				class="w-80vw max-w-full col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 			>
 				<SimpleCodeEditor
 					bind:value={obfuscationTemplate}

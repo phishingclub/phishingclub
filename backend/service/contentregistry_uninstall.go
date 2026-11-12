@@ -610,6 +610,9 @@ func (s *ContentRegistry) previewRemoval(
 		}
 	}
 	var domainIDs []uuid.UUID
+	// templates the removal deletes itself. their campaigns close now, also when
+	// they already have a later close time.
+	var deletedTemplates []*uuid.UUID
 	trackedAssets := map[uuid.UUID]bool{}
 	removedLists := map[uuid.UUID]bool{}
 	// lists are judged once every asset and domain the removal deletes is known.
@@ -694,6 +697,9 @@ func (s *ContentRegistry) previewRemoval(
 				return nil, nil, errs.Wrap(terr)
 			}
 			addTemplates(ids)
+			if r.ResourceType == "campaigntemplate" && r.ResourceID != nil && !skipTemplates[*r.ResourceID] {
+				deletedTemplates = append(deletedTemplates, r.ResourceID)
+			}
 			switch r.ResourceType {
 			case "domain":
 				domainIDs = append(domainIDs, *r.ResourceID)
@@ -743,6 +749,18 @@ func (s *ContentRegistry) previewRemoval(
 	campaignRepo := s.campaignRepository()
 	closing := map[uuid.UUID]bool{}
 	now := time.Now()
+	closesNow := map[uuid.UUID]bool{}
+	if len(deletedTemplates) > 0 && campaignRepo != nil {
+		campaigns, err := campaignRepo.GetByTemplateIDs(ctx, deletedTemplates)
+		if err != nil {
+			return nil, nil, errs.Wrap(err)
+		}
+		for _, c := range campaigns {
+			if cid, err := c.ID.Get(); err == nil {
+				closesNow[cid] = true
+			}
+		}
+	}
 	if len(templateIDs) > 0 && campaignRepo != nil {
 		campaigns, err := campaignRepo.GetByTemplateIDs(ctx, templateIDs)
 		if err != nil {
@@ -753,9 +771,11 @@ func (s *ContentRegistry) previewRemoval(
 				continue
 			}
 			v := previewCampaign(c)
-			// Campaign.Close leaves a campaign that already has a close time alone,
-			// so only one without a close time is closed now.
-			if at, err := c.CloseAt.Get(); err == nil {
+			// deleting a template closes its campaigns now. a template that only
+			// loses its domain or a page is closed with Campaign.Close, which
+			// leaves a campaign that already has a close time alone.
+			cid, _ := c.ID.Get()
+			if at, err := c.CloseAt.Get(); err == nil && !closesNow[cid] {
 				v.CloseAt = at.UTC().Format(time.RFC3339)
 				out.KeepRunningCount++
 				if len(out.KeepRunning) < uninstallPreviewCampaignCap {

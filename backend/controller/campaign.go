@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -329,8 +330,8 @@ func (c *Campaign) GetResultStats(g *gin.Context) {
 }
 
 // GetGroupedResultStats returns outcome counts grouped by a recipient attribute.
-// The group is chosen with the `by` query parameter and is restricted to the
-// snapshot columns position and department; small groups are suppressed by the
+// The group is chosen with the `by` query parameter and is restricted to
+// position, department and template; small groups are suppressed by the
 // service so an individual cannot be identified.
 func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
@@ -342,7 +343,7 @@ func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
 		return
 	}
 	groupBy := g.DefaultQuery("by", "position")
-	if groupBy != "position" && groupBy != "department" {
+	if groupBy != "position" && groupBy != "department" && groupBy != repository.GroupedStatByTemplate {
 		c.Response.BadRequest(g)
 		return
 	}
@@ -359,7 +360,8 @@ func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
 }
 
 // GetHasGroupData reports whether the campaign has any position or department data
-// to group on, so the UI can decide whether to offer the grouped breakdown.
+// to group on, and whether it uses more than one template, so the UI can decide
+// which grouped breakdowns to offer.
 func (c *Campaign) GetHasGroupData(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
@@ -373,7 +375,11 @@ func (c *Campaign) GetHasGroupData(g *gin.Context) {
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	c.Response.OK(g, gin.H{"hasGroupData": has})
+	hasTemplate, err := c.CampaignService.HasTemplateGroupData(g.Request.Context(), session, id)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{"hasGroupData": has, "hasTemplateGroupData": hasTemplate})
 }
 
 // GetCampaignStats get campaign stats
@@ -699,14 +705,14 @@ func (c *Campaign) ExportEventsAsCSV(g *gin.Context) {
 	// get all rows
 	queryArgs.Limit = 0
 	queryArgs.Offset = 0
-	// get events by campaign id
-	events, err := c.CampaignService.GetEventsByCampaignID(
+	// get events by campaign id, the export is audited
+	events, err := c.CampaignService.ExportEventsByCampaignID(
 		g.Request.Context(),
 		session,
 		id,
 		queryArgs,
 		nil,
-		nil,
+		"events",
 	)
 	if ok := c.handleErrors(g, err); !ok {
 		return
@@ -792,14 +798,14 @@ func (c *Campaign) ExportSubmissionsAsCSV(g *gin.Context) {
 	submissionEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
 	eventTypeFilter := []string{submissionEventID.String()}
 
-	// get submission events by campaign id
-	events, err := c.CampaignService.GetEventsByCampaignID(
+	// get submission events by campaign id, the export is audited
+	events, err := c.CampaignService.ExportEventsByCampaignID(
 		g.Request.Context(),
 		session,
 		id,
 		queryArgs,
-		nil,
 		eventTypeFilter,
+		"submissions",
 	)
 	if ok := c.handleErrors(g, err); !ok {
 		return
@@ -1345,6 +1351,9 @@ func (c *Campaign) DeleteCampaignStatsManual(g *gin.Context) {
 	c.Response.OK(g, gin.H{"message": "Campaign stats deleted successfully"})
 }
 
+// reportedCSVMaxBytes caps the size of an uploaded reported CSV
+const reportedCSVMaxBytes = 32 << 20
+
 // UploadReportedCSV uploads a CSV file with reported recipients
 func (c *Campaign) UploadReportedCSV(g *gin.Context) {
 	// handle session
@@ -1358,9 +1367,14 @@ func (c *Campaign) UploadReportedCSV(g *gin.Context) {
 		return
 	}
 
-	// get the uploaded file
+	g.Request.Body = http.MaxBytesReader(g.Writer, g.Request.Body, reportedCSVMaxBytes)
 	file, header, err := g.Request.FormFile("file")
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.Response.ValidationFailed(g, "file", errors.New("file is larger than 32 MB"))
+			return
+		}
 		c.Response.ValidationFailed(g, "file", err)
 		return
 	}
@@ -1372,29 +1386,34 @@ func (c *Campaign) UploadReportedCSV(g *gin.Context) {
 		return
 	}
 
-	// read file content
-	content, err := io.ReadAll(file)
-	if err != nil {
-		c.Response.ValidationFailed(g, "file", err)
-		return
+	// rows may have fewer columns than the header, those are reported per row.
+	// a broken file, such as an unclosed quote, rejects the whole import since
+	// the rows after it can not be trusted.
+	reader := csv.NewReader(file)
+	reader.FieldsPerRecord = -1
+	var headerRow []string
+	rows := []service.ReportedCSVRow{}
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			c.Logger.Debugw("failed to parse CSV file", "error", err)
+			c.Response.ValidationFailed(g, "file", errors.New("failed to parse CSV file: "+err.Error()))
+			return
+		}
+		if headerRow == nil {
+			headerRow = record
+			continue
+		}
+		line, _ := reader.FieldPos(0)
+		rows = append(rows, service.ReportedCSVRow{Line: line, Fields: record})
 	}
-
-	// parse CSV
-	reader := csv.NewReader(strings.NewReader(string(content)))
-	records, err := reader.ReadAll()
-	if err != nil {
-		c.Logger.Errorw("failed to parse CSV file", "error", err)
-		c.Response.ValidationFailed(g, "file", errors.New("failed to parse CSV file: "+err.Error()))
-		return
-	}
-
-	if len(records) < 2 {
-		c.Logger.Debugw("CSV file has insufficient rows", "rows", len(records))
+	if len(rows) == 0 {
 		c.Response.ValidationFailed(g, "file", errors.New("CSV file must have header and at least one data row"))
 		return
 	}
-
-	c.Logger.Debugw("processing CSV", "rows", len(records), "headers", records[0])
 
 	// get required column indices from query params
 	emailColStr := g.Query("emailColumn")
@@ -1421,20 +1440,10 @@ func (c *Campaign) UploadReportedCSV(g *gin.Context) {
 		return
 	}
 
-	c.Logger.Debugw("using provided column indices", "emailColumn", emailColIdx, "dateColumn", dateColIdx)
-
-	// process CSV
-	processed, skipped, err := c.CampaignService.ProcessReportedCSV(g.Request.Context(), session, id, records, emailColIdx, dateColIdx)
-	if err != nil {
-		c.Logger.Errorw("failed to process reported CSV", "error", err)
-		if ok := c.handleErrors(g, err); !ok {
-			return
-		}
+	result, err := c.CampaignService.ProcessReportedCSV(g.Request.Context(), session, id, headerRow, rows, emailColIdx, dateColIdx)
+	if ok := c.handleErrors(g, err); !ok {
+		return
 	}
 
-	c.Response.OK(g, gin.H{
-		"processed": processed,
-		"skipped":   skipped,
-		"message":   "CSV processed successfully",
-	})
+	c.Response.OK(g, result)
 }

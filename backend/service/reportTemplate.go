@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/data"
+	"github.com/phishingclub/phishingclub/embedded"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/remotebrowser"
@@ -18,6 +22,9 @@ import (
 type ReportTemplate struct {
 	Common
 	ReportTemplateRepository *repository.ReportTemplate
+	// RemoteBrowserExecPath is the browser binary report previews render
+	// with, found automatically when empty
+	RemoteBrowserExecPath string
 }
 
 // Create creates a report template
@@ -25,8 +32,9 @@ func (s *ReportTemplate) Create(
 	ctx context.Context,
 	session *model.Session,
 	tmpl *model.ReportTemplate,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("ReportTemplate.Create", session)
+	defer s.auditDone(ae, &err)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
@@ -44,6 +52,9 @@ func (s *ReportTemplate) Create(
 	if err != nil {
 		s.Logger.Errorw("failed to insert report template", "error", err)
 		return nil, errs.Wrap(err)
+	}
+	if id != nil {
+		ae.Details["id"] = id.String()
 	}
 	s.AuditLogAuthorized(ae)
 	return id, nil
@@ -110,8 +121,9 @@ func (s *ReportTemplate) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	tmpl *model.ReportTemplate,
-) error {
+) (err error) {
 	ae := NewAuditEvent("ReportTemplate.UpdateByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -136,8 +148,9 @@ func (s *ReportTemplate) UpdateByID(
 // WipeBrowserCache removes the auto-downloaded Chromium binary used for PDF generation.
 func (s *ReportTemplate) WipeBrowserCache(
 	session *model.Session,
-) error {
+) (err error) {
 	ae := NewAuditEvent("ReportTemplate.WipeBrowserCache", session)
+	defer s.auditDone(ae, &err)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
@@ -160,8 +173,9 @@ func (s *ReportTemplate) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("ReportTemplate.DeleteByID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -178,4 +192,57 @@ func (s *ReportTemplate) DeleteByID(
 	}
 	s.AuditLogAuthorized(ae)
 	return nil
+}
+
+// GetDefaultContent returns the built in default report template, the
+// training one when isTraining is set.
+func (s *ReportTemplate) GetDefaultContent(session *model.Session, isTraining bool) (string, error) {
+	ae := NewAuditEvent("ReportTemplate.GetDefaultContent", session)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		s.LogAuthError(err)
+		return "", errs.Wrap(err)
+	}
+	if !isAuthorized {
+		s.AuditLogNotAuthorized(ae)
+		return "", errs.ErrAuthorizationFailed
+	}
+	// no audit log on read
+	return defaultReportContent(isTraining), nil
+}
+
+func defaultReportContent(isTraining bool) string {
+	if isTraining {
+		return embedded.DefaultTrainingReportHTML
+	}
+	return embedded.DefaultReportHTML
+}
+
+// previousDefaultReportHashes are the SHA 256 hashes of the earlier built in
+// default report templates, white space trimmed. An install keeps the default
+// it was seeded with, so these still count as the default.
+var previousDefaultReportHashes = map[bool]map[string]bool{
+	false: {
+		"eb5108aac0dc0252aa50b61d0094149f5104981a8754d1e4408bf3948a7b7092": true,
+		"c5a46d34913b0bc5274789e7643926393351fa1ae62c5166e86144cfe408fef6": true,
+		"fe019c52bccdd0bf838caff6f28b25836df57aa0880a7d09d5c1046c8ea3df0f": true,
+		"015af55d53580a230f71684fc3962f3c0d45d2e66fec920595c61e114eef9231": true,
+	},
+	true: {
+		"6edcc3fc69e795baea771235538f657ec734ee3e526f1aaa72c07bca305f013b": true,
+		"265f954f73b39be32287ca04d61cad79fb33672586b982032bc774a30334dbcf": true,
+		"09a7feb1b0d390ed0cdb0272ad8745a3cc02aa0dbb1eb8db293dd1940bf7f26a": true,
+		"98a90ff4c0780b680d48cdab2d10fcf753db6930857f5851d9466090e68a591d": true,
+	},
+}
+
+// isDefaultReportContent reports whether content is the built in default
+// report template of its kind, the current one or an earlier one.
+func isDefaultReportContent(content string, isTraining bool) bool {
+	content = strings.TrimSpace(content)
+	if content == strings.TrimSpace(defaultReportContent(isTraining)) {
+		return true
+	}
+	sum := sha256.Sum256([]byte(content))
+	return previousDefaultReportHashes[isTraining][hex.EncodeToString(sum[:])]
 }

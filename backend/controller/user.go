@@ -393,9 +393,8 @@ func (c *User) ChangeUsernameOnLoggedInUser(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
-// ExpireSessionByID expires a session by ID
-// a administrator can expire any session
-// a user can expire their own sessions
+// ExpireSessionByID expires a session by ID, an administrator can expire any
+// session
 func (c *User) ExpireSessionByID(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
@@ -405,15 +404,7 @@ func (c *User) ExpireSessionByID(g *gin.Context) {
 	if !ok {
 		return
 	}
-	isAuthorized, err := service.IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
-	if ok := c.handleErrors(g, err); !ok {
-		return
-	}
-	if !isAuthorized {
-		c.Response.Forbidden(g)
-		return
-	}
-	err = c.SessionService.Expire(g, id)
+	err := c.SessionService.ExpireByID(g, session, id)
 	// handle response
 	if ok := c.handleErrors(g, err); !ok {
 		return
@@ -496,11 +487,9 @@ func (c *User) Login(g *gin.Context) {
 		req.Password,
 		g.ClientIP(),
 	)
-	if errors.Is(err, errs.ErrUserWrongPasword) {
-		c.Response.BadRequestMessage(g, "Invalid password")
-		return
-	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	// return one identical message whether the username is unknown or the
+	// password is wrong, so the response cannot be used to enumerate usernames
+	if errors.Is(err, errs.ErrUserWrongPasword) || errors.Is(err, gorm.ErrRecordNotFound) {
 		c.Response.BadRequestMessage(g, "Invalid credentials")
 		return
 	}
@@ -539,6 +528,7 @@ func (c *User) Login(g *gin.Context) {
 		// if the client has given both a TOTP and a recovery code
 		// we return a bad request
 		if MFATokenSupplied && MFARecoveryCodeSupplied {
+			c.UserService.RejectLoginMFA(&userID, g.ClientIP(), "bothCodes")
 			c.Response.BadRequestMessage(g, "Cannot supply both MFA token and MFA recovery code")
 			return
 		}
@@ -551,13 +541,15 @@ func (c *User) Login(g *gin.Context) {
 				c.Logger.Debugw("failed to create TOTP",
 					"error", err,
 				)
+				c.UserService.RejectLoginMFA(&userID, g.ClientIP(), "invalidCode")
 				c.Response.ValidationFailed(g, "TOTP", err)
 				return
 			}
-			err = c.UserService.CheckTOTP(
+			err = c.UserService.CheckLoginTOTP(
 				g,
 				&userID,
 				totpToken,
+				g.ClientIP(),
 			)
 			if err != nil {
 				if errors.Is(err, errs.ErrUserWrongTOTP) {
@@ -577,13 +569,15 @@ func (c *User) Login(g *gin.Context) {
 				c.Logger.Debugw("failed to create recovery code",
 					"error", err,
 				)
+				c.UserService.RejectLoginMFA(&userID, g.ClientIP(), "invalidCode")
 				c.Response.ValidationFailed(g, "RecoveryCode", err)
 				return
 			}
-			verifiedMFA, err := c.UserService.CheckMFARecoveryCode(
+			verifiedMFA, err := c.UserService.CheckLoginMFARecoveryCode(
 				g,
 				&userID,
 				recoveryCode,
+				g.ClientIP(),
 			)
 			if err != nil {
 				if errors.Is(err, errs.ErrUserWrongRecoveryCode) {
@@ -600,7 +594,7 @@ func (c *User) Login(g *gin.Context) {
 			}
 			// as the recovery code is valid, we can now disable MFA
 			// no session exists yet during login so pass nil
-			err = c.UserService.DisableTOTP(g, nil, &userID)
+			err = c.UserService.DisableTOTP(g, nil, &userID, g.ClientIP())
 			if ok := c.handleErrors(g, err); !ok {
 				return
 			}
@@ -667,10 +661,9 @@ func (c *User) Logout(g *gin.Context) {
 		return
 	}
 	ctx := g.Request.Context()
-	err = c.SessionService.Expire(ctx, &sessionID)
+	err = c.SessionService.Logout(ctx, &sessionID, g.ClientIP())
 	if err != nil {
-		c.expireCookieAndStatusOK(g)
-		return
+		c.Logger.Errorw("failed to log out", "error", err)
 	}
 	c.expireCookieAndStatusOK(g)
 }
@@ -864,10 +857,11 @@ func (c *User) DisableTOTP(g *gin.Context) {
 		c.Response.ValidationFailed(g, "Token", err)
 		return
 	}
-	// check TOTP
+	// check TOTP, a wrong code is audited
 	userID := user.ID.MustGet()
-	err = c.UserService.CheckTOTP(
+	err = c.UserService.CheckTOTPToDisable(
 		g.Request.Context(),
+		session,
 		&userID,
 		token,
 	)
@@ -885,6 +879,7 @@ func (c *User) DisableTOTP(g *gin.Context) {
 		g.Request.Context(),
 		session,
 		&userID,
+		g.ClientIP(),
 	)
 	// handle response
 	if err != nil {

@@ -48,6 +48,23 @@ type CampaignRecipient struct {
 	LureCode nullable.Nullable[string] `json:"lureCode"`
 	// LureCodeCustom marks a code set by the operator rather than generated.
 	LureCodeCustom nullable.Nullable[bool] `json:"lureCodeCustom"`
+	// TemplateID is the template this recipient was given from the campaign's
+	// pool. Null on rows created before pools existed, see EffectiveTemplateID.
+	TemplateID nullable.Nullable[uuid.UUID] `json:"templateID"`
+	// Template is the id and name of TemplateID, set when listing recipients
+	Template *CampaignTemplateRef `json:"template"`
+}
+
+// EffectiveTemplateID returns the recipient's template, or the campaign's first
+// template when the recipient has none
+func (c *CampaignRecipient) EffectiveTemplateID(campaign *Campaign) (uuid.UUID, error) {
+	if v, err := c.TemplateID.Get(); err == nil {
+		return v, nil
+	}
+	if campaign == nil {
+		return uuid.Nil, errors.New("campaign is not loaded")
+	}
+	return campaign.TemplateID.Get()
 }
 
 // Validate validates the campaign recipient.
@@ -142,6 +159,8 @@ func (c *CampaignRecipient) ToDBMap() map[string]any {
 			m["notable_event_id"] = v
 		}
 	}
+	// the template id is left out for the same reason as the lure code below. it
+	// is written only by Insert and ReplaceTemplatePool.
 	// the lure code is left out. callers load a whole recipient, change one
 	// field and write it back, so a code carried here would be restated on every
 	// such write and collide with the unique index once another recipient holds

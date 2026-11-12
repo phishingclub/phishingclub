@@ -138,8 +138,9 @@ func (b *Branding) SetDisplay(
 	session *model.Session,
 	slot string,
 	display BrandingDisplay,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Branding.SetDisplay", session)
+	defer b.auditDone(ae, &err)
 	ae.Details["slot"] = slot
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -206,8 +207,9 @@ func (b *Branding) SetImage(
 	session *model.Session,
 	slot string,
 	content []byte,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Branding.SetImage", session)
+	defer b.auditDone(ae, &err)
 	ae.Details["slot"] = slot
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -257,8 +259,9 @@ func (b *Branding) Reset(
 	ctx context.Context,
 	session *model.Session,
 	slot string,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Branding.Reset", session)
+	defer b.auditDone(ae, &err)
 	ae.Details["slot"] = slot
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -293,8 +296,9 @@ func (b *Branding) SetSideImageHidden(
 	ctx context.Context,
 	session *model.Session,
 	hidden bool,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Branding.SetSideImageHidden", session)
+	defer b.auditDone(ae, &err)
 	ae.Details["hidden"] = hidden
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {

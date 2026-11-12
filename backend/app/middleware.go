@@ -11,11 +11,15 @@ import (
 
 // Middlwares is a collection of middlewares
 type Middlewares struct {
-	IPLimiter          gin.HandlerFunc
-	LoginRateLimiter   gin.HandlerFunc
-	SessionHandler     gin.HandlerFunc
-	SoftSessionHandler gin.HandlerFunc
-	NoStore            gin.HandlerFunc
+	IPLimiter        gin.HandlerFunc
+	LoginRateLimiter gin.HandlerFunc
+	// SSOCallbackRateLimiter limits the SSO and OAuth callbacks per IP. Anyone
+	// can reach them, and each request costs a call to the identity provider
+	// and an audit event when it fails
+	SSOCallbackRateLimiter gin.HandlerFunc
+	SessionHandler         gin.HandlerFunc
+	SoftSessionHandler     gin.HandlerFunc
+	NoStore                gin.HandlerFunc
 }
 
 // NewMiddlewares creates a collection of middlewares
@@ -32,6 +36,7 @@ func NewMiddlewares(
 		requestPerSecond, // requests per second
 		requestBurst,     // burst
 	)
+	ssoCallbackThrottle := middleware.NewIPRateLimiterMiddleware(1, 3)
 	sessionHandler := middleware.NewSessionHandler(
 		services.Session,
 		services.User,
@@ -45,11 +50,12 @@ func NewMiddlewares(
 	)
 
 	return &Middlewares{
-		IPLimiter:          ipLimiter,
-		LoginRateLimiter:   loginThrottle,
-		SessionHandler:     sessionHandler,
-		SoftSessionHandler: softSessionHandler,
-		NoStore:            middleware.NoStore(),
+		IPLimiter:              ipLimiter,
+		LoginRateLimiter:       loginThrottle,
+		SSOCallbackRateLimiter: ssoCallbackThrottle,
+		SessionHandler:         sessionHandler,
+		SoftSessionHandler:     softSessionHandler,
+		NoStore:                middleware.NoStore(),
 	}
 }
 

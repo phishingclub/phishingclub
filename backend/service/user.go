@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"strings"
+	"time"
 
 	"github.com/go-errors/errors"
 
@@ -46,8 +47,9 @@ func (u *User) Create(
 	ctx context.Context,
 	session *model.Session,
 	newUser *model.UserUpsertRequest,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("User.Create", session)
+	defer u.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -141,12 +143,19 @@ func (u *User) CreateFromSSO(
 	name string,
 	email string,
 	externalID string,
-) (*uuid.UUID, error) {
+	ip string,
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("User.SSOLogin", nil)
+	defer u.auditDone(ae, &err)
+	ae.IP = ip
 	ae.Details["email"] = email
 	emailVO, err := vo.NewEmail(email)
 	if err != nil {
 		u.Logger.Debugw("failed SSO login: invalid email", "error", err)
+		// the value is not a valid email, so it is not logged
+		delete(ae.Details, "email")
+		ae.Details["reason"] = "invalidEmail"
+		u.AuditLogNotAuthorized(ae)
 		return nil, errs.Wrap(err)
 	}
 	existingUser, err := u.UserRepository.GetByEmail(
@@ -161,10 +170,12 @@ func (u *User) CreateFromSSO(
 	// users are not auto provisioned, an admin must create the user first
 	if existingUser == nil {
 		u.Logger.Infow("rejected SSO login for unprovisioned user", "email", email)
+		ae.Details["reason"] = "notProvisioned"
 		u.AuditLogNotAuthorized(ae)
 		return nil, errs.Wrap(errs.ErrSSOUserNotProvisioned)
 	}
 	uid := existingUser.ID.MustGet()
+	ae.UserID = uid.String()
 	// store the current provider subject id for reference, overwriting any
 	// previous value so a change of SSO method does not lock the account out.
 	// the password is left intact, whether password login is allowed is
@@ -240,8 +251,9 @@ func (s *User) UpsertAPIKey(
 	ctx context.Context,
 	session *model.Session,
 	userID *uuid.UUID,
-) (string, error) {
+) (_ string, err error) {
 	ae := NewAuditEvent("User.UpsertAPIKey", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["userId"] = userID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -278,8 +290,9 @@ func (u *User) RemoveAPIKey(
 	ctx context.Context,
 	session *model.Session,
 	userID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("User.RemoveAPIKey", session)
+	defer u.auditDone(ae, &err)
 	ae.Details["userId"] = userID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -308,8 +321,9 @@ func (u *User) Update(
 	session *model.Session,
 	userID *uuid.UUID,
 	incoming *model.User,
-) error {
+) (err error) {
 	ae := NewAuditEvent("User.Update", session)
+	defer u.auditDone(ae, &err)
 	ae.Details["id"] = userID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -479,8 +493,9 @@ func (u *User) Delete(
 	ctx context.Context,
 	session *model.Session,
 	userID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("User.Delete", session)
+	defer u.auditDone(ae, &err)
 	ae.Details["id"] = userID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -518,8 +533,9 @@ func (u *User) SetupTOTP(
 	ctx context.Context,
 	session *model.Session,
 	password *vo.ReasonableLengthPassword,
-) (*TOTPValues, error) {
+) (_ *TOTPValues, err error) {
 	ae := NewAuditEvent("User.SetupTOTP", session)
+	defer u.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -590,8 +606,9 @@ func (u *User) SetupCheckTOTP(
 	ctx context.Context,
 	session *model.Session,
 	token *vo.String64,
-) error {
+) (err error) {
 	ae := NewAuditEvent("User.SetupCheckTOTP", session)
+	defer u.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -709,10 +726,18 @@ func (u *User) DisableTOTP(
 	ctx context.Context,
 	session *model.Session,
 	userID *uuid.UUID,
-) error {
+	ip string,
+) (err error) {
 	ae := NewAuditEvent("User.DisableTOTP", session)
+	defer u.auditDone(ae, &err)
 	ae.Details["userId"] = userID.String()
-	err := u.UserRepository.RemoveTOTP(
+	if session == nil {
+		// a recovery code was used at login, there is no session yet
+		ae.UserID = userID.String()
+		ae.IP = ip
+		ae.Details["reason"] = "recoveryCodeUsed"
+	}
+	err = u.UserRepository.RemoveTOTP(
 		ctx,
 		userID,
 	)
@@ -722,6 +747,24 @@ func (u *User) DisableTOTP(
 	}
 	u.AuditLogAuthorized(ae)
 	return nil
+}
+
+// CheckTOTPToDisable checks the code a user gives to turn off their own MFA.
+// A wrong code is audited as a denied User.DisableTOTP.
+func (u *User) CheckTOTPToDisable(
+	ctx context.Context,
+	session *model.Session,
+	userID *uuid.UUID,
+	token *vo.String64,
+) error {
+	err := u.CheckTOTP(ctx, userID, token)
+	if errors.Is(err, errs.ErrUserWrongTOTP) {
+		ae := NewAuditEvent("User.DisableTOTP", session)
+		ae.Details["userId"] = userID.String()
+		ae.Details["reason"] = "wrongCode"
+		u.AuditLogNotAuthorized(ae)
+	}
+	return err
 }
 
 // CheckTOTP verifies a TOTP token
@@ -759,19 +802,27 @@ func (u *User) AuthenticateUsernameWithPassword(
 	username string,
 	passwd string,
 	ip string,
-) (*model.User, error) {
-	ae := NewAuditEvent("User.AuthenticateUsernameWithPassword", nil)
+) (_ *model.User, err error) {
+	// this event covers the password step only. A completed login, after MFA,
+	// is the User.Login event written when the session is created
+	ae := NewAuditEvent("User.LoginPassword", nil)
+	defer u.auditDone(ae, &err)
 	ae.IP = ip
-	ae.Details["username"] = username
 	// check the entities are valid before doing anything
 	usernameEntity, err := vo.NewUsername(username)
 	if err != nil {
 		u.Logger.Debugw("failed to authenticate - invalid username", "error", err)
+		// an invalid username is not logged, it can be any length and content
+		ae.Details["reason"] = "invalidUsername"
+		u.AuditLogNotAuthorized(ae)
 		return nil, errs.Wrap(err)
 	}
+	ae.Details["username"] = usernameEntity.String()
 	passwordEntity, err := vo.NewReasonableLengthPassword(passwd)
 	if err != nil {
 		u.Logger.Debugw("failed to authenticate - invalid password", "error", err)
+		ae.Details["reason"] = "invalidPassword"
+		u.AuditLogNotAuthorized(ae)
 		return nil, errs.Wrap(err)
 	}
 	// retrieve only the password hash to minimize the timing attack window compared to
@@ -792,6 +843,12 @@ func (u *User) AuthenticateUsernameWithPassword(
 		if err != nil {
 			u.Logger.Debugw("failed to verify dummy hash", "error", err)
 		}
+		if errIsRecordNotFound {
+			ae.Details["reason"] = "unknownUser"
+		} else {
+			ae.Details["reason"] = "noPassword"
+		}
+		u.AuditLogNotAuthorized(ae)
 		return nil, gorm.ErrRecordNotFound
 	}
 	// veriy the hash in a constant time manner
@@ -802,6 +859,7 @@ func (u *User) AuthenticateUsernameWithPassword(
 	}
 	// if the password is not verifed, log it and return the error
 	if !verified {
+		ae.Details["reason"] = "wrongPassword"
 		u.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrUserWrongPasword
 	}
@@ -817,6 +875,9 @@ func (u *User) AuthenticateUsernameWithPassword(
 	if err != nil {
 		u.Logger.Errorw("failed to get user by username after verifying login", "error", err)
 		return nil, errs.Wrap(err)
+	}
+	if id, err := user.ID.Get(); err == nil {
+		ae.UserID = id.String()
 	}
 	u.AuditLogAuthorized(ae)
 
@@ -851,8 +912,9 @@ func (u *User) ChangePassword(
 	session *model.Session,
 	currentPassword *vo.ReasonableLengthPassword,
 	newPassword *vo.ReasonableLengthPassword,
-) error {
+) (err error) {
 	ae := NewAuditEvent("User.ChangePassword", session)
+	defer u.auditDone(ae, &err)
 	// check if the current password is correct
 	user := session.User
 	if user == nil {
@@ -905,8 +967,9 @@ func (u *User) ChangeFullname(
 	session *model.Session,
 	userID *uuid.UUID,
 	newFullname *vo.UserFullname,
-) (*vo.UserFullname, error) {
+) (_ *vo.UserFullname, err error) {
 	ae := NewAuditEvent("User.ChangeFullname", session)
+	defer u.auditDone(ae, &err)
 	ae.Details["id"] = userID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -945,8 +1008,9 @@ func (u *User) ChangeEmailAsAdministrator(
 	session *model.Session,
 	userID *uuid.UUID,
 	newEmail *vo.Email,
-) (*vo.Email, error) {
+) (_ *vo.Email, err error) {
 	ae := NewAuditEvent("User.ChangeEmailAsAdministrator", session)
+	defer u.auditDone(ae, &err)
 	ae.Details["id"] = userID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -989,8 +1053,9 @@ func (u *User) ChangeUsername(
 	session *model.Session,
 	userID *uuid.UUID,
 	newUsername *vo.Username,
-) error {
+) (err error) {
 	ae := NewAuditEvent("User.ChangeUsername", session)
+	defer u.auditDone(ae, &err)
 	ae.Details["id"] = userID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -1022,6 +1087,62 @@ func (u *User) ChangeUsername(
 	return nil
 }
 
+// CheckLoginTOTP checks the TOTP given during login and audits the result.
+func (u *User) CheckLoginTOTP(
+	ctx context.Context,
+	userID *uuid.UUID,
+	token *vo.String64,
+	ip string,
+) error {
+	err := u.CheckTOTP(ctx, userID, token)
+	u.auditLoginMFA(userID, ip, "totp", err, errs.ErrUserWrongTOTP)
+	return err
+}
+
+// CheckLoginMFARecoveryCode checks the recovery code given during login and
+// audits the result.
+func (u *User) CheckLoginMFARecoveryCode(
+	ctx context.Context,
+	userID *uuid.UUID,
+	recoveryCode *vo.String64,
+	ip string,
+) (bool, error) {
+	ok, err := u.CheckMFARecoveryCode(ctx, userID, recoveryCode)
+	if err == nil && !ok {
+		err = errs.ErrUserWrongRecoveryCode
+	}
+	u.auditLoginMFA(userID, ip, "recoveryCode", err, errs.ErrUserWrongRecoveryCode)
+	return ok, err
+}
+
+// RejectLoginMFA audits an MFA step at login that was refused before any code
+// was checked, such as both a TOTP and a recovery code, or a malformed code.
+func (u *User) RejectLoginMFA(userID *uuid.UUID, ip string, reason string) {
+	ae := NewAuditEvent("User.LoginMFA", nil)
+	ae.UserID = userID.String()
+	ae.IP = ip
+	ae.Details["reason"] = reason
+	u.AuditLogNotAuthorized(ae)
+}
+
+// auditLoginMFA writes the User.LoginMFA event. A wrong code is denied,
+// any other error is a failed check.
+func (u *User) auditLoginMFA(userID *uuid.UUID, ip string, method string, err error, wrongCode error) {
+	ae := NewAuditEvent("User.LoginMFA", nil)
+	ae.UserID = userID.String()
+	ae.IP = ip
+	ae.Details["method"] = method
+	switch {
+	case err == nil:
+		u.AuditLogAuthorized(ae)
+	case errors.Is(err, wrongCode):
+		ae.Details["reason"] = "wrongCode"
+		u.AuditLogNotAuthorized(ae)
+	default:
+		u.AuditLogFailed(ae, err)
+	}
+}
+
 // CheckMFARecoveryCode checks if a recovery code is valid
 // returns true if the recovery code is valid
 func (u *User) CheckMFARecoveryCode(
@@ -1042,4 +1163,22 @@ func (u *User) CheckMFARecoveryCode(
 		return false, errs.ErrUserWrongRecoveryCode
 	}
 	return true, nil
+}
+
+// apiKeyFailedThrottle limits User.APIKeyFailed events to one per interval,
+// anyone who can reach the admin server can send a wrong key
+var apiKeyFailedThrottle = newAuditThrottle(time.Minute)
+
+// AuditAPIKeyFailed writes a denied User.APIKeyFailed event for a request with
+// an API key that matches no user. The key is never written.
+func (u *User) AuditAPIKeyFailed(ip string) {
+	write, suppressed, lastSuppressedIP := apiKeyFailedThrottle.allow("apiKey", ip)
+	if !write {
+		return
+	}
+	ae := NewAuditEvent("User.APIKeyFailed", nil)
+	ae.IP = ip
+	ae.Details["actor"] = "api"
+	addThrottleDetails(ae, suppressed, lastSuppressedIP)
+	u.AuditLogNotAuthorized(ae)
 }

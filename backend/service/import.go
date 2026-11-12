@@ -134,8 +134,10 @@ func (im *Import) Import(
 	fileHeader *multipart.FileHeader,
 	forCompany bool,
 	companyID *uuid.UUID,
-) (*ImportSummary, error) {
+) (_ *ImportSummary, err error) {
 	ae := NewAuditEvent("Import.Import", session)
+	defer im.auditDone(ae, &err)
+	setImportAuditTarget(ae, "upload", forCompany, companyID)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -165,11 +167,63 @@ func (im *Import) Import(
 		return nil, err
 	}
 
-	return im.ImportFromBytes(g, session, zipBytes, forCompany, companyID)
+	summary, err := im.importFromBytes(g, session, zipBytes, forCompany, companyID)
+	if err != nil {
+		return nil, err
+	}
+	im.auditImportDone(ae, summary)
+	return summary, nil
 }
 
-// ImportFromBytes imports templates from raw zip bytes
+// ImportFromBytes imports templates from raw zip bytes, such as the template
+// package downloaded at install
 func (im *Import) ImportFromBytes(
+	g *gin.Context,
+	session *model.Session,
+	zipBytes []byte,
+	forCompany bool,
+	companyID *uuid.UUID,
+) (_ *ImportSummary, err error) {
+	ae := NewAuditEvent("Import.Import", session)
+	defer im.auditDone(ae, &err)
+	setImportAuditTarget(ae, "templates", forCompany, companyID)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		im.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		im.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+	summary, err := im.importFromBytes(g, session, zipBytes, forCompany, companyID)
+	if err != nil {
+		return nil, err
+	}
+	im.auditImportDone(ae, summary)
+	return summary, nil
+}
+
+// setImportAuditTarget records where an import comes from and goes to
+func setImportAuditTarget(ae *AuditEvent, source string, forCompany bool, companyID *uuid.UUID) {
+	ae.Details["source"] = source
+	if forCompany && companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
+}
+
+// auditImportDone writes a finished import with its counts. Items that failed
+// inside the archive do not fail the import, they are counted in errors.
+func (im *Import) auditImportDone(ae *AuditEvent, s *ImportSummary) {
+	ae.Details["created"] = s.AssetsCreated + s.PagesCreated + s.EmailsCreated
+	ae.Details["updated"] = s.PagesUpdated + s.EmailsUpdated
+	ae.Details["skipped"] = s.AssetsSkipped + s.PagesSkipped + s.EmailsSkipped
+	ae.Details["errors"] = s.AssetsErrors + s.PagesErrors + s.EmailsErrors + len(s.Errors)
+	im.AuditLogAuthorized(ae)
+}
+
+// importFromBytes runs the import, the caller checks the permission
+func (im *Import) importFromBytes(
 	g *gin.Context,
 	session *model.Session,
 	zipBytes []byte,

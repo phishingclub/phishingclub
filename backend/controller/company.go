@@ -81,6 +81,13 @@ func (c *Company) ExportByCompanyID(g *gin.Context) {
 		session,
 		companyID,
 	)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	// the export holds recipients and campaign events, so it is audited
+	if ok := c.handleErrors(g, c.CompanyService.AuthorizeExport(session, companyID)); !ok {
+		return
+	}
 	// create ZIP file in memory
 	zipBuffer := new(bytes.Buffer)
 	zipWriter := zip.NewWriter(zipBuffer)
@@ -306,6 +313,10 @@ func (c *Company) ExportByCompanyID(g *gin.Context) {
 func (c *Company) ExportShared(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
+		return
+	}
+	// the export holds recipients and campaign events, so it is audited
+	if ok := c.handleErrors(g, c.CompanyService.AuthorizeExport(session, nil)); !ok {
 		return
 	}
 	// create ZIP file in memory

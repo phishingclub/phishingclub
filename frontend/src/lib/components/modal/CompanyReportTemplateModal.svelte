@@ -7,6 +7,7 @@
 	import FormFooter from '../FormFooter.svelte';
 	import FormError from '../FormError.svelte';
 	import Editor from '../editor/Editor.svelte';
+	import ReportPreviewPDF from '../ReportPreviewPDF.svelte';
 
 	// external
 	export let visible = false;
@@ -22,6 +23,10 @@
 	// the phishing and training reports are separate templates; edit one at a time
 	let rows = [];
 	let reportKind = 'phishing'; // 'phishing' | 'training'
+	// unsaved editor content per kind, kept while the modal is open so
+	// switching kind does not lose edits
+	let drafts = {};
+	let reportEditor;
 
 	// reactive: load the company template when the modal opens
 	$: {
@@ -39,11 +44,12 @@
 		templateID = null;
 		error = '';
 		rows = [];
+		drafts = {};
 		try {
 			showIsLoading();
 			const response = await api.reportTemplate.getAll(company.id);
 			rows = response.success ? response.data?.rows || [] : [];
-			selectReportKind('phishing');
+			loadReportKind('phishing');
 		} catch (e) {
 			console.error('Failed to load company report template:', e);
 			error = 'Failed to load template';
@@ -52,13 +58,22 @@
 		}
 	};
 
-	// loads the cached template row for the selected kind into the editor
+	// switches the editor to another kind, keeping the edits of the current one
 	const selectReportKind = (kind) => {
+		if (kind === reportKind) return;
+		drafts[reportKind] = content;
+		loadReportKind(kind);
+	};
+
+	// loads the kind's unsaved edits, or its stored template, into the editor
+	const loadReportKind = (kind) => {
 		reportKind = kind;
 		error = '';
 		const row = rows.find((r) => !!r.isTraining === (kind === 'training'));
-		content = row?.content || '';
+		content = drafts[kind] ?? (row?.content || '');
 		templateID = row?.id || null;
+		// the editor does not follow the bound value, so load the text into it
+		reportEditor?.replaceContent(content);
 	};
 
 	// re-fetch the templates after a save so the active kind keeps its id
@@ -138,9 +153,9 @@
 	<Modal bind:visible headerText="Report template: {company?.name}" onClose={close}>
 		<FormGrid on:submit={onSubmit} {isSubmitting} modalMode="update">
 			<div
-				class="w-80vw col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+				class="w-80vw max-w-full col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 			>
-				<div class="flex items-center gap-2 mb-4">
+				<div class="flex flex-wrap items-center gap-2 mb-4">
 					<span class="text-sm font-semibold text-gray-600 dark:text-gray-300">Report for</span>
 					<div
 						class="flex items-center rounded overflow-hidden border border-gray-300 dark:border-gray-600 text-sm"
@@ -164,8 +179,11 @@
 							Training
 						</button>
 					</div>
+					<div class="ml-auto">
+						<ReportPreviewPDF {content} isTraining={reportKind === 'training'} />
+					</div>
 				</div>
-				<Editor contentType="report" bind:value={content} />
+				<Editor bind:this={reportEditor} contentType="report" bind:value={content} />
 				<FormError message={error} />
 				{#if templateID}
 					<div class="mt-4">

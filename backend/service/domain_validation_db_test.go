@@ -324,7 +324,7 @@ func TestOAuthExchangeRefusesReplay(t *testing.T) {
 	if err := repo.MarkAsUsed(f.ctx, usedID); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	gotID, err := f.oauth.ExchangeCodeForTokens(f.ctx, nil, "used-state", "code", "https://cb")
+	gotID, err := f.oauth.ExchangeCodeForTokens(f.ctx, nil, "used-state", "code", "https://cb", "203.0.113.30")
 	if err == nil {
 		t.Fatal("expected replayed state to be refused")
 	}
@@ -334,7 +334,7 @@ func TestOAuthExchangeRefusesReplay(t *testing.T) {
 
 	// expired: refused and recorded as failed
 	insert("expired-state", time.Now().Add(-time.Minute))
-	gotID, err = f.oauth.ExchangeCodeForTokens(f.ctx, nil, "expired-state", "code", "https://cb")
+	gotID, err = f.oauth.ExchangeCodeForTokens(f.ctx, nil, "expired-state", "code", "https://cb", "203.0.113.30")
 	if err == nil {
 		t.Fatal("expected expired state to be refused")
 	}
@@ -352,10 +352,10 @@ func TestOAuthExchangeRefusesReplay(t *testing.T) {
 	if status != "pending" {
 		t.Fatalf("status before callback = %q, want pending", status)
 	}
-	if got := f.oauth.FailAuthorization(f.ctx, "error-state"); got != providerID {
+	if got := f.oauth.FailAuthorization(f.ctx, "error-state", "providerError", "203.0.113.32"); got != providerID {
 		t.Fatalf("fail returned %v, want %v", got, providerID)
 	}
-	if got := f.oauth.FailAuthorization(f.ctx, "error-state"); got != uuid.Nil {
+	if got := f.oauth.FailAuthorization(f.ctx, "error-state", "providerError", "203.0.113.32"); got != uuid.Nil {
 		t.Fatalf("second fail returned %v, want nil", got)
 	}
 	status, _ = f.oauth.GetAuthorizationStatus(f.ctx, f.session, &providerID, "error-state")

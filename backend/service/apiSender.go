@@ -48,8 +48,9 @@ func (a *APISender) Create(
 	ctx context.Context,
 	session *model.Session,
 	apiSender *model.APISender,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("ApiSender.Create", session)
+	defer a.auditDone(ae, &err)
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -210,7 +211,7 @@ func (a *APISender) GetByCompanyID(
 	option *repository.APISenderOption,
 ) (*model.Result[model.APISender], error) {
 	ae := NewAuditEvent("ApiSender.GetByCompanyID", session)
-	ae.Details["companyID"] = id.String()
+	ae.Details["companyId"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -244,8 +245,9 @@ func (a *APISender) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	incoming *model.APISender,
-) error {
+) (err error) {
 	ae := NewAuditEvent("ApiSender.UpdateByID", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -362,8 +364,9 @@ func (a *APISender) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("ApiSender.DeleteByID", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -405,8 +408,9 @@ func (a *APISender) SendTest(
 	session *model.Session,
 	id *uuid.UUID,
 	req *model.APISenderTestRequest,
-) (*APISenderTestResponse, error) {
+) (_ *APISenderTestResponse, err error) {
 	ae := NewAuditEvent("ApiSender.SendTest", session)
+	defer a.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

@@ -23,7 +23,7 @@ type CampaignRecipient struct {
 	UpdatedAt *time.Time `gorm:"not null;index;"`
 
 	Campaign   *Campaign
-	CampaignID *uuid.UUID `gorm:"not null;type:uuid;uniqueIndex:idx_campaign_recipients_campaign_id_recipient_id;"`
+	CampaignID *uuid.UUID `gorm:"not null;type:uuid;uniqueIndex:idx_campaign_recipients_campaign_id_recipient_id;index:idx_campaign_recipients_campaign_template,priority:1;"`
 
 	// CancelledAt *time.Time `gorm:"index;"`
 	CancelledAt *time.Time `gorm:"index;"`
@@ -54,6 +54,13 @@ type CampaignRecipient struct {
 	// is severed at anonymization. Populated only for anonymous campaigns.
 	Position   string `gorm:";"`
 	Department string `gorm:";"`
+
+	// CampaignTemplateID is the template this recipient was given from the
+	// campaign's template pool. Null on rows created before pools existed, which
+	// use campaigns.campaign_template_id instead. Indexed together with the
+	// campaign, which serves per campaign reads such as filling rows that have no
+	// template and checking how many templates a campaign used.
+	CampaignTemplateID *uuid.UUID `gorm:"type:uuid;index:idx_campaign_recipients_campaign_template,priority:2"`
 
 	// NotableEventID is the most notable event for this recipient
 	NotableEvent   *Event     `gorm:"foreignKey:NotableEventID;references:ID"`

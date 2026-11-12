@@ -166,11 +166,12 @@ func (s *IPData) Download(
 	ctx context.Context,
 	session *model.Session,
 	kind string,
-) error {
+) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	ae := NewAuditEvent("IPData.Download", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["kind"] = kind
 
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -296,11 +297,12 @@ func (s *IPData) Remove(
 	ctx context.Context,
 	session *model.Session,
 	kind string,
-) error {
+) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	ae := NewAuditEvent("IPData.Remove", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["kind"] = kind
 
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

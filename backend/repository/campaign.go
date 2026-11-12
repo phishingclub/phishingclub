@@ -184,13 +184,21 @@ func (r *Campaign) Insert(
 	row["id"] = id
 	AddTimestamps(row)
 
-	res := r.DB.Model(&database.Campaign{}).Create(row)
-
-	if res.Error != nil {
-		return nil, res.Error
+	// the campaign row and its template pool are written together
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&database.Campaign{}).Create(row).Error; err != nil {
+			return err
+		}
+		if pool := campaign.TemplatePool(); len(pool) > 0 {
+			return setTemplatePoolTx(tx, &id, pool)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
-	err := r.AddRecipientGroups(ctx, &id, campaign.RecipientGroupIDs.MustGet())
+	err = r.AddRecipientGroups(ctx, &id, campaign.RecipientGroupIDs.MustGet())
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
@@ -518,11 +526,10 @@ func (r *Campaign) GetByTemplateIDs(
 ) ([]*model.Campaign, error) {
 	rows := []*database.Campaign{}
 	models := []*model.Campaign{}
-	res := r.DB.
-		Where(
-			"campaign_template_id IN ?",
-			UUIDsToStrings(templateIDs),
-		).
+	if len(templateIDs) == 0 {
+		return models, nil
+	}
+	res := r.whereUsesTemplates(r.DB, UUIDsToStrings(templateIDs)).
 		Find(&rows)
 
 	if res.Error != nil {
@@ -1054,9 +1061,10 @@ func (r *Campaign) GetCampaignCountByTemplateID(
 	templateID *uuid.UUID,
 ) (int, error) {
 	var count int64
-	res := r.DB.
-		Model(&database.Campaign{}).
-		Where("campaign_template_id = ?", templateID).
+	res := r.whereUsesTemplates(
+		r.DB.Model(&database.Campaign{}),
+		[]string{templateID.String()},
+	).
 		Count(&count)
 
 	if res.Error != nil {
@@ -2067,6 +2075,52 @@ func (r *Campaign) SetPausedByID(
 	return res.Error
 }
 
+// SetClosedAtByID writes only the closed at time, so a campaign row loaded
+// earlier can not write back other columns that changed since
+func (r *Campaign) SetClosedAtByID(
+	ctx context.Context,
+	id *uuid.UUID,
+	closedAt time.Time,
+) error {
+	row := map[string]any{"closed_at": utils.RFC3339UTC(closedAt)}
+	AddUpdatedAt(row)
+	return r.DB.WithContext(ctx).
+		Model(&database.Campaign{}).
+		Where("id = ?", id).
+		Updates(row).Error
+}
+
+// SetCloseAtByID writes only the time the campaign is set to close, so a
+// campaign row loaded earlier can not write back other columns that changed
+// since
+func (r *Campaign) SetCloseAtByID(
+	ctx context.Context,
+	id *uuid.UUID,
+	closeAt time.Time,
+) error {
+	row := map[string]any{"close_at": utils.RFC3339UTC(closeAt)}
+	AddUpdatedAt(row)
+	return r.DB.WithContext(ctx).
+		Model(&database.Campaign{}).
+		Where("id = ?", id).
+		Updates(row).Error
+}
+
+// SetNotableEventByID writes only the most notable event, so a campaign row
+// loaded earlier can not write back other columns that changed since
+func (r *Campaign) SetNotableEventByID(
+	ctx context.Context,
+	id *uuid.UUID,
+	eventID *uuid.UUID,
+) error {
+	row := map[string]any{"notable_event_id": eventID.String()}
+	AddUpdatedAt(row)
+	return r.DB.WithContext(ctx).
+		Model(&database.Campaign{}).
+		Where("id = ?", id).
+		Updates(row).Error
+}
+
 // ClearPausedByID clears the paused at timestamp. Used on resume and on close so
 // a closed campaign is never left paused.
 func (r *Campaign) ClearPausedByID(
@@ -2112,43 +2166,22 @@ func (r *Campaign) RemoveCampaignRecipientGroupByGroupID(
 	return nil
 }
 
-// RemoveCampaignTemplateIDFromCampaigns removes campaign template id from all
-// campaign that use it.
-func (r *Campaign) RemoveCampaignTemplateIDFromCampaigns(
-	ctx context.Context,
-	campaignTemplateID *uuid.UUID,
-) error {
-	row := map[string]interface{}{}
-	AddUpdatedAt(row)
-	row["campaign_template_id"] = nil
-	res := r.DB.
-		Model(&database.Campaign{}).
-		Where(
-			fmt.Sprintf(
-				"%s = ?",
-				TableColumn(database.CAMPAIGN_TABLE, "campaign_template_id"),
-			),
-			campaignTemplateID.String(),
-		).
-		Updates(row)
-
-	if res.Error != nil {
-		return res.Error
-	}
-	return nil
-}
-
 // DeleteByID deletes a campaign by id including its stats
 func (r *Campaign) DeleteByID(
 	ctx context.Context,
 	id *uuid.UUID,
 ) error {
-	res := r.DB.
-		Where("id = ?", id).
-		Delete(&database.Campaign{})
-
-	if res.Error != nil {
-		return res.Error
+	// the pool rows and the campaign row go together
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.
+			Where("campaign_id = ?", id.String()).
+			Delete(&database.CampaignTemplatePool{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ?", id).Delete(&database.Campaign{}).Error
+	})
+	if err != nil {
+		return err
 	}
 	return r.DeleteCampaignStats(ctx, id)
 }
@@ -2505,6 +2538,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	isTest := nullable.NewNullableWithValue(row.IsTest)
 	isTraining := nullable.NewNullableWithValue(row.IsTraining)
 	obfuscate := nullable.NewNullableWithValue(row.Obfuscate)
+	templateMixBy := nullable.NewNullableWithValue(row.TemplateMixBy)
 	// deprecated fields - kept for backward compatibility
 	webhookIncludeData := nullable.NewNullableWithValue(row.WebhookIncludeData)
 	webhookEvents := nullable.NewNullableWithValue(row.WebhookEvents)
@@ -2678,6 +2712,7 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		IsTraining:          isTraining,
 		IsTest:              isTest,
 		Obfuscate:           obfuscate,
+		TemplateMixBy:       templateMixBy,
 		WebhookIncludeData:  webhookIncludeData,
 		WebhookEvents:       webhookEvents,
 		TemplateID:          templateID,
@@ -2975,6 +3010,9 @@ var groupedStatColumns = map[string]bool{
 	"department": true,
 }
 
+// GroupedStatByTemplate groups results by each recipient's template
+const GroupedStatByTemplate = "template"
+
 // GetGroupedResultStats returns outcome counts grouped by a recipient attribute
 // snapshotted on the campaign recipient, joining events to recipients by the
 // stable pseudonym so it works for an anonymous campaign both while live and after
@@ -2986,6 +3024,9 @@ func (r *Campaign) GetGroupedResultStats(
 	campaignID *uuid.UUID,
 	groupColumn string,
 ) ([]model.CampaignGroupStat, error) {
+	if groupColumn == GroupedStatByTemplate {
+		return r.getGroupedResultStatsByTemplate(ctx, campaignID)
+	}
 	if !groupedStatColumns[groupColumn] {
 		return nil, fmt.Errorf("invalid group column: %s", groupColumn)
 	}
@@ -3078,23 +3119,132 @@ func (r *Campaign) GetGroupedResultStats(
 	return result, nil
 }
 
-// HasEventByRecipientID reports whether a recipient has the given event on a
-// campaign
-func (r *Campaign) HasEventByRecipientID(
+// getGroupedResultStatsByTemplate returns outcome counts grouped by each
+// recipient's template, using the campaign's first template for recipients that
+// have none. It counts people the same way as GetGroupedResultStats.
+func (r *Campaign) getGroupedResultStatsByTemplate(
 	ctx context.Context,
 	campaignID *uuid.UUID,
-	recipientID *uuid.UUID,
-	eventID *uuid.UUID,
+) ([]model.CampaignGroupStat, error) {
+	beforeID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED]
+	pageID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED]
+	afterID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED]
+	submitID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
+	reportID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
+	startedID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED]
+	completedID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED]
+
+	type groupRow struct {
+		TemplateID        *string
+		TemplateName      *string
+		Total             int
+		Clicked           int
+		Submitted         int
+		Reported          int
+		TrainingStarted   int
+		TrainingCompleted int
+	}
+	var rows []groupRow
+	res := r.DB.WithContext(ctx).Raw(`
+	SELECT
+		p.template_id AS template_id,
+		t.name AS template_name,
+		COUNT(DISTINCT p.person) AS total,
+		COUNT(DISTINCT CASE WHEN ev.clicked = 1 THEN p.person END) AS clicked,
+		COUNT(DISTINCT CASE WHEN ev.submitted = 1 THEN p.person END) AS submitted,
+		COUNT(DISTINCT CASE WHEN ev.reported = 1 THEN p.person END) AS reported,
+		COUNT(DISTINCT CASE WHEN ev.training_started = 1 THEN p.person END) AS training_started,
+		COUNT(DISTINCT CASE WHEN ev.training_completed = 1 THEN p.person END) AS training_completed
+	FROM (
+		SELECT
+			COALESCE(cr.anonymized_id, cr.recipient_id) AS person,
+			COALESCE(cr.campaign_template_id, c.campaign_template_id) AS template_id
+		FROM campaign_recipients cr
+		JOIN campaigns c ON c.id = cr.campaign_id
+		WHERE cr.campaign_id = ? AND COALESCE(cr.anonymized_id, cr.recipient_id) IS NOT NULL
+	) AS p
+	LEFT JOIN (
+		SELECT
+			COALESCE(anonymized_id, recipient_id) AS person,
+			MAX(CASE WHEN event_id IN (?, ?, ?) THEN 1 ELSE 0 END) AS clicked,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS submitted,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS reported,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS training_started,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS training_completed
+		FROM campaign_events
+		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL
+		GROUP BY COALESCE(anonymized_id, recipient_id)
+	) AS ev ON ev.person = p.person
+	LEFT JOIN campaign_templates t ON t.id = p.template_id
+	GROUP BY p.template_id, t.name
+	ORDER BY total DESC
+	`,
+		campaignID,
+		beforeID, pageID, afterID,
+		submitID,
+		reportID,
+		startedID,
+		completedID,
+		campaignID,
+	).Scan(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	result := make([]model.CampaignGroupStat, 0, len(rows))
+	for _, row := range rows {
+		group := "(deleted template)"
+		if row.TemplateName != nil && *row.TemplateName != "" {
+			group = *row.TemplateName
+		}
+		groupID := ""
+		if row.TemplateID != nil {
+			groupID = *row.TemplateID
+		}
+		result = append(result, model.CampaignGroupStat{
+			Group:             group,
+			GroupID:           groupID,
+			Total:             row.Total,
+			Clicked:           row.Clicked,
+			Submitted:         row.Submitted,
+			Reported:          row.Reported,
+			TrainingStarted:   row.TrainingStarted,
+			TrainingCompleted: row.TrainingCompleted,
+		})
+	}
+	return result, nil
+}
+
+// HasTemplateGroupDataByCampaignID reports whether the campaign's recipients use
+// more than one template, or its pool holds more than one
+func (r *Campaign) HasTemplateGroupDataByCampaignID(
+	ctx context.Context,
+	id *uuid.UUID,
 ) (bool, error) {
-	var count int64
+	var poolCount int64
 	res := r.DB.WithContext(ctx).
-		Model(&database.CampaignEvent{}).
-		Where(clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: campaignID}).
-		Where(clause.Eq{Column: clause.Column{Name: "event_id"}, Value: eventID}).
-		Where(clause.Eq{Column: clause.Column{Name: "recipient_id"}, Value: recipientID}).
+		Model(&database.CampaignTemplatePool{}).
+		Where("campaign_id = ?", id.String()).
+		Count(&poolCount)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if poolCount > 1 {
+		return true, nil
+	}
+	// at most two distinct templates are read, which is enough to answer
+	used := r.DB.
+		Table("campaign_recipients AS cr").
+		Select("DISTINCT COALESCE(cr.campaign_template_id, c.campaign_template_id) AS template_id").
+		Joins("JOIN campaigns c ON c.id = cr.campaign_id").
+		Where("cr.campaign_id = ?", id.String()).
+		Where("COALESCE(cr.campaign_template_id, c.campaign_template_id) IS NOT NULL").
+		Limit(2)
+	var count int64
+	res = r.DB.WithContext(ctx).
+		Table("(?) AS used", used).
 		Count(&count)
 	if res.Error != nil {
-		return false, errs.Wrap(res.Error)
+		return false, res.Error
 	}
-	return count > 0, nil
+	return count > 1, nil
 }

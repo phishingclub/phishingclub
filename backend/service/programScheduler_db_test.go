@@ -40,6 +40,7 @@ func newProgramServiceTest(t *testing.T) *programTest {
 		&database.CampaignRecipient{},
 		&database.CampaignEvent{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplatePool{},
 		&database.Recipient{},
 		&database.Event{},
 		&database.Program{},

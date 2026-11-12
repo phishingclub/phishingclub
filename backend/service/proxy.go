@@ -525,8 +525,9 @@ func (m *Proxy) Create(
 	ctx context.Context,
 	session *model.Session,
 	proxy *model.Proxy,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("Proxy.Create", session)
+	defer m.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -708,8 +709,9 @@ func (m *Proxy) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	proxy *model.Proxy,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Proxy.UpdateByID", session)
+	defer m.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -2783,8 +2785,9 @@ func (m *Proxy) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Proxy.DeleteByID", session)
+	defer m.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

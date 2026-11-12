@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/go-errors/errors"
@@ -56,6 +57,10 @@ type Campaign struct {
 	IsAnonymous nullable.Nullable[bool] `json:"isAnonymous"`
 	IsTest      nullable.Nullable[bool] `json:"isTest"`
 	Obfuscate   nullable.Nullable[bool] `json:"obfuscate"`
+	// TemplateMixBy is the recipient field templates are mixed by when the
+	// campaign has several templates, one of the TemplateMix values. Empty
+	// means department.
+	TemplateMixBy nullable.Nullable[string] `json:"templateMixBy"`
 	// IsTraining is snapshotted from the template; read-only in campaign requests.
 	IsTraining nullable.Nullable[bool] `json:"isTraining"`
 	// deprecated: use Webhooks array instead for multiple webhooks with per-webhook settings
@@ -79,6 +84,12 @@ type Campaign struct {
 	EvasionPageID     nullable.Nullable[uuid.UUID]    `json:"evasionPageID,omitempty"`
 	EvasionPage       *Page                           `json:"evasionPage"`
 
+	// TemplateIDs is the ordered template pool. Each recipient is given one of
+	// them when scheduled. The first entry is always TemplateID.
+	TemplateIDs nullable.Nullable[[]*uuid.UUID] `json:"templateIDs,omitempty"`
+	// Templates is the pool in order, with id and name only. Read only.
+	Templates []*CampaignTemplateRef `json:"templates"`
+
 	// webhooks configuration with per-webhook settings
 	Webhooks nullable.Nullable[[]*CampaignWebhook] `json:"webhooks,omitempty"`
 
@@ -99,6 +110,115 @@ type Campaign struct {
 	// must not be set by a user
 	NotableEventID   nullable.Nullable[uuid.UUID] `json:"notableEventID"`
 	NotableEventName string                       `json:"notableEventName"`
+}
+
+// MaxCampaignTemplates is the largest template pool a campaign can hold
+const MaxCampaignTemplates = 50
+
+// CampaignTemplateRef is a template in a campaign's pool, with id and name only
+type CampaignTemplateRef struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+// NormalizeTemplatePool makes TemplateIDs and TemplateID agree. TemplateIDs wins
+// when it holds any entry. A request with only TemplateID gets a pool of that
+// one template.
+func (c *Campaign) NormalizeTemplatePool() {
+	if ids, err := c.TemplateIDs.Get(); err == nil && len(ids) > 0 {
+		// a given templateID is kept so a mismatch with the pool fails validation
+		if _, err := c.TemplateID.Get(); err != nil && ids[0] != nil {
+			c.TemplateID.Set(*ids[0])
+		}
+		return
+	}
+	if v, err := c.TemplateID.Get(); err == nil {
+		c.TemplateIDs.Set([]*uuid.UUID{&v})
+	}
+}
+
+// TemplatePool returns the pool ids, falling back to TemplateID alone
+func (c *Campaign) TemplatePool() []uuid.UUID {
+	out := []uuid.UUID{}
+	if ids, err := c.TemplateIDs.Get(); err == nil && len(ids) > 0 {
+		for _, id := range ids {
+			if id != nil {
+				out = append(out, *id)
+			}
+		}
+		return out
+	}
+	if v, err := c.TemplateID.Get(); err == nil {
+		out = append(out, v)
+	}
+	return out
+}
+
+// the recipient fields templates can be mixed by. None gives a plain even spread.
+const (
+	TemplateMixDepartment = "department"
+	TemplateMixPosition   = "position"
+	TemplateMixCity       = "city"
+	TemplateMixCountry    = "country"
+	TemplateMixMisc       = "misc"
+	TemplateMixNone       = "none"
+)
+
+// IsValidTemplateMixBy reports whether v is one of the TemplateMix values.
+// Empty is allowed and means department.
+func IsValidTemplateMixBy(v string) bool {
+	switch v {
+	case "", TemplateMixDepartment, TemplateMixPosition, TemplateMixCity,
+		TemplateMixCountry, TemplateMixMisc, TemplateMixNone:
+		return true
+	}
+	return false
+}
+
+// ValidateTemplateMixBy refuses a mix field that is not in the allowlist
+func (c *Campaign) ValidateTemplateMixBy() error {
+	if v, err := c.TemplateMixBy.Get(); err == nil && !IsValidTemplateMixBy(v) {
+		return validate.WrapErrorWithField(errors.New("unknown field to mix templates by"), "templateMixBy")
+	}
+	return nil
+}
+
+// TemplateMixField returns the field templates are mixed by, department when
+// none is set
+func (c *Campaign) TemplateMixField() string {
+	if v, err := c.TemplateMixBy.Get(); err == nil && v != "" {
+		return v
+	}
+	return TemplateMixDepartment
+}
+
+// ValidateTemplatePool checks the pool size, that no template is listed twice and
+// that the first entry is TemplateID
+func (c *Campaign) ValidateTemplatePool() error {
+	ids, err := c.TemplateIDs.Get()
+	if err != nil || len(ids) == 0 {
+		return validate.WrapErrorWithField(errors.New("must have at least one template"), "templateIDs")
+	}
+	if len(ids) > MaxCampaignTemplates {
+		return validate.WrapErrorWithField(
+			fmt.Errorf("can not have more than %d templates", MaxCampaignTemplates),
+			"templateIDs",
+		)
+	}
+	seen := map[uuid.UUID]bool{}
+	for _, id := range ids {
+		if id == nil || *id == uuid.Nil {
+			return validate.WrapErrorWithField(errors.New("template id is empty"), "templateIDs")
+		}
+		if seen[*id] {
+			return validate.WrapErrorWithField(errors.New("a template is selected more than once"), "templateIDs")
+		}
+		seen[*id] = true
+	}
+	if v, err := c.TemplateID.Get(); err != nil || v != *ids[0] {
+		return validate.WrapErrorWithField(errors.New("templateID must be the first template"), "templateID")
+	}
+	return nil
 }
 
 // Validate checks if the campaign has a valid state
@@ -227,6 +347,17 @@ func (c *Campaign) validate(checkAnonymizeAfterEnd bool) error {
 	}
 	if err := validate.NullableFieldRequired("templateID", c.TemplateID); err != nil {
 		return err
+	}
+	if err := c.ValidateTemplateMixBy(); err != nil {
+		return err
+	}
+	if c.TemplateIDs.IsSpecified() {
+		if err := c.ValidateTemplatePool(); err != nil {
+			return err
+		}
+		if err := c.ValidateAnonymousSelfManagedPool(); err != nil {
+			return err
+		}
 	}
 	if err := validate.NullableFieldRequired("RecipientGroupIDs", c.RecipientGroupIDs); err != nil {
 		return err
@@ -587,6 +718,12 @@ func (c *Campaign) ToDBMap() map[string]any {
 			m["is_anonymous"] = v
 		}
 	}
+	if c.TemplateMixBy.IsSpecified() {
+		m["template_mix_by"] = ""
+		if v, err := c.TemplateMixBy.Get(); err == nil {
+			m["template_mix_by"] = v
+		}
+	}
 	if c.Obfuscate.IsSpecified() {
 		m["obfuscate"] = false
 		if v, err := c.Obfuscate.Get(); err == nil {
@@ -705,6 +842,21 @@ func (c *Campaign) Close() error {
 	return nil
 }
 
+// CloseNow sets the campaign to close now. Unlike Close it also brings forward a
+// close time that is still in the future. A campaign already closed is left
+// alone.
+func (c *Campaign) CloseNow() error {
+	if c.ClosedAt.IsSpecified() && !c.ClosedAt.IsNull() {
+		return errs.ErrCampaignAlreadyClosed
+	}
+	now := time.Now().UTC()
+	if c.CloseAt.IsSpecified() && !c.CloseAt.IsNull() && !c.CloseAt.MustGet().After(now) {
+		return nil
+	}
+	c.CloseAt.Set(now)
+	return nil
+}
+
 // Closed sets the closed at timestamp to now
 // dont confuse with method Close
 func (c *Campaign) Closed() error {
@@ -733,6 +885,20 @@ func (c *Campaign) IsActive() bool {
 	return true
 }
 
+// ValidateAnonymousSelfManagedPool refuses several templates on a campaign that is
+// both anonymous and self managed. The operator delivers each email by hand there,
+// so they would see which template each person got.
+func (c *Campaign) ValidateAnonymousSelfManagedPool() error {
+	anonymous, err := c.IsAnonymous.Get()
+	if err != nil || !anonymous || !c.IsSelfManaged() || len(c.TemplatePool()) <= 1 {
+		return nil
+	}
+	return validate.WrapErrorWithField(
+		errors.New("an anonymous self managed campaign can use only one template"),
+		"templateIDs",
+	)
+}
+
 // IsSelfManaged returns true if the campaign is self managed
 func (c *Campaign) IsSelfManaged() bool {
 	return c.SendStartAt.IsSpecified() && c.SendStartAt.IsNull() && c.SendEndAt.IsSpecified() && c.SendEndAt.IsNull()
@@ -746,14 +912,4 @@ func (c *Campaign) IsPaused() bool {
 // IsProgramManaged returns true if a program owns this hidden campaign
 func (c *Campaign) IsProgramManaged() bool {
 	return c.ProgramID.IsSpecified() && !c.ProgramID.IsNull()
-}
-
-// IsStarted returns true if the send start time has passed. A self managed
-// campaign has no send window and is never started in this sense.
-func (c *Campaign) IsStarted() bool {
-	v, err := c.SendStartAt.Get()
-	if err != nil {
-		return false
-	}
-	return !v.After(time.Now())
 }

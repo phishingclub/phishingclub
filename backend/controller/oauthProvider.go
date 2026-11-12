@@ -241,7 +241,7 @@ func (c *OAuthProvider) HandleCallback(g *gin.Context) {
 	if errorParam != "" {
 		errorDesc := g.Query("error_description")
 		c.Logger.Warnw("oauth provider returned error", "error", errorParam, "description", errorDesc)
-		providerID := c.OAuthProviderService.FailAuthorization(g.Request.Context(), state)
+		providerID := c.OAuthProviderService.FailAuthorization(g.Request.Context(), state, "providerError", g.ClientIP())
 		c.renderCallbackPage(g, false, "provider_error", providerID)
 		return
 	}
@@ -249,7 +249,7 @@ func (c *OAuthProvider) HandleCallback(g *gin.Context) {
 	// validate parameters
 	if code == "" || state == "" {
 		c.Logger.Warnw("oauth callback missing required parameters")
-		providerID := c.OAuthProviderService.FailAuthorization(g.Request.Context(), state)
+		providerID := c.OAuthProviderService.FailAuthorization(g.Request.Context(), state, "invalidRequest", g.ClientIP())
 		c.renderCallbackPage(g, false, "invalid_request", providerID)
 		return
 	}
@@ -283,6 +283,7 @@ func (c *OAuthProvider) HandleCallback(g *gin.Context) {
 		state,
 		code,
 		redirectURI,
+		g.ClientIP(),
 	)
 	if err != nil {
 		// log detailed error internally, show generic error to user

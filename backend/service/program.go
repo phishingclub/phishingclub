@@ -96,8 +96,9 @@ func (s *Program) Create(
 	ctx context.Context,
 	session *model.Session,
 	program *model.Program,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("Program.Create", session)
+	defer s.auditDone(ae, &err)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
@@ -153,8 +154,9 @@ func (s *Program) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	incoming *model.Program,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Program.UpdateById", session)
+	defer s.auditDone(ae, &err)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
@@ -348,8 +350,9 @@ func (s *Program) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Program.DeleteById", session)
+	defer s.auditDone(ae, &err)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
@@ -644,8 +647,9 @@ func applyStartRequest(incoming *model.Program, existing *model.Program, now tim
 }
 
 // Start starts a draft or scheduled program now.
-func (s *Program) Start(ctx context.Context, session *model.Session, id *uuid.UUID) error {
+func (s *Program) Start(ctx context.Context, session *model.Session, id *uuid.UUID) (err error) {
 	ae := NewAuditEvent("Program.Start", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -688,8 +692,9 @@ func (s *Program) Start(ctx context.Context, session *model.Session, id *uuid.UU
 }
 
 // Pause halts enrollment and advancement and allows step edits.
-func (s *Program) Pause(ctx context.Context, session *model.Session, id *uuid.UUID) error {
+func (s *Program) Pause(ctx context.Context, session *model.Session, id *uuid.UUID) (err error) {
 	ae := NewAuditEvent("Program.Pause", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -724,8 +729,9 @@ func (s *Program) Pause(ctx context.Context, session *model.Session, id *uuid.UU
 }
 
 // Resume clears the pause so the scheduler picks the program up again.
-func (s *Program) Resume(ctx context.Context, session *model.Session, id *uuid.UUID) error {
+func (s *Program) Resume(ctx context.Context, session *model.Session, id *uuid.UUID) (err error) {
 	ae := NewAuditEvent("Program.Resume", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -812,8 +818,9 @@ func (s *Program) setCampaignsPaused(ctx context.Context, programID *uuid.UUID, 
 // Close ends a program for good. Sending stops, pending sends are cancelled and
 // the hidden campaigns are closed, while all results stay readable. A closed
 // program cannot be resumed or edited, only deleted.
-func (s *Program) Close(ctx context.Context, session *model.Session, id *uuid.UUID) error {
+func (s *Program) Close(ctx context.Context, session *model.Session, id *uuid.UUID) (err error) {
 	ae := NewAuditEvent("Program.Close", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {

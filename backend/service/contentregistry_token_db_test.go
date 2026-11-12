@@ -420,6 +420,11 @@ func auditCapture(t *testing.T, h *regFixture) func(name string) []map[string]an
 				continue
 			}
 			d, _ := line["details"].(map[string]any)
+			if d == nil {
+				d = map[string]any{}
+			}
+			// the result is a top level field, copied in so the checks read one map
+			d["result"] = line["result"]
 			out = append(out, d)
 		}
 		return out
@@ -452,7 +457,7 @@ func TestRegistryAuditNamesTheBaitBox(t *testing.T) {
 		t.Fatal(err)
 	}
 	up = events("Registry.Update")
-	if len(up) != 2 || up[1]["registryId"] != id.String() || up[1]["tokenChanged"] != true || up[1]["result"] != nil {
+	if len(up) != 2 || up[1]["registryId"] != id.String() || up[1]["tokenChanged"] != true || up[1]["result"] != "success" {
 		t.Fatalf("update success event: %v", up)
 	}
 	for _, e := range up {

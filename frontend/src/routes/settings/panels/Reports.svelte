@@ -6,6 +6,7 @@
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import ActionButton from '$lib/components/ActionButton.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import InstalledResourceBadge from '$lib/components/InstalledResourceBadge.svelte';
 	import Alert from '$lib/components/Alert.svelte';
@@ -14,6 +15,7 @@
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import CompanyReportDeliveryModal from '$lib/components/modal/CompanyReportDeliveryModal.svelte';
+	import ReportPreviewPDF from '$lib/components/ReportPreviewPDF.svelte';
 
 	let loaded = false;
 
@@ -34,6 +36,8 @@
 	// the phishing and training reports are separate templates; edit one at a time
 	let reportRows = [];
 	let reportKind = 'phishing'; // 'phishing' | 'training'
+	let reportEditor;
+	let isUseDefaultAlertVisible = false;
 
 	onMount(async () => {
 		showIsLoading();
@@ -98,9 +102,10 @@
 			showIsLoading();
 			reportTemplateError = '';
 			reportKind = 'phishing';
+			reportDrafts = {};
 			const response = await api.reportTemplate.getAll(null);
 			reportRows = response.success ? response.data?.rows || [] : [];
-			selectReportKind('phishing');
+			loadReportKind('phishing');
 		} catch (error) {
 			console.error('Failed to load report template:', error);
 			reportTemplateError = 'Failed to load template';
@@ -110,13 +115,37 @@
 		}
 	};
 
-	// loads the cached template row for the selected kind into the editor
+	// unsaved editor content per kind, kept while the modal is open so
+	// switching kind does not lose edits
+	let reportDrafts = {};
+
+	// switches the editor to another kind, keeping the edits of the current one
 	const selectReportKind = (kind) => {
+		if (kind === reportKind) return;
+		reportDrafts[reportKind] = reportTemplateContent;
+		loadReportKind(kind);
+	};
+
+	// loads the kind's unsaved edits, or its stored template, into the editor
+	const loadReportKind = (kind) => {
 		reportKind = kind;
 		reportTemplateError = '';
 		const row = reportRows.find((r) => !!r.isTraining === (kind === 'training'));
-		reportTemplateContent = row?.content || '';
+		reportTemplateContent = reportDrafts[kind] ?? (row?.content || '');
 		reportTemplateID = row?.id || null;
+		reportEditor?.replaceContent(reportTemplateContent);
+	};
+
+	// replaces the editor content with the built in default for the selected
+	// kind. nothing is stored until the user saves
+	const onConfirmUseDefault = async () => {
+		const response = await api.reportTemplate.getDefault(reportKind === 'training');
+		if (response.success) {
+			reportTemplateContent = response.data?.content || '';
+			reportEditor?.replaceContent(reportTemplateContent, true);
+			addToast('Default loaded, click Save to keep it', 'Info');
+		}
+		return response;
 	};
 
 	// re-fetch the templates after a save so the active kind keeps its id
@@ -233,9 +262,9 @@
 			modalMode="update"
 		>
 			<div
-				class="w-80vw col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
+				class="w-80vw max-w-full col-start-1 col-end-4 row-start-1 py-8 px-6 flex flex-col bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
 			>
-				<div class="flex items-center gap-2 mb-4">
+				<div class="flex flex-wrap items-center gap-2 mb-4">
 					<span class="text-sm font-semibold text-gray-600 dark:text-gray-300">Report for</span>
 					<div
 						class="flex items-center rounded overflow-hidden border border-gray-300 dark:border-gray-600 text-sm"
@@ -259,13 +288,46 @@
 							Training
 						</button>
 					</div>
+					<div class="ml-auto flex flex-wrap items-center justify-end gap-2">
+						<ReportPreviewPDF
+							content={reportTemplateContent}
+							isTraining={reportKind === 'training'}
+						/>
+						<ActionButton
+							variant="secondary"
+							icon="reset"
+							on:click={() => (isUseDefaultAlertVisible = true)}
+						>
+							Use Latest Default
+						</ActionButton>
+					</div>
 				</div>
-				<Editor contentType="report" bind:value={reportTemplateContent} />
+				<Editor
+					bind:this={reportEditor}
+					contentType="report"
+					bind:value={reportTemplateContent}
+				/>
 				<FormError message={reportTemplateError} />
 			</div>
 			<FormFooter isSubmitting={isReportTemplateSubmitting} closeModal={closeReportTemplateModal} />
 		</FormGrid>
 	</Modal>
+{/if}
+
+{#if isUseDefaultAlertVisible}
+	<Alert
+		headline="Use Latest Default"
+		bind:visible={isUseDefaultAlertVisible}
+		onConfirm={onConfirmUseDefault}
+		ok="Replace"
+	>
+		<div class="mt-4 text-gray-700 dark:text-gray-200 space-y-3">
+			<p>
+				Replace the {reportKind} report template in the editor with the latest built in default?
+			</p>
+			<p>Nothing is saved until you click Save. Cancel keeps the stored template.</p>
+		</div>
+	</Alert>
 {/if}
 
 {#if isReportPDFEnableModalVisible}

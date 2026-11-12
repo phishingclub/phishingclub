@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
-	"github.com/phishingclub/phishingclub/embedded"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/registry"
@@ -229,11 +228,7 @@ func (s *ContentRegistry) reportTemplateOwnerErr(ctx context.Context, isTraining
 // reportTemplateName describes a global report template for the overwrite
 // confirmation, since report templates carry no name of their own.
 func reportTemplateName(m *model.ReportTemplate, isTraining bool) (string, bool) {
-	def := embedded.DefaultReportHTML
-	if isTraining {
-		def = embedded.DefaultTrainingReportHTML
-	}
-	customized := strings.TrimSpace(optStr(m.Content)) != strings.TrimSpace(def)
+	customized := !isDefaultReportContent(optStr(m.Content), isTraining)
 	label := "Default"
 	if customized {
 		label = "Custom"

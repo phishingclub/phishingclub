@@ -51,8 +51,9 @@ func (m *Email) AddAttachments(
 	session *model.Session,
 	messageID *uuid.UUID,
 	attachments []AttachmentWithInline,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Email.AddAttachments", session)
+	defer m.auditDone(ae, &err)
 	ae.Details["messageId"] = messageID.String()
 
 	// check permissions
@@ -129,8 +130,9 @@ func (m *Email) RemoveAttachment(
 	session *model.Session,
 	emailID *uuid.UUID,
 	attachmentID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Email.RemoveAttachment", session)
+	defer m.auditDone(ae, &err)
 	ae.Details["emailId"] = emailID.String()
 	ae.Details["attachmentId"] = attachmentID.String()
 	// check permissions
@@ -182,8 +184,9 @@ func (m *Email) Create(
 	ctx context.Context,
 	session *model.Session,
 	email *model.Email,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("Email.Create", session)
+	defer m.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -442,12 +445,13 @@ func (m *Email) SendTestEmail(
 	domainID *uuid.UUID,
 	recpID *uuid.UUID,
 	companyID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Email.SendTestEmail", session)
+	defer m.auditDone(ae, &err)
 	ae.Details["emailId"] = emailID.String()
 	ae.Details["smtpId"] = smtpID.String()
 	ae.Details["recipientId"] = recpID.String()
-	ae.Details["domainID"] = domainID.String()
+	ae.Details["domainId"] = domainID.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -866,8 +870,9 @@ func (m *Email) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	email *model.Email,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Email.UpdateByID", session)
+	defer m.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -972,8 +977,9 @@ func (m *Email) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Email.DeleteByID", session)
+	defer m.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

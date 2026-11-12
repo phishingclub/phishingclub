@@ -384,7 +384,7 @@
 				bind:this={modalElement}
 				bind:offsetHeight={sectionHeight}
 				tabindex="-1"
-				class="focus:outline-none ring-1 ring-white/10 bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col shadow-2xl transition-all duration-200
+				class="focus:outline-none ring-1 ring-white/10 bg-white dark:bg-gray-800 opacity-100 rounded-md flex flex-col shadow-2xl transition duration-200
 					{fullscreen
 					? 'fixed inset-0 w-full h-full max-w-none max-h-none rounded-none'
 					: widthClasses[width]

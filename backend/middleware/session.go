@@ -110,6 +110,7 @@ func handleAPISession(
 		}
 		if !found {
 			logger.Debug("API key not found")
+			userService.AuditAPIKeyFailed(c.ClientIP())
 			// responseHandler.Unauthorized(c)
 			return false
 		}

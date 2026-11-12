@@ -35,7 +35,7 @@ func newAssetDeleteFixture(t *testing.T) *assetDeleteFixture {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&database.Domain{}, &database.Asset{}, &database.AssetHeader{}, &database.AssetAllowDeny{}); err != nil {
+	if err := db.AutoMigrate(&database.Domain{}, &database.Company{}, &database.Asset{}, &database.AssetHeader{}, &database.AssetAllowDeny{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	root := filepath.Join(dir, "files")
@@ -48,11 +48,12 @@ func newAssetDeleteFixture(t *testing.T) *assetDeleteFixture {
 		db:   db,
 		root: root,
 		svc: &Asset{
-			Common:           common,
-			RootFolder:       root,
-			FileService:      &File{Common: common},
-			AssetRepository:  &repository.Asset{DB: db},
-			DomainRepository: &repository.Domain{DB: db},
+			Common:            common,
+			RootFolder:        root,
+			FileService:       &File{Common: common},
+			AssetRepository:   &repository.Asset{DB: db},
+			DomainRepository:  &repository.Domain{DB: db},
+			CompanyRepository: &repository.Company{DB: db},
 		},
 		session: &model.Session{
 			IP: "127.0.0.1",
@@ -216,5 +217,94 @@ func TestAssetDeleteRemovesHeaders(t *testing.T) {
 	}
 	if f.headerCount(keep) != 1 {
 		t.Fatalf("headers of an unrelated asset were deleted")
+	}
+}
+
+// TestAssetDeleteAllRemovesEmptyContextFolder checks that deleting the assets
+// of a domain or a company also removes its now empty asset folder, keeps a
+// folder that still holds other files, and never removes the shared folder
+func TestAssetDeleteAllRemovesEmptyContextFolder(t *testing.T) {
+	f := newAssetDeleteFixture(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	// a domain whose folder only holds its asset
+	domainID := uuid.New()
+	if err := f.db.Create(&database.Domain{ID: domainID, CreatedAt: &now, UpdatedAt: &now, Name: "gone.test"}).Error; err != nil {
+		t.Fatalf("insert domain: %v", err)
+	}
+	f.writeFile(filepath.Join("gone.test", "img", "logo.png"))
+	f.insert(&domainID, "gone.test", "img/logo.png")
+	if err := f.svc.DeleteAllByDomainID(ctx, f.session, &domainID); err != nil {
+		t.Fatalf("delete all by domain: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, "gone.test")); !os.IsNotExist(err) {
+		t.Fatalf("empty domain folder was not removed: %v", err)
+	}
+
+	// a domain whose folder holds a file that is not an asset keeps its folder
+	keptID := uuid.New()
+	if err := f.db.Create(&database.Domain{ID: keptID, CreatedAt: &now, UpdatedAt: &now, Name: "kept.test"}).Error; err != nil {
+		t.Fatalf("insert domain: %v", err)
+	}
+	f.writeFile(filepath.Join("kept.test", "a.png"))
+	keep := f.writeFile(filepath.Join("kept.test", "other.txt"))
+	f.insert(&keptID, "kept.test", "a.png")
+	if err := f.svc.DeleteAllByDomainID(ctx, f.session, &keptID); err != nil {
+		t.Fatalf("delete all by domain: %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("folder with other files was touched: %v", err)
+	}
+
+	// a company folder under shared is removed, the shared folder stays
+	companyID := uuid.New()
+	if err := f.db.Create(&database.Company{ID: companyID, CreatedAt: &now, UpdatedAt: &now, Name: "acme", AssetsKey: "k1"}).Error; err != nil {
+		t.Fatalf("insert company: %v", err)
+	}
+	f.writeFile(filepath.Join(data.ASSET_GLOBAL_FOLDER, "k1", "logo.png"))
+	id := uuid.New()
+	if err := f.db.Create(&database.Asset{
+		ID: &id, CreatedAt: &now, UpdatedAt: &now,
+		CompanyID: &companyID, Name: "asset", Path: "logo.png",
+	}).Error; err != nil {
+		t.Fatalf("insert asset: %v", err)
+	}
+	if err := f.svc.DeleteAllByCompanyID(ctx, f.session, &companyID); err != nil {
+		t.Fatalf("delete all by company: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, data.ASSET_GLOBAL_FOLDER, "k1")); !os.IsNotExist(err) {
+		t.Fatalf("empty company folder was not removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(f.root, data.ASSET_GLOBAL_FOLDER)); err != nil {
+		t.Fatalf("shared folder was removed: %v", err)
+	}
+}
+
+// TestAssetDeleteAllKeepsLinkedDomainFolder checks that a link with the name of
+// a domain folder is never removed, also when it points at another folder
+func TestAssetDeleteAllKeepsLinkedDomainFolder(t *testing.T) {
+	f := newAssetDeleteFixture(t)
+	now := time.Now()
+	domainID := uuid.New()
+	if err := f.db.Create(&database.Domain{ID: domainID, CreatedAt: &now, UpdatedAt: &now, Name: "link.test"}).Error; err != nil {
+		t.Fatalf("insert domain: %v", err)
+	}
+	target := filepath.Join(f.root, "target")
+	if err := os.MkdirAll(target, 0o750); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	link := filepath.Join(f.root, "link.test")
+	if err := os.Symlink("target", link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	if err := f.svc.DeleteAllByDomainID(context.Background(), f.session, &domainID); err != nil {
+		t.Fatalf("delete all by domain: %v", err)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("link was removed: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("link target was removed: %v", err)
 	}
 }

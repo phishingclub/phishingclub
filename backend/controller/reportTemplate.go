@@ -2,12 +2,13 @@ package controller
 
 import (
 	"fmt"
+	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/model"
-	"github.com/phishingclub/phishingclub/remotebrowser"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/service"
 )
@@ -18,7 +19,6 @@ type ReportTemplate struct {
 	ReportTemplateService *service.ReportTemplate
 	CampaignService       *service.Campaign
 	OptionService         *service.Option
-	ExecPath              string
 }
 
 // Create creates a report template
@@ -79,6 +79,29 @@ func (r *ReportTemplate) GetByID(g *gin.Context) {
 	r.Response.OK(g, tmpl)
 }
 
+// GetDefault returns the built in default report template content. The
+// training query parameter picks the training report.
+func (r *ReportTemplate) GetDefault(g *gin.Context) {
+	session, _, ok := r.handleSession(g)
+	if !ok {
+		return
+	}
+	isTraining := false
+	if v := g.Query("training"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			r.Response.BadRequestMessage(g, "training must be true or false")
+			return
+		}
+		isTraining = b
+	}
+	content, err := r.ReportTemplateService.GetDefaultContent(session, isTraining)
+	if ok := r.handleErrors(g, err); !ok {
+		return
+	}
+	r.Response.OK(g, gin.H{"content": content})
+}
+
 // UpdateByID updates a report template
 func (r *ReportTemplate) UpdateByID(g *gin.Context) {
 	session, _, ok := r.handleSession(g)
@@ -132,7 +155,8 @@ func (r *ReportTemplate) GeneratePDFByCampaignID(g *gin.Context) {
 	if !ok {
 		return
 	}
-	htmlContent, campaignName, err := r.CampaignService.BuildReportHTML(
+	// the download is audited, the report names each recipient
+	pdfBytes, campaignName, err := r.CampaignService.ExportReportPDF(
 		g.Request.Context(),
 		session,
 		id,
@@ -140,12 +164,43 @@ func (r *ReportTemplate) GeneratePDFByCampaignID(g *gin.Context) {
 	if ok := r.handleErrors(g, err); !ok {
 		return
 	}
-	pdfBytes, err := remotebrowser.RenderHTMLToPDF(g.Request.Context(), htmlContent, r.ExecPath)
+	filename := fmt.Sprintf("report-%s.pdf", sanitizeFilename(campaignName))
+	r.responseWithPDF(g, pdfBytes, filename)
+}
+
+// PreviewPDFRequest is the template content a PDF preview is rendered from
+type PreviewPDFRequest struct {
+	Content    string `json:"content"`
+	IsTraining bool   `json:"isTraining"`
+}
+
+// PreviewPDF renders the posted report template with sample data to a PDF
+func (r *ReportTemplate) PreviewPDF(g *gin.Context) {
+	session, _, ok := r.handleSession(g)
+	if !ok {
+		return
+	}
+	opt, _ := r.OptionService.GetOptionWithoutAuth(g.Request.Context(), data.OptionKeyReportPDFEnabled)
+	if opt == nil || opt.Value.String() != "true" {
+		r.Response.NotFound(g)
+		return
+	}
+	// a 1MB template, as stored templates allow, with room for JSON escaping
+	g.Request.Body = http.MaxBytesReader(g.Writer, g.Request.Body, 2<<20)
+	var req PreviewPDFRequest
+	if ok := r.handleParseRequest(g, &req); !ok {
+		return
+	}
+	pdfBytes, err := r.ReportTemplateService.PreviewPDF(
+		g.Request.Context(),
+		session,
+		req.Content,
+		req.IsTraining,
+	)
 	if ok := r.handleErrors(g, err); !ok {
 		return
 	}
-	filename := fmt.Sprintf("report-%s.pdf", sanitizeFilename(campaignName))
-	r.responseWithPDF(g, pdfBytes, filename)
+	r.responseWithPDF(g, pdfBytes, "report-preview.pdf")
 }
 
 // WipeBrowserCache deletes the auto-downloaded Chromium binary used for PDF generation.

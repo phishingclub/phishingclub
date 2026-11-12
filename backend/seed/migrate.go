@@ -45,6 +45,7 @@ func initialInstallAndSeed(
 		&database.Email{},
 		&database.CampaignTemplate{},
 		&database.Campaign{},
+		&database.CampaignTemplatePool{},
 		&database.CampaignRecipientGroup{},
 		&database.CampaignRecipient{},
 		&database.Event{},

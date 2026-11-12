@@ -50,8 +50,9 @@ func (o *OAuthProvider) Create(
 	ctx context.Context,
 	session *model.Session,
 	provider *model.OAuthProvider,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("OAuthProvider.Create", session)
+	defer o.auditDone(ae, &err)
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -185,8 +186,9 @@ func (o *OAuthProvider) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	provider *model.OAuthProvider,
-) error {
+) (err error) {
 	ae := NewAuditEvent("OAuthProvider.UpdateByID", session)
+	defer o.auditDone(ae, &err)
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -276,8 +278,9 @@ func (o *OAuthProvider) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("OAuthProvider.DeleteByID", session)
+	defer o.auditDone(ae, &err)
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -321,8 +324,9 @@ func (o *OAuthProvider) RemoveAuthorization(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("OAuthProvider.RemoveAuthorization", session)
+	defer o.auditDone(ae, &err)
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -364,8 +368,12 @@ func (o *OAuthProvider) GetAuthorizationURL(
 	session *model.Session,
 	providerID *uuid.UUID,
 	redirectURI string,
-) (string, error) {
+) (_ string, err error) {
 	ae := NewAuditEvent("OAuthProvider.GetAuthorizationURL", session)
+	defer o.auditDone(ae, &err)
+	if providerID != nil {
+		ae.Details["id"] = providerID.String()
+	}
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -447,13 +455,17 @@ func (o *OAuthProvider) GetAuthorizationURL(
 // The callback arrives without the admin session, so session is nil and the
 // single use, expiring state token is the only check. It returns the provider
 // id of the state when known, so the callback page can name the flow.
+// A state token that is not known writes no audit event, so random callbacks
+// do not fill the log. The admin who started the flow is in the audit event
+// OAuthProvider.GetAuthorizationURL for the same provider.
 func (o *OAuthProvider) ExchangeCodeForTokens(
 	ctx context.Context,
 	session *model.Session,
 	stateToken string,
 	code string,
 	redirectURI string,
-) (uuid.UUID, error) {
+	ip string,
+) (_ uuid.UUID, err error) {
 	// retrieve state token from database
 	oauthState, err := o.OAuthStateRepository.GetByStateToken(ctx, stateToken)
 	if err != nil {
@@ -465,16 +477,24 @@ func (o *OAuthProvider) ExchangeCodeForTokens(
 		return uuid.Nil, errs.Wrap(err)
 	}
 	providerID := oauthState.OAuthProviderID.MustGet()
+	ae := NewAuditEvent("OAuthProvider.ExchangeCodeForTokens", session)
+	defer o.auditDone(ae, &err)
+	ae.IP = ip
+	ae.Details["id"] = providerID.String()
 
 	// validate state token hasn't been used (prevent replay attacks)
 	if oauthState.Used {
 		o.Logger.Warnw("state token already used", "oauthProviderID", providerID.String())
+		ae.Details["reason"] = "stateUsed"
+		o.AuditLogNotAuthorized(ae)
 		return uuid.Nil, errors.New("state token already used")
 	}
 
 	// validate state token hasn't expired
 	if oauthState.ExpiresAt != nil && time.Now().After(*oauthState.ExpiresAt) {
 		o.Logger.Warnw("state token expired", "oauthProviderID", providerID.String(), "expiresAt", oauthState.ExpiresAt)
+		ae.Details["reason"] = "stateExpired"
+		o.AuditLogNotAuthorized(ae)
 		if _, err := o.OAuthStateRepository.MarkFailedByStateToken(ctx, stateToken); err != nil {
 			return uuid.Nil, errors.New("state token expired")
 		}
@@ -487,6 +507,11 @@ func (o *OAuthProvider) ExchangeCodeForTokens(
 	stateID := oauthState.ID.MustGet()
 	if err := o.OAuthStateRepository.MarkAsUsed(ctx, stateID); err != nil {
 		o.Logger.Warnw("failed to claim state token, aborting token exchange", "error", err)
+		if errors.Is(err, repository.ErrOAuthStateAlreadyUsed) {
+			// another callback with the same state claimed it first
+			ae.Details["reason"] = "stateUsed"
+			o.AuditLogNotAuthorized(ae)
+		}
 		return uuid.Nil, errs.Wrap(err)
 	}
 
@@ -499,14 +524,19 @@ func (o *OAuthProvider) ExchangeCodeForTokens(
 	if err := o.OAuthStateRepository.SetResult(ctx, stateID, database.OAUTH_STATE_RESULT_SUCCESS); err != nil {
 		o.Logger.Errorw("failed to record oauth state result", "error", err)
 	}
+	o.AuditLogAuthorized(ae)
 	return providerID, nil
 }
 
 // FailAuthorization records a failed flow for a state token the provider sent
 // back with an error. It returns the provider id when the state was pending.
+// A pending state that is marked failed is audited with reason, so a consent
+// the provider refused is in the audit log. Unknown states write nothing.
 func (o *OAuthProvider) FailAuthorization(
 	ctx context.Context,
 	stateToken string,
+	reason string,
+	ip string,
 ) uuid.UUID {
 	if stateToken == "" {
 		return uuid.Nil
@@ -518,6 +548,11 @@ func (o *OAuthProvider) FailAuthorization(
 		}
 		return uuid.Nil
 	}
+	ae := NewAuditEvent("OAuthProvider.ExchangeCodeForTokens", nil)
+	ae.IP = ip
+	ae.Details["id"] = providerID.String()
+	ae.Details["reason"] = reason
+	o.AuditLogNotAuthorized(ae)
 	return providerID
 }
 
@@ -766,8 +801,10 @@ func (o *OAuthProvider) ImportAuthorizedTokens(
 	ctx context.Context,
 	session *model.Session,
 	tokens []model.ImportAuthorizedToken,
-) ([]uuid.UUID, error) {
+) (_ []uuid.UUID, err error) {
 	ae := NewAuditEvent("OAuthProvider.ImportAuthorizedTokens", session)
+	defer o.auditDone(ae, &err)
+	ae.Details["count"] = len(tokens)
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -786,6 +823,16 @@ func (o *OAuthProvider) ImportAuthorizedTokens(
 	}
 
 	var ids []uuid.UUID
+	recordIDs := func() {
+		created := make([]string, 0, len(ids))
+		for _, id := range ids {
+			created = append(created, id.String())
+		}
+		ae.Details["ids"] = created
+	}
+	// runs before auditDone, so a failure part way names the providers that
+	// were already created
+	defer recordIDs()
 
 	for _, token := range tokens {
 		// validate token
@@ -892,7 +939,7 @@ func (o *OAuthProvider) ImportAuthorizedTokens(
 		ids = append(ids, *id)
 	}
 
-	ae.Details["count"] = len(ids)
+	recordIDs()
 	o.AuditLogAuthorized(ae)
 
 	return ids, nil
@@ -903,8 +950,10 @@ func (o *OAuthProvider) ExportAuthorizedTokens(
 	ctx context.Context,
 	session *model.Session,
 	providerID uuid.UUID,
-) (*model.ImportAuthorizedToken, error) {
+) (_ *model.ImportAuthorizedToken, err error) {
 	ae := NewAuditEvent("OAuthProvider.ExportAuthorizedTokens", session)
+	defer o.auditDone(ae, &err)
+	ae.Details["id"] = providerID.String()
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -970,7 +1019,6 @@ func (o *OAuthProvider) ExportAuthorizedTokens(
 		CreatedAt:    createdAt,
 	}
 
-	ae.Details["id"] = providerID.String()
 	o.AuditLogAuthorized(ae)
 
 	return exported, nil

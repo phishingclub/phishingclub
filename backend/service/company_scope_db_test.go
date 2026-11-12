@@ -56,6 +56,7 @@ func newCompanyScopeFixture(t *testing.T) *companyScopeFixture {
 		&database.AllowDeny{},
 		&database.CampaignTemplate{},
 		&database.Campaign{},
+		&database.CampaignTemplatePool{},
 		&database.CampaignRecipientGroup{},
 		&database.CampaignAllowDeny{},
 		&database.CampaignWebhook{},

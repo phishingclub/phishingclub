@@ -32,8 +32,9 @@ func (r *RecipientGroup) Create(
 	ctx context.Context,
 	session *model.Session,
 	group *model.RecipientGroup,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("RecipientGroup.Create", session)
+	defer r.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -101,8 +102,9 @@ func (r *RecipientGroup) Import(
 	ignoreOverwriteEmptyFields bool,
 	recipientGroupID *uuid.UUID,
 	companyID *uuid.UUID,
-) (*RecipientImportResult, error) {
+) (_ *RecipientImportResult, err error) {
 	ae := NewAuditEvent("RecipientGroup.Import", session)
+	defer r.auditDone(ae, &err)
 	ae.Details["recipientGroupId"] = recipientGroupID.String()
 	if companyID != nil {
 		ae.Details["companyId"] = companyID.String()
@@ -317,8 +319,9 @@ func (r *RecipientGroup) UpdateByID(
 	session *model.Session,
 	id *uuid.UUID,
 	incoming *model.RecipientGroup,
-) error {
+) (err error) {
 	ae := NewAuditEvent("RecipientGroup.UpdateByID", session)
+	defer r.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -416,8 +419,9 @@ func (r *RecipientGroup) AddRecipients(
 	session *model.Session,
 	groupID *uuid.UUID,
 	recipients []*uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("RecipientGroup.AddRecipients", session)
+	defer r.auditDone(ae, &err)
 	ae.Details["id"] = groupID.String()
 	ae.Details["recipientIds"] = repository.UUIDsToStrings(recipients)
 	// check permissions
@@ -498,8 +502,9 @@ func (r *RecipientGroup) RemoveRecipients(
 	session *model.Session,
 	groupID *uuid.UUID,
 	recipientIDs []*uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("RecipientGroup.RemoveRecipients", session)
+	defer r.auditDone(ae, &err)
 	ae.Details["groupId"] = groupID.String()
 	ae.Details["recipientIds"] = repository.UUIDsToStrings(recipientIDs)
 	// check permissions
@@ -556,8 +561,9 @@ func (r *RecipientGroup) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("RecipientGroup.DeleteByID", session)
+	defer r.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

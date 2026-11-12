@@ -64,8 +64,9 @@ var (
 func (b *Backup) CreateBackup(
 	ctx context.Context,
 	session *model.Session,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Backup.CreateBackup", session)
+	defer b.auditDone(ae, &err)
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -101,7 +102,7 @@ func (b *Backup) CreateBackup(
 		currentBackupStatus.HasError = true
 		currentBackupStatus.ErrorMessage = err.Error()
 		b.Logger.Errorw("backup failed", "error", err)
-		b.AuditLogAuthorized(ae)
+		b.AuditLogFailed(ae, err)
 		return errs.Wrap(err)
 	} else {
 		currentBackupStatus.IsComplete = true
@@ -121,9 +122,9 @@ func (b *Backup) CreateBackup(
 	}
 
 	if currentBackupStatus.HasError {
-		ae.Details["error"] = currentBackupStatus.ErrorMessage
-		b.AuditLogAuthorized(ae)
-		return errs.Wrap(errors.New(currentBackupStatus.ErrorMessage))
+		err := errors.New(currentBackupStatus.ErrorMessage)
+		b.AuditLogFailed(ae, err)
+		return errs.Wrap(err)
 	}
 
 	b.AuditLogAuthorized(ae)
@@ -513,8 +514,7 @@ func (b *Backup) ListBackups(
 		}
 	}
 
-	ae.Details["backupCount"] = len(backupFiles)
-	b.AuditLogAuthorized(ae)
+	// no audit on read
 	return backupFiles, nil
 }
 
@@ -523,9 +523,9 @@ func (b *Backup) GetBackupFile(
 	ctx context.Context,
 	session *model.Session,
 	filename string,
-) (*os.File, error) {
+) (_ *os.File, err error) {
 	ae := NewAuditEvent("Backup.DownloadBackup", session)
-	ae.Details["filename"] = filename
+	defer b.auditDone(ae, &err)
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -543,6 +543,8 @@ func (b *Backup) GetBackupFile(
 		b.Logger.Debugw("invalid backup filename format", "filename", filename)
 		return nil, validate.WrapErrorWithField(errors.New("invalid backup filename"), "filename")
 	}
+	// the name is only recorded once it has the backup file shape
+	ae.Details["filename"] = filename
 
 	// get backup directory path
 	filesPath := strings.TrimSuffix(b.FilePath, "/")

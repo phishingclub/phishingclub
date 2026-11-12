@@ -66,6 +66,7 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import FormError from '$lib/components/FormError.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import { resourceContext } from '$lib/store/resourceContext';
 	import RemoteBrowserStream from '$lib/components/remote-browser/RemoteBrowserStream.svelte';
 	import LiveSessionBadgeDropdown from '$lib/components/remote-browser/LiveSessionBadgeDropdown.svelte';
@@ -86,6 +87,10 @@
 		closedAt: null,
 		pausedAt: null,
 		template: null,
+		// pool templates as {id, name}, the first is the primary template
+		templates: [],
+		// recipient field the template pool is mixed by, empty means department
+		templateMixBy: '',
 		isTest: false,
 		hasCustomLureCodes: false,
 		lureURLMode: 'query',
@@ -151,9 +156,113 @@
 	// results by group is hidden by default and loaded on demand
 	let showGroupedStats = false;
 	let groupedStatsLoading = false;
+	// true when the last grouped stats request failed
+	let groupedStatsFailed = false;
 	// only offer results by group when recipients actually carry a position or
 	// department to group on; determined on the server so pagination cannot hide it
 	let hasGroupData = false;
+	// true once the group data check has finished
+	let groupDataChecked = false;
+	// true when the group data check failed, so it is not known if there is a pool
+	let groupDataFailed = false;
+
+	// true when the pool holds more than one template or the recipients used more
+	// than one, so a campaign whose pool shrank still shows its template results
+	let hasTemplateGroupData = false;
+	// a campaign with more than one template shows which template each recipient got
+	$: hasPoolOfMany = (campaign.templates?.length ?? 0) > 1;
+	// name of the campaign template for rows from before template pools, empty
+	// when that template is deleted
+	$: primaryTemplateName =
+		campaign.templates?.find((x) => x.id === campaign.templateID)?.name ?? '';
+	// the details card shows this many pool templates, the rest are listed in a modal
+	const POOL_INLINE_LIMIT = 2;
+	let isPoolModalVisible = false;
+	$: hasTemplatePool = hasPoolOfMany || hasTemplateGroupData;
+	// an anonymous campaign never shows which recipient got which template
+	$: showTemplateColumn = hasTemplatePool && !campaign.isAnonymous;
+	// views that would show which template a recipient got are off on an anonymous
+	// campaign with several templates. until the pool check has finished, or when
+	// it failed, an anonymous campaign hides them too
+	$: hidesRecipientTemplate =
+		!!campaign.isAnonymous && (hasTemplatePool || !groupDataChecked || groupDataFailed);
+	// a dialog opened while the anonymous check was pending loads its template
+	// once the check allows it
+	$: if (!hidesRecipientTemplate && isSendMessageModalVisible) {
+		loadSendMessageTemplate();
+	}
+	$: if (!hidesRecipientTemplate && isLureCodeModalVisible) {
+		loadLureCodeTemplate();
+	}
+	$: recipientTemplateHiddenTitle = groupDataFailed
+		? 'Could not check the campaign templates, retrying on the next refresh'
+		: !groupDataChecked
+			? 'Checking the campaign templates'
+			: 'Not available on an anonymous campaign with several templates';
+	// without position or department data the only grouping left is by template
+	$: if (groupDataChecked && !hasGroupData && hasTemplatePool && groupedBy !== 'template') {
+		groupedBy = 'template';
+		// the section may already be open on the old grouping
+		if (showGroupedStats) {
+			setGroupedStats();
+		}
+	}
+	// with no pool left, grouping by template is gone, so go back to position
+	$: if (groupDataChecked && !hasTemplatePool && groupedBy === 'template') {
+		groupedBy = 'position';
+		if (showGroupedStats && hasGroupData) {
+			setGroupedStats();
+		}
+	}
+	const templateMixByLabels = {
+		department: 'Department',
+		position: 'Position',
+		city: 'City',
+		country: 'Country',
+		misc: 'Misc',
+		none: 'Everyone'
+	};
+
+	const groupedByLabels = { position: 'Position', department: 'Department', template: 'Template' };
+	// the results by group section title, also named by the hidden outcome tooltip
+	$: groupedStatsTitle = !hasGroupData
+		? 'Results by template'
+		: hasTemplatePool
+			? 'Results by position, department or template'
+			: 'Results by position or department';
+
+	// full template objects by id, loaded when a template is opened or needed for a recipient
+	let templateCache = {};
+	// the campaign templates the cache was filled for
+	let loadedTemplateKey = '';
+	// set on a dialog template when it could not be loaded for a reason other than
+	// the template being deleted
+	const TEMPLATE_LOAD_ERROR = 'error';
+	/**
+	 * gives null when the template is deleted and throws on any other failure
+	 * @param {string} id
+	 */
+	const loadTemplate = async (id) => {
+		if (!id) {
+			return null;
+		}
+		if (templateCache[id]) {
+			return templateCache[id];
+		}
+		const res = await api.campaignTemplate.getByID(id, true);
+		if (!res.success) {
+			if (res.statusCode === 404) {
+				return null;
+			}
+			console.error('failed to load template', res.error);
+			throw new Error(res.error || 'failed to load template');
+		}
+		templateCache[id] = res.data;
+		return res.data;
+	};
+	// the template a recipient row uses; rows from before template pools have none
+	/** @param {Object} recp */
+	const recipientTemplateID = (recp) => recp?.templateID || campaign.templateID;
 
 	// the outcomes shown for a group depend on whether it is a training campaign
 	const groupOutcomeMetrics = (r) =>
@@ -167,13 +276,33 @@
 		(r) => r.suppressed || groupOutcomeMetrics(r).some((v) => v < 0)
 	);
 
+	// counts group data checks so a late answer from an old check is dropped
+	let hasGroupDataSeq = 0;
 	const setHasGroupData = async () => {
+		const seq = ++hasGroupDataSeq;
 		try {
 			const res = await api.campaign.getHasGroupData($page.params.id);
+			if (seq !== hasGroupDataSeq) {
+				return;
+			}
+			if (!res.success) {
+				throw res.error;
+			}
 			hasGroupData = !!res.data?.hasGroupData;
+			hasTemplateGroupData = !!res.data?.hasTemplateGroupData;
+			groupDataFailed = false;
 		} catch (e) {
+			if (seq !== hasGroupDataSeq) {
+				return;
+			}
 			console.error('failed to check group data', e);
 			hasGroupData = false;
+			hasTemplateGroupData = false;
+			groupDataFailed = true;
+		} finally {
+			if (seq === hasGroupDataSeq) {
+				groupDataChecked = true;
+			}
 		}
 	};
 	// @ts-ignore
@@ -320,6 +449,22 @@
 	let reportedCSVPreview = [];
 	let reportedEmailColumn = '';
 	let reportedDateColumn = '';
+	// option labels for the column selects, one per column in file order, so the
+	// label position is the column index sent to the server
+	let reportedCSVColumnLabels = [];
+	// set when an import finished with failed rows, switches the modal to a result view
+	let reportedCSVResult = null;
+	// whole file error from the server, shown in the form
+	let reportedCSVError = '';
+	$: reportedCSVErrorsHeading = (() => {
+		if (!reportedCSVResult) return '';
+		const shown = reportedCSVResult.errors.length;
+		const total = reportedCSVResult.failed;
+		if (total > shown) {
+			return `Some rows could not be imported. First ${shown} of ${total} errors:`;
+		}
+		return `Some rows could not be imported. ${total === 1 ? 'Error' : 'Errors'}:`;
+	})();
 	let pendingEmailPreviewRecipient = null;
 	let storedCookieData = '';
 	let storedTokenData = '';
@@ -335,8 +480,14 @@
 		pendingEmailPreviewRecipient = null;
 	}
 	let sendMessageRecipient = null;
+	// undefined while loading, null when the recipient's template is deleted and
+	// TEMPLATE_LOAD_ERROR when it could not be loaded
+	let sendMessageTemplate = undefined;
 	let setAsSentRecipient = null;
 	let lureCodeRecipient = null;
+	// undefined while loading, null when the recipient's template is deleted and
+	// TEMPLATE_LOAD_ERROR when it could not be loaded
+	let lureCodeTemplate = undefined;
 	let lureCodeValue = '';
 	let lureCodeError = '';
 	/** set when the requested code is held by another recipient */
@@ -453,6 +604,8 @@
 		if (showLoading) {
 			showIsLoading();
 		}
+		// pool templates may have been edited since they were loaded
+		templateCache = {};
 		const recipientGroups = await fetchAllRows((options) => {
 			return api.recipient.getAllGroups(options, contextCompanyID);
 		});
@@ -559,12 +712,26 @@
 			}
 
 			// fetch the full template object
-			if (t.templateID) {
-				const templateRes = await api.campaignTemplate.getByID(t.templateID, true);
-				if (templateRes.success) {
-					campaign.template = templateRes.data;
-				}
+			// drop loaded templates when the campaign templates change
+			const templateKey = [t.templateID, ...(t.templates ?? []).map((x) => x.id)].join(',');
+			if (templateKey !== loadedTemplateKey) {
+				templateCache = {};
+				loadedTemplateKey = templateKey;
 			}
+			campaign.templateID = t.templateID;
+			// null when the template is deleted and TEMPLATE_LOAD_ERROR when it could not
+			// be loaded, so an old template is never shown
+			campaign.template = t.templateID
+				? await loadTemplate(t.templateID).catch(() => TEMPLATE_LOAD_ERROR)
+				: null;
+			// rows from before template pools have only templateID. built from the
+			// campaign so a failed template load does not empty the list
+			campaign.templates = t.templates?.length
+				? t.templates
+				: t.templateID
+					? [{ id: t.templateID, name: campaign.template?.name }]
+					: [];
+			campaign.templateMixBy = t.templateMixBy ?? '';
 			campaign.recipientGroups = t.recipientGroupIDs.map((id) => recipientGroupMap.byKey(id));
 			campaign.notableEventName = t.notableEventName;
 			campaign.scheduleAt = t.scheduleAt ?? null;
@@ -778,20 +945,33 @@
 		}
 	};
 
+	// counts grouped stats requests so a late answer for an old grouping is dropped
+	let groupedSeq = 0;
 	const setGroupedStats = async () => {
+		const seq = ++groupedSeq;
 		groupedStatsLoading = true;
 		try {
 			const res = await api.campaign.getGroupedResultStats($page.params.id, groupedBy);
+			if (seq !== groupedSeq) {
+				return;
+			}
 			if (!res.success) {
 				throw res.error;
 			}
 			groupedStats = res.data ?? [];
+			groupedStatsFailed = false;
 		} catch (e) {
+			if (seq !== groupedSeq) {
+				return;
+			}
 			console.error('failed to load grouped stats', e);
 			// clear so a failed dimension switch cannot leave stale rows under the new header
 			groupedStats = [];
+			groupedStatsFailed = true;
 		} finally {
-			groupedStatsLoading = false;
+			if (seq === groupedSeq) {
+				groupedStatsLoading = false;
+			}
 		}
 	};
 
@@ -801,7 +981,7 @@
 		await setGroupedStats();
 	};
 
-	/** @param {'position'|'department'} by */
+	/** @param {'position'|'department'|'template'} by */
 	const onChangeGroupedBy = async (by) => {
 		if (by === groupedBy) {
 			return;
@@ -911,8 +1091,32 @@
 		isEventsModalVisible = false;
 	};
 
+	// the template shown in the Template Details modal
+	let modalTemplate = null;
+
+	// true while the Template Details modal is loading its template
+	let isTemplateModalLoading = false;
+
+	/** @param {string} id */
 	const openTemplateModal = async (id) => {
-		isTemplateModalVisible = true;
+		if (isTemplateModalLoading) {
+			return;
+		}
+		isTemplateModalLoading = true;
+		try {
+			showIsLoading();
+			modalTemplate = await loadTemplate(id);
+			if (!modalTemplate) {
+				addToast('This template was deleted', 'Error');
+				return;
+			}
+			isTemplateModalVisible = true;
+		} catch (e) {
+			addToast('Failed to load template', 'Error');
+		} finally {
+			isTemplateModalLoading = false;
+			hideIsLoading();
+		}
 	};
 
 	const closeTemplateModal = () => {
@@ -971,12 +1175,38 @@
 		if (!recipient) {
 			return;
 		}
+		const sendRow = campaignRecipients.find((r) => r.id === campaignRecipientID);
 		sendMessageRecipient = {
 			id: campaignRecipientID,
 			name: `${recipient.firstName || ''} ${recipient.lastName || ''}`.trim(),
-			email: recipient.email
+			email: recipient.email,
+			// the recipient's own template gives the sender
+			templateID: sendRow?.templateID
 		};
+		sendMessageTemplate = undefined;
+		sendMessageRequested = null;
 		isSendMessageModalVisible = true;
+		loadSendMessageTemplate();
+	};
+
+	// the id of the recipient whose send message template was asked for
+	let sendMessageRequested = null;
+	// loads the sender of the open send message dialog once the template may be
+	// shown, also when the anonymous check finishes after the dialog opened
+	const loadSendMessageTemplate = () => {
+		const campaignRecipientID = sendMessageRecipient?.id;
+		if (!campaignRecipientID || hidesRecipientTemplate || sendMessageRequested === campaignRecipientID) {
+			return;
+		}
+		sendMessageRequested = campaignRecipientID;
+		// the sender comes from the recipient's own template
+		loadTemplate(recipientTemplateID(sendMessageRecipient))
+			.catch(() => TEMPLATE_LOAD_ERROR)
+			.then((t) => {
+				if (sendMessageRecipient?.id === campaignRecipientID) {
+					sendMessageTemplate = t;
+				}
+			});
 	};
 
 	const closeSendMessageModal = () => {
@@ -1025,7 +1255,10 @@
 	};
 
 	// path the template puts in front of the code, used for the preview
-	$: campaignURLPath = (campaign?.template?.urlPath || '').replace(/\/$/, '');
+	$: campaignURLPath =
+		lureCodeTemplate && lureCodeTemplate !== TEMPLATE_LOAD_ERROR
+			? (lureCodeTemplate.urlPath || '').replace(/\/$/, '')
+			: '';
 
 	// a path mode campaign gives every recipient a code, so the column is worth
 	// showing even before anyone sets one by hand
@@ -1038,17 +1271,43 @@
 			name: `${recp.recipient?.firstName || ''} ${recp.recipient?.lastName || ''}`.trim(),
 			email: recp.recipient?.email,
 			sentAt: recp.sentAt,
-			current: recp.lureCode || ''
+			current: recp.lureCode || '',
+			// the recipient's own template gives the domain and path
+			templateID: recp.templateID
 		};
 		lureCodeValue = recp.lureCode || '';
 		lureCodeError = '';
 		lureCodeConflict = null;
+		lureCodeTemplate = undefined;
+		lureCodeRequested = null;
 		isLureCodeModalVisible = true;
+		loadLureCodeTemplate();
+	};
+
+	// the id of the recipient whose lure code template was asked for
+	let lureCodeRequested = null;
+	// loads the template of the open lure code dialog once it may be shown, also
+	// when the anonymous check finishes after the dialog opened
+	const loadLureCodeTemplate = () => {
+		const recp = lureCodeRecipient;
+		if (!recp?.id || hidesRecipientTemplate || lureCodeRequested === recp.id) {
+			return;
+		}
+		lureCodeRequested = recp.id;
+		// the domain and path come from the recipient's own template
+		loadTemplate(recipientTemplateID(recp))
+			.catch(() => TEMPLATE_LOAD_ERROR)
+			.then((t) => {
+				if (lureCodeRecipient?.id === recp.id) {
+					lureCodeTemplate = t;
+				}
+			});
 	};
 
 	const closeLureCodeModal = () => {
 		isLureCodeModalVisible = false;
 		lureCodeRecipient = null;
+		lureCodeTemplate = undefined;
 		lureCodeValue = '';
 		lureCodeError = '';
 		lureCodeConflict = null;
@@ -1328,15 +1587,15 @@
 		return res;
 	};
 
-	// the pause action shows only while there is still delivery to stop: a scheduled
-	// campaign that has started, is not already paused or closed, and still has emails
-	// left to send
+	// the pause action shows while there is still delivery to stop: a scheduled
+	// campaign, started or not, that is not already paused or closed, has its
+	// recipients queued and still has emails left to send
 	$: canPause =
 		!campaign.closedAt &&
 		!campaign.pausedAt &&
 		!isSelfManaged &&
 		!!campaign.sendStartAt &&
-		new Date(campaign.sendStartAt) <= new Date() &&
+		campaign.notableEventName !== 'campaign_pending_schedule' &&
 		result.recipients - result.emailsSent > 0;
 	// the resume action shows while a campaign is paused and not closed
 	$: canResume = !!campaign.pausedAt && !campaign.closedAt;
@@ -1871,6 +2130,8 @@
 		papaparse.parse(file, {
 			preview: 5, // preview first 5 rows
 			skipEmptyLines: true,
+			// the server only splits on commas, so the preview must too
+			delimiter: ',',
 			complete: (results) => {
 				if (!results.data || results.data.length < 2) {
 					addToast('CSV file must have headers and at least one data row', 'Error');
@@ -1881,8 +2142,11 @@
 				reportedCSVFile = file;
 				reportedCSVHeaders = results.data[0]; // first row is headers
 				reportedCSVPreview = results.data.slice(1); // remaining rows are data preview
+				reportedCSVColumnLabels = toReportedColumnLabels(reportedCSVHeaders);
 				reportedEmailColumn = '';
 				reportedDateColumn = '';
+				reportedCSVResult = null;
+				reportedCSVError = '';
 				isReportedCSVModalVisible = true;
 
 				// clear the file input
@@ -1895,62 +2159,96 @@
 		});
 	};
 
+	// build one unique label per column. Empty or repeated headers get the
+	// column number added so each label points at exactly one column.
+	const toReportedColumnLabels = (headers) => {
+		const counts = {};
+		for (const h of headers) {
+			const name = String(h ?? '').trim();
+			counts[name] = (counts[name] || 0) + 1;
+		}
+		const used = new Set();
+		return headers.map((h, i) => {
+			const name = String(h ?? '').trim();
+			let label = name;
+			if (!name) {
+				label = `(column ${i + 1})`;
+			} else if (counts[name] > 1) {
+				label = `${name} (column ${i + 1})`;
+			}
+			// a header could already look like a generated label, keep labels unique
+			while (used.has(label)) {
+				label = `${label} (column ${i + 1})`;
+			}
+			used.add(label);
+			return label;
+		});
+	};
+
 	const closeReportedCSVModal = () => {
 		isReportedCSVModalVisible = false;
 		reportedCSVFile = null;
 		reportedCSVHeaders = [];
 		reportedCSVPreview = [];
+		reportedCSVColumnLabels = [];
 		reportedEmailColumn = '';
 		reportedDateColumn = '';
+		reportedCSVResult = null;
+		reportedCSVError = '';
 	};
 
 	const onConfirmUploadReportedCSV = async () => {
 		if (!reportedCSVFile) return;
+		reportedCSVError = '';
 
-		// validate that columns are selected
-		if (!reportedEmailColumn || !reportedDateColumn) {
-			addToast('Please select both email and date columns', 'Error');
+		// the selected label maps back to its column index
+		const emailColIndex = reportedCSVColumnLabels.indexOf(reportedEmailColumn);
+		const dateColIndex = reportedCSVColumnLabels.indexOf(reportedDateColumn);
+		if (emailColIndex < 0 || dateColIndex < 0) {
+			reportedCSVError = 'Select both the email and the date column from the list';
 			return;
 		}
-
-		const formData = new FormData();
-		formData.append('file', reportedCSVFile);
-
-		// build URL with column indices
-		const emailColIndex = reportedCSVHeaders.indexOf(reportedEmailColumn);
-		const dateColIndex = reportedCSVHeaders.indexOf(reportedDateColumn);
-
-		let url = `/api/v1/campaign/${$page.params.id}/upload/reported?emailColumn=${emailColIndex}&dateColumn=${dateColIndex}`;
 
 		try {
 			isReportedCSVSubmitting = true;
 			showIsLoading();
-			const response = await fetch(url, {
-				method: 'POST',
-				body: formData,
-				credentials: 'include'
-			});
-
-			const result = await response.json();
-
-			if (response.ok && result.success) {
-				addToast(
-					`Processed ${result.data.processed} reported entries${result.data.skipped > 0 ? `, skipped ${result.data.skipped} invalid entries` : ''}`,
-					'Success'
-				);
-				// refresh the stats, events, and recipients table
-				await setResults();
-				await refreshCampaignRecipients();
-				await getEvents();
-				closeReportedCSVModal();
-			} else {
-				// handle validation errors
-				const errorMessage = result.error || `HTTP ${response.status}`;
-				addToast(`Upload failed: ${errorMessage}`, 'Error');
+			const res = await api.campaign.uploadReported(
+				$page.params.id,
+				reportedCSVFile,
+				emailColIndex,
+				dateColIndex
+			);
+			if (!res.success) {
+				reportedCSVError = res.error || `Import failed (HTTP ${res.statusCode})`;
+				return;
 			}
+			const data = res.data || {};
+			// refresh the stats, events, and recipients table
+			await setResults();
+			await refreshCampaignRecipients();
+			await getEvents();
+
+			const processed = data.processed || 0;
+			const already = data.alreadyReported || 0;
+			const failed = data.failed || 0;
+			if (failed === 0) {
+				let msg = `Marked ${processed} ${processed === 1 ? 'recipient' : 'recipients'} as reported`;
+				if (already > 0) {
+					msg += `, ${already} already reported`;
+				}
+				addToast(msg, 'Success');
+				closeReportedCSVModal();
+				return;
+			}
+			reportedCSVResult = {
+				processed,
+				alreadyReported: already,
+				failed,
+				errors: Array.isArray(data.errors) ? data.errors : []
+			};
 		} catch (error) {
 			console.error('Upload error:', error);
-			addToast('Network error: Failed to upload CSV', 'Error');
+			reportedCSVError = 'Network error: failed to upload the CSV file';
 		} finally {
 			isReportedCSVSubmitting = false;
 			hideIsLoading();
@@ -2198,6 +2496,11 @@
 							try {
 								await setResults();
 								await setCampaign();
+								// a failed template check is tried again, so an anonymous campaign
+								// does not keep its recipient actions hidden for good
+								if (groupDataFailed) {
+									await setHasGroupData();
+								}
 								// results by group is on demand; only refresh it if the user opened it
 								if (showGroupedStats) {
 									await setGroupedStats();
@@ -2586,11 +2889,11 @@
 			{/if}
 		</div>
 
-		{#if hasGroupData}
+		{#if hasGroupData || hasTemplatePool}
 			<div class="mb-6">
 				<!-- Show sits next to the heading and starts at the left edge when it wraps -->
 				<div class="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-					<SubHeadline>Results by position or department</SubHeadline>
+					<SubHeadline>{groupedStatsTitle}</SubHeadline>
 					<button
 						type="button"
 						class="text-sm font-medium text-cta-blue hover:underline dark:text-highlight-blue transition-colors duration-200"
@@ -2600,13 +2903,15 @@
 				</div>
 
 				{#if showGroupedStats}
-					<div class="mb-4 flex gap-2">
+					<!-- the choice shows only when there is more than one way to group -->
+					<div class="mb-4 flex gap-2" class:hidden={!hasGroupData}>
 						<button
 							type="button"
 							class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 {groupedBy ===
 							'position'
 								? 'bg-cta-blue text-white'
 								: 'bg-grayblue-light dark:bg-gray-800/60 text-slate-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700/60'}"
+							aria-pressed={groupedBy === 'position'}
 							on:click={() => onChangeGroupedBy('position')}>Position</button
 						>
 						<button
@@ -2615,8 +2920,20 @@
 							'department'
 								? 'bg-cta-blue text-white'
 								: 'bg-grayblue-light dark:bg-gray-800/60 text-slate-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700/60'}"
+							aria-pressed={groupedBy === 'department'}
 							on:click={() => onChangeGroupedBy('department')}>Department</button
 						>
+						{#if hasTemplatePool}
+							<button
+								type="button"
+								class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 {groupedBy ===
+								'template'
+									? 'bg-cta-blue text-white'
+									: 'bg-grayblue-light dark:bg-gray-800/60 text-slate-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700/60'}"
+								aria-pressed={groupedBy === 'template'}
+								on:click={() => onChangeGroupedBy('template')}>Template</button
+							>
+						{/if}
 					</div>
 
 					{#if campaign.isAnonymous}
@@ -2636,50 +2953,61 @@
 						</div>
 					{/if}
 
-					<Table
-						columns={[
-							{ column: groupedBy === 'position' ? 'Position' : 'Department', size: 'large' },
-							{ column: 'Targets', size: 'small' },
-							{ column: campaign.isTraining ? 'Visited' : 'Clicked', size: 'small' },
-							{ column: campaign.isTraining ? 'Started' : 'Submitted', size: 'small' },
-							{ column: campaign.isTraining ? 'Completed' : 'Reported', size: 'small' }
-						]}
-						pagination={null}
-						noSearch
-						hasActions={false}
-						plural="groups"
-						hasData={groupedStats.length > 0}
-						hasNextPage={false}
-						isGhost={groupedStatsLoading && groupedStats.length === 0}
-					>
-						{#each groupedStats as row}
-							{@const metrics = campaign.isTraining
-								? [row.clicked, row.trainingStarted, row.trainingCompleted]
-								: [row.clicked, row.submitted, row.reported]}
-							<TableRow title={row.suppressed ? 'Group too small to show outcomes' : ''}>
-								<TableCell value={row.group} />
-								<TableCell value={String(row.total)} />
-								{#if row.suppressed}
-									<TableCell><span class="text-gray-400 dark:text-gray-500">-</span></TableCell>
-									<TableCell><span class="text-gray-400 dark:text-gray-500">-</span></TableCell>
-									<TableCell><span class="text-gray-400 dark:text-gray-500">-</span></TableCell>
-								{:else}
-									{#each metrics as val}
-										<TableCell>
-											{#if val < 0}
-												<span class="text-gray-400 dark:text-gray-500">-</span>
-											{:else}
-												{val}
-												<span class="text-gray-400 dark:text-gray-500"
-													>({row.total ? Math.round((val / row.total) * 100) : 0}%)</span
-												>
-											{/if}
-										</TableCell>
-									{/each}
-								{/if}
-							</TableRow>
-						{/each}
-					</Table>
+					{#if groupedStatsFailed && !groupedStatsLoading}
+						<div class="flex items-baseline gap-x-2 text-sm text-slate-600 dark:text-gray-300">
+							<span>Could not load results</span>
+							<button
+								type="button"
+								class="text-sm font-medium text-cta-blue hover:underline dark:text-highlight-blue transition-colors duration-200"
+								on:click={setGroupedStats}>Retry</button
+							>
+						</div>
+					{:else}
+						<Table
+							columns={[
+								{ column: groupedByLabels[groupedBy] ?? 'Group', size: 'large' },
+								{ column: 'Targets', size: 'small' },
+								{ column: campaign.isTraining ? 'Visited' : 'Clicked', size: 'small' },
+								{ column: campaign.isTraining ? 'Started' : 'Submitted', size: 'small' },
+								{ column: campaign.isTraining ? 'Completed' : 'Reported', size: 'small' }
+							]}
+							pagination={null}
+							noSearch
+							hasActions={false}
+							plural="groups"
+							hasData={groupedStats.length > 0}
+							hasNextPage={false}
+							isGhost={groupedStatsLoading && groupedStats.length === 0}
+						>
+							{#each groupedStats as row}
+								{@const metrics = campaign.isTraining
+									? [row.clicked, row.trainingStarted, row.trainingCompleted]
+									: [row.clicked, row.submitted, row.reported]}
+								<TableRow title={row.suppressed ? 'Group too small to show outcomes' : ''}>
+									<TableCell value={row.group} />
+									<TableCell value={String(row.total)} />
+									{#if row.suppressed}
+										<TableCell><span class="text-gray-400 dark:text-gray-500">-</span></TableCell>
+										<TableCell><span class="text-gray-400 dark:text-gray-500">-</span></TableCell>
+										<TableCell><span class="text-gray-400 dark:text-gray-500">-</span></TableCell>
+									{:else}
+										{#each metrics as val}
+											<TableCell>
+												{#if val < 0}
+													<span class="text-gray-400 dark:text-gray-500">-</span>
+												{:else}
+													{val}
+													<span class="text-gray-400 dark:text-gray-500"
+														>({row.total ? Math.round((val / row.total) * 100) : 0}%)</span
+													>
+												{/if}
+											</TableCell>
+										{/each}
+									{/if}
+								</TableRow>
+							{/each}
+						</Table>
+					{/if}
 				{/if}
 			</div>
 		{/if}
@@ -2729,12 +3057,35 @@
 					</div>
 
 					<div class="flex justify-between">
-						<span class="text-gray-600 dark:text-gray-400">Template:</span>
-						{#if campaign.template?.id}
+						<span class="text-gray-600 dark:text-gray-400"
+							>{hasPoolOfMany ? 'Templates:' : 'Template:'}</span
+						>
+						{#if hasPoolOfMany}
+							<div class="text-right">
+								{#each campaign.templates.slice(0, POOL_INLINE_LIMIT) as poolTemplate, i}
+									<button
+										type="button"
+										class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline text-right"
+										on:click={() => openTemplateModal(poolTemplate.id)}>{poolTemplate.name}</button
+									>{#if i !== Math.min(campaign.templates.length, POOL_INLINE_LIMIT) - 1},&nbsp;{/if}
+								{/each}
+								{#if campaign.templates.length > POOL_INLINE_LIMIT}
+									<button
+										type="button"
+										class="pc-focus rounded-sm block ml-auto text-cta-blue dark:text-highlight-blue hover:underline"
+										on:click={() => (isPoolModalVisible = true)}
+										>+{campaign.templates.length - POOL_INLINE_LIMIT} more</button
+									>
+								{/if}
+							</div>
+						{:else if campaign.template === TEMPLATE_LOAD_ERROR}
+							<span class="italic text-gray-500 dark:text-gray-400">Could not load the template</span>
+						{:else if campaign.template?.id}
 							<button
-								class="text-cta-blue dark:text-highlight-blue hover:underline text-right"
+								type="button"
+								class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline text-right"
 								on:click={() => {
-									openTemplateModal(campaign.template?.id);
+									openTemplateModal(campaign.template.id);
 								}}
 							>
 								{campaign.template?.name}
@@ -2745,6 +3096,15 @@
 							>
 						{/if}
 					</div>
+
+					{#if hasPoolOfMany}
+						<div class="flex justify-between">
+							<span class="text-gray-600 dark:text-gray-400">Balanced per:</span>
+							<span class="text-right"
+								>{templateMixByLabels[campaign.templateMixBy] ?? 'Department'}</span
+							>
+						</div>
+					{/if}
 
 					<div class="flex justify-between">
 						<span class="text-gray-600 dark:text-gray-400">Groups:</span>
@@ -3242,6 +3602,7 @@
 					{ column: 'Status', size: 'large' },
 					{ column: 'First name', size: 'small' },
 					{ column: 'Last name', size: 'small' },
+					...(showTemplateColumn ? [{ column: 'Template', size: 'medium' }] : []),
 					{ column: 'Send at', title: 'Scheduled', size: 'small' },
 					{ column: 'Sent at', title: 'Delivered', size: 'small' },
 					{ column: 'Cancelled at', size: 'small' },
@@ -3330,7 +3691,7 @@
 								{#if campaign.isAnonymous}
 									<span
 										class="text-sm italic text-gray-400 dark:text-gray-500"
-										title="Per recipient outcomes are hidden for anonymous campaigns. See Results by position or department."
+										title="Per recipient outcomes are hidden for anonymous campaigns. See {groupedStatsTitle}."
 										>Hidden</span
 									>
 								{:else}
@@ -3359,6 +3720,21 @@
 								</button>
 							</TableCell>
 						{/if}
+						{#if showTemplateColumn}
+							<!-- rows from before template pools have no template and use the primary one -->
+							<!-- the server names a deleted template "(deleted template)" -->
+							{#if recp?.templateID
+								? !recp?.template || recp.template.name === '(deleted template)'
+								: !primaryTemplateName}
+								<TableCell>
+									<span class="italic text-gray-500 dark:text-gray-400" title="The template was deleted"
+										>Deleted</span
+									>
+								</TableCell>
+							{:else}
+								<TableCell value={recp?.templateID ? recp.template.name : primaryTemplateName} />
+							{/if}
+						{/if}
 						{#if campaign.isAnonymous}
 							<!-- exact per recipient timing is withheld so it cannot be matched against
 							the anonymized event stream; a coarse sent indicator keeps self-managed usable -->
@@ -3369,7 +3745,10 @@
 								<span
 									class="text-sm {recp?.sent
 										? 'text-slate-600 dark:text-gray-200'
-										: 'text-gray-400 dark:text-gray-500'}">{recp?.sent ? 'Sent' : '-'}</span
+										: 'text-gray-400 dark:text-gray-500'}"
+									title={hasTemplatePool && !recp?.sent
+										? 'Delivery is hidden on an anonymous campaign with several templates'
+										: undefined}>{recp?.sent ? 'Sent' : '-'}</span
 								>
 							</TableCell>
 							<TableCell isDate isRelative value={recp?.cancelledAt} />
@@ -3420,8 +3799,11 @@
 										disabled={!!campaign.closedAt ||
 											!!campaign.anonymizedAt ||
 											!recp.recipient ||
+											hidesRecipientTemplate ||
 											isContextMismatch()}
-										title={isContextMismatch()
+										title={hidesRecipientTemplate && !campaign.anonymizedAt
+											? recipientTemplateHiddenTitle
+											: isContextMismatch()
 											? campaign.companyID
 												? 'Switch to company view to perform this action'
 												: 'Switch to global view to perform this action'
@@ -3460,8 +3842,11 @@
 										disabled={!!campaign.closedAt ||
 											!!campaign.anonymizedAt ||
 											!recp.recipient ||
+											hidesRecipientTemplate ||
 											isContextMismatch()}
-										title={isContextMismatch()
+										title={hidesRecipientTemplate && !campaign.anonymizedAt
+											? recipientTemplateHiddenTitle
+											: isContextMismatch()
 											? campaign.companyID
 												? 'Switch to company view to perform this action'
 												: 'Switch to global view to perform this action'
@@ -3496,8 +3881,11 @@
 										disabled={!!campaign.closedAt ||
 											!!campaign.anonymizedAt ||
 											!recp.recipient ||
+											hidesRecipientTemplate ||
 											isContextMismatch()}
-										title={isContextMismatch()
+										title={hidesRecipientTemplate && !campaign.anonymizedAt
+											? recipientTemplateHiddenTitle
+											: isContextMismatch()
 											? campaign.companyID
 												? 'Switch to company view to perform this action'
 												: 'Switch to global view to perform this action'
@@ -3554,6 +3942,32 @@
 	>
 		Are you sure you want to terminate this live session? The victim's browser will be closed.
 	</Alert>
+
+	<Modal
+		headerText="Templates"
+		visible={isPoolModalVisible}
+		onClose={() => (isPoolModalVisible = false)}
+	>
+		<div class="py-6 w-full max-w-xl">
+			<p class="mb-4 text-sm text-gray-600 dark:text-gray-300">
+				{campaign.templates?.length ?? 0} templates. Each recipient gets one of these.
+			</p>
+			<ul class="max-h-96 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700">
+				{#each campaign.templates ?? [] as poolTemplate}
+					<li class="py-2">
+						<button
+							type="button"
+							class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline text-left"
+							on:click={() => {
+								isPoolModalVisible = false;
+								openTemplateModal(poolTemplate.id);
+							}}>{poolTemplate.name}</button
+						>
+					</li>
+				{/each}
+			</ul>
+		</div>
+	</Modal>
 
 	<Modal headerText={'Events'} visible={isEventsModalVisible} onClose={closeEventsModal}>
 		<div class="mt-8"></div>
@@ -3639,19 +4053,19 @@
 					Phishing Flow
 				</h3>
 				<PageFlow
-					deliveryType={campaign.template?.email ? 'email' : 'api'}
-					deliveryName={campaign.template?.email
-						? campaign.template.email.name
-						: campaign.template?.apiSender?.name}
-					beforeName={campaign.template?.beforeLandingPage?.name ??
-						campaign.template?.beforeLandingProxy?.name}
-					beforeIsProxy={!campaign.template?.beforeLandingPage && !!campaign.template?.beforeLandingProxy}
-					landingName={campaign.template?.landingPage?.name ?? campaign.template?.landingProxy?.name}
-					landingIsProxy={!campaign.template?.landingPage && !!campaign.template?.landingProxy}
-					afterName={campaign.template?.afterLandingPage?.name ??
-						campaign.template?.afterLandingProxy?.name}
-					afterIsProxy={!campaign.template?.afterLandingPage && !!campaign.template?.afterLandingProxy}
-					redirectURL={campaign.template?.afterLandingPageRedirectURL}
+					deliveryType={modalTemplate?.email ? 'email' : 'api'}
+					deliveryName={modalTemplate?.email
+						? modalTemplate.email.name
+						: modalTemplate?.apiSender?.name}
+					beforeName={modalTemplate?.beforeLandingPage?.name ??
+						modalTemplate?.beforeLandingProxy?.name}
+					beforeIsProxy={!modalTemplate?.beforeLandingPage && !!modalTemplate?.beforeLandingProxy}
+					landingName={modalTemplate?.landingPage?.name ?? modalTemplate?.landingProxy?.name}
+					landingIsProxy={!modalTemplate?.landingPage && !!modalTemplate?.landingProxy}
+					afterName={modalTemplate?.afterLandingPage?.name ??
+						modalTemplate?.afterLandingProxy?.name}
+					afterIsProxy={!modalTemplate?.afterLandingPage && !!modalTemplate?.afterLandingProxy}
+					redirectURL={modalTemplate?.afterLandingPageRedirectURL}
 				/>
 			</div>
 
@@ -3664,57 +4078,57 @@
 					</h3>
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
 						<span class="text-grayblue-dark font-medium">Name:</span>
-						<span class="text-pc-darkblue dark:text-white">{campaign.template?.name ?? ''}</span>
+						<span class="text-pc-darkblue dark:text-white">{modalTemplate?.name ?? ''}</span>
 
 						<span class="text-grayblue-dark font-medium">Query Key:</span>
 						<span class="text-pc-darkblue dark:text-white"
-							>{campaign.template?.urlIdentifier?.name ?? ''}</span
+							>{modalTemplate?.urlIdentifier?.name ?? ''}</span
 						>
 
 						<span class="text-grayblue-dark font-medium">State Key:</span>
 						<span class="text-pc-darkblue dark:text-white"
-							>{campaign.template?.stateIdentifier?.name ?? ''}</span
+							>{modalTemplate?.stateIdentifier?.name ?? ''}</span
 						>
 
 						<span class="text-grayblue-dark font-medium">Delivery:</span>
 						<span class="text-pc-darkblue dark:text-white">
-							{#if campaign.template?.email}
-								Email ({campaign.template.email.name ?? ''})
+							{#if modalTemplate?.email}
+								Email ({modalTemplate.email.name ?? ''})
 							{:else}
-								API Sender ({campaign.template?.apiSender?.name ?? ''})
+								API Sender ({modalTemplate?.apiSender?.name ?? ''})
 							{/if}
 						</span>
 					</div>
 				</div>
 
 				<!-- Email Configuration -->
-				{#if campaign.template?.email}
+				{#if modalTemplate?.email}
 					<div class="p-6 rounded-lg">
 						<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
 							Email
 						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
 							<span class="text-grayblue-dark font-medium">Name:</span>
-							<span class="text-pc-darkblue dark:text-white">{campaign.template?.email?.name}</span>
+							<span class="text-pc-darkblue dark:text-white">{modalTemplate?.email?.name}</span>
 
 							<span class="text-grayblue-dark font-medium">Envelope:</span>
 							<span class="text-pc-darkblue dark:text-white"
-								>{campaign.template?.email?.mailEnvelopeFrom}</span
+								>{modalTemplate?.email?.mailEnvelopeFrom}</span
 							>
 
 							<span class="text-grayblue-dark font-medium">From:</span>
 							<span class="text-pc-darkblue dark:text-white"
-								>{campaign.template?.email?.mailHeaderFrom}</span
+								>{modalTemplate?.email?.mailHeaderFrom}</span
 							>
 
 							<span class="text-grayblue-dark font-medium">Subject:</span>
 							<span class="text-pc-darkblue dark:text-white"
-								>{campaign.template?.email?.mailHeaderSubject}</span
+								>{modalTemplate?.email?.mailHeaderSubject}</span
 							>
 
 							<span class="text-grayblue-dark font-medium">Tracking:</span>
 							<span class="text-pc-darkblue dark:text-white"
-								>{campaign.template?.email?.addTrackingPixel ? 'Enabled' : 'Disabled'}</span
+								>{modalTemplate?.email?.addTrackingPixel ? 'Enabled' : 'Disabled'}</span
 							>
 						</div>
 					</div>
@@ -3731,29 +4145,29 @@
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
 						<span class="text-grayblue-dark font-medium">Host Site:</span>
 						<span class="text-pc-darkblue dark:text-white"
-							>{campaign.template?.domain?.hostWebsite ? 'Yes' : 'No'}</span
+							>{modalTemplate?.domain?.hostWebsite ? 'Yes' : 'No'}</span
 						>
 
 						<span class="text-grayblue-dark font-medium">Domain:</span>
 						<span class="text-pc-darkblue dark:text-white">
 							<a
-								href="https://{campaign.template?.domain?.name}"
+								href="https://{modalTemplate?.domain?.name}"
 								target="_blank"
 								rel="noopener noreferrer"
 								class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline"
 							>
-								{campaign.template?.domain?.name}
+								{modalTemplate?.domain?.name}
 							</a>
 						</span>
 
 						<span class="text-grayblue-dark font-medium">URL Path:</span>
-						<span class="text-pc-darkblue dark:text-white">{campaign.template?.urlPath}</span>
+						<span class="text-pc-darkblue dark:text-white">{modalTemplate?.urlPath}</span>
 
 						<span class="text-grayblue-dark font-medium">TLS:</span>
 						<span class="text-pc-darkblue dark:text-white">
-							{campaign.template?.domain?.managedTLS
+							{modalTemplate?.domain?.managedTLS
 								? 'Managed'
-								: campaign.template?.domain?.ownManagedTLS
+								: modalTemplate?.domain?.ownManagedTLS
 									? 'Own'
 									: ''}
 						</span>
@@ -3761,41 +4175,41 @@
 				</div>
 
 				<!-- SMTP/API Configuration -->
-				{#if campaign.template?.smtpConfiguration || campaign.template?.apiSender}
+				{#if modalTemplate?.smtpConfiguration || modalTemplate?.apiSender}
 					<div class="p-6 rounded-lg">
 						<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-							{campaign.template?.smtpConfiguration ? 'Email SMTP' : 'API Sender'}
+							{modalTemplate?.smtpConfiguration ? 'Email SMTP' : 'API Sender'}
 						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
-							{#if campaign.template?.smtpConfiguration}
+							{#if modalTemplate?.smtpConfiguration}
 								<span class="text-grayblue-dark font-medium">Name:</span>
 								<span class="text-pc-darkblue dark:text-white"
-									>{campaign.template?.smtpConfiguration?.name}</span
+									>{modalTemplate?.smtpConfiguration?.name}</span
 								>
 
 								<span class="text-grayblue-dark font-medium">Host:</span>
 								<span class="text-pc-darkblue dark:text-white"
-									>{campaign.template?.smtpConfiguration?.host}</span
+									>{modalTemplate?.smtpConfiguration?.host}</span
 								>
 
 								<span class="text-grayblue-dark font-medium">Port:</span>
 								<span class="text-pc-darkblue dark:text-white"
-									>{campaign.template?.smtpConfiguration?.port}</span
+									>{modalTemplate?.smtpConfiguration?.port}</span
 								>
 
 								<span class="text-grayblue-dark font-medium">Username:</span>
 								<span class="text-pc-darkblue dark:text-white">
-									{campaign.template?.smtpConfiguration?.username || 'Not configured'}
+									{modalTemplate?.smtpConfiguration?.username || 'Not configured'}
 								</span>
 
 								<span class="text-grayblue-dark font-medium">Allow insecure: </span>
 								<span class="text-pc-darkblue dark:text-white">
-									{!campaign.template?.smtpConfiguration?.ignoreCertErrors ? 'Disabled' : 'Enabled'}
+									{!modalTemplate?.smtpConfiguration?.ignoreCertErrors ? 'Disabled' : 'Enabled'}
 								</span>
 							{:else}
 								<span class="text-grayblue-dark font-medium">API Sender:</span>
 								<span class="text-pc-darkblue dark:text-white"
-									>{campaign.template?.apiSender?.name}</span
+									>{modalTemplate?.apiSender?.name}</span
 								>
 							{/if}
 						</div>
@@ -4058,9 +4472,19 @@
 						<p class="text-gray-600 dark:text-gray-300 transition-colors duration-200">
 							{sendMessageRecipient.email}
 						</p>
+						{#if !hidesRecipientTemplate}
 						<p class="text-xs text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-200">
-							Sender type: {campaign.template?.smtpConfigurationID ? 'SMTP' : 'API Sender'}
+							Sender type: {sendMessageTemplate === undefined
+								? '...'
+								: sendMessageTemplate === null
+									? 'Unknown, the template was deleted'
+									: sendMessageTemplate === TEMPLATE_LOAD_ERROR
+										? 'Could not load the template'
+										: sendMessageTemplate.smtpConfigurationID
+										? 'SMTP'
+										: 'API Sender'}
 						</p>
+						{/if}
 						{#if recipient.sentAt}
 							<p class="mt-2 rounded-md px-3 py-2 text-sm bg-yellow-50 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200">
 								Previously sent on {shortDateTime(recipient.sentAt)}
@@ -4094,9 +4518,15 @@
 				>
 
 				<p class="mt-2 text-sm text-gray-600 dark:text-gray-300 break-all">
-					{lureCodeValue
-						? `https://${campaign.template?.domain?.name ?? 'domain'}${campaignURLPath}/${lureCodeValue}`
-						: 'Matched exactly as written, so case and separators are kept.'}
+					{lureCodeTemplate === null && !hidesRecipientTemplate
+						? 'The template for this recipient was deleted, so the full URL is unknown.'
+						: lureCodeTemplate === TEMPLATE_LOAD_ERROR && !hidesRecipientTemplate
+							? 'Could not load the template, so the full URL is unknown.'
+							: lureCodeValue && !hidesRecipientTemplate
+								? lureCodeTemplate === undefined
+									? 'Loading...'
+									: `https://${lureCodeTemplate?.domain?.name ?? 'domain'}${campaignURLPath}/${lureCodeValue}`
+								: 'Matched exactly as written, so case and separators are kept.'}
 				</p>
 
 				<p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -4325,48 +4755,137 @@
 		isSubmitting={isReportedCSVSubmitting}
 		noAutoFocus={true}
 	>
-		<FormGrid on:submit={onConfirmUploadReportedCSV} isSubmitting={isReportedCSVSubmitting}>
-			<FormColumns>
-				<FormColumn>
-					<p class="text-sm text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
-						Pick the columns with the email address and the report date.
-					</p>
+		{#if reportedCSVResult}
+			<div class="p-6 max-h-[80vh] overflow-y-auto text-gray-700 dark:text-gray-300">
+				<div class="space-y-6">
+					<ul class="space-y-1">
+						<li>Marked as reported: {reportedCSVResult.processed}</li>
+						{#if reportedCSVResult.alreadyReported > 0}
+							<li>Already reported: {reportedCSVResult.alreadyReported}</li>
+						{/if}
+						<li>Could not be imported: {reportedCSVResult.failed}</li>
+					</ul>
 
-					<TextFieldSelect
-						required
-						id="reported-email-column"
-						bind:value={reportedEmailColumn}
-						options={reportedCSVHeaders}
-						placeholder="Select email column...">Email Column</TextFieldSelect
-					>
-
-					<TextFieldSelect
-						required
-						id="reported-date-column"
-						bind:value={reportedDateColumn}
-						options={reportedCSVHeaders}
-						placeholder="Select date column...">Date Column</TextFieldSelect
-					>
-				</FormColumn>
-				<FormColumn overflowX={true}>
-					<Table
-						columns={reportedCSVHeaders.map((h) => ({ column: h, size: 'small' }))}
-						hasData={!!reportedCSVPreview.length}
-						plural="rows"
-					>
-						{#each reportedCSVPreview as row}
-							<TableRow>
-								{#each row as cell}
-									<TableCell value={cell} />
+					<div class="border-t border-gray-200 dark:border-gray-700 pt-6">
+						{#if reportedCSVResult.errors.length > 0}
+							<p class="text-sm">{reportedCSVErrorsHeading}</p>
+							<div
+								class="mt-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 space-y-1"
+							>
+								{#each reportedCSVResult.errors as err}
+									<div class="py-2 px-3 text-sm text-gray-900 dark:text-gray-100 break-words">
+										<span class="font-semibold">Line {err.line}:</span>
+										{err.reason}
+									</div>
 								{/each}
-								<TableCellEmpty />
-							</TableRow>
-						{/each}
-					</Table>
-				</FormColumn>
-			</FormColumns>
-			<FormFooter closeModal={closeReportedCSVModal} isSubmitting={isReportedCSVSubmitting} />
-		</FormGrid>
+							</div>
+						{:else}
+							<p class="text-sm">Some rows could not be imported.</p>
+						{/if}
+						<p class="mt-3 text-sm text-gray-500 dark:text-gray-400">
+							Fix these rows in the file and import it again. Rows already marked as
+							reported are not counted twice.
+						</p>
+					</div>
+				</div>
+				<div class="mt-6 flex justify-end">
+					<Button on:click={closeReportedCSVModal}>Close</Button>
+				</div>
+			</div>
+		{:else}
+			<FormGrid on:submit={onConfirmUploadReportedCSV} isSubmitting={isReportedCSVSubmitting}>
+				<FormColumns>
+					<FormColumn>
+						<p class="text-sm text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
+							Pick the columns with the email address and the report date.
+						</p>
+
+						<TextFieldSelect
+							required
+							id="reported-email-column"
+							bind:value={reportedEmailColumn}
+							options={reportedCSVColumnLabels}
+							placeholder="Select email column...">Email Column</TextFieldSelect
+						>
+
+						<TextFieldSelect
+							required
+							id="reported-date-column"
+							bind:value={reportedDateColumn}
+							options={reportedCSVColumnLabels}
+							placeholder="Select date column...">Date Column</TextFieldSelect
+						>
+					</FormColumn>
+					<FormColumn overflowX={true}>
+						<Table
+							columns={reportedCSVColumnLabels.map((h) => ({ column: h, size: 'small' }))}
+							hasData={!!reportedCSVPreview.length}
+							plural="rows"
+						>
+							{#each reportedCSVPreview as row}
+								<TableRow>
+									{#each row as cell}
+										<TableCell value={cell} />
+									{/each}
+									<TableCellEmpty />
+								</TableRow>
+							{/each}
+						</Table>
+					</FormColumn>
+				</FormColumns>
+				<div class="px-1 sm:px-6 pb-4">
+					<details class="text-sm text-gray-600 dark:text-gray-300 group">
+						<summary
+							class="cursor-pointer select-none font-semibold text-pc-darkblue dark:text-white list-none flex items-center gap-2"
+						>
+							<svg
+								class="w-4 h-4 transition-transform group-open:rotate-90"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+								aria-hidden="true"
+							>
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+							</svg>
+							Supported date formats
+						</summary>
+						<ul class="mt-2 ml-6 space-y-1 list-disc">
+							<li>
+								ISO 8601: <code>2024-03-05T14:30:00Z</code>,
+								<code>2024-03-05T14:30:00+02:00</code> or <code>2024-03-05T14:30:00</code>.
+								Fractional seconds are fine.
+							</li>
+							<li>
+								<code>YYYY-MM-DD HH:MM:SS</code>, <code>YYYY-MM-DD HH:MM</code>,
+								<code>YYYY-MM-DD</code>
+							</li>
+							<li>
+								<code>MM/DD/YYYY</code> month first, e.g. <code>3/5/2024 9:05</code>
+							</li>
+							<li><code>DD-MM-YYYY</code> day first</li>
+							<li><code>YYYY/MM/DD</code></li>
+						</ul>
+						<p class="mt-2">
+							The last three take an optional <code>HH:MM</code> or <code>HH:MM:SS</code> time.
+							Leading zeros are optional in <code>MM/DD/YYYY</code> and <code>DD-MM-YYYY</code>.
+							A time without a zone is read as UTC.
+							<code>DD/MM/YYYY</code> with slashes is read month first, so use dashes for day
+							first.
+						</p>
+					</details>
+				</div>
+				{#if reportedCSVError}
+					<div class="mt-4">
+						<FormError message={reportedCSVError} />
+					</div>
+				{/if}
+				<FormFooter
+					closeModal={closeReportedCSVModal}
+					isSubmitting={isReportedCSVSubmitting}
+					okText="Import"
+				/>
+			</FormGrid>
+		{/if}
 	</Modal>
 	<DeleteAlert
 		name={`${deleteEventValues.eventName} event for ${deleteEventValues.name}`}

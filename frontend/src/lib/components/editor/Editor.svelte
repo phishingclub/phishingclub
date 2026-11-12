@@ -196,6 +196,22 @@
 	let editorContainer = null;
 	let isExpanded = false;
 
+	// reports are printed by Chromium on A4 portrait with no margins, laid out
+	// at 794px wide (210mm at 96 dpi). the report preview lays the document out
+	// at that width and scales it to fit the pane, so lines wrap like in the PDF.
+	// page breaks are not drawn because only Chromium knows where they fall.
+	const A4_WIDTH_PX = 794;
+	$: isA4Preview = contentType === 'report';
+	let pageViewWidth = 0;
+	let pageViewHeight = 0;
+	$: pageGap = pageViewWidth < 480 ? 8 : 16;
+	$: pageScale =
+		pageViewWidth > 0
+			? Math.min(1.5, Math.max(0.1, (pageViewWidth - pageGap * 2) / A4_WIDTH_PX))
+			: 1;
+	$: pageShownWidth = A4_WIDTH_PX * pageScale;
+	$: pageShownHeight = Math.max(0, pageViewHeight - pageGap * 2);
+
 	const apiTemplates = [
 		{ label: 'Custom Field 1', text: '{{.CustomField1}}' },
 		{ label: 'Custom Field 2', text: '{{.CustomField2}}' },
@@ -369,6 +385,46 @@
 {{end}}`
 			}
 		],
+		Screenshots: [
+			{
+				label: 'Email Screenshot',
+				text: '{{if .EmailScreenshot}}<img src="{{.EmailScreenshot}}" style="width:100%">{{end}}'
+			},
+			{ label: 'Email From', text: '{{.EmailFrom}}' },
+			{ label: 'Email Subject', text: '{{.EmailSubject}}' },
+			{
+				label: 'Before Landing Page Screenshot',
+				text: '{{if .BeforeLandingPageScreenshot}}<img src="{{.BeforeLandingPageScreenshot}}" style="width:100%">{{end}}'
+			},
+			{
+				label: 'Landing Page Screenshot',
+				text: '{{if .LandingPageScreenshot}}<img src="{{.LandingPageScreenshot}}" style="width:100%">{{end}}'
+			},
+			{
+				label: 'After Landing Page Screenshot',
+				text: '{{if .AfterLandingPageScreenshot}}<img src="{{.AfterLandingPageScreenshot}}" style="width:100%">{{end}}'
+			},
+			{ label: 'Template Count', text: '{{.TemplateCount}}' },
+			{
+				label: 'More than one template (if)',
+				text: `{{if gt .TemplateCount 1}}
+
+{{else}}
+
+{{end}}`
+			},
+			{
+				label: 'Screenshots per template (loop)',
+				text: `{{range $t := .TemplateScreenshots}}
+<h2>Template {{$t.Number}} of {{$.TemplateCount}}: {{$t.Name}}</h2>
+{{if $t.Email}}<p>From: {{$t.EmailFrom}}<br>Subject: {{$t.EmailSubject}}</p>
+<img src="{{$t.Email}}" style="width:100%">{{end}}
+{{if $t.BeforeLandingPage}}<img src="{{$t.BeforeLandingPage}}" style="width:100%">{{end}}
+{{if $t.LandingPage}}<img src="{{$t.LandingPage}}" style="width:100%">{{end}}
+{{if $t.AfterLandingPage}}<img src="{{$t.AfterLandingPage}}" style="width:100%">{{end}}
+{{end}}`
+			}
+		],
 		Recipients: [
 			{
 				label: 'Recipient rows (loop)',
@@ -388,8 +444,9 @@
 	};
 
 	// sample data for the live preview only. the real report is rendered by Go's
-	// html/template on the server; this approximates the subset it uses (printf, if
-	// blocks, range loops) so the preview shows values, not raw tags.
+	// text/template on the server; the preview engine below imitates the subset it
+	// uses (fields, $ and range variables, if/else, range, compare and printf) so
+	// the preview shows values, not raw tags.
 	const sampleDepartmentGroups = [
 		{ Group: 'Engineering', Total: 70, Clicked: 21, ClickedPercent: '30', Submitted: 9, SubmittedPercent: '13', Reported: 11, ReportedPercent: '16', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false },
 		{ Group: 'Sales', Total: 49, Clicked: 20, ClickedPercent: '41', Submitted: 10, SubmittedPercent: '20', Reported: 4, ReportedPercent: '8', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false },
@@ -400,6 +457,28 @@
 		{ Group: 'Account Executive', Total: 35, Clicked: 14, ClickedPercent: '40', Submitted: 7, SubmittedPercent: '20', Reported: 3, ReportedPercent: '9', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false },
 		{ Group: 'Other (small groups)', Total: 1, Clicked: 0, ClickedPercent: '0', Submitted: 0, SubmittedPercent: '0', Reported: 0, ReportedPercent: '0', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: true }
 	];
+	// neutral placeholder image standing in for a screenshot in the preview.
+	// the label is fixed text from this file, never user input
+	const screenshotPlaceholder = (label) =>
+		'data:image/svg+xml,' +
+		encodeURIComponent(
+			`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">` +
+				`<rect width="800" height="500" fill="#f3f4f6"/>` +
+				`<rect x="12" y="12" width="776" height="476" fill="none" stroke="#d1d5db" stroke-width="2" stroke-dasharray="10 8"/>` +
+				`<text x="400" y="240" text-anchor="middle" font-family="sans-serif" font-size="30" fill="#6b7280">${label}</text>` +
+				`<text x="400" y="282" text-anchor="middle" font-family="sans-serif" font-size="18" fill="#9ca3af">Sample placeholder</text>` +
+				`</svg>`
+		);
+	const sampleTemplateScreenshots = [1, 2].map((n) => ({
+		Number: n,
+		Name: `Sample template ${n}`,
+		Email: screenshotPlaceholder(`Template ${n}: email screenshot`),
+		EmailFrom: `it-support@sample${n}.test`,
+		EmailSubject: `Sample subject for template ${n}`,
+		BeforeLandingPage: screenshotPlaceholder(`Template ${n}: before landing page screenshot`),
+		LandingPage: screenshotPlaceholder(`Template ${n}: landing page screenshot`),
+		AfterLandingPage: screenshotPlaceholder(`Template ${n}: after landing page screenshot`)
+	}));
 	const reportSampleData = {
 		CampaignName: 'Q1 Phishing Simulation',
 		CompanyName: 'World Corp',
@@ -437,6 +516,15 @@
 		Groups: sampleDepartmentGroups,
 		DepartmentGroups: sampleDepartmentGroups,
 		PositionGroups: samplePositionGroups,
+		// two templates, so the default report previews its per template section
+		TemplateCount: sampleTemplateScreenshots.length,
+		TemplateScreenshots: sampleTemplateScreenshots,
+		EmailScreenshot: sampleTemplateScreenshots[0].Email,
+		EmailFrom: sampleTemplateScreenshots[0].EmailFrom,
+		EmailSubject: sampleTemplateScreenshots[0].EmailSubject,
+		BeforeLandingPageScreenshot: sampleTemplateScreenshots[0].BeforeLandingPage,
+		LandingPageScreenshot: sampleTemplateScreenshots[0].LandingPage,
+		AfterLandingPageScreenshot: sampleTemplateScreenshots[0].AfterLandingPage,
 		Recipients: [
 			{ FirstName: 'Alice', LastName: 'Andersen', Email: 'alice@worldcorp.test', Department: 'Research and Development', Position: 'Head of operations', ClickedLink: true, SubmittedData: true, Reported: false },
 			{ FirstName: 'Bob', LastName: 'Berg', Email: 'bob@worldcorp.test', Department: 'Sales', Position: 'Account Executive', ClickedLink: true, SubmittedData: false, Reported: false },
@@ -451,123 +539,223 @@
 		return String(val ?? '');
 	}
 
-	// test one template condition against the preview data: a bare field ".X"
-	// (truthiness) or a comparison "lt/gt/eq .X N" as used by the report group cells.
-	// pure string and number matching, no code execution
-	function matchReportCondition(expr, ctx) {
-		const cmp = /^(lt|gt|eq)\s+\.(\w+)\s+(-?[\d.]+)$/.exec(expr.trim());
-		if (cmp) {
-			const left = Number(ctx[cmp[2]]) || 0;
-			const right = Number(cmp[3]);
-			if (cmp[1] === 'lt') return left < right;
-			if (cmp[1] === 'gt') return left > right;
-			return left === right;
+	// Go template truthiness: false, 0, "", nil and empty lists are false
+	function reportTruthy(v) {
+		if (Array.isArray(v)) return v.length > 0;
+		if (v !== null && typeof v === 'object') return Object.keys(v).length > 0;
+		return !!v;
+	}
+
+	// the template functions the preview understands. pure value functions, no
+	// code execution; anything else is left in the preview as written
+	const reportFuncs = {
+		not: (a) => !reportTruthy(a),
+		and: (...a) => {
+			const i = a.findIndex((x) => !reportTruthy(x));
+			return i === -1 ? a[a.length - 1] : a[i];
+		},
+		or: (...a) => {
+			const i = a.findIndex((x) => reportTruthy(x));
+			return i === -1 ? a[a.length - 1] : a[i];
+		},
+		eq: (a, b) => a === b || String(a) === String(b),
+		ne: (a, b) => !(a === b || String(a) === String(b)),
+		lt: (a, b) => (Number(a) || 0) < (Number(b) || 0),
+		le: (a, b) => (Number(a) || 0) <= (Number(b) || 0),
+		gt: (a, b) => (Number(a) || 0) > (Number(b) || 0),
+		ge: (a, b) => (Number(a) || 0) >= (Number(b) || 0),
+		len: (a) => (Array.isArray(a) || typeof a === 'string' ? a.length : 0),
+		mul: (a, b) => (Number(a) || 0) * (Number(b) || 0),
+		printf: (fmt, v) => goFormatFloat(fmt, v)
+	};
+
+	const REPORT_UNSUPPORTED = Symbol('unsupported');
+	// the deepest nesting of blocks the preview renders, and the most blocks
+	// it renders in all, so nested loops can not grow without end
+	const REPORT_MAX_DEPTH = 100;
+	const REPORT_MAX_STEPS = 100000;
+
+	// look up one argument: a literal, the dot, a field (.X, $.X, $t.X) or a
+	// variable ($, $t). only own properties of the sample data and of the
+	// variables are read
+	function reportValue(tok, scope) {
+		if (/^-?\d+(\.\d+)?$/.test(tok)) return Number(tok);
+		if (/^"[^"]*"$/.test(tok)) return tok.slice(1, -1);
+		if (tok === 'true' || tok === 'false') return tok === 'true';
+		if (tok === '.') return scope.dot;
+		const m = /^(\$\w*)?((?:\.\w+)*)$/.exec(tok);
+		if (!m || (!m[1] && !m[2])) return REPORT_UNSUPPORTED;
+		let v;
+		if (m[1] === undefined) v = scope.dot;
+		else if (m[1] === '$') v = scope.root;
+		else {
+			const name = m[1].slice(1);
+			v = Object.prototype.hasOwnProperty.call(scope.vars, name) ? scope.vars[name] : undefined;
 		}
-		const bare = /^\.(\w+)$/.exec(expr.trim());
-		return bare ? !!ctx[bare[1]] : false;
-	}
-
-	// resolve {{if .X}} / {{else if .Y}} / {{else}} / {{end}} chains against a
-	// scope, honouring nested blocks so the matching {{end}} is found correctly
-	function resolveReportConditionals(text, ctx) {
-		for (;;) {
-			const start = text.indexOf('{{if ');
-			if (start === -1) break;
-			const head = /^\{\{if\s+([^}]+?)\}\}/.exec(text.slice(start));
-			if (!head) break;
-			const tokenRe = /\{\{if\b[^}]*\}\}|\{\{range\b[^}]*\}\}|\{\{else if\s+([^}]+?)\}\}|\{\{else\}\}|\{\{end\}\}/g;
-			tokenRe.lastIndex = start + head[0].length;
-			let depth = 1;
-			let endStop = -1;
-			const parts = [{ cond: head[1], from: start + head[0].length, to: -1 }];
-			let m;
-			while ((m = tokenRe.exec(text)) !== null) {
-				const tok = m[0];
-				if (tok.startsWith('{{if') || tok.startsWith('{{range')) {
-					depth += 1;
-				} else if (tok === '{{end}}') {
-					depth -= 1;
-					if (depth === 0) {
-						parts[parts.length - 1].to = m.index;
-						endStop = m.index + tok.length;
-						break;
-					}
-				} else if (depth === 1) {
-					parts[parts.length - 1].to = m.index;
-					parts.push({ cond: tok === '{{else}}' ? null : m[1], from: m.index + tok.length, to: -1 });
-				}
-			}
-			if (endStop === -1) break; // unbalanced, stop to avoid a loop
-			let chosen = '';
-			for (const p of parts) {
-				if (p.cond === null || matchReportCondition(p.cond, ctx)) {
-					chosen = text.slice(p.from, p.to);
-					break;
-				}
-			}
-			text = text.slice(0, start) + chosen + text.slice(endStop);
+		for (const key of m[2].split('.').slice(1)) {
+			v =
+				v !== null && typeof v === 'object' && Object.prototype.hasOwnProperty.call(v, key)
+					? v[key]
+					: undefined;
 		}
-		return text;
+		return v;
 	}
 
-	// resolve if blocks, printf, mul and bare fields against one scope (the root
-	// report data, or one row inside a range loop)
-	function renderReportScope(text, ctx) {
-		text = resolveReportConditionals(text, ctx);
-		text = text.replace(
-			/\{\{printf\s+"([^"]+)"\s+\(mul\s+\.(\w+)\s+([\d.]+)\)\}\}/g,
-			(_m, fmt, key, n) => goFormatFloat(fmt, (Number(ctx[key]) || 0) * Number(n))
-		);
-		text = text.replace(
-			/\{\{printf\s+"([^"]+)"\s+\.(\w+)\}\}/g,
-			(_m, fmt, key) => goFormatFloat(fmt, ctx[key])
-		);
-		text = text.replace(/\{\{\.(\w+)\}\}/g, (_m, key) =>
-			ctx[key] !== undefined && typeof ctx[key] !== 'object' ? String(ctx[key]) : ''
-		);
-		return text;
-	}
-
-	// expand a range loop by its balanced end, so a nested if inside the loop
-	// body does not cut the match short at the wrong {{end}}
-	function expandReportRange(text, name, items) {
-		const open = '{{range .' + name + '}}';
-		let idx;
-		while ((idx = text.indexOf(open)) !== -1) {
-			const innerStart = idx + open.length;
-			const tokenRe = /\{\{range\b[^}]*\}\}|\{\{if\b[^}]*\}\}|\{\{end\}\}/g;
-			tokenRe.lastIndex = innerStart;
-			let depth = 1;
-			let innerEnd = -1;
-			let endStop = -1;
-			let m;
-			while ((m = tokenRe.exec(text)) !== null) {
-				if (m[0] === '{{end}}') {
-					depth -= 1;
-					if (depth === 0) {
-						innerEnd = m.index;
-						endStop = m.index + m[0].length;
-						break;
-					}
+	// evaluate one pipeline like `gt $.TemplateCount (len $.TemplateScreenshots)`.
+	// returns REPORT_UNSUPPORTED for anything the preview does not know
+	function evalReportExpr(expr, scope) {
+		const tokens = expr.match(/"[^"]*"|\(|\)|[^\s()]+/g) || [];
+		let i = 0;
+		const command = () => {
+			const items = [];
+			while (i < tokens.length && tokens[i] !== ')') {
+				if (tokens[i] === '(') {
+					i += 1;
+					const v = command();
+					if (tokens[i] !== ')') return REPORT_UNSUPPORTED;
+					i += 1;
+					items.push({ value: v });
 				} else {
-					depth += 1;
+					items.push({ tok: tokens[i] });
+					i += 1;
 				}
 			}
-			if (endStop === -1) break; // unbalanced, leave as is
-			const inner = text.slice(innerStart, innerEnd);
-			const rendered = items.map((it) => renderReportScope(inner, it)).join('');
-			text = text.slice(0, idx) + rendered + text.slice(endStop);
-		}
-		return text;
+			if (!items.length) return REPORT_UNSUPPORTED;
+			const head = items[0];
+			const isFunc =
+				head.tok !== undefined && Object.prototype.hasOwnProperty.call(reportFuncs, head.tok);
+			const args = (isFunc ? items.slice(1) : items).map((it) =>
+				it.tok !== undefined ? reportValue(it.tok, scope) : it.value
+			);
+			if (args.includes(REPORT_UNSUPPORTED)) return REPORT_UNSUPPORTED;
+			if (isFunc) return reportFuncs[head.tok](...args);
+			return args.length === 1 ? args[0] : REPORT_UNSUPPORTED;
+		};
+		const value = command();
+		return i === tokens.length ? value : REPORT_UNSUPPORTED;
 	}
 
-	// expand the range loops, then render the top level scope
+	// parse the template into text, actions and if/range/with blocks, matching
+	// each {{end}} to its own opening tag so nested blocks stay balanced
+	function parseReportTemplate(text) {
+		// the list a still open block is appending to: its else part once
+		// reached, otherwise its last branch or its body
+		const openBody = (node) =>
+			node.elseBody ?? (node.branches ? node.branches[node.branches.length - 1].body : node.body);
+		const root = { body: [] };
+		const stack = [];
+		let current = root.body;
+		let last = 0;
+		// scanned with indexOf so the time stays linear in the template size
+		for (;;) {
+			const open = text.indexOf('{{', last);
+			if (open === -1) break;
+			const close = text.indexOf('}}', open + 2);
+			if (close === -1) break;
+			if (open > last) current.push({ type: 'text', value: text.slice(last, open) });
+			last = close + 2;
+			const raw = text.slice(open, last);
+			// "{{- " and " -}}" are trim markers
+			const inner = text
+				.slice(open + 2, close)
+				.replace(/^-\s/, '')
+				.replace(/\s-$/, '')
+				.trim();
+			const block = stack[stack.length - 1];
+			if (stack.length > REPORT_MAX_DEPTH) {
+				// too deep to be a real report, the rest is shown as written
+				current.push({ type: 'text', value: text.slice(open) });
+				return root.body;
+			}
+			let k;
+			if (inner.startsWith('/*')) {
+				continue;
+			} else if ((k = /^(if|with)\s+([\s\S]+)$/.exec(inner))) {
+				const node = { type: k[1], branches: [{ expr: k[2], body: [] }], elseBody: null };
+				current.push(node);
+				stack.push(node);
+				current = node.branches[0].body;
+			} else if ((k = /^range\s+(?:(\$\w+)\s*(?:,\s*(\$\w+)\s*)?:=\s*)?([\s\S]+)$/.exec(inner))) {
+				// with two variables Go binds the index first and the element second
+				const node = {
+					type: 'range',
+					indexVar: k[2] ? k[1] : null,
+					itemVar: k[2] || k[1] || null,
+					expr: k[3],
+					body: [],
+					elseBody: null
+				};
+				current.push(node);
+				stack.push(node);
+				current = node.body;
+			} else if (block && (k = /^else\s+if\s+([\s\S]+)$/.exec(inner)) && block.type === 'if') {
+				const branch = { expr: k[1], body: [] };
+				block.branches.push(branch);
+				current = branch.body;
+			} else if (block && inner === 'else') {
+				block.elseBody = [];
+				current = block.elseBody;
+			} else if (block && inner === 'end') {
+				stack.pop();
+				current = stack.length ? openBody(stack[stack.length - 1]) : root.body;
+			} else {
+				current.push({ type: 'action', expr: inner, raw });
+			}
+		}
+		if (last < text.length) current.push({ type: 'text', value: text.slice(last) });
+		return root.body;
+	}
+
+	function renderReportNodes(nodes, scope) {
+		let out = '';
+		for (const node of nodes) {
+			scope.steps.left -= 1;
+			if (scope.steps.left < 0) {
+				throw new Error('report preview too large');
+			}
+			if (node.type === 'text') {
+				out += node.value;
+			} else if (node.type === 'action') {
+				const v = evalReportExpr(node.expr, scope);
+				if (v === REPORT_UNSUPPORTED) out += node.raw;
+				else if (v !== undefined && v !== null && typeof v !== 'object') out += String(v);
+			} else if (node.type === 'if') {
+				const hit = node.branches.find((b) => reportTruthy(evalReportExpr(b.expr, scope)));
+				if (hit) out += renderReportNodes(hit.body, scope);
+				else if (node.elseBody) out += renderReportNodes(node.elseBody, scope);
+			} else if (node.type === 'with') {
+				const v = evalReportExpr(node.branches[0].expr, scope);
+				if (reportTruthy(v)) out += renderReportNodes(node.branches[0].body, { ...scope, dot: v });
+				else if (node.elseBody) out += renderReportNodes(node.elseBody, scope);
+			} else if (node.type === 'range') {
+				const v = evalReportExpr(node.expr, scope);
+				const items = Array.isArray(v) ? v : [];
+				if (!items.length && node.elseBody) out += renderReportNodes(node.elseBody, scope);
+				items.forEach((item, idx) => {
+					const vars = Object.assign(Object.create(null), scope.vars);
+					if (node.indexVar) vars[node.indexVar.slice(1)] = idx;
+					if (node.itemVar) vars[node.itemVar.slice(1)] = item;
+					out += renderReportNodes(node.body, { root: scope.root, dot: item, vars, steps: scope.steps });
+				});
+			}
+		}
+		return out;
+	}
+
+	// render the report template against the sample data. the dot and $ both
+	// start at the root report data, like Go's Execute
 	function renderReportPreview(text) {
-		text = expandReportRange(text, 'Recipients', reportSampleData.Recipients);
-		text = expandReportRange(text, 'DepartmentGroups', reportSampleData.DepartmentGroups);
-		text = expandReportRange(text, 'PositionGroups', reportSampleData.PositionGroups);
-		text = expandReportRange(text, 'Groups', reportSampleData.Groups);
-		return renderReportScope(text, reportSampleData);
+		try {
+			return renderReportNodes(parseReportTemplate(text), {
+				root: reportSampleData,
+				dot: reportSampleData,
+				vars: Object.create(null),
+				steps: { left: REPORT_MAX_STEPS }
+			});
+		} catch (e) {
+			// a template the preview can not render is shown as written
+			return text;
+		}
 	}
 
 	switch (contentType) {
@@ -593,6 +781,25 @@
 			break;
 		}
 	}
+
+	// replace the whole content from the parent while the editor is open, as the
+	// editor only reads value when it mounts. keepUndo lets ctrl+z bring the old
+	// content back
+	export const replaceContent = (text, keepUndo = false) => {
+		value = text;
+		if (!editor) return;
+		const model = editor.getModel();
+		if (keepUndo) {
+			editor.pushUndoStop();
+			editor.executeEdits('replace-content', [{ range: model.getFullModelRange(), text }]);
+			editor.pushUndoStop();
+		} else {
+			model.setValue(text);
+		}
+		// measure again once the new content is drawn, so lines wrap at the
+		// editor width
+		requestAnimationFrame(() => editor?.layout());
+	};
 
 	const insertTemplate = (text) => {
 		if (editor) {
@@ -658,6 +865,8 @@
 		// vim mode will be initialized by reactive statement if needed
 
 		editor.getModel().onDidChangeContent((e) => {
+			// the bound value follows every edit, only the preview waits
+			value = editor.getValue();
 			if (previewRenderDelayID) {
 				clearTimeout(previewRenderDelayID);
 				previewRenderDelayID = null;
@@ -999,7 +1208,30 @@
 		const content = await replaceTemplateVariables(v);
 		// open the current content isolated in a new tab through the backend so it
 		// gets its own sandbox policy and loads its own external resources
-		submitPreviewForm(content, '_blank');
+		submitPreviewForm(isA4Preview ? wrapA4Page(content) : content, '_blank');
+	};
+
+	// a page that shows the report at A4 width on a neutral backdrop. the report
+	// sits in a sandboxed srcdoc frame inside the sandboxed preview response, so
+	// it stays isolated and its own html and body styles are untouched
+	const wrapA4Page = (html) => {
+		const isDark = document.documentElement.classList.contains('dark');
+		const backdrop = isDark ? '#4b5563' : '#e5e7eb';
+		const srcdoc = String(html ?? '')
+			.replace(/&/g, '&amp;')
+			.replace(/"/g, '&quot;');
+		return (
+			'<!doctype html><html><head><meta charset="utf-8">' +
+			'<meta name="viewport" content="width=device-width, initial-scale=1">' +
+			'<title>Report Preview</title><style>' +
+			`html,body{margin:0;height:100%;background:${backdrop}}` +
+			'body{box-sizing:border-box;padding:24px 0}' +
+			`iframe{display:block;width:${A4_WIDTH_PX}px;height:100%;margin:0 auto;border:0;` +
+			'background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2),0 4px 16px rgba(0,0,0,.12)}' +
+			'</style></head><body>' +
+			'<iframe title="Report" sandbox="allow-forms allow-modals allow-popups allow-scripts" ' +
+			`srcdoc="${srcdoc}"></iframe></body></html>`
+		);
 	};
 
 	const triggerFileInput = () => {
@@ -1289,11 +1521,37 @@
 			</div>
 			{#if isPreviewVisible}
 				<div
-					class="w-full md:w-1/2 min-w-0 border border-gray-300 dark:border-gray-600 bg-white transition-colors duration-200 {isExpanded
+					class="w-full md:w-1/2 min-w-0 border border-gray-300 dark:border-gray-600 transition-colors duration-200 {isA4Preview
+						? 'bg-gray-200 dark:bg-gray-600'
+						: 'bg-white'} {isExpanded
 						? 'flex-1 min-h-0 md:h-full'
 						: 'h-[var(--editor-h)] max-sm:h-60 md:h-full'}"
 				>
-					<div bind:this={shadowContainer} class="h-full w-full"></div>
+					{#if isA4Preview}
+						<!-- the page keeps its A4 width and is scaled to the pane; it
+						scrolls inside its own frame -->
+						<div
+							class="relative h-full w-full overflow-hidden"
+							bind:clientWidth={pageViewWidth}
+							bind:clientHeight={pageViewHeight}
+						>
+							<div
+								class="absolute bg-white shadow-md ring-1 ring-black/5 dark:shadow-black/40 overflow-hidden"
+								style="top: {pageGap}px; left: {Math.max(
+									0,
+									(pageViewWidth - pageShownWidth) / 2
+								)}px; width: {pageShownWidth}px; height: {pageShownHeight}px;"
+							>
+								<div
+									bind:this={shadowContainer}
+									style="width: {A4_WIDTH_PX}px; height: {pageShownHeight /
+										pageScale}px; transform: scale({pageScale}); transform-origin: 0 0;"
+								></div>
+							</div>
+						</div>
+					{:else}
+						<div bind:this={shadowContainer} class="h-full w-full"></div>
+					{/if}
 				</div>
 			{/if}
 		</div>

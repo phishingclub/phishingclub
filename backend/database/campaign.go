@@ -67,6 +67,9 @@ type Campaign struct {
 	IsAnonymous bool `gorm:"not null;default:false"`
 	IsTest      bool `gorm:"not null;default:false"`
 	Obfuscate   bool `gorm:"not null;default:false"`
+	// TemplateMixBy is the recipient field templates are mixed by when the
+	// campaign has several templates. Empty means department.
+	TemplateMixBy string `gorm:"not null;default:''"`
 
 	// deprecated: webhook settings moved to campaign_webhooks junction table
 	// kept for backward compatibility during migration

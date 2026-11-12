@@ -33,8 +33,9 @@ func (w *Webhook) Create(
 	ctx context.Context,
 	session *model.Session,
 	webhook *model.Webhook,
-) (*uuid.UUID, error) {
+) (_ *uuid.UUID, err error) {
 	ae := NewAuditEvent("Webhook.Create", session)
+	defer w.auditDone(ae, &err)
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -111,7 +112,7 @@ func (w *Webhook) GetAll(
 		w.Logger.Errorw("failed to get webhooks", "error", err)
 		return result, errs.Wrap(err)
 	}
-	w.AuditLogAuthorized(ae)
+	// no audit on read
 
 	return result, nil
 }
@@ -181,8 +182,9 @@ func (w *Webhook) Update(
 	session *model.Session,
 	id *uuid.UUID,
 	webhook *model.Webhook,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Webhook.Update", session)
+	defer w.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -251,8 +253,12 @@ func (w *Webhook) DeleteByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("Webhook.DeleteByID", session)
+	defer w.auditDone(ae, &err)
+	if id != nil {
+		ae.Details["id"] = id.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -315,8 +321,9 @@ func (w *Webhook) SendTest(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) (map[string]interface{}, error) {
+) (_ map[string]interface{}, err error) {
 	ae := NewAuditEvent("Webhook.SendTest", session)
+	defer w.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)

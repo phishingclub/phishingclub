@@ -44,8 +44,9 @@ func (s *Program) ProcessReportedCSV(
 	records [][]string,
 	emailColumn int,
 	dateColumn int,
-) (*ProgramReportedResult, error) {
+) (_ *ProgramReportedResult, err error) {
 	ae := NewAuditEvent("Program.ReportedCSV", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	program, err := s.authorizedProgram(ctx, session, id, ae, nil)
 	if err != nil {
@@ -170,7 +171,7 @@ func (s *Program) ProcessReportedCSV(
 // with a zone keeps it, a value without one is read in loc, and a date with no
 // time is the end of that day in loc, never later than now.
 func parseProgramReportedDate(v string, loc *time.Location, now time.Time) (time.Time, bool) {
-	for _, format := range reportedDateFormats {
+	for _, format := range reportedDateLayouts {
 		if _, err := time.Parse(format, v); err != nil {
 			continue
 		}
@@ -193,7 +194,7 @@ func parseProgramReportedDate(v string, loc *time.Location, now time.Time) (time
 // reportedFormatHasZone reports whether a reported date format carries a zone,
 // either as an offset or as a fixed Z or offset written in the value
 func reportedFormatHasZone(format string) bool {
-	return strings.HasSuffix(format, "Z") || strings.Contains(format, "-07") || strings.Contains(format, "+0")
+	return strings.Contains(format, "Z07") || strings.HasSuffix(format, "Z") || strings.Contains(format, "-07") || strings.Contains(format, "+0")
 }
 
 // reportedDayEnd returns the end of the reported day in loc, never later than

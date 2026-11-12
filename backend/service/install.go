@@ -128,3 +128,15 @@ func (s *InstallSetup) setupInitialAdministratorAccount(
 	}
 	return adminUser, password, nil
 }
+
+// AuditInstall writes the result of completing the first installation, where
+// the first administrator sets their own username and password. The work runs
+// in one transaction in the install controller. A nil err is a success.
+func (s *InstallSetup) AuditInstall(session *model.Session, err error) {
+	ae := NewAuditEvent("Install.Complete", session)
+	if err == nil {
+		s.AuditLogAuthorized(ae)
+		return
+	}
+	s.AuditLogFailed(ae, err)
+}

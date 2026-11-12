@@ -555,6 +555,28 @@ export class API {
 	 */
 	campaign = {
 		/**
+		 * Import who reported the campaign email from a CSV file. Column indexes
+		 * are zero based and point at the email and report date columns.
+		 * @param {string} campaignID
+		 * @param {File} file
+		 * @param {number} emailColumn
+		 * @param {number} dateColumn
+		 * @returns {Promise<ApiResponse>}
+		 */
+		uploadReported: async (campaignID, file, emailColumn, dateColumn) => {
+			const formData = new FormData();
+			formData.append('file', file);
+			const params = new URLSearchParams({
+				emailColumn: String(Number(emailColumn)),
+				dateColumn: String(Number(dateColumn))
+			});
+			return await postMultipart(
+				this.getPath(`/campaign/${campaignID}/upload/reported?${params.toString()}`),
+				formData
+			);
+		},
+
+		/**
 		 * @param {string} campaignID
 		 * @returns {Promise<ApiResponse>}
 		 */
@@ -636,7 +658,9 @@ export class API {
 		 *
 		 * @param {object} campaign
 		 * @param {string} [campaign.companyID]   uuid
-		 * @param {string} campaign.templateID  uuid
+		 * @param {string} campaign.templateID  uuid, the first entry of templateIDs
+		 * @param {string[]} [campaign.templateIDs] []uuid, ordered template pool
+		 * @param {string} [campaign.templateMixBy] recipient field templates are mixed by
 		 * @param {string} campaign.name
 		 * @param {boolean} [campaign.saveSubmittedData]
 		 * @param {boolean} [campaign.saveBrowserMetadata]
@@ -667,6 +691,8 @@ export class API {
 		create: async ({
 			companyID,
 			templateID,
+			templateIDs,
+			templateMixBy,
 			name,
 			saveSubmittedData,
 			saveBrowserMetadata,
@@ -697,6 +723,8 @@ export class API {
 			return await postJSON(this.getPath('/campaign'), {
 				companyID,
 				templateID,
+				templateIDs,
+				templateMixBy,
 				name,
 				isAnonymous,
 				isTest,
@@ -743,7 +771,9 @@ export class API {
 		 * @param {string} [campaign.anonymizeAt]
 		 * @param {string} [campaign.dataAnonymizeAt]
 		 * @param {string} [campaign.scheduleAt]
-		 * @param {string} campaign.templateID uuid
+		 * @param {string} campaign.templateID uuid, the first entry of templateIDs
+		 * @param {string[]} [campaign.templateIDs] []uuid, ordered template pool
+		 * @param {string} [campaign.templateMixBy] recipient field templates are mixed by
 		 * @param {string[]} campaign.recipientGroupIDs []uuid
 		 * @param {string[]} campaign.allowDenyIDs []uuid
 		 * @param {string} campaign.denyPageID uuid
@@ -760,6 +790,8 @@ export class API {
 		update: async ({
 			id,
 			templateID,
+			templateIDs,
+			templateMixBy,
 			name,
 			saveSubmittedData,
 			saveBrowserMetadata,
@@ -789,6 +821,8 @@ export class API {
 		}) => {
 			return await postJSON(this.getPath(`/campaign/${id}`), {
 				templateID,
+				templateIDs,
+				templateMixBy,
 				name,
 				isAnonymous,
 				isTest,
@@ -992,7 +1026,7 @@ export class API {
 		/**
 		 * Get campaign outcome stats grouped by a recipient attribute.
 		 * @param {string} campaignID
-		 * @param {'position'|'department'} by
+		 * @param {'position'|'department'|'template'} by
 		 * @returns {Promise<ApiResponse>}
 		 */
 		getGroupedResultStats: async (campaignID, by = 'position') => {
@@ -4192,6 +4226,12 @@ export class API {
 		getByID: async (id) => {
 			return await getJSON(this.getPath(`/report-template/${id}`));
 		},
+		// the built in default template content for the phishing or training report
+		getDefault: async (isTraining) => {
+			return await getJSON(
+				this.getPath(`/report-template/default?training=${isTraining ? 'true' : 'false'}`)
+			);
+		},
 		create: async (data) => {
 			return await postJSON(this.getPath('/report-template'), data);
 		},
@@ -4203,6 +4243,32 @@ export class API {
 		},
 		wipeBrowserCache: async () => {
 			return await deleteJSON(this.getPath('/report-pdf/browser-cache'));
+		},
+		// renders unsaved template content with sample data to a real PDF.
+		// returns the PDF as a Blob, typed as PDF whatever the response header says
+		previewPDF: async (content, isTraining) => {
+			const response = await fetch(this.getPath('/report-template/preview-pdf'), {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ content, isTraining: !!isTraining })
+			});
+			if (!response.ok) {
+				let error =
+					response.status === 404 ? 'PDF reports are not enabled' : 'Failed to render the PDF';
+				try {
+					const body = await response.json();
+					if (body?.error) {
+						error = body.error;
+					}
+				} catch (_) {
+					// the error body was not JSON, keep the default message
+				}
+				return { success: false, statusCode: response.status, error };
+			}
+			const bytes = await response.arrayBuffer();
+			const blob = new Blob([bytes], { type: 'application/pdf' });
+			return { success: true, data: blob };
 		}
 	};
 

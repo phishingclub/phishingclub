@@ -63,8 +63,9 @@ func (s *Program) ExportCSV(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-) ([][]string, string, error) {
+) (_ [][]string, _ string, err error) {
 	ae := NewAuditEvent("Program.Export", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	program, err := s.authorizedProgram(ctx, session, id, ae, nil)
 	if err != nil {

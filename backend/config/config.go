@@ -76,6 +76,9 @@ type (
 
 		LogPath    string
 		ErrLogPath string
+		// AuditLogPath is an optional extra file for audit events. Audit events
+		// are always written to the normal log output as well.
+		AuditLogPath string
 
 		IPSecurity     IPSecurityConfig
 		RemoteBrowser  RemoteBrowserServerConfig
@@ -108,6 +111,7 @@ type (
 	Log struct {
 		Path      string `json:"path"`
 		ErrorPath string `json:"errorPath"`
+		AuditPath string `json:"auditPath"`
 	}
 
 	// AdministrationServer ConfigDTO administration
@@ -517,6 +521,7 @@ func FromDTO(dto *ConfigDTO) (*Config, error) {
 	cfg.RemoteBrowser = dto.RemoteBrowser
 	cfg.Script = dto.Script
 	cfg.Authentication = dto.Authentication
+	cfg.AuditLogPath = dto.Log.AuditPath
 	return cfg, nil
 }
 
@@ -544,6 +549,7 @@ func (c *Config) ToDTO() *ConfigDTO {
 		Log: Log{
 			Path:      c.LogPath,
 			ErrorPath: c.ErrLogPath,
+			AuditPath: c.AuditLogPath,
 		},
 		IPSecurity:     c.IPSecurity,
 		RemoteBrowser:  c.RemoteBrowser,

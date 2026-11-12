@@ -38,6 +38,9 @@ func (s *CompanyReportConfig) GetByCompanyID(
 ) (*model.CompanyReportConfig, error) {
 	ae := NewAuditEvent("CompanyReportConfig.GetByCompanyID", session)
 	ae.Details["scope"] = reportConfigScope(companyID)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -65,9 +68,13 @@ func (s *CompanyReportConfig) Upsert(
 	session *model.Session,
 	companyID *uuid.UUID,
 	incoming *model.CompanyReportConfig,
-) (*model.CompanyReportConfig, error) {
+) (_ *model.CompanyReportConfig, err error) {
 	ae := NewAuditEvent("CompanyReportConfig.Upsert", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["scope"] = reportConfigScope(companyID)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -149,9 +156,13 @@ func (s *CompanyReportConfig) DeleteByCompanyID(
 	ctx context.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
-) error {
+) (err error) {
 	ae := NewAuditEvent("CompanyReportConfig.DeleteByCompanyID", session)
+	defer s.auditDone(ae, &err)
 	ae.Details["scope"] = reportConfigScope(companyID)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {
@@ -181,6 +192,9 @@ func (s *CompanyReportConfig) ListLogByCompanyID(
 ) (*model.Result[model.ReportSendLog], error) {
 	ae := NewAuditEvent("CompanyReportConfig.ListLogByCompanyID", session)
 	ae.Details["scope"] = reportConfigScope(companyID)
+	if companyID != nil {
+		ae.Details["companyId"] = companyID.String()
+	}
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil {

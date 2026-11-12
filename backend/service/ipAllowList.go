@@ -33,13 +33,10 @@ type IPAllowListService struct {
 }
 
 // NewIPAllowListService creates a new IP allow list service
-func NewIPAllowListService(logger *zap.SugaredLogger, proxyRepo *repository.Proxy) *IPAllowListService {
-	common := Common{
-		Logger: logger,
-	}
+func NewIPAllowListService(common Common, proxyRepo *repository.Proxy) *IPAllowListService {
 	service := &IPAllowListService{
 		Common:          common,
-		logger:          logger,
+		logger:          common.Logger,
 		cleanupDone:     make(chan bool),
 		ProxyRepository: proxyRepo,
 	}
@@ -147,9 +144,9 @@ func (s *IPAllowListService) GetEntriesForProxyConfig(
 		return true
 	})
 
-	ae.Details["proxy_config_id"] = proxyConfigID.String()
+	ae.Details["proxyConfigId"] = proxyConfigID.String()
 	if userId, err := session.User.ID.Get(); err == nil {
-		ae.Details["user_id"] = userId.String()
+		ae.Details["userId"] = userId.String()
 	}
 
 	return entries, nil
@@ -181,8 +178,12 @@ func (s *IPAllowListService) ClearForProxyConfig(
 	ctx context.Context,
 	session *model.Session,
 	proxyConfigID *uuid.UUID,
-) (int, error) {
+) (_ int, err error) {
 	ae := NewAuditEvent("IPAllowList.ClearForProxyConfig", session)
+	defer s.auditDone(ae, &err)
+	if proxyConfigID != nil {
+		ae.Details["proxyConfigId"] = proxyConfigID.String()
+	}
 
 	// check permissions
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -207,11 +208,8 @@ func (s *IPAllowListService) ClearForProxyConfig(
 		return true
 	})
 
-	ae.Details["proxy_config_id"] = proxyConfigID.String()
-	if userId, err := session.User.ID.Get(); err == nil {
-		ae.Details["user_id"] = userId.String()
-	}
-
+	ae.Details["count"] = count
+	s.AuditLogAuthorized(ae)
 	return count, nil
 }
 
