@@ -89,6 +89,7 @@ func renderReport(t *testing.T, content string, rd *model.ReportData) string {
 func TestDefaultReportScreenshotSections(t *testing.T) {
 	for name, content := range map[string]string{
 		"simulation": embedded.DefaultReportHTML,
+		"training":   embedded.DefaultTrainingReportHTML,
 	} {
 		t.Run(name, func(t *testing.T) {
 			testReportScreenshotSections(t, content)
