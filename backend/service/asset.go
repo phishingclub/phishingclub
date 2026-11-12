@@ -813,6 +813,14 @@ func (a *Asset) DeleteAllByCompanyID(
 			return err
 		}
 	}
+	// remove the company asset folder once it is empty
+	if companyID != nil {
+		if company, err := a.CompanyRepository.GetByID(ctx, companyID); err == nil {
+			if key, err := company.AssetsKey.Get(); err == nil && key.String() != "" {
+				a.removeEmptyContextFolder(filepath.Join(data.ASSET_GLOBAL_FOLDER, key.String()))
+			}
+		}
+	}
 	a.AuditLogAuthorized(ae)
 	return nil
 }
@@ -855,8 +863,41 @@ func (a *Asset) DeleteAllByDomainID(
 			return err
 		}
 	}
+	// remove the domain asset folder once it is empty
+	if domainID != nil {
+		if domain, err := a.DomainRepository.GetByID(ctx, domainID, &repository.DomainOption{}); err == nil {
+			if name, err := domain.Name.Get(); err == nil {
+				a.removeEmptyContextFolder(name.String())
+			}
+		}
+	}
 	a.AuditLogAuthorized(ae)
 	return nil
+}
+
+// removeEmptyContextFolder removes the asset folder of a domain or a company
+// when it is empty. A folder that still holds files is kept. The shared folder
+// itself is never removed, it holds the global assets.
+func (a *Asset) removeEmptyContextFolder(folder string) {
+	folder = filepath.Clean(folder)
+	if folder == "." || folder == data.ASSET_GLOBAL_FOLDER || filepath.IsAbs(folder) {
+		return
+	}
+	root, err := os.OpenRoot(a.RootFolder)
+	if err != nil {
+		a.Logger.Debugw("failed to open asset root folder", "error", err)
+		return
+	}
+	defer root.Close()
+	// only a real folder, a link of that name is left as it is
+	info, err := root.Lstat(folder)
+	if err != nil || !info.IsDir() {
+		return
+	}
+	// a folder that still holds files fails to remove and is kept
+	if err := root.Remove(folder); err != nil {
+		a.Logger.Debugw("asset folder not removed", "folder", folder, "error", err)
+	}
 }
 
 // deleteAssetFileAndRow deletes the file of an asset and then its row. An
