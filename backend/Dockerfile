@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     fonts-liberation \
+    fonts-noto-color-emoji \
     libx11-6 \
     libx11-xcb1 \
     libxcb1 \
