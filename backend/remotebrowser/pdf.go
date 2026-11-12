@@ -67,6 +67,8 @@ type Session struct {
 	// this session's captures blocked and refused
 	captureBlocked atomic.Int64
 	captureRefused atomic.Int64
+	// localReads holds a slot for each local file being read
+	localReads chan struct{}
 }
 
 // NewSession launches a headless Chromium instance behind the egress guard.
@@ -144,7 +146,7 @@ func NewSession(ctx context.Context, execPath string) (*Session, error) {
 		)
 	}
 
-	return &Session{browser: browser, proxy: proxy, l: l}, nil
+	return &Session{browser: browser, proxy: proxy, l: l, localReads: make(chan struct{}, sessionLocalReads)}, nil
 }
 
 // Close releases the browser process, its temp dirs and the egress guard
@@ -243,8 +245,9 @@ const captureJPEGQuality = 85
 // later local requests get 404.
 const captureLocalBudget = 64 << 20
 
-// captureLocalReads is the most local files one capture reads at the same time.
-const captureLocalReads = 4
+// sessionLocalReads is the most local files the captures of one session read
+// and hand to the browser at the same time, however many captures run.
+const sessionLocalReads = 4
 
 // CaptureCloseTimeout is the longest Capture takes after its Timeout to close
 // its browser context.
@@ -254,6 +257,7 @@ const CaptureCloseTimeout = 2 * time.Second
 const captureSettleTimeout = 5 * time.Second
 
 // Capture renders htmlContent in a new tab and returns a JPEG screenshot of it.
+// Several captures can run on one Session at the same time.
 // The page can not leave the given content: every document request, from a
 // redirect, a form post or a frame, is answered with 204 No Content, which
 // makes the browser keep the current document. JavaScript dialogs are
@@ -310,7 +314,6 @@ func (s *Session) Capture(htmlContent string, opts CaptureOptions) ([]byte, erro
 	}
 
 	var localBytes atomic.Int64
-	localReads := make(chan struct{}, captureLocalReads)
 
 	// subscribing enables the Fetch and Page domains before any content loads,
 	// so no request or dialog is missed
@@ -329,14 +332,7 @@ func (s *Session) Capture(htmlContent string, opts CaptureOptions) ([]byte, erro
 							_ = fulfillLocal(tab, e.RequestID, nil)
 							return
 						}
-						localReads <- struct{}{}
-						file, local := opts.Local(u)
-						<-localReads
-						if local {
-							if file != nil && localBytes.Add(int64(len(file.Body))) > captureLocalBudget {
-								file = nil
-							}
-							_ = fulfillLocal(tab, e.RequestID, file)
+						if s.serveLocal(tab, e.RequestID, u, opts.Local, &localBytes) {
 							return
 						}
 					}
@@ -420,6 +416,32 @@ func (s *Session) Capture(htmlContent string, opts CaptureOptions) ([]byte, erro
 		return nil, fmt.Errorf("reportcapture: screenshot failed: %w", err)
 	}
 	return shot.Data, nil
+}
+
+// serveLocal answers a paused request from local when local reports its URL
+// as local, and tells whether it did. A session slot is held from the read
+// until the file is handed to the browser, so the captures of a session hold
+// at most sessionLocalReads local files in memory at once. localBytes counts
+// the bytes of the files the capture was given, a file that takes it past
+// captureLocalBudget gets 404.
+func (s *Session) serveLocal(
+	tab *rod.Page,
+	id proto.FetchRequestID,
+	u *url.URL,
+	local func(u *url.URL) (*LocalFile, bool),
+	localBytes *atomic.Int64,
+) bool {
+	s.localReads <- struct{}{}
+	defer func() { <-s.localReads }()
+	file, isLocal := local(u)
+	if !isLocal {
+		return false
+	}
+	if file != nil && localBytes.Add(int64(len(file.Body))) > captureLocalBudget {
+		file = nil
+	}
+	_ = fulfillLocal(tab, id, file)
+	return true
 }
 
 // fulfillLocal answers a paused request with file, or with 404 when file is nil.

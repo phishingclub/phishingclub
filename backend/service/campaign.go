@@ -3,8 +3,10 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +15,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"sort"
 	"strings"
@@ -42,6 +46,7 @@ import (
 	"github.com/phishingclub/phishingclub/validate"
 	"github.com/phishingclub/phishingclub/vo"
 	"github.com/wneessen/go-mail"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -7552,35 +7557,166 @@ func (c *Campaign) buildReportHTMLWithData(
 // limits for the screenshots in a campaign report
 const (
 	reportScreenshotTimeout   = 15 * time.Second
-	reportScreenshotBudget    = 60 * time.Second
 	reportScreenshotMaxHeight = 2000
+	// reportScreenshotBudget is the time all captures of a report share, and
+	// reportScreenshotBudgetPerTemplate is added for each template after the
+	// first one
+	reportScreenshotBudget            = 60 * time.Second
+	reportScreenshotBudgetPerTemplate = 10 * time.Second
+	// reportScreenshotMaxBytes caps the screenshots in one report, so the
+	// report PDF stays small enough to send by email
+	reportScreenshotMaxBytes = 8 << 20
+	// reportScreenshotMaxTemplates is the most pool templates captured
+	reportScreenshotMaxTemplates = 10
+	// reportScreenshotParallel is the most screenshots taken at the same
+	// time, each in its own tab
+	reportScreenshotParallel = 4
 )
 
-// attachReportScreenshots renders the campaign's email and up to three of its
-// pages (before-landing, landing, after-landing) with a synthetic recipient
-// (see service.reportMockRecipient) and captures each as a JPEG screenshot,
-// embedded in rd as a data: URI for the report pages added in
-// default_report.html. It opens one guarded browser session shared by every
-// capture, so a report pays for at most one extra browser launch regardless
-// of how many of the four are produced.
+// reportScreenshotWants is the set of screenshots a capture takes.
+type reportScreenshotWants struct {
+	email, before, landing, after bool
+}
+
+func (w reportScreenshotWants) any() bool {
+	return w.email || w.before || w.landing || w.after
+}
+
+func (w reportScreenshotWants) or(o reportScreenshotWants) reportScreenshotWants {
+	return reportScreenshotWants{
+		email:   w.email || o.email,
+		before:  w.before || o.before,
+		landing: w.landing || o.landing,
+		after:   w.after || o.after,
+	}
+}
+
+// reportListStagePattern matches the stage fields of a TemplateScreenshots
+// entry. The word end keeps ".Email" from matching ".EmailScreenshot".
+var reportListStagePattern = regexp.MustCompile(`\.(Email|BeforeLandingPage|LandingPage|AfterLandingPage)\b`)
+
+// reportScreenshotsWanted reads which screenshots a report template uses.
+// single is the four fields filled from the first template, matched with
+// their leading dot so ".LandingPageScreenshot" does not match inside
+// ".BeforeLandingPageScreenshot". listUsed tells whether the template uses
+// .TemplateScreenshots, and list is the stages it reads from its entries.
+func reportScreenshotsWanted(content string) (single reportScreenshotWants, list reportScreenshotWants, listUsed bool) {
+	single = reportScreenshotWants{
+		email:   strings.Contains(content, ".EmailScreenshot"),
+		before:  strings.Contains(content, ".BeforeLandingPageScreenshot"),
+		landing: strings.Contains(content, ".LandingPageScreenshot"),
+		after:   strings.Contains(content, ".AfterLandingPageScreenshot"),
+	}
+	if !strings.Contains(content, ".TemplateScreenshots") {
+		return single, list, false
+	}
+	for _, m := range reportListStagePattern.FindAllStringSubmatch(content, -1) {
+		switch m[1] {
+		case "Email":
+			list.email = true
+		case "BeforeLandingPage":
+			list.before = true
+		case "LandingPage":
+			list.landing = true
+		case "AfterLandingPage":
+			list.after = true
+		}
+	}
+	return single, list, true
+}
+
+// reportScreenshotsFor returns the screenshots to take of the pool template
+// at index i, and false when that template is not captured at all. The first
+// template serves the single fields and the list, every later one only the
+// list, and no more than reportScreenshotMaxTemplates are captured.
+func reportScreenshotsFor(i int, single reportScreenshotWants, list reportScreenshotWants, listUsed bool) (reportScreenshotWants, bool) {
+	if i >= reportScreenshotMaxTemplates {
+		return reportScreenshotWants{}, false
+	}
+	if i == 0 {
+		want := single.or(list)
+		return want, want.any() || listUsed
+	}
+	return list, listUsed
+}
+
+// reportCaptureJob is one screenshot of a report, uri is its JPEG data URI
+// once taken.
+type reportCaptureJob struct {
+	what string
+	html string
+	opts remotebrowser.CaptureOptions
+	uri  string
+}
+
+var errReportScreenshotBudget = errors.New("time budget used up")
+
+// runReportCaptures takes the screenshots of jobs with capture, up to parallel
+// at a time. No capture starts once the screenshots taken reach maxBytes, so
+// at most maxBytes and the captures running are held in memory. Then maxBytes
+// is applied again in job order, which leaves out a screenshot that finished
+// past it. When the limit is reached, which jobs started before it depends on
+// the order the captures finished in. A job that is skipped or fails keeps an
+// empty uri.
+func runReportCaptures(
+	jobs []*reportCaptureJob,
+	parallel int,
+	maxBytes int,
+	logger *zap.SugaredLogger,
+	capture func(job *reportCaptureJob) ([]byte, error),
+) {
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, parallel)
+	var takenBytes atomic.Int64
+	for _, job := range jobs {
+		slots <- struct{}{}
+		wg.Add(1)
+		go func(job *reportCaptureJob) {
+			defer wg.Done()
+			defer func() { <-slots }()
+			if takenBytes.Load() >= int64(maxBytes) {
+				logger.Warnw("report screenshot skipped, size limit reached", "capture", job.what)
+				return
+			}
+			jpeg, err := capture(job)
+			if err != nil {
+				logger.Warnw("report screenshot not taken", "capture", job.what, "error", err)
+				return
+			}
+			job.uri = "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(jpeg)
+			takenBytes.Add(int64(len(job.uri)))
+		}(job)
+	}
+	wg.Wait()
+
+	total := 0
+	for _, job := range jobs {
+		if job.uri == "" {
+			continue
+		}
+		if total+len(job.uri) > maxBytes {
+			logger.Warnw("report screenshot left out, size limit reached", "capture", job.what)
+			job.uri = ""
+			continue
+		}
+		total += len(job.uri)
+	}
+}
+
+// attachReportScreenshots captures the email and pages of the campaign's
+// templates, rendered with a fake recipient, and adds them to rd as JPEG data
+// URIs. The first template fills the four single fields, and every template
+// in the pool, up to reportScreenshotMaxTemplates, fills TemplateScreenshots.
+// Only the screenshots the report template uses are taken, up to
+// reportScreenshotParallel at a time, and the browser is only launched when
+// there is something to capture.
 //
-// The configured report template is scanned first: if it references none of
-// the four screenshot fields, this returns immediately without loading the
-// campaign template or touching the browser at all, so a report template
-// that was never updated to use this feature never pays for it.
+// A stage served by an AiTM proxy is not captured, as it has no content of
+// its own and capturing it would mean loading the real site it proxies.
 //
-// A page configured as an AITM proxy (CampaignTemplate.*Proxy, as opposed to
-// a stored *Page) is deliberately not captured: unlike a stored page, a proxy
-// has no content of its own to render in isolation, capturing it would mean
-// actually driving the headless browser through the proxy against whatever
-// real third-party site it fronts. That is a materially different, more
-// sensitive operation than rendering stored content with a synthetic
-// recipient, so it is out of scope here.
-//
-// Screenshots are a best effort addition: a campaign with no template, no
-// email, or no matching page simply gets fewer screenshots, and any render or
-// capture error is logged and leaves the corresponding field empty. Nothing
-// here can fail report generation itself.
+// Screenshots are best effort: a missing template, email or page, or a failed
+// render or capture, only leaves that screenshot empty, and never fails the
+// report.
 func (c *Campaign) attachReportScreenshots(
 	ctx context.Context,
 	session *model.Session,
@@ -7589,59 +7725,23 @@ func (c *Campaign) attachReportScreenshots(
 	rd *model.ReportData,
 	rb *reportBrowser,
 ) {
-	// checked as ".Name" (how every one of these is actually written in a Go
-	// template, e.g. "{{if .LandingPageScreenshot}}") rather than bare "Name":
-	// "LandingPageScreenshot" alone is a substring of "BeforeLandingPageScreenshot"
-	// and "AfterLandingPageScreenshot", which would make a template using only
-	// one of those two always look like it wants the main landing page too.
-	wantsAny := strings.Contains(reportTemplateContent, ".EmailScreenshot") ||
-		strings.Contains(reportTemplateContent, ".BeforeLandingPageScreenshot") ||
-		strings.Contains(reportTemplateContent, ".LandingPageScreenshot") ||
-		strings.Contains(reportTemplateContent, ".AfterLandingPageScreenshot")
-	if !wantsAny {
+	single, list, listUsed := reportScreenshotsWanted(reportTemplateContent)
+	if !single.any() && !listUsed {
 		return
 	}
 
-	templateID, err := campaign.TemplateID.Get()
+	pool, err := c.templatePool(ctx, campaign)
 	if err != nil {
-		// campaigns always have a template in practice, but a campaign draft
-		// or a malformed row should degrade, not break the report
+		c.Logger.Warnw("failed to load campaign templates for report screenshots", "error", err)
 		return
 	}
-	campaignTemplate, err := c.CampaignTemplateService.GetByID(
-		ctx,
-		session,
-		&templateID,
-		&repository.CampaignTemplateOption{
-			WithDomain:            true,
-			WithEmail:             true,
-			WithBeforeLandingPage: true,
-			WithLandingPage:       true,
-			WithAfterLandingPage:  true,
-		},
-	)
-	if err != nil {
-		c.Logger.Warnw("failed to load campaign template for report screenshots", "error", err)
-		return
-	}
+	rd.TemplateCount = len(pool)
 
 	var companyID *uuid.UUID
 	if id, idErr := campaign.CompanyID.Get(); idErr == nil {
 		companyID = &id
 	}
-	// links and asset URLs point at the campaign domain, and its requests are
-	// answered from the asset folder, as the public server would serve them
-	domainName := "example.test"
-	if campaignTemplate.Domain != nil {
-		if n, nErr := campaignTemplate.Domain.Name.Get(); nErr == nil {
-			domainName = n.String()
-		}
-	}
-	urlPath := "/"
-	if p, pErr := campaignTemplate.URLPath.Get(); pErr == nil && p.String() != "" {
-		urlPath = p.String()
-	}
-	// without the domain list, requests to the campaign domain could not be
+	// without the domain list, requests to the campaign domains could not be
 	// kept from the live server, so no screenshots are taken
 	names, err := c.DomainService.DomainRepository.GetAllNames(ctx)
 	if err != nil {
@@ -7650,36 +7750,22 @@ func (c *Campaign) attachReportScreenshots(
 	}
 	assets := newReportAssets(c.DomainService.AssetService.RootFolder, names, companyID)
 
-	// the browser is only launched once the first screenshot is actually
-	// attempted, so a campaign whose configured pages the report template
-	// does not even ask for never pays for a launch here.
-
-	// every capture has its own time limit, and all captures together share
-	// one budget, so a slow or stuck page can not use up the time the report
-	// itself needs
-	budgetEnd := time.Now().Add(reportScreenshotBudget)
-	capture := func(what string, html string, opts remotebrowser.CaptureOptions) string {
-		if time.Until(budgetEnd) <= 0 {
-			c.Logger.Warnw("report screenshot skipped, time budget used up", "capture", what)
-			return ""
+	// the wanted emails and pages of every template are rendered first, then
+	// captured below, up to reportScreenshotParallel at a time
+	var jobs []*reportCaptureJob
+	// the same content captured the same way is taken once, as templates in
+	// a pool often share an email or a page
+	jobByKey := map[string]*reportCaptureJob{}
+	addJob := func(what string, html string, opts remotebrowser.CaptureOptions) *reportCaptureJob {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("%d %t\n%s", opts.Width, opts.DisableScripts, html)))
+		key := hex.EncodeToString(sum[:])
+		if job, ok := jobByKey[key]; ok {
+			return job
 		}
-		s := rb.forScreenshots()
-		if s == nil {
-			return ""
-		}
-		// counted after the launch, and leaving room for the capture to close
-		remaining := time.Until(budgetEnd) - remotebrowser.CaptureCloseTimeout
-		if remaining <= 0 {
-			c.Logger.Warnw("report screenshot skipped, time budget used up", "capture", what)
-			return ""
-		}
-		opts.Timeout = min(reportScreenshotTimeout, remaining)
-		jpeg, err := s.Capture(html, opts)
-		if err != nil {
-			c.Logger.Warnw("failed to capture report screenshot", "capture", what, "error", err)
-			return ""
-		}
-		return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(jpeg)
+		job := &reportCaptureJob{what: what, html: html, opts: opts}
+		jobByKey[key] = job
+		jobs = append(jobs, job)
+		return job
 	}
 
 	// an email is captured 600px wide like a typical mail client, with
@@ -7702,34 +7788,146 @@ func (c *Campaign) attachReportScreenshots(
 	emailCapture.LocalHost = assets.isLocalHost
 	pageCapture.LocalHost = assets.isLocalHost
 
-	if campaignTemplate.Email != nil && strings.Contains(reportTemplateContent, ".EmailScreenshot") {
-		emailHTML, mailErr := c.reportEmailHTML(ctx, session, campaignTemplate.Email, companyID, domainName, urlPath)
-		if mailErr != nil {
-			c.Logger.Warnw("failed to render email for report screenshot", "error", mailErr)
-		} else {
-			rd.EmailScreenshot = htmltemplate.HTML(capture("email", emailHTML, emailCapture))
-		}
+	// the capture jobs of one template, nil where a stage is not captured
+	type reportTemplateJobs struct {
+		number                        int
+		name                          string
+		loaded                        bool
+		email, before, landing, after *reportCaptureJob
 	}
 
-	capturePage := func(name string, page *model.Page, dest *htmltemplate.HTML) {
-		// see the ".EmailScreenshot" comment above: checked as ".Name", not
-		// bare "Name", so "LandingPageScreenshot" does not also match inside
-		// "BeforeLandingPageScreenshot" or "AfterLandingPageScreenshot".
-		if page == nil || !strings.Contains(reportTemplateContent, "."+name) {
-			return
+	// prepareTemplate renders the wanted email and pages of one template
+	prepareTemplate := func(number int, templateID uuid.UUID, want reportScreenshotWants) reportTemplateJobs {
+		t := reportTemplateJobs{number: number}
+		tmpl, err := c.CampaignTemplateService.GetByID(
+			ctx,
+			session,
+			&templateID,
+			&repository.CampaignTemplateOption{
+				WithDomain:            true,
+				WithEmail:             want.email || want.before || want.landing || want.after,
+				WithBeforeLandingPage: want.before,
+				WithLandingPage:       want.landing,
+				WithAfterLandingPage:  want.after,
+			},
+		)
+		if err != nil {
+			c.Logger.Warnw("failed to load campaign template for report screenshots", "error", err)
+			return t
 		}
-		pageBuf, pageErr := c.TemplateService.CreatePageMockForReport(page, campaignTemplate.Email, domainName, urlPath)
-		if pageErr != nil {
-			c.Logger.Warnw("failed to render page for report screenshot", "page", name, "error", pageErr)
-			return
+		t.loaded = true
+		if n, nErr := tmpl.Name.Get(); nErr == nil {
+			t.name = n.String()
 		}
-		pageHTML := withBaseURL(pageBuf.String(), "https://"+domainName+urlPath)
-		*dest = htmltemplate.HTML(capture(name, pageHTML, pageCapture))
+		// links and asset URLs point at the template domain, and its requests
+		// are answered from the asset folder, as the public server serves them
+		domainName := "example.test"
+		if tmpl.Domain != nil {
+			if n, nErr := tmpl.Domain.Name.Get(); nErr == nil {
+				domainName = n.String()
+			}
+		}
+		urlPath := "/"
+		if p, pErr := tmpl.URLPath.Get(); pErr == nil && p.String() != "" {
+			urlPath = p.String()
+		}
+
+		if want.email && tmpl.Email != nil {
+			emailHTML, mailErr := c.reportEmailHTML(ctx, session, tmpl.Email, companyID, domainName, urlPath)
+			if mailErr != nil {
+				c.Logger.Warnw("failed to render email for report screenshot", "error", mailErr)
+			} else {
+				t.email = addJob(fmt.Sprintf("template %d email", number), emailHTML, emailCapture)
+			}
+		}
+		preparePage := func(name string, wanted bool, page *model.Page) *reportCaptureJob {
+			if !wanted || page == nil {
+				return nil
+			}
+			pageBuf, pageErr := c.TemplateService.CreatePageMockForReport(page, tmpl.Email, domainName, urlPath)
+			if pageErr != nil {
+				c.Logger.Warnw("failed to render page for report screenshot", "page", name, "error", pageErr)
+				return nil
+			}
+			pageHTML := withBaseURL(pageBuf.String(), "https://"+domainName+urlPath)
+			return addJob(fmt.Sprintf("template %d %s", number, name), pageHTML, pageCapture)
+		}
+		t.before = preparePage("before landing page", want.before, tmpl.BeforeLandingePage)
+		t.landing = preparePage("landing page", want.landing, tmpl.LandingPage)
+		t.after = preparePage("after landing page", want.after, tmpl.AfterLandingPage)
+		return t
 	}
 
-	capturePage("BeforeLandingPageScreenshot", campaignTemplate.BeforeLandingePage, &rd.BeforeLandingPageScreenshot)
-	capturePage("LandingPageScreenshot", campaignTemplate.LandingPage, &rd.LandingPageScreenshot)
-	capturePage("AfterLandingPageScreenshot", campaignTemplate.AfterLandingPage, &rd.AfterLandingPageScreenshot)
+	var templates []reportTemplateJobs
+	for i, templateID := range pool {
+		want, ok := reportScreenshotsFor(i, single, list, listUsed)
+		if !ok {
+			break
+		}
+		templates = append(templates, prepareTemplate(i+1, templateID, want))
+	}
+
+	// every capture has its own time limit, and all captures together share
+	// one budget, so a slow or stuck page can not use up the time the report
+	// itself needs. The budget grows with the templates captured.
+	budget := reportScreenshotBudget
+	if listUsed {
+		budget += time.Duration(len(templates)-1) * reportScreenshotBudgetPerTemplate
+	}
+	budgetEnd := time.Now().Add(budget)
+	var s *remotebrowser.Session
+	if len(jobs) > 0 {
+		s = rb.forScreenshots()
+	}
+	if s != nil {
+		runReportCaptures(jobs, reportScreenshotParallel, reportScreenshotMaxBytes, c.Logger, func(job *reportCaptureJob) ([]byte, error) {
+			// counted when the capture starts, and leaving room for the
+			// capture to close
+			remaining := time.Until(budgetEnd) - remotebrowser.CaptureCloseTimeout
+			if remaining <= 0 {
+				return nil, errReportScreenshotBudget
+			}
+			opts := job.opts
+			opts.Timeout = min(reportScreenshotTimeout, remaining)
+			return s.Capture(job.html, opts)
+		})
+	}
+	uriOf := func(job *reportCaptureJob) string {
+		if job == nil {
+			return ""
+		}
+		return job.uri
+	}
+
+	for i, t := range templates {
+		shots := model.ReportTemplateScreenshots{
+			Number:            t.number,
+			Name:              t.name,
+			Email:             uriOf(t.email),
+			BeforeLandingPage: uriOf(t.before),
+			LandingPage:       uriOf(t.landing),
+			AfterLandingPage:  uriOf(t.after),
+		}
+		if i == 0 && t.loaded {
+			if single.email {
+				rd.EmailScreenshot = htmltemplate.HTML(shots.Email)
+			}
+			if single.before {
+				rd.BeforeLandingPageScreenshot = htmltemplate.HTML(shots.BeforeLandingPage)
+			}
+			if single.landing {
+				rd.LandingPageScreenshot = htmltemplate.HTML(shots.LandingPage)
+			}
+			if single.after {
+				rd.AfterLandingPageScreenshot = htmltemplate.HTML(shots.AfterLandingPage)
+			}
+		}
+		// a template that failed to load is kept in the list, so the report
+		// can tell its screenshots are missing
+		if listUsed {
+			rd.TemplateScreenshots = append(rd.TemplateScreenshots, shots)
+		}
+	}
 }
 
 // reportEmailHTML renders the email body for a report screenshot with its
@@ -8293,6 +8491,11 @@ func htmlEscapeReportData(rd *model.ReportData) *model.ReportData {
 	cp.Groups = escapeGroups(rd.Groups)
 	cp.DepartmentGroups = escapeGroups(rd.DepartmentGroups)
 	cp.PositionGroups = escapeGroups(rd.PositionGroups)
+	cp.TemplateScreenshots = make([]model.ReportTemplateScreenshots, len(rd.TemplateScreenshots))
+	for i, ts := range rd.TemplateScreenshots {
+		ts.Name = template.HTMLEscapeString(ts.Name)
+		cp.TemplateScreenshots[i] = ts
+	}
 	return &cp
 }
 

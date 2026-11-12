@@ -396,3 +396,31 @@ func TestCaptureGuardRefusesLocalHosts(t *testing.T) {
 		t.Fatalf("the guard refused nothing, asked locally for %v", asked)
 	}
 }
+
+func TestCaptureRunsConcurrently(t *testing.T) {
+	s := newTestSession(t)
+	colors := []string{"#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff"}
+	shots := make([][]byte, len(colors))
+	errs := make([]error, len(colors))
+	var wg sync.WaitGroup
+	for i, c := range colors {
+		wg.Add(1)
+		go func(i int, c string) {
+			defer wg.Done()
+			shots[i], errs[i] = s.Capture(`<html><body style="margin:0;background:`+c+`">x</body></html>`, testCaptureOptions())
+		}(i, c)
+	}
+	wg.Wait()
+	// each capture shows its own page, none got another one's content
+	for i, c := range colors {
+		if errs[i] != nil {
+			t.Fatalf("capture %d: %v", i, errs[i])
+		}
+		r, g, b, _ := decodeJPEG(t, shots[i]).At(200, 200).RGBA()
+		got := [3]bool{r>>8 > 200, g>>8 > 200, b>>8 > 200}
+		want := [3]bool{c[1:3] == "ff", c[3:5] == "ff", c[5:7] == "ff"}
+		if got != want {
+			t.Fatalf("capture %d shows the wrong page, want %s", i, c)
+		}
+	}
+}
