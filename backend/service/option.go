@@ -124,6 +124,23 @@ func auditOptionValue(key string, value string) string {
 	return string(b)
 }
 
+// AuthorizeSetLogLevel checks the session may change the log levels and
+// audits a denied attempt. The caller changes the levels in memory before
+// they are stored, so this must run before any level is changed.
+func (o *Option) AuthorizeSetLogLevel(session *model.Session) error {
+	ae := NewAuditEvent("Log.SetLevel", session)
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		o.LogAuthError(err)
+		return err
+	}
+	if !isAuthorized {
+		o.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	return nil
+}
+
 // SetOptionByKey sets an option
 func (o *Option) SetOptionByKey(
 	ctx context.Context,

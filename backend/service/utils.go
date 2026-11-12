@@ -11,6 +11,9 @@ import (
 // Common holds commonly used service utils
 type Common struct {
 	Logger *zap.SugaredLogger
+	// AuditLogger writes audit events. It ignores the runtime log level so
+	// audit events can not be turned off. When nil, Logger is used.
+	AuditLogger *zap.SugaredLogger
 }
 
 func (c *Common) LogAuthError(err error) {
@@ -43,7 +46,11 @@ func NewAuditEvent(name string, session *model.Session) *AuditEvent {
 }
 
 func (c *Common) auditLog(ae *AuditEvent) {
-	c.Logger.Infow("audit", ae.LogFields()...)
+	logger := c.AuditLogger
+	if logger == nil {
+		logger = c.Logger
+	}
+	logger.Infow("audit", ae.LogFields()...)
 }
 
 func (c *Common) AuditLogAuthorized(e *AuditEvent) {

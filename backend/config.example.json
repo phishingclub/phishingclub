@@ -19,7 +19,8 @@
   },
   "log": {
     "path": "",
-    "errorPath": ""
+    "errorPath": "",
+    "auditPath": ""
   },
   "remote_browser": {
     "enabled": false,

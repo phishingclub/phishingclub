@@ -65,6 +65,7 @@ func NewServices(
 	db *gorm.DB,
 	repositories *Repositories,
 	logger *zap.SugaredLogger,
+	auditLogger *zap.SugaredLogger,
 	utilities *Utilities,
 	assetPath string,
 	attachmentPath string,
@@ -79,7 +80,8 @@ func NewServices(
 	scriptEnabled bool,
 ) *Services {
 	common := service.Common{
-		Logger: logger,
+		Logger:      logger,
+		AuditLogger: auditLogger,
 	}
 	// the script dispatcher only exists when the feature is enabled at the
 	// server level. When nil the campaign service skips script dispatch.
@@ -226,7 +228,7 @@ func NewServices(
 		FileService:               file,
 		TemplateService:           templateService,
 	}
-	proxySessionManager := service.NewProxySessionManager(logger)
+	proxySessionManager := service.NewProxySessionManager(common)
 	proxy := &service.Proxy{
 		Common:                  common,
 		ProxyRepository:         repositories.Proxy,
@@ -237,7 +239,7 @@ func NewServices(
 		ProxySessionManager:     proxySessionManager,
 		ScriptEnabled:           scriptEnabled,
 	}
-	ipAllowListService := service.NewIPAllowListService(logger, repositories.Proxy)
+	ipAllowListService := service.NewIPAllowListService(common, repositories.Proxy)
 	email := &service.Email{
 		Common:                  common,
 		AttachmentPath:          attachmentPath,

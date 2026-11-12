@@ -153,13 +153,18 @@ func main() {
 	if err != nil {
 		golog.Fatalf("Failed to connect to database: %s\nDSN: %s", err, conf.Database().DSN)
 	}
-	logger, atomicLogger, err := app.SetupLogger(buildMode, conf)
+	logger, atomicLogger, auditLogger, err := app.SetupLogger(buildMode, conf)
 	if err != nil {
 		golog.Fatalf("failed to setup logger: %s", err)
 	}
 	defer func() {
+		_ = auditLogger.Sync()
 		_ = logger.Sync()
 	}()
+	// logged before the stored log level is applied so it is always shown
+	if p := conf.AuditLogPath; len(p) > 0 {
+		logger.Infow("using audit log file", "path", p)
+	}
 	// set log levels
 	err = setLogLevels(db, atomicLogger, *flagDebug)
 	if err != nil {
@@ -247,6 +252,7 @@ func main() {
 		db,
 		repositories,
 		logger,
+		auditLogger,
 		utils,
 		assetPath,
 		attachmentsPath,

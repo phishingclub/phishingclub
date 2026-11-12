@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	"github.com/phishingclub/phishingclub/data"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func TestAuditOptionValueRedactsSSOSecret(t *testing.T) {
@@ -34,5 +37,38 @@ func TestAuditOptionValueOtherKeysUnchanged(t *testing.T) {
 	got := auditOptionValue(data.OptionKeyDisplayMode, data.OptionValueDisplayModeWhitebox)
 	if got != data.OptionValueDisplayModeWhitebox {
 		t.Fatalf("expected value unchanged, got %s", got)
+	}
+}
+
+// bufferLogger returns a logger at level that writes JSON lines to the buffer
+func bufferLogger(level zapcore.Level) (*zap.SugaredLogger, *bytes.Buffer) {
+	buf := &bytes.Buffer{}
+	core := zapcore.NewCore(
+		zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
+		zapcore.AddSync(buf),
+		level,
+	)
+	return zap.New(core).Sugar(), buf
+}
+
+func TestCommonAuditLogUsesAuditLogger(t *testing.T) {
+	mainLogger, mainBuf := bufferLogger(zapcore.ErrorLevel)
+	auditLogger, auditBuf := bufferLogger(zapcore.InfoLevel)
+	c := Common{Logger: mainLogger, AuditLogger: auditLogger}
+	c.AuditLogAuthorized(NewAuditEvent("Test.Event", nil))
+	if !strings.Contains(auditBuf.String(), `"name":"Test.Event"`) {
+		t.Fatalf("expected the event in the audit logger, got %q", auditBuf.String())
+	}
+	if mainBuf.Len() != 0 {
+		t.Fatalf("audit should not go through the main logger when an audit logger is set")
+	}
+}
+
+func TestCommonAuditLogFallsBackToLogger(t *testing.T) {
+	mainLogger, mainBuf := bufferLogger(zapcore.InfoLevel)
+	c := Common{Logger: mainLogger}
+	c.AuditLogNotAuthorized(NewAuditEvent("Test.Event", nil))
+	if !strings.Contains(mainBuf.String(), `"name":"Test.Event"`) {
+		t.Fatalf("expected fallback to main logger, got %q", mainBuf.String())
 	}
 }

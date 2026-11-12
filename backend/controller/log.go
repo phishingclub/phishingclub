@@ -97,6 +97,11 @@ func (c *Log) SetLevel(g *gin.Context) {
 	if !ok {
 		return
 	}
+	// the levels are changed in memory before they are stored, so the
+	// permission must be checked first
+	if ok := c.handleErrors(g, c.OptionService.AuthorizeSetLogLevel(session)); !ok {
+		return
+	}
 	// parse request
 	var request SetLevelRequest
 	if ok := c.handleParseRequest(g, &request); !ok {

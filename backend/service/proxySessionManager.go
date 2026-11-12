@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/model"
-	"go.uber.org/zap"
 )
 
 // ProxySession represents an active MITM proxy session
@@ -52,11 +51,9 @@ type ProxySessionManager struct {
 }
 
 // NewProxySessionManager creates a new proxy session manager
-func NewProxySessionManager(logger *zap.SugaredLogger) *ProxySessionManager {
+func NewProxySessionManager(common Common) *ProxySessionManager {
 	return &ProxySessionManager{
-		Common: Common{
-			Logger: logger,
-		},
+		Common: common,
 	}
 }
 

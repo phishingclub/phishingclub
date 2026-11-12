@@ -33,13 +33,10 @@ type IPAllowListService struct {
 }
 
 // NewIPAllowListService creates a new IP allow list service
-func NewIPAllowListService(logger *zap.SugaredLogger, proxyRepo *repository.Proxy) *IPAllowListService {
-	common := Common{
-		Logger: logger,
-	}
+func NewIPAllowListService(common Common, proxyRepo *repository.Proxy) *IPAllowListService {
 	service := &IPAllowListService{
 		Common:          common,
-		logger:          logger,
+		logger:          common.Logger,
 		cleanupDone:     make(chan bool),
 		ProxyRepository: proxyRepo,
 	}
