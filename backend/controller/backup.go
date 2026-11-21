@@ -72,3 +72,20 @@ func (b *Backup) DownloadBackup(g *gin.Context) {
 	// serve the file content directly from the secure file handle
 	g.DataFromReader(http.StatusOK, -1, "application/octet-stream", backupFile, nil)
 }
+
+// ClearBackups deletes all backup files
+func (b *Backup) ClearBackups(g *gin.Context) {
+	session, _, ok := b.handleSession(g)
+	if !ok {
+		return
+	}
+
+	deleted, err := b.BackupService.ClearBackups(g, session)
+	if ok := b.handleErrors(g, err); !ok {
+		return
+	}
+
+	b.Response.OK(g, gin.H{
+		"deleted": deleted,
+	})
+}

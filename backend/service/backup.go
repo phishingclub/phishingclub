@@ -582,3 +582,77 @@ func (b *Backup) GetBackupFile(
 	b.AuditLogAuthorized(ae)
 	return file, nil
 }
+
+// ClearBackups deletes every backup file in the backups folder and returns
+// how many were deleted. It refuses while a backup is being created.
+func (b *Backup) ClearBackups(
+	ctx context.Context,
+	session *model.Session,
+) (deleted int, err error) {
+	ae := NewAuditEvent("Backup.ClearBackups", session)
+	defer b.auditDone(ae, &err)
+
+	// check permissions
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil {
+		b.LogAuthError(err)
+		return 0, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		b.AuditLogNotAuthorized(ae)
+		return 0, errs.ErrAuthorizationFailed
+	}
+
+	if currentBackupStatus != nil && currentBackupStatus.IsRunning {
+		return 0, errs.NewCustomError(errors.New("a backup is being created, try again when it is done"))
+	}
+
+	filesPath := strings.TrimSuffix(b.FilePath, "/")
+	backupDir := filepath.Join(filesPath, "backups")
+	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
+		ae.Details["deletedCount"] = 0
+		b.AuditLogAuthorized(ae)
+		return 0, nil
+	}
+
+	// the root keeps every delete inside the backups folder
+	root, err := os.OpenRoot(backupDir)
+	if err != nil {
+		return 0, errs.Wrap(err)
+	}
+	defer root.Close()
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		return 0, errs.Wrap(err)
+	}
+
+	deletedFiles := []string{}
+	var failed []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.Type().IsRegular() ||
+			!strings.HasPrefix(name, "backup-") ||
+			!strings.HasSuffix(name, ".tar.gz") {
+			continue
+		}
+		if err := root.Remove(name); err != nil {
+			b.Logger.Warnw("failed to delete backup", "file", name, "error", err)
+			failed = append(failed, name)
+			continue
+		}
+		deletedFiles = append(deletedFiles, name)
+	}
+	ae.Details["deletedFiles"] = deletedFiles
+	ae.Details["deletedCount"] = len(deletedFiles)
+
+	if len(failed) > 0 {
+		ae.Details["failedFiles"] = failed
+		return len(deletedFiles), errs.Wrap(
+			fmt.Errorf("failed to delete %d backup files", len(failed)),
+		)
+	}
+
+	b.AuditLogAuthorized(ae)
+	return len(deletedFiles), nil
+}

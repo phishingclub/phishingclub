@@ -260,6 +260,14 @@ export class API {
 		},
 
 		/**
+		 * Delete all backup files
+		 * @returns {Promise<ApiResponse>}
+		 */
+		clearBackups: async () => {
+			return await deleteJSON(this.getPath(`/backup/clear`));
+		},
+
+		/**
 		 * Download a backup file
 		 * @param {string} filename - name of the backup file
 		 * @returns {Promise<Blob>}

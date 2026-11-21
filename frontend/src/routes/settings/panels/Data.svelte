@@ -15,6 +15,7 @@
 	import FormColumn from '$lib/components/FormColumn.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 
 	let loaded = false;
 
@@ -29,6 +30,7 @@
 	let isCreatingBackup = false;
 	let availableBackups = [];
 	let isLoadingBackups = false;
+	let isClearBackupsAlertVisible = false;
 
 	// import
 	let importError = '';
@@ -159,6 +161,16 @@
 		} finally {
 			isCreatingBackup = false;
 		}
+	}
+
+	// returns the response so DeleteAlert closes on success and shows the error otherwise
+	async function clearBackups() {
+		const res = await api.application.clearBackups();
+		if (res.success) {
+			addToast('Backups deleted', 'Success');
+		}
+		await refreshBackupList();
+		return res;
 	}
 
 	const onSetImportFile = (event) => {
@@ -320,14 +332,24 @@
 			{/if}
 		</div>
 		<svelte:fragment slot="footer">
-			<FormButton
-				type="button"
-				size={'large'}
-				on:click={openBackupModal}
-				disabled={isCreatingBackup}
-			>
-				Create Backup
-			</FormButton>
+			<div class="flex gap-2">
+				{#if availableBackups.length > 0}
+					<Button
+						size={'large'}
+						variant="danger-outline"
+						disabled={isCreatingBackup}
+						on:click={() => (isClearBackupsAlertVisible = true)}>Clear Backups</Button
+					>
+				{/if}
+				<FormButton
+					type="button"
+					size={'large'}
+					on:click={openBackupModal}
+					disabled={isCreatingBackup}
+				>
+					Create Backup
+				</FormButton>
+			</div>
 		</svelte:fragment>
 	</SettingsCard>
 
@@ -613,4 +635,14 @@
 			/>
 		</FormGrid>
 	</Modal>
+{/if}
+
+{#if isClearBackupsAlertVisible}
+	<DeleteAlert
+		title="Clear Backups"
+		name={`all backups (${availableBackups.length})`}
+		list={['All backup files stored on the server will be deleted']}
+		onClick={() => clearBackups()}
+		bind:isVisible={isClearBackupsAlertVisible}
+	/>
 {/if}
