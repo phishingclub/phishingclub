@@ -1899,6 +1899,39 @@ export class API {
 			}
 		},
 
+		campaignDefaults: {
+			// path for a scope: a company id, or the global default when companyID is null
+			scopePath: (companyID) =>
+				companyID ? `/company/campaign-defaults/${companyID}` : `/campaign-defaults`,
+			// get the stored defaults of a company or the global default, data is null when none
+			getByCompanyID: async (companyID) => {
+				return await getJSON(this.getPath(this.company.campaignDefaults.scopePath(companyID)));
+			},
+			// get the defaults the new campaign form uses for a company, company values
+			// first then global. without a company only the global defaults apply
+			getResolved: async (companyID) => {
+				const query = companyID ? `?companyID=${encodeURIComponent(companyID)}` : '';
+				return await getJSON(this.getPath(`/campaign-defaults/resolved${query}`));
+			},
+			// store the defaults of a company or the global default, a null field is inherited
+			upsert: async (
+				companyID,
+				{ closeAfterDays, anonymizeAfterDays, dataAnonymizeAfterDays, isAnonymous, saveSubmittedData }
+			) => {
+				return await postJSON(this.getPath(this.company.campaignDefaults.scopePath(companyID)), {
+					closeAfterDays: closeAfterDays ?? null,
+					anonymizeAfterDays: anonymizeAfterDays ?? null,
+					dataAnonymizeAfterDays: dataAnonymizeAfterDays ?? null,
+					isAnonymous: isAnonymous ?? null,
+					saveSubmittedData: saveSubmittedData ?? null
+				});
+			},
+			// remove the defaults of a company or the global default
+			delete: async (companyID) => {
+				return await deleteJSON(this.getPath(this.company.campaignDefaults.scopePath(companyID)));
+			}
+		},
+
 		reportInbox: {
 			// path for a scope: a company id, or the global inbox when companyID is null.
 			// the global inbox only covers global campaigns.

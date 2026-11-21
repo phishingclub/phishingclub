@@ -86,6 +86,9 @@ const (
 	ROUTE_V1_COMPANY_REPORT_CONFIG_LOG = "/api/v1/company/report-config/:companyID/log"
 	ROUTE_V1_REPORT_CONFIG_GLOBAL      = "/api/v1/report-config"
 	ROUTE_V1_REPORT_CONFIG_SEND        = "/api/v1/report-config/send/:id"
+	ROUTE_V1_COMPANY_CAMPAIGN_DEFAULTS = "/api/v1/company/campaign-defaults/:companyID"
+	ROUTE_V1_CAMPAIGN_DEFAULTS_GLOBAL  = "/api/v1/campaign-defaults"
+	ROUTE_V1_CAMPAIGN_DEFAULTS_RESOLVE = "/api/v1/campaign-defaults/resolved"
 	ROUTE_V1_COMPANY_REPORT_INBOX      = "/api/v1/company/report-inbox/:companyID"
 	ROUTE_V1_COMPANY_REPORT_INBOX_TEST = "/api/v1/company/report-inbox/:companyID/test"
 	ROUTE_V1_COMPANY_REPORT_INBOX_POLL = "/api/v1/company/report-inbox/:companyID/poll"
@@ -474,6 +477,14 @@ func setupRoutes(
 		DELETE(ROUTE_V1_REPORT_CONFIG_GLOBAL, middleware.SessionHandler, controllers.CompanyReportConfig.DeleteGlobal).
 		// sends a report now, ExtendedTimeout required for headless browser rendering
 		POST(ROUTE_V1_REPORT_CONFIG_SEND, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.CompanyReportConfig.SendNow).
+		// new campaign form defaults, per company and global
+		GET(ROUTE_V1_COMPANY_CAMPAIGN_DEFAULTS, middleware.SessionHandler, controllers.CampaignDefaults.GetByCompanyID).
+		POST(ROUTE_V1_COMPANY_CAMPAIGN_DEFAULTS, middleware.SessionHandler, controllers.CampaignDefaults.Upsert).
+		DELETE(ROUTE_V1_COMPANY_CAMPAIGN_DEFAULTS, middleware.SessionHandler, controllers.CampaignDefaults.Delete).
+		GET(ROUTE_V1_CAMPAIGN_DEFAULTS_GLOBAL, middleware.SessionHandler, controllers.CampaignDefaults.GetGlobal).
+		POST(ROUTE_V1_CAMPAIGN_DEFAULTS_GLOBAL, middleware.SessionHandler, controllers.CampaignDefaults.UpsertGlobal).
+		DELETE(ROUTE_V1_CAMPAIGN_DEFAULTS_GLOBAL, middleware.SessionHandler, controllers.CampaignDefaults.DeleteGlobal).
+		GET(ROUTE_V1_CAMPAIGN_DEFAULTS_RESOLVE, middleware.SessionHandler, controllers.CampaignDefaults.GetResolved).
 		// company report inbox
 		GET(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.GetByCompanyID).
 		POST(ROUTE_V1_COMPANY_REPORT_INBOX, middleware.SessionHandler, controllers.ReportInbox.Upsert).

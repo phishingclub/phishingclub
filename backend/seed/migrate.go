@@ -66,6 +66,7 @@ func initialInstallAndSeed(
 		&database.MicrosoftDeviceCode{},
 		&database.CompanyScimConfig{},
 		&database.CompanyReportConfig{},
+		&database.CampaignDefaults{},
 		&database.ReportSendLog{},
 		&database.ReportInbox{},
 		&database.ReportInboxMessage{},

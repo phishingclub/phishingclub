@@ -11,6 +11,8 @@
 	import FormButton from '$lib/components/FormButton.svelte';
 	import FormError from '$lib/components/FormError.svelte';
 	import TextField from '$lib/components/TextField.svelte';
+	import CampaignDefaultsModal from '$lib/components/modal/CampaignDefaultsModal.svelte';
+	import CampaignDefaultsStatus from '$lib/components/company/CampaignDefaultsStatus.svelte';
 
 	let loaded = false;
 	let currentDisplayMode = DISPLAY_MODE.WHITEBOX;
@@ -21,6 +23,7 @@
 		repeatOffenderMonths: null
 	};
 	let updateSettingsError = '';
+	let isCampaignDefaultsModalVisible = false;
 
 	onMount(async () => {
 		showIsLoading();
@@ -160,5 +163,20 @@
 			</div>
 		</Form>
 	</SettingsCard>
+
+	<SettingsCard
+		title="Campaign Defaults"
+		description="Values a new campaign starts with, such as when it closes and is anonymized. Companies can set their own."
+	>
+		<div class="mt-2">
+			<CampaignDefaultsStatus modalVisible={isCampaignDefaultsModalVisible} />
+		</div>
+		<svelte:fragment slot="footer">
+			<FormButton size="medium" on:click={() => (isCampaignDefaultsModalVisible = true)}
+				>Configure</FormButton
+			>
+		</svelte:fragment>
+	</SettingsCard>
 </div>
+<CampaignDefaultsModal bind:visible={isCampaignDefaultsModalVisible} isGlobal />
 {/if}

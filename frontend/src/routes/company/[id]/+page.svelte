@@ -28,6 +28,8 @@
 	import ScimModal from '$lib/components/modal/ScimModal.svelte';
 	import CompanyReportTemplateModal from '$lib/components/modal/CompanyReportTemplateModal.svelte';
 	import CompanyReportDeliveryModal from '$lib/components/modal/CompanyReportDeliveryModal.svelte';
+	import CampaignDefaultsModal from '$lib/components/modal/CampaignDefaultsModal.svelte';
+	import CampaignDefaultsStatus from '$lib/components/company/CampaignDefaultsStatus.svelte';
 	import CompanyReportInboxModal from '$lib/components/modal/CompanyReportInboxModal.svelte';
 	import ReportInboxStatus from '$lib/components/company/ReportInboxStatus.svelte';
 	import CompanyReportDeliveryLog from '$lib/components/company/CompanyReportDeliveryLog.svelte';
@@ -84,6 +86,7 @@
 	let isScimModalVisible = false;
 	let isReportTemplateModalVisible = false;
 	let isReportDeliveryModalVisible = false;
+	let isCampaignDefaultsModalVisible = false;
 	let isReportInboxModalVisible = false;
 	let isExportAlertVisible = false;
 	let isDeleteAlertVisible = false;
@@ -400,25 +403,44 @@
 						</form>
 					</SettingsCard>
 
-					<SettingsCard
-						title="Automatically Prune Orphaned Recipients"
-						description="Choose whether orphaned recipients are removed automatically. Changes are saved right away."
-					>
-						<div class="space-y-2">
-							<RadioOption
-								checked={autoPruneEnabled}
-								label="Enabled"
-								description="Orphaned recipients are deleted automatically each hour"
-								on:change={() => setAutoPrune(true)}
-							/>
-							<RadioOption
-								checked={!autoPruneEnabled}
-								label="Disabled"
-								description="Orphaned recipients are kept until manually deleted"
-								on:change={() => setAutoPrune(false)}
-							/>
-						</div>
-					</SettingsCard>
+					<!-- right column, stacks the smaller cards beside the details form -->
+					<div class="flex flex-col gap-6 w-full sm:w-96">
+						<SettingsCard
+							widthClass="w-full"
+							title="Automatically Prune Orphaned Recipients"
+							description="Choose whether orphaned recipients are removed automatically. Changes are saved right away."
+						>
+							<div class="space-y-2">
+								<RadioOption
+									checked={autoPruneEnabled}
+									label="Enabled"
+									description="Orphaned recipients are deleted automatically each hour"
+									on:change={() => setAutoPrune(true)}
+								/>
+								<RadioOption
+									checked={!autoPruneEnabled}
+									label="Disabled"
+									description="Orphaned recipients are kept until manually deleted"
+									on:change={() => setAutoPrune(false)}
+								/>
+							</div>
+						</SettingsCard>
+
+						<SettingsCard
+							widthClass="w-full"
+							title="Campaign Defaults"
+							description="Values a new campaign for this company starts with."
+						>
+							<div class="mt-2">
+								<CampaignDefaultsStatus {companyId} modalVisible={isCampaignDefaultsModalVisible} />
+							</div>
+							<svelte:fragment slot="footer">
+								<FormButton size="medium" on:click={() => (isCampaignDefaultsModalVisible = true)}
+									>Configure</FormButton
+								>
+							</svelte:fragment>
+						</SettingsCard>
+					</div>
 				</div>
 			{:else if active === 'stats'}
 				<CompanyCustomStats {companyId} />
@@ -541,6 +563,7 @@
 	<ScimModal bind:visible={isScimModalVisible} {company} />
 	<CompanyReportTemplateModal bind:visible={isReportTemplateModalVisible} {company} />
 	<CompanyReportDeliveryModal bind:visible={isReportDeliveryModalVisible} {company} />
+	<CampaignDefaultsModal bind:visible={isCampaignDefaultsModalVisible} {company} />
 	<CompanyReportInboxModal
 		bind:visible={isReportInboxModalVisible}
 		{company}

@@ -34,6 +34,7 @@
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
 	import DateTimeField from '$lib/components/DateTimeField.svelte';
+	import DefaultDateHint from '$lib/components/form/DefaultDateHint.svelte';
 	import TextFieldMultiSelect from '$lib/components/TextFieldMultiSelect.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
@@ -250,6 +251,145 @@
 	let lateScheduleEnabled = false;
 	let showAdvancedOptionsStep3 = false;
 	let showAdvancedOptionsStep4 = false;
+
+	// campaign defaults of the company in context, company values first then
+	// global. Only loaded for a new or copied campaign, null otherwise.
+	let campaignDefaults = null;
+	// a date follows its default until the user sets or clears it
+	let followsDefault = { closeAt: false, anonymizeAt: false, dataAnonymizeAt: false };
+	const dateDefaultKey = {
+		closeAt: 'closeAfterDays',
+		anonymizeAt: 'anonymizeAfterDays',
+		dataAnonymizeAt: 'dataAnonymizeAfterDays'
+	};
+
+	const fetchCampaignDefaults = async () => {
+		try {
+			const res = await api.company.campaignDefaults.getResolved(contextCompanyID);
+			if (res.success) {
+				return res.data;
+			}
+			addToast('Failed to load campaign defaults', 'Error');
+		} catch (e) {
+			addToast('Failed to load campaign defaults', 'Error');
+			console.error('failed to load campaign defaults', e);
+		}
+		return null;
+	};
+
+	const dateDefaultDays = (field) => campaignDefaults?.[dateDefaultKey[field]] ?? null;
+
+	// every date with a default starts following it
+	const followDateDefaults = () => {
+		followsDefault = {
+			closeAt: dateDefaultDays('closeAt') !== null,
+			anonymizeAt: dateDefaultDays('anonymizeAt') !== null,
+			dataAnonymizeAt: dateDefaultDays('dataAnonymizeAt') !== null
+		};
+		// the close date is in the advanced options, show them when it is filled
+		if (followsDefault.closeAt) {
+			showAdvancedOptionsStep3 = true;
+		}
+	};
+
+	// the value each following date was last given, so a change event that
+	// keeps the same date does not stop it from following
+	let defaultDateValues = { closeAt: null, anonymizeAt: null, dataAnonymizeAt: null };
+
+	// the user picked another date, it no longer follows its default
+	const stopFollowingDefault = (field, value) => {
+		if (!followsDefault[field]) return;
+		if (value && sameMinute(value, defaultDateValues[field])) return;
+		followsDefault = { ...followsDefault, [field]: false };
+	};
+
+	const clearDefaultDate = (field) => {
+		formValues[field] = null;
+		followsDefault = { ...followsDefault, [field]: false };
+	};
+
+	const useDefaultDate = (field) => {
+		followsDefault = { ...followsDefault, [field]: true };
+	};
+
+	// adds whole days on the local calendar so the clock time stays the same
+	// across daylight saving changes
+	const addLocalDays = (value, days) => {
+		const d = new Date(value);
+		d.setDate(d.getDate() + days);
+		return d;
+	};
+
+	const sameMinute = (a, b) => {
+		if (!a || !b) return !a && !b;
+		return Math.floor(new Date(a).getTime() / 60000) === Math.floor(new Date(b).getTime() / 60000);
+	};
+
+	// keeps the dates that follow a default in step with the schedule. Close is
+	// days after the last send, the anonymize dates are days after close and
+	// stay empty without a close date. An anonymous campaign is anonymized at
+	// close, so it takes no anonymize defaults.
+	const syncDefaultDates = (defaults, follows, sendStartAt, sendEndAt, closeAt, isAnonymous) => {
+		if (!defaults) return;
+		let close = closeAt;
+		if (follows.closeAt && defaults.closeAfterDays != null) {
+			const lastSend = sendEndAt ?? sendStartAt;
+			const want = lastSend ? addLocalDays(lastSend, defaults.closeAfterDays) : null;
+			defaultDateValues.closeAt = want;
+			if (!sameMinute(want, closeAt)) {
+				formValues.closeAt = want ? want.toISOString() : null;
+			}
+			close = want;
+		}
+		const fromClose = (days) => (close && days != null ? addLocalDays(close, days) : null);
+		if (follows.anonymizeAt) {
+			const want = isAnonymous ? null : fromClose(defaults.anonymizeAfterDays);
+			defaultDateValues.anonymizeAt = want;
+			if (!sameMinute(want, formValues.anonymizeAt)) {
+				formValues.anonymizeAt = want ? want.toISOString() : null;
+			}
+		}
+		if (follows.dataAnonymizeAt) {
+			const want = isAnonymous ? null : fromClose(defaults.dataAnonymizeAfterDays);
+			defaultDateValues.dataAnonymizeAt = want;
+			if (!sameMinute(want, formValues.dataAnonymizeAt)) {
+				formValues.dataAnonymizeAt = want ? want.toISOString() : null;
+			}
+		}
+	};
+
+	$: syncDefaultDates(
+		campaignDefaults,
+		followsDefault,
+		formValues.sendStartAt,
+		formValues.sendEndAt,
+		formValues.closeAt,
+		formValues.isAnonymous
+	);
+
+	const daysText = (n) => (n === 1 ? '1 day' : `${n} days`);
+
+	// the line under a date that has a default: what it follows, or that the
+	// user set it themselves
+	const defaultDateHint = (field, follows, value, defaults, isAnonymous, schedule) => {
+		const days = defaults?.[dateDefaultKey[field]];
+		if (days == null) return '';
+		if (field !== 'closeAt' && isAnonymous) return '';
+		const source = defaults.sources?.[dateDefaultKey[field]] === 'company' ? 'company' : 'global';
+		const after = field === 'closeAt' ? 'the last send' : 'close';
+		if (!follows[field]) {
+			return `Default is ${daysText(days)} after ${after}.`;
+		}
+		if (!value) {
+			if (field === 'closeAt' && schedule === 'self-managed') {
+				return `Self managed campaigns have no last send, so the ${source} default of ${daysText(days)} is not used.`;
+			}
+			return field === 'closeAt'
+				? `Fills in ${daysText(days)} after the last send once the sending dates are set (${source} default).`
+				: `Fills in ${daysText(days)} after close once a close date is set (${source} default).`;
+		}
+		return `${daysText(days)} after ${after} (${source} default).`;
+	};
 	// true when the company context provisions recipients via SCIM
 	let companyHasScim = false;
 	// true while the current late schedule checkbox state came from the SCIM default
@@ -1314,8 +1454,19 @@
 			showIsLoading();
 			modalMode = 'create';
 			currentStep = 1;
-			await refreshCampaignDependencyData();
+			const [, defaults] = await Promise.all([
+				refreshCampaignDependencyData(),
+				fetchCampaignDefaults()
+			]);
 			resetFormValues();
+			campaignDefaults = defaults;
+			if (defaults?.isAnonymous != null) {
+				formValues.isAnonymous = defaults.isAnonymous;
+			}
+			if (defaults?.saveSubmittedData != null) {
+				formValues.saveSubmittedData = defaults.saveSubmittedData;
+			}
+			followDateDefaults();
 			isModalVisible = true;
 		} finally {
 			hideIsLoading();
@@ -1364,6 +1515,8 @@
 		showAdvancedOptionsStep4 = false;
 		lateScheduleAutoSelected = false;
 		prevLateScheduleEligible = false;
+		campaignDefaults = null;
+		followsDefault = { closeAt: false, anonymizeAt: false, dataAnonymizeAt: false };
 	};
 
 	const onChangeScheduleType = () => {
@@ -1410,6 +1563,9 @@
 			}
 			await refreshCampaignDependencyData();
 			assignCampaign(campaign);
+			// saved dates are kept as they are, defaults only fill new campaigns
+			campaignDefaults = null;
+			followsDefault = { closeAt: false, anonymizeAt: false, dataAnonymizeAt: false };
 			isModalVisible = true;
 		} catch (e) {
 			addToast('Failed to load campaign', 'Error');
@@ -1425,8 +1581,15 @@
 		try {
 			showIsLoading();
 			const campaign = await getCampaign(id);
-			await refreshCampaignDependencyData();
+			const [, defaults] = await Promise.all([
+				refreshCampaignDependencyData(),
+				fetchCampaignDefaults()
+			]);
 			assignCampaign(campaign, true);
+			// a copy keeps the choices of the source campaign, only its emptied
+			// dates take the defaults
+			campaignDefaults = defaults;
+			followDateDefaults();
 			isModalVisible = true;
 		} finally {
 			hideIsLoading();
@@ -2556,9 +2719,28 @@
 													? new Date(formValues.sendStartAt)
 													: new Date()}
 											optional
+											onChange={(v) => stopFollowingDefault('closeAt', v)}
+											ariaDescribedBy={campaignDefaults?.closeAfterDays != null
+												? 'closeAt-default-hint'
+												: null}
 											toolTipText="After this time, no more events are saved."
 											>Close Campaign</DateTimeField
 										>
+										<DefaultDateHint
+											id="closeAt-default-hint"
+											text={defaultDateHint(
+												'closeAt',
+												followsDefault,
+												formValues.closeAt,
+												campaignDefaults,
+												formValues.isAnonymous,
+												scheduleType
+											)}
+											following={followsDefault.closeAt}
+											hasValue={!!formValues.closeAt}
+											onClear={() => clearDefaultDate('closeAt')}
+											onUseDefault={() => useDefaultDate('closeAt')}
+										/>
 
 										{#if formValues.isAnonymous}
 											<div
@@ -2576,9 +2758,29 @@
 													? new Date(formValues.sendEndAt)
 													: new Date()}
 											optional
+											onChange={(v) => stopFollowingDefault('anonymizeAt', v)}
+											ariaDescribedBy={campaignDefaults?.anonymizeAfterDays != null &&
+											!formValues.isAnonymous
+												? 'anonymizeAt-default-hint'
+												: null}
 											toolTipText="When reached, the campaign closes and all data is anonymized, including the recipient relation."
 											>Anonymize All Data</DateTimeField
 										>
+										<DefaultDateHint
+											id="anonymizeAt-default-hint"
+											text={defaultDateHint(
+												'anonymizeAt',
+												followsDefault,
+												formValues.anonymizeAt,
+												campaignDefaults,
+												formValues.isAnonymous,
+												scheduleType
+											)}
+											following={followsDefault.anonymizeAt}
+											hasValue={!!formValues.anonymizeAt}
+											onClear={() => clearDefaultDate('anonymizeAt')}
+											onUseDefault={() => useDefaultDate('anonymizeAt')}
+										/>
 
 										{#if !formValues.isAnonymous}
 											<DateTimeField
@@ -2589,9 +2791,28 @@
 														? new Date(formValues.sendEndAt)
 														: new Date()}
 												optional
+												onChange={(v) => stopFollowingDefault('dataAnonymizeAt', v)}
+												ariaDescribedBy={campaignDefaults?.dataAnonymizeAfterDays != null
+													? 'dataAnonymizeAt-default-hint'
+													: null}
 												toolTipText="When reached, only the submitted data, user agent, ip and browser metadata are anonymized. The recipient relation is kept."
 												>Anonymize Data</DateTimeField
 											>
+											<DefaultDateHint
+												id="dataAnonymizeAt-default-hint"
+												text={defaultDateHint(
+													'dataAnonymizeAt',
+													followsDefault,
+													formValues.dataAnonymizeAt,
+													campaignDefaults,
+													formValues.isAnonymous,
+													scheduleType
+												)}
+												following={followsDefault.dataAnonymizeAt}
+												hasValue={!!formValues.dataAnonymizeAt}
+												onClear={() => clearDefaultDate('dataAnonymizeAt')}
+												onUseDefault={() => useDefaultDate('dataAnonymizeAt')}
+											/>
 										{/if}
 									{/if}
 								</div>

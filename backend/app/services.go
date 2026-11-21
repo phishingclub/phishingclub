@@ -52,6 +52,7 @@ type Services struct {
 	MicrosoftDeviceCode *service.MicrosoftDeviceCode
 	CompanyScimConfig   *service.CompanyScimConfig
 	CompanyReportConfig *service.CompanyReportConfig
+	CampaignDefaults    *service.CampaignDefaults
 	ReportInbox         *service.ReportInbox
 	Scim                *service.Scim
 	RemoteBrowser       *service.RemoteBrowser
@@ -375,6 +376,7 @@ func NewServices(
 		CompanyRepository:             repositories.Company,
 		ReportInboxRepository:         repositories.ReportInbox,
 		CompanyReportConfigRepository: repositories.CompanyReportConfig,
+		CampaignDefaultsRepository:    repositories.CampaignDefaults,
 		ReportSendLogRepository:       repositories.ReportSendLog,
 		CompanyScimConfigRepository:   repositories.CompanyScimConfig,
 		AttachmentService:             attachment,
@@ -486,6 +488,12 @@ func NewServices(
 		RecipientGroupRepository:      repositories.RecipientGroup,
 	}
 
+	campaignDefaults := &service.CampaignDefaults{
+		Common:                     common,
+		CampaignDefaultsRepository: repositories.CampaignDefaults,
+		CompanyRepository:          repositories.Company,
+	}
+
 	reportInbox := &service.ReportInbox{
 		Common:                      common,
 		ReportInboxRepository:       repositories.ReportInbox,
@@ -507,6 +515,7 @@ func NewServices(
 		ContentRegistry:     contentRegistry,
 		CompanyScimConfig:   companyScimConfig,
 		CompanyReportConfig: companyReportConfig,
+		CampaignDefaults:    campaignDefaults,
 		ReportInbox:         reportInbox,
 		Scim:                scim,
 		Asset:               asset,

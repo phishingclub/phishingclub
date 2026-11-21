@@ -47,6 +47,7 @@ type Controllers struct {
 	OAuthProvider       *controller.OAuthProvider
 	CompanyScimConfig   *controller.CompanyScimConfig
 	CompanyReportConfig *controller.CompanyReportConfig
+	CampaignDefaults    *controller.CampaignDefaults
 	ReportInbox         *controller.ReportInbox
 	Scim                *controller.Scim
 	RemoteBrowser       *controller.RemoteBrowserController
@@ -246,6 +247,10 @@ func NewControllers(
 		CompanyReportConfigService: services.CompanyReportConfig,
 		CampaignService:            services.Campaign,
 	}
+	campaignDefaults := &controller.CampaignDefaults{
+		Common:                  common,
+		CampaignDefaultsService: services.CampaignDefaults,
+	}
 	reportInbox := &controller.ReportInbox{
 		Common:             common,
 		ReportInboxService: services.ReportInbox,
@@ -317,6 +322,7 @@ func NewControllers(
 		OAuthProvider:       oauthProvider,
 		CompanyScimConfig:   companyScimConfig,
 		CompanyReportConfig: companyReportConfig,
+		CampaignDefaults:    campaignDefaults,
 		ReportInbox:         reportInbox,
 		Scim:                scim,
 		RemoteBrowser:       remoteBrowser,

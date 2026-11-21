@@ -41,7 +41,9 @@ type Company struct {
 	ReportInboxRepository    *repository.ReportInbox
 	// the report delivery config and logs of a company are deleted with it
 	CompanyReportConfigRepository *repository.CompanyReportConfig
-	ReportSendLogRepository       *repository.ReportSendLog
+	// CampaignDefaultsRepository removes the campaign defaults of a deleted company
+	CampaignDefaultsRepository *repository.CampaignDefaults
+	ReportSendLogRepository    *repository.ReportSendLog
 	// the SCIM config of a company is deleted first when it is deleted
 	CompanyScimConfigRepository *repository.CompanyScimConfig
 	// CancelReportInboxPoll stops a running poll of a reporting inbox that is
@@ -491,6 +493,12 @@ func (s *Company) deleteCompanyNow(
 	if s.CompanyReportConfigRepository != nil && companyID != nil {
 		if err := s.CompanyReportConfigRepository.DeleteByCompanyID(g, companyID); err != nil {
 			s.Logger.Errorw("failed to delete report config related to company", "error", err)
+			return errs.Wrap(err)
+		}
+	}
+	if s.CampaignDefaultsRepository != nil && companyID != nil {
+		if err := s.CampaignDefaultsRepository.DeleteByCompanyID(g, companyID); err != nil {
+			s.Logger.Errorw("failed to delete campaign defaults related to company", "error", err)
 			return errs.Wrap(err)
 		}
 	}
