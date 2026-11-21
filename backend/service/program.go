@@ -288,10 +288,12 @@ func (s *Program) Create(
 	unlockGroups()
 	unlockCompany()
 	ae.Details["id"] = id.String()
-	// a program that starts now enrolls its members right away. The program is
-	// stored, so when the request ends first the scheduler enrolls them instead
+	// a program that starts now enrolls its members in the background, so the
+	// request returns without waiting and the people list shows the planned
+	// sends, the same as Start
 	if start := program.StartAtTime(); start != nil && !start.After(now) {
-		s.enrollNowUnlocked(ctx, id)
+		s.noteRequester(programActionStart, *id, session)
+		s.enrollInBackground(id)
 	}
 	s.AuditLogAuthorized(ae)
 	return id, nil
@@ -544,9 +546,11 @@ func (s *Program) UpdateByID(
 		}
 	}
 	ae.Details["cancelledSends"] = cancelled
-	// an edit that starts a program now enrolls its members right away
+	// an edit that starts a program now enrolls its members in the background,
+	// so the request returns without waiting, the same as Start
 	if existing.StartedAt == nil {
-		s.enrollNowUnlocked(ctx, id)
+		s.noteRequester(programActionStart, *id, session)
+		s.enrollInBackground(id)
 	}
 	s.AuditLogAuthorized(ae)
 	return nil
