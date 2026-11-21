@@ -1818,7 +1818,8 @@
 <main>
 	<div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
 		<Headline docSlug="campaigns">Campaigns</Headline>
-		<div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+		<!-- drop the checkbox label padding so the row stays as tall as the headline -->
+		<div class="flex flex-wrap items-center gap-x-6 gap-y-2 [&>label]:py-0">
 			<CheckboxField
 				bind:value={includeTestCampaigns}
 				on:change={handleIncludeTestToggleChange}

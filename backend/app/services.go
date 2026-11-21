@@ -8,6 +8,7 @@ import (
 	"github.com/phishingclub/phishingclub/ipdata"
 	"github.com/phishingclub/phishingclub/script"
 	"github.com/phishingclub/phishingclub/service"
+	"github.com/phishingclub/phishingclub/utils"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -76,7 +77,7 @@ func NewServices(
 	certMagicConfig *certmagic.Config,
 	certMagicCache *certmagic.Cache,
 	filePath string,
-	trustedProxies []string,
+	ipTrust utils.IPTrust,
 	remoteBrowserExecPath string,
 	brandingPath string,
 	scriptEnabled bool,
@@ -306,7 +307,7 @@ func NewServices(
 		ReportInboxRepository:         repositories.ReportInbox,
 		OptionService:                 optionService,
 		RemoteBrowserExecPath:         remoteBrowserExecPath,
-		TrustedProxies:                trustedProxies,
+		IPTrust:                       ipTrust,
 		CompanyRepository:             repositories.Company,
 	}
 	// wire campaign service into microsoft device code service now that campaign is constructed

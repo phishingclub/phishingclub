@@ -22,5 +22,10 @@
   },
   "script": {
     "enabled": true
+  },
+  "ip_security": {
+    "admin_allowed": [],
+    "trusted_proxies": ["172.20.0.0/16"],
+    "trusted_ip_header": ""
   }
 }

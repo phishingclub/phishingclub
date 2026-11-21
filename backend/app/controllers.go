@@ -251,9 +251,9 @@ func NewControllers(
 		ReportInboxService: services.ReportInbox,
 	}
 	scim := &controller.Scim{
-		Common:         common,
-		ScimService:    services.Scim,
-		TrustedProxies: conf.IPSecurity.TrustedProxies,
+		Common:      common,
+		ScimService: services.Scim,
+		IPTrust:     conf.IPSecurity.ClientIPTrust(),
 	}
 	remoteBrowser := &controller.RemoteBrowserController{
 		Common:                      common,
@@ -265,7 +265,7 @@ func NewControllers(
 		ScriptService:               services.Script,
 		ExecPath:                    conf.RemoteBrowser.ExecPath,
 		Enabled:                     conf.RemoteBrowser.Enabled,
-		TrustedProxies:              conf.IPSecurity.TrustedProxies,
+		IPTrust:                     conf.IPSecurity.ClientIPTrust(),
 	}
 	reportTemplate := &controller.ReportTemplate{
 		Common:                common,

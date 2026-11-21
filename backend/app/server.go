@@ -66,7 +66,7 @@ type Server struct {
 	ja4Middleware         *middleware.JA4Middleware
 	remoteBrowserWSPath   string
 	reportPath            string
-	trustedProxies        []string
+	ipTrust               utils.IPTrust
 }
 
 // NewServer returns a new server
@@ -81,7 +81,7 @@ func NewServer(
 	certMagicConfig *certmagic.Config,
 	remoteBrowserWSPath string,
 	reportPath string,
-	trustedProxies []string,
+	ipTrust utils.IPTrust,
 ) *Server {
 	// setup ja4 middleware for tls fingerprinting
 	ja4Middleware := middleware.NewJA4Middleware(logger)
@@ -102,7 +102,7 @@ func NewServer(
 		repositories.Option,
 		services.Option,
 		services.Script,
-		trustedProxies,
+		ipTrust,
 	)
 
 	// setup proxy session cleanup routine
@@ -130,7 +130,7 @@ func NewServer(
 		ja4Middleware:         ja4Middleware,
 		remoteBrowserWSPath:   remoteBrowserWSPath,
 		reportPath:            reportPath,
-		trustedProxies:        trustedProxies,
+		ipTrust:               ipTrust,
 	}
 }
 
@@ -377,7 +377,7 @@ func (s *Server) assetFiltersAllow(c *gin.Context, logPath string, assetIDs []uu
 		)
 		return false
 	}
-	visitor := s.newFilterVisitor(c, utils.ExtractClientIP(c.Request, s.trustedProxies))
+	visitor := s.newFilterVisitor(c, utils.ExtractClientIP(c.Request, s.ipTrust))
 	for _, assetID := range assetIDs {
 		filters := lists[assetID]
 		if len(filters) == 0 {
@@ -1138,7 +1138,7 @@ func (s *Server) emitTrainingMilestoneIfNeeded(
 		return nil
 	}
 	eventID := uuid.New()
-	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.ipTrust))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 	event := &model.CampaignEvent{
 		ID:          &eventID,
@@ -1325,7 +1325,7 @@ func (s *Server) checkAndServePhishingPage(
 		return false, fmt.Errorf("failed to get campaign template: %s", err)
 	}
 	// check that the requesters IP is allow listed
-	ip := utils.ExtractClientIP(c.Request, s.trustedProxies)
+	ip := utils.ExtractClientIP(c.Request, s.ipTrust)
 	servedByIPFilter, err := s.checkIPFilter(c, ip, campaign, domain, &campaignID)
 	if err != nil {
 		return false, err
@@ -1642,7 +1642,7 @@ func (s *Server) checkAndServePhishingPage(
 		submitDataEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
 		newEventID := uuid.New()
 		campaignID := campaign.ID.MustGet()
-		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
+		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.ipTrust))
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 		submittedData := vo.NewEmptyOptionalString1MB()
 
@@ -1932,7 +1932,7 @@ func (s *Server) checkAndServePhishingPage(
 			// only create synthetic event if no message_read event exists
 			if !hasMessageRead {
 				syntheticReadEventID := uuid.New()
-				clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
+				clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.ipTrust))
 				userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 				syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
 
@@ -1976,7 +1976,7 @@ func (s *Server) checkAndServePhishingPage(
 		visitEventID := uuid.New()
 		eventName := pageVisitEventName(currentPageType)
 		eventID := cache.EventIDByName[eventName]
-		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
+		clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.ipTrust))
 		userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 		metadata := model.ExtractCampaignEventMetadata(c, campaign)
 		visitEvent := &model.CampaignEvent{
@@ -2255,7 +2255,7 @@ func (s *Server) checkAndServePhishingPage(
 		// only create synthetic event if no message_read event exists
 		if !hasMessageRead {
 			syntheticReadEventID := uuid.New()
-			clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
+			clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.ipTrust))
 			userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 			syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
 
@@ -2300,7 +2300,7 @@ func (s *Server) checkAndServePhishingPage(
 
 	campaignEventID := cache.EventIDByName[eventName]
 	eventID := uuid.New()
-	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.ipTrust))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 	metadata := model.ExtractCampaignEventMetadata(c, campaign)
 	event := &model.CampaignEvent{
@@ -2511,7 +2511,7 @@ func (s *Server) renderDenyPage(
 	// log deny page visited event
 	denyPageVisitEventID := uuid.New()
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED]
-	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.trustedProxies))
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(c.Request, s.ipTrust))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(c.Request.UserAgent(), 0, MAX_USER_AGENT_SAVED))
 	metadata := model.ExtractCampaignEventMetadata(c, campaign)
 	event := &model.CampaignEvent{

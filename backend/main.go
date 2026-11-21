@@ -261,7 +261,7 @@ func main() {
 		certMagicConfig,
 		certMagicCache,
 		*flagFilePath,
-		conf.IPSecurity.TrustedProxies,
+		conf.IPSecurity.ClientIPTrust(),
 		conf.RemoteBrowser.ExecPath,
 		brandingPath,
 		conf.Script.Enabled,
@@ -436,7 +436,7 @@ func main() {
 		certMagicConfig,
 		rbWSPath,
 		reportPath,
-		conf.IPSecurity.TrustedProxies,
+		conf.IPSecurity.ClientIPTrust(),
 	)
 
 	var r *gin.Engine

@@ -13,6 +13,7 @@ import (
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/file"
+	"github.com/phishingclub/phishingclub/utils"
 )
 
 var (
@@ -171,9 +172,20 @@ type IPSecurityConfig struct {
 	// ip/cidr of legitimate reverse proxies (e.g., Nginx, HAProxy, Cloudflare edges)
 	TrustedProxies []string `json:"trusted_proxies"`
 
-	// headers to check for real client IP
+	// the one header a trusted proxy sets with the real client IP. When set,
+	// only this header is read and only from trusted_proxies. When empty the
+	// phishing server checks a fixed list of common headers.
 	// examples: CF-Connecting-IP, X-Real-IP, True-Client-IP, X-Forwarded-For
 	TrustedIPHeader string `json:"trusted_ip_header"`
+}
+
+// ClientIPTrust returns the proxy trust used to read the client IP on the
+// phishing server
+func (c IPSecurityConfig) ClientIPTrust() utils.IPTrust {
+	return utils.IPTrust{
+		Proxies: c.TrustedProxies,
+		Header:  c.TrustedIPHeader,
+	}
 }
 
 // ValidateFileWriter validates the file writer

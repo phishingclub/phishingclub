@@ -131,7 +131,7 @@ type ProxyHandler struct {
 	OptionService               *service.Option
 	ScriptService               *service.Script
 	cookieName                  string
-	trustedProxies              []string
+	ipTrust                     utils.IPTrust
 }
 
 func NewProxyHandler(
@@ -150,7 +150,7 @@ func NewProxyHandler(
 	optionRepo *repository.Option,
 	optionService *service.Option,
 	scriptService *service.Script,
-	trustedProxies []string,
+	ipTrust utils.IPTrust,
 ) *ProxyHandler {
 	// get proxy cookie name from database
 	cookieName := "ps" // fallback default
@@ -175,7 +175,7 @@ func NewProxyHandler(
 		OptionService:               optionService,
 		ScriptService:               scriptService,
 		cookieName:                  cookieName,
-		trustedProxies:              trustedProxies,
+		ipTrust:                     ipTrust,
 	}
 }
 
@@ -1573,7 +1573,7 @@ func (m *ProxyHandler) runSessionScript(req *http.Request, reqCtx *RequestContex
 // script: the trusted proxy aware ip, its country and asns from the ipdata
 // store, the ja4 fingerprint, and the request headers.
 func (m *ProxyHandler) buildScriptRequestInput(req *http.Request, reqCtx *RequestContext) map[string]interface{} {
-	ip := utils.ExtractClientIP(req, m.trustedProxies)
+	ip := utils.ExtractClientIP(req, m.ipTrust)
 	if host, _, err := net.SplitHostPort(ip); err == nil {
 		ip = host
 	}
@@ -3928,7 +3928,7 @@ func (m *ProxyHandler) createCampaignInfoEvent(session *service.ProxySession, ca
 	}
 
 	eventID := uuid.New()
-	clientIP := utils.ExtractClientIP(req, m.trustedProxies)
+	clientIP := utils.ExtractClientIP(req, m.ipTrust)
 	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
 
 	event := &model.CampaignEvent{
@@ -3999,7 +3999,7 @@ func (m *ProxyHandler) createCampaignSubmitEvent(session *service.ProxySession, 
 	eventID := uuid.New()
 	// use the event creation below instead of service call
 
-	clientIP := utils.ExtractClientIP(req, m.trustedProxies)
+	clientIP := utils.ExtractClientIP(req, m.ipTrust)
 
 	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
 
@@ -4473,38 +4473,10 @@ func (m *ProxyHandler) applyDefaultPrivateMode(reqCtx *RequestContext, req *http
 	return false, "404"
 }
 
-// getClientIP extracts the real client IP from request headers
+// getClientIP returns the client IP used by the private mode allow list.
+// Forwarded headers are only read from a trusted proxy.
 func (m *ProxyHandler) getClientIP(req *http.Request) string {
-	// check common proxy headers first
-	proxyHeaders := []string{
-		"X-Forwarded-For",
-		"X-Real-IP",
-		"X-Client-IP",
-		"CF-Connecting-IP",
-		"True-Client-IP",
-	}
-
-	for _, header := range proxyHeaders {
-		ip := req.Header.Get(header)
-		if ip != "" {
-			// X-Forwarded-For can contain multiple IPs, take the first
-			if strings.Contains(ip, ",") {
-				ip = strings.TrimSpace(strings.Split(ip, ",")[0])
-			}
-			return ip
-		}
-	}
-
-	// fallback to remote addr
-	if req.RemoteAddr != "" {
-		ip, _, err := net.SplitHostPort(req.RemoteAddr)
-		if err != nil {
-			return req.RemoteAddr // might not have port
-		}
-		return ip
-	}
-
-	return ""
+	return utils.ExtractClientIP(req, m.ipTrust)
 }
 
 // createDenyResponse creates an appropriate response for denied access
@@ -4722,7 +4694,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 		// only create synthetic event if no message_read event exists
 		if !hasMessageRead {
 			syntheticReadEventID := uuid.New()
-			clientIP := utils.ExtractClientIP(req, m.trustedProxies)
+			clientIP := utils.ExtractClientIP(req, m.ipTrust)
 			clientIPVO := vo.NewOptionalString64Must(clientIP)
 			userAgent := vo.NewOptionalString255Must(utils.Substring(session.UserAgent, 0, 255))
 			syntheticData := vo.NewOptionalString1MBMust("synthetic_from_page_visit")
@@ -4788,7 +4760,7 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 	// create visit event
 	visitEventID := uuid.New()
 
-	clientIP := utils.ExtractClientIP(req, m.trustedProxies)
+	clientIP := utils.ExtractClientIP(req, m.ipTrust)
 	clientIPVO := vo.NewOptionalString64Must(clientIP)
 	userAgent := vo.NewOptionalString255Must(utils.Substring(session.UserAgent, 0, 255))
 
@@ -5404,7 +5376,7 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED]
 	newEventID := uuid.New()
-	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req, m.trustedProxies))
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req, m.ipTrust))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(reqCtx.OriginalUserAgent, 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
 
 	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
@@ -5464,7 +5436,7 @@ func (m *ProxyHandler) registerEvasionPageVisitEventDirect(req *http.Request, re
 
 	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_EVASION_PAGE_VISITED]
 	newEventID := uuid.New()
-	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req, m.trustedProxies))
+	clientIP := vo.NewOptionalString64Must(utils.ExtractClientIP(req, m.ipTrust))
 	userAgent := vo.NewOptionalString255Must(utils.Substring(reqCtx.OriginalUserAgent, 0, 1000)) // MAX_USER_AGENT_SAVED equivalent
 
 	metadata := model.ExtractCampaignEventMetadataFromHTTPRequest(req, campaign)
@@ -5512,7 +5484,7 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 	campaignID := reqCtx.CampaignID
 
 	// extract client IP and strip port if present using net.SplitHostPort for IPv6 safety
-	ip := utils.ExtractClientIP(req, m.trustedProxies)
+	ip := utils.ExtractClientIP(req, m.ipTrust)
 	if host, _, err := net.SplitHostPort(ip); err == nil {
 		ip = host
 	}

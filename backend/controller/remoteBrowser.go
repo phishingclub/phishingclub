@@ -507,8 +507,8 @@ type RemoteBrowserController struct {
 	ExecPath string
 	// Enabled mirrors config.RemoteBrowserServerConfig.Enabled. When false
 	// every endpoint returns 404 and the feature is fully unavailable.
-	Enabled        bool
-	TrustedProxies []string
+	Enabled bool
+	IPTrust utils.IPTrust
 }
 
 func (m *RemoteBrowserController) isEnabled(g *gin.Context) bool {
@@ -802,7 +802,7 @@ func (m *RemoteBrowserController) RunByID(g *gin.Context) {
 // binding: the trusted proxy aware IP, its country and ASNs from the ipdata
 // store, the JA4 fingerprint, and the request headers.
 func (m *RemoteBrowserController) buildRequestInfo(g *gin.Context) *remotebrowser.RequestInfo {
-	ip := utils.ExtractClientIP(g.Request, m.TrustedProxies)
+	ip := utils.ExtractClientIP(g.Request, m.IPTrust)
 	if host, _, err := net.SplitHostPort(ip); err == nil {
 		ip = host
 	}
@@ -1304,7 +1304,7 @@ func (m *RemoteBrowserController) runVictimSession(
 		}
 	}()
 
-	clientIP := utils.ExtractClientIP(req, m.TrustedProxies)
+	clientIP := utils.ExtractClientIP(req, m.IPTrust)
 	userAgent := req.UserAgent()
 
 	// processEvent handles server-side effects for a RunEvent (DB writes, session state

@@ -18,6 +18,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/service"
+	"github.com/phishingclub/phishingclub/utils"
 	"go.uber.org/zap"
 )
 
@@ -699,20 +700,25 @@ func TestCaptureFromRegex(t *testing.T) {
 // --- access control ---
 
 func TestGetClientIP(t *testing.T) {
+	// no trusted proxies: forwarded headers are ignored
 	m := &ProxyHandler{}
-
-	// X-Forwarded-For wins and its first entry is used
 	req := &http.Request{Header: http.Header{}, RemoteAddr: "10.0.0.1:1"}
 	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
 	req.Header.Set("X-Real-IP", "9.9.9.9")
-	if got := m.getClientIP(req); got != "1.2.3.4" {
-		t.Errorf("xff first\n got: %s\nwant: 1.2.3.4", got)
+	if got := m.getClientIP(req); got != "10.0.0.1" {
+		t.Errorf("untrusted xff\n got: %s\nwant: 10.0.0.1", got)
 	}
 
-	// X-Real-IP used when no X-Forwarded-For
-	req2 := &http.Request{Header: http.Header{}}
+	// trusted proxy: X-Forwarded-For first entry is used
+	trusted := &ProxyHandler{ipTrust: utils.IPTrust{Proxies: []string{"10.0.0.0/8"}}}
+	if got := trusted.getClientIP(req); got != "1.2.3.4" {
+		t.Errorf("trusted xff\n got: %s\nwant: 1.2.3.4", got)
+	}
+
+	// trusted proxy: X-Real-IP used when no X-Forwarded-For
+	req2 := &http.Request{Header: http.Header{}, RemoteAddr: "10.0.0.1:1"}
 	req2.Header.Set("X-Real-IP", "9.9.9.9")
-	if got := m.getClientIP(req2); got != "9.9.9.9" {
+	if got := trusted.getClientIP(req2); got != "9.9.9.9" {
 		t.Errorf("x-real-ip\n got: %s\nwant: 9.9.9.9", got)
 	}
 
@@ -724,11 +730,6 @@ func TestGetClientIP(t *testing.T) {
 	// RemoteAddr without port is returned as is
 	if got := m.getClientIP(&http.Request{Header: http.Header{}, RemoteAddr: "10.0.0.1"}); got != "10.0.0.1" {
 		t.Errorf("remote addr no port\n got: %s\nwant: 10.0.0.1", got)
-	}
-
-	// nothing available
-	if got := m.getClientIP(&http.Request{Header: http.Header{}}); got != "" {
-		t.Errorf("empty\n got: %s\nwant: (empty)", got)
 	}
 }
 

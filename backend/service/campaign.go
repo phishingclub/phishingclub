@@ -86,7 +86,7 @@ type Campaign struct {
 	ReportInboxRepository *repository.ReportInbox
 	OptionService         *Option
 	RemoteBrowserExecPath string
-	TrustedProxies        []string
+	IPTrust               utils.IPTrust
 	// TemplateRand spreads pool templates over recipients, nil uses math/rand
 	TemplateRand TemplateRand
 	// ProgramService plans the sends of a program's hidden campaigns the sender
@@ -2357,7 +2357,7 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 	}
 	trackingPixelLoadedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ]
 	newEventID := uuid.New()
-	ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.TrustedProxies))
+	ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.IPTrust))
 	ua := ctx.Request.UserAgent()
 	if len(ua) > 255 {
 		ua = strings.TrimSpace(ua[:255])
@@ -2472,7 +2472,7 @@ func (c *Campaign) SaveRecipientReported(
 		return err
 	}
 
-	ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.TrustedProxies))
+	ip := vo.NewOptionalString64Must(utils.ExtractClientIP(ctx.Request, c.IPTrust))
 	ua := ctx.Request.UserAgent()
 	if len(ua) > 255 {
 		ua = strings.TrimSpace(ua[:255])
