@@ -598,20 +598,25 @@
 
 	/**
 	 * formats the header title based on view mode
+	 * takes its inputs as arguments so the template redraws when any of them changes
+	 * @param {'month' | 'week'} mode
+	 * @param {Date} rangeStart
+	 * @param {Date} date
+	 * @param {boolean} fromToday
 	 */
-	function getHeaderTitle() {
-		if (viewMode === 'week') {
-			const weekEnd = addDays(start, 6);
-			if (isSameMonth(start, weekEnd)) {
-				return `${format(start, 'MMMM d')} - ${format(weekEnd, 'd, yyyy')}`;
-			} else if (start.getFullYear() === weekEnd.getFullYear()) {
-				return `${format(start, 'MMM d')} - ${format(weekEnd, 'MMM d, yyyy')}`;
+	function getHeaderTitle(mode, rangeStart, date, fromToday) {
+		if (mode === 'week') {
+			const weekEnd = addDays(rangeStart, 6);
+			if (isSameMonth(rangeStart, weekEnd)) {
+				return `${format(rangeStart, 'MMMM d')} - ${format(weekEnd, 'd, yyyy')}`;
+			} else if (rangeStart.getFullYear() === weekEnd.getFullYear()) {
+				return `${format(rangeStart, 'MMM d')} - ${format(weekEnd, 'MMM d, yyyy')}`;
 			} else {
-				return `${format(start, 'MMM d, yyyy')} - ${format(weekEnd, 'MMM d, yyyy')}`;
+				return `${format(rangeStart, 'MMM d, yyyy')} - ${format(weekEnd, 'MMM d, yyyy')}`;
 			}
 		}
 		// when starting from today in month view, show the date range
-		if (startFromToday && isSameMonth(currentDate, new Date())) {
+		if (fromToday && isSameMonth(date, new Date())) {
 			const today = new Date();
 			const nextMonthEnd = endOfMonth(addDays(endOfMonth(today), 1));
 			if (today.getFullYear() === nextMonthEnd.getFullYear()) {
@@ -620,7 +625,7 @@
 				return `${format(today, 'MMM d, yyyy')} - ${format(nextMonthEnd, 'MMM d, yyyy')}`;
 			}
 		}
-		return format(currentDate, 'MMMM yyyy');
+		return format(date, 'MMMM yyyy');
 	}
 
 	onMount(async () => {
@@ -728,7 +733,7 @@
 					<h2
 						class="text-xs sm:text-sm font-semibold text-gray-900 dark:text-gray-300 min-w-[140px] sm:min-w-[180px] text-center"
 					>
-						{getHeaderTitle()}
+						{getHeaderTitle(viewMode, start, currentDate, startFromToday)}
 					</h2>
 
 					<button
