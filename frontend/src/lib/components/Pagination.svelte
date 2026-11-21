@@ -31,9 +31,9 @@
 		// listen for browser back/forward navigation
 		window.addEventListener('popstate', popStateHandler);
 		// cleanup on component unmount
-		paginator.onChange((key, value) => {
-			if (key === 'page') {
-				currentPage = value;
+		paginator.onChange((key, value, changes) => {
+			if ('page' in changes) {
+				currentPage = changes.page;
 			}
 		});
 

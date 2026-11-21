@@ -61,17 +61,14 @@ func (r *Webhook) GetAll(
 		return result, errs.Wrap(err)
 	}
 	var rows []*database.Webhook
-	res := db.
+	res := withPeek(db, options.QueryArgs).
 		Find(&rows)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.WEBHOOK_TABLE, options.QueryArgs, webhookAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, row := range rows {

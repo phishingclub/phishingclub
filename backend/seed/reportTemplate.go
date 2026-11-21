@@ -1,31 +1,54 @@
 package seed
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/embedded"
 	"github.com/phishingclub/phishingclub/errs"
+	"github.com/phishingclub/phishingclub/repository"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // SeedReportTemplate inserts the default global report templates if they are
-// missing. There is one global template per kind (phishing and awareness
-// training); each is seeded independently and only when absent, so a template
-// already edited through the UI is never overwritten.
+// missing. There is one global template per kind (phishing, awareness
+// training and program); each is seeded independently and only when absent, so
+// a template already edited through the UI is never overwritten.
 func SeedReportTemplate(db *gorm.DB) error {
-	if err := seedGlobalReportTemplate(db, false, embedded.DefaultReportHTML); err != nil {
+	if err := seedGlobalReportTemplate(db, false, false, embedded.DefaultReportHTML); err != nil {
 		return err
 	}
-	return seedGlobalReportTemplate(db, true, embedded.DefaultTrainingReportHTML)
+	if err := seedGlobalReportTemplate(db, true, false, embedded.DefaultTrainingReportHTML); err != nil {
+		return err
+	}
+	if err := seedGlobalReportTemplate(db, false, true, embedded.DefaultProgramReportHTML); err != nil {
+		return err
+	}
+	return upgradeGlobalProgramReportTemplate(db)
 }
 
-func seedGlobalReportTemplate(db *gorm.DB, isTraining bool, content string) error {
+// upgradeGlobalProgramReportTemplate gives a global program report template
+// that still holds an earlier built in default the current one
+func upgradeGlobalProgramReportTemplate(db *gorm.DB) error {
+	repo := &repository.ReportTemplate{DB: db}
+	return repo.UpgradeGlobalProgramDefault(
+		context.Background(),
+		embedded.PreviousDefaultProgramReportHashes,
+		embedded.ReportContentHash,
+		embedded.DefaultProgramReportHTML,
+	)
+}
+
+func seedGlobalReportTemplate(db *gorm.DB, isTraining bool, isProgram bool, content string) error {
 	var count int64
 	res := db.
 		Model(&database.ReportTemplate{}).
-		Where("company_id IS NULL AND is_training = ?", isTraining).
+		Where(clause.Eq{Column: clause.Column{Name: "company_id"}, Value: nil}).
+		Where(clause.Eq{Column: clause.Column{Name: "is_training"}, Value: isTraining}).
+		Where(clause.Eq{Column: clause.Column{Name: "is_program"}, Value: isProgram}).
 		Count(&count)
 	if res.Error != nil {
 		return errs.Wrap(res.Error)
@@ -42,6 +65,7 @@ func seedGlobalReportTemplate(db *gorm.DB, isTraining bool, content string) erro
 		UpdatedAt:  &now,
 		Content:    content,
 		IsTraining: isTraining,
+		IsProgram:  isProgram,
 		// CompanyID intentionally nil → global template
 	}
 	res = db.Create(row)

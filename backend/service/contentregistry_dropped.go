@@ -32,11 +32,12 @@ type DroppedMemberImpact struct {
 	TemplateCount int      `json:"templateCount"`
 }
 
-// inUse reports whether removing the package would lose an edit or affect
-// content used outside the bundle.
+// inUse reports whether removing the package would lose an edit, affect
+// content used outside the bundle or keep a page it can not delete.
 func (d *DroppedMemberImpact) inUse() bool {
 	return len(d.Edited) > 0 || d.TemplateCount > 0 || d.CampaignCount > 0 ||
-		d.KeepRunningCount > 0 || d.ChangedCount > 0 || d.UserAssetCount > 0 || d.ChangedAssetCount > 0
+		d.KeepRunningCount > 0 || d.ChangedCount > 0 || d.UserAssetCount > 0 || d.ChangedAssetCount > 0 ||
+		len(d.Blocked) > 0
 }
 
 // templatesOf returns the campaign templates the given packages track.

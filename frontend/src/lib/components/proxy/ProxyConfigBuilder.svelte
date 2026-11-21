@@ -1,5 +1,6 @@
 <script>
 	import { createEventDispatcher, onMount } from 'svelte';
+	import Note from '$lib/components/Note.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import TextareaField from '$lib/components/TextareaField.svelte';
@@ -2678,9 +2679,10 @@
 								only, others default to Chrome)</span
 							>
 							{#if configData.global.impersonate.enabled}
-								<span class="form-hint text-amber-600 dark:text-amber-400"
-									>Unstable: the Firefox profile fails the TLS handshake on many sites and the Chrome
-									profile can fail to connect at random. Turn this off if requests to the target fail.</span
+								<Note class="mt-1"
+									>Unstable: the Firefox profile fails the TLS handshake on many sites and the
+									Chrome profile can fail to connect at random. Turn this off if requests to the
+									target fail.</Note
 								>
 								<label class="checkbox-label" style="margin-top: 0.5rem;">
 									<input

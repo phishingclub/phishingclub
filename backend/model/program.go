@@ -32,9 +32,19 @@ const (
 	ProgramEnrollmentStopped = "stopped"
 )
 
-// ProgramMaxMinutes is the longest interval, spread or delay a program may use,
-// three years in minutes
-const ProgramMaxMinutes = 3 * 365 * 24 * 60
+// the bounds of the program timing in minutes, the same the create and edit
+// form offers. A month is 30 days.
+const (
+	// ProgramMinIntervalMinutes is the shortest time between templates, one day
+	ProgramMinIntervalMinutes = 24 * 60
+	// ProgramMaxIntervalMinutes is the longest time between templates, three months
+	ProgramMaxIntervalMinutes = 3 * 30 * 24 * 60
+	// ProgramMaxSpreadMinutes is the longest spread, three months
+	ProgramMaxSpreadMinutes = 3 * 30 * 24 * 60
+	// ProgramMaxNewMemberDelayMinutes is the longest wait before the first
+	// template to a new member, one month
+	ProgramMaxNewMemberDelayMinutes = 30 * 24 * 60
+)
 
 // ProgramDefaultIntervalMinutes is the time between rounds when a program sets
 // none, two weeks in minutes
@@ -46,11 +56,43 @@ const ProgramMaxSteps = 200
 // ProgramMaxRecipientGroups is the most recipient groups a program may use
 const ProgramMaxRecipientGroups = 50
 
+// ProgramMaxAllowDeny and ProgramMaxWebhooks bound the lists a program can set
+const (
+	ProgramMaxAllowDeny = 50
+	ProgramMaxWebhooks  = 20
+)
+
+// ValidateProgramFilterPages applies the same page rules a campaign has: an
+// evasion page needs a deny page and so does an allow or deny list.
+func ValidateProgramFilterPages(hasDenyPage bool, hasEvasionPage bool, allowDenyCount int) error {
+	if hasEvasionPage && !hasDenyPage {
+		return validate.WrapErrorWithField(errors.New("The evasion page needs a deny page"), "evasionPageID")
+	}
+	if allowDenyCount > 0 && !hasDenyPage {
+		return validate.WrapErrorWithField(errors.New("Filtering needs a deny page"), "denyPageID")
+	}
+	return nil
+}
+
 // ValidateProgramRecipientGroupCount checks a list of group ids is not longer
 // than ProgramMaxRecipientGroups
 func ValidateProgramRecipientGroupCount(ids []*uuid.UUID) error {
 	if len(ids) > ProgramMaxRecipientGroups {
 		return validate.WrapErrorWithField(errors.Errorf("A program can have at most %d groups", ProgramMaxRecipientGroups), "recipientGroupIDs")
+	}
+	for _, id := range ids {
+		if id == nil {
+			return validate.WrapErrorWithField(errors.New("group entry cannot be null"), "recipientGroupIDs")
+		}
+	}
+	return nil
+}
+
+// ValidateProgramDataSaving refuses saving submitted data on an anonymous
+// program, the same rule an anonymous campaign has
+func ValidateProgramDataSaving(anonymous bool, saveSubmittedData bool) error {
+	if anonymous && saveSubmittedData {
+		return validate.WrapErrorWithField(errors.New("submitted data cannot be saved on an anonymous program"), "saveSubmittedData")
 	}
 	return nil
 }
@@ -60,6 +102,20 @@ var ProgramAllowedOrderModes = []string{ProgramOrderSequential, ProgramOrderShuf
 
 // ProgramAllowedLoopModes are the loop modes a program may use.
 var ProgramAllowedLoopModes = []string{ProgramLoopComplete, ProgramLoopLoop}
+
+// ProgramAllowedTemplateMixBy are the recipient fields a program may mix
+// templates by. Empty is off.
+var ProgramAllowedTemplateMixBy = []string{"", TemplateMixDepartment, TemplateMixPosition, TemplateMixCity}
+
+// IsValidProgramTemplateMixBy reports whether v is in ProgramAllowedTemplateMixBy
+func IsValidProgramTemplateMixBy(v string) bool {
+	for _, allowed := range ProgramAllowedTemplateMixBy {
+		if v == allowed {
+			return true
+		}
+	}
+	return false
+}
 
 // Program is a continuous, self running sequence of phishing and training content.
 type Program struct {
@@ -71,9 +127,21 @@ type Program struct {
 
 	ClosedAt nullable.Nullable[time.Time] `json:"closedAt"`
 	PausedAt nullable.Nullable[time.Time] `json:"pausedAt"`
+	// ClosingAt and DeletingAt are set while a close or a delete is under way,
+	// see database.Program. Only the service writes them.
+	ClosingAt  *time.Time `json:"closingAt"`
+	DeletingAt *time.Time `json:"deletingAt"`
+	// ReplanPendingAt and ReplanOldEndAt mark an edit whose people are not all
+	// planned again yet, see database.Program. Only the service writes them.
+	ReplanPendingAt *time.Time `json:"-"`
+	ReplanOldEndAt  *time.Time `json:"-"`
 
 	OrderMode nullable.Nullable[string] `json:"orderMode"`
 	LoopMode  nullable.Nullable[string] `json:"loopMode"`
+	// TemplateMixBy is the recipient field templates are mixed by in random
+	// order, one of ProgramAllowedTemplateMixBy. Empty is off. It is stored
+	// for sequential order too but only used in random order.
+	TemplateMixBy nullable.Nullable[string] `json:"templateMixBy"`
 
 	StepIntervalMinutes   nullable.Nullable[int]    `json:"stepIntervalMinutes"`
 	SpreadMinutes         nullable.Nullable[int]    `json:"spreadMinutes"`
@@ -85,6 +153,18 @@ type Program struct {
 	StartAt nullable.Nullable[time.Time] `json:"startAt"`
 	// EndAt is when the program closes on its own, null runs until closed
 	EndAt nullable.Nullable[time.Time] `json:"endAt"`
+	// AnonymizeAt and DataAnonymizeAt schedule the anonymize actions, see
+	// programAnonymize.go. AnonymizedAt and DataAnonymizedAt are read only and
+	// tell when they ran.
+	AnonymizeAt     nullable.Nullable[time.Time] `json:"anonymizeAt"`
+	DataAnonymizeAt nullable.Nullable[time.Time] `json:"dataAnonymizeAt"`
+	AnonymizedAt    *time.Time                   `json:"anonymizedAt"`
+	// AnonymizingAt is set while an Anonymize All has begun and not finished
+	AnonymizingAt    *time.Time `json:"anonymizingAt"`
+	DataAnonymizedAt *time.Time `json:"dataAnonymizedAt"`
+	// DataAnonymizingAt is set while an Anonymize Data run by hand has not
+	// finished. It is read only.
+	DataAnonymizingAt *time.Time `json:"dataAnonymizingAt"`
 	// EndedAutomatically is set on reads of a program closed by its end date
 	EndedAutomatically bool `json:"endedAutomatically"`
 	// Draft on create or update keeps the program from starting, start_at stays null
@@ -104,6 +184,22 @@ type Program struct {
 	// viewing, not against an admin who controls the recipients and groups,
 	// who can still narrow a group down to learn about one person.
 	IsAnonymous nullable.Nullable[bool] `json:"isAnonymous"`
+	// SaveSubmittedData keeps what people submit on the hidden campaigns, the
+	// same as the campaign setting. Never on for an anonymous program.
+	SaveSubmittedData nullable.Nullable[bool] `json:"saveSubmittedData"`
+
+	// automated report email settings, see programReportSchedule.go
+	ReportEnabled  nullable.Nullable[bool]   `json:"reportEnabled"`
+	ReportInterval nullable.Nullable[string] `json:"reportInterval"`
+	ReportPeriod   nullable.Nullable[string] `json:"reportPeriod"`
+	// ReportLastPeriodEnd is the end of the last period a report was sent for,
+	// or the baseline set when reports were turned on. Read only.
+	ReportLastPeriodEnd *time.Time `json:"reportLastPeriodEnd"`
+	// ReportNextAt is when the next automated report is sent, set on reads
+	ReportNextAt *time.Time `json:"reportNextAt"`
+	// ReportBaseline is stored as the last reported end on a write, set by
+	// ApplyReportBaseline and never read from a request
+	ReportBaseline *time.Time `json:"-"`
 
 	// bot filtering and webhooks, copied to every hidden campaign. A specified
 	// null or empty list clears them on update, unspecified keeps them.
@@ -128,8 +224,57 @@ type Program struct {
 	SimulationCount int `json:"simulationCount"`
 	// Enrolled is the number of people currently active in the program
 	Enrolled int64 `json:"enrolled"`
+	// Stopped is the number of people still active when the program closed
+	Stopped int64 `json:"stopped"`
+	// EnrolledTotal is the number of people the program ever enrolled, also
+	// those who completed, were removed or were still active at the close
+	EnrolledTotal int64 `json:"enrolledTotal"`
 	// NextSendAt is the earliest upcoming send of an active person
 	NextSendAt *time.Time `json:"nextSendAt"`
+	// Names names the templates, groups, lists, pages, webhooks and company
+	// the program refers to, filled on a single program read
+	Names *ProgramNames `json:"names,omitempty"`
+	// Resuming is set while a resume runs in the background, AnonymizeRunning
+	// while an Anonymize All or Anonymize Data runs, filled on a program read
+	Resuming         bool `json:"resuming"`
+	AnonymizeRunning bool `json:"anonymizeRunning"`
+	// Enrolling is set while the members are enrolled in the background
+	// after Start
+	Enrolling bool `json:"enrolling"`
+	// ActionFailure is the last resume or Anonymize Data that failed in the
+	// background, filled on a program read. It is kept in memory until the
+	// action runs again.
+	ActionFailure *ProgramActionFailure `json:"actionFailure,omitempty"`
+}
+
+// ProgramActionFailure is an action that ran in the background and failed.
+// Action is resume or anonymizeData.
+type ProgramActionFailure struct {
+	Action string    `json:"action"`
+	Reason string    `json:"reason"`
+	At     time.Time `json:"at"`
+}
+
+// ProgramNamedRef is the id and name of something a program refers to
+type ProgramNamedRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ProgramNames names what a program refers to, so a page shows the names
+// without reading each one. Something that no longer exists is left out.
+type ProgramNames struct {
+	// Templates maps a step template id to its name
+	Templates map[string]string `json:"templates"`
+	Groups    []ProgramNamedRef `json:"groups"`
+	AllowDeny []ProgramNamedRef `json:"allowDeny"`
+	// AllowDenyAllowed is true when the lists allow only what they hold, false
+	// when they block it, null without lists
+	AllowDenyAllowed *bool             `json:"allowDenyAllowed"`
+	DenyPage         *ProgramNamedRef  `json:"denyPage"`
+	EvasionPage      *ProgramNamedRef  `json:"evasionPage"`
+	Webhooks         []ProgramNamedRef `json:"webhooks"`
+	Company          *ProgramNamedRef  `json:"company"`
 }
 
 // Validate checks the program request has a valid state.
@@ -147,12 +292,15 @@ func (p *Program) Validate() error {
 			return validate.WrapErrorWithField(err, "loopMode")
 		}
 	}
+	if v, err := p.TemplateMixBy.Get(); err == nil && !IsValidProgramTemplateMixBy(v) {
+		return validate.WrapErrorWithField(errors.New("unknown field to mix templates by"), "templateMixBy")
+	}
 	if p.StepIntervalMinutes.IsSpecified() && !p.StepIntervalMinutes.IsNull() {
-		if p.StepIntervalMinutes.MustGet() < 1 {
-			return validate.WrapErrorWithField(errors.New("The time between emails must be at least one minute"), "stepIntervalMinutes")
+		if p.StepIntervalMinutes.MustGet() < ProgramMinIntervalMinutes {
+			return validate.WrapErrorWithField(errors.New("The time between templates must be at least one day"), "stepIntervalMinutes")
 		}
-		if p.StepIntervalMinutes.MustGet() > ProgramMaxMinutes {
-			return validate.WrapErrorWithField(errors.New("The time between emails can be at most three years"), "stepIntervalMinutes")
+		if p.StepIntervalMinutes.MustGet() > ProgramMaxIntervalMinutes {
+			return validate.WrapErrorWithField(errors.New("The time between templates can be at most three months"), "stepIntervalMinutes")
 		}
 	}
 	// a delivery window must set all three of weekdays, start and end together,
@@ -183,21 +331,21 @@ func (p *Program) Validate() error {
 		if spread < 0 {
 			return validate.WrapErrorWithField(errors.New("spread cannot be negative"), "spreadMinutes")
 		}
-		if spread > ProgramMaxMinutes {
-			return validate.WrapErrorWithField(errors.New("spread can be at most three years"), "spreadMinutes")
+		if spread > ProgramMaxSpreadMinutes {
+			return validate.WrapErrorWithField(errors.New("The spread can be at most three months"), "spreadMinutes")
 		}
 		if p.StepIntervalMinutes.IsSpecified() && !p.StepIntervalMinutes.IsNull() &&
 			spread > p.StepIntervalMinutes.MustGet() {
-			return validate.WrapErrorWithField(errors.New("The spread cannot be longer than the time between emails"), "spreadMinutes")
+			return validate.WrapErrorWithField(errors.New("The spread cannot be longer than the time between templates"), "spreadMinutes")
 		}
 	}
 	if p.NewMemberDelayMinutes.IsSpecified() && !p.NewMemberDelayMinutes.IsNull() {
 		delay := p.NewMemberDelayMinutes.MustGet()
 		if delay < 0 {
-			return validate.WrapErrorWithField(errors.New("First email to new members cannot be negative"), "newMemberDelayMinutes")
+			return validate.WrapErrorWithField(errors.New("First template to new members cannot be negative"), "newMemberDelayMinutes")
 		}
-		if delay > ProgramMaxMinutes {
-			return validate.WrapErrorWithField(errors.New("First email to new members can be at most three years"), "newMemberDelayMinutes")
+		if delay > ProgramMaxNewMemberDelayMinutes {
+			return validate.WrapErrorWithField(errors.New("First template to new members can be at most one month"), "newMemberDelayMinutes")
 		}
 	}
 	if p.TimeZone.IsSpecified() && !p.TimeZone.IsNull() {
@@ -207,12 +355,24 @@ func (p *Program) Validate() error {
 			return validate.WrapErrorWithField(errors.New("unknown time zone"), "timeZone")
 		}
 	}
+	if err := ValidateProgramDataSaving(p.IsAnonymousOn(), p.SaveSubmittedDataOn()); err != nil {
+		return err
+	}
 	if p.RecipientGroupIDs.IsSpecified() && !p.RecipientGroupIDs.IsNull() {
 		if err := ValidateProgramRecipientGroupCount(p.RecipientGroupIDs.MustGet()); err != nil {
 			return err
 		}
 	}
+	if err := p.validateSettingLists(); err != nil {
+		return err
+	}
+	if err := p.validateWindowClock(time.Now()); err != nil {
+		return err
+	}
 	if err := p.validateSchedule(); err != nil {
+		return err
+	}
+	if err := p.validateReportSchedule(); err != nil {
 		return err
 	}
 	// steps, when present, must each be valid, with distinct positions. A step
@@ -224,6 +384,9 @@ func (p *Program) Validate() error {
 	}
 	positions := map[int]bool{}
 	for i, s := range p.Steps {
+		if s == nil {
+			return validate.WrapErrorWithField(errors.New("template entry cannot be null"), "steps")
+		}
 		if err := s.Validate(); err != nil {
 			return err
 		}
@@ -240,6 +403,135 @@ func (p *Program) Validate() error {
 		positions[position] = true
 	}
 	return nil
+}
+
+// validateSettingLists checks the sizes and entries of the allow or deny list
+// and webhook lists of a request
+func (p *Program) validateSettingLists() error {
+	if ids, err := p.AllowDenyIDs.Get(); err == nil {
+		if len(ids) > ProgramMaxAllowDeny {
+			return validate.WrapErrorWithField(errors.New("too many allow or deny lists"), "allowDenyIDs")
+		}
+		for _, id := range ids {
+			if id == nil {
+				return validate.WrapErrorWithField(errors.New("Filter list not found"), "allowDenyIDs")
+			}
+		}
+	}
+	if webhooks, err := p.Webhooks.Get(); err == nil {
+		if len(webhooks) > ProgramMaxWebhooks {
+			return validate.WrapErrorWithField(errors.New("too many webhooks"), "webhooks")
+		}
+		for _, wh := range webhooks {
+			if wh == nil {
+				return validate.WrapErrorWithField(errors.New("webhook entry cannot be null"), "webhooks")
+			}
+			if err := wh.Validate(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateCreate checks a new program: the Validate rules, a spread no
+// longer than the time between templates it will have, also when that is the
+// default, at least one template and at least one recipient group
+func (p *Program) ValidateCreate() error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if p.SpreadOrDefault() > p.IntervalOrDefault() {
+		return validate.WrapErrorWithField(errors.New("The spread cannot be longer than the time between templates"), "spreadMinutes")
+	}
+	if len(p.Steps) == 0 {
+		return validate.WrapErrorWithField(errors.New("Add at least one template"), "steps")
+	}
+	if ids, err := p.RecipientGroupIDs.Get(); err != nil || len(ids) == 0 {
+		return validate.WrapErrorWithField(errors.New("a program must have at least one recipient group"), "recipientGroupIDs")
+	}
+	return nil
+}
+
+// ValidateUpdate checks the rules an update must keep together with the
+// stored program: the spread may not outgrow the interval when only one of
+// them changes, a group list that is sent may not be empty and the window
+// bounds must exist on every sending day in the zone the program will have.
+// It runs after Validate.
+func (p *Program) ValidateUpdate(existing *Program, now time.Time) error {
+	merged := &Program{
+		StepIntervalMinutes: existing.StepIntervalMinutes,
+		SpreadMinutes:       existing.SpreadMinutes,
+		TimeZone:            existing.TimeZone,
+		ConstraintWeekDays:  existing.ConstraintWeekDays,
+		ConstraintStartTime: existing.ConstraintStartTime,
+		ConstraintEndTime:   existing.ConstraintEndTime,
+	}
+	if p.StepIntervalMinutes.IsSpecified() && !p.StepIntervalMinutes.IsNull() {
+		merged.StepIntervalMinutes = p.StepIntervalMinutes
+	}
+	if p.SpreadMinutes.IsSpecified() && !p.SpreadMinutes.IsNull() {
+		merged.SpreadMinutes = p.SpreadMinutes
+	}
+	if merged.SpreadOrDefault() > merged.IntervalOrDefault() {
+		return validate.WrapErrorWithField(errors.New("The spread cannot be longer than the time between templates"), "spreadMinutes")
+	}
+	if p.RecipientGroupIDs.IsSpecified() && !p.RecipientGroupIDs.IsNull() && len(p.RecipientGroupIDs.MustGet()) == 0 {
+		return validate.WrapErrorWithField(errors.New("a program must have at least one recipient group"), "recipientGroupIDs")
+	}
+	windowChanged := p.ConstraintWeekDays.IsSpecified() || p.ConstraintStartTime.IsSpecified() || p.ConstraintEndTime.IsSpecified()
+	// each window field is stored on its own, so an update that sends only some
+	// of them keeps the stored rest
+	if p.ConstraintWeekDays.IsSpecified() {
+		merged.ConstraintWeekDays = p.ConstraintWeekDays
+	}
+	if p.ConstraintStartTime.IsSpecified() {
+		merged.ConstraintStartTime = p.ConstraintStartTime
+	}
+	if p.ConstraintEndTime.IsSpecified() {
+		merged.ConstraintEndTime = p.ConstraintEndTime
+	}
+	// a window is stored whole or not at all, a half window would be ignored
+	// by the scheduler while its stale columns stay
+	if windowChanged {
+		set := 0
+		if !merged.ConstraintWeekDays.IsNull() && merged.ConstraintWeekDays.IsSpecified() {
+			set++
+		}
+		if !merged.ConstraintStartTime.IsNull() && merged.ConstraintStartTime.IsSpecified() {
+			set++
+		}
+		if !merged.ConstraintEndTime.IsNull() && merged.ConstraintEndTime.IsSpecified() {
+			set++
+		}
+		if set != 0 && set != 3 {
+			return validate.WrapErrorWithField(errors.New("set the sending days, start and end together"), "constraintStartTime")
+		}
+	}
+	zoneChanged := p.TimeZone.IsSpecified() && !p.TimeZone.IsNull()
+	if zoneChanged {
+		merged.TimeZone = p.TimeZone
+	}
+	merged.BlackoutDates = existing.BlackoutDates
+	if p.BlackoutDates.IsSpecified() {
+		merged.BlackoutDates = p.BlackoutDates
+	}
+	if windowChanged || zoneChanged || p.BlackoutDates.IsSpecified() {
+		if err := merged.validateSendDay(now); err != nil {
+			return err
+		}
+	}
+	if windowChanged || zoneChanged {
+		return merged.validateWindowClock(now)
+	}
+	return nil
+}
+
+// SetReadState sets the fields a read derives from the time: the status and
+// when the next automated report is sent
+func (p *Program) SetReadState(now time.Time) {
+	p.Status = p.StatusAt(now)
+	p.ReportNextAt = p.ReportNextAtTime(now)
 }
 
 // ToDBMap converts the storable program fields to a column map. Steps and
@@ -262,6 +554,12 @@ func (p *Program) ToDBMap() map[string]any {
 	}
 	if p.LoopMode.IsSpecified() && !p.LoopMode.IsNull() {
 		m["loop_mode"] = p.LoopMode.MustGet()
+	}
+	if p.TemplateMixBy.IsSpecified() {
+		m["template_mix_by"] = ""
+		if v, err := p.TemplateMixBy.Get(); err == nil {
+			m["template_mix_by"] = v
+		}
 	}
 	if p.StepIntervalMinutes.IsSpecified() && !p.StepIntervalMinutes.IsNull() {
 		m["step_interval_minutes"] = p.StepIntervalMinutes.MustGet()
@@ -300,8 +598,13 @@ func (p *Program) ToDBMap() map[string]any {
 		m["time_zone"] = p.TimeZone.MustGet()
 	}
 	p.scheduleToDBMap(m)
+	p.anonymizeToDBMap(m)
+	p.reportScheduleToDBMap(m)
 	if p.IsAnonymous.IsSpecified() && !p.IsAnonymous.IsNull() {
 		m["is_anonymous"] = p.IsAnonymous.MustGet()
+	}
+	if p.SaveSubmittedData.IsSpecified() && !p.SaveSubmittedData.IsNull() {
+		m["save_submitted_data"] = p.SaveSubmittedData.MustGet()
 	}
 	if p.DenyPageID.IsSpecified() {
 		m["deny_page_id"] = nil
@@ -324,6 +627,19 @@ func (p *Program) OrderModeOrDefault() string {
 		return p.OrderMode.MustGet()
 	}
 	return ProgramOrderShuffle
+}
+
+// TemplateMixInEffect returns the recipient field templates are mixed by, or
+// empty when mixing is off. Only random order mixes, sequential order sends
+// everyone the same template at each step.
+func (p *Program) TemplateMixInEffect() string {
+	if p.OrderModeOrDefault() != ProgramOrderShuffle {
+		return ""
+	}
+	if v, err := p.TemplateMixBy.Get(); err == nil {
+		return v
+	}
+	return ""
 }
 
 // Location returns the time zone the delivery window is read in, UTC when unset
@@ -369,5 +685,12 @@ func (p *Program) IsClosed() bool {
 // IsAnonymousOn reports whether the program is anonymous, false when unset
 func (p *Program) IsAnonymousOn() bool {
 	v, err := p.IsAnonymous.Get()
+	return err == nil && v
+}
+
+// SaveSubmittedDataOn reports whether the program saves submitted data, false
+// when unset
+func (p *Program) SaveSubmittedDataOn() bool {
+	v, err := p.SaveSubmittedData.Get()
 	return err == nil && v
 }

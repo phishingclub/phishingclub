@@ -70,22 +70,14 @@ func (r *AllowDeny) GetAll(
 	if options.Fields != nil {
 		db = db.Select(strings.Join(options.Fields, ","))
 	}
-	res := db.
+	res := withPeek(db, options.QueryArgs).
 		Find(&rows)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.ALLOW_DENY_TABLE,
-		options.QueryArgs,
-		allowDenyAllowColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, ad := range rows {
@@ -109,17 +101,14 @@ func (r *AllowDeny) GetAllByCompanyID(
 		return results, errs.Wrap(err)
 	}
 	var rows []*database.AllowDeny
-	res := db.
+	res := withPeek(db, options.QueryArgs).
 		Find(&rows)
 
 	if res.Error != nil {
 		return results, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.ALLOW_DENY_TABLE, options.QueryArgs, allowDenyAllowColumns...)
-	if err != nil {
-		return results, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, options.QueryArgs)
 	results.HasNextPage = hasNextPage
 
 	for _, ad := range rows {

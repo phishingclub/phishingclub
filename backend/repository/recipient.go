@@ -71,6 +71,9 @@ type RecipientOption struct {
 type Recipient struct {
 	DB               *gorm.DB
 	OptionRepository *Option
+	// ExportPageSize is how many recipients one page of the export reads,
+	// zero uses recipientExportPageSize
+	ExportPageSize int
 }
 
 func (r *Recipient) load(db *gorm.DB, options *RecipientOption) *gorm.DB {
@@ -85,12 +88,9 @@ func (r *Recipient) load(db *gorm.DB, options *RecipientOption) *gorm.DB {
 	return db
 }
 
-// GetRepeatOffenderCount gets the repeat offender count
-func (r *Recipient) GetRepeatOffenderCount(
-	ctx context.Context,
-	companyID *uuid.UUID,
-) (int64, error) {
-	// get configured months from options
+// RepeatOffenderMonths returns how many months back a click or submit counts
+// toward a repeat offender, from the repeat_offender_months option
+func (r *Recipient) RepeatOffenderMonths(ctx context.Context) (int, error) {
 	opt, err := r.OptionRepository.GetByKey(ctx, data.OptionKeyRepeatOffenderMonths)
 	if err != nil {
 		return 0, errs.Wrap(err)
@@ -99,60 +99,126 @@ func (r *Recipient) GetRepeatOffenderCount(
 	if err != nil {
 		return 0, errs.Wrap(err)
 	}
-	repeatOffenderTimeThreshold := time.Now().AddDate(0, -months, 0)
+	return months, nil
+}
 
-	// a program's hidden campaigns are left out, as in the recipient stats
-	query := fmt.Sprintf(`
-        SELECT COUNT(*) FROM (
-            SELECT %s.id
-            FROM %s
-            WHERE EXISTS (
-                SELECT 1
-                FROM campaign_events ce
-                JOIN campaigns c ON ce.campaign_id = c.id
-                WHERE ce.recipient_id = %s.id
-                AND ce.created_at >= ?
-                AND c.is_test = false
-                AND c.is_training = false
-                AND c.program_id IS NULL
-                GROUP BY ce.recipient_id
-                HAVING COUNT(DISTINCT CASE
-                    WHEN ce.event_id IN (?, ?, ?) THEN ce.campaign_id
-                    WHEN ce.event_id = ? THEN ce.campaign_id
-                    END) > 1
-            )
-    `, database.RECIPIENT_TABLE, database.RECIPIENT_TABLE, database.RECIPIENT_TABLE)
-
-	// SCIM-disabled (deprovisioned) recipients are excluded: repeat-offender flags
-	// current at-risk people for training, not those who have left.
-	query += fmt.Sprintf(" AND %s.scim_soft_deleted_at IS NULL", database.RECIPIENT_TABLE)
-
-	if companyID != nil {
-		query += fmt.Sprintf(" AND (%s.company_id = ? OR %s.company_id IS NULL)",
-			database.RECIPIENT_TABLE, database.RECIPIENT_TABLE)
-		query += ") as count_query"
-		var count int64
-		err := r.DB.Raw(query,
-			repeatOffenderTimeThreshold,
-			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED],
-			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED],
-			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED],
-			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA],
-			companyID,
-		).Scan(&count).Error
-		return count, err
+// repeatOffenderCampaigns limits campaign events to the campaigns that count
+// toward a repeat offender: test and training campaigns are left out, program
+// sends count like campaigns unless the program is anonymous
+func (r *Recipient) repeatOffenderCampaigns() clause.Expression {
+	newDB := r.DB.Session(&gorm.Session{NewDB: true})
+	campaignCol := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
 	}
+	notAnonymousPrograms := newDB.
+		Table(database.PROGRAM_TABLE).
+		Clauses(clause.Select{Columns: []clause.Column{{Table: database.PROGRAM_TABLE, Name: "id"}}}).
+		Where(clause.Eq{Column: clause.Column{Table: database.PROGRAM_TABLE, Name: "is_anonymous"}, Value: false})
+	countedCampaigns := newDB.
+		Table(database.CAMPAIGN_TABLE).
+		Clauses(clause.Select{Columns: []clause.Column{campaignCol("id")}}).
+		Where(clause.Eq{Column: campaignCol("is_test"), Value: false}).
+		Where(clause.Eq{Column: campaignCol("is_training"), Value: false}).
+		Where(clause.Or(
+			clause.Eq{Column: campaignCol("program_id"), Value: nil},
+			clause.Expr{SQL: "? IN (?)", Vars: []interface{}{campaignCol("program_id"), notAnonymousPrograms}},
+		))
+	return clause.Expr{SQL: "? IN (?)", Vars: []interface{}{
+		clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "campaign_id"},
+		countedCampaigns,
+	}}
+}
 
-	query += fmt.Sprintf(" AND %s.company_id IS NULL) as count_query", database.RECIPIENT_TABLE)
-	var count int64
-	err = r.DB.Raw(query,
-		repeatOffenderTimeThreshold,
+// repeatOffenderIDs is a subquery of the ids of the recipients who clicked or
+// submitted data in more than one counted campaign since the given time. It is
+// read once for every recipient, not once per recipient row.
+func (r *Recipient) repeatOffenderIDs(since time.Time) *gorm.DB {
+	eventCol := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: name}
+	}
+	return r.DB.Session(&gorm.Session{NewDB: true}).
+		Table(database.CAMPAIGN_EVENT_TABLE).
+		Clauses(clause.Select{Columns: []clause.Column{eventCol("recipient_id")}}).
+		// the click and submit events are a small part of all events, read
+		// through the campaign and event index. The unary plus keeps the time
+		// window, which holds every kind of event, off the created_at index.
+		// created_at is stored as RFC3339 UTC text, so the time is compared as such
+		Where(clause.Expr{SQL: "+? >= ?", Vars: []interface{}{eventCol("created_at"), utils.RFC3339UTC(since)}}).
+		Where(clause.IN{Column: eventCol("event_id"), Values: repeatOffenderEventIDs()}).
+		Where(r.repeatOffenderCampaigns()).
+		// grouped on the value with a unary plus, so SQLite does not walk the
+		// whole recipient index to get the groups in order and reads only the
+		// events of the window
+		Clauses(clause.GroupBy{
+			Columns: []clause.Column{{Name: "+campaign_events.recipient_id", Raw: true}},
+			Having: []clause.Expression{clause.Expr{
+				SQL:  "COUNT(DISTINCT ?) > 1",
+				Vars: []interface{}{eventCol("campaign_id")},
+			}},
+		})
+}
+
+// repeatOffenderCampaignCount is a subquery that counts the campaigns in which
+// the outer recipient row clicked or submitted since the given time. It is
+// cheap for a page of rows, repeatOffenderIDs for every row.
+func (r *Recipient) repeatOffenderCampaignCount(since time.Time) *gorm.DB {
+	eventCol := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: name}
+	}
+	return r.DB.Session(&gorm.Session{NewDB: true}).
+		Table(database.CAMPAIGN_EVENT_TABLE).
+		Select("COUNT(DISTINCT ?)", eventCol("campaign_id")).
+		Where(clause.Eq{Column: eventCol("recipient_id"), Value: clause.Column{Table: database.RECIPIENT_TABLE, Name: "id"}}).
+		Where(clause.Gte{Column: eventCol("created_at"), Value: utils.RFC3339UTC(since)}).
+		Where(clause.IN{Column: eventCol("event_id"), Values: repeatOffenderEventIDs()}).
+		Where(r.repeatOffenderCampaigns())
+}
+
+// repeatOffenderEventIDs are the events that count toward a repeat offender
+func repeatOffenderEventIDs() []interface{} {
+	return []interface{}{
 		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED],
 		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED],
 		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED],
 		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA],
-	).Scan(&count).Error
-	return count, err
+	}
+}
+
+// isRepeatOffender is true for a recipient row that is a repeat offender
+func (r *Recipient) isRepeatOffender(since time.Time) clause.Expr {
+	return clause.Expr{SQL: "? IN (?)", Vars: []interface{}{
+		clause.Column{Table: database.RECIPIENT_TABLE, Name: "id"},
+		r.repeatOffenderIDs(since),
+	}}
+}
+
+// GetRepeatOffenderCount counts the repeat offenders of one company, or of
+// every company and the unowned recipients when companyID is nil, the scope of
+// the dashboard
+func (r *Recipient) GetRepeatOffenderCount(
+	ctx context.Context,
+	companyID *uuid.UUID,
+) (int64, error) {
+	months, err := r.RepeatOffenderMonths(ctx)
+	if err != nil {
+		return 0, errs.Wrap(err)
+	}
+	since := time.Now().AddDate(0, -months, 0)
+
+	db := r.DB.WithContext(ctx).
+		Table(database.RECIPIENT_TABLE).
+		Where(r.isRepeatOffender(since)).
+		// SCIM disabled (deprovisioned) recipients are left out: repeat offender
+		// flags current at risk people for training, not those who have left
+		Where(clause.Eq{Column: clause.Column{Table: database.RECIPIENT_TABLE, Name: "scim_soft_deleted_at"}, Value: nil})
+	if companyID != nil {
+		db = whereCompany(db, database.RECIPIENT_TABLE, companyID)
+	}
+	var count int64
+	if err := db.Count(&count).Error; err != nil {
+		return 0, errs.Wrap(err)
+	}
+	return count, nil
 }
 
 // GetAll gets all recipients
@@ -164,45 +230,24 @@ func (r *Recipient) GetAll(
 	result := model.NewEmptyResult[model.RecipientView]()
 	db := r.load(r.DB, options)
 
-	// get configured months from options
-	opt, err := r.OptionRepository.GetByKey(ctx, data.OptionKeyRepeatOffenderMonths)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	months, err := strconv.Atoi(opt.Value.String())
+	months, err := r.RepeatOffenderMonths(ctx)
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
 	repeatOffenderTimeThreshold := time.Now().AddDate(0, -months, 0)
 
-	// Create view query with repeat offender computation, leaving out a
-	// program's hidden campaigns as the recipient stats do
-	query := fmt.Sprintf(`
-        %s.*,
-        EXISTS (
-            SELECT 1
-            FROM campaign_events ce
-            JOIN campaigns c ON ce.campaign_id = c.id
-            WHERE ce.recipient_id = %s.id
-            AND ce.created_at >= ?
-            AND c.is_test = false
-            AND c.is_training = false
-            AND c.program_id IS NULL
-            GROUP BY ce.recipient_id
-            HAVING COUNT(DISTINCT CASE
-                WHEN ce.event_id IN (?, ?, ?) THEN ce.campaign_id
-                WHEN ce.event_id = ? THEN ce.campaign_id
-                END) > 1
-        ) as is_repeat_offender
-    `, database.RECIPIENT_TABLE, database.RECIPIENT_TABLE)
-
+	// every recipient column plus the computed repeat offender flag. Sorted on
+	// the flag every row needs it, so the offenders are read once. Otherwise
+	// only the rows of the page need it, counted per row.
+	var flag interface{} = clause.Expr{SQL: "(?) > 1", Vars: []interface{}{r.repeatOffenderCampaignCount(repeatOffenderTimeThreshold)}}
+	if options.QueryArgs != nil && options.QueryArgs.OrderBy == "is_repeat_offender" {
+		flag = r.isRepeatOffender(repeatOffenderTimeThreshold)
+	}
 	baseDb := db.Table(database.RECIPIENT_TABLE).
-		Select(query,
-			repeatOffenderTimeThreshold,
-			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED],
-			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED],
-			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED],
-			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA],
+		Select(
+			"?, ? AS is_repeat_offender",
+			clause.Column{Table: database.RECIPIENT_TABLE, Name: "*", Raw: true},
+			flag,
 		)
 
 	// Apply company filter
@@ -356,7 +401,7 @@ func (r *Recipient) GetAllCampaignEvents(
 		)
 	}
 	// a program's hidden campaigns are reported through the program
-	db = db.Where(notProgramCampaign)
+	db = withPeek(db.Where(notProgramCampaign), queryArgs)
 	res := db.InnerJoins(LeftJoinOn(
 		database.CAMPAIGN_EVENT_TABLE,
 		"event_id",
@@ -373,17 +418,7 @@ func (r *Recipient) GetAllCampaignEvents(
 	if res.Error != nil {
 		return result, res.Error
 	}
-
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.CAMPAIGN_EVENT_TABLE,
-		queryArgs,
-		allowdRecipientCampaignEventColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbEvents, queryArgs)
 
 	for _, event := range dbEvents {
 		evt, err := ToRecipientCampaignEvent(event)
@@ -552,16 +587,12 @@ func (r *Recipient) GetStatsByID(
 ) (*model.RecipientCampaignStatsView, error) {
 	stats := &model.RecipientCampaignStatsView{}
 
-	// get configured months from options
-	opt, err := r.OptionRepository.GetByKey(ctx, data.OptionKeyRepeatOffenderMonths)
+	months, err := r.RepeatOffenderMonths(ctx)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	months, err := strconv.Atoi(opt.Value.String())
-	if err != nil {
-		return nil, errs.Wrap(err)
-	}
-	repeatOffenderTimeThreshold := time.Now().AddDate(0, -months, 0)
+	// created_at is stored as RFC3339 UTC text, so the time is compared as such
+	repeatOffenderTimeThreshold := utils.RFC3339UTC(time.Now().AddDate(0, -months, 0))
 
 	// get phishing campaign count, training campaigns are counted separately below
 	r.DB.Model(&database.CampaignRecipient{}).
@@ -651,7 +682,8 @@ func (r *Recipient) GetStatsByID(
 		Distinct("campaign_events.campaign_id").
 		Count(&stats.CampaignsReported)
 
-	// Get repeat link clicks in last selected threshold months
+	// Get repeat link clicks in last selected threshold months. The recipient
+	// page tiles count campaigns only, program sends show in its Programs table
 	var linkClickCount int64
 	r.DB.Model(&database.CampaignEvent{}).
 		Joins("JOIN campaigns ON campaigns.id = campaign_events.campaign_id").
@@ -735,17 +767,12 @@ func (r *Recipient) GetAllByCompanyID(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	res := db.Find(&dbRecipients)
+	res := withPeek(db, options.QueryArgs).Find(&dbRecipients)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
-
-	hasNextPage, err := useHasNextPage(db, database.RECIPIENT_TABLE, options.QueryArgs, allowdRecipientColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbRecipients, options.QueryArgs)
 
 	for _, dbRecipient := range dbRecipients {
 		r, err := ToRecipient(&dbRecipient)
@@ -755,6 +782,135 @@ func (r *Recipient) GetAllByCompanyID(
 		result.Rows = append(result.Rows, r)
 	}
 	return result, nil
+}
+
+// recipientExportPageSize is how many recipients one page of the export
+// reads. The groups of a page are read with one variable per recipient, so a
+// page stays far below the SQLite limit of 32766 variables.
+const recipientExportPageSize = 500
+
+// recipientPageKey is the row id and id of a recipient
+type recipientPageKey struct {
+	RowID int64
+	ID    *uuid.UUID
+}
+
+// EachExportPageByCompanyID calls fn with the recipients of exactly the
+// company, or the recipients with no company when companyID is nil, one page
+// at a time in row id order. Each recipient has its groups sorted by name.
+// The pages are read by row id, so a page never holds more than
+// ExportPageSize recipients and the groups of a page never need more than
+// that many variables. ExportPageSize zero uses recipientExportPageSize.
+func (r *Recipient) EachExportPageByCompanyID(
+	ctx context.Context,
+	companyID *uuid.UUID,
+	fn func([]*model.Recipient) error,
+) error {
+	pageSize := r.ExportPageSize
+	if pageSize <= 0 {
+		pageSize = recipientExportPageSize
+	}
+	rowID := clause.Column{Table: database.RECIPIENT_TABLE, Name: "rowid"}
+	var after *int64
+	for {
+		keys := []recipientPageKey{}
+		q := r.DB.WithContext(ctx).
+			Session(&gorm.Session{NewDB: true}).
+			Model(&database.Recipient{}).
+			Clauses(clause.Select{Columns: []clause.Column{
+				{Table: database.RECIPIENT_TABLE, Name: "rowid", Alias: "row_id"},
+				{Table: database.RECIPIENT_TABLE, Name: "id"},
+			}})
+		q = whereCompany(q, database.RECIPIENT_TABLE, companyID)
+		if after != nil {
+			q = q.Where(clause.Gt{Column: rowID, Value: *after})
+		}
+		res := q.
+			Order(clause.OrderByColumn{Column: rowID}).
+			Limit(pageSize).
+			Scan(&keys)
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if len(keys) == 0 {
+			return nil
+		}
+		ids := make([]any, 0, len(keys))
+		for _, key := range keys {
+			ids = append(ids, key.ID)
+		}
+		var rows []database.Recipient
+		res = r.load(r.DB.WithContext(ctx), &RecipientOption{WithGroups: true}).
+			Where(clause.IN{Column: clause.Column{Table: database.RECIPIENT_TABLE, Name: "id"}, Values: ids}).
+			Find(&rows)
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		byID := make(map[uuid.UUID]*database.Recipient, len(rows))
+		for i := range rows {
+			byID[*rows[i].ID] = &rows[i]
+		}
+		page := make([]*model.Recipient, 0, len(keys))
+		for _, key := range keys {
+			row, ok := byID[*key.ID]
+			if !ok {
+				// deleted between the two reads
+				continue
+			}
+			recipient, err := ToRecipient(row)
+			if err != nil {
+				return errs.Wrap(err)
+			}
+			page = append(page, recipient)
+		}
+		if err := fn(page); err != nil {
+			return err
+		}
+		if len(keys) < pageSize {
+			return nil
+		}
+		last := keys[len(keys)-1].RowID
+		after = &last
+	}
+}
+
+// GetMaxGroupCountByCompanyID returns the most groups any one recipient of
+// exactly the company is in, or of the recipients with no company when
+// companyID is nil. Only groups that exist are counted.
+func (r *Recipient) GetMaxGroupCountByCompanyID(
+	ctx context.Context,
+	companyID *uuid.UUID,
+) (int, error) {
+	memberCol := func(name string) clause.Column {
+		return clause.Column{Table: database.RECIPIENT_GROUP_RECIPIENT_TABLE, Name: name}
+	}
+	recipients := r.DB.Session(&gorm.Session{NewDB: true}).
+		Table(database.RECIPIENT_TABLE).
+		Clauses(clause.Select{Columns: []clause.Column{{Table: database.RECIPIENT_TABLE, Name: "id"}}})
+	recipients = whereCompany(recipients, database.RECIPIENT_TABLE, companyID)
+	groups := r.DB.Session(&gorm.Session{NewDB: true}).
+		Table(database.RECIPIENT_GROUP_TABLE).
+		Clauses(clause.Select{Columns: []clause.Column{{Table: database.RECIPIENT_GROUP_TABLE, Name: "id"}}})
+	counts := []int{}
+	res := r.DB.WithContext(ctx).
+		Session(&gorm.Session{NewDB: true}).
+		Table(database.RECIPIENT_GROUP_RECIPIENT_TABLE).
+		Select("COUNT(*) AS n").
+		Where(clause.Expr{SQL: "? IN (?)", Vars: []any{memberCol("recipient_id"), recipients}}).
+		// the group check is a filter on the few rows of each recipient, not
+		// an index probe per group
+		Where(clause.Expr{SQL: "? IN (?)", Vars: []any{notIndexed(memberCol("recipient_group_id")), groups}}).
+		Group("recipient_id").
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "n"}, Desc: true}).
+		Limit(1).
+		Scan(&counts)
+	if res.Error != nil {
+		return 0, errs.Wrap(res.Error)
+	}
+	if len(counts) == 0 {
+		return 0, nil
+	}
+	return counts[0], nil
 }
 
 // GetRandomByCompanyID gets a random recipient from a company, optionally excluding a specific recipient

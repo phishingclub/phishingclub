@@ -4,20 +4,30 @@
 	import SubHeadline from '$lib/components/SubHeadline.svelte';
 	import { AppStateService } from '$lib/service/appState';
 	import { api } from '$lib/api/apiProxy.js';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
+	import { get } from 'svelte/store';
+	import { page } from '$app/stores';
 	import { addToast } from '$lib/store/toast';
 	import { newTableURLParams } from '$lib/service/tableURLParams';
 	import Table from '$lib/components/table/Table.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TestLabel from '$lib/components/TestLabel.svelte';
-	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
-	import { tick } from 'svelte';
 	import DashboardNav from '$lib/components/DashboardNav.svelte';
+	import DashboardToolbar from '$lib/components/DashboardToolbar.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import DashboardTiles from '$lib/components/DashboardTiles.svelte';
+	import { dashboardIncludeTest } from '$lib/store/dashboardIncludeTest.js';
+	import { toEvent } from '$lib/utils/events';
 	import { shortRelative } from '$lib/utils/shortRelative.js';
+	import { scrollToTable } from '$lib/utils/scrollToTable.js';
 
 	// services
 	const appStateService = AppStateService.instance;
+
+	// the table a tile link points at, read before the table paging rewrites
+	// the url without it
+	const initialHash = (get(page).url.hash || window.location.hash).slice(1);
 
 	// local state
 	let contextCompanyID = null;
@@ -52,7 +62,51 @@
 	let completedCampaigns = [];
 	let completedCampaignsHasNextPage = true;
 
-	let includeTestCampaigns = false;
+	$: includeTestCampaigns = $dashboardIncludeTest;
+	let isLoading = false;
+
+	// campaign counts from the stats endpoint, null until loaded
+	let stats = null;
+	$: tiles = [
+		{
+			key: 'active',
+			title: 'Active',
+			tip: 'Started and not closed, paused campaigns left out.',
+			value: stats?.active ?? 0,
+			border: 'border-campaign-active',
+			color: 'text-campaign-active',
+			icon: 'active',
+			href: '#active'
+		},
+		{
+			key: 'scheduled',
+			title: 'Scheduled',
+			value: stats?.upcoming ?? 0,
+			border: 'border-campaign-scheduled',
+			color: 'text-campaign-scheduled',
+			icon: 'scheduled',
+			href: '#scheduled'
+		},
+		{
+			key: 'completed',
+			title: 'Completed',
+			value: stats?.finished ?? 0,
+			border: 'border-campaign-completed',
+			color: 'text-campaign-completed',
+			icon: 'completed',
+			href: '#completed'
+		},
+		{
+			key: 'paused',
+			title: 'Paused',
+			tip: 'Sending is paused. The campaigns are marked Paused in the Active campaigns list.',
+			value: stats?.paused ?? 0,
+			border: 'border-closed',
+			color: 'text-closed',
+			icon: 'paused',
+			href: '#active'
+		}
+	];
 
 	// phones drop the Company column; the company moves into the name subline
 	let isPhone = false;
@@ -64,12 +118,6 @@
 		return () => query.removeEventListener('change', update);
 	});
 	$: showCompanyColumn = !contextCompanyID && !isPhone;
-
-	// handler for when toggle changes
-	const handleToggleChange = async () => {
-		await tick();
-		await refresh();
-	};
 
 	// relative dates tick every minute, the full date is in the title
 	let relativeNow = Date.now();
@@ -85,7 +133,11 @@
 			contextCompanyID = context.companyID;
 			contextCompanyName = context.companyName;
 		}
-		refresh();
+		refresh().then(async () => {
+			// the tables above have their height once loaded
+			await tick();
+			scrollToTable(initialHash);
+		});
 		activeTableURLParams.onChange(() => refreshActiveCampaigns(true));
 		scheduledTableURLParams.onChange(() => refreshScheduledCampaigns(true));
 		completedTableURLParams.onChange(() => refreshCompletedCampaigns(true));
@@ -97,12 +149,33 @@
 		};
 	});
 
-	const refresh = async () => {
-		await Promise.all([
-			refreshActiveCampaigns(true),
-			refreshScheduledCampaigns(true),
-			refreshCompletedCampaigns(true)
-		]);
+	const refresh = async (showLoading = true) => {
+		isLoading = true;
+		try {
+			await Promise.all([
+				refreshStats(),
+				refreshActiveCampaigns(showLoading),
+				refreshScheduledCampaigns(showLoading),
+				refreshCompletedCampaigns(showLoading)
+			]);
+		} finally {
+			isLoading = false;
+		}
+	};
+
+	const refreshStats = async () => {
+		try {
+			const res = await api.campaign.getStats(contextCompanyID, {
+				includeTest: includeTestCampaigns
+			});
+			if (!res.success) {
+				throw res.error;
+			}
+			stats = res.data;
+		} catch (e) {
+			addToast('Failed to load campaign counts', 'Error');
+			console.error('failed to load campaign counts', e);
+		}
 	};
 
 	const refreshActiveCampaigns = async (showLoading = true) => {
@@ -196,104 +269,25 @@
 
 	<DashboardNav />
 
-	<div class="flex flex-wrap justify-between items-center gap-x-6 gap-y-3 mb-4">
-		<SubHeadline>Active campaigns</SubHeadline>
-		<div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-			<label class="flex items-center gap-2 cursor-pointer">
-				<span class="font-semibold text-slate-600 dark:text-gray-300 whitespace-nowrap">
-					Include test campaigns
-				</span>
-				<div class="relative flex items-center">
-					<input
-						type="checkbox"
-						id="includeTestCampaigns"
-						bind:checked={includeTestCampaigns}
-						on:change={handleToggleChange}
-						class="peer sr-only"
-					/>
-					<div
-						class="peer-focus-visible:ring-2 peer-focus-visible:ring-cta-blue dark:peer-focus-visible:ring-highlight-blue peer-focus-visible:ring-offset-2 dark:peer-focus-visible:ring-offset-gray-900 w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
-						       peer-checked:border-cta-blue dark:peer-checked:border-highlight-blue/80 peer-checked:bg-cta-blue dark:peer-checked:bg-highlight-blue/80
-						       peer-focus:border-slate-400 dark:peer-focus:border-highlight-blue/80 peer-focus:bg-gray-100 dark:peer-focus:bg-gray-700/60
-						       transition-all duration-200 ease-in-out
-						       flex items-center justify-center
-						       bg-slate-50 dark:bg-gray-900/60"
-					>
-						{#if includeTestCampaigns}
-							<svg
-								class="w-3 h-3 text-white"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-								aria-hidden="true"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="3"
-									d="M5 13l4 4L19 7"
-								/>
-							</svg>
-						{/if}
-					</div>
-				</div>
-			</label>
-			<AutoRefresh
-				isLoading={false}
-				pageId="dashboard-campaigns"
-				onRefresh={async () => {
-					const activeOptions = {
-						page: activeTableURLParams.currentPage,
-						perPage: activeTableURLParams.perPage,
-						sortBy: activeTableURLParams.sortBy,
-						sortOrder: activeTableURLParams.sortOrder,
-						search: activeTableURLParams.search,
-						includeTest: includeTestCampaigns
-					};
-					const activeRes = await api.campaign.getAllActive(activeOptions, contextCompanyID);
-					if (activeRes.success) {
-						activeCampaigns = activeRes.data.rows;
-						activeCampaignsHasNextPage = activeRes.data.hasNextPage;
-					}
+	<DashboardToolbar
+		{isLoading}
+		allCompanies={!contextCompanyID}
+		pageId="dashboard-campaigns"
+		onRefresh={() => refresh(false)}
+		on:change={() => refresh(true)}
+	/>
 
-					const scheduledOptions = {
-						page: scheduledTableURLParams.currentPage,
-						perPage: scheduledTableURLParams.perPage,
-						sortBy: scheduledTableURLParams.sortBy,
-						sortOrder: scheduledTableURLParams.sortOrder,
-						search: scheduledTableURLParams.search,
-						includeTest: includeTestCampaigns
-					};
-					const scheduledRes = await api.campaign.getAllUpcoming(scheduledOptions, contextCompanyID);
-					if (scheduledRes.success) {
-						scheduledCampaigns = scheduledRes.data.rows;
-						scheduledCampaignsHasNextPage = scheduledRes.data.hasNextPage;
-					}
+	<DashboardTiles {tiles} />
 
-					const completedOptions = {
-						page: completedTableURLParams.currentPage,
-						perPage: completedTableURLParams.perPage,
-						sortBy: completedTableURLParams.sortBy,
-						sortOrder: completedTableURLParams.sortOrder,
-						search: completedTableURLParams.search,
-						includeTest: includeTestCampaigns
-					};
-					const completedRes = await api.campaign.getAllFinished(completedOptions, contextCompanyID);
-					if (completedRes.success) {
-						completedCampaigns = completedRes.data.rows;
-						completedCampaignsHasNextPage = completedRes.data.hasNextPage;
-					}
-				}}
-			/>
-		</div>
-	</div>
-
-	<div class="mb-10">
+	<section id="active" class="mt-8 scroll-mt-28">
+	<SubHeadline>Active campaigns</SubHeadline>
+	<div class="mt-4">
 		<Table
 			reserveSelect
 			isGhost={isActiveCampaignsLoading}
 			columns={[
 				{ column: 'Name', size: 'large' },
+				...(isPhone ? [] : [{ column: 'Status', size: 'medium' }]),
 				...(showCompanyColumn ? [{ column: 'Company', size: 'large' }] : []),
 				...(isPhone
 					? []
@@ -320,12 +314,32 @@
 									{campaign.name}
 								</a>
 							</span>
-							<!-- phones show the company and delivery times here instead of in columns -->
-							<span class="block sm:hidden text-xs text-gray-500 dark:text-gray-400"
-								>{#if !contextCompanyID && campaign.company?.name}{campaign.company.name} · {/if}{#if campaign.sendStartAt}Started {shortRelative(campaign.sendStartAt, relativeNow)}{#if campaign.sendEndAt}{' · ends '}{shortRelative(campaign.sendEndAt, relativeNow)}{/if}{:else}Self managed{/if}</span
+							<!-- phones show the status, company and delivery times here instead of in columns -->
+							<span class="flex sm:hidden min-w-0 items-center gap-2"
+								>{#if campaign.pausedAt}<span data-paused-badge
+										><StatusBadge tone="warning" title="Sending paused">Paused</StatusBadge></span
+									>{:else}<StatusBadge tone="success"
+										>{toEvent(campaign.sendStartAt ? 'campaign_active' : 'campaign_self_managed').name}</StatusBadge
+									>{/if}<span class="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400"
+									>{#if !contextCompanyID && campaign.company?.name}{campaign.company.name}{#if campaign.sendStartAt || campaign.pausedAt}{' · '}{/if}{/if}{#if campaign.sendStartAt}{new Date(campaign.sendStartAt).getTime() > relativeNow ? 'Starts' : 'Started'} {shortRelative(campaign.sendStartAt, relativeNow)}{#if campaign.sendEndAt}{' · ends '}{shortRelative(campaign.sendEndAt, relativeNow)}{/if}{:else if campaign.pausedAt}Self managed{/if}</span
+								></span
 							>
 						</div>
 					</TableCell>
+					{#if !isPhone}
+						<TableCell>
+							<!-- paused is a status word like Active, as in the campaign list -->
+							{#if campaign.pausedAt}
+								<span data-paused-badge
+									><StatusBadge tone="warning" title="Sending paused">Paused</StatusBadge></span
+								>
+							{:else}
+								<StatusBadge tone="success"
+									>{toEvent(campaign.sendStartAt ? 'campaign_active' : 'campaign_self_managed').name}</StatusBadge
+								>
+							{/if}
+						</TableCell>
+					{/if}
 					{#if showCompanyColumn}
 						<TableCell value={campaign.company?.name}
 							><span class="text-slate-400 dark:text-gray-500">Shared</span></TableCell
@@ -358,8 +372,11 @@
 		</Table>
 	</div>
 
+	</section>
+
+	<section id="scheduled" class="mt-8 scroll-mt-28">
 	<SubHeadline>Scheduled campaigns</SubHeadline>
-	<div class="mb-10">
+	<div class="mt-4">
 		<Table
 			reserveSelect
 			isGhost={isScheduledCampaignsLoading}
@@ -429,8 +446,11 @@
 		</Table>
 	</div>
 
+	</section>
+
+	<section id="completed" class="mt-8 scroll-mt-28">
 	<SubHeadline>Completed campaigns</SubHeadline>
-	<div class="mb-10">
+	<div class="mt-4">
 		<Table
 			reserveSelect
 			isGhost={isCompletedCampaignsLoading}
@@ -499,4 +519,5 @@
 			{/each}
 		</Table>
 	</div>
+	</section>
 </main>

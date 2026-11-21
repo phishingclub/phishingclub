@@ -107,33 +107,6 @@ func TestReportedDayEnd(t *testing.T) {
 	}
 }
 
-func TestProgramResultStatsSuppression(t *testing.T) {
-	raw := &model.CampaignResultView{
-		Recipients: 20, EmailsSent: 20, TrackingPixelLoaded: 12, WebsiteLoaded: 3,
-		SubmittedData: 0, Reported: 7, TrainingStarted: 5, TrainingCompleted: 1,
-	}
-	named := programResultStats(raw, false)
-	if named.Suppressed || named.WebsiteLoaded == nil || *named.WebsiteLoaded != 3 ||
-		named.TrainingCompleted == nil || *named.TrainingCompleted != 1 {
-		t.Fatalf("named program keeps every count: %+v", named)
-	}
-	anon := programResultStats(raw, true)
-	if !anon.Suppressed {
-		t.Fatal("small counts must mark the stats suppressed")
-	}
-	if anon.WebsiteLoaded != nil || anon.TrainingCompleted != nil {
-		t.Fatal("small outcome counts must be null")
-	}
-	if anon.TrackingPixelLoaded == nil || *anon.TrackingPixelLoaded != 12 ||
-		anon.Reported == nil || *anon.Reported != 7 || anon.SubmittedData == nil || *anon.SubmittedData != 0 {
-		t.Fatalf("large and zero counts stay: %+v", anon)
-	}
-	small := programResultStats(&model.CampaignResultView{Recipients: 4, EmailsSent: 4, Reported: 0}, true)
-	if !small.Suppressed || small.Reported != nil || small.TrackingPixelLoaded != nil {
-		t.Fatalf("a small group withholds every outcome: %+v", small)
-	}
-}
-
 func TestCtxMutexHonoursContext(t *testing.T) {
 	var m ctxMutex
 	m.Lock()

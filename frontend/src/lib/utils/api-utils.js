@@ -34,8 +34,10 @@ export const defaultOptions = {
 };
 
 export const fetchAllRows = async (fetchFn2, options = defaultOptions) => {
+	// a copy, so the page count never changes the shared defaults
+	options = { ...defaultOptions, ...options };
 	let items = [];
-	let res = await fetchFn2(options);
+	let res = await fetchFn2({ ...options });
 
 	// Add initial rows
 	if (res.data?.rows) {

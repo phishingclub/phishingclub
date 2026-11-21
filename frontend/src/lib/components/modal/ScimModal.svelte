@@ -1,5 +1,6 @@
 <script>
 	import { addToast } from '$lib/store/toast';
+	import Note from '$lib/components/Note.svelte';
 	import Modal from '../Modal.svelte';
 	import Alert from '../Alert.svelte';
 	import Button from '../Button.svelte';
@@ -260,35 +261,33 @@
 			</div>
 		{:else if showTokenReveal && revealedToken}
 			<!-- ── step 2: token reveal, nothing else until dismissed ── -->
-			<div
-				class="rounded-md border border-amber-400 dark:border-amber-500/60 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3 transition-colors duration-200"
-			>
-				<p class="text-sm font-semibold text-amber-700 dark:text-amber-400">
-					⚠ Copy this token now - it will not be shown again.
-				</p>
-				<div class="flex items-center gap-2">
-					<input
-						type="text"
-						readonly
-						value={revealedToken}
-						class="flex-1 px-3 py-2 text-sm rounded-md bg-white dark:bg-gray-900/60 border border-amber-300 dark:border-amber-600/60 text-gray-800 dark:text-gray-200 font-mono focus:outline-none transition-colors duration-200"
-					/>
+			<Note boxed role="status">
+				<div class="space-y-3">
+					<p class="font-semibold">Copy this token now. It will not be shown again.</p>
+					<div class="flex items-center gap-2">
+						<input
+							type="text"
+							readonly
+							value={revealedToken}
+							class="flex-1 px-3 py-2 text-sm rounded-md bg-white dark:bg-gray-900/60 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 font-mono focus:outline-none transition-colors duration-200"
+						/>
+						<button
+							type="button"
+							on:click={() => copyToClipboard(revealedToken)}
+							class="pc-focus px-3 py-2 text-sm rounded-md border border-gray-300 bg-white hover:bg-gray-100 text-slate-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:border-gray-500 dark:text-gray-100 transition-colors duration-200"
+						>
+							Copy
+						</button>
+					</div>
 					<button
 						type="button"
-						on:click={() => copyToClipboard(revealedToken)}
-						class="px-3 py-2 text-sm bg-amber-500 hover:bg-amber-400 dark:bg-amber-600/80 dark:hover:bg-amber-500/80 text-white rounded-md transition-colors duration-200"
+						class="pc-focus rounded-sm text-xs font-medium text-cta-blue dark:text-highlight-blue hover:underline"
+						on:click={dismissToken}
 					>
-						Copy
+						I have copied the token, dismiss
 					</button>
 				</div>
-				<button
-					type="button"
-					class="text-xs text-amber-600 dark:text-amber-500 underline hover:no-underline"
-					on:click={dismissToken}
-				>
-					I have copied the token, dismiss
-				</button>
-			</div>
+			</Note>
 		{:else if !scimConfig}
 			<!-- ── step 1: no config yet ── -->
 			<p class="text-sm text-gray-500 dark:text-gray-400 transition-colors duration-200">
@@ -344,10 +343,10 @@
 							</button>
 						</div>
 					{:else}
-						<p class="text-xs text-amber-600 dark:text-amber-400">
+						<Note>
 							No SCIM domain is configured. Set a global SCIM domain under Settings → SCIM before
 							connecting an identity provider.
-						</p>
+						</Note>
 					{/if}
 				</div>
 			</div>

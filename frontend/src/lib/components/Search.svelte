@@ -18,9 +18,9 @@
 		// listen for browser back/forward navigation
 		//window.addEventListener('popstate', popStateHandler);
 		// cleanup on component unmount
-		pagination.onChange((k, v) => {
-			if (k === 'search') {
-				value = v;
+		pagination.onChange((k, v, changes) => {
+			if ('search' in changes) {
+				value = changes.search;
 			}
 		});
 

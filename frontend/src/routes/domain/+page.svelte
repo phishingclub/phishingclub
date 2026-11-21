@@ -1,4 +1,5 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
@@ -640,6 +641,9 @@
 		};
 		reader.readAsText(file);
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <HeadTitle title="Domains" />
@@ -924,7 +928,8 @@
 		list={[
 			'All assets will be deleted',
 			'Templates using this domain will become unusable',
-			'Scheduled or active campaigns using this domain will be closed'
+			'Scheduled or active campaigns using this domain will be closed',
+			...(showPrograms ? ['Programs stop sending templates that use this domain'] : [])
 		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}

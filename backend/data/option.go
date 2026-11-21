@@ -50,6 +50,7 @@ const (
 	OptionKeyDisplayMode           = "display_mode"
 	OptionValueDisplayModeWhitebox = "whitebox"
 	OptionValueDisplayModeBlackbox = "blackbox"
+	OptionValueDisplayModeAll      = "all"
 
 	OptionKeyAutoPruneOrphanedRecipients = "auto_prune_orphaned_recipients"
 

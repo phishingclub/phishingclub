@@ -263,6 +263,18 @@ func TestReplanRedrawsOnIntervalChange(t *testing.T) {
 	}
 }
 
+// respreadHeld moves the held sends of a program the way a resume does
+func (p *programTest) respreadHeld(programID uuid.UUID, now time.Time) {
+	p.t.Helper()
+	moves, err := p.svc.heldSendMoves(p.ctx, p.loadProgram(programID), now)
+	if err == nil {
+		err = p.svc.ProgramRepository.MoveSends(p.ctx, moves)
+	}
+	if err != nil {
+		p.t.Fatalf("respread: %v", err)
+	}
+}
+
 // TestRespreadHeldSends checks a held send whose time passed is moved to now or
 // later, a training send too, and a send still ahead stays
 func TestRespreadHeldSends(t *testing.T) {
@@ -277,9 +289,7 @@ func TestRespreadHeldSends(t *testing.T) {
 	ahead := now.Add(48 * time.Hour).UTC().Truncate(time.Second)
 	future := p.sendAt(campaign1, bob, ahead, false)
 
-	if err := p.svc.respreadHeldSends(p.ctx, p.loadProgram(programID), now); err != nil {
-		t.Fatalf("respread: %v", err)
-	}
+	p.respreadHeld(programID, now)
 	if row := p.campaignRecipient(past); row.SendAt == nil || row.SendAt.Before(now.Add(-time.Second)) {
 		t.Fatalf("expected the held send moved to now or later, got %v", row.SendAt)
 	}
@@ -303,9 +313,7 @@ func TestRespreadHeldSendsKeepsBlackout(t *testing.T) {
 	alice := p.recipient("alice@example.com")
 	held := p.sendAt(campaign1, alice, now.Add(-time.Hour), false)
 
-	if err := p.svc.respreadHeldSends(p.ctx, p.loadProgram(programID), now); err != nil {
-		t.Fatalf("respread: %v", err)
-	}
+	p.respreadHeld(programID, now)
 	open := time.Date(now.Year(), now.Month(), now.Day()+2, 0, 0, 0, 0, time.UTC)
 	if row := p.campaignRecipient(held); row.SendAt == nil || row.SendAt.Before(open) {
 		t.Fatalf("expected the held send after the blackout, got %v", row.SendAt)
@@ -336,7 +344,18 @@ func TestResumeMembershipCancelsHeldSendsOfLeavers(t *testing.T) {
 	aliceSend := p.sendAt(campaign1, alice, now.Add(-time.Hour), false)
 	bobSend := p.sendAt(campaign1, bob, now.Add(-time.Hour), false)
 
-	p.svc.resolveMembershipOnResume(p.ctx, &programID, now)
+	plan, err := p.svc.resumeMembers(p.ctx, &programID, now)
+	if err != nil || plan == nil {
+		t.Fatalf("expected the members of a started program: %v", err)
+	}
+	found, changed, err := p.svc.resolveMembershipOnResume(p.ctx, &programID, plan, now)
+	if err != nil || changed {
+		t.Fatalf("resolve membership: changed %v err %v", changed, err)
+	}
+	always := func(*model.Program) bool { return true }
+	if _, err := p.svc.finishResumeMembership(p.ctx, &programID, found, now, always); err != nil {
+		t.Fatalf("cancel held sends: %v", err)
+	}
 	if row := p.campaignRecipient(bobSend); row.CancelledAt == nil {
 		t.Fatalf("expected the held send of the leaver cancelled")
 	}
@@ -371,26 +390,30 @@ func TestUpdateLocksAnonymousOnceEnrolled(t *testing.T) {
 	}
 }
 
-// TestProgramResultStatsComplement checks an anonymous funnel hides a count that
-// leaves fewer than programMinGroup people out, keeps zero and keeps a count
-// with enough people on both sides
-func TestProgramResultStatsComplement(t *testing.T) {
-	raw := &model.CampaignResultView{
-		Recipients: 20, EmailsSent: 20, TrackingPixelLoaded: 18, WebsiteLoaded: 15,
-		SubmittedData: 0, Reported: 20, TrainingStarted: 10, TrainingCompleted: 15,
+// TestProgramSummaryComplement checks the anonymous result tiles hide a count
+// that leaves fewer than programMinGroup people out, hide zero and keep a
+// count with enough people on both sides
+func TestProgramSummaryComplement(t *testing.T) {
+	facts := &programFacts{anonymous: true, templateNames: map[string]string{}}
+	for i, p := range people(20) {
+		outcome := "reported"
+		if i < 15 {
+			outcome = "clickedReported"
+		}
+		facts.sends = append(facts.sends, send(p, 10, outcome))
 	}
-	anon := programResultStats(raw, true)
-	if !anon.Suppressed || anon.TrackingPixelLoaded != nil || anon.Reported != nil {
+	anon := results(facts, time.UTC, anonymousNow, nil, nil).Summary
+	if !anon.Suppressed || anon.Reported != nil {
 		t.Fatalf("counts that leave under %d out must be null: %+v", programMinGroup, anon)
 	}
-	if anon.WebsiteLoaded == nil || *anon.WebsiteLoaded != 15 || anon.TrainingStarted == nil ||
-		anon.TrainingCompleted == nil || *anon.TrainingCompleted != 15 {
+	if anon.ClickedLink == nil || *anon.ClickedLink != 15 {
 		t.Fatalf("counts with enough people on both sides stay: %+v", anon)
 	}
-	if anon.SubmittedData == nil || *anon.SubmittedData != 0 {
-		t.Fatalf("zero stays: %+v", anon)
+	if anon.SubmittedData != nil {
+		t.Fatalf("zero is withheld: %+v", anon)
 	}
-	named := programResultStats(raw, false)
+	facts.anonymous = false
+	named := results(facts, time.UTC, resultsNow, nil, nil).Summary
 	if named.Suppressed || named.Reported == nil || *named.Reported != 20 {
 		t.Fatalf("a named program keeps every count: %+v", named)
 	}

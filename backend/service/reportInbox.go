@@ -281,6 +281,11 @@ func (s *ReportInbox) Upsert(
 	if err := s.authorize(session, ae); err != nil {
 		return nil, err
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	existing, err := s.ReportInboxRepository.GetByCompanyID(ctx, companyID)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		s.Logger.Errorw("failed to look up reporting inbox", "error", err)
@@ -1025,12 +1030,12 @@ func (s *ReportInbox) retryPendingMessages(
 		var ge *graphError
 		if errors.As(err, &ge) && ge.Status == http.StatusNotFound && ge.Code == "ErrorItemNotFound" {
 			// the message was deleted, there is nothing left to read
-			if err := s.resolveMessage(ctx, inbox, p.MessageID, p.ReceivedAt, false, out); err != nil {
+			if err := s.resolveMessage(ctx, inbox, p.MessageID, p.ReceivedAt, inboxNoMatch, out); err != nil {
 				return err
 			}
 			continue
 		}
-		matched := false
+		matched := inboxNoMatch
 		if err == nil {
 			matched, err = s.processMessage(ctx, token, inbox, m, senderDomains)
 		}
@@ -1056,18 +1061,36 @@ func (s *ReportInbox) retryPendingMessages(
 	return nil
 }
 
-// resolveMessage records a message as handled and counts it
-func (s *ReportInbox) resolveMessage(ctx context.Context, inbox *model.ReportInbox, messageID string, receivedAt time.Time, matched bool, out *pollOutcome) error {
+// inboxMatch is what reading one message of a report inbox found
+type inboxMatch int
+
+const (
+	// inboxNoMatch means no report was recorded
+	inboxNoMatch inboxMatch = iota
+	// inboxMatched means a report was recorded and is counted
+	inboxMatched
+	// inboxMatchedUncounted means the message was a report on a send of an
+	// anonymous campaign or program. It is handled but not counted as
+	// processed or matched, so the counters do not show it.
+	inboxMatchedUncounted
+)
+
+// resolveMessage records a message as handled and counts it, unless it was a
+// report on an anonymous send
+func (s *ReportInbox) resolveMessage(ctx context.Context, inbox *model.ReportInbox, messageID string, receivedAt time.Time, match inboxMatch, out *pollOutcome) error {
 	id := inbox.ID.MustGet()
 	// the poll context may have run out on this message, the record is still
 	// written so the message is not read again
 	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if err := s.ReportInboxRepository.ResolveMessage(wctx, &id, messageID, receivedAt, matched); err != nil {
+	if err := s.ReportInboxRepository.ResolveMessage(wctx, &id, messageID, receivedAt, match == inboxMatched); err != nil {
 		return errs.Wrap(err)
 	}
+	if match == inboxMatchedUncounted {
+		return nil
+	}
 	out.processed++
-	if matched {
+	if match == inboxMatched {
 		out.matched++
 	}
 	return nil
@@ -1090,7 +1113,7 @@ func (s *ReportInbox) recordFailure(ctx context.Context, inbox *model.ReportInbo
 			"reportInboxID", id.String(),
 			"error", cause,
 		)
-		return s.resolveMessage(ctx, inbox, messageID, receivedAt, false, out)
+		return s.resolveMessage(ctx, inbox, messageID, receivedAt, inboxNoMatch, out)
 	}
 	s.Logger.Warnw("reading a reported message failed, trying again on the next poll",
 		"reportInboxID", id.String(),
@@ -1295,19 +1318,19 @@ func (s *ReportInbox) processMessage(
 	inbox *model.ReportInbox,
 	m *graphMessage,
 	senderDomains sendersFunc,
-) (bool, error) {
+) (inboxMatch, error) {
 	reporter := m.From.EmailAddress.Address
 	// drafts and mail sent from the mailbox itself, such as an analyst forwarding
 	// a report from it, are not reports
 	if m.IsDraft || equalFoldEmail(reporter, inbox.Mailbox) {
-		return false, nil
+		return inboxNoMatch, nil
 	}
 	if m.HasAttachments {
 		// without the attachment list the reported email is unknown, and the
 		// user's own message around it must not be read instead, so retry later
 		attachments, err := s.client().listAttachments(ctx, token, inbox.Mailbox, m.ID)
 		if err != nil {
-			return false, err
+			return inboxNoMatch, err
 		}
 		tried := 0
 		// fetched caps the attachment requests of one message, also for items
@@ -1350,30 +1373,30 @@ func (s *ReportInbox) processMessage(
 					failed++
 					continue
 				}
-				return false, err
+				return inboxNoMatch, err
 			}
 			if candidates == nil {
 				continue
 			}
 			matched, err := s.matchCandidates(ctx, inbox, candidates, m.ReceivedDateTime, reporter)
-			if err != nil || matched {
+			if err != nil || matched != inboxNoMatch {
 				return matched, err
 			}
 		}
 		// the cap stopped the loop before an email was found, the reported email
 		// may be further down, so the user's own message is not read instead
 		if capped && tried == 0 {
-			return false, nil
+			return inboxNoMatch, nil
 		}
 		// an attached email that could not be read may be the reported one, so
 		// retry later. After a few polls the message is passed over.
 		if failed > 0 {
-			return false, lastErr
+			return inboxNoMatch, lastErr
 		}
 		// the attached email is the reported one, the message around it is the
 		// user's report and is not read
 		if tried > 0 {
-			return false, nil
+			return inboxNoMatch, nil
 		}
 	}
 	// a plain forward has no attached email, the reported email is the message
@@ -1381,10 +1404,10 @@ func (s *ReportInbox) processMessage(
 	// an error is retried, after a few polls the message is passed over
 	content, err := s.client().messageContent(ctx, token, inbox.Mailbox, m.ID)
 	if err != nil {
-		return false, err
+		return inboxNoMatch, err
 	}
 	if content == nil {
-		return false, nil
+		return inboxNoMatch, nil
 	}
 	// the delivered simulation email itself can land in the mailbox, copied or
 	// redirected by a rule. That is not a report. A forward always gets a new
@@ -1392,17 +1415,17 @@ func (s *ReportInbox) processMessage(
 	// Message-ID Phishing Club sent with, or comes from a simulation sender.
 	used, err := s.ReportInboxRepository.MessageIDUsed(ctx, normalizeMessageID(content.InternetMessageID))
 	if err != nil {
-		return false, err
+		return inboxNoMatch, err
 	}
 	if used {
-		return false, nil
+		return inboxNoMatch, nil
 	}
 	senders, err := senderDomains(ctx)
 	if err != nil {
-		return false, err
+		return inboxNoMatch, err
 	}
 	if senders.Addresses[repository.BareAddress(reporter)] {
-		return false, nil
+		return inboxNoMatch, nil
 	}
 	return s.matchCandidates(ctx, inbox, contentCandidates(content, senders.Served), m.ReceivedDateTime, reporter)
 }
@@ -1486,17 +1509,23 @@ func (s *ReportInbox) matchCandidates(
 	c *reportCandidates,
 	reportedAt time.Time,
 	reporter string,
-) (bool, error) {
+) (inboxMatch, error) {
 	scope := companyIDPtr(inbox.CompanyID)
 	// found stops the search at the first recipient in scope. Only a recorded
 	// event counts as matched, a skipped one (closed campaign, already reported)
-	// does not.
-	try := func(cr *model.CampaignRecipient) (found bool, recorded bool, err error) {
+	// does not. A report on an anonymous send is not counted at all.
+	try := func(cr *model.CampaignRecipient) (found bool, match inboxMatch, err error) {
 		res, err := s.CampaignService.RecordInboxReport(ctx, cr, scope, reportedAt, reporter, inbox.Mailbox)
 		if err != nil {
-			return false, false, err
+			return false, inboxNoMatch, err
 		}
-		return res != InboxReportOutOfScope, res == InboxReportRecorded, nil
+		switch res {
+		case InboxReportRecorded:
+			return true, inboxMatched, nil
+		case InboxReportAnonymous:
+			return true, inboxMatchedUncounted, nil
+		}
+		return res != InboxReportOutOfScope, inboxNoMatch, nil
 	}
 	for _, messageID := range c.MessageIDs {
 		cr, err := s.CampaignRecipientRepository.GetByMessageID(ctx, messageID)
@@ -1504,10 +1533,10 @@ func (s *ReportInbox) matchCandidates(
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
 			}
-			return false, errs.Wrap(err)
+			return inboxNoMatch, errs.Wrap(err)
 		}
-		if found, recorded, err := try(cr); err != nil || found {
-			return recorded, err
+		if found, match, err := try(cr); err != nil || found {
+			return match, err
 		}
 	}
 	for i := range c.RecipientIDs {
@@ -1516,10 +1545,10 @@ func (s *ReportInbox) matchCandidates(
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
 			}
-			return false, errs.Wrap(err)
+			return inboxNoMatch, errs.Wrap(err)
 		}
-		if found, recorded, err := try(cr); err != nil || found {
-			return recorded, err
+		if found, match, err := try(cr); err != nil || found {
+			return match, err
 		}
 	}
 	// a lure code in a link, for a campaign that carries a code in its links
@@ -1532,14 +1561,14 @@ func (s *ReportInbox) matchCandidates(
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
 			}
-			return false, errs.Wrap(err)
+			return inboxNoMatch, errs.Wrap(err)
 		}
 		if custom, cErr := cr.LureCodeCustom.Get(); cErr == nil && custom {
 			continue
 		}
-		if found, recorded, err := try(cr); err != nil || found {
-			return recorded, err
+		if found, match, err := try(cr); err != nil || found {
+			return match, err
 		}
 	}
-	return false, nil
+	return inboxNoMatch, nil
 }

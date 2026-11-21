@@ -2,144 +2,247 @@
 	import Headline from '$lib/components/Headline.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import SubHeadline from '$lib/components/SubHeadline.svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { AppStateService } from '$lib/service/appState';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
+	import { get } from 'svelte/store';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import { addToast } from '$lib/store/toast';
-	import StatsCard from '$lib/components/StatsCard.svelte';
+	import DashboardTiles from '$lib/components/DashboardTiles.svelte';
 	import CampaignCalender from '$lib/components/CampaignCalendar.svelte';
 	import CampaignTrendChart from '$lib/components/CampaignTrendChart.svelte';
 	import { fetchAllRows } from '$lib/utils/api-utils';
-	import { tick } from 'svelte';
-	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import { goto } from '$app/navigation';
 	import DashboardNav from '$lib/components/DashboardNav.svelte';
+	import DashboardToolbar from '$lib/components/DashboardToolbar.svelte';
+	import { dashboardIncludeTest } from '$lib/store/dashboardIncludeTest.js';
+	import { plural } from '$lib/utils/programText.js';
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 
 	// services
 	const appStateService = AppStateService.instance;
 
 	// local state
 	let contextCompanyID = null;
-	let contextCompanyName = '';
 
-	let active = 0;
-	let scheduled = 0;
-	let finished = 0;
+	// campaign counts from the stats endpoint, null until loaded
+	let stats = null;
 	let repeatOffenders = 0;
+	let repeatOffenderMonths = 12;
+	// program counts per state, null until loaded
+	let programStats = null;
 
 	let calendarCampaigns = [];
+	let calendarPrograms = [];
 	let campaignStats = [];
 
-	// training completion rate across closed training campaigns, derived from the
-	// campaign stats snapshots already loaded for the trend chart
-	$: trainingStats = (campaignStats || []).filter((s) => s.isTraining);
-	$: trainingStarted = trainingStats.reduce((sum, s) => sum + (s.trainingStarted || 0), 0);
-	$: trainingCompleted = trainingStats.reduce((sum, s) => sum + (s.trainingCompleted || 0), 0);
-	$: trainingCompletionRate =
-		trainingStarted > 0 ? Math.round((trainingCompleted / trainingStarted) * 100) : 0;
+	// training completed across closed training campaigns, from the campaign
+	// stats snapshots already loaded for the trend chart
+	$: trainingCompleted = (campaignStats || [])
+		.filter((s) => s.isTraining)
+		.reduce((sum, s) => sum + (s.trainingCompleted || 0), 0);
 	let isCampaignStatsLoading = true; // start as true to show ghost on initial load
+	let isLoading = false;
 
 	let calendarStartDate = null;
 	let calendarEndDate = null;
 
-	let includeTestCampaigns = false;
+	// the inbox settings: the company Reporting tab or the global inbox in Settings
+	$: reportInboxHref = contextCompanyID ? `/company/${contextCompanyID}#reporting` : '/settings#reporting';
 
-	// handler for when toggle changes
-	const handleToggleChange = async () => {
-		await tick();
-		await refresh(false);
-	};
+	// what needs a look, shown only when there is something
+	$: attention = [
+		stats?.paused > 0 && {
+			key: 'paused',
+			tone: 'warning',
+			text: `${plural(stats.paused, 'campaign')} paused`,
+			href: '/dashboard/campaigns/#active'
+		},
+		showPrograms && programStats?.needsAttention > 0 && {
+			key: 'programs',
+			tone: 'warning',
+			text: `${plural(programStats.needsAttention, 'program')} ${programStats.needsAttention === 1 ? 'needs' : 'need'} attention`,
+			href: '/dashboard/programs/#attention'
+		},
+		stats?.failedSending > 0 && {
+			key: 'failed',
+			tone: 'danger',
+			text: `${plural(stats.failedSending, 'failed send')} in the last ${plural(stats.failedSendingDays, 'day')}`,
+			href: '/dashboard/events/?eventType=campaign_recipient_message_failed'
+		},
+		stats?.reportInboxErrors > 0 && {
+			key: 'inbox',
+			tone: 'danger',
+			text:
+				stats.reportInboxErrors === 1
+					? 'Report inbox error'
+					: `${stats.reportInboxErrors} report inbox errors`,
+			href: reportInboxHref
+		}
+	].filter(Boolean);
+
+	$: activeTip = stats
+		? `Started and not closed, paused campaigns left out.${stats.selfManaged ? ` ${plural(stats.selfManaged, 'is', 'are')} self managed, with no delivery window, and stay active until closed.` : ''}`
+		: '';
+
+	$: repeatTip =
+		`Clicked a link or submitted data on 2 or more sends within ${plural(repeatOffenderMonths || 12, 'month')}, the repeat offender setting. Test campaigns never count.` +
+		(contextCompanyID ? '' : ' The recipient list shows the recipients without a company.');
+
+	// the recipient list sorted on its Repeat column
+	const repeatOffendersHref = `/recipient?sortBy=${encodeURIComponent('Repeat offender')}&sortOrder=desc`;
+
+	// program counts are only shown in the modes that show programs
+	$: showPrograms = showsSimulation($displayMode);
+
+	$: tiles = [
+		{
+			key: 'active',
+			title: 'Active campaigns',
+			tip: activeTip,
+			value: stats?.active ?? 0,
+			border: 'border-campaign-active',
+			color: 'text-campaign-active',
+			icon: 'active',
+			href: '/dashboard/campaigns/#active'
+		},
+		{
+			key: 'scheduled',
+			title: 'Scheduled campaigns',
+			value: stats?.upcoming ?? 0,
+			border: 'border-campaign-scheduled',
+			color: 'text-campaign-scheduled',
+			icon: 'scheduled',
+			href: '/dashboard/campaigns/#scheduled'
+		},
+		{
+			key: 'programs',
+			title: 'Active programs',
+			tip: 'Running programs, those that need attention left out.',
+			value: programStats?.active ?? 0,
+			border: 'border-campaign-active',
+			color: 'text-campaign-active',
+			icon: 'active',
+			href: '/dashboard/programs/#active'
+		},
+		{
+			key: 'repeat',
+			title: 'Repeat offenders',
+			tip: repeatTip,
+			value: repeatOffenders,
+			border: 'border-repeat-offenders',
+			color: 'text-repeat-offenders',
+			icon: 'people',
+			href: repeatOffendersHref
+		},
+		{
+			key: 'training',
+			title: 'Training completed',
+			tip: 'Recipients who completed the training of a closed training campaign. Test campaigns never count.',
+			value: trainingCompleted,
+			border: 'border-training-completed',
+			color: 'text-training-completed',
+			icon: 'training',
+			href: '/dashboard/campaigns/#completed'
+		}
+	].filter((tile) => showPrograms || tile.key !== 'programs');
 
 	// hooks
 	onMount(() => {
 		const context = appStateService.getContext();
 		if (context) {
 			contextCompanyID = context.companyID;
-			contextCompanyName = context.companyName;
 		}
 		refresh();
 	});
 
+	// loads everything at once and shows one error for any part that fails.
+	// A refresh asked for while one runs is done when it ends.
+	let refreshPending = false;
+	let monthsRead = false;
+	let campaignStatsKey = '';
 	const refresh = async (showLoading = true) => {
+		if (isLoading) {
+			refreshPending = true;
+			return;
+		}
+		isLoading = true;
+		if (showLoading) {
+			showIsLoading();
+			isCampaignStatsLoading = true;
+		}
+		const includeTest = get(dashboardIncludeTest);
 		try {
-			if (showLoading) {
-				showIsLoading();
+			const [statsRes, repeatRes, monthsRes, programRes, campaignStatsRes] = await Promise.all([
+				api.campaign.getStats(contextCompanyID, { includeTest }),
+				api.recipient.countRepeatOffenders(contextCompanyID),
+				// the setting is read once per visit
+				monthsRead ? null : api.option.get('repeat_offender_months'),
+				api.program.getStats(contextCompanyID),
+				api.campaign.getAllCampaignStats(contextCompanyID),
+				loadCalendar()
+			]);
+			for (const res of [statsRes, repeatRes, programRes, campaignStatsRes]) {
+				if (!res.success) throw res.error;
 			}
-			let res = await api.campaign.getStats(contextCompanyID, {
-				includeTest: includeTestCampaigns
-			});
-			if (!res.success) {
-				throw res.error;
+			stats = statsRes.data;
+			repeatOffenders = repeatRes.data;
+			programStats = programRes.data;
+			// the trend chart draws again only when its rows changed
+			const rows = campaignStatsRes.data.rows || [];
+			const rowsKey = JSON.stringify(rows);
+			if (rowsKey !== campaignStatsKey) {
+				campaignStatsKey = rowsKey;
+				campaignStats = rows;
 			}
-			await refreshRepeatOffenders();
-
-			active = res.data.active;
-			scheduled = res.data.upcoming;
-			finished = res.data.finished;
-			await refreshCalendarCampaings();
-			await refreshCampaignStats(showLoading);
+			// the setting falls back to its default when it cannot be read
+			if (monthsRes) {
+				const months = Number(monthsRes.data?.value);
+				if (monthsRes.success) monthsRead = true;
+				if (monthsRes.success && months > 0) repeatOffenderMonths = months;
+			}
 		} catch (e) {
-			addToast('Failed to load data', 'Error');
+			addToast('Failed to load the dashboard', 'Error');
+			console.error('failed to load the dashboard', e);
 		} finally {
+			isLoading = false;
+			isCampaignStatsLoading = false;
 			if (showLoading) {
 				hideIsLoading();
 			}
 		}
+		if (refreshPending) {
+			refreshPending = false;
+			await refresh(false);
+		}
 	};
 
-	const refreshCalendarCampaings = async () => {
+	// the campaigns and programs of the calendar range, throws on failure
+	const loadCalendar = async () => {
 		if (!calendarStartDate || !calendarEndDate) {
-			return [];
+			return;
 		}
-
-		try {
-			const rows = await fetchAllRows((options) => {
-				const a = api.campaign.getWithinDates(
-					calendarStartDate.toISOString(),
-					calendarEndDate.toISOString(),
-					{ ...options, includeTest: includeTestCampaigns },
-					contextCompanyID
-				);
-				return a;
-			});
-			calendarCampaigns = rows;
-		} catch (e) {
-			addToast('Failed to load calendar campaigns', 'Error');
-			console.error('Failed to load calendar campaigns', e);
-		}
+		const start = calendarStartDate.toISOString();
+		const end = calendarEndDate.toISOString();
+		const includeTest = get(dashboardIncludeTest);
+		const [campaigns, programs] = await Promise.all([
+			fetchAllRows((options) =>
+				api.campaign.getWithinDates(start, end, { ...options, includeTest }, contextCompanyID)
+			),
+			fetchAllRows((options) => api.program.getWithinDates(start, end, options, contextCompanyID))
+		]);
+		calendarCampaigns = campaigns;
+		calendarPrograms = programs;
 	};
 
-	const refreshRepeatOffenders = async () => {
+	// the calendar moved to another range
+	const onCalendarChange = async () => {
 		try {
-			const res = await api.recipient.countRepeatOffenders(contextCompanyID);
-			if (!res.success) {
-				throw res.error;
-			}
-			repeatOffenders = res.data;
+			await loadCalendar();
 		} catch (e) {
-			addToast('Failed to load repeat offenders', 'Error');
-			console.error('Failed to load repeat offenders', e);
-		}
-	};
-
-	const refreshCampaignStats = async (showLoading = true) => {
-		if (showLoading) {
-			isCampaignStatsLoading = true;
-		}
-		try {
-			const res = await api.campaign.getAllCampaignStats(contextCompanyID);
-			if (!res.success) {
-				throw res.error;
-			}
-			campaignStats = res.data.rows || [];
-		} catch (e) {
-			addToast('Failed to load campaign statistics', 'Error');
-			console.error('Failed to load campaign statistics', e);
-		} finally {
-			if (showLoading) {
-				isCampaignStatsLoading = false;
-			}
+			addToast('Failed to load the calendar', 'Error');
+			console.error('failed to load the calendar', e);
 		}
 	};
 </script>
@@ -150,200 +253,49 @@
 
 	<DashboardNav />
 
-	<div class="flex flex-wrap justify-between items-center gap-x-6 gap-y-3 mb-6">
-		<SubHeadline>Overview</SubHeadline>
-		<div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-			<label class="flex items-center gap-2 cursor-pointer">
-				<span class="font-semibold text-slate-600 dark:text-gray-300 whitespace-nowrap">
-					Include test campaigns
-				</span>
-				<div class="relative flex items-center">
-					<input
-						type="checkbox"
-						id="includeTestCampaigns"
-						bind:checked={includeTestCampaigns}
-						on:change={handleToggleChange}
-						class="peer sr-only"
-					/>
-					<div
-						class="peer-focus-visible:ring-2 peer-focus-visible:ring-cta-blue dark:peer-focus-visible:ring-highlight-blue peer-focus-visible:ring-offset-2 dark:peer-focus-visible:ring-offset-gray-900 w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
-						       peer-checked:border-cta-blue dark:peer-checked:border-highlight-blue/80 peer-checked:bg-cta-blue dark:peer-checked:bg-highlight-blue/80
-						       peer-focus:border-slate-400 dark:peer-focus:border-highlight-blue/80 peer-focus:bg-gray-100 dark:peer-focus:bg-gray-700/60
-						       transition-all duration-200 ease-in-out
-						       flex items-center justify-center
-						       bg-slate-50 dark:bg-gray-900/60"
-					>
-						{#if includeTestCampaigns}
-							<svg
-								class="w-3 h-3 text-white"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-								aria-hidden="true"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="3"
-									d="M5 13l4 4L19 7"
-								/>
-							</svg>
-						{/if}
-					</div>
-				</div>
-			</label>
-			<AutoRefresh isLoading={false} pageId="dashboard" onRefresh={() => refresh(false)} />
-		</div>
-	</div>
+	<DashboardToolbar
+		{isLoading}
+		allCompanies={!contextCompanyID}
+		pageId="dashboard"
+		onRefresh={() => refresh(false)}
+		on:change={() => refresh(false)}
+	/>
 
-	{#if contextCompanyName}
-		<SubHeadline>{contextCompanyName}</SubHeadline>
+	{#if attention.length}
+		<!-- what needs a look, as status badges linking to where it is listed -->
+		<div class="mt-4 flex flex-wrap items-center gap-2" data-attention>
+			{#each attention as item (item.key)}
+				<a href={item.href} class="pc-focus rounded-full transition-opacity duration-200 hover:opacity-80"
+					><StatusBadge tone={item.tone}>{item.text}</StatusBadge></a
+				>
+			{/each}
+		</div>
 	{/if}
 
-	<div class="pc-stats-grid grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 xl:gap-6 mb-8 mt-4">
-		<a href="/dashboard/campaigns" class="pc-focus rounded-lg block h-full min-w-0">
-			<StatsCard
-				title="Active campaigns"
-				value={active}
-				borderColor="border-blue-500"
-				iconColor="text-blue-500"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-8 w-8"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M13 10V3L4 14h7v7l9-11h-7z"
-					/>
-				</svg>
-			</StatsCard>
-		</a>
+	<DashboardTiles {tiles} />
 
-		<a href="/dashboard/campaigns" class="pc-focus rounded-lg block h-full min-w-0">
-			<StatsCard
-				title="Upcoming campaigns"
-				value={scheduled}
-				borderColor="border-indigo-500"
-				iconColor="text-indigo-500"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-8 w-8"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-					/>
-				</svg>
-			</StatsCard>
-		</a>
+	<section class="mt-8" data-section="trend">
+		<SubHeadline>Campaign Trends</SubHeadline>
+		<div class="mt-4 w-full">
+			<CampaignTrendChart
+				{campaignStats}
+				isLoading={isCampaignStatsLoading}
+				onCampaignClick={(id) => goto(`/campaign/${id}`)}
+			/>
+		</div>
+	</section>
 
-		<a href="/dashboard/campaigns" class="pc-focus rounded-lg block h-full min-w-0">
-			<StatsCard
-				title="Completed campaigns"
-				value={finished}
-				borderColor="border-green-500"
-				iconColor="text-green-500"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-8 w-8"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-					/>
-				</svg>
-			</StatsCard>
-		</a>
-
-		<a href="/recipient" class="pc-focus rounded-lg block h-full min-w-0">
-			<StatsCard
-				title="Repeat offenders"
-				value={repeatOffenders}
-				borderColor="border-red-500"
-				iconColor="text-red-500"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-8 w-8"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-					/>
-				</svg>
-			</StatsCard>
-		</a>
-
-		<a href="/campaign" class="pc-focus rounded-lg block h-full min-w-0 col-span-2 lg:col-span-1">
-			<StatsCard
-				title="Trainings completed"
-				value={trainingCompleted}
-				borderColor="border-training-completed"
-				iconColor="text-training-completed"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-8 w-8"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-					stroke-width="1.5"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5"
-					/>
-				</svg>
-			</StatsCard>
-		</a>
-	</div>
-
-	<SubHeadline>{contextCompanyName ? 'Campaign Trends' : 'Shared Campaign Trends'}</SubHeadline>
-	<div class="mb-8 w-full min-h-[300px]">
-		<CampaignTrendChart
-			{campaignStats}
-			isLoading={isCampaignStatsLoading}
-			onCampaignClick={(id) => goto(`/campaign/${id}`)}
-		/>
-	</div>
-
-	<SubHeadline>{contextCompanyName ? 'Calendar' : 'Shared Calendar'}</SubHeadline>
-	<div class="mb-8 min-h-[600px]">
-		<CampaignCalender
-			campaigns={calendarCampaigns}
-			bind:start={calendarStartDate}
-			bind:end={calendarEndDate}
-			onChangeDate={refreshCalendarCampaings}
-			showCompany={!contextCompanyID}
-		/>
-	</div>
+	<section class="mt-8 mb-8" data-section="calendar">
+		<SubHeadline>Calendar</SubHeadline>
+		<div class="mt-4">
+			<CampaignCalender
+				campaigns={calendarCampaigns}
+				programs={calendarPrograms}
+				bind:start={calendarStartDate}
+				bind:end={calendarEndDate}
+				onChangeDate={onCalendarChange}
+				showCompany={!contextCompanyID}
+			/>
+		</div>
+	</section>
 </main>

@@ -74,13 +74,23 @@ export const headerSelectionState = (selectedSet, pageIds) => {
 /**
  * Deletes each id by looping the single item delete endpoint, then toasts a
  * summary of the outcome. Respects the same per item guards as single delete,
- * so items that cannot be deleted are reported as failures.
- * @param {{ ids: Array<string>, deleteFn: (id: string) => Promise<*>, noun: string, nounPlural?: string }} args
+ * so items that cannot be deleted are reported as failures. doneVerb names
+ * what happened to the rows, a delete that finishes in the background says
+ * Deleting.
+ * @param {{ ids: Array<string>, deleteFn: (id: string) => Promise<*>, noun: string, nounPlural?: string, doneVerb?: string }} args
  * @returns {Promise<{ deleted: number, failed: number }>}
  */
-export const runBulkDelete = async ({ ids, deleteFn, noun, nounPlural = `${noun}s` }) => {
+export const runBulkDelete = async ({
+	ids,
+	deleteFn,
+	noun,
+	nounPlural = `${noun}s`,
+	doneVerb = 'Deleted'
+}) => {
 	let deleted = 0;
 	let failed = 0;
+	// the first refusal from the server, such as a template still used by a program
+	let firstError = '';
 	for (const id of ids) {
 		try {
 			const res = await deleteFn(id);
@@ -88,6 +98,9 @@ export const runBulkDelete = async ({ ids, deleteFn, noun, nounPlural = `${noun}
 				deleted++;
 			} else {
 				failed++;
+				if (!firstError && typeof res?.error === 'string') {
+					firstError = res.error;
+				}
 			}
 		} catch (e) {
 			failed++;
@@ -95,9 +108,12 @@ export const runBulkDelete = async ({ ids, deleteFn, noun, nounPlural = `${noun}
 		}
 	}
 	if (failed === 0) {
-		addToast(`Deleted ${deleted} ${deleted === 1 ? noun : nounPlural}`, 'Success');
+		addToast(`${doneVerb} ${deleted} ${deleted === 1 ? noun : nounPlural}`, 'Success');
 	} else {
-		addToast(`Deleted ${deleted}, failed ${failed}`, 'Error');
+		addToast(
+			`${doneVerb} ${deleted}, failed ${failed}${firstError ? `. ${firstError}` : ''}`,
+			'Error'
+		);
 	}
 	return { deleted, failed };
 };

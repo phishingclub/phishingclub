@@ -12,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/utils"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ReportInbox is the repository for report inbox configuration and the ids of
@@ -140,6 +141,25 @@ func (r *ReportInbox) AddCounts(ctx context.Context, id *uuid.UUID, processed, m
 			"matched_count":   gorm.Expr("matched_count + ?", matched),
 		})
 	return errs.Wrap(res.Error)
+}
+
+// CountWithError counts the turned on inboxes whose last read failed, of one
+// company, or only the global inbox when companyID is nil. This matches the
+// inbox the dashboard links to: the company Reporting tab or Settings.
+func (r *ReportInbox) CountWithError(ctx context.Context, companyID *uuid.UUID) (int64, error) {
+	col := func(name string) clause.Column {
+		return clause.Column{Table: database.REPORT_INBOX_TABLE, Name: name}
+	}
+	db := r.DB.WithContext(ctx).
+		Model(&database.ReportInbox{}).
+		Where(clause.Eq{Column: col("enabled"), Value: true}).
+		Where(clause.Neq{Column: col("last_error"), Value: ""})
+	db = whereCompany(db, database.REPORT_INBOX_TABLE, companyID)
+	var count int64
+	if err := db.Count(&count).Error; err != nil {
+		return 0, errs.Wrap(err)
+	}
+	return count, nil
 }
 
 // CountByOAuthProviderID counts the inboxes that sign in with an oauth provider

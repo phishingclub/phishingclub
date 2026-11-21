@@ -64,7 +64,7 @@ func TestConstrainedSendTimes(t *testing.T) {
 	// a Monday
 	start := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 1, 9, 23, 59, 0, 0, time.UTC) // the Friday
-	weekDays := vo.NewCampaignWeekDaysMust(62).AsSlice()  // Mon..Fri
+	weekDays := vo.NewCampaignWeekDaysMust(62).AsSlice() // Mon..Fri
 	dayStart := vo.NewCampaignTimeConstraintMust("09:00")
 	dayEnd := vo.NewCampaignTimeConstraintMust("17:00")
 

@@ -33,6 +33,43 @@ type Program struct {
 	// scheduler adds no enrollments and advances no recipients, and step edits
 	// are allowed.
 	PausedAt *time.Time `gorm:"index;"`
+	// ClosingAt marks a close that has stopped all sending but has not closed
+	// every hidden campaign yet. The scheduler or a new close finishes it.
+	ClosingAt *time.Time `gorm:"index;"`
+	// DeletingAt marks a delete that has stopped all sending but has not
+	// removed every hidden campaign yet. A new delete finishes it.
+	DeletingAt *time.Time `gorm:"index;"`
+	// AnonymizeAt is when a closed program has its people replaced with
+	// pseudonyms in every result. AnonymizedAt is set once that is done for
+	// every hidden campaign.
+	AnonymizeAt  *time.Time `gorm:"index;"`
+	AnonymizedAt *time.Time
+	// AnonymizingAt marks an Anonymize All that has begun and not finished.
+	// The anonymize task finishes it.
+	AnonymizingAt *time.Time `gorm:"index;"`
+	// the people counts by status taken when Anonymize All began. The
+	// enrollments are removed by it, so the counts of the program are read
+	// from here once it began.
+	AnonymizedPeople    int `gorm:"not null;default:0"`
+	AnonymizedCompleted int `gorm:"not null;default:0"`
+	AnonymizedExited    int `gorm:"not null;default:0"`
+	AnonymizedStopped   int `gorm:"not null;default:0"`
+	// DataAnonymizeAt is when the submitted data, IP addresses, user agents
+	// and browser metadata of the program are removed. DataAnonymizedAt is
+	// set once that is done for every hidden campaign.
+	DataAnonymizeAt  *time.Time `gorm:"index;"`
+	DataAnonymizedAt *time.Time
+	// DataAnonymizingAt marks an Anonymize Data run by hand that has not
+	// finished, so the background pass runs it after a failure or a restart
+	DataAnonymizingAt *time.Time
+	// ReplanPendingAt marks an edit whose people are not all planned again
+	// yet. It is set in the write of the edit and cleared once they are. The
+	// membership pass plans them again while it is set, so an edit cut short
+	// by a restart or an error is still finished.
+	ReplanPendingAt *time.Time
+	// ReplanOldEndAt is the end before the edit of ReplanPendingAt when the
+	// edit moved the end later. The people waiting at it are drawn again.
+	ReplanOldEndAt *time.Time
 
 	// OrderMode is 'shuffle' or 'sequential'. Shuffle picks a random step the
 	// recipient has not had in the current loop. Sequential takes the steps in
@@ -41,6 +78,10 @@ type Program struct {
 	// LoopMode is 'complete' or 'loop'. Loop starts a recipient over after the
 	// last step, complete marks them done.
 	LoopMode string `gorm:"not null;default:'complete'"`
+	// TemplateMixBy is the recipient field templates are mixed by in shuffle
+	// order: department, position or city. Empty is off. Sequential order
+	// keeps the value but does not use it.
+	TemplateMixBy string `gorm:"not null;default:''"`
 
 	// StepIntervalMinutes is the time between the start of one recipient's
 	// rounds, one step per round. The default is model.ProgramDefaultIntervalMinutes,
@@ -79,6 +120,25 @@ type Program struct {
 
 	// IsAnonymous is propagated to every hidden campaign the program creates.
 	IsAnonymous bool `gorm:"not null;default:false"`
+	// SaveSubmittedData is copied to every hidden campaign the program creates.
+	// It is never on for an anonymous program.
+	SaveSubmittedData bool `gorm:"not null;default:false"`
+
+	// ReportEnabled turns on the automated report email. ReportInterval is
+	// monthly, quarterly or yearly and ReportPeriod is last (the interval that
+	// just ended) or start (everything since the program started). The period
+	// boundaries are read in TimeZone.
+	ReportEnabled  bool   `gorm:"not null;default:false"`
+	ReportInterval string `gorm:"not null;default:'monthly'"`
+	ReportPeriod   string `gorm:"not null;default:'last'"`
+	// ReportLastPeriodEnd is the end of the last period an automated report
+	// was sent for, so a period is never sent twice
+	ReportLastPeriodEnd *time.Time
+	// ReportClaimedAt is set while a claimed report period has not been sent,
+	// with ReportClaimPrevEnd the period end before the claim. A claim left
+	// by a crash is given back after a while, so the period is not lost.
+	ReportClaimedAt    *time.Time
+	ReportClaimPrevEnd *time.Time
 
 	// DenyPageID and EvasionPageID are copied to every hidden campaign, the
 	// allow or deny lists and webhooks are in program_allow_denies and

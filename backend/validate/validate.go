@@ -314,19 +314,23 @@ func ErrorIfMailInvalid(s string) error {
 		return errs.NewValidationError(err)
 	}
 
-	r := `^.+@.+\..+`
-	pattern := regexp.MustCompile(r)
 	// check if the email address matches the pattern.
-	if !pattern.MatchString(s) {
+	if !mailPattern.MatchString(s) {
 		return errs.NewValidationError(
 			fmt.Errorf(
 				"simple pattern '%s' failed",
-				r,
+				mailPatternText,
 			),
 		)
 	}
 	return nil
 }
+
+// mailPatternText is the simple pattern every email address must match. It
+// is compiled once, as emails are checked for every recipient read.
+const mailPatternText = `^.+@.+\..+`
+
+var mailPattern = regexp.MustCompile(mailPatternText)
 
 // ErrorIfStringNotMatch checks if a string matches a pattern
 func ErrorIfStringNotMatch(s string, r string) error {

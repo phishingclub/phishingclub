@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/go-errors/errors"
 
@@ -19,6 +21,8 @@ type AllowDeny struct {
 	CampaignRepository  *repository.Campaign
 	ProgramRepository   *repository.Program
 	AssetRepository     *repository.Asset
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 func (s *AllowDeny) Create(
@@ -47,6 +51,11 @@ func (s *AllowDeny) Create(
 	if cid, err := allowDeny.CompanyID.Get(); err == nil {
 		companyID = &cid
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	name := allowDeny.Name.MustGet()
 	isOK, err := repository.CheckNameIsUnique(
 		ctx,
@@ -266,6 +275,7 @@ func (s *AllowDeny) DeleteByID(
 	id *uuid.UUID,
 ) (err error) {
 	ae := NewAuditEvent("AllowDeny.DeleteByID", session)
+	addDeleteOrigin(ctx, ae)
 	defer s.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
@@ -278,43 +288,42 @@ func (s *AllowDeny) DeleteByID(
 		s.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	// get campaigns afffected so we can remove any deny_page_id
-	affectedCampaigns, err := s.CampaignRepository.GetByAllowDenyID(
-		ctx,
-		id,
-	)
-	if err != nil {
-		s.Logger.Errorw("failed to get campaigns afffected by removing allow deny list",
-			"allowDenyID", id.String(),
-			"error", err,
-		)
-		return err
+	// a program that is not closed keeps filtering with its lists, so a list
+	// it uses is not deleted, the same as its templates, groups and pages
+	if s.ProgramRepository != nil {
+		programs, err := s.ProgramRepository.GetOpenUsingAllowDeny(ctx, id)
+		if err != nil {
+			s.Logger.Errorw("failed to check programs using the allow / deny list", "error", err)
+			return err
+		}
+		if len(programs) > 0 {
+			names := []string{}
+			for i, p := range programs {
+				if i == 3 {
+					break
+				}
+				names = append(names, p.Name)
+			}
+			list := strings.Join(names, ", ")
+			if more := len(programs) - len(names); more > 0 {
+				list = fmt.Sprintf("%s and %d more", list, more)
+			}
+			ae.Details["refused"] = "used by open programs"
+			return errs.NewValidationError(fmt.Errorf(
+				"the list is used by programs that are not closed: %s. Remove it from them first or close them",
+				list,
+			))
+		}
 	}
-	cids := []*uuid.UUID{}
-	for _, campaign := range affectedCampaigns {
-		cid := campaign.ID.MustGet()
-		cids = append(cids, &cid)
-	}
-	err = s.CampaignRepository.RemoveDenyPageByCampaignIDs(
-		ctx,
-		cids,
-	)
-	if err != nil {
-		s.Logger.Errorw("failed to remove deny page from campaigns", "error", err)
-		return err
-	}
-	// remove allow deny list from campaigns using it
-	err = s.CampaignRepository.RemoveAllowDenyListsByID(
-		ctx,
-		id,
-	)
-	if err != nil {
+	// remove the list from campaigns and closed programs using it. one left
+	// with no list and no evasion page also loses its deny page, the same rule
+	// for both
+	if err := s.CampaignRepository.RemoveAllowDenyFromFilters(ctx, id); err != nil {
 		s.Logger.Errorw("failed to remove allow / deny lists from campaigns", "error", err)
 		return err
 	}
-	// remove allow deny list from programs using it
 	if s.ProgramRepository != nil {
-		if err := s.ProgramRepository.RemoveAllowDenyFromPrograms(ctx, id); err != nil {
+		if err := s.ProgramRepository.RemoveAllowDenyFromProgramFilters(ctx, id); err != nil {
 			s.Logger.Errorw("failed to remove allow / deny lists from programs", "error", err)
 			return err
 		}

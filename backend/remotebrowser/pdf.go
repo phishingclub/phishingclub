@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -69,14 +70,135 @@ type Session struct {
 	captureRefused atomic.Int64
 	// localReads holds a slot for each local file being read
 	localReads chan struct{}
+	// releaseSlot gives back the browser slot taken in NewSession
+	releaseSlot func()
+}
+
+// reportBrowserSlots is how many report browsers may run at the same time in
+// the whole app. Each one is a Chromium process that uses about 150 to 400 MB.
+const reportBrowserSlots = 2
+
+// reportBrowsers limits the report browsers of every caller of NewSession.
+var reportBrowsers = newBrowserLimiter(reportBrowserSlots)
+
+// browserLimiter hands out a fixed number of browser slots.
+type browserLimiter struct {
+	slots chan struct{}
+}
+
+func newBrowserLimiter(n int) *browserLimiter {
+	return &browserLimiter{slots: make(chan struct{}, n)}
+}
+
+// reservedSlot is a slot taken by ReserveSession and carried in a context.
+type reservedSlot struct {
+	inUse atomic.Bool
+	// released is set once the slot is given back, the context that carries
+	// it then waits for a new slot like any other
+	released atomic.Bool
+	// oneSession gives the slot back when the first session on it closes
+	oneSession bool
+	// give hands the slot back to the limiter, once
+	give func()
+}
+
+// release marks the reservation as given back and frees its slot
+func (r *reservedSlot) release() {
+	r.released.Store(true)
+	r.give()
+}
+
+type reservedSlotKey struct{}
+
+// acquire waits for a free slot and returns the function that gives it back.
+// A slot reserved in ctx, not released and not in use is taken instead of a
+// new one. The wait ends with an OperationalError when ctx is cancelled or
+// times out.
+func (b *browserLimiter) acquire(ctx context.Context) (func(), error) {
+	if r, ok := ctx.Value(reservedSlotKey{}).(*reservedSlot); ok && !r.released.Load() && r.inUse.CompareAndSwap(false, true) {
+		// a release between the check and the swap leaves the slot to nobody
+		if !r.released.Load() {
+			var once sync.Once
+			return func() {
+				once.Do(func() {
+					if r.oneSession {
+						r.release()
+					}
+					r.inUse.Store(false)
+				})
+			}, nil
+		}
+		r.inUse.Store(false)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, browserBusyError(ctx)
+	}
+	select {
+	case b.slots <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-b.slots }) }, nil
+	case <-ctx.Done():
+		return nil, browserBusyError(ctx)
+	}
+}
+
+// reserve waits for a free slot and returns a context that carries it, see
+// ReserveSession. With oneSession set the slot is given back as soon as the
+// first session on it closes.
+func (b *browserLimiter) reserve(ctx context.Context, oneSession bool) (context.Context, func(), error) {
+	give, err := b.acquire(context.WithValue(ctx, reservedSlotKey{}, nil))
+	if err != nil {
+		return nil, nil, err
+	}
+	r := &reservedSlot{oneSession: oneSession, give: give}
+	return context.WithValue(ctx, reservedSlotKey{}, r), r.release, nil
+}
+
+func browserBusyError(ctx context.Context) error {
+	return errs.NewOperationalError(
+		"The report browser is busy with other reports. Try again in a moment.",
+		fmt.Errorf("waiting for a report browser slot: %w", context.Cause(ctx)),
+	)
+}
+
+// ReserveSession waits for a report browser slot for as long as ctx allows and
+// returns a context that holds it. NewSession called with that context, or a
+// context made from it, uses the held slot instead of waiting for another.
+// This lets background work wait in line first and then start its own time
+// limit for the render. release gives the slot back and must be called once
+// the sessions are closed. After release a session started with the context
+// waits for a new slot.
+func ReserveSession(ctx context.Context) (context.Context, func(), error) {
+	return reportBrowsers.reserve(ctx, false)
+}
+
+// ReserveOneSession is ReserveSession for work that renders on one session
+// and then goes on without the browser, such as sending the report by email.
+// The slot is given back as soon as that session closes, so the rest of the
+// work does not keep other reports waiting. A later session on the context
+// waits for a new slot. release must still be called, it does nothing when
+// the slot was already given back.
+func ReserveOneSession(ctx context.Context) (context.Context, func(), error) {
+	return reportBrowsers.reserve(ctx, true)
 }
 
 // NewSession launches a headless Chromium instance behind the egress guard.
 // If execPath is empty the browser binary is resolved automatically using the
 // same path as the runner. This is the single launch path shared by every
 // report render (PDF or screenshot) so the guard configuration cannot drift between
-// them.
-func NewSession(ctx context.Context, execPath string) (*Session, error) {
+// them. At most reportBrowserSlots sessions run at once in the whole app,
+// NewSession waits for a free slot until ctx is done.
+func NewSession(ctx context.Context, execPath string) (_ *Session, err error) {
+	releaseSlot, err := reportBrowsers.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// the slot is kept by the session, every failed start gives it back
+	defer func() {
+		if err != nil {
+			releaseSlot()
+		}
+	}()
 	rootDir, err := resolveBrowserRootDir()
 	if err != nil {
 		return nil, fmt.Errorf("reportbrowser: %w", err)
@@ -146,26 +268,51 @@ func NewSession(ctx context.Context, execPath string) (*Session, error) {
 		)
 	}
 
-	return &Session{browser: browser, proxy: proxy, l: l, localReads: make(chan struct{}, sessionLocalReads)}, nil
+	return &Session{
+		browser:     browser,
+		proxy:       proxy,
+		l:           l,
+		localReads:  make(chan struct{}, sessionLocalReads),
+		releaseSlot: releaseSlot,
+	}, nil
 }
+
+// sessionCloseTimeout bounds the polite browser close of Session.Close, a
+// browser that does not answer is killed after it
+const sessionCloseTimeout = 5 * time.Second
 
 // Close releases the browser process, its temp dirs and the egress guard
-// proxy. Safe to call once per Session, after which the Session must not be
-// used again.
+// proxy. The browser is asked to close for at most sessionCloseTimeout and
+// then killed, so a stuck browser never holds its slot. The slot and the
+// proxy are released last, also when a step panics. Safe to call once per
+// Session, after which the Session must not be used again.
 func (s *Session) Close() {
-	_ = s.browser.Close() //nolint:errcheck
+	defer s.releaseSlot()
+	defer s.proxy.close()
+	_ = s.browser.Timeout(sessionCloseTimeout).Close() //nolint:errcheck
 	s.l.Kill()
 	s.l.Cleanup()
-	s.proxy.close()
 }
 
+// PDFRenderTimeout bounds one RenderPDF call, page create to the last byte
+const PDFRenderTimeout = 90 * time.Second
+
 // RenderPDF renders an HTML string to PDF bytes on this session's browser.
+// The render stops after PDFRenderTimeout with an error that wraps
+// context.DeadlineExceeded. The browser may then be stuck, so the caller
+// closes the session, which ends the browser and frees its slot.
 func (s *Session) RenderPDF(htmlContent string) ([]byte, error) {
-	page, err := s.browser.Page(proto.TargetCreateTarget{URL: "about:blank"})
+	ctx, cancel := context.WithTimeout(s.browser.GetContext(), PDFRenderTimeout)
+	defer cancel()
+	page, err := s.browser.Context(ctx).Page(proto.TargetCreateTarget{URL: "about:blank"})
 	if err != nil {
-		return nil, fmt.Errorf("reportpdf: page create failed: %w", err)
+		return nil, fmt.Errorf("reportpdf: page create failed: %w", renderErr(ctx, err))
 	}
-	defer page.Close() //nolint:errcheck
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), CaptureCloseTimeout)
+		defer closeCancel()
+		_ = page.Context(closeCtx).Close() //nolint:errcheck
+	}()
 
 	// Set viewport to A4 at 96 dpi (794×1123 px) so layout fills exactly the paper width.
 	// Without this Chrome defaults to a wider viewport and the content may not reach the
@@ -176,11 +323,11 @@ func (s *Session) RenderPDF(htmlContent string) ([]byte, error) {
 		DeviceScaleFactor: 1,
 		Mobile:            false,
 	}); err != nil {
-		return nil, fmt.Errorf("reportpdf: set viewport failed: %w", err)
+		return nil, fmt.Errorf("reportpdf: set viewport failed: %w", renderErr(ctx, err))
 	}
 
 	if err := page.SetDocumentContent(htmlContent); err != nil {
-		return nil, fmt.Errorf("reportpdf: set content failed: %w", err)
+		return nil, fmt.Errorf("reportpdf: set content failed: %w", renderErr(ctx, err))
 	}
 
 	// not fatal: lets inline resources settle before printing
@@ -199,15 +346,24 @@ func (s *Session) RenderPDF(htmlContent string) ([]byte, error) {
 		MarginRight:     &zero,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("reportpdf: PDF render failed: %w", err)
+		return nil, fmt.Errorf("reportpdf: PDF render failed: %w", renderErr(ctx, err))
 	}
 	defer pdfReader.Close() //nolint:errcheck
 
 	data, err := io.ReadAll(pdfReader)
 	if err != nil {
-		return nil, fmt.Errorf("reportpdf: read PDF failed: %w", err)
+		return nil, fmt.Errorf("reportpdf: read PDF failed: %w", renderErr(ctx, err))
 	}
 	return data, nil
+}
+
+// renderErr returns the context error when the render ran out of time, so
+// the caller can tell a timeout by errors.Is, else err
+func renderErr(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 // CaptureOptions controls one screenshot taken by Session.Capture.

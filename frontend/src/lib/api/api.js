@@ -863,6 +863,18 @@ export class API {
 		},
 
 		/**
+		 * Get the allow listing information of every template in a campaign.
+		 *
+		 * @param {string} id
+		 * @param {string|null} companyID the company in view, null for the global view
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAllowListing: async (id, companyID = null) => {
+			const companyQuery = companyID ? `?${this.companyQuery(companyID)}` : '';
+			return await getJSON(this.getPath(`/campaign/${id}/allow-listing${companyQuery}`));
+		},
+
+		/**
 		 * Get a campaign by name.
 		 *
 		 * @param {string} name
@@ -992,12 +1004,14 @@ export class API {
 		 *
 		 * @param {TableURLParams} options
 		 * @param {string|null} companyID
+		 * @param {string} eventType event name to keep only that type, empty for all
 		 * @returns {Promise<ApiResponse>}
 		 */
-		getAllEvents: async (options, companyID = null) => {
+		getAllEvents: async (options, companyID = null, eventType = '') => {
+			const typeQuery = eventType ? `&eventType=${encodeURIComponent(eventType)}` : '';
 			return await getJSON(
 				this.getPath(
-					`/campaign/events?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`
+					`/campaign/events?${appendQuery(options)}${this.appendCompanyQuery(companyID)}${typeQuery}`
 				)
 			);
 		},
@@ -1237,13 +1251,65 @@ export class API {
 	 * @type {Object}
 	 */
 	program = {
-		getAll: async (options, companyID) => {
+		/**
+		 * Get one page of programs, optionally only those of one list status:
+		 * draft, scheduled, active, needs_attention, paused or closed.
+		 *
+		 * @param {*} options
+		 * @param {string|null} companyID
+		 * @param {string} [status]
+		 * @param {boolean} [allCompanies] without a company, list every company with its name
+		 */
+		getAll: async (options, companyID, status = '', allCompanies = false) => {
+			const statusQuery = status ? `&status=${encodeURIComponent(status)}` : '';
+			const allQuery = allCompanies ? '&allCompanies=true' : '';
 			return await getJSON(
-				this.getPath(`/program?${appendQuery(options)}${this.appendCompanyQuery(companyID)}`)
+				this.getPath(
+					`/program?${appendQuery(options)}${this.appendCompanyQuery(companyID)}${statusQuery}${allQuery}`
+				)
+			);
+		},
+		/**
+		 * Count programs per state for the dashboard. Without a company it
+		 * counts every company.
+		 *
+		 * @param {string|null} companyID
+		 */
+		getStats: async (companyID = null) => {
+			return await getJSON(
+				this.getPath(
+					`/program/statistics?${appendQuery(null)}${this.appendCompanyQuery(companyID)}`
+				)
+			);
+		},
+		/**
+		 * Programs that run between start and end for the dashboard calendar, paged.
+		 *
+		 * @param {string} start ISO time
+		 * @param {string} end ISO time
+		 * @param {*} options
+		 * @param {string|null} companyID
+		 */
+		getWithinDates: async (start, end, options, companyID = null) => {
+			return await getJSON(
+				this.getPath(
+					`/program/calendar?${appendQuery(options)}${this.appendCompanyQuery(companyID)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+				)
 			);
 		},
 		getByID: async (id) => {
 			return await getJSON(this.getPath(`/program/${id}`));
+		},
+		/**
+		 * Get the allow listing information of every template a program uses.
+		 *
+		 * @param {string} id
+		 * @param {string|null} companyID the company in view, null for the global view
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAllowListing: async (id, companyID = null) => {
+			const companyQuery = companyID ? `?${this.companyQuery(companyID)}` : '';
+			return await getJSON(this.getPath(`/program/${id}/allow-listing${companyQuery}`));
 		},
 		create: async (program) => {
 			return await postJSON(this.getPath('/program'), program);
@@ -1262,6 +1328,25 @@ export class API {
 		},
 		close: async (id) => {
 			return await postJSON(this.getPath(`/program/${id}/close`), {});
+		},
+		/**
+		 * Replace the people of a closed program with pseudonyms in every result.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		anonymize: async (id) => {
+			return await postJSON(this.getPath(`/program/${id}/anonymize`), {});
+		},
+		/**
+		 * Remove the submitted data, IPs, user agents and browser metadata of a
+		 * program while the people stay linked.
+		 *
+		 * @param {string} id
+		 * @returns {Promise<ApiResponse>}
+		 */
+		anonymizeData: async (id) => {
+			return await postJSON(this.getPath(`/program/${id}/anonymize-data`), {});
 		},
 		/**
 		 * Start a draft or scheduled program now.
@@ -1288,11 +1373,96 @@ export class API {
 				companyID: companyID || null
 			});
 		},
-		statistics: async (id) => {
-			return await getJSON(this.getPath(`/program/${id}/statistics`));
+		/**
+		 * Get one page of the recipient events across the sends of a program.
+		 * Sorted by the campaign event columns. An anonymous program lists none.
+		 *
+		 * @param {string} id
+		 * @param {TableURLParams} [options]
+		 */
+		events: async (id, options) => {
+			return await getJSON(this.getPath(`/program/${id}/events?${appendQuery(options)}`));
 		},
-		results: async (id) => {
-			return await getJSON(this.getPath(`/program/${id}/results`));
+		/**
+		 * Get one page of the events of one recipient in a program
+		 *
+		 * @param {string} id
+		 * @param {string} recipientID
+		 * @param {TableURLParams} options
+		 * @returns {Promise<ApiResponse>}
+		 */
+		recipientEvents: async (id, recipientID, options) => {
+			return await getJSON(
+				this.getPath(
+					`/program/${id}/events?${appendQuery(options)}&recipientID=${encodeURIComponent(recipientID)}`
+				)
+			);
+		},
+		/**
+		 * Get the plan of one recipient in a program
+		 *
+		 * @param {string} id
+		 * @param {string} recipientID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		recipientSchedule: async (id, recipientID) => {
+			return await getJSON(
+				this.getPath(`/program/${id}/recipients/${encodeURIComponent(recipientID)}/schedule`)
+			);
+		},
+		/**
+		 * Get the program results, with the result tiles for a time range
+		 * (30d, 90d, 12m or all), or the default of the program when empty
+		 *
+		 * @param {string} id
+		 * @param {string} [range]
+		 * @returns {Promise<ApiResponse>}
+		 */
+		results: async (id, range = '') => {
+			const query = range ? `?range=${encodeURIComponent(range)}` : '';
+			return await getJSON(this.getPath(`/program/${id}/results${query}`));
+		},
+		/**
+		 * Get the results of a named program since the start, grouped by the
+		 * current department or position of each recipient
+		 *
+		 * @param {string} id
+		 * @param {'department'|'position'} by
+		 * @returns {Promise<ApiResponse>}
+		 */
+		resultGroups: async (id, by) => {
+			return await getJSON(
+				this.getPath(`/program/${id}/results/groups?by=${encodeURIComponent(by)}`)
+			);
+		},
+		/**
+		 * Get the schedule timeline of a program: sends and outcomes per day
+		 * before now and planned sends from now on. from and to are YYYY-MM-DD
+		 * dates in the program time zone, both empty for the default range.
+		 *
+		 * @param {string} id
+		 * @param {string} [from]
+		 * @param {string} [to]
+		 * @param {string|null} [companyID]
+		 * @returns {Promise<ApiResponse>}
+		 */
+		timeline: async (id, from = '', to = '', companyID = null) => {
+			const params = new URLSearchParams();
+			if (from && to) {
+				params.set('from', from);
+				params.set('to', to);
+			}
+			if (companyID) params.set('companyID', companyID);
+			const query = params.toString();
+			return await getJSON(this.getPath(`/program/${id}/timeline${query ? `?${query}` : ''}`));
+		},
+		/**
+		 * Whether automated program reports can be sent for a company, or the
+		 * global scope when companyID is empty. Returns { ready, reason }.
+		 */
+		reportDelivery: async (companyID) => {
+			const q = companyID ? `?${this.companyQuery(companyID)}` : '';
+			return await getJSON(this.getPath(`/program/report-delivery${q}`));
 		},
 		audience: async (recipientGroupIDs, companyID) => {
 			return await postJSON(this.getPath('/program/audience'), {
@@ -1301,8 +1471,8 @@ export class API {
 			});
 		},
 		/**
-		 * Get one page of the people of a program. Sort by email, name, risk,
-		 * status or next_due_at, search on email and name.
+		 * Get one page of the people of a program. Sort by email, name, status
+		 * or next_due_at, search on email and name.
 		 *
 		 * @param {string} id
 		 * @param {TableURLParams} [options]
@@ -1381,6 +1551,18 @@ export class API {
 				p += '?full';
 			}
 			return await getJSON(p);
+		},
+
+		/**
+		 * Get the allow listing information of a campaign template.
+		 *
+		 * @param {string} id
+		 * @param {string|null} companyID the company in view, null for the global view
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getAllowListing: async (id, companyID = null) => {
+			const companyQuery = companyID ? `?${this.companyQuery(companyID)}` : '';
+			return await getJSON(this.getPath(`/campaign/template/${id}/allow-listing${companyQuery}`));
 		},
 
 		/**
@@ -2989,14 +3171,15 @@ export class API {
 		},
 
 		/**
-		 * Get the programs a recipient is enrolled in with their activity there.
-		 * Anonymous programs only give the name and enrollment status.
+		 * Get one page of the programs a recipient is enrolled in with their
+		 * activity there. Anonymous programs only give the name and enrollment status.
 		 *
 		 * @param {string} id
+		 * @param {TableURLParams} options
 		 * @returns {Promise<ApiResponse>}
 		 */
-		getPrograms: async (id) => {
-			return await getJSON(this.getPath(`/recipient/${id}/programs`));
+		getPrograms: async (id, options) => {
+			return await getJSON(this.getPath(`/recipient/${id}/programs?${appendQuery(options)}`));
 		},
 
 		/**
@@ -4226,10 +4409,10 @@ export class API {
 		getByID: async (id) => {
 			return await getJSON(this.getPath(`/report-template/${id}`));
 		},
-		// the built in default template content for the phishing or training report
-		getDefault: async (isTraining) => {
+		// the built in default template of a kind: simulation, training or program
+		getDefault: async (kind) => {
 			return await getJSON(
-				this.getPath(`/report-template/default?training=${isTraining ? 'true' : 'false'}`)
+				this.getPath(`/report-template/default?kind=${encodeURIComponent(kind || 'simulation')}`)
 			);
 		},
 		create: async (data) => {
@@ -4246,12 +4429,13 @@ export class API {
 		},
 		// renders unsaved template content with sample data to a real PDF.
 		// returns the PDF as a Blob, typed as PDF whatever the response header says
-		previewPDF: async (content, isTraining) => {
+		// kind picks the sample data: simulation, training or program
+		previewPDF: async (content, kind) => {
 			const response = await fetch(this.getPath('/report-template/preview-pdf'), {
 				method: 'POST',
 				credentials: 'same-origin',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ content, isTraining: !!isTraining })
+				body: JSON.stringify({ content, kind: kind || 'simulation' })
 			});
 			if (!response.ok) {
 				let error =

@@ -11,6 +11,7 @@ import (
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
+	"github.com/phishingclub/phishingclub/validate"
 	"gorm.io/gorm"
 )
 
@@ -20,6 +21,10 @@ type CompanyReportConfig struct {
 	Common
 	CompanyReportConfigRepository *repository.CompanyReportConfig
 	ReportSendLogRepository       *repository.ReportSendLog
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
+	// RecipientGroupRepository refuses a group that is being deleted
+	RecipientGroupRepository *repository.RecipientGroup
 }
 
 // reportConfigScope returns a human label for the config scope for audit logging
@@ -92,6 +97,11 @@ func (s *CompanyReportConfig) Upsert(
 	// a nil companyID targets the global default config. enabling and on-finish
 	// delivery are per company decisions, so they are never stored on the global
 	// config which only supplies default fields.
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	if companyID == nil {
 		incoming.CompanyID = nullable.NewNullNullable[uuid.UUID]()
 		incoming.Enabled = false
@@ -104,6 +114,19 @@ func (s *CompanyReportConfig) Upsert(
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		s.Logger.Errorw("failed to look up existing report config", "error", err)
 		return nil, errs.Wrap(err)
+	}
+	// a group that is being deleted can not receive the reports. The read
+	// lock keeps a delete mark from passing before the save, see
+	// deleteMarkLock
+	if groupID, err := incoming.RecipientGroupID.Get(); err == nil && s.RecipientGroupRepository != nil {
+		defer groupDeleteLock.read(&groupID)()
+		deleting, err := s.RecipientGroupRepository.AnyBeingDeleted(ctx, []*uuid.UUID{&groupID})
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		if deleting {
+			return nil, validate.WrapErrorWithField(errGroupDeleting, "recipientGroupID")
+		}
 	}
 	// the recipient group and SMTP configuration must be global or owned by the
 	// company, the global default config can only use global ones

@@ -67,19 +67,11 @@ func (o *OAuthProvider) GetAll(
 		return result, errs.Wrap(err)
 	}
 	dbProviders := []database.OAuthProvider{}
-	if err := db.Find(&dbProviders).Error; err != nil {
+	if err := withPeek(db, option.QueryArgs).Find(&dbProviders).Error; err != nil {
 		return result, err
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.OAUTH_PROVIDER_TABLE,
-		option.QueryArgs,
-		oauthProviderAllowedColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbProviders, option.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for i := range dbProviders {

@@ -1,11 +1,13 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/mattn/go-sqlite3"
 	"github.com/phishingclub/phishingclub/config"
 	"github.com/phishingclub/phishingclub/errs"
 	"gorm.io/driver/sqlite"
@@ -15,6 +17,24 @@ import (
 
 // sqliteMaxConns is the size of the sqlite connection pool
 const sqliteMaxConns = 8
+
+// sqliteDriverName is the sqlite driver with the connection setup below. It
+// is registered once, sql.Register panics on a second name use.
+const sqliteDriverName = "sqlite3_phishingclub"
+
+// sqliteJournalSizeLimit caps the write ahead log file that is left on disk
+// after a checkpoint has reset it, 64 MB. The driver has no DSN parameter for
+// it, so it is set on every new connection.
+const sqliteJournalSizeLimit = "PRAGMA journal_size_limit=67108864"
+
+func init() {
+	sql.Register(sqliteDriverName, &sqlite3.SQLiteDriver{
+		ConnectHook: func(conn *sqlite3.SQLiteConn) error {
+			_, err := conn.Exec(sqliteJournalSizeLimit, nil)
+			return err
+		},
+	})
+}
 
 // FromConfig database factory from config
 func FromConfig(conf config.Config) (*gorm.DB, error) {
@@ -41,7 +61,10 @@ func FromConfig(conf config.Config) (*gorm.DB, error) {
 			conf.Database().DSN,
 			separator,
 		)
-		db, err = gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		db, err = gorm.Open(sqlite.New(sqlite.Config{
+			DriverName: sqliteDriverName,
+			DSN:        dsn,
+		}), &gorm.Config{
 			Logger: logger.Default.LogMode(logger.Silent),
 		})
 		if err != nil {

@@ -665,9 +665,10 @@ func (s *MicrosoftDeviceCode) pollAndCapture(ctx context.Context, entry *model.M
 
 	currentNotableEventID, _ := campaignRecipient.NotableEventID.Get()
 	if cache.IsMoreNotableCampaignRecipientEventID(&currentNotableEventID, submitDataEventTypeID) {
-		campaignRecipient.NotableEventID.Set(*submitDataEventTypeID)
+		// only the notable event is written, so a concurrent unlink or close
+		// of an anonymous campaign keeps its cleared person link
 		crid := campaignRecipient.ID.MustGet()
-		if err := s.CampaignRecipientRepository.UpdateByID(ctx, &crid, campaignRecipient); err != nil {
+		if err := s.CampaignRecipientRepository.UpdateNotableEventByID(ctx, &crid, submitDataEventTypeID); err != nil {
 			s.Logger.Errorw("failed to update most notable event for campaign recipient after device code capture", "error", err)
 		}
 	}

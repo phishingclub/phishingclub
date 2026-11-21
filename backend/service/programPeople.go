@@ -3,12 +3,11 @@ package service
 import (
 	"context"
 	"errors"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/phishingclub/phishingclub/cache"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
@@ -17,25 +16,25 @@ import (
 	"github.com/phishingclub/phishingclub/vo"
 )
 
-// ProgramRiskSortKey is the sort name of the derived risk in the people table.
-// Risk is not a column, so these rows are sorted after they are scored.
-const ProgramRiskSortKey = "risk"
-
-// ProgramEnrollmentRow is one recipient's public journey state, including the
-// preplanned next step and when it is due.
+// ProgramEnrollmentRow is one recipient's journey state. NotableEventName is
+// the most notable event across the recipient's sends, named as on a campaign.
+// LastTemplateName and LastSentAt name the newest sent template.
+// NextTemplateName is set when the next template is known: a send waits in the
+// queue, or everyone gets the templates in the same order. It is null when the
+// template is picked at send time. NextDueAt is when the next send goes out.
 type ProgramEnrollmentRow struct {
-	RecipientID string `json:"recipientID"`
-	Email       string `json:"email"`
-	Name        string `json:"name"`
-	Position    int    `json:"position"`
-	LoopCount   int    `json:"loopCount"`
-	Status      string `json:"status"`
-	// RiskScore is nil when the person has too few sends to judge
-	RiskScore *float64   `json:"riskScore"`
-	RiskLevel string     `json:"riskLevel"`
-	Sends     int        `json:"sends"`
-	NextStep  string     `json:"nextStep"`
-	NextDueAt *time.Time `json:"nextDueAt"`
+	RecipientID      string     `json:"recipientID"`
+	Email            string     `json:"email"`
+	Name             string     `json:"name"`
+	Position         int        `json:"position"`
+	LoopCount        int        `json:"loopCount"`
+	Status           string     `json:"status"`
+	NotableEventName string     `json:"notableEventName"`
+	Sends            int        `json:"sends"`
+	LastTemplateName *string    `json:"lastTemplateName"`
+	LastSentAt       *time.Time `json:"lastSentAt"`
+	NextTemplateName *string    `json:"nextTemplateName"`
+	NextDueAt        *time.Time `json:"nextDueAt"`
 }
 
 // ProgramRecipientsView is the recipients endpoint response. For an anonymous
@@ -44,11 +43,14 @@ type ProgramEnrollmentRow struct {
 // match the search, Rows is one page of them.
 type ProgramRecipientsView struct {
 	Anonymous bool `json:"anonymous"`
-	StepCount int  `json:"stepCount"`
-	Total     int  `json:"total"`
-	Active    int  `json:"active"`
-	Exited    int  `json:"exited"`
-	Completed int  `json:"completed"`
+	// Anonymized is set when the people of the program are replaced with
+	// pseudonyms, the view then gives the counts only
+	Anonymized bool `json:"anonymized"`
+	StepCount  int  `json:"stepCount"`
+	Total      int  `json:"total"`
+	Active     int  `json:"active"`
+	Exited     int  `json:"exited"`
+	Completed  int  `json:"completed"`
 	// Stopped counts the people who were still active when the program closed
 	Stopped     int                    `json:"stopped"`
 	Count       int64                  `json:"count"`
@@ -73,8 +75,9 @@ func fullName(first, last string) string {
 	return strings.TrimSpace(first + " " + last)
 }
 
-// programPageFactsMax is the largest page whose facts are loaded by recipient
-const programPageFactsMax = 500
+// programPageFactsMax is the largest page whose facts are loaded by recipient,
+// the largest page a request may ask for
+const programPageFactsMax = vo.MAX_PER_PAGE
 
 // GetRecipientsView returns one page of the per recipient journey of a program,
 // withholding identity and behaviour for an anonymous program.
@@ -85,7 +88,10 @@ func (s *Program) GetRecipientsView(
 	q *vo.QueryArgs,
 ) (*ProgramRecipientsView, error) {
 	ae := NewAuditEvent("Program.GetRecipients", session)
-	program, err := s.authorizedProgram(ctx, session, id, ae, &repository.ProgramOption{WithSteps: true})
+	program, err := s.authorizedProgram(ctx, session, id, ae, &repository.ProgramOption{
+		WithSteps:           true,
+		WithRecipientGroups: true,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -113,97 +119,218 @@ func (s *Program) GetRecipientsView(
 		}
 	}
 	if anonymous {
+		// the people who had every template count as active while the
+		// program runs and as stopped after it closed, as on the recipient
+		// page, since when a person finished would point at the time of
+		// their sends
+		if program.IsClosed() {
+			view.Stopped += view.Completed
+		} else {
+			view.Active += view.Completed
+		}
+		view.Completed = 0
 		// no per recipient identity or behaviour for an anonymous program
+		return view, nil
+	}
+	if program.AnonymizeBegun() {
+		// the sends no longer name a person, so no row is shown per person
+		view.Anonymized = true
 		return view, nil
 	}
 	if q == nil {
 		q = &vo.QueryArgs{}
 	}
-	riskSort := q.OrderBy == ProgramRiskSortKey
-	pageQuery := *q
-	if riskSort {
-		// risk is scored after loading, so every match is loaded and paged here
-		pageQuery.OrderBy, pageQuery.Offset, pageQuery.Limit = "", 0, 0
+	if view.Total == 0 && programNotStarted(program) {
+		return s.audienceView(ctx, program, view, q)
 	}
-	enrollments, count, err := s.ProgramRepository.GetEnrollmentPage(ctx, id, &pageQuery)
+	enrollments, count, err := s.ProgramRepository.GetEnrollmentPage(ctx, id, q)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
 	view.Count = count
-	// a risk sort scores every match, so it needs the facts of all of them. A
-	// page needs only its own people, unless the page is too large to name
+	// a page needs only the facts of its own people, unless the page is too
+	// large to name
 	var pageIDs []*uuid.UUID
-	if !riskSort && len(enrollments) <= programPageFactsMax {
+	if len(enrollments) <= programPageFactsMax {
 		pageIDs = make([]*uuid.UUID, 0, len(enrollments))
 		for _, e := range enrollments {
 			pageIDs = append(pageIDs, e.RecipientID)
 		}
 	}
-	facts, err := s.loadProgramFacts(ctx, session, program, pageIDs)
+	facts, err := s.loadProgramFacts(ctx, program, pageIDs)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	now := time.Now()
-	risks := facts.risks(now)
+	// every template sent counts, and the most notable event of all of them
+	// is the recipient's status
 	sendCount := map[uuid.UUID]int{}
-	for _, sd := range facts.phishing() {
+	notable := map[uuid.UUID]*uuid.UUID{}
+	last := map[uuid.UUID]*programSend{}
+	for _, sd := range facts.sends {
 		sendCount[sd.Person]++
+		if cur := last[sd.Person]; cur == nil || sd.SentAt.After(cur.SentAt) {
+			last[sd.Person] = sd
+		}
+		cur := notable[sd.Person]
+		if sd.NotableEventID != nil && (cur == nil || cache.IsMoreNotableCampaignRecipientEventID(cur, sd.NotableEventID)) {
+			notable[sd.Person] = sd.NotableEventID
+		}
 	}
 	// resolve the scheduled step template names once, to name each recipient's
 	// next step
 	steps := program.Steps
-	stepNames := make(map[uuid.UUID]string, len(steps))
-	for _, st := range steps {
-		stepNames[st.ID.MustGet()] = s.templateName(ctx, session, st.CampaignTemplateID.MustGet().String())
-	}
 	// the deliveries of the page only, unless every match is loaded
 	deliveries, err := s.ProgramRepository.GetDeliveries(ctx, id, pageIDs)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
 	delivered := deliveriesByPersonLoop(deliveries)
+	// a send already in the queue names the next template for sure
+	queuedSends, err := s.ProgramRepository.GetQueuedSends(ctx, id, pageIDs)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	queued := map[uuid.UUID]repository.ProgramQueuedSend{}
+	for _, q := range queuedSends {
+		cur, ok := queued[q.RecipientID]
+		if !ok || (q.SendAt != nil && (cur.SendAt == nil || q.SendAt.Before(*cur.SendAt))) {
+			queued[q.RecipientID] = q
+		}
+	}
+	// the names of the step templates and the queued templates in one read
+	templateIDs := make([]*uuid.UUID, 0, len(steps)+len(queued))
+	for _, st := range steps {
+		tid := st.CampaignTemplateID.MustGet()
+		templateIDs = append(templateIDs, &tid)
+	}
+	for _, q := range queued {
+		if q.TemplateID != nil {
+			templateIDs = append(templateIDs, q.TemplateID)
+		}
+	}
+	templateNames, err := s.ProgramRepository.GetTemplateNames(ctx, templateIDs)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	nameOf := func(id uuid.UUID) string {
+		if n, ok := templateNames[id]; ok {
+			return n
+		}
+		return programDeletedTemplateName
+	}
+	stepNames := make(map[uuid.UUID]string, len(steps))
+	for _, st := range steps {
+		stepNames[st.ID.MustGet()] = nameOf(st.CampaignTemplateID.MustGet())
+	}
 	shuffle := program.OrderModeOrDefault() == model.ProgramOrderShuffle
 	for _, e := range enrollments {
 		email, name := recipientDisplayName(e.Recipient)
-		nextStep := "Complete"
+		var nextTemplate *string
 		var nextDue *time.Time
+		// the progress is the templates had in the current loop, read from the
+		// sends, so it also holds for a person who completed
+		position := e.Position
+		given := map[uuid.UUID]bool{}
+		if len(steps) > 0 {
+			given = deliveredSteps(steps, delivered[programPersonLoop{*e.RecipientID, e.LoopCount}])
+			position = len(given)
+		}
 		if e.Status == model.ProgramEnrollmentActive && len(steps) > 0 {
-			given := deliveredSteps(steps, delivered[programPersonLoop{*e.RecipientID, e.LoopCount}])
 			left := undeliveredSteps(steps, given)
 			if len(left) == 0 {
 				// the next send starts a new loop
 				left = steps
 			}
+			// in random order the template is picked when the send is planned,
+			// unless only one is left to pick
+			var next *model.ProgramStep
 			switch {
-			case shuffle:
-				nextStep = "Random, " + strconv.Itoa(len(left)) + " not yet sent"
-			default:
-				next := programPickStep(program, left, nil)
-				if next != nil {
-					nextStep = stepNames[next.ID.MustGet()]
-				}
+			case !shuffle:
+				next = programPickStep(program, left, nil)
+			case len(left) == 1:
+				next = left[0]
+			}
+			if next != nil {
+				n := stepNames[next.ID.MustGet()]
+				nextTemplate = &n
 			}
 			nextDue = e.NextDueAt
 		}
-		risk := risks[*e.RecipientID]
+		if q, ok := queued[*e.RecipientID]; ok {
+			if q.TemplateID != nil {
+				n := nameOf(*q.TemplateID)
+				nextTemplate = &n
+			}
+			if q.SendAt != nil {
+				nextDue = q.SendAt
+			}
+		}
+		row := ProgramEnrollmentRow{
+			RecipientID:      e.RecipientID.String(),
+			Email:            email,
+			Name:             name,
+			Position:         position,
+			LoopCount:        e.LoopCount,
+			Status:           e.Status,
+			Sends:            sendCount[*e.RecipientID],
+			NextTemplateName: nextTemplate,
+			NextDueAt:        nextDue,
+		}
+		if sd := last[*e.RecipientID]; sd != nil {
+			n := facts.templateNames[sd.Template]
+			at := sd.SentAt
+			row.LastTemplateName = &n
+			row.LastSentAt = &at
+		}
+		if id := notable[*e.RecipientID]; id != nil {
+			row.NotableEventName = cache.EventNameByID[id.String()]
+		}
+		view.Rows = append(view.Rows, row)
+	}
+	view.HasNextPage = q.Limit > 0 && int64(q.Offset+len(view.Rows)) < count
+	return view, nil
+}
+
+// ProgramAudienceNotStarted is the row status of a person who is in the
+// groups of a program that has not started, so is not enrolled yet
+const ProgramAudienceNotStarted = "not_started"
+
+// programNotStarted reports whether a program is a draft or scheduled and
+// never ran, so its people are only the members of its groups
+func programNotStarted(program *model.Program) bool {
+	if program.StartedAt != nil {
+		return false
+	}
+	status := program.StatusAt(time.Now())
+	return status == model.ProgramStatusDraft || status == model.ProgramStatusScheduled
+}
+
+// audienceView fills the view with one page of the people a program that has
+// not started would enroll, read by the same group rules the start uses. Each
+// row is not started, with nothing sent and no template named yet.
+func (s *Program) audienceView(
+	ctx context.Context,
+	program *model.Program,
+	view *ProgramRecipientsView,
+	q *vo.QueryArgs,
+) (*ProgramRecipientsView, error) {
+	groupIDs := []*uuid.UUID{}
+	if program.RecipientGroupIDs.IsSpecified() && !program.RecipientGroupIDs.IsNull() {
+		groupIDs = program.RecipientGroupIDs.MustGet()
+	}
+	recipients, count, err := s.ProgramRepository.GetAudiencePage(ctx, groupIDs, q)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	view.Count = count
+	for _, r := range recipients {
+		email, name := recipientDisplayName(r)
 		view.Rows = append(view.Rows, ProgramEnrollmentRow{
-			RecipientID: e.RecipientID.String(),
+			RecipientID: r.ID.String(),
 			Email:       email,
 			Name:        name,
-			Position:    e.Position,
-			LoopCount:   e.LoopCount,
-			Status:      e.Status,
-			RiskScore:   risk,
-			RiskLevel:   programRiskLevel(risk),
-			Sends:       sendCount[*e.RecipientID],
-			NextStep:    nextStep,
-			NextDueAt:   nextDue,
+			Status:      ProgramAudienceNotStarted,
 		})
-	}
-	if riskSort {
-		view.Rows = sortAndPageByRisk(view.Rows, q.Desc, q.Offset, q.Limit)
-		view.HasNextPage = q.Limit > 0 && int64(q.Offset+q.Limit) < count
-		return view, nil
 	}
 	view.HasNextPage = q.Limit > 0 && int64(q.Offset+len(view.Rows)) < count
 	return view, nil
@@ -225,59 +352,33 @@ func deliveriesByPersonLoop(deliveries []repository.ProgramDelivery) map[program
 	return out
 }
 
-// sortAndPageByRisk sorts rows by risk, rows without a risk last, and returns
-// one page
-func sortAndPageByRisk(rows []ProgramEnrollmentRow, desc bool, offset, limit int) []ProgramEnrollmentRow {
-	sort.SliceStable(rows, func(i, j int) bool {
-		a, b := rows[i].RiskScore, rows[j].RiskScore
-		switch {
-		case a == nil && b == nil:
-			return rows[i].Email < rows[j].Email
-		case a == nil:
-			return false
-		case b == nil:
-			return true
-		case *a == *b:
-			return rows[i].Email < rows[j].Email
-		case desc:
-			return *a > *b
-		}
-		return *a < *b
-	})
-	if offset >= len(rows) {
-		return []ProgramEnrollmentRow{}
-	}
-	end := len(rows)
-	if limit > 0 && offset+limit < end {
-		end = offset + limit
-	}
-	return rows[offset:end]
-}
-
-// ProgramRecipientSend is one message a program sent to a recipient
-type ProgramRecipientSend struct {
-	Template            string     `json:"template"`
-	Kind                string     `json:"kind"`
-	SentAt              time.Time  `json:"sentAt"`
-	OpenedAt            *time.Time `json:"openedAt"`
-	ClickedAt           *time.Time `json:"clickedAt"`
-	SubmittedAt         *time.Time `json:"submittedAt"`
-	ReportedAt          *time.Time `json:"reportedAt"`
-	TrainingCompletedAt *time.Time `json:"trainingCompletedAt"`
+// ProgramRecipientTotals counts what one recipient did in a program. Sent,
+// Clicked, Submitted and Reported count phishing sends, the training counts
+// count training sends.
+type ProgramRecipientTotals struct {
+	Sent              int `json:"sent"`
+	Clicked           int `json:"clicked"`
+	Submitted         int `json:"submitted"`
+	Reported          int `json:"reported"`
+	TrainingSent      int `json:"trainingSent"`
+	TrainingCompleted int `json:"trainingCompleted"`
 }
 
 // ProgramRecipientActivity is one program a recipient is enrolled in. For an
-// anonymous program only the name and enrollment status are given.
+// anonymous program only the name and enrollment status are given, Totals is
+// nil. The events are read through the program events with a recipient filter.
 type ProgramRecipientActivity struct {
-	ProgramID        string                  `json:"programID"`
-	Name             string                  `json:"name"`
-	Anonymous        bool                    `json:"anonymous"`
-	ProgramStatus    string                  `json:"programStatus"`
-	EnrollmentStatus string                  `json:"enrollmentStatus"`
-	RiskScore        *float64                `json:"riskScore"`
-	RiskLevel        string                  `json:"riskLevel"`
-	NextDueAt        *time.Time              `json:"nextDueAt"`
-	Sends            []*ProgramRecipientSend `json:"sends"`
+	ProgramID     string `json:"programID"`
+	Name          string `json:"name"`
+	Anonymous     bool   `json:"anonymous"`
+	ProgramStatus string `json:"programStatus"`
+	// ProgramClosingAt and ProgramDeletingAt are set while a close or a
+	// delete of the program has not finished
+	ProgramClosingAt  *time.Time              `json:"programClosingAt"`
+	ProgramDeletingAt *time.Time              `json:"programDeletingAt"`
+	EnrollmentStatus  string                  `json:"enrollmentStatus"`
+	NextDueAt         *time.Time              `json:"nextDueAt"`
+	Totals            *ProgramRecipientTotals `json:"totals"`
 }
 
 // program send kinds
@@ -286,21 +387,22 @@ const (
 	ProgramSendKindTraining = "training"
 )
 
-// GetRecipientPrograms returns the programs a recipient is enrolled in with
-// their activity there. Only programs of the recipient's company, or global
-// ones, are listed.
-func (s *Program) GetRecipientPrograms(
+// authorizeRecipientPrograms checks the session may read the programs of a
+// recipient and loads the recipient company
+func (s *Program) authorizeRecipientPrograms(
 	ctx context.Context,
 	session *model.Session,
 	recipientID *uuid.UUID,
-) ([]*ProgramRecipientActivity, error) {
+	action string,
+) (*uuid.UUID, error) {
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
 		return nil, errs.Wrap(err)
 	}
 	if !isAuthorized {
-		ae := NewAuditEvent("Program.GetRecipientPrograms", session)
+		ae := NewAuditEvent(action, session)
+		ae.Details["recipientId"] = recipientID.String()
 		s.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
@@ -308,64 +410,168 @@ func (s *Program) GetRecipientPrograms(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	var recipientCompany *uuid.UUID
 	if cid, err := recipient.CompanyID.Get(); err == nil {
-		recipientCompany = &cid
+		return &cid, nil
 	}
-	enrollments, err := s.ProgramRepository.GetEnrollmentsByRecipientID(ctx, recipientID)
+	return nil, nil
+}
+
+// GetRecipientPrograms returns one page of the programs a recipient is
+// enrolled in with what the recipient did there. Only programs of the
+// recipient's company, or global ones, are listed. The page is read in one
+// query and the totals of every program on it in one more read each for
+// campaigns, sends and events. An anonymous program gives only its name and
+// status.
+func (s *Program) GetRecipientPrograms(
+	ctx context.Context,
+	session *model.Session,
+	recipientID *uuid.UUID,
+	q *vo.QueryArgs,
+) (*model.Result[ProgramRecipientActivity], error) {
+	recipientCompany, err := s.authorizeRecipientPrograms(ctx, session, recipientID, "Program.GetRecipientPrograms")
+	if err != nil {
+		return nil, err
+	}
+	rows, hasNextPage, err := s.ProgramRepository.GetRecipientProgramPage(ctx, recipientID, recipientCompany, q)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
 	now := time.Now()
-	out := []*ProgramRecipientActivity{}
-	for _, e := range enrollments {
-		program, err := s.ProgramRepository.GetByID(ctx, e.ProgramID, &repository.ProgramOption{})
-		if err != nil {
-			continue
-		}
-		programCompany := optionalID(program.CompanyID)
-		if recipientCompany != nil && programCompany != nil && *programCompany != *recipientCompany {
-			continue
-		}
+	result := model.NewEmptyResult[ProgramRecipientActivity]()
+	result.HasNextPage = hasNextPage
+	// the programs whose totals may be shown, never an anonymous one
+	named := []*uuid.UUID{}
+	for _, row := range rows {
+		program := row.Program
+		program.SetReadState(now)
+		programID := program.ID.MustGet()
 		anonymous := program.IsAnonymousOn()
 		activity := &ProgramRecipientActivity{
-			ProgramID:        e.ProgramID.String(),
-			Name:             programName(program),
-			Anonymous:        anonymous,
-			ProgramStatus:    program.Status,
-			EnrollmentStatus: e.Status,
-			Sends:            []*ProgramRecipientSend{},
+			ProgramID:         programID.String(),
+			Name:              programName(program),
+			Anonymous:         anonymous,
+			ProgramStatus:     program.Status,
+			ProgramClosingAt:  program.ClosingAt,
+			ProgramDeletingAt: program.DeletingAt,
+			EnrollmentStatus:  row.Enrollment.Status,
 		}
 		if anonymous {
-			// no per person behaviour for an anonymous program
-			out = append(out, activity)
+			activity.EnrollmentStatus = anonymousEnrollmentStatus(row.Enrollment.Status, program.IsClosed())
+		} else {
+			if row.Enrollment.Status == model.ProgramEnrollmentActive {
+				activity.NextDueAt = row.Enrollment.NextDueAt
+			}
+			activity.Totals = &ProgramRecipientTotals{}
+			named = append(named, &programID)
+		}
+		result.Rows = append(result.Rows, activity)
+	}
+	totals, err := s.recipientProgramTotals(ctx, recipientID, named)
+	if err != nil {
+		return nil, err
+	}
+	for _, activity := range result.Rows {
+		if t, ok := totals[activity.ProgramID]; ok && activity.Totals != nil {
+			activity.Totals = t
+		}
+	}
+	return result, nil
+}
+
+// anonymousEnrollmentStatus is the status of a person in an anonymous program
+// as the recipient page shows it: enrolled, left or closed. A person who has
+// had every template is shown as enrolled while the program runs and as
+// closed after, since when a person finished would point at the time of
+// their sends.
+func anonymousEnrollmentStatus(status string, closed bool) string {
+	switch {
+	case status == model.ProgramEnrollmentExited:
+		return model.ProgramEnrollmentExited
+	case closed:
+		return model.ProgramEnrollmentStopped
+	default:
+		return model.ProgramEnrollmentActive
+	}
+}
+
+// recipientProgramTotals counts the sends of one recipient in each of the
+// given programs, keyed by program id
+func (s *Program) recipientProgramTotals(
+	ctx context.Context,
+	recipientID *uuid.UUID,
+	programIDs []*uuid.UUID,
+) (map[string]*ProgramRecipientTotals, error) {
+	out := map[string]*ProgramRecipientTotals{}
+	if len(programIDs) == 0 {
+		return out, nil
+	}
+	campaigns, err := s.ProgramRepository.GetCampaignsOfPrograms(ctx, programIDs)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	campaignOf := make(map[uuid.UUID]repository.ProgramCampaignOf, len(campaigns))
+	for _, c := range campaigns {
+		campaignOf[c.ID] = c
+	}
+	// one send per campaign, as the recipient is fixed
+	sends := map[uuid.UUID]*programSend{}
+	sendsOf := map[uuid.UUID][]*programSend{}
+	err = s.ProgramRepository.EachRecipientSentRow(ctx, recipientID, programIDs, func(r *repository.ProgramSendRow) error {
+		c, ok := campaignOf[r.CampaignID]
+		if !ok || r.RecipientID == nil {
+			return nil
+		}
+		sd := &programSend{
+			Campaign:    r.CampaignID,
+			Person:      *r.RecipientID,
+			RecipientID: r.RecipientID,
+			SentAt:      r.SentAt,
+			Training:    c.IsTraining,
+		}
+		sends[r.CampaignID] = sd
+		sendsOf[c.ProgramID] = append(sendsOf[c.ProgramID], sd)
+		return nil
+	})
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	ids := programResultEventIDs()
+	err = s.ProgramRepository.EachRecipientEventRow(ctx, recipientID, programIDs, ids.all(), func(e *repository.ProgramEventRow) error {
+		if sd, ok := sends[e.CampaignID]; ok {
+			ids.apply(sd, e.EventID, e.CreatedAt)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	for programID, list := range sendsOf {
+		out[programID.String()] = recipientTotals(list)
+	}
+	return out, nil
+}
+
+// recipientTotals counts the sends of one recipient
+func recipientTotals(sends []*programSend) *ProgramRecipientTotals {
+	t := &ProgramRecipientTotals{}
+	for _, sd := range sends {
+		if sd.Training {
+			t.TrainingSent++
+			if sd.TrainingCompletedAt != nil {
+				t.TrainingCompleted++
+			}
 			continue
 		}
-		if e.Status == model.ProgramEnrollmentActive {
-			activity.NextDueAt = e.NextDueAt
+		t.Sent++
+		if sd.Clicked() {
+			t.Clicked++
 		}
-		facts, err := s.loadProgramFacts(ctx, session, program, []*uuid.UUID{recipientID})
-		if err != nil {
-			return nil, errs.Wrap(err)
+		if sd.SubmittedAt != nil {
+			t.Submitted++
 		}
-		risk := facts.risks(now)[*recipientID]
-		activity.RiskScore = risk
-		activity.RiskLevel = programRiskLevel(risk)
-		for _, sd := range facts.sends {
-			activity.Sends = append(activity.Sends, &ProgramRecipientSend{
-				Template:            facts.templateNames[sd.Template],
-				Kind:                sd.Kind(),
-				SentAt:              sd.SentAt,
-				OpenedAt:            sd.ReadAt,
-				ClickedAt:           sd.ClickedAt,
-				SubmittedAt:         sd.SubmittedAt,
-				ReportedAt:          sd.ReportedAt,
-				TrainingCompletedAt: sd.TrainingCompletedAt,
-			})
+		if sd.ReportedAt != nil {
+			t.Reported++
 		}
-		sort.Slice(activity.Sends, func(i, j int) bool { return activity.Sends[i].SentAt.After(activity.Sends[j].SentAt) })
-		out = append(out, activity)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return t
 }

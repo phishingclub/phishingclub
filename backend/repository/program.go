@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,13 +21,49 @@ var allowedProgramColumns = assignTableToColumns(database.PROGRAM_TABLE, []strin
 	"created_at",
 	"updated_at",
 	"name",
+	"start_at",
+	"started_at",
+	"paused_at",
 })
 
-// ProgramOption controls preloading of a program read.
+// programSearchColumns are the text columns the program list search matches
+var programSearchColumns = []string{"name"}
+
+// likeEscape is the escape character of the program search LIKE pattern
+const likeEscape = `\`
+
+// likeEscaper escapes the LIKE wildcards and the escape character itself, so
+// a search for Q1_2026 matches that text only
+var likeEscaper = strings.NewReplacer(likeEscape, likeEscape+likeEscape, "%", likeEscape+"%", "_", likeEscape+"_")
+
+// programSearch matches the programs whose search columns hold the search
+// text. The LIKE wildcards in the text are matched as they are written.
+func programSearch(search string) clause.Expression {
+	pattern := "%" + likeEscaper.Replace(search) + "%"
+	likes := make([]clause.Expression, 0, len(programSearchColumns))
+	for _, column := range programSearchColumns {
+		likes = append(likes, clause.Expr{
+			SQL:  "? LIKE ? ESCAPE ?",
+			Vars: []any{clause.Column{Table: database.PROGRAM_TABLE, Name: column}, pattern, likeEscape},
+		})
+	}
+	return clause.Or(likes...)
+}
+
+// ProgramOption controls preloading and filtering of a program read.
 type ProgramOption struct {
 	*vo.QueryArgs
 	WithSteps           bool
 	WithRecipientGroups bool
+	// Status limits a list to the programs of one of model.ProgramListStatuses,
+	// empty lists every program
+	Status string
+	// AllCompanies lists the programs of every company when no company is
+	// given, as the dashboard does. Without it no company means the programs
+	// without a company.
+	AllCompanies bool
+	// WithCompany loads the company of each program
+	WithCompany bool
 }
 
 // Program is the repository for programs, their steps, assigned groups,
@@ -34,36 +72,98 @@ type Program struct {
 	DB *gorm.DB
 }
 
-// Insert stores a new program row and returns its id. Steps and groups are
-// stored through ReplaceSteps and ReplaceRecipientGroups.
+// ProgramChildren are the rows a program create or update writes together
+// with the program row. A nil list is left as it is stored, an empty list
+// removes every row.
+type ProgramChildren struct {
+	Steps             []*model.ProgramStep
+	RecipientGroupIDs []*uuid.UUID
+	AllowDenyIDs      []*uuid.UUID
+	Webhooks          []*model.CampaignWebhook
+}
+
+// programsColumn is a column of the programs table
+func programsColumn(name string) clause.Column {
+	return clause.Column{Table: database.PROGRAM_TABLE, Name: name}
+}
+
+// Insert stores a new program row with its steps, groups, allow or deny lists
+// and webhooks in one transaction and returns its id.
 func (r *Program) Insert(
 	ctx context.Context,
 	program *model.Program,
+	children *ProgramChildren,
 ) (*uuid.UUID, error) {
 	id := uuid.New()
 	row := program.ToDBMap()
 	row["id"] = id
 	AddTimestamps(row)
-	res := r.DB.WithContext(ctx).Model(&database.Program{}).Create(row)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&database.Program{}).Create(row).Error; err != nil {
+			return errs.Wrap(err)
+		}
+		return writeProgramChildren(tx, &id, children)
+	})
+	if err != nil {
+		return nil, err
 	}
 	return &id, nil
 }
 
-// UpdateByID updates the storable fields of a program.
+// UpdateByID updates the storable fields of a program, the columns in fields
+// and the child rows given in children, in one transaction. fields and
+// children may be nil.
 func (r *Program) UpdateByID(
 	ctx context.Context,
 	id *uuid.UUID,
 	program *model.Program,
+	children *ProgramChildren,
+	fields map[string]any,
 ) error {
 	row := program.ToDBMap()
+	for k, v := range fields {
+		row[k] = v
+	}
 	AddUpdatedAt(row)
-	res := r.DB.WithContext(ctx).
-		Model(&database.Program{}).
-		Where("id = ?", id).
-		Updates(row)
-	return errs.Wrap(res.Error)
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// the first statement is a write, so the transaction holds the write
+		// lock before it reads
+		if err := tx.Model(&database.Program{}).
+			Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id}).
+			Updates(row).Error; err != nil {
+			return errs.Wrap(err)
+		}
+		return writeProgramChildren(tx, id, children)
+	})
+}
+
+// writeProgramChildren writes the child rows of a program inside a
+// transaction
+func writeProgramChildren(tx *gorm.DB, programID *uuid.UUID, children *ProgramChildren) error {
+	if children == nil {
+		return nil
+	}
+	if children.Steps != nil {
+		if err := replaceStepsTx(tx, programID, children.Steps); err != nil {
+			return err
+		}
+	}
+	if children.RecipientGroupIDs != nil {
+		if err := replaceRecipientGroupsTx(tx, programID, children.RecipientGroupIDs); err != nil {
+			return err
+		}
+	}
+	if children.AllowDenyIDs != nil {
+		if err := replaceAllowDeniesTx(tx, programID, children.AllowDenyIDs); err != nil {
+			return err
+		}
+	}
+	if children.Webhooks != nil {
+		if err := replaceWebhooksTx(tx, programID, children.Webhooks); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetFields updates arbitrary columns on a program, used for lifecycle changes
@@ -76,31 +176,39 @@ func (r *Program) SetFields(
 	AddUpdatedAt(fields)
 	res := r.DB.WithContext(ctx).
 		Model(&database.Program{}).
-		Where("id = ?", id).
+		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id}).
 		Updates(fields)
 	return errs.Wrap(res.Error)
 }
 
-// DeleteByID removes a program and its steps, groups, enrollments and campaign
-// links. The hidden campaigns are deleted by the program service before this.
+// DeleteByID removes a program and its steps, groups, enrollments, campaign
+// links, allow or deny lists and webhooks. The enrollments are removed in
+// batches first, so a large program does not hold the database in one write.
+// The rest, and any enrollment added in between, go in one transaction. The
+// hidden campaigns are deleted by the program service before this.
 func (r *Program) DeleteByID(
 	ctx context.Context,
 	id *uuid.UUID,
 ) error {
+	if err := r.DeleteEnrollmentsByProgramID(ctx, id); err != nil {
+		return err
+	}
+	byProgram := programIDEq(clause.Column{Name: "program_id"}, id)
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("program_id = ?", id).Delete(&database.ProgramStep{}).Error; err != nil {
-			return errs.Wrap(err)
+		for _, table := range []any{
+			&database.ProgramStep{},
+			&database.ProgramRecipientGroup{},
+			&database.ProgramEnrollment{},
+			&database.ProgramCampaign{},
+			&database.ProgramAllowDeny{},
+			&database.ProgramWebhook{},
+		} {
+			if err := tx.Where(byProgram).Delete(table).Error; err != nil {
+				return errs.Wrap(err)
+			}
 		}
-		if err := tx.Where("program_id = ?", id).Delete(&database.ProgramRecipientGroup{}).Error; err != nil {
-			return errs.Wrap(err)
-		}
-		if err := tx.Where("program_id = ?", id).Delete(&database.ProgramEnrollment{}).Error; err != nil {
-			return errs.Wrap(err)
-		}
-		if err := tx.Where("program_id = ?", id).Delete(&database.ProgramCampaign{}).Error; err != nil {
-			return errs.Wrap(err)
-		}
-		if err := tx.Where("id = ?", id).Delete(&database.Program{}).Error; err != nil {
+		if err := tx.Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id}).
+			Delete(&database.Program{}).Error; err != nil {
 			return errs.Wrap(err)
 		}
 		return nil
@@ -114,7 +222,9 @@ func (r *Program) GetByID(
 	options *ProgramOption,
 ) (*model.Program, error) {
 	var row database.Program
-	res := r.DB.WithContext(ctx).Where("id = ?", id).First(&row)
+	res := r.DB.WithContext(ctx).
+		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id}).
+		First(&row)
 	if res.Error != nil {
 		return nil, res.Error
 	}
@@ -145,149 +255,460 @@ func (r *Program) GetByID(
 	return program, nil
 }
 
-// GetAll lists programs, newest first, scoped to a company.
+// GetAll lists programs scoped to a company, optionally only those of one
+// list status.
 func (r *Program) GetAll(
 	ctx context.Context,
 	companyID *uuid.UUID,
 	options *ProgramOption,
+	now time.Time,
 ) (*model.Result[model.Program], error) {
 	result := model.NewEmptyResult[model.Program]()
-	db := whereCompany(r.DB.WithContext(ctx), database.PROGRAM_TABLE, companyID)
-	db, err := useQuery(db, database.PROGRAM_TABLE, options.QueryArgs, allowedProgramColumns...)
+	db := r.DB.WithContext(ctx)
+	if companyID != nil || !options.AllCompanies {
+		db = whereCompany(db, database.PROGRAM_TABLE, companyID)
+	}
+	if options.WithCompany {
+		db = db.Preload("Company")
+	}
+	db, err := r.whereListStatus(db, options.Status, now)
+	if err != nil {
+		return result, err
+	}
+	// the search is added here on the text columns only, useQuery is given
+	// the paging and order alone
+	query := options.QueryArgs
+	search := ""
+	if query != nil && query.Search != "" {
+		search = query.Search
+		copied := *query
+		copied.Search = ""
+		query = &copied
+	}
+	db, err = useQuery(db, database.PROGRAM_TABLE, query, allowedProgramColumns...)
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
+	if search != "" {
+		db = db.Where(programSearch(search))
+	}
 	var rows []database.Program
-	res := db.Find(&rows)
+	res := withPeek(db, options.QueryArgs).Find(&rows)
 	if res.Error != nil {
 		return result, errs.Wrap(res.Error)
 	}
-	hasNextPage, err := useHasNextPage(db, database.PROGRAM_TABLE, options.QueryArgs, allowedProgramColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 	for i := range rows {
 		p, err := ToProgram(&rows[i])
 		if err != nil {
 			return nil, errs.Wrap(err)
 		}
+		if rows[i].Company != nil {
+			p.Company = ToCompany(rows[i].Company)
+		}
 		result.Rows = append(result.Rows, p)
 	}
 	return result, nil
 }
 
+// whereListStatus limits a program query to one of model.ProgramListStatuses
+// with the same rules as model.ProgramStatusOf. An active program is split
+// into needs attention and active the way the program list shows it, see
+// needsAttention. A program being closed or deleted is in none of them. An
+// unknown status is a validation error.
+func (r *Program) whereListStatus(db *gorm.DB, status string, now time.Time) (*gorm.DB, error) {
+	if status == "" {
+		return db, nil
+	}
+	closedAt, pausedAt, startAt := programsColumn("closed_at"), programsColumn("paused_at"), programsColumn("start_at")
+	notClosed := clause.Eq{Column: closedAt, Value: nil}
+	started := clause.And(
+		notClosed,
+		clause.Neq{Column: startAt, Value: nil},
+		clause.Lte{Column: startAt, Value: now.UTC()},
+	)
+	running := clause.And(started, clause.Eq{Column: pausedAt, Value: nil})
+	// a program being closed or deleted is paused by that, it is neither
+	// paused, scheduled nor a draft
+	notStopping := clause.And(
+		clause.Eq{Column: programsColumn("closing_at"), Value: nil},
+		clause.Eq{Column: programsColumn("deleting_at"), Value: nil},
+	)
+	switch status {
+	case model.ProgramStatusClosed:
+		return db.Where(clause.Neq{Column: closedAt, Value: nil}), nil
+	case model.ProgramStatusDraft:
+		return db.Where(notClosed).Where(notStopping).Where(clause.Eq{Column: startAt, Value: nil}), nil
+	case model.ProgramStatusScheduled:
+		return db.Where(notClosed).Where(notStopping).Where(clause.Gt{Column: startAt, Value: now.UTC()}), nil
+	case model.ProgramStatusPaused:
+		return db.Where(started).Where(notStopping).Where(clause.Neq{Column: pausedAt, Value: nil}), nil
+	case model.ProgramStatusActive:
+		return db.Where(running).Where(r.needsNoAttention(now)), nil
+	case model.ProgramStatusNeedsAttention:
+		return db.Where(running).Where(r.needsAttention(now)), nil
+	}
+	return db, errs.NewValidationError(errProgramUnknownStatus)
+}
+
+// errProgramUnknownStatus is a list status filter that is not one of
+// model.ProgramListStatuses
+var errProgramUnknownStatus = errors.New("unknown program status")
+
+// brokenStep selects the steps of the program row whose template is missing
+// or cannot be sent. It is a subquery on the steps of the program row, read
+// through the program index of the steps, instead of a list of every program
+// with such a step. A step without a template is not counted, as in
+// programAttentionReason.
+func (r *Program) brokenStep() *gorm.DB {
+	stepTemplate := clause.Column{Table: database.PROGRAM_STEP_TABLE, Name: "campaign_template_id"}
+	usable := r.DB.Model(&database.CampaignTemplate{}).
+		Select("id").
+		Where(clause.Expr{SQL: "? = ?", Vars: []any{clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "id"}, stepTemplate}}).
+		Where(clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "is_usable"}, Value: true})
+	steps := r.DB.Model(&database.ProgramStep{}).
+		Select("id").
+		Where(clause.Expr{SQL: "? = ?", Vars: []any{clause.Column{Table: database.PROGRAM_STEP_TABLE, Name: "program_id"}, programsColumn("id")}}).
+		Where(clause.Neq{Column: stepTemplate, Value: nil}).
+		Where(clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{usable}})
+	return steps
+}
+
+// hasPeople selects the people of the program row who have not exited:
+// active, completed or stopped. A started program without one has empty
+// groups, as a member is enrolled or made active again on the next membership
+// pass and is exited only after leaving the groups.
+func (r *Program) hasPeople() *gorm.DB {
+	people := r.DB.Model(&database.ProgramEnrollment{}).
+		Select("id").
+		Where(clause.Expr{SQL: "? = ?", Vars: []any{clause.Column{Table: database.PROGRAM_ENROLLMENT_TABLE, Name: "program_id"}, programsColumn("id")}}).
+		Where(clause.Neq{Column: clause.Column{Table: database.PROGRAM_ENROLLMENT_TABLE, Name: "status"}, Value: model.ProgramEnrollmentExited})
+	return people
+}
+
+// ProgramStallGrace is how long the next send of an active person may be
+// overdue, or a queued send may wait past its send time, before a running
+// program counts as stalled. The due times and send times are drawn inside
+// the sending days, hours and skip ranges, so a weekend, a holiday or the
+// delay of a new member never makes them overdue.
+const ProgramStallGrace = 24 * time.Hour
+
+// ProgramStallFailures is how many failed advances in a row of an active
+// person make a running program count as stalled. Each failure moves the next
+// try further out, see the program scheduler backoff, so the next send of
+// such a person is never overdue. Five failures are about a day of tries.
+const ProgramStallFailures = 5
+
+// ProgramFailWindow is how far back sends that failed are looked at. A
+// program whose sends failed in that time while none went out needs
+// attention, as its sender does not work. One failed send among others that
+// went out, such as an address that bounced, does not count.
+const ProgramFailWindow = 7 * 24 * time.Hour
+
+// ProgramStartGrace is how long a program may run past its start time before
+// the membership pass marks it started. A program past it with nobody in it
+// has empty groups, see emptyGroups.
+const ProgramStartGrace = time.Hour
+
+// enrollmentsOfRow selects the enrollments of the program row with a status
+func (r *Program) enrollmentsOfRow(status string) *gorm.DB {
+	return r.DB.Model(&database.ProgramEnrollment{}).
+		Select("id").
+		Where(clause.Expr{SQL: "? = ?", Vars: []any{clause.Column{Table: database.PROGRAM_ENROLLMENT_TABLE, Name: "program_id"}, programsColumn("id")}}).
+		Where(clause.Eq{Column: clause.Column{Table: database.PROGRAM_ENROLLMENT_TABLE, Name: "status"}, Value: status})
+}
+
+// queuedOfRow selects the sends of the hidden campaigns of the program row
+// that are neither sent nor cancelled. The predicates are those of the
+// partial index idx_campaign_recipients_unsent_campaign, so only the queued
+// rows of each campaign are read.
+func (r *Program) queuedOfRow() *gorm.DB {
+	return r.sendsOfRow().Where(unsentSends())
+}
+
+// sendsOfRow selects the sends of the hidden campaigns of the program of the
+// outer row
+func (r *Program) sendsOfRow() *gorm.DB {
+	campaigns := r.DB.Model(&database.Campaign{}).
+		Select("id").
+		Where(clause.Expr{SQL: "? = ?", Vars: []any{clause.Column{Table: database.CAMPAIGN_TABLE, Name: "program_id"}, programsColumn("id")}})
+	return r.DB.Model(&database.CampaignRecipient{}).
+		Select("id").
+		Where(clause.Expr{SQL: "? IN (?)", Vars: []any{clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "campaign_id"}, campaigns}})
+}
+
+// columnAfter matches a row whose time column is after the given time. Times
+// are stored in more than one text layout, so they are compared as julian
+// days.
+func columnAfter(name string, after time.Time) clause.Expression {
+	return clause.Expr{
+		SQL: "julianday(?) > julianday(?)",
+		Vars: []any{
+			clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: name},
+			after.UTC().Format(sqliteCompareLayout),
+		},
+	}
+}
+
+// notTried matches a send the sender has not tried yet. A send that failed
+// keeps its attempt time and is never tried again.
+func notTried() clause.Expression {
+	return clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "last_attempt_at"}, Value: nil}
+}
+
+// queuedBefore matches a queued send whose send time is before the given
+// time. The send time is stored in more than one text layout, so it is
+// compared as a julian day.
+func queuedBefore(before time.Time) clause.Expression {
+	return clause.Expr{
+		SQL: "julianday(?) < julianday(?)",
+		Vars: []any{
+			clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "send_at"},
+			before.UTC().Format(sqliteCompareLayout),
+		},
+	}
+}
+
+// stalled matches the started programs whose sends do not go out: a queued
+// send not tried yet waits more than ProgramStallGrace past its send time,
+// sends failed within ProgramFailWindow while none went out, also when nobody
+// is active any more, the next send of an active person is more than
+// ProgramStallGrace overdue, the advance of an active person failed
+// ProgramStallFailures times in a row, or an active person has no next send
+// while nothing is queued. It is the same rule as programStalledReason. The
+// due times are read through the program, status and due index.
+func (r *Program) stalled(now time.Time) clause.Expression {
+	limit := now.Add(-ProgramStallGrace)
+	nextDue := clause.Column{Table: database.PROGRAM_ENROLLMENT_TABLE, Name: "next_due_at"}
+	overdue := r.enrollmentsOfRow(model.ProgramEnrollmentActive).
+		Where(clause.Lt{Column: nextDue, Value: limit.UTC()})
+	failing := r.enrollmentsOfRow(model.ProgramEnrollmentActive).
+		Where(clause.Gte{Column: clause.Column{Table: database.PROGRAM_ENROLLMENT_TABLE, Name: "advance_failures"}, Value: ProgramStallFailures})
+	unplanned := r.enrollmentsOfRow(model.ProgramEnrollmentActive).
+		Where(clause.Eq{Column: nextDue, Value: nil})
+	failSince := now.Add(-ProgramFailWindow)
+	failed := r.queuedOfRow().
+		Where(clause.Neq{Column: clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "last_attempt_at"}, Value: nil}).
+		Where(columnAfter("last_attempt_at", failSince))
+	sent := r.sendsOfRow().
+		Where(clause.Neq{Column: clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "sent_at"}, Value: nil}).
+		Where(columnAfter("sent_at", failSince))
+	return clause.And(
+		clause.Neq{Column: programsColumn("started_at"), Value: nil},
+		clause.Or(
+			clause.Expr{SQL: "EXISTS (?)", Vars: []any{r.queuedOfRow().Where(notTried()).Where(queuedBefore(limit))}},
+			clause.And(
+				clause.Expr{SQL: "EXISTS (?)", Vars: []any{failed}},
+				clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{sent}},
+			),
+			clause.Expr{SQL: "EXISTS (?)", Vars: []any{overdue}},
+			clause.Expr{SQL: "EXISTS (?)", Vars: []any{failing}},
+			clause.And(
+				clause.Expr{SQL: "EXISTS (?)", Vars: []any{unplanned}},
+				clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{r.queuedOfRow().Where(notTried())}},
+			),
+		),
+	)
+}
+
+// emptyGroups matches the programs that run with nobody in them, see
+// hasPeople: marked started, or past their start by more than
+// ProgramStartGrace. It is the same rule as programAttentionReason.
+func (r *Program) emptyGroups(now time.Time) clause.Expression {
+	return clause.And(
+		clause.Or(
+			clause.Neq{Column: programsColumn("started_at"), Value: nil},
+			clause.Lte{Column: programsColumn("start_at"), Value: now.Add(-ProgramStartGrace).UTC()},
+		),
+		clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{r.hasPeople()}},
+	)
+}
+
+// notEmptyGroups matches the programs emptyGroups does not. The start time
+// may be empty, so each case is written out instead of negating emptyGroups.
+func (r *Program) notEmptyGroups(now time.Time) clause.Expression {
+	return clause.Or(
+		clause.And(
+			clause.Eq{Column: programsColumn("started_at"), Value: nil},
+			clause.Or(
+				clause.Eq{Column: programsColumn("start_at"), Value: nil},
+				clause.Gt{Column: programsColumn("start_at"), Value: now.Add(-ProgramStartGrace).UTC()},
+			),
+		),
+		clause.Expr{SQL: "EXISTS (?)", Vars: []any{r.hasPeople()}},
+	)
+}
+
+// sqliteCompareLayout is a time layout the SQLite date functions read
+const sqliteCompareLayout = "2006-01-02 15:04:05"
+
+// needsAttention matches the programs with a step whose template is missing or
+// cannot be sent, the ones whose groups are empty, see emptyGroups, and the
+// stalled ones, see stalled. It is the same rule as programAttentionReason.
+func (r *Program) needsAttention(now time.Time) clause.Expression {
+	return clause.Or(
+		clause.Expr{SQL: "EXISTS (?)", Vars: []any{r.brokenStep()}},
+		r.emptyGroups(now),
+		r.stalled(now),
+	)
+}
+
+// needsNoAttention matches the programs needsAttention does not
+func (r *Program) needsNoAttention(now time.Time) clause.Expression {
+	return clause.And(
+		clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{r.brokenStep()}},
+		r.notEmptyGroups(now),
+		clause.Expr{SQL: "NOT (?)", Vars: []any{r.stalled(now)}},
+	)
+}
+
 // GetActivePrograms returns programs that have started and are neither paused
 // nor closed, each with its steps and assigned group ids loaded, for the
-// scheduler.
+// scheduler. Steps and groups are read in batches over all programs.
 func (r *Program) GetActivePrograms(ctx context.Context, now time.Time) ([]*model.Program, error) {
 	var rows []database.Program
+	// a program past its end date is closed in the background, until then no
+	// one joins or leaves it
 	res := r.DB.WithContext(ctx).
 		Where(r.runningPrograms(now)).
+		Where(clause.Or(
+			clause.Eq{Column: clause.Column{Name: "end_at"}, Value: nil},
+			clause.Gt{Column: clause.Column{Name: "end_at"}, Value: now.UTC()},
+		)).
 		Find(&rows)
 	if res.Error != nil {
 		return nil, errs.Wrap(res.Error)
 	}
 	programs := make([]*model.Program, 0, len(rows))
+	byID := map[uuid.UUID]*model.Program{}
+	ids := make([]*uuid.UUID, 0, len(rows))
 	for i := range rows {
 		p, err := ToProgram(&rows[i])
 		if err != nil {
 			return nil, errs.Wrap(err)
 		}
-		steps, err := r.GetSteps(ctx, rows[i].ID)
-		if err != nil {
-			return nil, errs.Wrap(err)
-		}
-		p.Steps = steps
-		ids, err := r.GetRecipientGroupIDs(ctx, rows[i].ID)
-		if err != nil {
-			return nil, errs.Wrap(err)
-		}
-		p.RecipientGroupIDs = nullable.NewNullableWithValue(ids)
+		p.Steps = []*model.ProgramStep{}
+		p.RecipientGroupIDs = nullable.NewNullableWithValue([]*uuid.UUID{})
 		programs = append(programs, p)
+		byID[*rows[i].ID] = p
+		ids = append(ids, rows[i].ID)
+	}
+	for start := 0; start < len(ids); start += programEnrollmentBatch {
+		end := min(start+programEnrollmentBatch, len(ids))
+		inPrograms := clause.IN{Column: clause.Column{Name: "program_id"}, Values: uuidValues(ids[start:end])}
+		var steps []database.ProgramStep
+		if err := r.DB.WithContext(ctx).
+			Where(inPrograms).
+			Order(clause.OrderByColumn{Column: clause.Column{Name: "position"}}).
+			Find(&steps).Error; err != nil {
+			return nil, errs.Wrap(err)
+		}
+		for i := range steps {
+			if p := byID[*steps[i].ProgramID]; p != nil {
+				p.Steps = append(p.Steps, ToProgramStep(&steps[i]))
+			}
+		}
+		var groups []database.ProgramRecipientGroup
+		if err := r.DB.WithContext(ctx).Where(inPrograms).Find(&groups).Error; err != nil {
+			return nil, errs.Wrap(err)
+		}
+		for i := range groups {
+			if p := byID[*groups[i].ProgramID]; p != nil {
+				p.RecipientGroupIDs = nullable.NewNullableWithValue(append(p.RecipientGroupIDs.MustGet(), groups[i].RecipientGroupID))
+			}
+		}
 	}
 	return programs, nil
 }
 
-// ReplaceSteps makes the program's steps match the given list. A step that
-// carries the id of an existing step keeps that id, so the hidden campaigns and
-// the delivery history linked to it stay valid. Steps without a known id are
-// added and steps left out are removed.
+// ReplaceSteps makes the program's steps match the given list in one
+// transaction, see replaceStepsTx.
 func (r *Program) ReplaceSteps(
 	ctx context.Context,
 	programID *uuid.UUID,
 	steps []*model.ProgramStep,
 ) error {
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		existing := []database.ProgramStep{}
-		if err := tx.Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-			Find(&existing).Error; err != nil {
+		return replaceStepsTx(tx, programID, steps)
+	})
+}
+
+// replaceStepsTx makes the program's steps match the given list. A step that
+// carries the id of an existing step keeps that id, so the hidden campaigns and
+// the delivery history linked to it stay valid. Steps without a known id are
+// added and steps left out are removed.
+func replaceStepsTx(tx *gorm.DB, programID *uuid.UUID, steps []*model.ProgramStep) error {
+	byProgram := programIDEq(clause.Column{Name: "program_id"}, programID)
+	// move every position out of the way first, the position index is unique.
+	// Positions are never negative, so -1 - position gives each a free place.
+	// It is the first statement, so the transaction writes before it reads
+	if err := tx.Model(&database.ProgramStep{}).
+		Where(byProgram).
+		Update("position", gorm.Expr("? - ?", -1, clause.Column{Name: "position"})).Error; err != nil {
+		return errs.Wrap(err)
+	}
+	existing := []database.ProgramStep{}
+	if err := tx.Where(byProgram).Find(&existing).Error; err != nil {
+		return errs.Wrap(err)
+	}
+	// a step keeps its id only while it keeps its template. A new template is
+	// a new step, so its sends go into a new hidden campaign
+	knownTemplate := map[uuid.UUID]uuid.UUID{}
+	for _, e := range existing {
+		knownTemplate[*e.ID] = *e.CampaignTemplateID
+	}
+	kept := map[uuid.UUID]bool{}
+	now := utils.NowRFC3339UTC()
+	for i, s := range steps {
+		templateID := s.CampaignTemplateID.MustGet()
+		position := i
+		if s.Position.IsSpecified() && !s.Position.IsNull() {
+			position = s.Position.MustGet()
+		}
+		sameStep := false
+		if s.ID.IsSpecified() && !s.ID.IsNull() {
+			t, ok := knownTemplate[s.ID.MustGet()]
+			sameStep = ok && t == templateID && !kept[s.ID.MustGet()]
+		}
+		if sameStep {
+			id := s.ID.MustGet()
+			kept[id] = true
+			if err := tx.Model(&database.ProgramStep{}).
+				Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id}).
+				Updates(map[string]any{
+					"position":   position,
+					"updated_at": now,
+				}).Error; err != nil {
+				return errs.Wrap(err)
+			}
+			continue
+		}
+		if err := tx.Model(&database.ProgramStep{}).Create(map[string]any{
+			"id":                   uuid.New(),
+			"created_at":           now,
+			"updated_at":           now,
+			"program_id":           programID,
+			"campaign_template_id": templateID,
+			"position":             position,
+		}).Error; err != nil {
 			return errs.Wrap(err)
 		}
-		// a step keeps its id only while it keeps its template. A new template is
-		// a new step, so its sends go into a new hidden campaign
-		knownTemplate := map[uuid.UUID]uuid.UUID{}
-		for _, e := range existing {
-			knownTemplate[*e.ID] = *e.CampaignTemplateID
+	}
+	removed := []*uuid.UUID{}
+	for _, e := range existing {
+		if !kept[*e.ID] {
+			removed = append(removed, e.ID)
 		}
-		// move every position out of the way first, the position index is unique
-		for i, e := range existing {
-			if err := tx.Model(&database.ProgramStep{}).
-				Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: e.ID}).
-				Update("position", -(i + 1)).Error; err != nil {
-				return errs.Wrap(err)
-			}
+	}
+	for start := 0; start < len(removed); start += programEnrollmentBatch {
+		end := min(start+programEnrollmentBatch, len(removed))
+		if err := tx.Where(clause.IN{Column: clause.Column{Name: "id"}, Values: uuidValues(removed[start:end])}).
+			Delete(&database.ProgramStep{}).Error; err != nil {
+			return errs.Wrap(err)
 		}
-		kept := map[uuid.UUID]bool{}
-		now := time.Now()
-		for i, s := range steps {
-			templateID := s.CampaignTemplateID.MustGet()
-			position := i
-			if s.Position.IsSpecified() && !s.Position.IsNull() {
-				position = s.Position.MustGet()
-			}
-			sameStep := false
-			if s.ID.IsSpecified() && !s.ID.IsNull() {
-				t, ok := knownTemplate[s.ID.MustGet()]
-				sameStep = ok && t == templateID && !kept[s.ID.MustGet()]
-			}
-			if sameStep {
-				id := s.ID.MustGet()
-				kept[id] = true
-				if err := tx.Model(&database.ProgramStep{}).
-					Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id}).
-					Updates(map[string]any{
-						"position":   position,
-						"updated_at": now,
-					}).Error; err != nil {
-					return errs.Wrap(err)
-				}
-				continue
-			}
-			id := uuid.New()
-			row := database.ProgramStep{
-				ID:                 &id,
-				CreatedAt:          &now,
-				UpdatedAt:          &now,
-				ProgramID:          programID,
-				CampaignTemplateID: &templateID,
-				Position:           position,
-			}
-			if err := tx.Create(&row).Error; err != nil {
-				return errs.Wrap(err)
-			}
-		}
-		for _, e := range existing {
-			if kept[*e.ID] {
-				continue
-			}
-			if err := tx.Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: e.ID}).
-				Delete(&database.ProgramStep{}).Error; err != nil {
-				return errs.Wrap(err)
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // GetSteps returns a program's steps ordered by position.
@@ -297,8 +718,8 @@ func (r *Program) GetSteps(
 ) ([]*model.ProgramStep, error) {
 	var rows []database.ProgramStep
 	res := r.DB.WithContext(ctx).
-		Where("program_id = ?", programID).
-		Order("position ASC").
+		Where(programIDEq(clause.Column{Name: "program_id"}, programID)).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "position"}}).
 		Find(&rows)
 	if res.Error != nil {
 		return nil, errs.Wrap(res.Error)
@@ -310,28 +731,26 @@ func (r *Program) GetSteps(
 	return steps, nil
 }
 
-// ReplaceRecipientGroups deletes a program's assigned groups and inserts the
-// given ones.
-func (r *Program) ReplaceRecipientGroups(
-	ctx context.Context,
-	programID *uuid.UUID,
-	groupIDs []*uuid.UUID,
-) error {
-	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("program_id = ?", programID).Delete(&database.ProgramRecipientGroup{}).Error; err != nil {
-			return errs.Wrap(err)
+// replaceRecipientGroupsTx deletes a program's assigned groups and inserts the
+// given ones
+func replaceRecipientGroupsTx(tx *gorm.DB, programID *uuid.UUID, groupIDs []*uuid.UUID) error {
+	if err := tx.Where(programIDEq(clause.Column{Name: "program_id"}, programID)).
+		Delete(&database.ProgramRecipientGroup{}).Error; err != nil {
+		return errs.Wrap(err)
+	}
+	rows := []database.ProgramRecipientGroup{}
+	seen := map[uuid.UUID]bool{}
+	for _, gid := range groupIDs {
+		if gid == nil || seen[*gid] {
+			continue
 		}
-		for _, gid := range groupIDs {
-			row := database.ProgramRecipientGroup{
-				ProgramID:        programID,
-				RecipientGroupID: gid,
-			}
-			if err := tx.Create(&row).Error; err != nil {
-				return errs.Wrap(err)
-			}
-		}
+		seen[*gid] = true
+		rows = append(rows, database.ProgramRecipientGroup{ProgramID: programID, RecipientGroupID: gid})
+	}
+	if len(rows) == 0 {
 		return nil
-	})
+	}
+	return errs.Wrap(tx.Create(&rows).Error)
 }
 
 // GetRecipientGroupIDs returns the ids of a program's assigned groups.
@@ -341,7 +760,7 @@ func (r *Program) GetRecipientGroupIDs(
 ) ([]*uuid.UUID, error) {
 	var rows []database.ProgramRecipientGroup
 	res := r.DB.WithContext(ctx).
-		Where("program_id = ?", programID).
+		Where(programIDEq(clause.Column{Name: "program_id"}, programID)).
 		Find(&rows)
 	if res.Error != nil {
 		return nil, errs.Wrap(res.Error)
@@ -353,14 +772,17 @@ func (r *Program) GetRecipientGroupIDs(
 	return ids, nil
 }
 
+// getRecipientGroups returns the groups assigned to a program
 func (r *Program) getRecipientGroups(
 	ctx context.Context,
 	programID *uuid.UUID,
 ) ([]*model.RecipientGroup, error) {
+	assigned := r.DB.Model(&database.ProgramRecipientGroup{}).
+		Select("recipient_group_id").
+		Where(programIDEq(clause.Column{Name: "program_id"}, programID))
 	var rows []database.RecipientGroup
 	res := r.DB.WithContext(ctx).
-		Joins("JOIN program_recipient_groups ON program_recipient_groups.recipient_group_id = recipient_groups.id").
-		Where("program_recipient_groups.program_id = ?", programID).
+		Where("id IN (?)", assigned).
 		Find(&rows)
 	if res.Error != nil {
 		return nil, errs.Wrap(res.Error)
@@ -376,410 +798,17 @@ func (r *Program) getRecipientGroups(
 	return groups, nil
 }
 
-// InsertStepCampaign inserts a hidden, program managed campaign row from the
-// model. It sets no recipient groups, unlike the campaign repository Insert.
-func (r *Program) InsertStepCampaign(
-	ctx context.Context,
-	campaign *model.Campaign,
-) (*uuid.UUID, error) {
-	id := uuid.New()
-	row := campaign.ToDBMap()
-	row["id"] = id
-	AddTimestamps(row)
-	res := r.DB.WithContext(ctx).Model(&database.Campaign{}).Create(row)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	return &id, nil
-}
-
-// GetProgramCampaigns returns the link rows for a step and loop iteration,
-// newest first. There is more than one when a closed step campaign was
-// followed by a new one.
-func (r *Program) GetProgramCampaigns(
-	ctx context.Context,
-	programID *uuid.UUID,
-	stepID *uuid.UUID,
-	loopIndex int,
-) ([]*database.ProgramCampaign, error) {
-	rows := []*database.ProgramCampaign{}
-	res := r.DB.WithContext(ctx).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Where(clause.Eq{Column: clause.Column{Name: "program_step_id"}, Value: stepID}).
-		Where(clause.Eq{Column: clause.Column{Name: "loop_index"}, Value: loopIndex}).
-		Order(clause.OrderByColumn{Column: clause.Column{Name: "created_at"}, Desc: true}).
-		Find(&rows)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	return rows, nil
-}
-
-// ProgramPersonSend is the state of one person's send in a hidden campaign
-type ProgramPersonSend struct {
-	ID          uuid.UUID
-	SentAt      *time.Time
-	CancelledAt *time.Time
-}
-
-// GetPersonSend returns a person's send in a campaign, matched by recipient id
-// or pseudonym, or nil when there is none
-func (r *Program) GetPersonSend(
-	ctx context.Context,
-	campaignID *uuid.UUID,
-	recipientID *uuid.UUID,
-	anonymizedID *uuid.UUID,
-) (*ProgramPersonSend, error) {
-	rows := []ProgramPersonSend{}
-	res := r.DB.WithContext(ctx).
-		Model(&database.CampaignRecipient{}).
-		Select("id", "sent_at", "cancelled_at").
-		Where(clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: campaignID}).
-		Where(r.personMatch(recipientID, anonymizedID)).
-		Limit(1).
-		Scan(&rows)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return &rows[0], nil
-}
-
-// ReviveCancelledSend puts a cancelled, never sent row back in the send queue
-// at a new time. The unique campaign and recipient index allows one row per
-// person per campaign, so a returning person reuses it.
-func (r *Program) ReviveCancelledSend(
-	ctx context.Context,
-	campaignRecipientID *uuid.UUID,
-	sendAt time.Time,
-) error {
-	res := r.DB.WithContext(ctx).
-		Model(&database.CampaignRecipient{}).
-		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: campaignRecipientID}).
-		Where(clause.Eq{Column: clause.Column{Name: "sent_at"}, Value: nil}).
-		Updates(map[string]any{
-			"cancelled_at":    nil,
-			"send_at":         utils.RFC3339UTC(sendAt),
-			"last_attempt_at": nil,
-			"updated_at":      utils.NowRFC3339UTC(),
-		})
-	return errs.Wrap(res.Error)
-}
-
-// ProgramNewestSend is the newest planned send of a person's scheduled steps
-type ProgramNewestSend struct {
-	SendAt time.Time
-	StepID uuid.UUID
-}
-
-// GetNewestScheduledSend returns the latest planned send time of a person over
-// the program's steps, nil when there is none. Cancelled sends do not count. A
-// send of a step removed since then still counts.
-func (r *Program) GetNewestScheduledSend(
-	ctx context.Context,
-	programID *uuid.UUID,
-	recipientID *uuid.UUID,
-	anonymizedID *uuid.UUID,
-) (*ProgramNewestSend, error) {
-	rows := []struct {
-		CampaignID uuid.UUID
-		SendAt     *time.Time
-	}{}
-	if err := r.DB.WithContext(ctx).
-		Model(&database.CampaignRecipient{}).
-		Select("campaign_id", "send_at").
-		Where("campaign_id IN (?)", r.programCampaignIDs(programID)).
-		Where(clause.Eq{Column: clause.Column{Name: "cancelled_at"}, Value: nil}).
-		Where(r.personMatch(recipientID, anonymizedID)).
-		Scan(&rows).Error; err != nil {
-		return nil, errs.Wrap(err)
-	}
-	var newest *ProgramNewestSend
-	var newestCampaign uuid.UUID
-	for _, row := range rows {
-		if row.SendAt == nil {
-			continue
-		}
-		if newest == nil || row.SendAt.After(newest.SendAt) {
-			newest = &ProgramNewestSend{SendAt: *row.SendAt}
-			newestCampaign = row.CampaignID
-		}
-	}
-	if newest == nil {
-		return nil, nil
-	}
-	link := database.ProgramCampaign{}
-	res := r.DB.WithContext(ctx).
-		Where(clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: newestCampaign}).
-		Limit(1).
-		Find(&link)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	if res.RowsAffected > 0 && link.ProgramStepID != nil {
-		newest.StepID = *link.ProgramStepID
-	}
-	return newest, nil
-}
-
-// ProgramHeldSend is a send of a program that is not sent and not cancelled.
-type ProgramHeldSend struct {
-	ID          uuid.UUID
-	CampaignID  uuid.UUID
-	RecipientID *uuid.UUID
-	SendAt      *time.Time
-}
-
-// GetHeldSends returns the sends of a program's open hidden campaigns that are
-// neither sent nor cancelled
-func (r *Program) GetHeldSends(
-	ctx context.Context,
-	programID *uuid.UUID,
-) ([]ProgramHeldSend, error) {
-	openCampaigns := r.programCampaignIDs(programID).
+// openPrograms selects the ids of the programs that are not closed. A closed
+// program keeps its history but no longer holds on to its groups or
+// templates.
+func (r *Program) openPrograms() *gorm.DB {
+	return r.DB.Model(&database.Program{}).
+		Select("id").
 		Where(clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil})
-	rows := []ProgramHeldSend{}
-	res := r.DB.WithContext(ctx).
-		Model(&database.CampaignRecipient{}).
-		Select("id", "campaign_id", "recipient_id", "send_at").
-		Where("campaign_id IN (?)", openCampaigns).
-		Where(clause.Eq{Column: clause.Column{Name: "sent_at"}, Value: nil}).
-		Where(clause.Eq{Column: clause.Column{Name: "cancelled_at"}, Value: nil}).
-		Scan(&rows)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	return rows, nil
 }
 
-// SetSendAt moves the given sends that are not sent yet to a new send time, in
-// batches
-func (r *Program) SetSendAt(
-	ctx context.Context,
-	campaignRecipientIDs []*uuid.UUID,
-	sendAt time.Time,
-) error {
-	for start := 0; start < len(campaignRecipientIDs); start += programEnrollmentBatch {
-		end := min(start+programEnrollmentBatch, len(campaignRecipientIDs))
-		res := r.DB.WithContext(ctx).
-			Model(&database.CampaignRecipient{}).
-			Where(clause.IN{Column: clause.Column{Name: "id"}, Values: uuidValues(campaignRecipientIDs[start:end])}).
-			Where(clause.Eq{Column: clause.Column{Name: "sent_at"}, Value: nil}).
-			Updates(map[string]any{
-				"send_at":    utils.RFC3339UTC(sendAt),
-				"updated_at": utils.NowRFC3339UTC(),
-			})
-		if res.Error != nil {
-			return errs.Wrap(res.Error)
-		}
-	}
-	return nil
-}
-
-// CountEnrollments returns how many people were ever enrolled in a program,
-// whatever their status
-func (r *Program) CountEnrollments(ctx context.Context, programID *uuid.UUID) (int64, error) {
-	var count int64
-	res := r.DB.WithContext(ctx).
-		Model(&database.ProgramEnrollment{}).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Count(&count)
-	if res.Error != nil {
-		return 0, errs.Wrap(res.Error)
-	}
-	return count, nil
-}
-
-// GetAnonymousProgramIDs returns the ids of every anonymous program
-func (r *Program) GetAnonymousProgramIDs(ctx context.Context) ([]*uuid.UUID, error) {
-	ids := []uuid.UUID{}
-	res := r.DB.WithContext(ctx).
-		Model(&database.Program{}).
-		Where(clause.Eq{Column: clause.Column{Name: "is_anonymous"}, Value: true}).
-		Pluck("id", &ids)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	out := make([]*uuid.UUID, 0, len(ids))
-	for i := range ids {
-		out = append(out, &ids[i])
-	}
-	return out, nil
-}
-
-// RemoveIdentityOfSendsBefore removes the recipient link and releases the lure
-// code of the sent rows of a program's hidden campaigns sent before the given
-// time, the same way a closed anonymous campaign is finalized. Only rows that
-// carry a pseudonym are changed, so the results stay countable by it, and
-// rows not yet sent are never touched.
-func (r *Program) RemoveIdentityOfSendsBefore(
-	ctx context.Context,
-	programID *uuid.UUID,
-	before time.Time,
-) (int64, error) {
-	res := r.DB.WithContext(ctx).
-		Model(&database.CampaignRecipient{}).
-		Where("campaign_id IN (?)", r.programCampaignIDs(programID)).
-		Where(clause.Neq{Column: clause.Column{Name: "sent_at"}, Value: nil}).
-		// sent_at is stored as RFC3339 UTC text, so it is compared as such
-		Where(clause.Lt{Column: clause.Column{Name: "sent_at"}, Value: utils.RFC3339UTC(before)}).
-		Where(clause.Neq{Column: clause.Column{Name: "recipient_id"}, Value: nil}).
-		Where(clause.Neq{Column: clause.Column{Name: "anonymized_id"}, Value: nil}).
-		Updates(map[string]any{
-			"recipient_id": nil,
-			"lure_code":    nil,
-			"updated_at":   utils.NowRFC3339UTC(),
-		})
-	if res.Error != nil {
-		return 0, errs.Wrap(res.Error)
-	}
-	return res.RowsAffected, nil
-}
-
-// CountActiveEnrollments returns how many people are active in a program
-func (r *Program) CountActiveEnrollments(ctx context.Context, programID *uuid.UUID) (int64, error) {
-	var count int64
-	res := r.DB.WithContext(ctx).
-		Model(&database.ProgramEnrollment{}).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Where(clause.Eq{Column: clause.Column{Name: "status"}, Value: model.ProgramEnrollmentActive}).
-		Count(&count)
-	if res.Error != nil {
-		return 0, errs.Wrap(res.Error)
-	}
-	return count, nil
-}
-
-// InsertProgramCampaign creates the link between a step iteration and a hidden
-// campaign.
-func (r *Program) InsertProgramCampaign(
-	ctx context.Context,
-	programID *uuid.UUID,
-	stepID *uuid.UUID,
-	loopIndex int,
-	campaignID *uuid.UUID,
-) error {
-	now := time.Now()
-	id := uuid.New()
-	row := database.ProgramCampaign{
-		ID:            &id,
-		CreatedAt:     &now,
-		ProgramID:     programID,
-		ProgramStepID: stepID,
-		LoopIndex:     loopIndex,
-		CampaignID:    campaignID,
-	}
-	res := r.DB.WithContext(ctx).Create(&row)
-	return errs.Wrap(res.Error)
-}
-
-// GetCampaignIDs returns the ids of the hidden campaigns a program owns. It reads
-// campaigns.program_id rather than the links, so it still finds every campaign
-// after a delete that stopped half way.
-func (r *Program) GetCampaignIDs(
-	ctx context.Context,
-	programID *uuid.UUID,
-) ([]*uuid.UUID, error) {
-	ids := []uuid.UUID{}
-	res := r.DB.WithContext(ctx).
-		Model(&database.Campaign{}).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Pluck("id", &ids)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	out := make([]*uuid.UUID, 0, len(ids))
-	for i := range ids {
-		out = append(out, &ids[i])
-	}
-	return out, nil
-}
-
-// DeleteProgramCampaignByCampaignID removes the link between a hidden campaign
-// and its program step
-func (r *Program) DeleteProgramCampaignByCampaignID(
-	ctx context.Context,
-	campaignID *uuid.UUID,
-) error {
-	res := r.DB.WithContext(ctx).
-		Where(clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: campaignID}).
-		Delete(&database.ProgramCampaign{})
-	return errs.Wrap(res.Error)
-}
-
-// SetEnrollmentPseudonymIfEmpty stores a pseudonym on an enrollment that has none
-func (r *Program) SetEnrollmentPseudonymIfEmpty(
-	ctx context.Context,
-	enrollmentID *uuid.UUID,
-	pseudonym uuid.UUID,
-) error {
-	res := r.DB.WithContext(ctx).
-		Model(&database.ProgramEnrollment{}).
-		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: enrollmentID}).
-		Where(clause.Eq{Column: clause.Column{Name: "anonymized_id"}, Value: nil}).
-		Update("anonymized_id", pseudonym)
-	return errs.Wrap(res.Error)
-}
-
-// StopEnrollments clears every pending send time of a program's enrollments
-// and moves the active ones to stopped, used when the program closes
-func (r *Program) StopEnrollments(
-	ctx context.Context,
-	programID *uuid.UUID,
-) error {
-	now := utils.NowRFC3339UTC()
-	res := r.DB.WithContext(ctx).
-		Model(&database.ProgramEnrollment{}).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Where(clause.Eq{Column: clause.Column{Name: "status"}, Value: model.ProgramEnrollmentActive}).
-		Updates(map[string]any{
-			"status":        model.ProgramEnrollmentStopped,
-			"next_due_at":   nil,
-			"missing_since": nil,
-			"updated_at":    now,
-		})
-	if res.Error != nil {
-		return errs.Wrap(res.Error)
-	}
-	res = r.DB.WithContext(ctx).
-		Model(&database.ProgramEnrollment{}).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Where(clause.Neq{Column: clause.Column{Name: "next_due_at"}, Value: nil}).
-		Updates(map[string]any{
-			"next_due_at": nil,
-			"updated_at":  now,
-		})
-	return errs.Wrap(res.Error)
-}
-
-// ClearEnrollmentPseudonyms removes the pseudonym from every enrollment of a
-// program
-func (r *Program) ClearEnrollmentPseudonyms(
-	ctx context.Context,
-	programID *uuid.UUID,
-) error {
-	res := r.DB.WithContext(ctx).
-		Model(&database.ProgramEnrollment{}).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Update("anonymized_id", nil)
-	return errs.Wrap(res.Error)
-}
-
-// DeleteEnrollmentsByRecipientID removes every program enrollment of a recipient
-func (r *Program) DeleteEnrollmentsByRecipientID(
-	ctx context.Context,
-	recipientID *uuid.UUID,
-) error {
-	res := r.DB.WithContext(ctx).
-		Where(clause.Eq{Column: clause.Column{Name: "recipient_id"}, Value: recipientID}).
-		Delete(&database.ProgramEnrollment{})
-	return errs.Wrap(res.Error)
-}
-
-// GetNamesByRecipientGroupID returns the names of the programs that the
-// recipient group is assigned to
+// GetNamesByRecipientGroupID returns the names of the programs that are not
+// closed and have the recipient group assigned
 func (r *Program) GetNamesByRecipientGroupID(
 	ctx context.Context,
 	groupID *uuid.UUID,
@@ -791,6 +820,7 @@ func (r *Program) GetNamesByRecipientGroupID(
 	res := r.DB.WithContext(ctx).
 		Model(&database.Program{}).
 		Where("id IN (?)", assigned).
+		Where(clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "name"}}).
 		Pluck("name", &names)
 	if res.Error != nil {
@@ -799,28 +829,32 @@ func (r *Program) GetNamesByRecipientGroupID(
 	return names, nil
 }
 
+// RemoveRecipientGroupFromClosedPrograms removes a recipient group from every
+// closed program, used when the group is deleted. Programs that are not closed
+// block the delete, see GetNamesByRecipientGroupID.
+func (r *Program) RemoveRecipientGroupFromClosedPrograms(
+	ctx context.Context,
+	groupID *uuid.UUID,
+) error {
+	res := r.DB.WithContext(ctx).
+		Where(clause.Eq{Column: clause.Column{Name: "recipient_group_id"}, Value: groupID}).
+		Where("program_id NOT IN (?)", r.openPrograms()).
+		Delete(&database.ProgramRecipientGroup{})
+	return errs.Wrap(res.Error)
+}
+
 // GetIDsByCompanyID returns the ids of the programs that belong to a company
 func (r *Program) GetIDsByCompanyID(
 	ctx context.Context,
 	companyID *uuid.UUID,
 ) ([]*uuid.UUID, error) {
-	ids := []uuid.UUID{}
-	res := r.DB.WithContext(ctx).
+	return pluckUUIDs(r.DB.WithContext(ctx).
 		Model(&database.Program{}).
-		Where(clause.Eq{Column: companyColumn(database.PROGRAM_TABLE), Value: companyID}).
-		Pluck("id", &ids)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	out := make([]*uuid.UUID, 0, len(ids))
-	for i := range ids {
-		out = append(out, &ids[i])
-	}
-	return out, nil
+		Where(clause.Eq{Column: companyColumn(database.PROGRAM_TABLE), Value: companyID}), "id")
 }
 
-// GetNamesByCampaignTemplateID returns the names of the programs that have a
-// step using the campaign template
+// GetNamesByCampaignTemplateID returns the names of the programs that are not
+// closed and have a step using the campaign template
 func (r *Program) GetNamesByCampaignTemplateID(
 	ctx context.Context,
 	templateID *uuid.UUID,
@@ -832,6 +866,7 @@ func (r *Program) GetNamesByCampaignTemplateID(
 	res := r.DB.WithContext(ctx).
 		Model(&database.Program{}).
 		Where("id IN (?)", stepsUsing).
+		Where(clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "name"}}).
 		Pluck("name", &names)
 	if res.Error != nil {
@@ -840,196 +875,49 @@ func (r *Program) GetNamesByCampaignTemplateID(
 	return names, nil
 }
 
-// ProgramDelivery is one step a recipient has been given in a loop, with the
-// template the hidden campaign of the step sends
-type ProgramDelivery struct {
-	RecipientID uuid.UUID
-	StepID      uuid.UUID
-	LoopIndex   int
-	TemplateID  *uuid.UUID
-}
-
-// deliveredSends selects the campaign recipient rows that count as a delivery:
-// not cancelled, and either sent or still waiting in a campaign that is open.
-// A send that will never go out does not use up its step.
-func (r *Program) deliveredSends() *gorm.DB {
-	openCampaigns := r.DB.Model(&database.Campaign{}).
-		Select("id").
-		Where(clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil})
-	return r.DB.Model(&database.CampaignRecipient{}).
-		Where(clause.Eq{Column: clause.Column{Name: "cancelled_at"}, Value: nil}).
-		Where(r.DB.
-			Where(clause.Neq{Column: clause.Column{Name: "sent_at"}, Value: nil}).
-			Or("campaign_id IN (?)", openCampaigns))
-}
-
-// GetDeliveredStepIDs returns the steps a recipient has been given in a loop.
-// A cancelled send is not a delivery, so the step is offered again. The
-// pseudonym, when given, also matches sends whose recipient link was removed.
-func (r *Program) GetDeliveredStepIDs(
+// RemoveCampaignTemplateFromClosedPrograms removes the steps of closed
+// programs that use a campaign template, used when the template is deleted.
+// The sends and results of those steps stay, they name the template as
+// deleted. Programs that are not closed block the delete, see
+// GetNamesByCampaignTemplateID.
+func (r *Program) RemoveCampaignTemplateFromClosedPrograms(
 	ctx context.Context,
-	programID *uuid.UUID,
-	recipientID *uuid.UUID,
-	anonymizedID *uuid.UUID,
-	loopIndex int,
-) (map[uuid.UUID]bool, error) {
-	deliveries, err := r.GetLoopDeliveries(ctx, programID, recipientID, anonymizedID, loopIndex)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[uuid.UUID]bool, len(deliveries))
-	for _, d := range deliveries {
-		out[d.StepID] = true
-	}
-	return out, nil
-}
-
-// GetLoopDeliveries returns the steps a recipient has been given in a loop,
-// each with the template its hidden campaign sends. It matches sends the same
-// way as GetDeliveredStepIDs.
-func (r *Program) GetLoopDeliveries(
-	ctx context.Context,
-	programID *uuid.UUID,
-	recipientID *uuid.UUID,
-	anonymizedID *uuid.UUID,
-	loopIndex int,
-) ([]ProgramDelivery, error) {
-	sentTo := r.deliveredSends().
-		Select("campaign_id").
-		Where(r.personMatch(recipientID, anonymizedID))
-	links := []database.ProgramCampaign{}
+	templateID *uuid.UUID,
+) error {
 	res := r.DB.WithContext(ctx).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Where(clause.Eq{Column: clause.Column{Name: "loop_index"}, Value: loopIndex}).
-		Where("campaign_id IN (?)", sentTo).
-		Find(&links)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	templates, err := r.campaignTemplates(ctx, links)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ProgramDelivery, 0, len(links))
-	for _, l := range links {
-		d := ProgramDelivery{StepID: *l.ProgramStepID, LoopIndex: l.LoopIndex}
-		if recipientID != nil {
-			d.RecipientID = *recipientID
-		}
-		if t, ok := templates[*l.CampaignID]; ok {
-			d.TemplateID = &t
-		}
-		out = append(out, d)
-	}
-	return out, nil
-}
-
-// campaignTemplates returns the template of each linked hidden campaign that
-// has one
-func (r *Program) campaignTemplates(
-	ctx context.Context,
-	links []database.ProgramCampaign,
-) (map[uuid.UUID]uuid.UUID, error) {
-	out := map[uuid.UUID]uuid.UUID{}
-	if len(links) == 0 {
-		return out, nil
-	}
-	ids := make([]*uuid.UUID, 0, len(links))
-	for _, l := range links {
-		ids = append(ids, l.CampaignID)
-	}
-	for start := 0; start < len(ids); start += programEnrollmentBatch {
-		end := min(start+programEnrollmentBatch, len(ids))
-		rows := []struct {
-			ID                 uuid.UUID
-			CampaignTemplateID *uuid.UUID
-		}{}
-		if err := r.DB.WithContext(ctx).
-			Model(&database.Campaign{}).
-			Select("id", "campaign_template_id").
-			Where(clause.IN{Column: clause.Column{Name: "id"}, Values: uuidValues(ids[start:end])}).
-			Scan(&rows).Error; err != nil {
-			return nil, errs.Wrap(err)
-		}
-		for _, row := range rows {
-			if row.CampaignTemplateID != nil {
-				out[row.ID] = *row.CampaignTemplateID
-			}
-		}
-	}
-	return out, nil
-}
-
-// personMatch matches campaign recipient rows of a person by recipient id, or
-// by pseudonym when one is given
-func (r *Program) personMatch(recipientID *uuid.UUID, anonymizedID *uuid.UUID) *gorm.DB {
-	byRecipient := clause.Eq{Column: clause.Column{Name: "recipient_id"}, Value: recipientID}
-	if anonymizedID == nil {
-		return r.DB.Where(byRecipient)
-	}
-	return r.DB.Where(byRecipient).
-		Or(clause.Eq{Column: clause.Column{Name: "anonymized_id"}, Value: anonymizedID})
-}
-
-// GetDeliveries returns every step given to the recipients of a program. When
-// recipientIDs is not nil only those recipients' deliveries are returned.
-func (r *Program) GetDeliveries(
-	ctx context.Context,
-	programID *uuid.UUID,
-	recipientIDs []*uuid.UUID,
-) ([]ProgramDelivery, error) {
-	links := []database.ProgramCampaign{}
-	if err := r.DB.WithContext(ctx).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Find(&links).Error; err != nil {
-		return nil, errs.Wrap(err)
-	}
-	type sent struct {
-		CampaignID  uuid.UUID
-		RecipientID uuid.UUID
-	}
-	sends := []sent{}
-	if recipientIDs != nil && len(recipientIDs) == 0 {
-		return []ProgramDelivery{}, nil
-	}
-	db := r.deliveredSends().
-		WithContext(ctx).
-		Select("campaign_id", "recipient_id").
-		Where("campaign_id IN (?)", r.programCampaignIDs(programID)).
-		Where(clause.Neq{Column: clause.Column{Name: "recipient_id"}, Value: nil})
-	if recipientIDs != nil {
-		db = db.Where(clause.IN{Column: clause.Column{Name: "recipient_id"}, Values: idValues(recipientIDs)})
-	}
-	if err := db.Scan(&sends).Error; err != nil {
-		return nil, errs.Wrap(err)
-	}
-	templates, err := r.campaignTemplates(ctx, links)
-	if err != nil {
-		return nil, err
-	}
-	byCampaign := map[uuid.UUID]database.ProgramCampaign{}
-	for _, l := range links {
-		byCampaign[*l.CampaignID] = l
-	}
-	out := make([]ProgramDelivery, 0, len(sends))
-	for _, sd := range sends {
-		l, ok := byCampaign[sd.CampaignID]
-		if !ok {
-			continue
-		}
-		d := ProgramDelivery{RecipientID: sd.RecipientID, StepID: *l.ProgramStepID, LoopIndex: l.LoopIndex}
-		if t, ok := templates[sd.CampaignID]; ok {
-			d.TemplateID = &t
-		}
-		out = append(out, d)
-	}
-	return out, nil
+		Where(clause.Eq{Column: clause.Column{Name: "campaign_template_id"}, Value: templateID}).
+		Where("program_id NOT IN (?)", r.openPrograms()).
+		Delete(&database.ProgramStep{})
+	return errs.Wrap(res.Error)
 }
 
 // ProgramListSummary is what the program list shows for one program
 type ProgramListSummary struct {
-	Enrolled        int64
-	NextDueAt       *time.Time
+	// Enrolled counts the active people
+	Enrolled int64
+	// Stopped counts the people still active when the program closed
+	Stopped int64
+	// People counts the people who have not exited: active, completed or
+	// stopped
+	People int64
+	// Total counts every enrollment, also the people who were removed
+	Total int64
+	// NextDueAt is the earliest next send of the active people
+	NextDueAt *time.Time
+	// Unplanned counts the active people without a next send
+	Unplanned int64
+	// Failing counts the active people whose advance failed at least
+	// ProgramStallFailures times in a row
+	Failing int64
+	// Queued counts the sends of the hidden campaigns that are neither sent
+	// nor cancelled, and OldestQueuedAt is the earliest send time of the ones
+	// the sender has not tried yet
+	Queued         int64
+	OldestQueuedAt *time.Time
+	// NewestFailedAt is the newest attempt of a send that failed, and
+	// NewestSentAt the newest send that went out
+	NewestFailedAt  *time.Time
+	NewestSentAt    *time.Time
 	StepTemplateIDs []uuid.UUID
 	// Simulations counts the steps
 	Simulations int
@@ -1046,6 +934,12 @@ var sqliteTimeLayouts = []string{
 	"2006-01-02T15:04:05.999999999",
 }
 
+// julianToTime converts a julian day of SQLite to a time in UTC
+func julianToTime(day float64) time.Time {
+	const unixEpochJulian = 2440587.5
+	return time.UnixMilli(int64((day - unixEpochJulian) * 86400000)).UTC()
+}
+
 func parseSQLiteTime(v string) (time.Time, bool) {
 	for _, layout := range sqliteTimeLayouts {
 		if t, err := time.Parse(layout, v); err == nil {
@@ -1055,8 +949,9 @@ func parseSQLiteTime(v string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// GetListSummaries returns the active enrollment count, the earliest next send
-// and the step templates of each given program in three queries in total.
+// GetListSummaries returns the active and the not exited enrollment counts,
+// the earliest next send, the people without one, the queued sends and the
+// step templates of each given program in a few queries in total.
 func (r *Program) GetListSummaries(
 	ctx context.Context,
 	programIDs []*uuid.UUID,
@@ -1066,41 +961,65 @@ func (r *Program) GetListSummaries(
 		return out, nil
 	}
 	for _, id := range programIDs {
-		out[*id] = &ProgramListSummary{}
+		if id != nil {
+			out[*id] = &ProgramListSummary{}
+		}
 	}
 	inPrograms := clause.IN{Column: clause.Column{Name: "program_id"}, Values: uuidValues(programIDs)}
 	isActive := clause.Eq{Column: clause.Column{Name: "status"}, Value: model.ProgramEnrollmentActive}
 
 	var counts []struct {
 		ProgramID uuid.UUID
-		Enrolled  int64
+		Status    string
+		People    int64
 	}
 	err := r.DB.WithContext(ctx).
 		Model(&database.ProgramEnrollment{}).
-		Select("program_id, COUNT(*) AS enrolled").
+		Select("program_id, status, COUNT(*) AS people").
 		Where(inPrograms).
-		Where(isActive).
-		Group("program_id").
+		Group("program_id, status").
 		Scan(&counts).Error
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
 	for _, c := range counts {
-		if row, ok := out[c.ProgramID]; ok {
-			row.Enrolled = c.Enrolled
+		row, ok := out[c.ProgramID]
+		if !ok {
+			continue
 		}
+		if c.Status == model.ProgramEnrollmentActive {
+			row.Enrolled += c.People
+		}
+		if c.Status == model.ProgramEnrollmentStopped {
+			row.Stopped += c.People
+		}
+		if c.Status != model.ProgramEnrollmentExited {
+			row.People += c.People
+		}
+		row.Total += c.People
+	}
+	// the people of a program whose Anonymize All began are counted from the
+	// counts stored when it began, its enrollments are removed
+	if err := r.applyStoredPeopleCounts(ctx, programIDs, out); err != nil {
+		return nil, err
 	}
 
 	var nexts []struct {
 		ProgramID uuid.UUID
 		NextDueAt *string
+		Unplanned int64
+		Failing   int64
 	}
+	// the earliest due time, the people without one and the people whose
+	// advance keeps failing, read through the program, status and due index
+	nextDue := clause.Column{Name: "next_due_at"}
+	failures := clause.Column{Name: "advance_failures"}
 	err = r.DB.WithContext(ctx).
 		Model(&database.ProgramEnrollment{}).
-		Select("program_id, MIN(next_due_at) AS next_due_at").
+		Select("program_id, MIN(?) AS next_due_at, COUNT(*) - COUNT(?) AS unplanned, SUM(CASE WHEN ? >= ? THEN 1 ELSE 0 END) AS failing",
+			nextDue, nextDue, failures, ProgramStallFailures).
 		Where(inPrograms).
 		Where(isActive).
-		Where(clause.Neq{Column: clause.Column{Name: "next_due_at"}, Value: nil}).
 		Group("program_id").
 		Scan(&nexts).Error
 	if err != nil {
@@ -1108,11 +1027,105 @@ func (r *Program) GetListSummaries(
 	}
 	for _, n := range nexts {
 		row, ok := out[n.ProgramID]
-		if !ok || n.NextDueAt == nil {
+		if !ok {
+			continue
+		}
+		row.Unplanned = n.Unplanned
+		row.Failing = n.Failing
+		if n.NextDueAt == nil {
 			continue
 		}
 		if t, ok := parseSQLiteTime(*n.NextDueAt); ok {
 			row.NextDueAt = &t
+		}
+	}
+
+	// the hidden campaigns of the programs, then the queued sends of each
+	// campaign through the partial index of unsent rows
+	var campaigns []struct {
+		ID        uuid.UUID
+		ProgramID uuid.UUID
+	}
+	err = r.DB.WithContext(ctx).
+		Model(&database.Campaign{}).
+		Select("id", "program_id").
+		Where(inPrograms).
+		Scan(&campaigns).Error
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	programOf := make(map[uuid.UUID]uuid.UUID, len(campaigns))
+	campaignIDs := make([]*uuid.UUID, 0, len(campaigns))
+	for i := range campaigns {
+		programOf[campaigns[i].ID] = campaigns[i].ProgramID
+		campaignIDs = append(campaignIDs, &campaigns[i].ID)
+	}
+	// the send time is stored in more than one text layout, so the earliest
+	// is taken as a julian day
+	for start := 0; start < len(campaignIDs); start += programEnrollmentBatch {
+		end := min(start+programEnrollmentBatch, len(campaignIDs))
+		var queued []struct {
+			CampaignID   uuid.UUID
+			Queued       int64
+			OldestJulian *float64
+			FailedJulian *float64
+		}
+		err = r.DB.WithContext(ctx).
+			Model(&database.CampaignRecipient{}).
+			Select(
+				"campaign_id, COUNT(*) AS queued, MIN(CASE WHEN ? IS NULL THEN julianday(?) END) AS oldest_julian, MAX(julianday(?)) AS failed_julian",
+				clause.Column{Name: "last_attempt_at"}, clause.Column{Name: "send_at"}, clause.Column{Name: "last_attempt_at"},
+			).
+			Where(unsentSends()).
+			Where(clause.IN{Column: clause.Column{Name: "campaign_id"}, Values: uuidValues(campaignIDs[start:end])}).
+			Group("campaign_id").
+			Scan(&queued).Error
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		for _, q := range queued {
+			row, ok := out[programOf[q.CampaignID]]
+			if !ok {
+				continue
+			}
+			row.Queued += q.Queued
+			if q.FailedJulian != nil {
+				t := julianToTime(*q.FailedJulian)
+				if row.NewestFailedAt == nil || t.After(*row.NewestFailedAt) {
+					row.NewestFailedAt = &t
+				}
+			}
+			if q.OldestJulian == nil {
+				continue
+			}
+			t := julianToTime(*q.OldestJulian)
+			if row.OldestQueuedAt == nil || t.Before(*row.OldestQueuedAt) {
+				row.OldestQueuedAt = &t
+			}
+		}
+		var sent []struct {
+			CampaignID uuid.UUID
+			SentJulian *float64
+		}
+		err = r.DB.WithContext(ctx).
+			Model(&database.CampaignRecipient{}).
+			Select("campaign_id, MAX(julianday(?)) AS sent_julian", clause.Column{Name: "sent_at"}).
+			Where(clause.Neq{Column: clause.Column{Name: "sent_at"}, Value: nil}).
+			Where(clause.IN{Column: clause.Column{Name: "campaign_id"}, Values: uuidValues(campaignIDs[start:end])}).
+			Group("campaign_id").
+			Scan(&sent).Error
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		for _, q := range sent {
+			row, ok := out[programOf[q.CampaignID]]
+			if !ok || q.SentJulian == nil {
+				continue
+			}
+			t := julianToTime(*q.SentJulian)
+			if row.NewestSentAt == nil || t.After(*row.NewestSentAt) {
+				row.NewestSentAt = &t
+			}
 		}
 	}
 
@@ -1137,258 +1150,143 @@ func (r *Program) GetListSummaries(
 }
 
 // GetTemplateUsability returns for each existing template id whether it can be
-// sent. A template that is missing from the result no longer exists.
+// sent. A template that is missing from the result no longer exists. The ids
+// are deduped and read in batches, so a long list stays under the bind
+// parameter limit.
 func (r *Program) GetTemplateUsability(
 	ctx context.Context,
 	templateIDs []uuid.UUID,
 ) (map[uuid.UUID]bool, error) {
 	out := map[uuid.UUID]bool{}
-	if len(templateIDs) == 0 {
-		return out, nil
+	seen := map[uuid.UUID]bool{}
+	ids := []*uuid.UUID{}
+	for i := range templateIDs {
+		if seen[templateIDs[i]] {
+			continue
+		}
+		seen[templateIDs[i]] = true
+		ids = append(ids, &templateIDs[i])
 	}
-	values := make([]any, 0, len(templateIDs))
-	for _, id := range templateIDs {
-		values = append(values, id)
-	}
-	var rows []database.CampaignTemplate
-	err := r.DB.WithContext(ctx).
-		Select("id", "is_usable").
-		Where(clause.IN{Column: clause.Column{Name: "id"}, Values: values}).
-		Find(&rows).Error
-	if err != nil {
-		return nil, errs.Wrap(err)
-	}
-	for _, t := range rows {
-		out[*t.ID] = t.IsUsable
+	for start := 0; start < len(ids); start += programEnrollmentBatch {
+		end := min(start+programEnrollmentBatch, len(ids))
+		var rows []database.CampaignTemplate
+		err := r.DB.WithContext(ctx).
+			Select("id", "is_usable").
+			Where(clause.IN{Column: clause.Column{Name: "id"}, Values: uuidValues(ids[start:end])}).
+			Find(&rows).Error
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		for _, t := range rows {
+			out[*t.ID] = t.IsUsable
+		}
 	}
 	return out, nil
 }
 
+// programNotAnonymizing is the condition that an Anonymize All of the
+// program in table is not running: it never began or it finished. While it
+// runs the campaigns it has not reached still name people, so per person data
+// of such a program is left out, the same as once it began.
+func programNotAnonymizing(table string) clause.Expression {
+	return clause.Or(
+		clause.Eq{Column: clause.Column{Table: table, Name: "anonymizing_at"}, Value: nil},
+		clause.Neq{Column: clause.Column{Table: table, Name: "anonymized_at"}, Value: nil},
+	)
+}
+
+// programIDEq is the condition that column holds the program id. A nil id
+// matches no row: an equality with nil is IS NULL, which would match every
+// row that belongs to no program, such as every normal campaign.
+func programIDEq(column clause.Column, id *uuid.UUID) clause.Expression {
+	if id == nil {
+		return clause.Expr{SQL: "1 = 0"}
+	}
+	return clause.Eq{Column: column, Value: id}
+}
+
 // runningPrograms is the condition for a program the scheduler runs: its start
-// time has passed and it is neither paused nor closed. A draft has no start.
+// time has passed, it is neither paused nor closed and its company is not
+// being deleted. A draft has no start.
 func (r *Program) runningPrograms(now time.Time) clause.Expression {
+	deleting := r.DB.Model(&database.Company{}).
+		Select("id").
+		Where(clause.Neq{Column: clause.Column{Table: database.COMPANY_TABLE, Name: "deleting_at"}, Value: nil})
 	return clause.And(
 		clause.Eq{Column: clause.Column{Name: "paused_at"}, Value: nil},
 		clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil},
 		clause.Neq{Column: clause.Column{Name: "start_at"}, Value: nil},
 		clause.Lte{Column: clause.Column{Name: "start_at"}, Value: now.UTC()},
+		clause.Or(
+			clause.Eq{Column: clause.Column{Name: "company_id"}, Value: nil},
+			clause.Expr{SQL: "? NOT IN (?)", Vars: []any{clause.Column{Name: "company_id"}, deleting}},
+		),
 	)
 }
 
-// programCampaignIDs selects the ids of the hidden campaigns a program owns
-func (r *Program) programCampaignIDs(programID *uuid.UUID) *gorm.DB {
-	return r.DB.Model(&database.Campaign{}).
-		Select("id").
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID})
-}
-
-// CancelUnsentForProgramRecipients marks the not yet sent step sends of the
-// given recipients as cancelled, so program leavers receive no further mail. The
-// campaign set is chosen with a subquery on program_campaigns, and the recipient
-// ids are chunked to stay well under the SQLite bind parameter ceiling.
-func (r *Program) CancelUnsentForProgramRecipients(
-	ctx context.Context,
-	programID *uuid.UUID,
-	recipientIDs []*uuid.UUID,
-) error {
-	if len(recipientIDs) == 0 {
-		return nil
-	}
-	const chunkSize = 800
-	now := utils.NowRFC3339UTC()
-	for start := 0; start < len(recipientIDs); start += chunkSize {
-		end := start + chunkSize
-		if end > len(recipientIDs) {
-			end = len(recipientIDs)
-		}
-		res := r.DB.WithContext(ctx).
-			Model(&database.CampaignRecipient{}).
-			Where("campaign_id IN (?)", r.programCampaignIDs(programID)).
-			Where("recipient_id IN ?", recipientIDs[start:end]).
-			Where("sent_at IS NULL AND cancelled_at IS NULL").
-			Update("cancelled_at", now)
-		if res.Error != nil {
-			return errs.Wrap(res.Error)
-		}
-	}
-	return nil
-}
-
-// CancelUnsentFrom marks the not yet sent sends of a program that are planned
-// at or after the given time as cancelled, used when the program gets an end
-// date so nothing goes out after it
-func (r *Program) CancelUnsentFrom(
-	ctx context.Context,
-	programID *uuid.UUID,
-	at time.Time,
-) error {
-	res := r.DB.WithContext(ctx).
-		Model(&database.CampaignRecipient{}).
-		Where("campaign_id IN (?)", r.programCampaignIDs(programID)).
-		Where(clause.Eq{Column: clause.Column{Name: "sent_at"}, Value: nil}).
-		Where(clause.Eq{Column: clause.Column{Name: "cancelled_at"}, Value: nil}).
-		Where(clause.Gte{Column: clause.Column{Name: "send_at"}, Value: utils.RFC3339UTC(at)}).
-		Update("cancelled_at", utils.NowRFC3339UTC())
-	return errs.Wrap(res.Error)
-}
-
-// GetIDsDueToEnd returns the ids of the programs that are not closed and whose
-// end date has passed
-func (r *Program) GetIDsDueToEnd(ctx context.Context, now time.Time) ([]*uuid.UUID, error) {
-	ids := []uuid.UUID{}
-	res := r.DB.WithContext(ctx).
+// GetIDsToClose returns the ids of the programs the scheduler closes: not
+// closed and not being deleted, and either past their end date or with a close
+// that began and did not finish
+func (r *Program) GetIDsToClose(ctx context.Context, now time.Time, limit int, skip []*uuid.UUID) ([]*uuid.UUID, error) {
+	return pluckUUIDs(r.DB.WithContext(ctx).
 		Model(&database.Program{}).
 		Where(clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil}).
-		Where(clause.Neq{Column: clause.Column{Name: "end_at"}, Value: nil}).
-		Where(clause.Lte{Column: clause.Column{Name: "end_at"}, Value: now.UTC()}).
-		Pluck("id", &ids)
+		Where(clause.Eq{Column: clause.Column{Name: "deleting_at"}, Value: nil}).
+		Where(clause.Or(
+			clause.Neq{Column: clause.Column{Name: "closing_at"}, Value: nil},
+			clause.And(
+				clause.Neq{Column: clause.Column{Name: "end_at"}, Value: nil},
+				clause.Lte{Column: clause.Column{Name: "end_at"}, Value: now.UTC()},
+			),
+		)).
+		Where(notInIDs(skip)).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "created_at"}}).
+		Limit(limit), "id")
+}
+
+// IsEndedByID reports whether a program has an end date that is not after
+// now. It reads one row by its primary key. A program that is gone counts as
+// ended, so its hidden campaigns send nothing more.
+func (r *Program) IsEndedByID(ctx context.Context, id *uuid.UUID, now time.Time) (bool, error) {
+	rows := []database.Program{}
+	res := r.DB.WithContext(ctx).
+		Model(&database.Program{}).
+		Select("end_at").
+		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id}).
+		Limit(1).
+		Find(&rows)
 	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
+		return false, errs.Wrap(res.Error)
+	}
+	if len(rows) == 0 {
+		return true, nil
+	}
+	end := rows[0].EndAt
+	return end != nil && !now.Before(*end), nil
+}
+
+// uuidValues turns ids into values for an IN clause, skipping nil ones
+func uuidValues(ids []*uuid.UUID) []any {
+	values := make([]any, 0, len(ids))
+	for _, id := range ids {
+		if id != nil {
+			values = append(values, *id)
+		}
+	}
+	return values
+}
+
+// pluckUUIDs reads one uuid column of a query
+func pluckUUIDs(db *gorm.DB, column string) ([]*uuid.UUID, error) {
+	ids := []uuid.UUID{}
+	if err := db.Pluck(column, &ids).Error; err != nil {
+		return nil, errs.Wrap(err)
 	}
 	out := make([]*uuid.UUID, 0, len(ids))
 	for i := range ids {
 		out = append(out, &ids[i])
 	}
 	return out, nil
-}
-
-// programEnrollmentBatch is how many enrollments one insert or update writes
-const programEnrollmentBatch = 200
-
-// InsertEnrollments stores new enrollments in batches
-func (r *Program) InsertEnrollments(
-	ctx context.Context,
-	enrollments []*database.ProgramEnrollment,
-) error {
-	if len(enrollments) == 0 {
-		return nil
-	}
-	now := time.Now()
-	for _, enrollment := range enrollments {
-		if enrollment.ID == nil {
-			id := uuid.New()
-			enrollment.ID = &id
-		}
-		enrollment.CreatedAt = &now
-		enrollment.UpdatedAt = &now
-		// times are stored in UTC so text compares in the due scan hold
-		for _, t := range []**time.Time{&enrollment.RoundStartAt, &enrollment.NextDueAt, &enrollment.LastSendAt, &enrollment.MissingSince} {
-			if *t != nil {
-				u := (*t).UTC()
-				*t = &u
-			}
-		}
-	}
-	res := r.DB.WithContext(ctx).CreateInBatches(enrollments, programEnrollmentBatch)
-	return errs.Wrap(res.Error)
-}
-
-// UpdateEnrollmentsFields sets the same columns on many enrollments, in batches
-func (r *Program) UpdateEnrollmentsFields(
-	ctx context.Context,
-	ids []*uuid.UUID,
-	fields map[string]any,
-) error {
-	for k, v := range fields {
-		if t, ok := v.(time.Time); ok {
-			fields[k] = t.UTC()
-		}
-	}
-	AddUpdatedAt(fields)
-	for start := 0; start < len(ids); start += programEnrollmentBatch {
-		end := min(start+programEnrollmentBatch, len(ids))
-		values := make([]any, 0, end-start)
-		for _, id := range ids[start:end] {
-			values = append(values, id)
-		}
-		res := r.DB.WithContext(ctx).
-			Model(&database.ProgramEnrollment{}).
-			Where(clause.IN{Column: clause.Column{Name: "id"}, Values: values}).
-			Updates(fields)
-		if res.Error != nil {
-			return errs.Wrap(res.Error)
-		}
-	}
-	return nil
-}
-
-// UpdateEnrollmentFields updates columns on an enrollment.
-func (r *Program) UpdateEnrollmentFields(
-	ctx context.Context,
-	id *uuid.UUID,
-	fields map[string]any,
-) error {
-	// times are stored in UTC so text compares in the due scan hold
-	for k, v := range fields {
-		if t, ok := v.(time.Time); ok {
-			fields[k] = t.UTC()
-		}
-	}
-	AddUpdatedAt(fields)
-	res := r.DB.WithContext(ctx).
-		Model(&database.ProgramEnrollment{}).
-		Where("id = ?", id).
-		Updates(fields)
-	return errs.Wrap(res.Error)
-}
-
-// GetEnrollmentByProgramRecipient returns the enrollment for a recipient in a
-// program, or gorm.ErrRecordNotFound.
-func (r *Program) GetEnrollmentByProgramRecipient(
-	ctx context.Context,
-	programID *uuid.UUID,
-	recipientID *uuid.UUID,
-) (*database.ProgramEnrollment, error) {
-	var row database.ProgramEnrollment
-	res := r.DB.WithContext(ctx).
-		Where("program_id = ? AND recipient_id = ?", programID, recipientID).
-		First(&row)
-	if res.Error != nil {
-		return nil, res.Error
-	}
-	return &row, nil
-}
-
-// GetEnrollmentsByProgramID returns all enrollments of a program.
-func (r *Program) GetEnrollmentsByProgramID(
-	ctx context.Context,
-	programID *uuid.UUID,
-) ([]*database.ProgramEnrollment, error) {
-	var rows []*database.ProgramEnrollment
-	res := r.DB.WithContext(ctx).
-		Where("program_id = ?", programID).
-		Find(&rows)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	return rows, nil
-}
-
-// GetDueEnrollments returns active enrollments due at or before now, bounded by
-// limit so a large program drains over several ticks.
-func (r *Program) GetDueEnrollments(
-	ctx context.Context,
-	now time.Time,
-	limit int,
-) ([]*database.ProgramEnrollment, error) {
-	var rows []*database.ProgramEnrollment
-	// draft, scheduled, paused and closed programs do not advance, so their due
-	// rows must not take the places of other programs in the batch
-	running := r.DB.Model(&database.Program{}).
-		Select("id").
-		Where(r.runningPrograms(now))
-	res := r.DB.WithContext(ctx).
-		Where("status = ? AND next_due_at IS NOT NULL AND next_due_at <= ?", model.ProgramEnrollmentActive, now.UTC()).
-		// a person missing from the groups waits until they are back or exited
-		Where(clause.Eq{Column: clause.Column{Name: "missing_since"}, Value: nil}).
-		Where("program_id IN (?)", running).
-		Order("next_due_at ASC").
-		Limit(limit).
-		Find(&rows)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	return rows, nil
 }
 
 // ToProgram maps a program row to the model, without steps or groups.
@@ -1447,15 +1345,21 @@ func ToProgram(row *database.Program) (*model.Program, error) {
 		PausedAt:              pausedAt,
 		OrderMode:             nullable.NewNullableWithValue(row.OrderMode),
 		LoopMode:              nullable.NewNullableWithValue(row.LoopMode),
+		TemplateMixBy:         nullable.NewNullableWithValue(row.TemplateMixBy),
 		StepIntervalMinutes:   nullable.NewNullableWithValue(row.StepIntervalMinutes),
 		SpreadMinutes:         nullable.NewNullableWithValue(row.SpreadMinutes),
 		NewMemberDelayMinutes: nullable.NewNullableWithValue(row.NewMemberDelayMinutes),
 		TimeZone:              nullable.NewNullableWithValue(row.TimeZone),
 		StartedAt:             row.StartedAt,
+		ClosingAt:             row.ClosingAt,
+		DeletingAt:            row.DeletingAt,
+		ReplanPendingAt:       row.ReplanPendingAt,
+		ReplanOldEndAt:        row.ReplanOldEndAt,
 		ConstraintWeekDays:    weekDays,
 		ConstraintStartTime:   startTime,
 		ConstraintEndTime:     endTime,
 		IsAnonymous:           nullable.NewNullableWithValue(row.IsAnonymous),
+		SaveSubmittedData:     nullable.NewNullableWithValue(row.SaveSubmittedData),
 	}
 	program.StartAt = startAt
 	endAt := nullable.NewNullNullable[time.Time]()
@@ -1463,10 +1367,24 @@ func ToProgram(row *database.Program) (*model.Program, error) {
 		endAt.Set(*row.EndAt)
 	}
 	program.EndAt = endAt
+	anonymizeAt := nullable.NewNullNullable[time.Time]()
+	if row.AnonymizeAt != nil {
+		anonymizeAt.Set(*row.AnonymizeAt)
+	}
+	program.AnonymizeAt = anonymizeAt
+	dataAnonymizeAt := nullable.NewNullNullable[time.Time]()
+	if row.DataAnonymizeAt != nil {
+		dataAnonymizeAt.Set(*row.DataAnonymizeAt)
+	}
+	program.DataAnonymizeAt = dataAnonymizeAt
+	program.AnonymizedAt = row.AnonymizedAt
+	program.AnonymizingAt = row.AnonymizingAt
+	program.DataAnonymizedAt = row.DataAnonymizedAt
+	program.DataAnonymizingAt = row.DataAnonymizingAt
 	program.EndedAutomatically = row.ClosedAt != nil && row.EndAt != nil && !row.ClosedAt.Before(*row.EndAt)
 	program.BlackoutDates = nullable.NewNullableWithValue(model.ParseProgramBlackouts(row.BlackoutDates))
 	applyProgramSettingsRow(program, row)
-	program.Status = program.StatusAt(time.Now())
+	applyProgramReportRow(program, row)
 	return program, nil
 }
 
@@ -1483,11 +1401,33 @@ func ToProgramStep(row *database.ProgramStep) *model.ProgramStep {
 	return step
 }
 
-// uuidValues turns ids into values for an IN clause
-func uuidValues(ids []*uuid.UUID) []any {
-	values := make([]any, 0, len(ids))
-	for _, id := range ids {
-		values = append(values, *id)
-	}
-	return values
+// GetIDsWithReplanPending returns up to limit programs, not closed nor being
+// closed or deleted, with an edit whose people are not all planned again
+// yet, the oldest mark first
+func (r *Program) GetIDsWithReplanPending(ctx context.Context, limit int) ([]*uuid.UUID, error) {
+	return pluckUUIDs(r.DB.WithContext(ctx).
+		Model(&database.Program{}).
+		Where(clause.Neq{Column: clause.Column{Name: "replan_pending_at"}, Value: nil}).
+		Where(clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil}).
+		Where(clause.Eq{Column: clause.Column{Name: "closing_at"}, Value: nil}).
+		Where(clause.Eq{Column: clause.Column{Name: "deleting_at"}, Value: nil}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "replan_pending_at"}}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}}).
+		Limit(limit), "id")
+}
+
+// ClearReplanPending clears the replan mark of a program and the old end
+// with it, only while the mark is still the one given, so a newer mark is
+// kept. The updated time is left as it is, as the program itself does not
+// change.
+func (r *Program) ClearReplanPending(ctx context.Context, id *uuid.UUID, mark time.Time) error {
+	res := r.DB.WithContext(ctx).
+		Model(&database.Program{}).
+		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id}).
+		Where(clause.Eq{Column: clause.Column{Name: "replan_pending_at"}, Value: mark.UTC()}).
+		UpdateColumns(map[string]any{
+			"replan_pending_at": nil,
+			"replan_old_end_at": nil,
+		})
+	return errs.Wrap(res.Error)
 }

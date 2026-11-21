@@ -73,17 +73,14 @@ func (r *Asset) GetAllByDomainAndContext(
 	}
 
 	var dbModels []*database.Asset
-	dbRes := db.
+	dbRes := withPeek(db, queryArgs).
 		Find(&dbModels)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.ASSET_TABLE, queryArgs, assetAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbModels, queryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbModel := range dbModels {
@@ -111,18 +108,15 @@ func (r *Asset) GetAllByGlobalContext(
 		return result, errs.Wrap(err)
 	}
 	var dbModels []*database.Asset
-	dbRes := db.
-		Where("company_id IS NULL AND domain_id IS NULL").
+	dbRes := withPeek(db.
+		Where("company_id IS NULL AND domain_id IS NULL"), queryArgs).
 		Find(&dbModels)
 
 	if dbRes.Error != nil {
 		return nil, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.ASSET_TABLE, queryArgs, assetAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbModels, queryArgs)
 	result.HasNextPage = hasNextPage
 	for _, dbModel := range dbModels {
 		result.Rows = append(result.Rows, ToAsset(dbModel))
@@ -146,18 +140,15 @@ func (r *Asset) GetAllByCompanyContext(
 		return result, errs.Wrap(err)
 	}
 	var dbModels []*database.Asset
-	dbRes := db.
-		Where("company_id = ? AND domain_id IS NULL", companyID).
+	dbRes := withPeek(db.
+		Where("company_id = ? AND domain_id IS NULL", companyID), queryArgs).
 		Find(&dbModels)
 
 	if dbRes.Error != nil {
 		return nil, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.ASSET_TABLE, queryArgs, assetAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbModels, queryArgs)
 	result.HasNextPage = hasNextPage
 	for _, dbModel := range dbModels {
 		result.Rows = append(result.Rows, ToAsset(dbModel))

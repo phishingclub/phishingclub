@@ -19,6 +19,9 @@ var auditCoverageSkip = map[string]string{
 	"Session.Create": "event written last",
 	// timer job, failures repeat on every run and go to the error log
 	"Campaign.SchedulePendingCampaigns": "timer job",
+	// background delete passes audit each failure path themselves, throttled
+	"Company.finishDelete":        "background pass audits its failures",
+	"RecipientGroup.finishDelete": "background pass audits its failures",
 }
 
 var auditCoverageSkipName = regexp.MustCompile(

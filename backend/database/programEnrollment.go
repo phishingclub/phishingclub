@@ -19,9 +19,14 @@ type ProgramEnrollment struct {
 	CreatedAt *time.Time `gorm:"not null;index;"`
 	UpdatedAt *time.Time `gorm:"not null;index;"`
 
-	ProgramID   *uuid.UUID `gorm:"type:uuid;not null;index;uniqueIndex:idx_program_enrollments_program_recipient"`
-	Program     *Program
-	RecipientID *uuid.UUID `gorm:"type:uuid;not null;index;uniqueIndex:idx_program_enrollments_program_recipient"`
+	// the program_id lookups are served by the program and recipient index and
+	// the program, status and due index, which both lead with program_id
+	ProgramID *uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:idx_program_enrollments_program_recipient"`
+	Program   *Program
+	// RecipientID is null once the recipient is deleted, the enrollment then
+	// only counts, see UnlinkEnrollmentsOfRecipient. The unique index allows
+	// many null rows.
+	RecipientID *uuid.UUID `gorm:"type:uuid;index;uniqueIndex:idx_program_enrollments_program_recipient"`
 	Recipient   *Recipient
 
 	// Position is how many steps the recipient has been sent in the current loop.
@@ -40,7 +45,8 @@ type ProgramEnrollment struct {
 
 	// Status is 'active', 'exited', 'completed' or 'stopped'. Stopped is a
 	// person who was still active when the program closed.
-	Status      string     `gorm:"not null;default:'active';index"`
+	// the status lookups are served by the status and due index
+	Status      string     `gorm:"not null;default:'active'"`
 	ExitedAt    *time.Time `gorm:"index"`
 	CompletedAt *time.Time `gorm:"index"`
 
@@ -74,7 +80,31 @@ func (ProgramEnrollment) TableName() string {
 // Migrate adds the composite index the scheduler due scan reads every tick, so
 // it can seek the active rows and range over next_due_at already ordered.
 func (ProgramEnrollment) Migrate(db *gorm.DB) error {
-	return ensureIndex(db, "idx_program_enrollments_status_due",
-		`CREATE INDEX IF NOT EXISTS idx_program_enrollments_status_due
-			ON program_enrollments (status, next_due_at)`)
+	if err := ensureIndex(db, "idx_program_enrollments_status_due",
+		`CREATE INDEX idx_program_enrollments_status_due
+			ON program_enrollments (status, next_due_at)`); err != nil {
+		return err
+	}
+	if err := migrateProgramEnrollmentReadIndex(db); err != nil {
+		return err
+	}
+	return migrateProgramEnrollmentPseudonymIndex(db)
+}
+
+// migrateProgramEnrollmentPseudonymIndex adds the index the link of an
+// unlinked anonymous program send reads: the enrollment of a program that
+// carries a pseudonym is found without reading the other enrollments.
+func migrateProgramEnrollmentPseudonymIndex(db *gorm.DB) error {
+	return ensureIndex(db, "idx_program_enrollments_program_pseudonym",
+		`CREATE INDEX idx_program_enrollments_program_pseudonym
+			ON program_enrollments (program_id, anonymized_id)`)
+}
+
+// migrateProgramEnrollmentReadIndex adds the index the program page counts and
+// the program list read: the enrollments of a program by status and the
+// earliest next send are answered from the index alone, without the table.
+func migrateProgramEnrollmentReadIndex(db *gorm.DB) error {
+	return ensureIndex(db, "idx_program_enrollments_program_status_due",
+		`CREATE INDEX idx_program_enrollments_program_status_due
+			ON program_enrollments (program_id, status, next_due_at)`)
 }

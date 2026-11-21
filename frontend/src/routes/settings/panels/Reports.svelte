@@ -1,4 +1,6 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
+	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { addToast } from '$lib/store/toast';
@@ -16,6 +18,12 @@
 	import Editor from '$lib/components/editor/Editor.svelte';
 	import CompanyReportDeliveryModal from '$lib/components/modal/CompanyReportDeliveryModal.svelte';
 	import ReportPreviewPDF from '$lib/components/ReportPreviewPDF.svelte';
+	import {
+		programReportSampleData,
+		programReportCategories,
+		reportRowKind,
+		reportApiKind
+	} from '$lib/utils/programReportSample.js';
 
 	let loaded = false;
 
@@ -33,9 +41,9 @@
 	let reportTemplateID = null;
 	let reportTemplateError = '';
 	let isReportTemplateSubmitting = false;
-	// the phishing and training reports are separate templates; edit one at a time
+	// the phishing, training and program reports are separate templates; edit one at a time
 	let reportRows = [];
-	let reportKind = 'phishing'; // 'phishing' | 'training'
+	let reportKind = 'phishing'; // 'phishing' | 'training' | 'program'
 	let reportEditor;
 	let isUseDefaultAlertVisible = false;
 
@@ -130,7 +138,7 @@
 	const loadReportKind = (kind) => {
 		reportKind = kind;
 		reportTemplateError = '';
-		const row = reportRows.find((r) => !!r.isTraining === (kind === 'training'));
+		const row = reportRows.find((r) => reportRowKind(r) === kind);
 		reportTemplateContent = reportDrafts[kind] ?? (row?.content || '');
 		reportTemplateID = row?.id || null;
 		reportEditor?.replaceContent(reportTemplateContent);
@@ -139,7 +147,7 @@
 	// replaces the editor content with the built in default for the selected
 	// kind. nothing is stored until the user saves
 	const onConfirmUseDefault = async () => {
-		const response = await api.reportTemplate.getDefault(reportKind === 'training');
+		const response = await api.reportTemplate.getDefault(reportApiKind(reportKind));
 		if (response.success) {
 			reportTemplateContent = response.data?.content || '';
 			reportEditor?.replaceContent(reportTemplateContent, true);
@@ -152,7 +160,7 @@
 	const refreshReportRows = async () => {
 		const response = await api.reportTemplate.getAll(null);
 		reportRows = response.success ? response.data?.rows || [] : [];
-		const row = reportRows.find((r) => !!r.isTraining === (reportKind === 'training'));
+		const row = reportRows.find((r) => reportRowKind(r) === reportKind);
 		if (row?.id) {
 			reportTemplateID = row.id;
 		}
@@ -176,7 +184,8 @@
 			} else {
 				response = await api.reportTemplate.create({
 					content: reportTemplateContent,
-					isTraining: reportKind === 'training'
+					isTraining: reportKind === 'training',
+					isProgram: reportKind === 'program'
 				});
 				if (response.success && response.data?.id) {
 					reportTemplateID = response.data.id;
@@ -198,11 +207,14 @@
 			isReportTemplateSubmitting = false;
 		}
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 {#if loaded}
 <div class="flex flex-wrap gap-6">
-	<SettingsCard title="PDF Reports" description="Generate PDF reports for campaigns. Requires Chromium and system dependencies.">
+	<SettingsCard title="PDF Reports" description="Generate PDF reports for {showPrograms ? 'campaigns and programs' : 'campaigns'}. Requires Chromium and system dependencies.">
 		<div class="mt-2 space-y-4">
 			<div class="flex items-center gap-2">
 				<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
@@ -224,13 +236,13 @@
 	</SettingsCard>
 
 	{#if isReportPDFEnabled}
-		<SettingsCard title="Report Template" description="Default HTML template used when generating campaign PDF reports. Companies without their own template fall back to this.">
+		<SettingsCard title="Report Template" description="Default HTML templates used when generating {showPrograms ? 'campaign and program' : 'campaign'} PDF reports. Companies without their own template fall back to these.">
 			<svelte:fragment slot="footer">
 				<Button size={'large'} on:click={openReportTemplateModal}>Edit Template</Button>
 			</svelte:fragment>
 		</SettingsCard>
 
-		<SettingsCard title="Report Delivery" description="Default delivery settings used to email campaign reports. Companies without their own configuration fall back to this.">
+		<SettingsCard title="Report Delivery" description="Default delivery settings used to email {showPrograms ? 'campaign and program' : 'campaign'} reports. Companies without their own configuration fall back to this.">
 			<svelte:fragment slot="footer">
 				<Button size={'large'} on:click={() => (isReportDeliveryModalVisible = true)}
 					>Configure</Button
@@ -287,12 +299,20 @@
 						>
 							Training
 						</button>
+						<ConditionalDisplay show="simulation">
+							<button
+								type="button"
+								class="px-3 py-1 transition-colors duration-200 {reportKind === 'program'
+									? 'bg-cta-blue text-white'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+								on:click={() => selectReportKind('program')}
+							>
+								Program
+							</button>
+						</ConditionalDisplay>
 					</div>
 					<div class="ml-auto flex flex-wrap items-center justify-end gap-2">
-						<ReportPreviewPDF
-							content={reportTemplateContent}
-							isTraining={reportKind === 'training'}
-						/>
+						<ReportPreviewPDF content={reportTemplateContent} kind={reportApiKind(reportKind)} />
 						<ActionButton
 							variant="secondary"
 							icon="reset"
@@ -302,11 +322,17 @@
 						</ActionButton>
 					</div>
 				</div>
-				<Editor
-					bind:this={reportEditor}
-					contentType="report"
-					bind:value={reportTemplateContent}
-				/>
+				<!-- the program report has its own sample data and variables, which the
+				editor reads on mount -->
+				{#key reportKind === 'program'}
+					<Editor
+						bind:this={reportEditor}
+						contentType="report"
+						bind:value={reportTemplateContent}
+						reportSample={reportKind === 'program' ? programReportSampleData : null}
+						reportVariables={reportKind === 'program' ? programReportCategories : null}
+					/>
+				{/key}
 				<FormError message={reportTemplateError} />
 			</div>
 			<FormFooter isSubmitting={isReportTemplateSubmitting} closeModal={closeReportTemplateModal} />

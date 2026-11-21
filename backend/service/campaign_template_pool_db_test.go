@@ -1187,3 +1187,24 @@ func TestSelfManagedNewGroupStaysMixedAfterAdd(t *testing.T) {
 		}
 	}
 }
+
+// TestScheduleSkipsDeletingGroup checks a campaign scheduled late sends
+// nothing to the members of a group that is being deleted
+func TestScheduleSkipsDeletingGroup(t *testing.T) {
+	f := newPoolFixture(t)
+	a := f.template(templateOpts{})
+	kept := f.group([]string{"sales", "sales"})
+	deleting := f.group([]string{"it", "it", "it"})
+	if err := f.db.Model(&database.RecipientGroup{}).Where("id = ?", deleting).Update("deleting_at", time.Now().UTC()).Error; err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	campaignID := f.campaign([]uuid.UUID{a}, false, false)
+	campaign := f.loadCampaign(campaignID, kept)
+	campaign.RecipientGroupIDs = nullable.NewNullableWithValue([]*uuid.UUID{&kept, &deleting})
+	if err := f.svc.schedule(f.ctx, f.session, campaign); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	if rows := f.recipientsOf(campaignID); len(rows) != 2 {
+		t.Fatalf("got %d sends, want only the 2 of the group that is kept", len(rows))
+	}
+}

@@ -114,6 +114,73 @@ func TestBlackoutPickNeverLandsOnBlockedDay(t *testing.T) {
 	}
 }
 
+func TestYearlyBlackoutRepeats(t *testing.T) {
+	p := &model.Program{
+		BlackoutDates: nullable.NewNullableWithValue([]model.ProgramBlackout{
+			{From: "2024-12-25", To: "2024-12-25", Yearly: true},
+		}),
+	}
+	for _, year := range []int{2024, 2026, 2031} {
+		now := time.Date(year, 12, 25, 10, 0, 0, 0, time.UTC)
+		want := time.Date(year, 12, 26, 0, 0, 0, 0, time.UTC)
+		if got := programNextWindowSlot(p, now); !got.Equal(want) {
+			t.Fatalf("%d: expected %v, got %v", year, want, got)
+		}
+	}
+	// the same day of a year before the range was made is skipped too
+	if !p.IsBlackoutDay("2020-12-25") || p.IsBlackoutDay("2027-12-24") {
+		t.Fatalf("a yearly range must match on month and day only")
+	}
+	// a range that is not yearly does not repeat
+	p.BlackoutDates = nullable.NewNullableWithValue([]model.ProgramBlackout{{From: "2024-12-25", To: "2024-12-25"}})
+	if p.IsBlackoutDay("2026-12-25") {
+		t.Fatalf("a one time range must not repeat")
+	}
+}
+
+func TestYearlyBlackoutAcrossNewYear(t *testing.T) {
+	p := &model.Program{
+		BlackoutDates: nullable.NewNullableWithValue([]model.ProgramBlackout{
+			{From: "2024-12-24", To: "2025-01-01", Yearly: true},
+		}),
+	}
+	for _, d := range []string{"2026-12-24", "2026-12-31", "2027-01-01", "2030-12-28"} {
+		if !p.IsBlackoutDay(d) {
+			t.Errorf("%s should be skipped", d)
+		}
+	}
+	for _, d := range []string{"2026-12-23", "2027-01-02", "2027-06-15"} {
+		if p.IsBlackoutDay(d) {
+			t.Errorf("%s should not be skipped", d)
+		}
+	}
+	// a send on Dec 27 moves past the new year to Jan 2
+	now := time.Date(2026, 12, 27, 10, 0, 0, 0, time.UTC)
+	want := time.Date(2027, 1, 2, 0, 0, 0, 0, time.UTC)
+	if got := programNextWindowSlot(p, now); !got.Equal(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	// with a Monday only window, Monday Dec 28 2026 is skipped and Monday
+	// Jan 4 2027 is next
+	w := windowProgram(t)
+	w.BlackoutDates = p.BlackoutDates
+	got := programNextWindowSlot(w, time.Date(2026, 12, 22, 10, 0, 0, 0, time.UTC))
+	if want := time.Date(2027, 1, 4, 9, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	// picks over a spread across the holidays never land on a skipped day
+	w.StepIntervalMinutes = nullable.NewNullableWithValue(21 * 24 * 60)
+	w.SpreadMinutes = nullable.NewNullableWithValue(21 * 24 * 60)
+	roundStart := time.Date(2026, 12, 20, 0, 0, 0, 0, time.UTC)
+	rng := rand.New(rand.NewSource(5))
+	for i := 0; i < 200; i++ {
+		got := programPickSendTime(w, roundStart, roundStart, rng)
+		if w.IsBlackoutDay(got.Format(model.ProgramDateLayout)) {
+			t.Fatalf("pick %v is on a skipped day", got)
+		}
+	}
+}
+
 func TestBlackoutValidation(t *testing.T) {
 	name := nullable.NewNullableWithValue(*vo.NewString64Must("p"))
 	cases := []struct {
@@ -125,6 +192,22 @@ func TestBlackoutValidation(t *testing.T) {
 		{[]model.ProgramBlackout{{From: "2024-01-03", To: "2024-01-02"}}, false},
 		{[]model.ProgramBlackout{{From: "2024-1-3", To: "2024-01-04"}}, false},
 		{[]model.ProgramBlackout{{From: "", To: "2024-01-04"}}, false},
+		{[]model.ProgramBlackout{{From: "2024-12-24", To: "2025-01-01", Yearly: true}}, true},
+		{[]model.ProgramBlackout{{From: "2024-01-01", To: "2024-12-30", Yearly: true}}, true},
+		// a yearly range that covers every day of the year is refused
+		{[]model.ProgramBlackout{{From: "2024-01-01", To: "2024-12-31", Yearly: true}}, false},
+		{[]model.ProgramBlackout{{From: "2024-06-01", To: "2025-06-01", Yearly: true}}, false},
+		{[]model.ProgramBlackout{{From: "2024-12-26", To: "2024-12-25", Yearly: true}}, false},
+		// shorter than a year only because the next year has Feb 29, every other
+		// year it covers every day
+		{[]model.ProgramBlackout{{From: "2023-03-01", To: "2024-02-28", Yearly: true}}, false},
+		// Feb 28 stays free every year
+		{[]model.ProgramBlackout{{From: "2023-03-01", To: "2024-02-27", Yearly: true}}, true},
+		// a one off range covers at most a year
+		{[]model.ProgramBlackout{{From: "2027-01-01", To: "2027-12-31"}}, true},
+		{[]model.ProgramBlackout{{From: "2028-01-01", To: "2028-12-31"}}, true},
+		{[]model.ProgramBlackout{{From: "2027-01-01", To: "2028-01-01"}}, false},
+		{[]model.ProgramBlackout{{From: "2027-01-01", To: "2029-12-31"}}, false},
 	}
 	for i, c := range cases {
 		p := &model.Program{Name: name, BlackoutDates: nullable.NewNullableWithValue(c.ranges)}
@@ -262,5 +345,59 @@ func TestProgramStatus(t *testing.T) {
 	p.ClosedAt = nullable.NewNullableWithValue(now)
 	if s := p.StatusAt(now); s != model.ProgramStatusClosed {
 		t.Fatalf("got %s", s)
+	}
+}
+
+// TestLongBlackoutHoldsUntilItEnds checks a send is held until skip ranges
+// that run longer than one look ahead have ended, and never lands on a skip
+// day: Monday to Friday 09:00 to 17:00 with 2027-01-01 to 2029-12-31 skipped,
+// as one range saved before the one year cap and as three ranges of a year
+func TestLongBlackoutHoldsUntilItEnds(t *testing.T) {
+	window := func(ranges []model.ProgramBlackout) *model.Program {
+		return &model.Program{
+			// weekday bitmask: monday 2 to friday 32
+			ConstraintWeekDays:  nullable.NewNullableWithValue(*vo.NewCampaignWeekDaysMust(2 | 4 | 8 | 16 | 32)),
+			ConstraintStartTime: nullable.NewNullableWithValue(*vo.NewCampaignTimeConstraintMust("09:00")),
+			ConstraintEndTime:   nullable.NewNullableWithValue(*vo.NewCampaignTimeConstraintMust("17:00")),
+			BlackoutDates:       nullable.NewNullableWithValue(ranges),
+		}
+	}
+	programs := map[string]*model.Program{
+		"one range": window([]model.ProgramBlackout{{From: "2027-01-01", To: "2029-12-31"}}),
+		"three ranges": window([]model.ProgramBlackout{
+			{From: "2027-01-01", To: "2027-12-31"},
+			{From: "2028-01-01", To: "2028-12-31"},
+			{From: "2029-01-01", To: "2029-12-31"},
+		}),
+	}
+	// 2030-01-01 is a Tuesday
+	want := time.Date(2030, 1, 1, 9, 0, 0, 0, time.UTC)
+	for name, p := range programs {
+		for _, now := range []time.Time{
+			time.Date(2026, 12, 31, 18, 0, 0, 0, time.UTC),
+			time.Date(2027, 1, 4, 10, 0, 0, 0, time.UTC),
+			time.Date(2028, 6, 1, 10, 0, 0, 0, time.UTC),
+		} {
+			got := programNextWindowSlot(p, now)
+			if !got.Equal(want) {
+				t.Fatalf("%s from %v: expected %v, got %v", name, now, want, got)
+			}
+		}
+		rng := rand.New(rand.NewSource(7))
+		roundStart := time.Date(2026, 12, 28, 0, 0, 0, 0, time.UTC)
+		for i := 0; i < 50; i++ {
+			got := programPickSendTime(p, roundStart, time.Date(2027, 1, 2, 0, 0, 0, 0, time.UTC), rng)
+			if p.IsBlackoutDay(got.Format(model.ProgramDateLayout)) {
+				t.Fatalf("%s: pick %v is on a skip day", name, got)
+			}
+		}
+	}
+}
+
+// TestProgramSendDayLookAheadMatches checks the save check of the skip ranges
+// looks as far ahead as the scheduler looks for a window opening
+func TestProgramSendDayLookAheadMatches(t *testing.T) {
+	if programSlotMaxDays*programSlotMaxSearches != model.ProgramSendDayLookAheadDays {
+		t.Fatalf("look ahead %d days, the save check %d", programSlotMaxDays*programSlotMaxSearches, model.ProgramSendDayLookAheadDays)
 	}
 }

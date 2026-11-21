@@ -1,4 +1,5 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
@@ -334,6 +335,9 @@
 		// reset field
 		event.target.value = '';
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <HeadTitle title="Pages" />
@@ -434,7 +438,9 @@
 	<DeleteAlert
 		list={[
 			'Templates using this page will become unusable',
-			'Scheduled or active campaigns using this page will be cancelled'
+			'Scheduled or active campaigns using this page will be cancelled',
+			...(showPrograms ? ['Programs stop sending templates that use this page'] : []),
+			'A page used as deny or evasion page by an open campaign or program cannot be deleted. Closed ones lose the deny page, evasion page and filters'
 		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
@@ -444,7 +450,9 @@
 		title="Delete pages"
 		list={[
 			'Templates using these pages will become unusable',
-			'Scheduled or active campaigns using these pages will be cancelled'
+			'Scheduled or active campaigns using these pages will be cancelled',
+			...(showPrograms ? ['Programs stop sending templates that use these pages'] : []),
+			'Pages used as deny or evasion page by an open campaign or program cannot be deleted. Closed ones lose the deny page, evasion page and filters'
 		]}
 		name={`${$selection.size} page${$selection.size === 1 ? '' : 's'}`}
 		onClick={onClickBulkDelete}

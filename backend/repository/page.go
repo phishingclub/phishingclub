@@ -82,17 +82,14 @@ func (pa *Page) GetAll(
 		fields := assignTableToColumns(database.PAGE_TABLE, options.Fields)
 		db = db.Select(strings.Join(fields, ","))
 	}
-	dbRes := db.
+	dbRes := withPeek(db, options.QueryArgs).
 		Find(&dbPages)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.PAGE_TABLE, options.QueryArgs, pageAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbPages, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbPage := range dbPages {
@@ -124,17 +121,14 @@ func (pa *Page) GetAllByCompanyID(
 		fields := assignTableToColumns(database.PAGE_TABLE, options.Fields)
 		db = db.Select(strings.Join(fields, ","))
 	}
-	dbRes := db.
+	dbRes := withPeek(db, options.QueryArgs).
 		Find(&dbPages)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.PAGE_TABLE, options.QueryArgs, pageAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbPages, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbPage := range dbPages {

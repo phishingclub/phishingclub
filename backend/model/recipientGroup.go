@@ -34,6 +34,12 @@ type RecipientGroup struct {
 	IsDynamic   nullable.Nullable[bool]   `json:"isDynamic"`
 	FilterField nullable.Nullable[string] `json:"filterField"`
 	FilterValue nullable.Nullable[string] `json:"filterValue"`
+	// DeletingAt is set while a delete of the group runs in the background.
+	// It is read only.
+	DeletingAt *time.Time `json:"deletingAt"`
+	// DeleteFailure says why the delete of the group waits, kept in memory
+	// until the delete goes on
+	DeleteFailure string `json:"deleteFailure,omitempty"`
 
 	Recipients             []*Recipient             `json:"-"`
 	IsRecipientsLoaded     bool                     `json:"-"`

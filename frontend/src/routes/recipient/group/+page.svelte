@@ -1,7 +1,8 @@
 <script>
 	import { api } from '$lib/api/apiProxy.js';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
 	import { goto } from '$app/navigation';
 	import Headline from '$lib/components/Headline.svelte';
@@ -162,19 +163,57 @@
 		}
 	};
 
-	const refreshGroups = async () => {
+	// while a listed group is being deleted in the background the list is
+	// read again until it is gone
+	const deletingRefreshEvery = 5000;
+	let deletingTimer = null;
+	let isDestroyed = false;
+	const watchDeleting = (rows) => {
+		if (isDestroyed || !rows.some((g) => g.deletingAt)) {
+			clearTimeout(deletingTimer);
+			deletingTimer = null;
+			return;
+		}
+		if (deletingTimer) return;
+		deletingTimer = setTimeout(async () => {
+			await refreshGroups(false);
+			deletingTimer = null;
+			watchDeleting(groups);
+		}, deletingRefreshEvery);
+	};
+	$: watchDeleting(groups);
+	onDestroy(() => {
+		isDestroyed = true;
+		clearTimeout(deletingTimer);
+		deletingTimer = null;
+	});
+
+	// a group being deleted can not be changed
+	const deletingAttributes = (group) =>
+		group.deletingAt ? { disabled: true, title: 'The group is being deleted' } : {};
+
+	// a background refresh toasts only the first failure in a row, not one
+	// every few seconds
+	let refreshFailing = false;
+	const refreshGroups = async (showLoading = true) => {
+		const background = showLoading === false;
 		try {
-			isTableLoading = true;
-			// selection is current page only, drop it on every reload
-			selection.clear();
+			isTableLoading = !background;
+			// selection is current page only, drop it on a reload the user asked
+			// for, a background refresh of the same page keeps it
+			if (!background) selection.clear();
 			const res = await api.recipient.getAllGroups(tableURLParams, contextCompanyID);
 			if (!res.success) {
 				throw res.error;
 			}
-			groups = res.data.rows;
-			groupsHasNextPage = res.data.hasNextPage;
+			groups = res.data?.rows ?? [];
+			groupsHasNextPage = !!res.data?.hasNextPage;
+			refreshFailing = false;
 		} catch (e) {
-			addToast('Failed to load groups', 'Error');
+			if (!background || !refreshFailing) {
+				addToast('Failed to load groups', 'Error');
+			}
+			refreshFailing = true;
 			console.error('failed to load groups', e);
 		} finally {
 			isTableLoading = false;
@@ -311,7 +350,8 @@
 		await runBulkDelete({
 			ids: [...$selection],
 			deleteFn: api.recipient.deleteGroup,
-			noun: 'group'
+			noun: 'group',
+			doneVerb: 'Deleting'
 		});
 		await refreshGroups();
 		return { success: true };
@@ -435,6 +475,17 @@
 						<DynamicLabel />
 					{/if}
 					{group.name}
+					{#if group.deletingAt}
+						<span class="ml-2"
+							><StatusBadge
+								tone={group.deleteFailure ? 'warning' : 'danger'}
+								title={group.deleteFailure
+									? `The delete is waiting: ${group.deleteFailure}. Remove it and the delete continues on its own.`
+									: 'The group is deleted in the background'}
+								>Deleting</StatusBadge
+							></span
+						>
+					{/if}
 					{#if group.scimEnabled}
 						<span
 							class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
@@ -463,11 +514,13 @@
 							<TableUpdateButton
 								on:click={() => openDynamicUpdateModal(group.id)}
 								{...globalButtonDisabledAttributes(group, contextCompanyID)}
+								{...deletingAttributes(group)}
 							/>
 						{:else}
 							<TableUpdateButton
 								on:click={() => openUpdateModal(group.id)}
 								{...globalButtonDisabledAttributes(group, contextCompanyID)}
+								{...deletingAttributes(group)}
 							/>
 						{/if}
 						<TableDeleteButton
@@ -584,7 +637,8 @@
 			'Recipients not in any other group will become orphaned',
 			'Active campaign sends for recipients in this group will be cancelled',
 			'This group will be removed from any campaigns it is assigned to',
-			'Recipients are kept and their campaign history is left intact'
+			'Recipients are kept and their campaign history is left intact',
+			'A group used by an open program cannot be deleted'
 		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
@@ -596,7 +650,8 @@
 			'Recipients not in any other group will become orphaned',
 			'Active campaign sends for recipients in these groups will be cancelled',
 			'These groups will be removed from any campaigns they are assigned to',
-			'Recipients are kept and their campaign history is left intact'
+			'Recipients are kept and their campaign history is left intact',
+			'Groups used by an open program cannot be deleted'
 		]}
 		name={`${$selection.size} group${$selection.size === 1 ? '' : 's'}`}
 		onClick={onClickBulkDelete}

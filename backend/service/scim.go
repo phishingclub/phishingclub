@@ -314,6 +314,11 @@ type Scim struct {
 	OptionService               *Option
 	CampaignRepository          *repository.Campaign
 	CampaignRecipientRepository *repository.CampaignRecipient
+	ProgramRepository           *repository.Program
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
+	// RecipientGroupService forgets the delete state of a group SCIM removes
+	RecipientGroupService *RecipientGroup
 }
 
 // ServiceProviderConfig returns the static service provider configuration
@@ -659,6 +664,12 @@ func (s *Scim) CreateGroup(
 	req *ScimGroup,
 	baseURL string,
 ) (*ScimGroup, error) {
+	// the company read lock is held for the whole request, see deleteMarkLock
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	if strings.TrimSpace(req.DisplayName) == "" {
 		return nil, errs.NewSyntaxError(fmt.Errorf("displayName is required"))
 	}
@@ -710,6 +721,15 @@ func (s *Scim) ReplaceGroup(
 	req *ScimGroup,
 	baseURL string,
 ) (*ScimGroup, error) {
+	// the company read lock is held for the whole request, see deleteMarkLock
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
+	// the group read lock is held for the whole request, so the check that
+	// the group is not being deleted holds for its writes
+	defer groupDeleteLock.read(groupID)()
 	existing, err := s.RecipientGroupRepository.GetByID(ctx, groupID, &repository.RecipientGroupOption{
 		WithRecipients: true,
 	})
@@ -723,6 +743,10 @@ func (s *Scim) ReplaceGroup(
 	gCompanyID, compErr := existing.CompanyID.Get()
 	if compErr != nil || gCompanyID != *companyID {
 		return nil, errs.Wrap(gorm.ErrRecordNotFound)
+	}
+	// a group that is being deleted takes no more changes
+	if existing.DeletingAt != nil {
+		return nil, errs.NewValidationError(errGroupDeleting)
 	}
 
 	if strings.TrimSpace(req.DisplayName) != "" {
@@ -763,6 +787,15 @@ func (s *Scim) PatchGroup(
 	patch *ScimGroupPatchOp,
 	baseURL string,
 ) (*ScimGroup, error) {
+	// the company read lock is held for the whole request, see deleteMarkLock
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
+	// the group read lock is held for the whole request, so the check that
+	// the group is not being deleted holds for its writes
+	defer groupDeleteLock.read(groupID)()
 	existing, err := s.RecipientGroupRepository.GetByID(ctx, groupID, &repository.RecipientGroupOption{
 		WithRecipients: true,
 	})
@@ -776,6 +809,10 @@ func (s *Scim) PatchGroup(
 	gCompanyID, compErr := existing.CompanyID.Get()
 	if compErr != nil || gCompanyID != *companyID {
 		return nil, errs.Wrap(gorm.ErrRecordNotFound)
+	}
+	// a group that is being deleted takes no more changes
+	if existing.DeletingAt != nil {
+		return nil, errs.NewValidationError(errGroupDeleting)
 	}
 
 	for _, op := range patch.Operations {
@@ -837,11 +874,40 @@ func (s *Scim) DeleteGroup(
 		s.Logger.Errorw("scim delete group: failed to remove group from campaigns", "error", err)
 		return errs.Wrap(err)
 	}
+	// the identity provider owns the group, so a program using it never blocks
+	// the delete: the group is removed from the program, which then stops
+	// enrolling its members
+	programNames := []string{}
+	if s.ProgramRepository != nil {
+		programNames, err = s.ProgramRepository.GetNamesByRecipientGroupID(ctx, groupID)
+		if err != nil {
+			s.Logger.Errorw("scim delete group: failed to get programs using the group", "error", err)
+			return errs.Wrap(err)
+		}
+		if err := s.ProgramRepository.RemoveRecipientGroupFromPrograms(ctx, groupID); err != nil {
+			s.Logger.Errorw("scim delete group: failed to remove group from programs", "error", err)
+			return errs.Wrap(err)
+		}
+		if len(programNames) > 0 {
+			s.Logger.Infow("scim delete group: removed the group from programs",
+				"groupId", groupID.String(),
+				"programs", programNames,
+			)
+		}
+	}
 	if err := s.RecipientGroupRepository.DeleteByID(ctx, groupID); err != nil {
 		s.Logger.Errorw("scim delete group: failed to delete group", "error", err)
 		return errs.Wrap(err)
 	}
-	s.auditScim("Scim.DeleteGroup", config, map[string]any{"groupId": groupID.String()})
+	details := map[string]any{"groupId": groupID.String()}
+	if len(programNames) > 0 {
+		details["removedFromPrograms"] = programNames
+	}
+	s.auditScim("Scim.DeleteGroup", config, details)
+	// a delete of the group that was under way has nothing left to do
+	if s.RecipientGroupService != nil {
+		s.RecipientGroupService.forgetDelete(*groupID)
+	}
 	return nil
 }
 
@@ -1014,6 +1080,12 @@ func (s *Scim) CreateUser(
 	scimUser *ScimUser,
 	baseURL string,
 ) (*ScimUser, error) {
+	// the company read lock is held for the whole request, see deleteMarkLock
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	email, err := canonicalEmail(scimUser)
 	if err != nil {
 		return nil, errs.NewValidationError(err)
@@ -1109,6 +1181,12 @@ func (s *Scim) ReplaceUser(
 	scimUser *ScimUser,
 	baseURL string,
 ) (*ScimUser, error) {
+	// the company read lock is held for the whole request, see deleteMarkLock
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	existing, err := s.RecipientRepository.GetByID(ctx, recipientID, &repository.RecipientOption{})
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1165,6 +1243,12 @@ func (s *Scim) PatchUser(
 	patch *ScimPatchOp,
 	baseURL string,
 ) (*ScimUser, error) {
+	// the company read lock is held for the whole request, see deleteMarkLock
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	existing, err := s.RecipientRepository.GetByID(ctx, recipientID, &repository.RecipientOption{})
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1246,12 +1330,28 @@ func (s *Scim) DeprovisionUser(
 // returns (config, authed, error). authed is false when the token is wrong.
 // A refused token for a company with SCIM set up is audited. A company
 // without SCIM writes no event, so random requests do not fill the log.
+// companyDeleting reports whether the company of a SCIM request is being
+// deleted
+func (s *Scim) companyDeleting(ctx context.Context, companyID *uuid.UUID) (bool, error) {
+	if s.CompanyRepository == nil {
+		return false, nil
+	}
+	return s.CompanyRepository.IsDeleting(ctx, companyID)
+}
+
 func (s *Scim) VerifyAndLoadConfig(
 	ctx context.Context,
 	companyID *uuid.UUID,
 	plainToken string,
 	ip string,
 ) (*model.CompanyScimConfig, bool, error) {
+	// a company that is being deleted takes no more provisioning
+	if deleting, err := s.companyDeleting(ctx, companyID); err != nil {
+		return nil, false, errs.Wrap(err)
+	} else if deleting {
+		s.auditScimAuthFailed(companyID, ip, "companyDeleting")
+		return nil, false, nil
+	}
 	ok, config, err := s.CompanyScimConfigService.VerifyToken(ctx, companyID, plainToken)
 	if err != nil {
 		return nil, false, err
@@ -1313,7 +1413,9 @@ func (s *Scim) deprovisionRecipient(ctx context.Context, recipientID *uuid.UUID)
 	}
 	// cancel pending sends in active campaigns so no email reaches the disabled
 	// recipient; the rows are kept (cancelled, not deleted) so stats and any
-	// already-sent tracking links stay consistent
+	// already sent tracking links stay consistent. The sends of a program are
+	// kept: the sender skips a disabled person and the program cancels them
+	// once the person is gone from its groups past the grace period
 	return s.CampaignRecipientRepository.CancelInActiveCampaigns(ctx, recipientID)
 }
 
@@ -1549,20 +1651,35 @@ func (s *Scim) syncUserGroupMembership(
 		if err != nil {
 			continue
 		}
-		// verify the group belongs to this company before adding
-		group, err := s.RecipientGroupRepository.GetByID(ctx, &gid, &repository.RecipientGroupOption{})
-		if err != nil {
-			s.Logger.Warnw("scim sync group membership: group not found, skipping", "groupID", gid.String())
-			continue
+		if err := s.addToGroup(ctx, companyID, &gid, recipientID); err != nil {
+			return err
 		}
-		gCompanyID, compErr := group.CompanyID.Get()
-		if compErr != nil || gCompanyID != *companyID {
-			s.Logger.Warnw("scim sync group membership: group does not belong to company, skipping", "groupID", gid.String())
-			continue
-		}
-		if err := s.RecipientGroupRepository.AddRecipients(ctx, &gid, []*uuid.UUID{recipientID}); err != nil {
-			return errs.Wrap(err)
-		}
+	}
+	return nil
+}
+
+// addToGroup adds a recipient to a group of the company. A group that is
+// gone, of another company or being deleted is skipped. The read lock of the
+// group keeps a delete mark from passing between the check and the write.
+func (s *Scim) addToGroup(ctx context.Context, companyID *uuid.UUID, gid *uuid.UUID, recipientID *uuid.UUID) error {
+	defer groupDeleteLock.read(gid)()
+	// verify the group belongs to this company before adding
+	group, err := s.RecipientGroupRepository.GetByID(ctx, gid, &repository.RecipientGroupOption{})
+	if err != nil {
+		s.Logger.Warnw("scim sync group membership: group not found, skipping", "groupID", gid.String())
+		return nil
+	}
+	gCompanyID, compErr := group.CompanyID.Get()
+	if compErr != nil || gCompanyID != *companyID {
+		s.Logger.Warnw("scim sync group membership: group does not belong to company, skipping", "groupID", gid.String())
+		return nil
+	}
+	if group.DeletingAt != nil {
+		s.Logger.Warnw("scim sync group membership: group is being deleted, skipping", "groupID", gid.String())
+		return nil
+	}
+	if err := s.RecipientGroupRepository.AddRecipients(ctx, gid, []*uuid.UUID{recipientID}); err != nil {
+		return errs.Wrap(err)
 	}
 	return nil
 }

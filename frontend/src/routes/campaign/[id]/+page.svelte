@@ -1,5 +1,6 @@
 <script>
 	import { page } from '$app/stores';
+	import Note from '$lib/components/Note.svelte';
 	import { onMount, tick } from 'svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import Headline from '$lib/components/Headline.svelte';
@@ -44,6 +45,11 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import RelativeTime from '$lib/components/RelativeTime.svelte';
 	import ToolTip from '$lib/components/ToolTip.svelte';
+	import ReportInboxRow from '$lib/components/ReportInboxRow.svelte';
+	import {
+		reportInboxStatus,
+		reportInboxSettingsHref as inboxSettingsHref
+	} from '$lib/utils/reportInbox.js';
 	import TestLabel from '$lib/components/TestLabel.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import { autoRefreshStore } from '$lib/store/autoRefresh';
@@ -51,22 +57,19 @@
 	import Alert from '$lib/components/Alert.svelte';
 	import EventTimeline from '$lib/components/EventTimeline.svelte';
 	import CellCopy from '$lib/components/table/CopyCell.svelte';
-	import FormGrid from '$lib/components/FormGrid.svelte';
-	import FormColumns from '$lib/components/FormColumns.svelte';
-	import FormColumn from '$lib/components/FormColumn.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TableDeleteButton from '$lib/components/table/TableDeleteButton2.svelte';
 	import EventName from '$lib/components/table/EventName.svelte';
+	import EventDataCell from '$lib/components/table/EventDataCell.svelte';
+	import SessionCaptureModal from '$lib/components/SessionCaptureModal.svelte';
+	import RecipientEventsModal from '$lib/components/RecipientEventsModal.svelte';
 	import { goto } from '$app/navigation';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 	import ActionButton from '$lib/components/ActionButton.svelte';
-	import papaparse from 'papaparse';
-	import FormFooter from '$lib/components/FormFooter.svelte';
+	import ReportedUploadModal from '$lib/components/ReportedUploadModal.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import FormError from '$lib/components/FormError.svelte';
-	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
-	import Button from '$lib/components/Button.svelte';
 	import { resourceContext } from '$lib/store/resourceContext';
 	import RemoteBrowserStream from '$lib/components/remote-browser/RemoteBrowserStream.svelte';
 	import LiveSessionBadgeDropdown from '$lib/components/remote-browser/LiveSessionBadgeDropdown.svelte';
@@ -377,7 +380,9 @@
 		if (ms === 0 || n <= 1) {
 			resumeSendEndAt = resumeSendStartAt;
 		} else if (ms) {
-			resumeSendEndAt = new Date(new Date(resumeSendStartAt).getTime() + (n - 1) * ms).toISOString();
+			resumeSendEndAt = new Date(
+				new Date(resumeSendStartAt).getTime() + (n - 1) * ms
+			).toISOString();
 		}
 	}
 	// resume scheduling mode: 'basic' is the Time Box window above, 'schedule' is the
@@ -388,7 +393,12 @@
 	// Self Managed which does not apply when resuming a scheduled campaign
 	const resumeScheduleOptions = [
 		{ label: 'Time Box', value: 'basic', icon: '🕒', description: 'Send within defined time box' },
-		{ label: 'Daily Slots', value: 'schedule', icon: '📅', description: 'Schedule specific times each day' }
+		{
+			label: 'Daily Slots',
+			value: 'schedule',
+			icon: '📅',
+			description: 'Schedule specific times each day'
+		}
 	];
 	// Daily Slots state: the date range, the selected week days, and the daily hours
 	let resumeScheduledStartAt = null;
@@ -438,36 +448,13 @@
 	let isLureCodeModalVisible = false;
 	let isSessionSushiModalVisible = false;
 	let isTrackingPixelWarningVisible = false;
-	let isReportedCSVModalVisible = false;
-	let isReportedCSVSubmitting = false;
 	let isGenerateReportModalVisible = false;
 	let isReportPDFEnabled = false;
-	let reportedCSVFile = null;
-	/** @type {HTMLInputElement} */
-	let reportedCSVInput;
-	let reportedCSVHeaders = [];
-	let reportedCSVPreview = [];
-	let reportedEmailColumn = '';
-	let reportedDateColumn = '';
-	// option labels for the column selects, one per column in file order, so the
-	// label position is the column index sent to the server
-	let reportedCSVColumnLabels = [];
-	// set when an import finished with failed rows, switches the modal to a result view
-	let reportedCSVResult = null;
-	// whole file error from the server, shown in the form
-	let reportedCSVError = '';
-	$: reportedCSVErrorsHeading = (() => {
-		if (!reportedCSVResult) return '';
-		const shown = reportedCSVResult.errors.length;
-		const total = reportedCSVResult.failed;
-		if (total > shown) {
-			return `Some rows could not be imported. First ${shown} of ${total} errors:`;
-		}
-		return `Some rows could not be imported. ${total === 1 ? 'Error' : 'Errors'}:`;
-	})();
+	// the shared reported CSV import dialog
+	let reportedUpload;
 	let pendingEmailPreviewRecipient = null;
-	let storedCookieData = '';
-	let storedTokenData = '';
+	// formatted cookies or tokens shown in the Session Sushi import help
+	let sessionCaptureData = '';
 	let isDeleteEventAlertVisible = false;
 	let deleteEventValues = {
 		id: null,
@@ -514,11 +501,6 @@
 	// reporting inbox that covers this campaign: the company inbox, or the global one
 	// for a campaign without a company. null when none is configured or not readable.
 	let reportInbox = null;
-	// checks run every 2 minutes and one can take up to 3 minutes, so a healthy
-	// inbox is checked within about 6 minutes. older than the first limit is a
-	// delay, older than the second means the checker is not running
-	const REPORT_INBOX_WARN_MINUTES = 8;
-	const REPORT_INBOX_STALE_MINUTES = 15;
 	let reportInboxNow = Date.now();
 	let reportInboxNowInterval = null;
 
@@ -875,11 +857,7 @@
 				since = new Date(isNaN(createdMs) ? back : Math.max(back, createdMs)).toISOString();
 			}
 			for (;;) {
-				const res = await api.campaign.getAllEventsByCampaignID(
-					$page.params.id,
-					options,
-					since
-				);
+				const res = await api.campaign.getAllEventsByCampaignID($page.params.id, options, since);
 				if (res.data?.rows) {
 					rows = rows.concat(res.data.rows);
 				}
@@ -1195,7 +1173,11 @@
 	// shown, also when the anonymous check finishes after the dialog opened
 	const loadSendMessageTemplate = () => {
 		const campaignRecipientID = sendMessageRecipient?.id;
-		if (!campaignRecipientID || hidesRecipientTemplate || sendMessageRequested === campaignRecipientID) {
+		if (
+			!campaignRecipientID ||
+			hidesRecipientTemplate ||
+			sendMessageRequested === campaignRecipientID
+		) {
 			return;
 		}
 		sendMessageRequested = campaignRecipientID;
@@ -1616,68 +1598,10 @@
 		isAnonymizeDataModalVisible = false;
 	};
 
-	const closeSessionSushiModal = () => {
-		isSessionSushiModalVisible = false;
-		storedCookieData = '';
-		storedTokenData = '';
-	};
-
-	const onSessionSushiModalOk = () => {
-		closeSessionSushiModal();
-	};
-
-	/** @param {string} eventData @param {string} eventName */
-	const onClickCopyEventData = async (eventData, eventName) => {
-		try {
-			// remove emoji prefix before copying
-			let dataWithoutEmoji = eventData;
-			if (eventData.startsWith('🍪 ')) dataWithoutEmoji = eventData.substring(2);
-			else if (eventData.startsWith('🔑 ')) dataWithoutEmoji = eventData.substring(2);
-			await navigator.clipboard.writeText(dataWithoutEmoji);
-
-			if (eventName === 'campaign_recipient_submitted_data' && eventData.startsWith('🍪')) {
-				storedCookieData = eventData;
-				storedTokenData = '';
-				isSessionSushiModalVisible = true;
-			} else if (eventName === 'campaign_recipient_submitted_data' && eventData.startsWith('🔑')) {
-				storedTokenData = eventData;
-				storedCookieData = '';
-				isSessionSushiModalVisible = true;
-			}
-
-			addToast('Copied to clipboard', 'Success');
-		} catch (e) {
-			addToast('Failed to copy data to clipboard', 'Error');
-			console.error('failed to copy data to clipboard', e);
-		}
-	};
-
-	const onClickCopyCookies = async () => {
-		try {
-			// remove the cookie emoji prefix before copying
-			const dataWithoutEmoji = storedCookieData.startsWith('🍪 ')
-				? storedCookieData.substring(2)
-				: storedCookieData;
-			await navigator.clipboard.writeText(dataWithoutEmoji);
-			addToast('Copied to clipboard', 'Success');
-		} catch (e) {
-			addToast('Failed to copy cookie data', 'Error');
-			console.error('failed to copy cookie data', e);
-		}
-	};
-
-	const onClickCopyTokens = async () => {
-		try {
-			// remove the token emoji prefix before copying
-			const dataWithoutEmoji = storedTokenData.startsWith('🔑 ')
-				? storedTokenData.substring(2)
-				: storedTokenData;
-			await navigator.clipboard.writeText(dataWithoutEmoji);
-			addToast('Copied to clipboard', 'Success');
-		} catch (e) {
-			addToast('Failed to copy token data', 'Error');
-			console.error('failed to copy token data', e);
-		}
+	/** @param {string} formatted */
+	const showSessionCapture = (formatted) => {
+		sessionCaptureData = formatted;
+		isSessionSushiModalVisible = true;
 	};
 
 	const openDeleteEventAlert = (event) => {
@@ -1904,49 +1828,18 @@
 		reportInboxNow = Date.now();
 	};
 
-	// counts from the last check, or from when it was turned on if it never checked
-	$: reportInboxCheckedAt = reportInbox?.lastPolledAt || reportInbox?.readSince || null;
-	$: reportInboxAgeMinutes = reportInboxCheckedAt
-		? Math.max(0, Math.floor((reportInboxNow - new Date(reportInboxCheckedAt).getTime()) / 60000))
-		: null;
-	// gray when disabled, red on an error or no check for too long, yellow when
-	// checks are late or have not happened yet, green otherwise
-	$: reportInboxDot = !reportInbox
-		? null
-		: !reportInbox.enabled
-			? { color: 'bg-gray-400 dark:bg-gray-500', label: 'Disabled' }
-			: reportInbox.lastError
-				? { color: 'bg-red-500', label: 'Error' }
-				: reportInboxAgeMinutes === null
-					? { color: 'bg-yellow-400', label: 'Not checked yet' }
-					: reportInboxAgeMinutes > REPORT_INBOX_STALE_MINUTES
-						? { color: 'bg-red-500', label: 'Not checking' }
-						: reportInboxAgeMinutes >= REPORT_INBOX_WARN_MINUTES
-							? { color: 'bg-yellow-400', label: 'Delayed' }
-							: { color: 'bg-green-500', label: 'Active' };
-	$: reportInboxTone = !reportInboxDot
-		? 'neutral'
-		: { Active: 'success', Delayed: 'warning', 'Not checked yet': 'warning', Error: 'danger', 'Not checking': 'danger' }[
-				reportInboxDot.label
-			] ?? 'neutral';
-	$: reportInboxLastCheck =
-		!reportInboxDot || !reportInbox.enabled
-			? ''
-			: reportInboxAgeMinutes === null
-				? 'Last check never'
-				: `Last check ${shortDateTime(reportInboxCheckedAt)}`;
 	// the inbox row shows only when the inbox for this campaign's scope is enabled;
 	// the inbox skips closed campaigns
-	$: showReportInboxRow = !!(reportInbox?.enabled && reportInboxDot && !campaign.closedAt);
+	$: showReportInboxRow = !!(
+		reportInbox?.enabled &&
+		reportInboxStatus(reportInbox, reportInboxNow) &&
+		!campaign.closedAt
+	);
 	$: showImportReportedRow =
 		!campaign.anonymizedAt && campaign.notableEventName !== 'campaign_pending_schedule';
 	// the global inbox is only managed in the global context, so a global campaign
 	// viewed in a company context gets no link
-	$: reportInboxSettingsHref = campaign.companyID
-		? `/company/${campaign.companyID}#reporting`
-		: contextCompanyID
-			? null
-			: '/settings#reporting';
+	$: reportInboxSettingsHref = inboxSettingsHref(campaign.companyID, contextCompanyID);
 
 	const onClickSendReport = () => {
 		if (!isReportPDFEnabled) {
@@ -2115,271 +2008,15 @@
 		goto(`/campaign?update=${$page.params.id}`);
 	};
 
-	const onUploadReportedCSV = async (event) => {
-		const file = event.target.files?.[0];
-		if (!file) return;
+	const uploadReportedCSV = (file, emailColumn, dateColumn) =>
+		api.campaign.uploadReported($page.params.id, file, emailColumn, dateColumn);
 
-		// validate file type
-		if (!file.name.toLowerCase().endsWith('.csv')) {
-			addToast('Please select a CSV file', 'Error');
-			event.target.value = '';
-			return;
-		}
-
-		// parse csv file to extract headers and preview
-		papaparse.parse(file, {
-			preview: 5, // preview first 5 rows
-			skipEmptyLines: true,
-			// the server only splits on commas, so the preview must too
-			delimiter: ',',
-			complete: (results) => {
-				if (!results.data || results.data.length < 2) {
-					addToast('CSV file must have headers and at least one data row', 'Error');
-					event.target.value = '';
-					return;
-				}
-
-				reportedCSVFile = file;
-				reportedCSVHeaders = results.data[0]; // first row is headers
-				reportedCSVPreview = results.data.slice(1); // remaining rows are data preview
-				reportedCSVColumnLabels = toReportedColumnLabels(reportedCSVHeaders);
-				reportedEmailColumn = '';
-				reportedDateColumn = '';
-				reportedCSVResult = null;
-				reportedCSVError = '';
-				isReportedCSVModalVisible = true;
-
-				// clear the file input
-				event.target.value = '';
-			},
-			error: (error) => {
-				addToast(`Failed to parse CSV: ${error.message}`, 'Error');
-				event.target.value = '';
-			}
-		});
+	// refresh the stats, events, and recipients table after an import
+	const onReportedImported = async () => {
+		await setResults();
+		await refreshCampaignRecipients();
+		await getEvents();
 	};
-
-	// build one unique label per column. Empty or repeated headers get the
-	// column number added so each label points at exactly one column.
-	const toReportedColumnLabels = (headers) => {
-		const counts = {};
-		for (const h of headers) {
-			const name = String(h ?? '').trim();
-			counts[name] = (counts[name] || 0) + 1;
-		}
-		const used = new Set();
-		return headers.map((h, i) => {
-			const name = String(h ?? '').trim();
-			let label = name;
-			if (!name) {
-				label = `(column ${i + 1})`;
-			} else if (counts[name] > 1) {
-				label = `${name} (column ${i + 1})`;
-			}
-			// a header could already look like a generated label, keep labels unique
-			while (used.has(label)) {
-				label = `${label} (column ${i + 1})`;
-			}
-			used.add(label);
-			return label;
-		});
-	};
-
-	const closeReportedCSVModal = () => {
-		isReportedCSVModalVisible = false;
-		reportedCSVFile = null;
-		reportedCSVHeaders = [];
-		reportedCSVPreview = [];
-		reportedCSVColumnLabels = [];
-		reportedEmailColumn = '';
-		reportedDateColumn = '';
-		reportedCSVResult = null;
-		reportedCSVError = '';
-	};
-
-	const onConfirmUploadReportedCSV = async () => {
-		if (!reportedCSVFile) return;
-		reportedCSVError = '';
-
-		// the selected label maps back to its column index
-		const emailColIndex = reportedCSVColumnLabels.indexOf(reportedEmailColumn);
-		const dateColIndex = reportedCSVColumnLabels.indexOf(reportedDateColumn);
-		if (emailColIndex < 0 || dateColIndex < 0) {
-			reportedCSVError = 'Select both the email and the date column from the list';
-			return;
-		}
-
-		try {
-			isReportedCSVSubmitting = true;
-			showIsLoading();
-			const res = await api.campaign.uploadReported(
-				$page.params.id,
-				reportedCSVFile,
-				emailColIndex,
-				dateColIndex
-			);
-			if (!res.success) {
-				reportedCSVError = res.error || `Import failed (HTTP ${res.statusCode})`;
-				return;
-			}
-			const data = res.data || {};
-			// refresh the stats, events, and recipients table
-			await setResults();
-			await refreshCampaignRecipients();
-			await getEvents();
-
-			const processed = data.processed || 0;
-			const already = data.alreadyReported || 0;
-			const failed = data.failed || 0;
-			if (failed === 0) {
-				let msg = `Marked ${processed} ${processed === 1 ? 'recipient' : 'recipients'} as reported`;
-				if (already > 0) {
-					msg += `, ${already} already reported`;
-				}
-				addToast(msg, 'Success');
-				closeReportedCSVModal();
-				return;
-			}
-			reportedCSVResult = {
-				processed,
-				alreadyReported: already,
-				failed,
-				errors: Array.isArray(data.errors) ? data.errors : []
-			};
-		} catch (error) {
-			console.error('Upload error:', error);
-			reportedCSVError = 'Network error: failed to upload the CSV file';
-		} finally {
-			isReportedCSVSubmitting = false;
-			hideIsLoading();
-		}
-	};
-
-	// helper function to format cookie capture data
-	const formatEventData = (eventData, eventName) => {
-		if (!eventData || eventName !== 'campaign_recipient_submitted_data') {
-			return eventData;
-		}
-
-		try {
-			// parse the event data as JSON
-			const parsedData = JSON.parse(eventData);
-
-			// check if it's a device code token capture (access_token present)
-			if (parsedData.capture_type === 'device_code' && parsedData.access_token) {
-				const tokenPayload = {
-					access_token: parsedData.access_token,
-					refresh_token: parsedData.refresh_token || '',
-					id_token: parsedData.id_token || '',
-					user_code: parsedData.user_code || '',
-					client_id: parsedData.client_id || ''
-				};
-				return '🔑 ' + JSON.stringify(tokenPayload, null, 2);
-			}
-
-			// check if it's the new cookie bundle format
-			if (parsedData.capture_type === 'cookie' && parsedData.cookies) {
-				const cookies = [];
-
-				// iterate through each captured cookie
-				for (const [captureName, cookieData] of Object.entries(parsedData.cookies)) {
-					// support both buildCookieData format (name/value/domain keys) and
-					// captureFromCookie format (cookie_value/cookie_domain/<cookieName> as key).
-					// prefer the structured keys, fall back to the legacy ones.
-					const cookieValue = cookieData.value || cookieData.cookie_value || '';
-					const cookieDomain = cookieData.domain || cookieData.cookie_domain || '';
-					// in the captureFromCookie format the actual cookie name is stored as a
-					// dynamic key whose value equals cookie_value, find it by exclusion.
-					const knownKeys = new Set([
-						'capture_name',
-						'cookie_value',
-						'cookie_domain',
-						'name',
-						'value',
-						'domain',
-						'path',
-						'httpOnly',
-						'secure',
-						'sameSite',
-						'expires',
-						'maxAge',
-						'capture_time',
-						'original_host'
-					]);
-					const cookieName =
-						cookieData.name ||
-						Object.keys(cookieData).find(
-							(k) => !knownKeys.has(k) && cookieData[k] === cookieValue
-						) ||
-						captureName;
-
-					// convert SameSite attribute to browser extension format
-					let sameSite = 'no_restriction';
-					if (cookieData.sameSite) {
-						switch (cookieData.sameSite.toLowerCase()) {
-							case 'strict':
-								sameSite = 'strict';
-								break;
-							case 'lax':
-								sameSite = 'lax';
-								break;
-							case 'none':
-								sameSite = 'no_restriction';
-								break;
-							default:
-								sameSite = 'no_restriction';
-						}
-					}
-
-					// determine if this is a host-only cookie
-					const domain = cookieDomain;
-					const hostOnly = domain && !domain.startsWith('.');
-
-					// convert to browser extension compatible format
-					const browserCookie = {
-						domain: domain,
-						hostOnly: hostOnly,
-						httpOnly: cookieData.httpOnly === 'true',
-						name: cookieName,
-						path: cookieData.path || '/',
-						sameSite: sameSite,
-						secure: cookieData.secure === 'true',
-						session: !cookieData.expires && !cookieData.maxAge, // session cookie if no expiration
-						storeId: '1',
-						value: cookieValue
-					};
-
-					// handle expiration date
-					if (cookieData.expires) {
-						const expireDate = new Date(cookieData.expires);
-						if (!isNaN(expireDate.getTime())) {
-							browserCookie.expirationDate = expireDate.getTime() / 1000;
-							browserCookie.session = false;
-						}
-					} else if (cookieData.maxAge) {
-						// handle maxAge if present
-						const maxAgeSeconds = parseInt(cookieData.maxAge);
-						if (!isNaN(maxAgeSeconds)) {
-							browserCookie.expirationDate = Date.now() / 1000 + maxAgeSeconds;
-							browserCookie.session = false;
-						}
-					}
-
-					cookies.push(browserCookie);
-				}
-
-				// return as array format for browser import with cookie emoji
-				return '🍪 ' + JSON.stringify(cookies, null, 2);
-			}
-
-			// for other submitted data, return as is
-			return eventData;
-		} catch (e) {
-			// if not valid JSON, return as is
-			return eventData;
-		}
-	};
-
 
 	// Update is hidden when the campaign state rules it out, not when only the context is wrong
 	const isUpdateBlockedByState = (c) =>
@@ -2389,7 +2026,8 @@
 	const campaignStatus = (c) => {
 		if (c.pausedAt && !c.closedAt) return { label: 'Paused', tone: 'warning' };
 		const name = toEvent(c.notableEventName).name;
-		if (c.closedAt || c.notableEventName === 'campaign_closed') return { label: name, tone: 'neutral' };
+		if (c.closedAt || c.notableEventName === 'campaign_closed')
+			return { label: name, tone: 'neutral' };
 		if (c.notableEventName === 'campaign_pending_schedule') return { label: name, tone: 'neutral' };
 		if (c.notableEventName === 'campaign_active') return { label: name, tone: 'success' };
 		return { label: name, tone: 'info' };
@@ -2430,7 +2068,8 @@
 					</StatusBadge>
 				{/if}
 			</div>
-			<div class="flex flex-wrap items-center gap-x-4 gap-y-3">
+			<!-- ml-auto keeps the actions on the right when a long name wraps them to their own line -->
+			<div class="ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-3">
 				<div class="flex flex-wrap items-center gap-2" role="group" aria-label="Campaign actions">
 					{#if !isUpdateBlockedByState(campaign)}
 						<div title={campaignUpdateDisabledAndTitle(campaign).title}>
@@ -2506,7 +2145,7 @@
 									await setGroupedStats();
 								}
 								// await refreshCampaignRecipients();
-	
+
 								const res = await api.campaign.getAllCampaignRecipients(
 									$page.params.id,
 									recipientTableUrlParams
@@ -2537,9 +2176,7 @@
 			</p>
 		{/if}
 
-		<div
-			class="grid grid-cols-2 gap-3 sm:gap-6 mb-8 mt-4 lg:grid-cols-3 2xl:grid-cols-6"
-		>
+		<div class="grid grid-cols-2 gap-3 sm:gap-6 mb-8 mt-4 lg:grid-cols-3 2xl:grid-cols-6">
 			<StatsCard
 				title="Recipients"
 				value={result.recipients}
@@ -2696,23 +2333,22 @@
 						}
 					]}
 				>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-					stroke-width="1.5"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"
-					/>
-				</svg>
-			</StatsCard>
-
+					<svg
+						slot="icon"
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-5 w-5 ml-2"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+						stroke-width="1.5"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"
+						/>
+					</svg>
+				</StatsCard>
 			{/if}
 
 			{#if campaign.isTraining}
@@ -2724,8 +2360,7 @@
 					percentages={[
 						{
 							value: Math.round(
-								((result.trainingStarted - result.trainingCompleted) / result.trainingStarted) *
-									100
+								((result.trainingStarted - result.trainingCompleted) / result.trainingStarted) * 100
 							),
 							relativeTo: 'of started',
 							baseValue: result.trainingStarted
@@ -2754,46 +2389,45 @@
 					value={result.submittedData}
 					borderColor="border-submitted-data"
 					iconColor="text-submitted-data"
-				percentages={[
-					{
-						value: Math.round((result.submittedData / result.recipients) * 100),
-						relativeTo: 'of recipients',
-						baseValue: result.recipients
-					},
-					{
-						value: Math.round((result.submittedData / result.emailsSent) * 100),
-						relativeTo: 'of sent',
-						baseValue: result.emailsSent
-					},
-					{
-						value: Math.round((result.submittedData / result.trackingPixelLoaded) * 100),
-						relativeTo: 'of reads',
-						baseValue: result.trackingPixelLoaded
-					},
-					{
-						value: Math.round((result.submittedData / result.websiteLoaded) * 100),
-						relativeTo: 'of visits',
-						baseValue: result.websiteLoaded
-					}
-				]}
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-					stroke-width="1.5"
+					percentages={[
+						{
+							value: Math.round((result.submittedData / result.recipients) * 100),
+							relativeTo: 'of recipients',
+							baseValue: result.recipients
+						},
+						{
+							value: Math.round((result.submittedData / result.emailsSent) * 100),
+							relativeTo: 'of sent',
+							baseValue: result.emailsSent
+						},
+						{
+							value: Math.round((result.submittedData / result.trackingPixelLoaded) * 100),
+							relativeTo: 'of reads',
+							baseValue: result.trackingPixelLoaded
+						},
+						{
+							value: Math.round((result.submittedData / result.websiteLoaded) * 100),
+							relativeTo: 'of visits',
+							baseValue: result.websiteLoaded
+						}
+					]}
 				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-					/>
-				</svg>
-			</StatsCard>
-
+					<svg
+						slot="icon"
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-5 w-5 ml-2"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+						stroke-width="1.5"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+						/>
+					</svg>
+				</StatsCard>
 			{/if}
 
 			{#if campaign.isTraining}
@@ -2847,45 +2481,45 @@
 					value={result.reported}
 					borderColor="border-reported dark:border-slate-400"
 					iconColor="text-reported dark:text-slate-300"
-				percentages={[
-					{
-						value: Math.round((result.reported / result.recipients) * 100),
-						relativeTo: 'of recipients',
-						baseValue: result.recipients
-					},
-					{
-						value: Math.round((result.reported / result.emailsSent) * 100),
-						relativeTo: 'of sent',
-						baseValue: result.emailsSent
-					},
-					{
-						value: Math.round((result.reported / result.trackingPixelLoaded) * 100),
-						relativeTo: 'of reads',
-						baseValue: result.trackingPixelLoaded
-					},
-					{
-						value: Math.round((result.reported / result.websiteLoaded) * 100),
-						relativeTo: 'of visits',
-						baseValue: result.websiteLoaded
-					}
-				]}
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
+					percentages={[
+						{
+							value: Math.round((result.reported / result.recipients) * 100),
+							relativeTo: 'of recipients',
+							baseValue: result.recipients
+						},
+						{
+							value: Math.round((result.reported / result.emailsSent) * 100),
+							relativeTo: 'of sent',
+							baseValue: result.emailsSent
+						},
+						{
+							value: Math.round((result.reported / result.trackingPixelLoaded) * 100),
+							relativeTo: 'of reads',
+							baseValue: result.trackingPixelLoaded
+						},
+						{
+							value: Math.round((result.reported / result.websiteLoaded) * 100),
+							relativeTo: 'of visits',
+							baseValue: result.websiteLoaded
+						}
+					]}
 				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"
-					/>
-				</svg>
-			</StatsCard>
+					<svg
+						slot="icon"
+						xmlns="http://www.w3.org/2000/svg"
+						class="h-5 w-5 ml-2"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"
+						/>
+					</svg>
+				</StatsCard>
 			{/if}
 		</div>
 
@@ -3079,7 +2713,9 @@
 								{/if}
 							</div>
 						{:else if campaign.template === TEMPLATE_LOAD_ERROR}
-							<span class="italic text-gray-500 dark:text-gray-400">Could not load the template</span>
+							<span class="italic text-gray-500 dark:text-gray-400"
+								>Could not load the template</span
+							>
 						{:else if campaign.template?.id}
 							<button
 								type="button"
@@ -3313,82 +2949,47 @@
 			<div class="flex flex-col gap-6">
 				<!-- reporting card, hidden when it has no rows -->
 				{#if showReportInboxRow || showImportReportedRow}
-				<div
-					class="bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
-				>
-					<h3
-						class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+					<div
+						class="bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
 					>
-						Reporting
-					</h3>
-					<div class="divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-						{#if showReportInboxRow}
-							<div class="py-3 first:pt-0 last:pb-0">
-								<div class="flex items-center justify-between gap-x-4">
-									<div class="min-w-0">
-										<p class="flex items-center text-gray-600 dark:text-gray-400">
-											Reporting inbox
-											<ToolTip>Reports sent to the Reporting Inbox are matched to recipients automatically.</ToolTip>
-										</p>
-										{#if reportInboxLastCheck}
-											<p class="text-xs text-gray-500 dark:text-gray-400">{reportInboxLastCheck}</p>
-										{/if}
-									</div>
-									<div class="flex shrink-0 items-center gap-x-3">
-										<span data-report-inbox>
-											<StatusBadge tone={reportInboxTone}>{reportInboxDot.label}</StatusBadge>
-										</span>
-										{#if reportInboxSettingsHref}
-											<a
-												href={reportInboxSettingsHref}
-												class="pc-focus rounded-sm text-xs text-cta-blue dark:text-highlight-blue hover:underline"
-												>Settings</a
-											>
-										{/if}
-									</div>
-								</div>
-								{#if reportInbox.lastError}
-									<p
-										class="mt-1 text-xs text-red-700 dark:text-red-400 line-clamp-2 break-words"
-										title={reportInbox.lastError}
-									>
-										{reportInbox.lastError}
+						<h3
+							class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+						>
+							Reporting
+						</h3>
+						<div class="divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+							{#if showReportInboxRow}
+								<ReportInboxRow
+									inbox={reportInbox}
+									now={reportInboxNow}
+									settingsHref={reportInboxSettingsHref}
+								/>
+							{/if}
+							{#if showImportReportedRow}
+								<div
+									class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0"
+								>
+									<p class="flex items-center text-gray-600 dark:text-gray-400">
+										Reported emails
+										<ToolTip
+											>Mark recipients as reported from a CSV with an email column and a report date
+											column.</ToolTip
+										>
 									</p>
-								{/if}
-							</div>
-						{/if}
-						{#if showImportReportedRow}
-							<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
-								<p class="flex items-center text-gray-600 dark:text-gray-400">
-									Reported emails
-									<ToolTip
-										>Mark recipients as reported from a CSV with an email column and a report date
-										column.</ToolTip
-									>
-								</p>
-								<div title={contextTitle(campaign)}>
-									<input
-										bind:this={reportedCSVInput}
-										type="file"
-										accept=".csv"
-										class="hidden"
-										tabindex="-1"
-										aria-hidden="true"
-										on:change={onUploadReportedCSV}
-									/>
-									<ActionButton
-										variant="secondary"
-										icon="upload"
-										disabled={isContextMismatch()}
-										on:click={() => reportedCSVInput?.click()}
-									>
-										Import Reported
-									</ActionButton>
+									<div title={contextTitle(campaign)}>
+										<ActionButton
+											variant="secondary"
+											icon="upload"
+											disabled={isContextMismatch()}
+											on:click={() => reportedUpload?.pick()}
+										>
+											Import Reported
+										</ActionButton>
+									</div>
 								</div>
-							</div>
-						{/if}
+							{/if}
+						</div>
 					</div>
-				</div>
 				{/if}
 
 				<!-- data and privacy card -->
@@ -3405,7 +3006,9 @@
 							<div class="min-w-0">
 								<p class="flex items-center text-gray-600 dark:text-gray-400">
 									Recipients
-									<ToolTip>Closes the campaign and replaces recipients with anonymous IDs. Permanent.</ToolTip>
+									<ToolTip
+										>Closes the campaign and replaces recipients with anonymous IDs. Permanent.</ToolTip
+									>
 								</p>
 								{#if campaign.anonymizedAt}
 									<p class="text-xs text-gray-500 dark:text-gray-400">
@@ -3437,8 +3040,8 @@
 								<p class="flex items-center text-gray-600 dark:text-gray-400">
 									Collected data
 									<ToolTip
-										>Anonymizes submitted data, IPs, user agents and browser metadata. Recipients stay
-										linked. Permanent.</ToolTip
+										>Anonymizes submitted data, IPs, user agents and browser metadata. Recipients
+										stay linked. Permanent.</ToolTip
 									>
 								</p>
 								{#if !campaign.anonymizedAt && (campaign.dataAnonymizeAt || campaign.dataAnonymizedAt)}
@@ -3543,23 +3146,11 @@
 							<EventName eventName={campaign.eventTypesIDToNameMap[event.eventID]} />
 						</TableCell>
 						<TableCell>
-							{#if campaign.eventTypesIDToNameMap[event.eventID] === 'campaign_recipient_submitted_data' && (formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🍪') || formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🔑'))}
-								<button
-									class="hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded-md transition-colors w-full text-left text-ellipsis overflow-hidden text-gray-900 dark:text-gray-100"
-									title={formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
-									on:click={() =>
-										onClickCopyEventData(
-											formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]),
-											campaign.eventTypesIDToNameMap[event.eventID]
-										)}
-								>
-									{formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
-								</button>
-							{:else}
-								<CellCopy
-									text={formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
-								/>
-							{/if}
+							<EventDataCell
+								data={event.data}
+								eventName={campaign.eventTypesIDToNameMap[event.eventID]}
+								on:capture={(e) => showSessionCapture(e.detail)}
+							/>
 						</TableCell>
 						<TableCell>
 							<CellCopy text={event.userAgent} />
@@ -3676,7 +3267,9 @@
 										<!-- the Status column is off screen on phones -->
 										{#if !campaign.isAnonymous}
 											<span class="flex sm:hidden mt-1 min-w-0 items-center gap-2"
-												><EventName eventName={recp?.notableEventName} />{#if recp?.sentAt || (recp?.sendAt && !recp?.cancelledAt)}<span
+												><EventName
+													eventName={recp?.notableEventName}
+												/>{#if recp?.sentAt || (recp?.sendAt && !recp?.cancelledAt)}<span
 														class="min-w-0 truncate text-xs"
 														><RelativeTime value={recp.sentAt || recp.sendAt} short /></span
 													>{/if}</span
@@ -3690,7 +3283,7 @@
 							<div>
 								{#if campaign.isAnonymous}
 									<span
-										class="text-sm italic text-gray-400 dark:text-gray-500"
+										class="text-sm italic text-gray-500 dark:text-gray-400"
 										title="Per recipient outcomes are hidden for anonymous campaigns. See {groupedStatsTitle}."
 										>Hidden</span
 									>
@@ -3723,12 +3316,11 @@
 						{#if showTemplateColumn}
 							<!-- rows from before template pools have no template and use the primary one -->
 							<!-- the server names a deleted template "(deleted template)" -->
-							{#if recp?.templateID
-								? !recp?.template || recp.template.name === '(deleted template)'
-								: !primaryTemplateName}
+							{#if recp?.templateID ? !recp?.template || recp.template.name === '(deleted template)' : !primaryTemplateName}
 								<TableCell>
-									<span class="italic text-gray-500 dark:text-gray-400" title="The template was deleted"
-										>Deleted</span
+									<span
+										class="italic text-gray-500 dark:text-gray-400"
+										title="The template was deleted">Deleted</span
 									>
 								</TableCell>
 							{:else}
@@ -3739,7 +3331,7 @@
 							<!-- exact per recipient timing is withheld so it cannot be matched against
 							the anonymized event stream; a coarse sent indicator keeps self-managed usable -->
 							<TableCell>
-								<span class="text-sm italic text-gray-400 dark:text-gray-500">Hidden</span>
+								<span class="text-sm italic text-gray-500 dark:text-gray-400">Hidden</span>
 							</TableCell>
 							<TableCell>
 								<span
@@ -3804,16 +3396,16 @@
 										title={hidesRecipientTemplate && !campaign.anonymizedAt
 											? recipientTemplateHiddenTitle
 											: isContextMismatch()
-											? campaign.companyID
-												? 'Switch to company view to perform this action'
-												: 'Switch to global view to perform this action'
-											: campaign.closedAt
-												? 'Campaign is closed'
-												: campaign.anonymizedAt
-													? 'Campaign is anonymized'
-													: !recp.recipient
-														? 'Recipient not available'
-														: ''}
+												? campaign.companyID
+													? 'Switch to company view to perform this action'
+													: 'Switch to global view to perform this action'
+												: campaign.closedAt
+													? 'Campaign is closed'
+													: campaign.anonymizedAt
+														? 'Campaign is anonymized'
+														: !recp.recipient
+															? 'Recipient not available'
+															: ''}
 										on:click={() => onClickCopyURL(recp.id)}
 									/>
 									<TableUpdateButton
@@ -3847,14 +3439,14 @@
 										title={hidesRecipientTemplate && !campaign.anonymizedAt
 											? recipientTemplateHiddenTitle
 											: isContextMismatch()
-											? campaign.companyID
-												? 'Switch to company view to perform this action'
-												: 'Switch to global view to perform this action'
-											: campaign.closedAt
-												? 'Campaign is closed'
-												: campaign.anonymizedAt
-													? 'Campaign is anonymized'
-													: ''}
+												? campaign.companyID
+													? 'Switch to company view to perform this action'
+													: 'Switch to global view to perform this action'
+												: campaign.closedAt
+													? 'Campaign is closed'
+													: campaign.anonymizedAt
+														? 'Campaign is anonymized'
+														: ''}
 										on:click={() => onClickCopyEmailContent(recp.id)}
 									/>
 
@@ -3886,16 +3478,16 @@
 										title={hidesRecipientTemplate && !campaign.anonymizedAt
 											? recipientTemplateHiddenTitle
 											: isContextMismatch()
-											? campaign.companyID
-												? 'Switch to company view to perform this action'
-												: 'Switch to global view to perform this action'
-											: campaign.closedAt
-												? 'Campaign is closed'
-												: campaign.anonymizedAt
-													? 'Campaign is anonymized'
-													: !recp.recipient
-														? 'Recipient not available'
-														: ''}
+												? campaign.companyID
+													? 'Switch to company view to perform this action'
+													: 'Switch to global view to perform this action'
+												: campaign.closedAt
+													? 'Campaign is closed'
+													: campaign.anonymizedAt
+														? 'Campaign is anonymized'
+														: !recp.recipient
+															? 'Recipient not available'
+															: ''}
 										on:click={() => onClickPreviewEmail(recp.id)}
 									/>
 									{#if liveSessions.has(recp.id)}
@@ -3969,78 +3561,32 @@
 		</div>
 	</Modal>
 
-	<Modal headerText={'Events'} visible={isEventsModalVisible} onClose={closeEventsModal}>
-		<div class="mt-8"></div>
-		<Table
-			columns={[
-				{ column: 'Created at', size: 'medium' },
-				{ column: 'Event', size: 'large' },
-				{ column: 'Details' },
-				{ column: 'User-Agent', size: 'small' },
-				{ title: 'IP', column: 'Ip', size: 'small' },
-				{ column: 'Metadata', size: 'small' }
-			]}
-			sortable={['Created at', 'Event', 'Details', 'User-Agent', 'Ip', 'Metadata']}
-			pagination={recipientEventsTableParams}
-			plural="events"
-			hasData={!!recipientEvents.length}
-		>
-			{#each recipientEvents as event}
-				<TableRow>
-					<TableCell isDate value={event.createdAt} />
-					<TableCell>
-						<EventName eventName={campaign.eventTypesIDToNameMap[event.eventID]} />
-					</TableCell>
-					<TableCell>
-						{#if campaign.eventTypesIDToNameMap[event.eventID] === 'campaign_recipient_submitted_data' && (formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🍪') || formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]).startsWith('🔑'))}
-							<button
-								class="hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded-md transition-colors w-full text-left text-ellipsis overflow-hidden text-gray-900 dark:text-gray-100"
-								title={formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
-								on:click={() =>
-									onClickCopyEventData(
-										formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID]),
-										campaign.eventTypesIDToNameMap[event.eventID]
-									)}
-							>
-								{formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
-							</button>
-						{:else}
-							<CellCopy
-								text={formatEventData(event.data, campaign.eventTypesIDToNameMap[event.eventID])}
-							/>
-						{/if}
-					</TableCell>
-					<TableCell>
-						<CellCopy text={event.userAgent} />
-					</TableCell>
-					<TableCell>
-						<CellCopy text={event.ip} />
-					</TableCell>
-					<TableCell>
-						<CellCopy text={event.metadata || ''} />
-					</TableCell>
-					<TableCellEmpty />
-					<TableCellAction>
-						<TableDropDownEllipsis>
-							<TableDeleteButton
-								on:click={() => openDeleteEventAlert(event)}
-								disabled={!!campaign.closedAt || !!campaign.anonymizedAt || isContextMismatch()}
-								title={isContextMismatch()
-									? campaign.companyID
-										? 'Switch to company view to perform this action'
-										: 'Switch to global view to perform this action'
-									: campaign.closedAt
-										? 'Cannot delete events from closed campaign'
-										: campaign.anonymizedAt
-											? 'Cannot delete events from anonymized campaign'
-											: 'Delete event'}
-							/>
-						</TableDropDownEllipsis>
-					</TableCellAction>
-				</TableRow>
-			{/each}
-		</Table>
-	</Modal>
+	<RecipientEventsModal
+		visible={isEventsModalVisible}
+		onClose={closeEventsModal}
+		events={recipientEvents}
+		eventNames={campaign.eventTypesIDToNameMap}
+		pagination={recipientEventsTableParams}
+		on:capture={(e) => showSessionCapture(e.detail)}
+	>
+		<svelte:fragment slot="actions" let:event>
+			<TableDropDownEllipsis>
+				<TableDeleteButton
+					on:click={() => openDeleteEventAlert(event)}
+					disabled={!!campaign.closedAt || !!campaign.anonymizedAt || isContextMismatch()}
+					title={isContextMismatch()
+						? campaign.companyID
+							? 'Switch to company view to perform this action'
+							: 'Switch to global view to perform this action'
+						: campaign.closedAt
+							? 'Cannot delete events from closed campaign'
+							: campaign.anonymizedAt
+								? 'Cannot delete events from anonymized campaign'
+								: 'Delete event'}
+				/>
+			</TableDropDownEllipsis>
+		</svelte:fragment>
+	</RecipientEventsModal>
 
 	<Modal
 		headerText={'Template Details'}
@@ -4049,7 +3595,9 @@
 	>
 		<div class="space-y-6">
 			<div class="p-6 rounded-lg">
-				<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-5 pb-2 border-b border-gray-200 dark:border-gray-700">
+				<h3
+					class="text-lg font-semibold text-pc-darkblue dark:text-white mb-5 pb-2 border-b border-gray-200 dark:border-gray-700"
+				>
 					Phishing Flow
 				</h3>
 				<PageFlow
@@ -4073,7 +3621,9 @@
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 				<!-- Basic Info Section -->
 				<div class="p-6 rounded-lg">
-					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+					<h3
+						class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+					>
 						Basic Information
 					</h3>
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
@@ -4104,7 +3654,9 @@
 				<!-- Email Configuration -->
 				{#if modalTemplate?.email}
 					<div class="p-6 rounded-lg">
-						<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+						<h3
+							class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+						>
 							Email
 						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
@@ -4139,7 +3691,9 @@
 			<div class="grid grid-cols-2 gap-6">
 				<!-- Domain Configuration -->
 				<div class="p-6 rounded-lg">
-					<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+					<h3
+						class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+					>
 						Domain
 					</h3>
 					<div class="grid grid-cols-[120px_1fr] gap-y-3">
@@ -4177,7 +3731,9 @@
 				<!-- SMTP/API Configuration -->
 				{#if modalTemplate?.smtpConfiguration || modalTemplate?.apiSender}
 					<div class="p-6 rounded-lg">
-						<h3 class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+						<h3
+							class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
+						>
 							{modalTemplate?.smtpConfiguration ? 'Email SMTP' : 'API Sender'}
 						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
@@ -4283,7 +3839,9 @@
 				</DateTimeField>
 				<div class="pt-4 pb-2">
 					<div class="flex flex-col gap-2">
-						<p class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200">
+						<p
+							class="font-semibold text-slate-600 dark:text-gray-400 py-1 transition-colors duration-200"
+						>
 							Distribution Speed
 							<span class="italic font-normal">
 								({RESUME_SPREADS[resumeSpeedIndex]?.label ?? 'Manual timing'})
@@ -4313,7 +3871,9 @@
 					Delivery finish
 				</DateTimeField>
 			{:else if resumeScheduleType === 'schedule'}
-				<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
+				<p
+					class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+				>
 					Delivery start and end
 				</p>
 				<div class="flex">
@@ -4340,7 +3900,9 @@
 					>
 				</div>
 				<div class="mt-4">
-					<p class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200">
+					<p
+						class="font-semibold text-slate-600 dark:text-gray-400 py-2 transition-colors duration-200"
+					>
 						Delivery days
 					</p>
 					<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -4373,7 +3935,9 @@
 						{/each}
 					</div>
 				</div>
-				<p class="font-semibold text-slate-600 dark:text-gray-400 py-4 transition-colors duration-200">
+				<p
+					class="font-semibold text-slate-600 dark:text-gray-400 py-4 transition-colors duration-200"
+				>
 					Delivery hours
 				</p>
 				<div class="flex">
@@ -4437,9 +4001,7 @@
 			<ul
 				class="list-disc ml-8 mt-4 mb-4 text-gray-700 dark:text-gray-200 transition-colors duration-200"
 			>
-				<li>
-					Submitted data, user agent, ip and browser metadata will be anonymized
-				</li>
+				<li>Submitted data, user agent, ip and browser metadata will be anonymized</li>
 				<li>The recipient relation is kept</li>
 				<li>Anonymization is permanent and not reversible</li>
 				{#if !campaign.closedAt}
@@ -4473,22 +4035,22 @@
 							{sendMessageRecipient.email}
 						</p>
 						{#if !hidesRecipientTemplate}
-						<p class="text-xs text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-200">
-							Sender type: {sendMessageTemplate === undefined
-								? '...'
-								: sendMessageTemplate === null
-									? 'Unknown, the template was deleted'
-									: sendMessageTemplate === TEMPLATE_LOAD_ERROR
-										? 'Could not load the template'
-										: sendMessageTemplate.smtpConfigurationID
-										? 'SMTP'
-										: 'API Sender'}
-						</p>
+							<p
+								class="text-xs text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-200"
+							>
+								Sender type: {sendMessageTemplate === undefined
+									? '...'
+									: sendMessageTemplate === null
+										? 'Unknown, the template was deleted'
+										: sendMessageTemplate === TEMPLATE_LOAD_ERROR
+											? 'Could not load the template'
+											: sendMessageTemplate.smtpConfigurationID
+												? 'SMTP'
+												: 'API Sender'}
+							</p>
 						{/if}
 						{#if recipient.sentAt}
-							<p class="mt-2 rounded-md px-3 py-2 text-sm bg-yellow-50 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200">
-								Previously sent on {shortDateTime(recipient.sentAt)}
-							</p>
+							<Note class="mt-2">Previously sent on {shortDateTime(recipient.sentAt)}</Note>
 						{/if}
 					</div>
 					<p class="text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200">
@@ -4537,10 +4099,10 @@
 				</p>
 
 				{#if lureCodeRecipient.sentAt}
-					<p class="mt-4 rounded-md px-3 py-2 text-sm bg-yellow-50 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200">
-						Already sent on {shortDateTime(lureCodeRecipient.sentAt)}. Changing this
-						stops the link the recipient is holding from working.
-					</p>
+					<Note boxed class="mt-4">
+						Already sent on {shortDateTime(lureCodeRecipient.sentAt)}. Changing this stops the link
+						the recipient is holding from working.
+					</Note>
 				{/if}
 
 				{#if lureCodeError}
@@ -4550,38 +4112,41 @@
 				{/if}
 
 				{#if lureCodeConflict}
-					<div
-						class="mt-4 rounded-md border border-amber-400 dark:border-amber-600 p-4 text-sm space-y-3"
-					>
-						<p class="text-gray-800 dark:text-gray-100">
-							{#if lureCodeConflict.campaignName}
-								Already used by campaign <span class="font-medium"
-									>{lureCodeConflict.campaignName}</span
-								>{lureCodeConflict.isClosed ? ' (closed)' : ' (still running)'}.
-							{:else}
-								<!-- a holder outside this company is not described, so nothing
+					<Note boxed role="alert" class="mt-4">
+						<div class="space-y-3">
+							<p class="text-gray-800 dark:text-gray-100">
+								{#if lureCodeConflict.campaignName && !lureCodeConflict.campaignID}
+									<!-- an empty campaign id means a program send holds the code -->
+									Already used by program
+									<span class="font-medium">{lureCodeConflict.campaignName}</span
+									>{lureCodeConflict.isClosed ? ' (closed)' : ' (still running)'}.
+								{:else if lureCodeConflict.campaignName}
+									Already used by campaign <span class="font-medium"
+										>{lureCodeConflict.campaignName}</span
+									>{lureCodeConflict.isClosed ? ' (closed)' : ' (still running)'}.
+								{:else}
+									<!-- a holder outside this company is not described, so nothing
 								     about that campaign is disclosed to a guessed code -->
-								Already used by a campaign outside this company.
-							{/if}
-						</p>
-						<p class="text-gray-600 dark:text-gray-300">
-							Reclaiming frees it for this recipient. Anyone still holding the old link will land
-							in this campaign instead.
-						</p>
-						<button
-							type="button"
-							disabled={lureCodeSubmitting}
-							on:click={() => submitLureCode(true)}
-							class="rounded-md border border-amber-500 px-4 py-2 font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 disabled:opacity-50 transition-colors duration-200"
-						>
-							Reclaim
-						</button>
-					</div>
+									Already used by a campaign outside this company.
+								{/if}
+							</p>
+							<p class="text-gray-600 dark:text-gray-300">
+								Reclaiming frees it for this recipient. Anyone still holding the old link will land
+								in this campaign instead.
+							</p>
+							<button
+								type="button"
+								disabled={lureCodeSubmitting}
+								on:click={() => submitLureCode(true)}
+								class="pc-focus rounded-md border border-cta-blue px-4 py-2 font-medium text-cta-blue bg-white hover:bg-blue-50 dark:bg-gray-800 dark:border-highlight-blue dark:text-blue-200 dark:hover:bg-highlight-blue/20 disabled:opacity-50 transition-colors duration-200"
+							>
+								Reclaim
+							</button>
+						</div>
+					</Note>
 				{/if}
 
-				<div
-					class="mt-8 pt-4 flex justify-end gap-3 border-t border-gray-200 dark:border-gray-700"
-				>
+				<div class="mt-8 pt-4 flex justify-end gap-3 border-t border-gray-200 dark:border-gray-700">
 					<button
 						type="button"
 						on:click={closeLureCodeModal}
@@ -4624,9 +4189,7 @@
 							{setAsSentRecipient.email}
 						</p>
 						{#if recipient.sentAt}
-							<p class="mt-2 rounded-md px-3 py-2 text-sm bg-yellow-50 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200">
-								Already marked as sent on {shortDateTime(recipient.sentAt)}
-							</p>
+							<Note class="mt-2">Already marked as sent on {shortDateTime(recipient.sentAt)}</Note>
 						{/if}
 					</div>
 					<p class="text-sm text-gray-600 dark:text-gray-300 transition-colors duration-200">
@@ -4637,103 +4200,7 @@
 		</div>
 	</Alert>
 
-	<Modal
-		headerText={storedTokenData ? 'Tokens captured' : 'Cookies captured'}
-		visible={isSessionSushiModalVisible}
-		onClose={closeSessionSushiModal}
-	>
-		<div class="mt-4">
-			{#if storedTokenData}
-				<!-- token capture introduction section -->
-				<div>
-					<h3
-						class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200"
-					>
-						Import tokens
-					</h3>
-					<p class="text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
-						Tokens can be imported into <a
-							href="https://github.com/phishingclub/session-sushi"
-							target="_blank"
-							rel="noopener noreferrer"
-							class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline">Session Sushi</a
-						> to hijack the captured session.
-					</p>
-				</div>
-
-				<!-- token copy section -->
-				<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md transition-colors duration-200">
-					<button
-						class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline font-medium inline-flex items-center gap-2"
-						on:click={onClickCopyTokens}
-					>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-							></path>
-						</svg>
-						Copy tokens
-					</button>
-				</div>
-			{:else}
-				<!-- cookie capture introduction section -->
-				<div>
-					<h3
-						class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200"
-					>
-						Import cookie
-					</h3>
-					<p class="text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
-						Cookies can be imported and exchanged for tokens using the <a
-							href="https://github.com/phishingclub/session-sushi"
-							target="_blank"
-							rel="noopener noreferrer"
-							class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline">Session Sushi</a
-						> extension.
-					</p>
-				</div>
-
-				<!-- cookie copy section -->
-				<div class="bg-gray-50 dark:bg-gray-700 p-4 rounded-md transition-colors duration-200">
-					<button
-						class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline font-medium inline-flex items-center gap-2"
-						on:click={onClickCopyCookies}
-					>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-							></path>
-						</svg>
-						Copy cookies
-					</button>
-				</div>
-			{/if}
-		</div>
-		<FormGrid on:submit={onSessionSushiModalOk}>
-			<FormColumns>
-				<FormColumn>
-					<!-- Empty form column for structure -->
-				</FormColumn>
-			</FormColumns>
-			<div
-				class="py-4 row-span-2 col-start-1 col-span-3 border-t-2 border-gray-200 dark:border-gray-700 w-full flex flex-row justify-center items-center sm:justify-center md:justify-center lg:justify-end xl:justify-end 2xl:justify-end bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 transition-colors duration-200"
-			>
-				<button
-					type="button"
-					on:click={closeSessionSushiModal}
-					class="bg-blue-600 hover:bg-blue-500 dark:bg-blue-500 dark:hover:bg-blue-400 text-sm uppercase font-bold px-4 py-2 text-white rounded-md transition-colors duration-200"
-				>
-					Close
-				</button>
-			</div>
-		</FormGrid>
-	</Modal>
+	<SessionCaptureModal bind:visible={isSessionSushiModalVisible} bind:data={sessionCaptureData} />
 	<Alert
 		headline="Email Preview Warning"
 		bind:visible={isTrackingPixelWarningVisible}
@@ -4748,145 +4215,11 @@
 		</div>
 	</Alert>
 
-	<Modal
-		headerText="Import reported emails"
-		visible={isReportedCSVModalVisible}
-		onClose={closeReportedCSVModal}
-		isSubmitting={isReportedCSVSubmitting}
-		noAutoFocus={true}
-	>
-		{#if reportedCSVResult}
-			<div class="p-6 max-h-[80vh] overflow-y-auto text-gray-700 dark:text-gray-300">
-				<div class="space-y-6">
-					<ul class="space-y-1">
-						<li>Marked as reported: {reportedCSVResult.processed}</li>
-						{#if reportedCSVResult.alreadyReported > 0}
-							<li>Already reported: {reportedCSVResult.alreadyReported}</li>
-						{/if}
-						<li>Could not be imported: {reportedCSVResult.failed}</li>
-					</ul>
-
-					<div class="border-t border-gray-200 dark:border-gray-700 pt-6">
-						{#if reportedCSVResult.errors.length > 0}
-							<p class="text-sm">{reportedCSVErrorsHeading}</p>
-							<div
-								class="mt-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-2 space-y-1"
-							>
-								{#each reportedCSVResult.errors as err}
-									<div class="py-2 px-3 text-sm text-gray-900 dark:text-gray-100 break-words">
-										<span class="font-semibold">Line {err.line}:</span>
-										{err.reason}
-									</div>
-								{/each}
-							</div>
-						{:else}
-							<p class="text-sm">Some rows could not be imported.</p>
-						{/if}
-						<p class="mt-3 text-sm text-gray-500 dark:text-gray-400">
-							Fix these rows in the file and import it again. Rows already marked as
-							reported are not counted twice.
-						</p>
-					</div>
-				</div>
-				<div class="mt-6 flex justify-end">
-					<Button on:click={closeReportedCSVModal}>Close</Button>
-				</div>
-			</div>
-		{:else}
-			<FormGrid on:submit={onConfirmUploadReportedCSV} isSubmitting={isReportedCSVSubmitting}>
-				<FormColumns>
-					<FormColumn>
-						<p class="text-sm text-gray-600 dark:text-gray-300 mb-4 transition-colors duration-200">
-							Pick the columns with the email address and the report date.
-						</p>
-
-						<TextFieldSelect
-							required
-							id="reported-email-column"
-							bind:value={reportedEmailColumn}
-							options={reportedCSVColumnLabels}
-							placeholder="Select email column...">Email Column</TextFieldSelect
-						>
-
-						<TextFieldSelect
-							required
-							id="reported-date-column"
-							bind:value={reportedDateColumn}
-							options={reportedCSVColumnLabels}
-							placeholder="Select date column...">Date Column</TextFieldSelect
-						>
-					</FormColumn>
-					<FormColumn overflowX={true}>
-						<Table
-							columns={reportedCSVColumnLabels.map((h) => ({ column: h, size: 'small' }))}
-							hasData={!!reportedCSVPreview.length}
-							plural="rows"
-						>
-							{#each reportedCSVPreview as row}
-								<TableRow>
-									{#each row as cell}
-										<TableCell value={cell} />
-									{/each}
-									<TableCellEmpty />
-								</TableRow>
-							{/each}
-						</Table>
-					</FormColumn>
-				</FormColumns>
-				<div class="px-1 sm:px-6 pb-4">
-					<details class="text-sm text-gray-600 dark:text-gray-300 group">
-						<summary
-							class="cursor-pointer select-none font-semibold text-pc-darkblue dark:text-white list-none flex items-center gap-2"
-						>
-							<svg
-								class="w-4 h-4 transition-transform group-open:rotate-90"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-								aria-hidden="true"
-							>
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-							</svg>
-							Supported date formats
-						</summary>
-						<ul class="mt-2 ml-6 space-y-1 list-disc">
-							<li>
-								ISO 8601: <code>2024-03-05T14:30:00Z</code>,
-								<code>2024-03-05T14:30:00+02:00</code> or <code>2024-03-05T14:30:00</code>.
-								Fractional seconds are fine.
-							</li>
-							<li>
-								<code>YYYY-MM-DD HH:MM:SS</code>, <code>YYYY-MM-DD HH:MM</code>,
-								<code>YYYY-MM-DD</code>
-							</li>
-							<li>
-								<code>MM/DD/YYYY</code> month first, e.g. <code>3/5/2024 9:05</code>
-							</li>
-							<li><code>DD-MM-YYYY</code> day first</li>
-							<li><code>YYYY/MM/DD</code></li>
-						</ul>
-						<p class="mt-2">
-							The last three take an optional <code>HH:MM</code> or <code>HH:MM:SS</code> time.
-							Leading zeros are optional in <code>MM/DD/YYYY</code> and <code>DD-MM-YYYY</code>.
-							A time without a zone is read as UTC.
-							<code>DD/MM/YYYY</code> with slashes is read month first, so use dashes for day
-							first.
-						</p>
-					</details>
-				</div>
-				{#if reportedCSVError}
-					<div class="mt-4">
-						<FormError message={reportedCSVError} />
-					</div>
-				{/if}
-				<FormFooter
-					closeModal={closeReportedCSVModal}
-					isSubmitting={isReportedCSVSubmitting}
-					okText="Import"
-				/>
-			</FormGrid>
-		{/if}
-	</Modal>
+	<ReportedUploadModal
+		bind:this={reportedUpload}
+		upload={uploadReportedCSV}
+		onImported={onReportedImported}
+	/>
 	<DeleteAlert
 		name={`${deleteEventValues.eventName} event for ${deleteEventValues.name}`}
 		onClick={() => onClickDeleteEvent(deleteEventValues.id)}

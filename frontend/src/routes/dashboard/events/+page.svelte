@@ -1,26 +1,28 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import Headline from '$lib/components/Headline.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
-	import SubHeadline from '$lib/components/SubHeadline.svelte';
 	import { AppStateService } from '$lib/service/appState';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { addToast } from '$lib/store/toast';
 	import { newTableURLParams } from '$lib/service/tableURLParams';
 	import Table from '$lib/components/table/Table.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
-	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
-	import { tick } from 'svelte';
+	import TableFilterSelect from '$lib/components/table/TableFilterSelect.svelte';
 	import EventName from '$lib/components/table/EventName.svelte';
 	import DashboardNav from '$lib/components/DashboardNav.svelte';
+	import DashboardToolbar from '$lib/components/DashboardToolbar.svelte';
+	import { dashboardIncludeTest } from '$lib/store/dashboardIncludeTest.js';
+	import { toEvent } from '$lib/utils/events';
 
 	// services
 	const appStateService = AppStateService.instance;
 
 	// local state
 	let contextCompanyID = null;
-	let contextCompanyName = '';
 	let eventsTableURLParams = newTableURLParams({
 		prefix: 'events',
 		sortBy: 'created_at',
@@ -29,28 +31,41 @@
 	});
 
 	let isEventsLoading = false;
+	let isLoading = false;
 
 	let events = [];
 	let eventsHasNextPage = true;
 	let eventTypesIDToNameMap = {};
+	let eventTypeOptions = [];
 
-	let includeTestCampaigns = false;
+	// the event type filter lives in the url as ?eventType=, by event name
+	const readEventType = () => new URL(window.location.href).searchParams.get('eventType') || '';
+	let eventType = readEventType();
 
-	// handler for when toggle changes
-	const handleToggleChange = async () => {
-		await tick();
-		await refreshEvents(true);
+	const onEventTypeChange = async () => {
+		const url = new URL(window.location.href);
+		if (eventType) {
+			url.searchParams.set('eventType', eventType);
+		} else {
+			url.searchParams.delete('eventType');
+		}
+		await goto(`?${url.searchParams.toString()}`, { replaceState: true, noScroll: true, keepFocus: true });
+		// a page change reloads through the table listener
+		if (eventsTableURLParams.currentPage !== 1) {
+			eventsTableURLParams.currentPage = 1;
+		} else {
+			await refreshEvents(true);
+		}
 	};
 
 	// hooks
-	onMount(async () => {
+	onMount(() => {
 		const context = appStateService.getContext();
 		if (context) {
 			contextCompanyID = context.companyID;
-			contextCompanyName = context.companyName;
 		}
 		setEventTypes();
-		await refreshEvents(true);
+		refreshEvents(true);
 		eventsTableURLParams.onChange(() => refreshEvents(true));
 
 		return () => {
@@ -62,11 +77,14 @@
 		try {
 			const res = await api.campaign.getAllEventTypes();
 			if (!res.success) {
-				addToast('Failed to load event types', 'Error');
-				console.error('failed to load event types', res.error);
-				return;
+				throw res.error;
 			}
-			res.data.map((t) => (eventTypesIDToNameMap[t.id] = t.name));
+			const map = {};
+			res.data.forEach((t) => (map[t.id] = t.name));
+			eventTypesIDToNameMap = map;
+			eventTypeOptions = res.data
+				.map((t) => ({ value: t.name, label: toEvent(t.name).name || t.name }))
+				.sort((a, b) => a.label.localeCompare(b.label));
 		} catch (e) {
 			addToast('Failed to load event types', 'Error');
 			console.error('failed to load event types', e);
@@ -74,6 +92,7 @@
 	};
 
 	const refreshEvents = async (showIsLoading = true) => {
+		isLoading = true;
 		try {
 			if (showIsLoading) {
 				isEventsLoading = true;
@@ -84,22 +103,27 @@
 				sortBy: eventsTableURLParams.sortBy,
 				sortOrder: eventsTableURLParams.sortOrder,
 				search: eventsTableURLParams.search,
-				includeTest: includeTestCampaigns
+				includeTest: $dashboardIncludeTest
 			};
-			const res = await api.campaign.getAllEvents(options, contextCompanyID);
-			if (res.success) {
-				events = res.data?.rows ?? [];
-				eventsHasNextPage = res.data?.hasNextPage ?? false;
+			const res = await api.campaign.getAllEvents(options, contextCompanyID, eventType);
+			if (!res.success) {
+				throw res.error;
 			}
+			events = res.data?.rows ?? [];
+			eventsHasNextPage = res.data?.hasNextPage ?? false;
 		} catch (e) {
 			addToast('Failed to load events', 'Error');
 			console.error('failed to load events', e);
 		} finally {
+			isLoading = false;
 			if (showIsLoading) {
 				isEventsLoading = false;
 			}
 		}
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <HeadTitle title="Dashboard - Events" />
@@ -108,78 +132,22 @@
 
 	<DashboardNav />
 
-	<div class="flex flex-wrap justify-between items-center gap-x-6 gap-y-3 mb-6">
-		<SubHeadline>Recent Events</SubHeadline>
-		<div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-			<label class="flex items-center gap-2 cursor-pointer">
-				<span class="font-semibold text-slate-600 dark:text-gray-300 whitespace-nowrap">
-					Include test campaigns
-				</span>
-				<div class="relative flex items-center">
-					<input
-						type="checkbox"
-						id="includeTestCampaigns"
-						bind:checked={includeTestCampaigns}
-						on:change={handleToggleChange}
-						class="peer sr-only"
-					/>
-					<div
-						class="peer-focus-visible:ring-2 peer-focus-visible:ring-cta-blue dark:peer-focus-visible:ring-highlight-blue peer-focus-visible:ring-offset-2 dark:peer-focus-visible:ring-offset-gray-900 w-5 h-5 border-2 border-slate-300 dark:border-gray-700/60 rounded
-						       peer-checked:border-cta-blue dark:peer-checked:border-highlight-blue/80 peer-checked:bg-cta-blue dark:peer-checked:bg-highlight-blue/80
-						       peer-focus:border-slate-400 dark:peer-focus:border-highlight-blue/80 peer-focus:bg-gray-100 dark:peer-focus:bg-gray-700/60
-						       transition-all duration-200 ease-in-out
-						       flex items-center justify-center
-						       bg-slate-50 dark:bg-gray-900/60"
-					>
-						{#if includeTestCampaigns}
-							<svg
-								class="w-3 h-3 text-white"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-								aria-hidden="true"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="3"
-									d="M5 13l4 4L19 7"
-								/>
-							</svg>
-						{/if}
-					</div>
-				</div>
-			</label>
-			<AutoRefresh
-				isLoading={false}
-				pageId="dashboard-events"
-				onRefresh={async () => {
-					const eventsOptions = {
-						page: eventsTableURLParams.currentPage,
-						perPage: eventsTableURLParams.perPage,
-						sortBy: eventsTableURLParams.sortBy,
-						sortOrder: eventsTableURLParams.sortOrder,
-						search: eventsTableURLParams.search,
-						includeTest: includeTestCampaigns
-					};
-					const eventsRes = await api.campaign.getAllEvents(eventsOptions, contextCompanyID);
-					if (eventsRes.success) {
-						events = eventsRes.data?.rows ?? [];
-						eventsHasNextPage = eventsRes.data?.hasNextPage ?? false;
-					}
-				}}
-			/>
-		</div>
-	</div>
+	<DashboardToolbar
+		{isLoading}
+		allCompanies={!contextCompanyID}
+		pageId="dashboard-events"
+		onRefresh={() => refreshEvents(false)}
+		on:change={() => refreshEvents(true)}
+	/>
 
-	<div class="min-h-[300px] mb-8">
+	<div class="mt-4 mb-8">
 		<Table
 			reserveSelect
 			columns={[
 				{ column: 'Time', size: 'small' },
 				{ column: 'Event', size: 'medium' },
-				{ column: 'Campaign', size: 'large' },
-				{ column: 'Email', size: 'large' },
+				{ column: showPrograms ? 'Campaign or program' : 'Campaign', size: 'large' },
+				{ column: 'Recipient', size: 'large' },
 				...(contextCompanyID ? [] : [{ column: 'Company', size: 'medium' }])
 			]}
 			pagination={eventsTableURLParams}
@@ -190,14 +158,26 @@
 			noSearch={true}
 			hasActions={false}
 		>
+			<TableFilterSelect
+				slot="toolbar"
+				label="Event"
+				options={eventTypeOptions}
+				bind:value={eventType}
+				on:change={onEventTypeChange}
+			/>
 			{#each events as event (event.id)}
 				<TableRow>
 					<TableCell isDate isRelative value={event.createdAt} />
 					<TableCell>
-						<EventName eventName={eventTypesIDToNameMap[event.eventID]} />
+						<EventName eventName={eventTypesIDToNameMap[event.eventID]} full />
 					</TableCell>
 					<TableCell>
-						{#if event.campaign?.name}
+						{#if event.programID}
+							<a href={`/program/${event.programID}`} class="pc-cell-link block w-full py-1">
+								{event.programName}
+								<span class="text-slate-400 dark:text-gray-500">(program)</span>
+							</a>
+						{:else if event.campaign?.name}
 							<a href={`/campaign/${event.campaignID}`} class="pc-cell-link block w-full py-1">
 								{event.campaign.name}
 							</a>
@@ -212,8 +192,8 @@
 					</TableCell>
 					{#if !contextCompanyID}
 						<TableCell>
-							{#if event.campaign?.company?.name}
-								{event.campaign.company.name}
+							{#if event.campaign?.company?.name || event.company?.name}
+								{event.campaign?.company?.name || event.company?.name}
 							{:else}
 								<span class="text-slate-400 dark:text-gray-500">Shared</span>
 							{/if}

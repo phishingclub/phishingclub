@@ -1,6 +1,7 @@
 <script>
 	import { api } from '$lib/api/apiProxy.js';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import Headline from '$lib/components/Headline.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import FormError from '$lib/components/FormError.svelte';
@@ -46,33 +47,55 @@
 		};
 	});
 
+	// while a listed company is being deleted in the background the list is
+	// read again until it is gone
+	const deletingRefreshEvery = 5000;
+	let deletingTimer = null;
+	let isDestroyed = false;
+	const watchDeleting = (rows) => {
+		if (isDestroyed || !rows.some((c) => c.deletingAt)) {
+			clearTimeout(deletingTimer);
+			deletingTimer = null;
+			return;
+		}
+		if (deletingTimer) return;
+		deletingTimer = setTimeout(async () => {
+			await refreshCompanies(false);
+			deletingTimer = null;
+			watchDeleting(companies);
+		}, deletingRefreshEvery);
+	};
+	$: watchDeleting(companies);
+	onDestroy(() => {
+		isDestroyed = true;
+		clearTimeout(deletingTimer);
+		deletingTimer = null;
+	});
+
 	// component logic
-	const refreshCompanies = async () => {
+	// a failed read keeps the rows shown. A background refresh toasts only
+	// the first failure in a row, not one every few seconds
+	let refreshFailing = false;
+	const refreshCompanies = async (showLoading = true) => {
+		const background = showLoading === false;
 		try {
-			isTableLoading = true;
-			const data = await getCompanies();
-			companies = data.rows;
-			companiesHasNextPage = data.hasNextPage;
+			isTableLoading = !background;
+			const res = await api.company.getAll(tableURLParams);
+			if (!res.success) {
+				throw res.error;
+			}
+			companies = res.data?.rows ?? [];
+			companiesHasNextPage = !!res.data?.hasNextPage;
+			refreshFailing = false;
 		} catch (e) {
-			addToast('Failed to get companies', 'Error');
+			if (!background || !refreshFailing) {
+				addToast('Failed to get companies', 'Error');
+			}
+			refreshFailing = true;
 			console.error('failed to get companies', e);
 		} finally {
 			isTableLoading = false;
 		}
-	};
-
-	const getCompanies = async () => {
-		try {
-			const res = await api.company.getAll(tableURLParams);
-			if (res.success) {
-				return res.data;
-			}
-			throw new res.error();
-		} catch (e) {
-			addToast('Failed to get companies', 'Error');
-			console.error('failed to get companies', e);
-		}
-		return [];
 	};
 
 	const onSubmit = async () => {
@@ -162,7 +185,18 @@
 						href={`/company/${company.id}`}
 						title="Open {company.name}"
 					>
-						<span class="truncate">{company.name}</span>
+						<span class="flex min-w-0 items-center gap-2">
+							<span class="truncate">{company.name}</span>
+							{#if company.deletingAt}
+								<StatusBadge
+									tone={company.deleteFailure ? 'warning' : 'danger'}
+									title={company.deleteFailure
+										? `The delete is waiting: ${company.deleteFailure}. Remove it and the delete continues on its own.`
+										: 'The company is deleted in the background with everything in it'}
+									>Deleting</StatusBadge
+								>
+							{/if}
+						</span>
 						<svg
 							class="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500 group-hover:text-slate-600 dark:group-hover:text-gray-200"
 							viewBox="0 0 20 20"

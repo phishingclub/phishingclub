@@ -108,6 +108,10 @@ type RequestContext struct {
 	RecipientID       *uuid.UUID
 	CampaignID        *uuid.UUID
 	ProxyEntry        *model.Proxy
+	// ServeExpired marks a send that lost its person link after the identity
+	// retention of an anonymous program. The proxy is never run for it, a clean
+	// expired page is served instead, see initializeRequestContext.
+	ServeExpired bool
 }
 
 type ProxyHandler struct {
@@ -208,6 +212,12 @@ func (m *ProxyHandler) HandleHTTPRequest(w http.ResponseWriter, req *http.Reques
 			Header:     make(http.Header),
 			Body:       io.NopCloser(strings.NewReader("")),
 		})
+	}
+
+	// a send that lost its person link is never proxied, a clean expired page
+	// is served and nothing is stored
+	if reqCtx.ServeExpired {
+		return m.writeResponse(w, m.createExpiredResponse())
 	}
 
 	// check for URL rewrite and redirect if needed
@@ -353,16 +363,12 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 		}
 		reqCtx.CampaignRecipient = cRecipient
 
-		// get recipient and campaign IDs
-		recipientID, err := cRecipient.RecipientID.Get()
-		if err != nil {
-			return nil, errors.Errorf("failed to get recipient ID: %w", err)
-		}
+		// get campaign id and campaign first, so an unlinked anonymous program
+		// send can be recognized before the recipient id is required below
 		campaignID, err := cRecipient.CampaignID.Get()
 		if err != nil {
 			return nil, errors.Errorf("failed to get campaign ID: %w", err)
 		}
-		reqCtx.RecipientID = &recipientID
 		reqCtx.CampaignID = &campaignID
 
 		// get campaign
@@ -382,6 +388,25 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 		}
 
 		reqCtx.Campaign = campaign
+
+		// get recipient id
+		recipientID, err := cRecipient.RecipientID.Get()
+		if err != nil {
+			// a send of an anonymous program that lost its person link after the
+			// identity retention still has working links until the program
+			// closes. the man in the middle proxy captures live credentials and
+			// session cookies, which are the real account of the person and can
+			// not be stripped of identity, so it is never run for such a send. a
+			// clean expired page is served and nothing is stored. the click was
+			// already recorded on the pseudonym by the phishing server before
+			// the redirect here.
+			if m.isUnlinkedAnonymousProgramSend(ctx, campaign, cRecipient) {
+				reqCtx.ServeExpired = true
+				return reqCtx, nil
+			}
+			return nil, errors.Errorf("failed to get recipient ID: %w", err)
+		}
+		reqCtx.RecipientID = &recipientID
 
 		// preload the recipient's own template. a recipient whose template was
 		// deleted is not served, like on the phishing server.
@@ -486,6 +511,10 @@ func (m *ProxyHandler) processRequestWithContext(req *http.Request, reqCtx *Requ
 		if err != nil {
 			m.logger.Errorw("failed to resolve session context", "error", err)
 			return req, m.createServiceUnavailableResponse("Service temporarily unavailable")
+		}
+		// a session whose send lost its person link is ended
+		if reqCtx.ServeExpired {
+			return req, m.createExpiredResponse()
 		}
 
 		// load campaign recipient object if not already loaded (needed for deny page rendering)
@@ -644,6 +673,15 @@ func (m *ProxyHandler) resolveSessionContext(req *http.Request, reqCtx *RequestC
 					"campaignID", session.CampaignID.String(),
 				)
 				return fmt.Errorf("campaign is no longer active")
+			}
+			unlinked, err := m.sessionSendUnlinked(req.Context(), session)
+			if err != nil {
+				return err
+			}
+			if unlinked {
+				m.SessionManager.DeleteSession(reqCtx.SessionID)
+				reqCtx.ServeExpired = true
+				return nil
 			}
 		}
 	}
@@ -4505,6 +4543,69 @@ func (m *ProxyHandler) createDenyResponse(req *http.Request, reqCtx *RequestCont
 
 }
 
+// isUnlinkedAnonymousProgramSend reports whether a campaign recipient is a send
+// of an anonymous program that lost its person link after the identity
+// retention. Such a send keeps its links working until the program closes but
+// is never put through the man in the middle proxy.
+func (m *ProxyHandler) isUnlinkedAnonymousProgramSend(
+	ctx context.Context,
+	campaign *model.Campaign,
+	campaignRecipient *model.CampaignRecipient,
+) bool {
+	if m.CampaignService == nil || m.CampaignService.ProgramService == nil {
+		return false
+	}
+	_, ok := service.UnlinkedAnonymousProgramSend(
+		ctx,
+		m.CampaignService.ProgramService.ProgramRepository,
+		campaign,
+		campaignRecipient,
+	)
+	return ok
+}
+
+// sessionSendUnlinked reports whether the send of a session of an anonymous
+// program lost its person link since the session began. The session holds the
+// person from its start, so the send is read again on each request: once
+// the identity retention removed the link, the session must stop capturing.
+// Other sessions are not read again.
+func (m *ProxyHandler) sessionSendUnlinked(ctx context.Context, session *service.ProxySession) (bool, error) {
+	campaign := session.Campaign
+	if campaign == nil || session.CampaignRecipientID == nil || !campaign.ProgramID.IsSpecified() || campaign.ProgramID.IsNull() {
+		return false, nil
+	}
+	if anonymous, err := campaign.IsAnonymous.Get(); err != nil || !anonymous {
+		return false, nil
+	}
+	cRecipient, err := m.CampaignRecipientRepository.GetByID(ctx, session.CampaignRecipientID, &repository.CampaignRecipientOption{})
+	if err != nil {
+		return false, errors.Errorf("failed to read the campaign recipient of the session: %w", err)
+	}
+	// a send of an anonymous program that has no person any more is unlinked,
+	// even when the person was also deleted or disabled or the program closed,
+	// so the session stops whether or not the link would still be served
+	if cRecipient.RecipientID.IsNull() || !cRecipient.RecipientID.IsSpecified() {
+		return true, nil
+	}
+	return m.isUnlinkedAnonymousProgramSend(ctx, campaign, cRecipient), nil
+}
+
+// createExpiredResponse returns a clean page for a link that is no longer
+// served, used for a send that lost its person link. It carries no identity
+// and stores nothing.
+func (m *ProxyHandler) createExpiredResponse() *http.Response {
+	header := make(http.Header)
+	header.Set("Content-Type", "text/html; charset=utf-8")
+	body := "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
+		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+		"<title>Link expired</title></head><body><p>This link has expired.</p></body></html>"
+	return &http.Response{
+		StatusCode: http.StatusGone,
+		Header:     header,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
 // createRedirectResponse creates a redirect response
 func (m *ProxyHandler) createRedirectResponse(url string) *http.Response {
 	return &http.Response{
@@ -4724,8 +4825,9 @@ func (m *ProxyHandler) registerPageVisitEvent(req *http.Request, session *servic
 
 	currentNotableEventID, _ := campaignRecipient.NotableEventID.Get()
 	if cache.IsMoreNotableCampaignRecipientEventID(&currentNotableEventID, eventID) {
-		campaignRecipient.NotableEventID.Set(*eventID)
-		err := m.CampaignRecipientRepository.UpdateByID(ctx, session.CampaignRecipientID, campaignRecipient)
+		// only the notable event is written, so a concurrent unlink or close
+		// of an anonymous campaign keeps its cleared person link
+		err := m.CampaignRecipientRepository.UpdateNotableEventByID(ctx, session.CampaignRecipientID, eventID)
 		if err != nil {
 			m.logger.Errorw("failed to update notable event for MITM visit",
 				"campaignRecipientID", session.CampaignRecipientID.String(),
@@ -5327,9 +5429,9 @@ func (m *ProxyHandler) registerDenyPageVisitEventDirect(req *http.Request, reqCt
 	cRecipient := reqCtx.CampaignRecipient
 	currentNotableEventID, _ := cRecipient.NotableEventID.Get()
 	if cache.IsMoreNotableCampaignRecipientEventID(&currentNotableEventID, eventID) {
-		cRecipient.NotableEventID.Set(*eventID)
-		campaignRecipientID := reqCtx.CampaignRecipientID
-		err := m.CampaignRecipientRepository.UpdateByID(req.Context(), campaignRecipientID, cRecipient)
+		// only the notable event is written, so a concurrent unlink or close
+		// of an anonymous campaign keeps its cleared person link
+		err := m.CampaignRecipientRepository.UpdateNotableEventByID(req.Context(), reqCtx.CampaignRecipientID, eventID)
 		if err != nil {
 			m.logger.Errorw("failed to update campaign recipient notable event for deny page", "error", err)
 		}

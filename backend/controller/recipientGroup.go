@@ -329,6 +329,9 @@ func (r *RecipientGroup) DeleteByID(g *gin.Context) {
 	if !ok {
 		return
 	}
+	if !r.handleGlobalAuthorization(g, session) {
+		return
+	}
 	// parse id
 	id, ok := r.handleParseIDParam(g)
 	if !ok {

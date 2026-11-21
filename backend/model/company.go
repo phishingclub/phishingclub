@@ -20,6 +20,12 @@ type Company struct {
 	// AssetsKey is a read only slug naming the company asset folder. It is
 	// generated server side and never written from client input.
 	AssetsKey nullable.Nullable[vo.String64] `json:"assetsKey"`
+	// DeletingAt is set while a delete of the company runs in the background.
+	// It is read only.
+	DeletingAt *time.Time `json:"deletingAt"`
+	// DeleteFailure says why the delete of the company waits, kept in memory
+	// until the delete goes on
+	DeleteFailure string `json:"deleteFailure,omitempty"`
 }
 
 // Validate checks if the Company configuration with a valid state

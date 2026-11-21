@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/cache"
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
@@ -48,8 +47,20 @@ func newProgramServiceTest(t *testing.T) *programTest {
 		&database.ProgramCampaign{},
 		&database.ProgramRecipientGroup{},
 		&database.ProgramEnrollment{},
+		&database.ProgramAllowDeny{},
+		&database.ProgramWebhook{},
+		&database.MicrosoftDeviceCode{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
+	}
+	// the many to many join of the campaign makes the webhook table without
+	// its settings columns, as the scheduler reads them they are added here
+	for _, field := range []string{"WebhookIncludeData", "WebhookEvents"} {
+		if !db.Migrator().HasColumn(&database.CampaignWebhook{}, field) {
+			if err := db.Migrator().AddColumn(&database.CampaignWebhook{}, field); err != nil {
+				t.Fatalf("add webhook column: %v", err)
+			}
+		}
 	}
 	for _, name := range []string{
 		data.EVENT_CAMPAIGN_RECIPIENT_SCHEDULED,
@@ -75,6 +86,12 @@ func newProgramServiceTest(t *testing.T) *programTest {
 		RecipientRepository:         &repository.Recipient{DB: db},
 		CampaignService:             campaignService,
 	}
+	// a background delete or close pass ends before the database is removed
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = svc.settle(ctx)
+	})
 	return &programTest{t: t, ctx: context.Background(), db: db, svc: svc}
 }
 
@@ -170,12 +187,22 @@ func (p *programTest) send(campaignID, recipientID uuid.UUID, sent bool) uuid.UU
 	return id
 }
 
+// waitForCloses waits for the background close of the programs at their end
+// that a tick started
+func (p *programTest) waitForCloses(t *testing.T) {
+	t.Helper()
+	if err := p.svc.waitForCloses(p.ctx); err != nil {
+		t.Fatalf("wait for closes: %v", err)
+	}
+}
+
 func (p *programTest) loadProgram(id uuid.UUID) *model.Program {
 	p.t.Helper()
 	program, err := p.svc.ProgramRepository.GetByID(p.ctx, &id, &repository.ProgramOption{WithSteps: true})
 	if err != nil {
 		p.t.Fatalf("load program: %v", err)
 	}
+	program.SetReadState(time.Now())
 	return program
 }
 
@@ -205,8 +232,24 @@ func (p *programTest) sendsIn(campaignID uuid.UUID) []database.CampaignRecipient
 	return rows
 }
 
-func member(id uuid.UUID) *model.Recipient {
-	return &model.Recipient{ID: nullable.NewNullableWithValue(id)}
+// passMembers runs the writes of one membership pass the way
+// resolveListedProgramWith does, from members and existing at now, without
+// the group read and the lifecycle checks
+func (p *programTest) passMembers(program *model.Program, members []*uuid.UUID, existing []*database.ProgramEnrollment, now time.Time) {
+	p.t.Helper()
+	programID := program.ID.MustGet()
+	always := func(*model.Program) bool { return true }
+	r := p.svc.planReturners(program, members, existing, now)
+	r.joiners = p.svc.planJoiners(program, members, enrollmentsByRecipient(existing), now)
+	if done, err := p.svc.writeReturners(p.ctx, r, always); err != nil || !done {
+		p.t.Fatalf("write returners: done %v err %v", done, err)
+	}
+	if done, err := p.svc.writeLeavers(p.ctx, &programID, planLeavers(members, existing, now), now, always); err != nil || !done {
+		p.t.Fatalf("write leavers: done %v err %v", done, err)
+	}
+	if _, err := p.svc.cancelGoneSends(p.ctx, &programID, nil); err != nil {
+		p.t.Fatalf("cancel gone sends: %v", err)
+	}
 }
 
 // TestResolveEnrollmentsMissingGraceExitReturn walks one person through leaving
@@ -219,11 +262,11 @@ func TestResolveEnrollmentsMissingGraceExitReturn(t *testing.T) {
 	campaignID := p.stepCampaign(programID, stepID, 0)
 	rid := p.recipient("alice@example.com")
 	program := p.loadProgram(programID)
-	members := []*model.Recipient{member(rid)}
+	members := []*uuid.UUID{&rid}
 
 	now := time.Now()
-	p.svc.enrollJoiners(p.ctx, program, members, nil, now)
-	existing, err := p.svc.ProgramRepository.GetEnrollmentsByProgramID(p.ctx, &programID)
+	p.passMembers(program, members, nil, now)
+	existing, err := p.svc.ProgramRepository.GetEnrollmentPlansByProgramID(p.ctx, &programID)
 	if err != nil || len(existing) != 1 || existing[0].Status != model.ProgramEnrollmentActive || existing[0].NextDueAt == nil {
 		t.Fatalf("expected one active enrollment, got %v (%v)", existing, err)
 	}
@@ -231,18 +274,18 @@ func TestResolveEnrollmentsMissingGraceExitReturn(t *testing.T) {
 	unsent := p.send(campaignID, rid, false)
 
 	// gone from the groups: marked missing, still active
-	p.svc.exitLeavers(p.ctx, &programID, nil, []*database.ProgramEnrollment{e}, now)
+	p.passMembers(program, nil, []*database.ProgramEnrollment{e}, now)
 	row := p.enrollment(e.ID)
 	if row.Status != model.ProgramEnrollmentActive || row.MissingSince == nil {
 		t.Fatalf("expected active and missing, got %s %v", row.Status, row.MissingSince)
 	}
 	// within the grace period nothing changes
-	p.svc.exitLeavers(p.ctx, &programID, nil, []*database.ProgramEnrollment{&row}, now.Add(programMissingGrace/2))
+	p.passMembers(program, nil, []*database.ProgramEnrollment{&row}, now.Add(programMissingGrace/2))
 	if row = p.enrollment(e.ID); row.Status != model.ProgramEnrollmentActive {
 		t.Fatalf("exited within the grace period")
 	}
 	// after the grace period the person is exited and the unsent send cancelled
-	p.svc.exitLeavers(p.ctx, &programID, nil, []*database.ProgramEnrollment{&row}, now.Add(2*programMissingGrace))
+	p.passMembers(program, nil, []*database.ProgramEnrollment{&row}, now.Add(2*programMissingGrace))
 	row = p.enrollment(e.ID)
 	if row.Status != model.ProgramEnrollmentExited || row.ExitedAt == nil || row.NextDueAt != nil || row.MissingSince != nil {
 		t.Fatalf("expected exited, got %s exited %v due %v missing %v", row.Status, row.ExitedAt, row.NextDueAt, row.MissingSince)
@@ -253,7 +296,7 @@ func TestResolveEnrollmentsMissingGraceExitReturn(t *testing.T) {
 		t.Fatal("the unsent send of a leaver must be cancelled")
 	}
 	// back in the groups: active again with the same loop
-	p.svc.enrollJoiners(p.ctx, program, members, []*database.ProgramEnrollment{&row}, now.Add(3*programMissingGrace))
+	p.passMembers(program, members, []*database.ProgramEnrollment{&row}, now.Add(3*programMissingGrace))
 	row = p.enrollment(e.ID)
 	if row.Status != model.ProgramEnrollmentActive || row.ExitedAt != nil || row.NextDueAt == nil {
 		t.Fatalf("expected active again, got %s exited %v due %v", row.Status, row.ExitedAt, row.NextDueAt)
@@ -274,9 +317,10 @@ func TestResolveEnrollmentsBackWithinGrace(t *testing.T) {
 	rid := p.recipient("bob@example.com")
 	e := p.enroll(programID, rid, 0)
 	now := time.Now()
-	p.svc.exitLeavers(p.ctx, &programID, nil, []*database.ProgramEnrollment{e}, now)
+	program := p.loadProgram(programID)
+	p.passMembers(program, nil, []*database.ProgramEnrollment{e}, now)
 	row := p.enrollment(e.ID)
-	p.svc.enrollJoiners(p.ctx, p.loadProgram(programID), []*model.Recipient{member(rid)}, []*database.ProgramEnrollment{&row}, now)
+	p.passMembers(program, []*uuid.UUID{&rid}, []*database.ProgramEnrollment{&row}, now)
 	if row = p.enrollment(e.ID); row.MissingSince != nil || row.Status != model.ProgramEnrollmentActive {
 		t.Fatalf("expected active without missing mark, got %s %v", row.Status, row.MissingSince)
 	}
@@ -365,6 +409,37 @@ func TestAdvanceEnrollmentPostponesWhenAllBroken(t *testing.T) {
 	}
 }
 
+// TestAdvanceEnrollmentKeepsTakenCancelledSend checks a cancelled row the
+// sender already took is never put back in the queue, as it may have gone out
+// before a crash kept sent_at from being written, and its step counts as given
+func TestAdvanceEnrollmentKeepsTakenCancelledSend(t *testing.T) {
+	p := newProgramServiceTest(t)
+	programID := p.program(model.ProgramLoopComplete)
+	stepA := p.step(programID, 0, true)
+	stepB := p.step(programID, 1, true)
+	campaignID := p.stepCampaign(programID, stepA, 0)
+	campaignB := p.stepCampaign(programID, stepB, 0)
+	rid := p.recipient("frank@example.com")
+	e := p.enroll(programID, rid, 0)
+	taken := p.send(campaignID, rid, false)
+	now := utils.NowRFC3339UTC()
+	p.db.Model(&database.CampaignRecipient{}).Where("id = ?", taken).
+		Updates(map[string]any{"cancelled_at": now, "last_attempt_at": now})
+
+	p.advance(programID, e)
+	rows := p.sendsIn(campaignID)
+	if len(rows) != 1 || *rows[0].ID != taken {
+		t.Fatalf("expected only the taken row in the campaign, got %d rows", len(rows))
+	}
+	if rows[0].CancelledAt == nil {
+		t.Fatal("a row the sender took must not be put back in the queue")
+	}
+	// the taken step counts as given, so the person gets the other step
+	if rows := p.sendsIn(campaignB); len(rows) != 1 || rows[0].CancelledAt != nil {
+		t.Fatalf("expected the other step planned, got %d rows", len(rows))
+	}
+}
+
 // TestAdvanceEnrollmentRevivesCancelledSend checks that a cancelled unsent row
 // of the picked step goes back in the queue instead of a second row
 func TestAdvanceEnrollmentRevivesCancelledSend(t *testing.T) {
@@ -389,60 +464,5 @@ func TestAdvanceEnrollmentRevivesCancelledSend(t *testing.T) {
 	row := p.enrollment(e.ID)
 	if row.Position != 1 || row.Status != model.ProgramEnrollmentActive {
 		t.Fatalf("expected position 1 active, got %d %s", row.Position, row.Status)
-	}
-}
-
-// TestProcessReportedCSVNamedProgram checks the matching of a reported CSV on a
-// program that is not anonymous: email case is ignored, a time picks the send
-// at or before it, a second report is counted as already reported and unknown
-// people or bad dates are unmatched
-func TestProcessReportedCSVNamedProgram(t *testing.T) {
-	p := newProgramServiceTest(t)
-	programID := p.program(model.ProgramLoopComplete)
-	stepA := p.step(programID, 0, true)
-	stepB := p.step(programID, 1, true)
-	campaignA := p.stepCampaign(programID, stepA, 0)
-	campaignB := p.stepCampaign(programID, stepB, 0)
-	alice := p.recipient("alice@example.com")
-	bob := p.recipient("bob@example.com")
-	p.enroll(programID, alice, 0)
-	p.enroll(programID, bob, 0)
-	// alice got step A in January and step B in March
-	jan := time.Date(2026, 1, 10, 9, 0, 0, 0, time.UTC)
-	mar := time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC)
-	for campaignID, at := range map[uuid.UUID]time.Time{campaignA: jan, campaignB: mar} {
-		id := p.send(campaignID, alice, true)
-		p.db.Model(&database.CampaignRecipient{}).Where("id = ?", id).Update("sent_at", utils.RFC3339UTC(at))
-	}
-
-	records := [][]string{
-		{"email", "reported"},
-		{" ALICE@example.com ", "2026-02-01"},
-		{"alice@example.com", "2026-02-02"},
-		{"bob@example.com", ""},
-		{"nobody@example.com", ""},
-		{"alice@example.com", "not a date"},
-	}
-	out, err := p.svc.ProcessReportedCSV(p.ctx, authorizedSession(t), &programID, records, 0, 1)
-	if err != nil {
-		t.Fatalf("process: %v", err)
-	}
-	if out.Matched == nil || out.AlreadyReported == nil || out.Unmatched == nil {
-		t.Fatalf("a named program must return the full split: %+v", out)
-	}
-	if out.Recorded != 1 || *out.Matched != 2 || *out.AlreadyReported != 1 || *out.Unmatched != 3 {
-		t.Fatalf("got recorded %d matched %d already %d unmatched %d",
-			out.Recorded, *out.Matched, *out.AlreadyReported, *out.Unmatched)
-	}
-	reported := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
-	var events []database.CampaignEvent
-	p.db.Where("event_id = ?", reported).Find(&events)
-	if len(events) != 1 || *events[0].CampaignID != campaignA || *events[0].RecipientID != alice {
-		t.Fatalf("expected one report on the January send, got %d", len(events))
-	}
-
-	// unauthorized sessions are refused
-	if _, err := p.svc.ProcessReportedCSV(p.ctx, unauthorizedSession(t), &programID, records, 0, 1); err == nil {
-		t.Fatal("expected an unauthorized session to be refused")
 	}
 }

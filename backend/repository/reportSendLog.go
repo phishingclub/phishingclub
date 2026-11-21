@@ -11,6 +11,7 @@ import (
 	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var reportSendLogAllowedColumns = assignTableToColumns(database.REPORT_SEND_LOG_TABLE, []string{
@@ -53,6 +54,14 @@ func (r *ReportSendLog) Insert(
 	return &id, nil
 }
 
+// DeleteByCompanyID removes the report send logs of a company
+func (r *ReportSendLog) DeleteByCompanyID(ctx context.Context, companyID *uuid.UUID) error {
+	res := r.DB.WithContext(ctx).
+		Where(clause.Eq{Column: clause.Column{Name: "company_id"}, Value: companyID}).
+		Delete(&database.ReportSendLog{})
+	return errs.Wrap(res.Error)
+}
+
 // GetAllByCompanyID returns the report send logs for a company using pagination
 func (r *ReportSendLog) GetAllByCompanyID(
 	ctx context.Context,
@@ -66,13 +75,10 @@ func (r *ReportSendLog) GetAllByCompanyID(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	if res := db.Find(&rows); res.Error != nil {
+	if res := withPeek(db, options.QueryArgs).Find(&rows); res.Error != nil {
 		return result, errs.Wrap(res.Error)
 	}
-	hasNextPage, err := useHasNextPage(db, database.REPORT_SEND_LOG_TABLE, options.QueryArgs, reportSendLogAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 	for _, row := range rows {
 		result.Rows = append(result.Rows, ToReportSendLog(&row))
@@ -92,12 +98,30 @@ func ToReportSendLog(row *database.ReportSendLog) *model.ReportSendLog {
 	if row.CampaignID != nil {
 		campaignID.Set(*row.CampaignID)
 	}
+	programID := nullable.NewNullNullable[uuid.UUID]()
+	if row.ProgramID != nil {
+		programID.Set(*row.ProgramID)
+	}
+
+	source := model.ReportSendLogSourceCampaign
+	sourceID := ""
+	if row.CampaignID != nil {
+		sourceID = row.CampaignID.String()
+	}
+	if row.ProgramID != nil {
+		source = model.ReportSendLogSourceProgram
+		sourceID = row.ProgramID.String()
+	}
 
 	return &model.ReportSendLog{
+		Source:         source,
+		SourceName:     row.CampaignName,
+		SourceID:       sourceID,
 		ID:             id,
 		CreatedAt:      row.CreatedAt,
 		CompanyID:      companyID,
 		CampaignID:     campaignID,
+		ProgramID:      programID,
 		CampaignName:   row.CampaignName,
 		GroupName:      row.GroupName,
 		Trigger:        row.Trigger,

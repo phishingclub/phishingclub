@@ -1,19 +1,22 @@
 <script>
-	// Monthly click, submit and report rates as a small line chart.
-	// months: [{ key, name, sent, clicked, submitted, reported }]
+	// Monthly click, submission and report rates as a small line chart, named
+	// like the dashboard trend. A month the program ran only part of is drawn
+	// with a dashed hollow point.
+	// months: [{ key, name, sent, clicked, submitted, reported, partial }]
+	import { onMount } from 'svelte';
 	import { NONE_YET, PROGRAM_MIN_GROUP, ratePercent } from '$lib/utils/programText.js';
 
 	export let months = [];
 
-	// months with fewer emails than this get a note in the tooltip
-	const FEW_EMAILS = PROGRAM_MIN_GROUP;
+	// months with fewer sends than this get a note in the tooltip
+	const FEW_SENDS = PROGRAM_MIN_GROUP;
 	const height = 220;
 	const margin = { top: 12, right: 48, bottom: 30, left: 44 };
 
 	const series = [
 		{
 			key: 'clicked',
-			label: 'Click rate',
+			label: 'Click Rate',
 			short: 'click',
 			stroke: 'stroke-page-visited',
 			fill: 'fill-page-visited',
@@ -21,23 +24,34 @@
 		},
 		{
 			key: 'submitted',
-			label: 'Submit rate',
-			short: 'submit',
+			label: 'Submission Rate',
+			short: 'submission',
 			stroke: 'stroke-submitted-data',
 			fill: 'fill-submitted-data',
-			dash: '5 3'
+			dash: ''
 		},
 		{
 			key: 'reported',
-			label: 'Report rate',
+			label: 'Report Rate',
 			short: 'report',
-			stroke: 'stroke-reported dark:stroke-slate-400',
-			fill: 'fill-reported dark:fill-slate-400',
+			// the reported token, lighter in dark mode like the Reported tiles
+			stroke: 'stroke-reported dark:stroke-slate-300',
+			fill: 'fill-reported dark:fill-slate-300',
 			dash: ''
 		}
 	];
 
 	let width = 600;
+	let box;
+	// the chart follows the width of its box
+	onMount(() => {
+		width = box.clientWidth;
+		const observer = new ResizeObserver(() => {
+			width = box.clientWidth;
+		});
+		observer.observe(box);
+		return () => observer.disconnect();
+	});
 	let hoverIdx = -1;
 	let hoverSeries = '';
 
@@ -123,7 +137,8 @@
 	})();
 
 	const monthLabel = (m) =>
-		`${m.name}: ${series.map((s) => `${s.short} ${fmtOf(m, s.key)}`).join(', ')}, ${m.sent ?? 0} ${m.sent === 1 ? 'email' : 'emails'}`;
+		`${m.name}${m.partial ? ', partial month' : ''}: ${series.map((s) => `${s.short} ${fmtOf(m, s.key)}`).join(', ')}, ${m.sent ?? 0} sent`;
+	$: hasPartial = months.some((m) => m.partial);
 
 	$: hovered = hoverIdx >= 0 ? months[hoverIdx] : null;
 	$: tipLeft = hoverIdx >= 0 ? Math.min(Math.max(xAt(hoverIdx), 80), width - 80) : 0;
@@ -157,8 +172,23 @@
 				{s.label}
 			</span>
 		{/each}
+		{#if hasPartial}
+			<span class="inline-flex items-center gap-1.5">
+				<svg width="10" height="10" aria-hidden="true" class="overflow-visible">
+					<circle
+						cx="5"
+						cy="5"
+						r="3.5"
+						stroke-width="1.5"
+						stroke-dasharray="2 1.5"
+						class="fill-white dark:fill-gray-900 stroke-gray-500 dark:stroke-gray-400"
+					/>
+				</svg>
+				Partial month
+			</span>
+		{/if}
 	</div>
-	<div class="relative" bind:clientWidth={width}>
+	<div class="relative" bind:this={box}>
 		<svg {width} {height} role="group" aria-label={ariaLabel} class="block overflow-visible">
 			{#each ticks as t}
 				<line
@@ -216,8 +246,9 @@
 							<circle
 								cx={xAt(i)}
 								cy={yAt(rateOf(m, s.key))}
-								r={hoverIdx === i ? 4 : 2.5}
-								stroke-width="2"
+								r={hoverIdx === i ? 4.5 : m.partial ? 3.5 : 2.5}
+								stroke-width={m.partial ? 1.5 : 2}
+								stroke-dasharray={m.partial ? '2 1.5' : null}
 								class="fill-white dark:fill-gray-900 {s.stroke}"
 							/>
 						{/if}
@@ -263,11 +294,17 @@
 				class="pointer-events-none absolute top-0 -translate-x-1/2 rounded-md bg-white dark:bg-gray-800 px-3 py-2 text-xs shadow-lg ring-1 ring-gray-200 dark:ring-gray-700 text-gray-700 dark:text-gray-200"
 				style="left: {tipLeft}px"
 			>
-				<p class="font-semibold mb-1">{hovered.name}</p>
+				<p class="font-semibold mb-1">
+					{hovered.name}{#if hovered.partial}<span
+							class="font-normal text-gray-500 dark:text-gray-400"
+						>
+							(partial)</span
+						>{/if}
+				</p>
 				<p class="text-gray-600 dark:text-gray-400 mb-1 tabular-nums">
 					{hovered.sent ?? 0}
-					{hovered.sent === 1 ? 'email' : 'emails'}{#if (hovered.sent ?? 0) < FEW_EMAILS},
-						<span class="font-semibold text-yellow-800 dark:text-yellow-300">few emails</span>{/if}
+					sent{#if (hovered.sent ?? 0) < FEW_SENDS},
+						<span class="font-semibold text-pc-darkblue dark:text-white">few sends</span>{/if}
 				</p>
 				{#each series as s}
 					<p class="flex items-center justify-between gap-4 tabular-nums">

@@ -40,6 +40,30 @@ func TestAuditOptionValueOtherKeysUnchanged(t *testing.T) {
 	}
 }
 
+func TestIsValidDisplayMode(t *testing.T) {
+	for _, v := range []string{
+		data.OptionValueDisplayModeWhitebox,
+		data.OptionValueDisplayModeBlackbox,
+		data.OptionValueDisplayModeAll,
+	} {
+		if !isValidDisplayMode(v) {
+			t.Fatalf("expected %q to be a valid display mode", v)
+		}
+	}
+	for _, v := range []string{"", "ALL", "both", "whitebox "} {
+		if isValidDisplayMode(v) {
+			t.Fatalf("expected %q to be rejected", v)
+		}
+	}
+}
+
+func TestAuditOptionValueDisplayModeAllUnchanged(t *testing.T) {
+	got := auditOptionValue(data.OptionKeyDisplayMode, data.OptionValueDisplayModeAll)
+	if got != data.OptionValueDisplayModeAll {
+		t.Fatalf("expected value unchanged, got %s", got)
+	}
+}
+
 // bufferLogger returns a logger at level that writes JSON lines to the buffer
 func bufferLogger(level zapcore.Level) (*zap.SugaredLogger, *bytes.Buffer) {
 	buf := &bytes.Buffer{}

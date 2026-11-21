@@ -87,12 +87,23 @@
 		COLUMN_WIDTHS[typeof column === 'object' && columns.length > 1 ? column.size || '' : ''] ??
 		COLUMN_WIDTHS[''];
 
-	// below md a column with hideBelow is not shown and a compact column has no
-	// fixed width, so neither counts its full size toward the table min width
+	// a column hidden below its hideBelow size is not shown and below md a
+	// compact column has no fixed width, so neither counts its full size toward
+	// the table min width
 	const COMPACT_WIDTH = 96;
 	let isBelowMd = false;
+	let isBelowLg = false;
+	let isBelowXl = false;
+	let isBelow2xl = false;
+	$: isHidden = (column) =>
+		typeof column === 'object' &&
+		((column.hideBelow === 'sm' && isPhone) ||
+			(column.hideBelow === 'md' && isBelowMd) ||
+			(column.hideBelow === 'lg' && isBelowLg) ||
+			(column.hideBelow === 'xl' && isBelowXl) ||
+			(column.hideBelow === '2xl' && isBelow2xl));
 	$: effectiveWidthOf = (column) => {
-		if (isBelowMd && typeof column === 'object' && column.hideBelow === 'md') {
+		if (isHidden(column)) {
 			return 0;
 		}
 		if (isBelowMd && typeof column === 'object' && column.compact) {
@@ -126,14 +137,13 @@
 			? !isLong(columns[0])
 			: rankOf(columns[0]) < Math.max(...columns.map(rankOf)));
 	// a fixed first column is widened by the gutter, so its text keeps its room
-	$: gutterColumnWidth = reserveGutter && firstIsFixed ? effectiveWidthOf(columns[0]) + SELECT_WIDTH : null;
+	$: gutterColumnWidth =
+		reserveGutter && firstIsFixed ? effectiveWidthOf(columns[0]) + SELECT_WIDTH : null;
 	// for a fluid first column the gutter is not counted while the columns fit,
 	// so a fitting table keeps fitting; it is counted once the table scrolls
 	// anyway, so the first column keeps its width
 	$: reserveWidth =
-		reserveGutter && !firstIsFixed && boxWidth > 0 && columnsMinWidth > boxWidth
-			? SELECT_WIDTH
-			: 0;
+		reserveGutter && !firstIsFixed && boxWidth > 0 && columnsMinWidth > boxWidth ? SELECT_WIDTH : 0;
 	$: baseMinWidth = columnsMinWidth + reserveWidth;
 	// on phones a scrolling table with an actions column gives the first column
 	// the rest of the visible width, so the second column starts behind the
@@ -143,7 +153,8 @@
 		isPhone && hasActions && columns.length > 1 && boxWidth > 0 && baseMinWidth > boxWidth
 			? Math.max(120, boxWidth - selectWidth - actionsWidth)
 			: gutterColumnWidth;
-	$: minTableWidth = baseMinWidth + (firstColumnWidth ? firstColumnWidth - effectiveWidthOf(columns[0]) : 0);
+	$: minTableWidth =
+		baseMinWidth + (firstColumnWidth ? firstColumnWidth - effectiveWidthOf(columns[0]) : 0);
 	// on desktop an empty table fits the box, so no header label is cut or hides
 	// behind the pinned actions column and no edge fade shows; on phones it keeps
 	// its width like a table with rows, or fixed columns squeeze the others to nothing
@@ -152,7 +163,12 @@
 	// cover the extra columns, so it shows only the leading columns that fit
 	// (at least two) and fits the box with a round right end
 	$: phoneEmptyFit =
-		isPhone && isEmptyView && !hasActions && columns.length > 1 && boxWidth > 0 && baseMinWidth > boxWidth;
+		isPhone &&
+		isEmptyView &&
+		!hasActions &&
+		columns.length > 1 &&
+		boxWidth > 0 &&
+		baseMinWidth > boxWidth;
 	$: fitCount = (available) => {
 		let used = 0;
 		let count = 0;
@@ -208,11 +224,12 @@
 	};
 
 	onMount(() => {
-		pagination?.onChange((key, value) => {
-			if (key === 'page') {
-				currentPage = value;
-			} else if (key === 'perPage') {
-				perPage = Number(value) || 0;
+		pagination?.onChange((key, value, changes) => {
+			if ('page' in changes) {
+				currentPage = changes.page;
+			}
+			if ('perPage' in changes) {
+				perPage = Number(changes.perPage) || 0;
 			}
 		});
 		countRows();
@@ -243,8 +260,29 @@
 		};
 		onMdChange();
 		mdQuery.addEventListener('change', onMdChange);
+		const lgQuery = window.matchMedia('(max-width: 1023.98px)');
+		const onLgChange = () => {
+			isBelowLg = lgQuery.matches;
+		};
+		onLgChange();
+		lgQuery.addEventListener('change', onLgChange);
+		const xlQuery = window.matchMedia('(max-width: 1279.98px)');
+		const onXlChange = () => {
+			isBelowXl = xlQuery.matches;
+		};
+		onXlChange();
+		xlQuery.addEventListener('change', onXlChange);
+		const xxlQuery = window.matchMedia('(max-width: 1535.98px)');
+		const on2xlChange = () => {
+			isBelow2xl = xxlQuery.matches;
+		};
+		on2xlChange();
+		xxlQuery.addEventListener('change', on2xlChange);
 		return () => {
+			xxlQuery.removeEventListener('change', on2xlChange);
+			xlQuery.removeEventListener('change', onXlChange);
 			mdQuery.removeEventListener('change', onMdChange);
+			lgQuery.removeEventListener('change', onLgChange);
 			mutationObserver.disconnect();
 			resizeObserver.disconnect();
 			phoneQuery.removeEventListener('change', onPhoneChange);
@@ -271,73 +309,73 @@
 	>
 		<!-- the scroll box has no padding so rows never show beside the pinned actions column -->
 		<div class="relative">
-		<div
-			bind:this={scrollRef}
-			on:scroll={updateScrollCue}
-			data-scroll-more={canScrollRight && !isEmptyView ? '' : undefined}
-			data-scroll-rows={canScrollRight && hasData ? '' : undefined}
-			class="pc-table-scroll overflow-x-auto {scrollBarClassesHorizontal}"
-		>
-		<table
-			bind:this={tableRef}
-			class="w-full table-fixed border-separate border-spacing-0 bg-white dark:bg-gray-900 transition-colors duration-200"
-			style="min-width: {tableMinWidth}px"
-			class:pc-reserve-select={reserveSelect && !selectable}
-			class:animate-pulse={showSkeleton}
-		>
-			<TableHeader
-				isGhost={showSkeleton}
-				columns={shownColumns}
-				{sortable}
-				{hasActions}
-				{pagination}
-				selectable={selectColumn}
-				{headerState}
-				{firstColumnWidth}
-				showSelect={hasData}
-				on:toggleAll
-			/>
-			<tbody
-				bind:this={tbodyRef}
-				class="transition-opacity duration-200"
-				class:animate-pulse={dimRows}
-				class:pointer-events-none={dimRows}
-			>
-				{#if showSkeleton}
-					{#each Array(skeletonRows) as _, row}
-						<TableRow>
-							{#if selectColumn}
-								<TableCellEmpty />
-							{/if}
-							{#each columns as column, col}
-								<TableCell hideBelow={typeof column === 'object' ? column.hideBelow || '' : ''}>
-									<GhostText index={row * columns.length + col} />
-								</TableCell>
-							{/each}
-							{#if hasActions}
-								<TableCellEmpty />
-								<TableCellAction>
-									<GhostText square center />
-								</TableCellAction>
-							{/if}
-						</TableRow>
-					{/each}
-				{:else}
-					{#if !hasData}
-						<EmptyTableResult page={currentPage} {plural} colspan={columnsLength} />
-					{/if}
-					<slot />
-				{/if}
-			</tbody>
-		</table>
-		</div>
-		{#if canScrollRight && !hasActions && !isEmptyView}
-			<!-- no pinned actions column to hint at more columns, so the box edge fades out -->
 			<div
-				aria-hidden="true"
-				class="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-r from-transparent to-white dark:to-gray-900"
-			></div>
-		{/if}
+				bind:this={scrollRef}
+				on:scroll={updateScrollCue}
+				data-scroll-more={canScrollRight && !isEmptyView ? '' : undefined}
+				data-scroll-rows={canScrollRight && hasData ? '' : undefined}
+				class="pc-table-scroll overflow-x-auto {scrollBarClassesHorizontal}"
+			>
+				<table
+					bind:this={tableRef}
+					class="w-full table-fixed border-separate border-spacing-0 bg-white dark:bg-gray-900 transition-colors duration-200"
+					style="min-width: {tableMinWidth}px"
+					class:pc-reserve-select={reserveSelect && !selectable}
+					class:animate-pulse={showSkeleton}
+				>
+					<TableHeader
+						isGhost={showSkeleton}
+						columns={shownColumns}
+						{sortable}
+						{hasActions}
+						{pagination}
+						selectable={selectColumn}
+						{headerState}
+						{firstColumnWidth}
+						showSelect={hasData}
+						on:toggleAll
+					/>
+					<tbody
+						bind:this={tbodyRef}
+						class="transition-opacity duration-200"
+						class:animate-pulse={dimRows}
+						class:pointer-events-none={dimRows}
+					>
+						{#if showSkeleton}
+							{#each Array(skeletonRows) as _, row}
+								<TableRow>
+									{#if selectColumn}
+										<TableCellEmpty />
+									{/if}
+									{#each columns as column, col}
+										<TableCell hideBelow={typeof column === 'object' ? column.hideBelow || '' : ''}>
+											<GhostText index={row * columns.length + col} />
+										</TableCell>
+									{/each}
+									{#if hasActions}
+										<TableCellEmpty />
+										<TableCellAction>
+											<GhostText square center />
+										</TableCellAction>
+									{/if}
+								</TableRow>
+							{/each}
+						{:else}
+							{#if !hasData}
+								<EmptyTableResult page={currentPage} {plural} colspan={columnsLength} />
+							{/if}
+							<slot />
+						{/if}
+					</tbody>
+				</table>
+			</div>
+			{#if canScrollRight && !hasActions && !isEmptyView}
+				<!-- no pinned actions column to hint at more columns, so the box edge fades out -->
+				<div
+					aria-hidden="true"
+					class="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-r from-transparent to-white dark:to-gray-900"
+				></div>
+			{/if}
 		</div>
 	</div>
 	{#if pagination}

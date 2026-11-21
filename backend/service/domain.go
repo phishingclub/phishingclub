@@ -155,6 +155,11 @@ func (d *Domain) createDomain(
 		d.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, d.CompanyRepository, companyIDPtr(domain.CompanyID))
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	// prevent direct creation of proxy domains unless explicitly allowed
 	if !allowProxyCreation {
 		if domainType, err := domain.Type.Get(); err == nil && domainType.String() == "proxy" {
@@ -791,6 +796,7 @@ func (d *Domain) deleteDomain(
 	allowProxyDeletion bool,
 ) (err error) {
 	ae := NewAuditEvent("Domain.DeleteByID", session)
+	addDeleteOrigin(ctx, ae)
 	defer d.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions

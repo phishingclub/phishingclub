@@ -61,17 +61,14 @@ func (r *Script) GetAll(
 		return result, errs.Wrap(err)
 	}
 	var rows []*database.Script
-	res := db.
+	res := withPeek(db, options.QueryArgs).
 		Find(&rows)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.SCRIPT_TABLE, options.QueryArgs, scriptAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, row := range rows {

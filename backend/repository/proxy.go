@@ -82,17 +82,14 @@ func (m *Proxy) GetAll(
 		fields := assignTableToColumns(database.PROXY_TABLE, options.Fields)
 		db = db.Select(strings.Join(fields, ","))
 	}
-	dbRes := db.
+	dbRes := withPeek(db, options.QueryArgs).
 		Find(&dbProxies)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.PROXY_TABLE, options.QueryArgs, proxyAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbProxies, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbProxy := range dbProxies {
@@ -118,18 +115,15 @@ func (m *Proxy) GetAllSubset(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	dbRes := db.
-		Select("id, created_at, updated_at, name, description, start_url, company_id").
+	dbRes := withPeek(db.
+		Select("id, created_at, updated_at, name, description, start_url, company_id"), options.QueryArgs).
 		Find(&dbProxies)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.PROXY_TABLE, options.QueryArgs, proxyAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbProxies, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbProxy := range dbProxies {
@@ -165,17 +159,14 @@ func (m *Proxy) GetAllByCompanyID(
 		fields := assignTableToColumns(database.PROXY_TABLE, options.Fields)
 		db = db.Select(strings.Join(fields, ","))
 	}
-	dbRes := db.
+	dbRes := withPeek(db, options.QueryArgs).
 		Find(&dbProxies)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.PROXY_TABLE, options.QueryArgs, proxyAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbProxies, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbProxy := range dbProxies {

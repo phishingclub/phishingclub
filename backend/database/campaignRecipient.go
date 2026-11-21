@@ -131,9 +131,75 @@ func (CampaignRecipient) Migrate(db *gorm.DB) error {
 	// recipient ever created. sqlite uses a partial index only where the query
 	// repeats the predicate, so HasCustomLureCodesByCampaignID writes the same
 	// lure_code_custom = 1 literal. a bare column predicate would not match.
-	return ensureIndex(db, lureCodeCustomIndexName, `CREATE INDEX `+lureCodeCustomIndexName+`
+	if err := ensureIndex(db, lureCodeCustomIndexName, `CREATE INDEX `+lureCodeCustomIndexName+`
 		ON campaign_recipients (campaign_id)
-		WHERE lure_code_custom = 1`)
+		WHERE lure_code_custom = 1`); err != nil {
+		return err
+	}
+
+	// a program finds the sends of a person by pseudonym when the recipient link
+	// is gone. Only rows with a pseudonym enter the index, a lookup by value
+	// implies the IS NOT NULL predicate so sqlite can use it.
+	if err := ensureIndex(db, "idx_campaign_recipients_anonymized_id", `CREATE INDEX idx_campaign_recipients_anonymized_id
+		ON campaign_recipients (anonymized_id)
+		WHERE anonymized_id IS NOT NULL`); err != nil {
+		return err
+	}
+
+	// the identity removal of anonymous programs looks for sent rows that still
+	// carry both the person and the pseudonym. RemoveIdentityOfSendsBefore
+	// repeats both predicates so sqlite uses this index.
+	if err := ensureIndex(db, "idx_campaign_recipients_identity_sent", `CREATE INDEX idx_campaign_recipients_identity_sent
+		ON campaign_recipients (sent_at)
+		WHERE recipient_id IS NOT NULL AND anonymized_id IS NOT NULL`); err != nil {
+		return err
+	}
+
+	// the sender reads the rows waiting to be sent. Only those rows enter the
+	// index, so the read does not walk every row sent in the past.
+	// GetUnsendRecipientsForSending repeats both predicates.
+	if err := ensureIndex(db, "idx_campaign_recipients_unsent", `CREATE INDEX idx_campaign_recipients_unsent
+		ON campaign_recipients (send_at)
+		WHERE sent_at IS NULL AND cancelled_at IS NULL`); err != nil {
+		return err
+	}
+
+	// a program cancels and moves the rows of its campaigns that are neither
+	// sent nor cancelled, of all its people or of some. Only those rows enter
+	// the index. sent_at and cancelled_at lead the key although they are always
+	// null in it: a query that states both as IS NULL then matches two key
+	// columns, so sqlite picks this index over the single column sent_at and
+	// cancelled_at indexes, which hold every row, even without statistics. The
+	// recipient follows the campaign, so the rows of some people are found
+	// without reading the table.
+	if err := ensureIndex(db, "idx_campaign_recipients_unsent_campaign", `CREATE INDEX idx_campaign_recipients_unsent_campaign
+		ON campaign_recipients (sent_at, cancelled_at, campaign_id, recipient_id)
+		WHERE sent_at IS NULL AND cancelled_at IS NULL`); err != nil {
+		return err
+	}
+
+	// the sent rows of a campaign that name a person, by when they were sent.
+	// The facts of a program count them to find a removed send, and the
+	// program timeline counts them per day within a time range of each
+	// campaign. Both reads repeat the predicates, so they read this index only
+	// and not the table rows. A send that names nobody is not counted by
+	// either. The program code keeps a pseudonym on every send whose person
+	// link it clears, so such rows come only from older data.
+	if err := db.Exec(`DROP INDEX IF EXISTS idx_campaign_recipients_campaign_sent`).Error; err != nil {
+		return err
+	}
+	if err := ensureIndex(db, "idx_campaign_recipients_campaign_sent_at", `CREATE INDEX idx_campaign_recipients_campaign_sent_at
+		ON campaign_recipients (campaign_id, sent_at)
+		WHERE sent_at IS NOT NULL AND (recipient_id IS NOT NULL OR anonymized_id IS NOT NULL)`); err != nil {
+		return err
+	}
+
+	// the template mixing of a program counts the sends of its campaigns
+	// planned in a time window. The read repeats the cancelled_at IS NULL
+	// predicate, so it reads only the rows in the window of each campaign.
+	return ensureIndex(db, "idx_campaign_recipients_campaign_send_at", `CREATE INDEX idx_campaign_recipients_campaign_send_at
+		ON campaign_recipients (campaign_id, send_at)
+		WHERE cancelled_at IS NULL`)
 }
 
 // ensureIndex creates an index, replacing whatever carries the name when its

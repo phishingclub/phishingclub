@@ -21,9 +21,9 @@
 	};
 
 	onMount(() => {
-		pagination.onChange((k, v) => {
-			if (k === 'perPage') {
-				value = v;
+		pagination.onChange((k, v, changes) => {
+			if ('perPage' in changes) {
+				value = changes.perPage;
 			}
 		});
 	});
@@ -62,18 +62,3 @@
 		/>
 	</div>
 </div>
-
-<style>
-	/* the open list follows the other dropdowns in the app */
-	.pc-per-page option {
-		background-color: #f1f5f9; /* slate-100 */
-		color: #4b5563; /* gray-600 */
-	}
-	:global(.dark) .pc-per-page {
-		color-scheme: dark;
-	}
-	:global(.dark) .pc-per-page option {
-		background-color: #111827; /* gray-900 */
-		color: #d1d5db; /* gray-300 */
-	}
-</style>

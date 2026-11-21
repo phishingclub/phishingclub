@@ -21,6 +21,8 @@ import (
 type CompanyScimConfig struct {
 	Common
 	CompanyScimConfigRepository *repository.CompanyScimConfig
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // generateToken creates a cryptographically random 32-byte token and returns
@@ -95,6 +97,11 @@ func (s *CompanyScimConfig) Upsert(
 		s.AuditLogNotAuthorized(ae)
 		return nil, errs.ErrAuthorizationFailed
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	// check if a config already exists for this company
 	existing, err := s.CompanyScimConfigRepository.GetByCompanyID(ctx, companyID)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {

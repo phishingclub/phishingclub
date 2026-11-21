@@ -18,6 +18,9 @@
 		getDay
 	} from 'date-fns';
 	import { scrollBarClassesHorizontal, scrollBarClassesVertical } from '$lib/utils/scrollbar';
+	import { programStatus } from '$lib/utils/programText.js';
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
+	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 
 	// localStorage keys
 	const STORAGE_KEY_VIEW_MODE = 'calendar_view_mode';
@@ -27,6 +30,8 @@
 
 	/** @type * */
 	export let campaigns = [];
+	/** @type * - programs from GET /program/calendar, shown from start to close or end */
+	export let programs = [];
 	/** @type {Date} */
 	export let start = startOfMonth(new Date());
 	/** @type {Date} */
@@ -59,15 +64,18 @@
 
 	let isGeneratingCalendar = false;
 
-	// month cells show this many lines; with more campaigns the last line becomes "+N more"
+	// a day cell shows this many lines, then the last line becomes "+N more".
+	// a week is one row, so its days have room for more lines than a month
 	const MONTH_CELL_MAX = 4;
+	const WEEK_CELL_MAX = 10;
+	$: dayCellMax = viewMode === 'week' ? WEEK_CELL_MAX : MONTH_CELL_MAX;
 	let expandedDays = new Set();
 	const dayKey = (day) => day.date.toDateString();
-	const visibleCampaigns = (day, mode, expanded) => {
-		if (mode !== 'month' || day.campaigns.length <= MONTH_CELL_MAX || expanded.has(dayKey(day))) {
+	const visibleCampaigns = (day, expanded, max) => {
+		if (day.campaigns.length <= max || expanded.has(dayKey(day))) {
 			return day.campaigns;
 		}
-		return day.campaigns.slice(0, MONTH_CELL_MAX - 1);
+		return day.campaigns.slice(0, max - 1);
 	};
 	const toggleDay = (day) => {
 		const key = dayKey(day);
@@ -87,6 +95,10 @@
 		SELF_MANAGED: '#7C3AED' // darker purple
 	};
 
+	// the Programs menu icon
+	const PROGRAM_ICON =
+		'M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 0 0-3.7-3.7 48.678 48.678 0 0 0-7.324 0 4.006 4.006 0 0 0-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 0 0 3.7 3.7 48.656 48.656 0 0 0 7.324 0 4.006 4.006 0 0 0 3.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3-3 3';
+
 	const legendItems = [
 		{ key: 'SCHEDULED', color: COLORS.SCHEDULED, label: 'Scheduled' },
 		{ key: 'ACTIVE', color: COLORS.ACTIVE, label: 'Active' },
@@ -100,6 +112,9 @@
 			const storedViewMode = localStorage.getItem(STORAGE_KEY_VIEW_MODE);
 			if (storedViewMode === 'month' || storedViewMode === 'week') {
 				viewMode = storedViewMode;
+			} else if (window.matchMedia('(max-width: 639px)').matches) {
+				// a month of seven columns is too narrow to read on a phone
+				viewMode = 'week';
 			}
 
 			const storedStartFromToday = localStorage.getItem(STORAGE_KEY_START_FROM_TODAY);
@@ -204,8 +219,11 @@
 		});
 	}
 
+	// campaigns first, then programs, each by name
 	function sortByName(campaigns) {
-		return [...campaigns].sort((a, b) => a.name.localeCompare(b.name));
+		return [...campaigns].sort(
+			(a, b) => Number(!!a.isProgram) - Number(!!b.isProgram) || a.name.localeCompare(b.name)
+		);
 	}
 
 	function updateDateRange() {
@@ -296,6 +314,40 @@
 		return c;
 	});
 
+	// a program runs from its start to its close, or its end, or on without either.
+	// programs are only shown in the modes that show them
+	/** @type * */
+	$: calendarPrograms = (showsSimulation($displayMode) ? programs || [] : []).map((program) => {
+		const programStart = new Date(program.startAt);
+		let programEnd;
+		if (program.closedAt) {
+			programEnd = new Date(program.closedAt);
+		} else if (program.endAt) {
+			programEnd = new Date(program.endAt);
+		} else {
+			programEnd = new Date(programStart);
+			programEnd.setFullYear(programEnd.getFullYear() + 420);
+		}
+		const filterKey =
+			program.status === 'closed'
+				? 'COMPLETED'
+				: program.status === 'scheduled'
+					? 'SCHEDULED'
+					: 'ACTIVE';
+		return {
+			...program,
+			isProgram: true,
+			isOngoing: !program.closedAt && !program.endAt,
+			company: program.companyName ? { name: program.companyName } : null,
+			start: programStart,
+			end: programEnd,
+			filterKey,
+			color: COLORS[filterKey]
+		};
+	});
+
+	$: calendarItems = [...calendarCampaigns, ...calendarPrograms];
+
 	function getCampaignColor(campaign) {
 		if (campaign.anonymizedAt || campaign.closedAt) {
 			return COLORS.COMPLETED;
@@ -331,6 +383,9 @@
 
 		// filter campaigns based on active filters
 		const filteredCampaigns = campaigns.filter((campaign) => {
+			if (campaign.isProgram) {
+				return activeFilters[campaign.filterKey];
+			}
 			if (campaign.anonymizedAt || campaign.closedAt) {
 				return activeFilters.COMPLETED;
 			}
@@ -380,7 +435,7 @@
 
 		updateDateRange();
 
-		const dayMap = calculateCampaignLayers(calendarCampaigns, start, end);
+		const dayMap = calculateCampaignLayers(calendarItems, start, end);
 
 		// create weeks array
 		weeks = [];
@@ -512,6 +567,13 @@
 	 * @param {*} campaign
 	 */
 	function buildTooltip(campaign) {
+		if (campaign.isProgram) {
+			const range = campaign.isOngoing
+				? `${formatDateString(campaign.start)} - ?`
+				: `${formatDateString(campaign.start)} - ${formatDateString(campaign.end)}`;
+			const text = `${campaign.name} - Program - ${programStatus(campaign).label}, ${range}`;
+			return showCompany && campaign.company?.name ? `[${campaign.company.name}] ${text}` : text;
+		}
 		const status = campaign.isSelfManaged
 			? 'Self managed'
 			: campaign.end < new Date()
@@ -567,13 +629,13 @@
 		isInitialized = true;
 	});
 
-	$: if (calendarCampaigns && isInitialized) {
+	$: if (calendarItems && isInitialized) {
 		generateCalendarData();
 	}
 </script>
 
 <div
-	class="w-full bg-white dark:bg-gray-900/80 rounded-lg shadow-sm p-2 sm:p-4 border border-gray-200 dark:border-gray-700/60 transition-colors duration-200"
+	class="w-full bg-white dark:bg-gray-900/80 rounded-lg shadow-md dark:shadow-none dark:ring-1 dark:ring-gray-600/30 p-2 sm:p-4 transition-colors duration-200"
 >
 	<div class="space-y-3 sm:space-y-4 min-h-[400px] sm:min-h-[600px] max-w-[1600px] mx-auto">
 		<!-- Controls Row -->
@@ -715,6 +777,22 @@
 							</span>
 						</button>
 					{/each}
+					<ConditionalDisplay show="simulation">
+						<span class="flex items-center text-xs text-gray-700 dark:text-gray-300">
+							<svg
+								class="h-3.5 w-3.5 mr-1 text-gray-500 dark:text-gray-400"
+								xmlns="http://www.w3.org/2000/svg"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke-width="2"
+								stroke="currentColor"
+								aria-hidden="true"
+							>
+								<path stroke-linecap="round" stroke-linejoin="round" d={PROGRAM_ICON} />
+							</svg>
+							Program
+						</span>
+					</ConditionalDisplay>
 					<span class="flex items-center text-xs text-gray-700 dark:text-gray-300">
 						<svg
 							class="h-3.5 w-3.5 mr-1 text-training-completed"
@@ -795,6 +873,22 @@
 						</span>
 					</button>
 				{/each}
+				<ConditionalDisplay show="simulation">
+					<span class="flex items-center text-xs text-gray-700 dark:text-gray-300">
+						<svg
+							class="h-3 w-3 mr-1 text-gray-500 dark:text-gray-400"
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="2"
+							stroke="currentColor"
+							aria-hidden="true"
+						>
+							<path stroke-linecap="round" stroke-linejoin="round" d={PROGRAM_ICON} />
+						</svg>
+						Program
+					</span>
+				</ConditionalDisplay>
 				<span class="flex items-center text-xs text-gray-700 dark:text-gray-300">
 					<svg
 						class="h-3 w-3 mr-1 text-training-completed"
@@ -853,7 +947,7 @@
 						</div>
 					</div>
 				{:else}
-					<div class="grid grid-cols-7 gap-1 min-h-[450px]">
+					<div class="grid grid-cols-7 gap-1">
 						{#each weeks as week, weekIndex}
 							{#each week as day}
 								<div
@@ -875,19 +969,21 @@
 												: 'text-gray-400 dark:text-gray-600'}"
 									>
 										<span>{day.date.getDate()}</span>
-										{#if day.campaigns.length > MONTH_CELL_MAX}
+										{#if day.campaigns.length > dayCellMax}
 											<span
 												class="rounded-full bg-gray-100 dark:bg-gray-700/60 px-1.5 text-[10px] font-medium leading-4 text-gray-600 dark:text-gray-300"
-												title="{day.campaigns.length} campaigns"
+												title="{day.campaigns.length} entries"
 												>{day.campaigns.length}</span
 											>
 										{/if}
 									</div>
 									<!-- campaigns list -->
 									<div class="campaign-container {scrollBarClassesVertical}">
-										{#each visibleCampaigns(day, viewMode, expandedDays) as campaign}
+										{#each visibleCampaigns(day, expandedDays, dayCellMax) as campaign}
 											<a
-												href={`/campaign/${campaign.id}`}
+												href={campaign.isProgram
+													? `/program/${campaign.id}`
+													: `/campaign/${campaign.id}`}
 												class="campaign-item group flex items-start gap-1 sm:gap-2 mb-1 sm:mb-1.5 rounded px-1 sm:px-2 py-1 sm:py-1.5 overflow-hidden transition-all duration-150 hover:scale-[1.01] hover:shadow-sm bg-white/70 dark:bg-gray-800/50 border border-gray-200/70 dark:border-gray-700/40 hover:border-gray-300 dark:hover:border-gray-600"
 												title={buildTooltip(campaign)}
 											>
@@ -906,6 +1002,19 @@
 													<div
 														class="campaign-name flex items-center gap-1 truncate text-[10px] sm:text-xs leading-snug font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100"
 													>
+														{#if campaign.isProgram}
+															<svg
+																class="flex-shrink-0 h-3 w-3 text-gray-500 dark:text-gray-400"
+																xmlns="http://www.w3.org/2000/svg"
+																fill="none"
+																viewBox="0 0 24 24"
+																stroke-width="2"
+																stroke="currentColor"
+																aria-label="Program"
+															>
+																<path stroke-linecap="round" stroke-linejoin="round" d={PROGRAM_ICON} />
+															</svg>
+														{/if}
 														{#if campaign.isTraining}
 															<svg
 																class="flex-shrink-0 h-3 w-3 text-training-completed"
@@ -924,7 +1033,7 @@
 												</div>
 											</a>
 										{/each}
-										{#if viewMode === 'month' && day.campaigns.length > MONTH_CELL_MAX}
+										{#if day.campaigns.length > dayCellMax}
 											<button
 												type="button"
 												class="pc-focus w-full rounded px-1 sm:px-2 py-0.5 text-left text-[10px] sm:text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:underline"
@@ -933,7 +1042,7 @@
 											>
 												{expandedDays.has(dayKey(day))
 													? 'Show less'
-													: `+${day.campaigns.length - (MONTH_CELL_MAX - 1)} more`}
+													: `+${day.campaigns.length - (dayCellMax - 1)} more`}
 											</button>
 										{/if}
 									</div>
@@ -983,6 +1092,16 @@
 	}
 
 	.month-view .campaign-container {
+		overflow-y: visible;
+	}
+
+	/* a week is one row, its days grow with their entries like month cells */
+	.week-view .calendar-day {
+		height: auto;
+		min-height: 160px;
+	}
+
+	.week-view .campaign-container {
 		overflow-y: visible;
 	}
 

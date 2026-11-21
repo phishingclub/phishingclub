@@ -80,15 +80,15 @@
 					{Math.floor($displayValue)}
 				</span>
 			{/if}
-			<div class="ml-2">
+			<!-- the icon color applies to the slot icon too, through currentColor -->
+			<div class="ml-2 {iconColor}">
 				<slot name="icon">
 					<svg
 						xmlns="http://www.w3.org/2000/svg"
-						class="h-5 w-5 {iconColor}"
+						class="h-5 w-5"
 						fill="none"
 						viewBox="0 0 24 24"
 						stroke="currentColor"
-				
 						aria-hidden="true"
 					>
 						<path
@@ -136,11 +136,6 @@
 				/>
 			</svg>
 		</button>
-	{:else if $$slots.sub}
-		<!-- a free text line under the value, used when there are no percentages -->
-		<div class="mt-2 text-sm text-slate-600 dark:text-gray-400 transition-colors duration-200">
-			<slot name="sub" />
-		</div>
 	{:else if validPercentages.length === 1}
 		<p class="mt-2 text-sm text-slate-600 dark:text-gray-400 transition-colors duration-200">
 			<span class="text-pc-darkblue dark:text-gray-200 font-semibold transition-colors duration-200">

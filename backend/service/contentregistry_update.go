@@ -632,12 +632,25 @@ func (s *ContentRegistry) outsideUsers(
 			return nil, cerr
 		}
 		names := make([]string, 0, len(campaigns))
-		for _, c := range campaigns {
+		for _, c := range withoutProgramCampaigns(campaigns) {
 			names = append(names, previewCampaign(c).Name)
 		}
 		if len(names) > 0 {
 			users = append(users, namedLabel("campaign", "campaigns", names))
 		}
+	}
+	// open programs that use the entity, named by the program and never by the
+	// hidden campaigns they send with
+	programs, perr := s.openProgramsUsing(ctx, r.ResourceType, r.ResourceID)
+	if perr != nil {
+		return nil, perr
+	}
+	if len(programs) > 0 {
+		names := make([]string, 0, len(programs))
+		for _, p := range programs {
+			names = append(names, p.Name)
+		}
+		users = append(users, namedLabel("program", "programs", names))
 	}
 
 	// an asset that uses the list would lose its filter. An asset this install

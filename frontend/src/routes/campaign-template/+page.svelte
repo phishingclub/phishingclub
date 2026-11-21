@@ -1,6 +1,6 @@
 <script>
 	import { api } from '$lib/api/apiProxy.js';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
 	import { safeExternalHref } from '$lib/utils/url.js';
@@ -46,7 +46,7 @@
 	} from '$lib/service/tableSelection.js';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
-	import CopyCell from '$lib/components/table/CopyCell.svelte';
+	import AllowListingModal from '$lib/components/AllowListingModal.svelte';
 	import TextFieldSelectWithType from '$lib/components/form/TextFieldSelectWithType.svelte';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 	import { resourceContext } from '$lib/store/resourceContext';
@@ -168,20 +168,17 @@
 		return { success: true };
 	};
 	let modalError = '';
+	// a server refusal of the training flag, shown under its checkbox
+	let trainingError = '';
+	$: formValues.isTraining, (trainingError = '');
+	const capitalizeFirst = (text) => (text ? text[0].toUpperCase() + text.slice(1) : text);
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
 	let isSubmitting = false;
 	let isTableLoading = false;
 	let modalMode = null;
 	let modalText = '';
-	let isAllowListingVisible = false;
-	let allowListingLoading = false;
-	let allowListingError = '';
-	let allowListingData = {
-		senderIP: '',
-		smtpSenderDomain: '',
-		simulationUrl: ''
-	};
+	let allowListingModal;
 	let isDeleteAlertVisible = false;
 	let deleteValues = {
 		id: null,
@@ -294,46 +291,6 @@
 
 	// component logic
 
-	/**
-	 * Opens the allow-listing modal for a given campaign template ID.
-	 * Fetches the template, SMTP config, and fills allowListingData.
-	 */
-	// the policy wants the domain of the envelope sender, not the full address
-	const envelopeDomain = (from) => {
-		const at = (from || '').lastIndexOf('@');
-		return at === -1 ? '' : from.slice(at + 1).replace(/[>\s].*$/, '');
-	};
-
-	async function openAllowListingModal(templateId) {
-		isAllowListingVisible = true;
-		allowListingLoading = true;
-		allowListingError = '';
-		allowListingData = {
-			senderIP: '',
-			smtpSenderDomain: '',
-			simulationUrl: ''
-		};
-
-		try {
-			const templateRes = await api.campaignTemplate.getByID(templateId);
-			if (!templateRes.success) throw templateRes.error || 'Failed to fetch campaign template';
-			const template = templateRes.data;
-
-			const emailRes = await api.email.getByID(template.emailID);
-			const domainRes = await api.domain.getByID(template.domainID);
-
-			allowListingData = {
-				...allowListingData,
-				smtpSenderDomain: envelopeDomain(emailRes.data.mailEnvelopeFrom),
-				simulationUrl: `${domainRes.data.name}/*`
-			};
-		} catch (e) {
-			allowListingError =
-				typeof e === 'string' ? e : e?.message || 'Failed to load allow-listing info';
-		} finally {
-			allowListingLoading = false;
-		}
-	}
 	const refreshCampaignTemplates = async () => {
 		try {
 			isTableLoading = true;
@@ -471,6 +428,16 @@
 				isTraining: formValues.isTraining
 			});
 			if (!res.success) {
+				// a refused training change names the program, it shows on the checkbox
+				const training = /^isTraining: (.+)$/.exec(String(res.error ?? ''));
+				if (training) {
+					trainingError = capitalizeFirst(training[1]);
+					await tick();
+					document
+						.getElementById('isTraining')
+						?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+					return;
+				}
 				modalError = res.error;
 				return;
 			}
@@ -534,6 +501,7 @@
 			isTraining: false
 		};
 		modalError = '';
+		trainingError = '';
 		showAdvancedOptions = false;
 		// clear resource context when closing modal
 		resourceContext.clear();
@@ -664,10 +632,10 @@
 	};
 </script>
 
-<HeadTitle title="Campaign templates" />
+<HeadTitle title="Templates" />
 
 <main>
-	<Headline docSlug="templates">Campaign templates</Headline>
+	<Headline docSlug="templates">Templates</Headline>
 	<BigButton on:click={openCreateModal}>New template</BigButton>
 
 	<BulkActionBar
@@ -731,7 +699,10 @@
 						<span class="flex items-center gap-2 min-w-0">
 							<span class="truncate">{template.name}</span>
 							{#if template.isTraining}
-								<span class="shrink-0"><StatusBadge tone="success" title="Awareness training">training</StatusBadge></span>
+								<span class="shrink-0"
+									><StatusBadge tone="success" title="Awareness training">training</StatusBadge
+									></span
+								>
 							{/if}
 						</span>
 					</button>
@@ -829,7 +800,9 @@
 						>
 							<span class="flex items-center gap-1 min-w-0">
 								<span class="shrink-0"><ProxySvgIcon size="w-4 h-4" /></span>
-								<span class="truncate">{beforeLandingProxyMap.byKey(template.beforeLandingProxyID)}</span>
+								<span class="truncate"
+									>{beforeLandingProxyMap.byKey(template.beforeLandingProxyID)}</span
+								>
 							</span>
 						</a>
 					{:else}
@@ -853,7 +826,9 @@
 						>
 							<span class="flex items-center gap-1 min-w-0">
 								<span class="shrink-0"><ProxySvgIcon size="w-4 h-4" /></span>
-								<span class="truncate">{afterLandingProxyMap.byKey(template.afterLandingProxyID)}</span>
+								<span class="truncate"
+									>{afterLandingProxyMap.byKey(template.afterLandingProxyID)}</span
+								>
 							</span>
 						</a>
 					{:else}
@@ -894,13 +869,10 @@
 							{...globalButtonDisabledAttributes(template, contextCompanyID)}
 						/>
 						<TableCopyButton title={'Copy'} on:click={() => openCopyModal(template.id)} />
-						{#if template.smtpConfigurationID}
-							<TableDropDownButton
-								name="Allow listing"
-								on:click={() => openAllowListingModal(template.id)}
-								{...globalButtonDisabledAttributes(template, contextCompanyID)}
-							/>
-						{/if}
+						<TableDropDownButton
+							name="Allow listing"
+							on:click={() => allowListingModal.open(template.id, template.name)}
+						/>
 						<TableDeleteButton
 							on:click={() => openDeleteAlert(template)}
 							{...globalButtonDisabledAttributes(template, contextCompanyID)}
@@ -911,118 +883,37 @@
 		{/each}
 	</Table>
 
-	<Modal
-		headerText="Allow listing"
-		visible={isAllowListingVisible}
-		onClose={() => {
-			isAllowListingVisible = false;
-			allowListingData = { senderIP: '', smtpSenderDomain: '', simulationUrl: '' };
-			allowListingError = '';
-		}}
-	>
-		<div class="space-y-4 p-4 min-w-[350px] max-w-[600px]">
-			{#if allowListingLoading}
-				<div>Loading allow-listing information…</div>
-			{:else if allowListingError}
-				<div class="text-red-600">{allowListingError}</div>
-			{:else}
-				<h1>Microsoft Allow listing</h1>
-				<p>
-					To ensure your emails are delivered and not blocked by Microsoft Defender for Office 365,
-					add the following information to the <b>Advanced Delivery Policy</b>
-					as a third-party phishing simulation.
-				</p>
-				<div>
-					<b>Domain (MAIL FROM/5321.MailFrom)</b>
-					<CopyCell text={allowListingData.smtpSenderDomain}>
-						{allowListingData.smtpSenderDomain}
-					</CopyCell>
-					<div class="text-xs text-gray-500 mt-1">
-						{#if !allowListingData.smtpSenderDomain}
-							Use the domain part of the sender address you use for this campaign (e.g. <code
-								>example.com</code
-							>
-							if your sender is <code>user@example.com</code>).
-						{/if}
-					</div>
-				</div>
-				<div>
-					<b>Sending IP</b>
-					{#if allowListingData.senderIP}
-						<CopyCell text={allowListingData.senderIP}>
-							{allowListingData.senderIP}
-						</CopyCell>
-					{:else}
-						<div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-							Use the public IP address of the mail server that sends this campaign.
-						</div>
-					{/if}
-				</div>
-				<div>
-					<b>Simulation URLs to allow</b>
-					<CopyCell text={allowListingData.simulationUrl}>
-						{allowListingData.simulationUrl}
-					</CopyCell>
-				</div>
-				<div class="text-sm text-gray-700">
-					<b>Where to add these:</b>
-					<ol class="list-decimal ml-6">
-						<li>
-							Go to <a
-								href="https://security.microsoft.com/advanceddelivery"
-								target="_blank"
-								class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline">Microsoft Defender Advanced Delivery</a
-							>
-						</li>
-						<li>Select the <b>Phishing simulation</b> tab</li>
-						<li>
-							Click <b>Add</b> or <b>Edit</b> to configure a third-party phishing simulation
-						</li>
-						<li>
-							Enter the above values in the <b>Domain</b>, <b>Sending IP</b>, and
-							<b>Simulation URLs to allow</b> fields
-						</li>
-					</ol>
-					<div class="mt-2">
-						For more details, see the <a
-							href="https://learn.microsoft.com/en-us/defender-office-365/advanced-delivery-policy-configure?view=o365-worldwide"
-							target="_blank"
-							class="pc-focus rounded-sm text-cta-blue dark:text-highlight-blue hover:underline">official Microsoft documentation</a
-						>.
-					</div>
-				</div>
-				<div class="mt-4">
-					<button
-						class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-						on:click={() => {
-							const text = `Domain:\n${allowListingData.smtpSenderDomain}\n
-Sender IP:\n${allowListingData.senderIP}\n
-Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
-`;
-							navigator.clipboard.writeText(text);
-							addToast('Copied allow listing', 'Info');
-						}}>Copy All</button
-					>
-				</div>
-			{/if}
-		</div>
-	</Modal>
+	<AllowListingModal
+		bind:this={allowListingModal}
+		kind="template"
+		onEditTemplate={(id) => openUpdateModal(id)}
+	/>
 
 	<Modal headerText={modalText} visible={isModalVisible} onClose={closeModal} {isSubmitting}>
 		{#if modalMode === 'update'}
-			<InstalledResourceBadge resourceType="campaigntemplate" resourceId={formValues.id} variant="notice" />
+			<InstalledResourceBadge
+				resourceType="campaigntemplate"
+				resourceId={formValues.id}
+				variant="notice"
+			/>
 		{/if}
 		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
 			<div class="w-full lg:w-[56rem] max-w-full py-6 space-y-8">
 				<!-- Basic Information Section -->
 				<div class="w-full">
-					<h3 class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">
+					<h3
+						class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200"
+					>
 						Basic Information
 					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
 						<div class="md:max-w-xs">
-							<TextField required minLength={1} maxLength={64} width="full" bind:value={formValues.name}
-								>Name</TextField
+							<TextField
+								required
+								minLength={1}
+								maxLength={64}
+								width="full"
+								bind:value={formValues.name}>Name</TextField
 							>
 						</div>
 						<div class="md:max-w-xs">
@@ -1043,12 +934,17 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 					>
 						Awareness training
 					</CheckboxField>
+					{#if trainingError}
+						<div class="text-red-600 dark:text-red-400 text-sm" role="alert">{trainingError}</div>
+					{/if}
 				</div>
 
 				<!-- Delivery Configuration Section -->
 				<!-- Email/API Configuration -->
 				<div class="w-full">
-					<h3 class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">
+					<h3
+						class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200"
+					>
 						Email Configuration
 					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
@@ -1074,8 +970,11 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 							</div>
 						{/if}
 						<div class="md:max-w-xs">
-							<TextFieldSelect id="email" size="full" bind:value={formValues.email} options={emailMap.values()}
-								>Email</TextFieldSelect
+							<TextFieldSelect
+								id="email"
+								size="full"
+								bind:value={formValues.email}
+								options={emailMap.values()}>Email</TextFieldSelect
 							>
 						</div>
 					</div>
@@ -1083,7 +982,11 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 
 				<!-- Page Flow Section -->
 				<div class="w-full">
-					<h3 class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">Page Flow</h3>
+					<h3
+						class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200"
+					>
+						Page Flow
+					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-5 gap-6">
 						<div class="md:col-span-2 flex flex-col w-full md:max-w-xs">
 							<!-- Before Landing Page -->
@@ -1157,8 +1060,18 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 							on:click={() => (showAdvancedOptions = true)}
 						>
 							Show advanced options
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"
-								><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg
+							<svg
+								class="w-4 h-4"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+								aria-hidden="true"
+								><path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M19 9l-7 7-7-7"
+								/></svg
 							>
 						</button>
 					</div>
@@ -1166,7 +1079,9 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 
 				{#if showAdvancedOptions}
 					<div class="w-full">
-						<h3 class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200">
+						<h3
+							class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200"
+						>
 							Advanced Options
 						</h3>
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1236,10 +1151,7 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 									>
 									{#if lureCodeKeyspace(formValues.lureCodeAlgo, Number(formValues.lureCodeLength))}
 										<p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
-											{lureCodeKeyspace(
-												formValues.lureCodeAlgo,
-												Number(formValues.lureCodeLength)
-											)}
+											{lureCodeKeyspace(formValues.lureCodeAlgo, Number(formValues.lureCodeLength))}
 										</p>
 									{/if}
 								</div>
@@ -1280,7 +1192,10 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 	</Modal>
 
 	<DeleteAlert
-		list={['Scheduled or active campaigns using this template will be closed']}
+		list={[
+			'Scheduled or active campaigns using this template will be closed',
+			'A template used by an open program cannot be deleted'
+		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		confirm
@@ -1288,7 +1203,10 @@ Simulation URLs to allow:\n${allowListingData.simulationUrl}\n
 	></DeleteAlert>
 	<DeleteAlert
 		title="Delete templates"
-		list={['Scheduled or active campaigns using these templates will be closed']}
+		list={[
+			'Scheduled or active campaigns using these templates will be closed',
+			'Templates used by an open program cannot be deleted'
+		]}
 		name={`${$selection.size} template${$selection.size === 1 ? '' : 's'}`}
 		onClick={onClickBulkDelete}
 		confirm

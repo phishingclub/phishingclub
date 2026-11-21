@@ -137,7 +137,6 @@ export const deleteJSON = async (url, data) => {
  * @returns {Promise<Object>} - A promise that resolves to the response object containing the JSON data.
  */
 export const postMultipart = async (url, formData) => {
-	console.log(formData);
 	const res = await fetch(url, {
 		method: 'POST',
 		body: formData

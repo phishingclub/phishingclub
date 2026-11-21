@@ -30,8 +30,11 @@ export const newTableParams = (options = {}) => {
 		unsubscribe: function () {
 			this._listeners = [];
 		},
-		_notifyListeners: function (property, value) {
-			this._listeners.forEach((callback) => callback(property, value));
+		// each listener is called once per change with the first changed key and
+		// value, and all changed keys as the third argument
+		_notifyListeners: function (changes) {
+			const [property, value] = Object.entries(changes)[0];
+			this._listeners.forEach((callback) => callback(property, value, changes));
 		},
 		get currentPage() {
 			return state.page;
@@ -51,14 +54,12 @@ export const newTableParams = (options = {}) => {
 		set search(search) {
 			state.search = search;
 			state.page = 1;
-			this._notifyListeners('search', search);
-			this._notifyListeners('page', 1);
+			this._notifyListeners({ search, page: 1 });
 		},
 		set perPage(perPage) {
 			state.perPage = perPage;
 			state.page = 1;
-			this._notifyListeners('perPage', perPage);
-			this._notifyListeners('page', 1);
+			this._notifyListeners({ perPage, page: 1 });
 		},
 		reset: function () {
 			state = { ...firstState };
@@ -83,19 +84,18 @@ export const newTableParams = (options = {}) => {
 			}
 			state.sortBy = sortBy;
 			state.sortOrder = sortOrder;
-			this._notifyListeners('sortBy', sortBy);
-			this._notifyListeners('sortOrder', sortOrder);
+			this._notifyListeners({ sortBy, sortOrder });
 		},
 		next: function () {
 			state.page = state.page + 1;
-			this._notifyListeners('page', state.page);
+			this._notifyListeners({ page: state.page });
 			return state.page;
 		},
 		previous: function () {
 			if (state.page !== 1) {
 				state.page = state.page - 1;
 			}
-			this._notifyListeners('page', state.page);
+			this._notifyListeners({ page: state.page });
 			return state.page;
 		}
 	};

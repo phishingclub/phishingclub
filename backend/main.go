@@ -337,9 +337,13 @@ func main() {
 		return
 	}
 	// setup administration server
+	// the recovery of the admin router raises http.ErrAbortHandler again, so a
+	// download cut by an error ends as a broken response, see
+	// middleware.AbortRecovery
 	var adminRouter *gin.Engine
 	if !build.Flags.Production {
-		adminRouter = gin.Default()
+		adminRouter = gin.New()
+		adminRouter.Use(gin.Logger(), gin.CustomRecovery(middleware.AbortRecovery))
 	} else {
 		adminRouter = gin.New()
 		adminRouter.Use(ginzap.GinzapWithConfig(logger.Desugar(), &ginzap.Config{
@@ -353,7 +357,7 @@ func main() {
 				return fields
 			}),
 		}))
-		adminRouter.Use(ginzap.RecoveryWithZap(logger.Desugar(), true))
+		adminRouter.Use(ginzap.CustomRecoveryWithZap(logger.Desugar(), true, middleware.AbortRecovery))
 		// dont trust x-forwarded-by by default
 		if len(conf.IPSecurity.TrustedProxies) > 0 {
 			err := adminRouter.SetTrustedProxies(conf.IPSecurity.TrustedProxies)
@@ -496,15 +500,17 @@ func main() {
 	// the program scheduler runs as the system session, like the send batch
 	services.Program.SystemSession = systemSession
 	daemon := task.Runner{
-		CampaignService:     services.Campaign,
-		ProgramService:      services.Program,
-		UpdateService:       services.Update,
-		MicrosoftDeviceCode: services.MicrosoftDeviceCode,
-		OptionService:       services.Option,
-		RecipientService:    services.Recipient,
-		ScimService:         services.Scim,
-		ReportInboxService:  services.ReportInbox,
-		Logger:              logger,
+		CampaignService:       services.Campaign,
+		ProgramService:        services.Program,
+		CompanyService:        services.Company,
+		RecipientGroupService: services.RecipientGroup,
+		UpdateService:         services.Update,
+		MicrosoftDeviceCode:   services.MicrosoftDeviceCode,
+		OptionService:         services.Option,
+		RecipientService:      services.Recipient,
+		ScimService:           services.Scim,
+		ReportInboxService:    services.ReportInbox,
+		Logger:                logger,
 	}
 
 	// start tasks runner

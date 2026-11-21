@@ -842,6 +842,13 @@ func (m *RemoteBrowserController) ServeVictim(g *gin.Context) {
 	if !ok {
 		return
 	}
+	// a send of an anonymous program that lost its person link after the
+	// identity retention keeps working links, but the remote browser drives a
+	// live session on the real person and can not be stripped of identity, so
+	// it is never run for such a send. a clean expired page is served instead.
+	if m.serveExpiredIfUnlinked(g, cr) {
+		return
+	}
 	campaignID, err1 := cr.CampaignID.Get()
 	recipientID, err2 := cr.RecipientID.Get()
 	if err1 != nil || err2 != nil {
@@ -922,6 +929,51 @@ func (m *RemoteBrowserController) resolveVictimSession(g *gin.Context) (uuid.UUI
 		}
 	}
 	return crID, rbID, cr, rb, true
+}
+
+// serveExpiredIfUnlinked writes a clean 410 expired page when the send lost its
+// person link after the identity retention of an anonymous program. It stores
+// nothing and reads no identity. It returns true when the page was written and
+// the caller must stop. Every other send gives false and goes on as before.
+func (m *RemoteBrowserController) serveExpiredIfUnlinked(
+	g *gin.Context,
+	cr *model.CampaignRecipient,
+) bool {
+	if _, err := cr.RecipientID.Get(); err == nil {
+		return false
+	}
+	if m.CampaignService == nil || m.CampaignService.ProgramService == nil {
+		return false
+	}
+	cid, err := cr.CampaignID.Get()
+	if err != nil {
+		return false
+	}
+	campaign, err := m.CampaignRepository.GetByID(g.Request.Context(), &cid, &repository.CampaignOption{})
+	if err != nil {
+		return false
+	}
+	if _, ok := service.UnlinkedAnonymousProgramSend(
+		g.Request.Context(),
+		m.CampaignService.ProgramService.ProgramRepository,
+		campaign,
+		cr,
+	); !ok {
+		return false
+	}
+	m.writeExpiredPage(g)
+	return true
+}
+
+// writeExpiredPage writes the clean page a link that is no longer served
+// returns, the same page the proxy serves for an unlinked send. It carries no
+// identity and stores nothing.
+func (m *RemoteBrowserController) writeExpiredPage(g *gin.Context) {
+	body := "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
+		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+		"<title>Link expired</title></head><body><p>This link has expired.</p></body></html>"
+	g.Data(http.StatusGone, "text/html; charset=utf-8", []byte(body))
+	g.Abort()
 }
 
 // installSession registers sess under crID, honoring the keepAlive exception: a
@@ -1447,6 +1499,11 @@ func (m *RemoteBrowserController) pollSession(g *gin.Context, create bool) (*pol
 		return nil, false // 404 already written
 	}
 
+	// a send that lost its person link after the identity retention serves a
+	// clean expired page, see ServeVictim
+	if m.serveExpiredIfUnlinked(g, cr) {
+		return nil, false
+	}
 	campaignID, err1 := cr.CampaignID.Get()
 	recipientID, err2 := cr.RecipientID.Get()
 	if err1 != nil || err2 != nil {

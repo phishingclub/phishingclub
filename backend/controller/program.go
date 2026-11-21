@@ -1,9 +1,12 @@
 package controller
 
 import (
+	"slices"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/database"
+	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/service"
@@ -14,6 +17,16 @@ var programColumns = map[string]string{
 	"created_at": repository.TableColumn(database.PROGRAM_TABLE, "created_at"),
 	"updated_at": repository.TableColumn(database.PROGRAM_TABLE, "updated_at"),
 	"name":       repository.TableColumn(database.PROGRAM_TABLE, "name"),
+	"start_at":   repository.TableColumn(database.PROGRAM_TABLE, "start_at"),
+	"started_at": repository.TableColumn(database.PROGRAM_TABLE, "started_at"),
+	"paused_at":  repository.TableColumn(database.PROGRAM_TABLE, "paused_at"),
+}
+
+// programCompanyIDQuery reads the optional companyID query of a program
+// request. A value that is not a uuid is answered with a bad request and ok
+// false, so a typo never widens the scope to every company.
+func (c *Program) programCompanyIDQuery(g *gin.Context) (*uuid.UUID, bool) {
+	return strictCompanyIDQuery(g, c.Response)
 }
 
 // Program is the controller for programs.
@@ -51,18 +64,34 @@ func (c *Program) GetAll(g *gin.Context) {
 	if !c.handleGlobalAuthorization(g, session) {
 		return
 	}
-	companyID := companyIDFromRequestQuery(g)
+	companyID, ok := c.programCompanyIDQuery(g)
+	if !ok {
+		return
+	}
 	queryArgs, ok := c.handleQueryArgs(g)
 	if !ok {
 		return
 	}
 	queryArgs.RemapOrderBy(programColumns)
 	queryArgs.DefaultSortByUpdatedAt()
+	// status is one of model.ProgramListStatuses, empty lists every program
+	status := g.Query("status")
+	if status != "" && !slices.Contains(model.ProgramListStatuses, status) {
+		c.Response.BadRequestMessage(g, "unknown program status")
+		return
+	}
+	allCompanies := g.Query("allCompanies") == "true"
 	programs, err := c.ProgramService.GetAll(
 		g.Request.Context(),
 		session,
 		companyID,
-		&repository.ProgramOption{QueryArgs: queryArgs},
+		&repository.ProgramOption{
+			QueryArgs: queryArgs,
+			Status:    status,
+			// the dashboard lists the programs of every company with their company
+			AllCompanies: allCompanies,
+			WithCompany:  allCompanies,
+		},
 	)
 	if ok := c.handleErrors(g, err); !ok {
 		return
@@ -114,7 +143,9 @@ func (c *Program) UpdateByID(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
-// DeleteByID deletes a program.
+// DeleteByID starts the delete of a program. The program is marked as being
+// deleted and stops sending before the answer, its campaigns and results are
+// removed in the background.
 func (c *Program) DeleteByID(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
@@ -131,7 +162,7 @@ func (c *Program) DeleteByID(g *gin.Context) {
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	c.Response.OK(g, gin.H{})
+	c.Response.OK(g, gin.H{"deleting": true})
 }
 
 // Pause pauses a program.
@@ -214,8 +245,9 @@ func (c *Program) Close(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
-// GetResults returns the program results by month and by template.
-func (c *Program) GetResults(g *gin.Context) {
+// Anonymize replaces the people of a closed program with pseudonyms in every
+// result.
+func (c *Program) Anonymize(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
 		return
@@ -227,11 +259,32 @@ func (c *Program) GetResults(g *gin.Context) {
 	if !ok {
 		return
 	}
-	results, err := c.ProgramService.GetResults(g.Request.Context(), session, id)
+	err := c.ProgramService.AnonymizeByID(g.Request.Context(), session, id)
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	c.Response.OK(g, results)
+	c.Response.OK(g, gin.H{})
+}
+
+// AnonymizeData removes the submitted data, IP addresses, user agents and
+// browser metadata of a program while the people stay linked.
+func (c *Program) AnonymizeData(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	if !c.handleGlobalAuthorization(g, session) {
+		return
+	}
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	err := c.ProgramService.AnonymizeDataByID(g.Request.Context(), session, id)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
 }
 
 type programAudienceRequest struct {
@@ -259,8 +312,9 @@ func (c *Program) CountAudience(g *gin.Context) {
 	c.Response.OK(g, gin.H{"people": count})
 }
 
-// GetResultStats returns the program result funnel.
-func (c *Program) GetResultStats(g *gin.Context) {
+// GetReportDeliveryStatus tells whether automated program reports of the
+// company in the companyID query, or the global scope without it, can be sent.
+func (c *Program) GetReportDeliveryStatus(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
 		return
@@ -268,19 +322,19 @@ func (c *Program) GetResultStats(g *gin.Context) {
 	if !c.handleGlobalAuthorization(g, session) {
 		return
 	}
-	id, ok := c.handleParseIDParam(g)
+	companyID, ok := c.programCompanyIDQuery(g)
 	if !ok {
 		return
 	}
-	stats, err := c.ProgramService.GetResultStats(g.Request.Context(), session, id)
+	status, err := c.ProgramService.GetReportDeliveryStatus(g.Request.Context(), session, companyID)
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	c.Response.OK(g, stats)
+	c.Response.OK(g, status)
 }
 
-// GetRecipients returns the enrollment rows of a program.
-func (c *Program) GetRecipients(g *gin.Context) {
+// GetEvents returns one page of the events of a program, sorted by time.
+func (c *Program) GetEvents(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
 		return
@@ -296,11 +350,23 @@ func (c *Program) GetRecipients(g *gin.Context) {
 	if !ok {
 		return
 	}
-	// risk is derived, it is sorted by the service rather than by a column
-	if queryArgs.OrderBy != service.ProgramRiskSortKey {
-		queryArgs.RemapOrderBy(repository.ProgramEnrollmentSortColumns)
+	// the service sorts the events of a program by time only
+	queryArgs.DefaultSortByCreatedAt()
+	queryArgs.RemapOrderBy(campaignEventColumns)
+	if g.DefaultQuery("sortOrder", "desc") == "desc" {
+		queryArgs.Desc = true
 	}
-	view, err := c.ProgramService.GetRecipientsView(g.Request.Context(), session, id, queryArgs)
+	// the events of one recipient when recipientID is given
+	var recipientID *uuid.UUID
+	if v := g.Query("recipientID"); v != "" {
+		rid, err := uuid.Parse(v)
+		if err != nil {
+			c.Response.BadRequestMessage(g, errs.MsgFailedToParseUUID)
+			return
+		}
+		recipientID = &rid
+	}
+	view, err := c.ProgramService.GetEvents(g.Request.Context(), session, id, queryArgs, recipientID)
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}

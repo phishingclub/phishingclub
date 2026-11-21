@@ -21,14 +21,14 @@ const reportPreviewTimeout = 150 * time.Second
 
 // PreviewPDF renders content, a report template, with sample data into a PDF
 // the same way a campaign report is rendered, so the result shows the real
-// page size, fonts and page breaks. The training sample is used when
-// isTraining is set. A template that does not parse or run returns a
+// page size, fonts and page breaks. kind picks the sample data: simulation,
+// training or program. A template that does not parse or run returns a
 // validation error with the reason.
 func (s *ReportTemplate) PreviewPDF(
 	ctx context.Context,
 	session *model.Session,
 	content string,
-	isTraining bool,
+	kind string,
 ) ([]byte, error) {
 	ae := NewAuditEvent("ReportTemplate.PreviewPDF", session)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
@@ -44,7 +44,7 @@ func (s *ReportTemplate) PreviewPDF(
 	if _, err := vo.NewOptionalString1MB(content); err != nil {
 		return nil, errs.NewValidationError(err)
 	}
-	html, err := renderReportPreview(content, isTraining)
+	html, err := renderReportPreviewKind(content, kind)
 	if err != nil {
 		return nil, errs.NewValidationError(err)
 	}
@@ -61,6 +61,20 @@ func (s *ReportTemplate) PreviewPDF(
 	}
 	// no audit log on read
 	return pdf, nil
+}
+
+// renderReportPreviewKind renders content with the sample data of a report
+// kind, escaped the way a real report of that kind is.
+func renderReportPreviewKind(content string, kind string) (string, error) {
+	switch kind {
+	case model.ReportKindProgram:
+		return renderProgramReportContent(content, programReportSampleData())
+	case model.ReportKindTraining:
+		return renderReportPreview(content, true)
+	case model.ReportKindSimulation, "":
+		return renderReportPreview(content, false)
+	}
+	return "", fmt.Errorf("unknown report kind")
 }
 
 // renderReportPreview renders content with the sample report data, escaped

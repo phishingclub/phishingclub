@@ -6,6 +6,8 @@
 	import { menu, topMenu } from '$lib/consts/navigation';
 	import { shouldHideMenuItem } from '$lib/utils/common';
 	import { AppStateService } from '$lib/service/appState';
+	import { get } from 'svelte/store';
+	import { displayMode, showFor, isShown } from '$lib/store/displayMode';
 
 	const appState = AppStateService.instance;
 	// external
@@ -23,11 +25,15 @@
 	// build searchable items from navigation
 	const buildSearchableItems = () => {
 		const items = [];
+		// items follow the display mode the same way the menus do
+		const mode = get(displayMode);
+		const shown = (item) => isShown(showFor(item), mode);
 
 		// add all routes from menu structure
 		menu.forEach((section) => {
+			if (!shown(section)) return;
 			section.items.forEach((item) => {
-				if (!shouldHideMenuItem(item)) {
+				if (!shouldHideMenuItem(item) && shown(item)) {
 					items.push({
 						label: item.label,
 						route: item.route,
@@ -39,7 +45,7 @@
 
 		// add top menu items
 		topMenu.forEach((item) => {
-			if (!shouldHideMenuItem(item)) {
+			if (!shouldHideMenuItem(item) && shown(item)) {
 				if (item.external) {
 					items.push({
 						label: item.label,

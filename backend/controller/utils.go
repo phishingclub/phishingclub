@@ -284,6 +284,22 @@ func companyIDFromRequestQuery(g *gin.Context) *uuid.UUID {
 	return nil
 }
 
+// strictCompanyIDQuery reads the optional companyID query value.
+// An empty value means no company. A value that is not a UUID sends a 400
+// and returns false, so a bad id never widens the scope to all companies.
+func strictCompanyIDQuery(g *gin.Context, response api.JSONResponseHandler) (*uuid.UUID, bool) {
+	v := g.Query("companyID")
+	if v == "" {
+		return nil, true
+	}
+	cid, err := uuid.Parse(v)
+	if err != nil {
+		response.BadRequestMessage(g, errs.MsgFailedToParseUUID)
+		return nil, false
+	}
+	return &cid, true
+}
+
 // SetSessionInGinContext sets the session in the gin context
 func SetSessionInGinContext(c *gin.Context, s *model.Session) {
 	c.Set("session", s)

@@ -202,21 +202,13 @@ func (rg *RecipientGroup) GetAll(
 	}
 
 	var rows []database.RecipientGroup
-	dbRes := db.Find(&rows)
+	dbRes := withPeek(db, options.QueryArgs).Find(&rows)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.RECIPIENT_GROUP_TABLE,
-		options.QueryArgs,
-		RecipientGroupAllowedColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, recipientGroup := range rows {
@@ -474,7 +466,7 @@ func (rg *RecipientGroup) GetRecipientsByGroupID(
 	if options.ExcludeSoftDeleted {
 		db = db.Where(fmt.Sprintf("`%s`.`scim_soft_deleted_at` IS NULL", database.RECIPIENT_TABLE))
 	}
-	dbRes := db.
+	dbRes := withPeek(db.
 		Model(&database.Recipient{}).
 		Joins("JOIN recipient_group_recipients ON recipient_group_recipients.recipient_id = recipients.id").
 		Where(
@@ -483,19 +475,14 @@ func (rg *RecipientGroup) GetRecipientsByGroupID(
 				TableColumn(database.RECIPIENT_GROUP_RECIPIENT_TABLE, "recipient_group_id"),
 			),
 			id.String(),
-		).
+		), options.QueryArgs).
 		Find(&recipients)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db, database.RECIPIENT_TABLE, options.QueryArgs, allowdRecipientColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&recipients, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, recipient := range recipients {
@@ -506,6 +493,41 @@ func (rg *RecipientGroup) GetRecipientsByGroupID(
 		result.Rows = append(result.Rows, r)
 	}
 	return result, nil
+}
+
+// MemberIDsQuery returns a query that selects the recipient ids of the
+// members of a group, to be used as a subquery so no member id is bound as a
+// value. A static group selects the ids of its junction rows. A dynamic group
+// selects the recipients that are not deleted and match its filter within its
+// company, the members GetRecipientsByGroupID returns.
+func (rg *RecipientGroup) MemberIDsQuery(
+	ctx context.Context,
+	id *uuid.UUID,
+) (*gorm.DB, error) {
+	var group database.RecipientGroup
+	if err := rg.DB.WithContext(ctx).
+		Where(clause.Eq{Column: clause.Column{Table: database.RECIPIENT_GROUP_TABLE, Name: "id"}, Value: id}).
+		First(&group).Error; err != nil {
+		return nil, err
+	}
+	if !group.IsDynamic {
+		return rg.DB.Session(&gorm.Session{NewDB: true}).
+			Table(database.RECIPIENT_GROUP_RECIPIENT_TABLE).
+			Select("recipient_id").
+			Where(clause.Eq{
+				Column: clause.Column{Table: database.RECIPIENT_GROUP_RECIPIENT_TABLE, Name: "recipient_group_id"},
+				Value:  id,
+			}), nil
+	}
+	if !slices.Contains(model.DynamicGroupAllowedFields, group.FilterField) {
+		return nil, fmt.Errorf("invalid filter field: %s", group.FilterField)
+	}
+	db := rg.DB.Session(&gorm.Session{NewDB: true}).
+		Model(&database.Recipient{}).
+		Select("id").
+		Where(clause.Eq{Column: clause.Column{Table: database.RECIPIENT_TABLE, Name: "deleted_at"}, Value: nil}).
+		Where(clause.Eq{Column: clause.Column{Table: database.RECIPIENT_TABLE, Name: group.FilterField}, Value: group.FilterValue})
+	return whereCompany(db, database.RECIPIENT_TABLE, group.CompanyID), nil
 }
 
 // getDynamicRecipientsByGroup resolves members of a dynamic group via its filter
@@ -537,17 +559,12 @@ func (rg *RecipientGroup) getDynamicRecipientsByGroup(
 	db = whereCompany(db, database.RECIPIENT_TABLE, group.CompanyID)
 
 	var recipients []database.Recipient
-	dbRes := db.Find(&recipients)
+	dbRes := withPeek(db, options.QueryArgs).Find(&recipients)
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db, database.RECIPIENT_TABLE, options.QueryArgs, allowdRecipientColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&recipients, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, recipient := range recipients {
@@ -627,16 +644,13 @@ func (rg *RecipientGroup) DeleteByID(
 	ctx context.Context,
 	id *uuid.UUID,
 ) error {
-	// delete recipients
-	res := rg.DB.
-		Where("recipient_group_id = ?", id).
-		Delete(&database.RecipientGroupRecipient{})
-
-	if res.Error != nil {
-		return res.Error
+	// delete the member links in batches, a large group holds many
+	if err := deleteInBatches(ctx, rg.DB, &database.RecipientGroupRecipient{},
+		clause.Eq{Column: clause.Column{Name: "recipient_group_id"}, Value: id}, deleteBatch); err != nil {
+		return err
 	}
 	// delete recipient group
-	res = rg.DB.
+	res := rg.DB.
 		Where("id = ?", id).
 		Delete(&database.RecipientGroup{})
 
@@ -676,5 +690,6 @@ func ToRecipientGroup(row *database.RecipientGroup) (*model.RecipientGroup, erro
 		FilterValue:    nullable.NewNullableWithValue(row.FilterValue),
 		Recipients:     recipients,
 		RecipientCount: nullable.NewNullNullable[int64](),
+		DeletingAt:     row.DeletingAt,
 	}, nil
 }

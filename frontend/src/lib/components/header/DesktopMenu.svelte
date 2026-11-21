@@ -31,6 +31,7 @@
 	const appState = AppStateService.instance;
 	import { createEventDispatcher } from 'svelte';
 	import ConditionalDisplay from '../ConditionalDisplay.svelte';
+	import { showFor } from '$lib/store/displayMode';
 	const dispatch = createEventDispatcher();
 
 	// check if scrollbar is present
@@ -246,7 +247,7 @@
 		>
 			{#each menu as link}
 				{#if link.type === 'submenu'}
-					<ConditionalDisplay show={link.whitebox ? 'whitebox' : link.blackbox ? 'blackbox' : 'both'}>
+					<ConditionalDisplay show={showFor(link)}>
 					<div class="py-1 first:mt-0 {isExpanded ? 'mt-4' : 'mt-2'}">
 						{#if isExpanded}
 							<div
@@ -258,7 +259,7 @@
 
 						<div>
 							{#each link.items as item, i (i)}
-								<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
+								<ConditionalDisplay show={showFor(item)}>
 									<a
 										aria-current={(
 											item.route === '/dashboard/'

@@ -34,6 +34,8 @@ type Proxy struct {
 	// ScriptEnabled reports whether the Scripts feature is enabled on this
 	// instance. A config that names a session script is rejected when it is off.
 	ScriptEnabled bool
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // ProxyServiceConfig represents the YAML configuration for proxy
@@ -542,6 +544,11 @@ func (m *Proxy) Create(
 	if cid, err := proxy.CompanyID.Get(); err == nil {
 		companyID = &cid
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, m.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 
 	// validate data
 	if err := proxy.Validate(); err != nil {

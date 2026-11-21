@@ -55,7 +55,10 @@ type Campaign struct {
 	// templateLocks holds one mutex per campaign. A manual send and a template
 	// pool change of the same campaign take it, so a recipient is never moved
 	// to another template while its email is being sent.
-	templateLocks                 sync.Map
+	templateLocks sync.Map
+	// sendRests holds the campaigns the sender rests, by id with the time the
+	// rest ends, see restCampaignSends
+	sendRests                     sync.Map
 	LureCodeService               *LureCode
 	CampaignRepository            *repository.Campaign
 	CampaignRecipientRepository   *repository.CampaignRecipient
@@ -79,11 +82,20 @@ type Campaign struct {
 	ReportTemplateRepository      *repository.ReportTemplate
 	CompanyReportConfigRepository *repository.CompanyReportConfig
 	ReportSendLogRepository       *repository.ReportSendLog
-	OptionService                 *Option
-	RemoteBrowserExecPath         string
-	TrustedProxies                []string
+	// ReportInboxRepository counts report inboxes with errors for the dashboard
+	ReportInboxRepository *repository.ReportInbox
+	OptionService         *Option
+	RemoteBrowserExecPath string
+	TrustedProxies        []string
 	// TemplateRand spreads pool templates over recipients, nil uses math/rand
 	TemplateRand TemplateRand
+	// ProgramService plans the sends of a program's hidden campaigns the sender
+	// holds back or a close cancels. Without it the sender only holds them.
+	ProgramService *Program
+	// closeReports bounds the automatic close reports that wait to try again
+	closeReports closeReportState
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // Create creates a new campaign
@@ -110,6 +122,11 @@ func (c *Campaign) Create(
 	if len(campaign.RecipientGroupIDs) == 0 {
 		return nil, validate.WrapErrorWithField(errors.New("no groups provided"), "Recipient Groups")
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, c.CompanyRepository, optionalID(campaign.CompanyID))
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 
 	// handle backward compatibility: convert old single webhook to new array format
 	if campaign.WebhookID.IsSpecified() && !campaign.WebhookID.IsNull() {
@@ -235,6 +252,16 @@ func (c *Campaign) Create(
 	if err := c.validateAllowDenyIsSameTypeByIDs(ctx, campaign); err != nil {
 		return nil, errs.Wrap(err)
 	}
+	// a group that is being deleted can not be used. The read locks of the
+	// groups are held until the campaign and its group links are written, see
+	// deleteMarkLock
+	unlockGroups := groupDeleteLock.read(campaign.RecipientGroupIDs.MustGet()...)
+	defer unlockGroups()
+	if deleting, err := c.RecipientGroupRepository.AnyBeingDeleted(ctx, campaign.RecipientGroupIDs.MustGet()); err != nil {
+		return nil, errs.Wrap(err)
+	} else if deleting {
+		return nil, validate.WrapErrorWithField(errGroupDeleting, "Recipient Groups")
+	}
 	// check there is atleast one valid group
 	// and remove any empty groups
 	validGroups := []*uuid.UUID{}
@@ -320,6 +347,11 @@ func (c *Campaign) Create(
 		// Immediate scheduling: jitter lives in memory only for this call, never written to DB.
 		createdCampaign.JitterMin = campaign.JitterMin
 		createdCampaign.JitterMax = campaign.JitterMax
+		// the campaign, its groups, webhooks and scripts exist, a delete from
+		// here on finds them. The sends are written by schedule, which takes the
+		// locks again
+		unlockGroups()
+		unlockCompany()
 		err = c.schedule(ctx, session, createdCampaign)
 		if err != nil {
 			c.Logger.Errorw("failed to schedule campaign", "error", err)
@@ -615,19 +647,21 @@ func (c *Campaign) insertScheduledRecipients(
 // them all first and so does read the template again, which is safe because its
 // recipients are recreated with new IDs and the old links die either way.
 //
-// Nothing here is fatal, so a lure setting cannot stop a campaign scheduling. A
-// template that could not be read leaves the snapshot unwritten rather than
+// A template that could not be read leaves the snapshot unwritten rather than
 // settling on the defaults, because the write closes the question for good and a
 // transient error would otherwise mark a path mode campaign as query mode with
-// no way back while it holds recipients.
+// no way back while it holds recipients. Such a failure is returned. A normal
+// campaign schedules on, so a lure setting cannot stop it, while a hidden
+// program campaign is removed and made again, see getOrCreateStepCampaign, so
+// a training step never sends as phishing.
 func (c *Campaign) snapshotLureSettings(
 	ctx context.Context,
 	session *model.Session,
 	campaign *model.Campaign,
-) {
+) error {
 	campaignID, err := campaign.ID.Get()
 	if err != nil {
-		return
+		return errs.Wrap(err)
 	}
 	hasRecipients, err := c.CampaignRecipientRepository.HasRecipientsByCampaignID(
 		ctx,
@@ -639,10 +673,10 @@ func (c *Campaign) snapshotLureSettings(
 		c.Logger.Errorw("failed to check for existing recipients, keeping lure settings",
 			"error", err,
 		)
-		return
+		return errs.Wrap(err)
 	}
 	if hasRecipients {
-		return
+		return nil
 	}
 
 	mode := data.LureURLModeQuery
@@ -659,7 +693,7 @@ func (c *Campaign) snapshotLureSettings(
 		c.Logger.Errorw("campaign has no template, leaving the snapshot unwritten",
 			"campaignID", campaignID.String(),
 		)
-		return
+		return errs.Wrap(err)
 	}
 	cTemplate, err := c.CampaignTemplateService.GetByID(
 		ctx,
@@ -673,7 +707,10 @@ func (c *Campaign) snapshotLureSettings(
 			"templateID", templateID.String(),
 			"error", err,
 		)
-		return
+		if err == nil {
+			err = errors.New("template not found")
+		}
+		return errs.Wrap(err)
 	}
 	if v, err := cTemplate.LureURLMode.Get(); err == nil && data.IsValidLureURLMode(v) {
 		mode = v
@@ -703,7 +740,9 @@ func (c *Campaign) snapshotLureSettings(
 		// the in memory campaign still carries them, so this run allocates
 		// correctly even unpersisted
 		c.Logger.Errorw("failed to persist lure settings snapshot", "error", err)
+		return errs.Wrap(err)
 	}
+	return nil
 }
 
 func (c *Campaign) schedule(
@@ -720,9 +759,21 @@ func (c *Campaign) schedule(
 	if !isAuthorized {
 		return errs.ErrAuthorizationFailed
 	}
+	// the sends are written under the read locks of the company and the
+	// groups, so a delete mark of either sees them. A campaign of a company
+	// that is being deleted is not scheduled, the delete removes it
+	unlockCompany, err := refuseDeletingCompany(ctx, c.CompanyRepository, optionalID(campaign.CompanyID))
+	if err != nil {
+		return err
+	}
+	defer unlockCompany()
+	if campaign.RecipientGroupIDs.IsSpecified() && !campaign.RecipientGroupIDs.IsNull() {
+		defer groupDeleteLock.read(campaign.RecipientGroupIDs.MustGet()...)()
+	}
 	// settle the lure settings before any row is written, so every recipient in
-	// this run is allocated under the same rules
-	c.snapshotLureSettings(ctx, session, campaign)
+	// this run is allocated under the same rules. A failure is logged and the
+	// campaign schedules on with the settings it holds
+	_ = c.snapshotLureSettings(ctx, session, campaign)
 
 	// get all recipients and remove duplicates
 	recipients := []*model.Recipient{}
@@ -737,6 +788,10 @@ func (c *Campaign) schedule(
 			if err != nil {
 				c.Logger.Errorw("failed to get recipient group by id", "error", err)
 				return errs.Wrap(err)
+			}
+			// the members of a group that is being deleted get nothing
+			if group.DeletingAt != nil {
+				continue
 			}
 
 			var recps []*model.Recipient
@@ -1469,7 +1524,7 @@ func (c *Campaign) GetStats(
 		return nil, errs.ErrAuthorizationFailed
 	}
 	// get stats
-	active, err := c.CampaignRepository.GetActiveCount(ctx, companyID, includeTestCampaigns)
+	active, err := c.CampaignRepository.GetActiveCounts(ctx, companyID, includeTestCampaigns)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
@@ -1481,12 +1536,45 @@ func (c *Campaign) GetStats(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
+	// failed sends in the scope of the dashboard events tab
+	failedID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_FAILED]
+	var failed int64
+	if failedID != nil {
+		failed, err = c.CampaignRepository.CountDashboardEvents(
+			ctx,
+			companyID,
+			time.Now().AddDate(0, 0, -FailedSendingDays),
+			&repository.CampaignEventAllOption{
+				IncludeTestCampaigns: includeTestCampaigns,
+				ProgramEventTypeIDs:  programRecipientEventIDs(),
+				EventTypeIDs:         []string{failedID.String()},
+			},
+		)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+	}
+	var inboxErrors int64
+	if c.ReportInboxRepository != nil {
+		inboxErrors, err = c.ReportInboxRepository.CountWithError(ctx, companyID)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+	}
 	return &model.CampaignsStatView{
-		Active:   active,
-		Upcoming: upcoming,
-		Finished: finished,
+		Active:            active.Active,
+		SelfManaged:       active.SelfManaged,
+		Upcoming:          upcoming,
+		Finished:          finished,
+		Paused:            active.Paused,
+		FailedSending:     failed,
+		FailedSendingDays: FailedSendingDays,
+		ReportInboxErrors: inboxErrors,
 	}, nil
 }
+
+// FailedSendingDays is how far back the dashboard counts failed sends
+const FailedSendingDays = 7
 
 // GetResultStats gets results stats for a campaign
 func (c *Campaign) GetResultStats(
@@ -1623,6 +1711,9 @@ func (c *Campaign) HasGroupData(
 		return false, errs.Wrap(err)
 	}
 	if !isAuthorized {
+		ae := NewAuditEvent("Campaign.HasGroupData", session)
+		ae.Details["campaignId"] = campaignID.String()
+		c.AuditLogNotAuthorized(ae)
 		return false, errs.ErrAuthorizationFailed
 	}
 	// a program's hidden campaigns are read through the program
@@ -1645,7 +1736,14 @@ func (c *Campaign) HasTemplateGroupData(
 		return false, errs.Wrap(err)
 	}
 	if !isAuthorized {
+		ae := NewAuditEvent("Campaign.HasTemplateGroupData", session)
+		ae.Details["campaignId"] = campaignID.String()
+		c.AuditLogNotAuthorized(ae)
 		return false, errs.ErrAuthorizationFailed
+	}
+	// a program's hidden campaigns are read through the program
+	if err := c.rejectProgramCampaign(ctx, campaignID); err != nil {
+		return false, err
 	}
 	return c.CampaignRepository.HasTemplateGroupDataByCampaignID(ctx, campaignID)
 }
@@ -1811,13 +1909,17 @@ func (c *Campaign) GetRecipientsByCampaignID(
 	return result, nil
 }
 
-// GetAllEvents gets all events across campaigns
+// GetAllEvents gets one page of the events of the dashboard: the events of
+// campaigns and the recipient events of programs that are not anonymous. A
+// program event carries the program id and name in place of its hidden
+// campaign. eventTypeID, when set, keeps only that event type.
 func (c *Campaign) GetAllEvents(
 	ctx context.Context,
 	session *model.Session,
 	companyID *uuid.UUID,
 	queryArgs *vo.QueryArgs,
 	includeTestCampaigns bool,
+	eventTypeID *uuid.UUID,
 ) (*model.Result[model.CampaignEvent], error) {
 	result := model.NewEmptyResult[model.CampaignEvent]()
 	ae := NewAuditEvent("Campaign.GetAllEvents", session)
@@ -1831,22 +1933,60 @@ func (c *Campaign) GetAllEvents(
 		c.AuditLogNotAuthorized(ae)
 		return result, errs.ErrAuthorizationFailed
 	}
-	result, err = c.CampaignRepository.GetAllEvents(
-		ctx,
-		companyID,
-		&repository.CampaignEventAllOption{
-			QueryArgs:            queryArgs,
-			WithUser:             true,
-			WithCampaign:         true,
-			IncludeTestCampaigns: includeTestCampaigns,
-		},
-	)
+	options := &repository.CampaignEventAllOption{
+		QueryArgs:            queryArgs,
+		WithUser:             true,
+		WithCampaign:         true,
+		IncludeTestCampaigns: includeTestCampaigns,
+		ProgramEventTypeIDs:  programRecipientEventIDs(),
+	}
+	if eventTypeID != nil {
+		options.EventTypeIDs = []string{eventTypeID.String()}
+	}
+	result, err = c.CampaignRepository.GetAllEvents(ctx, companyID, options)
 	if err != nil {
 		c.Logger.Errorw("failed to get all events", "error", err)
 		return result, errs.Wrap(err)
 	}
+	if err := c.nameProgramEvents(ctx, result.Rows); err != nil {
+		c.Logger.Errorw("failed to name program events", "error", err)
+		return result, errs.Wrap(err)
+	}
 	// no audit on read
 	return result, nil
+}
+
+// nameProgramEvents replaces the hidden campaign of a program event with the
+// program id and name. Only the company of the campaign is kept, so nothing of
+// the hidden campaign reaches the client.
+func (c *Campaign) nameProgramEvents(ctx context.Context, events []*model.CampaignEvent) error {
+	ids := []*uuid.UUID{}
+	for _, ev := range events {
+		if ev.Campaign == nil || !ev.Campaign.IsProgramManaged() {
+			continue
+		}
+		id := ev.Campaign.ProgramID.MustGet()
+		ids = append(ids, &id)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	names, err := c.CampaignRepository.GetProgramNamesByIDs(ctx, ids)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	for _, ev := range events {
+		if ev.Campaign == nil || !ev.Campaign.IsProgramManaged() {
+			continue
+		}
+		programID := ev.Campaign.ProgramID.MustGet()
+		ev.ProgramID = &programID
+		ev.ProgramName = names[programID]
+		ev.Company = ev.Campaign.Company
+		ev.CampaignID = nil
+		ev.Campaign = nil
+	}
+	return nil
 }
 
 // GetEventsByCampaignID gets all events for a campaign
@@ -2031,7 +2171,8 @@ func (c *Campaign) GetAllWithinDates(
 		c.Logger.Errorw("failed to get all campaigns between dates", "error", err)
 		return result, errs.Wrap(err)
 	}
-	if result != nil {
+	// the template pools are read only for a caller that reads the templates
+	if result != nil && options.WithCampaignTemplate {
 		if err := c.attachTemplatePools(ctx, result.Rows...); err != nil {
 			c.Logger.Errorw("failed to get campaign template pools", "error", err)
 			return result, errs.Wrap(err)
@@ -2189,8 +2330,7 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 	// be hit long after close from a token in a delivered email, so return quietly
 	// rather than dereferencing a null id.
 	if campaignRecipient.RecipientID.IsNull() {
-		c.Logger.Debugw("skipping tracking pixel event: recipient is anonymized", "campaignRecipientID", campaignRecipientID.String())
-		return nil
+		return c.saveUnlinkedTrackingPixelLoaded(ctx, campaignRecipient)
 	}
 	recipientID := campaignRecipient.RecipientID.MustGet()
 	campaignID := campaignRecipient.CampaignID.MustGet()
@@ -2263,6 +2403,46 @@ func (c *Campaign) SaveTrackingPixelLoaded(
 		return errs.Wrap(err)
 	}
 	return nil
+}
+
+// saveUnlinkedTrackingPixelLoaded records the opened event of a send without a
+// person link. Only an unlinked send of an anonymous program in an open
+// campaign is recorded, on its pseudonym with no identity, and no webhook or
+// script runs, as for every event of a single recipient on an anonymous
+// campaign. Any other send, such as one of a closed anonymous campaign, is
+// skipped quietly.
+func (c *Campaign) saveUnlinkedTrackingPixelLoaded(
+	ctx *gin.Context,
+	campaignRecipient *model.CampaignRecipient,
+) error {
+	campaignID, err := campaignRecipient.CampaignID.Get()
+	if err != nil || c.ProgramService == nil {
+		c.Logger.Debugw("skipping tracking pixel event: recipient is anonymized")
+		return nil
+	}
+	campaign, err := c.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{})
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return errs.Wrap(err)
+	}
+	pseudonym, ok := UnlinkedAnonymousProgramSend(ctx, c.ProgramService.ProgramRepository, campaign, campaignRecipient)
+	if !ok || !campaign.IsActive() {
+		c.Logger.Debugw("skipping tracking pixel event: recipient is anonymized")
+		return nil
+	}
+	eventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ]
+	newEventID := uuid.New()
+	campaignEvent := &model.CampaignEvent{
+		ID:         &newEventID,
+		CampaignID: &campaignID,
+		EventID:    eventID,
+	}
+	campaignEvent.Anonymize(&pseudonym)
+	if err := c.CampaignRepository.SaveEvent(ctx, campaignEvent); err != nil {
+		c.Logger.Errorw("failed to save tracking pixel loaded event", "error", err)
+		return errs.Wrap(err)
+	}
+	return c.SetNotableCampaignRecipientEvent(ctx, campaignRecipient, data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ)
 }
 
 // SaveRecipientReported records that a recipient reported the phishing message for
@@ -2379,6 +2559,13 @@ func (c *Campaign) UpdateByID(
 	if current.IsProgramManaged() {
 		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
+	// a campaign of a company that is being deleted is not changed, before
+	// anything is written. The read lock is held to the end of the save
+	unlockCompany, err := refuseDeletingCompany(ctx, c.CompanyRepository, companyIDPtr(current.CompanyID))
+	if err != nil {
+		return err
+	}
+	defer unlockCompany()
 	// check if the campaign is within the allowed time frame for editing
 	// we allow editing up until 5 minutes before the campaigns start time
 	if sendStartAt, err := current.SendStartAt.Get(); err == nil {
@@ -2692,6 +2879,14 @@ func (c *Campaign) UpdateByID(
 		}
 	}
 
+	// a group that is being deleted can not be used. The read locks of the
+	// groups are held to the end of the save, see deleteMarkLock
+	defer groupDeleteLock.read(current.RecipientGroupIDs.MustGet()...)()
+	if deleting, err := c.RecipientGroupRepository.AnyBeingDeleted(ctx, current.RecipientGroupIDs.MustGet()); err != nil {
+		return errs.Wrap(err)
+	} else if deleting {
+		return validate.WrapErrorWithField(errGroupDeleting, "Recipient Groups")
+	}
 	// check there is atleast one valid group
 	// and remove any empty groups
 	validGroups := []*uuid.UUID{}
@@ -3029,6 +3224,15 @@ func (c *Campaign) deleteByID(
 	if !allowProgramManaged && existing.IsProgramManaged() {
 		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
+	// the campaign is closed before its links and rows are removed, so a
+	// delete that stops half way never leaves it sending or serving pages
+	// without its allow and deny lists
+	if existing.IsActive() {
+		if err := c.CampaignRepository.SetClosedAtByID(ctx, id, time.Now()); err != nil {
+			c.Logger.Errorw("failed to close campaign before delete", "error", err)
+			return errs.Wrap(err)
+		}
+	}
 	// delete all campaign-webhook junction records
 	err = c.CampaignRepository.RemoveWebhooksByCampaignID(ctx, id)
 	if err != nil {
@@ -3059,8 +3263,7 @@ func (c *Campaign) deleteByID(
 		return errs.Wrap(err)
 	}
 	// delete the relation between the campaign and the recipient groups
-	err = c.CampaignRepository.RemoveCampaignRecipientGroups(ctx, id)
-	if err != nil {
+	if err := c.CampaignRepository.RemoveCampaignRecipientGroups(ctx, id); err != nil {
 		c.Logger.Errorw("failed to delete campaign recipient groups by campaign id",
 			"campaignID", id.String(),
 			"error", err,
@@ -3229,7 +3432,8 @@ func (c *Campaign) SendNextBatch(
 		ctx,
 		1000, // limit
 		&repository.CampaignRecipientOption{
-			WithRecipient: true,
+			WithRecipient:      true,
+			ExcludeCampaignIDs: c.restingCampaigns(time.Now()),
 		},
 	)
 	if err != nil {
@@ -3248,11 +3452,44 @@ func (c *Campaign) SendNextBatch(
 		err = c.sendCampaignMessages(ctx, session, campaignID, campaignRecipients)
 		if err != nil {
 			c.Logger.Errorw("failed to send campaign messages", "error", err)
+			c.restCampaignSends(uuid.MustParse(campaignID), time.Now())
 			continue
 		}
 	}
 
 	return errs.Wrap(err)
+}
+
+// campaignSendRest is how long the sender leaves out a campaign it could not
+// send
+const campaignSendRest = time.Minute
+
+// restCampaignSends leaves the rows of a campaign out of the next batches for
+// a while. A send that stops with an error can leave the rows of the campaign
+// due and untouched, for example when a read fails, a program campaign waits
+// or the campaign has no template. The batch has a limit and no order, so the
+// same rows would be read first on every run and could fill the whole batch,
+// and the other campaigns would never be sent. The rest is kept in memory
+// only, a restart sends the campaign again at once.
+func (c *Campaign) restCampaignSends(campaignID uuid.UUID, now time.Time) {
+	c.sendRests.Store(campaignID, now.Add(campaignSendRest))
+}
+
+// restingCampaigns returns the campaigns the sender rests at the time given
+// and forgets the rests that have ended
+func (c *Campaign) restingCampaigns(now time.Time) []*uuid.UUID {
+	ids := []*uuid.UUID{}
+	c.sendRests.Range(func(key, value any) bool {
+		id, _ := key.(uuid.UUID)
+		until, _ := value.(time.Time)
+		if !now.Before(until) {
+			c.sendRests.Delete(key)
+			return true
+		}
+		ids = append(ids, &id)
+		return true
+	})
+	return ids
 }
 
 // calendarContentType is the MIME content type for a calendar invitation.
@@ -3300,6 +3537,47 @@ func (c *Campaign) sendCampaignMessages(
 			"campaignID", campaign.ID.MustGet().String(),
 		)
 		return errors.New("skipping send, campaign is not active")
+	}
+	// a hidden program campaign sends nothing once its program has ended. An
+	// end date moved closer cancels the sends in chunks after the edit and the
+	// scheduler closes the program on its next tick, until then the sends wait
+	// and are cancelled by the close. The campaign is paused here, so the due
+	// read leaves its rows out and they can not fill every batch while the
+	// close is still to come or keeps failing. The tick keeps the campaigns of
+	// an ended program paused, see ReconcileCampaignPause.
+	if programID, err := campaign.ProgramID.Get(); err == nil && c.ProgramService != nil {
+		ended, err := c.ProgramService.ProgramRepository.IsEndedByID(ctx, &programID, time.Now())
+		if err != nil {
+			c.Logger.Errorw("failed to read program end before sending",
+				"campaignID", campaignID.String(),
+				"error", err,
+			)
+			return errs.Wrap(err)
+		}
+		if ended {
+			c.Logger.Debugw("skipping send and pausing campaign, program has ended",
+				"campaignID", campaignID.String(),
+				"programID", programID.String(),
+			)
+			if err := c.CampaignRepository.PauseOpenByID(ctx, &campaignID); err != nil {
+				c.Logger.Errorw("failed to pause campaign of ended program",
+					"campaignID", campaignID.String(),
+					"error", err,
+				)
+				return errs.Wrap(err)
+			}
+			return nil
+		}
+		// an edit stores the new steps before it cancels the sends of a step it
+		// removed, a removed template is never sent. The campaign rests and
+		// the edit or the next pass cancels its sends.
+		removed, err := c.ProgramService.ProgramRepository.IsCampaignStepRemoved(ctx, &campaignID)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		if removed {
+			return errs.Wrap(errors.New("skipping send, the program step of the campaign was removed"))
+		}
 	}
 	// send each template's recipients together, so a template is loaded once per
 	// batch and an SMTP connection is shared by recipients with the same sender
@@ -3353,7 +3631,61 @@ func (c *Campaign) sendTemplateGroups(
 	return errors.Join(sendErrs...)
 }
 
-// sendCampaignMessagesWithTemplate sends to recipients that share one template
+// holdProgramSends keeps a hidden campaign of a program open when its template
+// can not be sent now. The sends are cancelled and their people planned again
+// as if the step was not given, see Program.replanHeldSends, so the scheduler
+// skips the step for that pick only and gives the person another template,
+// and offers the step again once it can be sent. The program page warns about
+// the template. Closing the campaign would end the step for the loop. It
+// reports false for a campaign that is not a program campaign, which the
+// caller closes.
+func (c *Campaign) holdProgramSends(
+	ctx context.Context,
+	campaign *model.Campaign,
+	campaignRecipients []*model.CampaignRecipient,
+	reason string,
+) (bool, error) {
+	if !campaign.IsProgramManaged() {
+		return false, nil
+	}
+	c.Logger.Warnw("program template can not be sent now, its sends are planned again",
+		"campaignID", campaign.ID.MustGet().String(),
+		"reason", reason,
+	)
+	if c.ProgramService == nil {
+		return true, errs.Wrap(errors.New("program sends held: " + reason))
+	}
+	ids := make([]*uuid.UUID, 0, len(campaignRecipients))
+	for _, cr := range campaignRecipients {
+		if id, err := cr.ID.Get(); err == nil {
+			ids = append(ids, &id)
+		}
+	}
+	if err := c.CampaignRecipientRepository.Cancel(ctx, ids); err != nil {
+		return true, errs.Wrap(err)
+	}
+	c.ProgramService.replanHeldSends(ctx, campaign, campaignRecipients)
+	return true, nil
+}
+
+// programTemplateNotSendable returns why a program template can not be sent,
+// empty when it can: it is marked as not usable, or it has neither a landing
+// page nor a landing proxy
+func programTemplateNotSendable(t *model.CampaignTemplate) string {
+	if usable, err := t.IsUsable.Get(); err == nil && !usable {
+		return "the template is not usable"
+	}
+	_, errPage := t.LandingPageID.Get()
+	_, errProxy := t.LandingProxyID.Get()
+	if errPage != nil && errProxy != nil {
+		return "the template has no landing page"
+	}
+	return ""
+}
+
+// sendCampaignMessagesWithTemplate sends to recipients that share one template.
+// A template that can not be sent closes the campaign, while a hidden campaign
+// of a program stays open and its sends wait, see holdProgramSends.
 func (c *Campaign) sendCampaignMessagesWithTemplate(
 	ctx context.Context,
 	session *model.Session,
@@ -3376,6 +3708,9 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 		},
 	)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "template was deleted"); held {
+			return holdErr
+		}
 		// unsent recipients point at a deleted template. deleting a template
 		// closes the campaigns using it, so this only happens before that close
 		// is done or when a save raced the delete. the campaign is closed here
@@ -3410,6 +3745,11 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	}
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign template by id", "error", err)
+		// a failed read may pass, a program keeps its campaign and the sends are
+		// tried again on the next run
+		if campaign.IsProgramManaged() {
+			return errs.Wrap(err)
+		}
 		closeErr := c.closeCampaign(
 			ctx,
 			session,
@@ -3419,9 +3759,22 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 		)
 		return errs.Wrap(errors.Join(err, closeErr))
 	}
+	// a program template must be usable and have a landing page or proxy. A
+	// page or proxy removed from it leaves the template in place, but its
+	// links would lead nowhere
+	if campaign.IsProgramManaged() {
+		if reason := programTemplateNotSendable(cTemplate); reason != "" {
+			if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, reason); held {
+				return holdErr
+			}
+		}
+	}
 	// domain
 	domain := cTemplate.Domain
 	if domain == nil {
+		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the template has no domain"); held {
+			return holdErr
+		}
 		// if the domain has been removed from the campaign template used in this campaign, close the campaign
 		closeErr := c.closeCampaign(
 			ctx,
@@ -3441,6 +3794,9 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	// get email details
 	emailID, err := cTemplate.EmailID.Get()
 	if err != nil {
+		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the template has no email"); held {
+			return holdErr
+		}
 		c.Logger.Warnw("Running campaign does not have a email relation - cancelling campaign",
 			"campaignID", campaignID.String(),
 		)
@@ -3471,6 +3827,15 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 		campaignCompanyID,
 	)
 	if err != nil {
+		if campaign.IsProgramManaged() {
+			// a failed read may pass, only an email that is gone holds the sends
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return errs.Wrap(err)
+			}
+			if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the email of the template was deleted"); held {
+				return holdErr
+			}
+		}
 		closeErr := c.closeCampaign(
 			ctx,
 			session,
@@ -3482,6 +3847,9 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	}
 	content, err := email.Content.Get()
 	if err != nil {
+		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the email has no content"); held {
+			return holdErr
+		}
 		// if mail templates fails to parse, close the campaign
 		closeErr := c.closeCampaign(
 			ctx,
@@ -3499,6 +3867,9 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	t = t.Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID))
 	_, err = t.Parse(content.String())
 	if err != nil {
+		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the email does not parse"); held {
+			return holdErr
+		}
 		// if mail templates fails to parse, close the campaign
 		closeErr := c.closeCampaign(
 			ctx,
@@ -3514,6 +3885,9 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	isAPISenderCampaign := cTemplate.APISenderID.IsSpecified() && !cTemplate.APISenderID.IsNull()
 	// close the campaign
 	if !isSmtpCampaign && !isAPISenderCampaign {
+		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the template has no SMTP configuration or API sender"); held {
+			return holdErr
+		}
 		c.Logger.Warnw("Running campaign does not have a SMTP or API sender relation - cancelling campaign",
 			"campaignID", campaignID.String(),
 		)
@@ -3529,22 +3903,12 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	if isAPISenderCampaign {
 		// send via API
 		for _, campaignRecipient := range campaignRecipients {
-			// update the last attempt at timestamp so we do not accidently try sending the same
-			// email again if a panic or error happens in a 3. party lib.
-			campaignRecipientID := campaignRecipient.ID.MustGet()
-			campaignRecipient.LastAttemptAt = nullable.NewNullableWithValue(time.Now())
-			err := c.CampaignRecipientRepository.UpdateByID(
-				ctx,
-				&campaignRecipientID,
-				campaignRecipient,
-			)
+			claimed, err := c.claimForSending(ctx, campaignRecipient)
 			if err != nil {
-				c.Logger.Errorw("CRITICAL - failed to update last attempted at - aborting",
-					"error", err,
-				)
-				return errs.Wrap(
-					fmt.Errorf("failed to update last attempted at: %s \nThis is critical for sending, aborting...", err),
-				)
+				return errs.Wrap(err)
+			}
+			if !claimed {
+				continue
 			}
 			// generate custom campaign URL if first page is MITM
 			customCampaignURL, urlErr := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
@@ -3690,20 +4054,12 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	messages := []*mail.Msg{}
 	mailToCampaignRecipient := make(map[string]*model.CampaignRecipient, len(campaignRecipients))
 	for _, campaignRecipient := range campaignRecipients {
-		// update the last attempt at timestamp so we do not accidently try sending the same
-		// email again if a panic or error happens in a 3. party lib.
-		campaignRecipientID := campaignRecipient.ID.MustGet()
-		campaignRecipient.LastAttemptAt = nullable.NewNullableWithValue(time.Now())
-		err := c.CampaignRecipientRepository.UpdateByID(
-			ctx,
-			&campaignRecipientID,
-			campaignRecipient,
-		)
+		claimed, err := c.claimForSending(ctx, campaignRecipient)
 		if err != nil {
-			c.Logger.Errorw("CRITICAL - failed to update last attempted at - aborting",
-				"error", err,
-			)
-			return fmt.Errorf("failed to update last attempted at: %s \nThis is critical for sending, aborting...", err)
+			return err
+		}
+		if !claimed {
+			continue
 		}
 		m := mail.NewMsg(messageOptions...)
 		/* TODO at the moment the mail envelope from is a email, so it can not be empty by definition
@@ -3741,19 +4097,6 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 		if err != nil {
 			c.Logger.Errorw("failed to set mail header 'From'", "error", err)
 			return errs.Wrap(err)
-		}
-		// handle a race where the recipient has been removed/anonymized
-		if campaignRecipient.Recipient == nil {
-			crid := campaignRecipient.ID.MustGet()
-			err := c.CampaignRecipientRepository.Cancel(
-				ctx,
-				[]*uuid.UUID{&crid},
-			)
-			if err != nil {
-				return errors.New("Missing recipient from campaign recipient")
-			}
-			c.Logger.Info("A campaign recipient had no recipient - cancelled - this can happend in rare race conditions or curruption bugs")
-			continue
 		}
 		recpEmail := campaignRecipient.Recipient.Email.MustGet().String()
 		err = m.To(recpEmail)
@@ -3982,6 +4325,10 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 		}
 		messages = append(messages, m)
 	}
+	// every row was cancelled or changed after the batch was read
+	if len(messages) == 0 {
+		return nil
+	}
 
 	// send the messages
 	// the client sends all the messages and ensure that all messages are sent
@@ -4050,6 +4397,11 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 		var sendError error = nil
 		if m.HasSendError() {
 			sendError = m.SendError()
+		} else if !m.IsDelivered() {
+			// the server never took the message, for example it could not be
+			// reached or refused the login, so the client gives no error on the
+			// message itself. It is not sent.
+			sendError = smtpNotDeliveredError(err)
 		}
 		// deref 0 as only a single recipient in each mail
 		to := m.GetToString()[0]
@@ -4082,23 +4434,73 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	return nil
 }
 
+// claimForSending marks a row of the batch as tried and reports whether it may
+// be sent. The batch is read before any of its campaigns are sent, so a row
+// can be cancelled, sent, paused or lose its recipient while the campaigns
+// before it are sent. Such a row is not claimed and is skipped. The last
+// attempt time keeps a row from being sent again if a panic or an error in a
+// third party library stops the send. A row with no recipient loaded is
+// cancelled, it can not be sent.
+func (c *Campaign) claimForSending(
+	ctx context.Context,
+	campaignRecipient *model.CampaignRecipient,
+) (bool, error) {
+	campaignRecipientID := campaignRecipient.ID.MustGet()
+	if campaignRecipient.Recipient == nil {
+		if err := c.CampaignRecipientRepository.Cancel(ctx, []*uuid.UUID{&campaignRecipientID}); err != nil {
+			return false, errs.Wrap(fmt.Errorf("failed to cancel campaign recipient with no recipient: %w", err))
+		}
+		c.Logger.Infow("campaign recipient has no recipient, cancelled",
+			"campaignRecipientID", campaignRecipientID.String(),
+		)
+		return false, nil
+	}
+	now := time.Now()
+	claimed, err := c.CampaignRecipientRepository.ClaimForSending(ctx, &campaignRecipientID, now)
+	if err != nil {
+		c.Logger.Errorw("CRITICAL - failed to update last attempted at - aborting",
+			"error", err,
+		)
+		return false, fmt.Errorf("failed to update last attempted at: %s \nThis is critical for sending, aborting...", err)
+	}
+	if !claimed {
+		c.Logger.Debugw("campaign recipient changed after the batch was read, not sent",
+			"campaignRecipientID", campaignRecipientID.String(),
+		)
+		return false, nil
+	}
+	campaignRecipient.LastAttemptAt = nullable.NewNullableWithValue(now)
+	return true, nil
+}
+
 // saveSendingResult saves a result from a send campaign atttempts
+// smtpNotDeliveredError is the reason stored for a message the SMTP server
+// never took, with the error of the whole send when there is one
+func smtpNotDeliveredError(sendErr error) error {
+	if sendErr != nil {
+		return fmt.Errorf("message not delivered: %w", sendErr)
+	}
+	return errors.New("message not delivered")
+}
+
 func (c *Campaign) saveSendingResult(
 	ctx context.Context,
 	campaignRecipient *model.CampaignRecipient,
 	sendError error,
 ) error {
+	var err error
+	// only the sent time is written. The row was read before the send, and
+	// writing it all back would undo what others changed meanwhile, such as a
+	// cancel, a recipient delete or an anonymize. A failed send keeps the last
+	// attempt time set when the row was claimed.
 	if sendError == nil {
-		campaignRecipient.SentAt = nullable.NewNullableWithValue(time.Now())
-	}
-	campaignRecipientID := campaignRecipient.ID.MustGet()
-	err := c.CampaignRecipientRepository.UpdateByID(
-		ctx,
-		&campaignRecipientID,
-		campaignRecipient,
-	)
-	if err != nil {
-		c.Logger.Errorw("failed to update campaign recipient by id", "error", err)
+		now := time.Now()
+		campaignRecipient.SentAt = nullable.NewNullableWithValue(now)
+		campaignRecipientID := campaignRecipient.ID.MustGet()
+		err = c.CampaignRecipientRepository.SetSentAtByID(ctx, &campaignRecipientID, now)
+		if err != nil {
+			c.Logger.Errorw("failed to update campaign recipient by id", "error", err)
+		}
 	}
 	// persist the event
 	id := uuid.New()
@@ -5004,6 +5406,11 @@ func (c *Campaign) closeCampaign(
 	}
 	campaignRecipientUUIDs := []*uuid.UUID{}
 	for _, cr := range campaignRecipients {
+		// a send of a program the sender took may have gone out before
+		// sent_at was written, so it keeps its row as it is
+		if campaign.IsProgramManaged() && cr.LastAttemptAt.IsSpecified() && !cr.LastAttemptAt.IsNull() {
+			continue
+		}
 		campaignRecipientID := cr.ID.MustGet()
 		campaignRecipientUUIDs = append(campaignRecipientUUIDs, &campaignRecipientID)
 	}
@@ -5030,6 +5437,12 @@ func (c *Campaign) closeCampaign(
 	if err != nil {
 		c.Logger.Errorw("failed to close campaign by id", "error", err)
 		return errs.Wrap(err)
+	}
+	// the people of a running program whose sends were cancelled are planned
+	// again once the campaign is closed, the next send of the step then goes
+	// to a new campaign, so no template is lost to them
+	if campaign.IsProgramManaged() && c.ProgramService != nil {
+		c.ProgramService.replanCancelledCampaignSends(ctx, campaign, campaignRecipients)
 	}
 	// a closed campaign is never left paused. clearing it keeps the state clean so
 	// pause and resume only ever apply to a campaign that is still open.
@@ -5098,23 +5511,165 @@ func (c *Campaign) closeCampaign(
 	// sender loop. failures are logged and a panic is recovered so it can never
 	// crash the process. a program's hidden campaigns get no report of their own.
 	if !campaign.IsTest.MustGet() && !campaign.IsProgramManaged() {
-		reportCampaignID := *id
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					c.Logger.Errorw("recovered from panic during automatic report delivery", "panic", r, "campaignID", reportCampaignID.String())
-				}
-			}()
-			bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			if err := c.SendCampaignReport(bgCtx, session, &reportCampaignID, false); err != nil {
-				c.Logger.Errorw("failed to send automatic campaign report", "error", err, "campaignID", reportCampaignID.String())
-			}
-		}()
+		go c.sendCloseReport(session, *id, false)
 	}
 
 	return nil
 }
+
+// closeReportBrowserWait is how long the automatic report of a closed campaign
+// waits for a report browser before it gives up
+var closeReportBrowserWait = 30 * time.Minute
+
+// closeReportRetryAfter is how long a close report that found no report
+// browser waits before its one more try
+var closeReportRetryAfter = time.Hour
+
+// closeReportMaxRetries is the most close reports that wait to try again at
+// once. A report past it is dropped at once.
+const closeReportMaxRetries = 50
+
+// closeReportReserve reserves a report browser for a close report
+var closeReportReserve = remotebrowser.ReserveOneSession
+
+// closeReportNeedsBrowser reports whether the automatic report of a closed
+// campaign will be built, see closeReportReady
+var closeReportNeedsBrowser = (*Campaign).closeReportReady
+
+// closeReportReady reports whether the automatic report of a closed campaign
+// will be built: PDF reports are on, and the company of the campaign has report
+// delivery on with send on close and a complete config, as SendCampaignReport
+// checks. A read that fails reports true, so the report call handles it.
+func (c *Campaign) closeReportReady(campaignID uuid.UUID) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	opt, _ := c.OptionService.GetOptionWithoutAuth(ctx, data.OptionKeyReportPDFEnabled)
+	if opt == nil || opt.Value.String() != "true" {
+		return false
+	}
+	campaign, err := c.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{})
+	if err != nil {
+		return true
+	}
+	var companyID *uuid.UUID
+	if cid, err := campaign.CompanyID.Get(); err == nil {
+		companyID = &cid
+	}
+	companyConfig, err := c.CompanyReportConfigRepository.GetByCompanyID(ctx, companyID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	if !companyConfig.Enabled || !companyConfig.SendOnFinish {
+		return false
+	}
+	globalConfig, err := c.CompanyReportConfigRepository.GetByCompanyID(ctx, nil)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return true
+	}
+	if err != nil {
+		globalConfig = nil
+	}
+	return resolveEffectiveReportConfig(companyConfig, globalConfig).Validate() == nil
+}
+
+// closeReportState is the state of the automatic close reports
+type closeReportState struct {
+	// retries counts the reports that wait to try again or try again now
+	retries atomic.Int32
+	// audit holds back repeated drop events
+	audit     *auditThrottle
+	auditOnce sync.Once
+}
+
+// sendCloseReport sends the automatic report of a closed campaign. It waits
+// in line for a report browser first, so a busy browser queues the report
+// instead of using up its time limit. The wait is bounded so a stuck browser
+// can not pile up waiting reports. A report that finds no browser tries once
+// more after closeReportRetryAfter, while fewer than closeReportMaxRetries
+// wait, and is otherwise dropped, see dropCloseReport. The slot is given back
+// once the report browser closes, before the email is sent. A panic is
+// recovered so it can never crash the process.
+func (c *Campaign) sendCloseReport(session *model.Session, campaignID uuid.UUID, retry bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			c.Logger.Errorw("recovered from panic during automatic report delivery", "panic", r, "campaignID", campaignID.String())
+		}
+	}()
+	// a campaign whose company has no complete report delivery set up for a
+	// close needs no report browser. The report call still runs, so it skips
+	// or logs the incomplete config as it does for any close, without waiting
+	// for a browser held by others
+	if !closeReportNeedsBrowser(c, campaignID) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := c.SendCampaignReport(ctx, session, &campaignID, false); err != nil {
+			c.Logger.Errorw("failed to send automatic campaign report", "error", err, "campaignID", campaignID.String())
+		}
+		return
+	}
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), closeReportBrowserWait)
+	defer cancelWait()
+	slotCtx, releaseSlot, err := closeReportReserve(waitCtx)
+	if err != nil {
+		if !retry {
+			if c.closeReports.retries.Add(1) <= closeReportMaxRetries {
+				c.Logger.Warnw("no report browser for the automatic report, trying again later",
+					"error", err, "wait", closeReportBrowserWait.String(), "retryAfter", closeReportRetryAfter.String(),
+					"campaignID", campaignID.String())
+				time.AfterFunc(closeReportRetryAfter, func() {
+					defer c.closeReports.retries.Add(-1)
+					c.sendCloseReport(session, campaignID, true)
+				})
+				return
+			}
+			c.closeReports.retries.Add(-1)
+		}
+		c.dropCloseReport(campaignID, err)
+		return
+	}
+	defer releaseSlot()
+	// the render time limit starts now and does not end with the wait
+	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(slotCtx), 5*time.Minute)
+	defer cancel()
+	if err := c.SendCampaignReport(bgCtx, session, &campaignID, false); err != nil {
+		c.Logger.Errorw("failed to send automatic campaign report", "error", err, "campaignID", campaignID.String())
+	}
+}
+
+// dropCloseReport logs and audits an automatic close report that is not sent
+// as no report browser was free. The audit event names the system as the
+// actor and is written at most once per closeReportDropAuditEvery, with how
+// many were held back in between.
+func (c *Campaign) dropCloseReport(campaignID uuid.UUID, err error) {
+	c.Logger.Errorw("gave up waiting for the report browser, the automatic report is not sent",
+		"error", err, "wait", closeReportBrowserWait.String(), "campaignID", campaignID.String())
+	st := &c.closeReports
+	st.auditOnce.Do(func() {
+		if st.audit == nil {
+			st.audit = newAuditThrottle(closeReportDropAuditEvery)
+		}
+	})
+	write, suppressed, _ := st.audit.allow("closeReport", "")
+	if !write {
+		return
+	}
+	ae := NewAuditEvent("Campaign.SendCloseReport", nil)
+	ae.system = true
+	ae.Details["actor"] = "system"
+	ae.Details["campaignId"] = campaignID.String()
+	ae.Details["reason"] = "no report browser was free"
+	if suppressed > 0 {
+		ae.Details["suppressed"] = suppressed
+	}
+	c.AuditLogFailed(ae, err)
+}
+
+// closeReportDropAuditEvery is how often a dropped close report is written to
+// the audit log
+const closeReportDropAuditEvery = time.Hour
 
 // GetCampaignEmailBody returns the rendered email for a self managed campaign recipient
 func (c *Campaign) GetCampaignEmailBody(
@@ -5652,7 +6207,20 @@ func (c *Campaign) SetLureCodeByCampaignRecipientID(
 		return nil, errs.Wrap(err)
 	}
 	if holder != nil {
+		// a program send keeps its code until the program closes and is only
+		// changed through the program. Its conflict is the plain one, with no
+		// details, as the holder may belong to another company or to an
+		// anonymous program, and its code is never reclaimed here.
+		heldByProgram := holder.Campaign != nil && holder.Campaign.IsProgramManaged()
 		conflict := &LureCodeConflict{}
+		if heldByProgram && !reclaim {
+			ae.skip()
+			return conflict, ErrLureCodeTaken
+		}
+		if heldByProgram {
+			ae.Details["reason"] = "lure code held by a program send"
+			return nil, errs.NewValidationError(errors.New("lure code is in use and can not be reclaimed"))
+		}
 		if holder.Campaign != nil {
 			// codes are unique instance wide, so the holder may belong to another
 			// company. naming it would disclose that company's campaign to someone
@@ -5741,12 +6309,9 @@ func (c *Campaign) SetSentAtByCampaignRecipientID(
 		)
 		return errors.New("campaign recipient already cancelled")
 	}
-	campaignRecipient.SentAt = nullable.NewNullableWithValue(time.Now())
-	err = c.CampaignRecipientRepository.UpdateByID(
-		ctx,
-		campaignRecipientID,
-		campaignRecipient,
-	)
+	sentAt := time.Now()
+	campaignRecipient.SentAt = nullable.NewNullableWithValue(sentAt)
+	err = c.CampaignRecipientRepository.SetSentAtByID(ctx, campaignRecipientID, sentAt)
 	if err != nil {
 		c.Logger.Errorw("wailed to cancel campaign recipient by recipient id", "error", err)
 		return errs.Wrap(err)
@@ -5843,10 +6408,16 @@ func (c *Campaign) HandleWebhooks(
 		return nil
 	}
 
-	// get campaign name once for all webhooks
-	campaignName, err := c.CampaignRepository.GetNameByID(ctx, campaignID)
+	// get campaign name once for all webhooks, a program send is named after
+	// its program and never by its hidden campaign name
+	displayName, err := c.CampaignRepository.GetDisplayNameByID(ctx, campaignID)
 	if err != nil {
 		return errs.Wrap(err)
+	}
+	campaignName := displayName.Name
+	programID := ""
+	if displayName.ProgramID != nil {
+		programID = displayName.ProgramID.String()
 	}
 
 	// an anonymous campaign must never send identity or captured data off box, so
@@ -5927,9 +6498,13 @@ func (c *Campaign) HandleWebhooks(
 		case model.WebhookDataLevelBasic:
 			// include campaign name but no email or captured data
 			webhookReq.CampaignName = campaignName
+			webhookReq.ProgramName = displayName.ProgramName
+			webhookReq.ProgramID = programID
 		case model.WebhookDataLevelFull:
 			// include everything
 			webhookReq.CampaignName = campaignName
+			webhookReq.ProgramName = displayName.ProgramName
+			webhookReq.ProgramID = programID
 			webhookReq.Data = capturedData
 			if email != nil {
 				webhookReq.Email = email.String()
@@ -6019,10 +6594,12 @@ func (c *Campaign) handleScripts(
 		return nil
 	}
 
-	campaignName, err := c.CampaignRepository.GetNameByID(ctx, campaignID)
+	// a program send is named after its program
+	displayName, err := c.CampaignRepository.GetDisplayNameByID(ctx, campaignID)
 	if err != nil {
 		return errs.Wrap(err)
 	}
+	campaignName := displayName.Name
 
 	var email string
 	if recipientID != nil && !isAnon {
@@ -6208,72 +6785,19 @@ func (c *Campaign) emitScriptEvent(
 // finalizes anonymization. Each recipient keeps its existing pseudonym (an
 // anonymous campaign assigned one at materialization) or is given a fresh one and
 // has its events rewritten (a normal campaign anonymized at close). Lure codes are
-// released, recipient group links dropped, recipient ids removed, and anonymized_at
-// stamped. The campaign must already be closed. Safe to run more than once: a
-// second run finds recipient ids already null and skips them.
+// released, also on rows whose person link is already gone, recipient group links
+// dropped, recipient ids removed, and anonymized_at stamped. The rows are written
+// in paced chunks without being loaded. The campaign must already be closed, and
+// the program lifecycle lock must not be held. Safe to run more than once: a
+// second run finds nothing left to write.
 func (c *Campaign) anonymizeCampaignRecipients(ctx context.Context, id *uuid.UUID) error {
-	campaignRecipientsResult, err := c.CampaignRecipientRepository.GetByCampaignID(
-		ctx,
-		id,
-		&repository.CampaignRecipientOption{},
-	)
-	if err != nil {
-		c.Logger.Errorw("failed to get campaign recipients by campaign id", "error", err)
+	if err := c.CampaignRecipientRepository.AnonymizeRowsOfCampaign(ctx, id); err != nil {
+		c.Logger.Errorw("failed to anonymize campaign recipients", "error", err)
 		return errs.Wrap(err)
-	}
-	for _, cr := range campaignRecipientsResult.Rows {
-		if cr.RecipientID.IsNull() {
-			c.Logger.Debug("skipping anonymization of campaign recipient without recipient")
-			continue
-		}
-		recipientID := cr.RecipientID.MustGet()
-		campaignID, err := cr.CampaignID.Get()
-		if err != nil {
-			c.Logger.Debug("Recipient removed or anonymized, skipping in anonymization")
-			continue
-		}
-		// an anonymous campaign already assigned a stable pseudonym at
-		// materialization and its events already carry it. keep that id, only
-		// release the lure code and sever the recipient link below. rewriting
-		// events would fail to match, since they hold no recipient id, and
-		// regenerating the id would orphan the events already written.
-		if existing, err := cr.AnonymizedID.Get(); err == nil {
-			if err := c.CampaignRecipientRepository.Anonymize(ctx, &campaignID, &recipientID, &existing); err != nil {
-				c.Logger.Errorw("failed to finalize anonymous campaign recipient", "error", err)
-				return errs.Wrap(err)
-			}
-			continue
-		}
-		// add anonymized ID to each campaign recipient
-		anonymizedID := uuid.New()
-		cr.AnonymizedID = nullable.NewNullableWithValue(anonymizedID)
-		err = c.CampaignRecipientRepository.Anonymize(ctx, &campaignID, &recipientID, &anonymizedID)
-		if err != nil {
-			c.Logger.Errorw("failed to add anonymized ID to campaign recipient", "error", err)
-			return errs.Wrap(err)
-		}
-		// anonymize events and assign each anonymized ID so the events can still be tracked
-		err = c.CampaignRepository.AnonymizeCampaignEvent(
-			ctx,
-			&campaignID,
-			&recipientID,
-			&anonymizedID,
-		)
-		if err != nil {
-			c.Logger.Errorw("failed to anonymize campaign event", "error", err)
-			return errs.Wrap(err)
-		}
 	}
 	// delete the relation between the campaign and the recipient groups
-	err = c.CampaignRepository.RemoveCampaignRecipientGroups(ctx, id)
-	if err != nil {
+	if err := c.CampaignRepository.RemoveCampaignRecipientGroups(ctx, id); err != nil {
 		c.Logger.Errorw("failed to delete campaign recipient groups by campaign id", "error", err)
-		return errs.Wrap(err)
-	}
-	// remove the recipient ID from the campaign recipient so only the anomymized ID is left
-	err = c.CampaignRecipientRepository.RemoveRecipientIDByCampaignID(ctx, id)
-	if err != nil {
-		c.Logger.Errorw("failed to remove recipient ID from campaign recipients", "error", err)
 		return errs.Wrap(err)
 	}
 	// finally add a timestamp to the campaign to indicate when it was anonymized
@@ -6563,8 +7087,9 @@ func (c *Campaign) sendSingleCampaignMessage(
 
 	// update last attempt timestamp
 	campaignRecipientID := campaignRecipient.ID.MustGet()
-	campaignRecipient.LastAttemptAt = nullable.NewNullableWithValue(time.Now())
-	err = c.CampaignRecipientRepository.UpdateByID(ctx, &campaignRecipientID, campaignRecipient)
+	lastAttemptAt := time.Now()
+	campaignRecipient.LastAttemptAt = nullable.NewNullableWithValue(lastAttemptAt)
+	err = c.CampaignRecipientRepository.SetLastAttemptAtByID(ctx, &campaignRecipientID, lastAttemptAt)
 	if err != nil {
 		c.Logger.Errorw("failed to update last attempted at", "error", err)
 		return errs.Wrap(err)
@@ -7234,7 +7759,12 @@ func (c *Campaign) GetCampaignStats(ctx context.Context, session *model.Session,
 }
 
 // GetAllCampaignStats retrieves all campaign statistics
-func (c *Campaign) GetAllCampaignStats(ctx context.Context, session *model.Session, companyID *uuid.UUID) (*model.Result[database.CampaignStats], error) {
+func (c *Campaign) GetAllCampaignStats(
+	ctx context.Context,
+	session *model.Session,
+	companyID *uuid.UUID,
+	since *time.Time,
+) (*model.Result[database.CampaignStats], error) {
 	result := model.NewEmptyResult[database.CampaignStats]()
 
 	// Check permissions
@@ -7248,7 +7778,7 @@ func (c *Campaign) GetAllCampaignStats(ctx context.Context, session *model.Sessi
 	}
 
 	// Get the data
-	stats, err := c.CampaignRepository.GetAllCampaignStats(ctx, companyID)
+	stats, err := c.CampaignRepository.GetAllCampaignStats(ctx, companyID, since)
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
@@ -7289,6 +7819,11 @@ func (c *Campaign) CreateManualCampaignStats(ctx context.Context, session *model
 	req.CreatedAt = &now
 	req.UpdatedAt = &now
 	req.CampaignID = nil // No campaign reference for manual stats
+	unlockCompany, err := refuseDeletingCompany(ctx, c.CompanyRepository, req.CompanyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 
 	// Calculate total events
 	req.TotalEvents = req.EmailsSent + req.TrackingPixelLoaded + req.WebsiteVisits + req.DataSubmissions + req.Reported
@@ -7372,6 +7907,21 @@ func (c *Campaign) UpdateManualCampaignStats(ctx context.Context, session *model
 	// Ensure this is a manual stat (no campaignID)
 	if existingStats.CampaignID != nil {
 		return nil, errs.Wrap(errors.New("cannot update system-generated campaign stats"))
+	}
+	// neither the company the stats belong to nor the one they move to may be
+	// being deleted
+	unlockCompanies := []func(){}
+	defer func() {
+		for _, unlock := range unlockCompanies {
+			unlock()
+		}
+	}()
+	for _, companyID := range []*uuid.UUID{existingStats.CompanyID, req.CompanyID} {
+		unlock, err := refuseDeletingCompany(ctx, c.CompanyRepository, companyID)
+		if err != nil {
+			return nil, err
+		}
+		unlockCompanies = append(unlockCompanies, unlock)
 	}
 
 	// Set updated timestamp
@@ -8173,13 +8723,19 @@ func renderReportEmailField(c *Campaign, tmplStr string, fallback string, data a
 
 // sanitizeReportFilename removes characters that are unsafe in filenames
 func sanitizeReportFilename(name string) string {
+	return sanitizeReportFilenameOr(name, "campaign")
+}
+
+// sanitizeReportFilenameOr removes characters that are unsafe in filenames
+// and returns fallback for a name left empty
+func sanitizeReportFilenameOr(name, fallback string) string {
 	replacer := strings.NewReplacer(
 		"/", "-", "\\", "-", ":", "-", "*", "-",
 		"?", "-", "\"", "-", "<", "-", ">", "-", "|", "-",
 	)
 	safe := strings.TrimSpace(replacer.Replace(name))
 	if safe == "" {
-		return "campaign"
+		return fallback
 	}
 	return safe
 }

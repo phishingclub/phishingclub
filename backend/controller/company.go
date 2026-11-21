@@ -4,18 +4,25 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/csv"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/api"
 	"github.com/phishingclub/phishingclub/cache"
+	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
+	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/service"
 	"github.com/phishingclub/phishingclub/utils"
-	"github.com/phishingclub/phishingclub/vo"
 )
 
 // DomainColumnsMap is a map between the frontend and the backend
@@ -64,7 +71,10 @@ func (c *Company) GetByID(g *gin.Context) {
 	c.Response.OK(g, company)
 }
 
-// ExportByCompanyID outputs a CSV with all events related to the recipient
+// ExportByCompanyID sends a zip of CSV files with the company, its
+// recipients, the events of each of its campaigns and the events of each of
+// its programs. Recipients are read one page at a time and events one row at
+// a time, each written straight into its zip entry.
 func (c *Company) ExportByCompanyID(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
@@ -73,6 +83,9 @@ func (c *Company) ExportByCompanyID(g *gin.Context) {
 	// parse request
 	companyID, ok := c.handleParseIDParam(g)
 	if !ok {
+		return
+	}
+	if !c.handleExportAuthorization(g, session, companyID) {
 		return
 	}
 	// get the company exported
@@ -85,12 +98,19 @@ func (c *Company) ExportByCompanyID(g *gin.Context) {
 		return
 	}
 	// the export holds recipients and campaign events, so it is audited
-	if ok := c.handleErrors(g, c.CompanyService.AuthorizeExport(session, companyID)); !ok {
+	done, err := c.CompanyService.AuthorizeExport(g.Request.Context(), session, companyID)
+	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	// create ZIP file in memory
-	zipBuffer := new(bytes.Buffer)
-	zipWriter := zip.NewWriter(zipBuffer)
+	// the event is written once the file is built and sent, or as failed
+	built := false
+	defer func() { done(built) }()
+	// the zip is written to a temporary file and sent once it is complete
+	zipWriter, ok := c.newExportZip(g)
+	if !ok {
+		return
+	}
+	defer zipWriter.remove()
 	zipFileName := fmt.Sprintf("company_export_%s.zip", company.Name.MustGet().String())
 
 	// add company data to zip
@@ -128,55 +148,62 @@ func (c *Company) ExportByCompanyID(g *gin.Context) {
 			return
 		}
 	}
+	if ok := c.addRecipientsToZip(g, session, companyID, zipWriter.Writer); !ok {
+		return
+	}
+	if ok := c.addCampaignEventsToZip(g, session, companyID, zipWriter.Writer); !ok {
+		return
+	}
+	// program sends, named by program and template
+	if ok := c.addProgramEventsToZip(g, session, companyID, zipWriter.Writer); !ok {
+		return
+	}
+	built = c.responseWithExportZip(g, zipWriter, zipFileName)
+}
 
-	// add recipients to zip
-	{
-		// get the recipients
-		recipients, err := c.RecipientService.GetByCompanyID(
-			g,
-			session,
-			companyID,
-			&repository.RecipientOption{
-				WithCompany: true,
-				WithGroups:  true,
-			},
-		)
-		if ok := c.handleErrors(g, err); !ok {
-			return
-		}
-		// write a csv buffer with all recipient and their groups
-		buffer := &bytes.Buffer{}
-		writer := csv.NewWriter(buffer)
-		headers := []string{
-			"Created at",
-			"Updated at",
-			"Email",
-			"Phone",
-			"Extra Identifier",
-			"Name",
-			"Position",
-			"Department",
-			"City",
-			"Country",
-			"Misc",
-		}
-		// find the recipient with the most groups and add that number of
-		// extra headers for groups
-		maxGroups := 0
-		for _, recipient := range recipients.Rows {
-			groups, _ := recipient.Groups.Get()
-			if groupLen := len(groups); groupLen > maxGroups {
-				maxGroups = groupLen
-			}
-		}
-		for i := 1; i <= maxGroups; i++ {
-			headers = append(headers, fmt.Sprintf("Group %d", i))
-		}
-		err = writer.Write(headers)
-		if ok := c.handleErrors(g, err); !ok {
-			return
-		}
-		for _, recipient := range recipients.Rows {
+// addRecipientsToZip adds recipients.csv with the recipients of exactly the
+// company, or the shared recipients when companyID is nil, and a column per
+// group for as many groups as the recipient in the most groups has. The
+// recipients are read one page at a time and written straight into the zip
+// entry. It returns false when a response was written.
+func (c *Company) addRecipientsToZip(
+	g *gin.Context,
+	session *model.Session,
+	companyID *uuid.UUID,
+	zipWriter *zip.Writer,
+) bool {
+	ctx := g.Request.Context()
+	maxGroups, err := c.RecipientService.GetExportGroupCount(ctx, session, companyID)
+	if ok := c.handleErrors(g, err); !ok {
+		return false
+	}
+	headers := []string{
+		"Created at",
+		"Updated at",
+		"Email",
+		"Phone",
+		"Extra Identifier",
+		"First name",
+		"Last name",
+		"Position",
+		"Department",
+		"City",
+		"Country",
+		"Misc",
+	}
+	for i := 1; i <= maxGroups; i++ {
+		headers = append(headers, fmt.Sprintf("Group %d", i))
+	}
+	f, err := zipWriter.Create("recipients.csv")
+	if ok := c.handleErrors(g, err); !ok {
+		return false
+	}
+	writer := csv.NewWriter(f)
+	if err := writer.Write(headers); err != nil {
+		return c.handleErrors(g, err)
+	}
+	err = c.RecipientService.EachExportPage(ctx, session, companyID, func(recipients []*model.Recipient) error {
+		for _, recipient := range recipients {
 			groups, _ := recipient.Groups.Get()
 			row := []string{
 				utils.CSVFromDate(recipient.CreatedAt),
@@ -193,314 +220,326 @@ func (c *Company) ExportByCompanyID(g *gin.Context) {
 				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Misc)),
 			}
 			for _, group := range groups {
-				row = append(row, group.Name.MustGet().String())
+				row = append(row, utils.CSVRemoveFormulaStart(group.Name.MustGet().String()))
 			}
-			err = writer.Write(row)
-			if ok := c.handleErrors(g, err); !ok {
-				return
+			if err := writer.Write(row); err != nil {
+				return err
 			}
-			writer.Flush()
 		}
-		// add to zip
-		f, err := zipWriter.Create("recipients.csv")
-		if ok := c.handleErrors(g, err); !ok {
-			return
-		}
-		_, err = f.Write(buffer.Bytes())
-		if ok := c.handleErrors(g, err); !ok {
-			return
-		}
+		return nil
+	})
+	if err != nil {
+		return c.handleErrors(g, err)
 	}
-	// get all campaigns all recipient events
-	{
-		campaigns, err := c.CampaignService.GetByCompanyID(
-			g,
-			session,
-			companyID,
-			&repository.CampaignOption{},
-		)
-		for _, campaign := range campaigns.Rows {
-			headers := []string{
-				"Campaign",
-				"Created at",
-				"Recipient name",
-				"Recipient email",
-				"Event name",
-				"Event Details",
-				"User-Agent",
-				"IP",
-			}
-			buffer := &bytes.Buffer{}
-			writer := csv.NewWriter(buffer)
-			err = writer.Write(headers)
-			if ok := c.handleErrors(g, err); !ok {
-				return
-			}
-			queryArgs := vo.QueryArgs{}
-			queryArgs.OrderBy = repository.TableColumn(
-				database.CAMPAIGN_EVENT_TABLE,
-				"created_at",
-			)
-			sortOrder := g.DefaultQuery("sortOrder", "desc")
-			if sortOrder == "desc" {
-				queryArgs.Desc = true
-			}
-			// get all rows
-			queryArgs.Limit = 0
-			queryArgs.Offset = 0
-			// get events by campaign id
-			cid := campaign.ID.MustGet()
-			events, err := c.CampaignService.GetEventsByCampaignID(
-				g.Request.Context(),
-				session,
-				&cid,
-				&queryArgs,
-				nil,
-				nil,
-			)
-			if ok := c.handleErrors(g, err); !ok {
-				return
-			}
-			for _, event := range events.Rows {
-				firstName := "anonymized"
-				lastName := "anonymized"
-				recpEmail := "anonymized"
-				if event.Recipient != nil {
-					firstName = event.Recipient.FirstName.MustGet().String()
-					lastName = event.Recipient.LastName.MustGet().String()
-					recpEmail = event.Recipient.Email.MustGet().String()
-				}
-				row := []string{
-					utils.CSVRemoveFormulaStart(campaign.Name.MustGet().String()),
-					utils.CSVFromDate(event.CreatedAt),
-					utils.CSVRemoveFormulaStart(firstName),
-					utils.CSVRemoveFormulaStart(lastName),
-					utils.CSVRemoveFormulaStart(recpEmail),
-					utils.CSVRemoveFormulaStart(cache.EventNameByID[event.EventID.String()]),
-					utils.CSVRemoveFormulaStart(event.Data.String()),
-					utils.CSVRemoveFormulaStart(event.UserAgent.String()),
-					utils.CSVRemoveFormulaStart(event.IP.String()),
-				}
-				err = writer.Write(row)
-				if ok := c.handleErrors(g, err); !ok {
-					return
-				}
-			}
-			// add a new subdirectory wit the event file in the zip
-			writer.Flush()
-			// add to zip
-			filename := fmt.Sprintf("campaign_events/%s.csv", campaign.Name.MustGet().String())
-			f, err := zipWriter.Create(filename)
-			if ok := c.handleErrors(g, err); !ok {
-				return
-			}
-			_, err = f.Write(buffer.Bytes())
-			if ok := c.handleErrors(g, err); !ok {
-				return
-			}
-		}
-	}
-	// close zip
-	err = zipWriter.Close()
-	if ok := c.handleErrors(g, err); !ok {
-		return
-	}
-
-	c.responseWithZIP(g, zipBuffer, zipFileName)
+	writer.Flush()
+	return c.handleErrors(g, writer.Error())
 }
 
-// ExportShared outputs a CSV with all shared recipients and events
+// addCampaignEventsToZip adds one events file per campaign of exactly the
+// company, or per shared campaign when companyID is nil. The events are read
+// one row at a time and written straight into the zip entry. An event with no
+// recipient, as in an anonymous campaign, or whose recipient is gone, is
+// written with anonymized in place of the name and email. It returns false
+// when a response was written.
+func (c *Company) addCampaignEventsToZip(
+	g *gin.Context,
+	session *model.Session,
+	companyID *uuid.UUID,
+	zipWriter *zip.Writer,
+) bool {
+	campaigns, err := c.CampaignService.GetByCompanyID(
+		g,
+		session,
+		companyID,
+		&repository.CampaignOption{},
+	)
+	if ok := c.handleErrors(g, err); !ok {
+		return false
+	}
+	desc := g.DefaultQuery("sortOrder", "desc") == "desc"
+	usedZipNames := map[string]bool{}
+	for _, campaign := range campaigns.Rows {
+		headers := []string{
+			"Campaign",
+			"Created at",
+			"Recipient first name",
+			"Recipient last name",
+			"Recipient email",
+			"Event name",
+			"Event Details",
+			"User-Agent",
+			"IP",
+		}
+		campaignName := utils.CSVRemoveFormulaStart(campaign.Name.MustGet().String())
+		filename := uniqueZipName(usedZipNames, "campaign_events/", sanitizeFilename(campaign.Name.MustGet().String()), ".csv")
+		f, err := zipWriter.Create(filename)
+		if ok := c.handleErrors(g, err); !ok {
+			return false
+		}
+		writer := csv.NewWriter(f)
+		if err := writer.Write(headers); err != nil {
+			return c.handleErrors(g, err)
+		}
+		cid := campaign.ID.MustGet()
+		err = c.CampaignService.EachEventForExport(g.Request.Context(), session, &cid, desc, func(event *repository.CampaignEventExportRow) error {
+			firstName, lastName, email := "anonymized", "anonymized", "anonymized"
+			if event.HasRecipient {
+				firstName, lastName, email = event.FirstName, event.LastName, event.Email
+			}
+			return writer.Write([]string{
+				campaignName,
+				utils.CSVFromDate(&event.CreatedAt),
+				utils.CSVRemoveFormulaStart(firstName),
+				utils.CSVRemoveFormulaStart(lastName),
+				utils.CSVRemoveFormulaStart(email),
+				utils.CSVRemoveFormulaStart(cache.EventNameByID[event.EventID.String()]),
+				utils.CSVRemoveFormulaStart(event.Data),
+				utils.CSVRemoveFormulaStart(event.UserAgent),
+				utils.CSVRemoveFormulaStart(event.IP),
+			})
+		})
+		if err != nil {
+			return c.handleErrors(g, err)
+		}
+		writer.Flush()
+		if ok := c.handleErrors(g, writer.Error()); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// exportZip is a zip written to a temporary file, so a large export does not
+// grow the memory of the server, and a failure part way answers with an error
+// instead of a partial file
+type exportZip struct {
+	*zip.Writer
+	file *os.File
+	// unlinked is set when the file name was removed right after the file was
+	// created, the open file is then freed when it is closed
+	unlinked bool
+}
+
+// newExportZip creates the temporary file of an export in the temporary
+// directory of the system. The file is readable by the server user only. Its
+// name is removed at once and the open handle is used from then on, so a
+// crash leaves no file behind. It returns false when a response was written.
+func (c *Company) newExportZip(g *gin.Context) (*exportZip, bool) {
+	file, err := os.CreateTemp("", "phishingclub-export-*.zip")
+	if err != nil {
+		c.Logger.Errorw("failed to create export file", "error", err)
+		return nil, c.handleErrors(g, err)
+	}
+	// a system that can not remove an open file keeps the name until remove
+	unlinked := os.Remove(file.Name()) == nil
+	return &exportZip{Writer: zip.NewWriter(file), file: file, unlinked: unlinked}, true
+}
+
+// remove closes the temporary file, and deletes it when its name is still there
+func (z *exportZip) remove() {
+	_ = z.file.Close()
+	if !z.unlinked {
+		_ = os.Remove(z.file.Name())
+	}
+}
+
+// responseWithExportZip completes the zip and sends the file. It reports
+// whether the file was complete and its sending started.
+func (c *Company) responseWithExportZip(g *gin.Context, z *exportZip, name string) bool {
+	if ok := c.handleErrors(g, z.Close()); !ok {
+		return false
+	}
+	size, err := z.file.Seek(0, io.SeekCurrent)
+	if ok := c.handleErrors(g, err); !ok {
+		return false
+	}
+	if _, err := z.file.Seek(0, io.SeekStart); err != nil {
+		c.handleErrors(g, err)
+		return false
+	}
+	g.Header("Content-Type", "application/zip")
+	setSecureContentDisposition(g, name)
+	g.Header("Content-Transfer-Encoding", "binary")
+	g.Header("Expires", "0")
+	g.Header("Cache-Control", "must-revalidate")
+	g.Header("Pragma", "public")
+	g.Header("Content-Length", fmt.Sprintf("%d", size))
+	g.Status(http.StatusOK)
+	if _, err := io.Copy(g.Writer, z.file); err != nil {
+		// the headers are sent, so the client sees a short download
+		c.Logger.Errorw("failed to send export", "error", err)
+		return false
+	}
+	return true
+}
+
+// uniqueZipName returns dir + base + ext, or with " (2)", " (3)" and so on
+// after base when that name is already used, so two entries never share a
+// name. Each final name is checked, also against a name that already ends in
+// a number, and is added to used.
+func uniqueZipName(used map[string]bool, dir, base, ext string) string {
+	name := dir + base + ext
+	for n := 2; used[strings.ToLower(name)]; n++ {
+		name = fmt.Sprintf("%s%s (%d)%s", dir, base, n, ext)
+	}
+	used[strings.ToLower(name)] = true
+	return name
+}
+
+// addProgramEventsToZip adds programs.csv, listing the programs of exactly the
+// company (global programs when companyID is nil), and one events file per
+// program that is not anonymous. An anonymous program has no events file, it
+// gives no per person data. It returns false when a response was written.
+func (c *Company) addProgramEventsToZip(
+	g *gin.Context,
+	session *model.Session,
+	companyID *uuid.UUID,
+	zipWriter *zip.Writer,
+) bool {
+	programs, err := c.CampaignService.GetProgramEventsExport(g.Request.Context(), session, companyID)
+	if ok := c.handleErrors(g, err); !ok {
+		return false
+	}
+	// the same order as the campaign event files
+	desc := g.DefaultQuery("sortOrder", "desc") == "desc"
+	summary := &bytes.Buffer{}
+	summaryWriter := csv.NewWriter(summary)
+	if err := summaryWriter.Write([]string{"Program", "Anonymous", "Events file"}); err != nil {
+		return c.handleErrors(g, err)
+	}
+	usedNames := map[string]bool{}
+	for _, program := range programs {
+		eventsFile := ""
+		if !program.Anonymous {
+			eventsFile = uniqueZipName(usedNames, "program_events/", sanitizeProgramFilename(program.ProgramName), ".csv")
+		}
+		anonymous := "no"
+		if program.Anonymous {
+			anonymous = "yes"
+		}
+		if err := summaryWriter.Write([]string{
+			utils.CSVRemoveFormulaStart(program.ProgramName),
+			anonymous,
+			utils.CSVRemoveFormulaStart(eventsFile),
+		}); err != nil {
+			return c.handleErrors(g, err)
+		}
+		if eventsFile == "" {
+			continue
+		}
+		// the rows are written straight into the zip as they are read, so the
+		// events of a program are never held in memory
+		f, err := zipWriter.Create(eventsFile)
+		if ok := c.handleErrors(g, err); !ok {
+			return false
+		}
+		writer := csv.NewWriter(f)
+		if err := writer.Write([]string{
+			"Program",
+			"Template",
+			"Created at",
+			"Recipient first name",
+			"Recipient last name",
+			"Recipient email",
+			"Event name",
+			"Event Details",
+			"User-Agent",
+			"IP",
+		}); err != nil {
+			return c.handleErrors(g, err)
+		}
+		err = program.EachEvent(g.Request.Context(), desc, func(event *repository.ProgramEventExportRow) error {
+			firstName, lastName, email := "anonymized", "anonymized", "anonymized"
+			if event.HasRecipient {
+				firstName, lastName, email = event.FirstName, event.LastName, event.Email
+			}
+			return writer.Write([]string{
+				utils.CSVRemoveFormulaStart(program.ProgramName),
+				utils.CSVRemoveFormulaStart(program.TemplateByCampaign[event.CampaignID]),
+				utils.CSVFromDate(&event.CreatedAt),
+				utils.CSVRemoveFormulaStart(firstName),
+				utils.CSVRemoveFormulaStart(lastName),
+				utils.CSVRemoveFormulaStart(email),
+				utils.CSVRemoveFormulaStart(cache.EventNameByID[event.EventID.String()]),
+				utils.CSVRemoveFormulaStart(event.Data),
+				utils.CSVRemoveFormulaStart(event.UserAgent),
+				utils.CSVRemoveFormulaStart(event.IP),
+			})
+		})
+		if err != nil {
+			return c.handleErrors(g, err)
+		}
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			return c.handleErrors(g, err)
+		}
+	}
+	summaryWriter.Flush()
+	f, err := zipWriter.Create("programs.csv")
+	if ok := c.handleErrors(g, err); !ok {
+		return false
+	}
+	if _, err := f.Write(summary.Bytes()); err != nil {
+		return c.handleErrors(g, err)
+	}
+	return true
+}
+
+// ExportShared sends a zip of CSV files with the shared recipients, the
+// events of each shared campaign and the events of each global program
 func (c *Company) ExportShared(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
 		return
 	}
-	// the export holds recipients and campaign events, so it is audited
-	if ok := c.handleErrors(g, c.CompanyService.AuthorizeExport(session, nil)); !ok {
+	if !c.handleExportAuthorization(g, session, nil) {
 		return
 	}
-	// create ZIP file in memory
-	zipBuffer := new(bytes.Buffer)
-	zipWriter := zip.NewWriter(zipBuffer)
-	zipFileName := "shared_export_%s.zip"
-	// add recipients to zip
-	{
-		// get the recipients
-		recipients, err := c.RecipientService.GetByCompanyID(
-			g,
-			session,
-			nil,
-			&repository.RecipientOption{
-				WithCompany: true,
-				WithGroups:  true,
-			},
-		)
-		if ok := c.handleErrors(g, err); !ok {
-			return
-		}
-		// write a csv buffer with all recipient and their groups
-		buffer := &bytes.Buffer{}
-		writer := csv.NewWriter(buffer)
-		headers := []string{
-			"Created at",
-			"Updated at",
-			"Email",
-			"Phone",
-			"Extra Identifier",
-			"Name",
-			"Position",
-			"Department",
-			"City",
-			"Country",
-			"Misc",
-		}
-		// find the recipient with the most groups and add that number of
-		// extra headers for groups
-		maxGroups := 0
-		for _, recipient := range recipients.Rows {
-			groups, _ := recipient.Groups.Get()
-			if groupLen := len(groups); groupLen > maxGroups {
-				maxGroups = groupLen
-			}
-		}
-		for i := 1; i <= maxGroups; i++ {
-			headers = append(headers, fmt.Sprintf("Group %d", i))
-		}
-		err = writer.Write(headers)
-		if ok := c.handleErrors(g, err); !ok {
-			return
-		}
-		for _, recipient := range recipients.Rows {
-			groups, _ := recipient.Groups.Get()
-			row := []string{
-				utils.CSVFromDate(recipient.CreatedAt),
-				utils.CSVFromDate(recipient.UpdatedAt),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Email)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Phone)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.ExtraIdentifier)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.FirstName)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.LastName)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Position)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Department)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.City)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Country)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Misc)),
-			}
-			for _, group := range groups {
-				row = append(row, group.Name.MustGet().String())
-			}
-			err = writer.Write(row)
-			if ok := c.handleErrors(g, err); !ok {
-				return
-			}
-			writer.Flush()
-		}
-		// add to zip
-		f, err := zipWriter.Create("recipients.csv")
-		if ok := c.handleErrors(g, err); !ok {
-			return
-		}
-		_, err = f.Write(buffer.Bytes())
-		if ok := c.handleErrors(g, err); !ok {
-			return
-		}
-	}
-	// get all campaigns all recipient events
-	{
-		campaigns, err := c.CampaignService.GetByCompanyID(
-			g,
-			session,
-			nil,
-			&repository.CampaignOption{},
-		)
-		for _, campaign := range campaigns.Rows {
-			headers := []string{
-				"Campaign",
-				"Created at",
-				"Recipient name",
-				"Recipient email",
-				"Event name",
-				"Event Details",
-				"User-Agent",
-				"IP",
-			}
-			buffer := &bytes.Buffer{}
-			writer := csv.NewWriter(buffer)
-			err = writer.Write(headers)
-			if ok := c.handleErrors(g, err); !ok {
-				return
-			}
-			queryArgs := vo.QueryArgs{}
-			queryArgs.OrderBy = repository.TableColumn(
-				database.CAMPAIGN_EVENT_TABLE,
-				"created_at",
-			)
-			sortOrder := g.DefaultQuery("sortOrder", "desc")
-			if sortOrder == "desc" {
-				queryArgs.Desc = true
-			}
-			// get all rows
-			queryArgs.Limit = 0
-			queryArgs.Offset = 0
-			// get events by campaign id
-			cid := campaign.ID.MustGet()
-			events, err := c.CampaignService.GetEventsByCampaignID(
-				g.Request.Context(),
-				session,
-				&cid,
-				&queryArgs,
-				nil,
-				nil,
-			)
-			if ok := c.handleErrors(g, err); !ok {
-				return
-			}
-			for _, event := range events.Rows {
-				firstName := "anonymized"
-				lastName := "anonymized"
-				recpEmail := "anonymized"
-				if event.Recipient != nil {
-					firstName = event.Recipient.FirstName.MustGet().String()
-					lastName = event.Recipient.LastName.MustGet().String()
-					recpEmail = event.Recipient.Email.MustGet().String()
-				}
-				row := []string{
-					utils.CSVRemoveFormulaStart(campaign.Name.MustGet().String()),
-					utils.CSVFromDate(event.CreatedAt),
-					utils.CSVRemoveFormulaStart(firstName),
-					utils.CSVRemoveFormulaStart(lastName),
-					utils.CSVRemoveFormulaStart(recpEmail),
-					utils.CSVRemoveFormulaStart(cache.EventNameByID[event.EventID.String()]),
-					utils.CSVRemoveFormulaStart(event.Data.String()),
-					utils.CSVRemoveFormulaStart(event.UserAgent.String()),
-					utils.CSVRemoveFormulaStart(event.IP.String()),
-				}
-				err = writer.Write(row)
-				if ok := c.handleErrors(g, err); !ok {
-					return
-				}
-			}
-			// add a new subdirectory wit the event file in the zip
-			writer.Flush()
-			// add to zip
-			filename := fmt.Sprintf("campaign_events/%s.csv", campaign.Name.MustGet().String())
-			f, err := zipWriter.Create(filename)
-			if ok := c.handleErrors(g, err); !ok {
-				return
-			}
-			_, err = f.Write(buffer.Bytes())
-			if ok := c.handleErrors(g, err); !ok {
-				return
-			}
-		}
-	}
-	// close zip
-	err := zipWriter.Close()
+	// the export holds recipients and campaign events, so it is audited
+	done, err := c.CompanyService.AuthorizeExport(g.Request.Context(), session, nil)
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
+	// the event is written once the file is built and sent, or as failed
+	built := false
+	defer func() { done(built) }()
+	// the zip is written to a temporary file and sent once it is complete
+	zipWriter, ok := c.newExportZip(g)
+	if !ok {
+		return
+	}
+	defer zipWriter.remove()
+	zipFileName := fmt.Sprintf("shared_export_%s.zip", time.Now().UTC().Format("2006-01-02"))
+	if ok := c.addRecipientsToZip(g, session, nil, zipWriter.Writer); !ok {
+		return
+	}
+	if ok := c.addCampaignEventsToZip(g, session, nil, zipWriter.Writer); !ok {
+		return
+	}
+	// program sends of global programs, named by program and template
+	if ok := c.addProgramEventsToZip(g, session, nil, zipWriter.Writer); !ok {
+		return
+	}
+	built = c.responseWithExportZip(g, zipWriter, zipFileName)
+}
 
-	c.responseWithZIP(g, zipBuffer, zipFileName)
+// handleExportAuthorization checks the session holds the global permission
+// before an export reads anything. A refused export is still written to the
+// audit log as denied by the service, as an export holds recipients and
+// campaign events. On a server error or a refusal it writes the response and
+// returns false.
+func (c *Company) handleExportAuthorization(g *gin.Context, session *model.Session, companyID *uuid.UUID) bool {
+	isAuthorized, err := service.IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		_ = handleServerError(g, c.Response, err)
+		return false
+	}
+	if !isAuthorized {
+		_, _ = c.CompanyService.AuthorizeExport(g.Request.Context(), session, companyID)
+		c.Response.Unauthorized(g)
+		return false
+	}
+	return true
 }
 
 // ChangeName changes a company name
@@ -537,14 +576,17 @@ func (c *Company) DeleteByID(g *gin.Context) {
 	if !ok {
 		return
 	}
+	if !c.handleGlobalAuthorization(g, session) {
+		return
+	}
 	// parse request
 	id, ok := c.handleParseIDParam(g)
 	if !ok {
 		return
 	}
-	// TODO company delete should FAIL if it has any relations to anything
-	// delete company
-	_, err := c.CompanyService.DeleteByID(g, session, id)
+	// the delete is refused while the company holds rows it does not remove,
+	// else it is marked and finished in the background
+	_, err := c.CompanyService.DeleteByID(g.Request.Context(), session, id)
 	// handle response
 	if ok := c.handleErrors(g, err); !ok {
 		return

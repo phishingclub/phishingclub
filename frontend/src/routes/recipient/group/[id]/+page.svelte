@@ -1,6 +1,7 @@
 <script>
 	import CsvColumnsHelp from '../../CsvColumnsHelp.svelte';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import Note from '$lib/components/Note.svelte';
 	import DynamicLabel from '$lib/components/DynamicLabel.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
@@ -61,7 +62,9 @@
 		companyID: null,
 		isDynamic: false,
 		filterField: null,
-		filterValue: null
+		filterValue: null,
+		deletingAt: null,
+		deleteFailure: ''
 	};
 	let recipientSearch = '';
 	let searchOptions = [];
@@ -137,8 +140,9 @@
 
 	// component logic
 	const loadGroup = async () => {
+		let res;
 		try {
-			const res = await api.recipient.getGroupByID($page.params.id);
+			res = await api.recipient.getGroupByID($page.params.id);
 			if (!res.success) {
 				throw res.error;
 			}
@@ -148,11 +152,51 @@
 			groupValues.isDynamic = res.data.isDynamic ?? false;
 			groupValues.filterField = res.data.filterField ?? null;
 			groupValues.filterValue = res.data.filterValue ?? null;
+			groupValues.deletingAt = res.data.deletingAt ?? null;
+			groupValues.deleteFailure = res.data.deleteFailure ?? '';
+			loadFailing = false;
 		} catch (err) {
-			addToast('Failed to load group', 'Error');
+			// a group the background delete removed is gone, back to the list
+			if (groupValues.deletingAt && res?.statusCode === 404) {
+				goto('/recipient/group/');
+				return;
+			}
+			if (!loadFailing) {
+				addToast('Failed to load group', 'Error');
+			}
+			loadFailing = true;
 			console.error('failed to load group', err);
 		}
 	};
+
+	// a group being deleted can not be changed, the page is read again until
+	// the delete is done
+	let loadFailing = false;
+	$: groupAttrs = groupValues.deletingAt
+		? { disabled: true, title: 'The group is being deleted' }
+		: globalButtonDisabledAttributes(groupValues, contextCompanyID);
+	const deletingRefreshEvery = 5000;
+	let deletingTimer = null;
+	let pageGone = false;
+	const watchDeleting = (deleting) => {
+		if (pageGone || !deleting) {
+			clearTimeout(deletingTimer);
+			deletingTimer = null;
+			return;
+		}
+		if (deletingTimer) return;
+		deletingTimer = setTimeout(async () => {
+			await loadGroup();
+			deletingTimer = null;
+			watchDeleting(!!groupValues.deletingAt);
+		}, deletingRefreshEvery);
+	};
+	$: watchDeleting(!!groupValues.deletingAt);
+	onDestroy(() => {
+		pageGone = true;
+		clearTimeout(deletingTimer);
+		deletingTimer = null;
+	});
 
 	const refreshRecipients = async () => {
 		try {
@@ -504,6 +548,13 @@
 			<DynamicLabel />
 		{/if}
 	</div>
+	{#if groupValues.deletingAt}
+		<Note id="group-deleting-note">
+			{groupValues.deleteFailure
+				? `The delete is waiting: ${groupValues.deleteFailure}. Remove it and the delete continues on its own.`
+				: 'This group is being deleted in the background. It can not be changed meanwhile.'}
+		</Note>
+	{/if}
 	{#if groupValues.isDynamic}
 		<p class="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-8">
 			Recipients where
@@ -522,17 +573,17 @@
 		>
 			<BigButton
 				on:click={openCreateRecipientModal}
-				{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>New recipient</BigButton
+				{...groupAttrs}>New recipient</BigButton
 			>
 			<BigButton
 				variant="secondary"
 				on:click={openAddRecipientsModal}
-				{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Add recipients</BigButton
+				{...groupAttrs}>Add recipients</BigButton
 			>
 			<BigButton
 				variant="secondary"
 				on:click={openImportModal}
-				{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}>Import from CSV</BigButton
+				{...groupAttrs}>Import from CSV</BigButton
 			>
 		</div>
 	{/if}
@@ -605,7 +656,7 @@
 							<TableDeleteButton
 								name="Remove from group"
 								on:click={() => openDeleteAlert(recipient)}
-								{...globalButtonDisabledAttributes(groupValues, contextCompanyID)}
+								{...groupAttrs}
 							></TableDeleteButton>
 						{/if}
 					</TableDropDownEllipsis>

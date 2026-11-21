@@ -102,9 +102,9 @@ func TestProgramResultReads(t *testing.T) {
 	if err != nil || count != 1 || len(rows) != 1 || *rows[0].RecipientID != *alice {
 		t.Fatalf("expected search to find alice, got %d (%v)", count, err)
 	}
-	// risk_score is a real column in older databases but is not sortable, so it
-	// stands in for a name outside the allowlist
-	if _, _, err := repo.GetEnrollmentPage(ctx, programID, &vo.QueryArgs{OrderBy: "risk_score"}); err == nil {
+	// loop_count is a real column that is not sortable, so it stands in for a
+	// name outside the allowlist
+	if _, _, err := repo.GetEnrollmentPage(ctx, programID, &vo.QueryArgs{OrderBy: "loop_count"}); err == nil {
 		t.Fatalf("expected a column outside the allowlist to be rejected")
 	}
 	counts, err := repo.GetEnrollmentStatusCounts(ctx, programID)

@@ -32,6 +32,7 @@ type Services struct {
 	CampaignTemplate    *service.CampaignTemplate
 	Campaign            *service.Campaign
 	Program             *service.Program
+	AllowListing        *service.AllowListing
 	Template            *service.Template
 	APISender           *service.APISender
 	AllowDeny           *service.AllowDeny
@@ -128,6 +129,7 @@ func NewServices(
 		FileService:          file,
 		AttachmentRepository: repositories.Attachment,
 		EmailRepository:      repositories.Email,
+		CompanyRepository:    repositories.Company,
 	}
 	installSetup := &service.InstallSetup{
 		Common:            common,
@@ -160,6 +162,7 @@ func NewServices(
 		CampaignRepository:          repositories.Campaign,
 		CampaignRecipientRepository: repositories.CampaignRecipient,
 		ProgramRepository:           repositories.Program,
+		CompanyRepository:           repositories.Company,
 	}
 
 	recipientGroup := &service.RecipientGroup{
@@ -171,12 +174,14 @@ func NewServices(
 		RecipientService:            recipient,
 		ProgramRepository:           repositories.Program,
 		DB:                          db,
+		CompanyRepository:           repositories.Company,
 	}
 	webhook := &service.Webhook{
 		Common:             common,
 		CampaignRepository: repositories.Campaign,
 		WebhookRepository:  repositories.Webhook,
 		ProgramRepository:  repositories.Program,
+		CompanyRepository:  repositories.Company,
 	}
 	// a standalone runner powers the editor test panel (capture mode)
 	var scriptTestRunner *script.Runner
@@ -192,6 +197,7 @@ func NewServices(
 		CampaignRepository: repositories.Campaign,
 		ScriptRepository:   repositories.Script,
 		TestRunner:         scriptTestRunner,
+		CompanyRepository:  repositories.Company,
 	}
 
 	campaignTemplate := &service.CampaignTemplate{
@@ -200,17 +206,20 @@ func NewServices(
 		CampaignRepository:         repositories.Campaign,
 		IdentifierRepository:       repositories.Identifier,
 		ProgramRepository:          repositories.Program,
+		CompanyRepository:          repositories.Company,
 	}
 	apiSender := &service.APISender{
 		Common:                  common,
 		APISenderRepository:     repositories.APISender,
 		TemplateService:         templateService,
 		CampaignTemplateService: campaignTemplate,
+		CompanyRepository:       repositories.Company,
 	}
 	smtpConfiguration := &service.SMTPConfiguration{
 		Common:                      common,
 		SMTPConfigurationRepository: repositories.SMTPConfiguration,
 		CampaignTemplateService:     campaignTemplate,
+		CompanyRepository:           repositories.Company,
 	}
 	page := &service.Page{
 		Common:                  common,
@@ -220,6 +229,7 @@ func NewServices(
 		TemplateService:         templateService,
 		DomainRepository:        repositories.Domain,
 		ProgramRepository:       repositories.Program,
+		CompanyRepository:       repositories.Company,
 	}
 	domain := &service.Domain{
 		Common:                    common,
@@ -244,6 +254,7 @@ func NewServices(
 		DomainService:           domain,
 		ProxySessionManager:     proxySessionManager,
 		ScriptEnabled:           scriptEnabled,
+		CompanyRepository:       repositories.Company,
 	}
 	ipAllowListService := service.NewIPAllowListService(common, repositories.Proxy)
 	email := &service.Email{
@@ -256,10 +267,12 @@ func NewServices(
 		RecipientService:        recipient,
 		TemplateService:         templateService,
 		CampaignTemplateService: campaignTemplate,
+		CompanyRepository:       repositories.Company,
 	}
 	remoteBrowser := &service.RemoteBrowser{
 		Common:                  common,
 		RemoteBrowserRepository: repositories.RemoteBrowser,
+		CompanyRepository:       repositories.Company,
 	}
 	lureCode := &service.LureCode{
 		CampaignRecipientRepository: repositories.CampaignRecipient,
@@ -290,9 +303,11 @@ func NewServices(
 		ReportTemplateRepository:      repositories.ReportTemplate,
 		CompanyReportConfigRepository: repositories.CompanyReportConfig,
 		ReportSendLogRepository:       repositories.ReportSendLog,
+		ReportInboxRepository:         repositories.ReportInbox,
 		OptionService:                 optionService,
 		RemoteBrowserExecPath:         remoteBrowserExecPath,
 		TrustedProxies:                trustedProxies,
+		CompanyRepository:             repositories.Company,
 	}
 	// wire campaign service into microsoft device code service now that campaign is constructed
 	microsoftDeviceCodeService.CampaignService = campaign
@@ -309,37 +324,59 @@ func NewServices(
 		WebhookRepository:           repositories.Webhook,
 		PageRepository:              repositories.Page,
 		CompanyRepository:           repositories.Company,
+		// the program report and the automated report email
+		ReportTemplateRepository:      repositories.ReportTemplate,
+		CompanyReportConfigRepository: repositories.CompanyReportConfig,
+		ReportSendLogRepository:       repositories.ReportSendLog,
+		SMTPConfigService:             smtpConfiguration,
+		OptionService:                 optionService,
+		RemoteBrowserExecPath:         remoteBrowserExecPath,
 	}
 	recipient.ProgramService = program
+	campaignTemplate.ProgramService = program
+	// the sender holds and plans again the sends of a program's hidden campaigns
+	campaign.ProgramService = program
+	allowListing := &service.AllowListing{
+		Common:                     common,
+		CampaignTemplateRepository: repositories.CampaignTemplate,
+		CampaignRepository:         repositories.Campaign,
+		ProgramRepository:          repositories.Program,
+		DomainRepository:           repositories.Domain,
+	}
 	allowDeny := &service.AllowDeny{
 		Common:              common,
 		AllowDenyRepository: repositories.AllowDeny,
 		CampaignRepository:  repositories.Campaign,
 		ProgramRepository:   repositories.Program,
 		AssetRepository:     repositories.Asset,
+		CompanyRepository:   repositories.Company,
 	}
 	identifier := &service.Identifier{
 		Common:               common,
 		IdentifierRepository: repositories.Identifier,
 	}
 	companyService := &service.Company{
-		Common:                   common,
-		DomainService:            domain,
-		PageService:              page,
-		EmailService:             email,
-		SMTPConfigurationService: smtpConfiguration,
-		APISenderService:         apiSender,
-		RecipientService:         recipient,
-		RecipientGroupService:    recipientGroup,
-		CampaignService:          campaign,
-		CampaignTemplate:         campaignTemplate,
-		ProgramService:           program,
-		AllowDenyService:         allowDeny,
-		WebhookService:           webhook,
-		ScriptService:            scriptSvc,
-		AssetService:             asset,
-		CompanyRepository:        repositories.Company,
-		ReportInboxRepository:    repositories.ReportInbox,
+		Common:                        common,
+		DomainService:                 domain,
+		PageService:                   page,
+		EmailService:                  email,
+		SMTPConfigurationService:      smtpConfiguration,
+		APISenderService:              apiSender,
+		RecipientService:              recipient,
+		RecipientGroupService:         recipientGroup,
+		CampaignService:               campaign,
+		CampaignTemplate:              campaignTemplate,
+		ProgramService:                program,
+		AllowDenyService:              allowDeny,
+		WebhookService:                webhook,
+		ScriptService:                 scriptSvc,
+		AssetService:                  asset,
+		CompanyRepository:             repositories.Company,
+		ReportInboxRepository:         repositories.ReportInbox,
+		CompanyReportConfigRepository: repositories.CompanyReportConfig,
+		ReportSendLogRepository:       repositories.ReportSendLog,
+		CompanyScimConfigRepository:   repositories.CompanyScimConfig,
+		AttachmentService:             attachment,
 	}
 	versionService := &service.Version{Common: common}
 	ssoService := &service.SSO{
@@ -377,6 +414,7 @@ func NewServices(
 		OAuthProviderRepository: repositories.OAuthProvider,
 		OAuthStateRepository:    repositories.OAuthState,
 		ReportInboxRepository:   repositories.ReportInbox,
+		CompanyRepository:       repositories.Company,
 	}
 
 	// inject oauth provider service into api sender
@@ -384,6 +422,7 @@ func NewServices(
 	companyScimConfig := &service.CompanyScimConfig{
 		Common:                      common,
 		CompanyScimConfigRepository: repositories.CompanyScimConfig,
+		CompanyRepository:           repositories.Company,
 	}
 	scim := &service.Scim{
 		Common:                      common,
@@ -395,12 +434,16 @@ func NewServices(
 		OptionService:               optionService,
 		CampaignRepository:          repositories.Campaign,
 		CampaignRecipientRepository: repositories.CampaignRecipient,
+		ProgramRepository:           repositories.Program,
+		CompanyRepository:           repositories.Company,
+		RecipientGroupService:       recipientGroup,
 	}
 
 	reportTemplate := &service.ReportTemplate{
 		Common:                   common,
 		ReportTemplateRepository: repositories.ReportTemplate,
 		RemoteBrowserExecPath:    remoteBrowserExecPath,
+		CompanyRepository:        repositories.Company,
 	}
 
 	contentRegistry := &service.ContentRegistry{
@@ -438,6 +481,8 @@ func NewServices(
 		Common:                        common,
 		CompanyReportConfigRepository: repositories.CompanyReportConfig,
 		ReportSendLogRepository:       repositories.ReportSendLog,
+		CompanyRepository:             repositories.Company,
+		RecipientGroupRepository:      repositories.RecipientGroup,
 	}
 
 	reportInbox := &service.ReportInbox{
@@ -482,6 +527,7 @@ func NewServices(
 		CampaignTemplate:    campaignTemplate,
 		Campaign:            campaign,
 		Program:             program,
+		AllowListing:        allowListing,
 		APISender:           apiSender,
 		AllowDeny:           allowDeny,
 		Webhook:             webhook,

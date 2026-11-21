@@ -6,6 +6,7 @@
 	import { shouldHideMenuItem } from '$lib/utils/common';
 	import { AppStateService } from '$lib/service/appState';
 	import ConditionalDisplay from '../ConditionalDisplay.svelte';
+	import { showFor } from '$lib/store/displayMode';
 	import BetaTag from '../BetaTag.svelte';
 	export let logout;
 	export let visible = false;
@@ -141,7 +142,7 @@
 			</button>
 
 			{#each topMenu as item}
-				<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
+				<ConditionalDisplay show={showFor(item)}>
 					<a
 						aria-current={$page.url.pathname === item.route ? 'page' : undefined}
 						class="pc-focus-dark flex items-center pl-5 py-2 text-white last:rounded-md first:rounded-t-md transition-colors duration-200 {$page

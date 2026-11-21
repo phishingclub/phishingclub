@@ -1,10 +1,16 @@
 <script>
 	import { api } from '$lib/api/apiProxy.js';
+	import Note from '$lib/components/Note.svelte';
 	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
-	import { eventDisplayNames } from '$lib/consts/events.js';
+	import {
+		eventDisplayNames,
+		webhookEventOptions,
+		webhookEventsFromBinary,
+		webhookEventsToBinary
+	} from '$lib/consts/events.js';
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
@@ -31,6 +37,7 @@
 	import TextFieldMultiSelect from '$lib/components/TextFieldMultiSelect.svelte';
 	import FormGrid from '$lib/components/FormGrid.svelte';
 	import Modal from '$lib/components/Modal.svelte';
+	import AllowListingModal from '$lib/components/AllowListingModal.svelte';
 	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
@@ -170,22 +177,6 @@
 		}
 	];
 
-	// webhook event options - 0 means all events will trigger webhook (default)
-	const webhookEventOptions = [
-		'campaign_recipient_message_sent',
-		'campaign_recipient_message_failed',
-		'campaign_recipient_message_read',
-		'campaign_recipient_submitted_data',
-		'campaign_recipient_page_visited',
-		'campaign_recipient_before_page_visited',
-		'campaign_recipient_after_page_visited',
-		'campaign_recipient_evasion_page_visited',
-		'campaign_recipient_deny_page_visited',
-		'campaign_recipient_training_started',
-		'campaign_recipient_training_completed',
-		'campaign_closed'
-	];
-
 	// human-readable display names for webhook events (shared with the script editor)
 	const webhookEventDisplayNames = eventDisplayNames;
 
@@ -194,38 +185,6 @@
 		value: event,
 		label: webhookEventDisplayNames[event] || event
 	}));
-
-	// map event names to bit positions (must match backend data.WebhookEventToBit)
-	const webhookEventToBit = {
-		campaign_closed: 1 << 0, // 1
-		campaign_recipient_message_sent: 1 << 1, // 2
-		campaign_recipient_message_failed: 1 << 2, // 4
-		campaign_recipient_message_read: 1 << 3, // 8
-		campaign_recipient_submitted_data: 1 << 4, // 16
-		campaign_recipient_evasion_page_visited: 1 << 5, // 32
-		campaign_recipient_before_page_visited: 1 << 6, // 64
-		campaign_recipient_page_visited: 1 << 7, // 128
-		campaign_recipient_after_page_visited: 1 << 8, // 256
-		campaign_recipient_deny_page_visited: 1 << 9, // 512
-		campaign_recipient_training_started: 1 << 10, // 1024
-		campaign_recipient_training_completed: 1 << 11 // 2048
-	};
-
-	const WEBHOOK_EVENT_ALL_BITS = 4095; // 2^12 - 1, all 12 events selected
-
-	// convert array of event names to bitwise int
-	// if all events are selected, return 0 to preserve the "all events" semantic
-	const webhookEventsToBinary = (events) => {
-		if (!events?.length) return 0; // 0 means all events
-		const binary = events.reduce((acc, event) => acc | (webhookEventToBit[event] || 0), 0);
-		return binary === WEBHOOK_EVENT_ALL_BITS ? 0 : binary;
-	};
-
-	// convert bitwise int to array of event names (internal values, not display names)
-	const webhookEventsFromBinary = (binary) => {
-		if (binary === 0) return [...webhookEventOptions]; // 0 means all events, return all
-		return webhookEventOptions.filter((event) => binary & webhookEventToBit[event]);
-	};
 
 	// helper to get display name for an event
 	const getEventDisplayName = (eventValue) => {
@@ -558,6 +517,7 @@
 	let isValidatingName = false;
 	let weekDaysAvailable = [];
 	let isDeleteAlertVisible = false;
+	let allowListingModal;
 	let isClearDeviceCodesAlertVisible = false;
 	let clearDeviceCodesValues = {
 		id: null,
@@ -692,7 +652,10 @@
 
 	// same tones as the campaign detail header
 	const statusTone = (c) => {
-		if (c.closedAt || ['campaign_closed', 'campaign_pending_schedule'].includes(c.notableEventName)) {
+		if (
+			c.closedAt ||
+			['campaign_closed', 'campaign_pending_schedule'].includes(c.notableEventName)
+		) {
 			return 'neutral';
 		}
 		return c.notableEventName === 'campaign_active' ? 'success' : 'info';
@@ -724,7 +687,8 @@
 				return;
 			}
 			const scroller =
-				currentStepContainer.closest('.modal-body') ?? currentStepContainer.closest('.overflow-y-auto');
+				currentStepContainer.closest('.modal-body') ??
+				currentStepContainer.closest('.overflow-y-auto');
 			if (scroller) {
 				scroller.scrollTop = 0;
 			}
@@ -919,7 +883,11 @@
 
 	/** @returns {string} empty unless an anonymous self managed campaign has a pool */
 	const anonymousPoolError = () => {
-		if (formValues.isAnonymous && scheduleType === 'self-managed' && formValues.templates.length > 1) {
+		if (
+			formValues.isAnonymous &&
+			scheduleType === 'self-managed' &&
+			formValues.templates.length > 1
+		) {
 			return 'An anonymous self managed campaign can use only one template.';
 		}
 		return '';
@@ -1500,7 +1468,9 @@
 			constraintWeekDays: copyMode ? [] : (localSlots?.weekDays ?? []),
 			contraintStartTime: copyMode ? null : (localSlots?.startTime ?? null),
 			contraintEndTime: copyMode ? null : (localSlots?.endTime ?? null),
-			constraintTimeZone: copyMode ? browserTimeZone() : (localSlots?.timeZone ?? browserTimeZone()),
+			constraintTimeZone: copyMode
+				? browserTimeZone()
+				: (localSlots?.timeZone ?? browserTimeZone()),
 			closeAt: copyMode ? null : campaign.closeAt,
 			anonymizeAt: copyMode ? null : campaign.anonymizeAt,
 			dataAnonymizeAt: copyMode ? null : campaign.dataAnonymizeAt,
@@ -1915,7 +1885,9 @@
 						>
 					{:else if campaign.notableEventName}
 						<span class="block sm:hidden mt-1"
-							><StatusBadge tone={statusTone(campaign)}>{toEvent(campaign.notableEventName).name}</StatusBadge></span
+							><StatusBadge tone={statusTone(campaign)}
+								>{toEvent(campaign.notableEventName).name}</StatusBadge
+							></span
 						>
 					{/if}
 				</TableCellLink>
@@ -1926,7 +1898,11 @@
 							><StatusBadge tone="warning" title="Sending paused">Paused</StatusBadge></span
 						>
 					{:else if campaign.notableEventName}
-						<span><StatusBadge tone={statusTone(campaign)}>{toEvent(campaign.notableEventName).name}</StatusBadge></span>
+						<span
+							><StatusBadge tone={statusTone(campaign)}
+								>{toEvent(campaign.notableEventName).name}</StatusBadge
+							></span
+						>
 					{/if}
 				</TableCell>
 				{#if campaign.templateID}
@@ -1992,6 +1968,11 @@
 						<TableCopyButton
 							title="Copy"
 							on:click={() => openCopyModal(campaign.id)}
+							{...globalButtonDisabledAttributes(campaign, contextCompanyID)}
+						/>
+						<TableDropDownButton
+							name="Allow listing"
+							on:click={() => allowListingModal.open(campaign.id, campaign.name)}
 							{...globalButtonDisabledAttributes(campaign, contextCompanyID)}
 						/>
 						<ConditionalDisplay show="blackbox">
@@ -2115,7 +2096,9 @@
 									options={Array.from(templateMap.values())}>Templates</TextFieldMultiSelect
 								>
 								{#if formValues.templates.length > 1}
-									<p class="text-sm text-slate-500 dark:text-gray-400 transition-colors duration-200">
+									<p
+										class="text-sm text-slate-500 dark:text-gray-400 transition-colors duration-200"
+									>
 										Each recipient gets one of these templates, spread evenly.
 									</p>
 									<TextFieldSelect
@@ -2127,13 +2110,15 @@
 									>
 								{/if}
 								{#if missingPoolTemplates.length}
-									<p class="mt-2 text-sm text-amber-600 dark:text-amber-400" data-missing-pool-templates>
-										{modalMode === 'copy'
-											? 'No longer usable and left out of the new campaign'
-											: 'These templates are no longer usable and were removed from the list'}: {missingPoolTemplates.join(
-											', '
-										)}.
-									</p>
+									<div class="mt-2" data-missing-pool-templates>
+										<Note>
+											{modalMode === 'copy'
+												? 'No longer usable and left out of the new campaign'
+												: 'These templates are no longer usable and were removed from the list'}: {missingPoolTemplates.join(
+												', '
+											)}.
+										</Note>
+									</div>
 								{/if}
 							</div>
 						</div>
@@ -2166,7 +2151,13 @@
 											isRecipientModalVisible = true;
 										}}
 									>
-										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+										<svg
+											class="w-4 h-4"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+											aria-hidden="true"
+										>
 											<path
 												stroke-linecap="round"
 												stroke-linejoin="round"
@@ -2391,7 +2382,9 @@
 												Set the start and end dates to pick days.
 											</p>
 										{/if}
-										<div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 lg:gap-1.5 max-w-lg">
+										<div
+											class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 lg:gap-1.5 max-w-lg"
+										>
 											{#each Object.entries(dayMap) as [dayNum, dayName]}
 												{@const dayInt = parseInt(dayNum)}
 												{@const dayAvailable = weekDaysAvailable.includes(dayInt)}
@@ -2412,12 +2405,12 @@
 															const t = e.currentTarget;
 															t.setCustomValidity('Please select at least one day for delivery.');
 														}}
-														required={!formValues.sendEndAt && !formValues.constraintWeekDays.length}
+														required={!formValues.sendEndAt &&
+															!formValues.constraintWeekDays.length}
 														on:change={() => {
 															if (formValues.constraintWeekDays.includes(dayInt)) {
-																formValues.constraintWeekDays = formValues.constraintWeekDays.filter(
-																	(d) => d !== dayInt
-																);
+																formValues.constraintWeekDays =
+																	formValues.constraintWeekDays.filter((d) => d !== dayInt);
 															} else {
 																formValues.constraintWeekDays = [
 																	...formValues.constraintWeekDays,
@@ -2431,7 +2424,9 @@
 														title={!dayAvailable ? 'Delivery start and end must be set first' : ''}
 													/>
 													<span class="lg:sr-only">{dayName}</span>
-													<span class="hidden lg:inline" aria-hidden="true">{dayName.slice(0, 3)}</span>
+													<span class="hidden lg:inline" aria-hidden="true"
+														>{dayName.slice(0, 3)}</span
+													>
 												</label>
 											{/each}
 										</div>
@@ -2440,7 +2435,9 @@
 									<div class="mt-4">
 										<FieldLabel>Delivery hours</FieldLabel>
 									</div>
-									<div class="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-y-2">
+									<div
+										class="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-y-2"
+									>
 										<input
 											class="w-full sm:w-auto rounded-md py-2 px-2 text-slate-800 dark:text-gray-300 text-left border border-transparent dark:border-gray-700/60 bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200 focus:outline-none focus:ring-2 focus:border-cta-blue focus:ring-cta-blue/30 dark:focus:border-highlight-blue dark:focus:ring-highlight-blue/30"
 											id="constraintStartTime"
@@ -2488,8 +2485,18 @@
 												on:click={() => (showAdvancedOptionsStep3 = true)}
 											>
 												Show advanced options
-												<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"
-													><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg
+												<svg
+													class="w-4 h-4"
+													fill="none"
+													stroke="currentColor"
+													viewBox="0 0 24 24"
+													aria-hidden="true"
+													><path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M19 9l-7 7-7-7"
+													/></svg
 												>
 											</button>
 										</div>
@@ -2612,12 +2619,14 @@
 								/>
 								{#if selfManagedPool && (formValues.isAnonymous || modalMode !== 'update')}
 									<p class="mb-4 text-sm text-slate-600 dark:text-gray-300">
-										Anonymous self managed campaigns can use only one template, because you send each
-										email yourself.
+										Anonymous self managed campaigns can use only one template, because you send
+										each email yourself.
 									</p>
 								{/if}
 								{#if modalMode === 'update'}
-									<p class="flex items-start gap-1.5 mb-4 text-sm text-slate-600 dark:text-gray-300">
+									<p
+										class="flex items-start gap-1.5 mb-4 text-sm text-slate-600 dark:text-gray-300"
+									>
 										<svg
 											xmlns="http://www.w3.org/2000/svg"
 											class="h-4 w-4 mt-0.5 flex-shrink-0"
@@ -2676,8 +2685,18 @@
 										on:click={() => (showAdvancedOptionsStep4 = true)}
 									>
 										Show advanced options
-										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"
-											><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg
+										<svg
+											class="w-4 h-4"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+											aria-hidden="true"
+											><path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M19 9l-7 7-7-7"
+											/></svg
 										>
 									</button>
 								</div>
@@ -2686,7 +2705,11 @@
 							{#if showAdvancedOptionsStep4}
 								<div class="mb-6 pt-4">
 									<div class="flex flex-col">
-										<FieldLabel optional toolTipText="Configure multiple webhooks to receive campaign event notifications. Each webhook can have its own data level and event filters.">Webhooks</FieldLabel>
+										<FieldLabel
+											optional
+											toolTipText="Configure multiple webhooks to receive campaign event notifications. Each webhook can have its own data level and event filters."
+											>Webhooks</FieldLabel
+										>
 										<div class="space-y-3 max-w-lg">
 											{#each formValues.webhooks as webhook, index}
 												<div
@@ -2747,7 +2770,7 @@
 																<button
 																	type="button"
 																	on:click={() => toggleWebhookEvent(index, eventOption.value)}
-															aria-pressed={isSelected}
+																	aria-pressed={isSelected}
 																	class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors duration-200 {isSelected
 																		? 'bg-blue-50 dark:bg-highlight-blue/20 text-cta-blue dark:text-white border border-cta-blue dark:border-highlight-blue hover:bg-blue-100 dark:hover:bg-highlight-blue/30'
 																		: 'bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
@@ -2771,93 +2794,97 @@
 								</div>
 
 								<ConditionalDisplay show="blackbox">
-								{#if scriptsEnabled}
-									<div class="mb-6 pt-4">
-										<div class="flex flex-col">
-											<FieldLabel optional toolTipText="Run a script when a campaign event fires. Each script has its own data level and event filters, the same as webhooks.">Scripts</FieldLabel>
-											<div class="space-y-3 max-w-lg">
-												{#each formValues.scripts as script, index}
-													<div
-														class="flex flex-col gap-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800/50 dark:to-gray-800/30 rounded-lg border border-gray-300 dark:border-gray-600/50 shadow-sm hover:shadow-md transition-all duration-200"
-													>
-														<div class="flex gap-2 items-start">
-															<div class="flex-1">
-																<TextFieldSelect
-																	id="script-{index}"
-																	bind:value={script.id}
-																	optional
-																	options={scriptMap
-																		.keys()
-																		.map((k) => ({ value: k, label: scriptMap.byKey(k) }))}
-																>
-																	Script
-																</TextFieldSelect>
-															</div>
-															<div class="flex items-end pb-4">
-																<button
-																	type="button"
-																	class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
-																	on:click={() => removeScript(index)}
-																	title="Remove this script"
-																	aria-label="Remove script"
-																>
-																	<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
-																</button>
-															</div>
-														</div>
-
-														<div>
-															<SelectSquare
-																bind:value={script.includeData}
-																options={webhookDataLevelOptions}
-																label="Data Level"
-															/>
-														</div>
-
-														<div class="pt-1">
-															<div class="flex items-center gap-2 mb-2">
-																<p class="text-xs font-semibold text-gray-700 dark:text-gray-300">
-																	Events
-																</p>
-																<span
-																	class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
-																>
-																	{script.events.length === webhookEventOptions.length
-																		? 'All'
-																		: script.events.length} / {webhookEventOptions.length}
-																</span>
-															</div>
-															<div
-																class="flex flex-row flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-white/50 dark:bg-gray-900/30 rounded border border-gray-200 dark:border-gray-700/50"
-															>
-																{#each webhookEventDisplayOptions as eventOption}
-																	{@const isSelected = script.events.includes(eventOption.value)}
+									{#if scriptsEnabled}
+										<div class="mb-6 pt-4">
+											<div class="flex flex-col">
+												<FieldLabel
+													optional
+													toolTipText="Run a script when a campaign event fires. Each script has its own data level and event filters, the same as webhooks."
+													>Scripts</FieldLabel
+												>
+												<div class="space-y-3 max-w-lg">
+													{#each formValues.scripts as script, index}
+														<div
+															class="flex flex-col gap-3 p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800/50 dark:to-gray-800/30 rounded-lg border border-gray-300 dark:border-gray-600/50 shadow-sm hover:shadow-md transition-all duration-200"
+														>
+															<div class="flex gap-2 items-start">
+																<div class="flex-1">
+																	<TextFieldSelect
+																		id="script-{index}"
+																		bind:value={script.id}
+																		optional
+																		options={scriptMap
+																			.keys()
+																			.map((k) => ({ value: k, label: scriptMap.byKey(k) }))}
+																	>
+																		Script
+																	</TextFieldSelect>
+																</div>
+																<div class="flex items-end pb-4">
 																	<button
 																		type="button"
-																		on:click={() => toggleScriptEvent(index, eventOption.value)}
-															aria-pressed={isSelected}
-																		class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors duration-200 {isSelected
-																			? 'bg-blue-50 dark:bg-highlight-blue/20 text-cta-blue dark:text-white border border-cta-blue dark:border-highlight-blue hover:bg-blue-100 dark:hover:bg-highlight-blue/30'
-																			: 'bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
+																		class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700/80 rounded-md transition-colors duration-200"
+																		on:click={() => removeScript(index)}
+																		title="Remove this script"
+																		aria-label="Remove script"
 																	>
-																		{eventOption.label}
+																		<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
 																	</button>
-																{/each}
+																</div>
+															</div>
+
+															<div>
+																<SelectSquare
+																	bind:value={script.includeData}
+																	options={webhookDataLevelOptions}
+																	label="Data Level"
+																/>
+															</div>
+
+															<div class="pt-1">
+																<div class="flex items-center gap-2 mb-2">
+																	<p class="text-xs font-semibold text-gray-700 dark:text-gray-300">
+																		Events
+																	</p>
+																	<span
+																		class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
+																	>
+																		{script.events.length === webhookEventOptions.length
+																			? 'All'
+																			: script.events.length} / {webhookEventOptions.length}
+																	</span>
+																</div>
+																<div
+																	class="flex flex-row flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-white/50 dark:bg-gray-900/30 rounded border border-gray-200 dark:border-gray-700/50"
+																>
+																	{#each webhookEventDisplayOptions as eventOption}
+																		{@const isSelected = script.events.includes(eventOption.value)}
+																		<button
+																			type="button"
+																			on:click={() => toggleScriptEvent(index, eventOption.value)}
+																			aria-pressed={isSelected}
+																			class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors duration-200 {isSelected
+																				? 'bg-blue-50 dark:bg-highlight-blue/20 text-cta-blue dark:text-white border border-cta-blue dark:border-highlight-blue hover:bg-blue-100 dark:hover:bg-highlight-blue/30'
+																				: 'bg-white dark:bg-gray-900/60 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700/60 hover:border-blue-300 dark:hover:border-highlight-blue/80 hover:bg-blue-50 dark:hover:bg-highlight-blue/20'}"
+																		>
+																			{eventOption.label}
+																		</button>
+																	{/each}
+																</div>
 															</div>
 														</div>
-													</div>
-												{/each}
-												<button
-													type="button"
-													class="pc-focus inline-flex items-center px-4 py-2 rounded-md border border-cta-blue text-cta-blue bg-white hover:bg-blue-50 dark:bg-gray-800 dark:border-highlight-blue dark:text-blue-200 dark:hover:bg-highlight-blue/20 text-sm font-semibold transition-colors duration-200"
-													on:click={addScript}
-												>
-													+ Add Script
-												</button>
+													{/each}
+													<button
+														type="button"
+														class="pc-focus inline-flex items-center px-4 py-2 rounded-md border border-cta-blue text-cta-blue bg-white hover:bg-blue-50 dark:bg-gray-800 dark:border-highlight-blue dark:text-blue-200 dark:hover:bg-highlight-blue/20 text-sm font-semibold transition-colors duration-200"
+														on:click={addScript}
+													>
+														+ Add Script
+													</button>
+												</div>
 											</div>
 										</div>
-									</div>
-								{/if}
+									{/if}
 								</ConditionalDisplay>
 
 								<ConditionalDisplay show="blackbox">
@@ -2986,7 +3013,9 @@
 										>
 											Basic Information
 										</h3>
-										<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+										<div
+											class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]"
+										>
 											<span class="text-slate-500 dark:text-gray-400 font-medium">Name:</span>
 											<span class="text-pc-darkblue dark:text-white"
 												>{formValues.name || 'Not set'}</span
@@ -2996,12 +3025,18 @@
 												>{formValues.templates.length > 1 ? 'Templates:' : 'Template:'}</span
 											>
 											<span class="text-pc-darkblue dark:text-white"
-												>{formValues.templates.length ? formValues.templates.join(', ') : 'Not set'}</span
+												>{formValues.templates.length
+													? formValues.templates.join(', ')
+													: 'Not set'}</span
 											>
 
 											{#if formValues.templates.length > 1}
-												<span class="text-slate-500 dark:text-gray-400 font-medium">Balanced per:</span>
-												<span class="text-pc-darkblue dark:text-white">{formValues.templateMixBy}</span>
+												<span class="text-slate-500 dark:text-gray-400 font-medium"
+													>Balanced per:</span
+												>
+												<span class="text-pc-darkblue dark:text-white"
+													>{formValues.templateMixBy}</span
+												>
 											{/if}
 
 											<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
@@ -3021,7 +3056,9 @@
 											Recipients
 										</h3>
 										<div class="space-y-4">
-											<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+											<div
+												class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]"
+											>
 												<span class="text-slate-500 dark:text-gray-400 font-medium">Groups:</span>
 												<span
 													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
@@ -3040,10 +3077,10 @@
 											</div>
 
 											{#if lateScheduleEnabled}
-												<p class="text-sm text-amber-600 dark:text-amber-400">
+												<Note tone="info">
 													Recipients will be resolved when the campaign is scheduled.<br />
 													Campaign is scheduled 24 hours before send start.
-												</p>
+												</Note>
 											{:else if formValues.recipientGroups.length > 0}
 												<button
 													type="button"
@@ -3053,7 +3090,13 @@
 														isRecipientModalVisible = true;
 													}}
 												>
-													<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+													<svg
+														class="w-4 h-4"
+														fill="none"
+														stroke="currentColor"
+														viewBox="0 0 24 24"
+														aria-hidden="true"
+													>
 														<path
 															stroke-linecap="round"
 															stroke-linejoin="round"
@@ -3103,27 +3146,37 @@
 													class="border-gray-200 dark:border-gray-700"
 												>
 													{#if formValues.templates.length > 1}
-														<h4 class="text-sm font-semibold text-pc-darkblue dark:text-white mb-2 [overflow-wrap:anywhere]">
+														<h4
+															class="text-sm font-semibold text-pc-darkblue dark:text-white mb-2 [overflow-wrap:anywhere]"
+														>
 															{templateName}
 														</h4>
 													{/if}
 													{#await getTemplateDetails(templateName)}
-														<div class="text-sm text-gray-500 dark:text-gray-400">Loading delivery details...</div>
+														<div class="text-sm text-gray-500 dark:text-gray-400">
+															Loading delivery details...
+														</div>
 													{:then template}
 														{#if template?.apiSender}
-															<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
-																<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
-																<span class="text-pc-darkblue dark:text-white"
-																	>API Sender</span
+															<div
+																class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]"
+															>
+																<span class="text-slate-500 dark:text-gray-400 font-medium"
+																	>Type:</span
 																>
+																<span class="text-pc-darkblue dark:text-white">API Sender</span>
 
-																<span class="text-slate-500 dark:text-gray-400 font-medium">Name:</span>
+																<span class="text-slate-500 dark:text-gray-400 font-medium"
+																	>Name:</span
+																>
 																<span class="text-pc-darkblue dark:text-white"
 																	>{template.apiSender.name || 'Not set'}</span
 																>
 
 																{#if template?.email}
-																	<span class="text-slate-500 dark:text-gray-400 font-medium">Email:</span>
+																	<span class="text-slate-500 dark:text-gray-400 font-medium"
+																		>Email:</span
+																	>
 																	<span class="text-pc-darkblue dark:text-white"
 																		>{template.email.name || 'Not set'}</span
 																	>
@@ -3131,28 +3184,40 @@
 															</div>
 														{:else if template?.email}
 															{@const fromParts = splitFromHeader(template.email.mailHeaderFrom)}
-															<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
-																<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
+															<div
+																class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]"
+															>
+																<span class="text-slate-500 dark:text-gray-400 font-medium"
+																	>Type:</span
+																>
 																<span class="text-pc-darkblue dark:text-white">SMTP</span>
 
-																<span class="text-slate-500 dark:text-gray-400 font-medium">Name:</span>
+																<span class="text-slate-500 dark:text-gray-400 font-medium"
+																	>Name:</span
+																>
 																<span class="text-pc-darkblue dark:text-white"
 																	>{template.email.name || 'Not set'}</span
 																>
 
-																<span class="text-slate-500 dark:text-gray-400 font-medium">From:</span>
+																<span class="text-slate-500 dark:text-gray-400 font-medium"
+																	>From:</span
+																>
 																<span class="text-pc-darkblue dark:text-white"
 																	>{#if fromParts}<span class="block">{fromParts.name}</span><span
 																			class="block">{fromParts.address}</span
 																		>{:else}{template.email.mailHeaderFrom || 'Not set'}{/if}</span
 																>
 
-																<span class="text-slate-500 dark:text-gray-400 font-medium">Mail from:</span>
+																<span class="text-slate-500 dark:text-gray-400 font-medium"
+																	>Mail from:</span
+																>
 																<span class="text-pc-darkblue dark:text-white"
 																	>{template.email.mailEnvelopeFrom || 'Not set'}</span
 																>
 
-																<span class="text-slate-500 dark:text-gray-400 font-medium">Subject:</span>
+																<span class="text-slate-500 dark:text-gray-400 font-medium"
+																	>Subject:</span
+																>
 																<span class="text-pc-darkblue dark:text-white"
 																	>{template.email.mailHeaderSubject || 'Not set'}</span
 																>
@@ -3181,10 +3246,13 @@
 										>
 											Schedule
 										</h3>
-										<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+										<div
+											class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]"
+										>
 											<span class="text-slate-500 dark:text-gray-400 font-medium">Type:</span>
 											<span class="text-pc-darkblue dark:text-white"
-												>{scheduleOptions.find((o) => o.value === scheduleType)?.label ?? scheduleType}</span
+												>{scheduleOptions.find((o) => o.value === scheduleType)?.label ??
+													scheduleType}</span
 											>
 
 											{#if scheduleType === 'basic'}
@@ -3198,7 +3266,9 @@
 													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 												>
 													<Datetime value={formValues.sendStartAt} />
-													<span class="block text-xs"><RelativeTime value={formValues.sendStartAt} /></span>
+													<span class="block text-xs"
+														><RelativeTime value={formValues.sendStartAt} /></span
+													>
 												</span>
 
 												<span class="text-slate-500 dark:text-gray-400 font-medium">End:</span>
@@ -3206,7 +3276,9 @@
 													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 												>
 													<Datetime value={formValues.sendEndAt} />
-													<span class="block text-xs"><RelativeTime value={formValues.sendEndAt} /></span>
+													<span class="block text-xs"
+														><RelativeTime value={formValues.sendEndAt} /></span
+													>
 												</span>
 
 												{#if spreadOption && spreadOption !== SPREAD_MANUAL}
@@ -3228,7 +3300,8 @@
 												{/if}
 											{:else if scheduleType === 'schedule'}
 												{#if dailySlotData?.error}
-													<span class="text-slate-500 dark:text-gray-400 font-medium">Problem:</span>
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Problem:</span
+													>
 													<span class="text-red-600 dark:text-red-400">{dailySlotData.error}</span>
 												{/if}
 												{#if dailySlotPreview}
@@ -3237,7 +3310,9 @@
 														class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 													>
 														<Datetime value={dailySlotPreview.start} />
-														<span class="block text-xs"><RelativeTime value={dailySlotPreview.start} /></span>
+														<span class="block text-xs"
+															><RelativeTime value={dailySlotPreview.start} /></span
+														>
 													</span>
 
 													<span class="text-slate-500 dark:text-gray-400 font-medium">End:</span>
@@ -3245,10 +3320,14 @@
 														class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 													>
 														<Datetime value={dailySlotPreview.end} />
-														<span class="block text-xs"><RelativeTime value={dailySlotPreview.end} /></span>
+														<span class="block text-xs"
+															><RelativeTime value={dailySlotPreview.end} /></span
+														>
 													</span>
 
-													<span class="text-slate-500 dark:text-gray-400 font-medium">Duration:</span>
+													<span class="text-slate-500 dark:text-gray-400 font-medium"
+														>Duration:</span
+													>
 													<span
 														class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 													>
@@ -3259,7 +3338,9 @@
 													</span>
 												{/if}
 
-												<span class="text-slate-500 dark:text-gray-400 font-medium">Active days:</span>
+												<span class="text-slate-500 dark:text-gray-400 font-medium"
+													>Active days:</span
+												>
 												<span
 													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 												>
@@ -3270,7 +3351,9 @@
 												{#if formValues.contraintStartTime && formValues.contraintEndTime}
 													<span class="text-slate-500 dark:text-gray-400 font-medium">Hours:</span>
 													<span class="text-pc-darkblue dark:text-white">
-														{formatClock(formValues.contraintStartTime)} - {formatClock(formValues.contraintEndTime)}
+														{formatClock(formValues.contraintStartTime)} - {formatClock(
+															formValues.contraintEndTime
+														)}
 													</span>
 												{/if}
 
@@ -3296,12 +3379,16 @@
 											{/if}
 
 											{#if formValues.scheduleAt}
-												<span class="text-slate-500 dark:text-gray-400 font-medium">Schedule at:</span>
+												<span class="text-slate-500 dark:text-gray-400 font-medium"
+													>Schedule at:</span
+												>
 												<span
 													class="text-pc-darkblue dark:text-gray-100 transition-colors duration-200"
 												>
 													<Datetime value={formValues.scheduleAt} />
-													<span class="block text-xs"><RelativeTime value={formValues.scheduleAt} /></span>
+													<span class="block text-xs"
+														><RelativeTime value={formValues.scheduleAt} /></span
+													>
 												</span>
 											{/if}
 
@@ -3309,7 +3396,9 @@
 												<span class="text-slate-500 dark:text-gray-400 font-medium">Close at:</span>
 												<span class="text-pc-darkblue dark:text-white">
 													<Datetime value={formValues.closeAt} />
-													<span class="block text-xs"><RelativeTime value={formValues.closeAt} /></span>
+													<span class="block text-xs"
+														><RelativeTime value={formValues.closeAt} /></span
+													>
 												</span>
 											{/if}
 										</div>
@@ -3326,9 +3415,12 @@
 										>
 											Data and Privacy
 										</h3>
-										<div class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]">
+										<div
+											class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]"
+										>
 											<ConditionalDisplay show="blackbox">
-												<span class="text-slate-500 dark:text-gray-400 font-medium">Filtering:</span>
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Filtering:</span
+												>
 												<span class="text-pc-darkblue dark:text-white">
 													{#if allowDenyType === 'none'}
 														None
@@ -3356,7 +3448,9 @@
 											>
 
 											<ConditionalDisplay show="blackbox">
-												<span class="text-slate-500 dark:text-gray-400 font-medium">Save Metadata:</span>
+												<span class="text-slate-500 dark:text-gray-400 font-medium"
+													>Save Metadata:</span
+												>
 												<span class="text-pc-darkblue dark:text-white"
 													>{formValues.isAnonymous
 														? 'Disabled'
@@ -3388,47 +3482,55 @@
 											{/if}
 
 											<ConditionalDisplay show="blackbox">
-											{#if scriptsEnabled && formValues.scripts.length > 0}
-												<span class="text-slate-500 dark:text-gray-400 font-medium">Scripts:</span>
-												<div class="text-pc-darkblue dark:text-white space-y-2">
-													{#each formValues.scripts as script, index}
-														<div class="border-l-2 border-blue-400 pl-3 py-1">
-															<div class="font-medium">
-																{scriptMap.byKey(script.id) || 'Not selected'}
+												{#if scriptsEnabled && formValues.scripts.length > 0}
+													<span class="text-slate-500 dark:text-gray-400 font-medium">Scripts:</span
+													>
+													<div class="text-pc-darkblue dark:text-white space-y-2">
+														{#each formValues.scripts as script, index}
+															<div class="border-l-2 border-blue-400 pl-3 py-1">
+																<div class="font-medium">
+																	{scriptMap.byKey(script.id) || 'Not selected'}
+																</div>
+																<div class="text-sm text-gray-600 dark:text-gray-400">
+																	Data Level: <span class="capitalize">{script.includeData}</span>
+																</div>
+																<div class="text-sm text-gray-600 dark:text-gray-400">
+																	Events: {script.events.length === webhookEventOptions.length
+																		? 'All Events'
+																		: script.events.length + ' selected'}
+																</div>
 															</div>
-															<div class="text-sm text-gray-600 dark:text-gray-400">
-																Data Level: <span class="capitalize">{script.includeData}</span>
-															</div>
-															<div class="text-sm text-gray-600 dark:text-gray-400">
-																Events: {script.events.length === webhookEventOptions.length
-																	? 'All Events'
-																	: script.events.length + ' selected'}
-															</div>
-														</div>
-													{/each}
-												</div>
-											{/if}
+														{/each}
+													</div>
+												{/if}
 											</ConditionalDisplay>
 
 											{#if formValues.denyPageValue}
-												<span class="text-slate-500 dark:text-gray-400 font-medium">Deny Page:</span>
+												<span class="text-slate-500 dark:text-gray-400 font-medium">Deny Page:</span
+												>
 												<span class="text-pc-darkblue dark:text-white"
 													>{formValues.denyPageValue}</span
 												>
 											{/if}
 
 											{#if formValues.evasionPageValue}
-												<span class="text-slate-500 dark:text-gray-400 font-medium">Evasion Page:</span>
+												<span class="text-slate-500 dark:text-gray-400 font-medium"
+													>Evasion Page:</span
+												>
 												<span class="text-pc-darkblue dark:text-white"
 													>{formValues.evasionPageValue}</span
 												>
 											{/if}
 
 											{#if formValues.anonymizeAt}
-												<span class="text-slate-500 dark:text-gray-400 font-medium">Anonymize all data at:</span>
+												<span class="text-slate-500 dark:text-gray-400 font-medium"
+													>Anonymize all data at:</span
+												>
 												<span class="text-pc-darkblue dark:text-white">
 													<Datetime value={formValues.anonymizeAt} />
-													<span class="block text-xs"><RelativeTime value={formValues.anonymizeAt} /></span>
+													<span class="block text-xs"
+														><RelativeTime value={formValues.anonymizeAt} /></span
+													>
 												</span>
 											{/if}
 
@@ -3438,7 +3540,9 @@
 												>
 												<span class="text-pc-darkblue dark:text-white">
 													<Datetime value={formValues.dataAnonymizeAt} />
-													<span class="block text-xs"><RelativeTime value={formValues.dataAnonymizeAt} /></span>
+													<span class="block text-xs"
+														><RelativeTime value={formValues.dataAnonymizeAt} /></span
+													>
 												</span>
 											{/if}
 										</div>
@@ -3489,7 +3593,12 @@
 							Cancel
 						</button>
 						{#if currentStep < 5}
-							<FormButton type="button" size="large" disabled={isValidatingName} on:click={nextStep}>
+							<FormButton
+								type="button"
+								size="large"
+								disabled={isValidatingName}
+								on:click={nextStep}
+							>
 								{#if isValidatingName}
 									Checking...
 								{:else}
@@ -3635,4 +3744,5 @@
 		onClick={() => onClickClearDeviceCodes(clearDeviceCodesValues.id)}
 		bind:isVisible={isClearDeviceCodesAlertVisible}
 	/>
+	<AllowListingModal bind:this={allowListingModal} kind="campaign" />
 </main>

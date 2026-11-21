@@ -34,6 +34,8 @@ type APISender struct {
 	CampaignTemplateService *CampaignTemplate
 	APISenderRepository     *repository.APISender
 	OAuthProviderService    *OAuthProvider
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // APISenderTestResponse is a response for testing API sender
@@ -68,6 +70,11 @@ func (a *APISender) Create(
 		return nil, errs.Wrap(err)
 	}
 	companyID := companyIDPtr(apiSender.CompanyID)
+	unlockCompany, err := refuseDeletingCompany(ctx, a.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	// the OAuth provider must be global or owned by the sender company
 	refs := companyRefs{}
 	refs.add(database.OAUTH_PROVIDER_TABLE, "oauthProviderID", apiSender.OAuthProviderID)

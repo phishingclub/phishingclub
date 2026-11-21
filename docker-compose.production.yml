@@ -4,6 +4,9 @@ services:
 
     container_name: phishingclub
     restart: unless-stopped
+    # run a small init as PID 1 that reaps exited processes, so the helper
+    # processes of the report browser do not stay as zombies
+    init: true
 
     # Mount config and data directories
     volumes:

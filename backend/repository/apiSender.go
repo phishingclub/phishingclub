@@ -102,20 +102,12 @@ func (a *APISender) GetAll(
 		return result, errs.Wrap(err)
 	}
 	dbAPISenders := []*database.APISender{}
-	res := db.Find(&dbAPISenders)
+	res := withPeek(db, option.QueryArgs).Find(&dbAPISenders)
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.API_SENDER_TABLE,
-		option.QueryArgs,
-		apiSenderAllowedColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbAPISenders, option.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbAPISender := range dbAPISenders {
@@ -147,25 +139,17 @@ func (a *APISender) GetAllOverview(
 		return result, errs.Wrap(err)
 	}
 	dbAPISenders := []*database.APISender{}
-	res := db.
+	res := withPeek(db.
 		Select(
 			TableColumn(database.API_SENDER_TABLE, "id"),
 			TableColumn(database.API_SENDER_TABLE, "name"),
-		).
+		), option.QueryArgs).
 		Find(&dbAPISenders)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.API_SENDER_TABLE,
-		option.QueryArgs,
-		apiSenderAllowedColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbAPISenders, option.QueryArgs)
 	result.HasNextPage = hasNextPage
 	for _, dbAPISender := range dbAPISenders {
 		apiSender, err := ToAPISenderOverview(dbAPISender)

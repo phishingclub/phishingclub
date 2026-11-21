@@ -80,19 +80,28 @@ func TestCampaignExportEventsAudit(t *testing.T) {
 func TestAuthorizeExportAudit(t *testing.T) {
 	auditLogger, buf := bufferLogger(zapcore.InfoLevel)
 	common := Common{Logger: auditLogger}
-	company := &Company{Common: common}
+	// the export event counts the programs it lists
+	company := &Company{Common: common, CampaignService: newProgramServiceTest(t).svc.CampaignService}
 	recipient := &Recipient{Common: common}
 	admin := adminSession(uuid.New(), data.RoleSuperAdministrator)
 	other := adminSession(uuid.New(), data.RoleCompanyUser)
 	companyID := uuid.New()
 	recipientID := uuid.New()
 
-	if err := company.AuthorizeExport(admin, &companyID); err != nil {
+	done, err := company.AuthorizeExport(context.Background(), admin, &companyID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := company.AuthorizeExport(admin, nil); err != nil {
+	if got := step4Events(t, buf.String(), "Company.Export"); len(got) != 0 {
+		t.Fatalf("nothing is written before the file is built: %v", got)
+	}
+	done(true)
+	done(true)
+	done, err = company.AuthorizeExport(context.Background(), admin, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
+	done(true)
 	if err := recipient.AuthorizeExport(other, &recipientID); err == nil {
 		t.Fatal("expected a role without permissions to be refused")
 	}
@@ -106,6 +115,16 @@ func TestAuthorizeExportAudit(t *testing.T) {
 	}
 	if d, _ := ce[1]["details"].(map[string]any); d["shared"] != true {
 		t.Errorf("shared export should say so: %v", ce[1])
+	}
+	// an export whose file was not built is written as failed
+	done, err = company.AuthorizeExport(context.Background(), admin, &companyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done(false)
+	ce = step4Events(t, buf.String(), "Company.Export")
+	if len(ce) != 3 || ce[2]["result"] != "failed" {
+		t.Fatalf("an export not built must be written as failed: %v", ce)
 	}
 	re := step4Events(t, buf.String(), "Recipient.Export")
 	if len(re) != 1 || re[0]["result"] != "denied" {

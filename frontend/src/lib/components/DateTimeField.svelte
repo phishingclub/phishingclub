@@ -27,6 +27,8 @@
 	export let readonly = false;
 	export let required = false;
 	export let min = new Date();
+	// the id of an error or help text read with both inputs
+	export let ariaDescribedBy = null;
 	/** @type {'small'|'medium'|'large'} */
 	export let labelWidth = 'large';
 	let minDate = '';
@@ -134,7 +136,10 @@
 		{required}
 		autocomplete="off"
 		aria-labelledby="{labelId} {labelId}-date"
-		class="date-input w-44 rounded-md py-2 px-2 border font-normal transition-colors duration-200 focus:outline-none focus:ring-2 disabled:opacity-60 disabled:cursor-not-allowed {readonly ? readonlyClass : editableClass}"
+		aria-describedby={ariaDescribedBy}
+		class="date-input w-44 rounded-md py-2 px-2 border font-normal transition-colors duration-200 focus:outline-none focus:ring-2 disabled:opacity-60 disabled:cursor-not-allowed {readonly
+			? readonlyClass
+			: editableClass}"
 	/>
 	<input
 		type="time"
@@ -148,6 +153,9 @@
 		{required}
 		autocomplete="off"
 		aria-labelledby="{labelId} {labelId}-time"
-		class="time-input text-center rounded-md py-2 px-2 border font-normal transition-colors duration-200 focus:outline-none focus:ring-2 disabled:opacity-60 disabled:cursor-not-allowed {readonly ? readonlyClass : editableClass}"
+		aria-describedby={ariaDescribedBy}
+		class="time-input text-center rounded-md py-2 px-2 border font-normal transition-colors duration-200 focus:outline-none focus:ring-2 disabled:opacity-60 disabled:cursor-not-allowed {readonly
+			? readonlyClass
+			: editableClass}"
 	/>
 </div>

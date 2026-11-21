@@ -9,6 +9,8 @@
 	export let onRefresh;
 	export let isLoading = false;
 	export let pageId = JSON.stringify($page.route);
+	// a small normal weight label, for a toolbar
+	export let plain = false;
 
 	const options = new BiMap({
 		Disabled: '0',
@@ -73,7 +75,7 @@
 
 <div class="flex shrink-0 items-center gap-2">
 	<span
-		class="font-semibold text-slate-600 dark:text-gray-300 transition-colors duration-200 whitespace-nowrap"
+		class="{plain ? 'font-normal text-sm' : 'font-semibold'} text-slate-600 dark:text-gray-300 transition-colors duration-200 whitespace-nowrap"
 		aria-hidden="true">Auto-Refresh</span
 	>
 	<TextFieldSelect

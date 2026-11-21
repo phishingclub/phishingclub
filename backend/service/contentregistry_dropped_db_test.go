@@ -158,8 +158,9 @@ func TestUpdateDroppedMemberInvalidResolution(t *testing.T) {
 }
 
 // TestUpdateDroppedMemberInUse raises a conflict for a dropped member whose page
-// a campaign template outside the bundle uses and an active campaign uses as
-// its deny page, though nothing was edited.
+// a campaign template outside the bundle uses and a campaign uses as its deny
+// page, though nothing was edited. While that campaign is open the page can not
+// be deleted and is listed as blocked, once it is closed the template counts.
 func TestUpdateDroppedMemberInUse(t *testing.T) {
 	h, regID, bundle, v2, fetch := droppedFixture(t)
 	pageID, _ := h.pageIDByName("A page")
@@ -184,7 +185,26 @@ func TestUpdateDroppedMemberInUse(t *testing.T) {
 		t.Fatalf("member conflicts = %+v", mc)
 	}
 	m := mc[0].Member
-	if len(m.Edited) != 0 || m.TemplateCount != 1 || m.Templates[0] != "Mine" || m.ChangedCount != 1 {
+	if len(m.Edited) != 0 || m.TemplateCount != 0 || m.ChangedCount != 0 || len(m.Blocked) != 1 ||
+		strings.Join(m.Blocked[0].UsedBy, ",") != "campaign Live" {
+		t.Fatalf("impact = %+v", m)
+	}
+	if !h.isInstalled(&regID, "ns/a") {
+		t.Fatal("member removed by a stopped update")
+	}
+
+	if err := h.db.Model(&database.Campaign{}).Where("id = ?", cid.String()).
+		Update("closed_at", now).Error; err != nil {
+		t.Fatalf("close campaign: %v", err)
+	}
+	_, _, err = h.applyWith(bundle, v2, fetch, nil)
+	mc = memberConflictsOf(t, err)
+	if len(mc) != 1 || mc[0].SourceName != "ns/a" {
+		t.Fatalf("member conflicts = %+v", mc)
+	}
+	m = mc[0].Member
+	if len(m.Edited) != 0 || m.TemplateCount != 1 || m.Templates[0] != "Mine" || m.ChangedCount != 0 ||
+		len(m.Blocked) != 0 {
 		t.Fatalf("impact = %+v", m)
 	}
 	if !h.isInstalled(&regID, "ns/a") {

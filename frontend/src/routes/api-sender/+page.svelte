@@ -1,4 +1,5 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
@@ -486,6 +487,9 @@
 			.map((key) => `${key}: ${headers[key]}`)
 			.join('\n');
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <HeadTitle title="API Senders" />
@@ -1027,7 +1031,8 @@
 	<DeleteAlert
 		list={[
 			'Templates using this API sender will become unusable',
-			'Scheduled or active campaigns using this API sender will be closed'
+			'Scheduled or active campaigns using this API sender will be closed',
+			...(showPrograms ? ['Programs stop sending templates that use this API sender'] : [])
 		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
@@ -1037,7 +1042,8 @@
 		title="Delete API senders"
 		list={[
 			'Templates using these API senders will become unusable',
-			'Scheduled or active campaigns using these API senders will be closed'
+			'Scheduled or active campaigns using these API senders will be closed',
+			...(showPrograms ? ['Programs stop sending templates that use these API senders'] : [])
 		]}
 		name={`${$selection.size} API sender${$selection.size === 1 ? '' : 's'}`}
 		onClick={onClickBulkDelete}

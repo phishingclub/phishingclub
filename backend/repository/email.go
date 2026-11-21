@@ -185,16 +185,12 @@ func (m *Email) GetAll(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	dbRes := db.Find(&dbEmails)
+	dbRes := withPeek(db, options.QueryArgs).Find(&dbEmails)
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.EMAIL_TABLE, options.QueryArgs, allowedEmailOrderBy...)
-
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbEmails, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbEmail := range dbEmails {
@@ -218,15 +214,12 @@ func (m *Email) GetAllByCompanyID(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	dbRes := db.Find(&dbEmails)
+	dbRes := withPeek(db, options.QueryArgs).Find(&dbEmails)
 	if dbRes.Error != nil {
 		return nil, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.EMAIL_TABLE, options.QueryArgs, allowedEmailOrderBy...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbEmails, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbEmail := range dbEmails {
@@ -250,19 +243,16 @@ func (m *Email) GetOverviews(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	dbRes := db.
+	dbRes := withPeek(db.
 		Omit(
 			TableColumn(database.EMAIL_TABLE, "content"),
-		).
+		), options.QueryArgs).
 		Find(&dbEmails)
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.EMAIL_TABLE, options.QueryArgs, allowedEmailOrderBy...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbEmails, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbEmail := range dbEmails {

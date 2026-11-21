@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +18,7 @@ type ReportTemplate struct {
 	CompanyID  nullable.Nullable[uuid.UUID]            `json:"companyID"`
 	Content    nullable.Nullable[vo.OptionalString1MB] `json:"content"`
 	IsTraining nullable.Nullable[bool]                 `json:"isTraining"`
+	IsProgram  nullable.Nullable[bool]                 `json:"isProgram"`
 
 	Company *Company `json:"-"`
 }
@@ -26,7 +28,32 @@ func (r *ReportTemplate) Validate() error {
 	if err := validate.NullableFieldRequired("content", r.Content); err != nil {
 		return err
 	}
+	if r.IsTrainingOn() && r.IsProgramOn() {
+		return validate.WrapErrorWithField(errors.New("a report template is either a training or a program template"), "isProgram")
+	}
 	return nil
+}
+
+// report template kinds
+const (
+	ReportKindSimulation = "simulation"
+	ReportKindTraining   = "training"
+	ReportKindProgram    = "program"
+)
+
+// ReportKinds are the report template kinds
+var ReportKinds = []string{ReportKindSimulation, ReportKindTraining, ReportKindProgram}
+
+// IsTrainingOn reports whether the template is a training template
+func (r *ReportTemplate) IsTrainingOn() bool {
+	v, err := r.IsTraining.Get()
+	return err == nil && v
+}
+
+// IsProgramOn reports whether the template is a program template
+func (r *ReportTemplate) IsProgramOn() bool {
+	v, err := r.IsProgram.Get()
+	return err == nil && v
 }
 
 // ToDBMap converts updatable fields to a map
@@ -48,6 +75,11 @@ func (r *ReportTemplate) ToDBMap() map[string]any {
 	if r.IsTraining.IsSpecified() {
 		if v, err := r.IsTraining.Get(); err == nil {
 			m["is_training"] = v
+		}
+	}
+	if r.IsProgram.IsSpecified() {
+		if v, err := r.IsProgram.Get(); err == nil {
+			m["is_program"] = v
 		}
 	}
 	return m

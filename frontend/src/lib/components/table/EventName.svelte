@@ -1,6 +1,8 @@
 <script>
 	import { toEvent } from '$lib/utils/events';
 	export let eventName;
+	// show the whole name on one line instead of cutting it short
+	export let full = false;
 
 	// reactive statement to update event when eventName prop changes
 	$: event = toEvent(eventName);
@@ -14,7 +16,7 @@
 		<div
 			class="w-4 h-4 flex-shrink-0 {event.color} mr-2 rounded-sm ring-1 ring-inset ring-black/10 dark:ring-white/50"
 		></div>
-		<span class="min-w-0 truncate">{event.name}</span>
+		<span class={full ? 'whitespace-nowrap' : 'min-w-0 truncate'}>{event.name}</span>
 	</div>
 {:else}
 	<span class="text-slate-400 dark:text-gray-500">-</span>

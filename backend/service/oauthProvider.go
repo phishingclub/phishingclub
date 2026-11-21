@@ -34,6 +34,8 @@ type OAuthProvider struct {
 	// refreshGroup ensures only one token refresh happens per provider at a time
 	// even if multiple goroutines request simultaneous token refreshes
 	refreshGroup singleflight.Group
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // TokenResponse represents the response from oauth token endpoints
@@ -75,6 +77,11 @@ func (o *OAuthProvider) Create(
 	if cid, err := provider.CompanyID.Get(); err == nil {
 		companyID = &cid
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, o.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 
 	// check uniqueness
 	name := provider.Name.MustGet()

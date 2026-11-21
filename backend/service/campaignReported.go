@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -79,21 +80,7 @@ func (c *Campaign) reportableCampaign(
 	at time.Time,
 ) (*model.Campaign, bool, error) {
 	crID := campaignRecipient.ID.MustGet()
-	// an anonymized campaign recipient has no recipient id, which happens for a
-	// closed anonymous campaign whose link was severed. a token from a delivered
-	// email can arrive long after close, so return quietly.
-	if campaignRecipient.RecipientID.IsNull() {
-		c.Logger.Debugw("skipping report event: recipient is anonymized", "campaignRecipientID", crID.String())
-		return nil, false, nil
-	}
-	recipientID := campaignRecipient.RecipientID.MustGet()
 	campaignID := campaignRecipient.CampaignID.MustGet()
-
-	// do not record events for SCIM disabled (deprovisioned) recipients
-	if recipient, rErr := c.RecipientRepository.GetByID(ctx, &recipientID, &repository.RecipientOption{}); rErr == nil && recipient.ScimSoftDeletedAt != nil {
-		c.Logger.Debugw("skipping report event: recipient is scim-disabled", "campaignRecipientID", crID.String())
-		return nil, false, nil
-	}
 	campaign, err := c.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{})
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
@@ -102,6 +89,27 @@ func (c *Campaign) reportableCampaign(
 	// do not record events for closed campaigns
 	if closedAt, cErr := campaign.ClosedAt.Get(); cErr == nil && closedAt.Before(at) {
 		c.Logger.Debugw("skipping report event: campaign is closed", "campaignID", campaignID.String())
+		return nil, false, nil
+	}
+	// a campaign recipient without a recipient id is anonymized. a send of an
+	// anonymous program that only lost its person link after the identity
+	// retention still takes reports on its pseudonym until the program closes.
+	// any other anonymized recipient, such as one of a closed anonymous
+	// campaign, takes none. a token from a delivered email can arrive long
+	// after close, so return quietly.
+	if campaignRecipient.RecipientID.IsNull() {
+		if c.ProgramService != nil {
+			if _, ok := UnlinkedAnonymousProgramSend(ctx, c.ProgramService.ProgramRepository, campaign, campaignRecipient); ok {
+				return campaign, true, nil
+			}
+		}
+		c.Logger.Debugw("skipping report event: recipient is anonymized")
+		return nil, false, nil
+	}
+	recipientID := campaignRecipient.RecipientID.MustGet()
+	// do not record events for SCIM disabled (deprovisioned) recipients
+	if recipient, rErr := c.RecipientRepository.GetByID(ctx, &recipientID, &repository.RecipientOption{}); rErr == nil && recipient.ScimSoftDeletedAt != nil {
+		c.Logger.Debugw("skipping report event: recipient is scim-disabled", "campaignRecipientID", crID.String())
 		return nil, false, nil
 	}
 	return campaign, true, nil
@@ -117,9 +125,13 @@ func (c *Campaign) recordReported(
 	campaign *model.Campaign,
 	fields reportedEventFields,
 ) (bool, error) {
-	recipientID := campaignRecipient.RecipientID.MustGet()
 	campaignID := campaignRecipient.CampaignID.MustGet()
 	reportedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
+	// a send that lost its person link has no recipient id, only the pseudonym
+	var recipientRef *uuid.UUID
+	if rid, err := campaignRecipient.RecipientID.Get(); err == nil {
+		recipientRef = &rid
+	}
 
 	// an anonymous campaign's events carry the pseudonym rather than a recipient
 	// id, so dedup on that instead
@@ -128,7 +140,7 @@ func (c *Campaign) recordReported(
 	if aid, aErr := campaignRecipient.AnonymizedID.Get(); aErr == nil {
 		alreadyReported, err = c.CampaignRepository.HasEventByAnonymizedID(ctx, &campaignID, &aid, reportedEventID)
 	} else {
-		alreadyReported, err = c.CampaignRepository.HasEvent(ctx, &campaignID, &recipientID, reportedEventID)
+		alreadyReported, err = c.CampaignRepository.HasEvent(ctx, &campaignID, recipientRef, reportedEventID)
 	}
 	if err != nil {
 		c.Logger.Errorw("failed to check existing reported event", "error", err)
@@ -143,7 +155,7 @@ func (c *Campaign) recordReported(
 	campaignEvent := &model.CampaignEvent{
 		ID:          &newEventID,
 		CampaignID:  &campaignID,
-		RecipientID: &recipientID,
+		RecipientID: recipientRef,
 		IP:          fields.IP,
 		UserAgent:   fields.UserAgent,
 		EventID:     reportedEventID,
@@ -168,14 +180,18 @@ func (c *Campaign) recordReported(
 		// logging was done in the previous call
 		return true, errs.Wrap(err)
 	}
-	if err := c.HandleWebhooks(
-		ctx,
-		&campaignID,
-		&recipientID,
-		data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
-		nil,
-	); err != nil {
-		return true, errs.Wrap(err)
+	// a send that lost its person link runs no webhooks or scripts, as for
+	// every event of an unlinked anonymous program send
+	if recipientRef != nil {
+		if err := c.HandleWebhooks(
+			ctx,
+			&campaignID,
+			recipientRef,
+			data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
+			nil,
+		); err != nil {
+			return true, errs.Wrap(err)
+		}
 	}
 	return true, nil
 }
@@ -192,6 +208,11 @@ const (
 	InboxReportSkipped
 	// InboxReportRecorded means a reported event was saved
 	InboxReportRecorded
+	// InboxReportAnonymous means the report was on a send of an anonymous
+	// campaign or program and was handled, recorded or not. The inbox does not
+	// count it, so its counters never show whether or when a person of an
+	// anonymous campaign reported.
+	InboxReportAnonymous
 )
 
 // RecordInboxReport records a report that was found in a report inbox.
@@ -241,23 +262,28 @@ func (c *Campaign) RecordInboxReport(
 		return InboxReportSkipped, nil
 	}
 
+	// a send of an anonymous program that lost its person link has no recipient
+	// id. its email address is gone, so the mailbox match and the reportedBy
+	// comparison below are skipped. the report is still recorded on the
+	// pseudonym, matched by the Message-ID still kept on the row.
 	recipientEmail := ""
-	recipientID := campaignRecipient.RecipientID.MustGet()
-	recipient, rErr := c.RecipientRepository.GetByID(ctx, &recipientID, &repository.RecipientOption{})
-	if errors.Is(rErr, gorm.ErrRecordNotFound) {
-		return InboxReportSkipped, nil
-	}
-	if rErr != nil {
-		// without the address the mailbox check below can not run, retry later
-		return InboxReportSkipped, errs.Wrap(rErr)
-	}
-	if email, eErr := recipient.Email.Get(); eErr == nil {
-		recipientEmail = email.String()
-	}
-	// the reporting mailbox can be a recipient itself, for example through an all
-	// staff group. A simulation email delivered to it is not a report.
-	if recipientEmail != "" && equalFoldEmail(recipientEmail, mailbox) {
-		return InboxReportSkipped, nil
+	if rid, ridErr := campaignRecipient.RecipientID.Get(); ridErr == nil {
+		recipient, rErr := c.RecipientRepository.GetByID(ctx, &rid, &repository.RecipientOption{})
+		if errors.Is(rErr, gorm.ErrRecordNotFound) {
+			return InboxReportSkipped, nil
+		}
+		if rErr != nil {
+			// without the address the mailbox check below can not run, retry later
+			return InboxReportSkipped, errs.Wrap(rErr)
+		}
+		if email, eErr := recipient.Email.Get(); eErr == nil {
+			recipientEmail = email.String()
+		}
+		// the reporting mailbox can be a recipient itself, for example through an all
+		// staff group. A simulation email delivered to it is not a report.
+		if recipientEmail != "" && equalFoldEmail(recipientEmail, mailbox) {
+			return InboxReportSkipped, nil
+		}
 	}
 
 	eventData := map[string]any{"source": "reporting inbox"}
@@ -268,7 +294,10 @@ func (c *Campaign) RecordInboxReport(
 	if err != nil {
 		return InboxReportSkipped, errs.Wrap(err)
 	}
-	at := reportedAt.UTC()
+	at, err := c.inboxReportTime(ctx, campaign, reportedAt, time.Now())
+	if err != nil {
+		return InboxReportSkipped, err
+	}
 	// once the event is saved the notable update and webhooks must run too, also
 	// when the poll is stopped meanwhile, as the report is not read again
 	// shorter than the time shutdown waits for polls, so a report is finished
@@ -288,12 +317,46 @@ func (c *Campaign) RecordInboxReport(
 		if err != nil {
 			c.Logger.Warnw("reported event saved but a follow up step failed", "error", err)
 		}
+		if campaignAnonymous(campaign) {
+			return InboxReportAnonymous, nil
+		}
 		return InboxReportRecorded, nil
 	}
 	if err != nil {
 		return InboxReportSkipped, err
 	}
+	if campaignAnonymous(campaign) {
+		return InboxReportAnonymous, nil
+	}
 	return InboxReportSkipped, nil
+}
+
+// inboxReportTime returns the time an inbox report is recorded at. A report
+// on a send of an anonymous program is recorded no earlier than when the last
+// month the program shows settled, see programAnonymousFixedFrom. A report
+// read late, such as from a backfill, then never changes a month that was
+// already shown, and counts only in months not shown yet.
+func (c *Campaign) inboxReportTime(ctx context.Context, campaign *model.Campaign, reportedAt time.Time, now time.Time) (time.Time, error) {
+	at := reportedAt.UTC()
+	programID, err := campaign.ProgramID.Get()
+	if err != nil {
+		return at, nil
+	}
+	programs := &repository.Program{DB: c.CampaignRepository.DB}
+	program, err := programs.GetByID(ctx, &programID, &repository.ProgramOption{})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return at, nil
+	}
+	if err != nil {
+		return at, errs.Wrap(err)
+	}
+	if !program.IsAnonymousOn() {
+		return at, nil
+	}
+	if fixed := programAnonymousFixedFrom(now, program.Location()); at.Before(fixed) {
+		return fixed.UTC(), nil
+	}
+	return at, nil
 }
 
 // equalFoldEmail compares two addresses ignoring case and surrounding space
@@ -338,14 +401,34 @@ var reportedDateLayouts = []string{
 	"2006/01/02",
 }
 
-// parseReportedDate reads a report date in one of reportedDateLayouts
+// parseReportedDate reads a report date in one of reportedDateLayouts, a
+// value without a time zone is read as UTC
 func parseReportedDate(value string) (time.Time, error) {
+	t, _, err := parseReportedDateIn(value, time.UTC)
+	return t, err
+}
+
+// parseReportedDateIn reads a report date in one of reportedDateLayouts. A
+// value with a zone keeps it, a value without one is read in loc. hasTime is
+// false for a value that is only a date.
+func parseReportedDateIn(value string, loc *time.Location) (t time.Time, hasTime bool, err error) {
 	for _, layout := range reportedDateLayouts {
-		if t, err := time.Parse(layout, value); err == nil {
-			return t, nil
+		if reportedLayoutHasZone(layout) {
+			t, err = time.Parse(layout, value)
+		} else {
+			t, err = time.ParseInLocation(layout, value, loc)
+		}
+		if err == nil {
+			return t, strings.Contains(layout, "15"), nil
 		}
 	}
-	return time.Time{}, errors.New("unsupported date format")
+	return time.Time{}, false, errors.New("unsupported date format")
+}
+
+// reportedLayoutHasZone reports whether a reported date layout reads a zone
+// from the value
+func reportedLayoutHasZone(layout string) bool {
+	return strings.Contains(layout, "Z07") || strings.Contains(layout, "-07")
 }
 
 // ReportedCSVRow is one data row of a reported CSV and the line it starts on
@@ -376,6 +459,18 @@ type ReportedCSVResult struct {
 	Errors []ReportedCSVRowError `json:"errors"`
 }
 
+// countRecorded counts a matched row. A row whose recipient already reported
+// counts as processed on an anonymous campaign, so the import does not tell
+// who reported.
+func (r *ReportedCSVResult) countRecorded(recorded bool, anonymous bool) {
+	if recorded || anonymous {
+		r.Processed++
+		return
+	}
+	r.AlreadyReported++
+	r.Skipped++
+}
+
 func (r *ReportedCSVResult) fail(line int, reason string) {
 	r.Failed++
 	r.Skipped++
@@ -392,26 +487,97 @@ func quoteCSVValue(value string) string {
 	return strconv.Quote(value)
 }
 
-// reportedCSVRecipients finds the campaign recipient for an email. An exact
-// match wins, otherwise a match that ignores case is used when only one
-// recipient has that email.
-type reportedCSVRecipients struct {
-	exact  map[string]*model.CampaignRecipient
-	folded map[string][]*model.CampaignRecipient
+// reportedCSVRecipients finds who an email of a reported CSV belongs to. An
+// exact match wins, otherwise a match that ignores case is used when only one
+// entry has that email. More than one is ambiguous and never guessed.
+type reportedCSVRecipients[T any] struct {
+	exact  map[string]T
+	folded map[string][]T
 }
 
-// ambiguous is true when no exact match exists and more than one recipient
-// has the email in another case.
-func (r *reportedCSVRecipients) find(email string) (cr *model.CampaignRecipient, ambiguous bool) {
-	if cr, ok := r.exact[email]; ok {
-		return cr, false
-	}
-	crs := r.folded[strings.ToLower(email)]
-	if len(crs) == 1 {
-		return crs[0], false
-	}
-	return nil, len(crs) > 1
+func newReportedCSVRecipients[T any]() *reportedCSVRecipients[T] {
+	return &reportedCSVRecipients[T]{exact: map[string]T{}, folded: map[string][]T{}}
 }
+
+// add registers an entry under its email
+func (r *reportedCSVRecipients[T]) add(email string, v T) {
+	r.exact[email] = v
+	folded := strings.ToLower(email)
+	r.folded[folded] = append(r.folded[folded], v)
+}
+
+// find returns the entry of an email. ambiguous is true when no exact match
+// exists and more than one entry has the email in another case.
+func (r *reportedCSVRecipients[T]) find(email string) (v T, found bool, ambiguous bool) {
+	if v, ok := r.exact[email]; ok {
+		return v, true, false
+	}
+	vs := r.folded[strings.ToLower(email)]
+	if len(vs) == 1 {
+		return vs[0], true, false
+	}
+	return v, false, len(vs) > 1
+}
+
+// reportedCSVCell is the email and the date of one reported CSV row
+type reportedCSVCell struct {
+	email string
+	date  string
+}
+
+// readReportedCSVRow reads and checks the email and date of a row. A
+// dateColumn below zero means the file has no date column. When a date column
+// is picked, a row without a date in it fails, also where the date is
+// optional, so a missing date is never read as no date. When ok is false the
+// row is recorded as failed on result.
+func readReportedCSVRow(
+	result *ReportedCSVResult,
+	row ReportedCSVRow,
+	emailColumn int,
+	dateColumn int,
+	dateRequired bool,
+) (cell reportedCSVCell, ok bool) {
+	datePicked := dateRequired || dateColumn >= 0
+	if len(row.Fields) <= emailColumn || (datePicked && len(row.Fields) <= dateColumn) {
+		result.fail(row.Line, "Missing email or date column")
+		return cell, false
+	}
+	cell.email = strings.TrimSpace(row.Fields[emailColumn])
+	if dateColumn >= 0 && dateColumn < len(row.Fields) {
+		cell.date = strings.TrimSpace(row.Fields[dateColumn])
+	}
+	if cell.email == "" {
+		result.fail(row.Line, "Email is empty")
+		return cell, false
+	}
+	if datePicked && cell.date == "" {
+		result.fail(row.Line, "Date is empty")
+		return cell, false
+	}
+	return cell, true
+}
+
+// checkReportedCSVColumns checks the column indexes of a reported CSV. A
+// dateColumn below zero is allowed only when the date is optional.
+func checkReportedCSVColumns(header []string, rows []ReportedCSVRow, emailColumn, dateColumn int, dateRequired bool) error {
+	if len(rows) == 0 {
+		return errs.NewValidationError(errors.New("CSV must have at least a header row and one data row"))
+	}
+	if len(rows) > ReportedCSVMaxRows {
+		return errs.NewValidationError(fmt.Errorf("CSV has more than %d rows", ReportedCSVMaxRows))
+	}
+	if emailColumn < 0 || emailColumn >= len(header) {
+		return errs.NewValidationError(errors.New("invalid email column index"))
+	}
+	if dateColumn >= len(header) || (dateRequired && dateColumn < 0) {
+		return errs.NewValidationError(errors.New("invalid date column index"))
+	}
+	return nil
+}
+
+// ReportedCSVMaxRows bounds how many data rows one reported CSV may hold. The
+// upload stops reading once a file has more
+const ReportedCSVMaxRows = 100000
 
 // ProcessReportedCSV marks the campaign recipients in a CSV as reported at the
 // date in the row. Rows that can not be imported are counted and the first of
@@ -455,14 +621,8 @@ func (c *Campaign) ProcessReportedCSV(
 		return nil, errs.NewValidationError(errors.New("the campaign is anonymized, reports can not be imported"))
 	}
 
-	if len(rows) == 0 {
-		return nil, errs.NewValidationError(errors.New("CSV must have at least a header row and one data row"))
-	}
-	if emailColumnIndex < 0 || emailColumnIndex >= len(header) {
-		return nil, errs.NewValidationError(errors.New("invalid email column index"))
-	}
-	if dateColumnIndex < 0 || dateColumnIndex >= len(header) {
-		return nil, errs.NewValidationError(errors.New("invalid date column index"))
+	if err := checkReportedCSVColumns(header, rows, emailColumnIndex, dateColumnIndex, true); err != nil {
+		return nil, err
 	}
 
 	campaignRecipients, err := c.CampaignRecipientRepository.GetByCampaignID(
@@ -474,10 +634,7 @@ func (c *Campaign) ProcessReportedCSV(
 		c.Logger.Errorw("failed to get campaign recipients", "error", err)
 		return nil, errs.Wrap(err)
 	}
-	recipients := reportedCSVRecipients{
-		exact:  map[string]*model.CampaignRecipient{},
-		folded: map[string][]*model.CampaignRecipient{},
-	}
+	recipients := newReportedCSVRecipients[*model.CampaignRecipient]()
 	for _, cr := range campaignRecipients.Rows {
 		if cr.RecipientID.IsNull() || cr.Recipient == nil {
 			continue
@@ -486,99 +643,42 @@ func (c *Campaign) ProcessReportedCSV(
 		if err != nil {
 			continue
 		}
-		e := email.String()
-		recipients.exact[e] = cr
-		folded := strings.ToLower(e)
-		recipients.folded[folded] = append(recipients.folded[folded], cr)
+		recipients.add(email.String(), cr)
 	}
 
 	anonymous := campaignAnonymous(campaign)
-	reportedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
 	result := &ReportedCSVResult{Errors: []ReportedCSVRowError{}}
 
 	for _, row := range rows {
-		if len(row.Fields) <= emailColumnIndex || len(row.Fields) <= dateColumnIndex {
-			result.fail(row.Line, "Missing email or date column")
+		cell, ok := readReportedCSVRow(result, row, emailColumnIndex, dateColumnIndex, true)
+		if !ok {
 			continue
 		}
-		reportedByEmail := strings.TrimSpace(row.Fields[emailColumnIndex])
-		dateReported := strings.TrimSpace(row.Fields[dateColumnIndex])
-		if reportedByEmail == "" {
-			result.fail(row.Line, "Email is empty")
-			continue
-		}
-		if dateReported == "" {
-			result.fail(row.Line, "Date is empty")
-			continue
-		}
-		parsedDate, err := parseReportedDate(dateReported)
+		parsedDate, err := parseReportedDate(cell.date)
 		if err != nil {
-			result.fail(row.Line, "Invalid date "+quoteCSVValue(dateReported))
+			result.fail(row.Line, "Invalid date "+quoteCSVValue(cell.date))
 			continue
 		}
-		if _, err := vo.NewEmail(reportedByEmail); err != nil {
-			result.fail(row.Line, "Invalid email "+quoteCSVValue(reportedByEmail))
+		if _, err := vo.NewEmail(cell.email); err != nil {
+			result.fail(row.Line, "Invalid email "+quoteCSVValue(cell.email))
 			continue
 		}
-		campaignRecipient, ambiguous := recipients.find(reportedByEmail)
+		campaignRecipient, found, ambiguous := recipients.find(cell.email)
 		if ambiguous {
-			result.fail(row.Line, quoteCSVValue(reportedByEmail)+" matches more than one recipient, use the exact case")
+			result.fail(row.Line, quoteCSVValue(cell.email)+" matches more than one recipient, use the exact case")
 			continue
 		}
-		if campaignRecipient == nil {
-			result.fail(row.Line, quoteCSVValue(reportedByEmail)+" is not a recipient of this campaign")
+		if !found {
+			result.fail(row.Line, quoteCSVValue(cell.email)+" is not a recipient of this campaign")
 			continue
 		}
-		recipientID := campaignRecipient.RecipientID.MustGet()
-
-		// an anonymous campaign's events carry the pseudonym rather than a
-		// recipient id, so dedup on that
-		var alreadyReported bool
-		if aid, aErr := campaignRecipient.AnonymizedID.Get(); aErr == nil {
-			alreadyReported, err = c.CampaignRepository.HasEventByAnonymizedID(ctx, campaignID, &aid, reportedEventID)
-		} else {
-			alreadyReported, err = c.CampaignRepository.HasEvent(ctx, campaignID, &recipientID, reportedEventID)
-		}
+		recorded, err := c.recordReportedEvent(ctx, campaign, campaignRecipient, parsedDate)
 		if err != nil {
-			c.Logger.Errorw("failed to check existing reported event", "error", err, "line", row.Line)
+			c.Logger.Errorw("failed to record reported event", "error", err, "line", row.Line)
 			result.fail(row.Line, "Could not be saved")
 			continue
 		}
-		if alreadyReported {
-			if anonymous {
-				result.Processed++
-			} else {
-				result.AlreadyReported++
-				result.Skipped++
-			}
-			continue
-		}
-
-		eventID := uuid.New()
-		campaignEvent := &model.CampaignEvent{
-			ID:          &eventID,
-			CampaignID:  campaignID,
-			RecipientID: &recipientID,
-			IP:          vo.NewEmptyOptionalString64(),
-			UserAgent:   vo.NewEmptyOptionalString255(),
-			EventID:     reportedEventID,
-			Data:        vo.NewEmptyOptionalString1MB(),
-			Metadata:    vo.NewEmptyOptionalString1MB(),
-		}
-		anonymizeEventForRecipient(anonymous, campaignRecipient, campaignEvent)
-		if err := c.saveReportedEvent(campaignEvent, parsedDate); err != nil {
-			c.Logger.Errorw("failed to save reported event", "error", err, "line", row.Line)
-			result.fail(row.Line, "Could not be saved")
-			continue
-		}
-		if err := c.SetNotableCampaignRecipientEvent(
-			ctx,
-			campaignRecipient,
-			data.EVENT_CAMPAIGN_RECIPIENT_REPORTED,
-		); err != nil {
-			c.Logger.Errorw("failed to update notable event", "error", err)
-		}
-		result.Processed++
+		result.countRecorded(recorded, anonymous)
 	}
 
 	ae.Details["processed"] = result.Processed

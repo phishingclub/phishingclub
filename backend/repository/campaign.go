@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -77,6 +78,13 @@ type CampaignEventOption struct {
 	WithCampaign bool
 	WithUser     bool
 	EventTypeIDs []string
+	// RecipientID limits the events to one recipient when set
+	RecipientID *uuid.UUID
+	// CreatedFrom and CreatedTo, when set, limit the events to those created
+	// in that time. A bound lets a read sorted by time start at it on the
+	// created_at index
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
 }
 
 // CampaignEventAllOption is options for preloading events across all campaigns
@@ -86,6 +94,159 @@ type CampaignEventAllOption struct {
 	WithUser              bool
 	IncludeTestCampaigns  bool
 	IncludeProgramManaged bool
+	// ProgramEventTypeIDs, when set, adds the events of these types from the
+	// hidden campaigns of programs that are not anonymous
+	ProgramEventTypeIDs []string
+	// EventTypeIDs, when set, keeps only these event types
+	EventTypeIDs []string
+}
+
+// eventIDValues turns event type ids into IN clause values
+func eventIDValues(ids []string) []any {
+	values := make([]any, 0, len(ids))
+	for _, id := range ids {
+		values = append(values, id)
+	}
+	return values
+}
+
+// whereDashboardEvents limits campaign events joined with their campaign to the
+// dashboard scope: one company or all of them, test campaigns when asked, and
+// program events of the given types from programs that are not anonymous.
+// With indexed false the company and program columns of the campaign are not
+// read through their indexes, so a page sorted by time walks the created_at
+// index.
+func (r *Campaign) whereDashboardEvents(
+	db *gorm.DB,
+	companyID *uuid.UUID,
+	options *CampaignEventAllOption,
+	indexed bool,
+) *gorm.DB {
+	campaignCol := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
+	}
+	eventCol := clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "event_id"}
+	if companyID != nil {
+		var company any = campaignCol("company_id")
+		if !indexed {
+			company = notIndexed(campaignCol("company_id"))
+		}
+		db = db.Where(clause.Expr{SQL: "? = ?", Vars: []any{company, companyID}})
+	}
+	if !options.IncludeTestCampaigns {
+		db = db.Where(clause.Eq{Column: campaignCol("is_test"), Value: false})
+	}
+	if len(options.EventTypeIDs) > 0 {
+		db = db.Where(clause.IN{Column: eventCol, Values: eventIDValues(options.EventTypeIDs)})
+	}
+	switch {
+	case options.IncludeProgramManaged:
+	case len(options.ProgramEventTypeIDs) > 0:
+		notAnonymousPrograms := r.DB.Session(&gorm.Session{NewDB: true}).
+			Table(database.PROGRAM_TABLE).
+			Clauses(clause.Select{Columns: []clause.Column{{Table: database.PROGRAM_TABLE, Name: "id"}}}).
+			Where(clause.Eq{Column: clause.Column{Table: database.PROGRAM_TABLE, Name: "is_anonymous"}, Value: false}).
+			Where(programNotAnonymizing(database.PROGRAM_TABLE))
+		// with the program column read through its index in either branch,
+		// SQLite reads the OR through two indexes, then every event of those
+		// campaigns, which suits a count of one event type. A page sorted by
+		// time would sort every event, while a walk of the created_at index
+		// stops after one page.
+		var program any = programColumn(database.CAMPAIGN_TABLE)
+		if !indexed {
+			program = notIndexed(programColumn(database.CAMPAIGN_TABLE))
+		}
+		db = db.Where(clause.Or(
+			clause.Expr{SQL: "? IS NULL", Vars: []any{program}},
+			clause.And(
+				clause.Expr{SQL: "? IN (?)", Vars: []any{program, notAnonymousPrograms}},
+				clause.IN{Column: eventCol, Values: eventIDValues(options.ProgramEventTypeIDs)},
+			),
+		))
+	default:
+		// hide events belonging to a program's hidden campaigns
+		db = db.Where(clause.Eq{Column: programColumn(database.CAMPAIGN_TABLE), Value: nil})
+	}
+	return db
+}
+
+// dashboardEventsSortLimit is the most events the dashboard scope may hold for
+// a page of them sorted by time to be read campaign by campaign and sorted.
+// Sorting this many rows takes a few milliseconds. A scope with more events
+// walks the created_at index instead, which stops after one page and is fast
+// when the scope has many of the events of its time.
+var dashboardEventsSortLimit = 20000
+
+// dashboardCampaigns limits campaign events to the campaigns of the company,
+// or of every company when companyID is nil. The scope is already kept by the
+// join with the campaign, this only lets SQLite read the events campaign by
+// campaign through the campaign and event index.
+func (r *Campaign) dashboardCampaigns(companyID *uuid.UUID) clause.Expr {
+	campaigns := r.DB.Session(&gorm.Session{NewDB: true}).
+		Table(database.CAMPAIGN_TABLE).
+		Clauses(clause.Select{Columns: []clause.Column{{Table: database.CAMPAIGN_TABLE, Name: "id"}}})
+	if companyID != nil {
+		campaigns = campaigns.Where(clause.Eq{Column: companyColumn(database.CAMPAIGN_TABLE), Value: companyID})
+	}
+	return clause.Expr{SQL: "? IN (?)", Vars: []any{
+		clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "campaign_id"},
+		campaigns,
+	}}
+}
+
+// dashboardHasFewEvents reports whether the dashboard scope holds at most
+// dashboardEventsSortLimit events. The count reads the events campaign by
+// campaign and stops after the limit, so it stays cheap for a large scope.
+func (r *Campaign) dashboardHasFewEvents(
+	ctx context.Context,
+	companyID *uuid.UUID,
+	options *CampaignEventAllOption,
+) (bool, error) {
+	capped := r.DB.Session(&gorm.Session{NewDB: true}).
+		Model(&database.CampaignEvent{}).
+		Select("1").
+		Joins(LeftJoinOn(
+			database.CAMPAIGN_EVENT_TABLE,
+			"campaign_id",
+			database.CAMPAIGN_TABLE,
+			"id",
+		)).
+		Where(r.dashboardCampaigns(companyID)).
+		Limit(dashboardEventsSortLimit + 1)
+	capped = r.whereDashboardEvents(capped, companyID, options, true)
+	var count int64
+	if err := r.DB.WithContext(ctx).Table("(?) AS capped", capped).Count(&count).Error; err != nil {
+		return false, errs.Wrap(err)
+	}
+	return count <= int64(dashboardEventsSortLimit), nil
+}
+
+// CountDashboardEvents counts the campaign events created since the given
+// time in the dashboard scope
+func (r *Campaign) CountDashboardEvents(
+	ctx context.Context,
+	companyID *uuid.UUID,
+	since time.Time,
+	options *CampaignEventAllOption,
+) (int64, error) {
+	db := r.DB.WithContext(ctx).
+		Model(&database.CampaignEvent{}).
+		Joins(LeftJoinOn(
+			database.CAMPAIGN_EVENT_TABLE,
+			"campaign_id",
+			database.CAMPAIGN_TABLE,
+			"id",
+		)).
+		Where(clause.Gte{
+			Column: clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "created_at"},
+			Value:  utils.RFC3339UTC(since),
+		})
+	db = r.whereDashboardEvents(db, companyID, options, true)
+	var count int64
+	if err := db.Count(&count).Error; err != nil {
+		return 0, errs.Wrap(err)
+	}
+	return count, nil
 }
 
 // Campaign is a Campaign repository
@@ -100,7 +261,7 @@ func (r *Campaign) applyTestCampaignFilter(db *gorm.DB, options *CampaignOption)
 	}
 	// hidden campaigns a program manages must never surface in a campaign listing
 	if !options.IncludeProgramManaged {
-		db = db.Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: nil})
+		db = db.Where(clause.Eq{Column: programColumn(database.CAMPAIGN_TABLE), Value: nil})
 	}
 	return db
 }
@@ -483,6 +644,30 @@ func (r *Campaign) GetByDenyPageID(
 	return models, nil
 }
 
+// GetByEvasionPageID gets the campaigns that use a page as their evasion page
+// not paginated
+func (r *Campaign) GetByEvasionPageID(
+	ctx context.Context,
+	pageID *uuid.UUID,
+) ([]*model.Campaign, error) {
+	rows := []*database.Campaign{}
+	models := []*model.Campaign{}
+	res := r.DB.WithContext(ctx).
+		Where(clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_TABLE, Name: "evasion_page_id"}, Value: pageID}).
+		Find(&rows)
+	if res.Error != nil {
+		return models, res.Error
+	}
+	for _, row := range rows {
+		c, err := ToCampaign(row)
+		if err != nil {
+			return models, errs.Wrap(err)
+		}
+		models = append(models, c)
+	}
+	return models, nil
+}
+
 // GetByScriptID gets the campaigns a script is attached to
 // not paginated
 func (r *Campaign) GetByScriptID(
@@ -719,6 +904,137 @@ func (r *Campaign) RemoveDenyPageByDenyPageIDs(
 	return nil
 }
 
+// GetOpenNamesByFilterPage returns the names of at most limit campaigns that
+// are not closed and use a page as deny or evasion page, sorted by name, and
+// how many such campaigns there are. The hidden campaigns of a program are
+// left out, the program is named instead.
+func (r *Campaign) GetOpenNamesByFilterPage(
+	ctx context.Context,
+	pageID *uuid.UUID,
+	limit int,
+) ([]string, int64, error) {
+	col := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
+	}
+	q := r.DB.WithContext(ctx).
+		Model(&database.Campaign{}).
+		Where(clause.Eq{Column: col("closed_at"), Value: nil}).
+		Where(clause.Eq{Column: col("program_id"), Value: nil}).
+		Where(clause.Or(
+			clause.Eq{Column: col("deny_page_id"), Value: pageID},
+			clause.Eq{Column: col("evasion_page_id"), Value: pageID},
+		))
+	var count int64
+	if err := q.Session(&gorm.Session{}).Count(&count).Error; err != nil {
+		return nil, 0, errs.Wrap(err)
+	}
+	names := []string{}
+	if count == 0 {
+		return names, 0, nil
+	}
+	if err := q.Session(&gorm.Session{}).
+		Order(clause.OrderByColumn{Column: col("name")}).
+		Limit(limit).
+		Pluck("name", &names).Error; err != nil {
+		return nil, 0, errs.Wrap(err)
+	}
+	return names, count, nil
+}
+
+// RemovePageFromFilters clears a page that is being deleted from every closed
+// campaign. A campaign that used it as deny page also loses its evasion page
+// and its allow or deny lists, as both need a deny page. A campaign that used
+// it as evasion page loses only the evasion page. A campaign that is not
+// closed keeps the page, the delete is refused while one uses it, see
+// GetOpenNamesByFilterPage. The hidden campaigns of a program are cleared as
+// closed ones.
+func (r *Campaign) RemovePageFromFilters(
+	ctx context.Context,
+	pageID *uuid.UUID,
+) error {
+	col := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
+	}
+	// a hidden campaign follows its program, which refuses the delete while
+	// it is open and uses the page
+	closed := clause.Or(
+		clause.Neq{Column: col("closed_at"), Value: nil},
+		clause.Neq{Column: col("program_id"), Value: nil},
+	)
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		usingAsDenyPage := tx.Session(&gorm.Session{NewDB: true}).
+			Table(database.CAMPAIGN_TABLE).
+			Clauses(clause.Select{Columns: []clause.Column{col("id")}}).
+			Where(clause.Eq{Column: col("deny_page_id"), Value: pageID}).
+			Where(closed)
+		if err := tx.
+			Where(clause.Expr{SQL: "? IN (?)", Vars: []any{
+				clause.Column{Table: database.CAMPAIGN_ALLOW_DENY_TABLE, Name: "campaign_id"},
+				usingAsDenyPage,
+			}}).
+			Delete(&database.CampaignAllowDeny{}).Error; err != nil {
+			return errs.Wrap(err)
+		}
+		row := map[string]any{"deny_page_id": nil, "evasion_page_id": nil}
+		AddUpdatedAt(row)
+		if err := tx.Model(&database.Campaign{}).
+			Where(clause.Eq{Column: col("deny_page_id"), Value: pageID}).
+			Where(closed).
+			Updates(row).Error; err != nil {
+			return errs.Wrap(err)
+		}
+		row = map[string]any{"evasion_page_id": nil}
+		AddUpdatedAt(row)
+		if err := tx.Model(&database.Campaign{}).
+			Where(clause.Eq{Column: col("evasion_page_id"), Value: pageID}).
+			Where(closed).
+			Updates(row).Error; err != nil {
+			return errs.Wrap(err)
+		}
+		return nil
+	})
+}
+
+// RemoveAllowDenyFromFilters removes an allow or deny list that is being
+// deleted from every campaign. A campaign left with no list and no evasion
+// page also loses its deny page, as nothing uses it anymore. A campaign that
+// keeps another list or an evasion page keeps its deny page, both need it.
+func (r *Campaign) RemoveAllowDenyFromFilters(
+	ctx context.Context,
+	allowDenyID *uuid.UUID,
+) error {
+	col := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
+	}
+	listCol := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_ALLOW_DENY_TABLE, Name: name}
+	}
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		newDB := tx.Session(&gorm.Session{NewDB: true})
+		holders := newDB.Table(database.CAMPAIGN_ALLOW_DENY_TABLE).
+			Clauses(clause.Select{Columns: []clause.Column{listCol("campaign_id")}}).
+			Where(clause.Eq{Column: listCol("allow_deny_id"), Value: allowDenyID})
+		otherHolders := newDB.Table(database.CAMPAIGN_ALLOW_DENY_TABLE).
+			Clauses(clause.Select{Columns: []clause.Column{listCol("campaign_id")}}).
+			Where(clause.Neq{Column: listCol("allow_deny_id"), Value: allowDenyID})
+		row := map[string]any{"deny_page_id": nil}
+		AddUpdatedAt(row)
+		if err := tx.Model(&database.Campaign{}).
+			Where(clause.Expr{SQL: "? IN (?)", Vars: []any{col("id"), holders}}).
+			Where(clause.Expr{SQL: "? NOT IN (?)", Vars: []any{col("id"), otherHolders}}).
+			Where(clause.Eq{Column: col("evasion_page_id"), Value: nil}).
+			Updates(row).Error; err != nil {
+			return errs.Wrap(err)
+		}
+		if err := tx.
+			Where(clause.Eq{Column: listCol("allow_deny_id"), Value: allowDenyID}).
+			Delete(&database.CampaignAllowDeny{}).Error; err != nil {
+			return errs.Wrap(err)
+		}
+		return nil
+	})
+}
+
 // RemoveAllowDenyListsByID removes allow/block lists from campaign by allow deny list id
 func (r *Campaign) RemoveAllowDenyListsByID(
 	ctx context.Context,
@@ -788,28 +1104,27 @@ func (r *Campaign) GetAllActive(
 	// Apply test campaign filter based on options
 	db = r.applyTestCampaignFilter(db, options)
 
+	// open campaigns that started, are self managed or are paused. A campaign
+	// paused before its delivery started is listed here as Paused, not as
+	// scheduled, the same bucket as the dashboard Paused tile.
+	col := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
+	}
 	var dbCampaigns []database.Campaign
-	res := db.
-		Where(
-			"((send_start_at <= ? OR send_start_at IS NULL) AND closed_at IS NULL)",
-			utils.NowRFC3339UTC(),
-		).
+	res := withPeek(db.
+		Where(clause.Eq{Column: col("closed_at"), Value: nil}).
+		Where(clause.Or(
+			clause.Lte{Column: col("send_start_at"), Value: utils.NowRFC3339UTC()},
+			clause.Eq{Column: col("send_start_at"), Value: nil},
+			clause.Neq{Column: col("paused_at"), Value: nil},
+		)), options.QueryArgs).
 		Find(&dbCampaigns)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.CAMPAIGN_TABLE,
-		options.QueryArgs,
-		allowedCampaignColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaigns, options.QueryArgs)
 
 	for _, dbCampaign := range dbCampaigns {
 		campaign, err := ToCampaign(&dbCampaign)
@@ -839,25 +1154,22 @@ func (r *Campaign) GetAllUpcoming(
 	// Apply test campaign filter based on options
 	db = r.applyTestCampaignFilter(db, options)
 
+	// a paused campaign is listed with the active campaigns as Paused
+	col := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
+	}
 	var dbCampaigns []database.Campaign
-	res := db.
-		Where("((send_start_at > ?) AND closed_at IS NULL)", utils.NowRFC3339UTC()).
+	res := withPeek(db.
+		Where(clause.Gt{Column: col("send_start_at"), Value: utils.NowRFC3339UTC()}).
+		Where(clause.Eq{Column: col("closed_at"), Value: nil}).
+		Where(clause.Eq{Column: col("paused_at"), Value: nil}), options.QueryArgs).
 		Find(&dbCampaigns)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.CAMPAIGN_TABLE,
-		options.QueryArgs,
-		allowedCampaignColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaigns, options.QueryArgs)
 
 	for _, dbCampaign := range dbCampaigns {
 		campaign, err := ToCampaign(&dbCampaign)
@@ -891,24 +1203,15 @@ func (r *Campaign) GetAllFinished(
 	db = r.applyTestCampaignFilter(db, options)
 
 	var dbCampaigns []database.Campaign
-	res := db.
-		Where("closed_at IS NOT NULL").
+	res := withPeek(db.
+		Where("closed_at IS NOT NULL"), options.QueryArgs).
 		Find(&dbCampaigns)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.CAMPAIGN_TABLE,
-		options.QueryArgs,
-		allowedCampaignColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaigns, options.QueryArgs)
 
 	for _, dbCampaign := range dbCampaigns {
 		campaign, err := ToCampaign(&dbCampaign)
@@ -920,18 +1223,47 @@ func (r *Campaign) GetAllFinished(
 	return result, nil
 }
 
-// GetAllEvents gets all campaign events across campaigns
+// GetAllEvents gets one page of campaign events in the dashboard scope. A
+// page sorted by time is read the cheaper of two ways, see
+// dashboardEventsSortLimit, and both give the same rows in the same order.
 func (r *Campaign) GetAllEvents(
 	ctx context.Context,
 	companyID *uuid.UUID,
 	options *CampaignEventAllOption,
 ) (*model.Result[model.CampaignEvent], error) {
 	result := model.NewEmptyResult[model.CampaignEvent]()
-	db := r.preloadAllEventRecipient(r.DB, options)
+	sortedByTime := eventsSortedByCreatedAt(options.QueryArgs)
+	// walk the created_at index newest first and stop after one page, unless
+	// a company or an event type keeps few enough events to read them all
+	// campaign by campaign and sort them, since the walk would pass every
+	// event of everything else to fill the page
+	walk := sortedByTime
+	if sortedByTime && (companyID != nil || len(options.EventTypeIDs) > 0) {
+		few, err := r.dashboardHasFewEvents(ctx, companyID, options)
+		if err != nil {
+			return result, err
+		}
+		walk = !few
+	}
+	db := r.preloadAllEventRecipient(r.DB.WithContext(ctx), options)
 	db = r.joinEvent(db)
-	db, err := useQuery(db, database.CAMPAIGN_TABLE, options.QueryArgs, allowedCampaginEventViewColumns...)
+	queryArgs := options.QueryArgs
+	if sortedByTime {
+		// sorted without case folding, so a page walks the created_at index
+		// in order and stops, see getEventsInScope
+		q := *queryArgs
+		q.OrderBy = ""
+		queryArgs = &q
+	}
+	db, err := useQuery(db, database.CAMPAIGN_TABLE, queryArgs, allowedCampaginEventViewColumns...)
 	if err != nil {
 		return result, errs.Wrap(err)
+	}
+	if sortedByTime {
+		db = db.Clauses(eventTimeOrder(options.QueryArgs.Desc, walk))
+		if !walk {
+			db = db.Where(r.dashboardCampaigns(companyID))
+		}
 	}
 	var dbCampaignEvents []database.CampaignEvent
 	db = db.
@@ -948,37 +1280,15 @@ func (r *Campaign) GetAllEvents(
 			"id",
 		))
 
-	// filter by company if in company context
-	if companyID != nil {
-		db = db.Where(TableColumn(database.CAMPAIGN_TABLE, "company_id")+" = ?", companyID)
-	}
+	db = r.whereDashboardEvents(db, companyID, options, !walk)
 
-	// filter test campaigns if not included
-	if !options.IncludeTestCampaigns {
-		db = db.Where(TableColumn(database.CAMPAIGN_TABLE, "is_test")+" = ?", false)
-	}
-
-	// hide events belonging to a program's hidden campaigns
-	if !options.IncludeProgramManaged {
-		db = db.Where(clause.Eq{Column: programColumn(database.CAMPAIGN_TABLE), Value: nil})
-	}
-
-	res := db.Find(&dbCampaignEvents)
+	res := withPeek(db, options.QueryArgs).Find(&dbCampaignEvents)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.CAMPAIGN_TABLE,
-		options.QueryArgs,
-		allowedCampaginEventViewColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaignEvents, options.QueryArgs)
 
 	for _, dbCampaignEvent := range dbCampaignEvents {
 		c, err := ToCampaignEvent(&dbCampaignEvent)
@@ -997,54 +1307,127 @@ func (r *Campaign) GetEventsByCampaignID(
 	options *CampaignEventOption,
 	since *time.Time,
 ) (*model.Result[model.CampaignEvent], error) {
+	scope := clause.Eq{
+		Column: clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "campaign_id"},
+		Value:  campaignID,
+	}
+	return r.getEventsInScope(ctx, scope, options, since, true)
+}
+
+// eventTimeOrder sorts campaign events by time and then by row id, so events
+// of the same time keep the order a walk of the created_at index gives. With
+// indexed false the time is not read through its index, so SQLite sorts the
+// rows the other predicates found.
+func eventTimeOrder(desc, indexed bool) clause.OrderBy {
+	createdAt := clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "created_at"}
+	rowID := clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "rowid"}
+	if indexed {
+		return clause.OrderBy{Columns: []clause.OrderByColumn{
+			{Column: createdAt, Desc: desc},
+			{Column: rowID, Desc: desc},
+		}}
+	}
+	if desc {
+		return clause.OrderBy{Expression: clause.Expr{SQL: "+? DESC, ? DESC", Vars: []any{createdAt, rowID}}}
+	}
+	return clause.OrderBy{Expression: clause.Expr{SQL: "+? ASC, ? ASC", Vars: []any{createdAt, rowID}}}
+}
+
+// campaignEventJoins joins the event type and the recipient to a campaign
+// event, the columns the event view sorts and searches on
+func campaignEventJoins() clause.From {
+	eventCol := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: name}
+	}
+	return clause.From{Joins: []clause.Join{
+		{
+			Type:  clause.LeftJoin,
+			Table: clause.Table{Name: database.EVENT_TABLE},
+			ON: clause.Where{Exprs: []clause.Expression{clause.Eq{
+				Column: eventCol("event_id"),
+				Value:  clause.Column{Table: database.EVENT_TABLE, Name: "id"},
+			}}},
+		},
+		{
+			Type:  clause.LeftJoin,
+			Table: clause.Table{Name: database.RECIPIENT_TABLE},
+			ON: clause.Where{Exprs: []clause.Expression{clause.Eq{
+				Column: eventCol("recipient_id"),
+				Value:  clause.Column{Table: database.RECIPIENT_TABLE, Name: "id"},
+			}}},
+		},
+	}}
+}
+
+// getEventsInScope reads one page of campaign events limited by scope, sorted
+// and searched through the campaign event view allowlist. since keeps only
+// events created after it, EventTypeIDs keeps only those event types. Events
+// sorted by time are sorted by row id next, the order a walk of the
+// created_at index gives. With timeIndexed false the created_at column is not
+// read through its index, neither for the sort nor for the time bounds, so
+// the scope picks the index.
+func (r *Campaign) getEventsInScope(
+	ctx context.Context,
+	scope clause.Expression,
+	options *CampaignEventOption,
+	since *time.Time,
+	timeIndexed bool,
+) (*model.Result[model.CampaignEvent], error) {
 	result := model.NewEmptyResult[model.CampaignEvent]()
-	db := r.preloadEventRecipient(r.DB, options)
-	db = r.joinEvent(db)
-	db, err := useQuery(db, database.CAMPAIGN_TABLE, options.QueryArgs, allowedCampaginEventViewColumns...)
+	db := r.preloadEventRecipient(r.DB.WithContext(ctx), options)
+	db = db.Model(&database.CampaignEvent{}).Clauses(campaignEventJoins())
+	queryArgs := options.QueryArgs
+	if eventsSortedByCreatedAt(queryArgs) {
+		// a time sorts the same with or without case folding, and without it
+		// SQLite can read the created_at index in order instead of sorting
+		q := *queryArgs
+		q.OrderBy = ""
+		queryArgs = &q
+	}
+	db, err := useQuery(db, database.CAMPAIGN_TABLE, queryArgs, allowedCampaginEventViewColumns...)
 	if err != nil {
 		return result, errs.Wrap(err)
+	}
+	createdAt := clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "created_at"}
+	if queryArgs != options.QueryArgs {
+		db = db.Clauses(eventTimeOrder(options.QueryArgs.Desc, timeIndexed))
+	}
+	// the time bounds as the sort reads the created_at column
+	var created any = createdAt
+	if !timeIndexed {
+		created = notIndexed(createdAt)
+	}
+	db = db.Where(scope)
+	if since != nil {
+		db = db.Where(clause.Expr{SQL: "? > ?", Vars: []any{created, utils.RFC3339UTC(*since)}})
+	}
+	if options.CreatedFrom != nil {
+		db = db.Where(clause.Expr{SQL: "? >= ?", Vars: []any{created, utils.RFC3339UTC(*options.CreatedFrom)}})
+	}
+	if options.CreatedTo != nil {
+		db = db.Where(clause.Expr{SQL: "? <= ?", Vars: []any{created, utils.RFC3339UTC(*options.CreatedTo)}})
+	}
+	if options.RecipientID != nil {
+		db = db.Where(clause.Eq{
+			Column: clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "recipient_id"},
+			Value:  options.RecipientID,
+		})
+	}
+	if len(options.EventTypeIDs) > 0 {
+		values := make([]any, 0, len(options.EventTypeIDs))
+		for _, id := range options.EventTypeIDs {
+			values = append(values, id)
+		}
+		db = db.Where(clause.IN{
+			Column: clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "event_id"},
+			Values: values,
+		})
 	}
 	var dbCampaignEvents []database.CampaignEvent
-	db = db.
-		Joins(LeftJoinOn(
-			database.CAMPAIGN_EVENT_TABLE,
-			"recipient_id",
-			database.RECIPIENT_TABLE,
-			"id",
-		)).
-		Where("campaign_id = ?", campaignID)
-
-	if since != nil {
-		db = db.Where(
-			TableColumn(database.CAMPAIGN_EVENT_TABLE, "created_at")+" > ?",
-			utils.RFC3339UTC(*since),
-		)
-	}
-
-	if len(options.EventTypeIDs) > 0 {
-		db = db.Where(
-			TableColumn(database.CAMPAIGN_EVENT_TABLE, "event_id")+" IN ?",
-			options.EventTypeIDs,
-		)
-	}
-
-	res := db.Find(&dbCampaignEvents)
-
-	if res.Error != nil {
-		return result, res.Error
-	}
-
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.CAMPAIGN_TABLE,
-		options.QueryArgs,
-		allowedCampaginEventViewColumns...,
-	)
-	if err != nil {
+	if err := withPeek(db, options.QueryArgs).Find(&dbCampaignEvents).Error; err != nil {
 		return result, errs.Wrap(err)
 	}
-	result.HasNextPage = hasNextPage
-
+	result.HasNextPage = trimPeek(&dbCampaignEvents, options.QueryArgs)
 	for _, dbCampaignEvent := range dbCampaignEvents {
 		c, err := ToCampaignEvent(&dbCampaignEvent)
 		if err != nil {
@@ -1053,6 +1436,95 @@ func (r *Campaign) GetEventsByCampaignID(
 		result.Rows = append(result.Rows, c)
 	}
 	return result, nil
+}
+
+// CampaignEventExportRow is one event of a campaign as the company export
+// writes it. The text fields have their outer spaces removed, as the event
+// view gives them. The recipient fields are empty when the event names nobody
+// or the recipient is gone, HasRecipient tells which.
+type CampaignEventExportRow struct {
+	CreatedAt    time.Time
+	EventID      uuid.UUID
+	Data         string
+	UserAgent    string
+	IP           string
+	HasRecipient bool
+	FirstName    string
+	LastName     string
+	Email        string
+}
+
+// EachCampaignEventForExport calls fn with every event of a campaign with its
+// recipient, newest first when desc is set and oldest first otherwise, read
+// one row at a time. The events are read through the campaign index and
+// sorted, so only the events of the campaign are read. Events of the same
+// time are sorted by row id in the same direction, the order a walk of the
+// created_at index gives. The row passed to fn is reused, fn must copy what
+// it keeps.
+func (r *Campaign) EachCampaignEventForExport(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	desc bool,
+	fn func(*CampaignEventExportRow) error,
+) error {
+	eventCol := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: name}
+	}
+	recipientCol := func(name string) clause.Column {
+		return clause.Column{Table: database.RECIPIENT_TABLE, Name: name}
+	}
+	rows, err := r.DB.WithContext(ctx).
+		Session(&gorm.Session{NewDB: true}).
+		Table(database.CAMPAIGN_EVENT_TABLE).
+		Clauses(
+			clause.From{Joins: []clause.Join{{
+				Type:  clause.LeftJoin,
+				Table: clause.Table{Name: database.RECIPIENT_TABLE},
+				ON: clause.Where{Exprs: []clause.Expression{clause.Eq{
+					Column: eventCol("recipient_id"),
+					Value:  recipientCol("id"),
+				}}},
+			}}},
+			clause.Select{Columns: []clause.Column{
+				eventCol("created_at"),
+				eventCol("event_id"),
+				eventCol("data"),
+				eventCol("user_agent"),
+				eventCol("ip_address"),
+				recipientCol("id"),
+				recipientCol("first_name"),
+				recipientCol("last_name"),
+				recipientCol("email"),
+			}},
+			eventTimeOrder(desc, false),
+		).
+		Where(clause.Eq{Column: eventCol("campaign_id"), Value: campaignID}).
+		Rows()
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	defer rows.Close()
+	var row CampaignEventExportRow
+	for rows.Next() {
+		var data, userAgent, ip, recipientID, firstName, lastName, email sql.NullString
+		if err := rows.Scan(
+			&row.CreatedAt, &row.EventID, &data, &userAgent, &ip,
+			&recipientID, &firstName, &lastName, &email,
+		); err != nil {
+			return errs.Wrap(err)
+		}
+		row.Data = strings.TrimSpace(data.String)
+		row.UserAgent = strings.TrimSpace(userAgent.String)
+		row.IP = strings.TrimSpace(ip.String)
+		row.HasRecipient = recipientID.Valid
+		row.FirstName = strings.TrimSpace(firstName.String)
+		row.LastName = strings.TrimSpace(lastName.String)
+		row.Email = email.String
+		if err := fn(&row); err != nil {
+			return err
+		}
+	}
+	return errs.Wrap(rows.Err())
 }
 
 // GetCampaignCountByTemplateID gets the count of campaigns by template id
@@ -1300,97 +1772,171 @@ func (r *Campaign) GetResultStats(
 	return stats, nil
 }
 
-// GetProgramResultStats computes a result funnel across the hidden campaigns a
-// program owns. It counts unique people across the whole program, so a recipient
-// who progressed through several steps or loops is counted once. The campaign
-// set is selected with a subquery on program_campaigns rather than a bound id
-// list, so the number of campaigns never bumps into the SQLite bind parameter
-// ceiling.
-func (r *Campaign) GetProgramResultStats(
+// programEventsSortLimit is the most events a program may have for a page of
+// its events sorted by time to be read through the campaign index and
+// sorted. Sorting this many rows takes a few milliseconds. A program with more
+// events walks the created_at index instead, which stops after one page and is
+// fast when the program has many of the events of its time.
+var programEventsSortLimit = 20000
+
+// GetEventsByProgramID gets one page of the events of the hidden campaigns a
+// program owns, sorted and searched through the campaign event allowlist. The
+// campaigns are selected with a subquery, so their number never bumps into the
+// SQLite bind parameter ceiling. A page sorted by time is read the cheaper of
+// two ways, see programEventsSortLimit, and both give the same rows in the
+// same order.
+func (r *Campaign) GetEventsByProgramID(
 	ctx context.Context,
 	programID *uuid.UUID,
-) (*model.CampaignResultView, error) {
-	stats := &model.CampaignResultView{}
-	if programID == nil {
-		return stats, nil
-	}
-	// programCampaigns selects the ids of the hidden campaigns the program owns,
-	// only the phishing ones when phishingOnly is set
-	programCampaigns := func(phishingOnly bool) *gorm.DB {
-		db := r.DB.Model(&database.Campaign{}).
-			Select("id").
-			Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID})
-		if phishingOnly {
-			db = db.Where(clause.Eq{Column: clause.Column{Name: "is_training"}, Value: false})
+	options *CampaignEventOption,
+) (*model.Result[model.CampaignEvent], error) {
+	var campaign any = clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "campaign_id"}
+	timeIndexed := true
+	switch {
+	case options.RecipientID != nil:
+		// one recipient is read through the recipient index, the unary plus
+		// keeps the campaign predicate off its index
+		campaign = clause.Expr{SQL: "+?", Vars: []any{campaign}}
+	case eventsSortedByCreatedAt(options.QueryArgs):
+		few, err := r.programHasFewEvents(ctx, programID, options.EventTypeIDs)
+		if err != nil {
+			return model.NewEmptyResult[model.CampaignEvent](), err
 		}
-		return db
+		if few {
+			// every event of the program is read through the campaign index
+			// and sorted, the walk would pass the events of everything else
+			timeIndexed = false
+		} else {
+			// newest first walks the created_at index back and stops after
+			// one page, which SQLite does not pick without statistics
+			campaign = clause.Expr{SQL: "+?", Vars: []any{campaign}}
+			res, ok, err := r.programEventsCappedWalk(ctx, programID, campaign, options)
+			if err != nil || ok {
+				return res, err
+			}
+			// the program has no full page among the newest events of the
+			// install, such as a large program that is quiet now, so its
+			// events are read through the campaign index and sorted, which
+			// costs the size of the program and not of the install
+			campaign = clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "campaign_id"}
+			timeIndexed = false
+		}
 	}
-	// countUniqueIn counts the distinct people in the rows of model that belong to
-	// the program's campaigns. A row names a person by its pseudonym when it has
-	// one and by its recipient id otherwise. A live anonymous row carries both, so
-	// counting either column on its own would count that person twice. An
-	// anonymous program uses one pseudonym per person across all its campaigns.
-	countUniqueIn := func(model any, phishingOnly bool, filter func(*gorm.DB) *gorm.DB) (int64, error) {
-		var count int64
-		res := filter(r.DB.WithContext(ctx).Model(model).
-			Where("campaign_id IN (?)", programCampaigns(phishingOnly)).
-			Where(clause.Or(
-				clause.Neq{Column: clause.Column{Name: "anonymized_id"}, Value: nil},
-				clause.Neq{Column: clause.Column{Name: "recipient_id"}, Value: nil},
-			))).
-			Select("COUNT(DISTINCT COALESCE(anonymized_id, recipient_id))").
-			Scan(&count)
-		return count, res.Error
+	scope := clause.Expr{
+		SQL:  "? IN (?)",
+		Vars: []any{campaign, r.programCampaignIDs(programID)},
 	}
+	return r.getEventsInScope(ctx, scope, options, nil, timeIndexed)
+}
 
-	// countUnique counts the distinct people that have any of the given events.
-	// The phishing funnel only reads phishing campaigns, so opening a training
-	// page never counts as a click.
-	countUnique := func(phishingOnly bool, eventIDs []any) (int64, error) {
-		return countUniqueIn(&database.CampaignEvent{}, phishingOnly, func(db *gorm.DB) *gorm.DB {
-			return db.Where(clause.IN{Column: clause.Column{Name: "event_id"}, Values: eventIDs})
+// programEventsWalkLimit is how many events of the install a walk of the
+// created_at index for a page of program events may pass. Finding where the
+// walk stops reads that many entries of the index only, which takes a few
+// milliseconds.
+var programEventsWalkLimit = 50000
+
+// programEventsCappedWalk reads a page of program events sorted by time with a
+// walk of the created_at index that passes at most programEventsWalkLimit
+// events of the install. ok is false when the walk found no full page with a
+// row past it, which the caller then reads another way. Every event the walk
+// leaves out sorts after every event it reads, so a page with a row past it
+// is the same page an unbounded walk gives.
+func (r *Campaign) programEventsCappedWalk(
+	ctx context.Context,
+	programID *uuid.UUID,
+	campaign any,
+	options *CampaignEventOption,
+) (*model.Result[model.CampaignEvent], bool, error) {
+	q := options.QueryArgs
+	if q == nil || q.Limit <= 0 {
+		return nil, false, nil
+	}
+	createdAt := clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "created_at"}
+	// the time of the event programEventsWalkLimit steps into the walk, read
+	// within the same time window as the page
+	// the unary plus drops the declared column type, so the driver hands over
+	// the stored text as it is
+	edge := r.DB.WithContext(ctx).
+		Model(&database.CampaignEvent{}).
+		Select("+? AS edge", createdAt)
+	if options.CreatedFrom != nil {
+		edge = edge.Where(clause.Expr{SQL: "? >= ?", Vars: []any{createdAt, utils.RFC3339UTC(*options.CreatedFrom)}})
+	}
+	if options.CreatedTo != nil {
+		edge = edge.Where(clause.Expr{SQL: "? <= ?", Vars: []any{createdAt, utils.RFC3339UTC(*options.CreatedTo)}})
+	}
+	var edges []struct{ Edge string }
+	err := edge.Order(clause.OrderByColumn{Column: createdAt, Desc: q.Desc}).
+		Offset(programEventsWalkLimit).
+		Limit(1).
+		Scan(&edges).Error
+	if err != nil {
+		return nil, false, errs.Wrap(err)
+	}
+	if len(edges) == 0 {
+		// the window holds fewer events than the limit, the walk is bounded
+		scope := clause.Expr{SQL: "? IN (?)", Vars: []any{campaign, r.programCampaignIDs(programID)}}
+		res, err := r.getEventsInScope(ctx, scope, options, nil, true)
+		return res, err == nil, err
+	}
+	// the stored text is compared as stored, so events that share the edge
+	// time are all read or all left out
+	bound := clause.Expr{SQL: "? >= ?", Vars: []any{createdAt, edges[0].Edge}}
+	if !q.Desc {
+		bound = clause.Expr{SQL: "? <= ?", Vars: []any{createdAt, edges[0].Edge}}
+	}
+	scope := clause.And(
+		clause.Expr{SQL: "? IN (?)", Vars: []any{campaign, r.programCampaignIDs(programID)}},
+		bound,
+	)
+	res, err := r.getEventsInScope(ctx, scope, options, nil, true)
+	if err != nil {
+		return nil, false, err
+	}
+	if !res.HasNextPage {
+		return nil, false, nil
+	}
+	return res, true, nil
+}
+
+// programCampaignIDs selects the ids of the hidden campaigns of a program
+func (r *Campaign) programCampaignIDs(programID *uuid.UUID) *gorm.DB {
+	return r.DB.Session(&gorm.Session{NewDB: true}).
+		Table(database.CAMPAIGN_TABLE).
+		Clauses(clause.Select{Columns: []clause.Column{{Table: database.CAMPAIGN_TABLE, Name: "id"}}}).
+		Where(clause.Eq{Column: programColumn(database.CAMPAIGN_TABLE), Value: programID})
+}
+
+// programHasFewEvents reports whether a program has at most
+// programEventsSortLimit events of the given types, or of any type when none
+// are given. The count reads the campaign and event index only and stops
+// after the limit, so it stays cheap for a large program.
+func (r *Campaign) programHasFewEvents(ctx context.Context, programID *uuid.UUID, eventTypeIDs []string) (bool, error) {
+	capped := r.DB.Session(&gorm.Session{NewDB: true}).
+		Model(&database.CampaignEvent{}).
+		Select("1").
+		Where(clause.Expr{SQL: "? IN (?)", Vars: []any{
+			clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "campaign_id"},
+			r.programCampaignIDs(programID),
+		}}).
+		Limit(programEventsSortLimit + 1)
+	if len(eventTypeIDs) > 0 {
+		capped = capped.Where(clause.IN{
+			Column: clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "event_id"},
+			Values: eventIDValues(eventTypeIDs),
 		})
 	}
+	var count int64
+	if err := r.DB.WithContext(ctx).Table("(?) AS capped", capped).Count(&count).Error; err != nil {
+		return false, errs.Wrap(err)
+	}
+	return count <= int64(programEventsSortLimit), nil
+}
 
-	eid := func(name string) any { return cache.EventIDByName[name] }
-
-	// recipients: unique people materialized across the program
-	recipients, err := countUniqueIn(&database.CampaignRecipient{}, false, func(db *gorm.DB) *gorm.DB {
-		return db
-	})
-	if err != nil {
-		return nil, err
-	}
-	stats.Recipients = recipients
-
-	if stats.EmailsSent, err = countUnique(true, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT)}); err != nil {
-		return nil, err
-	}
-	if stats.TrackingPixelLoaded, err = countUnique(true, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ)}); err != nil {
-		return nil, err
-	}
-	if stats.WebsiteLoaded, err = countUnique(true, []any{
-		eid(data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED),
-		eid(data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED),
-		eid(data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED),
-	}); err != nil {
-		return nil, err
-	}
-	if stats.SubmittedData, err = countUnique(true, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA)}); err != nil {
-		return nil, err
-	}
-	if stats.Reported, err = countUnique(true, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_REPORTED)}); err != nil {
-		return nil, err
-	}
-	// a program mixes phishing and training steps, so always count the training
-	// funnel across the set; it stays zero where no training step ran
-	if stats.TrainingStarted, err = countUnique(false, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED)}); err != nil {
-		return nil, err
-	}
-	if stats.TrainingCompleted, err = countUnique(false, []any{eid(data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED)}); err != nil {
-		return nil, err
-	}
-	return stats, nil
+// eventsSortedByCreatedAt reports whether a page of events is sorted by when
+// the event was created
+func eventsSortedByCreatedAt(q *vo.QueryArgs) bool {
+	return q != nil && q.OrderBy == TableColumn(database.CAMPAIGN_EVENT_TABLE, "created_at")
 }
 
 // GetAll gets all campaigns with pagination
@@ -1414,18 +1960,12 @@ func (r *Campaign) GetAll(
 	db = r.applyTestCampaignFilter(db, options)
 
 	var dbCampaigns []database.Campaign
-	res := db.Find(&dbCampaigns)
+	res := withPeek(db, options.QueryArgs).Find(&dbCampaigns)
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db, database.CAMPAIGN_TABLE, options.QueryArgs, allowedCampaignColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaigns, options.QueryArgs)
 
 	for _, dbCampaign := range dbCampaigns {
 		campaign, err := ToCampaign(&dbCampaign)
@@ -1474,27 +2014,18 @@ func (r *Campaign) GetAllCampaignWithinDates(
 	// Query campaigns that:
 	// 1. Are self-managed (no send_start_at)
 	// 2. Start within the date range
-	res := db.Where(
+	res := withPeek(db.Where(
 		"(send_start_at IS NULL) OR "+ // self managed
 			"(send_start_at BETWEEN ? AND ?)", // is within time
 		utils.RFC3339UTC(startDate),
 		utils.RFC3339UTC(endDate),
-	).Find(&dbCampaigns)
+	), options.QueryArgs).Find(&dbCampaigns)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.CAMPAIGN_TABLE,
-		options.QueryArgs,
-		allowedCampaignColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaigns, options.QueryArgs)
 
 	for _, dbCampaign := range dbCampaigns {
 		campaign, err := ToCampaign(&dbCampaign)
@@ -1524,18 +2055,12 @@ func (r *Campaign) GetAllByCompanyID(
 		return result, errs.Wrap(err)
 	}
 	var dbCampaigns []database.Campaign
-	res := db.Find(&dbCampaigns)
+	res := withPeek(db, options.QueryArgs).Find(&dbCampaigns)
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db, database.CAMPAIGN_TABLE, options.QueryArgs, allowedCampaignColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaigns, options.QueryArgs)
 
 	for _, dbCampaign := range dbCampaigns {
 		campaign, err := ToCampaign(&dbCampaign)
@@ -1599,6 +2124,251 @@ func (r *Campaign) GetNameByID(
 		return "", res.Error
 	}
 	return dbCampaign.Name, nil
+}
+
+// CampaignDisplayName is the name users and integrations see for a campaign.
+// The hidden campaigns a program sends with are named after their program.
+type CampaignDisplayName struct {
+	// Name is the campaign name, or the program name for a program send
+	Name string
+	// ProgramID and ProgramName are set for a program send
+	ProgramID   *uuid.UUID
+	ProgramName string
+}
+
+// GetDisplayNameByID gets the name users and integrations see for a campaign
+func (r *Campaign) GetDisplayNameByID(
+	ctx context.Context,
+	id *uuid.UUID,
+) (*CampaignDisplayName, error) {
+	var row database.Campaign
+	res := r.DB.WithContext(ctx).
+		Model(&database.Campaign{}).
+		Select("name", "program_id").
+		Where(clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_TABLE, Name: "id"}, Value: id}).
+		First(&row)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if row.ProgramID == nil {
+		return &CampaignDisplayName{Name: row.Name}, nil
+	}
+	names, err := r.GetProgramNamesByIDs(ctx, []*uuid.UUID{row.ProgramID})
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	programName := names[*row.ProgramID]
+	return &CampaignDisplayName{
+		Name:        programName,
+		ProgramID:   row.ProgramID,
+		ProgramName: programName,
+	}, nil
+}
+
+// GetProgramNamesByIDs maps program ids to program names. An unknown id is
+// left out of the map.
+func (r *Campaign) GetProgramNamesByIDs(
+	ctx context.Context,
+	ids []*uuid.UUID,
+) (map[uuid.UUID]string, error) {
+	out := map[uuid.UUID]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	values := make([]any, 0, len(ids))
+	for _, id := range ids {
+		if id != nil {
+			values = append(values, id)
+		}
+	}
+	var rows []database.Program
+	res := r.DB.WithContext(ctx).
+		Model(&database.Program{}).
+		Select("id", "name").
+		Where(clause.IN{Column: clause.Column{Table: database.PROGRAM_TABLE, Name: "id"}, Values: values}).
+		Find(&rows)
+	if res.Error != nil {
+		return nil, errs.Wrap(res.Error)
+	}
+	for _, row := range rows {
+		if row.ID != nil {
+			out[*row.ID] = row.Name
+		}
+	}
+	return out, nil
+}
+
+// ProgramExportSource is a program whose sends a company export lists
+type ProgramExportSource struct {
+	ID          *uuid.UUID
+	Name        string
+	IsAnonymous bool
+	// Anonymizing is set while an Anonymize All of the program runs, the
+	// campaigns it has not reached then still name people
+	Anonymizing bool
+}
+
+// GetProgramsForExport returns the programs of exactly the company, or the
+// global programs when companyID is nil, sorted by name
+func (r *Campaign) GetProgramsForExport(
+	ctx context.Context,
+	companyID *uuid.UUID,
+) ([]ProgramExportSource, error) {
+	var rows []database.Program
+	db := r.DB.WithContext(ctx).
+		Model(&database.Program{}).
+		Select("id", "name", "is_anonymous", "anonymizing_at", "anonymized_at")
+	db = whereCompany(db, database.PROGRAM_TABLE, companyID)
+	res := db.
+		Order(clause.OrderByColumn{Column: clause.Column{Table: database.PROGRAM_TABLE, Name: "name"}}).
+		Find(&rows)
+	if res.Error != nil {
+		return nil, errs.Wrap(res.Error)
+	}
+	out := make([]ProgramExportSource, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, ProgramExportSource{
+			ID:          row.ID,
+			Name:        row.Name,
+			IsAnonymous: row.IsAnonymous,
+			Anonymizing: row.AnonymizingAt != nil && row.AnonymizedAt == nil,
+		})
+	}
+	return out, nil
+}
+
+// ProgramEventExportRow is one event of a program as the company export
+// writes it. The recipient fields are empty when the event names nobody or
+// the recipient is gone, HasRecipient tells which.
+type ProgramEventExportRow struct {
+	CampaignID   uuid.UUID
+	CreatedAt    time.Time
+	EventID      uuid.UUID
+	Data         string
+	UserAgent    string
+	IP           string
+	HasRecipient bool
+	FirstName    string
+	LastName     string
+	Email        string
+}
+
+// EachProgramEventForExport calls fn with every event of the hidden campaigns
+// of a program with its recipient, newest first when desc is set and oldest
+// first otherwise, read one row at a time. The events are read through the
+// campaign index and sorted, so only the events of the program are read.
+// Events of the same time are sorted by row id in the same direction, the
+// order a walk of the created_at index gives. The row passed to fn is reused,
+// fn must copy what it keeps.
+func (r *Campaign) EachProgramEventForExport(
+	ctx context.Context,
+	programID *uuid.UUID,
+	desc bool,
+	fn func(*ProgramEventExportRow) error,
+) error {
+	eventCol := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: name}
+	}
+	recipientCol := func(name string) clause.Column {
+		return clause.Column{Table: database.RECIPIENT_TABLE, Name: name}
+	}
+	rows, err := r.DB.WithContext(ctx).
+		Session(&gorm.Session{NewDB: true}).
+		Table(database.CAMPAIGN_EVENT_TABLE).
+		Clauses(
+			clause.From{Joins: []clause.Join{{
+				Type:  clause.LeftJoin,
+				Table: clause.Table{Name: database.RECIPIENT_TABLE},
+				ON: clause.Where{Exprs: []clause.Expression{clause.Eq{
+					Column: eventCol("recipient_id"),
+					Value:  recipientCol("id"),
+				}}},
+			}}},
+			clause.Select{Columns: []clause.Column{
+				eventCol("campaign_id"),
+				eventCol("created_at"),
+				eventCol("event_id"),
+				eventCol("data"),
+				eventCol("user_agent"),
+				eventCol("ip_address"),
+				recipientCol("id"),
+				recipientCol("first_name"),
+				recipientCol("last_name"),
+				recipientCol("email"),
+			}},
+			clause.OrderBy{Columns: []clause.OrderByColumn{
+				{Column: eventCol("created_at"), Desc: desc},
+				{Column: eventCol("rowid"), Desc: desc},
+			}},
+		).
+		Where(clause.Expr{SQL: "? IN (?)", Vars: []any{eventCol("campaign_id"), r.programCampaignIDs(programID)}}).
+		Rows()
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	defer rows.Close()
+	var row ProgramEventExportRow
+	for rows.Next() {
+		var userAgent, ip, recipientID, firstName, lastName, email sql.NullString
+		if err := rows.Scan(
+			&row.CampaignID, &row.CreatedAt, &row.EventID, &row.Data, &userAgent, &ip,
+			&recipientID, &firstName, &lastName, &email,
+		); err != nil {
+			return errs.Wrap(err)
+		}
+		row.UserAgent, row.IP = userAgent.String, ip.String
+		row.HasRecipient = recipientID.Valid
+		row.FirstName, row.LastName, row.Email = firstName.String, lastName.String, email.String
+		if err := fn(&row); err != nil {
+			return err
+		}
+	}
+	return errs.Wrap(rows.Err())
+}
+
+// GetProgramTemplateNames maps the hidden campaigns of a program to the name
+// of the template each sends
+func (r *Campaign) GetProgramTemplateNames(
+	ctx context.Context,
+	programID *uuid.UUID,
+) (map[uuid.UUID]string, error) {
+	type row struct {
+		CampaignID   *uuid.UUID
+		TemplateName string
+	}
+	campaignCol := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
+	}
+	rows := []row{}
+	res := r.DB.WithContext(ctx).
+		Session(&gorm.Session{NewDB: true}).
+		Table(database.CAMPAIGN_TABLE).
+		Clauses(
+			clause.From{Joins: []clause.Join{{
+				Type:  clause.LeftJoin,
+				Table: clause.Table{Name: database.CAMPAIGN_TEMPLATE_TABLE},
+				ON: clause.Where{Exprs: []clause.Expression{clause.Eq{
+					Column: campaignCol("campaign_template_id"),
+					Value:  clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "id"},
+				}}},
+			}}},
+			clause.Select{Columns: []clause.Column{
+				{Table: database.CAMPAIGN_TABLE, Name: "id", Alias: "campaign_id"},
+				{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "name", Alias: "template_name"},
+			}},
+		).
+		Where(clause.Eq{Column: programColumn(database.CAMPAIGN_TABLE), Value: programID}).
+		Scan(&rows)
+	if res.Error != nil {
+		return nil, errs.Wrap(res.Error)
+	}
+	out := make(map[uuid.UUID]string, len(rows))
+	for _, r := range rows {
+		if r.CampaignID != nil {
+			out[*r.CampaignID] = r.TemplateName
+		}
+	}
+	return out, nil
 }
 
 // IsAnonymousByID reads only the anonymity flag for a campaign.
@@ -1759,19 +2529,15 @@ func (r *Campaign) GetAllReadyToClose(
 		return result, errs.Wrap(err)
 	}
 	var dbCampaigns []database.Campaign
-	res := db.
-		Where("close_at <= ? AND closed_at IS NULL", utils.NowRFC3339UTC()).
+	res := withPeek(db.
+		Where("close_at <= ? AND closed_at IS NULL", utils.NowRFC3339UTC()), options.QueryArgs).
 		Find(&dbCampaigns)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.CAMPAIGN_TABLE, options.QueryArgs)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaigns, options.QueryArgs)
 
 	for _, dbCampaign := range dbCampaigns {
 		campaign, err := ToCampaign(&dbCampaign)
@@ -1801,19 +2567,15 @@ func (r *Campaign) GetReadyToAnonymize(
 	// unset so a campaign that is already anonymized is never reprocessed.
 	var dbCampaigns []database.Campaign
 	now := utils.NowRFC3339UTC()
-	res := db.
+	res := withPeek(db.
 		Where("anonymized_at IS NULL").
-		Where("(anonymize_at <= ?) OR (is_anonymous = ? AND closed_at IS NOT NULL)", now, true).
+		Where("(anonymize_at <= ?) OR (is_anonymous = ? AND closed_at IS NOT NULL)", now, true), options.QueryArgs).
 		Find(&dbCampaigns)
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.CAMPAIGN_TABLE, options.QueryArgs)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaigns, options.QueryArgs)
 
 	for _, dbCampaign := range dbCampaigns {
 		campaign, err := ToCampaign(&dbCampaign)
@@ -1839,18 +2601,14 @@ func (r *Campaign) GetReadyToDataAnonymize(
 		return result, errs.Wrap(err)
 	}
 	var dbCampaigns []database.Campaign
-	res := db.
-		Where("data_anonymize_at <= ? AND data_anonymized_at IS NULL AND anonymized_at IS NULL", utils.NowRFC3339UTC()).
+	res := withPeek(db.
+		Where("data_anonymize_at <= ? AND data_anonymized_at IS NULL AND anonymized_at IS NULL", utils.NowRFC3339UTC()), options.QueryArgs).
 		Find(&dbCampaigns)
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.CAMPAIGN_TABLE, options.QueryArgs)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaigns, options.QueryArgs)
 
 	for _, dbCampaign := range dbCampaigns {
 		campaign, err := ToCampaign(&dbCampaign)
@@ -1876,17 +2634,13 @@ func (r *Campaign) GetReadyToLateSchedule(
 	}
 	pendingEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_PENDING_SCHEDULE]
 	var dbCampaigns []database.Campaign
-	res := db.
-		Where("schedule_at <= ? AND notable_event_id = ?", utils.NowRFC3339UTC(), pendingEventID).
+	res := withPeek(db.
+		Where("schedule_at <= ? AND notable_event_id = ?", utils.NowRFC3339UTC(), pendingEventID), options.QueryArgs).
 		Find(&dbCampaigns)
 	if res.Error != nil {
 		return result, res.Error
 	}
-	hasNextPage, err := useHasNextPage(db, database.CAMPAIGN_TABLE, options.QueryArgs)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
+	result.HasNextPage = trimPeek(&dbCampaigns, options.QueryArgs)
 	for _, dbCampaign := range dbCampaigns {
 		campaign, err := ToCampaign(&dbCampaign)
 		if err != nil {
@@ -1938,21 +2692,7 @@ func (r *Campaign) HasMessageReadEvent(
 	recipientID *uuid.UUID,
 	messageReadEventID *uuid.UUID,
 ) (bool, error) {
-	var count int64
-
-	query := r.DB.Model(&database.CampaignEvent{}).
-		Where("campaign_id = ? AND event_id = ?", campaignID, messageReadEventID)
-
-	if recipientID != nil {
-		query = query.Where("recipient_id = ?", recipientID)
-	}
-
-	res := query.Count(&count)
-	if res.Error != nil {
-		return false, res.Error
-	}
-
-	return count > 0, nil
+	return r.HasEvent(ctx, campaignID, recipientID, messageReadEventID)
 }
 
 // HasEvent reports whether an event of the given type exists for the campaign,
@@ -1963,21 +2703,19 @@ func (r *Campaign) HasEvent(
 	recipientID *uuid.UUID,
 	eventID *uuid.UUID,
 ) (bool, error) {
-	var count int64
-
-	query := r.DB.Model(&database.CampaignEvent{}).
-		Where("campaign_id = ? AND event_id = ?", campaignID, eventID)
-
-	if recipientID != nil {
-		query = query.Where("recipient_id = ?", recipientID)
+	if recipientID == nil {
+		var count int64
+		res := r.DB.WithContext(ctx).Model(&database.CampaignEvent{}).
+			Where(clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: campaignID}).
+			Where(clause.Eq{Column: clause.Column{Name: "event_id"}, Value: eventID}).
+			Count(&count)
+		if res.Error != nil {
+			return false, res.Error
+		}
+		return count > 0, nil
 	}
-
-	res := query.Count(&count)
-	if res.Error != nil {
-		return false, res.Error
-	}
-
-	return count > 0, nil
+	return r.hasEventOfPerson(ctx, campaignID, eventID,
+		clause.Eq{Column: clause.Column{Name: "recipient_id"}, Value: recipientID})
 }
 
 // HasEventByAnonymizedID reports whether an event of the given type already exists
@@ -1989,9 +2727,26 @@ func (r *Campaign) HasEventByAnonymizedID(
 	anonymizedID *uuid.UUID,
 	eventID *uuid.UUID,
 ) (bool, error) {
+	return r.hasEventOfPerson(ctx, campaignID, eventID,
+		clause.Eq{Column: clause.Column{Name: "anonymized_id"}, Value: anonymizedID})
+}
+
+// hasEventOfPerson reports whether an event of the given type exists in the
+// campaign for the person that person matches. The campaign and event columns
+// are not read through their index: without table statistics sqlite picks the
+// campaign and event index and checks every event of that type in the
+// campaign, while the person index finds the few events of the person.
+func (r *Campaign) hasEventOfPerson(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	eventID *uuid.UUID,
+	person clause.Expression,
+) (bool, error) {
 	var count int64
-	res := r.DB.Model(&database.CampaignEvent{}).
-		Where("campaign_id = ? AND event_id = ? AND anonymized_id = ?", campaignID, eventID, anonymizedID).
+	res := r.DB.WithContext(ctx).Model(&database.CampaignEvent{}).
+		Where(person).
+		Where(clause.Expr{SQL: "? = ?", Vars: []any{notIndexed(clause.Column{Name: "campaign_id"}), campaignID}}).
+		Where(clause.Expr{SQL: "? = ?", Vars: []any{notIndexed(clause.Column{Name: "event_id"}), eventID}}).
 		Count(&count)
 	if res.Error != nil {
 		return false, res.Error
@@ -2073,6 +2828,22 @@ func (r *Campaign) SetPausedByID(
 		Where("id = ?", id).
 		Updates(row)
 	return res.Error
+}
+
+// PauseOpenByID marks a campaign as paused when it is open and not paused
+// yet. It is one write by the primary key that touches no other column, so a
+// campaign closed in between is left as it is.
+func (r *Campaign) PauseOpenByID(
+	ctx context.Context,
+	id *uuid.UUID,
+) error {
+	now := utils.NowRFC3339UTC()
+	return r.DB.WithContext(ctx).
+		Model(&database.Campaign{}).
+		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id}).
+		Where(clause.Eq{Column: clause.Column{Name: "paused_at"}, Value: nil}).
+		Where(clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil}).
+		Updates(map[string]any{"paused_at": now, "updated_at": now}).Error
 }
 
 // SetClosedAtByID writes only the closed at time, so a campaign row loaded
@@ -2178,6 +2949,14 @@ func (r *Campaign) DeleteByID(
 			Delete(&database.CampaignTemplatePool{}).Error; err != nil {
 			return err
 		}
+		// a tracking event saved after the events were deleted would make the
+		// campaign row fail its foreign key, so the events are deleted again in
+		// the same transaction as the row. There are none or a few.
+		if err := tx.
+			Where(clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: id}).
+			Delete(&database.CampaignEvent{}).Error; err != nil {
+			return err
+		}
 		return tx.Where("id = ?", id).Delete(&database.Campaign{}).Error
 	})
 	if err != nil {
@@ -2186,19 +2965,16 @@ func (r *Campaign) DeleteByID(
 	return r.DeleteCampaignStats(ctx, id)
 }
 
-// DeleteEventsByCampaignID deletes all events by campaign id
+// DeleteEventsByCampaignID deletes all events by campaign id, in batches with
+// a pause between them, see deleteInBatches
 func (r *Campaign) DeleteEventsByCampaignID(
 	ctx context.Context,
 	campaignID *uuid.UUID,
 ) error {
-	res := r.DB.
-		Where("campaign_id = ?", campaignID).
-		Delete(&database.CampaignEvent{})
-
-	if res.Error != nil {
-		return res.Error
-	}
-	return nil
+	// a delete that began finishes also when the request ends, so the events
+	// of a campaign are not left half deleted
+	return deleteInBatches(context.WithoutCancel(ctx), r.DB, &database.CampaignEvent{},
+		clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: campaignID}, deleteBatch)
 }
 
 // GetEventByID gets a campaign event by its id
@@ -2337,49 +3113,33 @@ func (r *Campaign) AnonymizeCampaignEventData(
 	return nil
 }
 
-// AnonymizeCampaignEvent anonymizes a campaign event
-func (r *Campaign) AnonymizeCampaignEvent(
-	ctx context.Context,
-	campaignID *uuid.UUID,
-	recipientID *uuid.UUID,
-	anonymizedID *uuid.UUID,
-) error {
-	row := map[string]any{
-		"recipient_id":  nil,
-		"anonymized_id": anonymizedID.String(),
-		"user_agent":    "anonymized",
-		"ip_address":    nil,
-		"data":          "anonymized",
-	}
-	AddUpdatedAt(row)
-	res := r.DB.
-		Model(&database.CampaignEvent{}).
-		Where("campaign_id = ? AND recipient_id = ?", campaignID, recipientID).
-		Updates(row)
-
-	if res.Error != nil {
-		return res.Error
-	}
-	return nil
-}
-
-// AnonymizeCampaignEventsByRecipientID anonymizes campaign events by recipient ID
+// AnonymizeCampaignEventsByRecipientID moves the events of a recipient onto a
+// pseudonym and removes their submitted data, IP address, user agent and
+// browser metadata. Each event takes the pseudonym of the recipient's send in
+// its own campaign when that send has one, so the event stays with its send,
+// else anonymizedID. The sends must still name the recipient.
 func (r *Campaign) AnonymizeCampaignEventsByRecipientID(
 	ctx context.Context,
 	recipientID *uuid.UUID,
 	anonymizedID *uuid.UUID,
 ) error {
-	row := map[string]interface{}{
-		"recipient_id":  nil,
-		"anonymized_id": anonymizedID,
-		"user_agent":    "anonymized",
-		"ip_address":    nil,
-		"data":          "anonymized",
-	}
-	AddUpdatedAt(row)
+	sendPseudonym := r.DB.Session(&gorm.Session{NewDB: true}).
+		Model(&database.CampaignRecipient{}).
+		Select("?", clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "anonymized_id"}).
+		Where(clause.Expr{SQL: "? = ?", Vars: []any{
+			clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "campaign_id"},
+			clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "campaign_id"},
+		}}).
+		Where(clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "recipient_id"}, Value: recipientID}).
+		Where(clause.Neq{Column: clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "anonymized_id"}, Value: nil}).
+		Limit(1)
+	row := scrubbedEventFields()
+	row["recipient_id"] = nil
+	row["anonymized_id"] = clause.Expr{SQL: "COALESCE((?), ?)", Vars: []any{sendPseudonym, anonymizedID.String()}}
 	res := r.DB.
+		WithContext(ctx).
 		Model(&database.CampaignEvent{}).
-		Where("recipient_id = ?", recipientID).
+		Where(clause.Eq{Column: clause.Column{Name: "recipient_id"}, Value: recipientID}).
 		Updates(row)
 
 	if res.Error != nil {
@@ -2388,48 +3148,80 @@ func (r *Campaign) AnonymizeCampaignEventsByRecipientID(
 	return nil
 }
 
-// GetActiveCount get the number running campaigns
-// if no company ID is selected it gets the global count including all companies.
-// The hidden campaigns of a program are not counted.
-func (r *Campaign) GetActiveCount(ctx context.Context, companyID *uuid.UUID, includeTestCampaigns bool) (int64, error) {
-	var c int64
-	db := r.DB
-	if companyID != nil {
-		db = whereCompany(db, database.CAMPAIGN_TABLE, companyID)
+// ActiveCounts are the open campaigns that started, are self managed or are paused
+type ActiveCounts struct {
+	// Active is sending now, paused campaigns left out
+	Active int64
+	// SelfManaged is the part of Active without a delivery window
+	SelfManaged int64
+	// Paused is open with sending paused, also when paused before the delivery
+	// started. Paused wins over scheduled, like the campaign list badge.
+	Paused int64
+}
+
+// GetActiveCounts counts the open campaigns that started, are self managed or
+// are paused. If no company ID is selected it counts all companies. The hidden
+// campaigns of a program are not counted.
+func (r *Campaign) GetActiveCounts(ctx context.Context, companyID *uuid.UUID, includeTestCampaigns bool) (*ActiveCounts, error) {
+	col := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
 	}
-
-	whereClause := "((send_start_at <= ? OR send_start_at IS NULL) AND closed_at IS NULL)"
-	if !includeTestCampaigns {
-		whereClause += " AND is_test = false"
+	open := func() *gorm.DB {
+		db := r.DB.WithContext(ctx).Model(&database.Campaign{})
+		if companyID != nil {
+			db = whereCompany(db, database.CAMPAIGN_TABLE, companyID)
+		}
+		if !includeTestCampaigns {
+			db = db.Where(clause.Eq{Column: col("is_test"), Value: false})
+		}
+		return db.
+			Where(clause.Eq{Column: col("closed_at"), Value: nil}).
+			Where(notProgramCampaign)
 	}
-
-	res := db.
-		Model(&database.Campaign{}).
-		Where(whereClause, utils.NowRFC3339UTC()).
-		Where(notProgramCampaign).
-		Count(&c)
-
-	return c, res.Error
+	started := func() *gorm.DB {
+		return open().
+			Where(clause.Or(
+				clause.Lte{Column: col("send_start_at"), Value: utils.NowRFC3339UTC()},
+				clause.Eq{Column: col("send_start_at"), Value: nil},
+			)).
+			Where(clause.Eq{Column: col("paused_at"), Value: nil})
+	}
+	out := &ActiveCounts{}
+	if err := started().Count(&out.Active).Error; err != nil {
+		return nil, errs.Wrap(err)
+	}
+	if err := started().
+		Where(clause.Eq{Column: col("send_start_at"), Value: nil}).
+		Count(&out.SelfManaged).Error; err != nil {
+		return nil, errs.Wrap(err)
+	}
+	if err := open().Where(clause.Neq{Column: col("paused_at"), Value: nil}).Count(&out.Paused).Error; err != nil {
+		return nil, errs.Wrap(err)
+	}
+	return out, nil
 }
 
 // GetUpcomingCount get the upcoming campaign count
 // if no company ID is selected it gets the global count including all companies.
-// The hidden campaigns of a program are not counted.
+// The hidden campaigns of a program are not counted. A paused campaign counts
+// as paused, not as upcoming.
 func (r *Campaign) GetUpcomingCount(ctx context.Context, companyID *uuid.UUID, includeTestCampaigns bool) (int64, error) {
+	col := func(name string) clause.Column {
+		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
+	}
 	var c int64
-	db := r.DB
+	db := r.DB.WithContext(ctx)
 	if companyID != nil {
 		db = whereCompany(db, database.CAMPAIGN_TABLE, companyID)
 	}
-
-	whereClause := "((send_start_at > ?) AND closed_at IS NULL)"
 	if !includeTestCampaigns {
-		whereClause += " AND is_test = false"
+		db = db.Where(clause.Eq{Column: col("is_test"), Value: false})
 	}
-
 	res := db.
 		Model(&database.Campaign{}).
-		Where(whereClause, utils.NowRFC3339UTC()).
+		Where(clause.Gt{Column: col("send_start_at"), Value: utils.NowRFC3339UTC()}).
+		Where(clause.Eq{Column: col("closed_at"), Value: nil}).
+		Where(clause.Eq{Column: col("paused_at"), Value: nil}).
 		Where(notProgramCampaign).
 		Count(&c)
 
@@ -2813,14 +3605,30 @@ func (r *Campaign) GetCampaignStats(ctx context.Context, campaignID *uuid.UUID) 
 	return &stats, nil
 }
 
-// GetAllCampaignStats retrieves all campaign statistics
-func (r *Campaign) GetAllCampaignStats(ctx context.Context, companyID *uuid.UUID) ([]database.CampaignStats, error) {
+// GetAllCampaignStats retrieves all campaign statistics. When since is set
+// only the campaigns that started, closed or were created at or after it are
+// returned. A campaign without a start date is dated by when it was created.
+func (r *Campaign) GetAllCampaignStats(ctx context.Context, companyID *uuid.UUID, since *time.Time) ([]database.CampaignStats, error) {
 	var stats []database.CampaignStats
 
 	db := r.DB.WithContext(ctx).Order("campaign_start_date DESC NULLS LAST, created_at DESC")
 
 	if companyID != nil {
 		db = db.Where("company_id = ?", companyID)
+	}
+	if since != nil {
+		col := func(name string) clause.Column {
+			return clause.Column{Table: database.CAMPAIGN_STATS_TABLE, Name: name}
+		}
+		at := since.UTC()
+		db = db.Where(clause.Or(
+			clause.Gte{Column: col("campaign_start_date"), Value: at},
+			clause.Gte{Column: col("campaign_closed_at"), Value: at},
+			clause.And(
+				clause.Eq{Column: col("campaign_start_date"), Value: nil},
+				clause.Gte{Column: col("created_at"), Value: at},
+			),
+		))
 	}
 
 	res := db.Find(&stats)
@@ -2889,6 +3697,16 @@ func (r *Campaign) GetCampaignStatsByID(ctx context.Context, statsID *uuid.UUID)
 func (r *Campaign) UpdateCampaignStats(ctx context.Context, statsID *uuid.UUID, updateData map[string]interface{}) error {
 	res := r.DB.WithContext(ctx).Model(&database.CampaignStats{}).Where("id = ?", statsID).Updates(updateData)
 	return res.Error
+}
+
+// DeleteManualStatsByCompanyID deletes the manual campaign stats of a
+// company, the ones that have no campaign
+func (r *Campaign) DeleteManualStatsByCompanyID(ctx context.Context, companyID *uuid.UUID) error {
+	err := r.DB.WithContext(ctx).
+		Where(clause.Eq{Column: clause.Column{Name: "company_id"}, Value: companyID}).
+		Where(clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: nil}).
+		Delete(&database.CampaignStats{}).Error
+	return errs.Wrap(err)
 }
 
 // DeleteCampaignStatsByID deletes campaign statistics by stats ID

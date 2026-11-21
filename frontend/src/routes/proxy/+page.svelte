@@ -1,4 +1,5 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import FormSection from '$lib/components/form/FormSection.svelte';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
@@ -671,6 +672,9 @@ portal.example.com:
 			console.error('failed to clear IP allow list', e);
 		}
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <HeadTitle title="Proxies" />
@@ -962,7 +966,8 @@ portal.example.com:
 		list={[
 			'All associated domains will be deleted',
 			'Templates using this Proxy will become unusable',
-			'Scheduled or active campaigns using this Proxy will be cancelled'
+			'Scheduled or active campaigns using this Proxy will be cancelled',
+			...(showPrograms ? ['Programs stop sending templates that use this Proxy'] : [])
 		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
@@ -973,7 +978,8 @@ portal.example.com:
 		list={[
 			'All associated domains will be deleted',
 			'Templates using these proxies will become unusable',
-			'Scheduled or active campaigns using these proxies will be cancelled'
+			'Scheduled or active campaigns using these proxies will be cancelled',
+			...(showPrograms ? ['Programs stop sending templates that use these proxies'] : [])
 		]}
 		name={`${$selection.size} ${$selection.size === 1 ? 'proxy' : 'proxies'}`}
 		onClick={onClickBulkDelete}

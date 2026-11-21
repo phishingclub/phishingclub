@@ -17,8 +17,10 @@
 	// fixed pixel width, wins over size and fluid
 	/** @type {number|null} */
 	export let width = null;
-	// hideBelow 'md' hides the column on small screens
+	// hideBelow 'sm', 'md', 'lg', 'xl' or '2xl' hides the column below that screen size
 	export let hideBelow = '';
+	// a column for wide screens only shows from 2xl
+	$: wideOnly = hideBelow === '2xl' ? '2xl:table-cell' : '';
 	// compact drops the fixed widths below md so columns share small screens
 	export let compact = false;
 
@@ -44,7 +46,7 @@
 <!-- on phones labels stay on one line, so columns scrolled out of view
      do not make the header row taller -->
 <th
-	class="px-4 bg-grayblue-light dark:bg-gray-800/60 py-3 border-hidden first:rounded-tl-lg first:rounded-bl-lg transition-colors duration-200 align-middle"
+	class="px-4 bg-grayblue-light dark:bg-gray-800/60 py-3 border-hidden first:rounded-tl-lg first:rounded-bl-lg transition-colors duration-200 align-middle {wideOnly}"
 	class:rounded-br-lg={last}
 	class:rounded-tr-lg={last}
 	class:w-40={!fluid && !compact && size === ''}
@@ -57,8 +59,15 @@
 	class:md:w-44={!fluid && compact && size === 'medium'}
 	class:md:w-64={!fluid && compact && size === 'large'}
 	class:md:w-72={!fluid && compact && size === 'xlarge'}
-	class:hidden={hideBelow === 'md'}
+	class:hidden={hideBelow === 'sm' ||
+		hideBelow === 'md' ||
+		hideBelow === 'lg' ||
+		hideBelow === 'xl' ||
+		hideBelow === '2xl'}
+	class:sm:table-cell={hideBelow === 'sm'}
 	class:md:table-cell={hideBelow === 'md'}
+	class:lg:table-cell={hideBelow === 'lg'}
+	class:xl:table-cell={hideBelow === 'xl'}
 	style:width={width ? `${width}px` : null}
 	aria-sort={sortable && !isGhost && sortBy && column.toLowerCase() === sortBy.toLowerCase()
 		? sortOrder === 'asc'

@@ -30,6 +30,8 @@ type RemoteBrowser struct {
 	Common
 	RemoteBrowserRepository *repository.RemoteBrowser
 	sessions                sync.Map // key (crID or rbID string) → LiveSession
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // SwapSession atomically replaces the session for key, returning the previous one.
@@ -112,6 +114,11 @@ func (s *RemoteBrowser) Create(
 	if cid, err := rb.CompanyID.Get(); err == nil {
 		companyID = &cid
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 
 	if err := rb.Validate(); err != nil {
 		s.Logger.Errorw("failed to validate remote browser", "error", err)

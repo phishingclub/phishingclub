@@ -1,4 +1,5 @@
 <script>
+	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { addToast } from '$lib/store/toast';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
@@ -8,6 +9,12 @@
 	import FormError from '../FormError.svelte';
 	import Editor from '../editor/Editor.svelte';
 	import ReportPreviewPDF from '../ReportPreviewPDF.svelte';
+	import {
+		programReportSampleData,
+		programReportCategories,
+		reportRowKind,
+		reportApiKind
+	} from '$lib/utils/programReportSample.js';
 
 	// external
 	export let visible = false;
@@ -20,9 +27,9 @@
 	let error = '';
 	let isSubmitting = false;
 	let loadedForCompanyID = null;
-	// the phishing and training reports are separate templates; edit one at a time
+	// the phishing, training and program reports are separate templates; edit one at a time
 	let rows = [];
-	let reportKind = 'phishing'; // 'phishing' | 'training'
+	let reportKind = 'phishing'; // 'phishing' | 'training' | 'program'
 	// unsaved editor content per kind, kept while the modal is open so
 	// switching kind does not lose edits
 	let drafts = {};
@@ -69,7 +76,7 @@
 	const loadReportKind = (kind) => {
 		reportKind = kind;
 		error = '';
-		const row = rows.find((r) => !!r.isTraining === (kind === 'training'));
+		const row = rows.find((r) => reportRowKind(r) === kind);
 		content = drafts[kind] ?? (row?.content || '');
 		templateID = row?.id || null;
 		// the editor does not follow the bound value, so load the text into it
@@ -80,7 +87,7 @@
 	const refreshRows = async () => {
 		const response = await api.reportTemplate.getAll(company.id);
 		rows = response.success ? response.data?.rows || [] : [];
-		const row = rows.find((r) => !!r.isTraining === (reportKind === 'training'));
+		const row = rows.find((r) => reportRowKind(r) === reportKind);
 		if (row?.id) {
 			templateID = row.id;
 		}
@@ -103,7 +110,8 @@
 				response = await api.reportTemplate.create({
 					content,
 					companyID: company.id,
-					isTraining: reportKind === 'training'
+					isTraining: reportKind === 'training',
+					isProgram: reportKind === 'program'
 				});
 				if (response.success && response.data?.id) {
 					templateID = response.data.id;
@@ -178,12 +186,33 @@
 						>
 							Training
 						</button>
+						<ConditionalDisplay show="simulation">
+							<button
+								type="button"
+								class="px-3 py-1 transition-colors duration-200 {reportKind === 'program'
+									? 'bg-cta-blue text-white'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}"
+								on:click={() => selectReportKind('program')}
+							>
+								Program
+							</button>
+						</ConditionalDisplay>
 					</div>
 					<div class="ml-auto">
-						<ReportPreviewPDF {content} isTraining={reportKind === 'training'} />
+						<ReportPreviewPDF {content} kind={reportApiKind(reportKind)} />
 					</div>
 				</div>
-				<Editor bind:this={reportEditor} contentType="report" bind:value={content} />
+				<!-- the program report has its own sample data and variables, which the
+				editor reads on mount -->
+				{#key reportKind === 'program'}
+					<Editor
+						bind:this={reportEditor}
+						contentType="report"
+						bind:value={content}
+						reportSample={reportKind === 'program' ? programReportSampleData : null}
+						reportVariables={reportKind === 'program' ? programReportCategories : null}
+					/>
+				{/key}
 				<FormError message={error} />
 				{#if templateID}
 					<div class="mt-4">

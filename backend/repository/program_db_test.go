@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/utils"
+	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -32,6 +34,11 @@ func newProgramTestDB(t *testing.T) *gorm.DB {
 		&database.ProgramCampaign{},
 		&database.ProgramRecipientGroup{},
 		&database.ProgramEnrollment{},
+		&database.ProgramAllowDeny{},
+		&database.ProgramWebhook{},
+		&database.CampaignTemplate{},
+		&database.Recipient{},
+		&database.Event{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -127,10 +134,10 @@ func addEvent(t *testing.T, db *gorm.DB, campaignID, recipientID, anonymizedID, 
 	}
 }
 
-// TestGetProgramResultStatsCountsUniquePeople checks that a person reached by
-// several steps of a program is counted once and that other programs and plain
-// campaigns are left out
-func TestGetProgramResultStatsCountsUniquePeople(t *testing.T) {
+// TestGetEventsByProgramID checks the events of every hidden campaign of a
+// program are listed, paged, and that other programs and plain campaigns are
+// left out
+func TestGetEventsByProgramID(t *testing.T) {
 	db := newProgramTestDB(t)
 	ctx := context.Background()
 	sentID, clickID := ptrUUID(), ptrUUID()
@@ -192,18 +199,51 @@ func TestGetProgramResultStatsCountsUniquePeople(t *testing.T) {
 	addEvent(t, db, trainingCamp, bob, nil, clickID)
 
 	r := &Campaign{DB: db}
-	stats, err := r.GetProgramResultStats(ctx, programID)
+	all, err := r.GetEventsByProgramID(ctx, programID, &CampaignEventOption{WithUser: true})
 	if err != nil {
-		t.Fatalf("stats: %v", err)
+		t.Fatalf("events: %v", err)
 	}
-	if stats.Recipients != 3 {
-		t.Errorf("recipients = %d, want 3", stats.Recipients)
+	// 3 sent events and 1 click of alice and bob, 1 pseudonymous click, 2
+	// pseudonymous sends of carol and 1 training click
+	if len(all.Rows) != 8 {
+		t.Fatalf("events = %d, want 8", len(all.Rows))
 	}
-	if stats.EmailsSent != 3 {
-		t.Errorf("emails sent = %d, want 3", stats.EmailsSent)
+	for _, e := range all.Rows {
+		if *e.CampaignID == *otherCamp || *e.CampaignID == *plainCamp {
+			t.Fatalf("an event outside the program was listed: %+v", e)
+		}
 	}
-	if stats.WebsiteLoaded != 2 {
-		t.Errorf("website loaded = %d, want 2", stats.WebsiteLoaded)
+	// one event type and one page
+	clicks, err := r.GetEventsByProgramID(ctx, programID, &CampaignEventOption{
+		QueryArgs:    &vo.QueryArgs{OrderBy: TableColumn(database.CAMPAIGN_EVENT_TABLE, "created_at"), Limit: 2},
+		EventTypeIDs: []string{clickID.String()},
+	})
+	if err != nil {
+		t.Fatalf("click events: %v", err)
+	}
+	if len(clicks.Rows) != 2 || !clicks.HasNextPage {
+		t.Fatalf("click page = %d rows, next %v, want 2 and a next page", len(clicks.Rows), clicks.HasNextPage)
+	}
+	// a search ORs its columns, it must still keep to the program
+	searched, err := r.GetEventsByProgramID(ctx, programID, &CampaignEventOption{
+		QueryArgs: &vo.QueryArgs{Search: "2"},
+	})
+	if err != nil {
+		t.Fatalf("searched events: %v", err)
+	}
+	if len(searched.Rows) == 0 {
+		t.Fatalf("a search on the event time should match the program events")
+	}
+	for _, e := range searched.Rows {
+		if *e.CampaignID == *otherCamp || *e.CampaignID == *plainCamp {
+			t.Fatalf("a search listed an event outside the program: %+v", e)
+		}
+	}
+	// a sort column outside the allowlist is refused
+	if _, err := r.GetEventsByProgramID(ctx, programID, &CampaignEventOption{
+		QueryArgs: &vo.QueryArgs{OrderBy: "campaign_events.data; DROP TABLE campaigns"},
+	}); err == nil {
+		t.Fatalf("a sort column outside the allowlist must fail")
 	}
 }
 
@@ -287,13 +327,13 @@ func TestProgramLookups(t *testing.T) {
 	if err := db.Create(enrollment).Error; err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
-	if err := r.DeleteEnrollmentsByRecipientID(ctx, recipientID); err != nil {
-		t.Fatalf("delete enrollments: %v", err)
+	if err := r.UnlinkEnrollmentsOfRecipient(ctx, recipientID); err != nil {
+		t.Fatalf("unlink enrollments: %v", err)
 	}
 	var enrollments int64
-	db.Model(&database.ProgramEnrollment{}).Count(&enrollments)
+	db.Model(&database.ProgramEnrollment{}).Where("recipient_id IS NOT NULL").Count(&enrollments)
 	if enrollments != 0 {
-		t.Errorf("enrollments after delete = %d, want 0", enrollments)
+		t.Errorf("linked enrollments after unlink = %d, want 0", enrollments)
 	}
 
 	// delete removes the campaign links with the program
@@ -386,6 +426,10 @@ func TestGetListSummaries(t *testing.T) {
 	if got[*a].Enrolled != 3 || got[*b].Enrolled != 1 || got[*empty].Enrolled != 0 {
 		t.Fatalf("enrolled a=%d b=%d empty=%d", got[*a].Enrolled, got[*b].Enrolled, got[*empty].Enrolled)
 	}
+	// the total also counts the person who was removed
+	if got[*a].Total != 4 || got[*b].Total != 1 || got[*empty].Total != 0 {
+		t.Fatalf("total a=%d b=%d empty=%d", got[*a].Total, got[*b].Total, got[*empty].Total)
+	}
 	if got[*a].NextDueAt == nil || !got[*a].NextDueAt.Equal(soon) {
 		t.Fatalf("next due a = %v, want %v", got[*a].NextDueAt, soon)
 	}
@@ -404,5 +448,44 @@ func TestGetListSummaries(t *testing.T) {
 	}
 	if _, ok := usable[*gone]; ok {
 		t.Fatalf("a deleted template must be missing from the result")
+	}
+}
+
+// TestProgramListSearch checks the program list search matches the name only,
+// not the date columns, and reads LIKE wildcards in the text as spaces
+func TestProgramListSearch(t *testing.T) {
+	db := newProgramTestDB(t)
+	ctx := context.Background()
+	r := &Program{DB: db}
+	createProgram(t, db, "Phishing quarter", nil)
+	createProgram(t, db, "Awareness", nil)
+	createProgram(t, db, "100% done", nil)
+	search := func(text string) []string {
+		t.Helper()
+		got, err := r.GetAll(ctx, nil, &ProgramOption{QueryArgs: &vo.QueryArgs{Search: text}, AllCompanies: true}, time.Now())
+		if err != nil {
+			t.Fatalf("search %q: %v", text, err)
+		}
+		names := []string{}
+		for _, p := range got.Rows {
+			names = append(names, p.Name.MustGet().String())
+		}
+		sort.Strings(names)
+		return names
+	}
+	if got := search("quarter"); len(got) != 1 || got[0] != "Phishing quarter" {
+		t.Fatalf("name search: %v", got)
+	}
+	// every program was created this year, a date column would match
+	year := time.Now().UTC().Format("2006")
+	if got := search(year); len(got) != 0 {
+		t.Fatalf("a search must not match the date columns: %v", got)
+	}
+	// the underscore is no wildcard, read as a space
+	if got := search("x_done"); len(got) != 0 {
+		t.Fatalf("an underscore is no wildcard: %v", got)
+	}
+	if got := search("100"); len(got) != 1 {
+		t.Fatalf("search 100: %v", got)
 	}
 }

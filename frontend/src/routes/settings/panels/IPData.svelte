@@ -1,5 +1,6 @@
 <script>
 	import { onMount } from 'svelte';
+	import Note from '$lib/components/Note.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { addToast } from '$lib/store/toast';
 	import SettingsCard from '$lib/components/SettingsCard.svelte';
@@ -130,14 +131,10 @@
 						{/if}
 					</div>
 					{#if p.kind === 'geoip' && !(p.info && p.info.downloaded)}
-						<div
-							class="rounded-md border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 transition-colors duration-200"
-						>
-							<p class="text-sm text-amber-800 dark:text-amber-200">
-								The built in Geo IP data is deprecated and will be removed in a future release.
-								Download it to keep country filters working.
-							</p>
-						</div>
+						<Note boxed>
+							The built in Geo IP data is deprecated and will be removed in a future release.
+							Download it to keep country filters working.
+						</Note>
 					{/if}
 				</div>
 				<svelte:fragment slot="footer">
@@ -152,11 +149,7 @@
 								Remove
 							</Button>
 						{/if}
-						<Button
-							size="large"
-							disabled={busy[p.kind]}
-							on:click={() => download(p.kind)}
-						>
+						<Button size="large" disabled={busy[p.kind]} on:click={() => download(p.kind)}>
 							{p.info && p.info.downloaded ? 'Update' : 'Download'}
 						</Button>
 					</div>

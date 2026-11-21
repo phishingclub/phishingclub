@@ -98,7 +98,7 @@ func TestProgramLifecyclePauseResumeCloseDelete(t *testing.T) {
 		t.Fatalf("the hidden campaign must be paused with the program")
 	}
 
-	if err := p.svc.Resume(p.ctx, session, &programID); err != nil {
+	if err := p.svc.resumeWait(p.ctx, session, &programID); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	if p.loadProgram(programID).Status != model.ProgramStatusActive {
@@ -108,7 +108,7 @@ func TestProgramLifecyclePauseResumeCloseDelete(t *testing.T) {
 		t.Fatalf("the hidden campaign must send again after resume")
 	}
 
-	if err := p.svc.Close(p.ctx, session, &programID); err != nil {
+	if err := p.svc.closeWait(p.ctx, session, &programID); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	program := p.loadProgram(programID)
@@ -133,19 +133,20 @@ func TestProgramLifecyclePauseResumeCloseDelete(t *testing.T) {
 	if err := p.svc.Pause(p.ctx, session, &programID); err == nil {
 		t.Fatalf("a closed program can not be paused")
 	}
-	if err := p.svc.Resume(p.ctx, session, &programID); err == nil {
+	if err := p.svc.resumeWait(p.ctx, session, &programID); err == nil {
 		t.Fatalf("a closed program can not be resumed")
 	}
-	if err := p.svc.Start(p.ctx, session, &programID); err == nil {
+	if err := p.svc.startWait(p.ctx, session, &programID); err == nil {
 		t.Fatalf("a closed program can not be started")
 	}
-	if err := p.svc.Close(p.ctx, session, &programID); err == nil {
+	if err := p.svc.closeWait(p.ctx, session, &programID); err == nil {
 		t.Fatalf("a closed program can not be closed again")
 	}
 
 	if err := p.svc.DeleteByID(p.ctx, session, &programID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
+	p.waitDeletes()
 	if _, err := p.svc.ProgramRepository.GetByID(p.ctx, &programID, nil); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("expected the program gone, got %v", err)
 	}
@@ -169,10 +170,10 @@ func TestProgramLifecycleWaitsForContext(t *testing.T) {
 	p.svc.lifecycleMu.Lock()
 	defer p.svc.lifecycleMu.Unlock()
 	calls := map[string]func() error{
-		"start":  func() error { return p.svc.Start(cancelledContext(), session, &programID) },
+		"start":  func() error { return p.svc.startWait(cancelledContext(), session, &programID) },
 		"pause":  func() error { return p.svc.Pause(cancelledContext(), session, &programID) },
-		"resume": func() error { return p.svc.Resume(cancelledContext(), session, &programID) },
-		"close":  func() error { return p.svc.Close(cancelledContext(), session, &programID) },
+		"resume": func() error { return p.svc.resumeWait(cancelledContext(), session, &programID) },
+		"close":  func() error { return p.svc.closeWait(cancelledContext(), session, &programID) },
 		"delete": func() error { return p.svc.DeleteByID(cancelledContext(), session, &programID) },
 	}
 	for name, call := range calls {
@@ -201,7 +202,7 @@ func TestProgramStartRefusesPassedEnd(t *testing.T) {
 	}
 	ended := draft()
 	p.setProgram(ended, map[string]any{"end_at": now.Add(-time.Minute)})
-	err := p.svc.Start(p.ctx, session, &ended)
+	err := p.svc.startWait(p.ctx, session, &ended)
 	if err == nil || !strings.Contains(err.Error(), "The end has passed") {
 		t.Fatalf("expected a start after the end refused, got %v", err)
 	}
@@ -210,7 +211,7 @@ func TestProgramStartRefusesPassedEnd(t *testing.T) {
 	}
 	ok := draft()
 	p.setProgram(ok, map[string]any{"end_at": now.Add(48 * time.Hour)})
-	if err := p.svc.Start(p.ctx, session, &ok); err != nil {
+	if err := p.svc.startWait(p.ctx, session, &ok); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	if p.loadProgram(ok).Status != model.ProgramStatusActive {
@@ -229,6 +230,7 @@ func TestTickClosesDraftPastEnd(t *testing.T) {
 	if err := p.svc.Tick(p.ctx, authorizedSession(t)); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
+	p.waitForCloses(t)
 	if !p.loadProgram(programID).IsClosed() {
 		t.Fatalf("expected the draft closed at its end")
 	}
@@ -250,8 +252,9 @@ func failEnrollmentStop(t *testing.T, db *gorm.DB) func() {
 	}
 }
 
-// TestProgramClosePartialFailureRetry checks a close that fails half way
-// leaves a paused program that is not closed, and a second close finishes it
+// TestProgramClosePartialFailureRetry checks a close that fails while it
+// stops the sending leaves a paused program marked as closing that is not
+// closed, and a second close finishes it
 func TestProgramClosePartialFailureRetry(t *testing.T) {
 	p := newProgramLifecycleTest(t)
 	session := authorizedSession(t)
@@ -262,8 +265,9 @@ func TestProgramClosePartialFailureRetry(t *testing.T) {
 	e := p.enroll(programID, alice, 0)
 
 	restore := failEnrollmentStop(t, p.db)
-	if err := p.svc.Close(p.ctx, session, &programID); err == nil {
-		t.Fatalf("expected the close to fail")
+	// the request marks the close, the background close then fails
+	if err := p.svc.closeWait(p.ctx, session, &programID); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 	program := p.loadProgram(programID)
 	if program.IsClosed() {
@@ -272,8 +276,11 @@ func TestProgramClosePartialFailureRetry(t *testing.T) {
 	if program.Status != model.ProgramStatusPaused {
 		t.Fatalf("a close that failed must leave the program paused, got %s", program.Status)
 	}
-	if p.campaignRow(campaignID).ClosedAt == nil {
-		t.Fatalf("the steps before the failure are kept")
+	if program.ClosingAt == nil {
+		t.Fatalf("a close that failed must leave the program marked as closing")
+	}
+	if p.campaignRow(campaignID).ClosedAt != nil {
+		t.Fatalf("the hidden campaigns are closed only after the sending stopped")
 	}
 	// the scheduler does not advance the half closed program
 	due, err := p.svc.ProgramRepository.GetDueEnrollments(p.ctx, time.Now().Add(time.Hour), 10)
@@ -282,12 +289,15 @@ func TestProgramClosePartialFailureRetry(t *testing.T) {
 	}
 
 	restore()
-	if err := p.svc.Close(p.ctx, session, &programID); err != nil {
+	if err := p.svc.closeWait(p.ctx, session, &programID); err != nil {
 		t.Fatalf("second close: %v", err)
 	}
 	program = p.loadProgram(programID)
-	if !program.IsClosed() || program.IsPaused() {
+	if !program.IsClosed() || program.IsPaused() || program.ClosingAt != nil {
 		t.Fatalf("expected the second close to finish, got %s", program.Status)
+	}
+	if p.campaignRow(campaignID).ClosedAt == nil {
+		t.Fatalf("the second close must close the hidden campaign")
 	}
 	if row := p.enrollment(e.ID); row.Status != model.ProgramEnrollmentStopped {
 		t.Fatalf("expected the person stopped, got %s", row.Status)
@@ -295,7 +305,7 @@ func TestProgramClosePartialFailureRetry(t *testing.T) {
 }
 
 // TestTickRetriesFailedEndDateClose checks a failed close at the end date is
-// tried again by the next tick
+// held back for programCloseRetryEvery and then tried again by a tick
 func TestTickRetriesFailedEndDateClose(t *testing.T) {
 	p := newProgramLifecycleTest(t)
 	programID := p.program(model.ProgramLoopComplete)
@@ -309,6 +319,7 @@ func TestTickRetriesFailedEndDateClose(t *testing.T) {
 	if err := p.svc.Tick(p.ctx, authorizedSession(t)); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
+	p.waitForCloses(t)
 	if p.loadProgram(programID).IsClosed() {
 		t.Fatalf("the failed close must not mark the program closed")
 	}
@@ -316,11 +327,24 @@ func TestTickRetriesFailedEndDateClose(t *testing.T) {
 		t.Fatalf("the failed close must be audited")
 	}
 	restore()
+	// the next tick waits for the retry time
 	if err := p.svc.Tick(p.ctx, authorizedSession(t)); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
+	p.waitForCloses(t)
+	if p.loadProgram(programID).IsClosed() {
+		t.Fatalf("a failed close must wait before it is tried again")
+	}
+	p.svc.closeRetryAt[programID] = time.Now().Add(-time.Second)
+	if err := p.svc.Tick(p.ctx, authorizedSession(t)); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	p.waitForCloses(t)
 	if !p.loadProgram(programID).IsClosed() {
-		t.Fatalf("the next tick must finish the close")
+		t.Fatalf("the tick after the retry time must finish the close")
+	}
+	if _, ok := p.svc.closeRetryAt[programID]; ok {
+		t.Fatalf("a finished close clears the retry time")
 	}
 	if _, ok := p.svc.closeFailureAuditAt[programID]; ok {
 		t.Fatalf("a finished close clears the failure mark")
@@ -339,7 +363,11 @@ func TestProgramDeletePausesCampaignsFirst(t *testing.T) {
 		BEGIN SELECT RAISE(ABORT, 'delete refused'); END`).Error; err != nil {
 		t.Fatalf("create trigger: %v", err)
 	}
-	if err := p.svc.DeleteByID(p.ctx, session, &programID); err == nil {
+	if err := p.svc.DeleteByID(p.ctx, session, &programID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	p.waitDeletes()
+	if p.programGone(programID) {
 		t.Fatalf("expected the delete to fail")
 	}
 	if p.campaignRow(campaignID).PausedAt == nil {
@@ -348,13 +376,18 @@ func TestProgramDeletePausesCampaignsFirst(t *testing.T) {
 	if err := p.db.Exec(`DROP TRIGGER fail_delete`).Error; err != nil {
 		t.Fatalf("drop trigger: %v", err)
 	}
+	// a new request tries again at once, even within the retry wait
 	if err := p.svc.DeleteByID(p.ctx, session, &programID); err != nil {
 		t.Fatalf("second delete: %v", err)
 	}
+	p.waitDeletes()
+	if !p.programGone(programID) {
+		t.Fatalf("expected the program deleted")
+	}
 }
 
-// TestProgramResultsAfterAnonymousClose checks coverage is not shown for a
-// closed program, also an anonymous one whose pseudonyms are gone
+// TestProgramResultsAfterAnonymousClose checks the results of an anonymous
+// program stay after close, when its pseudonyms are gone
 func TestProgramResultsAfterAnonymousClose(t *testing.T) {
 	p := newProgramLifecycleTest(t)
 	session := authorizedSession(t)
@@ -362,7 +395,8 @@ func TestProgramResultsAfterAnonymousClose(t *testing.T) {
 	p.setProgram(programID, map[string]any{"is_anonymous": true})
 	stepID := p.step(programID, 0, true)
 	campaignID := p.stepCampaign(programID, stepID, 0)
-	sentAt := time.Now().UTC().AddDate(0, 0, -10)
+	// two months back is always in a whole settled month
+	sentAt := time.Now().UTC().AddDate(0, -2, 0)
 	for i := 0; i < 6; i++ {
 		rid := p.recipient(uuid.NewString() + "@example.com")
 		e := p.enroll(programID, rid, 0)
@@ -376,18 +410,18 @@ func TestProgramResultsAfterAnonymousClose(t *testing.T) {
 	if err != nil {
 		t.Fatalf("results: %v", err)
 	}
-	if open.Closed || open.Coverage == nil || open.Coverage.Active != 6 || open.Coverage.Covered != 6 {
-		t.Fatalf("expected full coverage while open: %+v", open.Coverage)
+	if open.Closed || open.Summary.Recipients != 6 || *open.Summary.Sent != 6 {
+		t.Fatalf("expected 6 recipients sent to while open: %+v", open.Summary)
 	}
-	if err := p.svc.Close(p.ctx, session, &programID); err != nil {
+	if err := p.svc.closeWait(p.ctx, session, &programID); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	closed, err := p.svc.programResults(p.ctx, session, p.loadProgram(programID), time.Now(), nil, nil)
 	if err != nil {
 		t.Fatalf("results: %v", err)
 	}
-	if !closed.Closed || closed.Coverage != nil {
-		t.Fatalf("a closed program shows no coverage: closed=%v coverage=%+v", closed.Closed, closed.Coverage)
+	if !closed.Closed || *closed.Summary.Sent != 6 {
+		t.Fatalf("a closed program keeps its results: closed=%v %+v", closed.Closed, closed.Summary)
 	}
 	if closed.Months[0].Sent == nil || *closed.Months[0].Sent != 6 {
 		t.Fatalf("the results stay after close: %+v", closed.Months[0])
@@ -517,10 +551,10 @@ func TestProgramGroupCap(t *testing.T) {
 	}
 }
 
-// TestProgramAnonymousFunnelCountsPeopleOnce checks the anonymous funnel counts
-// each person once across the steps of a program, by pseudonym, and leaves out
-// sends that have not settled
-func TestProgramAnonymousFunnelCountsPeopleOnce(t *testing.T) {
+// TestProgramAnonymousFunnelCountsSettledSends checks the anonymous results
+// count the sends of every step of a program, by pseudonym, and leave out
+// sends whose month has not settled
+func TestProgramAnonymousFunnelCountsSettledSends(t *testing.T) {
 	p := newProgramLifecycleTest(t)
 	session := authorizedSession(t)
 	programID := p.program(model.ProgramLoopComplete)
@@ -529,7 +563,7 @@ func TestProgramAnonymousFunnelCountsPeopleOnce(t *testing.T) {
 	step2 := p.step(programID, 1, true)
 	campaign1 := p.stepCampaign(programID, step1, 0)
 	campaign2 := p.stepCampaign(programID, step2, 0)
-	settled := time.Now().UTC().AddDate(0, 0, -10)
+	settled := time.Now().UTC().AddDate(0, -2, 0)
 	fresh := time.Now().UTC().Add(-time.Hour)
 	addSend := func(campaignID, rid, pseudonym uuid.UUID, at time.Time) {
 		id := p.sendAt(campaignID, rid, at, true)
@@ -545,11 +579,11 @@ func TestProgramAnonymousFunnelCountsPeopleOnce(t *testing.T) {
 	// a person sent only an hour ago is not counted yet
 	addSend(campaign1, p.recipient("fresh@example.com"), uuid.New(), fresh)
 
-	stats, err := p.svc.GetResultStats(p.ctx, session, &programID)
+	results, err := p.svc.GetResults(p.ctx, session, &programID, "")
 	if err != nil {
-		t.Fatalf("stats: %v", err)
+		t.Fatalf("results: %v", err)
 	}
-	if stats.Recipients != 6 || stats.EmailsSent != 6 {
-		t.Fatalf("expected 6 people counted once, got recipients=%d sent=%d", stats.Recipients, stats.EmailsSent)
+	if sum := results.Summary; *sum.Sent != 12 || sum.SentTotal != 12 {
+		t.Fatalf("expected the 12 settled sends counted, got %+v", sum)
 	}
 }

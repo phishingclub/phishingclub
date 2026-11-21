@@ -3,16 +3,14 @@ package controller
 import (
 	"bytes"
 	"encoding/csv"
-	"io"
-	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-errors/errors"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/build"
 	"github.com/phishingclub/phishingclub/cache"
 	"github.com/phishingclub/phishingclub/data"
@@ -23,6 +21,7 @@ import (
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/service"
 	"github.com/phishingclub/phishingclub/utils"
+	"github.com/phishingclub/phishingclub/vo"
 )
 
 // allowedCampaignColumns is a map between the frontend and the backend
@@ -476,9 +475,11 @@ func (c *Campaign) GetAllWithinDates(g *gin.Context) {
 		endDate,
 		companyID,
 		&repository.CampaignOption{
-			QueryArgs:            queryArgs,
-			WithCompany:          true,
-			WithCampaignTemplate: true,
+			QueryArgs:   queryArgs,
+			WithCompany: true,
+			// the template is joined only to sort or search on its name, the
+			// calendar does not show it
+			WithCampaignTemplate: queryArgs.OrderBy == allowedCampaignColumns["template"] || queryArgs.Search != "",
 			IncludeTestCampaigns: includeTestCampaigns,
 		},
 	)
@@ -486,8 +487,89 @@ func (c *Campaign) GetAllWithinDates(g *gin.Context) {
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	c.Response.OK(g, campaigns)
+	c.Response.OK(g, newCampaignCalendarResult(campaigns))
 
+}
+
+// campaignCalendarCompany is the company of a calendar row
+type campaignCalendarCompany struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// campaignCalendarRow is a campaign as the dashboard calendar shows it, the
+// fields it reads under the names of the full campaign
+type campaignCalendarRow struct {
+	ID             nullable.Nullable[uuid.UUID]   `json:"id"`
+	Name           nullable.Nullable[vo.String64] `json:"name"`
+	CompanyID      nullable.Nullable[uuid.UUID]   `json:"companyID"`
+	Company        *campaignCalendarCompany       `json:"company"`
+	CreatedAt      *time.Time                     `json:"createdAt"`
+	UpdatedAt      *time.Time                     `json:"updatedAt"`
+	SendStartAt    nullable.Nullable[time.Time]   `json:"sendStartAt"`
+	SendEndAt      nullable.Nullable[time.Time]   `json:"sendEndAt"`
+	ScheduleAt     nullable.Nullable[time.Time]   `json:"scheduleAt"`
+	CloseAt        nullable.Nullable[time.Time]   `json:"closeAt"`
+	ClosedAt       nullable.Nullable[time.Time]   `json:"closedAt"`
+	PausedAt       nullable.Nullable[time.Time]   `json:"pausedAt"`
+	AnonymizeAt    nullable.Nullable[time.Time]   `json:"anonymizeAt"`
+	AnonymizedAt   nullable.Nullable[time.Time]   `json:"anonymizedAt"`
+	IsTraining     nullable.Nullable[bool]        `json:"isTraining"`
+	IsTest         nullable.Nullable[bool]        `json:"isTest"`
+	NotableEventID nullable.Nullable[uuid.UUID]   `json:"notableEventID"`
+	// SelfManaged is set for a campaign without a delivery window
+	SelfManaged bool `json:"selfManaged"`
+}
+
+// campaignCalendarResult is one page of calendar rows
+type campaignCalendarResult struct {
+	Rows        []*campaignCalendarRow `json:"rows"`
+	HasNextPage bool                   `json:"hasNextPage"`
+}
+
+// newCampaignCalendarResult keeps the calendar fields of each campaign
+func newCampaignCalendarResult(campaigns *model.Result[model.Campaign]) *campaignCalendarResult {
+	out := &campaignCalendarResult{Rows: []*campaignCalendarRow{}}
+	if campaigns == nil {
+		return out
+	}
+	out.HasNextPage = campaigns.HasNextPage
+	for _, cmp := range campaigns.Rows {
+		if cmp == nil {
+			continue
+		}
+		row := &campaignCalendarRow{
+			ID:             cmp.ID,
+			Name:           cmp.Name,
+			CompanyID:      cmp.CompanyID,
+			CreatedAt:      cmp.CreatedAt,
+			UpdatedAt:      cmp.UpdatedAt,
+			SendStartAt:    cmp.SendStartAt,
+			SendEndAt:      cmp.SendEndAt,
+			ScheduleAt:     cmp.ScheduleAt,
+			CloseAt:        cmp.CloseAt,
+			ClosedAt:       cmp.ClosedAt,
+			PausedAt:       cmp.PausedAt,
+			AnonymizeAt:    cmp.AnonymizeAt,
+			AnonymizedAt:   cmp.AnonymizedAt,
+			IsTraining:     cmp.IsTraining,
+			IsTest:         cmp.IsTest,
+			NotableEventID: cmp.NotableEventID,
+			SelfManaged:    !cmp.SendStartAt.IsSpecified() || cmp.SendStartAt.IsNull(),
+		}
+		if cmp.Company != nil {
+			company := &campaignCalendarCompany{}
+			if id, err := cmp.Company.ID.Get(); err == nil {
+				company.ID = id.String()
+			}
+			if name, err := cmp.Company.Name.Get(); err == nil {
+				company.Name = name.String()
+			}
+			row.Company = company
+		}
+		out.Rows = append(out.Rows, row)
+	}
+	return out
 }
 
 // GetAllActive gets all active campaigns with pagination
@@ -622,6 +704,16 @@ func (c *Campaign) GetAllEvents(g *gin.Context) {
 	queryArgs.Desc = true
 	// disable search for performance
 	queryArgs.Search = ""
+	// an optional event type filter by event name, only known names pass
+	var eventTypeID *uuid.UUID
+	if name := g.Query("eventType"); name != "" {
+		id, ok := cache.EventIDByName[name]
+		if !ok || id == nil {
+			c.Response.BadRequestMessage(g, "unknown event type")
+			return
+		}
+		eventTypeID = id
+	}
 	// get events
 	events, err := c.CampaignService.GetAllEvents(
 		g.Request.Context(),
@@ -629,6 +721,7 @@ func (c *Campaign) GetAllEvents(g *gin.Context) {
 		companyID,
 		queryArgs,
 		includeTestCampaigns,
+		eventTypeID,
 	)
 	// handle responses
 	if ok := c.handleErrors(g, err); !ok {
@@ -1246,9 +1339,20 @@ func (c *Campaign) GetAllCampaignStats(g *gin.Context) {
 	}
 	// parse request
 	companyID := companyIDFromRequestQuery(g)
+	// since, an RFC 3339 time, keeps the campaigns that started, closed or
+	// were created at or after it. Without it every campaign is returned.
+	var since *time.Time
+	if v := g.Query("since"); v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			c.Response.ValidationFailed(g, "since", err)
+			return
+		}
+		since = &t
+	}
 
 	// get stats
-	stats, err := c.CampaignService.GetAllCampaignStats(g.Request.Context(), session, companyID)
+	stats, err := c.CampaignService.GetAllCampaignStats(g.Request.Context(), session, companyID, since)
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
@@ -1351,9 +1455,6 @@ func (c *Campaign) DeleteCampaignStatsManual(g *gin.Context) {
 	c.Response.OK(g, gin.H{"message": "Campaign stats deleted successfully"})
 }
 
-// reportedCSVMaxBytes caps the size of an uploaded reported CSV
-const reportedCSVMaxBytes = 32 << 20
-
 // UploadReportedCSV uploads a CSV file with reported recipients
 func (c *Campaign) UploadReportedCSV(g *gin.Context) {
 	// handle session
@@ -1367,51 +1468,8 @@ func (c *Campaign) UploadReportedCSV(g *gin.Context) {
 		return
 	}
 
-	g.Request.Body = http.MaxBytesReader(g.Writer, g.Request.Body, reportedCSVMaxBytes)
-	file, header, err := g.Request.FormFile("file")
-	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			c.Response.ValidationFailed(g, "file", errors.New("file is larger than 32 MB"))
-			return
-		}
-		c.Response.ValidationFailed(g, "file", err)
-		return
-	}
-	defer file.Close()
-
-	// validate file extension
-	if !strings.HasSuffix(strings.ToLower(header.Filename), ".csv") {
-		c.Response.ValidationFailed(g, "file", errors.New("file must be a CSV"))
-		return
-	}
-
-	// rows may have fewer columns than the header, those are reported per row.
-	// a broken file, such as an unclosed quote, rejects the whole import since
-	// the rows after it can not be trusted.
-	reader := csv.NewReader(file)
-	reader.FieldsPerRecord = -1
-	var headerRow []string
-	rows := []service.ReportedCSVRow{}
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			c.Logger.Debugw("failed to parse CSV file", "error", err)
-			c.Response.ValidationFailed(g, "file", errors.New("failed to parse CSV file: "+err.Error()))
-			return
-		}
-		if headerRow == nil {
-			headerRow = record
-			continue
-		}
-		line, _ := reader.FieldPos(0)
-		rows = append(rows, service.ReportedCSVRow{Line: line, Fields: record})
-	}
-	if len(rows) == 0 {
-		c.Response.ValidationFailed(g, "file", errors.New("CSV file must have header and at least one data row"))
+	headerRow, rows, ok := readReportedCSVUpload(g, c.Response)
+	if !ok {
 		return
 	}
 

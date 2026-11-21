@@ -12,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var allowdCampaignTemplatesColumns = []string{
@@ -221,6 +222,42 @@ func (r *CampaignTemplate) GetByID(
 	return ToCampaignTemplate(&tmpl)
 }
 
+// GetByIDs gets the campaign templates with the given ids in one query. A
+// template that does not exist is left out, the order is not kept.
+func (r *CampaignTemplate) GetByIDs(
+	ctx context.Context,
+	ids []uuid.UUID,
+	options *CampaignTemplateOption,
+) ([]*model.CampaignTemplate, error) {
+	out := []*model.CampaignTemplate{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	values := make([]any, 0, len(ids))
+	for _, id := range ids {
+		values = append(values, id.String())
+	}
+	db := r.load(options, r.DB.WithContext(ctx))
+	var rows []database.CampaignTemplate
+	res := db.
+		Where(clause.IN{
+			Column: clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "id"},
+			Values: values,
+		}).
+		Find(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	for i := range rows {
+		tmpl, err := ToCampaignTemplate(&rows[i])
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		out = append(out, tmpl)
+	}
+	return out, nil
+}
+
 // GetByNameAndCompanyID gets a campaign template by name and company ID
 func (r *CampaignTemplate) GetByNameAndCompanyID(
 	ctx context.Context,
@@ -276,21 +313,13 @@ func (r *CampaignTemplate) GetAll(
 		)
 	}
 	var tmpl []database.CampaignTemplate
-	res := db.Find(&tmpl)
+	res := withPeek(db, options.QueryArgs).Find(&tmpl)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.CAMPAIGN_TEMPLATE_TABLE,
-		options.QueryArgs,
-		allowdCampaignTemplatesColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&tmpl, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, t := range tmpl {
@@ -337,21 +366,13 @@ func (r *CampaignTemplate) GetAllByCompanyID(
 		)
 	}
 	var tmpl []database.CampaignTemplate
-	res := db.Find(&tmpl)
+	res := withPeek(db, options.QueryArgs).Find(&tmpl)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.CAMPAIGN_TEMPLATE_TABLE,
-		options.QueryArgs,
-		allowdCampaignTemplatesColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&tmpl, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, t := range tmpl {
@@ -722,33 +743,54 @@ func (r *CampaignTemplate) RemoveEmailIDFromAll(
 }
 
 // RemovePageIDFromAll removes the page ID from any matching columns
-// landing_page_id, before_landing_page_id and after_landing_page_id
+// landing_page_id, before_landing_page_id and after_landing_page_id. A template
+// is marked as not usable only when it loses its landing page and has no
+// landing proxy, see model.CampaignTemplate.ToDBMap. A before or after page is
+// optional and leaves the usable flag as it is.
 func (r *CampaignTemplate) RemovePageIDFromAll(
 	ctx context.Context,
 	pageID *uuid.UUID,
 ) error {
-	columns := []string{"before_landing_page_id", "after_landing_page_id", "landing_page_id"}
-	for _, column := range columns {
-		row := map[string]any{}
-		AddUpdatedAt(row)
-		row[column] = nil
-		row["is_usable"] = false
-		res := r.DB.
-			Model(&database.CampaignTemplate{}).
-			Where(
-				fmt.Sprintf(
-					"%s = ?",
-					TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, column),
-				),
-				pageID.String(),
-			).
-			Updates(row)
+	return r.removeLandingFromAll(ctx, pageID,
+		[]string{"before_landing_page_id", "after_landing_page_id"},
+		"landing_page_id", "landing_proxy_id",
+	)
+}
 
+// removeLandingFromAll sets the given optional columns and the landing column
+// to null where they hold id. A template that loses its landing column and has
+// nothing in the other landing column is marked as not usable. The writes are
+// one transaction, so a template is never left without its landing and still
+// marked as usable.
+func (r *CampaignTemplate) removeLandingFromAll(
+	ctx context.Context,
+	id *uuid.UUID,
+	optional []string,
+	landing string,
+	otherLanding string,
+) error {
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.
+			Model(&database.CampaignTemplate{}).
+			Where(clause.Eq{Column: clause.Column{Name: landing}, Value: id.String()}).
+			Where(clause.Eq{Column: clause.Column{Name: otherLanding}, Value: nil}).
+			Updates(map[string]any{"is_usable": false})
 		if res.Error != nil {
 			return res.Error
 		}
-	}
-	return nil
+		for _, column := range append(optional, landing) {
+			row := map[string]any{column: nil}
+			AddUpdatedAt(row)
+			res := tx.
+				Model(&database.CampaignTemplate{}).
+				Where(clause.Eq{Column: clause.Column{Name: column}, Value: id.String()}).
+				Updates(row)
+			if res.Error != nil {
+				return res.Error
+			}
+		}
+		return nil
+	})
 }
 
 // UpdateByID updates a campaign template by id
@@ -1015,30 +1057,16 @@ func (r *CampaignTemplate) GetByProxyID(
 	return templates, nil
 }
 
+// RemoveProxyIDFromAll removes the proxy ID from any matching columns
+// landing_proxy_id, before_landing_proxy_id and after_landing_proxy_id. A
+// template is marked as not usable only when it loses its landing proxy and has
+// no landing page, see RemovePageIDFromAll.
 func (r *CampaignTemplate) RemoveProxyIDFromAll(
 	ctx context.Context,
 	proxyID *uuid.UUID,
 ) error {
-	columns := []string{"before_landing_proxy_id", "after_landing_proxy_id", "landing_proxy_id"}
-	for _, column := range columns {
-		row := map[string]any{}
-		AddUpdatedAt(row)
-		row[column] = nil
-		row["is_usable"] = false
-		res := r.DB.
-			Model(&database.CampaignTemplate{}).
-			Where(
-				fmt.Sprintf(
-					"%s = ?",
-					TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, column),
-				),
-				proxyID.String(),
-			).
-			Updates(row)
-
-		if res.Error != nil {
-			return res.Error
-		}
-	}
-	return nil
+	return r.removeLandingFromAll(ctx, proxyID,
+		[]string{"before_landing_proxy_id", "after_landing_proxy_id"},
+		"landing_proxy_id", "landing_page_id",
+	)
 }

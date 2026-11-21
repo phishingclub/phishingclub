@@ -4,6 +4,7 @@
 	import { menu, mobileTopMenu } from '$lib/consts/navigation';
 	import { shouldHideMenuItem } from '$lib/utils/common';
 	import ConditionalDisplay from '../ConditionalDisplay.svelte';
+	import { showFor } from '$lib/store/displayMode';
 	import BetaTag from '../BetaTag.svelte';
 	import ThemeToggle from '../ThemeToggle.svelte';
 	import { branding, loadBranding, headerLogoSrc, brandingDisplayFor, BRANDING_SLOT } from '$lib/store/branding';
@@ -333,7 +334,7 @@
 			<div class="space-y-1">
 				{#each menu as link}
 					{#if link.type === 'submenu' && link.items.length > 1}
-						<ConditionalDisplay show={link.whitebox ? 'whitebox' : link.blackbox ? 'blackbox' : 'both'}>
+						<ConditionalDisplay show={showFor(link)}>
 							<h3
 								class="pt-5 pb-1.5 px-4 text-xs font-semibold uppercase tracking-wider text-white/60 dark:text-gray-400 text-left"
 							>
@@ -341,7 +342,7 @@
 							</h3>
 							<div class="space-y-1">
 								{#each link.items as item, i (i)}
-									<ConditionalDisplay show={item.blackbox ? 'blackbox' : 'both'}>
+									<ConditionalDisplay show={showFor(item)}>
 										<a
 											aria-current={isCurrent(item.route) ? 'page' : undefined}
 											class="pc-focus-dark flex items-center w-full py-2.5 px-4 text-base font-medium rounded-lg transition-colors duration-200 {isCurrent(
@@ -370,7 +371,7 @@
 							</div>
 						</ConditionalDisplay>
 					{:else}
-						<ConditionalDisplay show={link.whitebox ? 'whitebox' : link.blackbox ? 'blackbox' : 'both'}>
+						<ConditionalDisplay show={showFor(link)}>
 							<a
 								aria-current={isCurrent(singleOf(link).route) ? 'page' : undefined}
 								class="pc-focus-dark mt-1 flex items-center w-full py-2.5 px-4 text-base font-medium rounded-lg transition-colors duration-200 {isCurrent(singleOf(link).route)
@@ -399,7 +400,7 @@
 			</h2>
 			<div class="space-y-1">
 				{#each mobileTopMenu as link}
-					<ConditionalDisplay show={link.blackbox ? 'blackbox' : 'both'}>
+					<ConditionalDisplay show={showFor(link)}>
 						<a
 							aria-current={$page.url.pathname === link.route ? 'page' : undefined}
 							class="pc-focus-dark flex items-center w-full py-2.5 px-4 text-base font-medium rounded-lg transition-colors duration-200 {isCurrent(

@@ -1,22 +1,20 @@
 package controller
 
 import (
-	"bytes"
 	"encoding/csv"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/phishingclub/phishingclub/api"
+	"github.com/phishingclub/phishingclub/service"
 )
 
-// programReportedMaxBytes bounds the size of a reported CSV upload
-const programReportedMaxBytes = 10 << 20
-
-// GetRecipientPrograms returns the programs a recipient is enrolled in.
-func (c *Program) GetRecipientPrograms(g *gin.Context) {
+// GetResults returns the program results by month and by template, with the
+// result tiles for the time range in the range query value, one of the time
+// range keys, or the default of the program when it is not given.
+func (c *Program) GetResults(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
 		return
@@ -28,11 +26,55 @@ func (c *Program) GetRecipientPrograms(g *gin.Context) {
 	if !ok {
 		return
 	}
-	programs, err := c.ProgramService.GetRecipientPrograms(g.Request.Context(), session, id)
+	timeRange, ok := programTimeRangeQuery(g, c.Response)
+	if !ok {
+		return
+	}
+	results, err := c.ProgramService.GetResults(g.Request.Context(), session, id, timeRange)
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	c.Response.OK(g, programs)
+	c.Response.OK(g, results)
+}
+
+// GetResultGroups returns the results of a program grouped by the current
+// department or position of each recipient, named by the by query value
+func (c *Program) GetResultGroups(g *gin.Context) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	if !c.handleGlobalAuthorization(g, session) {
+		return
+	}
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	by := g.Query("by")
+	if !service.IsValidProgramGroupBy(by) {
+		c.Response.ValidationFailed(g, "by", errors.New("must be department or position"))
+		return
+	}
+	groups, err := c.ProgramService.GetResultGroups(g.Request.Context(), session, id, by)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, groups)
+}
+
+// programTimeRangeQuery reads the optional range query value. A value that is
+// not a time range key is refused with 400.
+func programTimeRangeQuery(g *gin.Context, response api.JSONResponseHandler) (string, bool) {
+	values, given := g.GetQueryArray("range")
+	if !given {
+		return "", true
+	}
+	if len(values) != 1 || !service.IsValidProgramTimeRange(values[0]) {
+		response.ValidationFailed(g, "range", errors.New("must be 30d, 90d, 12m or all"))
+		return "", false
+	}
+	return values[0], true
 }
 
 // ExportCSV returns the program results as a CSV file.
@@ -48,17 +90,50 @@ func (c *Program) ExportCSV(g *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, name, err := c.ProgramService.ExportCSV(g.Request.Context(), session, id)
+	export, err := c.ProgramService.ExportCSV(g.Request.Context(), session, id)
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	buffer := &bytes.Buffer{}
-	writer := csv.NewWriter(buffer)
-	if err := writer.WriteAll(rows); err != nil {
+	// the rows are written as they are read, so a large program is never held
+	// as a whole
+	setSecureContentDisposition(g, "program-"+sanitizeProgramFilename(export.Name)+".csv")
+	g.Header("Content-Type", "text/csv")
+	err = writeCSVStream(g, func(write func([]string) error) error {
+		err := export.Write(g.Request.Context(), write)
+		if err != nil {
+			c.Logger.Errorw("failed to write the program export", "error", err)
+		}
+		return err
+	})
+	if err != nil {
 		c.handleErrors(g, err)
-		return
 	}
-	c.responseWithCSV(g, buffer, writer, "program-"+sanitizeFilename(name)+".csv")
+}
+
+// writeCSVStream writes the rows of run to the response as they come. The
+// csv writer holds the first rows in its buffer, so an error before any byte
+// reached the client is returned with the headers of the file cleared, for the
+// caller to answer with an error. An error after bytes were sent can not be
+// answered, so the response is cut with http.ErrAbortHandler, which the server
+// ends without the last chunk, and the client sees a broken download and not a
+// short file that looks complete.
+func writeCSVStream(g *gin.Context, run func(write func([]string) error) error) error {
+	writer := csv.NewWriter(g.Writer)
+	err := run(writer.Write)
+	if err == nil {
+		writer.Flush()
+		err = writer.Error()
+	}
+	if err == nil {
+		return nil
+	}
+	if !g.Writer.Written() {
+		g.Header("Content-Disposition", "")
+		g.Header("Content-Type", "")
+		return err
+	}
+	_ = g.Error(err)
+	panic(http.ErrAbortHandler)
 }
 
 // ReportPDF returns the program report as a PDF for an optional period. A
@@ -79,11 +154,11 @@ func (c *Program) ReportPDF(g *gin.Context) {
 	}
 	// from and to are YYYY-MM-DD dates or RFC 3339 times, read in the program
 	// time zone by the service
-	pdf, name, err := c.ProgramService.BuildReportPDF(g.Request.Context(), session, id, g.Query("from"), g.Query("to"))
+	pdf, name, err := c.ProgramService.ExportReportPDF(g.Request.Context(), session, id, g.Query("from"), g.Query("to"))
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	c.responseWithPDF(g, pdf, "program-report-"+sanitizeFilename(name)+".pdf")
+	c.responseWithPDF(g, pdf, "program-report-"+sanitizeProgramFilename(name)+".pdf")
 }
 
 // UploadReportedCSV records the reports of a reported CSV on a program. The
@@ -113,34 +188,11 @@ func (c *Program) UploadReportedCSV(g *gin.Context) {
 			return
 		}
 	}
-	g.Request.Body = http.MaxBytesReader(g.Writer, g.Request.Body, programReportedMaxBytes+(1<<20))
-	file, header, err := g.Request.FormFile("file")
-	if err != nil {
-		c.Response.ValidationFailed(g, "file", errors.New("a CSV file of at most 10 MB is required"))
+	header, rows, ok := readReportedCSVUpload(g, c.Response)
+	if !ok {
 		return
 	}
-	defer file.Close()
-	if !strings.HasSuffix(strings.ToLower(header.Filename), ".csv") {
-		c.Response.ValidationFailed(g, "file", errors.New("file must be a CSV"))
-		return
-	}
-	content, err := io.ReadAll(io.LimitReader(file, programReportedMaxBytes+1))
-	if err != nil {
-		c.Response.ValidationFailed(g, "file", err)
-		return
-	}
-	if len(content) > programReportedMaxBytes {
-		c.Response.ValidationFailed(g, "file", errors.New("file is larger than 10 MB"))
-		return
-	}
-	reader := csv.NewReader(bytes.NewReader(content))
-	reader.FieldsPerRecord = -1
-	records, err := reader.ReadAll()
-	if err != nil {
-		c.Response.ValidationFailed(g, "file", errors.New("failed to parse CSV file"))
-		return
-	}
-	result, err := c.ProgramService.ProcessReportedCSV(g.Request.Context(), session, id, records, emailColumn, dateColumn)
+	result, err := c.ProgramService.ProcessReportedCSV(g.Request.Context(), session, id, header, rows, emailColumn, dateColumn)
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}

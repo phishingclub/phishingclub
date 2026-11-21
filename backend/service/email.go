@@ -37,6 +37,8 @@ type Email struct {
 	AttachmentService       *Attachment
 	CampaignTemplateService *CampaignTemplate
 	AttachmentPath          string
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // AttachmentWithInline represents an attachment with inline flag
@@ -214,6 +216,11 @@ func (m *Email) Create(
 	if cid, err := email.CompanyID.Get(); err == nil {
 		companyID = &cid
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, m.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	name := email.Name.MustGet()
 	isOK, err := repository.CheckNameIsUnique(
 		ctx,
@@ -979,6 +986,7 @@ func (m *Email) DeleteByID(
 	id *uuid.UUID,
 ) (err error) {
 	ae := NewAuditEvent("Email.DeleteByID", session)
+	addDeleteOrigin(ctx, ae)
 	defer m.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions

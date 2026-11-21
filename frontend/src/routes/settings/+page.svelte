@@ -1,6 +1,6 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
-	import { displayMode, DISPLAY_MODE } from '$lib/store/displayMode';
+	import { displayMode, showsRedTeam } from '$lib/store/displayMode';
 	import { AppStateService } from '$lib/service/appState';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import Headline from '$lib/components/Headline.svelte';
@@ -16,7 +16,7 @@
 	import IPData from './panels/IPData.svelte';
 	import Reporting from './panels/Reporting.svelte';
 
-	// Red Team panel is only relevant in red team phishing (blackbox) mode.
+	// Red Team panel is only shown in modes that show red team features.
 	// Reporting holds the global reporting inbox, so it is only shown in the
 	// global context. A company's reporting inbox is in its company settings.
 	$: tabs = [
@@ -29,7 +29,7 @@
 		...(!companyContext.isCompany
 			? [{ id: 'reporting', label: 'Reporting Inbox', component: Reporting }]
 			: []),
-		...($displayMode === DISPLAY_MODE.BLACKBOX
+		...(showsRedTeam($displayMode)
 			? [{ id: 'redteam', label: 'Red Team', component: RedTeam }]
 			: []),
 		{ id: 'branding', label: 'Branding', component: Branding },

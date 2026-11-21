@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,13 +13,88 @@ import (
 	"github.com/phishingclub/phishingclub/repository"
 )
 
-// ProgramResultRow counts the phishing sends of one period or one template and
+// results tuning for programs
+const (
+	// programOpenAge is how long an anonymous program waits before it counts a
+	// send or an outcome, see programSettleCutoff
+	programOpenAge = model.ProgramAnonymousSettleDays * 24 * time.Hour
+	// programMinGroup is the smallest group an anonymous program shows counts for
+	programMinGroup = 5
+	// programRepeatOffenderMonthsDefault is the repeat offender window used when
+	// the repeat_offender_months option can not be read
+	programRepeatOffenderMonthsDefault = 12
+)
+
+// programSend is one sent message of a program with what the person did. Each
+// outcome holds the first time it happened, so page reloads count once.
+type programSend struct {
+	Campaign    uuid.UUID
+	Person      uuid.UUID
+	RecipientID *uuid.UUID
+	Template    string
+	SentAt      time.Time
+	Training    bool
+	ClickedAt   *time.Time
+	SubmittedAt *time.Time
+	ReportedAt  *time.Time
+	// TrainingStartedAt and TrainingCompletedAt are set on training sends
+	TrainingStartedAt   *time.Time
+	TrainingCompletedAt *time.Time
+	// NotableEventID is the most notable event of the send, as on a campaign
+	NotableEventID *uuid.UUID
+}
+
+// Clicked reports whether the person clicked, a submit counts as a click
+func (s *programSend) Clicked() bool {
+	return s.ClickedAt != nil || s.SubmittedAt != nil
+}
+
+// Kind returns whether the send was phishing or training
+func (s *programSend) Kind() string {
+	if s.Training {
+		return ProgramSendKindTraining
+	}
+	return ProgramSendKindPhishing
+}
+
+// withholdCount reports whether an anonymous program must hide count out of
+// group. A count below programMinGroup is hidden, zero too, as a zero tells
+// what everyone did just as a full count does. So is a count that leaves fewer
+// than programMinGroup of the group out, as that tells nearly everyone did it.
+func withholdCount(group, count int) bool {
+	return count < programMinGroup || group-count < programMinGroup
+}
+
+// withholdGap reports whether an anonymous program must hide two related
+// counts, such as clicked and submitted, whose difference is fewer than
+// programMinGroup people. Subtracting one from the other would otherwise name
+// the few who did one and not the other.
+func withholdGap(a, b int) bool {
+	gap := a - b
+	if gap < 0 {
+		gap = -gap
+	}
+	return gap < programMinGroup
+}
+
+func intPtr(v int) *int {
+	return &v
+}
+
+// ProgramResultRow counts the phishing sends of one month or one template and
 // how many of those sends were clicked, had data submitted or were reported.
-// Rates are per send, so a month reads the same however long the program ran.
-// For an anonymous program a row with fewer than programMinGroup people has its
-// counts withheld and Suppressed set. In a row that is shown, an outcome count
-// is null when it is 1 to programMinGroup - 1 or when it leaves fewer than
-// programMinGroup out, counted in sends and in people.
+// When the program has training it also counts the training sends and how
+// many of those were started or completed, a completed training counts as
+// started. The phishing counts of a template that sent no phishing are null,
+// as are the phishing counts of a month of a program without phishing, and
+// the training counts are null on a template that sent no training and on
+// every row of a program without training.
+// An anonymous program shows the size of a row only, the sends, and every
+// outcome is null with OutcomesHidden set: a month and a template row share
+// sends, so outcomes shown per row could be subtracted from each other or from
+// the summary to learn what a hidden row holds. The outcomes are in the
+// summary only. A row with fewer than programMinGroup people also has its
+// sends withheld and Suppressed set.
 type ProgramResultRow struct {
 	Key       string `json:"key"`
 	Name      string `json:"name"`
@@ -28,84 +102,71 @@ type ProgramResultRow struct {
 	Clicked   *int   `json:"clicked"`
 	Submitted *int   `json:"submitted"`
 	Reported  *int   `json:"reported"`
-	// Open counts sends too young to judge, left out of the counts. It is null
-	// on an anonymous program when it is 1 to programMinGroup - 1.
-	Open *int `json:"open,omitempty"`
-	// Difficulty labels a template from its click rate once sent often enough
-	Difficulty string `json:"difficulty,omitempty"`
-	Suppressed bool   `json:"suppressed"`
+	// TrainingSent, TrainingStarted and TrainingCompleted count the training
+	// sends of the row. An anonymous program holds them null, the training
+	// outcomes are in the summary only.
+	TrainingSent      *int `json:"trainingSent"`
+	TrainingStarted   *int `json:"trainingStarted"`
+	TrainingCompleted *int `json:"trainingCompleted"`
+	// Partial is set on a month the program or the period covers only in part
+	Partial    bool `json:"partial,omitempty"`
+	Suppressed bool `json:"suppressed"`
+	// OutcomesHidden is set on every row of an anonymous program
+	OutcomesHidden bool `json:"outcomesHidden,omitempty"`
+}
+
+// ProgramSummary counts recipients, each once, over the whole program or the
+// period of a report: the result tiles of the PDF report and the CSV export.
+// The program page tiles are ProgramTiles. Sent, Clicked link,
+// Data submitted, Reported and Repeat offenders read phishing sends, the
+// training counts read training sends. An anonymous program counts sends
+// instead of recipients, in whole settled months, and never shows repeat
+// offenders, see programResultsAnonymous.go. A count an anonymous program
+// withholds is null and Suppressed is set.
+type ProgramSummary struct {
+	// Recipients is everyone ever enrolled in the program
+	Recipients    int  `json:"recipients"`
+	Sent          *int `json:"sent"`
+	ClickedLink   *int `json:"clickedLink"`
+	SubmittedData *int `json:"submittedData"`
+	Reported      *int `json:"reported"`
+	// RepeatOffenders clicked or submitted data on 2 or more sends within
+	// RepeatOffenderMonths, the repeat offender setting
+	RepeatOffenders      *int `json:"repeatOffenders"`
+	RepeatOffenderMonths int  `json:"repeatOffenderMonths"`
+	// HasPhishing is set when the program has or had a phishing template
+	HasPhishing bool `json:"hasPhishing"`
+	// HasTraining is set when the program has or had a training template
+	HasTraining bool `json:"hasTraining"`
+	// TrainingSent counts the people sent a training template, the base of
+	// Training started
+	TrainingSent      *int `json:"trainingSent"`
+	TrainingStarted   *int `json:"trainingStarted"`
+	TrainingCompleted *int `json:"trainingCompleted"`
+	// SentTotal counts every template sent, phishing and training. An
+	// anonymous program gives 0 with SentTotalHidden set when it withholds Sent.
+	SentTotal       int  `json:"sentTotal"`
+	SentTotalHidden bool `json:"sentTotalHidden"`
+	// HasSent is set when any template was sent in the view, also when the
+	// counts are withheld
+	HasSent    bool `json:"hasSent"`
+	Suppressed bool `json:"suppressed"`
 }
 
 // ProgramResults is the program results breakdown
 type ProgramResults struct {
 	Anonymous bool `json:"anonymous"`
-	// Closed is set for a closed program. Its Coverage is null, as nobody is
-	// active in a closed program.
-	Closed    bool                `json:"closed"`
-	Months    []*ProgramResultRow `json:"months"`
-	Templates []*ProgramResultRow `json:"templates"`
-	// Last30 and Previous30 are the sends of the last 30 days and the 30 before.
-	// Sends younger than three days are counted as open on Last30 instead. An
-	// anonymous program counts no young sends at all, so it has no open count.
-	Last30         *ProgramResultRow      `json:"last30"`
-	Previous30     *ProgramResultRow      `json:"previous30"`
-	LastSentAt     *time.Time             `json:"lastSentAt"`
-	Coverage       *ProgramCoverage       `json:"coverage"`
-	PhishProne     *ProgramPhishProne     `json:"phishProne"`
-	RepeatClickers *ProgramRepeatClickers `json:"repeatClickers"`
-	Exposure       []*ProgramExposureRow  `json:"exposure"`
-	Resilience     *ProgramResilience     `json:"resilience"`
-}
-
-// resultCounts adds up sends and the people behind them before they become a
-// result row
-type resultCounts struct {
-	sent, opened, clicked, submitted, reported programTally
-}
-
-func (c *resultCounts) add(s *programSend) {
-	c.sent.add(s.Person)
-	if s.ReadAt != nil {
-		c.opened.add(s.Person)
-	}
-	if s.Clicked() {
-		c.clicked.add(s.Person)
-	}
-	if s.SubmittedAt != nil {
-		c.submitted.add(s.Person)
-	}
-	if s.ReportedAt != nil {
-		c.reported.add(s.Person)
-	}
-}
-
-// tooFew reports whether an anonymous program must withhold the whole group
-func (c *resultCounts) tooFew(anonymous bool) bool {
-	return anonymous && c.sent.persons() < programMinGroup
-}
-
-// outcome returns the send count of an outcome, nil when an anonymous program
-// withholds it
-func (c *resultCounts) outcome(t *programTally, anonymous bool) *int {
-	if anonymous && t.withheldIn(&c.sent) {
-		return nil
-	}
-	return intPtr(t.sends)
-}
-
-// row turns the counts into a result row, withholding small groups and small
-// or nearly total outcomes of an anonymous program
-func (c *resultCounts) row(key, name string, anonymous bool) *ProgramResultRow {
-	r := &ProgramResultRow{Key: key, Name: name}
-	if c.tooFew(anonymous) {
-		r.Suppressed = true
-		return r
-	}
-	r.Sent = intPtr(c.sent.sends)
-	r.Clicked = c.outcome(&c.clicked, anonymous)
-	r.Submitted = c.outcome(&c.submitted, anonymous)
-	r.Reported = c.outcome(&c.reported, anonymous)
-	return r
+	// Closed is set for a closed program
+	Closed     bool                `json:"closed"`
+	Summary    *ProgramSummary     `json:"summary"`
+	Months     []*ProgramResultRow `json:"months"`
+	Templates  []*ProgramResultRow `json:"templates"`
+	LastSentAt *time.Time          `json:"lastSentAt"`
+	// Tiles is set on the results of the program page
+	Tiles *ProgramTiles `json:"tiles,omitempty"`
+	// CountedTo is set on an anonymous program: the first instant not
+	// counted, the end of the last whole settled month in the period
+	CountedTo *time.Time `json:"countedTo,omitempty"`
 }
 
 // programFacts is everything sent by a program with the outcomes
@@ -116,44 +177,12 @@ type programFacts struct {
 	templateNames map[string]string
 }
 
-// phishing returns the phishing sends
-func (f *programFacts) phishing() []*programSend {
-	out := make([]*programSend, 0, len(f.sends))
-	for _, s := range f.sends {
-		if !s.Training {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-// trainingDone returns when each person completed a training
-func (f *programFacts) trainingDone() map[uuid.UUID][]time.Time {
-	out := map[uuid.UUID][]time.Time{}
-	for _, s := range f.sends {
-		if s.Training && s.TrainingCompletedAt != nil {
-			out[s.Person] = append(out[s.Person], *s.TrainingCompletedAt)
-		}
-	}
-	return out
-}
-
-// risks returns the risk of every person with phishing sends
-func (f *programFacts) risks(now time.Time) map[uuid.UUID]*float64 {
-	done := f.trainingDone()
-	out := map[uuid.UUID]*float64{}
-	for person, list := range programByPerson(f.sends) {
-		out[person] = programPersonRisk(list, done[person], now)
-	}
-	return out
-}
-
-// programPerson names the person of a row. An anonymous program names people
-// by pseudonym, as its rows may lose the recipient link, any other program by
-// recipient id.
-func programPerson(anonymous bool, recipientID, anonymizedID *uuid.UUID) (uuid.UUID, bool) {
+// programPerson names the person of a row, by pseudonym first when
+// byPseudonym is set, else by recipient id first. An anonymous program names
+// people by pseudonym, as its rows may lose the recipient link.
+func programPerson(byPseudonym bool, recipientID, anonymizedID *uuid.UUID) (uuid.UUID, bool) {
 	first, second := recipientID, anonymizedID
-	if anonymous {
+	if byPseudonym {
 		first, second = anonymizedID, recipientID
 	}
 	if first != nil {
@@ -165,23 +194,13 @@ func programPerson(anonymous bool, recipientID, anonymizedID *uuid.UUID) (uuid.U
 	return uuid.UUID{}, false
 }
 
-// programEventIDs returns the ids of the events the results read
-func programEventIDs() []*uuid.UUID {
-	return []*uuid.UUID{
-		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ],
-		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED],
-		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED],
-		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED],
-		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA],
-		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED],
-		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED],
-		cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED],
-	}
-}
-
-func eventIs(id uuid.UUID, name string) bool {
-	e := cache.EventIDByName[name]
-	return e != nil && *e == id
+// programPersonByPseudonym reports whether the results of a named program
+// name people by pseudonym first. Anonymize All gives every send of the
+// program its pseudonym before it marks the program and before any send
+// loses its person, so from the mark on every send has one, and the sends
+// that lost their person are counted with the rest.
+func programPersonByPseudonym(program *model.Program) bool {
+	return program.AnonymizeBegun()
 }
 
 // earliest keeps the first time an outcome happened
@@ -193,10 +212,10 @@ func earliest(cur **time.Time, at time.Time) {
 }
 
 // loadProgramFacts loads every sent message of a program with its outcomes.
-// When recipientID is set only that recipient's messages are loaded.
+// When recipientIDs is not nil only those recipients' messages are loaded.
+// The rows are read one at a time, so only the sends are held in memory.
 func (s *Program) loadProgramFacts(
 	ctx context.Context,
-	session *model.Session,
 	program *model.Program,
 	recipientIDs []*uuid.UUID,
 ) (*programFacts, error) {
@@ -206,165 +225,264 @@ func (s *Program) loadProgramFacts(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	infoOf := map[uuid.UUID]repository.ProgramCampaignInfo{}
-	for _, i := range infos {
-		infoOf[i.ID] = i
-	}
-	rows, err := s.ProgramRepository.GetSentRows(ctx, &programID, recipientIDs)
-	if err != nil {
-		return nil, errs.Wrap(err)
-	}
-	events, err := s.ProgramRepository.GetEventRows(ctx, &programID, recipientIDs, programEventIDs())
-	if err != nil {
-		return nil, errs.Wrap(err)
+	// a campaign is named by its place in infos, so the send index key is small
+	infoOf := make(map[uuid.UUID]int32, len(infos))
+	templateOf := make([]string, len(infos))
+	templateIDs := make([]*uuid.UUID, 0, len(infos))
+	for i, info := range infos {
+		infoOf[info.ID] = int32(i)
+		if info.CampaignTemplateID != nil {
+			templateOf[i] = info.CampaignTemplateID.String()
+			templateIDs = append(templateIDs, info.CampaignTemplateID)
+		}
 	}
 	facts := &programFacts{anonymous: anonymous, templateNames: map[string]string{}}
 	type rowKey struct {
-		campaign uuid.UUID
+		campaign int32
 		id       uuid.UUID
 	}
 	// a send is found by its recipient id and by its pseudonym, so an event
 	// matches whichever of the two it carries
 	index := map[rowKey]*programSend{}
-	for _, r := range rows {
+	err = s.ProgramRepository.EachSentRow(ctx, &programID, recipientIDs, func(r *repository.ProgramSendRow) error {
 		person, ok := programPerson(anonymous, r.RecipientID, r.AnonymizedID)
 		if !ok {
-			continue
+			return nil
 		}
-		info, ok := infoOf[r.CampaignID]
+		ci, ok := infoOf[r.CampaignID]
 		if !ok {
-			continue
+			return nil
 		}
-		templateID := ""
-		if info.CampaignTemplateID != nil {
-			templateID = info.CampaignTemplateID.String()
-		}
+		info := infos[ci]
 		sd := &programSend{
 			Campaign:    r.CampaignID,
 			Person:      person,
 			RecipientID: r.RecipientID,
-			Template:    templateID,
+			Template:    templateOf[ci],
 			SentAt:      r.SentAt,
 			Training:    info.IsTraining,
+			// the notable event names the person's own outcome, so an
+			// anonymous program does not keep it
+			NotableEventID: notableOf(anonymous, r.NotableEventID),
 		}
 		facts.sends = append(facts.sends, sd)
 		if r.RecipientID != nil {
-			index[rowKey{r.CampaignID, *r.RecipientID}] = sd
+			index[rowKey{ci, *r.RecipientID}] = sd
 		}
 		if r.AnonymizedID != nil {
-			index[rowKey{r.CampaignID, *r.AnonymizedID}] = sd
+			index[rowKey{ci, *r.AnonymizedID}] = sd
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, errs.Wrap(err)
 	}
-	for _, e := range events {
+	ids := programResultEventIDs()
+	err = s.ProgramRepository.EachEventRow(ctx, &programID, recipientIDs, ids.all(), func(e *repository.ProgramEventRow) error {
+		ci, ok := infoOf[e.CampaignID]
+		if !ok {
+			return nil
+		}
 		var sd *programSend
 		if e.RecipientID != nil {
-			sd = index[rowKey{e.CampaignID, *e.RecipientID}]
+			sd = index[rowKey{ci, *e.RecipientID}]
 		}
 		if sd == nil && e.AnonymizedID != nil {
-			sd = index[rowKey{e.CampaignID, *e.AnonymizedID}]
+			sd = index[rowKey{ci, *e.AnonymizedID}]
 		}
 		if sd == nil {
-			continue
+			return nil
 		}
-		at := e.CreatedAt
-		if sd.Training {
-			// opening a training page is not a click on a phish
-			switch {
-			case eventIs(e.EventID, data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ):
-				earliest(&sd.ReadAt, at)
-			case eventIs(e.EventID, data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED):
-				earliest(&sd.TrainingStartedAt, at)
-			case eventIs(e.EventID, data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED):
-				earliest(&sd.TrainingCompletedAt, at)
-			}
-			continue
-		}
-		switch {
-		case eventIs(e.EventID, data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ):
-			earliest(&sd.ReadAt, at)
-		case eventIs(e.EventID, data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED),
-			eventIs(e.EventID, data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED),
-			eventIs(e.EventID, data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED):
-			earliest(&sd.ClickedAt, at)
-		case eventIs(e.EventID, data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA):
-			earliest(&sd.SubmittedAt, at)
-		case eventIs(e.EventID, data.EVENT_CAMPAIGN_RECIPIENT_REPORTED):
-			earliest(&sd.ReportedAt, at)
-		}
+		ids.apply(sd, e.EventID, e.CreatedAt)
+		return nil
+	})
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	names, err := s.programTemplateNames(ctx, templateIDs)
+	if err != nil {
+		return nil, err
 	}
 	for _, sd := range facts.sends {
 		if _, ok := facts.templateNames[sd.Template]; ok {
 			continue
 		}
-		facts.templateNames[sd.Template] = s.templateName(ctx, session, sd.Template)
+		name := programDeletedTemplateName
+		if tid, err := uuid.Parse(sd.Template); err == nil {
+			if n, ok := names[tid]; ok {
+				name = n
+			}
+		}
+		facts.templateNames[sd.Template] = name
 	}
 	return facts, nil
+}
+
+// programResultEvents holds the ids of the events the results read, looked up
+// once per load instead of once per event
+type programResultEvents struct {
+	beforeVisit, visit, afterVisit, submitted, reported, trainingStarted, trainingCompleted *uuid.UUID
+}
+
+func programResultEventIDs() programResultEvents {
+	return programResultEvents{
+		beforeVisit:       cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED],
+		visit:             cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED],
+		afterVisit:        cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED],
+		submitted:         cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA],
+		reported:          cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED],
+		trainingStarted:   cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED],
+		trainingCompleted: cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED],
+	}
+}
+
+// all returns the ids of the events the results read
+func (p programResultEvents) all() []*uuid.UUID {
+	return []*uuid.UUID{
+		p.beforeVisit, p.visit, p.afterVisit, p.submitted, p.reported, p.trainingStarted, p.trainingCompleted,
+	}
+}
+
+// apply records an event on its send, keeping the first time of each outcome
+func (p programResultEvents) apply(sd *programSend, eventID uuid.UUID, at time.Time) {
+	is := func(id *uuid.UUID) bool { return id != nil && *id == eventID }
+	if sd.Training {
+		// opening a training page is not a click on a phish
+		switch {
+		case is(p.trainingStarted):
+			earliest(&sd.TrainingStartedAt, at)
+		case is(p.trainingCompleted):
+			earliest(&sd.TrainingCompletedAt, at)
+		}
+		return
+	}
+	switch {
+	case is(p.beforeVisit), is(p.visit), is(p.afterVisit):
+		earliest(&sd.ClickedAt, at)
+	case is(p.submitted):
+		earliest(&sd.SubmittedAt, at)
+	case is(p.reported):
+		earliest(&sd.ReportedAt, at)
+	}
+}
+
+// programTemplateNames reads the names of templates in one query. A template
+// that no longer exists is left out, so the caller names it as deleted.
+func (s *Program) programTemplateNames(ctx context.Context, ids []*uuid.UUID) (map[uuid.UUID]string, error) {
+	seen := map[uuid.UUID]bool{}
+	unique := make([]*uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if id == nil || seen[*id] {
+			continue
+		}
+		seen[*id] = true
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return map[uuid.UUID]string{}, nil
+	}
+	names, err := s.ProgramRepository.GetTemplateNames(ctx, unique)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	return names, nil
 }
 
 // programDeletedTemplateName names a template that no longer exists
 const programDeletedTemplateName = "Deleted template"
 
-// programLastPeriod is the length of the last period and of the one before it
-// in the period comparison
-const programLastPeriod = 30 * 24 * time.Hour
-
-// inPeriod reports whether a send went out in the period from, inclusive, to
-// to, exclusive. A nil bound is open.
-func inPeriod(sd *programSend, from, to *time.Time) bool {
-	if from != nil && sd.SentAt.Before(*from) {
-		return false
+// notableOf returns the notable event of a send row, none for an anonymous
+// program
+func notableOf(anonymous bool, id *uuid.UUID) *uuid.UUID {
+	if anonymous {
+		return nil
 	}
-	if to != nil && !sd.SentAt.Before(*to) {
-		return false
-	}
-	return true
+	return id
 }
 
-// templateName returns the name of a template, or a placeholder when it is gone
-func (s *Program) templateName(ctx context.Context, session *model.Session, templateID string) string {
-	name := programDeletedTemplateName
-	if templateID == "" {
-		return name
-	}
-	tid, err := uuid.Parse(templateID)
-	if err != nil {
-		return name
-	}
-	t, err := s.CampaignTemplateService.GetByID(ctx, session, &tid, &repository.CampaignTemplateOption{})
-	if err != nil {
-		return name
-	}
-	if v, err := t.Name.Get(); err == nil {
-		return v.String()
-	}
-	return name
+// programEnrollmentCounts counts the people of a program by enrollment status
+type programEnrollmentCounts struct {
+	total, active, completed, exited, stopped int
 }
 
-// activeEnrollmentPeople returns the person key of every active enrollment, by
-// pseudonym for an anonymous program. An anonymous person who has not been sent
-// anything yet has no pseudonym and gets a key that matches no send.
-func (s *Program) activeEnrollmentPeople(ctx context.Context, programID *uuid.UUID, anonymous bool) ([]uuid.UUID, error) {
-	enrollments, err := s.ProgramRepository.GetEnrollmentsByProgramID(ctx, programID)
+// enrollmentCounts counts the people ever enrolled in a program by status
+func (s *Program) enrollmentCounts(ctx context.Context, programID *uuid.UUID) (programEnrollmentCounts, error) {
+	counts, err := s.ProgramRepository.GetEnrollmentStatusCounts(ctx, programID)
+	if err != nil {
+		return programEnrollmentCounts{}, errs.Wrap(err)
+	}
+	out := programEnrollmentCounts{}
+	for _, c := range counts {
+		out.total += c.Count
+		switch c.Status {
+		case model.ProgramEnrollmentActive:
+			out.active += c.Count
+		case model.ProgramEnrollmentCompleted:
+			out.completed += c.Count
+		case model.ProgramEnrollmentExited:
+			out.exited += c.Count
+		case model.ProgramEnrollmentStopped:
+			out.stopped += c.Count
+		}
+	}
+	return out, nil
+}
+
+// repeatOffenderMonths reads the repeat offender window the way the recipient
+// pages do, the default when the option can not be read
+func (s *Program) repeatOffenderMonths(ctx context.Context) int {
+	if s.RecipientRepository == nil || s.RecipientRepository.OptionRepository == nil {
+		return programRepeatOffenderMonthsDefault
+	}
+	months, err := s.RecipientRepository.RepeatOffenderMonths(ctx)
+	if err != nil || months <= 0 {
+		if err != nil {
+			s.Logger.Warnw("failed to read the repeat offender months, using the default", "error", err)
+		}
+		return programRepeatOffenderMonthsDefault
+	}
+	return months
+}
+
+// programStepKinds tells which kinds of template the steps of a program send
+type programStepKinds struct {
+	training bool
+	phishing bool
+}
+
+// stepKinds reports whether a step of the program sends a training template
+// and whether a step sends a phishing template
+// template, read for every step in one query
+func (s *Program) stepKinds(ctx context.Context, program *model.Program) (programStepKinds, error) {
+	kinds := programStepKinds{}
+	infos, err := s.stepTemplateInfos(ctx, program)
+	if err != nil {
+		return kinds, err
+	}
+	for _, info := range infos {
+		if info.IsTraining {
+			kinds.training = true
+		} else {
+			kinds.phishing = true
+		}
+	}
+	return kinds, nil
+}
+
+// stepTemplateInfos reads the templates of the steps of a program in one
+// query. A template that no longer exists is left out.
+func (s *Program) stepTemplateInfos(ctx context.Context, program *model.Program) (map[uuid.UUID]repository.ProgramTemplateInfo, error) {
+	ids := make([]*uuid.UUID, 0, len(program.Steps))
+	for _, st := range program.Steps {
+		if templateID, err := st.CampaignTemplateID.Get(); err == nil {
+			ids = append(ids, &templateID)
+		}
+	}
+	infos, err := s.ProgramRepository.GetTemplateInfos(ctx, ids)
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	out := []uuid.UUID{}
-	for _, e := range enrollments {
-		if e.Status != model.ProgramEnrollmentActive {
-			continue
-		}
-		var person uuid.UUID
-		switch {
-		case anonymous && e.AnonymizedID != nil:
-			person = *e.AnonymizedID
-		case !anonymous && e.RecipientID != nil:
-			person = *e.RecipientID
-		default:
-			person = uuid.New()
-		}
-		out = append(out, person)
-	}
-	return out, nil
+	return infos, nil
 }
 
 // programSettleCutoff returns the time before which an anonymous program counts
@@ -373,44 +491,7 @@ func (s *Program) activeEnrollmentPeople(ctx context.Context, programID *uuid.UU
 // or an action, so reading them again and again can not tell when one person
 // acted.
 func programSettleCutoff(now time.Time, loc *time.Location) time.Time {
-	return startOfDay(now, loc).AddDate(0, 0, -int(programOpenAge/(24*time.Hour)))
-}
-
-// beforeCutoff returns t when it is before cutoff, nil otherwise
-func beforeCutoff(t *time.Time, cutoff time.Time) *time.Time {
-	if t == nil || !t.Before(cutoff) {
-		return nil
-	}
-	return t
-}
-
-// settled returns the facts an anonymous program may count: the sends sent
-// before cutoff, each with only the outcomes that happened before cutoff
-func (f *programFacts) settled(cutoff time.Time) *programFacts {
-	out := &programFacts{anonymous: f.anonymous, templateNames: f.templateNames}
-	for _, sd := range f.sends {
-		if !sd.SentAt.Before(cutoff) {
-			continue
-		}
-		c := *sd
-		c.ReadAt = beforeCutoff(sd.ReadAt, cutoff)
-		c.ClickedAt = beforeCutoff(sd.ClickedAt, cutoff)
-		c.SubmittedAt = beforeCutoff(sd.SubmittedAt, cutoff)
-		c.ReportedAt = beforeCutoff(sd.ReportedAt, cutoff)
-		c.TrainingStartedAt = beforeCutoff(sd.TrainingStartedAt, cutoff)
-		c.TrainingCompletedAt = beforeCutoff(sd.TrainingCompletedAt, cutoff)
-		out.sends = append(out.sends, &c)
-	}
-	return out
-}
-
-// countable returns the facts that may be counted at now: every fact of a
-// named program, only the settled ones of an anonymous program
-func (f *programFacts) countable(now time.Time, loc *time.Location) *programFacts {
-	if !f.anonymous {
-		return f
-	}
-	return f.settled(programSettleCutoff(now, loc))
+	return model.ProgramAnonymousSettleCutoff(now, loc)
 }
 
 // startOfDay returns the first instant of the calendar day of t in loc
@@ -419,109 +500,26 @@ func startOfDay(t time.Time, loc *time.Location) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
 }
 
-// buildProgramResults computes the results from the facts. Only phishing sends
-// in [from, to) count when a bound is set. Month names use loc. An anonymous
-// program counts only settled sends and outcomes, see programSettleCutoff, and
-// reads now as the start of the day in loc, so the rolling windows move a whole
-// day at a time and can not single out one send.
-func buildProgramResults(
-	facts *programFacts,
-	activePeople []uuid.UUID,
-	loc *time.Location,
-	now time.Time,
-	from, to *time.Time,
-) *ProgramResults {
-	anonymous := facts.anonymous
-	facts = facts.countable(now, loc)
-	if anonymous {
-		now = startOfDay(now, loc)
-	}
-	sends := []*programSend{}
-	for _, sd := range facts.phishing() {
-		if !inPeriod(sd, from, to) {
-			continue
-		}
-		sends = append(sends, sd)
-	}
-	months := map[string]*resultCounts{}
-	monthNames := map[string]string{}
-	templates := map[string]*resultCounts{}
-	last30, previous30 := &resultCounts{}, &resultCounts{}
-	open := &programTally{}
-	out := &ProgramResults{Anonymous: anonymous, Months: []*ProgramResultRow{}, Templates: []*ProgramResultRow{}}
-	for _, sd := range sends {
-		month := sd.SentAt.In(loc).Format("2006-01")
-		if months[month] == nil {
-			months[month] = &resultCounts{}
-			monthNames[month] = sd.SentAt.In(loc).Format("Jan 2006")
-		}
-		months[month].add(sd)
-		if templates[sd.Template] == nil {
-			templates[sd.Template] = &resultCounts{}
-		}
-		templates[sd.Template].add(sd)
-		age := now.Sub(sd.SentAt)
-		switch {
-		case age < programOpenAge:
-			open.add(sd.Person)
-		case age < programLastPeriod:
-			last30.add(sd)
-		case age < 2*programLastPeriod:
-			previous30.add(sd)
-		}
-		if out.LastSentAt == nil || sd.SentAt.After(*out.LastSentAt) {
-			t := sd.SentAt
-			out.LastSentAt = &t
-		}
-	}
-	for key, c := range months {
-		out.Months = append(out.Months, c.row(key, monthNames[key], anonymous))
-	}
-	sort.Slice(out.Months, func(i, j int) bool { return out.Months[i].Key < out.Months[j].Key })
-	type templateRow struct {
-		row  *ProgramResultRow
-		sent int
-	}
-	trows := []templateRow{}
-	for key, c := range templates {
-		name, ok := facts.templateNames[key]
-		if !ok {
-			name = programDeletedTemplateName
-		}
-		r := c.row(key, name, anonymous)
-		// the label tells the click rate band, so it goes with the clicks
-		if !r.Suppressed && r.Clicked != nil {
-			r.Difficulty = programDifficulty(c.sent.sends, c.clicked.sends)
-		}
-		trows = append(trows, templateRow{r, c.sent.sends})
-	}
-	sort.Slice(trows, func(i, j int) bool {
-		if trows[i].sent != trows[j].sent {
-			return trows[i].sent > trows[j].sent
-		}
-		return trows[i].row.Name < trows[j].row.Name
-	})
-	for _, t := range trows {
-		out.Templates = append(out.Templates, t.row)
-	}
-	out.Last30 = last30.row("last30", "Last 30 days", anonymous)
-	if !anonymous {
-		out.Last30.Open = intPtr(open.sends)
-	}
-	out.Previous30 = previous30.row("previous30", "Previous 30 days", anonymous)
-	// an anonymous program shows the day of the last send, not the time
-	if anonymous && out.LastSentAt != nil {
-		day := startOfDay(*out.LastSentAt, loc)
-		out.LastSentAt = &day
-	}
-
-	byPerson := programByPerson(sends)
-	out.Coverage = programCoverage(activePeople, programByPerson(facts.phishing()), now)
-	out.PhishProne = programPhishProne(byPerson, now, anonymous)
-	out.RepeatClickers = programRepeatClickers(byPerson, now, anonymous)
-	out.Exposure = programExposure(byPerson, now, anonymous)
-	out.Resilience = programResilience(sends, anonymous)
-	return out
+// programResultsInput is what the results are computed with besides the facts
+type programResultsInput struct {
+	// loc names the months
+	loc *time.Location
+	now time.Time
+	// from and to bound the period [from, to), nil is open
+	from, to *time.Time
+	// recipients is how many people were ever enrolled
+	recipients int
+	// enrollment counts the people by enrollment status now
+	enrollment programEnrollmentCounts
+	// hasTraining is set when the program has or had a training template
+	hasTraining bool
+	// hasPhishing is set when the program has or had a phishing template
+	hasPhishing bool
+	// repeatMonths is the repeat offender window in months
+	repeatMonths int
+	// startedAt and closedAt bound the time the program ran, to tell partial
+	// months
+	startedAt, closedAt *time.Time
 }
 
 // authorizedProgram checks the session and loads a program for a read. The
@@ -533,6 +531,7 @@ func (s *Program) authorizedProgram(
 	ae *AuditEvent,
 	option *repository.ProgramOption,
 ) (*model.Program, error) {
+	ae.Details["id"] = id.String()
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
 		s.LogAuthError(err)
@@ -549,56 +548,217 @@ func (s *Program) authorizedProgram(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
+	program.SetReadState(time.Now())
 	return program, nil
 }
 
-// GetResults returns the phishing results of a program by month, in the
-// program time zone, and by template, with the people based measures.
+// GetResults returns the program results: the result tiles for a time range,
+// see ProgramTiles, and the phishing results by month, in the program time
+// zone, and by template since the start. An empty time range is the default
+// of the program, any other must be one of the time range keys.
 func (s *Program) GetResults(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
+	timeRange string,
 ) (*ProgramResults, error) {
+	if timeRange != "" && !IsValidProgramTimeRange(timeRange) {
+		return nil, errs.NewValidationError(errors.New("unknown time range"))
+	}
 	ae := NewAuditEvent("Program.GetResults", session)
-	program, err := s.authorizedProgram(ctx, session, id, ae, nil)
+	program, err := s.authorizedProgram(ctx, session, id, ae, &repository.ProgramOption{WithSteps: true})
 	if err != nil {
 		return nil, err
 	}
-	return s.programResults(ctx, session, program, time.Now(), nil, nil)
+	if timeRange == "" {
+		timeRange = defaultProgramTimeRange(program.IsAnonymousOn())
+	}
+	now := time.Now()
+	tiles := &programTilesPeriod{key: timeRange, from: programTimeRangeFrom(timeRange, now, program.Location())}
+	return s.cachedProgramResults(ctx, program, now, nil, nil, tiles)
 }
 
+// programResults returns the results of a program at now for the period
+// [from, to), nil bounds are open. A result is cached until something it is
+// computed from changes, see programResultsStamp. An anonymous program counts
+// only settled months, so its result holds until the day moves. A named program
+// is computed again after a new event or a new send on its campaigns, and
+// always after programResultsNamedMaxAge. When computing it was slow it is
+// kept at least programResultsNamedMinAge.
 func (s *Program) programResults(
 	ctx context.Context,
-	session *model.Session,
+	_ *model.Session,
 	program *model.Program,
 	now time.Time,
 	from, to *time.Time,
 ) (*ProgramResults, error) {
-	facts, err := s.loadProgramFacts(ctx, session, program, nil)
-	if err != nil {
-		return nil, err
-	}
-	return s.resultsFromFacts(ctx, program, facts, now, from, to)
+	return s.cachedProgramResults(ctx, program, now, from, to, nil)
 }
 
-// resultsFromFacts computes the results of loaded facts
-func (s *Program) resultsFromFacts(
+// cachedProgramResults returns the results of a program at now for the period
+// [from, to), with the result tiles of the program page when tiles is set. The
+// results are computed in memory from the facts of the program, see
+// programFactsFor, which are read once and then kept up to date.
+func (s *Program) cachedProgramResults(
 	ctx context.Context,
 	program *model.Program,
-	facts *programFacts,
 	now time.Time,
 	from, to *time.Time,
+	tiles *programTilesPeriod,
 ) (*ProgramResults, error) {
 	programID := program.ID.MustGet()
-	active, err := s.activeEnrollmentPeople(ctx, &programID, facts.anonymous)
+	in, kinds, err := s.programResultsInputs(ctx, program, now, from, to)
 	if err != nil {
 		return nil, err
 	}
-	results := buildProgramResults(facts, active, program.Location(), now, from, to)
-	// nobody is active in a closed program, so coverage is not shown for it
-	if program.IsClosed() {
-		results.Closed = true
-		results.Coverage = nil
+	stamp := programResultsStamp{
+		closed:       program.IsClosed(),
+		anonymous:    program.IsAnonymousOn(),
+		byPseudonym:  programPersonByPseudonym(program),
+		timeZone:     in.loc.String(),
+		recipients:   in.recipients,
+		enrollment:   in.enrollment,
+		repeatMonths: in.repeatMonths,
+		stepTraining: kinds.training,
+		stepPhishing: kinds.phishing,
 	}
-	return results, nil
+	if program.UpdatedAt != nil {
+		stamp.updatedAt = program.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if in.startedAt != nil {
+		stamp.updatedAt += "|" + in.startedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if in.closedAt != nil {
+		stamp.updatedAt += "|" + in.closedAt.UTC().Format(time.RFC3339Nano)
+	}
+	expires := now.Add(programResultsNamedMaxAge)
+	if stamp.anonymous {
+		day := startOfDay(now, in.loc)
+		stamp.day = day.Format(time.RFC3339)
+		expires = day.AddDate(0, 0, 1)
+	}
+	key := newProgramResultsKey(programID, from, to)
+	if tiles != nil {
+		key = key.withTiles(tiles)
+	}
+	fresh := func(e *programResultsEntry) (bool, error) {
+		if stamp.anonymous {
+			// an anonymous program counts settled months only, they do not
+			// change during the day
+			return true, nil
+		}
+		if e.took > programResultsSlowCompute && now.Sub(e.computedAt) < programResultsNamedMinAge {
+			return true, nil
+		}
+		facts, err := s.programFactsFor(ctx, program, now)
+		if err != nil {
+			return false, err
+		}
+		return facts.load == e.factsLoad && facts.currentVersion() == e.factsVersion, nil
+	}
+	compute := func() (*programResultsEntry, error) {
+		started := time.Now()
+		facts, err := s.programFactsFor(ctx, program, now)
+		if err != nil {
+			return nil, err
+		}
+		facts.mu.RLock()
+		in.hasTraining = kinds.training || facts.hasTraining
+		in.hasPhishing = kinds.phishing || facts.hasPhishing
+		version := facts.version
+		results := facts.programResults(in, tiles, program.IsClosed())
+		facts.mu.RUnlock()
+		return &programResultsEntry{
+			results:      results,
+			factsLoad:    facts.load,
+			factsVersion: version,
+			took:         time.Since(started),
+			expires:      expires,
+		}, nil
+	}
+	return s.resultsCache.get(key, stamp, now, programFactsBackground(ctx), fresh, compute)
+}
+
+// buildProgramResults computes the results of loaded facts for the period of
+// the input
+func buildProgramResults(facts *programFacts, in programResultsInput) *ProgramResults {
+	return programFactsStoreOf(facts).programResults(in, nil, false)
+}
+
+// programResults computes the results for the period of the input, with the
+// result tiles of a time range when tiles is set. The caller holds the read
+// lock.
+func (st *programFactsStore) programResults(in programResultsInput, tiles *programTilesPeriod, closed bool) *ProgramResults {
+	var results *ProgramResults
+	var anon *programAnonymousFacts
+	if st.anonymous {
+		anon = st.anonymousFacts(in.now, in.loc)
+		results = st.anonymousResults(anon, in)
+	} else {
+		results = st.namedResults(in)
+	}
+	results.Anonymous = st.anonymous
+	results.Closed = closed
+	if tiles != nil {
+		tin := in
+		tin.hasTraining = results.Summary.HasTraining
+		tin.hasPhishing = results.Summary.HasPhishing
+		results.Tiles = st.programTiles(anon, tin, *tiles, closed, results.Summary)
+	}
+	return results
+}
+
+// programResultsInputs reads what the results are computed with besides the
+// facts, with the kinds of template the steps of the program send.
+func (s *Program) programResultsInputs(
+	ctx context.Context,
+	program *model.Program,
+	now time.Time,
+	from, to *time.Time,
+) (programResultsInput, programStepKinds, error) {
+	programID := program.ID.MustGet()
+	enrollment, err := s.enrollmentCounts(ctx, &programID)
+	if err != nil {
+		return programResultsInput{}, programStepKinds{}, err
+	}
+	kinds, err := s.stepKinds(ctx, program)
+	if err != nil {
+		return programResultsInput{}, kinds, err
+	}
+	in := programResultsInput{
+		loc:          program.Location(),
+		now:          now,
+		from:         from,
+		to:           to,
+		recipients:   enrollment.total,
+		enrollment:   enrollment,
+		repeatMonths: s.repeatOffenderMonths(ctx),
+		startedAt:    program.StartedAt,
+	}
+	if t, err := program.ClosedAt.Get(); err == nil {
+		in.closedAt = &t
+	}
+	return in, kinds, nil
+}
+
+// ForgetTemplateResults forgets the cached results of the programs that may
+// show a campaign template, after it was renamed or deleted, so they show its
+// new name. An anonymous program keeps its results for the day otherwise. The
+// facts are kept and read the names again on their next use.
+func (s *Program) ForgetTemplateResults(templateID *uuid.UUID) {
+	if s == nil || templateID == nil {
+		return
+	}
+	for _, id := range s.resultsCache.programsWithTemplate(*templateID) {
+		s.resultsCache.invalidateResults(id)
+	}
+}
+
+// invalidateResults forgets the cached results of a program, after a change
+// the cache can not see. The facts are kept and checked against the database
+// on their next use, see programResultsCache.invalidateResults.
+func (s *Program) invalidateResults(programID *uuid.UUID) {
+	if programID != nil {
+		s.resultsCache.invalidateResults(*programID)
+	}
 }

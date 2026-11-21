@@ -27,6 +27,8 @@ type Recipient struct {
 	// ProgramService gives the program lifecycle lock, so a scheduler tick can
 	// not add a program send for a recipient that is being deleted
 	ProgramService *Program
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // Create creates a new recipient
@@ -52,6 +54,11 @@ func (r *Recipient) Create(
 		r.Logger.Debugw("failed to create recipient - recipient is invalid", "error", err)
 		return nil, errs.Wrap(err)
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, r.CompanyRepository, optionalID(recipient.CompanyID))
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	email := recipient.Email.MustGet()
 	// check if recipient already exists to avoid a unique constraint error
 	// and gorm does not return a unique constraint error but a string error depending on DB
@@ -310,6 +317,63 @@ func (r *Recipient) GetAllCampaignEvents(
 	return result, nil
 }
 
+// GetProgramExport returns the program sends and program events of a
+// recipient for the recipient export. Only programs that are not anonymous
+// are read, an anonymous program never gives per person data, and only
+// programs of the recipient's company or global programs.
+func (r *Recipient) GetProgramExport(
+	ctx context.Context,
+	session *model.Session,
+	recipientID *uuid.UUID,
+) ([]repository.RecipientProgramSend, []repository.RecipientProgramEvent, error) {
+	ae := NewAuditEvent("Recipient.GetProgramExport", session)
+	ae.Details["recipientId"] = recipientID.String()
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		r.LogAuthError(err)
+		return nil, nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		r.AuditLogNotAuthorized(ae)
+		return nil, nil, errs.ErrAuthorizationFailed
+	}
+	recipient, err := r.RecipientRepository.GetByID(ctx, recipientID, &repository.RecipientOption{})
+	if err != nil {
+		return nil, nil, errs.Wrap(err)
+	}
+	var recipientCompany *uuid.UUID
+	if cid, err := recipient.CompanyID.Get(); err == nil {
+		recipientCompany = &cid
+	}
+	sameScope := func(programCompany *uuid.UUID) bool {
+		return recipientCompany == nil || programCompany == nil || *programCompany == *recipientCompany
+	}
+	sends, err := r.RecipientRepository.GetProgramSendsForExport(ctx, recipientID)
+	if err != nil {
+		r.Logger.Errorw("failed to get recipient program sends", "error", err)
+		return nil, nil, errs.Wrap(err)
+	}
+	events, err := r.RecipientRepository.GetProgramEventsForExport(ctx, recipientID)
+	if err != nil {
+		r.Logger.Errorw("failed to get recipient program events", "error", err)
+		return nil, nil, errs.Wrap(err)
+	}
+	keptSends := make([]repository.RecipientProgramSend, 0, len(sends))
+	for _, sd := range sends {
+		if sameScope(sd.ProgramCompanyID) {
+			keptSends = append(keptSends, sd)
+		}
+	}
+	keptEvents := make([]repository.RecipientProgramEvent, 0, len(events))
+	for _, e := range events {
+		if sameScope(e.ProgramCompanyID) {
+			keptEvents = append(keptEvents, e)
+		}
+	}
+	// no audit log on read, the export itself is audited
+	return keptSends, keptEvents, nil
+}
+
 // GetAll gets all recipients
 func (r *Recipient) GetAll(
 	ctx context.Context,
@@ -439,6 +503,8 @@ func (r *Recipient) DeleteAllOrphaned(
 	var count int64
 	// runs before auditDone, so a failure part way records what was deleted
 	defer func() { ae.Details["count"] = count }()
+	// paced as in a company delete, see repository.WritePacer
+	var pacer repository.WritePacer
 	for _, recipient := range orphanedRecipients.Rows {
 		recipientID := recipient.ID.MustGet()
 		err = r.deleteRecipientByID(ctx, &recipientID)
@@ -447,6 +513,9 @@ func (r *Recipient) DeleteAllOrphaned(
 			return count, errs.Wrap(err)
 		}
 		count++
+		if err = pacer.Pause(ctx); err != nil {
+			return count, errs.Wrap(err)
+		}
 	}
 
 	ae.Details["count"] = count
@@ -573,6 +642,11 @@ func (r *Recipient) Import(
 	if len(recipients) == 0 {
 		return result, validate.WrapErrorWithField(errors.New("no recipients"), "add recipients")
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, r.CompanyRepository, companyID)
+	if err != nil {
+		return result, err
+	}
+	defer unlockCompany()
 
 	// process each recipient individually, collecting successes and failures
 	for i, incoming := range recipients {
@@ -730,6 +804,15 @@ func (r *Recipient) deleteRecipientByID(
 		r.Logger.Errorw("failed to cancel campaign recipient sends before deletion", "error", err)
 		return err
 	}
+	// a program send takes the pseudonym the person has in that program when
+	// there is one, as an Anonymize All of the program gives it to the sends it
+	// already went through. The person then keeps one pseudonym in the program.
+	if r.ProgramRepository != nil {
+		if err := r.ProgramRepository.LinkRecipientSendsToEnrollmentPseudonyms(ctx, id); err != nil {
+			r.Logger.Errorw("failed to give program sends the enrollment pseudonym", "error", err)
+			return err
+		}
+	}
 	// anonymize all recipient data
 	anonymizedID := uuid.New()
 	err = r.CampaignRecipientRepository.Anonymize(
@@ -742,7 +825,8 @@ func (r *Recipient) deleteRecipientByID(
 		r.Logger.Errorw("failed to add anonymized ID to campaign recipient", "error", err)
 		return err
 	}
-	// anonymize events and assign each anonymized ID so the events can still be tracked
+	// move the events onto the pseudonym of their send, so they can still be
+	// tracked, and remove their data
 	err = r.CampaignRepository.AnonymizeCampaignEventsByRecipientID(
 		ctx,
 		id,
@@ -761,10 +845,18 @@ func (r *Recipient) deleteRecipientByID(
 		r.Logger.Errorw("failed to remove recipient id from campaign recipient", "error", err)
 		return err
 	}
-	// remove the recipient from every program it is enrolled in
+	// remove the recipient from every program it is enrolled in. The program
+	// sends that already lost their recipient link are found through the
+	// enrollment pseudonyms, so their lure code and message id are released
+	// first. The enrollments stay without the person, so the person still
+	// counts once in the people of each program.
 	if r.ProgramRepository != nil {
-		if err := r.ProgramRepository.DeleteEnrollmentsByRecipientID(ctx, id); err != nil {
-			r.Logger.Errorw("failed to delete program enrollments of recipient", "error", err)
+		if err := r.ProgramRepository.ReleaseUnlinkedSendsOfRecipient(ctx, id); err != nil {
+			r.Logger.Errorw("failed to release program sends of recipient", "error", err)
+			return err
+		}
+		if err := r.ProgramRepository.UnlinkEnrollmentsOfRecipient(ctx, id); err != nil {
+			r.Logger.Errorw("failed to unlink program enrollments of recipient", "error", err)
 			return err
 		}
 	}
@@ -788,6 +880,7 @@ func (r *Recipient) DeleteByID(
 	id *uuid.UUID,
 ) (err error) {
 	ae := NewAuditEvent("Recipient.DeleteByID", session)
+	addDeleteOrigin(ctx, ae)
 	defer r.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions

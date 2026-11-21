@@ -22,6 +22,8 @@ type Script struct {
 	// TestRunner runs scripts in capture mode for the editor test panel. Nil when
 	// the feature is disabled.
 	TestRunner *script.Runner
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // Test runs a script against a simulated event and returns what it did, without
@@ -107,6 +109,11 @@ func (a *Script) Create(
 	if cid, err := script.CompanyID.Get(); err == nil {
 		companyID = &cid
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, a.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	name := script.Name.MustGet()
 	isOK, err := repository.CheckNameIsUnique(
 		ctx,
@@ -298,6 +305,7 @@ func (a *Script) DeleteByID(
 	id *uuid.UUID,
 ) (err error) {
 	ae := NewAuditEvent("Script.DeleteByID", session)
+	addDeleteOrigin(ctx, ae)
 	defer a.auditDone(ae, &err)
 	if id != nil {
 		ae.Details["id"] = id.String()

@@ -21,11 +21,10 @@
 	export let isLoading = false;
 	export let onCampaignClick = (campaignId) => {};
 
-	let hasAttemptedLoad = false;
+	// the card surface of the stat tiles
+	const card =
+		'bg-white dark:bg-gray-900/80 rounded-lg shadow-md dark:shadow-none dark:ring-1 dark:ring-gray-600/30 transition-colors duration-200';
 
-	$: if (isLoading) {
-		hasAttemptedLoad = true;
-	}
 
 	// localStorage keys for persisting chart settings
 	const VISIBLE_METRICS_KEY = 'campaignTrend.visibleMetrics';
@@ -172,18 +171,23 @@
 		// ignore errors
 	}
 
-	// save trend n
-	$: try {
-		localStorage.setItem(TREND_N_KEY, trendN.toString());
-	} catch (e) {
-		// ignore errors
+	// save trend n, only once the user picked it, so the automatic value keeps
+	// following the number of campaigns shown
+	$: if (userHasSetTrendN) {
+		try {
+			localStorage.setItem(TREND_N_KEY, trendN.toString());
+		} catch (e) {
+			// ignore errors
+		}
 	}
 
-	// save moving avg n
-	$: try {
-		localStorage.setItem(MOVING_AVG_N_KEY, movingAvgN.toString());
-	} catch (e) {
-		// ignore errors
+	// save moving avg n, only once the user picked it
+	$: if (userHasSetMovingAvgN) {
+		try {
+			localStorage.setItem(MOVING_AVG_N_KEY, movingAvgN.toString());
+		} catch (e) {
+			// ignore errors
+		}
 	}
 
 	// save log scale
@@ -203,9 +207,12 @@
 	// Responsive margins based on container width
 	// on narrow screens the legend goes under the plot in two columns
 	$: compactLegend = width < 520;
+	// the rates above the chart name and toggle the main lines, so the legend
+	// in the chart is drawn only to name the moving average lines
+	$: showLegend = showMovingAvg;
 	$: margin = {
 		top: 15,
-		right: compactLegend ? 16 : Math.min(180, Math.max(160, width * 0.28)),
+		right: !showLegend ? 32 : compactLegend ? 16 : Math.min(180, Math.max(160, width * 0.28)),
 		bottom: 50, // Increased bottom margin for better label spacing
 		left: 50
 	};
@@ -321,9 +328,9 @@
 		{
 			key: 'reportRate',
 			label: 'Report Rate',
-			color: '#4c6ef5',
+			color: '#2c3e50',
 			suffix: '%',
-			mavg: { color: '#60a5fa', label: 'Report MA' }
+			mavg: { color: '#7b8a9a', label: 'Report MA' }
 		}
 	];
 	const trainingMetrics = [
@@ -343,7 +350,15 @@
 		}
 	];
 	const allMetrics = [...phishingMetrics, ...trainingMetrics];
-	$: metrics = chartMode === 'training' ? trainingMetrics : phishingMetrics;
+	// the reported token, lighter in dark mode like the Reported tiles
+	$: reportColors = isDarkMode
+		? { color: '#cbd5e1', mavg: '#94a3b8' }
+		: { color: '#2c3e50', mavg: '#7b8a9a' };
+	$: metrics = (chartMode === 'training' ? trainingMetrics : phishingMetrics).map((m) =>
+		m.key === 'reportRate'
+			? { ...m, color: reportColors.color, mavg: { ...m.mavg, color: reportColors.mavg } }
+			: m
+	);
 
 	// toggle metric visibility (reassign to trigger svelte reactivity and persist)
 	function toggleMetric(metricKey) {
@@ -365,6 +380,33 @@
 		}
 		return out;
 	})();
+
+
+	// moving average lines and their legend entries, off until turned on in
+	// the chart options
+	const SHOW_MAVG_KEY = 'campaignTrend.showMovingAvg';
+	let showMovingAvg = false;
+	try {
+		showMovingAvg = localStorage.getItem(SHOW_MAVG_KEY) === 'true';
+	} catch (e) {
+		// ignore errors
+	}
+	const setShowMovingAvg = (on) => {
+		showMovingAvg = on;
+		// turning it on shows the average of every metric
+		if (on) {
+			const next = { ...visibleMetrics };
+			for (const m of allMetrics) next[`mavg-${m.key}`] = true;
+			visibleMetrics = next;
+		}
+		try {
+			localStorage.setItem(SHOW_MAVG_KEY, String(on));
+		} catch (e) {
+			// ignore errors
+		}
+	};
+	// the options that change how the chart is drawn
+	let showOptions = false;
 
 	// --- Force chart rerender ---
 	let chartKey = '';
@@ -457,10 +499,8 @@
 		const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
 		bgRect.setAttribute('width', '100%');
 		bgRect.setAttribute('height', '100%');
-		bgRect.setAttribute(
-			'fill',
-			document.documentElement.classList.contains('dark') ? '#111827' : '#ffffff'
-		);
+		// the card behind the chart shows through
+		bgRect.setAttribute('fill', 'none');
 		svg.appendChild(bgRect);
 
 		const xExtent = [0, chartData.length - 1];
@@ -496,7 +536,7 @@
 			});
 			// draw the moving average for any metric that supports one and is toggled on
 			metrics.forEach((metric) => {
-				if (metric.mavg && visibleMetrics[`mavg-${metric.key}`]) {
+				if (showMovingAvg && metric.mavg && visibleMetrics[`mavg-${metric.key}`]) {
 					createMovingAverageLine(svg, metric, movingAvgN);
 				}
 			});
@@ -515,7 +555,9 @@
 				}
 			});
 		}
-		createLegend(svg, svg);
+		if (showLegend) {
+			createLegend(svg, svg);
+		}
 		createTooltip(svg, svg.querySelectorAll('.chart-point'));
 
 		// Add hover listeners for legend enhancement
@@ -944,7 +986,7 @@
 			});
 			// in moving average only mode the raw lines are gone, so a separate MA
 			// entry per metric would just double the legend
-			if (metric.mavg && !maOnlyMode) {
+			if (metric.mavg && !maOnlyMode && showMovingAvg) {
 				legendItems.push({
 					type: 'mavg',
 					key: metric.key,
@@ -967,7 +1009,7 @@
 	// rows of the legend when it sits under the plot
 	const legendRowHeight = 18;
 	const compactLegendHeight = () =>
-		compactLegend ? Math.ceil(buildLegendItems().length / 2) * legendRowHeight + 12 : 0;
+		compactLegend && showLegend ? Math.ceil(buildLegendItems().length / 2) * legendRowHeight + 12 : 0;
 
 	function createLegend(svg, svgRoot) {
 		const legendY = margin.top + 5;
@@ -1363,6 +1405,10 @@
 			useRelativeMetrics;
 			chartMode;
 			maOnlyMode;
+			showMovingAvg;
+			showLegend;
+			margin;
+			metrics;
 			createChart();
 		}
 	}
@@ -1375,247 +1421,214 @@
 		class="chart-container w-full overflow-x-auto"
 		style="height:0;overflow:hidden;visibility:hidden;position:absolute;"
 	></div>
-	{#if isLoading}
-		<!-- ghost/skeleton loader matching final chart layout -->
-		<div
-			class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-6 transition-colors duration-200 animate-pulse"
-		>
-			<!-- header skeleton -->
-			<div class="flex flex-row items-center justify-between mb-2 pb-0 flex-wrap gap-2">
-				<div class="h-5 w-48 bg-gray-200 dark:bg-gray-700 rounded"></div>
+	<div class="{card} p-4 sm:p-6">
+		{#if isLoading}
+			<!-- ghost loader with the height of the chart -->
+			<div class="animate-pulse">
+				<div class="h-5 w-48 bg-gray-200 dark:bg-gray-700 rounded mb-6"></div>
+				<div class="h-[240px] w-full rounded-md bg-gray-50 dark:bg-gray-800/50"></div>
 			</div>
-			<div class="mb-8"></div>
-
-			<!-- invisible spacer matching stats grid height -->
-			<div class="h-[60px]"></div>
-
-			<div class="mt-8 mb-6"></div>
-
-			<!-- chart skeleton matching actual dimensions -->
-			<div class="relative">
-				<div
-					class="h-[240px] w-full box-border relative rounded-md bg-gray-50 dark:bg-gray-800/50 m-1"
-				></div>
-			</div>
-		</div>
-	{:else}
-		<div>
-			{#if hasAttemptedLoad && !isLoading && campaignStats.length < 2}
-				<div
-					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4 sm:p-6 transition-colors duration-200"
-				>
-					<!-- Match the height structure of the data container -->
-					<div class="flex flex-row items-center justify-between mb-2 pb-0 flex-wrap gap-2">
-						<h4
-							class="text-sm font-medium text-gray-600 dark:text-gray-300 m-0 transition-colors duration-200"
-						>
-							Trend Analytics
-						</h4>
-					</div>
-					<div class="mb-8"></div>
-
-					<!-- Centered content matching stats grid height -->
-					<div class="flex items-center justify-center min-h-[350px] py-16">
-						<div class="text-center">
-							<svg
-								class="mx-auto h-12 w-12 text-cta-blue dark:text-highlight-blue transition-colors duration-200"
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke="currentColor"
-								aria-hidden="true"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-								/>
-							</svg>
-							<h3
-								class="mt-3 text-lg font-medium text-gray-900 dark:text-gray-100 transition-colors duration-200"
-							>
-								Insufficient data for trend analysis
-							</h3>
-							<p
-								class="mt-2 text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200"
-							>
-								Trend analysis requires at least 2 completed campaigns to show meaningful patterns.
-							</p>
-						</div>
-					</div>
-				</div>
-			{:else}
-				<div
-					class="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 p-4 sm:p-6 transition-colors duration-200"
-				>
-					<!-- Trendline stats and controls above chart -->
-					<div class="flex flex-row items-center justify-between mb-2 pb-0 flex-wrap gap-2">
-						<h4
-							class="text-sm font-medium text-gray-600 dark:text-gray-300 m-0 transition-colors duration-200"
-						>
-							Trendline: Last {trendStats ? trendStats.n : campaignStats.length} Campaigns (average)
-						</h4>
-						<div class="flex flex-wrap items-center gap-2 mb-0">
-							{#if hasTraining}
-								<div
-									class="flex items-center rounded overflow-hidden border border-gray-300 dark:border-gray-600 text-xs"
-								>
-									<button
-										type="button"
-										class="px-2 py-0.5 transition-colors duration-200 {chartMode === 'phishing'
-											? 'bg-cta-blue text-white'
-											: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}"
-										on:click={() => (chartMode = 'phishing')}
-									>
-										Phishing
-									</button>
-									<button
-										type="button"
-										class="px-2 py-0.5 transition-colors duration-200 {chartMode === 'training'
-											? 'bg-training-completed text-white'
-											: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}"
-										on:click={() => (chartMode = 'training')}
-									>
-										Training
-									</button>
-								</div>
-							{/if}
-							<label
-								class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
-							>
-								Time range:
-								<select
-									bind:value={selectedTimeRange}
-									class="pc-select h-6 py-0"
-								>
-									{#each timeRanges as range}
-										<option value={range.value}>{range.label}</option>
-									{/each}
-								</select>
-							</label>
-							{#if campaignStats.length > 1}
-								<label
-									class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
-								>
-									Trendline N:
-									<input
-										type="number"
-										min="1"
-										max={campaignStats.length}
-										bind:value={trendN}
-										on:input={() => (userHasSetTrendN = true)}
-										class="h-6 w-12 px-1 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
-									/>
-								</label>
-							{/if}
-							<label
-								class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
-							>
-								Moving Avg N:
-								<input
-									type="number"
-									min="2"
-									max={campaignStats.length}
-									bind:value={movingAvgN}
-									on:input={() => (userHasSetMovingAvgN = true)}
-									class="h-6 w-12 px-1 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 hover:border-cta-blue dark:hover:border-highlight-blue focus:border-cta-blue dark:focus:border-highlight-blue transition-colors duration-200"
-								/>
-							</label>
-							<label
-								class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
-							>
-								Log scale:
-								<input type="checkbox" bind:checked={useLogScale} class="pc-checkbox" />
-							</label>
-							{#if densePossible}
-								<label
-									class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
-								>
-									Show raw points:
-									<input
-										type="checkbox"
-										bind:checked={showRawOverride}
-										class="pc-checkbox"
-									/>
-								</label>
-							{/if}
-							<div class="ml-auto flex items-center">
-								<label
-									class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300 transition-colors duration-200"
-								>
-									Relative metrics:
-									<input
-										type="checkbox"
-										bind:checked={useRelativeMetrics}
-										class="pc-checkbox"
-									/>
-								</label>
-							</div>
-						</div>
-					</div>
-					<div class="mb-8"></div>
-					{#if campaignStats.length > 0}
-						<div class="flex flex-wrap justify-around gap-x-4 gap-y-4">
-							{#each metrics as metric}
-								<div class="text-center min-w-[7rem]">
-									<div class="flex items-center justify-center">
-										<div
-											class="w-3 h-3 rounded-full mr-2"
-											style="background-color: {metric.color}"
-										></div>
-										<span
-											class="text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors duration-200"
-											>{metric.label}</span
-										>
-									</div>
-									<div class="mt-1">
-										<span class="text-2xl font-bold" style="color: {metric.color}">
-											{trendStats &&
-											typeof trendStats[metric.key] === 'number' &&
-											!isNaN(trendStats[metric.key])
-												? trendStats[metric.key].toFixed(1) + '%'
-												: '·'}
-										</span>
-									</div>
-								</div>
-							{/each}
-						</div>
-					{:else}
+		{:else if chartData.length < 2}
+			<!-- the chart needs two completed campaigns in the time range and mode shown -->
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<p class="text-sm text-gray-600 dark:text-gray-400">
+					The trend needs at least 2 completed {chartMode === 'training' ? 'training ' : ''}campaigns
+					in the time range.
+				</p>
+				<div class="flex flex-wrap items-center gap-2">
+					{#if hasTraining}
 						<div
-							class="text-center text-gray-400 dark:text-gray-500 text-sm py-4 transition-colors duration-200"
+							class="flex items-center rounded overflow-hidden border border-gray-300 dark:border-gray-600 text-xs"
 						>
-							No trendline stats to display (trendStats is null or not enough data).
+							<button
+								type="button"
+								class="pc-focus px-2 py-0.5 transition-colors duration-200 {chartMode === 'phishing'
+									? 'bg-cta-blue text-white'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}"
+								aria-pressed={chartMode === 'phishing'}
+								on:click={() => (chartMode = 'phishing')}>Phishing</button
+							>
+							<button
+								type="button"
+								class="pc-focus px-2 py-0.5 transition-colors duration-200 {chartMode === 'training'
+									? 'bg-training-completed text-white'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}"
+								aria-pressed={chartMode === 'training'}
+								on:click={() => (chartMode = 'training')}>Training</button
+							>
 						</div>
 					{/if}
-					<div class="mt-8 mb-6"></div>
-					{#key chartKey}
-						{#if containerReady}
-							<div class="relative">
-								<div
-									bind:this={chartContainer}
-									class="min-h-[220px] w-full box-border relative rounded-md bg-white dark:bg-gray-900 m-1 transition-colors duration-200"
-									style="contain: layout style; max-height: {compactLegend ? 'none' : '280px'};"
-								></div>
-								<div
-									bind:this={tooltip}
-									class="absolute z-50 hidden bg-white dark:bg-gray-900 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700/60 max-w-xs transition-colors duration-200"
-								></div>
-							</div>
-						{/if}
-					{/key}
-					<!-- DEBUG: Show moving average arrays for openRate and submissionRate
-					<div class="text-xs text-red-600 mt-2">
-						openRate movingAvg: {JSON.stringify(getMovingAverageData('openRate', movingAvgN))}
-						<br />
-						submissionRate movingAvg: {JSON.stringify(
-							getMovingAverageData('submissionRate', movingAvgN)
-						)}
-					</div>
-					 -->
+					<label class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300">
+						Time range:
+						<select bind:value={selectedTimeRange} class="pc-select pc-focus h-6 py-0">
+							{#each timeRanges as range}
+								<option value={range.value}>{range.label}</option>
+							{/each}
+						</select>
+					</label>
+				</div>
+			</div>
+		{:else}
+			<div class="flex flex-row items-center justify-between mb-4 flex-wrap gap-2">
+				<h4 class="text-sm font-medium text-gray-600 dark:text-gray-300 m-0">
+					Last {trendStats ? trendStats.n : chartData.length} completed {chartMode === 'training'
+						? 'training '
+						: ''}campaigns
+				</h4>
+				<div class="flex flex-wrap items-center gap-2">
+					{#if hasTraining}
+						<div
+							class="flex items-center rounded overflow-hidden border border-gray-300 dark:border-gray-600 text-xs"
+						>
+							<button
+								type="button"
+								class="pc-focus px-2 py-0.5 transition-colors duration-200 {chartMode === 'phishing'
+									? 'bg-cta-blue text-white'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}"
+								aria-pressed={chartMode === 'phishing'}
+								on:click={() => (chartMode = 'phishing')}>Phishing</button
+							>
+							<button
+								type="button"
+								class="pc-focus px-2 py-0.5 transition-colors duration-200 {chartMode === 'training'
+									? 'bg-training-completed text-white'
+									: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'}"
+								aria-pressed={chartMode === 'training'}
+								on:click={() => (chartMode = 'training')}>Training</button
+							>
+						</div>
+					{/if}
+					<label class="flex items-center gap-1 text-xs text-gray-700 dark:text-gray-300">
+						Time range:
+						<select bind:value={selectedTimeRange} class="pc-select pc-focus h-6 py-0">
+							{#each timeRanges as range}
+								<option value={range.value}>{range.label}</option>
+							{/each}
+						</select>
+					</label>
+					<button
+						type="button"
+						class="pc-focus inline-flex items-center gap-1 rounded px-1 text-xs text-gray-700 dark:text-gray-300 hover:text-cta-blue dark:hover:text-highlight-blue"
+						aria-expanded={showOptions}
+						aria-controls="campaign-trend-options"
+						on:click={() => (showOptions = !showOptions)}
+					>
+						Chart options
+						<svg
+							class="h-3 w-3 transition-transform duration-200"
+							class:rotate-180={showOptions}
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+							stroke-width="2"
+							aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg
+						>
+					</button>
+				</div>
+			</div>
+			{#if showOptions}
+				<div
+					id="campaign-trend-options"
+					class="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 mb-4 text-xs text-gray-700 dark:text-gray-300"
+				>
+					<label class="flex items-center gap-1">
+						Average of the last
+						<input
+							type="number"
+							min="1"
+							max={chartData.length}
+							bind:value={trendN}
+							on:input={() => (userHasSetTrendN = true)}
+							class="pc-focus h-6 w-12 px-1 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200"
+						/>
+						campaigns
+					</label>
+					<label class="flex items-center gap-1">
+						<input
+							type="checkbox"
+							checked={showMovingAvg}
+							on:change={(e) => setShowMovingAvg(e.currentTarget.checked)}
+							class="pc-checkbox pc-focus"
+						/>
+						Moving average of
+						<input
+							type="number"
+							min="2"
+							max={chartData.length}
+							bind:value={movingAvgN}
+							on:input={() => (userHasSetMovingAvgN = true)}
+							disabled={!showMovingAvg && !maOnlyMode}
+							class="pc-focus h-6 w-12 px-1 text-center border border-gray-300 dark:border-gray-600 rounded py-0 text-xs bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200 disabled:opacity-50"
+						/>
+						campaigns
+					</label>
+					<label class="flex items-center gap-1">
+						<input type="checkbox" bind:checked={useLogScale} class="pc-checkbox pc-focus" />
+						Log scale
+					</label>
+					{#if densePossible}
+						<label class="flex items-center gap-1">
+							<input type="checkbox" bind:checked={showRawOverride} class="pc-checkbox pc-focus" />
+							Show each campaign
+						</label>
+					{/if}
+					<label
+						class="flex items-center gap-1"
+						title="Each rate is taken of the step before it, so clicks of reads and submissions of clicks"
+					>
+						<input type="checkbox" bind:checked={useRelativeMetrics} class="pc-checkbox pc-focus" />
+						Rate of previous step
+					</label>
 				</div>
 			{/if}
-		</div>
-	{/if}
+			<!-- the average rates of the campaigns in the trend. They name the lines
+			     and a click turns a line on or off, as the legend did -->
+			{#if trendStats}
+				<div class="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-4 mb-6" data-trend-rates>
+					{#each metrics as metric (metric.key)}
+						{@const isOn = !!visibleMetrics[metric.key]}
+						<button
+							type="button"
+							class="pc-focus min-w-0 rounded-sm text-center transition-opacity duration-200"
+							class:opacity-50={!isOn}
+							aria-pressed={isOn}
+							title={isOn ? `Hide ${metric.label}` : `Show ${metric.label}`}
+							on:click={() => toggleMetric(metric.key)}
+						>
+							<span class="flex items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+								<span
+									class="h-2.5 w-2.5 shrink-0 rounded-full"
+									style="background-color: {metric.color}"
+									aria-hidden="true"
+								></span>
+								{metric.label}
+							</span>
+							<span class="mt-1 block text-2xl font-bold tabular-nums" style="color: {metric.color}">
+								{typeof trendStats[metric.key] === 'number' && !isNaN(trendStats[metric.key])
+									? `${trendStats[metric.key].toFixed(1)}%`
+									: '-'}
+							</span>
+						</button>
+					{/each}
+				</div>
+			{/if}
+			{#key chartKey}
+				{#if containerReady}
+					<div class="relative">
+						<div
+							bind:this={chartContainer}
+							class="min-h-[220px] w-full box-border relative rounded-md m-1"
+							style="contain: layout style; max-height: {compactLegend ? 'none' : '280px'};"
+						></div>
+						<div
+							bind:this={tooltip}
+							class="absolute z-50 hidden bg-white dark:bg-gray-900 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700/60 max-w-xs transition-colors duration-200"
+						></div>
+					</div>
+				{/if}
+			{/key}
+		{/if}
+	</div>
 </div>
 
 <style>
@@ -1654,11 +1667,7 @@
 		box-sizing: border-box !important;
 		display: block !important;
 		contain: layout style !important;
-		background: white;
-		transition: background-color 0.2s ease;
-	}
-	:global(.dark .campaign-trend-chart) {
-		background: #1f2937 !important;
+		background: transparent;
 	}
 	:global(.line-enhanced) {
 		stroke-width: 5 !important;

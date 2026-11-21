@@ -25,6 +25,9 @@ type RecipientGroup struct {
 	FilterField string `gorm:"not null;default:'';"`
 	// FilterValue is the value to match against the filter field
 	FilterValue string `gorm:"not null;default:'';"`
+	// DeletingAt marks a delete that has begun and is finished in the
+	// background, see service.RecipientGroup.DeleteByID
+	DeletingAt *time.Time `gorm:"index;"`
 
 	// can belong-to
 	CompanyID *uuid.UUID `gorm:"type:uuid;index;uniqueIndex:idx_recipient_groups_unique_name_and_company_id"`

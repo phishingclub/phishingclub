@@ -165,7 +165,7 @@
 		setupVimClipboardIntegration,
 		destroyVimClipboardIntegration
 	} from '$lib/utils/vimClipboard.js';
-	import { displayMode, DISPLAY_MODE } from '$lib/store/displayMode';
+	import { displayMode, showsRedTeam } from '$lib/store/displayMode';
 
 	/** @type {'domain'|'page'|'email'|'report'} */
 	export let contentType;
@@ -175,6 +175,10 @@
 	export let selectedDomain = '';
 	export let externalVimMode = null; // allow external control of vim mode
 	export let attachments = []; // array of email attachments for inline image preview
+	// for a report, the sample data the preview renders and the variables the
+	// insert menu offers, the campaign report ones when not set. Read on mount
+	export let reportSample = null;
+	export let reportVariables = null;
 	// height of the editor and preview area when not expanded, any CSS length
 	export let height = 'max(16rem, min(55vh, calc(100dvh - 20rem)))';
 	let localVimMode = externalVimMode !== null ? externalVimMode : $vimModeEnabled;
@@ -257,7 +261,7 @@
 		]
 	};
 
-	// device code templates are only available in blackbox (red team phishing) mode
+	// device code templates are only available in modes that show red team features
 	const deviceCodeTemplates = [
 		{ label: 'User Code', text: '{{MicrosoftDeviceCode}}' },
 		{ label: 'Verification URL', text: '{{MicrosoftDeviceCodeURL}}' },
@@ -266,10 +270,10 @@
 
 	$: computedTemplates = (() => {
 		const result = { ...templates };
-		if ($displayMode === DISPLAY_MODE.BLACKBOX && contentType !== 'report') {
+		if (showsRedTeam($displayMode) && contentType !== 'report') {
 			result['Device Code'] = deviceCodeTemplates;
 		}
-		if ($displayMode === DISPLAY_MODE.BLACKBOX && contentType === 'page') {
+		if (showsRedTeam($displayMode) && contentType === 'page') {
 			result['Remote Browser'] = [
 				{ label: 'Script', text: '{{RemoteBrowserScript "remote_browser_name"}}' }
 			];
@@ -746,9 +750,10 @@
 	// start at the root report data, like Go's Execute
 	function renderReportPreview(text) {
 		try {
+			const sample = reportSample ?? reportSampleData;
 			return renderReportNodes(parseReportTemplate(text), {
-				root: reportSampleData,
-				dot: reportSampleData,
+				root: sample,
+				dot: sample,
 				vars: Object.create(null),
 				steps: { left: REPORT_MAX_STEPS }
 			});
@@ -776,7 +781,7 @@
 			// report variables grouped into meaningful categories; keep Functions last
 			const reportFunctions = templates['Functions'];
 			delete templates['Functions'];
-			Object.assign(templates, reportCategories);
+			Object.assign(templates, reportVariables ?? reportCategories);
 			templates['Functions'] = reportFunctions;
 			break;
 		}

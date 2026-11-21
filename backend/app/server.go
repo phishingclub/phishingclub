@@ -29,6 +29,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/cache"
 	"github.com/phishingclub/phishingclub/config"
 	"github.com/phishingclub/phishingclub/data"
@@ -977,6 +978,113 @@ func (s *Server) applyEventAnonymization(
 	event.Anonymize(&aid)
 }
 
+// pageEvents records the events of the page requests of one send. A send with
+// a pseudonym has no person link, see service.UnlinkedAnonymousProgramSend:
+// its events carry the pseudonym only and no webhook or script runs, the same
+// as for every event of a single recipient on an anonymous campaign.
+type pageEvents struct {
+	s           *Server
+	campaign    *model.Campaign
+	campaignID  uuid.UUID
+	recipientID uuid.UUID
+	pseudonym   *uuid.UUID
+}
+
+// sendPerson returns the recipient to render the pages of a send with and the
+// event recorder of the send. A send with a person link gives a nil recipient,
+// which the caller reads. A send without one gives an empty recipient, so
+// every personal field renders as an empty string, when it is an unlinked
+// send of an anonymous program. Any other send without a person gives false.
+func (s *Server) sendPerson(
+	ctx context.Context,
+	campaign *model.Campaign,
+	campaignID uuid.UUID,
+	campaignRecipient *model.CampaignRecipient,
+) (*model.Recipient, *pageEvents, bool) {
+	ev := &pageEvents{s: s, campaign: campaign, campaignID: campaignID}
+	if recipientID, err := campaignRecipient.RecipientID.Get(); err == nil {
+		ev.recipientID = recipientID
+		return nil, ev, true
+	}
+	pseudonym, ok := service.UnlinkedAnonymousProgramSend(ctx, s.repositories.Program, campaign, campaignRecipient)
+	if !ok {
+		return nil, nil, false
+	}
+	ev.pseudonym = &pseudonym
+	return &model.Recipient{}, ev, true
+}
+
+// recipientRef is the recipient id an event is created with, none for a
+// send without a person link
+func (p *pageEvents) recipientRef() *uuid.UUID {
+	if p.pseudonym != nil {
+		return nil
+	}
+	id := p.recipientID
+	return &id
+}
+
+// anonymize strips identity from an event of an anonymous campaign before it
+// is saved, see applyEventAnonymization
+func (p *pageEvents) anonymize(ctx context.Context, event *model.CampaignEvent) {
+	if p.pseudonym != nil {
+		event.Anonymize(p.pseudonym)
+		return
+	}
+	p.s.applyEventAnonymization(ctx, p.campaign, p.campaignID, p.recipientID, event)
+}
+
+// hasEvent reports whether the send already has an event of the given type.
+// The events of an anonymous campaign carry the pseudonym and no recipient id,
+// so they are looked up by the pseudonym of the send, which is the one
+// applyEventAnonymization stores them with.
+func (p *pageEvents) hasEvent(ctx context.Context, eventID *uuid.UUID) (bool, error) {
+	if p.pseudonym != nil {
+		return p.s.repositories.Campaign.HasEventByAnonymizedID(ctx, &p.campaignID, p.pseudonym, eventID)
+	}
+	isAnon, err := p.campaign.IsAnonymous.Get()
+	if err != nil {
+		isAnon, err = p.s.repositories.Campaign.IsAnonymousByID(ctx, &p.campaignID)
+		if err != nil {
+			return false, errs.Wrap(err)
+		}
+	}
+	if !isAnon {
+		return p.s.repositories.Campaign.HasMessageReadEvent(ctx, &p.campaignID, &p.recipientID, eventID)
+	}
+	cr, err := p.s.repositories.CampaignRecipient.GetByCampaignAndRecipientID(
+		ctx,
+		&p.campaignID,
+		&p.recipientID,
+		&repository.CampaignRecipientOption{},
+	)
+	if err != nil {
+		return false, errs.Wrap(err)
+	}
+	aid, err := cr.AnonymizedID.Get()
+	if err != nil {
+		// an event without a pseudonym is stored uncounted and can not be found
+		return false, nil
+	}
+	return p.s.repositories.Campaign.HasEventByAnonymizedID(ctx, &p.campaignID, &aid, eventID)
+}
+
+// webhooks runs the webhooks and scripts of an event, none for a send without
+// a person link
+func (p *pageEvents) webhooks(eventName string, capturedData map[string]interface{}) error {
+	if p.pseudonym != nil {
+		return nil
+	}
+	return p.s.services.Campaign.HandleWebhooks(
+		// TODO this should be tied to a application wide context not the request
+		context.TODO(),
+		&p.campaignID,
+		&p.recipientID,
+		eventName,
+		capturedData,
+	)
+}
+
 // emitTrainingMilestoneIfNeeded records a training_started or training_completed
 // event for a training campaign, at most once per recipient. The raw page visit
 // event is still recorded separately, so this adds a deduplicated milestone on
@@ -986,8 +1094,7 @@ func (s *Server) emitTrainingMilestoneIfNeeded(
 	campaign *model.Campaign,
 	campaignRecipient *model.CampaignRecipient,
 	campaignRecipientIDPtr *uuid.UUID,
-	campaignID uuid.UUID,
-	recipientID uuid.UUID,
+	ev *pageEvents,
 	pageType string,
 ) error {
 	isTraining := false
@@ -1005,12 +1112,16 @@ func (s *Server) emitTrainingMilestoneIfNeeded(
 	if milestoneEventID == nil {
 		return nil
 	}
+	campaignID := ev.campaignID
+	recipientID := ev.recipientID
 	// a milestone is recorded once per recipient per campaign. an anonymous
 	// campaign's events carry the pseudonym rather than a recipient id, so dedup on
 	// that; otherwise a milestone would be recorded on every page visit.
 	var has bool
 	var err error
-	if isAnon, _ := campaign.IsAnonymous.Get(); isAnon {
+	if ev.pseudonym != nil {
+		has, err = s.repositories.Campaign.HasEventByAnonymizedID(c, &campaignID, ev.pseudonym, milestoneEventID)
+	} else if isAnon, _ := campaign.IsAnonymous.Get(); isAnon {
 		if cr, crErr := s.repositories.CampaignRecipient.GetByCampaignAndRecipientID(c, &campaignID, &recipientID, &repository.CampaignRecipientOption{}); crErr == nil {
 			if aid, aerr := cr.AnonymizedID.Get(); aerr == nil {
 				has, err = s.repositories.Campaign.HasEventByAnonymizedID(c, &campaignID, &aid, milestoneEventID)
@@ -1032,14 +1143,14 @@ func (s *Server) emitTrainingMilestoneIfNeeded(
 	event := &model.CampaignEvent{
 		ID:          &eventID,
 		CampaignID:  &campaignID,
-		RecipientID: &recipientID,
+		RecipientID: ev.recipientRef(),
 		IP:          clientIP,
 		UserAgent:   userAgent,
 		EventID:     milestoneEventID,
 		Data:        vo.NewEmptyOptionalString1MB(),
 		Metadata:    model.ExtractCampaignEventMetadata(c, campaign),
 	}
-	s.applyEventAnonymization(c, campaign, campaignID, recipientID, event)
+	ev.anonymize(c, event)
 	if err := s.repositories.Campaign.SaveEvent(c, event); err != nil {
 		return fmt.Errorf("failed to save training milestone event: %s", err)
 	}
@@ -1049,18 +1160,12 @@ func (s *Server) emitTrainingMilestoneIfNeeded(
 		currentNotableEventID, _ := campaignRecipient.NotableEventID.Get()
 		if cache.IsMoreNotableCampaignRecipientEventID(&currentNotableEventID, milestoneEventID) {
 			campaignRecipient.NotableEventID.Set(*milestoneEventID)
-			if err := s.repositories.CampaignRecipient.UpdateByID(c, campaignRecipientIDPtr, campaignRecipient); err != nil {
+			if err := s.repositories.CampaignRecipient.UpdateNotableEventByID(c, campaignRecipientIDPtr, milestoneEventID); err != nil {
 				s.logger.Errorw("failed to update notable event for training milestone", "error", err)
 			}
 		}
 	}
-	if err := s.services.Campaign.HandleWebhooks(
-		context.TODO(),
-		&campaignID,
-		&recipientID,
-		milestoneName,
-		nil,
-	); err != nil {
+	if err := ev.webhooks(milestoneName, nil); err != nil {
 		return fmt.Errorf("failed to handle webhooks for training milestone: %s", err)
 	}
 	return nil
@@ -1069,6 +1174,78 @@ func (s *Server) emitTrainingMilestoneIfNeeded(
 // checkAndServePhishingPage serves a phishing page
 // returns a bool if the request was for a phishing page
 // and an error if there was an error
+// serveExpiredPage writes the clean page a link that is no longer served
+// returns, the same page the proxy serves for a send that lost its person
+// link. It carries no identity and stores nothing.
+func (s *Server) serveExpiredPage(c *gin.Context) {
+	body := "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
+		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+		"<title>Link expired</title></head><body><p>This link has expired.</p></body></html>"
+	c.Data(http.StatusGone, "text/html; charset=utf-8", []byte(body))
+}
+
+// liveRecipientPageFuncs are the template function names that drive a live
+// session against the real person: the Microsoft device code functions and the
+// remote browser script. A page that uses any of them can not be served to a
+// send that lost its person link.
+var liveRecipientPageFuncs = []string{
+	"MicrosoftDeviceCode",
+	"DeviceCodeCaptured",
+	"RemoteBrowserScript",
+}
+
+// pageUsesLiveRecipientFuncs reports whether the page content uses a function
+// that drives a live session against the real person
+func pageUsesLiveRecipientFuncs(page *model.Page) bool {
+	content, err := page.Content.Get()
+	if err != nil {
+		return false
+	}
+	body := content.String()
+	for _, name := range liveRecipientPageFuncs {
+		if strings.Contains(body, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// templateUsesLiveRecipientFuncs reports whether any page a send of the
+// campaign can be served uses a function that drives a live session against
+// the real person. It reads the before, landing and after pages of the
+// template and the evasion and deny pages of the campaign, and stores
+// nothing. A missing page is skipped.
+func (s *Server) templateUsesLiveRecipientFuncs(
+	c *gin.Context,
+	cTemplate *model.CampaignTemplate,
+	campaign *model.Campaign,
+) (bool, error) {
+	pageIDs := []nullable.Nullable[uuid.UUID]{
+		cTemplate.BeforeLandingPageID,
+		cTemplate.LandingPageID,
+		cTemplate.AfterLandingPageID,
+		campaign.EvasionPageID,
+		campaign.DenyPageID,
+	}
+	for _, idField := range pageIDs {
+		id, err := idField.Get()
+		if err != nil {
+			continue
+		}
+		page, err := s.repositories.Page.GetByID(c, &id, &repository.PageOption{})
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return false, errs.Wrap(err)
+		}
+		if pageUsesLiveRecipientFuncs(page) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s *Server) checkAndServePhishingPage(
 	c *gin.Context,
 	domain *database.Domain,
@@ -1157,27 +1334,47 @@ func (s *Server) checkAndServePhishingPage(
 		return true, nil
 	}
 	// get the recipient
-	// if the recipient has been anonymized or removed, stop
-	recipientID, err := campaignRecipient.RecipientID.Get()
-	if err != nil {
+	// if the recipient has been anonymized or removed, stop, unless the send
+	// is one of an anonymous program that only lost its person link
+	recipient, ev, ok := s.sendPerson(c, campaign, campaignID, campaignRecipient)
+	if !ok {
 		return false, nil
 	}
-	recipient, err := s.repositories.Recipient.GetByID(
-		c,
-		&recipientID,
-		&repository.RecipientOption{},
-	)
-	if err != nil {
-		return false, fmt.Errorf("failed to get recipient: %s", err)
-	}
-	// if the recipient has been disabled (deprovisioned) in the identity provider,
-	// stop engaging them: no landing page, no proxy relay, no credential capture and
-	// no event recording. Fall through to the normal not-found response.
-	if recipient.ScimSoftDeletedAt != nil {
-		s.logger.Debugw("recipient is scim-disabled, not serving phishing content",
-			"campaignRecipientID", campaignRecipientID.String(),
+	recipientID := ev.recipientID
+	if ev.pseudonym == nil {
+		var err error
+		recipient, err = s.repositories.Recipient.GetByID(
+			c,
+			&recipientID,
+			&repository.RecipientOption{},
 		)
-		return false, nil
+		if err != nil {
+			return false, fmt.Errorf("failed to get recipient: %s", err)
+		}
+		// if the recipient has been disabled (deprovisioned) in the identity provider,
+		// stop engaging them: no landing page, no proxy relay, no credential capture and
+		// no event recording. Fall through to the normal not-found response.
+		if recipient.ScimSoftDeletedAt != nil {
+			s.logger.Debugw("recipient is scim-disabled, not serving phishing content",
+				"campaignRecipientID", campaignRecipientID.String(),
+			)
+			return false, nil
+		}
+	}
+	// a device code or remote browser page drives a live session against the
+	// real person, which can not be stripped of identity, so it is never
+	// served for a send that lost its person link after the identity
+	// retention. a clean expired page is served instead, like the proxy, while
+	// the program stays open. a normal page keeps working.
+	if ev.pseudonym != nil {
+		usesLive, err := s.templateUsesLiveRecipientFuncs(c, cTemplate, campaign)
+		if err != nil {
+			return false, err
+		}
+		if usesLive {
+			s.serveExpiredPage(c)
+			return true, nil
+		}
 	}
 	// check for evasion page first
 	var evasionPageID *uuid.UUID
@@ -1453,7 +1650,9 @@ func (s *Server) checkAndServePhishingPage(
 		var webhookData map[string]interface{}
 		var rawData string
 
-		if campaign.SaveSubmittedData.MustGet() {
+		// a send without a person link belongs to an anonymous program, which
+		// never stores or forwards submitted data
+		if ev.pseudonym == nil && campaign.SaveSubmittedData.MustGet() {
 			// parse based on content type
 			contentType := c.Request.Header.Get("Content-Type")
 			mediaType, _, _ := mime.ParseMediaType(contentType)
@@ -1606,14 +1805,14 @@ func (s *Server) checkAndServePhishingPage(
 		event := &model.CampaignEvent{
 			ID:          &newEventID,
 			CampaignID:  &campaignID,
-			RecipientID: &recipientID,
+			RecipientID: ev.recipientRef(),
 			IP:          clientIP,
 			UserAgent:   userAgent,
 			EventID:     submitDataEventID,
 			Data:        submittedData,
 			Metadata:    metadata,
 		}
-		s.applyEventAnonymization(c, campaign, campaignID, recipientID, event)
+		ev.anonymize(c, event)
 		err = s.repositories.Campaign.SaveEvent(c, event)
 		if err != nil {
 			return true, fmt.Errorf("failed to save campaign event: %s", err)
@@ -1625,10 +1824,10 @@ func (s *Server) checkAndServePhishingPage(
 			submitDataEventID,
 		) {
 			campaignRecipient.NotableEventID.Set(*submitDataEventID)
-			err := s.repositories.CampaignRecipient.UpdateByID(
+			err := s.repositories.CampaignRecipient.UpdateNotableEventByID(
 				c,
 				campaignRecipientIDPtr,
-				campaignRecipient,
+				submitDataEventID,
 			)
 			if err != nil {
 				s.logger.Errorw(
@@ -1640,14 +1839,7 @@ func (s *Server) checkAndServePhishingPage(
 			}
 		}
 		// handle webhooks
-		err = s.services.Campaign.HandleWebhooks(
-			// TODO this should be tied to a application wide context not the request
-			context.TODO(),
-			&campaignID,
-			&recipientID,
-			data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA,
-			webhookData,
-		)
+		err = ev.webhooks(data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA, webhookData)
 		if err != nil {
 			return true, fmt.Errorf("failed to handle webhooks: %s", err)
 		}
@@ -1728,12 +1920,7 @@ func (s *Server) checkAndServePhishingPage(
 			messageReadEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ]
 
 			// check if recipient already has a message_read event for this campaign
-			hasMessageRead, err := s.repositories.Campaign.HasMessageReadEvent(
-				c,
-				&campaignID,
-				&recipientID,
-				messageReadEventID,
-			)
+			hasMessageRead, err := ev.hasEvent(c, messageReadEventID)
 			if err != nil {
 				s.logger.Errorw("failed to check for existing message read event",
 					"error", err,
@@ -1753,7 +1940,7 @@ func (s *Server) checkAndServePhishingPage(
 				syntheticReadEvent := &model.CampaignEvent{
 					ID:          &syntheticReadEventID,
 					CampaignID:  &campaignID,
-					RecipientID: &recipientID,
+					RecipientID: ev.recipientRef(),
 					IP:          clientIP,
 					UserAgent:   userAgent,
 					EventID:     messageReadEventID,
@@ -1762,7 +1949,7 @@ func (s *Server) checkAndServePhishingPage(
 				}
 
 				// save the synthetic message read event
-				s.applyEventAnonymization(c, campaign, campaignID, recipientID, syntheticReadEvent)
+				ev.anonymize(c, syntheticReadEvent)
 				err = s.repositories.Campaign.SaveEvent(c, syntheticReadEvent)
 				if err != nil {
 					s.logger.Errorw("failed to save synthetic message read event",
@@ -1795,7 +1982,7 @@ func (s *Server) checkAndServePhishingPage(
 		visitEvent := &model.CampaignEvent{
 			ID:          &visitEventID,
 			CampaignID:  &campaignID,
-			RecipientID: &recipientID,
+			RecipientID: ev.recipientRef(),
 			IP:          clientIP,
 			UserAgent:   userAgent,
 			EventID:     eventID,
@@ -1805,7 +1992,7 @@ func (s *Server) checkAndServePhishingPage(
 
 		// save the visit event unless it's the final page repeat
 		if currentPageType != data.PAGE_TYPE_DONE {
-			s.applyEventAnonymization(c, campaign, campaignID, recipientID, visitEvent)
+			ev.anonymize(c, visitEvent)
 			err = s.repositories.Campaign.SaveEvent(
 				c,
 				visitEvent,
@@ -1824,10 +2011,10 @@ func (s *Server) checkAndServePhishingPage(
 				eventID,
 			) {
 				campaignRecipient.NotableEventID.Set(*eventID)
-				err := s.repositories.CampaignRecipient.UpdateByID(
+				err := s.repositories.CampaignRecipient.UpdateNotableEventByID(
 					c,
 					campaignRecipientIDPtr,
-					campaignRecipient,
+					eventID,
 				)
 				if err != nil {
 					s.logger.Errorw("failed to update notable event for proxy",
@@ -1841,14 +2028,7 @@ func (s *Server) checkAndServePhishingPage(
 
 		// handle webhooks for Proxy page visit
 		if currentPageType != data.PAGE_TYPE_DONE {
-			err = s.services.Campaign.HandleWebhooks(
-				// TODO this should be tied to a application wide context not the request
-				context.TODO(),
-				&campaignID,
-				&recipientID,
-				eventName,
-				nil,
-			)
+			err = ev.webhooks(eventName, nil)
 			if err != nil {
 				s.logger.Errorw("failed to handle webhooks for Proxy page visit",
 					"campaignID", campaignID.String(),
@@ -1865,8 +2045,7 @@ func (s *Server) checkAndServePhishingPage(
 			campaign,
 			campaignRecipient,
 			campaignRecipientIDPtr,
-			campaignID,
-			recipientID,
+			ev,
 			currentPageType,
 		); err != nil {
 			return true, errs.Wrap(err)
@@ -2064,12 +2243,7 @@ func (s *Server) checkAndServePhishingPage(
 		messageReadEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_READ]
 
 		// check if recipient already has a message_read event for this campaign
-		hasMessageRead, err := s.repositories.Campaign.HasMessageReadEvent(
-			c,
-			&campaignID,
-			&recipientID,
-			messageReadEventID,
-		)
+		hasMessageRead, err := ev.hasEvent(c, messageReadEventID)
 		if err != nil {
 			s.logger.Errorw("failed to check for existing message read event",
 				"error", err,
@@ -2089,7 +2263,7 @@ func (s *Server) checkAndServePhishingPage(
 			syntheticReadEvent := &model.CampaignEvent{
 				ID:          &syntheticReadEventID,
 				CampaignID:  &campaignID,
-				RecipientID: &recipientID,
+				RecipientID: ev.recipientRef(),
 				IP:          clientIP,
 				UserAgent:   userAgent,
 				EventID:     messageReadEventID,
@@ -2098,7 +2272,7 @@ func (s *Server) checkAndServePhishingPage(
 			}
 
 			// save the synthetic message read event
-			s.applyEventAnonymization(c, campaign, campaignID, recipientID, syntheticReadEvent)
+			ev.anonymize(c, syntheticReadEvent)
 			err = s.repositories.Campaign.SaveEvent(c, syntheticReadEvent)
 			if err != nil {
 				s.logger.Errorw("failed to save synthetic message read event",
@@ -2132,7 +2306,7 @@ func (s *Server) checkAndServePhishingPage(
 	event := &model.CampaignEvent{
 		ID:          &eventID,
 		CampaignID:  &campaignID,
-		RecipientID: &recipientID,
+		RecipientID: ev.recipientRef(),
 		IP:          clientIP,
 		UserAgent:   userAgent,
 		EventID:     campaignEventID,
@@ -2141,7 +2315,7 @@ func (s *Server) checkAndServePhishingPage(
 	}
 	// only log the page visit if it is not after the final page
 	if currentPageType != data.PAGE_TYPE_DONE {
-		s.applyEventAnonymization(c, campaign, campaignID, recipientID, event)
+		ev.anonymize(c, event)
 		err = s.repositories.Campaign.SaveEvent(
 			c,
 			event,
@@ -2157,10 +2331,10 @@ func (s *Server) checkAndServePhishingPage(
 		campaignEventID,
 	) {
 		campaignRecipient.NotableEventID.Set(*campaignEventID)
-		err := s.repositories.CampaignRecipient.UpdateByID(
+		err := s.repositories.CampaignRecipient.UpdateNotableEventByID(
 			c,
 			campaignRecipientIDPtr,
-			campaignRecipient,
+			campaignEventID,
 		)
 		if err != nil {
 			s.logger.Errorw("failed to update notable event",
@@ -2174,14 +2348,7 @@ func (s *Server) checkAndServePhishingPage(
 	// handle webhooks
 	// do not notify on visiting the page done as it is a repeat of the flow
 	if currentPageType != data.PAGE_TYPE_DONE {
-		err = s.services.Campaign.HandleWebhooks(
-			// TODO this should be tied to a application wide context not the request
-			context.TODO(),
-			&campaignID,
-			&recipientID,
-			eventName,
-			nil,
-		)
+		err = ev.webhooks(eventName, nil)
 		if err != nil {
 			return true, fmt.Errorf("failed to handle webhooks: %s", err)
 		}
@@ -2193,8 +2360,7 @@ func (s *Server) checkAndServePhishingPage(
 		campaign,
 		campaignRecipient,
 		campaignRecipientIDPtr,
-		campaignID,
-		recipientID,
+		ev,
 		currentPageType,
 	); err != nil {
 		return true, errs.Wrap(err)
@@ -2234,19 +2400,6 @@ func (s *Server) renderDenyPage(
 		return fmt.Errorf("campaign recipient is nil")
 	}
 
-	// get recipient ID from campaign recipient with nil check
-	recipientID, err := campaignRecipient.RecipientID.Get()
-	if err != nil {
-		return fmt.Errorf("campaign recipient has no recipient ID: %s", err)
-	}
-	recipient, err := s.repositories.Recipient.GetByID(ctx, &recipientID, &repository.RecipientOption{})
-	if err != nil {
-		return fmt.Errorf("failed to get recipient: %s", err)
-	}
-	if recipient == nil {
-		return fmt.Errorf("recipient is nil")
-	}
-
 	// get campaign with nil check
 	campaignID, err := campaignRecipient.CampaignID.Get()
 	if err != nil {
@@ -2258,6 +2411,29 @@ func (s *Server) renderDenyPage(
 	}
 	if campaign == nil {
 		return fmt.Errorf("campaign is nil")
+	}
+
+	// get the recipient, an unlinked send of an anonymous program has none
+	recipient, ev, ok := s.sendPerson(ctx, campaign, campaignID, campaignRecipient)
+	if !ok {
+		return fmt.Errorf("campaign recipient has no recipient ID")
+	}
+	recipientID := ev.recipientID
+	if ev.pseudonym == nil {
+		recipient, err = s.repositories.Recipient.GetByID(ctx, &recipientID, &repository.RecipientOption{})
+		if err != nil {
+			return fmt.Errorf("failed to get recipient: %s", err)
+		}
+		if recipient == nil {
+			return fmt.Errorf("recipient is nil")
+		}
+	}
+	// a deny page that drives a live session against the real person is not
+	// served for a send that lost its person link, the clean expired page is
+	// served instead, the same as for the other pages
+	if ev.pseudonym != nil && pageUsesLiveRecipientFuncs(page) {
+		s.serveExpiredPage(c)
+		return nil
 	}
 
 	// get campaign template with email and nil check
@@ -2341,7 +2517,7 @@ func (s *Server) renderDenyPage(
 	event := &model.CampaignEvent{
 		ID:          &denyPageVisitEventID,
 		CampaignID:  &campaignID,
-		RecipientID: &recipientID,
+		RecipientID: ev.recipientRef(),
 		IP:          clientIP,
 		UserAgent:   userAgent,
 		EventID:     eventID,
@@ -2349,7 +2525,7 @@ func (s *Server) renderDenyPage(
 		Metadata:    metadata,
 	}
 
-	s.applyEventAnonymization(c, campaign, campaignID, recipientID, event)
+	ev.anonymize(c, event)
 	err = s.repositories.Campaign.SaveEvent(c, event)
 	if err != nil {
 		s.logger.Errorw("failed to save deny page visit event",
@@ -2362,7 +2538,7 @@ func (s *Server) renderDenyPage(
 	currentNotableEventID, _ := campaignRecipient.NotableEventID.Get()
 	if cache.IsMoreNotableCampaignRecipientEventID(&currentNotableEventID, eventID) {
 		campaignRecipient.NotableEventID.Set(*eventID)
-		err := s.repositories.CampaignRecipient.UpdateByID(c, &campaignRecipientID, campaignRecipient)
+		err := s.repositories.CampaignRecipient.UpdateNotableEventByID(c, &campaignRecipientID, eventID)
 		if err != nil {
 			s.logger.Errorw("failed to update campaign recipient notable event",
 				"error", err,
@@ -2380,19 +2556,10 @@ func (s *Server) renderDenyPage(
 	if pageIDVal, err := page.ID.Get(); err == nil {
 		pageIDStr = pageIDVal.String()
 	}
-	recipientEmailStr := "unknown"
-	if recipientEmailVal, err := recipient.Email.Get(); err == nil {
-		recipientEmailStr = recipientEmailVal.String()
-	}
+	logFields := denyPageLogFields(campaign, recipient, pageName, pageIDStr)
 
 	// handle webhooks for deny page visit
-	err = s.services.Campaign.HandleWebhooks(
-		context.TODO(),
-		&campaignID,
-		&recipientID,
-		data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED,
-		nil,
-	)
+	err = ev.webhooks(data.EVENT_CAMPAIGN_RECIPIENT_DENY_PAGE_VISITED, nil)
 	if err != nil {
 		s.logger.Errorw("failed to handle webhooks for deny page visit",
 			"campaignID", campaignID.String(),
@@ -2402,12 +2569,26 @@ func (s *Server) renderDenyPage(
 		// not returning error as we don't want to block page rendering
 	}
 
-	s.logger.Debugw("rendered deny page",
-		"pageName", pageName,
-		"pageID", pageIDStr,
-		"recipientEmail", recipientEmailStr,
-	)
+	s.logger.Debugw("rendered deny page", logFields...)
 	return nil
+}
+
+// denyPageLogFields returns the fields of the debug log of a deny page
+// visit. The recipient is named only when the campaign is known not to be
+// anonymous, an unknown flag leaves it out.
+func denyPageLogFields(campaign *model.Campaign, recipient *model.Recipient, pageName, pageID string) []any {
+	fields := []any{"pageName", pageName, "pageID", pageID}
+	if campaign == nil || recipient == nil {
+		return fields
+	}
+	if isAnon, err := campaign.IsAnonymous.Get(); err != nil || isAnon {
+		return fields
+	}
+	email := "unknown"
+	if v, err := recipient.Email.Get(); err == nil {
+		email = v.String()
+	}
+	return append(fields, "recipientEmail", email)
 }
 
 // AssignRoutes assigns the routes to the server

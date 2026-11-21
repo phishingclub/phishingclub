@@ -75,21 +75,13 @@ func (r *Domain) GetAll(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	dbRes := db.Find(&dbDomains)
+	dbRes := withPeek(db, options.QueryArgs).Find(&dbDomains)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.DOMAIN_TABLE,
-		options.QueryArgs,
-		domainAllowedColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbDomains, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbDomain := range dbDomains {
@@ -134,22 +126,13 @@ func (r *Domain) GetAllByCompanyID(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	dbRes := db.Find(&dbDomains)
-
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.DOMAIN_TABLE,
-		options.QueryArgs,
-		domainAllowedColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
-	result.HasNextPage = hasNextPage
-
+	dbRes := withPeek(db, options.QueryArgs).Find(&dbDomains)
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
+	hasNextPage := trimPeek(&dbDomains, options.QueryArgs)
+	result.HasNextPage = hasNextPage
+
 	for _, dbDomain := range dbDomains {
 		result.Rows = append(result.Rows, ToDomain(&dbDomain))
 	}
@@ -175,21 +158,18 @@ func (r *Domain) GetAllSubset(
 	}
 
 	var dbDomains []database.Domain
-	res := db.
+	res := withPeek(db.
 		Omit(
 			TableColumn(database.DOMAIN_TABLE, "page_content"),
 			TableColumn(database.DOMAIN_TABLE, "page_not_found_content"),
-		).
+		), options.QueryArgs).
 		Find(&dbDomains)
 
 	if res.Error != nil {
 		return nil, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.DOMAIN_TABLE, options.QueryArgs, domainAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbDomains, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbDomain := range dbDomains {
@@ -356,6 +336,38 @@ func (r *Domain) GetByProxyID(
 		result.Rows = append(result.Rows, ToDomain(&dbDomain))
 	}
 	return result, nil
+}
+
+// GetNamesByProxyIDs returns the names of the domains of each proxy, sorted
+// by name, in one query
+func (r *Domain) GetNamesByProxyIDs(
+	ctx context.Context,
+	proxyIDs []uuid.UUID,
+) (map[uuid.UUID][]string, error) {
+	out := map[uuid.UUID][]string{}
+	if len(proxyIDs) == 0 {
+		return out, nil
+	}
+	values := make([]any, 0, len(proxyIDs))
+	for _, id := range proxyIDs {
+		values = append(values, id.String())
+	}
+	var rows []database.Domain
+	res := r.DB.WithContext(ctx).
+		Select("name", "proxy_id").
+		Where(clause.IN{Column: clause.Column{Name: "proxy_id"}, Values: values}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "name"}}).
+		Find(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	for _, row := range rows {
+		if row.ProxyID == nil {
+			continue
+		}
+		out[*row.ProxyID] = append(out[*row.ProxyID], row.Name)
+	}
+	return out, nil
 }
 
 // ToDomainSubset converts a domain subset from db row to model

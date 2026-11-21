@@ -322,8 +322,81 @@ select::placeholder {
 
 /* native controls follow the theme so they do not render as white boxes in dark mode */
 .dark .pc-select,
+.dark .pc-per-page,
+.dark .pc-table-filter,
 .dark .pc-checkbox {
 	color-scheme: dark;
+}
+
+/* the open list of every select, the toolbar select, the Show select and the
+   table filter, uses the colors of the TextFieldSelect list */
+:is(.pc-select, .pc-per-page, .pc-table-filter) option {
+	background-color: theme('colors.slate.100');
+	color: theme('colors.gray.600');
+}
+.dark :is(.pc-select, .pc-per-page, .pc-table-filter) option {
+	background-color: theme('colors.gray.900');
+	color: theme('colors.gray.300');
+}
+
+/* where the browser lets the open list be styled, it also looks and hovers like
+   the TextFieldSelect list. Other browsers keep their own list. */
+@supports (appearance: base-select) {
+	:is(.pc-select, .pc-per-page, .pc-table-filter),
+	:is(.pc-select, .pc-per-page, .pc-table-filter)::picker(select) {
+		appearance: base-select;
+	}
+	:is(.pc-select, .pc-per-page, .pc-table-filter) {
+		align-items: center;
+	}
+	:is(.pc-select, .pc-per-page, .pc-table-filter)::picker-icon,
+	:is(.pc-select, .pc-per-page, .pc-table-filter) option::checkmark {
+		display: none;
+	}
+	:is(.pc-select, .pc-per-page, .pc-table-filter)::picker(select) {
+		margin-top: 0.25rem;
+		padding: 0;
+		border: 1px solid theme('colors.gray.200');
+		border-radius: 0.375rem;
+		background-color: theme('colors.gray.100');
+		box-shadow:
+			0 10px 15px -3px rgb(0 0 0 / 0.1),
+			0 4px 6px -4px rgb(0 0 0 / 0.1);
+	}
+	:is(.pc-select, .pc-per-page, .pc-table-filter) option {
+		padding: 0.5rem;
+		border-radius: 0.375rem;
+		cursor: pointer;
+	}
+	:is(.pc-select, .pc-per-page, .pc-table-filter) option:checked {
+		font-weight: 600;
+	}
+	:is(.pc-select, .pc-per-page, .pc-table-filter) option:hover,
+	:is(.pc-select, .pc-per-page, .pc-table-filter) option:focus-visible {
+		background-color: theme('colors.grayblue-dark');
+		color: theme('colors.white');
+		outline: none;
+	}
+	/* while the mouse is over the list only the option under it is marked */
+	:is(.pc-select, .pc-per-page, .pc-table-filter):has(option:hover) option:focus-visible:not(:hover) {
+		background-color: transparent;
+		color: inherit;
+	}
+	.dark :is(.pc-select, .pc-per-page, .pc-table-filter)::picker(select) {
+		border-color: rgb(55 65 81 / 0.6);
+		background-color: theme('colors.gray.900');
+	}
+	.dark :is(.pc-select, .pc-per-page, .pc-table-filter) option:hover,
+	.dark :is(.pc-select, .pc-per-page, .pc-table-filter) option:focus-visible {
+		background-color: rgb(104 135 234 / 0.4);
+		color: theme('colors.white');
+	}
+	.dark
+		:is(.pc-select, .pc-per-page, .pc-table-filter):has(option:hover)
+		option:focus-visible:not(:hover) {
+		background-color: transparent;
+		color: inherit;
+	}
 }
 
 /* two column stat card grid on phones: an odd last card takes the full row */

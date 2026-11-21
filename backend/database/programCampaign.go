@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 const (
@@ -31,14 +30,4 @@ type ProgramCampaign struct {
 
 func (ProgramCampaign) TableName() string {
 	return PROGRAM_CAMPAIGN_TABLE
-}
-
-// Migrate drops the old unique index on (program, step, loop), since a closed
-// step campaign can now be followed by a new one for the same step and loop.
-func (p *ProgramCampaign) Migrate(db *gorm.DB) error {
-	const oldIndex = "idx_program_campaigns_step_loop"
-	if db.Migrator().HasIndex(&ProgramCampaign{}, oldIndex) {
-		return db.Migrator().DropIndex(&ProgramCampaign{}, oldIndex)
-	}
-	return nil
 }

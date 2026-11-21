@@ -74,19 +74,15 @@ func (i *Identifier) GetAll(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	res := db.
-		Model(&database.Identifier{}).
+	res := withPeek(db.
+		Model(&database.Identifier{}), option.QueryArgs).
 		Find(&rows)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.IDENTIFIER_TABLE, option.QueryArgs, identifierAllowedColumns...)
-
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, option.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, row := range rows {

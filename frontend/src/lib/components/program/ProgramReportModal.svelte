@@ -4,7 +4,8 @@
 	import { api } from '$lib/api/apiProxy.js';
 	import Alert from '$lib/components/Alert.svelte';
 	import SelectSquare from '$lib/components/SelectSquare.svelte';
-	import { browserTimeZone, toZoneLocal } from '$lib/utils/programText.js';
+	import { toZoneLocal } from '$lib/utils/programText.js';
+	import { browserTimeZone } from '$lib/utils/dailySlots.js';
 
 	export let programID;
 	export let programName = '';
@@ -47,7 +48,7 @@
 	// the first day of the month a number of months before the current month
 	// in the program zone, as "YYYY-MM-DD"
 	const monthStart = (monthsBack) => {
-		const today = toZoneLocal(new Date(), timeZone || browserTimeZone);
+		const today = toZoneLocal(new Date(), timeZone || browserTimeZone());
 		const [y, m] = today.slice(0, 7).split('-').map(Number);
 		return new Date(Date.UTC(y, m - 1 - monthsBack, 1)).toISOString().slice(0, 10);
 	};
@@ -65,8 +66,14 @@
 		const { from, to } = periodRange(reportPeriod);
 		try {
 			const res = await api.program.reportPDF(programID, from, to);
+			// the server answers not found both for a missing program and for PDF
+			// reports turned off, the setting tells them apart
 			if (!res.success && /not found/i.test(res.error || '')) {
-				return { success: false, error: 'PDF reports are not enabled. Enable them in Settings.' };
+				const opt = await api.option.get('report_pdf_enabled');
+				if (opt.success && opt.data?.value !== 'true') {
+					return { success: false, error: 'PDF reports are not enabled. Enable them in Settings.' };
+				}
+				return { success: false, error: 'The program was not found. It may have been deleted.' };
 			}
 			return res;
 		} catch (e) {

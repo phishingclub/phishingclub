@@ -86,7 +86,8 @@ export const route = {
 	},
 	programs: {
 		label: 'Programs',
-		route: '/program/'
+		route: '/program/',
+		simulation: true
 	},
 	users: {
 		label: 'Users',

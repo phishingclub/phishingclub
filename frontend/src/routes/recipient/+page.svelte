@@ -1,4 +1,5 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import CsvColumnsHelp from './CsvColumnsHelp.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
@@ -453,6 +454,9 @@
 		const at = email.lastIndexOf('@');
 		return at < 0 ? [email, ''] : [email.slice(0, at + 1), email.slice(at + 1)];
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <HeadTitle title="Recipients" />
@@ -788,7 +792,10 @@
 		</FormGrid>
 	</Modal>
 	<DeleteAlert
-		list={['Any associated data will be anonymized']}
+		list={[
+			'Any associated data will be anonymized',
+			...(showPrograms ? ['The recipient is removed from all programs'] : [])
+		]}
 		name={deleteValues.email}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
@@ -796,7 +803,10 @@
 	<DeleteAlert
 		title="Delete recipients"
 		name={`${$selection.size} recipient${$selection.size === 1 ? '' : 's'}`}
-		list={['Any associated data will be anonymized']}
+		list={[
+			'Any associated data will be anonymized',
+			...(showPrograms ? ['The recipients are removed from all programs'] : [])
+		]}
 		onClick={onClickBulkDelete}
 		confirm
 		bind:isVisible={isBulkDeleteAlertVisible}

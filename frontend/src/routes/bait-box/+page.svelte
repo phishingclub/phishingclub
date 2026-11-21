@@ -1361,6 +1361,9 @@
 	$: removeChangedCount = removePreview?.changedCount || 0;
 	$: removeChangedOpen = removeChanged.some((c) => c.openToEveryone);
 	$: removeUserAssetCount = removePreview?.userAssetCount || 0;
+	$: removePrograms = removePreview?.programs || [];
+	$: removeProgramCount = removePreview?.programCount || removePrograms.length;
+	$: removeProgramsBlock = !!removePreview?.programsBlock || removePrograms.some((p) => p.blocks);
 	$: removeChangedAssets = removePreview?.changedAssets || [];
 	$: removeChangedAssetCount = removePreview?.changedAssetCount || 0;
 	$: removeChangedAssetsOpen = removeChangedAssets.some((a) => a.openToEveryone);
@@ -1384,6 +1387,13 @@
 	$: removeMembers = removePreview?.members || [];
 	$: removeUsedBy = removePreview?.usedBy || [];
 	$: removeKeptLists = removePreview?.keptLists || [];
+	$: removeBlocked = removePreview?.blocked || [];
+	// who holds a blocked item, naming the few the preview lists and counting the rest.
+	function blockedUsers(b) {
+		const names = (b.usedBy || []).join(', ');
+		const more = (b.usedByCount || 0) - (b.usedBy || []).length;
+		return more > 0 ? `${names} and ${more} more` : names;
+	}
 	// readable singular noun per resource type for the uninstall summary, so the confirm
 	// names what is actually removed rather than a generic "pages and emails".
 	const RESOURCE_NOUNS = {
@@ -3008,6 +3018,12 @@ Escape closes, the arrows page through the screenshots -->
 								{#if (m.members || []).length}
 									<li class="break-words">Also uninstalls {m.members.join(', ')}</li>
 								{/if}
+								{#each m.blocked || [] as b}
+									<li class="break-words">
+										{resourceNoun(b.resourceType, 1)} <span class="font-medium">{b.name}</span> can
+										not be removed and stays installed (deny or evasion page of {blockedUsers(b)})
+									</li>
+								{/each}
 							</ul>
 							{#if conflictChoices[key] === 'remove' && (m.campaignCount || m.keepRunningCount || m.changedCount || m.userAssetCount || m.changedAssetCount)}
 								<div
@@ -3423,7 +3439,7 @@ Escape closes, the arrows page through the screenshots -->
 	actionMessage="Uninstall"
 	name={removeInstallTarget ? removeInstallTarget.packageId : ''}
 	list={removeUsedBy.length ? [] : removeInstallList}
-	okDisabled={removeUsedBy.length > 0}
+	okDisabled={removeUsedBy.length > 0 || removeProgramsBlock}
 	permanent={!removeUsedBy.length}
 	onClick={confirmRemoveInstall}
 	bind:isVisible={removeInstallVisible}
@@ -3458,6 +3474,34 @@ Escape closes, the arrows page through the screenshots -->
 						{removePreviewError}
 					</p>
 				{/if}
+			</div>
+		{/if}
+		{#if removeBlocked.length}
+			<div
+				class="rounded-md border-2 border-red-200 bg-red-50/60 p-4 dark:border-red-500/30 dark:bg-red-900/10"
+			>
+				<p class="font-medium text-red-700 dark:text-red-300">
+					{removeBlocked.length === 1
+						? '1 item is used by an open campaign or program and can not be removed. It stays installed'
+						: `${removeBlocked.length} items are used by open campaigns or programs and can not be removed. They stay installed`}
+				</p>
+				<p class="mt-1 text-sm text-gray-700 dark:text-gray-300">
+					The rest is removed and the package stays installed. Remove the page from these campaigns
+					and programs or close them first, then uninstall again.
+				</p>
+				<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
+					{#each removeBlocked as b}
+						<li class="break-words">
+							{resourceNoun(b.resourceType, 1)} <span class="font-medium">{b.name}</span>
+							{#if removeInstallTarget && b.packageId !== removeInstallTarget.packageId}
+								<span class="text-gray-500 dark:text-gray-400">({b.packageId})</span>
+							{/if}
+							<span class="text-gray-500 dark:text-gray-400"
+								>(deny or evasion page of {blockedUsers(b)})</span
+							>
+						</li>
+					{/each}
+				</ul>
 			</div>
 		{/if}
 		{#if removeCampaignCount}
@@ -3545,6 +3589,47 @@ Escape closes, the arrows page through the screenshots -->
 				{#if removeChangedCount > removeChanged.length}
 					<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
 						and {removeChangedCount - removeChanged.length} more
+					</p>
+				{/if}
+			</div>
+		{/if}
+		{#if removeProgramCount}
+			<div
+				class="rounded-md border-2 p-4 {removeProgramsBlock
+					? 'border-red-200 bg-red-50/60 dark:border-red-500/30 dark:bg-red-900/10'
+					: 'border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-900/10'}"
+			>
+				<p
+					class="font-medium {removeProgramsBlock
+						? 'text-red-700 dark:text-red-300'
+						: 'text-amber-800 dark:text-amber-300'}"
+				>
+					{removeProgramsBlock
+						? 'An open program uses a template this uninstall deletes, so it cannot be uninstalled'
+						: removeProgramCount === 1
+							? '1 open program keeps running but loses content'
+							: `${removeProgramCount} open programs keep running but lose content`}
+				</p>
+				{#if removeProgramsBlock}
+					<p class="mt-1 text-sm text-gray-700 dark:text-gray-300">
+						Remove the template from the program or close the program first.
+					</p>
+				{/if}
+				<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
+					{#each removePrograms as p (p.id)}
+						<li class="break-words">
+							<span class="font-medium">{p.name}</span>
+							<ul class="ml-4 list-[circle]">
+								{#each p.losses || [] as loss}
+									<li class="break-words">{loss}</li>
+								{/each}
+							</ul>
+						</li>
+					{/each}
+				</ul>
+				{#if removeProgramCount > removePrograms.length}
+					<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
+						and {removeProgramCount - removePrograms.length} more
 					</p>
 				{/if}
 			</div>

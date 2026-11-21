@@ -26,6 +26,11 @@ type CampaignTemplate struct {
 	CampaignRepository         *repository.Campaign
 	IdentifierRepository       *repository.Identifier
 	ProgramRepository          *repository.Program
+	// ProgramService forgets the cached program results that name a template
+	// after it is renamed or deleted
+	ProgramService *Program
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // Create creates a new campaign template
@@ -51,6 +56,11 @@ func (c *CampaignTemplate) Create(
 	if cid, err := campaignTemplate.CompanyID.Get(); err == nil {
 		companyID = &cid
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, c.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	name := campaignTemplate.Name.MustGet()
 	isOK, err := repository.CheckNameIsUnique(
 		ctx,
@@ -152,8 +162,13 @@ func (c *CampaignTemplate) GetByID(
 	}
 	// get the campaign template
 	tmpl, err := c.CampaignTemplateRepository.GetByID(ctx, id, options)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// a deleted template is looked up in normal use, not an error
+		c.Logger.Debugw("campaign template not found", "id", id.String())
+		return nil, errs.Wrap(err)
+	}
 	if err != nil {
-		c.Logger.Errorw("wailed to get campaign template by id", "error", err)
+		c.Logger.Errorw("failed to get campaign template by id", "error", err)
 		return nil, errs.Wrap(err)
 	}
 	// no audit on read
@@ -274,7 +289,9 @@ func (c *CampaignTemplate) removeAPISenderIDBySenderID(
 	closedIDs := []string{}
 	closeFailedIDs := []string{}
 	for _, campaign := range campaignsAffected {
-		if !campaign.IsActive() {
+		// a hidden campaign of a program stays open, its sends wait while
+		// the template can not be sent and the program page warns about it
+		if !campaign.IsActive() || campaign.IsProgramManaged() {
 			continue
 		}
 		err := campaign.Close()
@@ -358,7 +375,9 @@ func (c *CampaignTemplate) RemoveDomainByDomainID(
 	closedIDs := []string{}
 	closeFailedIDs := []string{}
 	for _, campaign := range campaignsAffected {
-		if !campaign.IsActive() {
+		// a hidden campaign of a program stays open, its sends wait while
+		// the template can not be sent and the program page warns about it
+		if !campaign.IsActive() || campaign.IsProgramManaged() {
 			continue
 		}
 		err := campaign.Close()
@@ -442,7 +461,9 @@ func (c *CampaignTemplate) RemoveSmtpBySmtpID(
 	closedIDs := []string{}
 	closeFailedIDs := []string{}
 	for _, campaign := range campaignsAffected {
-		if !campaign.IsActive() {
+		// a hidden campaign of a program stays open, its sends wait while
+		// the template can not be sent and the program page warns about it
+		if !campaign.IsActive() || campaign.IsProgramManaged() {
 			continue
 		}
 		err := campaign.Close()
@@ -524,7 +545,9 @@ func (c *CampaignTemplate) RemoveEmailByEmailID(
 	closedIDs := []string{}
 	closeFailedIDs := []string{}
 	for _, campaign := range campaignsAffected {
-		if !campaign.IsActive() {
+		// a hidden campaign of a program stays open, its sends wait while
+		// the template can not be sent and the program page warns about it
+		if !campaign.IsActive() || campaign.IsProgramManaged() {
 			continue
 		}
 		err := campaign.Close()
@@ -608,7 +631,9 @@ func (c *CampaignTemplate) RemovePagesByPageID(
 	closedIDs := []string{}
 	closeFailedIDs := []string{}
 	for _, campaign := range campaignsAffected {
-		if !campaign.IsActive() {
+		// a hidden campaign of a program stays open, its sends wait while
+		// the template can not be sent and the program page warns about it
+		if !campaign.IsActive() || campaign.IsProgramManaged() {
 			continue
 		}
 		err := campaign.Close()
@@ -874,6 +899,35 @@ func (c *CampaignTemplate) UpdateByID(
 				"lureURLMode",
 			)
 		}
+		// a program copies the settings to its campaigns when it makes them,
+		// so a change would count its later sends as the other kind
+		if c.ProgramRepository != nil {
+			programs, err := c.ProgramRepository.GetStartedUsingTemplate(ctx, id)
+			if err != nil {
+				c.Logger.Errorw("failed to check programs using the campaign template", "error", err)
+				return err
+			}
+			if len(programs) > 0 {
+				listed := []string{}
+				for i, p := range programs {
+					if i == 3 {
+						break
+					}
+					listed = append(listed, p.Name)
+				}
+				text := strings.Join(listed, ", ")
+				if len(programs) > 3 {
+					text += " and more"
+				}
+				return validate.WrapErrorWithField(
+					fmt.Errorf(
+						"the lure and training settings can not change while the template is used by programs that have started and are not closed: %s",
+						text,
+					),
+					"lureURLMode",
+				)
+			}
+		}
 	}
 	// validate
 	if err := incoming.ValidateUpdate(storedRedirectURL); err != nil {
@@ -889,6 +943,7 @@ func (c *CampaignTemplate) UpdateByID(
 		c.Logger.Errorw("failed to update campaign template by id", "error", err)
 		return err
 	}
+	c.ProgramService.ForgetTemplateResults(id)
 	c.AuditLogAuthorized(ae)
 
 	return nil
@@ -901,6 +956,7 @@ func (c *CampaignTemplate) DeleteByID(
 	id *uuid.UUID,
 ) (err error) {
 	ae := NewAuditEvent("CampaignTemplate.DeleteByID", session)
+	addDeleteOrigin(ctx, ae)
 	defer c.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
@@ -990,6 +1046,16 @@ func (c *CampaignTemplate) DeleteByID(
 		c.AuditLogFailed(ae, err)
 		return err
 	}
+	// a closed program keeps its results but no longer holds the template, its
+	// step is removed so the template can go
+	if c.ProgramRepository != nil {
+		if err = c.ProgramRepository.RemoveCampaignTemplateFromClosedPrograms(ctx, id); err != nil {
+			c.Logger.Errorw("failed to remove the template from closed programs", "error", err)
+			ae.Details["step"] = "failed to remove the template from closed programs"
+			c.AuditLogFailed(ae, err)
+			return err
+		}
+	}
 	// delete the campaign template
 	err = c.CampaignTemplateRepository.DeleteByID(ctx, id)
 	if err != nil {
@@ -998,6 +1064,7 @@ func (c *CampaignTemplate) DeleteByID(
 		c.AuditLogFailed(ae, err)
 		return err
 	}
+	c.ProgramService.ForgetTemplateResults(id)
 	c.AuditLogAuthorized(ae)
 	return nil
 }
@@ -1052,7 +1119,9 @@ func (c *CampaignTemplate) RemoveProxiesByProxyID(
 		}
 
 		for _, campaign := range campaignsAffected {
-			if !campaign.IsActive() {
+			// a hidden campaign of a program stays open, its sends wait while
+			// the template can not be sent and the program page warns about it
+			if !campaign.IsActive() || campaign.IsProgramManaged() {
 				continue
 			}
 			err := campaign.Close()

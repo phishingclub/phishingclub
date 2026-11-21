@@ -574,13 +574,22 @@ func TestReportInboxPoll_AnonymousStoresNoReporterInfo(t *testing.T) {
 	if err := f.db.Model(&database.CampaignRecipient{}).Where("id = ?", crid).Update("anonymized_id", aid).Error; err != nil {
 		t.Fatalf("aid: %v", err)
 	}
+	named := f.campaign(&f.c1, false)
+	f.recipient(named, "named@c1.example", "named-1@send.example")
 	f.graph.messages = []fakeGraphMessage{
 		{id: "a1", received: time.Now().Add(-time.Hour), from: "anon@c1.example",
 			attachment: reportMIME("anon-1@send.example", ""), body: ""},
+		{id: "a2", received: time.Now().Add(-time.Hour), from: "named@c1.example",
+			attachment: reportMIME("named-1@send.example", ""), body: ""},
 	}
-	f.inbox(&f.c1, "reports@c1.example")
+	inboxID := f.inbox(&f.c1, "reports@c1.example")
 	if err := f.pollAll(); err != nil {
 		t.Fatalf("poll: %v", err)
+	}
+	// the report on the anonymous send moves neither counter, the report on
+	// the named campaign moves both
+	if row := f.inboxRow(inboxID); row.ProcessedCount != 1 || row.MatchedCount != 1 {
+		t.Fatalf("counters: processed %d matched %d, want 1 and 1", row.ProcessedCount, row.MatchedCount)
 	}
 	var rows []database.CampaignEvent
 	if err := f.db.Where("campaign_id = ? AND event_id = ?", camp, *f.reported).Find(&rows).Error; err != nil {

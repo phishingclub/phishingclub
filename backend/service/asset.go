@@ -109,6 +109,18 @@ func (a *Asset) Create(
 				return ids, errs.Wrap(err)
 			}
 			domainName := dn.String()
+			// an asset of a domain belongs to the company of the domain
+			name, err := vo.NewString255(domainName)
+			if err != nil {
+				return ids, errs.Wrap(err)
+			}
+			if domain, err := a.DomainRepository.GetByName(g, name, &repository.DomainOption{}); err == nil {
+				unlockCompany, err := refuseDeletingCompany(g, a.CompanyRepository, companyIDPtr(domain.CompanyID))
+				if err != nil {
+					return ids, err
+				}
+				defer unlockCompany()
+			}
 			if contextFolder == "" {
 				contextFolder = domainName
 			} else if contextFolder != domainName {
@@ -120,6 +132,11 @@ func (a *Asset) Create(
 			// company assets slug, so it resolves on any domain via the
 			// existing shared asset fallback
 			companyID := asset.CompanyID.MustGet()
+			unlockCompany, err := refuseDeletingCompany(g, a.CompanyRepository, &companyID)
+			if err != nil {
+				return ids, err
+			}
+			defer unlockCompany()
 			company, err := a.CompanyRepository.GetByID(g, &companyID)
 			if err != nil {
 				a.Logger.Debugw("failed to get company for asset", "error", err)
@@ -792,6 +809,7 @@ func (a *Asset) DeleteAllByCompanyID(
 	companyID *uuid.UUID,
 ) (err error) {
 	ae := NewAuditEvent("Asset.DeleteAllByCompanyID", session)
+	addDeleteOrigin(ctx, ae)
 	defer a.auditDone(ae, &err)
 	if companyID != nil {
 		ae.Details["companyId"] = companyID

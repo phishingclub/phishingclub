@@ -28,6 +28,7 @@ type Controllers struct {
 	CampaignTemplate    *controller.CampaignTemplate
 	Campaign            *controller.Campaign
 	Program             *controller.Program
+	AllowListing        *controller.AllowListing
 	QR                  *controller.QRGenerator
 	Preview             *controller.Preview
 	APISender           *controller.APISender
@@ -169,6 +170,10 @@ func NewControllers(
 		Common:          common,
 		CampaignService: services.Campaign,
 	}
+	allowListing := &controller.AllowListing{
+		Common:              common,
+		AllowListingService: services.AllowListing,
+	}
 	program := &controller.Program{
 		Common:         common,
 		ProgramService: services.Program,
@@ -294,6 +299,7 @@ func NewControllers(
 		CampaignTemplate:    campaignTemplate,
 		Campaign:            campaign,
 		Program:             program,
+		AllowListing:        allowListing,
 		QR:                  qr,
 		Preview:             preview,
 		APISender:           apiSender,

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,12 +17,13 @@ type ProgramStep struct {
 	ProgramID          nullable.Nullable[uuid.UUID] `json:"programID"`
 	CampaignTemplateID nullable.Nullable[uuid.UUID] `json:"campaignTemplateID"`
 	Position           nullable.Nullable[int]       `json:"position"`
-
-	CampaignTemplate *CampaignTemplate `json:"campaignTemplate"`
 }
 
 // Validate checks the step references a template.
 func (s *ProgramStep) Validate() error {
+	if s == nil {
+		return validate.WrapErrorWithField(errors.New("template entry cannot be null"), "steps")
+	}
 	if err := validate.NullableFieldRequired("campaignTemplateID", s.CampaignTemplateID); err != nil {
 		return err
 	}

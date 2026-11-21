@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/go-errors/errors"
 
@@ -23,6 +25,8 @@ type Page struct {
 	TemplateService         *Template
 	DomainRepository        *repository.Domain
 	ProgramRepository       *repository.Program
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // Create creates a new page
@@ -47,6 +51,11 @@ func (p *Page) Create(
 	if cid, err := page.CompanyID.Get(); err == nil {
 		companyID = &cid
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, p.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 
 	// validate data
 	if err := page.Validate(); err != nil {
@@ -298,6 +307,7 @@ func (p *Page) DeleteByID(
 	id *uuid.UUID,
 ) (err error) {
 	ae := NewAuditEvent("Page.DeleteByID", session)
+	addDeleteOrigin(ctx, ae)
 	defer p.auditDone(ae, &err)
 	ae.Details["id"] = id.String()
 	// check permissions
@@ -310,14 +320,21 @@ func (p *Page) DeleteByID(
 		p.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	// remove the relation to campaign allow deny PageRepository
-	err = p.CampaignRepository.RemoveDenyPageByDenyPageIDs(
-		ctx,
-		[]*uuid.UUID{id},
-	)
-	// clear the page from programs using it as deny or evasion page
+	// a campaign or program that is not closed needs its deny and evasion
+	// page, so the page must be removed from it first
+	if err := p.checkPageNotUsedByOpen(ctx, id); err != nil {
+		return err
+	}
+	// clear the page from the closed campaigns and programs using it as deny or
+	// evasion page. a deny page goes together with the lists and the evasion
+	// page that need it, so no campaign or program is left with filtering but
+	// no deny page
+	if err := p.CampaignRepository.RemovePageFromFilters(ctx, id); err != nil {
+		p.Logger.Errorw("failed to remove page from campaigns", "error", err)
+		return err
+	}
 	if p.ProgramRepository != nil {
-		if err := p.ProgramRepository.RemovePageFromPrograms(ctx, id); err != nil {
+		if err := p.ProgramRepository.RemovePageFromProgramFilters(ctx, id); err != nil {
 			p.Logger.Errorw("failed to remove page from programs", "error", err)
 			return err
 		}
@@ -344,4 +361,61 @@ func (p *Page) DeleteByID(
 	p.AuditLogAuthorized(ae)
 
 	return nil
+}
+
+// pageInUseNamesMax is how many campaigns and programs a refused page delete
+// names
+const pageInUseNamesMax = 5
+
+// OpenFilterPageUsers returns up to pageInUseNamesMax campaigns and programs
+// that are not closed and use the page as deny or evasion page, each named as
+// "campaign X" or "program X", and how many there are in total. A page with
+// any of them can not be deleted.
+func (p *Page) OpenFilterPageUsers(ctx context.Context, id *uuid.UUID) ([]string, int64, error) {
+	campaignNames, campaignCount, err := p.CampaignRepository.GetOpenNamesByFilterPage(ctx, id, pageInUseNamesMax)
+	if err != nil {
+		p.Logger.Errorw("failed to get campaigns using the page", "error", err)
+		return nil, 0, errs.Wrap(err)
+	}
+	var programNames []string
+	var programCount int64
+	if p.ProgramRepository != nil {
+		programNames, programCount, err = p.ProgramRepository.GetOpenNamesByFilterPage(ctx, id, pageInUseNamesMax)
+		if err != nil {
+			p.Logger.Errorw("failed to get programs using the page", "error", err)
+			return nil, 0, errs.Wrap(err)
+		}
+	}
+	names := make([]string, 0, pageInUseNamesMax)
+	for _, n := range campaignNames {
+		if len(names) < pageInUseNamesMax {
+			names = append(names, "campaign "+n)
+		}
+	}
+	for _, n := range programNames {
+		if len(names) < pageInUseNamesMax {
+			names = append(names, "program "+n)
+		}
+	}
+	return names, campaignCount + programCount, nil
+}
+
+// checkPageNotUsedByOpen returns a validation error naming the campaigns and
+// programs that are not closed and use the page as deny or evasion page
+func (p *Page) checkPageNotUsedByOpen(ctx context.Context, id *uuid.UUID) error {
+	names, total, err := p.OpenFilterPageUsers(ctx, id)
+	if err != nil {
+		return err
+	}
+	if total == 0 {
+		return nil
+	}
+	list := strings.Join(names, ", ")
+	if more := total - int64(len(names)); more > 0 {
+		list = fmt.Sprintf("%s and %d more", list, more)
+	}
+	return errs.NewValidationError(errors.Errorf(
+		"page is used as deny or evasion page by: %s. Remove it from them first",
+		list,
+	))
 }

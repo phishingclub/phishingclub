@@ -116,21 +116,13 @@ func (r *SMTPConfiguration) GetAll(
 		return result, errs.Wrap(err)
 	}
 	dbSMTPs := []database.SMTPConfiguration{}
-	res := db.Find(&dbSMTPs)
+	res := withPeek(db, options.QueryArgs).Find(&dbSMTPs)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db,
-		database.SMTP_CONFIGURATION_TABLE,
-		options.QueryArgs,
-		allowedSMTPConfigurationsSortBy...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbSMTPs, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbSMTP := range dbSMTPs {
@@ -271,6 +263,7 @@ func ToSMTPConfiguration(
 	password := nullable.NewNullableWithValue(*vo.NewOptionalString255Must(row.Password))
 	ignoreCertErrors := nullable.NewNullableWithValue(row.IgnoreCertErrors)
 	helo := nullable.NewNullableWithValue(*vo.NewOptionalString255Must(row.Helo))
+	publicSendingIPs := nullable.NewNullableWithValue(row.PublicSendingIPs)
 
 	return &model.SMTPConfiguration{
 		ID:               id,
@@ -284,6 +277,7 @@ func ToSMTPConfiguration(
 		Password:         password,
 		IgnoreCertErrors: ignoreCertErrors,
 		Helo:             helo,
+		PublicSendingIPs: publicSendingIPs,
 		Headers:          headers,
 	}
 }

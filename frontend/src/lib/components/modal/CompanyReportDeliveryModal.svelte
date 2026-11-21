@@ -1,5 +1,7 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import { addToast } from '$lib/store/toast';
+	import Note from '$lib/components/Note.svelte';
 	import Modal from '../Modal.svelte';
 	import Alert from '../Alert.svelte';
 	import TextField from '../TextField.svelte';
@@ -218,6 +220,9 @@
 	};
 
 	$: isBusy = isSaving || isDeleting;
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <Modal headerText={isGlobal ? 'Default report delivery' : 'Report delivery'} bind:visible>
@@ -227,18 +232,15 @@
 				<p class="text-gray-500 dark:text-gray-400">Loading...</p>
 			</div>
 		{:else if !pdfEnabled}
-			<div
-				class="rounded-md border border-amber-400 dark:border-amber-500/60 bg-amber-50 dark:bg-amber-900/20 p-4"
-			>
-				<p class="text-sm text-amber-700 dark:text-amber-400">
-					PDF report generation is disabled. Enable it under Settings → PDF Reports before configuring
-					automatic delivery.
-				</p>
-			</div>
+			<Note boxed>
+				PDF report generation is disabled. Enable it under Settings → PDF Reports before configuring
+				automatic delivery.
+			</Note>
 		{:else}
 			<p class="text-sm text-gray-500 dark:text-gray-400">
 				Email the campaign report PDF to a recipient group, on demand or automatically when a
 				campaign is closed.
+				{#if showPrograms}Programs with an automated report use it too.{/if}
 				{#if isGlobal}
 					These are the global defaults used for any field a company does not set itself.
 				{:else}

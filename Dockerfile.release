@@ -30,6 +30,7 @@ RUN apt-get update && \
         libx11-xcb1 \
         libxcb1 \
         libxext6 \
+        tini=0.19.0-1+b3 \
     && rm -rf /var/lib/apt/lists/*
 
 # create non-root user
@@ -54,4 +55,9 @@ RUN chmod +x /entrypoint.sh
 # expose ports (using non-privileged ports by default)
 EXPOSE 8080 8443 8000
 
-ENTRYPOINT ["/entrypoint.sh"]
+# tini runs as PID 1 and reaps exited processes. The report browser leaves
+# helper processes (such as the crash handler) that are handed to PID 1 when
+# they exit, and without a reaper they stay as zombies. -s also makes tini
+# reap them when it is not PID 1, for example under docker run --init or
+# compose init: true.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--", "/entrypoint.sh"]

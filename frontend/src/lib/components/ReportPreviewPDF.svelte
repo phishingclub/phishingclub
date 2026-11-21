@@ -5,7 +5,9 @@
 
 	// the report template text as it is in the editor, saved or not
 	export let content = '';
-	export let isTraining = false;
+	// the report kind whose sample data the PDF is rendered with: simulation,
+	// training or program
+	export let kind = 'simulation';
 
 	let isRendering = false;
 
@@ -24,7 +26,7 @@
 		tab.document.body.textContent = 'Rendering PDF...';
 		isRendering = true;
 		try {
-			const response = await api.reportTemplate.previewPDF(content, isTraining);
+			const response = await api.reportTemplate.previewPDF(content, kind);
 			if (!response?.success) {
 				tab.close();
 				addToast(response?.error || 'Failed to render the PDF', 'Error');

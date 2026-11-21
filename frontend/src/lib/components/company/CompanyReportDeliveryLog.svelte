@@ -6,6 +6,7 @@
 	import Table from '$lib/components/table/Table.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
+	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 
 	// the company whose delivery log is shown
@@ -47,19 +48,33 @@
 	});
 
 	const triggerLabel = (t) =>
-		t === 'on_demand' ? 'On demand' : t === 'on_finish' ? 'On finish' : t;
+		t === 'on_demand'
+			? 'On demand'
+			: t === 'on_finish'
+				? 'On finish'
+				: t === 'scheduled'
+					? 'Program schedule'
+					: t;
+
+	// a log row links to the program or campaign it was sent for, while it exists
+	const sourceHref = (row) => {
+		if (!row.sourceID) {
+			return '';
+		}
+		return row.source === 'program' ? `/program/${row.sourceID}` : `/campaign/${row.sourceID}`;
+	};
 </script>
 
 <Table
 	columns={[
 		{ column: 'Date', size: 'medium' },
-		{ column: 'Campaign', size: 'large' },
+		{ column: 'Source', size: 'large' },
 		{ column: 'Group', size: 'medium' },
 		{ column: 'Trigger', size: 'small' },
 		{ column: 'Status', size: 'small' },
 		{ column: 'Recipients', size: 'small' }
 	]}
-	sortable={['Date', 'Campaign', 'Group', 'Trigger', 'Status', 'Recipients']}
+	sortable={['Date', 'Source', 'Group', 'Trigger', 'Status', 'Recipients']}
 	hasData={!!rows.length}
 	{hasNextPage}
 	plural="deliveries"
@@ -68,9 +83,14 @@
 	hasActions={false}
 >
 	{#each rows as row}
+		{@const href = sourceHref(row)}
 		<TableRow>
 			<TableCell value={row.createdAt} isDate />
-			<TableCell value={row.campaignName || '-'} />
+			{#if href}
+				<TableCellLink {href} title={row.sourceName}>{row.sourceName || ''}</TableCellLink>
+			{:else}
+				<TableCell value={row.sourceName || '-'} />
+			{/if}
 			<TableCell value={row.groupName || '-'} />
 			<TableCell value={triggerLabel(row.trigger)} />
 			<TableCell>

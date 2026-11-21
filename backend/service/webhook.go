@@ -27,6 +27,8 @@ type Webhook struct {
 	CampaignRepository *repository.Campaign
 	WebhookRepository  *repository.Webhook
 	ProgramRepository  *repository.Program
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 func (w *Webhook) Create(
@@ -55,6 +57,11 @@ func (w *Webhook) Create(
 	if cid, err := webhook.CompanyID.Get(); err == nil {
 		companyID = &cid
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, w.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	name := webhook.Name.MustGet()
 	isOK, err := repository.CheckNameIsUnique(
 		ctx,
@@ -255,6 +262,7 @@ func (w *Webhook) DeleteByID(
 	id *uuid.UUID,
 ) (err error) {
 	ae := NewAuditEvent("Webhook.DeleteByID", session)
+	addDeleteOrigin(ctx, ae)
 	defer w.auditDone(ae, &err)
 	if id != nil {
 		ae.Details["id"] = id.String()
@@ -435,9 +443,14 @@ func (w *Webhook) Send(
 // - "none": only Time and Event are sent (maximum privacy)
 // - "basic": Time, Event, and CampaignName are sent (no PII)
 // - "full": all fields including Email and Data are sent (complete information)
+//
+// for a program send CampaignName is the program name, and ProgramName and
+// ProgramID are sent with it on the basic and full levels
 type WebhookRequest struct {
 	Time         *time.Time             `json:"time"`
 	CampaignName string                 `json:"campaignName,omitempty"`
+	ProgramName  string                 `json:"programName,omitempty"`
+	ProgramID    string                 `json:"programId,omitempty"`
 	Email        string                 `json:"email,omitempty"`
 	Event        string                 `json:"event"`
 	Data         map[string]interface{} `json:"data,omitempty"`

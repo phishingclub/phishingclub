@@ -1,4 +1,5 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
@@ -14,6 +15,7 @@
 	import { addToast } from '$lib/store/toast';
 	import FormSection from '$lib/components/form/FormSection.svelte';
 	import PasswordField from '$lib/components/PasswordField.svelte';
+	import TextareaField from '$lib/components/TextareaField.svelte';
 	import { AppStateService } from '$lib/service/appState';
 	import TableCellAction from '$lib/components/table/TableCellAction.svelte';
 	import TableCellEmpty from '$lib/components/table/TableCellEmpty.svelte';
@@ -58,8 +60,11 @@
 		username: null,
 		password: null,
 		ignoreCertErrors: null,
-		helo: null
+		helo: null,
+		publicSendingIPs: ''
 	};
+	// the Advanced section starts closed unless the configuration uses it
+	let showAdvancedOptions = false;
 	let headerFormValues = {
 		id: null,
 		key: null,
@@ -218,6 +223,7 @@
 				password: formValues.password,
 				ignoreCertErrors: formValues.ignoreCertErrors,
 				helo: formValues.helo,
+				publicSendingIPs: formValues.publicSendingIPs ?? '',
 				companyID: contextCompanyID
 			});
 			if (!res.success) {
@@ -246,6 +252,7 @@
 				password: formValues.password,
 				ignoreCertErrors: formValues.ignoreCertErrors,
 				helo: formValues.helo,
+				publicSendingIPs: formValues.publicSendingIPs ?? '',
 				companyID: formValues.companyID
 			});
 			if (res.success) {
@@ -338,12 +345,15 @@
 
 	const openCreateModal = () => {
 		modalMode = 'create';
+		showAdvancedOptions = false;
 		isModalVisible = true;
 	};
 
 	const closeModal = () => {
 		formError = '';
 		form.reset();
+		formValues.publicSendingIPs = '';
+		showAdvancedOptions = false;
 		isModalVisible = false;
 	};
 
@@ -395,8 +405,10 @@
 			username: configuration.username,
 			password: configuration.password,
 			ignoreCertErrors: configuration.ignoreCertErrors,
-			helo: configuration.helo
+			helo: configuration.helo,
+			publicSendingIPs: configuration.publicSendingIPs ?? ''
 		};
+		showAdvancedOptions = !!formValues.publicSendingIPs;
 	};
 
 	const onClickSubmitTestModal = async () => {
@@ -457,6 +469,9 @@
 		headerFormValues.id = null;
 		isHeaderModalVisible = false;
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <HeadTitle title="SMTP configurations" />
@@ -549,7 +564,11 @@
 					<FormColumn>
 						<div class="flex flex-col w-full sm:w-[26rem]">
 							{#if modalMode === 'update'}
-								<InstalledResourceBadge resourceType="smtp" resourceId={formValues.id} variant="notice" />
+								<InstalledResourceBadge
+									resourceType="smtp"
+									resourceId={formValues.id}
+									variant="notice"
+								/>
 							{/if}
 							<FormSection title="Basic Configuration" css="pt-4">
 								<div>
@@ -622,10 +641,56 @@
 										bind:value={formValues.ignoreCertErrors}
 									/>
 									{#if formValues.ignoreCertErrors !== true && formValues.ignoreCertErrors !== false}
-										<p class="-mt-1 text-xs text-gray-500 dark:text-gray-400">Pick Ignore TLS Errors or Validate Certificates.</p>
+										<p class="-mt-1 text-xs text-gray-500 dark:text-gray-400">
+											Pick Ignore TLS Errors or Validate Certificates.
+										</p>
 									{/if}
 								</div>
 							</FormSection>
+
+							{#if !showAdvancedOptions}
+								<div class="mb-6">
+									<button
+										type="button"
+										class="pc-focus inline-flex items-center gap-1 rounded-sm text-sm font-medium text-cta-blue dark:text-highlight-blue hover:underline"
+										aria-expanded={false}
+										on:click={() => (showAdvancedOptions = true)}
+									>
+										Show advanced options
+										<svg
+											class="w-4 h-4"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+											aria-hidden="true"
+											><path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M19 9l-7 7-7-7"
+											/></svg
+										>
+									</button>
+								</div>
+							{:else}
+								<FormSection title="Advanced">
+									<div>
+										<TextareaField
+											fullWidth
+											optional
+											maxLength={1024}
+											bind:value={formValues.publicSendingIPs}
+											placeholder={'203.0.113.10\n198.51.100.0/24'}
+											toolTipText="One IPv4 or IPv6 address or CIDR range per line, at most 10."
+											>Public Sending IPs</TextareaField
+										>
+										<p class="-mt-1 text-xs text-gray-500 dark:text-gray-400">
+											The public IPs your mail leaves from. Used only to fill in allow listing
+											information, never for sending.
+										</p>
+									</div>
+								</FormSection>
+							{/if}
 						</div>
 					</FormColumn>
 				</FormColumns>
@@ -662,7 +727,8 @@
 		name={deleteValues.name}
 		list={[
 			'Templates using this SMTP configuration will become unusable',
-			'Scheduled or active campaigns using this SMTP configuration will be closed'
+			'Scheduled or active campaigns using this SMTP configuration will be closed',
+			...(showPrograms ? ['Programs stop sending templates that use this SMTP configuration'] : [])
 		]}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
@@ -672,7 +738,8 @@
 		name={`${$selection.size} configuration${$selection.size === 1 ? '' : 's'}`}
 		list={[
 			'Templates using these SMTP configurations will become unusable',
-			'Scheduled or active campaigns using these SMTP configurations will be closed'
+			'Scheduled or active campaigns using these SMTP configurations will be closed',
+			...(showPrograms ? ['Programs stop sending templates that use these SMTP configurations'] : [])
 		]}
 		onClick={onClickBulkDelete}
 		confirm

@@ -1,16 +1,13 @@
 <script>
-	import { displayMode, DISPLAY_MODE } from '$lib/store/displayMode';
+	import { displayMode, isShown } from '$lib/store/displayMode';
 
 	/**
-	 * what mode should this content be visible in?
-	 * @type {'whitebox' | 'blackbox' | 'both'}
+	 * what mode should this content be visible in, see isShown
+	 * @type {'whitebox' | 'blackbox' | 'simulation' | 'both'}
 	 */
 	export let show = 'blackbox';
 
-	$: shouldShow =
-		show === 'both' ||
-		(show === 'whitebox' && $displayMode === DISPLAY_MODE.WHITEBOX) ||
-		(show === 'blackbox' && $displayMode === DISPLAY_MODE.BLACKBOX);
+	$: shouldShow = isShown(show, $displayMode);
 </script>
 
 {#if shouldShow}

@@ -110,7 +110,7 @@
 
 {#if loaded}
 <div class="flex flex-wrap gap-6">
-	<SettingsCard title="Display Mode" description="Choose which features are available. A change applies immediately.">
+	<SettingsCard title="Display Mode" description="Choose which features are shown.">
 		<div class="mt-2 space-y-4">
 			<div class="space-y-3">
 				<RadioOption
@@ -122,6 +122,11 @@
 					checked={currentDisplayMode === DISPLAY_MODE.BLACKBOX}
 					label="Red Team Phishing"
 					on:change={() => setDisplayMode(DISPLAY_MODE.BLACKBOX)}
+				/>
+				<RadioOption
+					checked={currentDisplayMode === DISPLAY_MODE.ALL}
+					label="Show All"
+					on:change={() => setDisplayMode(DISPLAY_MODE.ALL)}
 				/>
 				<p class="text-gray-600 dark:text-gray-300 text-sm transition-colors duration-200">
 					Read about the difference between <a

@@ -13,6 +13,7 @@ type ReportSendLog struct {
 	CreatedAt      *time.Time                   `json:"createdAt"`
 	CompanyID      nullable.Nullable[uuid.UUID] `json:"companyID"`
 	CampaignID     nullable.Nullable[uuid.UUID] `json:"campaignID"`
+	ProgramID      nullable.Nullable[uuid.UUID] `json:"programID"`
 	CampaignName   string                       `json:"campaignName"`
 	GroupName      string                       `json:"groupName"`
 	Trigger        string                       `json:"trigger"`
@@ -21,7 +22,20 @@ type ReportSendLog struct {
 	Recipients     string                       `json:"recipients"`
 	SenderEmail    string                       `json:"senderEmail"`
 	ErrorMessage   string                       `json:"errorMessage"`
+
+	// Source is "program" for a program report and "campaign" otherwise.
+	// SourceName is the campaign or program name and SourceID the id to link
+	// to. These are read only, they are derived from the stored columns.
+	Source     string `json:"source"`
+	SourceName string `json:"sourceName"`
+	SourceID   string `json:"sourceID"`
 }
+
+// report send log sources
+const (
+	ReportSendLogSourceCampaign = "campaign"
+	ReportSendLogSourceProgram  = "program"
+)
 
 // ToDBMap converts the fields for persistence
 func (r *ReportSendLog) ToDBMap() map[string]any {
@@ -42,6 +56,10 @@ func (r *ReportSendLog) ToDBMap() map[string]any {
 	m["campaign_id"] = nil
 	if r.CampaignID.IsSpecified() && !r.CampaignID.IsNull() {
 		m["campaign_id"] = r.CampaignID.MustGet()
+	}
+	m["program_id"] = nil
+	if r.ProgramID.IsSpecified() && !r.ProgramID.IsNull() {
+		m["program_id"] = r.ProgramID.MustGet()
 	}
 	return m
 }

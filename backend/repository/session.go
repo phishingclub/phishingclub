@@ -114,7 +114,7 @@ func (r *Session) GetAllActiveSessionByUserID(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	dbRes := db.Find(
+	dbRes := withPeek(db, options.QueryArgs).Find(
 		&dbSessions,
 		fmt.Sprintf(
 			"%s = ? AND (expires_at > ? OR %s > ?)",
@@ -129,12 +129,7 @@ func (r *Session) GetAllActiveSessionByUserID(
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
-	hasNextPage, err := useHasNextPage(
-		db, database.SESSION_TABLE, options.QueryArgs, allowedSessionColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbSessions, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbSession := range dbSessions {

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"gorm.io/gorm/clause"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
@@ -56,24 +57,31 @@ func (r *Attachment) GetAllByContext(
 		return result, errs.Wrap(err)
 	}
 	var dbModels []database.Attachment
-	dbRes := db.
-		Where("(company_id = ? OR company_id IS NULL)", companyID).
+	dbRes := withPeek(db.
+		Where("(company_id = ? OR company_id IS NULL)", companyID), query).
 		Find(&dbModels)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.ATTACHMENT_TABLE, query, attachmentAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbModels, query)
 	result.HasNextPage = hasNextPage
 
 	for _, dbModel := range dbModels {
 		result.Rows = append(result.Rows, ToAttachment(&dbModel))
 	}
 	return result, nil
+}
+
+// GetIDsByCompanyID returns up to limit attachments of exactly this company,
+// never shared ones
+func (r *Attachment) GetIDsByCompanyID(ctx context.Context, companyID *uuid.UUID, limit int) ([]*uuid.UUID, error) {
+	return pluckUUIDs(r.DB.WithContext(ctx).
+		Model(&database.Attachment{}).
+		Where(clause.Eq{Column: clause.Column{Name: "company_id"}, Value: companyID}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}}).
+		Limit(limit), "id")
 }
 
 // GetAllByGlobalContext gets all global attachments
@@ -87,18 +95,15 @@ func (r *Attachment) GetAllByGlobalContext(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	dbRes := db.
-		Where("company_id IS NULL").
+	dbRes := withPeek(db.
+		Where("company_id IS NULL"), query).
 		Find(&dbModels)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.ATTACHMENT_TABLE, query, attachmentAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbModels, query)
 	result.HasNextPage = hasNextPage
 
 	for _, dbModel := range dbModels {

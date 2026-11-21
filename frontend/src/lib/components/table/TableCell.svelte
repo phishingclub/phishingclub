@@ -11,21 +11,28 @@
 	export let alignText = '';
 	/** on phones show the text on up to two lines; use only on the main name column */
 	export let wrap = false;
-	// hideBelow 'md' hides the cell on small screens
+	// hideBelow 'sm', 'md', 'lg', 'xl' or '2xl' hides the cell below that screen size
 	export let hideBelow = '';
 
 	$: hasValue = value !== null && value !== undefined && value !== '' && value !== false;
 </script>
 
 <td
-	class={`pc-cell pl-4 font-regular text-slate-600 dark:text-gray-200 text-ellipsis whitespace-nowrap overflow-hidden pr-4 transition-colors duration-200 max-w-0 [&>*]:text-ellipsis [&>*]:overflow-hidden [&>*]:whitespace-nowrap`}
+	class={`pc-cell pl-4 font-regular text-slate-600 dark:text-gray-200 text-ellipsis whitespace-nowrap overflow-hidden pr-4 transition-colors duration-200 max-w-0 [&>*]:text-ellipsis [&>*]:overflow-hidden [&>*]:whitespace-nowrap ${hideBelow === '2xl' ? '2xl:table-cell' : ''}`}
 	title={isDate || !hasValue ? '' : value}
 	class:pc-cell-wrap={wrap}
 	class:text-left={alignText === 'left'}
 	class:text-center={alignText === 'center'}
 	class:text-right={alignText === 'right'}
-	class:hidden={hideBelow === 'md'}
+	class:hidden={hideBelow === 'sm' ||
+		hideBelow === 'md' ||
+		hideBelow === 'lg' ||
+		hideBelow === 'xl' ||
+		hideBelow === '2xl'}
+	class:sm:table-cell={hideBelow === 'sm'}
 	class:md:table-cell={hideBelow === 'md'}
+	class:lg:table-cell={hideBelow === 'lg'}
+	class:xl:table-cell={hideBelow === 'xl'}
 >
 	{#if hasValue}
 		{#if isDate}

@@ -1,5 +1,6 @@
 <script>
 	import { onMount, tick } from 'svelte';
+	import Note from '$lib/components/Note.svelte';
 	import { goto } from '$app/navigation';
 	import { API } from '$lib/api/api';
 	import { AppStateService } from '$lib/service/appState';
@@ -358,13 +359,9 @@
 						<div id="step-2" tabindex="-1" class="outline-none">
 							<FormSection title="Display Mode">
 								<p id="display-mode-help" class="pb-2 text-sm text-slate-600 dark:text-gray-400">
-									Select which features are available
+									Choose which features are shown.
 								</p>
-								<div
-									role="radiogroup"
-									aria-labelledby="display-mode-help"
-									class="space-y-3"
-								>
+								<div role="radiogroup" aria-labelledby="display-mode-help" class="space-y-3">
 									<RadioOption
 										label="Phishing Simulation"
 										checked={selectedDisplayMode === DISPLAY_MODE.WHITEBOX}
@@ -374,6 +371,11 @@
 										label="Red Team Phishing"
 										checked={selectedDisplayMode === DISPLAY_MODE.BLACKBOX}
 										on:change={() => (selectedDisplayMode = DISPLAY_MODE.BLACKBOX)}
+									/>
+									<RadioOption
+										label="Show All"
+										checked={selectedDisplayMode === DISPLAY_MODE.ALL}
+										on:change={() => (selectedDisplayMode = DISPLAY_MODE.ALL)}
 									/>
 								</div>
 								<p class="pt-3 text-sm text-slate-600 dark:text-gray-400">
@@ -410,18 +412,12 @@
 									</span>
 								</label>
 								{#if templatesError}
-									<div
-										role="alert"
-										class="mt-2 p-3 rounded-md border bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800 transition-colors duration-200"
-									>
-										<p class="text-sm text-yellow-800 dark:text-yellow-200">
-											<strong>Note:</strong>
-											{templatesError}
-										</p>
-										<p class="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
+									<Note boxed role="alert" class="mt-2">
+										<p>{templatesError}</p>
+										<p class="text-xs text-gray-600 dark:text-gray-400 mt-1">
 											You can manually import templates later from Settings.
 										</p>
-									</div>
+									</Note>
 								{/if}
 							</FormSection>
 						</div>

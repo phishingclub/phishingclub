@@ -1,5 +1,6 @@
 <script>
 	import { onDestroy, createEventDispatcher } from 'svelte';
+	import Note from '$lib/components/Note.svelte';
 	import { addToast } from '$lib/store/toast';
 	import Modal from '../Modal.svelte';
 	import Alert from '../Alert.svelte';
@@ -271,7 +272,6 @@
 		}
 	};
 
-
 	// same format as the Datetime component
 	const formatDate = (dateStr) => (dateStr ? new Date(dateStr).toLocaleString() : 'Never');
 
@@ -332,11 +332,14 @@
 					<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
 						<div class="flex justify-between gap-2">
 							<span class="text-gray-500 dark:text-gray-500">Last checked</span>
-							<span class="text-gray-800 dark:text-gray-200">{formatDate(config.lastPolledAt)}</span>
+							<span class="text-gray-800 dark:text-gray-200">{formatDate(config.lastPolledAt)}</span
+							>
 						</div>
 						<div class="flex justify-between gap-2">
 							<span class="text-gray-500 dark:text-gray-500">Last success</span>
-							<span class="text-gray-800 dark:text-gray-200">{formatDate(config.lastSuccessAt)}</span>
+							<span class="text-gray-800 dark:text-gray-200"
+								>{formatDate(config.lastSuccessAt)}</span
+							>
 						</div>
 						<div class="flex justify-between gap-2">
 							<span class="text-gray-500 dark:text-gray-500">Processed</span>
@@ -488,11 +491,9 @@
 				{/if}
 
 				{#if testResult?.warnings?.length}
-					<div
-						class="rounded-md border border-amber-400 dark:border-amber-500/60 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-1"
-					>
+					<div class="space-y-2">
 						{#each testResult.warnings as warning}
-							<p class="text-sm text-amber-700 dark:text-amber-400">{warning}</p>
+							<Note boxed role="status">{warning}</Note>
 						{/each}
 					</div>
 				{/if}

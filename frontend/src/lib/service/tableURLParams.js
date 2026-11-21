@@ -182,11 +182,13 @@ export const newTableURLParams = (
 		if (newSearch) state.search = newSearch;
 
 		state.onPopState();
-		pagination._notifyListeners('page', state.page);
-		pagination._notifyListeners('perPage', state.perPage);
-		pagination._notifyListeners('sortBy', state.sortBy);
-		pagination._notifyListeners('sortOrder', state.sortOrder);
-		pagination._notifyListeners('search', state.search);
+		pagination._notifyListeners({
+			page: state.page,
+			perPage: state.perPage,
+			sortBy: state.sortBy,
+			sortOrder: state.sortOrder,
+			search: state.search
+		});
 	};
 
 	window.addEventListener('popstate', popstateHandler);
@@ -198,7 +200,12 @@ export const newTableURLParams = (
 		url.searchParams.set(param('sortBy', state.prefix), state.sortBy);
 		url.searchParams.set(param('sortOrder', state.prefix), state.sortOrder);
 		url.searchParams.set(param('search', state.prefix), state.search);
-		await goto(`?${url.searchParams.toString()}`, { replaceState: true, invalidateAll: false });
+		// a table that never scrolls the page keeps the page where it is here too
+		await goto(`?${url.searchParams.toString()}`, {
+			replaceState: true,
+			invalidateAll: false,
+			noScroll: !!options.noScroll
+		});
 	};
 
 	URLUpdateQueue.getInstance().add(updateURL);
@@ -212,9 +219,12 @@ export const newTableURLParams = (
 			this._listeners = [];
 			window.removeEventListener('popstate', popstateHandler);
 		},
-		_notifyListeners: function (property, value) {
+		// each listener is called once per change with the first changed key and
+		// value, and all changed keys as the third argument
+		_notifyListeners: function (changes) {
+			const [property, value] = Object.entries(changes)[0];
 			this._listeners.forEach((callback) => {
-				callback(property, value);
+				callback(property, value, changes);
 			});
 		},
 		_goto(url, opts) {
@@ -235,7 +245,7 @@ export const newTableURLParams = (
 			const url = new URL(window.location.toString());
 			url.searchParams.set(param('page', state.prefix), page.toString());
 			this._goto(url);
-			this._notifyListeners('page', page);
+			this._notifyListeners({ page });
 		},
 		get perPage() {
 			return state.perPage;
@@ -259,8 +269,7 @@ export const newTableURLParams = (
 				keepFocus: true,
 				replaceState: true
 			});
-			this._notifyListeners('search', search);
-			this._notifyListeners('page', 1);
+			this._notifyListeners({ search, page: 1 });
 		},
 		set perPage(perPage) {
 			state.perPage = perPage;
@@ -269,8 +278,7 @@ export const newTableURLParams = (
 			url.searchParams.set(param('perPage', state.prefix), perPage.toString());
 			url.searchParams.set(param('page', state.prefix), '1');
 			this._goto(url);
-			this._notifyListeners('perPage', perPage);
-			this._notifyListeners('page', 1);
+			this._notifyListeners({ perPage, page: 1 });
 		},
 		sort: function (sortBy, sortOrder) {
 			if (sortBy !== state.sortBy) {
@@ -295,15 +303,14 @@ export const newTableURLParams = (
 			url.searchParams.set(param('sortBy', state.prefix), sortBy);
 			url.searchParams.set(param('sortOrder', state.prefix), sortOrder);
 			this._goto(url);
-			this._notifyListeners('sortBy', sortBy);
-			this._notifyListeners('sortOrder', sortOrder);
+			this._notifyListeners({ sortBy, sortOrder });
 		},
 		next: function () {
 			state.page = state.page + 1;
 			const url = new URL(window.location.toString());
 			url.searchParams.set(param('page', state.prefix), state.page.toString());
 			this._goto(url);
-			this._notifyListeners('page', state.page);
+			this._notifyListeners({ page: state.page });
 			return state.page;
 		},
 		previous: function () {
@@ -312,7 +319,7 @@ export const newTableURLParams = (
 				const url = new URL(window.location.toString());
 				url.searchParams.set(param('page', state.prefix), state.page.toString());
 				this._goto(url);
-				this._notifyListeners('page', state.page);
+				this._notifyListeners({ page: state.page });
 			}
 			return state.page;
 		}

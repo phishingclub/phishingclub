@@ -198,6 +198,7 @@ func (c *CompanyReportConfig) GetLogByCompanyID(g *gin.Context) {
 		"date":       "created_at",
 		"created_at": "created_at",
 		"campaign":   "campaign_name",
+		"source":     "campaign_name",
 		"group":      "group_name",
 		"trigger":    "trigger",
 		"status":     "status",

@@ -345,19 +345,14 @@ func (r *User) GetAll(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	dbRes := r.with(options, db).
+	dbRes := withPeek(r.with(options, db), options.QueryArgs).
 		Find(&dbUsers)
 
 	if dbRes.Error != nil {
 		return result, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(
-		db, database.USER_TABLE, options.QueryArgs, userAllowedColumns...,
-	)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbUsers, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbUsers := range dbUsers {

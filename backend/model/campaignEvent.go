@@ -25,6 +25,12 @@ type CampaignEvent struct {
 	RecipientID *uuid.UUID `json:"recipientID"`
 	Recipient   *Recipient `json:"recipient,omitempty"`
 	EventID     *uuid.UUID `json:"eventID"`
+	// ProgramID and ProgramName are set in place of the hidden campaign on a
+	// program event in the dashboard event list
+	ProgramID   *uuid.UUID `json:"programID,omitempty"`
+	ProgramName string     `json:"programName,omitempty"`
+	// Company is the company of a program event, which has no campaign
+	Company *Company `json:"company,omitempty"`
 }
 
 // Anonymize strips identity from an event and stamps the stable pseudonym in its

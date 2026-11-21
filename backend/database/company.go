@@ -21,6 +21,9 @@ type Company struct {
 	// AssetsKey is a random slug naming the company asset folder stored under the
 	// shared asset directory, so company assets resolve on any domain via {{.BaseURL}}/<AssetsKey>/file
 	AssetsKey string `gorm:"unique;index"`
+	// DeletingAt marks a delete that has begun and is finished in the
+	// background, see service.Company.DeleteByID
+	DeletingAt *time.Time `gorm:"index;"`
 
 	// backref: many-to-one
 	Users           []*User           //`gorm:"foreignKey:CompanyID;"`

@@ -25,6 +25,7 @@ require (
 	github.com/google/uuid v1.3.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.18.7
+	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/oapi-codegen/nullable v1.1.0
 	github.com/pquerna/otp v1.4.0
 	github.com/stretchr/testify v1.11.1
@@ -84,7 +85,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-localereader v0.0.1 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
-	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/mholt/acmez v1.2.0 // indirect
 	github.com/miekg/dns v1.1.55 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect

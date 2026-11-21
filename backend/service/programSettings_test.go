@@ -27,6 +27,7 @@ func cloneTestSource(sourceCompany *uuid.UUID) (*programCloneSource, map[string]
 		CompanyID:           company,
 		OrderMode:           nullable.NewNullableWithValue(model.ProgramOrderShuffle),
 		LoopMode:            nullable.NewNullableWithValue(model.ProgramLoopLoop),
+		TemplateMixBy:       nullable.NewNullableWithValue(model.TemplateMixPosition),
 		StepIntervalMinutes: nullable.NewNullableWithValue(10080),
 		TimeZone:            nullable.NewNullableWithValue("Europe/Copenhagen"),
 		IsAnonymous:         nullable.NewNullableWithValue(true),
@@ -104,6 +105,9 @@ func TestBuildProgramCloneSameCompany(t *testing.T) {
 	if !clone.IsAnonymous.MustGet() || clone.TimeZone.MustGet() != "Europe/Copenhagen" {
 		t.Fatal("settings must be copied")
 	}
+	if clone.TemplateMixBy.MustGet() != model.TemplateMixPosition {
+		t.Fatal("the template mixing must be copied")
+	}
 	if !clone.StartAt.IsSpecified() || !clone.StartAt.IsNull() {
 		t.Fatal("a clone must be a draft")
 	}
@@ -160,7 +164,7 @@ func TestBuildProgramCloneDropsFiltersWithoutDenyPage(t *testing.T) {
 	if len(clone.AllowDenyIDs.MustGet()) != 0 {
 		t.Fatal("filters need a deny page, they must be dropped with it")
 	}
-	if err := ValidateProgramFilterPages(!clone.DenyPageID.IsNull(), !clone.EvasionPageID.IsNull(), len(clone.AllowDenyIDs.MustGet())); err != nil {
+	if err := model.ValidateProgramFilterPages(!clone.DenyPageID.IsNull(), !clone.EvasionPageID.IsNull(), len(clone.AllowDenyIDs.MustGet())); err != nil {
 		t.Fatalf("clone must satisfy the page rules: %v", err)
 	}
 }
@@ -189,16 +193,16 @@ func TestBuildProgramCloneMissingItem(t *testing.T) {
 }
 
 func TestValidateProgramFilterPages(t *testing.T) {
-	if err := ValidateProgramFilterPages(false, true, 0); err == nil {
+	if err := model.ValidateProgramFilterPages(false, true, 0); err == nil {
 		t.Fatal("evasion without deny page must fail")
 	}
-	if err := ValidateProgramFilterPages(false, false, 1); err == nil {
+	if err := model.ValidateProgramFilterPages(false, false, 1); err == nil {
 		t.Fatal("filters without deny page must fail")
 	}
-	if err := ValidateProgramFilterPages(true, true, 2); err != nil {
+	if err := model.ValidateProgramFilterPages(true, true, 2); err != nil {
 		t.Fatalf("valid setup rejected: %v", err)
 	}
-	if err := ValidateProgramFilterPages(false, false, 0); err != nil {
+	if err := model.ValidateProgramFilterPages(false, false, 0); err != nil {
 		t.Fatalf("nothing set must pass: %v", err)
 	}
 }

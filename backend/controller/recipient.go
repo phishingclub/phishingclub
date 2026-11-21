@@ -187,7 +187,7 @@ func (r *Recipient) Export(g *gin.Context) {
 		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Misc)),
 	}
 	for _, group := range groups {
-		row = append(row, group.Name.MustGet().String())
+		row = append(row, utils.CSVRemoveFormulaStart(group.Name.MustGet().String()))
 	}
 	err = recipientWriter.Write(row)
 	if ok := r.handleErrors(g, err); !ok {
@@ -218,6 +218,9 @@ func (r *Recipient) Export(g *gin.Context) {
 		nil,
 		queryArgs,
 	)
+	if ok := r.handleErrors(g, err); !ok {
+		return
+	}
 	// handle response
 	eventsBuffer := &bytes.Buffer{}
 	eventsWriter := csv.NewWriter(eventsBuffer)
@@ -251,6 +254,83 @@ func (r *Recipient) Export(g *gin.Context) {
 	}
 	eventsWriter.Flush()
 
+	// program sends and events, named by program and template. an anonymous
+	// program is left out, it never gives per person data
+	programSends, programEvents, err := r.RecipientService.GetProgramExport(
+		g.Request.Context(),
+		session,
+		recipientID,
+	)
+	if ok := r.handleErrors(g, err); !ok {
+		return
+	}
+	programSendsBuffer := &bytes.Buffer{}
+	programSendsWriter := csv.NewWriter(programSendsBuffer)
+	err = programSendsWriter.Write([]string{
+		"Sent at",
+		"Program",
+		"Template",
+		"Kind",
+		"Most notable event",
+	})
+	if ok := r.handleErrors(g, err); !ok {
+		return
+	}
+	for _, send := range programSends {
+		kind := service.ProgramSendKindPhishing
+		if send.IsTraining {
+			kind = service.ProgramSendKindTraining
+		}
+		notable := ""
+		if send.NotableEventID != nil {
+			notable = cache.EventNameByID[send.NotableEventID.String()]
+		}
+		err = programSendsWriter.Write([]string{
+			utils.CSVFromDate(send.SentAt),
+			utils.CSVRemoveFormulaStart(send.ProgramName),
+			utils.CSVRemoveFormulaStart(send.TemplateName),
+			kind,
+			utils.CSVRemoveFormulaStart(notable),
+		})
+		if ok := r.handleErrors(g, err); !ok {
+			return
+		}
+	}
+	programSendsWriter.Flush()
+	programEventsBuffer := &bytes.Buffer{}
+	programEventsWriter := csv.NewWriter(programEventsBuffer)
+	err = programEventsWriter.Write([]string{
+		"Created at",
+		"Program",
+		"Template",
+		"IP",
+		"User-Agent",
+		"Event Details",
+		"Event",
+	})
+	if ok := r.handleErrors(g, err); !ok {
+		return
+	}
+	for _, event := range programEvents {
+		eventName := ""
+		if event.EventID != nil {
+			eventName = cache.EventNameByID[event.EventID.String()]
+		}
+		err = programEventsWriter.Write([]string{
+			utils.CSVFromDate(event.CreatedAt),
+			utils.CSVRemoveFormulaStart(event.ProgramName),
+			utils.CSVRemoveFormulaStart(event.TemplateName),
+			utils.CSVRemoveFormulaStart(event.IPAddress),
+			utils.CSVRemoveFormulaStart(event.UserAgent),
+			utils.CSVRemoveFormulaStart(event.Data),
+			utils.CSVRemoveFormulaStart(eventName),
+		})
+		if ok := r.handleErrors(g, err); !ok {
+			return
+		}
+	}
+	programEventsWriter.Flush()
+
 	// create ZIP file in memory
 	zipBuffer := new(bytes.Buffer)
 	zipWriter := zip.NewWriter(zipBuffer)
@@ -278,6 +358,23 @@ func (r *Recipient) Export(g *gin.Context) {
 			return
 		}
 	}
+	// add program sends and events to zip
+	for _, file := range []struct {
+		name   string
+		buffer *bytes.Buffer
+	}{
+		{"program_sends.csv", programSendsBuffer},
+		{"program_events.csv", programEventsBuffer},
+	} {
+		f, err := zipWriter.Create(file.name)
+		if ok := r.handleErrors(g, err); !ok {
+			return
+		}
+		_, err = f.Write(file.buffer.Bytes())
+		if ok := r.handleErrors(g, err); !ok {
+			return
+		}
+	}
 	// close zip
 	err = zipWriter.Close()
 	if ok := r.handleErrors(g, err); !ok {
@@ -294,8 +391,11 @@ func (r *Recipient) GetRepeatOffenderCount(g *gin.Context) {
 		return
 	}
 
-	// parse request
-	companyID := companyIDFromRequestQuery(g)
+	// parse request, a bad companyID is a 400 and never means all companies
+	companyID, ok := strictCompanyIDQuery(g, r.Response)
+	if !ok {
+		return
+	}
 
 	// get count
 	count, err := r.RecipientService.GetRepeatOffenderCount(

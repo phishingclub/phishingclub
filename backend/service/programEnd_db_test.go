@@ -42,6 +42,7 @@ func TestTickClosesProgramAtEndDate(t *testing.T) {
 	if err := p.svc.Tick(p.ctx, authorizedSession(t)); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
+	p.waitForCloses(t)
 
 	program := p.loadProgram(ended)
 	if !program.IsClosed() || program.Status != model.ProgramStatusClosed {

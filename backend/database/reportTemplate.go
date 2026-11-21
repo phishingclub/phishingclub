@@ -23,21 +23,27 @@ type ReportTemplate struct {
 	// company can hold a separate phishing and training report template. Uniqueness
 	// is enforced per kind by the indexes in Migrate.
 	IsTraining bool `gorm:"not null;default:false"`
+	// IsProgram selects the report used for programs. A program template is
+	// never a training template, so the kinds are simulation (both false),
+	// training and program.
+	IsProgram bool `gorm:"not null;default:false"`
 
 	Company *Company
 }
 
 func (e *ReportTemplate) Migrate(db *gorm.DB) error {
-	// drop the legacy indexes that enforced one template per company and one global,
-	// replaced by the per kind indexes below
+	// these indexes allow one template per company, or one per company and
+	// training flag, which the per kind indexes below must not be held back by
 	db.Exec(`DROP INDEX IF EXISTS idx_report_templates_company_id`)
 	db.Exec(`DROP INDEX IF EXISTS idx_report_templates_null_company_id`)
+	db.Exec(`DROP INDEX IF EXISTS idx_report_templates_company_training`)
+	db.Exec(`DROP INDEX IF EXISTS idx_report_templates_null_company_training`)
 	// one template per company per kind (the global case is covered separately)
-	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_report_templates_company_training ON report_templates(company_id, is_training) WHERE company_id IS NOT NULL`).Error; err != nil {
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_report_templates_company_kind ON report_templates(company_id, is_training, is_program) WHERE company_id IS NOT NULL`).Error; err != nil {
 		return err
 	}
 	// enforce at most one global template per kind (company_id IS NULL)
-	idx := `CREATE UNIQUE INDEX IF NOT EXISTS idx_report_templates_null_company_training ON report_templates(is_training) WHERE company_id IS NULL`
+	idx := `CREATE UNIQUE INDEX IF NOT EXISTS idx_report_templates_null_company_kind ON report_templates(is_training, is_program) WHERE company_id IS NULL`
 	return db.Exec(idx).Error
 }
 

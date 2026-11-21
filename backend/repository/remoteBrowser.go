@@ -68,14 +68,11 @@ func (m *RemoteBrowser) GetAll(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	if res := db.Find(&rows); res.Error != nil {
+	if res := withPeek(db, options.QueryArgs).Find(&rows); res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.REMOTE_BROWSER_TABLE, options.QueryArgs, remoteBrowserAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, row := range rows {
@@ -102,14 +99,11 @@ func (m *RemoteBrowser) GetAllSubset(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	if res := db.Select("id, created_at, updated_at, name, description, company_id").Find(&rows); res.Error != nil {
+	if res := withPeek(db.Select("id, created_at, updated_at, name, description, company_id"), options.QueryArgs).Find(&rows); res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.REMOTE_BROWSER_TABLE, options.QueryArgs, remoteBrowserAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, row := range rows {

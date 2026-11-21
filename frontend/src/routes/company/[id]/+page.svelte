@@ -1,5 +1,7 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import { page } from '$app/stores';
+	import Note from '$lib/components/Note.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount, onDestroy } from 'svelte';
 	import { api } from '$lib/api/apiProxy.js';
@@ -125,6 +127,49 @@
 		]);
 	};
 
+	// while the company is being deleted its state is read again until the
+	// delete is done, then the page goes back to the list. Only the delete
+	// state is taken, so nothing typed into a form is replaced
+	const deletingRefreshEvery = 5000;
+	let deletingTimer = null;
+	let pageGone = false;
+	let pollFailing = false;
+	const pollDeleting = async () => {
+		const res = await api.company.getByID(companyId);
+		if (res.success) {
+			company = { ...company, deletingAt: res.data.deletingAt, deleteFailure: res.data.deleteFailure };
+			pollFailing = false;
+			return;
+		}
+		if (res.statusCode === 404) {
+			goto('/company');
+			return;
+		}
+		if (!pollFailing) {
+			addToast('Failed to get company', 'Error');
+		}
+		pollFailing = true;
+	};
+	const watchDeleting = (deleting) => {
+		if (pageGone || !deleting) {
+			clearTimeout(deletingTimer);
+			deletingTimer = null;
+			return;
+		}
+		if (deletingTimer) return;
+		deletingTimer = setTimeout(async () => {
+			await pollDeleting();
+			deletingTimer = null;
+			watchDeleting(!!company?.deletingAt);
+		}, deletingRefreshEvery);
+	};
+	$: watchDeleting(!!company?.deletingAt);
+	onDestroy(() => {
+		pageGone = true;
+		clearTimeout(deletingTimer);
+		deletingTimer = null;
+	});
+
 	const loadReportPDFEnabled = async () => {
 		try {
 			const res = await api.option.get('report_pdf_enabled');
@@ -249,11 +294,14 @@
 	const onConfirmDelete = async () => {
 		const res = await api.company.delete(companyId);
 		if (res.success) {
-			addToast('Company deleted', 'Success');
+			addToast('Company is being deleted', 'Success');
 			goto('/company');
 		}
 		return res;
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <HeadTitle title={company ? company.name : 'Company'} />
@@ -261,12 +309,26 @@
 	{#if !loaded}
 		<SettingsLoading />
 	{:else}
-		<Breadcrumb crumbs={[{ label: 'Companies', href: '/company' }, { label: company?.name ?? '' }]} />
+		<Breadcrumb
+			crumbs={[{ label: 'Companies', href: '/company' }, { label: company?.name ?? '' }]}
+		/>
 		<Headline docSlug="companies" preserveCase>{company?.name ?? 'Company'}</Headline>
+		{#if company?.deletingAt && company?.deleteFailure}
+			<Note id="company-delete-waiting">
+				The delete is waiting: {company.deleteFailure}. Remove it and the delete continues on its
+				own.
+			</Note>
+		{:else if company?.deletingAt}
+			<Note id="company-deleting-note">
+				This company is being deleted in the background with everything in it and can not be
+				changed meanwhile. A step that fails is tried again about every 10 minutes.
+			</Note>
+		{/if}
 
 		<TabBar items={tabs} {active} label="Company sections" on:select={(e) => selectTab(e.detail)} />
 
-		<div class="pb-8">
+		<!-- a company being deleted can not be changed, every control is off -->
+		<fieldset class="pb-8 min-w-0" disabled={!!company?.deletingAt}>
 			{#if active === 'general'}
 				<div class="flex flex-wrap items-start gap-6">
 					<SettingsCard title="Company Details" widthClass="w-full lg:w-[34rem]">
@@ -293,8 +355,8 @@
 									<FieldLabel optional>Banner color</FieldLabel>
 								</label>
 								<p class="text-gray-600 dark:text-gray-300 text-sm mb-3">
-									Tints the banner and frame shown while viewing as this company, making it easier to
-									recognize which company you are working in.
+									Tints the banner and frame shown while viewing as this company, making it easier
+									to recognize which company you are working in.
 								</p>
 								<div class="flex flex-wrap items-center gap-3">
 									<input
@@ -338,7 +400,10 @@
 						</form>
 					</SettingsCard>
 
-					<SettingsCard title="Automatically Prune Orphaned Recipients" description="Choose whether orphaned recipients are removed automatically. Changes are saved right away.">
+					<SettingsCard
+						title="Automatically Prune Orphaned Recipients"
+						description="Choose whether orphaned recipients are removed automatically. Changes are saved right away."
+					>
 						<div class="space-y-2">
 							<RadioOption
 								checked={autoPruneEnabled}
@@ -359,7 +424,10 @@
 				<CompanyCustomStats {companyId} />
 			{:else if active === 'integrations'}
 				<div class="flex flex-wrap gap-6">
-					<SettingsCard title="SCIM Provisioning" description="Automatically provision recipients from your identity provider.">
+					<SettingsCard
+						title="SCIM Provisioning"
+						description="Automatically provision recipients from your identity provider."
+					>
 						<div class="flex items-center gap-2 mt-2">
 							<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
 							<StatusBadge
@@ -385,7 +453,10 @@
 				</div>
 			{:else if active === 'reporting'}
 				<div class="flex flex-wrap gap-6">
-					<SettingsCard title="Reporting Inbox" description="Set up automated report tracking with Microsoft 365.">
+					<SettingsCard
+						title="Reporting Inbox"
+						description="Set up automated report tracking with Microsoft 365."
+					>
 						<div class="mt-2">
 							<ReportInboxStatus inbox={reportInbox} />
 						</div>
@@ -398,17 +469,16 @@
 				</div>
 			{:else if active === 'reports'}
 				{#if !reportPDFEnabled}
-					<div
-						class="rounded-md border border-amber-400 dark:border-amber-500/60 bg-amber-50 dark:bg-amber-900/20 p-4 max-w-xl"
-					>
-						<p class="text-sm text-amber-700 dark:text-amber-400">
-							PDF report generation is disabled. Enable it under Settings → PDF Reports to configure
-							report templates and delivery.
-						</p>
-					</div>
+					<Note boxed class="max-w-xl">
+						PDF report generation is disabled. Enable it under Settings → PDF Reports to configure
+						report templates and delivery.
+					</Note>
 				{:else}
 					<div class="flex flex-wrap gap-6">
-						<SettingsCard title="Report Template" description="Override the global report template for this company.">
+						<SettingsCard
+							title="Report Template"
+							description="Override the global report template for this company."
+						>
 							<svelte:fragment slot="footer">
 								<FormButton size="medium" on:click={() => (isReportTemplateModalVisible = true)}
 									>Edit template</FormButton
@@ -416,7 +486,10 @@
 							</svelte:fragment>
 						</SettingsCard>
 
-						<SettingsCard title="Report Delivery" description="Email the campaign report PDF to a recipient group, on demand or when a campaign is closed.">
+						<SettingsCard
+							title="Report Delivery"
+							description="Email the campaign report PDF to a recipient group, on demand or when a campaign is closed.{showPrograms ? ' Programs with an automated report use it too.' : ''}"
+						>
 							<svelte:fragment slot="footer">
 								<FormButton size="medium" on:click={() => (isReportDeliveryModalVisible = true)}
 									>Configure</FormButton
@@ -430,12 +503,15 @@
 						<p class="text-gray-600 dark:text-gray-300 text-sm mt-1 mb-4">
 							Reports sent for this company, including automatic and on demand deliveries.
 						</p>
-						<CompanyReportDeliveryLog companyId={companyId} />
+						<CompanyReportDeliveryLog {companyId} />
 					</div>
 				{/if}
 			{:else if active === 'data'}
 				<div class="flex flex-wrap gap-6">
-					<SettingsCard title="Export" description="Download a ZIP with all company data, recipients, and campaign events.">
+					<SettingsCard
+						title="Export"
+						description="Download a ZIP with all company data, recipients, and campaign events."
+					>
 						<svelte:fragment slot="footer">
 							<FormButton size="medium" on:click={() => (isExportAlertVisible = true)}
 								>Export data</FormButton
@@ -445,19 +521,21 @@
 				</div>
 			{:else if active === 'danger'}
 				<div class="flex flex-wrap gap-6">
-					<SettingsCard title="Delete Company" description="Permanently removes this company and all of its domains, campaigns, and recipients. This cannot be undone.">
+					<SettingsCard
+						title="Delete Company"
+						description="Permanently removes this company and all of its domains, campaigns, and recipients. This cannot be undone."
+					>
 						<svelte:fragment slot="footer">
 							<Button
 								variant="danger-outline"
 								type="button"
-								on:click={() => (isDeleteAlertVisible = true)}
-								>Delete</Button
+								on:click={() => (isDeleteAlertVisible = true)}>Delete</Button
 							>
 						</svelte:fragment>
 					</SettingsCard>
 				</div>
 			{/if}
-		</div>
+		</fieldset>
 	{/if}
 
 	<ScimModal bind:visible={isScimModalVisible} {company} />
@@ -486,7 +564,10 @@
 	</Alert>
 
 	<DeleteAlert
-		list={['All data related to the company such as domains, campaign, recipients will be lost']}
+		list={[
+			'All data related to the company such as domains, campaigns, recipients will be lost',
+			...(showPrograms ? ['Programs and their results will be lost'] : [])
+		]}
 		name={company?.name}
 		onClick={onConfirmDelete}
 		confirm

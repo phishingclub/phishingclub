@@ -87,7 +87,7 @@ func TestDeliveredIgnoresCancelledAndClosedUnsent(t *testing.T) {
 			db.Model(&database.CampaignRecipient{}).Where("id = ?", crID).Update("cancelled_at", utils.NowRFC3339UTC())
 		}
 	}
-	got, err := r.GetDeliveredStepIDs(ctx, programID, recipientID, nil, 0)
+	got, err := deliveredStepIDs(ctx, r, programID, recipientID, nil, 0)
 	if err != nil {
 		t.Fatalf("delivered: %v", err)
 	}
@@ -142,8 +142,12 @@ func TestDeliveredMatchesPseudonymAfterIdentityRemoved(t *testing.T) {
 	}
 	var old database.CampaignRecipient
 	db.Where("id = ?", oldRow).First(&old)
-	if old.RecipientID != nil || old.LureCode != nil || old.AnonymizedID == nil {
+	if old.RecipientID != nil || old.AnonymizedID == nil {
 		t.Fatal("old row must keep only the pseudonym")
+	}
+	// the lure code stays so the link works until the program closes
+	if old.LureCode == nil || *old.LureCode != "OLDCODE1" {
+		t.Fatalf("old row lure code = %v, want it kept", old.LureCode)
 	}
 	for _, id := range []*uuid.UUID{newRow, unsentRow} {
 		var row database.CampaignRecipient
@@ -153,14 +157,14 @@ func TestDeliveredMatchesPseudonymAfterIdentityRemoved(t *testing.T) {
 		}
 	}
 	// without the pseudonym the old step looks undelivered, with it delivered
-	got, err := r.GetDeliveredStepIDs(ctx, programID, recipientID, nil, 0)
+	got, err := deliveredStepIDs(ctx, r, programID, recipientID, nil, 0)
 	if err != nil {
 		t.Fatalf("delivered: %v", err)
 	}
 	if got[*oldStep] {
 		t.Fatal("old step found by recipient id after the link was removed")
 	}
-	got, err = r.GetDeliveredStepIDs(ctx, programID, recipientID, pseudonym, 0)
+	got, err = deliveredStepIDs(ctx, r, programID, recipientID, pseudonym, 0)
 	if err != nil {
 		t.Fatalf("delivered: %v", err)
 	}
@@ -231,4 +235,24 @@ func TestReviveCancelledSend(t *testing.T) {
 	if sentRow.CancelledAt == nil {
 		t.Fatal("a sent row must not be changed")
 	}
+}
+
+// deliveredStepIDs returns the steps a recipient has been given in a loop
+func deliveredStepIDs(
+	ctx context.Context,
+	r *Program,
+	programID *uuid.UUID,
+	recipientID *uuid.UUID,
+	anonymizedID *uuid.UUID,
+	loopIndex int,
+) (map[uuid.UUID]bool, error) {
+	deliveries, err := r.GetLoopDeliveries(ctx, programID, recipientID, anonymizedID, loopIndex)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]bool, len(deliveries))
+	for _, d := range deliveries {
+		out[d.StepID] = true
+	}
+	return out, nil
 }

@@ -1,5 +1,7 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import Note from '$lib/components/Note.svelte';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
@@ -467,6 +469,9 @@
 		}
 		return ip + '/32';
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <HeadTitle title="Filter" />
@@ -587,7 +592,11 @@
 						{#if modalMode === 'update'}
 							<!-- zero width so the notice wraps to the form width instead of setting it -->
 							<div class="w-0 min-w-full">
-								<InstalledResourceBadge resourceType="allowdeny" resourceId={formValues.id} variant="notice" />
+								<InstalledResourceBadge
+									resourceType="allowdeny"
+									resourceId={formValues.id}
+									variant="notice"
+								/>
 							</div>
 						{/if}
 						<div class="w-full">
@@ -632,63 +641,25 @@
 							{/if}
 						</p>
 						{#if asnAllowBlocksAll}
-							<div
-								role="note"
-								class="mb-4 flex w-0 min-w-full items-start gap-2.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-700/50 dark:bg-amber-900/20"
-							>
-								<svg
-									class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									aria-hidden="true"
+							<Note boxed role="note" class="mb-4 w-0 min-w-full break-words">
+								This allow filter only lists ASNs and no ASN data is downloaded, so it will block
+								every visitor. Download the ASN data under
+								<a
+									class="font-medium text-cta-blue dark:text-highlight-blue underline-offset-2 hover:underline"
+									href="/settings#ipdata">Settings, IP Data</a
 								>
-									<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-									<line x1="12" y1="9" x2="12" y2="13" />
-									<line x1="12" y1="17" x2="12.01" y2="17" />
-								</svg>
-								<p class="min-w-0 break-words text-sm leading-relaxed text-amber-800 dark:text-amber-200">
-									This allow filter only lists ASNs and no ASN data is downloaded, so it will
-									block every visitor. Download the ASN data under
-									<a
-										class="font-medium text-cta-blue dark:text-highlight-blue underline-offset-2 hover:underline"
-										href="/settings#ipdata">Settings, IP Data</a
-									>
-									or remove the ASN rules.
-								</p>
-							</div>
+								or remove the ASN rules.
+							</Note>
 						{/if}
 						{#if asnRuleNoEffect}
-							<div
-								role="note"
-								class="mb-4 flex w-0 min-w-full items-start gap-2.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-700/50 dark:bg-amber-900/20"
-							>
-								<svg
-									class="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									aria-hidden="true"
-								>
-									<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-									<line x1="12" y1="9" x2="12" y2="13" />
-									<line x1="12" y1="17" x2="12.01" y2="17" />
-								</svg>
-								<p class="min-w-0 break-words text-sm leading-relaxed text-amber-800 dark:text-amber-200">
-									This filter lists ASNs but no ASN data is downloaded, so its ASN rule has no
-									effect (no visitor can be matched by ASN). Download the ASN data under
-									<a
-										class="font-medium text-cta-blue dark:text-highlight-blue underline-offset-2 hover:underline"
-										href="/settings#ipdata">Settings, IP Data</a
-									>.
-								</p>
-							</div>
+							<Note boxed role="note" class="mb-4 w-0 min-w-full break-words">
+								This filter lists ASNs but no ASN data is downloaded, so its ASN rule has no effect
+								(no visitor can be matched by ASN). Download the ASN data under
+								<a
+									class="font-medium text-cta-blue dark:text-highlight-blue underline-offset-2 hover:underline"
+									href="/settings#ipdata">Settings, IP Data</a
+								>.
+							</Note>
 						{/if}
 						<div class="mb-6 pt-4">
 							<div class="flex flex-col" role="group" aria-labelledby="filter-header-rules-label">
@@ -733,7 +704,13 @@
 											</div>
 										</div>
 									{/each}
-									<Button type="button" variant="secondary" css="w-auto" size="" on:click={addHeaderRule}>
+									<Button
+										type="button"
+										variant="secondary"
+										css="w-auto"
+										size=""
+										on:click={addHeaderRule}
+									>
 										+ Add Header Rule
 									</Button>
 								</div>
@@ -782,7 +759,9 @@
 	</Modal>
 	<DeleteAlert
 		list={[
-			'It is removed from the campaigns and assets that use it',
+			showPrograms
+				? 'It is removed from the campaigns, programs and assets that use it'
+				: 'It is removed from the campaigns and assets that use it',
 			'Assets with no lists left are no longer filtered'
 		]}
 		name={deleteValues.name}
@@ -792,7 +771,9 @@
 	<DeleteAlert
 		title="Delete filters"
 		list={[
-			'They are removed from the campaigns and assets that use them',
+			showPrograms
+				? 'They are removed from the campaigns, programs and assets that use them'
+				: 'They are removed from the campaigns and assets that use them',
 			'Assets with no lists left are no longer filtered'
 		]}
 		name={`${$selection.size} filter${$selection.size === 1 ? '' : 's'}`}

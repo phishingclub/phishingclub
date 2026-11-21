@@ -26,6 +26,9 @@ type SMTPConfiguration struct {
 	// Helo is the hostname sent in the SMTP HELO/EHLO greeting.
 	// empty means go-mail falls back to the machine hostname.
 	Helo string `gorm:"not null;default:'';"`
+	// PublicSendingIPs holds the public IPs or CIDR ranges the mail leaves
+	// from, one per line. It only fills in allow listing information.
+	PublicSendingIPs string `gorm:"column:public_sending_ips;not null;default:'';"`
 
 	// back-reference
 	Headers []*SMTPHeader

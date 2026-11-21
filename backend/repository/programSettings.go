@@ -2,24 +2,26 @@ package repository
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/utils"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 // ProgramCampaignSettings is what a program copies to each of its hidden
-// campaigns: the deny and evasion page, allow or deny lists and webhooks.
+// campaigns: the deny and evasion page, allow or deny lists, webhooks and
+// whether submitted data is saved.
 type ProgramCampaignSettings struct {
-	DenyPageID    *uuid.UUID
-	EvasionPageID *uuid.UUID
-	AllowDenyIDs  []*uuid.UUID
-	Webhooks      []*model.CampaignWebhook
+	DenyPageID        *uuid.UUID
+	EvasionPageID     *uuid.UUID
+	AllowDenyIDs      []*uuid.UUID
+	Webhooks          []*model.CampaignWebhook
+	SaveSubmittedData bool
 }
 
 // applyProgramSettingsRow fills the page ids of a program read from its row.
@@ -36,26 +38,16 @@ func applyProgramSettingsRow(program *model.Program, row *database.Program) {
 
 // GetAllowDenyIDs returns the allow or deny list ids set on a program.
 func (r *Program) GetAllowDenyIDs(ctx context.Context, programID *uuid.UUID) ([]*uuid.UUID, error) {
-	ids := []uuid.UUID{}
-	res := r.DB.WithContext(ctx).
+	return pluckUUIDs(r.DB.WithContext(ctx).
 		Model(&database.ProgramAllowDeny{}).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Pluck("allow_deny_id", &ids)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	out := make([]*uuid.UUID, 0, len(ids))
-	for i := range ids {
-		out = append(out, &ids[i])
-	}
-	return out, nil
+		Where(programIDEq(clause.Column{Name: "program_id"}, programID)), "allow_deny_id")
 }
 
 // GetWebhooks returns the webhooks set on a program with their settings.
 func (r *Program) GetWebhooks(ctx context.Context, programID *uuid.UUID) ([]*model.CampaignWebhook, error) {
 	var rows []database.ProgramWebhook
 	res := r.DB.WithContext(ctx).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
+		Where(programIDEq(clause.Column{Name: "program_id"}, programID)).
 		Find(&rows)
 	if res.Error != nil {
 		return nil, errs.Wrap(res.Error)
@@ -73,24 +65,40 @@ func (r *Program) GetWebhooks(ctx context.Context, programID *uuid.UUID) ([]*mod
 
 // ReplaceAllowDenies sets the allow or deny lists of a program.
 func (r *Program) ReplaceAllowDenies(ctx context.Context, programID *uuid.UUID, ids []*uuid.UUID) error {
-	rows := programAllowDenyRows(programID, ids)
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-			Delete(&database.ProgramAllowDeny{}).Error; err != nil {
-			return errs.Wrap(err)
-		}
-		if len(rows) == 0 {
-			return nil
-		}
-		return errs.Wrap(tx.Create(&rows).Error)
+		return replaceAllowDeniesTx(tx, programID, ids)
 	})
+}
+
+// replaceAllowDeniesTx sets the allow or deny lists of a program inside a
+// transaction
+func replaceAllowDeniesTx(tx *gorm.DB, programID *uuid.UUID, ids []*uuid.UUID) error {
+	rows := programAllowDenyRows(programID, ids)
+	if err := tx.Where(programIDEq(clause.Column{Name: "program_id"}, programID)).
+		Delete(&database.ProgramAllowDeny{}).Error; err != nil {
+		return errs.Wrap(err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return errs.Wrap(tx.Create(&rows).Error)
 }
 
 // ReplaceWebhooks sets the webhooks of a program.
 func (r *Program) ReplaceWebhooks(ctx context.Context, programID *uuid.UUID, webhooks []*model.CampaignWebhook) error {
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return replaceWebhooksTx(tx, programID, webhooks)
+	})
+}
+
+// replaceWebhooksTx sets the webhooks of a program inside a transaction
+func replaceWebhooksTx(tx *gorm.DB, programID *uuid.UUID, webhooks []*model.CampaignWebhook) error {
 	rows := []database.ProgramWebhook{}
 	seen := map[uuid.UUID]bool{}
 	for _, wh := range webhooks {
+		if wh == nil {
+			continue
+		}
 		id, err := wh.WebhookID.Get()
 		if err != nil || seen[id] {
 			continue
@@ -104,49 +112,27 @@ func (r *Program) ReplaceWebhooks(ctx context.Context, programID *uuid.UUID, web
 			WebhookEvents:      wh.GetWebhookEventsOrDefault(),
 		})
 	}
-	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-			Delete(&database.ProgramWebhook{}).Error; err != nil {
-			return errs.Wrap(err)
-		}
-		if len(rows) == 0 {
-			return nil
-		}
-		return errs.Wrap(tx.Create(&rows).Error)
-	})
-}
-
-// DeleteSettings removes the allow or deny list and webhook links of a program.
-func (r *Program) DeleteSettings(ctx context.Context, programID *uuid.UUID) error {
-	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		where := clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}
-		if err := tx.Where(where).Delete(&database.ProgramAllowDeny{}).Error; err != nil {
-			return errs.Wrap(err)
-		}
-		return errs.Wrap(tx.Where(where).Delete(&database.ProgramWebhook{}).Error)
-	})
+	if err := tx.Where(programIDEq(clause.Column{Name: "program_id"}, programID)).
+		Delete(&database.ProgramWebhook{}).Error; err != nil {
+		return errs.Wrap(err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return errs.Wrap(tx.Create(&rows).Error)
 }
 
 // GetOpenCampaignIDs returns the hidden campaigns of a program that are not closed.
 func (r *Program) GetOpenCampaignIDs(ctx context.Context, programID *uuid.UUID) ([]*uuid.UUID, error) {
-	ids := []uuid.UUID{}
-	res := r.DB.WithContext(ctx).
+	return pluckUUIDs(r.DB.WithContext(ctx).
 		Model(&database.Campaign{}).
-		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: programID}).
-		Where(clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil}).
-		Pluck("id", &ids)
-	if res.Error != nil {
-		return nil, errs.Wrap(res.Error)
-	}
-	out := make([]*uuid.UUID, 0, len(ids))
-	for i := range ids {
-		out = append(out, &ids[i])
-	}
-	return out, nil
+		Where(programIDEq(clause.Column{Name: "program_id"}, programID)).
+		Where(clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil}), "id")
 }
 
 // ApplyCampaignSettings writes the program settings onto hidden campaigns,
-// replacing their pages, allow or deny lists and webhooks in one transaction.
+// replacing their pages, allow or deny lists, webhooks and data saving in one
+// transaction.
 func (r *Program) ApplyCampaignSettings(
 	ctx context.Context,
 	campaignIDs []*uuid.UUID,
@@ -180,9 +166,10 @@ func (r *Program) ApplyCampaignSettings(
 	values := uuidValues(campaignIDs)
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		fields := map[string]any{
-			"deny_page_id":    nil,
-			"evasion_page_id": nil,
-			"updated_at":      time.Now().UTC(),
+			"deny_page_id":        nil,
+			"evasion_page_id":     nil,
+			"save_submitted_data": settings.SaveSubmittedData,
+			"updated_at":          utils.NowRFC3339UTC(),
 		}
 		if settings.DenyPageID != nil {
 			fields["deny_page_id"] = *settings.DenyPageID
@@ -217,15 +204,6 @@ func (r *Program) ApplyCampaignSettings(
 	})
 }
 
-// RemoveAllowDenyFromPrograms drops an allow or deny list from every program,
-// used when the list is deleted.
-func (r *Program) RemoveAllowDenyFromPrograms(ctx context.Context, allowDenyID *uuid.UUID) error {
-	res := r.DB.WithContext(ctx).
-		Where(clause.Eq{Column: clause.Column{Name: "allow_deny_id"}, Value: allowDenyID}).
-		Delete(&database.ProgramAllowDeny{})
-	return errs.Wrap(res.Error)
-}
-
 // RemoveWebhookFromPrograms drops a webhook from every program, used when the
 // webhook is deleted.
 func (r *Program) RemoveWebhookFromPrograms(ctx context.Context, webhookID *uuid.UUID) error {
@@ -233,21 +211,6 @@ func (r *Program) RemoveWebhookFromPrograms(ctx context.Context, webhookID *uuid
 		Where(clause.Eq{Column: clause.Column{Name: "webhook_id"}, Value: webhookID}).
 		Delete(&database.ProgramWebhook{})
 	return errs.Wrap(res.Error)
-}
-
-// RemovePageFromPrograms clears a page used as deny or evasion page by any
-// program, used when the page is deleted.
-func (r *Program) RemovePageFromPrograms(ctx context.Context, pageID *uuid.UUID) error {
-	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		for _, column := range []string{"deny_page_id", "evasion_page_id"} {
-			if err := tx.Model(&database.Program{}).
-				Where(clause.Eq{Column: clause.Column{Name: column}, Value: pageID}).
-				Update(column, nil).Error; err != nil {
-				return errs.Wrap(err)
-			}
-		}
-		return nil
-	})
 }
 
 func programAllowDenyRows(programID *uuid.UUID, ids []*uuid.UUID) []database.ProgramAllowDeny {
@@ -261,10 +224,4 @@ func programAllowDenyRows(programID *uuid.UUID, ids []*uuid.UUID) []database.Pro
 		rows = append(rows, database.ProgramAllowDeny{ProgramID: programID, AllowDenyID: id})
 	}
 	return rows
-}
-
-// IsNameUnique reports whether no program of the company, or no global program
-// when companyID is nil, already has the name
-func (r *Program) IsNameUnique(ctx context.Context, name string, companyID *uuid.UUID) (bool, error) {
-	return CheckNameIsUnique(ctx, r.DB, database.PROGRAM_TABLE, name, companyID, nil)
 }

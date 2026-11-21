@@ -224,9 +224,67 @@ func (s *ContentRegistry) Remove(
 		s.auditFailure(ae, &err)
 		return err
 	}
+	// a campaign template a step of an open program uses blocks the uninstall
+	// before anything is deleted, so a bundle is never left half removed
+	if perr := s.checkRemovalNotUsedByOpenProgram(ctx, installedPackageID); perr != nil {
+		ae.Details["installedPackageId"] = installedPackageID.String()
+		err = perr
+		s.auditFailure(ae, &err)
+		return err
+	}
 	// once deleting starts it runs to the end even if the request ends, so an
 	// uninstall is never cut off halfway.
 	return s.remove(context.WithoutCancel(ctx), session, installedPackageID)
+}
+
+// checkRemovalNotUsedByOpenProgram refuses an uninstall that would delete a
+// campaign template a step of an open program uses. It walks the package and
+// the referenced packages removed with it. A closed program does not block.
+func (s *ContentRegistry) checkRemovalNotUsedByOpenProgram(ctx context.Context, installedPackageID *uuid.UUID) error {
+	repo := s.programRepository()
+	if repo == nil {
+		return nil
+	}
+	members, err := s.removalSet(ctx, []*uuid.UUID{installedPackageID}, nil, nil, nil)
+	if err != nil {
+		return err
+	}
+	packageIDs := []*uuid.UUID{installedPackageID}
+	for _, m := range members {
+		packageIDs = append(packageIDs, m.ID)
+	}
+	for _, pid := range packageIDs {
+		resources, err := s.RegistryRepository.GetInstalledResourcesByPackage(ctx, pid)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		for _, r := range resources {
+			if r.ResourceType != "campaigntemplate" || r.ResourceID == nil {
+				continue
+			}
+			uses, err := repo.GetOpenUsingTemplates(ctx, []*uuid.UUID{r.ResourceID})
+			if err != nil {
+				return errs.Wrap(err)
+			}
+			if len(uses) == 0 {
+				continue
+			}
+			quoted := make([]string, len(uses))
+			for i, u := range uses {
+				quoted[i] = fmt.Sprintf("%q", u.Name)
+			}
+			label := "program"
+			if len(uses) > 1 {
+				label = "programs"
+			}
+			return errs.NewValidationError(fmt.Errorf(
+				"cannot uninstall: campaign template %q is used by %s %s. "+
+					"Remove the template from the program or close the program first, then uninstall again",
+				s.campaignTemplateName(ctx, *r.ResourceID), label, strings.Join(quoted, ", "),
+			))
+		}
+	}
+	return nil
 }
 
 // packageUsers returns the package ids of the installed packages that link the
@@ -497,8 +555,9 @@ type UninstallPreviewItem struct {
 // Members lists the referenced packages a bundle uninstall also removes, which
 // leaves out any still used by another bundle or installed by the user directly.
 // KeptLists are lists of the removed packages that stay because assets still
-// use them. UsedBy names the installed packages that use this one; while any
-// does, the uninstall is refused.
+// use them. Blocked are entities the uninstall can not delete, they stay
+// installed and the uninstall ends incomplete. UsedBy names the installed
+// packages that use this one; while any does, the uninstall is refused.
 type UninstallPreview struct {
 	Campaigns         []UninstallPreviewCampaign `json:"campaigns"`
 	CampaignCount     int                        `json:"campaignCount"`
@@ -512,7 +571,40 @@ type UninstallPreview struct {
 	Edited            []UninstallPreviewItem     `json:"edited"`
 	Members           []string                   `json:"members"`
 	KeptLists         []UninstallPreviewKeptList `json:"keptLists"`
+	Blocked           []UninstallPreviewBlocked  `json:"blocked"`
 	UsedBy            []string                   `json:"usedBy"`
+	// Programs are the open programs the uninstall affects. A program with a
+	// step whose campaign template the uninstall deletes blocks the uninstall.
+	Programs []UninstallPreviewProgram `json:"programs"`
+	// ProgramCount is the number of affected open programs, Programs holds up
+	// to uninstallPreviewCampaignCap of them. ProgramsBlock is set when any of
+	// them blocks the uninstall, listed or not.
+	ProgramCount  int  `json:"programCount"`
+	ProgramsBlock bool `json:"programsBlock"`
+}
+
+// UninstallPreviewBlocked is an installed entity the uninstall can not delete,
+// a page that an open campaign or open program uses as deny or evasion page.
+// It stays installed with its package, and nothing that uses it loses it.
+// UsedBy names some of the campaigns and programs as "campaign X" or
+// "program X", UsedByCount counts all of them.
+type UninstallPreviewBlocked struct {
+	ResourceType string   `json:"resourceType"`
+	Name         string   `json:"name"`
+	PackageID    string   `json:"packageId"`
+	UsedBy       []string `json:"usedBy"`
+	UsedByCount  int      `json:"usedByCount"`
+}
+
+// UninstallPreviewProgram is an open program an uninstall would affect.
+// Blocks is set when the uninstall deletes a campaign template one of its
+// steps uses, the uninstall is refused until the step is removed or the
+// program is closed.
+type UninstallPreviewProgram struct {
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Losses []string `json:"losses"`
+	Blocks bool     `json:"blocks"`
 }
 
 // campaignLoss is what one campaign loses from the deletes of an uninstall.
@@ -523,6 +615,8 @@ type campaignLoss struct {
 	removedAllow map[uuid.UUID]bool
 	// removedFilter holds every allow or block list the uninstall deletes from it
 	removedFilter map[uuid.UUID]bool
+	// denyPageRemoved is set when its deny page is deleted
+	denyPageRemoved bool
 }
 
 // UninstallPreview reports, without changing anything, which active campaigns
@@ -545,6 +639,9 @@ func (s *ContentRegistry) UninstallPreview(
 		return nil, err
 	}
 	pkgs := append([]*database.InstalledPackage{root}, members...)
+	if pkgs, err = s.removalReached(ctx, pkgs); err != nil {
+		return nil, err
+	}
 	var clients []*registry.Client
 	defer func() {
 		for _, c := range clients {
@@ -590,6 +687,8 @@ func (s *ContentRegistry) previewRemoval(
 		Edited:        []UninstallPreviewItem{},
 		Members:       []string{},
 		KeptLists:     []UninstallPreviewKeptList{},
+		Blocked:       []UninstallPreviewBlocked{},
+		Programs:      []UninstallPreviewProgram{},
 	}
 	for _, p := range pkgs[1:] {
 		out.Members = append(out.Members, p.PackageID)
@@ -668,6 +767,44 @@ func (s *ContentRegistry) previewRemoval(
 		return l
 	}
 
+	programs := map[uuid.UUID]*UninstallPreviewProgram{}
+	var programOrder []uuid.UUID
+	addProgram := func(p repository.ProgramUse, text string, blocks bool) {
+		v, ok := programs[p.ID]
+		if !ok {
+			v = &UninstallPreviewProgram{ID: p.ID.String(), Name: p.Name, Losses: []string{}}
+			programs[p.ID] = v
+			programOrder = append(programOrder, p.ID)
+		}
+		if !slices.Contains(v.Losses, text) {
+			v.Losses = append(v.Losses, text)
+		}
+		v.Blocks = v.Blocks || blocks
+	}
+	// a deleted list, page or webhook is taken off the programs using it
+	addProgramLosses := func(r *database.InstalledResource) error {
+		what := ""
+		switch r.ResourceType {
+		case "allowdeny":
+			what = "allow or block list"
+		case "page":
+			what = "page"
+		case "webhook":
+			what = "webhook"
+		default:
+			return nil
+		}
+		uses, err := s.openProgramsUsing(ctx, r.ResourceType, r.ResourceID)
+		if err != nil {
+			return err
+		}
+		name := s.resourceName(ctx, r)
+		for _, u := range uses {
+			addProgram(u, fmt.Sprintf("%s %q removed", what, name), false)
+		}
+		return nil
+	}
+
 	for _, p := range pkgs {
 		resources, rerr := s.RegistryRepository.GetInstalledResourcesByPackage(ctx, p.ID)
 		if rerr != nil {
@@ -676,6 +813,19 @@ func (s *ContentRegistry) previewRemoval(
 		declared := declaredFor(p)
 		for _, r := range resources {
 			if r.ResourceID == nil {
+				continue
+			}
+			// a page an open campaign or program filters with is refused by the
+			// page delete, so it stays and nothing using it changes
+			users, total, berr := s.pageDeleteBlockers(ctx, r)
+			if berr != nil {
+				return nil, nil, berr
+			}
+			if total > 0 {
+				out.Blocked = append(out.Blocked, UninstallPreviewBlocked{
+					ResourceType: r.ResourceType, Name: s.resourceName(ctx, r), PackageID: p.PackageID,
+					UsedBy: users, UsedByCount: int(total),
+				})
 				continue
 			}
 			if r.ResourceType == "asset" {
@@ -726,6 +876,9 @@ func (s *ContentRegistry) previewRemoval(
 			if lerr := s.collectCampaignLosses(ctx, r, addLoss); lerr != nil {
 				return nil, nil, errs.Wrap(lerr)
 			}
+			if perr := addProgramLosses(r); perr != nil {
+				return nil, nil, errs.Wrap(perr)
+			}
 		}
 	}
 	// a list an asset the removal keeps still uses stays, as remove keeps it, so
@@ -743,6 +896,59 @@ func (s *ContentRegistry) previewRemoval(
 		removedLists[*r.ResourceID] = true
 		if lerr := s.collectCampaignLosses(ctx, r, addLoss); lerr != nil {
 			return nil, nil, errs.Wrap(lerr)
+		}
+		if perr := addProgramLosses(r); perr != nil {
+			return nil, nil, errs.Wrap(perr)
+		}
+	}
+
+	// programs with a step on a template the removal deletes block it, a step
+	// whose template loses content keeps running without those sends
+	if s.programRepository() != nil {
+		deleted := map[uuid.UUID]bool{}
+		for _, id := range deletedTemplates {
+			deleted[*id] = true
+		}
+		for _, id := range templateIDs {
+			uses, perr := s.programRepository().GetOpenUsingTemplates(ctx, []*uuid.UUID{id})
+			if perr != nil {
+				return nil, nil, errs.Wrap(perr)
+			}
+			name := s.campaignTemplateName(ctx, *id)
+			for _, u := range uses {
+				if deleted[*id] {
+					addProgram(u, fmt.Sprintf("template %q deleted", name), true)
+				} else {
+					addProgram(u, fmt.Sprintf("template %q loses content, its open sends close", name), false)
+				}
+			}
+		}
+		for _, id := range deletedTemplates {
+			if seenTemplate[*id] {
+				continue
+			}
+			uses, perr := s.programRepository().GetOpenUsingTemplates(ctx, []*uuid.UUID{id})
+			if perr != nil {
+				return nil, nil, errs.Wrap(perr)
+			}
+			name := s.campaignTemplateName(ctx, *id)
+			for _, u := range uses {
+				addProgram(u, fmt.Sprintf("template %q deleted", name), true)
+			}
+		}
+	}
+	// the blocking programs are listed first, so the cap never hides them all
+	for _, blocking := range []bool{true, false} {
+		for _, id := range programOrder {
+			p := programs[id]
+			if p.Blocks != blocking {
+				continue
+			}
+			out.ProgramCount++
+			out.ProgramsBlock = out.ProgramsBlock || p.Blocks
+			if len(out.Programs) < uninstallPreviewCampaignCap {
+				out.Programs = append(out.Programs, *p)
+			}
 		}
 	}
 
@@ -766,7 +972,8 @@ func (s *ContentRegistry) previewRemoval(
 		if err != nil {
 			return nil, nil, errs.Wrap(err)
 		}
-		for _, c := range campaigns {
+		// a program's sends are reported under Programs
+		for _, c := range withoutProgramCampaigns(campaigns) {
 			if !campaignStillRunning(c, now) {
 				continue
 			}
@@ -799,8 +1006,9 @@ func (s *ContentRegistry) previewRemoval(
 			continue
 		}
 		open := false
-		if len(l.removedAllow) > 0 && campaignRepo != nil {
-			open = true
+		listsLeft := 0
+		if len(l.removedFilter) > 0 && campaignRepo != nil {
+			open = len(l.removedAllow) > 0
 			lists, err := campaignRepo.GetAllDenyByCampaignID(ctx, &cid)
 			if err != nil {
 				return nil, nil, errs.Wrap(err)
@@ -810,13 +1018,22 @@ func (s *ContentRegistry) previewRemoval(
 				if ierr != nil || l.removedFilter[id] {
 					continue
 				}
+				listsLeft++
 				if allowed, aerr := ad.Allowed.Get(); aerr == nil && allowed {
 					open = false
-					break
 				}
 			}
 		}
 		texts := l.losses
+		// a list delete clears the deny page once no list and no evasion page
+		// needs it anymore
+		if len(l.removedFilter) > 0 && listsLeft == 0 && !l.denyPageRemoved {
+			_, denyErr := l.campaign.DenyPageID.Get()
+			_, evasionErr := l.campaign.EvasionPageID.Get()
+			if denyErr == nil && evasionErr != nil {
+				texts = append(texts, "deny page cleared")
+			}
+		}
 		if open {
 			texts = append([]string{"IP filter removed: campaign will be reachable by everyone"}, texts...)
 		}
@@ -860,6 +1077,89 @@ func (s *ContentRegistry) previewRemoval(
 		closed = append(closed, *id)
 	}
 	return out, closed, nil
+}
+
+// pageDeleteBlockers returns, for an installed page, the open campaigns and
+// programs that use it as deny or evasion page and how many there are. The
+// page delete refuses such a page, so a removal keeps it installed. Any other
+// resource has none.
+func (s *ContentRegistry) pageDeleteBlockers(
+	ctx context.Context, r *database.InstalledResource,
+) ([]string, int64, error) {
+	if r.ResourceType != "page" || r.ResourceID == nil || s.Page == nil || s.Page.CampaignRepository == nil {
+		return nil, 0, nil
+	}
+	return s.Page.OpenFilterPageUsers(ctx, r.ResourceID)
+}
+
+// removalReached returns the packages of pkgs that remove gets to, pkgs being
+// the package removed first and then the referenced packages removed with it.
+// remove stops at a package with a page it can not delete: that package stays
+// installed, so the packages it references stay too. Such a package is still
+// reached when every package linking it is removed, and its other content is
+// deleted.
+func (s *ContentRegistry) removalReached(
+	ctx context.Context, pkgs []*database.InstalledPackage,
+) ([]*database.InstalledPackage, error) {
+	blocked := map[uuid.UUID]bool{}
+	for _, p := range pkgs {
+		resources, err := s.RegistryRepository.GetInstalledResourcesByPackage(ctx, p.ID)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		for _, r := range resources {
+			_, total, err := s.pageDeleteBlockers(ctx, r)
+			if err != nil {
+				return nil, err
+			}
+			if total > 0 {
+				blocked[*p.ID] = true
+				break
+			}
+		}
+	}
+	root := pkgs[0]
+	if len(blocked) == 0 {
+		return pkgs, nil
+	}
+	if blocked[*root.ID] {
+		return pkgs[:1], nil
+	}
+	taken, err := s.removalSet(ctx, []*uuid.UUID{root.ID}, nil, nil, func(mp *database.InstalledPackage) bool {
+		return blocked[*mp.ID]
+	})
+	if err != nil {
+		return nil, err
+	}
+	removed := map[uuid.UUID]bool{*root.ID: true}
+	for _, p := range taken {
+		removed[*p.ID] = true
+	}
+	out := []*database.InstalledPackage{root}
+	for _, p := range pkgs[1:] {
+		if removed[*p.ID] {
+			out = append(out, p)
+			continue
+		}
+		if !blocked[*p.ID] {
+			continue
+		}
+		parents, err := s.RegistryRepository.GetPackageParents(ctx, p.ID)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		reached := true
+		for _, pp := range parents {
+			if pp != nil && !removed[*pp] {
+				reached = false
+				break
+			}
+		}
+		if reached {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 // assetRemovedFunc returns a check for whether a removal deletes an asset: one
@@ -1102,6 +1402,50 @@ func previewCampaign(c *model.Campaign) UninstallPreviewCampaign {
 	return v
 }
 
+// withoutProgramCampaigns leaves out the hidden campaigns programs send with. A
+// preview names the program instead.
+func withoutProgramCampaigns(campaigns []*model.Campaign) []*model.Campaign {
+	out := make([]*model.Campaign, 0, len(campaigns))
+	for _, c := range campaigns {
+		if !c.IsProgramManaged() {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// programRepository is the program repository the entity services use, or nil
+// when it is not wired.
+func (s *ContentRegistry) programRepository() *repository.Program {
+	if s.CampaignTemplate == nil {
+		return nil
+	}
+	return s.CampaignTemplate.ProgramRepository
+}
+
+// openProgramsUsing returns the open programs that use an entity: a campaign
+// template as a step, an allow or deny list, a deny or evasion page, or a
+// webhook. Closed programs never count.
+func (s *ContentRegistry) openProgramsUsing(
+	ctx context.Context, resourceType string, id *uuid.UUID,
+) ([]repository.ProgramUse, error) {
+	repo := s.programRepository()
+	if repo == nil || id == nil {
+		return nil, nil
+	}
+	switch resourceType {
+	case "campaigntemplate":
+		return repo.GetOpenUsingTemplates(ctx, []*uuid.UUID{id})
+	case "allowdeny":
+		return repo.GetOpenUsingAllowDeny(ctx, id)
+	case "page":
+		return repo.GetOpenUsingPage(ctx, id)
+	case "webhook":
+		return repo.GetOpenUsingWebhook(ctx, id)
+	}
+	return nil, nil
+}
+
 // campaignRepository is the campaign repository the entity services use, or nil
 // when it is not wired.
 func (s *ContentRegistry) campaignRepository() *repository.Campaign {
@@ -1133,8 +1477,11 @@ func (s *ContentRegistry) proxyDomainsOf(ctx context.Context, proxyID *uuid.UUID
 }
 
 // collectCampaignLosses records what campaigns lose, other than being closed,
-// when the entity service deletes this entity: an allow or block list (which
-// also clears the campaign deny page), a deny page, a webhook or a script.
+// when the entity service deletes this entity: an allow or block list, a deny
+// page (which takes the lists and the evasion page that need it along), an
+// evasion page, a webhook or a script. A deny page that a list delete leaves
+// unused is reported once all losses are known. The hidden campaigns of a
+// program are left out, the program is reported instead.
 func (s *ContentRegistry) collectCampaignLosses(
 	ctx context.Context,
 	r *database.InstalledResource,
@@ -1143,6 +1490,12 @@ func (s *ContentRegistry) collectCampaignLosses(
 	repo := s.campaignRepository()
 	if repo == nil {
 		return nil
+	}
+	listLabel := func(allowed bool, name string) string {
+		if allowed {
+			return fmt.Sprintf("allow list %q removed", name)
+		}
+		return fmt.Sprintf("block list %q removed", name)
 	}
 	switch r.ResourceType {
 	case "allowdeny":
@@ -1161,12 +1514,8 @@ func (s *ContentRegistry) collectCampaignLosses(
 		if err != nil {
 			return err
 		}
-		kind := "block list"
-		if allowed {
-			kind = "allow list"
-		}
-		for _, c := range campaigns {
-			l := addLoss(c, fmt.Sprintf("%s %q removed", kind, name))
+		for _, c := range withoutProgramCampaigns(campaigns) {
+			l := addLoss(c, listLabel(allowed, name))
 			if l == nil {
 				continue
 			}
@@ -1174,15 +1523,50 @@ func (s *ContentRegistry) collectCampaignLosses(
 			if allowed {
 				l.removedAllow[*r.ResourceID] = true
 			}
-			if _, err := c.DenyPageID.Get(); err == nil {
-				addLoss(c, "deny page cleared")
+		}
+	case "page":
+		name := s.resourceName(ctx, r)
+		campaigns, err := repo.GetByDenyPageID(ctx, r.ResourceID)
+		if err != nil {
+			return err
+		}
+		for _, c := range withoutProgramCampaigns(campaigns) {
+			l := addLoss(c, fmt.Sprintf("deny page %q removed", name))
+			if l == nil {
+				continue
+			}
+			l.denyPageRemoved = true
+			cid, _ := c.ID.Get()
+			lists, lerr := repo.GetAllDenyByCampaignID(ctx, &cid)
+			if lerr != nil {
+				return lerr
+			}
+			for _, ad := range lists {
+				id, ierr := ad.ID.Get()
+				if ierr != nil {
+					continue
+				}
+				allowed, _ := ad.Allowed.Get()
+				addLoss(c, listLabel(allowed, optStr(ad.Name)))
+				l.removedFilter[id] = true
+				if allowed {
+					l.removedAllow[id] = true
+				}
+			}
+			if _, err := c.EvasionPageID.Get(); err == nil {
+				addLoss(c, "evasion page cleared")
 			}
 		}
-	case "page", "webhook", "script":
-		get, what := repo.GetByDenyPageID, "deny page"
-		if r.ResourceType == "webhook" {
-			get, what = repo.GetByWebhookID, "webhook"
-		} else if r.ResourceType == "script" {
+		evading, err := repo.GetByEvasionPageID(ctx, r.ResourceID)
+		if err != nil {
+			return err
+		}
+		for _, c := range withoutProgramCampaigns(evading) {
+			addLoss(c, fmt.Sprintf("evasion page %q removed", name))
+		}
+	case "webhook", "script":
+		get, what := repo.GetByWebhookID, "webhook"
+		if r.ResourceType == "script" {
 			get, what = repo.GetByScriptID, "script"
 		}
 		campaigns, err := get(ctx, r.ResourceID)
@@ -1190,7 +1574,7 @@ func (s *ContentRegistry) collectCampaignLosses(
 			return err
 		}
 		name := s.resourceName(ctx, r)
-		for _, c := range campaigns {
+		for _, c := range withoutProgramCampaigns(campaigns) {
 			addLoss(c, fmt.Sprintf("%s %q removed", what, name))
 		}
 	}

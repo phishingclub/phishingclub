@@ -26,6 +26,8 @@ type SMTPConfiguration struct {
 	Common
 	SMTPConfigurationRepository *repository.SMTPConfiguration
 	CampaignTemplateService     *CampaignTemplate
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // Create creates a new SMTP configuration
@@ -56,6 +58,11 @@ func (s *SMTPConfiguration) Create(
 	if cid, err := conf.CompanyID.Get(); err == nil {
 		companyID = &cid
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, companyID)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 
 	name := conf.Name.MustGet()
 	isOK, err := repository.CheckNameIsUnique(
@@ -474,6 +481,9 @@ func (s *SMTPConfiguration) UpdateByID(
 	}
 	if v, err := incoming.Helo.Get(); err == nil {
 		current.Helo.Set(v)
+	}
+	if v, err := incoming.PublicSendingIPs.Get(); err == nil {
+		current.PublicSendingIPs.Set(v)
 	}
 	if err := incoming.Validate(); err != nil {
 		s.Logger.Errorw("failed to update SMTP configuration", "error", err)

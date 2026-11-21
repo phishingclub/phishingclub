@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/go-errors/errors"
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/utils"
@@ -128,63 +127,23 @@ func useQuery(db *gorm.DB, tableName string, q *vo.QueryArgs, allowdColumns ...s
 	return db, errs.Wrap(err)
 }
 
-func useHasNextPage(
-	db *gorm.DB,
-	tableName string,
-	q *vo.QueryArgs,
-	allowdColumns ...string,
-) (bool, error) {
-	if q == nil {
-		return false, nil
+// withPeek makes a paged query read one row more than the page holds, so
+// trimPeek can tell a next page exists without a second query
+func withPeek(db *gorm.DB, q *vo.QueryArgs) *gorm.DB {
+	if q == nil || q.Limit <= 0 {
+		return db
 	}
-	if q.Limit == 0 && q.Offset == 0 {
-		return false, nil
+	return db.Limit(q.Limit + 1)
+}
+
+// trimPeek removes the extra row a withPeek query read and reports whether
+// there was one, which means a next page exists
+func trimPeek[T any](rows *[]T, q *vo.QueryArgs) bool {
+	if q == nil || q.Limit <= 0 || len(*rows) <= q.Limit {
+		return false
 	}
-	db = withOffsetLimit(db, q.Offset+q.Limit, 1)
-	db, err := WithOrderBy(db, assignTableToColumn(tableName, q.OrderBy), q.Desc, allowdColumns...)
-	if err != nil {
-		return false, errs.Wrap(err)
-	}
-	// handle search
-	if q.Search != "" {
-		searchColumns := []string{}
-		// add columns that are allowed to be searched in
-		for _, column := range allowdColumns {
-			searchColumns = append(
-				searchColumns,
-				assignTableToColumn(tableName, column),
-			)
-		}
-		// if no columns has been added, use the default
-		if len(searchColumns) == 0 {
-			searchColumns = assignTableToColumns(tableName, defaultAllowdSearchColumns)
-		}
-		// remove search symbols
-		search := strings.ReplaceAll(q.Search, "%", " ")
-		search = strings.ReplaceAll(search, "_", " ")
-		// build the LIKE query
-		var searches []interface{}
-		q := ""
-		for i, column := range searchColumns {
-			if i == 0 {
-				q += fmt.Sprintf("%s LIKE ?", column)
-			} else {
-				q += fmt.Sprintf(" OR %s LIKE ?", column)
-			}
-			searches = append(searches, "%"+search+"%")
-		}
-		db.Where(q, searches...)
-	}
-	// Check if there's at least one record
-	var exists bool
-	err = db.Select("1").Find(&exists).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, errs.Wrap(err)
-	}
-	return exists, nil
+	*rows = (*rows)[:q.Limit]
+	return true
 }
 
 /*

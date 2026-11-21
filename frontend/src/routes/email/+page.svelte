@@ -1,4 +1,5 @@
 <script>
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
@@ -442,6 +443,9 @@
 			console.error('failed to send test email:', err);
 		}
 	};
+
+	// texts leave out programs in the modes that hide them
+	$: showPrograms = showsSimulation($displayMode);
 </script>
 
 <HeadTitle title="Emails" />
@@ -628,12 +632,20 @@
 		</FormGrid>
 	</Modal>
 	<DeleteAlert
+		list={[
+			'Templates using this email will become unusable',
+			...(showPrograms ? ['Programs stop sending templates that use this email'] : [])
+		]}
 		name={deleteValues.name}
 		onClick={() => onClickDelete(deleteValues.id)}
 		bind:isVisible={isDeleteAlertVisible}
 	></DeleteAlert>
 	<DeleteAlert
 		title="Delete emails"
+		list={[
+			'Templates using these emails will become unusable',
+			...(showPrograms ? ['Programs stop sending templates that use these emails'] : [])
+		]}
 		name={`${$selection.size} email${$selection.size === 1 ? '' : 's'}`}
 		onClick={onClickBulkDelete}
 		confirm

@@ -78,17 +78,14 @@ func (r *Company) GetAll(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	dbRes := db.
+	dbRes := withPeek(db, queryArgs).
 		Find(&dbCompanies)
 
 	if dbRes.Error != nil {
 		return nil, dbRes.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.COMPANY_TABLE, queryArgs, companyAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbCompanies, queryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbCompany := range dbCompanies {
@@ -171,12 +168,13 @@ func ToCompany(row *database.Company) *model.Company {
 		}
 	}
 	return &model.Company{
-		ID:        id,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		Name:      name,
-		Comment:   comment,
-		Color:     color,
-		AssetsKey: assetsKey,
+		ID:         id,
+		CreatedAt:  row.CreatedAt,
+		UpdatedAt:  row.UpdatedAt,
+		Name:       name,
+		Comment:    comment,
+		Color:      color,
+		AssetsKey:  assetsKey,
+		DeletingAt: row.DeletingAt,
 	}
 }

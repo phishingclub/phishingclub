@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -26,6 +27,8 @@ type Attachment struct {
 	FileService          *File
 	AttachmentRepository *repository.Attachment
 	EmailRepository      *repository.Email
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // Create creates and stores a new attachments
@@ -77,6 +80,11 @@ func (a *Attachment) Create(
 				a.Logger.Debugw("failed to get company id", "error", err)
 				return createdIDs, errs.Wrap(err)
 			}
+			unlockCompany, err := refuseDeletingCompany(g, a.CompanyRepository, &companyID)
+			if err != nil {
+				return createdIDs, err
+			}
+			defer unlockCompany()
 			if contextFolder == "" {
 				contextFolder = companyID.String()
 			} else if contextFolder != companyID.String() {
@@ -371,24 +379,26 @@ func (a *Attachment) DeleteByID(
 	}
 	defer root.Close()
 
-	// validate that company context exists and is accessible
+	// validate that company context exists and is accessible. A file or
+	// folder that is already gone, for example after a delete that stopped
+	// half way, leaves only the row to remove
 	companyRoot, err := root.OpenRoot(companyContext)
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		a.Logger.Debugw("failed to open company context", "error", err)
 		return err
 	}
-	defer companyRoot.Close()
-
-	attachmentFileName := attachment.FileName.MustGet()
-
-	// delete through the company context root
-	err = a.FileService.Delete(
-		companyRoot,
-		attachmentFileName.String(),
-	)
-	if err != nil {
-		a.Logger.Debugw("failed to delete attachment file", "error", err)
-		return err
+	if err == nil {
+		defer companyRoot.Close()
+		attachmentFileName := attachment.FileName.MustGet()
+		// delete through the company context root
+		err = a.FileService.Delete(
+			companyRoot,
+			attachmentFileName.String(),
+		)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			a.Logger.Debugw("failed to delete attachment file", "error", err)
+			return err
+		}
 	}
 	// delete the attachment from the database
 	err = a.AttachmentRepository.DeleteByID(
@@ -403,6 +413,44 @@ func (a *Attachment) DeleteByID(
 	}
 	a.AuditLogAuthorized(ae)
 	return nil
+}
+
+// attachmentDeletePage is how many attachments a company delete reads at a
+// time
+const attachmentDeletePage = 500
+
+// DeleteAllByCompanyID deletes every attachment of a company, rows and files,
+// a page at a time. Only attachments of exactly this company are read, never
+// shared ones.
+func (a *Attachment) DeleteAllByCompanyID(
+	ctx context.Context,
+	session *model.Session,
+	companyID *uuid.UUID,
+) error {
+	if companyID == nil {
+		return errs.Wrap(errors.New("a company is required"))
+	}
+	removed := map[uuid.UUID]bool{}
+	for {
+		ids, err := a.AttachmentRepository.GetIDsByCompanyID(ctx, companyID, attachmentDeletePage)
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		for _, id := range ids {
+			// an attachment read twice was not removed, stop instead of
+			// reading the same page forever
+			if removed[*id] {
+				return errs.Wrap(errors.New("an attachment of the company was not removed"))
+			}
+			removed[*id] = true
+			if err := a.DeleteByID(ctx, session, id); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // GetPath returns the filesystem path of the attachment file after checking

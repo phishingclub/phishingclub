@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -79,23 +80,33 @@ func (r *ReportTemplate) GetByID(g *gin.Context) {
 	r.Response.OK(g, tmpl)
 }
 
-// GetDefault returns the built in default report template content. The
-// training query parameter picks the training report.
+// GetDefault returns the built in default report template content. The kind
+// query parameter picks simulation, training or program. The older training
+// parameter picks the training report.
 func (r *ReportTemplate) GetDefault(g *gin.Context) {
 	session, _, ok := r.handleSession(g)
 	if !ok {
 		return
 	}
-	isTraining := false
+	kind := model.ReportKindSimulation
 	if v := g.Query("training"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
 			r.Response.BadRequestMessage(g, "training must be true or false")
 			return
 		}
-		isTraining = b
+		if b {
+			kind = model.ReportKindTraining
+		}
 	}
-	content, err := r.ReportTemplateService.GetDefaultContent(session, isTraining)
+	if v := g.Query("kind"); v != "" {
+		if !slices.Contains(model.ReportKinds, v) {
+			r.Response.BadRequestMessage(g, "kind must be simulation, training or program")
+			return
+		}
+		kind = v
+	}
+	content, err := r.ReportTemplateService.GetDefaultContent(session, kind)
 	if ok := r.handleErrors(g, err); !ok {
 		return
 	}
@@ -168,10 +179,13 @@ func (r *ReportTemplate) GeneratePDFByCampaignID(g *gin.Context) {
 	r.responseWithPDF(g, pdfBytes, filename)
 }
 
-// PreviewPDFRequest is the template content a PDF preview is rendered from
+// PreviewPDFRequest is the template content a PDF preview is rendered from.
+// Kind is simulation, training or program; when empty IsTraining picks the
+// training report.
 type PreviewPDFRequest struct {
 	Content    string `json:"content"`
 	IsTraining bool   `json:"isTraining"`
+	Kind       string `json:"kind"`
 }
 
 // PreviewPDF renders the posted report template with sample data to a PDF
@@ -191,11 +205,22 @@ func (r *ReportTemplate) PreviewPDF(g *gin.Context) {
 	if ok := r.handleParseRequest(g, &req); !ok {
 		return
 	}
+	kind := req.Kind
+	if kind == "" {
+		kind = model.ReportKindSimulation
+		if req.IsTraining {
+			kind = model.ReportKindTraining
+		}
+	}
+	if !slices.Contains(model.ReportKinds, kind) {
+		r.Response.BadRequestMessage(g, "kind must be simulation, training or program")
+		return
+	}
 	pdfBytes, err := r.ReportTemplateService.PreviewPDF(
 		g.Request.Context(),
 		session,
 		req.Content,
-		req.IsTraining,
+		kind,
 	)
 	if ok := r.handleErrors(g, err); !ok {
 		return
@@ -216,15 +241,28 @@ func (r *ReportTemplate) WipeBrowserCache(g *gin.Context) {
 	r.Response.OK(g, gin.H{})
 }
 
-// sanitizeFilename removes characters that are unsafe in filenames
+// sanitizeFilename removes characters that are unsafe in filenames, a name
+// left empty is campaign
 func sanitizeFilename(name string) string {
+	return sanitizeFilenameOr(name, "campaign")
+}
+
+// sanitizeProgramFilename removes characters that are unsafe in filenames, a
+// name left empty is program
+func sanitizeProgramFilename(name string) string {
+	return sanitizeFilenameOr(name, "program")
+}
+
+// sanitizeFilenameOr removes characters that are unsafe in filenames and
+// returns fallback for a name left empty
+func sanitizeFilenameOr(name, fallback string) string {
 	replacer := strings.NewReplacer(
 		"/", "-", "\\", "-", ":", "-", "*", "-",
 		"?", "-", "\"", "-", "<", "-", ">", "-", "|", "-",
 	)
 	safe := strings.TrimSpace(replacer.Replace(name))
 	if safe == "" {
-		return "campaign"
+		return fallback
 	}
 	return safe
 }

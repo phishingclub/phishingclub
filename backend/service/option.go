@@ -141,6 +141,17 @@ func (o *Option) AuthorizeSetLogLevel(session *model.Session) error {
 	return nil
 }
 
+// isValidDisplayMode reports if v is a known display mode value
+func isValidDisplayMode(v string) bool {
+	switch v {
+	case data.OptionValueDisplayModeWhitebox,
+		data.OptionValueDisplayModeBlackbox,
+		data.OptionValueDisplayModeAll:
+		return true
+	}
+	return false
+}
+
 // SetOptionByKey sets an option
 func (o *Option) SetOptionByKey(
 	ctx context.Context,
@@ -219,7 +230,7 @@ func (o *Option) SetOptionByKey(
 		// is allow listed
 	case data.OptionKeyDisplayMode:
 		// validate display mode value
-		if v != data.OptionValueDisplayModeWhitebox && v != data.OptionValueDisplayModeBlackbox {
+		if !isValidDisplayMode(v) {
 			o.Logger.Debugw("invalid display mode value",
 				"value", v,
 			)

@@ -19,14 +19,14 @@ type CompanyReportConfig struct {
 	ID                  *uuid.UUID `gorm:"primary_key;not null;unique;type:uuid"`
 	CreatedAt           *time.Time `gorm:"not null;index;"`
 	UpdatedAt           *time.Time `gorm:"not null;index;"`
-	CompanyID           *uuid.UUID `gorm:"uniqueIndex;type:uuid"`           // NULL is the global default
+	CompanyID           *uuid.UUID `gorm:"uniqueIndex;type:uuid"` // NULL is the global default
 	Enabled             bool       `gorm:"not null;default:false"`
-	SendOnFinish        bool       `gorm:"not null;default:false"`         // auto send when a campaign is closed
-	RecipientGroupID    *uuid.UUID `gorm:"type:uuid"`                      // group that receives the report
-	SMTPConfigurationID *uuid.UUID `gorm:"type:uuid"`                      // smtp used to send the report
-	SenderEmail         string     `gorm:"not null;default:''"`            // from address used for the report email
-	EmailSubject        string     `gorm:"not null;default:'';type:text"`  // subject of the delivery email
-	EmailBody           string     `gorm:"not null;default:'';type:text"`  // html body of the delivery email
+	SendOnFinish        bool       `gorm:"not null;default:false"`        // auto send when a campaign is closed
+	RecipientGroupID    *uuid.UUID `gorm:"type:uuid"`                     // group that receives the report
+	SMTPConfigurationID *uuid.UUID `gorm:"type:uuid"`                     // smtp used to send the report
+	SenderEmail         string     `gorm:"not null;default:''"`           // from address used for the report email
+	EmailSubject        string     `gorm:"not null;default:'';type:text"` // subject of the delivery email
+	EmailBody           string     `gorm:"not null;default:'';type:text"` // html body of the delivery email
 	LastSentAt          *time.Time // nullable: last time a report was successfully delivered
 
 	Company           *Company           `gorm:"foreignKey:CompanyID"`

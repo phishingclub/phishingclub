@@ -1,6 +1,9 @@
 package model
 
 import (
+	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,9 +24,13 @@ type SMTPConfiguration struct {
 	Password         nullable.Nullable[vo.OptionalString255] `json:"password"`
 	IgnoreCertErrors nullable.Nullable[bool]                 `json:"ignoreCertErrors"`
 	Helo             nullable.Nullable[vo.OptionalString255] `json:"helo"`
-	CompanyID        nullable.Nullable[uuid.UUID]            `json:"companyID"`
-	Company          *Company                                `json:"company"`
-	Headers          []*SMTPHeader                           `json:"headers"`
+	// PublicSendingIPs lists the public IPs or CIDR ranges the mail leaves
+	// from, one per line. It only fills in allow listing information and is
+	// never used to send, connect or look anything up.
+	PublicSendingIPs nullable.Nullable[string]    `json:"publicSendingIPs"`
+	CompanyID        nullable.Nullable[uuid.UUID] `json:"companyID"`
+	Company          *Company                     `json:"company"`
+	Headers          []*SMTPHeader                `json:"headers"`
 }
 
 // Validate checks if the SMTP configuration has a valid state
@@ -55,7 +62,72 @@ func (s *SMTPConfiguration) Validate() error {
 			}
 		}
 	}
+	if s.PublicSendingIPs.IsSpecified() {
+		if v, err := s.PublicSendingIPs.Get(); err == nil {
+			if _, err := ParsePublicSendingIPs(v); err != nil {
+				return validate.WrapErrorWithField(err, "publicSendingIPs")
+			}
+		}
+	}
 	return nil
+}
+
+// MaxPublicSendingIPs is the most public sending IPs one SMTP configuration holds
+const MaxPublicSendingIPs = 10
+
+// maxPublicSendingIPsLength bounds the raw text before it is split
+const maxPublicSendingIPsLength = 1024
+
+// ParsePublicSendingIPs splits a list of IPs or CIDR ranges on new lines and
+// commas. Each entry must be an IPv4 or IPv6 address or CIDR range, never a
+// hostname. The list only fills in allow listing text, so what an address
+// means is not checked. Each entry is written in its normal form, a range as
+// its network address. Duplicates are dropped and the order is kept.
+func ParsePublicSendingIPs(input string) ([]string, error) {
+	if len(input) > maxPublicSendingIPsLength {
+		return nil, fmt.Errorf("must be at most %d characters", maxPublicSendingIPsLength)
+	}
+	out := []string{}
+	seen := map[string]bool{}
+	for _, entry := range parseList(input) {
+		var normalized string
+		if strings.Contains(entry, "/") {
+			_, ipNet, err := net.ParseCIDR(entry)
+			if err != nil {
+				return nil, fmt.Errorf("%q is not an IP address or CIDR range", entry)
+			}
+			normalized = ipNet.String()
+		} else {
+			ip := net.ParseIP(entry)
+			if ip == nil {
+				return nil, fmt.Errorf("%q is not an IP address or CIDR range", entry)
+			}
+			normalized = ip.String()
+		}
+		if seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+	if len(out) > MaxPublicSendingIPs {
+		return nil, fmt.Errorf("at most %d entries", MaxPublicSendingIPs)
+	}
+	return out, nil
+}
+
+// PublicSendingIPList returns the stored public sending IPs, an empty list
+// when none are set or the stored text does not parse
+func (s *SMTPConfiguration) PublicSendingIPList() []string {
+	v, err := s.PublicSendingIPs.Get()
+	if err != nil {
+		return []string{}
+	}
+	ips, err := ParsePublicSendingIPs(v)
+	if err != nil {
+		return []string{}
+	}
+	return ips
 }
 
 // ToDBMap converts the fields that can be stored or updated to a map
@@ -103,6 +175,16 @@ func (s *SMTPConfiguration) ToDBMap() map[string]any {
 		m["helo"] = ""
 		if helo, err := s.Helo.Get(); err == nil {
 			m["helo"] = helo.String()
+		}
+	}
+	if s.PublicSendingIPs.IsSpecified() {
+		m["public_sending_ips"] = ""
+		if v, err := s.PublicSendingIPs.Get(); err == nil {
+			// stored one per line in the normalized form, Validate has
+			// already refused text that does not parse
+			if ips, err := ParsePublicSendingIPs(v); err == nil {
+				m["public_sending_ips"] = strings.Join(ips, "\n")
+			}
 		}
 	}
 	if v, err := s.CompanyID.Get(); err == nil {

@@ -82,10 +82,13 @@ func campaignRow(t *testing.T, h *ownershipFixture, id uuid.UUID) database.Campa
 }
 
 // TestUninstallPreviewMatchesRemove checks the preview splits campaigns the way
-// the delete paths treat them: a campaign without a close time is closed, one
-// that already has a close time keeps running, and one that only uses the page
-// as its deny page keeps running without it. Remove must then close exactly the
-// campaigns the preview listed as closed.
+// the delete paths treat them. While an open campaign uses the page as its deny
+// page, the page delete is refused: the preview lists the page as blocked and
+// nothing as closed or changed, and remove keeps the page and changes no
+// campaign. Once that campaign is closed, a campaign without a close time is
+// closed, one that already has a close time keeps running, and the closed
+// campaign loses its deny page. Remove must then close exactly the campaigns
+// the preview listed as closed.
 func TestUninstallPreviewMatchesRemove(t *testing.T) {
 	h := newOwnershipFixture(t)
 	ip, pageID := installLoginPage(t, h)
@@ -105,9 +108,48 @@ func TestUninstallPreviewMatchesRemove(t *testing.T) {
 	otherTpl := uuid.New()
 	denyOnlyID := insertCampaign(t, h, "DenyOnly", &otherTpl, pageID, nil)
 
+	// the open campaign DenyOnly holds the page
 	preview, err := h.s.UninstallPreview(h.ctx, h.session, ip.ID)
 	if err != nil {
 		t.Fatalf("preview: %v", err)
+	}
+	if len(preview.Blocked) != 1 || preview.Blocked[0].Name != "Login" ||
+		preview.Blocked[0].ResourceType != "page" || preview.Blocked[0].UsedByCount != 1 ||
+		len(preview.Blocked[0].UsedBy) != 1 || preview.Blocked[0].UsedBy[0] != "campaign DenyOnly" {
+		t.Fatalf("expected the Login page blocked by campaign DenyOnly, got %+v", preview.Blocked)
+	}
+	if preview.CampaignCount != 0 || preview.KeepRunningCount != 0 || preview.ChangedCount != 0 {
+		t.Fatalf("a page that stays changes no campaign, got closed %+v, keep running %+v, changed %+v",
+			preview.Campaigns, preview.KeepRunning, preview.Changed)
+	}
+	err = h.s.Remove(h.ctx, h.session, ip.ID)
+	if err == nil || !strings.Contains(err.Error(), "stay installed") || !strings.Contains(err.Error(), "DenyOnly") {
+		t.Fatalf("expected remove to keep the page used by DenyOnly, got %v", err)
+	}
+	if _, ok := h.pageIDByName("Login"); !ok {
+		t.Fatalf("the Login page should stay installed")
+	}
+	if _, err := h.s.RegistryRepository.GetInstalledPackageByID(h.ctx, ip.ID); err != nil {
+		t.Fatalf("the package should stay installed: %v", err)
+	}
+	if row := campaignRow(t, h, denyOnlyID); row.DenyPageID == nil || *row.DenyPageID != *pageID {
+		t.Fatalf("DenyOnly should keep its deny page, got %v", row.DenyPageID)
+	}
+	if row := campaignRow(t, h, openID); row.CloseAt != nil {
+		t.Fatalf("Open should not be closed while the page stays, got %v", row.CloseAt)
+	}
+
+	// once DenyOnly is closed the page goes and DenyOnly loses it
+	if err := h.db.Model(&database.Campaign{}).Where("id = ?", denyOnlyID.String()).
+		Update("closed_at", now).Error; err != nil {
+		t.Fatalf("close DenyOnly: %v", err)
+	}
+	preview, err = h.s.UninstallPreview(h.ctx, h.session, ip.ID)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if len(preview.Blocked) != 0 {
+		t.Fatalf("a closed campaign does not hold the page, got %+v", preview.Blocked)
 	}
 	if preview.CampaignCount != 1 || len(preview.Campaigns) != 1 || preview.Campaigns[0].Name != "Open" {
 		t.Fatalf("expected only Open to be closed, got %+v", preview.Campaigns)
@@ -116,15 +158,15 @@ func TestUninstallPreviewMatchesRemove(t *testing.T) {
 		preview.KeepRunning[0].Name != "Scheduled" || preview.KeepRunning[0].CloseAt == "" {
 		t.Fatalf("expected Scheduled to keep running with its close time, got %+v", preview.KeepRunning)
 	}
-	if preview.ChangedCount != 1 || len(preview.Changed) != 1 || preview.Changed[0].Name != "DenyOnly" {
-		t.Fatalf("expected DenyOnly to lose its deny page, got %+v", preview.Changed)
-	}
-	if !strings.Contains(strings.Join(preview.Changed[0].Losses, ";"), "deny page") {
-		t.Fatalf("expected a deny page loss, got %v", preview.Changed[0].Losses)
+	if preview.ChangedCount != 0 {
+		t.Fatalf("a closed campaign is not listed as changed, got %+v", preview.Changed)
 	}
 
 	if err := h.s.Remove(h.ctx, h.session, ip.ID); err != nil {
 		t.Fatalf("remove: %v", err)
+	}
+	if _, ok := h.pageIDByName("Login"); ok {
+		t.Fatalf("the Login page should be removed")
 	}
 	var closed []string
 	for _, id := range []uuid.UUID{openID, scheduledID, denyOnlyID} {
@@ -150,7 +192,59 @@ func TestUninstallPreviewMatchesRemove(t *testing.T) {
 		t.Fatalf("the close time of Scheduled should be unchanged, got %v", row.CloseAt)
 	}
 	if row := campaignRow(t, h, denyOnlyID); row.DenyPageID != nil {
-		t.Fatalf("DenyOnly should have lost its deny page")
+		t.Fatalf("the closed DenyOnly should have lost its deny page")
+	}
+}
+
+// TestUninstallPreviewBlockedMemberKeepsItsMembers checks a bundle whose
+// referenced package has a page an open campaign filters with: remove keeps
+// that package and so the package it references, and the preview lists only
+// the packages remove gets to. Uninstalling the blocked package itself takes
+// none of its members.
+func TestUninstallPreviewBlockedMemberKeepsItsMembers(t *testing.T) {
+	h := newOwnershipFixture(t)
+	member, pageID := installLoginPage(t, h)
+	bundleID := h.newInstall("acme/bundle")
+	subID := h.newInstall("acme/sub")
+	for _, id := range []*uuid.UUID{member.ID, subID} {
+		if err := h.s.RegistryRepository.SetInstalledAsDependency(h.ctx, id, true); err != nil {
+			t.Fatalf("mark dependency: %v", err)
+		}
+	}
+	if err := h.s.RegistryRepository.InsertPackageMember(h.ctx, bundleID, member.ID); err != nil {
+		t.Fatalf("link member: %v", err)
+	}
+	if err := h.s.RegistryRepository.InsertPackageMember(h.ctx, member.ID, subID); err != nil {
+		t.Fatalf("link sub member: %v", err)
+	}
+	otherTpl := uuid.New()
+	insertCampaign(t, h, "DenyOnly", &otherTpl, pageID, nil)
+
+	preview, err := h.s.UninstallPreview(h.ctx, h.session, bundleID)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if strings.Join(preview.Members, ",") != "acme/login" {
+		t.Fatalf("expected only acme/login to be reached, got %v", preview.Members)
+	}
+	if len(preview.Blocked) != 1 || preview.Blocked[0].PackageID != "acme/login" {
+		t.Fatalf("expected the Login page of acme/login blocked, got %+v", preview.Blocked)
+	}
+	preview, err = h.s.UninstallPreview(h.ctx, h.session, member.ID)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if len(preview.Members) != 0 || len(preview.Blocked) != 1 {
+		t.Fatalf("a blocked package takes no members, got members %v blocked %+v", preview.Members, preview.Blocked)
+	}
+
+	if err := h.s.Remove(h.ctx, h.session, bundleID); err == nil {
+		t.Fatalf("expected remove to be incomplete")
+	}
+	for _, id := range []*uuid.UUID{member.ID, subID} {
+		if _, err := h.s.RegistryRepository.GetInstalledPackageByID(h.ctx, id); err != nil {
+			t.Fatalf("package %s should stay installed: %v", id, err)
+		}
 	}
 }
 

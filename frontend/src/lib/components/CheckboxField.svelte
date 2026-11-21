@@ -10,6 +10,8 @@
 	export let id = null;
 	export let inline = false;
 	export let disabled = false;
+	// a small normal weight label, for a toolbar
+	export let plain = false;
 
 	let parentForm = null;
 	let parentFormResetListener = null;
@@ -48,7 +50,7 @@
 	class:opacity-50={disabled}
 	class:cursor-not-allowed={disabled}
 >
-	<FieldLabel {toolTipText} {optional}><slot /></FieldLabel>
+	<FieldLabel {toolTipText} {optional} {plain}><slot /></FieldLabel>
 	<span class="block mt-1" class:mt-0={inline} class:ml-3={inline}>
 		<span
 			class="relative inline-flex items-center"

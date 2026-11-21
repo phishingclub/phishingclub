@@ -16,6 +16,7 @@ import (
 	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var allowedCampaignRecipientColumns = []string{
@@ -35,6 +36,10 @@ type CampaignRecipientOption struct {
 	*vo.QueryArgs
 	WithCampaign  bool
 	WithRecipient bool
+	// ExcludeCampaignIDs leaves the rows of these campaigns out of
+	// GetUnsendRecipientsForSending. The sender rests a campaign it could not
+	// send for a while, so its rows do not fill every batch.
+	ExcludeCampaignIDs []*uuid.UUID
 }
 
 // CampaignRecipient is a CampaignRecipient repository
@@ -54,60 +59,57 @@ func (r *CampaignRecipient) preload(db *gorm.DB, options *CampaignRecipientOptio
 	return db
 }
 
-// Cancel cancels recipients
+// cancelBatch is how many ids one cancel write names, so a list of any size
+// stays under the bind parameter limit
+const cancelBatch = 500
+
+// Cancel cancels recipients. The ids are written in batches of cancelBatch.
 func (r *CampaignRecipient) Cancel(
 	ctx context.Context,
 	campaignRecipientUUIDs []*uuid.UUID,
 ) error {
-	if len(campaignRecipientUUIDs) == 0 {
-		return nil
+	for start := 0; start < len(campaignRecipientUUIDs); start += cancelBatch {
+		end := min(start+cancelBatch, len(campaignRecipientUUIDs))
+		if err := r.cancelBatch(ctx, campaignRecipientUUIDs[start:end]); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+// cancelBatch cancels one batch of Cancel and sets the cancelled notable event
+// on the rows not sent. The rows are found by id: sent_at, cancelled_at and
+// notable_event_id are not read through an index, or sqlite picks one of
+// those indexes and walks every row not sent or with no notable event.
+func (r *CampaignRecipient) cancelBatch(ctx context.Context, ids []*uuid.UUID) error {
+	byID := clause.IN{Column: clause.Column{Name: "id"}, Values: uuidValues(ids)}
 	row := map[string]any{
 		"cancelled_at": utils.NowRFC3339UTC(),
 	}
 	AddUpdatedAt(row)
-	result := r.DB.
+	result := r.DB.WithContext(ctx).
 		Model(&database.CampaignRecipient{}).
-		Where(
-			fmt.Sprintf(
-				"%s IN ?",
-				TableColumnID(database.CAMPAIGN_RECIPIENT_TABLE_NAME),
-			),
-			UUIDsToStrings(campaignRecipientUUIDs),
-		).
+		Where(byID).
 		Updates(row)
-
 	if result.Error != nil {
 		return result.Error
-	}
-	// set notable event
-	if len(campaignRecipientUUIDs) == 0 {
-		return nil
 	}
 	row = map[string]any{
 		"notable_event_id": cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_CANCELLED],
 	}
 	AddUpdatedAt(row)
-	result = r.DB.
+	notableColumn := notIndexed(clause.Column{Name: "notable_event_id"})
+	result = r.DB.WithContext(ctx).
 		Model(&database.CampaignRecipient{}).
-		Where(
-			fmt.Sprintf(
-				"%s IN ? AND sent_at IS NULL AND cancelled_at IS NOT NULL",
-				TableColumnID(database.CAMPAIGN_RECIPIENT_TABLE_NAME),
-			),
-			UUIDsToStrings(campaignRecipientUUIDs),
-		).
-		Where(
-			"notable_event_id IS NULL OR notable_event_id IS ?",
-			cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SCHEDULED],
-		).
+		Where(byID).
+		Where(clause.Expr{SQL: "? IS NULL", Vars: []any{notIndexed(clause.Column{Name: "sent_at"})}}).
+		Where(clause.Expr{SQL: "? IS NOT NULL", Vars: []any{notIndexed(clause.Column{Name: "cancelled_at"})}}).
+		Where(clause.Or(
+			clause.Expr{SQL: "? IS NULL", Vars: []any{notableColumn}},
+			clause.Expr{SQL: "? IS ?", Vars: []any{notableColumn, cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SCHEDULED]}},
+		)).
 		Updates(row)
-
-	if result.Error != nil {
-		return result.Error
-	}
-
-	return nil
+	return result.Error
 }
 
 // Insert inserts a new campaign recipient
@@ -243,22 +245,19 @@ func (r *CampaignRecipient) GetByCampaignID(
 	}
 	db = r.preload(db, options)
 	var dbCampaignRecipients []database.CampaignRecipient
-	res := db.
+	res := withPeek(db.
 		Joins("LEFT JOIN recipients ON recipients.id = campaign_recipients.recipient_id").
 		Where(
 			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "campaign_id")),
 			campaignID,
-		).
+		), options.QueryArgs).
 		Find(&dbCampaignRecipients)
 
 	if res.Error != nil {
 		return result, res.Error
 	}
 
-	hasNextPage, err := useHasNextPage(db, database.CAMPAIGN_RECIPIENT_TABLE_NAME, options.QueryArgs, allowedCampaignRecipientColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&dbCampaignRecipients, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 
 	for _, dbCampaignRecipient := range dbCampaignRecipients {
@@ -657,6 +656,14 @@ func (r *CampaignRecipient) GetUnsendRecipientsForSending(
 			), utils.NowRFC3339UTC(),
 		)
 
+	// nothing of a company that is being deleted is sent
+	q = q.Where(clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{r.campaignOfDeletingCompany(ctx)}})
+	if len(options.ExcludeCampaignIDs) > 0 {
+		q = q.Where(clause.Not(clause.IN{
+			Column: clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "campaign_id"},
+			Values: uuidValues(options.ExcludeCampaignIDs),
+		}))
+	}
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
@@ -676,24 +683,16 @@ func (r *CampaignRecipient) GetUnsendRecipientsForSending(
 	return recps, nil
 }
 
-// DeleteByCampaigID removes all campaign recipients from a campaign
+// DeleteByCampaigID removes all campaign recipients from a campaign, in
+// batches with a pause between them, see deleteInBatches
 func (r *CampaignRecipient) DeleteByCampaigID(
 	ctx context.Context,
 	campaignID *uuid.UUID,
 ) error {
-	res := r.DB.
-		Where(
-			fmt.Sprintf(
-				"%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "campaign_id"),
-			),
-			campaignID,
-		).
-		Delete(&database.CampaignRecipient{})
-
-	if res.Error != nil {
-		return res.Error
-	}
-	return nil
+	// a delete that began finishes also when the request ends, so the sends
+	// of a campaign are not left half deleted
+	return deleteInBatches(context.WithoutCancel(ctx), r.DB, &database.CampaignRecipient{},
+		clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: campaignID}, deleteBatchSends)
 }
 
 // UpdateByID updates a campaign recipient by id
@@ -719,6 +718,122 @@ func (c *CampaignRecipient) UpdateByID(
 		return res.Error
 	}
 	return nil
+}
+
+// campaignOfDeletingCompany selects the campaign of a campaign recipient row
+// when the campaign belongs to a company marked as being deleted, for a NOT
+// EXISTS guard of the sender
+func (r *CampaignRecipient) campaignOfDeletingCompany(ctx context.Context) *gorm.DB {
+	deleting := r.DB.WithContext(ctx).
+		Model(&database.Company{}).
+		Select("id").
+		Where(clause.Neq{Column: clause.Column{Table: database.COMPANY_TABLE, Name: "deleting_at"}, Value: nil})
+	return r.DB.WithContext(ctx).
+		Model(&database.Campaign{}).
+		Select("1").
+		Where(clause.Expr{
+			SQL: "? = ?",
+			Vars: []any{
+				clause.Column{Table: database.CAMPAIGN_TABLE, Name: "id"},
+				clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "campaign_id"},
+			},
+		}).
+		Where(clause.Expr{SQL: "? IN (?)", Vars: []any{clause.Column{Table: database.CAMPAIGN_TABLE, Name: "company_id"}, deleting}})
+}
+
+// ClaimForSending sets the last attempt time on a row that is still due to be
+// sent and reports whether it did. The sender reads a batch of rows and sends
+// them one campaign after another, so a row can be cancelled, sent, paused,
+// moved later or lose its recipient after it was read, and its recipient can
+// be disabled by SCIM. Only a claimed row may be sent. The
+// last attempt time also keeps the row out of the next batches, so a crash in
+// the middle of a send does not send it twice.
+func (r *CampaignRecipient) ClaimForSending(
+	ctx context.Context,
+	id *uuid.UUID,
+	at time.Time,
+) (bool, error) {
+	row := map[string]any{
+		"last_attempt_at": utils.RFC3339UTC(at),
+	}
+	AddUpdatedAt(row)
+	paused := r.DB.WithContext(ctx).
+		Model(&database.Campaign{}).
+		Select("1").
+		Where(clause.Expr{
+			SQL: "? = ?",
+			Vars: []any{
+				clause.Column{Table: database.CAMPAIGN_TABLE, Name: "id"},
+				clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "campaign_id"},
+			},
+		}).
+		Where(clause.Expr{SQL: "? IS NOT NULL", Vars: []any{clause.Column{Table: database.CAMPAIGN_TABLE, Name: "paused_at"}}})
+	disabled := r.DB.WithContext(ctx).
+		Model(&database.Recipient{}).
+		Select("1").
+		Where(clause.Expr{
+			SQL: "? = ?",
+			Vars: []any{
+				clause.Column{Table: database.RECIPIENT_TABLE, Name: "id"},
+				clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "recipient_id"},
+			},
+		}).
+		Where(clause.Expr{SQL: "? IS NOT NULL", Vars: []any{clause.Column{Table: database.RECIPIENT_TABLE, Name: "scim_soft_deleted_at"}}})
+	res := r.DB.WithContext(ctx).
+		Model(&database.CampaignRecipient{}).
+		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id.String()}).
+		Where(clause.Expr{SQL: "? IS NULL", Vars: []any{clause.Column{Name: "cancelled_at"}}}).
+		Where(clause.Expr{SQL: "? IS NULL", Vars: []any{clause.Column{Name: "sent_at"}}}).
+		Where(clause.Expr{SQL: "? IS NULL", Vars: []any{clause.Column{Name: "last_attempt_at"}}}).
+		Where(clause.Expr{SQL: "? IS NOT NULL", Vars: []any{clause.Column{Name: "recipient_id"}}}).
+		Where(clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{paused}}).
+		// a send moved later after the batch was read, for example by a resume
+		// that spread the sends again, waits for its new time
+		Where(clause.Lte{Column: clause.Column{Name: "send_at"}, Value: utils.RFC3339UTC(at)}).
+		// a person disabled by SCIM after the batch was read gets nothing
+		Where(clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{disabled}}).
+		// a company marked as being deleted after the batch was read sends
+		// nothing more
+		Where(clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{r.campaignOfDeletingCompany(ctx)}}).
+		Updates(row)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// SetLastAttemptAtByID sets only the last attempt time of a campaign recipient
+func (r *CampaignRecipient) SetLastAttemptAtByID(
+	ctx context.Context,
+	id *uuid.UUID,
+	at time.Time,
+) error {
+	row := map[string]any{
+		"last_attempt_at": utils.RFC3339UTC(at),
+	}
+	AddUpdatedAt(row)
+	return r.DB.WithContext(ctx).
+		Model(&database.CampaignRecipient{}).
+		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id.String()}).
+		Updates(row).Error
+}
+
+// SetSentAtByID sets only the sent time of a campaign recipient. The other
+// columns are left as they are, so a change made by another writer while the
+// email was sent, such as a recipient delete or an anonymize, is kept.
+func (r *CampaignRecipient) SetSentAtByID(
+	ctx context.Context,
+	id *uuid.UUID,
+	at time.Time,
+) error {
+	row := map[string]any{
+		"sent_at": utils.RFC3339UTC(at),
+	}
+	AddUpdatedAt(row)
+	return r.DB.WithContext(ctx).
+		Model(&database.CampaignRecipient{}).
+		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id.String()}).
+		Updates(row).Error
 }
 
 // UpdateNotableEventByID updates only the notable event id for a campaign recipient
@@ -788,6 +903,244 @@ func (r *CampaignRecipient) Anonymize(
 	return nil
 }
 
+// updateCampaignRecipientsPaced sets fields on the campaign recipients that
+// match find, at most ProgramWriteChunk rows per write with PauseAfterWrite
+// between two writes. The rowids of a chunk are read first and the update
+// then writes those rows by rowid, so the write holds the database only for
+// the update and not for the search. The update repeats guard, so a row
+// another writer changed between the read and the write is left as it is.
+// guard must not read an index, see notIndexedEq, so the update finds the
+// rows by rowid.
+//
+// Without keyset each read starts from the beginning of the matching rows, so
+// the fields must make a row stop matching find, or the loop would find the
+// same rows again. With keyset each read continues in rowid order after the
+// last row of the chunk before, for fields that leave a row in the index range
+// find reads, where a read from the beginning would pass every written row
+// again. It must not be called inside a transaction or while the program
+// lifecycle lock is held.
+func (r *CampaignRecipient) updateCampaignRecipientsPaced(
+	ctx context.Context,
+	find clause.Expression,
+	guard clause.Expression,
+	fields map[string]any,
+	keyset bool,
+) error {
+	rowidColumn := clause.Column{Name: "rowid"}
+	var last int64
+	for {
+		q := r.DB.WithContext(ctx).
+			Model(&database.CampaignRecipient{}).
+			Where(find).
+			Limit(ProgramWriteChunk)
+		if keyset {
+			q = q.Where(clause.Gt{Column: rowidColumn, Value: last}).
+				Order(clause.OrderByColumn{Column: rowidColumn})
+		}
+		var rowids []int64
+		if err := q.Pluck("rowid", &rowids).Error; err != nil {
+			return errs.Wrap(err)
+		}
+		if len(rowids) == 0 {
+			return nil
+		}
+		last = rowids[len(rowids)-1]
+		start := time.Now()
+		res := r.DB.WithContext(ctx).
+			Model(&database.CampaignRecipient{}).
+			Where(clause.IN{Column: rowidColumn, Values: int64Values(rowids)}).
+			Where(guard).
+			Updates(fields)
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if len(rowids) < ProgramWriteChunk {
+			return nil
+		}
+		if err := PauseAfterWrite(ctx, time.Since(start)); err != nil {
+			return err
+		}
+	}
+}
+
+// notIndexedEq matches a null column without reading an index on it, see
+// notIndexed. A guard of a write by rowid uses it, so the rows are found by
+// rowid and not through an index that holds many other rows.
+func notIndexedEq(column string) clause.Expr {
+	return clause.Expr{SQL: "? IS NULL", Vars: []any{notIndexed(clause.Column{Name: column})}}
+}
+
+// notIndexedNeq matches a column that is not null without reading an index
+// on it, see notIndexedEq
+func notIndexedNeq(column string) clause.Expr {
+	return clause.Expr{SQL: "? IS NOT NULL", Vars: []any{notIndexed(clause.Column{Name: column})}}
+}
+
+// int64Values returns the values as a list for an IN clause
+func int64Values(values []int64) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = v
+	}
+	return out
+}
+
+// AnonymizeRowsOfCampaign anonymizes every campaign recipient row of a
+// campaign with paced writes, without loading the rows. It runs in three
+// passes:
+//
+//  1. a row with a person and no pseudonym gets a fresh random pseudonym, and
+//     the events of that person in the campaign are moved onto it. An
+//     anonymous campaign assigned a pseudonym at materialization, so it has no
+//     such rows.
+//  2. a row with a person has its lure code and message id released and its
+//     person link removed.
+//  3. a row without a person that still holds a lure code or a message id
+//     has both released. An anonymous program send keeps its code and its
+//     message id after its person link is cleared, so the report inbox can
+//     still match it while the program is open, and a link cleared while
+//     pass 2 runs is found here too.
+//
+// Each pass writes at most ProgramWriteChunk rows per write with a pause
+// between writes. It must not be called inside a transaction or while the
+// program lifecycle lock is held. Running it again finds nothing to do.
+func (r *CampaignRecipient) AnonymizeRowsOfCampaign(ctx context.Context, campaignID *uuid.UUID) error {
+	byCampaign := clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: campaignID}
+	linked := clause.Neq{Column: clause.Column{Name: "recipient_id"}, Value: nil}
+	if err := r.assignMissingPseudonyms(ctx, campaignID); err != nil {
+		return err
+	}
+	now := utils.NowRFC3339UTC()
+	// a written row leaves the linked rows of the campaign, so each read
+	// starts at the first row still linked
+	if err := r.updateCampaignRecipientsPaced(ctx, clause.And(byCampaign, linked), notIndexedNeq("recipient_id"), map[string]any{
+		"lure_code":    nil,
+		"message_id":   nil,
+		"recipient_id": nil,
+		"updated_at":   now,
+	}, false); err != nil {
+		return err
+	}
+	if err := PauseBetweenWrites(ctx); err != nil {
+		return err
+	}
+	// a written row stays among the unlinked rows of the campaign, which the
+	// campaign and recipient index holds in rowid order, so the reads walk
+	// that range once by rowid
+	unlinkedWithCode := clause.And(
+		clause.Eq{Column: clause.Column{Name: "recipient_id"}, Value: nil},
+		clause.Or(
+			clause.Neq{Column: clause.Column{Name: "lure_code"}, Value: nil},
+			clause.Neq{Column: clause.Column{Name: "message_id"}, Value: nil},
+		),
+	)
+	return r.updateCampaignRecipientsPaced(ctx, clause.And(byCampaign, unlinkedWithCode), clause.And(
+		notIndexedEq("recipient_id"),
+		clause.Or(notIndexedNeq("lure_code"), notIndexedNeq("message_id")),
+	), map[string]any{
+		"lure_code":  nil,
+		"message_id": nil,
+		"updated_at": now,
+	}, true)
+}
+
+// pseudonymChunk is how many rows one transaction of assignMissingPseudonyms
+// writes. Each row takes two writes, one for the row and one for its events,
+// so a chunk is smaller than ProgramWriteChunk to keep the hold short.
+const pseudonymChunk = 100
+
+// assignMissingPseudonyms gives each row of a campaign that has a person and
+// no pseudonym a fresh random one, and moves the events of that person in the
+// campaign onto it with their identifying data replaced. The rows are walked
+// in the order of the campaign and person index, at most pseudonymChunk rows
+// at a time, so each read covers only its own part of the index. The ids of a
+// chunk are read and then written in one transaction, with PauseAfterWrite
+// between two chunks. A row whose pseudonym or person link was set by another
+// writer in between is left as it is.
+func (r *CampaignRecipient) assignMissingPseudonyms(ctx context.Context, campaignID *uuid.UUID) error {
+	recipientColumn := clause.Column{Name: "recipient_id"}
+	var after *uuid.UUID
+	for {
+		var rows []struct {
+			ID          *uuid.UUID
+			RecipientID *uuid.UUID
+		}
+		q := r.DB.WithContext(ctx).
+			Model(&database.CampaignRecipient{}).
+			Select("id, recipient_id").
+			Where(clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: campaignID}).
+			Where(clause.Neq{Column: recipientColumn, Value: nil}).
+			Where(clause.Eq{Column: clause.Column{Name: "anonymized_id"}, Value: nil})
+		if after != nil {
+			q = q.Where(clause.Gt{Column: recipientColumn, Value: after})
+		}
+		if err := q.Order(clause.OrderByColumn{Column: recipientColumn}).
+			Limit(pseudonymChunk).
+			Scan(&rows).Error; err != nil {
+			return errs.Wrap(err)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		after = rows[len(rows)-1].RecipientID
+		start := time.Now()
+		err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			for _, row := range rows {
+				now := utils.NowRFC3339UTC()
+				pseudonym := uuid.New()
+				res := tx.Model(&database.CampaignRecipient{}).
+					Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: row.ID}).
+					Where(clause.Eq{Column: recipientColumn, Value: row.RecipientID}).
+					Where(clause.Eq{Column: clause.Column{Name: "anonymized_id"}, Value: nil}).
+					Updates(map[string]any{"anonymized_id": pseudonym.String(), "updated_at": now})
+				if res.Error != nil {
+					return res.Error
+				}
+				if res.RowsAffected == 0 {
+					continue
+				}
+				// the events are found through the person index, the campaign
+				// index would read every event of the campaign for each row
+				if err := tx.Model(&database.CampaignEvent{}).
+					Where(clause.Eq{Column: recipientColumn, Value: row.RecipientID}).
+					Where(clause.Expr{SQL: "? = ?", Vars: []any{notIndexed(clause.Column{Name: "campaign_id"}), campaignID}}).
+					Updates(movedEventFields(pseudonym, now)).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		if len(rows) < pseudonymChunk {
+			return nil
+		}
+		if err := PauseAfterWrite(ctx, time.Since(start)); err != nil {
+			return err
+		}
+	}
+}
+
+// movedEventFields are the values of an event moved onto a pseudonym: no
+// person, the pseudonym, and no submitted data, IP address, user agent or
+// browser metadata, see scrubbedEventFields
+func movedEventFields(pseudonym uuid.UUID, now string) map[string]any {
+	fields := scrubbedEventFields()
+	fields["recipient_id"] = nil
+	fields["anonymized_id"] = pseudonym.String()
+	fields["updated_at"] = now
+	return fields
+}
+
+// CancelInActiveCampaigns cancels a recipient's rows that are neither sent nor
+// cancelled in every active campaign. The hidden campaigns of a program are
+// left out: the sender never sends to a disabled person, and the program
+// membership pass cancels their sends once they are gone from the groups for
+// longer than the grace period, so a person enabled again within it keeps
+// their sends. A sent row is kept as it is. Both IS NULL predicates are
+// written as the partial index idx_campaign_recipients_unsent_campaign states
+// them, so the rows are found through it.
 func (r *CampaignRecipient) CancelInActiveCampaigns(
 	ctx context.Context,
 	recipientID *uuid.UUID,
@@ -796,16 +1149,120 @@ func (r *CampaignRecipient) CancelInActiveCampaigns(
 		"cancelled_at": utils.NowRFC3339UTC(),
 	}
 	AddUpdatedAt(row)
-	subSelect := r.DB.Table(database.CAMPAIGN_TABLE).Select("id")
+	subSelect := r.DB.Table(database.CAMPAIGN_TABLE).Select("id").
+		Where(clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_TABLE, Name: "program_id"}, Value: nil})
 	subSelect = appendWhereCampaignIsActive(subSelect)
 
-	res := r.DB.
+	res := r.DB.WithContext(ctx).
 		Model(&database.CampaignRecipient{}).
 		Where("campaign_id IN (?)", subSelect).
-		Where("recipient_id = ?", recipientID).
+		Where(clause.Eq{Column: clause.Column{Name: "recipient_id"}, Value: recipientID}).
+		Where(clause.Eq{Column: clause.Column{Name: "sent_at"}, Value: nil}).
+		Where(clause.Eq{Column: clause.Column{Name: "cancelled_at"}, Value: nil}).
 		Updates(row)
 	if res.Error != nil {
 		return res.Error
+	}
+	return nil
+}
+
+// GetOpenCampaignGroupsOfGroup returns the campaigns that a recipient group
+// is linked to and that are not closed, scheduled ones included, each with
+// the other groups linked to it. A hidden campaign of a program is never
+// returned, as a program enrolls through its own groups.
+func (r *CampaignRecipient) GetOpenCampaignGroupsOfGroup(
+	ctx context.Context,
+	groupID *uuid.UUID,
+) (map[uuid.UUID][]*uuid.UUID, error) {
+	openCampaigns := r.DB.Session(&gorm.Session{NewDB: true}).
+		Model(&database.Campaign{}).
+		Select("id").
+		Where(clause.Eq{Column: clause.Column{Name: "closed_at"}, Value: nil}).
+		Where(clause.Eq{Column: clause.Column{Name: "program_id"}, Value: nil})
+	linked := r.DB.Session(&gorm.Session{NewDB: true}).
+		Model(&database.CampaignRecipientGroup{}).
+		Select("campaign_id").
+		Where(clause.Eq{Column: clause.Column{Name: "recipient_group_id"}, Value: groupID})
+	rows := []struct {
+		CampaignID       uuid.UUID
+		RecipientGroupID uuid.UUID
+	}{}
+	err := r.DB.WithContext(ctx).
+		Model(&database.CampaignRecipientGroup{}).
+		Select("campaign_id", "recipient_group_id").
+		Where(clause.Expr{SQL: "? IN (?)", Vars: []any{clause.Column{Name: "campaign_id"}, linked}}).
+		Where(clause.Expr{SQL: "? IN (?)", Vars: []any{clause.Column{Name: "campaign_id"}, openCampaigns}}).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
+	out := map[uuid.UUID][]*uuid.UUID{}
+	for i := range rows {
+		others := out[rows[i].CampaignID]
+		if rows[i].RecipientGroupID != *groupID {
+			others = append(others, &rows[i].RecipientGroupID)
+		}
+		out[rows[i].CampaignID] = others
+	}
+	return out, nil
+}
+
+// CancelUnsentOfMembersInCampaign cancels the rows of one campaign that are
+// neither sent nor cancelled for every person that members selects, except a
+// person that one of the keep queries selects. members and keep are queries
+// of recipient ids such as RecipientGroup.MemberIDsQuery, so no id is bound
+// as a value and any number of people fits. The rows are cancelled in paced
+// chunks, see updateCampaignRecipientsPaced. It must not be called inside a
+// transaction or while the program lifecycle lock is held.
+func (r *CampaignRecipient) CancelUnsentOfMembersInCampaign(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	members *gorm.DB,
+	keep []*gorm.DB,
+) error {
+	recipientColumn := clause.Column{Name: "recipient_id"}
+	where := []clause.Expression{
+		clause.Eq{Column: clause.Column{Name: "campaign_id"}, Value: campaignID},
+		clause.Expr{SQL: "? IN (?)", Vars: []any{recipientColumn, members}},
+		clause.Eq{Column: clause.Column{Name: "sent_at"}, Value: nil},
+		clause.Eq{Column: clause.Column{Name: "cancelled_at"}, Value: nil},
+	}
+	for _, k := range keep {
+		where = append(where, clause.Expr{SQL: "? NOT IN (?)", Vars: []any{recipientColumn, k}})
+	}
+	now := utils.NowRFC3339UTC()
+	// a cancelled row leaves the unsent rows, so each read starts at the
+	// first row still unsent. A row sent or cancelled since the read is left.
+	return r.updateCampaignRecipientsPaced(ctx, clause.And(where...), clause.And(
+		notIndexedEq("sent_at"),
+		notIndexedEq("cancelled_at"),
+	), map[string]any{
+		"cancelled_at": now,
+		"updated_at":   now,
+	}, false)
+}
+
+// CancelUnsentOfRecipientsInCampaign cancels the rows of one campaign that are
+// neither sent nor cancelled for the given recipients, except a person that
+// one of the keep queries selects, see CancelUnsentOfMembersInCampaign. The
+// recipients are bound in batches to stay under the bind parameter limit. It
+// must not be called inside a transaction or while the program lifecycle
+// lock is held.
+func (r *CampaignRecipient) CancelUnsentOfRecipientsInCampaign(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	recipientIDs []*uuid.UUID,
+	keep []*gorm.DB,
+) error {
+	for start := 0; start < len(recipientIDs); start += programEnrollmentBatch {
+		end := min(start+programEnrollmentBatch, len(recipientIDs))
+		members := r.DB.Session(&gorm.Session{NewDB: true}).
+			Model(&database.Recipient{}).
+			Select("id").
+			Where(clause.IN{Column: clause.Column{Name: "id"}, Values: uuidValues(recipientIDs[start:end])})
+		if err := r.CancelUnsentOfMembersInCampaign(ctx, campaignID, members, keep); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -832,26 +1289,6 @@ func (r *CampaignRecipient) CancelUnsentInOpenCampaigns(
 		Where("recipient_id = ?", recipientID).
 		Where(fmt.Sprintf("%s IS NULL", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "sent_at"))).
 		Where(fmt.Sprintf("%s IS NULL", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "cancelled_at"))).
-		Updates(row)
-	if res.Error != nil {
-		return res.Error
-	}
-	return nil
-}
-
-// RemoveRecipientIDByCampaignID removes a recipient id from all campaign recipients
-// related to a campaign, this is used when anonymizing a campaign
-func (r *CampaignRecipient) RemoveRecipientIDByCampaignID(
-	ctx context.Context,
-	campaignID *uuid.UUID,
-) error {
-	row := map[string]interface{}{
-		"recipient_id": nil,
-	}
-	AddUpdatedAt(row)
-	res := r.DB.
-		Model(&database.CampaignRecipient{}).
-		Where("campaign_id = ?", campaignID).
 		Updates(row)
 	if res.Error != nil {
 		return res.Error

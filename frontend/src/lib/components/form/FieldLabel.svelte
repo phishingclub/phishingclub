@@ -5,12 +5,16 @@
 	export let optional = false;
 	// id of the label text, for aria-labelledby on controls the label does not wrap
 	export let id = undefined;
+	// a small normal weight label, for a toolbar
+	export let plain = false;
 </script>
 
 <span class="flex flex-wrap items-center gap-y-1 py-2">
 	<span
 		{id}
-		class="font-semibold text-slate-600 dark:text-gray-400 leading-6 transition-colors duration-200"
+		class="{plain
+			? 'font-normal text-sm dark:text-gray-300'
+			: 'font-semibold dark:text-gray-400'} text-slate-600 leading-6 transition-colors duration-200"
 	>
 		<slot />
 	</span>

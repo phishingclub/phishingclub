@@ -178,56 +178,67 @@ const (
 	ROUTE_V1_EMAIL_SEND_TEST  = "/api/v1/email/:id/send-test"
 	ROUTE_V1_EMAIL_CONTENT_ID = "/api/v1/email/:id/content"
 	// campaign
-	ROUTE_V1_CAMPAIGN_TEMPLATE           = "/api/v1/campaign/template"
-	ROUTE_v1_CAMPAIGN_TEMPLATE_ID        = "/api/v1/campaign/template/:id"
-	ROUTE_V1_CAMPAIGN                    = "/api/v1/campaign"
-	ROUTE_V1_CAMPAIGN_CALENDAR           = "/api/v1/campaign/calendar"
-	ROUTE_V1_CAMPAIGN_ACTIVE             = "/api/v1/campaign/active"
-	ROUTE_V1_CAMPAIGN_UPCOMING           = "/api/v1/campaign/upcoming"
-	ROUTE_V1_CAMPAIGN_FINISHED           = "/api/v1/campaign/finished"
-	ROUTE_V1_CAMPAIGN_CLOSE              = "/api/v1/campaign/:id/close"
-	ROUTE_V1_CAMPAIGN_PAUSE              = "/api/v1/campaign/:id/pause"
-	ROUTE_V1_CAMPAIGN_RESUME             = "/api/v1/campaign/:id/resume"
-	ROUTE_V1_CAMPAIGN_EXPORT_EVENTS      = "/api/v1/campaign/:id/export/events"
-	ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS = "/api/v1/campaign/:id/export/submissions"
-	ROUTE_V1_CAMPAIGN_ANONYMIZE          = "/api/v1/campaign/:id/anonymize"
-	ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA     = "/api/v1/campaign/:id/anonymize-data"
-	ROUTE_V1_CAMPAIGN_ID                 = "/api/v1/campaign/:id"
-	ROUTE_V1_CAMPAIGN_NAME               = "/api/v1/campaign/name/:name"
-	ROUTE_V1_CAMPAIGN_RECIPIENTS         = "/api/v1/campaign/:id/recipients"
-	ROUTE_V1_CAMPAIGN_RESULT_STATS       = "/api/v1/campaign/:id/statistics"
-	ROUTE_V1_CAMPAIGN_GROUPED_STATS      = "/api/v1/campaign/:id/grouped-statistics"
-	ROUTE_V1_CAMPAIGN_HAS_GROUP_DATA     = "/api/v1/campaign/:id/has-group-data"
-	ROUTE_V1_CAMPAIGN_EVENTS             = "/api/v1/campaign/:id/events"
-	ROUTE_V1_CAMPAIGN_ALL_EVENTS         = "/api/v1/campaign/events"
-	ROUTE_V1_CAMPAIGN_EVENT_ID           = "/api/v1/campaign/event/:id"
-	ROUTE_V1_CAMPAIGN_EVENT_NAMES        = "/api/v1/campaign/event-types"
-	ROUTE_V1_CAMPAIGN_STATS              = "/api/v1/campaign/statistics"
-	ROUTE_V1_CAMPAIGN_STATS_ID           = "/api/v1/campaign/:id/stats"
-	ROUTE_V1_CAMPAIGN_STATS_ALL          = "/api/v1/campaign/stats/all"
-	ROUTE_V1_CAMPAIGN_STATS_CREATE       = "/api/v1/campaign/stats"
-	ROUTE_V1_CAMPAIGN_STATS_MANUAL       = "/api/v1/campaign/stats/manual"
-	ROUTE_V1_CAMPAIGN_STATS_UPDATE       = "/api/v1/campaign/stats/:id"
-	ROUTE_V1_CAMPAIGN_STATS_DELETE       = "/api/v1/campaign/stats/:id"
-	ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED    = "/api/v1/campaign/:id/upload/reported"
-	ROUTE_V1_CAMPAIGN_DEVICE_CODES       = "/api/v1/campaign/:id/device-codes"
-	ROUTE_V1_CAMPAIGN_REPORT             = "/api/v1/campaign/:id/report"
+	ROUTE_V1_CAMPAIGN_TEMPLATE               = "/api/v1/campaign/template"
+	ROUTE_v1_CAMPAIGN_TEMPLATE_ID            = "/api/v1/campaign/template/:id"
+	ROUTE_V1_CAMPAIGN_TEMPLATE_ALLOW_LISTING = "/api/v1/campaign/template/:id/allow-listing"
+	ROUTE_V1_CAMPAIGN_ALLOW_LISTING          = "/api/v1/campaign/:id/allow-listing"
+	ROUTE_V1_CAMPAIGN                        = "/api/v1/campaign"
+	ROUTE_V1_CAMPAIGN_CALENDAR               = "/api/v1/campaign/calendar"
+	ROUTE_V1_CAMPAIGN_ACTIVE                 = "/api/v1/campaign/active"
+	ROUTE_V1_CAMPAIGN_UPCOMING               = "/api/v1/campaign/upcoming"
+	ROUTE_V1_CAMPAIGN_FINISHED               = "/api/v1/campaign/finished"
+	ROUTE_V1_CAMPAIGN_CLOSE                  = "/api/v1/campaign/:id/close"
+	ROUTE_V1_CAMPAIGN_PAUSE                  = "/api/v1/campaign/:id/pause"
+	ROUTE_V1_CAMPAIGN_RESUME                 = "/api/v1/campaign/:id/resume"
+	ROUTE_V1_CAMPAIGN_EXPORT_EVENTS          = "/api/v1/campaign/:id/export/events"
+	ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS     = "/api/v1/campaign/:id/export/submissions"
+	ROUTE_V1_CAMPAIGN_ANONYMIZE              = "/api/v1/campaign/:id/anonymize"
+	ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA         = "/api/v1/campaign/:id/anonymize-data"
+	ROUTE_V1_CAMPAIGN_ID                     = "/api/v1/campaign/:id"
+	ROUTE_V1_CAMPAIGN_NAME                   = "/api/v1/campaign/name/:name"
+	ROUTE_V1_CAMPAIGN_RECIPIENTS             = "/api/v1/campaign/:id/recipients"
+	ROUTE_V1_CAMPAIGN_RESULT_STATS           = "/api/v1/campaign/:id/statistics"
+	ROUTE_V1_CAMPAIGN_GROUPED_STATS          = "/api/v1/campaign/:id/grouped-statistics"
+	ROUTE_V1_CAMPAIGN_HAS_GROUP_DATA         = "/api/v1/campaign/:id/has-group-data"
+	ROUTE_V1_CAMPAIGN_EVENTS                 = "/api/v1/campaign/:id/events"
+	ROUTE_V1_CAMPAIGN_ALL_EVENTS             = "/api/v1/campaign/events"
+	ROUTE_V1_CAMPAIGN_EVENT_ID               = "/api/v1/campaign/event/:id"
+	ROUTE_V1_CAMPAIGN_EVENT_NAMES            = "/api/v1/campaign/event-types"
+	ROUTE_V1_CAMPAIGN_STATS                  = "/api/v1/campaign/statistics"
+	ROUTE_V1_CAMPAIGN_STATS_ID               = "/api/v1/campaign/:id/stats"
+	ROUTE_V1_CAMPAIGN_STATS_ALL              = "/api/v1/campaign/stats/all"
+	ROUTE_V1_CAMPAIGN_STATS_CREATE           = "/api/v1/campaign/stats"
+	ROUTE_V1_CAMPAIGN_STATS_MANUAL           = "/api/v1/campaign/stats/manual"
+	ROUTE_V1_CAMPAIGN_STATS_UPDATE           = "/api/v1/campaign/stats/:id"
+	ROUTE_V1_CAMPAIGN_STATS_DELETE           = "/api/v1/campaign/stats/:id"
+	ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED        = "/api/v1/campaign/:id/upload/reported"
+	ROUTE_V1_CAMPAIGN_DEVICE_CODES           = "/api/v1/campaign/:id/device-codes"
+	ROUTE_V1_CAMPAIGN_REPORT                 = "/api/v1/campaign/:id/report"
 	// program
-	ROUTE_V1_PROGRAM              = "/api/v1/program"
-	ROUTE_V1_PROGRAM_ID           = "/api/v1/program/:id"
-	ROUTE_V1_PROGRAM_PAUSE        = "/api/v1/program/:id/pause"
-	ROUTE_V1_PROGRAM_RESUME       = "/api/v1/program/:id/resume"
-	ROUTE_V1_PROGRAM_START        = "/api/v1/program/:id/start"
-	ROUTE_V1_PROGRAM_CLONE        = "/api/v1/program/:id/clone"
-	ROUTE_V1_PROGRAM_CLOSE        = "/api/v1/program/:id/close"
-	ROUTE_V1_PROGRAM_RESULTS      = "/api/v1/program/:id/results"
-	ROUTE_V1_PROGRAM_AUDIENCE     = "/api/v1/program/audience"
-	ROUTE_V1_PROGRAM_RESULT_STATS = "/api/v1/program/:id/statistics"
-	ROUTE_V1_PROGRAM_RECIPIENTS   = "/api/v1/program/:id/recipients"
-	ROUTE_V1_PROGRAM_EXPORT       = "/api/v1/program/:id/export.csv"
-	ROUTE_V1_PROGRAM_REPORT       = "/api/v1/program/:id/report.pdf"
-	ROUTE_V1_PROGRAM_REPORTED     = "/api/v1/program/:id/reported"
-	ROUTE_V1_RECIPIENT_PROGRAMS   = "/api/v1/recipient/:id/programs"
+	ROUTE_V1_PROGRAM                 = "/api/v1/program"
+	ROUTE_V1_PROGRAM_ID              = "/api/v1/program/:id"
+	ROUTE_V1_PROGRAM_PAUSE           = "/api/v1/program/:id/pause"
+	ROUTE_V1_PROGRAM_RESUME          = "/api/v1/program/:id/resume"
+	ROUTE_V1_PROGRAM_START           = "/api/v1/program/:id/start"
+	ROUTE_V1_PROGRAM_CLONE           = "/api/v1/program/:id/clone"
+	ROUTE_V1_PROGRAM_CLOSE           = "/api/v1/program/:id/close"
+	ROUTE_V1_PROGRAM_ANONYMIZE       = "/api/v1/program/:id/anonymize"
+	ROUTE_V1_PROGRAM_ANONYMIZE_DATA  = "/api/v1/program/:id/anonymize-data"
+	ROUTE_V1_PROGRAM_RESULTS         = "/api/v1/program/:id/results"
+	ROUTE_V1_PROGRAM_RESULT_GROUPS   = "/api/v1/program/:id/results/groups"
+	ROUTE_V1_PROGRAM_AUDIENCE        = "/api/v1/program/audience"
+	ROUTE_V1_PROGRAM_REPORT_DELIVERY = "/api/v1/program/report-delivery"
+	ROUTE_V1_PROGRAM_STATISTICS      = "/api/v1/program/statistics"
+	ROUTE_V1_PROGRAM_CALENDAR        = "/api/v1/program/calendar"
+	ROUTE_V1_PROGRAM_EVENTS          = "/api/v1/program/:id/events"
+	ROUTE_V1_PROGRAM_TIMELINE        = "/api/v1/program/:id/timeline"
+	ROUTE_V1_PROGRAM_RECIPIENTS      = "/api/v1/program/:id/recipients"
+	ROUTE_V1_PROGRAM_RECIPIENT_PLAN  = "/api/v1/program/:id/recipients/:recipientID/schedule"
+	ROUTE_V1_PROGRAM_EXPORT          = "/api/v1/program/:id/export.csv"
+	ROUTE_V1_PROGRAM_REPORT          = "/api/v1/program/:id/report.pdf"
+	ROUTE_V1_PROGRAM_REPORTED        = "/api/v1/program/:id/reported"
+	ROUTE_V1_PROGRAM_ALLOW_LISTING   = "/api/v1/program/:id/allow-listing"
+	ROUTE_V1_RECIPIENT_PROGRAMS      = "/api/v1/recipient/:id/programs"
 	// report templates
 	ROUTE_V1_REPORT_TEMPLATE          = "/api/v1/report-template"
 	ROUTE_V1_REPORT_TEMPLATE_ID       = "/api/v1/report-template/:id"
@@ -438,9 +449,11 @@ func setupRoutes(
 		POST(ROUTE_V1_COMPANY, middleware.SessionHandler, controllers.Company.Create).
 		POST(ROUTE_V1_COMPANY_ID, middleware.SessionHandler, controllers.Company.ChangeName).
 		GET(ROUTE_V1_COMPANY, middleware.SessionHandler, controllers.Company.GetAll).
-		GET(ROUTE_V1_COMPANY_ID_EXPORT, middleware.SessionHandler, controllers.Company.ExportByCompanyID).
-		GET(ROUTE_V1_COMPANY_ID_EXPORT_SHARED, middleware.SessionHandler, controllers.Company.ExportShared).
+		// company exports, ExtendedTimeout required for the events of large campaigns and programs
+		GET(ROUTE_V1_COMPANY_ID_EXPORT, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.Company.ExportByCompanyID).
+		GET(ROUTE_V1_COMPANY_ID_EXPORT_SHARED, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.Company.ExportShared).
 		GET(ROUTE_V1_COMPANY_ID, middleware.SessionHandler, controllers.Company.GetByID).
+		// a company delete marks the company and finishes in the background
 		DELETE(ROUTE_V1_COMPANY_ID, middleware.SessionHandler, controllers.Company.DeleteByID).
 		// company scim
 		GET(ROUTE_V1_COMPANY_SCIM, middleware.SessionHandler, controllers.CompanyScimConfig.GetByCompanyID).
@@ -510,7 +523,9 @@ func setupRoutes(
 		GET(ROUTE_V1_RECIPIENT_ID_STATS, middleware.SessionHandler, controllers.Recipient.GetStatsByID).
 		POST(ROUTE_V1_RECIPIENT, middleware.SessionHandler, controllers.Recipient.Create).
 		POST(ROUTE_V1_RECIPIENT_IMPORT, middleware.SessionHandler, controllers.Recipient.Import).
-		GET(ROUTE_V1_RECIPIENT_EXPORT, middleware.SessionHandler, controllers.Recipient.Export).
+		// the export reads every campaign and program event of the recipient,
+		// ExtendedTimeout required for a recipient with a long history
+		GET(ROUTE_V1_RECIPIENT_EXPORT, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.Recipient.Export).
 		PATCH(ROUTE_V1_RECIPIENT_ID, middleware.SessionHandler, controllers.Recipient.UpdateByID).
 		DELETE(ROUTE_V1_RECIPIENT_ID, middleware.SessionHandler, controllers.Recipient.DeleteByID).
 		GET(ROUTE_V1_RECIPIENT_REPEAT_OFFENDERS, middleware.SessionHandler, controllers.Recipient.GetRepeatOffenderCount).
@@ -525,6 +540,7 @@ func setupRoutes(
 		POST(ROUTE_V1_RECIPIENT_GROUP, middleware.SessionHandler, controllers.RecipientGroup.Create).
 		PATCH(ROUTE_V1_RECIPIENT_GROUP_ID, middleware.SessionHandler, controllers.RecipientGroup.UpdateByID).
 		PUT(ROUTE_V1_RECIPIENT_GROUP_ID_IMPORT, middleware.SessionHandler, controllers.RecipientGroup.Import).
+		// a group delete marks the group and finishes in the background
 		DELETE(ROUTE_V1_RECIPIENT_GROUP_ID, middleware.SessionHandler, controllers.RecipientGroup.DeleteByID).
 		// page
 		GET(ROUTE_V1_PAGE, middleware.SessionHandler, controllers.Page.GetAll).
@@ -597,6 +613,7 @@ func setupRoutes(
 		// campaign templates
 		GET(ROUTE_V1_CAMPAIGN_TEMPLATE, middleware.SessionHandler, controllers.CampaignTemplate.GetAll).
 		GET(ROUTE_v1_CAMPAIGN_TEMPLATE_ID, middleware.SessionHandler, controllers.CampaignTemplate.GetByID).
+		GET(ROUTE_V1_CAMPAIGN_TEMPLATE_ALLOW_LISTING, middleware.SessionHandler, controllers.AllowListing.GetByTemplateID).
 		// TODO PATCH
 		POST(ROUTE_V1_CAMPAIGN_TEMPLATE, middleware.SessionHandler, controllers.CampaignTemplate.Create).
 		POST(ROUTE_v1_CAMPAIGN_TEMPLATE_ID, middleware.SessionHandler, controllers.CampaignTemplate.UpdateByID).
@@ -622,6 +639,7 @@ func setupRoutes(
 		PUT(ROUTE_V1_CAMPAIGN_STATS_UPDATE, middleware.SessionHandler, controllers.Campaign.UpdateCampaignStats).
 		DELETE(ROUTE_V1_CAMPAIGN_STATS_DELETE, middleware.SessionHandler, controllers.Campaign.DeleteCampaignStatsManual).
 		GET(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.GetByID).
+		GET(ROUTE_V1_CAMPAIGN_ALLOW_LISTING, middleware.SessionHandler, controllers.AllowListing.GetByCampaignID).
 		GET(ROUTE_V1_CAMPAIGN_NAME, middleware.SessionHandler, controllers.Campaign.GetByName).
 		POST(ROUTE_V1_CAMPAIGN, middleware.SessionHandler, controllers.Campaign.Create).
 		// TODO PATCH
@@ -631,29 +649,49 @@ func setupRoutes(
 		POST(ROUTE_V1_CAMPAIGN_RESUME, middleware.SessionHandler, controllers.Campaign.ResumeCampaignByID).
 		GET(ROUTE_V1_CAMPAIGN_EXPORT_EVENTS, middleware.SessionHandler, controllers.Campaign.ExportEventsAsCSV).
 		GET(ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS, middleware.SessionHandler, controllers.Campaign.ExportSubmissionsAsCSV).
-		POST(ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED, middleware.SessionHandler, controllers.Campaign.UploadReportedCSV).
-		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE, middleware.SessionHandler, controllers.Campaign.AnonymizeByID).
+		// a reported CSV of a large campaign matches many rows, ExtendedTimeout required
+		POST(ROUTE_V1_CAMPAIGN_UPLOAD_REPORTED, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.Campaign.UploadReportedCSV).
+		// anonymizing writes every recipient of the campaign, ExtendedTimeout
+		// required for large campaigns
+		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.Campaign.AnonymizeByID).
 		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA, middleware.SessionHandler, controllers.Campaign.AnonymizeDataByID).
 		DELETE(ROUTE_V1_CAMPAIGN_DEVICE_CODES, middleware.SessionHandler, controllers.Campaign.DeleteDeviceCodesByCampaignID).
 		DELETE(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.DeleteByID).
 		// programs
 		GET(ROUTE_V1_PROGRAM, middleware.SessionHandler, controllers.Program.GetAll).
-		GET(ROUTE_V1_PROGRAM_RESULT_STATS, middleware.SessionHandler, controllers.Program.GetResultStats).
+		GET(ROUTE_V1_PROGRAM_EVENTS, middleware.SessionHandler, controllers.Program.GetEvents).
+		GET(ROUTE_V1_PROGRAM_TIMELINE, middleware.SessionHandler, controllers.Program.GetTimeline).
 		GET(ROUTE_V1_PROGRAM_RESULTS, middleware.SessionHandler, controllers.Program.GetResults).
+		GET(ROUTE_V1_PROGRAM_RESULT_GROUPS, middleware.SessionHandler, controllers.Program.GetResultGroups).
 		GET(ROUTE_V1_PROGRAM_RECIPIENTS, middleware.SessionHandler, controllers.Program.GetRecipients).
-		GET(ROUTE_V1_PROGRAM_EXPORT, middleware.SessionHandler, controllers.Program.ExportCSV).
-		GET(ROUTE_V1_PROGRAM_REPORT, middleware.SessionHandler, controllers.Program.ReportPDF).
-		POST(ROUTE_V1_PROGRAM_REPORTED, middleware.SessionHandler, controllers.Program.UploadReportedCSV).
+		GET(ROUTE_V1_PROGRAM_RECIPIENT_PLAN, middleware.SessionHandler, controllers.Program.GetRecipientSchedule).
+		// the export of a large program reads every send, ExtendedTimeout required
+		GET(ROUTE_V1_PROGRAM_EXPORT, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.Program.ExportCSV).
+		// program PDF report, ExtendedTimeout required for headless browser rendering
+		GET(ROUTE_V1_PROGRAM_REPORT, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.Program.ReportPDF).
+		// a reported CSV of a large program matches many sends, ExtendedTimeout required
+		POST(ROUTE_V1_PROGRAM_REPORTED, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.Program.UploadReportedCSV).
 		GET(ROUTE_V1_RECIPIENT_PROGRAMS, middleware.SessionHandler, controllers.Program.GetRecipientPrograms).
+		GET(ROUTE_V1_PROGRAM_REPORT_DELIVERY, middleware.SessionHandler, controllers.Program.GetReportDeliveryStatus).
+		GET(ROUTE_V1_PROGRAM_STATISTICS, middleware.SessionHandler, controllers.Program.GetStats).
+		GET(ROUTE_V1_PROGRAM_CALENDAR, middleware.SessionHandler, controllers.Program.GetCalendar).
 		GET(ROUTE_V1_PROGRAM_ID, middleware.SessionHandler, controllers.Program.GetByID).
-		POST(ROUTE_V1_PROGRAM, middleware.SessionHandler, controllers.Program.Create).
+		GET(ROUTE_V1_PROGRAM_ALLOW_LISTING, middleware.SessionHandler, controllers.AllowListing.GetByProgramID).
+		// create enrolls the audience and update plans the sends again,
+		// ExtendedTimeout required for large programs
+		POST(ROUTE_V1_PROGRAM, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.Program.Create).
 		POST(ROUTE_V1_PROGRAM_AUDIENCE, middleware.SessionHandler, controllers.Program.CountAudience).
-		POST(ROUTE_V1_PROGRAM_ID, middleware.SessionHandler, controllers.Program.UpdateByID).
+		POST(ROUTE_V1_PROGRAM_ID, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.Program.UpdateByID).
 		POST(ROUTE_V1_PROGRAM_PAUSE, middleware.SessionHandler, controllers.Program.Pause).
+		// resume, start and close check and mark the program, the work that
+		// grows with the program runs in the background
 		POST(ROUTE_V1_PROGRAM_RESUME, middleware.SessionHandler, controllers.Program.Resume).
 		POST(ROUTE_V1_PROGRAM_START, middleware.SessionHandler, controllers.Program.Start).
 		POST(ROUTE_V1_PROGRAM_CLONE, middleware.SessionHandler, controllers.Program.Clone).
 		POST(ROUTE_V1_PROGRAM_CLOSE, middleware.SessionHandler, controllers.Program.Close).
+		// anonymize checks the program and runs in the background
+		POST(ROUTE_V1_PROGRAM_ANONYMIZE, middleware.SessionHandler, controllers.Program.Anonymize).
+		POST(ROUTE_V1_PROGRAM_ANONYMIZE_DATA, middleware.SessionHandler, controllers.Program.AnonymizeData).
 		DELETE(ROUTE_V1_PROGRAM_ID, middleware.SessionHandler, controllers.Program.DeleteByID).
 		// campaign PDF report, ExtendedTimeout required for headless browser rendering
 		GET(ROUTE_V1_CAMPAIGN_REPORT, middleware.ExtendedTimeout(3*time.Minute), middleware.SessionHandler, controllers.ReportTemplate.GeneratePDFByCampaignID).

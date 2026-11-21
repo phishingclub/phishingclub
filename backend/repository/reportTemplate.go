@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
@@ -11,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var reportTemplateAllowedColumns = assignTableToColumns(database.REPORT_TEMPLATE_TABLE, []string{
@@ -70,13 +72,10 @@ func (r *ReportTemplate) GetAll(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
-	if res := db.Find(&rows); res.Error != nil {
+	if res := withPeek(db, options.QueryArgs).Find(&rows); res.Error != nil {
 		return result, res.Error
 	}
-	hasNextPage, err := useHasNextPage(db, database.REPORT_TEMPLATE_TABLE, options.QueryArgs, reportTemplateAllowedColumns...)
-	if err != nil {
-		return result, errs.Wrap(err)
-	}
+	hasNextPage := trimPeek(&rows, options.QueryArgs)
 	result.HasNextPage = hasNextPage
 	for _, row := range rows {
 		tmpl, err := ToReportTemplate(&row)
@@ -105,18 +104,42 @@ func (r *ReportTemplate) GetByID(
 	return ToReportTemplate(&row)
 }
 
-// GetForCampaign resolves the report template for a given company: company-specific first,
-// then global (NULL company_id). Returns gorm.ErrRecordNotFound if neither exists.
+// GetForCampaign resolves the campaign report template of a kind for a company:
+// company specific first, then global (NULL company_id). Returns
+// gorm.ErrRecordNotFound if neither exists.
 func (r *ReportTemplate) GetForCampaign(
 	ctx context.Context,
 	companyID *uuid.UUID,
 	isTraining bool,
 ) (*model.ReportTemplate, error) {
-	trainingCol := TableColumn(database.REPORT_TEMPLATE_TABLE, "is_training")
+	return r.getForKind(ctx, companyID, isTraining, false)
+}
+
+// GetForProgram resolves the program report template for a company: company
+// specific first, then global. Returns gorm.ErrRecordNotFound if neither exists.
+func (r *ReportTemplate) GetForProgram(
+	ctx context.Context,
+	companyID *uuid.UUID,
+) (*model.ReportTemplate, error) {
+	return r.getForKind(ctx, companyID, false, true)
+}
+
+// getForKind reads the template of a kind, the company one before the global one
+func (r *ReportTemplate) getForKind(
+	ctx context.Context,
+	companyID *uuid.UUID,
+	isTraining bool,
+	isProgram bool,
+) (*model.ReportTemplate, error) {
+	kind := func(db *gorm.DB) *gorm.DB {
+		return db.
+			Where(clause.Eq{Column: clause.Column{Table: database.REPORT_TEMPLATE_TABLE, Name: "is_training"}, Value: isTraining}).
+			Where(clause.Eq{Column: clause.Column{Table: database.REPORT_TEMPLATE_TABLE, Name: "is_program"}, Value: isProgram})
+	}
 	var row database.ReportTemplate
 	if companyID != nil {
-		res := r.DB.
-			Where(TableColumn(database.REPORT_TEMPLATE_TABLE, "company_id")+" = ? AND "+trainingCol+" = ?", companyID, isTraining).
+		res := kind(r.DB.WithContext(ctx)).
+			Where(clause.Eq{Column: clause.Column{Table: database.REPORT_TEMPLATE_TABLE, Name: "company_id"}, Value: companyID}).
 			First(&row)
 		if res.Error == nil {
 			return ToReportTemplate(&row)
@@ -125,8 +148,7 @@ func (r *ReportTemplate) GetForCampaign(
 			return nil, res.Error
 		}
 	}
-	res := whereCompanyIsNull(r.DB, database.REPORT_TEMPLATE_TABLE).
-		Where(trainingCol+" = ?", isTraining).
+	res := kind(whereCompanyIsNull(r.DB.WithContext(ctx), database.REPORT_TEMPLATE_TABLE)).
 		First(&row)
 	if res.Error != nil {
 		return nil, res.Error
@@ -183,5 +205,41 @@ func ToReportTemplate(row *database.ReportTemplate) (*model.ReportTemplate, erro
 		CompanyID:  companyID,
 		Content:    content,
 		IsTraining: nullable.NewNullableWithValue(row.IsTraining),
+		IsProgram:  nullable.NewNullableWithValue(row.IsProgram),
 	}, nil
+}
+
+// UpgradeGlobalProgramDefault replaces the content of each global program
+// report template whose content hash is in earlier with content. An edited
+// global template and every company template are left as they are.
+func (r *ReportTemplate) UpgradeGlobalProgramDefault(
+	ctx context.Context,
+	earlier map[string]bool,
+	hash func(string) string,
+	content string,
+) error {
+	var rows []database.ReportTemplate
+	res := r.DB.
+		WithContext(ctx).
+		Model(&database.ReportTemplate{}).
+		Where(clause.Eq{Column: clause.Column{Name: "company_id"}, Value: nil}).
+		Where(clause.Eq{Column: clause.Column{Name: "is_program"}, Value: true}).
+		Find(&rows)
+	if res.Error != nil {
+		return errs.Wrap(res.Error)
+	}
+	for _, row := range rows {
+		if row.ID == nil || !earlier[hash(row.Content)] {
+			continue
+		}
+		res = r.DB.
+			WithContext(ctx).
+			Model(&database.ReportTemplate{}).
+			Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: row.ID}).
+			Updates(map[string]any{"content": content, "updated_at": time.Now().UTC()})
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+	}
+	return nil
 }

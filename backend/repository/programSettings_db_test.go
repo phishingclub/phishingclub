@@ -97,13 +97,14 @@ func TestApplyCampaignSettingsAndOpenCampaigns(t *testing.T) {
 	if len(gotIDs) != 1 || len(gotHooks) != 1 || gotHooks[0].GetWebhookEventsOrDefault() != 4 {
 		t.Fatalf("join rows wrong: %d %d", len(gotIDs), len(gotHooks))
 	}
-	if err := repo.RemoveAllowDenyFromPrograms(ctx, filter); err != nil {
+	if err := repo.RemoveAllowDenyFromProgramFilters(ctx, filter); err != nil {
 		t.Fatal(err)
 	}
 	if gotIDs, _ = repo.GetAllowDenyIDs(ctx, programID); len(gotIDs) != 0 {
 		t.Fatal("deleted filter must be removed from programs")
 	}
-	if err := repo.DeleteSettings(ctx, programID); err != nil {
+	// deleting the program deletes its settings in the same transaction
+	if err := repo.DeleteByID(ctx, programID); err != nil {
 		t.Fatal(err)
 	}
 	if gotHooks, _ = repo.GetWebhooks(ctx, programID); len(gotHooks) != 0 {

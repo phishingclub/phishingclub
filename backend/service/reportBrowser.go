@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"github.com/phishingclub/phishingclub/remotebrowser"
 	"go.uber.org/zap"
@@ -47,6 +48,12 @@ func (b *reportBrowser) renderPDF(htmlContent string) ([]byte, error) {
 		}
 	}
 	pdf, err := b.session.RenderPDF(htmlContent)
+	// a render that ran out of time may have left the browser stuck, it is
+	// ended so its slot is free for the next report, and not tried again
+	if errors.Is(err, context.DeadlineExceeded) {
+		b.close()
+		return nil, err
+	}
 	if err == nil || !reused || b.ctx.Err() != nil {
 		return pdf, err
 	}
@@ -55,7 +62,11 @@ func (b *reportBrowser) renderPDF(htmlContent string) ([]byte, error) {
 	if err := b.launch(); err != nil {
 		return nil, err
 	}
-	return b.session.RenderPDF(htmlContent)
+	pdf, err = b.session.RenderPDF(htmlContent)
+	if errors.Is(err, context.DeadlineExceeded) {
+		b.close()
+	}
+	return pdf, err
 }
 
 func (b *reportBrowser) launch() error {

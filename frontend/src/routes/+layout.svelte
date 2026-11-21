@@ -19,6 +19,7 @@
 	import { hideIsLoading, showIsLoading, setNavigationLoading } from '$lib/store/loading';
 	import Header from '$lib/components/header/Header.svelte';
 	import { setupTheme, setupOSThemeListener } from '$lib/theme.js';
+	import { startStableSelectWidth } from '$lib/utils/selectWidth.js';
 	import { displayMode } from '$lib/store/displayMode';
 	import { toggleVimMode } from '$lib/store/vimMode.js';
 	import { resetInstalledResources } from '$lib/store/installedResources.js';
@@ -72,6 +73,9 @@
 
 	// show loading spinner during navigation
 	$: setNavigationLoading(!!$navigating);
+
+	// styled selects keep the width of their widest option
+	onMount(() => startStableSelectWidth());
 
 	onMount(() => {
 		// initialize theme system

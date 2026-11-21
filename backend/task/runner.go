@@ -28,15 +28,19 @@ const REPORT_INBOX_INTERVAL = 10 * time.Second
 // Daemon is for running tasks in the background
 // ex: sending emails etc..
 type Runner struct {
-	CampaignService     *service.Campaign
-	ProgramService      *service.Program
-	UpdateService       *service.Update
-	MicrosoftDeviceCode *service.MicrosoftDeviceCode
-	OptionService       *service.Option
-	RecipientService    *service.Recipient
-	ScimService         *service.Scim
-	ReportInboxService  *service.ReportInbox
-	Logger              *zap.SugaredLogger
+	CampaignService *service.Campaign
+	ProgramService  *service.Program
+	// CompanyService and RecipientGroupService finish the deletes that run in
+	// the background
+	CompanyService        *service.Company
+	RecipientGroupService *service.RecipientGroup
+	UpdateService         *service.Update
+	MicrosoftDeviceCode   *service.MicrosoftDeviceCode
+	OptionService         *service.Option
+	RecipientService      *service.Recipient
+	ScimService           *service.Scim
+	ReportInboxService    *service.ReportInbox
+	Logger                *zap.SugaredLogger
 }
 
 // Run starts the task runner
@@ -121,6 +125,13 @@ func (d *Runner) runTask(
 ) {
 	d.Logger.Debugw("task runner started", "name", name)
 	now := time.Now()
+	// a panic in one task is logged and the tick goes on, so one bad row can
+	// not stop the tasks after it, such as sending messages
+	defer func() {
+		if r := recover(); r != nil {
+			d.Logger.Errorw("task runner panicked", "name", name, "error", r, "stack", string(debug.Stack()))
+		}
+	}()
 	err := errs.Wrap(fn())
 	if err != nil {
 		d.Logger.Errorw("task runner failed", "name", name, "error", err)
@@ -137,6 +148,9 @@ func (d *Runner) Process(
 	ctx context.Context,
 	session *model.Session,
 ) {
+	// the program report pass runs in the background past this tick, so it gets
+	// the runner context and stops when the runner stops
+	runnerCtx := ctx
 	ctx, cancel := context.WithTimeoutCause(
 		ctx,
 		MAX_PROCESSING_TICK_TIME,
@@ -179,6 +193,36 @@ func (d *Runner) Process(
 			session,
 		)
 		return errs.Wrap(err)
+	})
+	// run the anonymize dates of programs that passed and finish an
+	// Anonymize All that stopped half way. The pass runs in the background, so
+	// a large program never holds up the tick
+	d.runTask("anonymize programs", func() error {
+		if d.ProgramService == nil {
+			return nil
+		}
+		return d.ProgramService.AnonymizeDueInBackground(runnerCtx, session)
+	})
+	// finish the company and recipient group deletes that began, for example
+	// one stopped by a restart. The passes run in the background
+	d.runTask("finish deletes", func() error {
+		if d.CompanyService != nil {
+			if err := d.CompanyService.FinishDeletesInBackground(runnerCtx, session); err != nil {
+				return errs.Wrap(err)
+			}
+		}
+		if d.RecipientGroupService != nil {
+			return d.RecipientGroupService.FinishDeletesInBackground(runnerCtx, session)
+		}
+		return nil
+	})
+	// email the automated program reports that are due. The pass runs in the
+	// background, so a slow PDF render never holds up sending
+	d.runTask("send program reports", func() error {
+		if d.ProgramService == nil {
+			return nil
+		}
+		return d.ProgramService.SendDueReports(runnerCtx, session)
 	})
 	// poll pending device codes and capture any successful authentications
 	d.runTask("poll device codes", func() error {

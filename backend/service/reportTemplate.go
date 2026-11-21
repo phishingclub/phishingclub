@@ -15,6 +15,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/remotebrowser"
 	"github.com/phishingclub/phishingclub/repository"
+	"github.com/phishingclub/phishingclub/validate"
 	"gorm.io/gorm"
 )
 
@@ -25,6 +26,8 @@ type ReportTemplate struct {
 	// RemoteBrowserExecPath is the browser binary report previews render
 	// with, found automatically when empty
 	RemoteBrowserExecPath string
+	// CompanyRepository refuses new data in a company that is being deleted
+	CompanyRepository *repository.Company
 }
 
 // Create creates a report template
@@ -48,6 +51,11 @@ func (s *ReportTemplate) Create(
 		s.Logger.Errorw("failed to validate report template", "error", err)
 		return nil, errs.Wrap(err)
 	}
+	unlockCompany, err := refuseDeletingCompany(ctx, s.CompanyRepository, optionalID(tmpl.CompanyID))
+	if err != nil {
+		return nil, err
+	}
+	defer unlockCompany()
 	id, err := s.ReportTemplateRepository.Insert(ctx, tmpl)
 	if err != nil {
 		s.Logger.Errorw("failed to insert report template", "error", err)
@@ -137,6 +145,18 @@ func (s *ReportTemplate) UpdateByID(
 	// the company of a report template is set on create and never changed by an
 	// update, it decides which company the template applies to
 	tmpl.CompanyID = nullable.Nullable[uuid.UUID]{}
+	// a program template stays a program template, and a campaign template
+	// never becomes one
+	tmpl.IsProgram = nullable.Nullable[bool]{}
+	if tmpl.IsTrainingOn() {
+		existing, err := s.ReportTemplateRepository.GetByID(ctx, id, &repository.ReportTemplateOption{})
+		if err != nil {
+			return errs.Wrap(err)
+		}
+		if existing.IsProgramOn() {
+			return validate.WrapErrorWithField(errors.New("a program report template cannot be a training template"), "isTraining")
+		}
+	}
 	if err := s.ReportTemplateRepository.UpdateByID(ctx, id, tmpl); err != nil {
 		s.Logger.Errorw("failed to update report template", "error", err)
 		return errs.Wrap(err)
@@ -194,9 +214,8 @@ func (s *ReportTemplate) DeleteByID(
 	return nil
 }
 
-// GetDefaultContent returns the built in default report template, the
-// training one when isTraining is set.
-func (s *ReportTemplate) GetDefaultContent(session *model.Session, isTraining bool) (string, error) {
+// GetDefaultContent returns the built in default report template of a kind
+func (s *ReportTemplate) GetDefaultContent(session *model.Session, kind string) (string, error) {
 	ae := NewAuditEvent("ReportTemplate.GetDefaultContent", session)
 	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
 	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
@@ -208,7 +227,19 @@ func (s *ReportTemplate) GetDefaultContent(session *model.Session, isTraining bo
 		return "", errs.ErrAuthorizationFailed
 	}
 	// no audit log on read
-	return defaultReportContent(isTraining), nil
+	return defaultReportContentForKind(kind), nil
+}
+
+// defaultReportContentForKind returns the built in default report template of
+// a kind, the simulation one for an unknown kind
+func defaultReportContentForKind(kind string) string {
+	switch kind {
+	case model.ReportKindProgram:
+		return embedded.DefaultProgramReportHTML
+	case model.ReportKindTraining:
+		return embedded.DefaultTrainingReportHTML
+	}
+	return embedded.DefaultReportHTML
 }
 
 func defaultReportContent(isTraining bool) string {
