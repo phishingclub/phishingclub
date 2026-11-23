@@ -560,8 +560,9 @@ func (r *CampaignRecipient) HasCustomLureCodesByCampaignID(
 // at campaign close to cancel only sends that never started; recipients that were
 // attempted (sent, failed, or still in flight) are left untouched so their
 // existing state is not overwritten.
-// if limit is larger than 0 it will limit the number of results
-// if campaignID is not nil, it will filter by that campaign
+// if limit is larger than 0 it will limit the number of results.
+// campaignID is required: a nil id is refused, as close cancels every row
+// returned and must never reach the rows of other campaigns.
 func (r *CampaignRecipient) GetUnsendRecipients(
 	ctx context.Context,
 	campaignID *uuid.UUID,
@@ -569,6 +570,9 @@ func (r *CampaignRecipient) GetUnsendRecipients(
 	options *CampaignRecipientOption,
 ) ([]*model.CampaignRecipient, error) {
 	recps := []*model.CampaignRecipient{}
+	if campaignID == nil {
+		return recps, errs.Wrap(errNilCampaignID)
+	}
 	db := r.preload(r.DB, options)
 	db, err := useQuery(db, database.CAMPAIGN_RECIPIENT_TABLE_NAME, options.QueryArgs)
 	if err != nil {
@@ -583,12 +587,10 @@ func (r *CampaignRecipient) GetUnsendRecipients(
 			TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "last_attempt_at"),
 		),
 	)
-	if campaignID != nil {
-		q = q.Where(
-			fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "campaign_id")),
-			campaignID,
-		)
-	}
+	q = q.Where(
+		fmt.Sprintf("%s = ?", TableColumn(database.CAMPAIGN_RECIPIENT_TABLE_NAME, "campaign_id")),
+		campaignID,
+	)
 	if limit > 0 {
 		q = q.Limit(limit)
 	}

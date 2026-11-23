@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -3113,6 +3114,14 @@ func (r *Campaign) AnonymizeCampaignEventData(
 	return nil
 }
 
+// errNilCampaignID and errNilRecipientID refuse a write keyed by a nil id. A
+// nil id in a clause.Eq becomes IS NULL and a skipped filter matches every
+// row, both of which would reach rows outside the campaign or recipient.
+var (
+	errNilCampaignID  = errors.New("campaign id is nil")
+	errNilRecipientID = errors.New("recipient id is nil")
+)
+
 // AnonymizeCampaignEventsByRecipientID moves the events of a recipient onto a
 // pseudonym and removes their submitted data, IP address, user agent and
 // browser metadata. Each event takes the pseudonym of the recipient's send in
@@ -3123,6 +3132,14 @@ func (r *Campaign) AnonymizeCampaignEventsByRecipientID(
 	recipientID *uuid.UUID,
 	anonymizedID *uuid.UUID,
 ) error {
+	// a nil id would match recipient_id IS NULL, which is every campaign
+	// event and every already anonymized event of every campaign
+	if recipientID == nil {
+		return errs.Wrap(errNilRecipientID)
+	}
+	if anonymizedID == nil {
+		return errs.Wrap(errors.New("anonymized id is nil"))
+	}
 	sendPseudonym := r.DB.Session(&gorm.Session{NewDB: true}).
 		Model(&database.CampaignRecipient{}).
 		Select("?", clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "anonymized_id"}).
