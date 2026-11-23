@@ -286,7 +286,7 @@
 	class:w-full={!inline && size !== 'small'}
 	class:sm:w-auto={!inline && size === 'normal' && width !== 'full'}
 >
-	<label class="flex flex-col relative" class:pr-2={inline}>
+	<label for={comboboxId} class="flex flex-col relative" class:pr-2={inline}>
 		<FieldLabel id={labelId} {toolTipText} {optional}><slot /></FieldLabel>
 	</label>
 	<div class="relative">

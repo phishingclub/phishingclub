@@ -1,3 +1,7 @@
+<script context="module">
+	let fieldCounter = 0;
+</script>
+
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
 	import FieldLabel from './form/FieldLabel.svelte';
@@ -14,6 +18,10 @@
 	export let minLength = null;
 	export let maxLength = null;
 	export let id = null;
+	// the label points at the field, else a click on the label text goes to
+	// the first button inside it, the ToolTip
+	const fallbackId = `password-field-${++fieldCounter}`;
+	$: inputId = id ?? fallbackId;
 	/** @type {'medium'|'large'|'full'} */
 	export let width = 'medium';
 
@@ -49,6 +57,7 @@
 </script>
 
 <label
+	for={inputId}
 	class="flex flex-col py-2 w-full"
 	class:sm:w-60={width === 'medium'}
 	class:sm:w-80={width === 'large'}
@@ -57,7 +66,7 @@
 	<div class="relative flex items-center">
 		{#if viewPassword}
 			<input
-				{id}
+				id={inputId}
 				type="password"
 				bind:this={bindTo}
 				bind:value
@@ -71,7 +80,7 @@
 			/>
 		{:else}
 			<input
-				{id}
+				id={inputId}
 				on:keyup
 				type="text"
 				bind:this={bindTo}

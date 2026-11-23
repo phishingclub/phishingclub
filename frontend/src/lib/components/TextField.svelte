@@ -1,3 +1,7 @@
+<script context="module">
+	let fieldCounter = 0;
+</script>
+
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
 	import FieldLabel from './form/FieldLabel.svelte';
@@ -22,6 +26,10 @@
 	export let width = 'medium';
 	export let pattern = null;
 	export let id = null;
+	// the label points at the field, else a click on the label text goes to
+	// the first button inside it, the ToolTip
+	const fallbackId = `text-field-${++fieldCounter}`;
+	$: inputId = id ?? fallbackId;
 	export let onBlur = () => {};
 	export let error = false;
 	// id of the help or error text that describes the field
@@ -61,6 +69,7 @@
 </script>
 
 <label
+	for={inputId}
 	class="flex flex-col py-2"
 	class:w-full={width !== 'small'}
 	class:sm:w-auto={width === 'medium' || width === 'large'}
@@ -68,7 +77,7 @@
 	<FieldLabel {toolTipText} {optional}><slot /></FieldLabel>
 	<input
 		{...{ type: inputType }}
-		{id}
+		id={inputId}
 		aria-invalid={error ? 'true' : undefined}
 		aria-describedby={ariaDescribedBy || undefined}
 		bind:this={bindTo}

@@ -45,7 +45,7 @@
 	});
 </script>
 
-<label class="flex flex-col py-2 w-full" class:sm:w-60={!fullWidth}>
+<label for={id} class="flex flex-col py-2 w-full" class:sm:w-60={!fullWidth}>
 	{#if $$slots.default || toolTipText.length > 0 || optional === true}
 		<FieldLabel {toolTipText} {optional}><slot /></FieldLabel>
 	{/if}

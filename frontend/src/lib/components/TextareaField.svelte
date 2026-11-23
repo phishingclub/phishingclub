@@ -1,3 +1,7 @@
+<script context="module">
+	let fieldCounter = 0;
+</script>
+
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
 	import FieldLabel from './form/FieldLabel.svelte';
@@ -16,6 +20,10 @@
 	export let minLength = null;
 	export let maxLength = null;
 	export let id = null;
+	// the label points at the field, else a click on the label text goes to
+	// the first button inside it, the ToolTip
+	const fallbackId = `textarea-field-${++fieldCounter}`;
+	$: inputId = id ?? fallbackId;
 	export let fullWidth = false;
 	export let height = 'small';
 
@@ -49,10 +57,10 @@
 	});
 </script>
 
-<label class="flex flex-col py-2 w-full" class:sm:w-60={!fullWidth}>
+<label for={inputId} class="flex flex-col py-2 w-full" class:sm:w-60={!fullWidth}>
 	<FieldLabel {toolTipText} {optional}><slot /></FieldLabel>
 	<textarea
-		{id}
+		id={inputId}
 		bind:this={bindTo}
 		bind:value
 		{required}

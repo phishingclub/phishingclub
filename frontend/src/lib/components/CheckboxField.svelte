@@ -1,3 +1,7 @@
+<script context="module">
+	let checkboxCounter = 0;
+</script>
+
 <script>
 	import { afterUpdate, onDestroy, onMount } from 'svelte';
 	import FieldLabel from './form/FieldLabel.svelte';
@@ -12,6 +16,11 @@
 	export let disabled = false;
 	// a small normal weight label, for a toolbar
 	export let plain = false;
+
+	// the label points at the checkbox, else a click on the label text goes to
+	// the first button inside it, the ToolTip, and the box never toggles
+	const fallbackId = `checkbox-field-${++checkboxCounter}`;
+	$: inputId = id ?? fallbackId;
 
 	let parentForm = null;
 	let parentFormResetListener = null;
@@ -43,6 +52,7 @@
 </script>
 
 <label
+	for={inputId}
 	class="flex py-2 w-full sm:w-60"
 	class:flex-col={!inline}
 	class:flex-row={inline}
@@ -58,7 +68,7 @@
 			class:cursor-not-allowed={disabled}
 		>
 			<input
-				{id}
+				id={inputId}
 				type="checkbox"
 				class="peer sr-only"
 				bind:this={bindTo}
