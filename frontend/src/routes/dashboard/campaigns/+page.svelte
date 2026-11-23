@@ -16,7 +16,7 @@
 	import DashboardNav from '$lib/components/DashboardNav.svelte';
 	import DashboardToolbar from '$lib/components/DashboardToolbar.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
-	import DashboardTiles from '$lib/components/DashboardTiles.svelte';
+	import StatTiles from '$lib/components/StatTiles.svelte';
 	import { dashboardIncludeTest } from '$lib/store/dashboardIncludeTest.js';
 	import { toEvent } from '$lib/utils/events';
 	import { shortRelative } from '$lib/utils/shortRelative.js';
@@ -73,7 +73,6 @@
 			title: 'Active',
 			tip: 'Started and not closed, paused campaigns left out.',
 			value: stats?.active ?? 0,
-			border: 'border-campaign-active',
 			color: 'text-campaign-active',
 			icon: 'active',
 			href: '#active'
@@ -82,7 +81,6 @@
 			key: 'scheduled',
 			title: 'Scheduled',
 			value: stats?.upcoming ?? 0,
-			border: 'border-campaign-scheduled',
 			color: 'text-campaign-scheduled',
 			icon: 'scheduled',
 			href: '#scheduled'
@@ -91,7 +89,6 @@
 			key: 'completed',
 			title: 'Completed',
 			value: stats?.finished ?? 0,
-			border: 'border-campaign-completed',
 			color: 'text-campaign-completed',
 			icon: 'completed',
 			href: '#completed'
@@ -101,7 +98,6 @@
 			title: 'Paused',
 			tip: 'Sending is paused. The campaigns are marked Paused in the Active campaigns list.',
 			value: stats?.paused ?? 0,
-			border: 'border-closed',
 			color: 'text-closed',
 			icon: 'paused',
 			href: '#active'
@@ -277,7 +273,7 @@
 		on:change={() => refresh(true)}
 	/>
 
-	<DashboardTiles {tiles} />
+	<StatTiles {tiles} class="mt-4" />
 
 	<section id="active" class="mt-8 scroll-mt-28">
 	<SubHeadline>Active campaigns</SubHeadline>

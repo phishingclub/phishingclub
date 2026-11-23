@@ -21,7 +21,7 @@
 	import TableDropDownEllipsis from '$lib/components/table/TableDropDownEllipsis.svelte';
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
-	import StatsCard from '$lib/components/StatsCard.svelte';
+	import StatTiles from '$lib/components/StatTiles.svelte';
 	import EventName from '$lib/components/table/EventName.svelte';
 	import RecipientProgramsTable from '$lib/components/program/RecipientProgramsTable.svelte';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
@@ -156,6 +156,59 @@
 			hideIsLoading();
 		}
 	};
+	// the stat tiles, with the icons and colors of the campaign page
+	$: statTiles = [
+		{
+			key: 'campaigns',
+			title: 'Campaigns',
+			tip: campaignTip,
+			value: stats.campaignsParticiated,
+			color: 'text-cta-blue dark:text-highlight-blue',
+			icon: 'sent'
+		},
+		{
+			key: 'read',
+			title: 'Emails read',
+			value: stats.campaignsTrackingPixelLoaded,
+			color: 'text-message-read',
+			icon: 'read'
+		},
+		{
+			key: 'clicked',
+			title: 'Clicked link',
+			value: stats.campaignsPhishingPageLoaded,
+			color: 'text-page-visited',
+			icon: 'clicked'
+		},
+		{
+			key: 'submitted',
+			title: 'Data submitted',
+			value: stats.campaignsDataSubmitted,
+			color: 'text-submitted-data',
+			icon: 'submitted'
+		},
+		{
+			key: 'reported',
+			title: 'Reported',
+			value: stats.campaignsReported,
+			color: 'text-reported dark:text-slate-300',
+			icon: 'reported'
+		},
+		{
+			key: 'repeatClicks',
+			title: 'Repeat link clicks',
+			value: stats.repeatLinkClicks,
+			color: 'text-repeat-link-clicks',
+			icon: 'repeat'
+		},
+		{
+			key: 'repeatSubmissions',
+			title: 'Repeat submissions',
+			value: stats.repeatSubmissions,
+			color: 'text-repeart-submissions',
+			icon: 'repeat'
+		}
+	];
 </script>
 
 <HeadTitle title={recipient.email ? `Recipient ${recipient.email}` : 'Recipient'} />
@@ -192,186 +245,7 @@
 		</div>
 	</div>
 	<div>
-		<div
-			class="pc-stats-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-6 mb-8 mt-8"
-		>
-			<!-- Campaigns card -->
-			<StatsCard
-				title="Campaigns"
-				tip={campaignTip}
-				value={stats.campaignsParticiated}
-				borderColor="border-cta-blue"
-				iconColor="text-cta-blue"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M13 10V3L4 14h7v7l9-11h-7z"
-					/>
-				</svg>
-			</StatsCard>
-
-			<!-- Emails read card -->
-			<StatsCard
-				title="Emails read"
-				value={stats.campaignsTrackingPixelLoaded}
-				borderColor="border-message-read"
-				iconColor="text-message-read"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-					/>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-					/>
-				</svg>
-			</StatsCard>
-
-			<!-- Clicked link card -->
-			<StatsCard
-				title="Clicked link"
-				value={stats.campaignsPhishingPageLoaded}
-				borderColor="border-clicked-link"
-				iconColor="text-clicked-link"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
-					/>
-				</svg>
-			</StatsCard>
-
-			<!-- Data submitted card -->
-			<StatsCard
-				title="Data submitted"
-				value={stats.campaignsDataSubmitted}
-				borderColor="border-submitted-data"
-				iconColor="text-submitted-data"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-					/>
-				</svg>
-			</StatsCard>
-
-			<!-- Reported card -->
-			<StatsCard
-				title="Reported"
-				value={stats.campaignsReported}
-				borderColor="border-reported dark:border-slate-400"
-				iconColor="text-reported dark:text-slate-300"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"
-					/>
-				</svg>
-			</StatsCard>
-
-			<!-- Repeat link clicks card -->
-			<StatsCard
-				title="Repeat link clicks"
-				value={stats.repeatLinkClicks}
-				borderColor="border-repeat-link-clicks"
-				iconColor="text-repeat-link-clicks"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-					/>
-				</svg>
-			</StatsCard>
-
-			<!-- Repeat submissions card -->
-			<div class="sm:col-span-3 lg:col-span-1">
-				<StatsCard
-					title="Repeat submissions"
-					value={stats.repeatSubmissions}
-					borderColor="border-repeart-submissions"
-					iconColor="text-repeart-submissions"
-				>
-					<svg
-						slot="icon"
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-5 w-5 ml-2"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-						/>
-					</svg>
-				</StatsCard>
-			</div>
-		</div>
+		<StatTiles tiles={statTiles} class="mb-8 mt-8" />
 
 		{#if stats.trainingsAssigned > 0}
 			<div class="flex flex-wrap items-center gap-x-6 gap-y-2 mb-8 text-sm">

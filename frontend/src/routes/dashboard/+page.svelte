@@ -9,7 +9,7 @@
 	import { get } from 'svelte/store';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import { addToast } from '$lib/store/toast';
-	import DashboardTiles from '$lib/components/DashboardTiles.svelte';
+	import StatTiles from '$lib/components/StatTiles.svelte';
 	import CampaignCalender from '$lib/components/CampaignCalendar.svelte';
 	import CampaignTrendChart from '$lib/components/CampaignTrendChart.svelte';
 	import { fetchAllRows } from '$lib/utils/api-utils';
@@ -102,7 +102,6 @@
 			title: 'Active campaigns',
 			tip: activeTip,
 			value: stats?.active ?? 0,
-			border: 'border-campaign-active',
 			color: 'text-campaign-active',
 			icon: 'active',
 			href: '/dashboard/campaigns/#active'
@@ -111,7 +110,6 @@
 			key: 'scheduled',
 			title: 'Scheduled campaigns',
 			value: stats?.upcoming ?? 0,
-			border: 'border-campaign-scheduled',
 			color: 'text-campaign-scheduled',
 			icon: 'scheduled',
 			href: '/dashboard/campaigns/#scheduled'
@@ -121,9 +119,9 @@
 			title: 'Active programs',
 			tip: 'Running programs, those that need attention left out.',
 			value: programStats?.active ?? 0,
-			border: 'border-campaign-active',
 			color: 'text-campaign-active',
-			icon: 'active',
+			// the Programs icon, so it differs from the Active campaigns tile beside it
+			icon: 'programs',
 			href: '/dashboard/programs/#active'
 		},
 		{
@@ -131,7 +129,6 @@
 			title: 'Repeat offenders',
 			tip: repeatTip,
 			value: repeatOffenders,
-			border: 'border-repeat-offenders',
 			color: 'text-repeat-offenders',
 			icon: 'people',
 			href: repeatOffendersHref
@@ -141,7 +138,6 @@
 			title: 'Training completed',
 			tip: 'Recipients who completed the training of a closed training campaign. Test campaigns never count.',
 			value: trainingCompleted,
-			border: 'border-training-completed',
 			color: 'text-training-completed',
 			icon: 'training',
 			href: '/dashboard/campaigns/#completed'
@@ -272,7 +268,7 @@
 		</div>
 	{/if}
 
-	<DashboardTiles {tiles} />
+	<StatTiles {tiles} class="mt-4" />
 
 	<section class="mt-8" data-section="trend">
 		<SubHeadline>Campaign Trends</SubHeadline>

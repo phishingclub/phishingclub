@@ -14,7 +14,7 @@
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import DashboardNav from '$lib/components/DashboardNav.svelte';
 	import DashboardToolbar from '$lib/components/DashboardToolbar.svelte';
-	import DashboardTiles from '$lib/components/DashboardTiles.svelte';
+	import StatTiles from '$lib/components/StatTiles.svelte';
 	import { shortRelative } from '$lib/utils/shortRelative.js';
 	import { scrollToTable } from '$lib/utils/scrollToTable.js';
 	import { NEXT_HIDDEN_TIP } from '$lib/utils/programText.js';
@@ -54,7 +54,6 @@
 			title: 'Active',
 			tip: 'Running programs, those that need attention left out.',
 			value: stats?.active ?? 0,
-			border: 'border-campaign-active',
 			color: 'text-campaign-active',
 			icon: 'active',
 			href: '#active'
@@ -64,7 +63,6 @@
 			title: 'Scheduled',
 			tip: 'Set to start on a date. Drafts are left out.',
 			value: stats?.scheduled ?? 0,
-			border: 'border-campaign-scheduled',
 			color: 'text-campaign-scheduled',
 			icon: 'scheduled',
 			href: '#scheduled'
@@ -74,7 +72,6 @@
 			title: 'Paused',
 			tip: 'Started and then paused. Nothing is sent until resumed.',
 			value: stats?.paused ?? 0,
-			border: 'border-closed',
 			color: 'text-closed',
 			icon: 'paused',
 			href: '#paused'
@@ -84,7 +81,6 @@
 			title: 'Needs attention',
 			tip: 'Running, but a template cannot be sent, the groups are empty or sending has stalled.',
 			value: stats?.needsAttention ?? 0,
-			border: 'border-failed-sending',
 			color: 'text-failed-sending',
 			icon: 'attention',
 			href: '#attention'
@@ -215,7 +211,7 @@
 		on:change={() => refresh(true)}
 	/>
 
-	<DashboardTiles {tiles} />
+	<StatTiles {tiles} class="mt-4" />
 
 	{#if stats?.needsAttention > 0}
 		<section id="attention" class="mt-8 scroll-mt-28">

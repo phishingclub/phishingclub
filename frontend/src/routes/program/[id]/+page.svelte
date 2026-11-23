@@ -16,7 +16,7 @@
 	import ToolTip from '$lib/components/ToolTip.svelte';
 	import ReportInboxRow from '$lib/components/ReportInboxRow.svelte';
 	import { reportInboxStatus, reportInboxSettingsHref } from '$lib/utils/reportInbox.js';
-	import StatsCard from '$lib/components/StatsCard.svelte';
+	import StatTiles from '$lib/components/StatTiles.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
@@ -895,10 +895,8 @@
 					: 'Recipients active in the program now.' +
 						(left.length ? ` ${capitalize(left.join(', '))}.` : ''),
 				value: isClosed ? everyone : (tiles.recipients ?? 0),
-				border: 'border-recipients',
 				color: 'text-recipients',
-				icon: icons.users,
-				stroke: 2
+				icon: 'recipients'
 			}
 		];
 		if (trainingOnly) {
@@ -907,9 +905,8 @@
 				title: words ? `Sent, ${words}` : 'Sent',
 				tip: `Training templates sent ${inRange}.`,
 				value: tiles.trainingSent,
-				border: 'border-message-sent',
 				color: 'text-message-sent',
-				icon: icons.send
+				icon: 'sent'
 			});
 		}
 		if (tiles.hasPhishing) {
@@ -919,18 +916,16 @@
 					title: words ? `Sent, ${words}` : 'Sent',
 					tip: `Phishing templates sent ${inRange}.`,
 					value: tiles.sent,
-					border: 'border-message-sent',
 					color: 'text-message-sent',
-					icon: icons.send
+					icon: 'sent'
 				},
 				{
 					key: 'clickedLink',
 					title: 'Clicked link',
 					tip: `Sends ${inRange} where the link was clicked.`,
 					value: tiles.clickedLink,
-					border: 'border-page-visited',
 					color: 'text-page-visited',
-					icon: icons.link,
+					icon: 'clicked',
 					percentages: of(tiles.clickedLink, 'of sent', tiles.sent)
 				},
 				{
@@ -938,9 +933,8 @@
 					title: 'Data submitted',
 					tip: `Sends ${inRange} where data was submitted.`,
 					value: tiles.submittedData,
-					border: 'border-submitted-data',
 					color: 'text-submitted-data',
-					icon: icons.check,
+					icon: 'submitted',
 					percentages: of(tiles.submittedData, 'of sent', tiles.sent)
 				},
 				{
@@ -948,10 +942,8 @@
 					title: 'Reported',
 					tip: `Sends ${inRange} that were reported.`,
 					value: tiles.reported,
-					border: 'border-reported dark:border-slate-400',
 					color: 'text-reported dark:text-slate-300',
-					icon: icons.warning,
-					stroke: 2,
+					icon: 'reported',
 					percentages: of(tiles.reported, 'of sent', tiles.sent)
 				}
 			);
@@ -963,9 +955,8 @@
 					title: 'Training started',
 					tip: `Training sends ${inRange} where the training was started.`,
 					value: tiles.trainingStarted,
-					border: 'border-training-started',
 					color: 'text-training-started',
-					icon: icons.training,
+					icon: 'training',
 					percentages: of(tiles.trainingStarted, 'of training sent', tiles.trainingSent)
 				},
 				{
@@ -973,9 +964,8 @@
 					title: 'Training completed',
 					tip: `Training sends ${inRange} where the training was completed.`,
 					value: tiles.trainingCompleted,
-					border: 'border-training-completed',
 					color: 'text-training-completed',
-					icon: icons.check,
+					icon: 'completed',
 					percentages: of(tiles.trainingCompleted, 'of started', tiles.trainingStarted)
 				}
 			);
@@ -988,10 +978,8 @@
 			title: 'Repeat offenders',
 			tip: `Recipients who clicked a link or submitted data on 2 or more sends in the last ${plural(tiles.repeatOffenderMonths || 12, 'month')}, the repeat offender setting. Not limited by the time range.`,
 			value: tiles.repeatOffenders,
-			border: 'border-repeat-offenders',
 			color: 'text-repeat-offenders',
-			icon: icons.users,
-			stroke: 2
+			icon: 'people'
 		});
 		return list;
 	})();
@@ -1327,20 +1315,6 @@
 		'bg-white dark:bg-gray-900/80 rounded-lg shadow-md dark:shadow-none dark:ring-1 dark:ring-gray-600/30 transition-colors duration-200';
 	const cardTitle =
 		'text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200';
-	// stat card icons, outline paths drawn on a 24 grid
-	const iconCls = 'h-5 w-5 ml-2';
-	const icons = {
-		users:
-			'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z',
-		// the paper plane of the sending menu items
-		send: 'M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5',
-		link: 'M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244',
-		check: 'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
-		warning:
-			'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z',
-		training:
-			'M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5'
-	};
 	// a state note under the header
 	const note = 'text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200';
 	const inlineLink =
@@ -1348,9 +1322,6 @@
 	// a value hidden for anonymity, as on the campaign page
 	const hiddenCls =
 		'text-sm italic text-gray-500 dark:text-gray-400 cursor-help underline decoration-dotted underline-offset-2';
-	// the tile row fills the width on wide screens: an anonymous program has no
-	// Repeat offenders tile, and training tiles make two rows of four
-	const tileCols = { 5: '2xl:grid-cols-5', 6: '2xl:grid-cols-6' };
 	// an empty value, as in the campaign Timeline card
 	const emptyCls = 'text-gray-400 dark:text-gray-500 text-right';
 	const pctCls = 'text-gray-400 dark:text-gray-500';
@@ -1602,68 +1573,23 @@
 					</select>
 				</label>
 			</div>
-			<div
+			<StatTiles
 				id="program-results"
-				class="grid grid-cols-2 gap-3 sm:gap-6 mt-2 lg:grid-cols-3 {tileCols[resultTiles.length] ??
-					'2xl:grid-cols-4'}"
-			>
-				{#each resultTiles as tile (tile.key)}
-					{#if tile.value == null}
-						<StatsCard
-							title={tile.title}
-							tip={tile.tip ?? ''}
-							borderColor={tile.border}
-							iconColor={tile.color}
-						>
-							<svg
-								slot="icon"
-								class={iconCls}
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke="currentColor"
-								stroke-width={tile.stroke ?? 1.5}
-								aria-hidden="true"
-								><path stroke-linecap="round" stroke-linejoin="round" d={tile.icon} /></svg
-							>
-							<svelte:fragment slot="value"
-								><span
-									title={tile.key === 'sent' ? SENT_HIDDEN_TIP : HIDDEN_TIP}
-									class="font-normal {hiddenCls}">Hidden</span
-								></svelte:fragment
-							>
-						</StatsCard>
-					{:else}
-						<StatsCard
-							title={tile.title}
-							tip={tile.tip ?? ''}
-							value={tile.value}
-							percentages={tile.percentages ?? []}
-							borderColor={tile.border}
-							iconColor={tile.color}
-						>
-							<svg
-								slot="icon"
-								class={iconCls}
-								fill="none"
-								viewBox="0 0 24 24"
-								stroke="currentColor"
-								stroke-width={tile.stroke ?? 1.5}
-								aria-hidden="true"
-								><path stroke-linecap="round" stroke-linejoin="round" d={tile.icon} /></svg
-							>
-						</StatsCard>
-					{/if}
-				{/each}
-			</div>
+				tiles={resultTiles.map((t) => ({
+					...t,
+					hiddenTip: t.key === 'sent' ? SENT_HIDDEN_TIP : HIDDEN_TIP
+				}))}
+				class="mt-2"
+			/>
 			<!-- one note line under the tiles. An anonymous program adds how it counts -->
 			{#if isAnonymous}
-				<p id="program-anon-delay-note" class="{note} mt-2">
+				<p id="program-anon-delay-note" class="{note} mt-3">
 					{#if anyTileHidden}{HIDDEN_RESULTS_NOTE}{' '}{/if}{#if tiles?.rangeText}Counts {tiles.rangeText}.{:else}No
 						month counted yet.{/if} An anonymous program counts whole months, 3 days after each month
 					ends.
 				</p>
 			{:else if anyTileHidden}
-				<p id="program-hidden-note" class="{note} mt-2">{HIDDEN_RESULTS_NOTE}</p>
+				<p id="program-hidden-note" class="{note} mt-3">{HIDDEN_RESULTS_NOTE}</p>
 			{/if}
 		{/if}
 

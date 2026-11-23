@@ -53,7 +53,7 @@
 	import TestLabel from '$lib/components/TestLabel.svelte';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import { autoRefreshStore } from '$lib/store/autoRefresh';
-	import StatsCard from '$lib/components/StatsCard.svelte';
+	import StatTiles from '$lib/components/StatTiles.svelte';
 	import Alert from '$lib/components/Alert.svelte';
 	import EventTimeline from '$lib/components/EventTimeline.svelte';
 	import CellCopy from '$lib/components/table/CopyCell.svelte';
@@ -2045,6 +2045,102 @@
 		{ label: 'Close at', value: c.closeAt },
 		{ label: 'Closed', value: c.closedAt }
 	];
+	// the result tiles. Each share counts against an earlier step of the funnel
+	const pct = (part, base) => ({
+		value: Math.round((part / base) * 100),
+		baseValue: base
+	});
+	$: resultTiles = (() => {
+		const r = result;
+		const shares = (v, steps) => steps.map(([label, base]) => ({ ...pct(v, base), relativeTo: label }));
+		const ofRecipients = ['of recipients', r.recipients];
+		const ofSent = ['of sent', r.emailsSent];
+		const ofReads = ['of reads', r.trackingPixelLoaded];
+		const ofVisits = ['of visits', r.websiteLoaded];
+		const ofStarted = ['of started', r.trainingStarted];
+		const list = [
+			{
+				key: 'recipients',
+				title: 'Recipients',
+				value: r.recipients,
+				color: 'text-recipients',
+				icon: 'recipients'
+			},
+			{
+				key: 'sent',
+				title: 'Emails sent',
+				value: r.emailsSent,
+				color: 'text-message-sent',
+				icon: 'sent',
+				percentages: shares(r.emailsSent, [ofRecipients])
+			},
+			{
+				key: 'read',
+				title: 'Emails read',
+				value: r.trackingPixelLoaded,
+				color: 'text-message-read',
+				icon: 'read',
+				percentages: shares(r.trackingPixelLoaded, [ofRecipients, ofSent])
+			}
+		];
+		if (campaign.isTraining) {
+			const inProgress = Math.max(r.trainingStarted - r.trainingCompleted, 0);
+			list.push(
+				{
+					key: 'trainingStarted',
+					title: 'Training started',
+					value: r.trainingStarted,
+					color: 'text-training-started',
+					icon: 'training',
+					percentages: shares(r.trainingStarted, [ofRecipients, ofSent, ofReads])
+				},
+				{
+					key: 'inProgress',
+					title: 'In progress',
+					value: inProgress,
+					color: 'text-training-started',
+					icon: 'inProgress',
+					percentages: shares(inProgress, [ofStarted])
+				},
+				{
+					key: 'trainingCompleted',
+					title: 'Training completed',
+					value: r.trainingCompleted,
+					color: 'text-training-completed',
+					icon: 'completed',
+					percentages: shares(r.trainingCompleted, [ofRecipients, ofSent, ofReads, ofStarted])
+				}
+			);
+		} else {
+			list.push(
+				{
+					key: 'clicked',
+					title: 'Clicked link',
+					value: r.websiteLoaded,
+					color: 'text-page-visited',
+					icon: 'clicked',
+					percentages: shares(r.websiteLoaded, [ofRecipients, ofSent, ofReads])
+				},
+				{
+					key: 'submitted',
+					title: 'Data submitted',
+					value: r.submittedData,
+					color: 'text-submitted-data',
+					icon: 'submitted',
+					percentages: shares(r.submittedData, [ofRecipients, ofSent, ofReads, ofVisits])
+				},
+				{
+					key: 'reported',
+					title: 'Reported',
+					value: r.reported,
+					color: 'text-reported dark:text-slate-300',
+					icon: 'reported',
+					percentages: shares(r.reported, [ofRecipients, ofSent, ofReads, ofVisits])
+				}
+			);
+		}
+		return list;
+	})();
 </script>
 
 <HeadTitle title="Campaign {campaign.name ? ` - ${campaign.name}` : ''}" />
@@ -2176,352 +2272,7 @@
 			</p>
 		{/if}
 
-		<div class="grid grid-cols-2 gap-3 sm:gap-6 mb-8 mt-4 lg:grid-cols-3 2xl:grid-cols-6">
-			<StatsCard
-				title="Recipients"
-				value={result.recipients}
-				borderColor="border-recipients"
-				iconColor="text-recipients"
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
-					/>
-				</svg>
-			</StatsCard>
-
-			<StatsCard
-				title="Emails sent"
-				value={result.emailsSent}
-				borderColor="border-message-sent"
-				iconColor="text-message-sent"
-				percentages={[
-					{
-						value: Math.round((result.emailsSent / result.recipients) * 100),
-						relativeTo: 'of recipients',
-						baseValue: result.recipients
-					}
-				]}
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-					stroke-width="1.5"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"
-					/>
-				</svg>
-			</StatsCard>
-			<StatsCard
-				title="Emails read"
-				value={result.trackingPixelLoaded}
-				borderColor="border-message-read"
-				iconColor="text-message-read"
-				percentages={[
-					{
-						value: Math.round((result.trackingPixelLoaded / result.recipients) * 100),
-						relativeTo: 'of recipients',
-						baseValue: result.recipients
-					},
-					{
-						value: Math.round((result.trackingPixelLoaded / result.emailsSent) * 100),
-						relativeTo: 'of sent',
-						baseValue: result.emailsSent
-					}
-				]}
-			>
-				<svg
-					slot="icon"
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 ml-2"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-					stroke-width="1.5"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
-					/>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-					/>
-				</svg>
-			</StatsCard>
-
-			{#if campaign.isTraining}
-				<StatsCard
-					title="Training started"
-					value={result.trainingStarted}
-					borderColor="border-training-started"
-					iconColor="text-training-started"
-					percentages={[
-						{
-							value: Math.round((result.trainingStarted / result.recipients) * 100),
-							relativeTo: 'of recipients',
-							baseValue: result.recipients
-						},
-						{
-							value: Math.round((result.trainingStarted / result.emailsSent) * 100),
-							relativeTo: 'of sent',
-							baseValue: result.emailsSent
-						},
-						{
-							value: Math.round((result.trainingStarted / result.trackingPixelLoaded) * 100),
-							relativeTo: 'of reads',
-							baseValue: result.trackingPixelLoaded
-						}
-					]}
-				>
-					<svg
-						slot="icon"
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-5 w-5 ml-2"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-						stroke-width="1.5"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5"
-						/>
-					</svg>
-				</StatsCard>
-			{:else}
-				<StatsCard
-					title="Clicked link"
-					value={result.websiteLoaded}
-					borderColor="border-page-visited"
-					iconColor="text-page-visited"
-					percentages={[
-						{
-							value: Math.round((result.websiteLoaded / result.recipients) * 100),
-							relativeTo: 'of recipients',
-							baseValue: result.recipients
-						},
-						{
-							value: Math.round((result.websiteLoaded / result.emailsSent) * 100),
-							relativeTo: 'of sent',
-							baseValue: result.emailsSent
-						},
-						{
-							value: Math.round((result.websiteLoaded / result.trackingPixelLoaded) * 100),
-							relativeTo: 'of reads',
-							baseValue: result.trackingPixelLoaded
-						}
-					]}
-				>
-					<svg
-						slot="icon"
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-5 w-5 ml-2"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-						stroke-width="1.5"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"
-						/>
-					</svg>
-				</StatsCard>
-			{/if}
-
-			{#if campaign.isTraining}
-				<StatsCard
-					title="In progress"
-					value={Math.max(result.trainingStarted - result.trainingCompleted, 0)}
-					borderColor="border-training-started"
-					iconColor="text-training-started"
-					percentages={[
-						{
-							value: Math.round(
-								((result.trainingStarted - result.trainingCompleted) / result.trainingStarted) * 100
-							),
-							relativeTo: 'of started',
-							baseValue: result.trainingStarted
-						}
-					]}
-				>
-					<svg
-						slot="icon"
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-5 w-5 ml-2"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-						stroke-width="1.5"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-						/>
-					</svg>
-				</StatsCard>
-			{:else}
-				<StatsCard
-					title="Data submitted"
-					value={result.submittedData}
-					borderColor="border-submitted-data"
-					iconColor="text-submitted-data"
-					percentages={[
-						{
-							value: Math.round((result.submittedData / result.recipients) * 100),
-							relativeTo: 'of recipients',
-							baseValue: result.recipients
-						},
-						{
-							value: Math.round((result.submittedData / result.emailsSent) * 100),
-							relativeTo: 'of sent',
-							baseValue: result.emailsSent
-						},
-						{
-							value: Math.round((result.submittedData / result.trackingPixelLoaded) * 100),
-							relativeTo: 'of reads',
-							baseValue: result.trackingPixelLoaded
-						},
-						{
-							value: Math.round((result.submittedData / result.websiteLoaded) * 100),
-							relativeTo: 'of visits',
-							baseValue: result.websiteLoaded
-						}
-					]}
-				>
-					<svg
-						slot="icon"
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-5 w-5 ml-2"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-						stroke-width="1.5"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-						/>
-					</svg>
-				</StatsCard>
-			{/if}
-
-			{#if campaign.isTraining}
-				<StatsCard
-					title="Training completed"
-					value={result.trainingCompleted}
-					borderColor="border-training-completed"
-					iconColor="text-training-completed"
-					percentages={[
-						{
-							value: Math.round((result.trainingCompleted / result.recipients) * 100),
-							relativeTo: 'of recipients',
-							baseValue: result.recipients
-						},
-						{
-							value: Math.round((result.trainingCompleted / result.emailsSent) * 100),
-							relativeTo: 'of sent',
-							baseValue: result.emailsSent
-						},
-						{
-							value: Math.round((result.trainingCompleted / result.trackingPixelLoaded) * 100),
-							relativeTo: 'of reads',
-							baseValue: result.trackingPixelLoaded
-						},
-						{
-							value: Math.round((result.trainingCompleted / result.trainingStarted) * 100),
-							relativeTo: 'of started',
-							baseValue: result.trainingStarted
-						}
-					]}
-				>
-					<svg
-						slot="icon"
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-5 w-5 ml-2"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-						stroke-width="1.5"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-						/>
-					</svg>
-				</StatsCard>
-			{:else}
-				<StatsCard
-					title="Reported"
-					value={result.reported}
-					borderColor="border-reported dark:border-slate-400"
-					iconColor="text-reported dark:text-slate-300"
-					percentages={[
-						{
-							value: Math.round((result.reported / result.recipients) * 100),
-							relativeTo: 'of recipients',
-							baseValue: result.recipients
-						},
-						{
-							value: Math.round((result.reported / result.emailsSent) * 100),
-							relativeTo: 'of sent',
-							baseValue: result.emailsSent
-						},
-						{
-							value: Math.round((result.reported / result.trackingPixelLoaded) * 100),
-							relativeTo: 'of reads',
-							baseValue: result.trackingPixelLoaded
-						},
-						{
-							value: Math.round((result.reported / result.websiteLoaded) * 100),
-							relativeTo: 'of visits',
-							baseValue: result.websiteLoaded
-						}
-					]}
-				>
-					<svg
-						slot="icon"
-						xmlns="http://www.w3.org/2000/svg"
-						class="h-5 w-5 ml-2"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"
-						/>
-					</svg>
-				</StatsCard>
-			{/if}
-		</div>
+		<StatTiles tiles={resultTiles} class="mb-8 mt-4" />
 
 		{#if hasGroupData || hasTemplatePool}
 			<div class="mb-6">
