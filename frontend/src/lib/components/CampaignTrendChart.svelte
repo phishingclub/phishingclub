@@ -1,5 +1,6 @@
 <script>
 	import { onMount, onDestroy, tick } from 'svelte';
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	let resizeObserver;
 
 	// Theme detection for chart reactivity
@@ -254,8 +255,10 @@
 		// ignore errors
 	}
 
-	// the training mode is only meaningful when there are training campaigns
-	$: hasTraining = (campaignStats || []).some((s) => s.isTraining);
+	// the training mode is only meaningful when there are training campaigns,
+	// and training is part of phishing simulation, so red team mode leaves it out
+	$: hasTraining =
+		showsSimulation($displayMode) && (campaignStats || []).some((s) => s.isTraining);
 	$: if (!hasTraining && chartMode !== 'phishing') {
 		chartMode = 'phishing';
 	}

@@ -92,7 +92,8 @@
 	// the recipient list sorted on its Repeat column
 	const repeatOffendersHref = `/recipient?sortBy=${encodeURIComponent('Repeat offender')}&sortOrder=desc`;
 
-	// program counts are only shown in the modes that show programs
+	// programs, repeat offenders and training are awareness concepts, shown
+	// only in the modes that show phishing simulation
 	$: showPrograms = showsSimulation($displayMode);
 
 	$: tiles = [
@@ -112,6 +113,14 @@
 			color: 'text-campaign-scheduled',
 			icon: 'scheduled',
 			href: '/dashboard/campaigns/#scheduled'
+		},
+		{
+			key: 'completed',
+			title: 'Completed campaigns',
+			value: stats?.finished ?? 0,
+			color: 'text-campaign-completed',
+			icon: 'completed',
+			href: '/dashboard/campaigns/#completed'
 		},
 		{
 			key: 'programs',
@@ -141,7 +150,12 @@
 			icon: 'training',
 			href: '/dashboard/campaigns/#completed'
 		}
-	].filter((tile) => showPrograms || tile.key !== 'programs');
+	].filter((tile) =>
+		// red team mode shows what runs, what is next and what is done
+		showPrograms
+			? tile.key !== 'completed'
+			: !['programs', 'repeat', 'training'].includes(tile.key)
+	);
 
 	// hooks
 	onMount(() => {

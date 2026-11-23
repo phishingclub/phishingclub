@@ -15,6 +15,7 @@
 	$: hasContext = tiles.some((t) => (t.percentages ?? []).some((p) => p.baseValue > 0));
 	$: cols =
 		{
+			2: '',
 			3: 'sm:grid-cols-3',
 			4: 'lg:grid-cols-4',
 			5: hasContext ? 'lg:grid-cols-3 2xl:grid-cols-5' : 'lg:grid-cols-5',
