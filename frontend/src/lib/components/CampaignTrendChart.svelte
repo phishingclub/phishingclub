@@ -357,11 +357,17 @@
 	$: reportColors = isDarkMode
 		? { color: '#cbd5e1', mavg: '#94a3b8' }
 		: { color: '#2c3e50', mavg: '#7b8a9a' };
-	$: metrics = (chartMode === 'training' ? trainingMetrics : phishingMetrics).map((m) =>
-		m.key === 'reportRate'
-			? { ...m, color: reportColors.color, mavg: { ...m.mavg, color: reportColors.mavg } }
-			: m
-	);
+	// red team operators rarely see the target's reports, so a report rate of 0
+	// would read as nobody reported. Red team mode shows it only once there is data
+	$: showReportRate =
+		showsSimulation($displayMode) || chartData.some((d) => d.reportRate > 0);
+	$: metrics = (chartMode === 'training' ? trainingMetrics : phishingMetrics)
+		.filter((m) => m.key !== 'reportRate' || showReportRate)
+		.map((m) =>
+			m.key === 'reportRate'
+				? { ...m, color: reportColors.color, mavg: { ...m.mavg, color: reportColors.mavg } }
+				: m
+		);
 
 	// toggle metric visibility (reassign to trigger svelte reactivity and persist)
 	function toggleMetric(metricKey) {
@@ -1587,7 +1593,13 @@
 			<!-- the average rates of the campaigns in the trend. They name the lines
 			     and a click turns a line on or off, as the legend did -->
 			{#if trendStats}
-				<div class="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-4 mb-6" data-trend-rates>
+				<!-- one column per rate, so two or three rates spread the full width -->
+				<div
+					class="grid grid-cols-2 gap-x-4 gap-y-4 mb-6 {{ 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3' }[
+						metrics.length
+					] ?? 'sm:grid-cols-4'}"
+					data-trend-rates
+				>
 					{#each metrics as metric (metric.key)}
 						{@const isOn = !!visibleMetrics[metric.key]}
 						<button

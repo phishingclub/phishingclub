@@ -18,7 +18,7 @@
 			2: '',
 			3: 'sm:grid-cols-3',
 			4: 'lg:grid-cols-4',
-			5: hasContext ? 'lg:grid-cols-3 2xl:grid-cols-5' : 'lg:grid-cols-5',
+			5: hasContext ? 'lg:grid-cols-3 xl:grid-cols-5' : 'lg:grid-cols-5',
 			6: 'sm:grid-cols-3 2xl:grid-cols-6'
 		}[tiles.length] ?? 'lg:grid-cols-4';
 

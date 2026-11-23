@@ -208,7 +208,11 @@
 			color: 'text-repeart-submissions',
 			icon: 'repeat'
 		}
-	];
+	].filter(
+		// red team operators rarely see the target's reports, so a 0 would read as
+		// nobody reported. Red team mode shows the tile only once there is data
+		(tile) => tile.key !== 'reported' || showsSimulation($displayMode) || tile.value > 0
+	);
 </script>
 
 <HeadTitle title={recipient.email ? `Recipient ${recipient.email}` : 'Recipient'} />

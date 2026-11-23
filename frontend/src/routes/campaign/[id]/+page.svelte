@@ -52,6 +52,7 @@
 	} from '$lib/utils/reportInbox.js';
 	import TestLabel from '$lib/components/TestLabel.svelte';
 	import { campaignStatus } from '$lib/utils/campaignStatus.js';
+	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import { autoRefreshStore } from '$lib/store/autoRefresh';
 	import StatTiles from '$lib/components/StatTiles.svelte';
@@ -2120,16 +2121,22 @@
 					color: 'text-submitted-data',
 					icon: 'submitted',
 					percentages: shares(r.submittedData, [ofRecipients, ofSent, ofReads, ofVisits])
-				},
-				{
-					key: 'reported',
-					title: 'Reported',
-					value: r.reported,
-					color: 'text-reported dark:text-slate-300',
-					icon: 'reported',
-					percentages: shares(r.reported, [ofRecipients, ofSent, ofReads, ofVisits])
 				}
 			);
+			// red team operators rarely see the target's reports, so a 0 would read
+			// as nobody reported. Red team mode shows the tile only once there is data
+			if (showsSimulation($displayMode) || r.reported > 0) {
+				list.push(
+					{
+						key: 'reported',
+						title: 'Reported',
+						value: r.reported,
+						color: 'text-reported dark:text-slate-300',
+						icon: 'reported',
+						percentages: shares(r.reported, [ofRecipients, ofSent, ofReads, ofVisits])
+					}
+				);
+			}
 		}
 		return list;
 	})();
