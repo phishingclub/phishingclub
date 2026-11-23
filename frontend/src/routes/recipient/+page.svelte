@@ -1,4 +1,5 @@
 <script>
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import CsvColumnsHelp from './CsvColumnsHelp.svelte';
 	import { api } from '$lib/api/apiProxy.js';
@@ -537,11 +538,7 @@
 						>
 					{/if}
 					{#if recipient.scimSoftDeletedAt}
-						<span
-							class="ml-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase align-middle bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-						>
-							Disabled
-						</span>
+						<StatusBadge tone="neutral" title="Disabled through SCIM" class="ml-2">Disabled</StatusBadge>
 					{/if}
 				</TableCellLink>
 				<TableCellCheck value={recipient.isRepeatOffender} />

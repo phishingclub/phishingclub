@@ -8,6 +8,7 @@
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import Headline from '$lib/components/Headline.svelte';
 	import BetaTag from '$lib/components/BetaTag.svelte';
+	import Tag from '$lib/components/Tag.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import BigButton from '$lib/components/BigButton.svelte';
@@ -652,25 +653,22 @@
 			case 'updateAvailable':
 				return {
 					kind: s,
+					tone: 'info',
 					label: i.currentVersion ? `Update to v${i.currentVersion}` : 'Update available',
-					dot: 'bg-cta-blue dark:bg-highlight-blue',
-					text: 'text-cta-blue dark:text-highlight-blue',
 					title: ''
 				};
 			case 'upToDate':
 				return {
 					kind: s,
+					tone: 'success',
 					label: 'Up to date',
-					dot: 'bg-green-500',
-					text: 'text-green-600 dark:text-green-400',
 					title: ''
 				};
 			case 'tokenRefused':
 				return {
 					kind: s,
+					tone: 'danger',
 					label: 'Token refused',
-					dot: 'bg-red-500',
-					text: 'text-red-600 dark:text-red-400',
 					title:
 						`${sentence(i.statusMessage || 'the Bait Box refused the token')} ` +
 						'Edit the Bait Box to enter a valid token. It can still be uninstalled.'
@@ -678,17 +676,15 @@
 			case 'registryRemoved':
 				return {
 					kind: s,
+					tone: 'neutral',
 					label: 'Bait Box removed',
-					dot: 'bg-gray-400',
-					text: 'text-gray-500 dark:text-gray-400',
 					title: 'The Bait Box this package came from was removed. It can still be uninstalled.'
 				};
 			default:
 				return {
 					kind: 'unknown',
+					tone: 'neutral',
 					label: 'Unknown',
-					dot: 'bg-gray-400',
-					text: 'text-gray-500 dark:text-gray-400',
 					title:
 						'The Bait Box did not answer or no longer lists this package. ' +
 						'It can still be uninstalled.'
@@ -1671,10 +1667,7 @@
 							</TableCell>
 							<TableCell value={i.installedAsDependency ? 'Dependency' : 'Direct'} />
 							<TableCell>
-								<span title={st.title || st.label} class="text-xs font-semibold {st.text}">
-									<span class="mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle {st.dot}"
-									></span>{st.label}
-								</span>
+								<StatusBadge tone={st.tone} title={st.title || st.label}>{st.label}</StatusBadge>
 							</TableCell>
 							<TableCellEmpty />
 							<TableCellAction>
@@ -1854,7 +1847,7 @@
 											on:error={(e) => (e.currentTarget.style.display = 'none')}
 										/>
 										<span
-											class="absolute left-2 top-2 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-700 shadow-sm dark:bg-gray-900/80 dark:text-gray-200"
+											class="absolute left-2 top-2 rounded bg-white/90 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 text-gray-700 shadow-sm dark:bg-gray-900/80 dark:text-gray-200"
 											>{typeLabel(p.type)}</span
 										>
 										<span
@@ -1895,7 +1888,7 @@
 										>
 										<!-- same corner chips as cards with a preview image -->
 										<span
-											class="absolute left-2 top-2 rounded bg-white/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-700 shadow-sm dark:bg-gray-900/80 dark:text-gray-200"
+											class="absolute left-2 top-2 rounded bg-white/90 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 text-gray-700 shadow-sm dark:bg-gray-900/80 dark:text-gray-200"
 											>{typeLabel(p.type)}</span
 										>
 										<span
@@ -1924,16 +1917,14 @@
 									{#if p.tags && p.tags.length}
 										<div class="mt-3 flex flex-wrap gap-1">
 											{#each p.tags as t}
-												<span class="rounded px-1.5 py-0.5 text-[10px] {tagChipClass(tagColors[t])}"
-													>{t}</span
-												>
+<Tag colors={tagChipClass(tagColors[t])}>{t}</Tag>
 											{/each}
 										</div>
 									{/if}
 									<div class="min-h-4 flex-1" aria-hidden="true"></div>
 									<!-- every footer is one row of the same height: state on the left, actions on the right -->
 									<div
-										class="flex min-h-[3.5rem] items-center justify-between gap-2 border-t-2 border-gray-100 pt-3 dark:border-gray-800"
+										class="flex min-h-[3.5rem] items-center justify-between gap-2 border-t-2 text-sm border-gray-100 pt-3 dark:border-gray-800"
 									>
 										{#if st.kind === 'update'}
 											<StatusBadge tone="info">Update available</StatusBadge>
@@ -2114,17 +2105,13 @@
 										>
 											Status
 										</dt>
-										<dd class="mt-0.5">
+										<dd class="mt-0.5 text-sm">
 											{#if statusOf(detail).kind === 'installed'}
 												<StatusBadge tone="success">Installed</StatusBadge>
 											{:else if statusOf(detail).kind === 'update'}
-												<span
-													class="inline-flex items-center gap-1.5 text-sm font-medium text-cta-blue dark:text-highlight-blue"
-													><span class="h-1.5 w-1.5 rounded-full bg-cta-blue dark:bg-highlight-blue"
-													></span>{statusOf(detail).label}</span
-												>
+												<StatusBadge tone="info">{statusOf(detail).label}</StatusBadge>
 											{:else}
-												<span class="text-sm text-gray-800 dark:text-gray-100">Not installed</span>
+												<StatusBadge tone="neutral">Not installed</StatusBadge>
 											{/if}
 										</dd>
 									</div>
@@ -2171,10 +2158,7 @@
 												<span class="font-mono font-medium text-gray-800 dark:text-gray-100"
 													>{v.name}</span
 												>
-												<span
-													class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-													>{v.type || 'text'}</span
-												>
+												<Tag>{v.type || 'text'}</Tag>
 												<!-- the admin marks optional, not required: a field is required unless tagged -->
 												{#if !v.required}<span class="text-xs text-gray-400 dark:text-gray-500"
 														>optional</span
@@ -2234,18 +2218,9 @@
 								<div class="min-w-0 flex-1">
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 										<span class="font-medium text-gray-800 dark:text-gray-100">{a.display}</span>
-										{#if a.embedded}<span
-												class="rounded bg-grayblue-light px-1.5 py-0.5 text-[10px] uppercase text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-												>Embedded</span
-											>{/if}
-										{#if a.inline}<span
-												class="rounded bg-grayblue-light px-1.5 py-0.5 text-[10px] uppercase text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-												>Inline</span
-											>{/if}
-										{#if a.calendar}<span
-												class="rounded bg-grayblue-light px-1.5 py-0.5 text-[10px] uppercase text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-												>Calendar</span
-											>{/if}
+										{#if a.embedded}<Tag>Embedded</Tag>{/if}
+										{#if a.inline}<Tag>Inline</Tag>{/if}
+										{#if a.calendar}<Tag>Calendar</Tag>{/if}
 									</div>
 									<div
 										class="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-gray-500 dark:text-gray-400"
@@ -2297,10 +2272,7 @@
 										>
 										<span class="truncate font-mono text-gray-800 dark:text-gray-100">{f.path}</span
 										>
-										{#if isMetaFile(f.path)}<span
-												class="shrink-0 rounded bg-gray-200 px-1.5 py-0.5 text-[10px] uppercase text-gray-500 dark:bg-gray-700 dark:text-gray-400"
-												>meta</span
-											>{/if}
+										{#if isMetaFile(f.path)}<Tag>Meta</Tag>{/if}
 									</span>
 									<span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400"
 										>{(f.size / 1024).toFixed(1)} KB</span

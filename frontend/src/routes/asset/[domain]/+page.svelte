@@ -1,4 +1,5 @@
 <script>
+	import Tag from '$lib/components/Tag.svelte';
 	import { api } from '$lib/api/apiProxy.js';
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
@@ -939,11 +940,8 @@
 							{asset.name}
 						</button>
 						{#if asset.hasAllowDeny}
-							<!-- same quiet marker as the installed badge, with the filters menu icon -->
-							<span
-								class="ml-2 inline-flex shrink-0 items-center gap-1 rounded bg-grayblue-light px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800/60 dark:text-gray-400"
-								title="Visitors must pass the allow or deny lists"
-							>
+							<!-- a tag with the filters menu icon -->
+							<Tag class="ml-2" title="Visitors must pass the allow or deny lists">
 								<svg
 									class="h-3 w-3"
 									viewBox="0 0 24 24"
@@ -959,7 +957,7 @@
 									/>
 								</svg>
 								Filtered
-							</span>
+							</Tag>
 						{/if}
 					</div>
 				</TableCell>

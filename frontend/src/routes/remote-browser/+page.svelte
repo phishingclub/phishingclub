@@ -287,7 +287,7 @@ s.keepAlive();
 <main>
 	<!-- fixed row height on wide screens so the taller refresh select does not push the title down -->
 	<div class="flex flex-wrap items-center justify-between gap-3 md:h-[2.625rem] md:flex-nowrap">
-		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+		<div class="flex flex-wrap items-center gap-y-1 min-w-0">
 			<Headline docSlug="remote-browser">Remote Browsers</Headline>
 			<BetaTag label="Experimental" />
 		</div>

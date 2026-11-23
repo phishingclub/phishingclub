@@ -13,12 +13,12 @@
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TestLabel from '$lib/components/TestLabel.svelte';
+	import { campaignStatus } from '$lib/utils/campaignStatus.js';
 	import DashboardNav from '$lib/components/DashboardNav.svelte';
 	import DashboardToolbar from '$lib/components/DashboardToolbar.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import StatTiles from '$lib/components/StatTiles.svelte';
 	import { dashboardIncludeTest } from '$lib/store/dashboardIncludeTest.js';
-	import { toEvent } from '$lib/utils/events';
 	import { shortRelative } from '$lib/utils/shortRelative.js';
 	import { scrollToTable } from '$lib/utils/scrollToTable.js';
 
@@ -67,6 +67,10 @@
 
 	// campaign counts from the stats endpoint, null until loaded
 	let stats = null;
+	// an open campaign is active with a delivery window, else self managed
+	const activeStatus = (c) =>
+		campaignStatus({ notableEventName: c.sendStartAt ? 'campaign_active' : 'campaign_self_managed' });
+
 	$: tiles = [
 		{
 			key: 'active',
@@ -302,20 +306,20 @@
 				<TableRow>
 					<TableCell>
 						<div class="min-w-0 max-sm:py-1.5">
-							<span class="flex min-w-0 items-center gap-1 py-1">
-								{#if campaign.isTest}
-									<TestLabel />
-								{/if}
+							<span class="flex min-w-0 items-center gap-2 py-1">
 								<a href={`/campaign/${campaign.id}`} class="pc-cell-link min-w-0 truncate">
 									{campaign.name}
 								</a>
+								{#if campaign.isTest}
+									<TestLabel />
+								{/if}
 							</span>
 							<!-- phones show the status, company and delivery times here instead of in columns -->
-							<span class="flex sm:hidden min-w-0 items-center gap-2"
+							<span class="flex sm:hidden min-w-0 items-center gap-2 text-xs"
 								>{#if campaign.pausedAt}<span data-paused-badge
 										><StatusBadge tone="warning" title="Sending paused">Paused</StatusBadge></span
-									>{:else}<StatusBadge tone="success"
-										>{toEvent(campaign.sendStartAt ? 'campaign_active' : 'campaign_self_managed').name}</StatusBadge
+									>{:else}<StatusBadge tone={activeStatus(campaign).tone}
+										>{activeStatus(campaign).label}</StatusBadge
 									>{/if}<span class="min-w-0 truncate text-xs text-gray-500 dark:text-gray-400"
 									>{#if !contextCompanyID && campaign.company?.name}{campaign.company.name}{#if campaign.sendStartAt || campaign.pausedAt}{' · '}{/if}{/if}{#if campaign.sendStartAt}{new Date(campaign.sendStartAt).getTime() > relativeNow ? 'Starts' : 'Started'} {shortRelative(campaign.sendStartAt, relativeNow)}{#if campaign.sendEndAt}{' · ends '}{shortRelative(campaign.sendEndAt, relativeNow)}{/if}{:else if campaign.pausedAt}Self managed{/if}</span
 								></span
@@ -330,9 +334,7 @@
 									><StatusBadge tone="warning" title="Sending paused">Paused</StatusBadge></span
 								>
 							{:else}
-								<StatusBadge tone="success"
-									>{toEvent(campaign.sendStartAt ? 'campaign_active' : 'campaign_self_managed').name}</StatusBadge
-								>
+								<StatusBadge tone={activeStatus(campaign).tone}>{activeStatus(campaign).label}</StatusBadge>
 							{/if}
 						</TableCell>
 					{/if}
@@ -396,13 +398,13 @@
 				<TableRow>
 					<TableCell>
 						<div class="min-w-0 max-sm:py-1.5">
-							<span class="flex min-w-0 items-center gap-1 py-1">
-								{#if campaign.isTest}
-									<TestLabel />
-								{/if}
+							<span class="flex min-w-0 items-center gap-2 py-1">
 								<a href={`/campaign/${campaign.id}`} class="pc-cell-link min-w-0 truncate">
 									{campaign.name}
 								</a>
+								{#if campaign.isTest}
+									<TestLabel />
+								{/if}
 							</span>
 							<!-- phones show the company and delivery times here instead of in columns -->
 							<span class="block sm:hidden text-xs text-gray-500 dark:text-gray-400"
@@ -470,13 +472,13 @@
 				<TableRow>
 					<TableCell>
 						<div class="min-w-0 max-sm:py-1.5">
-							<span class="flex min-w-0 items-center gap-1 py-1">
-								{#if campaign.isTest}
-									<TestLabel />
-								{/if}
+							<span class="flex min-w-0 items-center gap-2 py-1">
 								<a href={`/campaign/${campaign.id}`} class="pc-cell-link min-w-0 truncate">
 									{campaign.name}
 								</a>
+								{#if campaign.isTest}
+									<TestLabel />
+								{/if}
 							</span>
 							<!-- phones show the company and delivery times here instead of in columns -->
 							<span class="block sm:hidden text-xs text-gray-500 dark:text-gray-400"

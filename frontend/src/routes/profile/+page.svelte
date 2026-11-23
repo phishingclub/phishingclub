@@ -453,9 +453,9 @@
 				>
 					{#if hasPassword}
 						{#if isMFAEnabled}
-							<div class="flex items-center gap-2 mt-2">
-								<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
-								<StatusBadge tone="success">MFA is enabled</StatusBadge>
+							<div class="text-sm flex items-center gap-2 mt-2">
+								<span class="text-gray-500 dark:text-gray-400">Status</span>
+								<StatusBadge tone="success">Enabled</StatusBadge>
 							</div>
 							<div class={footerClass}>
 								<Button
@@ -470,9 +470,9 @@
 						{:else}
 							<Form on:submit={onClickSetupTOTPMFA} fullHeight fullWidth>
 								<div>
-									<div class="flex items-center gap-2 mt-2 mb-2">
-										<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
-										<StatusBadge tone="warning">MFA is not enabled</StatusBadge>
+									<div class="text-sm flex items-center gap-2 mt-2 mb-2">
+										<span class="text-gray-500 dark:text-gray-400">Status</span>
+										<StatusBadge tone="warning">Not enabled</StatusBadge>
 									</div>
 									<PasswordField
 										required
@@ -625,9 +625,7 @@
 					<FormColumns>
 						<FormColumn>
 							<div class="space-y-6 w-full">
-								<div>
-									<StatusBadge tone="success">MFA Setup Successful</StatusBadge>
-								</div>
+								<p class="font-semibold text-gray-700 dark:text-white">MFA is now enabled.</p>
 
 								<div>
 									<h3 class="text-xl font-semibold text-gray-700 dark:text-white mb-2">

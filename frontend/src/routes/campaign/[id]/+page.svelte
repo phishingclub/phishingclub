@@ -51,6 +51,7 @@
 		reportInboxSettingsHref as inboxSettingsHref
 	} from '$lib/utils/reportInbox.js';
 	import TestLabel from '$lib/components/TestLabel.svelte';
+	import { campaignStatus } from '$lib/utils/campaignStatus.js';
 	import AutoRefresh from '$lib/components/AutoRefresh.svelte';
 	import { autoRefreshStore } from '$lib/store/autoRefresh';
 	import StatTiles from '$lib/components/StatTiles.svelte';
@@ -2023,15 +2024,6 @@
 		c.closedAt != null ||
 		(c.sendStartAt != null && new Date(c.sendStartAt) <= new Date(Date.now() + 5 * 60 * 1000));
 
-	const campaignStatus = (c) => {
-		if (c.pausedAt && !c.closedAt) return { label: 'Paused', tone: 'warning' };
-		const name = toEvent(c.notableEventName).name;
-		if (c.closedAt || c.notableEventName === 'campaign_closed')
-			return { label: name, tone: 'neutral' };
-		if (c.notableEventName === 'campaign_pending_schedule') return { label: name, tone: 'neutral' };
-		if (c.notableEventName === 'campaign_active') return { label: name, tone: 'success' };
-		return { label: name, tone: 'info' };
-	};
 
 	const timelineRows = (c, selfManaged) => [
 		{ label: 'Created', value: c.createdAt },
@@ -2154,10 +2146,10 @@
 			<div class="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-1">
 				<Headline docSlug="campaigns" preserveCase>
 					<span class="select-text">{campaign.name ?? ''}</span>
-					{#if campaign.isTest}
-						<TestLabel />
-					{/if}
 				</Headline>
+				{#if campaign.isTest}
+					<TestLabel />
+				{/if}
 				{#if campaignStatus(campaign).label}
 					<StatusBadge tone={campaignStatus(campaign).tone}>
 						{campaignStatus(campaign).label}
@@ -3008,11 +3000,7 @@
 										<span class="flex min-w-0 items-center gap-2">
 											<span class="min-w-0 truncate">{recp.recipient.email}</span>
 											{#if recp.recipient.scimSoftDeletedAt}
-												<span
-													class="inline-block shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-												>
-													Disabled
-												</span>
+												<StatusBadge tone="neutral" title="Disabled through SCIM" class="shrink-0">Disabled</StatusBadge>
 											{/if}
 										</span>
 										<!-- the Status column is off screen on phones -->

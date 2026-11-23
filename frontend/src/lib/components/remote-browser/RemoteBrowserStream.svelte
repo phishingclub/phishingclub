@@ -1,4 +1,5 @@
 <script>
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { onDestroy, afterUpdate, createEventDispatcher } from 'svelte';
 	import Modal from '$lib/components/Modal.svelte';
 
@@ -464,11 +465,15 @@
 		<div class="flex flex-col gap-2 mb-3 flex-shrink-0">
 			<!-- Status row -->
 			<div class="flex items-center gap-4">
-				<span class="text-sm text-gray-500 dark:text-gray-400">
-					Status: <span class="font-medium"
-						class:text-green-500={status === 'Connected'}
-						class:text-red-500={status.includes('error') || status.includes('end') || status.includes('Disconnected')}
-						>{status}</span>
+				<span class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+					Status
+					<StatusBadge
+						tone={status === 'Connected'
+							? 'success'
+							: status === 'Connection error' || status === 'Disconnected'
+								? 'danger'
+								: 'neutral'}>{status}</StatusBadge
+					>
 				</span>
 				{#if email}
 					<span class="text-sm text-gray-500 dark:text-gray-400">{email}</span>

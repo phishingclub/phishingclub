@@ -189,7 +189,7 @@
 							<span class="truncate">{company.name}</span>
 							{#if company.deletingAt}
 								<StatusBadge
-									tone={company.deleteFailure ? 'warning' : 'danger'}
+									tone={company.deleteFailure ? 'danger' : 'neutral'}
 									title={company.deleteFailure
 										? `The delete is waiting: ${company.deleteFailure}. Remove it and the delete continues on its own.`
 										: 'The company is deleted in the background with everything in it'}

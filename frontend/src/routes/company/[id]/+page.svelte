@@ -387,12 +387,7 @@
 											Reset to default
 										</button>
 									{:else}
-										<span
-											id="company-color-state"
-											class="inline-flex items-center h-6 px-2 rounded text-xs bg-gray-100 text-slate-600 dark:bg-gray-700 dark:text-gray-300"
-										>
-											Default color
-										</span>
+										<span id="company-color-state" class="text-sm text-gray-500 dark:text-gray-400">Default color</span>
 									{/if}
 								</div>
 							</div>
@@ -450,14 +445,10 @@
 						title="SCIM Provisioning"
 						description="Automatically provision recipients from your identity provider."
 					>
-						<div class="flex items-center gap-2 mt-2">
-							<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
+						<div class="text-sm flex items-center gap-2 mt-2">
+							<span class="text-gray-500 dark:text-gray-400">Status</span>
 							<StatusBadge
-								tone={scimStatus === 'enabled'
-									? 'success'
-									: scimStatus === 'disabled'
-										? 'warning'
-										: 'neutral'}
+								tone={scimStatus === 'enabled' ? 'success' : 'neutral'}
 							>
 								{scimStatus === 'enabled'
 									? 'Enabled'

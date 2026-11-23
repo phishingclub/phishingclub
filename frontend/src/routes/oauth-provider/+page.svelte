@@ -675,7 +675,7 @@
 						<span class="block truncate">{provider.name}</span>
 						<span class="block sm:hidden mt-1">
 							<StatusBadge tone={provider.isAuthorized ? 'success' : 'warning'}>
-								{provider.isAuthorized ? 'Authorized' : 'Not Authorized'}
+								{provider.isAuthorized ? 'Authorized' : 'Not authorized'}
 							</StatusBadge>
 						</span>
 					</button>
@@ -685,7 +685,7 @@
 						{#if provider.isAuthorized}
 							<StatusBadge tone="success">Authorized</StatusBadge>
 						{:else}
-							<StatusBadge tone="warning">Not Authorized</StatusBadge>
+							<StatusBadge tone="warning">Not authorized</StatusBadge>
 						{/if}
 					</div>
 				</TableCell>

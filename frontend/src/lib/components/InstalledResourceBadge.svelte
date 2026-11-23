@@ -1,4 +1,5 @@
 <script>
+	import Tag from './Tag.svelte';
 	import { onMount } from 'svelte';
 	import {
 		installedResources,
@@ -24,18 +25,15 @@
 
 {#if info}
 	{#if variant === 'badge'}
-		<!-- a quiet marker in the app's own muted surface, not a loud colour -->
-		<span
-			class="ml-2 inline-flex shrink-0 items-center gap-1 rounded bg-grayblue-light px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:bg-gray-800/60 dark:text-gray-400"
-			title={`Installed from ${info.packageId}`}
-		>
+		<!-- a tag with the package icon -->
+		<Tag class="ml-2" title={`Installed from ${info.packageId}`}>
 			<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 				<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
 				<polyline points="3.27 6.96 12 12.01 20.73 6.96" />
 				<line x1="12" y1="22.08" x2="12" y2="12" />
 			</svg>
 			Installed
-		</span>
+		</Tag>
 	{:else}
 		<!-- muted panel for in form messages. w-0 min-w-full makes it take the width
 		of its container without adding to it, so long package names wrap instead of

@@ -14,6 +14,7 @@
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import EventName from '$lib/components/table/EventName.svelte';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import Tag from '$lib/components/Tag.svelte';
 	import RelativeTime from '$lib/components/RelativeTime.svelte';
 	import { dayDate } from '$lib/utils/programSchedule.js';
 	import { formatDateTime, formatWeekDay, plural } from '$lib/utils/programText.js';
@@ -33,7 +34,7 @@
 		stopped: 'Still active when the program closed'
 	};
 	const statusText = { sent: 'Sent', scheduled: 'Scheduled', notSent: 'Not sent yet' };
-	const muted = 'text-sm text-gray-400 dark:text-gray-500';
+	const muted = 'text-gray-400 dark:text-gray-500';
 	// how many coming windows the random order line names
 	const windowsShown = 4;
 
@@ -148,10 +149,7 @@
 						<span class="flex items-center gap-2 min-w-0" title={r.templateName}>
 							<span class="truncate">{r.templateName}</span>
 							{#if r.training}
-								<span class="shrink-0"
-									><StatusBadge tone="success" title="Awareness training">Training</StatusBadge
-									></span
-								>
+								<Tag title="Awareness training">Training</Tag>
 							{/if}
 						</span>
 					</TableCell>

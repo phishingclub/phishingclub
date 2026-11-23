@@ -56,6 +56,8 @@
 	import TableDropDownButton from '$lib/components/table/TableDropDownButton.svelte';
 	import DeleteAlert from '$lib/components/modal/DeleteAlert.svelte';
 	import TestLabel from '$lib/components/TestLabel.svelte';
+	import Tag from '$lib/components/Tag.svelte';
+	import { campaignStatus } from '$lib/utils/campaignStatus.js';
 	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
 	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
 	import {
@@ -791,15 +793,7 @@
 	});
 
 	// same tones as the campaign detail header
-	const statusTone = (c) => {
-		if (
-			c.closedAt ||
-			['campaign_closed', 'campaign_pending_schedule'].includes(c.notableEventName)
-		) {
-			return 'neutral';
-		}
-		return c.notableEventName === 'campaign_active' ? 'success' : 'info';
-	};
+	const statusTone = (c) => campaignStatus(c).tone;
 
 	// "HH:MM" in the same locale clock format as the Start and End values
 	const formatClock = (hhmm) => {
@@ -2012,7 +2006,7 @@
 		on:toggleAll={(e) => selection.setPageSelection(selectablePageIds, e.detail)}
 		columns={[
 			{ column: 'Name', size: 'large' },
-			{ column: 'Status', size: 'small' },
+			{ column: 'Status', size: 'medium' },
 			{ column: 'Template', size: 'medium' },
 			{ column: 'Send start at', title: 'Delivery start', size: 'medium' },
 			{ column: 'Send end at', title: 'Delivery finish', size: 'medium' },
@@ -2035,13 +2029,13 @@
 					/>
 				{/if}
 				<TableCellLink href={`/campaign/${campaign.id}`} title={campaign.name}>
+					{campaign.name}
 					{#if campaign.isTest}
-						<TestLabel />
+						<TestLabel class="ml-2" />
 					{/if}
 					{#if campaign.isTraining}
-						<StatusBadge tone="success" title="Awareness training">training</StatusBadge>
+						<Tag title="Awareness training" class="ml-2">Training</Tag>
 					{/if}
-					{campaign.name}
 					<!-- the Status column is off screen on phones, so the status shows under the name -->
 					{#if campaign.pausedAt && !campaign.closedAt}
 						<span class="block sm:hidden mt-1"
@@ -2976,9 +2970,7 @@
 															<p class="text-xs font-semibold text-gray-700 dark:text-gray-300">
 																Events
 															</p>
-															<span
-																class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
-															>
+															<span class="text-xs text-gray-500 dark:text-gray-400">
 																{webhook.events.length === webhookEventOptions.length
 																	? 'All'
 																	: webhook.events.length} / {webhookEventOptions.length}
@@ -3068,9 +3060,7 @@
 																	<p class="text-xs font-semibold text-gray-700 dark:text-gray-300">
 																		Events
 																	</p>
-																	<span
-																		class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
-																	>
+																	<span class="text-xs text-gray-500 dark:text-gray-400">
 																		{script.events.length === webhookEventOptions.length
 																			? 'All'
 																			: script.events.length} / {webhookEventOptions.length}
@@ -3911,11 +3901,7 @@
 												>
 													{recipient.email}
 													{#if recipient.scimSoftDeletedAt}
-														<span
-															class="ml-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-														>
-															Disabled
-														</span>
+														<StatusBadge tone="neutral" title="Disabled through SCIM" class="ml-2">Disabled</StatusBadge>
 													{/if}
 												</span>
 												{#if recipient.firstName || recipient.lastName}

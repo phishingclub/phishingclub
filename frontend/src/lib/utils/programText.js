@@ -339,8 +339,8 @@ export const programStatus = (program) => {
 		};
 	}
 	if (program.closedAt || program.status === 'closed') return { label: 'Closed', tone: 'neutral' };
-	if (program.status === 'draft') return { label: 'Draft', tone: 'neutral' };
-	if (program.status === 'scheduled') return { label: 'Scheduled', tone: 'info' };
+	if (program.status === 'draft') return { label: 'Draft', tone: 'draft' };
+	if (program.status === 'scheduled') return { label: 'Scheduled', tone: 'scheduled' };
 	if (program.resuming) {
 		return {
 			label: 'Resuming',
@@ -352,7 +352,7 @@ export const programStatus = (program) => {
 	if (program.needsAttention || program.warnings?.length) {
 		return { label: 'Needs attention', tone: 'warning' };
 	}
-	return { label: 'Active', tone: 'success' };
+	return { label: 'Active', tone: 'active' };
 };
 
 // tooltip for a value hidden to protect anonymity

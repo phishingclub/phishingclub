@@ -37,7 +37,7 @@
 	import { page } from '$app/stores';
 	import TableCellCheckbox from '$lib/components/table/TableCellCheckbox.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
-	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import Tag from '$lib/components/Tag.svelte';
 	import BulkActionBar from '$lib/components/table/BulkActionBar.svelte';
 	import {
 		createTableSelection,
@@ -699,10 +699,7 @@
 						<span class="flex items-center gap-2 min-w-0">
 							<span class="truncate">{template.name}</span>
 							{#if template.isTraining}
-								<span class="shrink-0"
-									><StatusBadge tone="success" title="Awareness training">training</StatusBadge
-									></span
-								>
+								<Tag title="Awareness training">Training</Tag>
 							{/if}
 						</span>
 					</button>

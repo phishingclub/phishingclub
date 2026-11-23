@@ -8,6 +8,7 @@
 	import Headline from '$lib/components/Headline.svelte';
 	import TextField from '$lib/components/TextField.svelte';
 	import DynamicLabel from '$lib/components/DynamicLabel.svelte';
+	import Tag from '$lib/components/Tag.svelte';
 	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
@@ -471,14 +472,14 @@
 					/>
 				{/if}
 				<TableCellLink href={`/recipient/group/${group.id}`} title={group.name} wrap>
-					{#if group.isDynamic}
-						<DynamicLabel />
-					{/if}
 					{group.name}
+					{#if group.isDynamic}
+						<DynamicLabel class="ml-2" />
+					{/if}
 					{#if group.deletingAt}
 						<span class="ml-2"
 							><StatusBadge
-								tone={group.deleteFailure ? 'warning' : 'danger'}
+								tone={group.deleteFailure ? 'danger' : 'neutral'}
 								title={group.deleteFailure
 									? `The delete is waiting: ${group.deleteFailure}. Remove it and the delete continues on its own.`
 									: 'The group is deleted in the background'}
@@ -487,11 +488,7 @@
 						>
 					{/if}
 					{#if group.scimEnabled}
-						<span
-							class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
-						>
-							SCIM
-						</span>
+						<Tag title="Managed through SCIM" class="ml-2">SCIM</Tag>
 					{/if}
 				</TableCellLink>
 

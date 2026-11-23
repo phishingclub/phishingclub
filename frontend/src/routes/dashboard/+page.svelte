@@ -2,7 +2,6 @@
 	import Headline from '$lib/components/Headline.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import SubHeadline from '$lib/components/SubHeadline.svelte';
-	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { AppStateService } from '$lib/service/appState';
 	import { api } from '$lib/api/apiProxy.js';
 	import { onMount } from 'svelte';
@@ -258,12 +257,22 @@
 	/>
 
 	{#if attention.length}
-		<!-- what needs a look, as status badges linking to where it is listed -->
-		<div class="mt-4 flex flex-wrap items-center gap-2" data-attention>
+		<!-- what needs a look, as notices with a bar in the state color, each
+		linking to where it is listed -->
+		<div class="mt-4 flex flex-wrap items-center gap-3" data-attention>
 			{#each attention as item (item.key)}
-				<a href={item.href} class="pc-focus rounded-full transition-opacity duration-200 hover:opacity-80"
-					><StatusBadge tone={item.tone}>{item.text}</StatusBadge></a
+				<a
+					href={item.href}
+					class="pc-focus group flex items-center gap-3 rounded-r-md border-l-4 py-2 pl-3 pr-4 text-sm font-semibold text-slate-800 transition-colors duration-200 dark:text-gray-100 {item.tone ===
+					'danger'
+						? 'border-pc-red bg-pc-red/10'
+						: 'border-failed-sending bg-failed-sending/15 dark:bg-failed-sending/10'}"
 				>
+					<span>{item.text}</span>
+					<span class="text-cta-blue underline-offset-2 group-hover:underline dark:text-highlight-blue"
+						>View</span
+					>
+				</a>
 			{/each}
 		</div>
 	{/if}

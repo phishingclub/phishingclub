@@ -1,4 +1,5 @@
 <script>
+	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import CsvColumnsHelp from '../../CsvColumnsHelp.svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import Note from '$lib/components/Note.svelte';
@@ -542,7 +543,7 @@
 	<Breadcrumb
 		crumbs={[{ label: 'Groups', href: '/recipient/group/' }, { label: groupValues.name ?? '' }]}
 	/>
-	<div class="flex flex-wrap items-center gap-x-1">
+	<div class="flex flex-wrap items-center gap-x-3">
 		<Headline docSlug="groups" preserveCase>{groupValues.name ?? 'Group'}</Headline>
 		{#if groupValues.isDynamic}
 			<DynamicLabel />
@@ -632,11 +633,7 @@
 						>
 					{/if}
 					{#if recipient.scimSoftDeletedAt}
-						<span
-							class="ml-2 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase align-middle bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-						>
-							Disabled
-						</span>
+						<StatusBadge tone="neutral" title="Disabled through SCIM" class="ml-2">Disabled</StatusBadge>
 					{/if}
 				</TableCellLink>
 				<TableCell value={recipient.firstName} />

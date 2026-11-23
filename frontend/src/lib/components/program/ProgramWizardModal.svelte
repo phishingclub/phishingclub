@@ -2392,9 +2392,7 @@
 													<p class="text-xs font-semibold text-gray-700 dark:text-gray-300">
 														Events
 													</p>
-													<span
-														class="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
-													>
+													<span class="text-xs text-gray-500 dark:text-gray-400">
 														{webhook.events.length === webhookEventOptions.length
 															? 'All'
 															: webhook.events.length} / {webhookEventOptions.length}
@@ -3223,7 +3221,7 @@
 														>
 													{/if}
 													{#if change}
-														<StatusBadge tone="warning" class="mt-1">Changed</StatusBadge>
+														<span class="mt-1 block"><StatusBadge tone="warning">Changed</StatusBadge></span>
 													{/if}
 												</div>
 											{/each}

@@ -1,6 +1,7 @@
 <script>
 	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import Tag from '$lib/components/Tag.svelte';
 	import Note from '$lib/components/Note.svelte';
 	import { page } from '$app/stores';
 	import { api } from '$lib/api/apiProxy.js';
@@ -510,47 +511,36 @@
 					/>
 				{/if}
 				<TableCell wrap>
-					<button
-						on:click={() => {
-							openUpdateModal(entry.id);
-						}}
-						{...globalButtonDisabledAttributes(entry, contextCompanyID)}
-						title={entry.name}
-						class="pc-cell-link py-1 text-left max-w-full truncate align-middle"
-					>
-						{entry.name}
-					</button>
-					{#if entry.asns && entry.asns.trim() && !asnAvailable}
-						<StatusBadge
-							tone="warning"
-							class="ml-2 align-middle"
-							title={asnOnlyAllow(entry)
-								? 'This filter lists ASNs but ASN data is not downloaded, so it blocks every visitor. Download it under Settings, IP Data.'
-								: 'This filter lists ASNs but ASN data is not downloaded, so its ASN rule has no effect. Download it under Settings, IP Data.'}
-							>ASN data missing</StatusBadge
+					<!-- the name truncates so the warning stays on the same line -->
+					<span class="flex min-w-0 items-center gap-2">
+						<button
+							on:click={() => {
+								openUpdateModal(entry.id);
+							}}
+							{...globalButtonDisabledAttributes(entry, contextCompanyID)}
+							title={entry.name}
+							class="pc-cell-link min-w-0 py-1 text-left truncate"
 						>
-					{/if}
+							{entry.name}
+						</button>
+						{#if entry.asns && entry.asns.trim() && !asnAvailable}
+							<StatusBadge
+								tone="warning"
+								class="shrink-0"
+								title={asnOnlyAllow(entry)
+									? 'This filter lists ASNs but ASN data is not downloaded, so it blocks every visitor. Download it under Settings, IP Data.'
+									: 'This filter lists ASNs but ASN data is not downloaded, so its ASN rule has no effect. Download it under Settings, IP Data.'}
+								>ASN data missing</StatusBadge
+							>
+						{/if}
+					</span>
 					<!-- the Type column is off screen on phones -->
 					<span class="flex sm:hidden pb-1">
-						<span
-							class="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold {entry.allowed
-								? 'bg-cta-light-blue text-active-blue dark:bg-highlight-blue/20 dark:text-pc-dusty-light-blue'
-								: 'bg-gray-200 text-slate-700 dark:bg-gray-700 dark:text-gray-200'}"
-						>
-							{entry.allowed ? 'Allow' : 'Deny'}
-						</span>
+						<Tag>{entry.allowed ? 'Allow' : 'Deny'}</Tag>
 					</span>
 				</TableCell>
 				<TableCell alignText="center">
-					<span class="leading-none">
-						<span
-							class="inline-flex items-center rounded px-2 py-0.5 text-xs font-semibold {entry.allowed
-								? 'bg-cta-light-blue text-active-blue dark:bg-highlight-blue/20 dark:text-pc-dusty-light-blue'
-								: 'bg-gray-200 text-slate-700 dark:bg-gray-700 dark:text-gray-200'}"
-						>
-							{entry.allowed ? 'Allow' : 'Deny'}
-						</span>
-					</span>
+					<Tag>{entry.allowed ? 'Allow' : 'Deny'}</Tag>
 				</TableCell>
 				{#if contextCompanyID}
 					<TableCellScope companyID={entry.companyID} />
@@ -621,13 +611,7 @@
 						{:else}
 							<div class="flex flex-col py-2">
 								<FieldLabel>Filter Type</FieldLabel>
-								<span
-									class="self-start inline-flex items-center rounded px-2 py-0.5 text-sm font-semibold {formValues.allowed
-										? 'bg-cta-light-blue text-active-blue dark:bg-highlight-blue/20 dark:text-pc-dusty-light-blue'
-										: 'bg-gray-200 text-slate-700 dark:bg-gray-700 dark:text-gray-200'}"
-								>
-									{formValues.allowed ? 'Allow' : 'Deny'}
-								</span>
+								<Tag class="self-start">{formValues.allowed ? 'Allow' : 'Deny'}</Tag>
 							</div>
 						{/if}
 						<p class="text-sm text-gray-600 dark:text-gray-400 mb-4 transition-colors duration-200">

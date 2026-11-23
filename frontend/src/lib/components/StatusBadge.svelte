@@ -1,27 +1,57 @@
-<script>
-	// small tinted pill with a dot and a text label for the state of a thing.
-	// the label carries the meaning, the color only supports it.
-	/** @type {'success'|'warning'|'danger'|'info'|'neutral'} */
-	export let tone = 'neutral';
-	export let title = '';
-	let cssClass = '';
-	export { cssClass as class };
-
-	const TONES = {
-		success: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
-		warning: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
-		danger: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
-		info: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
-		neutral: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+<script context="module">
+	// the dot color of each tone, in the app's own state colors: the calendar
+	// legend, the chart legends and the stat tiles use the same ones.
+	// draft is a gray dot for a thing not started yet; neutral is a hollow dot
+	// for a state that is off or over.
+	export const STATUS_DOTS = {
+		active: 'bg-campaign-active dark:bg-highlight-blue',
+		managed: 'bg-pc-purple',
+		scheduled: 'bg-campaign-scheduled',
+		success: 'bg-training-completed dark:bg-campaign-completed',
+		info: 'bg-cta-blue dark:bg-highlight-blue',
+		warning: 'bg-failed-sending',
+		danger: 'bg-pc-red',
+		draft: 'bg-gray-400 dark:bg-gray-500',
+		neutral: 'ring-1 ring-inset ring-gray-400 dark:ring-gray-500'
 	};
 </script>
 
-<span
-	class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold leading-5 whitespace-nowrap {TONES[
-		tone
-	] ?? TONES.neutral} {cssClass}"
-	title={title || undefined}
->
-	<span class="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden="true"></span>
-	<slot />
-</span>
+<script>
+	// the state of a thing as a colored dot and its name in body text, as in
+	// the calendar and chart legends. The label carries the meaning, the dot
+	// only supports it.
+	/** @type {'active'|'managed'|'scheduled'|'success'|'info'|'warning'|'danger'|'draft'|'neutral'} */
+	export let tone = 'neutral';
+	export let title = '';
+	// a state that links to where it is handled
+	export let href = '';
+	let cssClass = '';
+	export { cssClass as class };
+
+	$: dot = STATUS_DOTS[tone] ?? STATUS_DOTS.neutral;
+	// an off state recedes, a state that needs a look stands out
+	$: text =
+		tone === 'neutral'
+			? 'text-slate-500 dark:text-gray-400'
+			: tone === 'danger' || tone === 'warning'
+				? 'font-semibold text-slate-800 dark:text-gray-100'
+				: 'text-slate-700 dark:text-gray-200';
+	// no font size of its own: the state reads at the size of the text around it
+	$: classes = `inline-flex items-baseline gap-1.5 whitespace-nowrap align-baseline ${text} ${cssClass}`;
+</script>
+
+{#if href}
+	<a
+		{href}
+		class="{classes} pc-focus rounded-sm underline-offset-2 transition-colors duration-200 hover:text-cta-blue hover:underline dark:hover:text-highlight-blue"
+		title={title || undefined}
+	>
+		<span class="h-2 w-2 shrink-0 self-center rounded-full {dot}" aria-hidden="true"></span>
+		<slot />
+	</a>
+{:else}
+	<span class={classes} title={title || undefined}>
+		<span class="h-2 w-2 shrink-0 self-center rounded-full {dot}" aria-hidden="true"></span>
+		<slot />
+	</span>
+{/if}

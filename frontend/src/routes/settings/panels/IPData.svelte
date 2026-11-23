@@ -110,17 +110,17 @@
 			>
 				<div class="mt-2 space-y-4">
 					<div class="space-y-1">
-						<div class="flex flex-wrap items-center gap-2">
-							<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
-							{#if p.info && p.info.downloaded}
+						<div class="text-sm flex flex-wrap items-center gap-2">
+							<span class="text-gray-500 dark:text-gray-400">Status</span>
+							<!-- one state: a newer version means the data is there but old -->
+							{#if p.info && p.info.downloaded && p.updateAvailable}
+								<StatusBadge tone="info">Update available</StatusBadge>
+							{:else if p.info && p.info.downloaded}
 								<StatusBadge tone="success">Downloaded</StatusBadge>
 							{:else if p.info}
 								<StatusBadge tone="warning">Built in</StatusBadge>
 							{:else}
 								<StatusBadge tone="neutral">Not downloaded</StatusBadge>
-							{/if}
-							{#if p.updateAvailable}
-								<StatusBadge tone="info">Update available</StatusBadge>
 							{/if}
 						</div>
 						{#if p.info}

@@ -216,8 +216,8 @@
 <div class="flex flex-wrap gap-6">
 	<SettingsCard title="PDF Reports" description="Generate PDF reports for {showPrograms ? 'campaigns and programs' : 'campaigns'}. Requires Chromium and system dependencies.">
 		<div class="mt-2 space-y-4">
-			<div class="flex items-center gap-2">
-				<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
+			<div class="text-sm flex items-center gap-2">
+				<span class="text-gray-500 dark:text-gray-400">Status</span>
 				<StatusBadge tone={isReportPDFEnabled ? 'success' : 'neutral'}>
 					{isReportPDFEnabled ? 'Enabled' : 'Disabled'}
 				</StatusBadge>

@@ -161,8 +161,8 @@
 {#if loaded}
 	<div class="flex flex-wrap gap-6">
 		<SettingsCard title="Single Sign-On" description="Let users sign in with your identity provider.">
-			<div class="flex items-center gap-2 mt-2">
-				<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
+			<div class="text-sm flex items-center gap-2 mt-2">
+				<span class="text-gray-500 dark:text-gray-400">Status</span>
 				{#if isSSOEnabled}
 					<StatusBadge tone="success">Enabled</StatusBadge>
 				{:else}

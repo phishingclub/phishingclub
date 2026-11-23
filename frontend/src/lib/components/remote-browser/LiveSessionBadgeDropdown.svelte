@@ -1,4 +1,5 @@
 <script>
+	import { STATUS_DOTS } from '$lib/components/StatusBadge.svelte';
 	import { onDestroy } from 'svelte';
 	import { activeFormElement } from '$lib/store/activeFormElement';
 	import { scrollBarClassesVertical } from '$lib/utils/scrollbar';
@@ -101,17 +102,15 @@
 <div>
 	<button
 		bind:this={buttonRef}
-		class="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-semibold transition-colors duration-150 focus:outline-none {victimConnected
-			? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-400 dark:hover:bg-green-800/50'
-			: 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/40 dark:text-yellow-400 dark:hover:bg-yellow-800/50'}"
+		class="pc-focus inline-flex items-center gap-1.5 whitespace-nowrap rounded-sm text-sm leading-5 text-slate-700 transition-colors duration-150 hover:text-cta-blue dark:text-gray-200 dark:hover:text-highlight-blue"
 		on:click|stopPropagation|preventDefault={toggle}
 		on:keydown={handleKeydown}
 	>
 		{#if victimConnected}
-			<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse inline-block"></span>
+			<span class="h-2 w-2 shrink-0 rounded-full {STATUS_DOTS.success} motion-safe:animate-pulse"></span>
 			Live
 		{:else}
-			<span class="w-1.5 h-1.5 rounded-full bg-yellow-500 inline-block"></span>
+			<span class="h-2 w-2 shrink-0 rounded-full {STATUS_DOTS.warning}"></span>
 			Active
 		{/if}
 		<svg class="w-3 h-3 opacity-60" viewBox="0 0 20 20" fill="currentColor">

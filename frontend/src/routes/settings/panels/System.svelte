@@ -208,9 +208,7 @@
 			<div class="flex items-center justify-between gap-2">
 				<span class="text-gray-500 dark:text-gray-400 transition-colors duration-200">Status</span>
 				{#if updateAvailable}
-					<a href="/settings/update/" class="pc-focus rounded-full hover:underline">
-						<StatusBadge tone="info">Update available</StatusBadge>
-					</a>
+					<StatusBadge tone="info" href="/settings/update/">Update available</StatusBadge>
 				{:else}
 					<StatusBadge tone="success">Up to date</StatusBadge>
 				{/if}

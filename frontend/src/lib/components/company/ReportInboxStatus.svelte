@@ -18,15 +18,15 @@
 
 	const TONES = {
 		none: 'neutral',
-		disabled: 'warning',
+		disabled: 'neutral',
 		error: 'danger',
 		active: 'success'
 	};
 </script>
 
 <div>
-	<div class="flex items-center gap-2">
-		<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
+	<div class="text-sm flex items-center gap-2">
+		<span class="text-gray-500 dark:text-gray-400">Status</span>
 		<StatusBadge tone={TONES[status]}>{LABELS[status]}</StatusBadge>
 	</div>
 	{#if showError && status === 'error'}

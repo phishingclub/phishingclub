@@ -57,13 +57,13 @@
 
 {#if loaded}
 	<div>
-		<div class="flex items-center gap-2">
-			<span class="text-sm text-gray-500 dark:text-gray-400">Status</span>
+		<div class="text-sm flex items-center gap-2">
+			<span class="text-gray-500 dark:text-gray-400">Status</span>
 			{#if configured}
 				<StatusBadge tone="info">{isGlobal ? 'Configured' : 'Company overrides'}</StatusBadge>
 			{:else}
 				<StatusBadge tone="neutral"
-					>{isGlobal ? 'Not configured' : 'Uses the global defaults'}</StatusBadge
+					>{isGlobal ? 'Not configured' : 'Global defaults'}</StatusBadge
 				>
 			{/if}
 		</div>

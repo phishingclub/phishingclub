@@ -462,7 +462,7 @@
 
 				{#if testResult}
 					<div
-						class="rounded-md border border-gray-200 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-800/40 p-4 space-y-2"
+						class="rounded-md border border-gray-200 dark:border-gray-700/60 bg-gray-50 dark:bg-gray-800/40 p-4 space-y-2 text-sm"
 					>
 						<StatusBadge tone={testResult.ok ? 'success' : 'danger'}>
 							{testResult.ok ? 'Test passed' : 'Test failed'}
