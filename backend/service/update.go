@@ -71,6 +71,10 @@ func (u *Update) CheckForUpdate(
 		return false, false, errors.New("unauthorized")
 	}
 
+	if inApp, ok := simulatedUpdate(); ok {
+		return true, inApp, nil
+	}
+
 	// Check GitHub for latest release
 	updateAvailable, err := u.checkGitHubForUpdate()
 	if err != nil {
@@ -103,6 +107,10 @@ func (u *Update) CheckForUpdateCached(
 		return false, false, errors.New("unauthorized")
 	}
 
+	if inApp, ok := simulatedUpdate(); ok {
+		return true, inApp, nil
+	}
+
 	// Get cached update availability
 	updateAvailable := cache.IsUpdateAvailable()
 
@@ -113,6 +121,15 @@ func (u *Update) CheckForUpdateCached(
 	}
 
 	return updateAvailable, usingSystemd.Value.String() == data.OptionValueUsingSystemdYes, nil
+}
+
+// UpdateInApp returns if the update can run from the application, a simulated
+// update in dev decides this itself
+func (u *Update) UpdateInApp(usingSystemd bool) bool {
+	if inApp, ok := simulatedUpdate(); ok {
+		return inApp
+	}
+	return usingSystemd
 }
 
 // checkGitHubForUpdate checks GitHub releases API for newer version
@@ -191,6 +208,13 @@ func (u *Update) GetUpdateDetails(
 	if !isAuthorized {
 		// skip audit logging on this endpoint
 		return nil, errors.New("unauthorized")
+	}
+
+	if _, ok := simulatedUpdate(); ok {
+		return &UpdateDetails{
+			LatestVersion: simulatedUpdateVersion,
+			Message:       "Simulated update (.dev/simulate-update)",
+		}, nil
 	}
 
 	// Get latest release info from GitHub
@@ -286,6 +310,15 @@ func (u *Update) RunUpdate(
 	if !isAuthorized {
 		u.AuditLogNotAuthorized(ae)
 		return errors.New("unauthorized")
+	}
+
+	// a simulated update stops here, nothing is downloaded or installed
+	if _, ok := simulatedUpdate(); ok {
+		time.Sleep(2 * time.Second)
+		u.Logger.Infow("simulated update finished, nothing was installed")
+		ae.Details["simulated"] = true
+		u.AuditLogAuthorized(ae)
+		return nil
 	}
 
 	// Get update details

@@ -65,7 +65,7 @@ func (u *Update) GetUpdateDetails(g *gin.Context) {
 	if errors.Is(err, errs.ErrNoUpdateAvailable) {
 		u.Response.OK(g, gin.H{
 			"updateAvailable": false,
-			"updateInApp":     opt.Value.String() == data.OptionValueUsingSystemdYes,
+			"updateInApp":     u.UpdateService.UpdateInApp(opt.Value.String() == data.OptionValueUsingSystemdYes),
 			"downloadURL":     "",
 			"latestVersion":   "",
 		})
@@ -73,7 +73,7 @@ func (u *Update) GetUpdateDetails(g *gin.Context) {
 	}
 	u.Response.OK(g, gin.H{
 		"updateAvailable": true,
-		"updateInApp":     opt.Value.String() == data.OptionValueUsingSystemdYes,
+		"updateInApp":     u.UpdateService.UpdateInApp(opt.Value.String() == data.OptionValueUsingSystemdYes),
 		"downloadURL":     details.DownloadURL,
 		"latestVersion":   details.LatestVersion,
 	})
