@@ -198,6 +198,8 @@ const (
 	ROUTE_V1_CAMPAIGN_EXPORT_SUBMISSIONS     = "/api/v1/campaign/:id/export/submissions"
 	ROUTE_V1_CAMPAIGN_ANONYMIZE              = "/api/v1/campaign/:id/anonymize"
 	ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA         = "/api/v1/campaign/:id/anonymize-data"
+	ROUTE_V1_CAMPAIGN_ANONYMIZE_SCHEDULE     = "/api/v1/campaign/:id/anonymize/schedule"
+	ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA_SCHED   = "/api/v1/campaign/:id/anonymize-data/schedule"
 	ROUTE_V1_CAMPAIGN_ID                     = "/api/v1/campaign/:id"
 	ROUTE_V1_CAMPAIGN_NAME                   = "/api/v1/campaign/name/:name"
 	ROUTE_V1_CAMPAIGN_RECIPIENTS             = "/api/v1/campaign/:id/recipients"
@@ -667,6 +669,8 @@ func setupRoutes(
 		// required for large campaigns
 		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE, middleware.ExtendedTimeout(10*time.Minute), middleware.SessionHandler, controllers.Campaign.AnonymizeByID).
 		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA, middleware.SessionHandler, controllers.Campaign.AnonymizeDataByID).
+		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE_SCHEDULE, middleware.SessionHandler, controllers.Campaign.ScheduleAnonymizeByID).
+		POST(ROUTE_V1_CAMPAIGN_ANONYMIZE_DATA_SCHED, middleware.SessionHandler, controllers.Campaign.ScheduleDataAnonymizeByID).
 		DELETE(ROUTE_V1_CAMPAIGN_DEVICE_CODES, middleware.SessionHandler, controllers.Campaign.DeleteDeviceCodesByCampaignID).
 		DELETE(ROUTE_V1_CAMPAIGN_ID, middleware.SessionHandler, controllers.Campaign.DeleteByID).
 		// programs

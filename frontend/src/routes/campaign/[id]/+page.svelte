@@ -505,6 +505,8 @@
 	let reportInbox = null;
 	let reportInboxNow = Date.now();
 	let reportInboxNowInterval = null;
+	// keeps anonymizeNow current, see anonymizeDue
+	let anonymizeClockInterval = null;
 
 	// hooks
 	onMount(() => {
@@ -538,6 +540,25 @@
 		// enough. It also keeps the minutes since the last check current.
 		reportInboxNowInterval = setInterval(loadReportInbox, 60000);
 
+		// a scheduled anonymize date can pass while the page is open. The task
+		// runs it within seconds, so while one is due the campaign is read again
+		// until it shows as done.
+		anonymizeClockInterval = setInterval(async () => {
+			anonymizeNow = Date.now();
+			if (!anonymizeDue && !dataAnonymizeDue) {
+				return;
+			}
+			const allWasDue = anonymizeDue;
+			const dataWasDue = dataAnonymizeDue;
+			await setCampaign();
+			// once the task is done the events and recipients change too, so they
+			// are read again like after Anonymize Now
+			if ((allWasDue && campaign.anonymizedAt) || (dataWasDue && !dataAnonymizeDue)) {
+				await getEvents();
+				await refreshCampaignRecipients();
+			}
+		}, 15000);
+
 		// cleanup resource context when leaving page
 		return () => {
 			recipientTableUrlParams.unsubscribe();
@@ -545,6 +566,7 @@
 			resourceContext.clear();
 			clearInterval(liveSessionPollInterval);
 			clearInterval(reportInboxNowInterval);
+			clearInterval(anonymizeClockInterval);
 		};
 	});
 
@@ -1584,6 +1606,34 @@
 	// the resume action shows while a campaign is paused and not closed
 	$: canResume = !!campaign.pausedAt && !campaign.closedAt;
 
+	// the data was anonymized at or after the close, so no newer data exists. A
+	// run while the campaign was open leaves the events after it, which can
+	// still be anonymized.
+	$: dataRanAfterClose =
+		!!campaign.closedAt &&
+		!!campaign.dataAnonymizedAt &&
+		new Date(campaign.dataAnonymizedAt) >= new Date(campaign.closedAt);
+	// a scheduled anonymize date has passed and the task has not finished it
+	// yet. The task runs it within seconds, until then the date is shown as
+	// running and can not be changed, a change could come too late.
+	let anonymizeNow = Date.now();
+	$: anonymizeDue =
+		!campaign.anonymizedAt &&
+		!!campaign.anonymizeAt &&
+		new Date(campaign.anonymizeAt).getTime() <= anonymizeNow;
+	$: dataAnonymizeDue =
+		!campaign.anonymizedAt &&
+		dataSchedulePending &&
+		new Date(campaign.dataAnonymizeAt).getTime() <= anonymizeNow;
+
+	// a data anonymize date that has not run yet. After a run after the close
+	// there is nothing left to scrub, so a later date does not run.
+	$: dataSchedulePending =
+		!dataRanAfterClose &&
+		!!campaign.dataAnonymizeAt &&
+		(!campaign.dataAnonymizedAt ||
+			new Date(campaign.dataAnonymizedAt) < new Date(campaign.dataAnonymizeAt));
+
 	const showAnonymizeModal = () => {
 		isAnonymizeModalVisible = true;
 	};
@@ -1599,6 +1649,140 @@
 	const closeAnonymizeDataModal = () => {
 		isAnonymizeDataModalVisible = false;
 	};
+
+	// schedule an anonymize of a closed campaign for later. kind is 'all' for
+	// the recipients or 'data' for the collected data
+	let isScheduleAnonymizeModalVisible = false;
+	let scheduleAnonymizeKind = 'all';
+	let scheduleAnonymizeChoice = '14d';
+	let scheduleAnonymizeCustomAt = null;
+	// days after close from the company or global defaults, null when there is none
+	let scheduleAnonymizeDefaultDays = null;
+	// the time the modal was opened, the presets count from it
+	let scheduleAnonymizeNow = Date.now();
+
+	// a date some days after base, cut to the minute like the server does
+	const daysFromNow = (days, base) => {
+		const d = new Date(base);
+		d.setSeconds(0, 0);
+		d.setDate(d.getDate() + days);
+		return d;
+	};
+	// the same day next month, or the last day of next month when it is shorter
+	const monthFromNow = (base) => {
+		const d = new Date(base);
+		d.setSeconds(0, 0);
+		const day = d.getDate();
+		d.setDate(1);
+		d.setMonth(d.getMonth() + 1);
+		const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+		d.setDate(Math.min(day, lastDay));
+		return d;
+	};
+	const longDateTime = (d) =>
+		d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+	// the date already set for the kind shown in the modal, empty when none
+	$: scheduleAnonymizeCurrentAt =
+		scheduleAnonymizeKind === 'all'
+			? campaign.anonymizeAt || ''
+			: dataSchedulePending
+				? campaign.dataAnonymizeAt
+				: '';
+
+	$: scheduleAnonymizeOptions = (() => {
+		const in14 = daysFromNow(14, scheduleAnonymizeNow);
+		const in1m = monthFromNow(scheduleAnonymizeNow);
+		const options = [
+			{ label: 'In 14 days', value: '14d', at: in14 },
+			{ label: 'In 1 month', value: '1m', at: in1m }
+		];
+		// the default counts days from the close, as it does for a new campaign.
+		// it is left out when that date has already passed
+		const defaultAt =
+			scheduleAnonymizeDefaultDays != null && campaign.closedAt
+				? daysFromNow(scheduleAnonymizeDefaultDays, new Date(campaign.closedAt).getTime())
+				: null;
+		if (defaultAt && defaultAt.getTime() > scheduleAnonymizeNow) {
+			options.push({ label: 'Company default', value: 'default', at: defaultAt });
+		}
+		return options;
+	})();
+
+	// a preset fills the date field, and a date typed in the field is the
+	// custom choice, so the modal keeps the same layout for both
+	$: scheduleAnonymizePresetAt =
+		scheduleAnonymizeOptions.find((o) => o.value === scheduleAnonymizeChoice)?.at || null;
+	$: if (scheduleAnonymizeChoice !== 'custom' && scheduleAnonymizePresetAt) {
+		scheduleAnonymizeCustomAt = scheduleAnonymizePresetAt.toString();
+	}
+
+	$: scheduleAnonymizeAt =
+		scheduleAnonymizeChoice === 'custom'
+			? scheduleAnonymizeCustomAt
+				? new Date(scheduleAnonymizeCustomAt)
+				: null
+			: scheduleAnonymizePresetAt;
+	$: isScheduleAnonymizeValid =
+		!!scheduleAnonymizeAt &&
+		!isNaN(scheduleAnonymizeAt.getTime()) &&
+		scheduleAnonymizeAt.getTime() > Date.now();
+
+	const showScheduleAnonymizeModal = async (kind) => {
+		scheduleAnonymizeKind = kind;
+		scheduleAnonymizeChoice = '14d';
+		scheduleAnonymizeCustomAt = null;
+		scheduleAnonymizeDefaultDays = null;
+		// the defaults load before the modal opens so its tiles do not change while it is shown
+		try {
+			showIsLoading();
+			const res = await api.company.campaignDefaults.getResolved(campaign.companyID || null);
+			if (res.success) {
+				const days =
+					kind === 'all' ? res.data?.anonymizeAfterDays : res.data?.dataAnonymizeAfterDays;
+				scheduleAnonymizeDefaultDays = typeof days === 'number' && days > 0 ? days : null;
+			}
+		} catch (e) {
+			// the default preset is left out when the defaults can not be loaded
+			console.error('failed to load campaign defaults', e);
+		} finally {
+			hideIsLoading();
+		}
+		scheduleAnonymizeNow = Date.now();
+		isScheduleAnonymizeModalVisible = true;
+	};
+
+	// at is a date or null, null clears the schedule. The schedule button runs
+	// through the modal, which shows a failure itself, so only clear toasts it.
+	const saveAnonymizeSchedule = async (at, toastError) => {
+		let res;
+		try {
+			showIsLoading();
+			const iso = at ? at.toISOString() : null;
+			res =
+				scheduleAnonymizeKind === 'all'
+					? await api.campaign.scheduleAnonymize($page.params.id, iso)
+					: await api.campaign.scheduleAnonymizeData($page.params.id, iso);
+			if (!res.success) {
+				if (toastError) {
+					addToast(res.error || 'Failed to save the schedule', 'Error');
+				}
+				return res;
+			}
+			await setCampaign();
+			isScheduleAnonymizeModalVisible = false;
+			addToast(at ? 'Anonymize scheduled' : 'Schedule cleared', 'Success');
+		} catch (e) {
+			addToast('Failed to save the schedule', 'Error');
+			console.error('failed to save anonymize schedule', e);
+		} finally {
+			hideIsLoading();
+		}
+		return res;
+	};
+
+	const onConfirmScheduleAnonymize = () => saveAnonymizeSchedule(scheduleAnonymizeAt, false);
+	const onClickClearAnonymizeSchedule = () => saveAnonymizeSchedule(null, true);
 
 	/** @param {string} formatted */
 	const showSessionCapture = (formatted) => {
@@ -2752,7 +2936,7 @@
 						Data and Privacy
 					</h3>
 					<div class="divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-						<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pb-3">
+						<div class="flex items-center justify-between gap-4 pb-3">
 							<div class="min-w-0">
 								<p class="flex items-center text-gray-600 dark:text-gray-400">
 									Recipients
@@ -2764,6 +2948,8 @@
 									<p class="text-xs text-gray-500 dark:text-gray-400">
 										{shortDateTime(campaign.anonymizedAt)}
 									</p>
+								{:else if anonymizeDue}
+									<p class="text-xs text-gray-500 dark:text-gray-400">Anonymizing now</p>
 								{:else if campaign.anonymizeAt}
 									<p class="text-xs text-gray-500 dark:text-gray-400">
 										Scheduled {shortDateTime(campaign.anonymizeAt)}
@@ -2773,19 +2959,53 @@
 							{#if campaign.anonymizedAt}
 								<StatusBadge tone="success">Anonymized</StatusBadge>
 							{:else}
-								<div title={contextTitle(campaign)}>
-									<ActionButton
-										variant="danger-outline"
-										icon="anonymize"
-										disabled={isContextMismatch()}
-										on:click={showAnonymizeModal}
-									>
-										Anonymize All
-									</ActionButton>
+								<div class="shrink-0" title={contextTitle(campaign)}>
+									{#if campaign.closedAt && !campaign.isAnonymous}
+										<!-- a closed campaign can be anonymized now or at a later date -->
+										<TableDropDownEllipsis
+											text="Anonymize All"
+											label="Anonymize all"
+											variant="danger-outline"
+											disabled={isContextMismatch()}
+										>
+											<svg
+												slot="icon"
+												xmlns="http://www.w3.org/2000/svg"
+												class="h-4 w-4"
+												aria-hidden="true"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke="currentColor"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
+												/>
+											</svg>
+											<TableDropDownButton name="Anonymize Now" on:click={showAnonymizeModal} />
+											{#if !anonymizeDue}
+												<TableDropDownButton
+													name={campaign.anonymizeAt ? 'Change Schedule' : 'Schedule Anonymize'}
+													on:click={() => showScheduleAnonymizeModal('all')}
+												/>
+											{/if}
+										</TableDropDownEllipsis>
+									{:else}
+										<ActionButton
+											variant="danger-outline"
+											icon="anonymize"
+											disabled={isContextMismatch()}
+											on:click={showAnonymizeModal}
+										>
+											Anonymize All
+										</ActionButton>
+									{/if}
 								</div>
 							{/if}
 						</div>
-						<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-3">
+						<div class="flex items-center justify-between gap-4 pt-3">
 							<div class="min-w-0">
 								<p class="flex items-center text-gray-600 dark:text-gray-400">
 									Collected data
@@ -2796,9 +3016,11 @@
 								</p>
 								{#if !campaign.anonymizedAt && (campaign.dataAnonymizeAt || campaign.dataAnonymizedAt)}
 									<p class="text-xs text-gray-500 dark:text-gray-400">
-										{#if campaign.dataAnonymizeAt && !campaign.dataAnonymizedAt}
+										{#if dataAnonymizeDue}
+											Anonymizing now
+										{:else if dataSchedulePending}
 											Scheduled {shortDateTime(campaign.dataAnonymizeAt)}
-										{:else if campaign.closedAt}
+										{:else if dataRanAfterClose}
 											{shortDateTime(campaign.dataAnonymizedAt)}
 										{:else}
 											Last run {shortDateTime(campaign.dataAnonymizedAt)}
@@ -2808,18 +3030,52 @@
 							</div>
 							{#if campaign.anonymizedAt}
 								<StatusBadge tone="success">Anonymized</StatusBadge>
-							{:else if campaign.dataAnonymizedAt && campaign.closedAt}
+							{:else if dataRanAfterClose}
 								<StatusBadge tone="success">Data anonymized</StatusBadge>
 							{:else}
-								<div title={contextTitle(campaign)}>
-									<ActionButton
-										variant="danger-outline"
-										icon="anonymize"
-										disabled={isContextMismatch()}
-										on:click={showAnonymizeDataModal}
-									>
-										Anonymize Data
-									</ActionButton>
+								<div class="shrink-0" title={contextTitle(campaign)}>
+									{#if campaign.closedAt}
+										<!-- a closed campaign can be anonymized now or at a later date -->
+										<TableDropDownEllipsis
+											text="Anonymize Data"
+											label="Anonymize data"
+											variant="danger-outline"
+											disabled={isContextMismatch()}
+										>
+											<svg
+												slot="icon"
+												xmlns="http://www.w3.org/2000/svg"
+												class="h-4 w-4"
+												aria-hidden="true"
+												fill="none"
+												viewBox="0 0 24 24"
+												stroke="currentColor"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
+												/>
+											</svg>
+											<TableDropDownButton name="Anonymize Now" on:click={showAnonymizeDataModal} />
+											{#if !dataAnonymizeDue}
+												<TableDropDownButton
+													name={dataSchedulePending ? 'Change Schedule' : 'Schedule Anonymize'}
+													on:click={() => showScheduleAnonymizeModal('data')}
+												/>
+											{/if}
+										</TableDropDownEllipsis>
+									{:else}
+										<ActionButton
+											variant="danger-outline"
+											icon="anonymize"
+											disabled={isContextMismatch()}
+											on:click={showAnonymizeDataModal}
+										>
+											Anonymize Data
+										</ActionButton>
+									{/if}
 								</div>
 							{/if}
 						</div>
@@ -3753,6 +4009,61 @@
 				{#if !campaign.closedAt}
 					<li>The campaign stays open and keeps tracking events</li>
 				{/if}
+			</ul>
+		</div>
+	</Alert>
+
+	<Alert
+		headline={scheduleAnonymizeKind === 'all' ? 'schedule anonymize' : 'schedule anonymize data'}
+		tone="affirmative"
+		ok="Schedule"
+		bind:visible={isScheduleAnonymizeModalVisible}
+		onConfirm={onConfirmScheduleAnonymize}
+		okDisabled={!isScheduleAnonymizeValid}
+		focusInput={false}
+	>
+		<div>
+			{#if scheduleAnonymizeCurrentAt}
+				<div
+					class="flex flex-wrap items-center justify-between gap-2 bg-gray-50 dark:bg-gray-700 p-3 rounded-md mb-4 transition-colors duration-200"
+				>
+					<StatusBadge tone="scheduled"
+						>Scheduled {longDateTime(new Date(scheduleAnonymizeCurrentAt))}</StatusBadge
+					>
+					<ActionButton variant="secondary" icon="reset" on:click={onClickClearAnonymizeSchedule}>
+						Clear schedule
+					</ActionButton>
+				</div>
+			{/if}
+			<SelectSquare
+				label="When"
+				width="small"
+				toolTipText={scheduleAnonymizeDefaultDays != null
+					? `Company default is ${scheduleAnonymizeDefaultDays} days after close.`
+					: ''}
+				options={scheduleAnonymizeOptions}
+				bind:value={scheduleAnonymizeChoice}
+			/>
+			<DateTimeField
+				bind:value={scheduleAnonymizeCustomAt}
+				min={new Date()}
+				labelWidth={'medium'}
+				resets={false}
+				toolTipText="In your browser time zone. Pick a preset or enter any later date."
+				onChange={() => (scheduleAnonymizeChoice = 'custom')}
+				required
+			>
+				Anonymize at
+			</DateTimeField>
+			<ul
+				class="list-disc ml-8 mt-6 text-gray-700 dark:text-gray-200 transition-colors duration-200"
+			>
+				{#if scheduleAnonymizeKind === 'all'}
+					<li>Recipients become anonymous IDs and links stop working</li>
+				{:else}
+					<li>Submitted data, IPs, user agents and metadata are removed</li>
+				{/if}
+				<li>Permanent once it runs, the date can be changed until then</li>
 			</ul>
 		</div>
 	</Alert>

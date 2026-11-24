@@ -107,6 +107,11 @@ func (c *Campaign) Create(
 	// program_id is owned by the program feature; a client campaign request can
 	// never set it, or it would hide and lock a campaign no program owns
 	campaign.ProgramID = nullable.Nullable[uuid.UUID]{}
+	// closed at, anonymized at and data anonymized at are written only by the
+	// close and anonymize actions, never taken from a request
+	campaign.ClosedAt = nullable.Nullable[time.Time]{}
+	campaign.AnonymizedAt = nullable.Nullable[time.Time]{}
+	campaign.DataAnonymizedAt = nullable.Nullable[time.Time]{}
 	ae := NewAuditEvent("Campaign.Create", session)
 	defer c.auditDone(ae, &err)
 	// check permissions
@@ -2559,6 +2564,14 @@ func (c *Campaign) UpdateByID(
 	if current.IsProgramManaged() {
 		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
+	// a closed campaign is not edited. A self managed campaign has no start
+	// time, so the start check below does not stop it.
+	if current.ClosedAt.IsSpecified() && !current.ClosedAt.IsNull() {
+		return validate.WrapErrorWithField(
+			errors.New("a closed campaign can not be edited"),
+			"Not allowed",
+		)
+	}
 	// a campaign of a company that is being deleted is not changed, before
 	// anything is written. The read lock is held to the end of the save
 	unlockCompany, err := refuseDeletingCompany(ctx, c.CompanyRepository, companyIDPtr(current.CompanyID))
@@ -2798,15 +2811,8 @@ func (c *Campaign) UpdateByID(
 	if v, err := incoming.DataAnonymizeAt.Get(); err == nil {
 		current.DataAnonymizeAt.Set(v.Truncate(time.Minute))
 	}
-	if v, err := incoming.ClosedAt.Get(); err == nil {
-		current.ClosedAt.Set(v.Truncate(time.Minute))
-	}
-	if v, err := incoming.AnonymizedAt.Get(); err == nil {
-		current.AnonymizedAt.Set(v.Truncate(time.Minute))
-	}
-	if v, err := incoming.DataAnonymizedAt.Get(); err == nil {
-		current.DataAnonymizedAt.Set(v.Truncate(time.Minute))
-	}
+	// closed at, anonymized at and data anonymized at are written only by the
+	// close and anonymize actions, never taken from an update
 	if v, err := incoming.ScheduleAt.Get(); err == nil {
 		current.ScheduleAt.Set(v)
 	} else if incoming.ScheduleAt.IsSpecified() {
@@ -3002,6 +3008,9 @@ func (c *Campaign) UpdateByID(
 		poolAE.Details["plannedMoves"] = movedCount
 		c.AuditLogAuthorized(poolAE)
 	}
+	// closed at is written only by close. The campaign was read open, and
+	// writing that back would open it again if it closed during the update.
+	current.ClosedAt = nullable.Nullable[time.Time]{}
 	err = c.CampaignRepository.UpdateByID(ctx, id, current)
 	if err != nil {
 		c.Logger.Errorw("failed to update campaign by id", "error", err)
@@ -4755,6 +4764,10 @@ func (c *Campaign) HandleAnonymizeCampaigns(
 		c.Logger.Debugw("anonymizing campaign with id", "campaignID", campaignID)
 		err = c.anonymizeByID(ctx, session, &campaignID, true)
 
+		if errors.Is(err, errAnonymizeNotDue) {
+			c.Logger.Debugw("campaign anonymize date changed, not anonymized", "campaignID", campaignID)
+			continue
+		}
 		if errors.Is(err, errs.ErrCampaignAlreadyAnonymized) {
 			c.Logger.Debugw("campaign already anonymized", "error", err)
 			continue
@@ -4816,6 +4829,10 @@ func (c *Campaign) HandleDataAnonymizeCampaigns(
 		campaignID := campaign.ID.MustGet()
 		c.Logger.Debugw("anonymizing campaign data with id", "campaignID", campaignID)
 		err = c.anonymizeDataByID(ctx, session, &campaignID, true)
+		if errors.Is(err, errAnonymizeNotDue) {
+			c.Logger.Debugw("campaign data anonymize date changed, not anonymized", "campaignID", campaignID)
+			continue
+		}
 		if errors.Is(err, errs.ErrCampaignDataAlreadyAnonymized) {
 			c.Logger.Debugw("campaign data already anonymized", "error", err)
 			continue
@@ -6817,13 +6834,15 @@ func (c *Campaign) AnonymizeByID(
 	return c.anonymizeByID(ctx, session, id, false)
 }
 
-// anonymizeByID is AnonymizeByID with a switch that lets the anonymize task
-// include campaigns a program owns
+// anonymizeByID is AnonymizeByID, or the anonymize task when fromTask is set.
+// The task may include campaigns a program owns, and only anonymizes a
+// campaign that is still due when it is read here, so a date cleared or moved
+// after the task listed the campaign is kept.
 func (c *Campaign) anonymizeByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-	allowProgramManaged bool,
+	fromTask bool,
 ) (err error) {
 	ae := NewAuditEvent("Campaign.AnonymizeByID", session)
 	defer c.auditDone(ae, &err)
@@ -6848,8 +6867,11 @@ func (c *Campaign) anonymizeByID(
 		return errs.Wrap(err)
 	}
 	// a program owns its hidden campaigns, only the anonymize task may touch them
-	if !allowProgramManaged && campaign.IsProgramManaged() {
+	if !fromTask && campaign.IsProgramManaged() {
 		return errs.Wrap(gorm.ErrRecordNotFound)
+	}
+	if fromTask && !campaignAnonymizeDue(campaign, time.Now()) {
+		return errs.Wrap(errAnonymizeNotDue)
 	}
 	// check if campaign is active, cause then it should be closed before continueing
 	if campaign.IsActive() {
@@ -6883,13 +6905,15 @@ func (c *Campaign) AnonymizeDataByID(
 	return c.anonymizeDataByID(ctx, session, id, false)
 }
 
-// anonymizeDataByID is AnonymizeDataByID with a switch that lets the anonymize
-// task include campaigns a program owns
+// anonymizeDataByID is AnonymizeDataByID, or the data anonymize task when
+// fromTask is set. The task may include campaigns a program owns, and only
+// runs on a campaign whose data anonymize date is still due when it is read
+// here, so a date cleared or moved after the task listed the campaign is kept.
 func (c *Campaign) anonymizeDataByID(
 	ctx context.Context,
 	session *model.Session,
 	id *uuid.UUID,
-	allowProgramManaged bool,
+	fromTask bool,
 ) (err error) {
 	ae := NewAuditEvent("Campaign.AnonymizeDataByID", session)
 	defer c.auditDone(ae, &err)
@@ -6915,19 +6939,21 @@ func (c *Campaign) anonymizeDataByID(
 		return errs.Wrap(err)
 	}
 	// a program owns its hidden campaigns, only the anonymize task may touch them
-	if !allowProgramManaged && campaign.IsProgramManaged() {
+	if !fromTask && campaign.IsProgramManaged() {
 		return errs.Wrap(gorm.ErrRecordNotFound)
 	}
 	// a fully anonymized campaign has already had its data scrubbed
 	if campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull() {
 		return errs.Wrap(errs.ErrCampaignAlreadyAnonymized)
 	}
-	// once the campaign is closed and its data is anonymized there is no new
-	// data to scrub, while it is open it can be re-run to scrub newer events
-	isClosed := campaign.ClosedAt.IsSpecified() && !campaign.ClosedAt.IsNull()
-	isDataAnonymized := campaign.DataAnonymizedAt.IsSpecified() && !campaign.DataAnonymizedAt.IsNull()
-	if isClosed && isDataAnonymized {
+	// once the campaign is closed and its data was anonymized after the close
+	// there is no new data to scrub. While it is open, or when the last run was
+	// before the close, it can run again to scrub newer events.
+	if campaignDataRanAfterClose(campaign) {
 		return errs.Wrap(errs.ErrCampaignDataAlreadyAnonymized)
+	}
+	if fromTask && !campaignDataDatePending(campaign, time.Now()) {
+		return errs.Wrap(errAnonymizeNotDue)
 	}
 	// scrub the submitted data, user agent, ip and browser metadata of all events
 	// while keeping the recipient relation intact
@@ -6945,6 +6971,163 @@ func (c *Campaign) anonymizeDataByID(
 	c.AuditLogAuthorized(ae)
 
 	return nil
+}
+
+// anonymizeScheduleMax is how far ahead an anonymize date of a closed
+// campaign can be set
+const anonymizeScheduleMax = 5 * 365 * 24 * time.Hour
+
+// ScheduleAnonymizeByID sets when Anonymize All runs on a closed campaign, or
+// clears the date when at is nil. The anonymize task runs it when the date
+// has passed.
+func (c *Campaign) ScheduleAnonymizeByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	at *time.Time,
+) error {
+	return c.scheduleAnonymize(ctx, session, id, at, false)
+}
+
+// ScheduleDataAnonymizeByID sets when Anonymize Data runs on a closed
+// campaign, or clears the date when at is nil, see ScheduleAnonymizeByID
+func (c *Campaign) ScheduleDataAnonymizeByID(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	at *time.Time,
+) error {
+	return c.scheduleAnonymize(ctx, session, id, at, true)
+}
+
+// scheduleAnonymize is ScheduleAnonymizeByID, or ScheduleDataAnonymizeByID
+// when onlyData is set. Only a closed campaign takes a date here: the date of an
+// open campaign is set when it is created or edited, and the resume of a
+// paused campaign is checked against it. The date is not checked against the
+// close date, a campaign closed by hand keeps the later close date it had.
+func (c *Campaign) scheduleAnonymize(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	at *time.Time,
+	onlyData bool,
+) (err error) {
+	action := "Campaign.ScheduleAnonymizeByID"
+	if onlyData {
+		action = "Campaign.ScheduleDataAnonymizeByID"
+	}
+	ae := NewAuditEvent(action, session)
+	defer c.auditDone(ae, &err)
+	ae.Details["id"] = id.String()
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return errs.ErrAuthorizationFailed
+	}
+	campaign, err := c.CampaignRepository.GetByID(ctx, id, &repository.CampaignOption{})
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign by id", "error", err)
+		return errs.Wrap(err)
+	}
+	// a program owns its hidden campaigns, they are only changed through the program
+	if campaign.IsProgramManaged() {
+		return errs.Wrap(gorm.ErrRecordNotFound)
+	}
+	if campaign.ClosedAt.IsNull() || !campaign.ClosedAt.IsSpecified() {
+		return validate.WrapErrorWithField(
+			errors.New("only a closed campaign can have its anonymize date set here, edit the campaign instead"),
+			"at",
+		)
+	}
+	if campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull() {
+		return validate.WrapErrorWithField(errors.New("the campaign is already anonymized"), "at")
+	}
+	previous := campaign.AnonymizeAt
+	if onlyData {
+		previous = campaign.DataAnonymizeAt
+	}
+	if v, err := previous.Get(); err == nil {
+		ae.Details["previousAt"] = utils.RFC3339UTC(v)
+	}
+	if at != nil {
+		// an anonymous campaign is anonymized when it closes
+		if !onlyData && campaignAnonymous(campaign) {
+			return validate.WrapErrorWithField(errors.New("an anonymous campaign is anonymized when it closes"), "at")
+		}
+		// the data was scrubbed after the close, there is nothing left to scrub
+		if onlyData && campaignDataRanAfterClose(campaign) {
+			return validate.WrapErrorWithField(errors.New("the data was already anonymized after the campaign closed"), "at")
+		}
+		v := at.UTC().Truncate(time.Minute)
+		now := time.Now()
+		if !v.After(now) {
+			return validate.WrapErrorWithField(errors.New("the date must be in the future"), "at")
+		}
+		if v.After(now.Add(anonymizeScheduleMax)) {
+			return validate.WrapErrorWithField(errors.New("the date must be within 5 years"), "at")
+		}
+		at = &v
+		ae.Details["at"] = utils.RFC3339UTC(v)
+	}
+	write := c.CampaignRepository.SetAnonymizeAtByID
+	if onlyData {
+		write = c.CampaignRepository.SetDataAnonymizeAtByID
+	}
+	written, err := write(ctx, id, at)
+	if err != nil {
+		c.Logger.Errorw("failed to set anonymize date", "error", err)
+		return errs.Wrap(err)
+	}
+	// the campaign was anonymized after it was read
+	if !written {
+		return validate.WrapErrorWithField(errors.New("the campaign is already anonymized"), "at")
+	}
+	c.AuditLogAuthorized(ae)
+	return nil
+}
+
+// errAnonymizeNotDue is returned to the anonymize tasks for a campaign whose
+// date was cleared or moved after the task listed it
+var errAnonymizeNotDue = errors.New("campaign anonymize date is not due")
+
+// campaignAnonymizeDue reports whether Anonymize All is due on a campaign,
+// the campaigns GetReadyToAnonymize returns: not anonymized, and its
+// anonymize date has passed or it is anonymous and closed
+func campaignAnonymizeDue(campaign *model.Campaign, now time.Time) bool {
+	if campaign.AnonymizedAt.IsSpecified() && !campaign.AnonymizedAt.IsNull() {
+		return false
+	}
+	if at, err := campaign.AnonymizeAt.Get(); err == nil && !at.After(now) {
+		return true
+	}
+	closed := campaign.ClosedAt.IsSpecified() && !campaign.ClosedAt.IsNull()
+	return closed && campaignAnonymous(campaign)
+}
+
+// campaignDataRanAfterClose reports whether a closed campaign had its data
+// anonymized at or after it closed, so no newer data can exist
+func campaignDataRanAfterClose(campaign *model.Campaign) bool {
+	ran, err := campaign.DataAnonymizedAt.Get()
+	if err != nil {
+		return false
+	}
+	return dataRanAfterClose(campaign.ClosedAt, &ran)
+}
+
+// campaignDataDatePending reports whether the data anonymize date of a
+// campaign has passed and its data was not anonymized since, the campaigns
+// GetReadyToDataAnonymize returns
+func campaignDataDatePending(campaign *model.Campaign, now time.Time) bool {
+	at, err := campaign.DataAnonymizeAt.Get()
+	if err != nil || at.After(now) {
+		return false
+	}
+	ran, err := campaign.DataAnonymizedAt.Get()
+	return err != nil || ran.Before(at)
 }
 
 // SendEmailByCampaignRecipientID sends an email to a specific campaign recipient

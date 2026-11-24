@@ -601,6 +601,27 @@ export class API {
 		},
 
 		/**
+		 * Set when a closed campaign is anonymized, or clear the date with null.
+		 * @param {string} campaignID
+		 * @param {string|null} at ISO date
+		 * @returns {Promise<ApiResponse>}
+		 */
+		scheduleAnonymize: async (campaignID, at) => {
+			return postJSON(this.getPath(`/campaign/${campaignID}/anonymize/schedule`), { at });
+		},
+
+		/**
+		 * Set when the data of a closed campaign is anonymized, or clear the date
+		 * with null.
+		 * @param {string} campaignID
+		 * @param {string|null} at ISO date
+		 * @returns {Promise<ApiResponse>}
+		 */
+		scheduleAnonymizeData: async (campaignID, at) => {
+			return postJSON(this.getPath(`/campaign/${campaignID}/anonymize-data/schedule`), { at });
+		},
+
+		/**
 		 * @param {string} campaignID
 		 * @returns {Promise<ApiResponse>}
 		 */

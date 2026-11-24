@@ -20,6 +20,9 @@
 	// greys and blocks the confirm button while the action cannot proceed, for example an
 	// install whose bundle references packages that no longer exist on the registry.
 	export let okDisabled = false;
+	// focus the first text field when the alert opens, as a typed confirmation
+	// needs. When false the alert focuses its cancel button instead.
+	export let focusInput = true;
 	export let onConfirm;
 	// 'destructive' (red, warning icon) suits remove and uninstall, 'affirmative'
 	// (blue, no icon) suits positive actions like install and update.
@@ -171,9 +174,9 @@
 		updateFocusableElements();
 
 		// Focus priority: 1) Input fields (for confirmation), 2) Cancel button, 3) Other elements
-		const firstInput = focusableElements.find(
-			(el) => el.tagName === 'INPUT' || el.tagName === 'TEXTAREA'
-		);
+		const firstInput = focusInput
+			? focusableElements.find((el) => el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
+			: null;
 		const cancelButton = focusableElements.find(
 			(el) =>
 				el.tagName === 'BUTTON' &&

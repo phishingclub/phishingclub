@@ -2589,8 +2589,13 @@ func (r *Campaign) GetReadyToAnonymize(
 }
 
 // GetReadyToDataAnonymize gets all campaigns that are ready to have their
-// submitted data anonymized while keeping the recipient relation intact.
-// Fully anonymized campaigns are excluded as their data is already scrubbed.
+// submitted data anonymized while keeping the recipient relation intact. A
+// campaign is ready when its data anonymize date has passed and its data was
+// not anonymized since that date, so a run before the date, by hand or while
+// the campaign was open, does not stand in for it. A closed campaign whose
+// data was anonymized at or after the close has no newer data and is left
+// out. Fully anonymized campaigns are excluded as their data is already
+// scrubbed.
 func (r *Campaign) GetReadyToDataAnonymize(
 	ctx context.Context,
 	options *CampaignOption,
@@ -2601,9 +2606,23 @@ func (r *Campaign) GetReadyToDataAnonymize(
 	if err != nil {
 		return result, errs.Wrap(err)
 	}
+	at := clause.Column{Table: database.CAMPAIGN_TABLE, Name: "data_anonymize_at"}
+	ran := clause.Column{Table: database.CAMPAIGN_TABLE, Name: "data_anonymized_at"}
+	closed := clause.Column{Table: database.CAMPAIGN_TABLE, Name: "closed_at"}
 	var dbCampaigns []database.Campaign
 	res := withPeek(db.
-		Where("data_anonymize_at <= ? AND data_anonymized_at IS NULL AND anonymized_at IS NULL", utils.NowRFC3339UTC()), options.QueryArgs).
+		Where(clause.Neq{Column: at, Value: nil}).
+		Where(clause.Lte{Column: at, Value: utils.NowRFC3339UTC()}).
+		Where(clause.Or(
+			clause.Eq{Column: ran, Value: nil},
+			clause.Expr{SQL: "julianday(?) < julianday(?)", Vars: []any{ran, at}},
+		)).
+		Where(clause.Or(
+			clause.Eq{Column: closed, Value: nil},
+			clause.Eq{Column: ran, Value: nil},
+			clause.Expr{SQL: "julianday(?) < julianday(?)", Vars: []any{ran, closed}},
+		)).
+		Where(clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_TABLE, Name: "anonymized_at"}, Value: nil}), options.QueryArgs).
 		Find(&dbCampaigns)
 	if res.Error != nil {
 		return result, res.Error
@@ -2876,6 +2895,46 @@ func (r *Campaign) SetCloseAtByID(
 		Model(&database.Campaign{}).
 		Where("id = ?", id).
 		Updates(row).Error
+}
+
+// SetAnonymizeAtByID writes only the time a closed campaign is anonymized,
+// or clears it when at is nil. It writes nothing when the campaign is open or
+// already anonymized and reports whether a row was written.
+func (r *Campaign) SetAnonymizeAtByID(ctx context.Context, id *uuid.UUID, at *time.Time) (bool, error) {
+	return r.setClosedCampaignDate(ctx, id, map[string]any{"anonymize_at": optionalRFC3339UTC(at)})
+}
+
+// SetDataAnonymizeAtByID writes only the time the data of a closed campaign
+// is anonymized, or clears it when at is nil, see SetAnonymizeAtByID
+func (r *Campaign) SetDataAnonymizeAtByID(ctx context.Context, id *uuid.UUID, at *time.Time) (bool, error) {
+	return r.setClosedCampaignDate(ctx, id, map[string]any{"data_anonymize_at": optionalRFC3339UTC(at)})
+}
+
+// setClosedCampaignDate writes row on a campaign that is closed and not
+// anonymized and reports whether a row was written
+func (r *Campaign) setClosedCampaignDate(ctx context.Context, id *uuid.UUID, row map[string]any) (bool, error) {
+	if id == nil {
+		return false, errs.Wrap(errNilCampaignID)
+	}
+	AddUpdatedAt(row)
+	res := r.DB.WithContext(ctx).
+		Model(&database.Campaign{}).
+		Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id}).
+		Where(clause.Neq{Column: clause.Column{Name: "closed_at"}, Value: nil}).
+		Where(clause.Eq{Column: clause.Column{Name: "anonymized_at"}, Value: nil}).
+		Updates(row)
+	if res.Error != nil {
+		return false, errs.Wrap(res.Error)
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// optionalRFC3339UTC is at as stored, or nil
+func optionalRFC3339UTC(at *time.Time) any {
+	if at == nil {
+		return nil
+	}
+	return utils.RFC3339UTC(*at)
 }
 
 // SetNotableEventByID writes only the most notable event, so a campaign row

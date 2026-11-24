@@ -1310,6 +1310,57 @@ func (c *Campaign) AnonymizeDataByID(g *gin.Context) {
 	c.Response.OK(g, gin.H{})
 }
 
+// anonymizeScheduleRequest is the body that sets or clears the anonymize date
+// of a closed campaign. at is required, null clears the date.
+type anonymizeScheduleRequest struct {
+	At nullable.Nullable[time.Time] `json:"at"`
+}
+
+// ScheduleAnonymizeByID sets when a closed campaign is anonymized
+func (c *Campaign) ScheduleAnonymizeByID(g *gin.Context) {
+	c.scheduleAnonymize(g, false)
+}
+
+// ScheduleDataAnonymizeByID sets when the data of a closed campaign is
+// anonymized
+func (c *Campaign) ScheduleDataAnonymizeByID(g *gin.Context) {
+	c.scheduleAnonymize(g, true)
+}
+
+// scheduleAnonymize handles both anonymize schedule routes
+func (c *Campaign) scheduleAnonymize(g *gin.Context, onlyData bool) {
+	session, _, ok := c.handleSession(g)
+	if !ok {
+		return
+	}
+	id, ok := c.handleParseIDParam(g)
+	if !ok {
+		return
+	}
+	var req anonymizeScheduleRequest
+	if ok := c.handleParseRequest(g, &req); !ok {
+		return
+	}
+	if !req.At.IsSpecified() {
+		c.Response.ValidationFailed(g, "at", errors.New("is required, null clears the date"))
+		return
+	}
+	var at *time.Time
+	if v, err := req.At.Get(); err == nil {
+		at = &v
+	}
+	var err error
+	if onlyData {
+		err = c.CampaignService.ScheduleDataAnonymizeByID(g.Request.Context(), session, id, at)
+	} else {
+		err = c.CampaignService.ScheduleAnonymizeByID(g.Request.Context(), session, id, at)
+	}
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{})
+}
+
 // GetCampaignStats gets campaign statistics by campaign ID
 func (c *Campaign) GetCampaignStats(g *gin.Context) {
 	// handle session
