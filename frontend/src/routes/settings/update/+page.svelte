@@ -166,7 +166,7 @@
 			</div>
 		</div>
 	</div>
-	<Alert onConfirm={runUpdate} visible={isUpdateAlertVisible}>
+	<Alert onConfirm={runUpdate} bind:visible={isUpdateAlertVisible}>
 		<p class="">Updating will make the application unavailable for a short time.</p>
 		<p class="mt-4">Select <b>Yes, proceed</b> to continue.</p>
 	</Alert>
