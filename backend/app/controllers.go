@@ -1,9 +1,13 @@
 package app
 
 import (
+	"time"
+
 	"github.com/phishingclub/phishingclub/config"
 	"github.com/phishingclub/phishingclub/controller"
+	"github.com/phishingclub/phishingclub/middleware"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 	"gorm.io/gorm"
 )
 
@@ -29,6 +33,7 @@ type Controllers struct {
 	Campaign            *controller.Campaign
 	Program             *controller.Program
 	AllowListing        *controller.AllowListing
+	AllowListingSync    *controller.AllowListingSync
 	QR                  *controller.QRGenerator
 	Preview             *controller.Preview
 	APISender           *controller.APISender
@@ -251,6 +256,13 @@ func NewControllers(
 		Common:                  common,
 		CampaignDefaultsService: services.CampaignDefaults,
 	}
+	allowListingSync := &controller.AllowListingSync{
+		Common:                  common,
+		AllowListingSyncService: services.AllowListingSync,
+		IPTrust:                 conf.IPSecurity.ClientIPTrust(),
+		// a run makes at most three calls, a runner runs at most once an hour
+		RunnerLimiter: middleware.NewKeyRateLimiter(rate.Limit(0.5), 10, 10*time.Minute),
+	}
 	reportInbox := &controller.ReportInbox{
 		Common:             common,
 		ReportInboxService: services.ReportInbox,
@@ -305,6 +317,7 @@ func NewControllers(
 		Campaign:            campaign,
 		Program:             program,
 		AllowListing:        allowListing,
+		AllowListingSync:    allowListingSync,
 		QR:                  qr,
 		Preview:             preview,
 		APISender:           apiSender,

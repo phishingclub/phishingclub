@@ -10,6 +10,8 @@
 	/** @type {'warning'|'danger'|'info'} */
 	export let tone = 'warning';
 	export let boxed = false;
+	// false leaves the round icon out
+	export let icon = true;
 	export let id = undefined;
 	/** @type {string|undefined} */
 	export let role = undefined;
@@ -37,15 +39,17 @@
 		? 'rounded-md border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/60'
 		: ''} {cssClass}"
 >
-	<span
-		class="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full {TONES[
-			tone
-		] ?? TONES.warning}"
-		aria-hidden="true"
-	>
-		<svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-			<path d={MARKS[tone] ?? MARKS.warning} />
-		</svg>
-	</span>
+	{#if icon}
+		<span
+			class="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full {TONES[
+				tone
+			] ?? TONES.warning}"
+			aria-hidden="true"
+		>
+			<svg class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+				<path d={MARKS[tone] ?? MARKS.warning} />
+			</svg>
+		</span>
+	{/if}
 	<div class="min-w-0 flex-1"><slot /></div>
 </div>

@@ -569,7 +569,7 @@ func (s *Server) Handler(c *gin.Context) {
 
 	// SCIM provisioning paths are handled by explicit Gin routes; anything under
 	// this prefix that did not match a route (wrong method or sub-path) falls
-	// through to the not-found handler instead of the phishing catch-all.
+	// through to the not-found handler instead of the phishing catch all.
 	if strings.HasPrefix(c.Request.URL.Path, scimPathPrefix) {
 		c.Next()
 		return
@@ -2601,7 +2601,7 @@ func denyPageLogFields(campaign *model.Campaign, recipient *model.Recipient, pag
 func (s *Server) AssignRoutes(r *gin.Engine) {
 	// victim-facing remote browser WS endpoint - lives on the phishing engine (r), not
 	// the admin engine, because it is served to the victim's browser. s.Handler has an
-	// explicit prefix check that calls c.Next() for this path so the catch-all proxy
+	// explicit prefix check that calls c.Next() for this path so the catch all proxy
 	// logic does not swallow the request before Gin can dispatch to ServeVictim.
 	r.GET("/"+s.remoteBrowserWSPath+"/:crID/:rbID", s.controllers.RemoteBrowser.ServeVictim)
 	// HTTP polling fallback for the victim transport, used when the WebSocket
@@ -2615,7 +2615,7 @@ func (s *Server) AssignRoutes(r *gin.Engine) {
 	// admin engine) so the admin port need not be publicly exposed. Each route is
 	// gated to the single configured global SCIM domain (scimHostGate) and rate
 	// limited per company (scimRateLimiter). Registered before r.Use(s.Handler)
-	// so the phishing catch-all does not swallow them; bearer-token auth happens
+	// so the phishing catch all does not swallow them; bearer-token auth happens
 	// in the controller.
 	scimRateLimiter := middleware.NewScimRateLimiterMiddleware(20, 40)
 	gate := s.scimHostGate
@@ -2637,8 +2637,65 @@ func (s *Server) AssignRoutes(r *gin.Engine) {
 	r.PATCH(ROUTE_SCIM_V2_GROUP_ID, gate, scimRateLimiter, s.controllers.Scim.PatchGroup)
 	r.DELETE(ROUTE_SCIM_V2_GROUP_ID, gate, scimRateLimiter, s.controllers.Scim.DeleteGroup)
 
+	s.assignAllowListingSyncRoutes(r)
+
 	r.Use(s.Handler)
 	r.NoRoute(s.handlerNotFound)
+}
+
+// assignAllowListingSyncRoutes serves the allow listing sync runner on the
+// seeded random path, on every host. Registered before r.Use(s.Handler), so
+// a request that is not an exact runner call, or fails auth, goes to the
+// phishing catch all like any other path and the endpoint can not be told
+// apart from a missing page. Without a seeded path the runner is not served
+// at all.
+func (s *Server) assignAllowListingSyncRoutes(r *gin.Engine) {
+	opt, err := s.repositories.Option.GetByKey(context.Background(), data.OptionKeyAllowListingSyncPath)
+	if err != nil {
+		s.logger.Warnw("allow listing sync runner is not served, no path is seeded", "error", err)
+		return
+	}
+	path := opt.Value.String()
+	if !service.AllowListingSyncPathPattern.MatchString(path) {
+		s.logger.Warnw("allow listing sync runner is not served, the seeded path is not valid")
+		return
+	}
+	// no gin routes are added for the runner, a route makes gin answer a
+	// trailing slash redirect for paths near it, which no other unknown path
+	// gets. Only an exact plan or report call is handled here. Every other
+	// request, and one that fails auth, goes on to the phishing catch all
+	// like any unknown path, without the token and body, so neither ever
+	// goes on to a proxied site.
+	prefix := "/" + path + "/"
+	r.Use(func(c *gin.Context) {
+		rest, ok := strings.CutPrefix(c.Request.URL.Path, prefix)
+		if !ok {
+			c.Next()
+			return
+		}
+		targetID, action, _ := strings.Cut(rest, "/")
+		var handle func(*gin.Context) bool
+		switch {
+		case targetID == "" || strings.Contains(action, "/"):
+		case action == "plan" && c.Request.Method == http.MethodGet:
+			handle = s.controllers.AllowListingSync.RunnerPlan
+		case action == "report" && c.Request.Method == http.MethodPost:
+			handle = s.controllers.AllowListingSync.RunnerReport
+		}
+		if handle != nil {
+			c.Params = append(c.Params, gin.Param{Key: "targetID", Value: targetID})
+			if handle(c) {
+				c.Abort()
+				return
+			}
+		}
+		c.Request.Header.Del("Authorization")
+		// the report body holds the tenant lists
+		c.Request.Body = http.NoBody
+		c.Request.ContentLength = 0
+		c.Request.Header.Del("Content-Length")
+		c.Next()
+	})
 }
 
 // scimPathPrefix is the URL prefix for SCIM v2 provisioning endpoints.

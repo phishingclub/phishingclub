@@ -34,6 +34,7 @@ type Services struct {
 	Campaign            *service.Campaign
 	Program             *service.Program
 	AllowListing        *service.AllowListing
+	AllowListingSync    *service.AllowListingSync
 	Template            *service.Template
 	APISender           *service.APISender
 	AllowDeny           *service.AllowDeny
@@ -345,6 +346,17 @@ func NewServices(
 		ProgramRepository:          repositories.Program,
 		DomainRepository:           repositories.Domain,
 	}
+	allowListingSync := &service.AllowListingSync{
+		Common:                     common,
+		Repository:                 repositories.AllowListingSync,
+		AllowListing:               allowListing,
+		CampaignTemplateRepository: repositories.CampaignTemplate,
+		CampaignRepository:         repositories.Campaign,
+		ProgramRepository:          repositories.Program,
+		CompanyRepository:          repositories.Company,
+		DomainRepository:           repositories.Domain,
+		OptionRepository:           repositories.Option,
+	}
 	allowDeny := &service.AllowDeny{
 		Common:              common,
 		AllowDenyRepository: repositories.AllowDeny,
@@ -503,6 +515,7 @@ func NewServices(
 		OAuthProviderService:        oauthProvider,
 	}
 	companyService.CancelReportInboxPoll = reportInbox.CancelPoll
+	companyService.DeleteAllowListingTarget = allowListingSync.DeleteForCompany
 
 	brandingService := &service.Branding{
 		Common:           common,
@@ -538,6 +551,7 @@ func NewServices(
 		Campaign:            campaign,
 		Program:             program,
 		AllowListing:        allowListing,
+		AllowListingSync:    allowListingSync,
 		APISender:           apiSender,
 		AllowDeny:           allowDeny,
 		Webhook:             webhook,

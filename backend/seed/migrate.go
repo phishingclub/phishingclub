@@ -83,6 +83,9 @@ func initialInstallAndSeed(
 		&database.ProgramCampaign{},
 		&database.ProgramAllowDeny{},
 		&database.ProgramWebhook{},
+		&database.AllowListingTarget{},
+		&database.AllowListingEntry{},
+		&database.AllowListingPin{},
 	}
 
 	// disable foreign key constraints temporarily for sqlite to allow table recreation
@@ -410,6 +413,43 @@ func SeedSettings(
 				ID:    &id,
 				Key:   data.OptionKeyProxyCookieName,
 				Value: cookieName,
+			})
+			if res.Error != nil {
+				return errs.Wrap(res.Error)
+			}
+		}
+	}
+	{
+		// seed the allow listing sync runner path, 32 random lowercase
+		// alphanumeric chars drawn without modulo bias
+		id := uuid.New()
+		var c int64
+		res := db.
+			Model(&database.Option{}).
+			Where("key = ?", data.OptionKeyAllowListingSyncPath).
+			Count(&c)
+		if res.Error != nil {
+			return errs.Wrap(res.Error)
+		}
+		if c == 0 {
+			const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+			path := make([]byte, 0, 32)
+			buf := make([]byte, 64)
+			for len(path) < 32 {
+				if _, err := rand.Read(buf); err != nil {
+					return errs.Wrap(err)
+				}
+				for _, b := range buf {
+					// 252 is the largest multiple of 36 below 256
+					if b < 252 && len(path) < 32 {
+						path = append(path, charset[int(b)%len(charset)])
+					}
+				}
+			}
+			res = db.Create(&database.Option{
+				ID:    &id,
+				Key:   data.OptionKeyAllowListingSyncPath,
+				Value: string(path),
 			})
 			if res.Error != nil {
 				return errs.Wrap(res.Error)

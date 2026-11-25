@@ -34,6 +34,7 @@
 	import ReportInboxStatus from '$lib/components/company/ReportInboxStatus.svelte';
 	import CompanyReportDeliveryLog from '$lib/components/company/CompanyReportDeliveryLog.svelte';
 	import CompanyCustomStats from '$lib/components/company/CompanyCustomStats.svelte';
+	import AllowListingSyncSection from '$lib/components/allowListingSync/AllowListingSyncSection.svelte';
 
 	$: companyId = $page.params.id;
 
@@ -440,7 +441,7 @@
 			{:else if active === 'stats'}
 				<CompanyCustomStats {companyId} />
 			{:else if active === 'integrations'}
-				<div class="flex flex-wrap gap-6">
+				<AllowListingSyncSection {companyId} companyName={company?.name ?? ''}>
 					<SettingsCard
 						title="SCIM Provisioning"
 						description="Automatically provision recipients from your identity provider."
@@ -463,7 +464,7 @@
 							>
 						</svelte:fragment>
 					</SettingsCard>
-				</div>
+				</AllowListingSyncSection>
 			{:else if active === 'reporting'}
 				<div class="flex flex-wrap gap-6">
 					<SettingsCard

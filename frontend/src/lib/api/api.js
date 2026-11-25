@@ -2033,6 +2033,105 @@ export class API {
 	};
 
 	/**
+	 * allowListingSync keeps the Microsoft Defender Advanced Delivery lists of a
+	 * tenant in sync. companyID is the target scope, null is the global target
+	 * that covers global campaigns only.
+	 */
+	allowListingSync = {
+		// path with the scope query, extra is more query text such as domain=x
+		scopePath: (path, companyID, extra = '') => {
+			const query = [this.companyQuery(companyID), extra].filter(Boolean).join('&');
+			return `/allow-listing-sync${path}${query ? `?${query}` : ''}`;
+		},
+		// get the target, 404 when none is set up
+		get: async (companyID) => {
+			return await getJSON(this.getPath(this.allowListingSync.scopePath('', companyID)));
+		},
+		// create the target or save its settings. create returns the token once
+		upsert: async (
+			companyID,
+			{ enabled, leadMinutes, graceMinutes, intervalMinutes }
+		) => {
+			return await postJSON(this.getPath(this.allowListingSync.scopePath('', companyID)), {
+				enabled: !!enabled,
+				leadMinutes,
+				graceMinutes,
+				intervalMinutes
+			});
+		},
+		// remove the target, its entries and pins. With removeValues the target
+		// stays until the runner has removed the values Phishing Club added,
+		// then it deletes itself and the response holds the target
+		delete: async (companyID, removeValues) => {
+			const path = this.allowListingSync.scopePath('', companyID);
+			const sep = path.includes('?') ? '&' : '?';
+			return await deleteJSON(
+				this.getPath(removeValues ? `${path}${sep}removeValues=true` : path)
+			);
+		},
+		// new token, returned once. the old token stops at once
+		rotateToken: async (companyID) => {
+			return await postJSON(this.getPath(this.allowListingSync.scopePath('/token', companyID)), {});
+		},
+		// stop a delete that waits for the values to be removed
+		cancelDelete: async (companyID) => {
+			return await postJSON(
+				this.getPath(this.allowListingSync.scopePath('/cancel-delete', companyID)),
+				{}
+			);
+		},
+		// stores the domain the runner calls
+		setRunnerDomain: async (companyID, domain) => {
+			return await postJSON(
+				this.getPath(this.allowListingSync.scopePath('/runner-domain', companyID)),
+				{ domain }
+			);
+		},
+		// the values the target keeps track of
+		getEntries: async (companyID) => {
+			return await getJSON(this.getPath(this.allowListingSync.scopePath('/entries', companyID)));
+		},
+		// what the next sync adds and removes, and why
+		getPreview: async (companyID) => {
+			return await getJSON(this.getPath(this.allowListingSync.scopePath('/preview', companyID)));
+		},
+		// the runner script calling Phishing Club on the given domain
+		getRunbook: async (companyID, domain) => {
+			return await getJSON(
+				this.getPath(
+					this.allowListingSync.scopePath(
+						'/runbook',
+						companyID,
+						`domain=${encodeURIComponent(domain)}`
+					)
+				)
+			);
+		},
+		getPins: async (companyID) => {
+			return await getJSON(this.getPath(this.allowListingSync.scopePath('/pins', companyID)));
+		},
+		// pin is { campaignTemplateID, note, expiresAt } or { kind, value, note, expiresAt }
+		createPin: async (companyID, pin) => {
+			return await postJSON(this.getPath(this.allowListingSync.scopePath('/pins', companyID)), pin);
+		},
+		deletePin: async (companyID, id) => {
+			return await deleteJSON(
+				this.getPath(this.allowListingSync.scopePath(`/pins/${id}`, companyID))
+			);
+		},
+		// sync status of a campaign, companyID is the company in view
+		getCampaignStatus: async (id, companyID) => {
+			const query = companyID ? `?${this.companyQuery(companyID)}` : '';
+			return await getJSON(this.getPath(`/campaign/${id}/allow-listing-sync${query}`));
+		},
+		// sync status of a program, companyID is the company in view
+		getProgramStatus: async (id, companyID) => {
+			const query = companyID ? `?${this.companyQuery(companyID)}` : '';
+			return await getJSON(this.getPath(`/program/${id}/allow-listing-sync${query}`));
+		}
+	};
+
+	/**
 	 * domain is the API for domain related operations.
 	 */
 	domain = {

@@ -95,6 +95,18 @@ const (
 	ROUTE_V1_REPORT_INBOX_GLOBAL       = "/api/v1/report-inbox"
 	ROUTE_V1_REPORT_INBOX_GLOBAL_TEST  = "/api/v1/report-inbox/test"
 	ROUTE_V1_REPORT_INBOX_GLOBAL_POLL  = "/api/v1/report-inbox/poll"
+	// allow listing sync, the companyID query is the target scope, empty is global
+	ROUTE_V1_ALLOW_LISTING_SYNC               = "/api/v1/allow-listing-sync"
+	ROUTE_V1_ALLOW_LISTING_SYNC_TOKEN         = "/api/v1/allow-listing-sync/token"
+	ROUTE_V1_ALLOW_LISTING_SYNC_CANCEL_DELETE = "/api/v1/allow-listing-sync/cancel-delete"
+	ROUTE_V1_ALLOW_LISTING_SYNC_RUNNER_DOMAIN = "/api/v1/allow-listing-sync/runner-domain"
+	ROUTE_V1_ALLOW_LISTING_SYNC_ENTRIES       = "/api/v1/allow-listing-sync/entries"
+	ROUTE_V1_ALLOW_LISTING_SYNC_PREVIEW       = "/api/v1/allow-listing-sync/preview"
+	ROUTE_V1_ALLOW_LISTING_SYNC_RUNBOOK       = "/api/v1/allow-listing-sync/runbook"
+	ROUTE_V1_ALLOW_LISTING_SYNC_PINS          = "/api/v1/allow-listing-sync/pins"
+	ROUTE_V1_ALLOW_LISTING_SYNC_PIN           = "/api/v1/allow-listing-sync/pins/:id"
+	ROUTE_V1_CAMPAIGN_ALLOW_LISTING_SYNC      = "/api/v1/campaign/:id/allow-listing-sync"
+	ROUTE_V1_PROGRAM_ALLOW_LISTING_SYNC       = "/api/v1/program/:id/allow-listing-sync"
 	// scim v2 provisioning endpoints (public, authenticated via bearer token)
 	ROUTE_SCIM_V2_SERVICE_PROVIDER_CONFIG = "/api/v1/scim/v2/:companyID/ServiceProviderConfig"
 	ROUTE_SCIM_V2_RESOURCE_TYPES          = "/api/v1/scim/v2/:companyID/ResourceTypes"
@@ -499,6 +511,21 @@ func setupRoutes(
 		DELETE(ROUTE_V1_REPORT_INBOX_GLOBAL, middleware.SessionHandler, controllers.ReportInbox.DeleteGlobal).
 		POST(ROUTE_V1_REPORT_INBOX_GLOBAL_TEST, middleware.SessionHandler, controllers.ReportInbox.TestGlobal).
 		POST(ROUTE_V1_REPORT_INBOX_GLOBAL_POLL, middleware.SessionHandler, controllers.ReportInbox.PollNowGlobal).
+		// allow listing sync
+		GET(ROUTE_V1_ALLOW_LISTING_SYNC, middleware.SessionHandler, controllers.AllowListingSync.Get).
+		POST(ROUTE_V1_ALLOW_LISTING_SYNC, middleware.SessionHandler, controllers.AllowListingSync.Upsert).
+		DELETE(ROUTE_V1_ALLOW_LISTING_SYNC, middleware.SessionHandler, controllers.AllowListingSync.Delete).
+		POST(ROUTE_V1_ALLOW_LISTING_SYNC_TOKEN, middleware.SessionHandler, controllers.AllowListingSync.RotateToken).
+		POST(ROUTE_V1_ALLOW_LISTING_SYNC_CANCEL_DELETE, middleware.SessionHandler, controllers.AllowListingSync.CancelDelete).
+		POST(ROUTE_V1_ALLOW_LISTING_SYNC_RUNNER_DOMAIN, middleware.SessionHandler, controllers.AllowListingSync.SetRunnerDomain).
+		GET(ROUTE_V1_ALLOW_LISTING_SYNC_ENTRIES, middleware.SessionHandler, controllers.AllowListingSync.Entries).
+		GET(ROUTE_V1_ALLOW_LISTING_SYNC_PREVIEW, middleware.SessionHandler, controllers.AllowListingSync.Preview).
+		GET(ROUTE_V1_ALLOW_LISTING_SYNC_RUNBOOK, middleware.SessionHandler, controllers.AllowListingSync.Runbook).
+		GET(ROUTE_V1_ALLOW_LISTING_SYNC_PINS, middleware.SessionHandler, controllers.AllowListingSync.ListPins).
+		POST(ROUTE_V1_ALLOW_LISTING_SYNC_PINS, middleware.SessionHandler, controllers.AllowListingSync.CreatePin).
+		DELETE(ROUTE_V1_ALLOW_LISTING_SYNC_PIN, middleware.SessionHandler, controllers.AllowListingSync.DeletePin).
+		GET(ROUTE_V1_CAMPAIGN_ALLOW_LISTING_SYNC, middleware.SessionHandler, controllers.AllowListingSync.CampaignStatus).
+		GET(ROUTE_V1_PROGRAM_ALLOW_LISTING_SYNC, middleware.SessionHandler, controllers.AllowListingSync.ProgramStatus).
 		// options
 		GET(ROUTE_V1_OPTION_GET, middleware.SessionHandler, controllers.Option.Get).
 		POST(ROUTE_V1_OPTION, middleware.SessionHandler, middleware.SessionHandler, controllers.Option.Update).

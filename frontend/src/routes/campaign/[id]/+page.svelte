@@ -46,6 +46,8 @@
 	import RelativeTime from '$lib/components/RelativeTime.svelte';
 	import ToolTip from '$lib/components/ToolTip.svelte';
 	import ReportInboxRow from '$lib/components/ReportInboxRow.svelte';
+	import AllowListingSyncRow from '$lib/components/allowListingSync/AllowListingSyncRow.svelte';
+	import { allowListingSettingsHref } from '$lib/utils/allowListingSync.js';
 	import {
 		reportInboxStatus,
 		reportInboxSettingsHref as inboxSettingsHref
@@ -508,6 +510,10 @@
 	// keeps anonymizeNow current, see anonymizeDue
 	let anonymizeClockInterval = null;
 
+	// allow listing sync status of this campaign on the target of its scope,
+	// null until loaded or when it can not be read
+	let allowListing = null;
+
 	// hooks
 	onMount(() => {
 		const context = appStateService.getContext();
@@ -521,6 +527,7 @@
 			await refresh();
 			// not awaited, the indicator must not hold up the page
 			loadReportInbox();
+			loadAllowListing();
 			if (isReportPDFEnabled) {
 				await loadReportDeliveryConfig();
 			}
@@ -538,7 +545,11 @@
 
 		// the inbox checks every 2 minutes, so reloading its status once a minute is
 		// enough. It also keeps the minutes since the last check current.
-		reportInboxNowInterval = setInterval(loadReportInbox, 60000);
+		// the allow listing runner reports at most once an hour, once a minute is enough too
+		reportInboxNowInterval = setInterval(() => {
+			loadReportInbox();
+			loadAllowListing();
+		}, 60000);
 
 		// a scheduled anonymize date can pass while the page is open. The task
 		// runs it within seconds, so while one is due the campaign is read again
@@ -2014,6 +2025,24 @@
 		reportInboxNow = Date.now();
 	};
 
+	const loadAllowListing = async () => {
+		// wait until the campaign is loaded
+		if (!campaign?.createdAt) {
+			return;
+		}
+		try {
+			const res = await api.allowListingSync.getCampaignStatus($page.params.id, contextCompanyID);
+			if (res && res.success && res.data) {
+				allowListing = res.data;
+			}
+			// any failure keeps the last known status
+		} catch (e) {
+			// keep the last known status when one reload fails
+		}
+	};
+	$: showAllowListingRow = !!allowListing && allowListing.status !== 'noTarget';
+	$: allowListingHref = allowListingSettingsHref(campaign.companyID, contextCompanyID);
+
 	// the inbox row shows only when the inbox for this campaign's scope is enabled;
 	// the inbox skips closed campaigns
 	$: showReportInboxRow = !!(
@@ -2882,7 +2911,7 @@
 
 			<div class="flex flex-col gap-6">
 				<!-- reporting card, hidden when it has no rows -->
-				{#if showReportInboxRow || showImportReportedRow}
+				{#if showReportInboxRow || showAllowListingRow || showImportReportedRow}
 					<div
 						class="bg-white dark:bg-gray-900/80 p-6 rounded-lg shadow-md dark:shadow-none transition-all duration-200 dark:ring-1 dark:ring-gray-600/30"
 					>
@@ -2897,6 +2926,13 @@
 									inbox={reportInbox}
 									now={reportInboxNow}
 									settingsHref={reportInboxSettingsHref}
+								/>
+							{/if}
+							{#if showAllowListingRow}
+								<AllowListingSyncRow
+									status={allowListing}
+									closed={!!campaign.closedAt}
+									settingsHref={allowListingHref}
 								/>
 							{/if}
 							{#if showImportReportedRow}

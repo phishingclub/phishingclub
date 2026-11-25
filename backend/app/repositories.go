@@ -37,6 +37,7 @@ type Repositories struct {
 	CompanyReportConfig *repository.CompanyReportConfig
 	CampaignDefaults    *repository.CampaignDefaults
 	ReportInbox         *repository.ReportInbox
+	AllowListingSync    *repository.AllowListingSync
 	ReportSendLog       *repository.ReportSendLog
 	RemoteBrowser       *repository.RemoteBrowser
 	ReportTemplate      *repository.ReportTemplate
@@ -79,6 +80,7 @@ func NewRepositories(
 		CompanyReportConfig: &repository.CompanyReportConfig{DB: db},
 		CampaignDefaults:    &repository.CampaignDefaults{DB: db},
 		ReportInbox:         &repository.ReportInbox{DB: db},
+		AllowListingSync:    &repository.AllowListingSync{DB: db},
 		ReportSendLog:       &repository.ReportSendLog{DB: db},
 		RemoteBrowser:       &repository.RemoteBrowser{DB: db},
 		ReportTemplate:      &repository.ReportTemplate{DB: db},

@@ -49,6 +49,9 @@ type Company struct {
 	// CancelReportInboxPoll stops a running poll of a reporting inbox that is
 	// deleted with its company
 	CancelReportInboxPoll func(uuid.UUID)
+	// DeleteAllowListingTarget removes the allow listing sync target of a
+	// company that is deleted, so its runner can no longer pull plans
+	DeleteAllowListingTarget func(context.Context, *uuid.UUID) error
 	// deletes finishes the deletes of the companies marked as being deleted
 	deletes deletePass
 }
@@ -462,6 +465,15 @@ func (s *Company) deleteCompanyNow(
 	if s.CompanyScimConfigRepository != nil {
 		if err := s.CompanyScimConfigRepository.DeleteByCompanyID(g, companyID); err != nil {
 			s.Logger.Errorw("failed to delete the SCIM config of the company", "error", err)
+			return errs.Wrap(err)
+		}
+	}
+	// the allow listing sync target goes with it, its runner then gets no
+	// more plans. Values it added stay in the tenant, deleting the sync
+	// first with its values removed takes them out.
+	if s.DeleteAllowListingTarget != nil {
+		if err := s.DeleteAllowListingTarget(g, companyID); err != nil {
+			s.Logger.Errorw("failed to delete the allow listing target of the company", "error", err)
 			return errs.Wrap(err)
 		}
 	}

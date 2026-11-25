@@ -15,6 +15,8 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import ToolTip from '$lib/components/ToolTip.svelte';
 	import ReportInboxRow from '$lib/components/ReportInboxRow.svelte';
+	import AllowListingSyncRow from '$lib/components/allowListingSync/AllowListingSyncRow.svelte';
+	import { allowListingSettingsHref } from '$lib/utils/allowListingSync.js';
 	import { reportInboxStatus, reportInboxSettingsHref } from '$lib/utils/reportInbox.js';
 	import StatTiles from '$lib/components/StatTiles.svelte';
 	import Table from '$lib/components/table/Table.svelte';
@@ -437,6 +439,7 @@
 				if (program.status === 'draft' || program.status === 'scheduled') loadAudience(program);
 				loadReportDelivery(program);
 				loadReportInbox();
+				loadAllowListing();
 			}
 			// a failed refresh keeps the data shown before, the toast tells it is old
 			if (!pRes.success) {
@@ -507,7 +510,10 @@
 		eventsParams.onChange(loadEvents);
 		// the inbox checks every 2 minutes, so reloading its status once a minute is
 		// enough. It also keeps the minutes since the last check current.
-		const reportInboxInterval = setInterval(loadReportInbox, 60000);
+		const reportInboxInterval = setInterval(() => {
+			loadReportInbox();
+			loadAllowListing();
+		}, 60000);
 		return () => {
 			clearInterval(reportInboxInterval);
 			peopleParams.unsubscribe();
@@ -554,6 +560,30 @@
 		reportInboxStatus(reportInbox, reportInboxNow) &&
 		!isClosed
 	);
+	// allow listing sync status of this program on the target of its scope,
+	// null until loaded or when it can not be read
+	let allowListing = null;
+	const loadAllowListing = async () => {
+		if (!program) return;
+		try {
+			const res = await api.allowListingSync.getProgramStatus(
+				programID,
+				appStateService.getContext()?.companyID ?? null
+			);
+			if (res && res.success && res.data) {
+				allowListing = res.data;
+			}
+			// any failure keeps the last known status
+		} catch (e) {
+			// keep the last known status when one reload fails
+		}
+	};
+	$: showAllowListingRow = !!allowListing && allowListing.status !== 'noTarget';
+	$: allowListingHref = allowListingSettingsHref(
+		program?.companyID ?? null,
+		appStateService.getContext()?.companyID ?? null
+	);
+
 	$: inboxSettingsHref = reportInboxSettingsHref(
 		program?.companyID ?? null,
 		appStateService.getContext()?.companyID ?? null
@@ -1294,6 +1324,7 @@
 								]
 							: []),
 						...(showReportInboxRow ? [{ label: 'Reporting inbox', inbox: true }] : []),
+						...(showAllowListingRow ? [{ label: 'Allow listing', allowListing: true }] : []),
 						// an anonymous program takes no import, its reports come from the report
 						// inbox. The sends of an anonymized program name no one to match.
 						...(!notStarted && !isAnonymous && !program.anonymizedAt && !program.anonymizingAt
@@ -1869,6 +1900,15 @@
 														inbox={reportInbox}
 														now={reportInboxNow}
 														settingsHref={inboxSettingsHref}
+													/>
+												</div>
+											{:else if row.allowListing}
+												<!-- the same row as on the campaign Reporting card -->
+												<div id="program-allow-listing">
+													<AllowListingSyncRow
+														status={allowListing}
+														closed={isClosed}
+														settingsHref={allowListingHref}
 													/>
 												</div>
 											{:else}

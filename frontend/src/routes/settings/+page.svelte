@@ -15,10 +15,12 @@
 	import Branding from './panels/Branding.svelte';
 	import IPData from './panels/IPData.svelte';
 	import Reporting from './panels/Reporting.svelte';
+	import AllowListing from './panels/AllowListing.svelte';
 
 	// Red Team panel is only shown in modes that show red team features.
-	// Reporting holds the global reporting inbox, so it is only shown in the
-	// global context. A company's reporting inbox is in its company settings.
+	// Reporting holds the global reporting inbox and Allow Listing the global
+	// allow listing sync, so both are only shown in the global context. A
+	// company has its own in its company settings.
 	$: tabs = [
 		{ id: 'general', label: 'General', component: General },
 		{ id: 'access', label: 'Access', component: Access },
@@ -27,7 +29,10 @@
 		{ id: 'ipdata', label: 'IP Data', component: IPData },
 		{ id: 'reports', label: 'PDF Reports', component: Reports },
 		...(!companyContext.isCompany
-			? [{ id: 'reporting', label: 'Reporting Inbox', component: Reporting }]
+			? [
+					{ id: 'reporting', label: 'Reporting Inbox', component: Reporting },
+					{ id: 'allowlisting', label: 'Allow Listing Sync', component: AllowListing }
+				]
 			: []),
 		...(showsRedTeam($displayMode)
 			? [{ id: 'redteam', label: 'Red Team', component: RedTeam }]
