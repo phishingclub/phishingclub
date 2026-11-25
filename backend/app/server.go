@@ -164,8 +164,11 @@ func (s *Server) defaultServer(handler http.Handler, skipFirstTLS bool) *http.Se
 	return server
 }
 
-// host extract the host part of the request
+// getHostOnly returns the lowercase host part of the request host. Domain
+// names are stored lowercase and hostnames are case insensitive, so a client
+// that keeps the case of a link (mIcrosoft.com) still matches its domain.
 func (s *Server) getHostOnly(host string) (string, error) {
+	host = strings.ToLower(host)
 	if strings.Contains(host, ":") {
 		hostOnly, _, err := net.SplitHostPort(host)
 		if err != nil {
@@ -555,6 +558,9 @@ func (s *Server) checkAndServeSharedAsset(c *gin.Context) assetServeResult {
 // checks if the request should be redirected
 // checks if the request is for a static page or static not found page
 func (s *Server) Handler(c *gin.Context) {
+	// lowercase the request host so the proxy and every later step, which read
+	// the request host directly, see the same form as the domain lookup
+	c.Request.Host = strings.ToLower(c.Request.Host)
 	// pass through to the explicit Gin route for the victim remote browser WS endpoint
 	if strings.HasPrefix(c.Request.URL.Path, "/"+s.remoteBrowserWSPath+"/") {
 		c.Next()
