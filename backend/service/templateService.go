@@ -1028,6 +1028,7 @@ func TemplateFuncs() template.FuncMap {
 		"mul": func(a, b float64) float64 {
 			return a * b
 		},
+		"hostUpper": HostUpper,
 		// MicrosoftDeviceCode is a no-op stub used during template validation; it is replaced with
 		// a live implementation via TemplateFuncsWithDeviceCode when rendering for real recipients.
 		"MicrosoftDeviceCode": func(args ...string) (string, error) {

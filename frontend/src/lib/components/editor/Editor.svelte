@@ -160,6 +160,7 @@
 	import { BiMap } from '$lib/utils/maps';
 	import { previewQR as generateQR } from '$lib/utils/qrPreview';
 	import { submitPreviewForm } from '$lib/utils/safePreview.js';
+	import { replaceHostUpper } from '$lib/utils/hostUpper.js';
 	import { vimModeEnabled } from '$lib/store/vimMode.js';
 	import {
 		setupVimClipboardIntegration,
@@ -257,7 +258,8 @@
 			{ label: 'Random number', text: '{{randInt 1 4}}' },
 			{ label: 'Date', text: '{{date "Y-m-d H:i:s" 0}}' },
 			{ label: 'Base64', text: '{{base64 "text"}}' },
-			{ label: 'Multiply', text: '{{mul 1.0 1.0}}' }
+			{ label: 'Multiply', text: '{{mul 1.0 1.0}}' },
+			{ label: 'Uppercase host letters', text: '{{.URL | hostUpper "i" 1}}' }
 		]
 	};
 
@@ -1128,6 +1130,15 @@
 				return formatDate(targetTime, format);
 			});
 		}
+
+		// handle hostUpper on the URL variables known to the preview
+		text = replaceHostUpper(text, {
+			URL: _url,
+			BaseURL: _baseURL,
+			BeforeLandingPageURL: _beforeLandingPageURL,
+			LandingPageURL: _landingPageURL,
+			AfterLandingPageURL: _afterLandingPageURL
+		});
 
 		switch (contentType) {
 			case 'report':
