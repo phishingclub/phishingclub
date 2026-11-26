@@ -32,8 +32,11 @@
 	let isReportPDFEnableModalVisible = false;
 	let isTogglingReportPDF = false;
 
-	// global default report delivery
+	// global default report delivery. it only holds default fields and can not
+	// be enabled, so the card shows whether defaults are configured, null while
+	// unknown
 	let isReportDeliveryModalVisible = false;
+	let hasReportDeliveryDefaults = null;
 
 	// report template
 	let isReportTemplateModalVisible = false;
@@ -50,12 +53,34 @@
 	onMount(async () => {
 		showIsLoading();
 		try {
-			await refreshReportPDFEnabled();
+			await Promise.all([refreshReportPDFEnabled(), loadReportDeliveryDefaults()]);
 		} finally {
 			loaded = true;
 			hideIsLoading();
 		}
 	});
+
+	const loadReportDeliveryDefaults = async () => {
+		try {
+			const res = await api.company.reportConfig.getByCompanyID(null);
+			if (res && res.success && res.data) {
+				hasReportDeliveryDefaults = true;
+			} else if (res && res.statusCode === 404) {
+				hasReportDeliveryDefaults = false;
+			}
+		} catch (_) {
+			// keep the last known state
+		}
+	};
+
+	// the dialog can save or delete the defaults, so read them again once it closes
+	let wasReportDeliveryModalVisible = false;
+	$: {
+		if (wasReportDeliveryModalVisible && !isReportDeliveryModalVisible) {
+			loadReportDeliveryDefaults();
+		}
+		wasReportDeliveryModalVisible = isReportDeliveryModalVisible;
+	}
 
 	const refreshReportPDFEnabled = async () => {
 		const response = await api.option.get('report_pdf_enabled');
@@ -243,6 +268,16 @@
 		</SettingsCard>
 
 		<SettingsCard title="Report Delivery" description="Default delivery settings used to email {showPrograms ? 'campaign and program' : 'campaign'} reports. Companies without their own configuration fall back to this.">
+			{#if hasReportDeliveryDefaults !== null}
+				<div class="mt-2 space-y-4">
+					<div class="text-sm flex items-center gap-2">
+						<span class="text-gray-500 dark:text-gray-400">Defaults</span>
+						<StatusBadge tone={hasReportDeliveryDefaults ? 'success' : 'neutral'}>
+							{hasReportDeliveryDefaults ? 'Configured' : 'Not configured'}
+						</StatusBadge>
+					</div>
+				</div>
+			{/if}
 			<svelte:fragment slot="footer">
 				<Button size={'large'} on:click={() => (isReportDeliveryModalVisible = true)}
 					>Configure</Button

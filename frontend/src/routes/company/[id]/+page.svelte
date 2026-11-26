@@ -82,6 +82,11 @@
 	// whether PDF report generation is enabled globally; gates the Reports tab
 	let reportPDFEnabled = false;
 
+	// report delivery status shown on the Report Delivery card, null while
+	// unknown so no status is shown
+	let reportDelivery = null; // null | 'none' | 'disabled' | 'enabled'
+	let reportDeliveryOnClose = false;
+
 	// modals
 	let isScimModalVisible = false;
 	let isReportTemplateModalVisible = false;
@@ -126,7 +131,8 @@
 			loadAutoPrune(),
 			loadScimStatus(),
 			loadReportInbox(),
-			loadReportPDFEnabled()
+			loadReportPDFEnabled(),
+			loadReportDelivery()
 		]);
 	};
 
@@ -220,6 +226,30 @@
 			// keep the last known status
 		}
 	};
+
+	const loadReportDelivery = async () => {
+		try {
+			const res = await api.company.reportConfig.getByCompanyID(companyId);
+			if (res && res.success && res.data) {
+				reportDelivery = res.data.enabled ? 'enabled' : 'disabled';
+				reportDeliveryOnClose = !!res.data.sendOnFinish;
+			} else if (res && res.statusCode === 404) {
+				reportDelivery = 'none';
+				reportDeliveryOnClose = false;
+			}
+		} catch (_) {
+			// keep the last known status
+		}
+	};
+
+	// the dialog can save or delete the config, so read it again once it closes
+	let wasReportDeliveryModalVisible = false;
+	$: {
+		if (wasReportDeliveryModalVisible && !isReportDeliveryModalVisible) {
+			loadReportDelivery();
+		}
+		wasReportDeliveryModalVisible = isReportDeliveryModalVisible;
+	}
 
 	const loadScimStatus = async () => {
 		try {
@@ -503,6 +533,28 @@
 							title="Report Delivery"
 							description="Email the campaign report PDF to a recipient group, on demand or when a campaign is closed.{showPrograms ? ' Programs with an automated report use it too.' : ''}"
 						>
+							{#if reportDelivery}
+								<div class="text-sm mt-2 space-y-1">
+									<div class="flex items-center gap-2">
+										<span class="text-gray-500 dark:text-gray-400">Status</span>
+										<StatusBadge tone={reportDelivery === 'enabled' ? 'success' : 'neutral'}>
+											{reportDelivery === 'enabled'
+												? 'Enabled'
+												: reportDelivery === 'disabled'
+													? 'Disabled'
+													: 'Not configured'}
+										</StatusBadge>
+									</div>
+									{#if reportDelivery === 'enabled'}
+										<div class="flex items-center gap-2">
+											<span class="text-gray-500 dark:text-gray-400">On finish</span>
+											<StatusBadge tone={reportDeliveryOnClose ? 'success' : 'neutral'}>
+												{reportDeliveryOnClose ? 'Sends report' : 'Off'}
+											</StatusBadge>
+										</div>
+									{/if}
+								</div>
+							{/if}
 							<svelte:fragment slot="footer">
 								<FormButton size="medium" on:click={() => (isReportDeliveryModalVisible = true)}
 									>Configure</FormButton
