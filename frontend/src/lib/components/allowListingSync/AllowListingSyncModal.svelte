@@ -106,6 +106,8 @@
 		replacedRunnerDomain = '';
 		showPermissionScript = false;
 		showRunbookScript = false;
+		automationAccountName = '';
+		tenantDomain = '';
 		isRotateAlertVisible = false;
 		isDeleteAlertVisible = false;
 		isCancelDeleteAlertVisible = false;
@@ -384,8 +386,8 @@
 	};
 
 	const downloadRunbook = () => {
-		if (!runbook) return;
-		const blob = new Blob([runbook.runbook], { type: 'text/plain;charset=utf-8' });
+		if (!runbook || !isTenantDomainValid) return;
+		const blob = new Blob([runbookText], { type: 'text/plain;charset=utf-8' });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
@@ -439,9 +441,44 @@
 
 	// the Automation account variables the runbook reads
 	const automationVariables = [
-		{ name: 'PhishingClubSyncToken', value: 'the token, encrypted' },
-		{ name: 'PhishingClubOrganization', value: 'the tenant domain, such as contoso.onmicrosoft.com' }
+		{
+			name: 'PhishingClubSyncToken',
+			value: 'the token shown when the sync was set up, Encrypted: Yes'
+		}
 	];
+
+	// the Automation account name goes into the permission script, so the
+	// script can be copied as it is. Azure allows letters, numbers and
+	// hyphens, starting with a letter, so nothing typed can break out of the
+	// quotes in the script.
+	const accountNamePlaceholder = 'NAME OF THE AUTOMATION ACCOUNT';
+	let automationAccountName = '';
+	$: accountName = automationAccountName.trim();
+	$: isAccountNameValid = /^[A-Za-z][A-Za-z0-9-]{4,48}[A-Za-z0-9]$/.test(accountName);
+	$: permissionScript = runbook
+		? runbook.permissionScript.replaceAll(
+				accountNamePlaceholder,
+				isAccountNameValid ? accountName : accountNamePlaceholder
+			)
+		: '';
+
+	// the tenant domain goes into the runbook, Exchange Online needs it to
+	// sign in with the managed identity. Only the .onmicrosoft.com form is
+	// taken, so nothing typed can break out of the quotes in the runbook.
+	const tenantDomainPlaceholder = '__TENANT_DOMAIN__';
+	let tenantDomain = '';
+	$: tenantDomainValue = tenantDomain.trim().toLowerCase();
+	$: isTenantDomainValid = /^[a-z0-9][a-z0-9-]{0,62}\.onmicrosoft\.com$/.test(tenantDomainValue);
+	$: runbookText = runbook
+		? runbook.runbook.replaceAll(
+				tenantDomainPlaceholder,
+				isTenantDomainValid ? tenantDomainValue : tenantDomainPlaceholder
+			)
+		: '';
+
+	// the optional limits, as written at the top of the runbook
+	const limitsExample =
+		"$AllowedSenderIPs = @('203.0.113.10', '198.51.100.0/24')\n$AllowedDomainSuffixes = @('example.com')";
 </script>
 
 <Modal
@@ -732,78 +769,44 @@
 
 						<FormSection title="Setup in Azure Automation">
 							<ol
-								class="list-decimal pl-5 space-y-4 text-sm text-gray-700 dark:text-gray-300 marker:font-semibold marker:text-gray-500 dark:marker:text-gray-400"
+								class="list-decimal pl-5 space-y-5 text-sm text-gray-700 dark:text-gray-300 marker:font-semibold marker:text-gray-500 dark:marker:text-gray-400"
 								data-allow-listing-setup
 							>
 								<li class="pl-1">
-									Create an Automation account and turn on its system assigned managed identity.
-								</li>
-								<li class="pl-1">
-									Create a runtime environment on PowerShell 7.4 and add the module
-									<button
-										type="button"
-										class={copyCodeClass}
-										title="Copy"
-										on:click={() => copyToClipboard(runbook.moduleName)}
-										>{runbook.moduleName}<svg
-											class="h-3 w-3 shrink-0 text-gray-500 dark:text-gray-400"
-											viewBox="0 0 24 24"
-											fill="none"
-											stroke="currentColor"
-											stroke-width="2"
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											aria-hidden="true"
-											><rect x="9" y="9" width="11" height="11" rx="1.5" /><path
-												d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5"
-											/></svg
-										></button
-									>
-									version <span class={codeClass}>{runbook.moduleVersion}</span>, plus
-									<span class={codeClass}>PowerShellGet</span> and
-									<span class={codeClass}>PackageManagement</span>.
+									<p>
+										In the Azure portal open <span class="font-semibold">Automation Accounts</span> and
+										select <span class="font-semibold">Create</span>.
+									</p>
+									<ul class="mt-2 list-disc pl-5 space-y-1">
+										<li>
+											<span class="font-semibold">Basics</span>: pick the subscription, resource group,
+											a name and a region.
+										</li>
+										<li>
+											<span class="font-semibold">Advanced</span>: keep
+											<span class="font-semibold">System assigned</span> managed identity checked.
+										</li>
+										<li>
+											<span class="font-semibold">Networking</span>: keep
+											<span class="font-semibold">Public access</span>. The runbook only calls out to
+											Microsoft and Phishing Club, so no private endpoint is needed.
+										</li>
+										<li>
+											<span class="font-semibold">Review + Create</span>, then
+											<span class="font-semibold">Create</span>.
+										</li>
+									</ul>
+									<p class="mt-2 text-gray-500 dark:text-gray-400">
+										We recommend a budget with an alert on the subscription or resource group, so
+										an unexpected cost is noticed.
+									</p>
 								</li>
 								<li class="pl-1">
 									<p>
-										As a Global Administrator or Privileged Role Administrator, run this script in
-										Microsoft Graph PowerShell to give the managed identity its permissions. Replace
-										<span class={codeClass}>NAME OF THE AUTOMATION ACCOUNT</span> first.
+										In the Automation account open <span class="font-semibold">Shared Resources</span> &gt;
+										<span class="font-semibold">Variables</span> and add a variable of type
+										<span class="font-semibold">String</span>:
 									</p>
-									<div class="mt-2 flex flex-wrap items-center gap-3">
-										<button
-											type="button"
-											class={copyButtonClass}
-											on:click={() => copyToClipboard(runbook.permissionScript)}>Copy</button
-										>
-										<button
-											type="button"
-											class={linkClass}
-											aria-expanded={showPermissionScript}
-											on:click={() => (showPermissionScript = !showPermissionScript)}
-										>
-											{showPermissionScript ? 'Hide script' : 'Show script'}
-											<svg
-												class="w-4 h-4 transition-transform duration-200"
-												class:rotate-180={showPermissionScript}
-												fill="none"
-												stroke="currentColor"
-												viewBox="0 0 24 24"
-												aria-hidden="true"
-												><path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													stroke-width="2"
-													d="M19 9l-7 7-7-7"
-												/></svg
-											>
-										</button>
-									</div>
-									{#if showPermissionScript}
-										<pre class={preClass}>{runbook.permissionScript}</pre>
-									{/if}
-								</li>
-								<li class="pl-1">
-									<p>Add these variables to the Automation account:</p>
 									<dl class="mt-2 grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-x-4 gap-y-2">
 										{#each automationVariables as v}
 											<dt>
@@ -813,18 +816,18 @@
 													title="Copy"
 													on:click={() => copyToClipboard(v.name)}
 													>{v.name}<svg
-														class="h-3 w-3 shrink-0 text-gray-500 dark:text-gray-400"
-														viewBox="0 0 24 24"
-														fill="none"
-														stroke="currentColor"
-														stroke-width="2"
-														stroke-linecap="round"
-														stroke-linejoin="round"
-														aria-hidden="true"
-														><rect x="9" y="9" width="11" height="11" rx="1.5" /><path
-															d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5"
-														/></svg
-													></button
+													class="h-3 w-3 shrink-0 text-gray-500 dark:text-gray-400"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+													><rect x="9" y="9" width="11" height="11" rx="1.5" /><path
+														d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5"
+													/></svg
+												></button
 												>
 											</dt>
 											<dd class="text-gray-500 dark:text-gray-400">{v.value}</dd>
@@ -833,16 +836,161 @@
 								</li>
 								<li class="pl-1">
 									<p>
-										Create a PowerShell runbook in that runtime environment from the script,
-										publish it and link it to a
-										schedule that runs <span class="font-semibold">{runbook.schedule}</span>.
+										In the Automation account open <span class="font-semibold">Process Automation</span> &gt;
+										<span class="font-semibold">Runtime Environments</span> and select
+										<span class="font-semibold">Create</span>.
 									</p>
+									<ul class="mt-2 list-disc pl-5 space-y-1">
+										<li>
+											<span class="font-semibold">Basics</span>: a name such as PhishingClub, Language
+											<span class="font-semibold">PowerShell</span>, Runtime version
+											<span class="font-semibold">7.4</span>.
+										</li>
+										<li>
+											<span class="font-semibold">Packages</span>: select
+											<span class="font-semibold">Add from gallery</span> and add each module, in the
+											version shown:
+											<dl class="mt-1 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+												{#each [{ name: runbook.moduleName, version: runbook.moduleVersion }, { name: 'PowerShellGet', version: 'latest' }, { name: 'PackageManagement', version: 'latest' }] as m}
+													<dt>
+														<button
+															type="button"
+															class={copyCodeClass}
+															title="Copy"
+															on:click={() => copyToClipboard(m.name)}
+															>{m.name}<svg
+													class="h-3 w-3 shrink-0 text-gray-500 dark:text-gray-400"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+													><rect x="9" y="9" width="11" height="11" rx="1.5" /><path
+														d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5"
+													/></svg
+												></button
+														>
+													</dt>
+													<dd class="text-gray-500 dark:text-gray-400">{m.version}</dd>
+												{/each}
+											</dl>
+										</li>
+										<li>
+											<span class="font-semibold">Review + Create</span>, then
+											<span class="font-semibold">Create</span>. The modules are ready when their
+											status shows them as available.
+										</li>
+									</ul>
+								</li>
+								<li class="pl-1">
+									<p>
+										Give the managed identity its permissions. Enter the name of the Automation
+										account, then run the script in Microsoft Graph PowerShell, for example in Azure
+										Cloud Shell, as a Global Administrator or Privileged Role Administrator.
+									</p>
+									<div class="mt-2 max-w-sm">
+										<label
+											for="allow-listing-account-name"
+											class="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1"
+											>Automation account name</label
+										>
+										<input
+											id="allow-listing-account-name"
+											type="text"
+											autocomplete="off"
+											spellcheck="false"
+											maxlength="50"
+											bind:value={automationAccountName}
+											placeholder="automation-phishingclub"
+											class="{inputClass} w-full"
+										/>
+										{#if accountName && !isAccountNameValid}
+											<p class="mt-1 text-xs text-red-600 dark:text-red-400">
+												6 to 50 letters, numbers or hyphens, starting with a letter.
+											</p>
+										{/if}
+									</div>
 									<div class="mt-2 flex flex-wrap items-center gap-3">
-										<Button type="button" size="auto" on:click={downloadRunbook}>Download</Button>
+										<button
+											type="button"
+											class="{copyButtonClass} disabled:opacity-50 disabled:cursor-not-allowed"
+											disabled={!isAccountNameValid}
+											on:click={() => copyToClipboard(permissionScript)}>Copy</button
+										>
+										<button
+											type="button"
+											class={linkClass}
+											aria-expanded={showPermissionScript}
+											on:click={() => (showPermissionScript = !showPermissionScript)}
+										>
+											{showPermissionScript ? 'Hide script' : 'Show script'}
+											<svg
+											class="w-4 h-4 transition-transform duration-200"
+											class:rotate-180={showPermissionScript}
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+											aria-hidden="true"
+											><path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M19 9l-7 7-7-7"
+											/></svg
+										>
+										</button>
+									</div>
+									{#if showPermissionScript}
+										<pre class={preClass}>{permissionScript}</pre>
+									{/if}
+								</li>
+								<li class="pl-1">
+									<p>
+										Download the runbook. In the Automation account open <span class="font-semibold">Process Automation</span>
+										&gt; <span class="font-semibold">Runbooks</span>, select
+										<span class="font-semibold">Import a runbook</span> and upload the file, with
+										Runbook type <span class="font-semibold">PowerShell</span> and the runtime
+										environment from step 3. Select <span class="font-semibold">Create</span>, then
+										<span class="font-semibold">Publish</span>. Enter the tenant domain first, it is
+										written into the runbook.
+									</p>
+									<div class="mt-2 max-w-sm">
+										<label
+											for="allow-listing-tenant-domain"
+											class="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1"
+											>Tenant domain</label
+										>
+										<input
+											id="allow-listing-tenant-domain"
+											type="text"
+											autocomplete="off"
+											spellcheck="false"
+											maxlength="80"
+											bind:value={tenantDomain}
+											placeholder="contoso.onmicrosoft.com"
+											class="{inputClass} w-full"
+										/>
+										{#if tenantDomainValue && !isTenantDomainValid}
+											<p class="mt-1 text-xs text-red-600 dark:text-red-400">
+												The .onmicrosoft.com domain of the tenant, such as contoso.onmicrosoft.com.
+											</p>
+										{/if}
+									</div>
+									<div class="mt-2 flex flex-wrap items-center gap-3">
+										<Button
+											type="button"
+											size="auto"
+											disabled={!isTenantDomainValid}
+											on:click={downloadRunbook}>Download</Button
+										>
 										<button
 											type="button"
 											class={copyButtonClass}
-											on:click={() => copyToClipboard(runbook.runbook)}>Copy</button
+											class:opacity-50={!isTenantDomainValid}
+											disabled={!isTenantDomainValid}
+											on:click={() => copyToClipboard(runbookText)}>Copy</button
 										>
 										<button
 											type="button"
@@ -852,29 +1000,49 @@
 										>
 											{showRunbookScript ? 'Hide script' : 'Show script'}
 											<svg
-												class="w-4 h-4 transition-transform duration-200"
-												class:rotate-180={showRunbookScript}
-												fill="none"
-												stroke="currentColor"
-												viewBox="0 0 24 24"
-												aria-hidden="true"
-												><path
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													stroke-width="2"
-													d="M19 9l-7 7-7-7"
-												/></svg
-											>
+											class="w-4 h-4 transition-transform duration-200"
+											class:rotate-180={showRunbookScript}
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+											aria-hidden="true"
+											><path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M19 9l-7 7-7-7"
+											/></svg
+										>
 										</button>
 									</div>
 									{#if showRunbookScript}
-										<pre class="{preClass} max-h-96" data-allow-listing-runbook>{runbook.runbook}</pre>
+										<pre class="{preClass} max-h-96" data-allow-listing-runbook>{runbookText}</pre>
 									{/if}
 								</li>
 								<li class="pl-1">
-									Optional: set <span class={codeClass}>$AllowedSenderIPs</span> and
-									<span class={codeClass}>$AllowedDomainSuffixes</span> at the top of the runbook to limit
-									what it may add.
+									<p>
+										In the runbook select <span class="font-semibold">Link to schedule</span> and add
+										a new schedule with Recurrence <span class="font-semibold">Recurring</span>, so it
+										runs <span class="font-semibold">{runbook.schedule}</span>. When the sync interval
+										is changed here, change the schedule too.
+									</p>
+									<p class="mt-2 text-gray-500 dark:text-gray-400">
+										The first run only reads the tenant. Its result is under
+										<span class="font-semibold">Jobs</span> and on the Status tab here.
+									</p>
+								</li>
+								<li class="pl-1">
+									<p>
+										Optional: limit what the runbook may add. Before publishing, set the two lists
+										near the top of the runbook, for example:
+									</p>
+									<pre class={preClass}>{limitsExample}</pre>
+									<p class="mt-2">
+										The runbook then refuses to add a sending IP that is not listed exactly, and a
+										domain or simulation URL that is not example.com or below it, such as
+										mail.example.com, even when Phishing Club asks for it. Empty lists allow
+										everything.
+									</p>
 								</li>
 							</ol>
 							<div class="pt-4">

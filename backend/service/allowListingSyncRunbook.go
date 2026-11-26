@@ -245,12 +245,16 @@ fetches a plan from Phishing Club, applies it, reads the lists again and
 reports both reads. Phishing Club decides what is added and removed, the
 runbook keeps no state between runs.
 
-Needs the Automation variables PhishingClubSyncToken (encrypted) and
-PhishingClubOrganization.
+Needs the encrypted Automation variable PhishingClubSyncToken. The tenant
+domain is set in $Organization below.
 #>
 $ErrorActionPreference = 'Stop'
 
 $BaseUrl = '__BASE_URL__'
+
+# the .onmicrosoft.com domain of the tenant, filled in by Phishing Club when
+# the runbook is downloaded
+$Organization = '__TENANT_DOMAIN__'
 
 # Optional limits set by the tenant. When a list is not empty, any value
 # outside it is refused even when Phishing Club asks to add it.
@@ -349,14 +353,14 @@ try {
     # setup errors from here on are reported to Phishing Club too
     # the runtime environment must hold the pinned module version
     Import-Module ExchangeOnlineManagement -RequiredVersion '__MODULE_VERSION__'
-    $Organization = Get-AutomationVariable -Name 'PhishingClubOrganization'
+    if ($Organization -cnotmatch '^[a-z0-9][a-z0-9-]{0,62}\.onmicrosoft\.com$') { throw 'Set $Organization at the top of the runbook to the .onmicrosoft.com domain of the tenant' }
 
     Connect-ExchangeOnline -ManagedIdentity -Organization $Organization -ShowBanner:$false
 
     $before = Read-Lists
     $beforeKeys = Get-Keys $before
 
-    $plan = Invoke-RestMethod -Method Get -Uri "$($BaseUrl)/plan" -Headers $Headers -TimeoutSec 60
+    $plan = Invoke-RestMethod -Method Get -Uri "$($BaseUrl)/plan" -Headers $Headers -ConnectionTimeoutSeconds 30 -OperationTimeoutSeconds 60
     if (-not $plan.planId) { throw 'Phishing Club returned no plan' }
     $adds = @($plan.add | Where-Object { $_ })
     $removes = @($plan.remove | Where-Object { $_ })
@@ -478,12 +482,12 @@ try {
         errors = @($RunErrors)
         addedNow = @($addedNow)
     } | ConvertTo-Json -Depth 5
-    Invoke-RestMethod -Method Post -Uri "$($BaseUrl)/report" -Headers $Headers -ContentType 'application/json' -Body $body -TimeoutSec 60 | Out-Null
+    Invoke-RestMethod -Method Post -Uri "$($BaseUrl)/report" -Headers $Headers -ContentType 'application/json' -Body $body -ConnectionTimeoutSeconds 30 -OperationTimeoutSeconds 60 | Out-Null
 } catch {
     $message = "$($_.Exception.Message)"
     try {
         $failure = @{ failed = $true; errors = @(@($RunErrors) + @($message)) } | ConvertTo-Json -Depth 3
-        Invoke-RestMethod -Method Post -Uri "$($BaseUrl)/report" -Headers $Headers -ContentType 'application/json' -Body $failure -TimeoutSec 60 | Out-Null
+        Invoke-RestMethod -Method Post -Uri "$($BaseUrl)/report" -Headers $Headers -ContentType 'application/json' -Body $failure -ConnectionTimeoutSeconds 30 -OperationTimeoutSeconds 60 | Out-Null
     } catch { }
     throw
 } finally {
