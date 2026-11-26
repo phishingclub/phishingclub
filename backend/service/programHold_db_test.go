@@ -309,3 +309,79 @@ func TestRoundStartKeepsWallClockOverClockChange(t *testing.T) {
 		t.Fatalf("an interval that is not whole days is a fixed duration, got %v", got)
 	}
 }
+
+// TestSenderHoldsProgramTemplateWithBrokenSubject checks a subject that does
+// not parse is found before any row is tried, so the program send is held and
+// planned again instead of being saved as a failed send, while a subject that
+// parses goes on to the send
+func TestSenderHoldsProgramTemplateWithBrokenSubject(t *testing.T) {
+	for name, subject := range map[string]string{
+		"broken": "Hello {{.FirstName",
+		"parses": "Hello {{.FirstName}}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := newProgramSenderTest(t)
+			for _, event := range []string{
+				data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT,
+				data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_FAILED,
+			} {
+				if cache.EventIDByName[event] == nil {
+					id := uuid.New()
+					cache.EventIDByName[event] = &id
+				}
+				cache.EventNameByID[cache.EventIDByName[event].String()] = event
+			}
+			p.svc.CampaignService.MailService = &Email{Common: p.svc.Common, EmailRepository: &repository.Email{DB: p.db}}
+			p.svc.CampaignService.SMTPConfigService = &SMTPConfiguration{Common: p.svc.Common,
+				SMTPConfigurationRepository: &repository.SMTPConfiguration{DB: p.db}}
+			programID := p.program(model.ProgramLoopComplete)
+			stepID := p.step(programID, 0, true)
+			templateID := p.stepTemplate(stepID)
+			now := time.Now().UTC()
+			domainID, emailID, pageID, smtpID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+			p.create(&database.Domain{ID: domainID, CreatedAt: &now, UpdatedAt: &now, Name: "subject.example.com"})
+			p.create(&database.Email{ID: &emailID, CreatedAt: &now, UpdatedAt: &now, Name: "subject " + name,
+				Content: "Hello {{.FirstName}}", MailFrom: "sender@example.com",
+				From: "Sender <sender@example.com>", Subject: subject})
+			if err := p.db.AutoMigrate(&database.SMTPConfiguration{}, &database.SMTPHeader{}); err != nil {
+				t.Fatalf("migrate: %v", err)
+			}
+			// nothing listens on port 1, so no mail can leave the test
+			p.create(&database.SMTPConfiguration{ID: smtpID, CreatedAt: &now, UpdatedAt: &now,
+				Name: "smtp " + name, Host: "127.0.0.1", Port: 1})
+			p.setTemplate(templateID, map[string]any{
+				"domain_id": domainID, "email_id": emailID, "landing_page_id": pageID,
+				"smtp_configuration_id": smtpID,
+			})
+			campaignID := p.stepCampaign(programID, stepID, 0)
+			sendID := p.sendAt(campaignID, p.recipient("alice@example.com"), now.Add(-time.Minute), false)
+			// read the row with its recipient, as the sender does
+			rows, err := p.svc.CampaignRecipientRepository.GetUnsendRecipientsForSending(
+				p.ctx, 1000, &repository.CampaignRecipientOption{WithRecipient: true},
+			)
+			if err != nil || len(rows) != 1 {
+				t.Fatalf("read due row: %v %d", err, len(rows))
+			}
+			campaign, err := p.svc.CampaignRepository.GetByID(p.ctx, &campaignID, &repository.CampaignOption{IncludeProgramManaged: true})
+			if err != nil {
+				t.Fatalf("load campaign: %v", err)
+			}
+			_ = p.svc.CampaignService.sendCampaignMessagesWithTemplate(p.ctx, authorizedSession(t), campaign, templateID, rows)
+			if row := p.campaignRow(campaignID); row.ClosedAt != nil {
+				t.Fatal("the hidden campaign must stay open")
+			}
+			row := p.campaignRecipient(sendID)
+			if name == "broken" {
+				if row.CancelledAt == nil || row.SentAt != nil || row.LastAttemptAt != nil {
+					t.Fatalf("the send must be held before it is tried, cancelled %v sent %v tried %v",
+						row.CancelledAt, row.SentAt, row.LastAttemptAt)
+				}
+				return
+			}
+			if row.LastAttemptAt == nil || row.CancelledAt != nil || row.SentAt != nil {
+				t.Fatalf("a subject that parses must go on to the send, cancelled %v tried %v sent %v",
+					row.CancelledAt, row.LastAttemptAt, row.SentAt)
+			}
+		})
+	}
+}

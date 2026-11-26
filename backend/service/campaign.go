@@ -3889,6 +3889,24 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 		)
 		return errs.Wrap(errors.Join(err, closeErr))
 	}
+	// the subject is the same for every recipient, so a subject that does not
+	// parse is handled like a body that does not parse, before any row is tried
+	subjectCheck := template.New("subject")
+	subjectCheck = subjectCheck.Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID))
+	_, err = subjectCheck.Parse(email.MailHeaderSubject.MustGet().String())
+	if err != nil {
+		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the email subject does not parse"); held {
+			return holdErr
+		}
+		closeErr := c.closeCampaign(
+			ctx,
+			session,
+			&campaignID,
+			campaign,
+			"failed to parse the subject",
+		)
+		return errs.Wrap(errors.Join(err, closeErr))
+	}
 	// check if sending is API or SMTP
 	isSmtpCampaign := cTemplate.SMTPConfigurationID.IsSpecified() && !cTemplate.SMTPConfigurationID.IsNull()
 	isAPISenderCampaign := cTemplate.APISenderID.IsSpecified() && !cTemplate.APISenderID.IsNull()
@@ -4058,159 +4076,218 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	messageOptions := []mail.MsgOption{
 		mail.WithNoDefaultUserAgent(),
 	}
-	// create maps between recipients and messages
-	// and prepare all messages
-	messages := []*mail.Msg{}
-	mailToCampaignRecipient := make(map[string]*model.CampaignRecipient, len(campaignRecipients))
-	for _, campaignRecipient := range campaignRecipients {
-		claimed, err := c.claimForSending(ctx, campaignRecipient)
-		if err != nil {
-			return err
-		}
-		if !claimed {
-			continue
-		}
-		m := mail.NewMsg(messageOptions...)
-		/* TODO at the moment the mail envelope from is a email, so it can not be empty by definition
-		if envelopefrom.string() == "" {
-			// extract the email only from mail.mailheaderfrom
-			// and use that as the envelope from
-			// this is a fallback if the envelope from is not set
-			address, err := netmail.parseaddress(email.mailheaderfrom)
-			if err != nil {
-				c.logger.errorw("failed to parse mail header 'from'", "error", err)
-				return false,errs.Wrap(err)
+	// claim and prepare all messages, a row whose message can not be built
+	// gets a failed send event and is not tried again
+	messages, mailToCampaignRecipient, buildErr := c.claimAndBuildMessages(
+		ctx,
+		campaignRecipients,
+		func(campaignRecipient *model.CampaignRecipient) (*mail.Msg, error) {
+			m := mail.NewMsg(messageOptions...)
+			var err error
+			/* TODO at the moment the mail envelope from is a email, so it can not be empty by definition
+			if envelopefrom.string() == "" {
+				// extract the email only from mail.mailheaderfrom
+				// and use that as the envelope from
+				// this is a fallback if the envelope from is not set
+				address, err := netmail.parseaddress(email.mailheaderfrom)
+				if err != nil {
+					c.logger.errorw("failed to parse mail header 'from'", "error", err)
+					return false,errs.Wrap(err)
+				}
+				err = m.envelopefrom(address.address)
+				if err != nil {
+					c.logger.errorw("failed to set envelope from", "error", err)
+					return false,errs.Wrap(err)
+				}
+			} else {
+				err = m.envelopefrom(email.mailenvelopefrom)
+				if err != nil {
+					c.logger.errorw("failed to set envelope from", "error", err)
+					return false,errs.Wrap(err)
+				}
 			}
-			err = m.envelopefrom(address.address)
+			*/
+			err = m.EnvelopeFrom(email.MailEnvelopeFrom.MustGet().String())
 			if err != nil {
-				c.logger.errorw("failed to set envelope from", "error", err)
-				return false,errs.Wrap(err)
+				c.Logger.Errorw("failed to set envelope from", "error", err)
+				return nil, errs.Wrap(err)
 			}
-		} else {
-			err = m.envelopefrom(email.mailenvelopefrom)
+			// message id from the sending domain so the host is not leaked
+			setMessageIDFromAddress(m, email.MailEnvelopeFrom.MustGet().String())
+			// headers
+			err = m.From(email.MailHeaderFrom.MustGet().String())
 			if err != nil {
-				c.logger.errorw("failed to set envelope from", "error", err)
-				return false,errs.Wrap(err)
+				c.Logger.Errorw("failed to set mail header 'From'", "error", err)
+				return nil, errs.Wrap(err)
 			}
-		}
-		*/
-		err = m.EnvelopeFrom(email.MailEnvelopeFrom.MustGet().String())
-		if err != nil {
-			c.Logger.Errorw("failed to set envelope from", "error", err)
-			return errs.Wrap(err)
-		}
-		// message id from the sending domain so the host is not leaked
-		setMessageIDFromAddress(m, email.MailEnvelopeFrom.MustGet().String())
-		// headers
-		err = m.From(email.MailHeaderFrom.MustGet().String())
-		if err != nil {
-			c.Logger.Errorw("failed to set mail header 'From'", "error", err)
-			return errs.Wrap(err)
-		}
-		recpEmail := campaignRecipient.Recipient.Email.MustGet().String()
-		err = m.To(recpEmail)
-		if err != nil {
-			c.Logger.Errorw("failed to set mail header 'To'", "error", err)
-			return errs.Wrap(err)
-		}
-		// store a map between recipient email and message
-		// so we can later save the sending result
-		mailToCampaignRecipient[m.GetToString()[0]] = campaignRecipient
-
-		urlIdentifier := cTemplate.URLIdentifier
-		if urlIdentifier == nil {
-			c.Logger.Error("url identifier is MUST be loaded for the campaign template")
-			return fmt.Errorf("url identifier is MUST be loaded for the campaign template")
-		}
-
-		// get template domain for assets and tracking pixel
-		domainName, err := domain.Name.Get()
-		if err != nil {
-			c.Logger.Errorw("failed to get domain name", "error", err)
-			return errs.Wrap(err)
-		}
-		urlPath := cTemplate.URLPath.MustGet().String()
-
-		// generate custom campaign URL if first page is MITM
-		customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
-		if err != nil {
-			c.Logger.Errorw("failed to get campaign url", "error", err)
-			return errs.Wrap(err)
-		}
-
-		t := c.TemplateService.CreateMail(
-			ctx,
-			domainName.String(),
-			urlIdentifier.Name.MustGet(),
-			urlPath,
-			campaignRecipient,
-			email,
-			nil,
-			campaignCompanyID,
-			NewFlowContext(cTemplate, campaignID),
-		)
-
-		// the only builder that knows about proxy first pages and path mode codes
-		(*t)["URL"] = customCampaignURL
-
-		// build per recipient template funcs so that {{MicrosoftDeviceCode}} resolves
-		// to a real device code for this campaign recipient.
-		// use the actual recipient id (not the campaign recipient row id) so the
-		// lookup key matches what the landing page path uses.
-		actualRecipientID := campaignRecipient.RecipientID.MustGet()
-		recipientDeviceFuncs := c.TemplateService.TemplateFuncsWithDeviceCode(ctx, &campaignID, &actualRecipientID)
-
-		// custom headers support the same per recipient variables as the subject and body
-		applyCustomSMTPHeaders(m, smtpConfig.Headers, t, recipientDeviceFuncs, c.Logger)
-
-		// process subject through template
-		subjectTemplate, err := template.New("subject").Funcs(recipientDeviceFuncs).Parse(email.MailHeaderSubject.MustGet().String())
-		if err != nil {
-			c.Logger.Errorw("failed to parse subject template", "error", err)
-			return errs.Wrap(err)
-		}
-		var subjectBuffer bytes.Buffer
-		err = subjectTemplate.Execute(&subjectBuffer, t)
-		if err != nil {
-			c.Logger.Errorw("failed to execute subject template", "error", err)
-			return errs.Wrap(err)
-		}
-		m.Subject(subjectBuffer.String())
-
-		// re-parse the body template per recipient so device code funcs are bound
-		// to the correct recipient id
-		recipientMailTmpl, err := template.New("email").Funcs(recipientDeviceFuncs).Parse(content.String())
-		if err != nil {
-			c.Logger.Errorw("failed to parse per recipient mail template", "error", err)
-			return errs.Wrap(err)
-		}
-		var bodyBuffer bytes.Buffer
-		err = recipientMailTmpl.Execute(&bodyBuffer, t)
-		if err != nil {
-			c.Logger.Errorw("failed to execute mail template", "error", err)
-			return errs.Wrap(err)
-		}
-		m.SetBodyString("text/html", bodyBuffer.String())
-		// attachments
-		attachments := email.Attachments
-		for _, emailAttachment := range attachments {
-			attachment := emailAttachment.Attachment
-			p, err := c.MailService.AttachmentService.GetPath(attachment)
+			recpEmail := campaignRecipient.Recipient.Email.MustGet().String()
+			err = m.To(recpEmail)
 			if err != nil {
-				return fmt.Errorf("failed to get attachment path: %s", err)
+				c.Logger.Errorw("failed to set mail header 'To'", "error", err)
+				return nil, errs.Wrap(err)
 			}
 
-			// check if attachment should be inline (for cid: references)
-			if emailAttachment.IsInline {
-				// inline attachment - embedded in email body, can be referenced via cid:filename
-				if !attachment.EmbeddedContent.MustGet() {
-					// simple inline image - no template processing needed
-					m.EmbedFile(p)
+			urlIdentifier := cTemplate.URLIdentifier
+			if urlIdentifier == nil {
+				c.Logger.Error("url identifier is MUST be loaded for the campaign template")
+				return nil, fmt.Errorf("url identifier is MUST be loaded for the campaign template")
+			}
+
+			// get template domain for assets and tracking pixel
+			domainName, err := domain.Name.Get()
+			if err != nil {
+				c.Logger.Errorw("failed to get domain name", "error", err)
+				return nil, errs.Wrap(err)
+			}
+			urlPath := cTemplate.URLPath.MustGet().String()
+
+			// generate custom campaign URL if first page is MITM
+			customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
+			if err != nil {
+				c.Logger.Errorw("failed to get campaign url", "error", err)
+				return nil, errs.Wrap(err)
+			}
+
+			t := c.TemplateService.CreateMail(
+				ctx,
+				domainName.String(),
+				urlIdentifier.Name.MustGet(),
+				urlPath,
+				campaignRecipient,
+				email,
+				nil,
+				campaignCompanyID,
+				NewFlowContext(cTemplate, campaignID),
+			)
+
+			// the only builder that knows about proxy first pages and path mode codes
+			(*t)["URL"] = customCampaignURL
+
+			// build per recipient template funcs so that {{MicrosoftDeviceCode}} resolves
+			// to a real device code for this campaign recipient.
+			// use the actual recipient id (not the campaign recipient row id) so the
+			// lookup key matches what the landing page path uses.
+			actualRecipientID := campaignRecipient.RecipientID.MustGet()
+			recipientDeviceFuncs := c.TemplateService.TemplateFuncsWithDeviceCode(ctx, &campaignID, &actualRecipientID)
+
+			// custom headers support the same per recipient variables as the subject and body
+			applyCustomSMTPHeaders(m, smtpConfig.Headers, t, recipientDeviceFuncs, c.Logger)
+
+			// process subject through template
+			subjectTemplate, err := template.New("subject").Funcs(recipientDeviceFuncs).Parse(email.MailHeaderSubject.MustGet().String())
+			if err != nil {
+				c.Logger.Errorw("failed to parse subject template", "error", err)
+				return nil, errs.Wrap(err)
+			}
+			var subjectBuffer bytes.Buffer
+			err = subjectTemplate.Execute(&subjectBuffer, t)
+			if err != nil {
+				c.Logger.Errorw("failed to execute subject template", "error", err)
+				return nil, errs.Wrap(err)
+			}
+			m.Subject(subjectBuffer.String())
+
+			// re-parse the body template per recipient so device code funcs are bound
+			// to the correct recipient id
+			recipientMailTmpl, err := template.New("email").Funcs(recipientDeviceFuncs).Parse(content.String())
+			if err != nil {
+				c.Logger.Errorw("failed to parse per recipient mail template", "error", err)
+				return nil, errs.Wrap(err)
+			}
+			var bodyBuffer bytes.Buffer
+			err = recipientMailTmpl.Execute(&bodyBuffer, t)
+			if err != nil {
+				c.Logger.Errorw("failed to execute mail template", "error", err)
+				return nil, errs.Wrap(err)
+			}
+			m.SetBodyString("text/html", bodyBuffer.String())
+			// attachments
+			attachments := email.Attachments
+			for _, emailAttachment := range attachments {
+				attachment := emailAttachment.Attachment
+				p, err := c.MailService.AttachmentService.GetPath(attachment)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get attachment path: %s", err)
+				}
+
+				// check if attachment should be inline (for cid: references)
+				if emailAttachment.IsInline {
+					// inline attachment - embedded in email body, can be referenced via cid:filename
+					if !attachment.EmbeddedContent.MustGet() {
+						// simple inline image - no template processing needed
+						m.EmbedFile(p)
+					} else {
+						// inline image with template processing
+						attachmentContent, err := os.ReadFile(p)
+						if err != nil {
+							return nil, errs.Wrap(err)
+						}
+						// setup attachment for executing as email template
+						attachmentAsEmail := model.Email{
+							ID:                email.ID,
+							CreatedAt:         email.CreatedAt,
+							UpdatedAt:         email.UpdatedAt,
+							Name:              email.Name,
+							MailEnvelopeFrom:  email.MailEnvelopeFrom,
+							MailHeaderFrom:    email.MailHeaderFrom,
+							MailHeaderSubject: email.MailHeaderSubject,
+							Content:           email.Content,
+							AddTrackingPixel:  email.AddTrackingPixel,
+							CompanyID:         email.CompanyID,
+							Attachments:       email.Attachments,
+							Company:           email.Company,
+						}
+						attachmentAsEmail.Content = nullable.NewNullableWithValue(
+							*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
+						)
+						// generate custom campaign URL for attachment
+						customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
+						if err != nil {
+							c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
+							return nil, errs.Wrap(err)
+						}
+
+						attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURLAndRecipient(
+							ctx,
+							urlIdentifier.Name.MustGet(),
+							urlPath,
+							domain,
+							campaignRecipient,
+							&attachmentAsEmail,
+							nil,
+							customCampaignURL,
+							campaignCompanyID,
+							&campaignID,
+							&actualRecipientID,
+							NewFlowContext(cTemplate, campaignID),
+						)
+						if err != nil {
+							return nil, errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
+						}
+						// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
+						// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
+						m.EmbedReader(
+							filepath.Base(p),
+							strings.NewReader(attachmentStr),
+						)
+					}
+				} else if !attachment.EmbeddedContent.MustGet() {
+					if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
+						// calendar invitation parsed natively by Outlook, raw file content
+						icsContent, err := os.ReadFile(p)
+						if err != nil {
+							return nil, fmt.Errorf("failed to read calendar file: %s", err)
+						}
+						m.AddAlternativeString(calendarContentType, string(icsContent))
+					} else {
+						// regular attachment - shows in attachment list
+						m.AttachFile(p)
+					}
 				} else {
-					// inline image with template processing
+					// regular attachment with template processing
 					attachmentContent, err := os.ReadFile(p)
 					if err != nil {
-						return errs.Wrap(err)
+						return nil, errs.Wrap(err)
 					}
 					// setup attachment for executing as email template
 					attachmentAsEmail := model.Email{
@@ -4234,7 +4311,7 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 					customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
 					if err != nil {
 						c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
-						return errs.Wrap(err)
+						return nil, errs.Wrap(err)
 					}
 
 					attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURLAndRecipient(
@@ -4252,91 +4329,30 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 						NewFlowContext(cTemplate, campaignID),
 					)
 					if err != nil {
-						return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
+						return nil, errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
 					}
-					// use EmbedReader for inline images - sets Content-Disposition: inline and Content-ID header
-					// the filename becomes the Content-ID, so use <img src="cid:filename.jpg"> in HTML
-					m.EmbedReader(
-						filepath.Base(p),
-						strings.NewReader(attachmentStr),
-					)
-				}
-			} else if !attachment.EmbeddedContent.MustGet() {
-				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
-					// calendar invitation parsed natively by Outlook, raw file content
-					icsContent, err := os.ReadFile(p)
-					if err != nil {
-						return fmt.Errorf("failed to read calendar file: %s", err)
+					if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
+						// calendar invitation parsed natively by Outlook, with rendered variables
+						m.AddAlternativeString(calendarContentType, attachmentStr)
+					} else {
+						m.AttachReadSeeker(
+							filepath.Base(p),
+							strings.NewReader(attachmentStr),
+						)
 					}
-					m.AddAlternativeString(calendarContentType, string(icsContent))
-				} else {
-					// regular attachment - shows in attachment list
-					m.AttachFile(p)
-				}
-			} else {
-				// regular attachment with template processing
-				attachmentContent, err := os.ReadFile(p)
-				if err != nil {
-					return errs.Wrap(err)
-				}
-				// setup attachment for executing as email template
-				attachmentAsEmail := model.Email{
-					ID:                email.ID,
-					CreatedAt:         email.CreatedAt,
-					UpdatedAt:         email.UpdatedAt,
-					Name:              email.Name,
-					MailEnvelopeFrom:  email.MailEnvelopeFrom,
-					MailHeaderFrom:    email.MailHeaderFrom,
-					MailHeaderSubject: email.MailHeaderSubject,
-					Content:           email.Content,
-					AddTrackingPixel:  email.AddTrackingPixel,
-					CompanyID:         email.CompanyID,
-					Attachments:       email.Attachments,
-					Company:           email.Company,
-				}
-				attachmentAsEmail.Content = nullable.NewNullableWithValue(
-					*vo.NewUnsafeOptionalString1MB(string(attachmentContent)),
-				)
-				// generate custom campaign URL for attachment
-				customCampaignURL, err := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
-				if err != nil {
-					c.Logger.Errorw("failed to get campaign url for attachment", "error", err)
-					return errs.Wrap(err)
-				}
-
-				attachmentStr, err := c.TemplateService.CreateMailBodyWithCustomURLAndRecipient(
-					ctx,
-					urlIdentifier.Name.MustGet(),
-					urlPath,
-					domain,
-					campaignRecipient,
-					&attachmentAsEmail,
-					nil,
-					customCampaignURL,
-					campaignCompanyID,
-					&campaignID,
-					&actualRecipientID,
-					NewFlowContext(cTemplate, campaignID),
-				)
-				if err != nil {
-					return errs.Wrap(fmt.Errorf("failed to setup attachment with embedded content: %s", err))
-				}
-				if attachment.SendAsCalendar.MustGet() && isCalendarAttachment(p) {
-					// calendar invitation parsed natively by Outlook, with rendered variables
-					m.AddAlternativeString(calendarContentType, attachmentStr)
-				} else {
-					m.AttachReadSeeker(
-						filepath.Base(p),
-						strings.NewReader(attachmentStr),
-					)
 				}
 			}
-		}
-		messages = append(messages, m)
+			return m, nil
+		},
+	)
+	// the messages built before the build stopped are claimed, so they are sent
+	// and their results saved before the error is returned
+	if buildErr != nil {
+		c.Logger.Errorw("building messages stopped, the rows not reached stay due", "error", buildErr)
 	}
-	// every row was cancelled or changed after the batch was read
+	// every row was cancelled, changed after the batch was read or failed to build
 	if len(messages) == 0 {
-		return nil
+		return errs.Wrap(buildErr)
 	}
 
 	// send the messages
@@ -4438,9 +4454,68 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	)
 	if err != nil {
 		// err is logged in method call
-		return errs.Wrap(err)
+		return errs.Wrap(errors.Join(err, buildErr))
 	}
-	return nil
+	return errs.Wrap(buildErr)
+}
+
+// buildFailureLimit is how many rows in a row may fail to build before the
+// rest of the group is left for a later send. A failure on every row is most
+// likely not about the person, for example a missing attachment file or a
+// device code service that is down, so only a few rows are failed and the
+// campaign rests, see SendNextBatch.
+const buildFailureLimit = 3
+
+// claimAndBuildMessages claims each row and builds its message. A row is
+// claimed before its message is built, so a row whose message can not be built,
+// for example a device code that Microsoft refuses, is already marked as tried.
+// It gets a failed send event with the reason and is not tried again, and the
+// other rows are still built. After buildFailureLimit failures in a row, or when
+// a row can not be claimed, it stops and returns the error together with the
+// messages built so far. Those rows are claimed, so the caller must still send
+// them; the rows not reached stay due.
+func (c *Campaign) claimAndBuildMessages(
+	ctx context.Context,
+	campaignRecipients []*model.CampaignRecipient,
+	build func(campaignRecipient *model.CampaignRecipient) (*mail.Msg, error),
+) ([]*mail.Msg, map[string]*model.CampaignRecipient, error) {
+	messages := []*mail.Msg{}
+	mailToCampaignRecipient := make(map[string]*model.CampaignRecipient, len(campaignRecipients))
+	failuresInARow := 0
+	for _, campaignRecipient := range campaignRecipients {
+		claimed, err := c.claimForSending(ctx, campaignRecipient)
+		if err != nil {
+			return messages, mailToCampaignRecipient, err
+		}
+		if !claimed {
+			continue
+		}
+		m, buildErr := build(campaignRecipient)
+		if buildErr != nil {
+			c.Logger.Errorw("failed to build message, the send is saved as failed",
+				"campaignRecipientID", campaignRecipient.ID.MustGet().String(),
+				"error", buildErr,
+			)
+			// a failed save is only logged, as after the send, so the messages
+			// already built are still sent
+			if err := c.saveSendingResult(ctx, campaignRecipient, buildErr); err != nil {
+				c.Logger.Errorw("failed to save sending result", "error", err)
+			}
+			failuresInARow++
+			if failuresInARow >= buildFailureLimit {
+				return messages, mailToCampaignRecipient, fmt.Errorf(
+					"%d messages in a row failed to build, last error: %w", failuresInARow, buildErr,
+				)
+			}
+			continue
+		}
+		failuresInARow = 0
+		// map the recipient address to the row so the result of each message
+		// can be saved after the send
+		mailToCampaignRecipient[m.GetToString()[0]] = campaignRecipient
+		messages = append(messages, m)
+	}
+	return messages, mailToCampaignRecipient, nil
 }
 
 // claimForSending marks a row of the batch as tried and reports whether it may

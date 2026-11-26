@@ -12,6 +12,7 @@ import (
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/utils"
+	"github.com/wneessen/go-mail"
 )
 
 // newSendRaceTest is a test with a campaign and due rows, each for a real
@@ -257,5 +258,120 @@ func TestSendNextBatchRestsFailingCampaign(t *testing.T) {
 	// the rest ends
 	if got := c.restingCampaigns(now.Add(campaignSendRest)); len(got) != 0 {
 		t.Fatalf("the rest must end, got %v", got)
+	}
+}
+
+// TestBuildFailureSavesFailedSend checks a row whose message can not be built
+// gets a failed send event with the reason, is not read again by the sender,
+// and does not stop the other rows of the batch
+func TestBuildFailureSavesFailedSend(t *testing.T) {
+	p, campaignID, ids := newSendRaceTest(t, 3)
+	c := p.svc.CampaignService
+	batch := readBatch(p)
+	rows := []*model.CampaignRecipient{batch[ids[0]], batch[ids[1]], batch[ids[2]]}
+	broken := ids[1]
+
+	messages, byAddress, err := c.claimAndBuildMessages(p.ctx, rows,
+		func(cr *model.CampaignRecipient) (*mail.Msg, error) {
+			if cr.ID.MustGet() == broken {
+				return nil, errors.New("subject does not parse")
+			}
+			m := mail.NewMsg()
+			if err := m.To(cr.Recipient.Email.MustGet().String()); err != nil {
+				return nil, err
+			}
+			return m, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("a build failure must not stop the send: %v", err)
+	}
+	if len(messages) != 2 || len(byAddress) != 2 {
+		t.Fatalf("the other rows must still be sent, got %d messages", len(messages))
+	}
+	for _, cr := range byAddress {
+		if cr.ID.MustGet() == broken {
+			t.Fatal("the broken row must not be mapped to a message")
+		}
+	}
+
+	row := p.campaignRecipient(broken)
+	if row.LastAttemptAt == nil || row.SentAt != nil || row.CancelledAt != nil {
+		t.Fatalf("the broken row must be tried, not sent and not cancelled: %+v", row)
+	}
+	var events []database.CampaignEvent
+	failedEventID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_FAILED]
+	if err := p.db.Where("campaign_id = ? AND event_id = ?", campaignID, failedEventID).
+		Find(&events).Error; err != nil {
+		t.Fatalf("load events: %v", err)
+	}
+	recipientID := batch[broken].RecipientID.MustGet()
+	if len(events) != 1 || events[0].RecipientID == nil || *events[0].RecipientID != recipientID {
+		t.Fatalf("one failed send event for the broken row, got %+v", events)
+	}
+	if events[0].Data != "subject does not parse" {
+		t.Fatalf("the failed send event must hold the reason, got %q", events[0].Data)
+	}
+
+	// the sender never reads the broken row again
+	if _, ok := readBatch(p)[broken]; ok {
+		t.Fatal("a failed row must not be tried again")
+	}
+}
+
+// TestBuildFailuresInARowStop checks rows that keep failing to build stop the
+// group after buildFailureLimit rows, so a failure that is not about the person
+// only fails a few rows. The messages built before stay in the result to be
+// sent and the rows not reached stay due.
+func TestBuildFailuresInARowStop(t *testing.T) {
+	p, campaignID, ids := newSendRaceTest(t, 6)
+	c := p.svc.CampaignService
+	batch := readBatch(p)
+	rows := make([]*model.CampaignRecipient, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, batch[id])
+	}
+	built := ids[0]
+
+	messages, byAddress, err := c.claimAndBuildMessages(p.ctx, rows,
+		func(cr *model.CampaignRecipient) (*mail.Msg, error) {
+			if cr.ID.MustGet() != built {
+				return nil, errors.New("attachment file is gone")
+			}
+			m := mail.NewMsg()
+			if err := m.To(cr.Recipient.Email.MustGet().String()); err != nil {
+				return nil, err
+			}
+			return m, nil
+		},
+	)
+	if err == nil {
+		t.Fatal("failures in a row must stop the group with an error")
+	}
+	if len(messages) != 1 || byAddress[messages[0].GetToString()[0]].ID.MustGet() != built {
+		t.Fatal("the message built before the stop must be returned to be sent")
+	}
+	for _, id := range ids[1 : 1+buildFailureLimit] {
+		if row := p.campaignRecipient(id); row.LastAttemptAt == nil || row.SentAt != nil {
+			t.Fatalf("a row that failed to build must be tried and not sent: %+v", row)
+		}
+	}
+	var failed int64
+	if err := p.db.Model(&database.CampaignEvent{}).Where("campaign_id = ? AND event_id = ?",
+		campaignID, cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_MESSAGE_FAILED]).
+		Count(&failed).Error; err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if failed != buildFailureLimit {
+		t.Fatalf("only %d rows may fail before the stop, got %d", buildFailureLimit, failed)
+	}
+	due := readBatch(p)
+	for _, id := range ids[1+buildFailureLimit:] {
+		if _, ok := due[id]; !ok {
+			t.Fatal("a row not reached before the stop must stay due")
+		}
+	}
+	if len(due) != len(ids)-1-buildFailureLimit {
+		t.Fatalf("only the rows not reached may stay due, got %d", len(due))
 	}
 }
