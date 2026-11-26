@@ -5522,12 +5522,13 @@ func (c *Campaign) closeCampaign(
 		}
 	}
 
-	// automatic report delivery when the company has opted in (skip test campaigns).
+	// automatic report delivery when the company has opted in. a test campaign
+	// is not sent, SendCampaignReport records the skip in the delivery log.
 	// rendering the PDF and sending mail can take seconds, so it runs in the
 	// background with its own context to avoid blocking the close path and the
 	// sender loop. failures are logged and a panic is recovered so it can never
 	// crash the process. a program's hidden campaigns get no report of their own.
-	if !campaign.IsTest.MustGet() && !campaign.IsProgramManaged() {
+	if !campaign.IsProgramManaged() {
 		go c.sendCloseReport(session, *id, false)
 	}
 
@@ -5554,9 +5555,10 @@ var closeReportReserve = remotebrowser.ReserveOneSession
 var closeReportNeedsBrowser = (*Campaign).closeReportReady
 
 // closeReportReady reports whether the automatic report of a closed campaign
-// will be built: PDF reports are on, and the company of the campaign has report
-// delivery on with send on close and a complete config, as SendCampaignReport
-// checks. A read that fails reports true, so the report call handles it.
+// will be built: the campaign is not a test, PDF reports are on, and the
+// company of the campaign has report delivery on with send on close and a
+// complete config, as SendCampaignReport checks. A read that fails reports
+// true, so the report call handles it.
 func (c *Campaign) closeReportReady(campaignID uuid.UUID) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -5567,6 +5569,9 @@ func (c *Campaign) closeReportReady(campaignID uuid.UUID) bool {
 	campaign, err := c.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{})
 	if err != nil {
 		return true
+	}
+	if isTest, err := campaign.IsTest.Get(); err == nil && isTest {
+		return false
 	}
 	var companyID *uuid.UUID
 	if cid, err := campaign.CompanyID.Get(); err == nil {
@@ -8876,6 +8881,10 @@ func (c *Campaign) reportEmailHTML(
 	return withInlineImages(body, images), nil
 }
 
+// reportSkippedTestCampaign is why the automatic report of a test campaign is
+// not sent, shown in the delivery log and the campaign events
+const reportSkippedTestCampaign = "test campaigns are only sent with Send Report"
+
 const defaultReportEmailSubject = "Campaign report: {{.CampaignName}}"
 const defaultReportEmailBody = "<p>The {{if .IsTraining}}awareness training{{else}}phishing simulation{{end}} report for <strong>{{.CampaignName}}</strong> is attached.</p>"
 
@@ -8968,7 +8977,9 @@ func resolveEffectiveReportConfig(company, global *model.CompanyReportConfig) *m
 // company's configured recipient group using the configured SMTP. when onDemand
 // is false the send is treated as the automatic on close delivery and silently
 // skips when the company has not enabled it; when onDemand is true the caller
-// receives an error explaining why delivery is not possible.
+// receives an error explaining why delivery is not possible. a test campaign
+// is never sent on close, the skip is written to the delivery log and the
+// campaign events.
 func (c *Campaign) SendCampaignReport(
 	ctx context.Context,
 	session *model.Session,
@@ -9037,6 +9048,8 @@ func (c *Campaign) SendCampaignReport(
 		switch {
 		case err != nil:
 			c.AuditLogFailed(ae, err)
+		case deliveryOutcome == "skipped":
+			c.AuditLogAuthorized(ae)
 		case deliveryOutcome != "sent":
 			// a path that stops without an error, such as an empty recipient
 			// group on an automatic send
@@ -9090,6 +9103,43 @@ func (c *Campaign) SendCampaignReport(
 		}
 	}
 
+	// resolveGroupName looks up the recipient group name now so the log keeps it
+	// even if the group is deleted later. an empty name means the group no
+	// longer exists.
+	resolveGroupName := func(groupID uuid.UUID) string {
+		group, gErr := c.RecipientGroupRepository.GetByID(ctx, &groupID, &repository.RecipientGroupOption{})
+		if gErr != nil || group == nil {
+			return ""
+		}
+		if n, nErr := group.Name.Get(); nErr == nil {
+			return n.String()
+		}
+		return ""
+	}
+
+	// a test campaign is never sent on close, only on demand. the skip is
+	// written to the delivery log and the campaign events so it can be seen.
+	// it comes before the config check, as nothing is sent whatever the config
+	if isTest, tErr := campaign.IsTest.Get(); !onDemand && tErr == nil && isTest {
+		deliveryOutcome = "skipped"
+		if groupID, gErr := config.RecipientGroupID.Get(); gErr == nil {
+			groupName = resolveGroupName(groupID)
+		}
+		if sender, sErr := config.SenderEmail.Get(); sErr == nil {
+			senderEmailStr = sender.String()
+		}
+		writeReportSendLog("skipped", nil, errors.New(reportSkippedTestCampaign))
+		if eErr := c.saveCampaignEvent(
+			ctx,
+			campaignID,
+			data.EVENT_CAMPAIGN_INFO,
+			"Automatic report skipped: "+reportSkippedTestCampaign,
+		); eErr != nil {
+			c.Logger.Errorw("failed to save report skipped event", "error", eErr, "campaignID", campaignID.String())
+		}
+		return nil
+	}
+
 	// the effective config must be complete enough to deliver
 	if err := config.Validate(); err != nil {
 		writeReportSendLog("failed", nil, err)
@@ -9105,13 +9155,7 @@ func (c *Campaign) SendCampaignReport(
 	senderEmail := config.SenderEmail.MustGet()
 	senderEmailStr = senderEmail.String()
 
-	// resolve the recipient group name now so the log keeps it even if the group is
-	// deleted later. an empty name means the group no longer exists.
-	if group, gErr := c.RecipientGroupRepository.GetByID(ctx, &groupID, &repository.RecipientGroupOption{}); gErr == nil && group != nil {
-		if n, nErr := group.Name.Get(); nErr == nil {
-			groupName = n.String()
-		}
-	}
+	groupName = resolveGroupName(groupID)
 
 	// build the report and render it to PDF, on one browser launch
 	rb := newReportBrowser(ctx, c.RemoteBrowserExecPath, c.Logger)

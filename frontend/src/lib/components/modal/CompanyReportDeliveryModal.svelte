@@ -288,7 +288,8 @@
 							Send automatically on finish
 						</p>
 						<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-							Deliver the report when a campaign is closed. When off, send on demand only.
+							Deliver the report when a campaign is closed. Test campaigns are skipped. When off,
+							send on demand only.
 						</p>
 					</div>
 					<button

@@ -8,6 +8,9 @@ const (
 	EVENT_CAMPAIGN_CLOSED           = "campaign_closed"
 	EVENT_CAMPAIGN_PAUSED           = "campaign_paused"
 	EVENT_CAMPAIGN_RESUMED          = "campaign_resumed"
+	// EVENT_CAMPAIGN_INFO is a note about the campaign itself, such as an
+	// automatic report that was not sent
+	EVENT_CAMPAIGN_INFO = "campaign_info"
 
 	EVENT_CAMPAIGN_RECIPIENT_SCHEDULED            = "campaign_recipient_scheduled"
 	EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT         = "campaign_recipient_message_sent"
@@ -38,6 +41,7 @@ var Events = []string{
 	EVENT_CAMPAIGN_CLOSED,
 	EVENT_CAMPAIGN_PAUSED,
 	EVENT_CAMPAIGN_RESUMED,
+	EVENT_CAMPAIGN_INFO,
 	// campaign recipient events
 	EVENT_CAMPAIGN_RECIPIENT_SCHEDULED,
 	EVENT_CAMPAIGN_RECIPIENT_MESSAGE_SENT,

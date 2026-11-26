@@ -27,7 +27,7 @@ type ReportSendLog struct {
 	CampaignName   string     `gorm:"not null;default:''"`
 	GroupName      string     `gorm:"not null;default:''"` // recipient group name at send time
 	Trigger        string     `gorm:"not null;default:''"` // on_demand, on_finish or scheduled
-	Status         string     `gorm:"not null;default:''"` // sent or failed
+	Status         string     `gorm:"not null;default:''"` // sent, failed or skipped
 	RecipientCount int        `gorm:"not null;default:0"`
 	Recipients     string     `gorm:"not null;default:'';type:text"` // comma separated recipient addresses
 	SenderEmail    string     `gorm:"not null;default:''"`

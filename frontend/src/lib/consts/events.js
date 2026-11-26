@@ -5,6 +5,7 @@ export const eventDisplayNames = {
 	campaign_closed: 'Campaign Closed',
 	campaign_paused: 'Sending Paused',
 	campaign_resumed: 'Sending Resumed',
+	campaign_info: 'Campaign Info',
 	campaign_recipient_message_sent: 'Message Sent',
 	campaign_recipient_message_failed: 'Message Failed',
 	campaign_recipient_message_read: 'Message Read',

@@ -47,6 +47,11 @@
 		return () => tableURLParams.unsubscribe();
 	});
 
+	// a skipped row is a report that was not sent on purpose, such as a test
+	// campaign closing, the reason is in its title
+	const statusTone = (s) => (s === 'sent' ? 'success' : s === 'skipped' ? 'neutral' : 'danger');
+	const statusLabel = (s) => (s === 'sent' ? 'Sent' : s === 'skipped' ? 'Skipped' : 'Failed');
+
 	const triggerLabel = (t) =>
 		t === 'on_demand'
 			? 'On demand'
@@ -96,10 +101,10 @@
 			<TableCell>
 				<div>
 					<StatusBadge
-						tone={row.status === 'sent' ? 'success' : 'danger'}
+						tone={statusTone(row.status)}
 						title={row.status !== 'sent' ? row.errorMessage : ''}
 					>
-						{row.status === 'sent' ? 'Sent' : 'Failed'}
+						{statusLabel(row.status)}
 					</StatusBadge>
 				</div>
 			</TableCell>

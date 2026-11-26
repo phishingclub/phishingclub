@@ -65,7 +65,8 @@ export const eventNameMap = {
 	campaign_pending_schedule: { name: 'Pending Schedule', priority: 5 },
 	campaign_closed: { name: 'Closed', priority: 30, color: 'bg-closed' },
 	campaign_paused: { name: 'Paused', priority: 28 },
-	campaign_resumed: { name: 'Resumed', priority: 29 }
+	campaign_resumed: { name: 'Resumed', priority: 29 },
+	campaign_info: { name: 'Info', priority: 27, color: 'bg-message-sent' }
 };
 
 /**

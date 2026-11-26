@@ -514,7 +514,7 @@
 					<div class="mt-8">
 						<SubHeadline>Delivery log</SubHeadline>
 						<p class="text-gray-600 dark:text-gray-300 text-sm mt-1 mb-4">
-							Reports sent for this company, including automatic and on demand deliveries.
+							Report deliveries for this company, automatic and on demand, including skipped ones.
 						</p>
 						<CompanyReportDeliveryLog {companyId} />
 					</div>
