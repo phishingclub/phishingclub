@@ -70,6 +70,12 @@ type Campaign struct {
 	// TemplateMixBy is the recipient field templates are mixed by when the
 	// campaign has several templates. Empty means department.
 	TemplateMixBy string `gorm:"not null;default:''"`
+	// LanguageRouteBy is the recipient field that picks each recipient's
+	// language. Empty is off. The values are mapped in campaign_language_routes.
+	LanguageRouteBy string `gorm:"not null;type:varchar(32);default:''"`
+	// LanguageDefault is the language of a recipient whose value has no route.
+	// Set when LanguageRouteBy is set.
+	LanguageDefault string `gorm:"not null;type:varchar(16);default:''"`
 
 	// deprecated: webhook settings moved to campaign_webhooks junction table
 	// kept for backward compatibility during migration

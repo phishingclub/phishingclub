@@ -291,7 +291,8 @@
 			{ label: 'Start Date', text: '{{.CampaignStartDate}}' },
 			{ label: 'End Date', text: '{{.CampaignEndDate}}' },
 			{ label: 'Closed At', text: '{{.CampaignClosedAt}}' },
-			{ label: 'Total Targets', text: '{{.TotalTargets}}' }
+			{ label: 'Total Targets', text: '{{.TotalTargets}}' },
+			{ label: 'Is anonymous campaign', text: '{{.Anonymous}}' }
 		],
 		Results: [
 			{ label: 'Emails Sent', text: '{{.EmailsSent}}' },
@@ -361,6 +362,22 @@
 			{
 				label: 'Group rows: by position (loop)',
 				text: `{{range .PositionGroups}}
+<tr>
+  <td>{{.Group}}</td>
+  <td>{{.Total}}</td>
+  {{if .Suppressed}}
+  <td colspan="3">Hidden (group too small)</td>
+  {{else}}
+  <td>{{if lt .Clicked 0}}-{{else}}{{.Clicked}} ({{.ClickedPercent}}%){{end}}</td>
+  <td>{{if lt .Submitted 0}}-{{else}}{{.Submitted}} ({{.SubmittedPercent}}%){{end}}</td>
+  <td>{{if lt .Reported 0}}-{{else}}{{.Reported}} ({{.ReportedPercent}}%){{end}}</td>
+  {{end}}
+</tr>
+{{end}}`
+			},
+			{
+				label: 'Group rows: by language (loop)',
+				text: `{{range .LanguageGroups}}
 <tr>
   <td>{{.Group}}</td>
   <td>{{.Total}}</td>
@@ -463,6 +480,12 @@
 		{ Group: 'Account Executive', Total: 35, Clicked: 14, ClickedPercent: '40', Submitted: 7, SubmittedPercent: '20', Reported: 3, ReportedPercent: '9', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false },
 		{ Group: 'Other (small groups)', Total: 1, Clicked: 0, ClickedPercent: '0', Submitted: 0, SubmittedPercent: '0', Reported: 0, ReportedPercent: '0', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: true }
 	];
+	// filled only when the recipients got more than one language
+	const sampleLanguageGroups = [
+		{ Group: 'English', Total: 64, Clicked: 19, ClickedPercent: '30', Submitted: 8, SubmittedPercent: '13', Reported: 7, ReportedPercent: '11', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false },
+		{ Group: 'German', Total: 41, Clicked: 10, ClickedPercent: '24', Submitted: 5, SubmittedPercent: '12', Reported: 1, ReportedPercent: '2', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false },
+		{ Group: 'Danish', Total: 15, Clicked: 3, ClickedPercent: '20', Submitted: 1, SubmittedPercent: '7', Reported: 0, ReportedPercent: '0', TrainingStarted: 0, TrainingStartedPercent: '0', TrainingCompleted: 0, TrainingCompletedPercent: '0', Suppressed: false }
+	];
 	// neutral placeholder image standing in for a screenshot in the preview.
 	// the label is fixed text from this file, never user input
 	const screenshotPlaceholder = (label) =>
@@ -510,6 +533,7 @@
 		SubmitRate: 11.7,
 		ReportRate: 6.7,
 		IsTraining: false,
+		Anonymous: false,
 		TrainingStarted: 0,
 		TrainingCompleted: 0,
 		TrainingStartedPercent: '0',
@@ -522,6 +546,7 @@
 		Groups: sampleDepartmentGroups,
 		DepartmentGroups: sampleDepartmentGroups,
 		PositionGroups: samplePositionGroups,
+		LanguageGroups: sampleLanguageGroups,
 		// two templates, so the default report previews its per template section
 		TemplateCount: sampleTemplateScreenshots.length,
 		TemplateScreenshots: sampleTemplateScreenshots,

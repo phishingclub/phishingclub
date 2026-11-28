@@ -53,6 +53,9 @@ type ProgramSendRow struct {
 	SentAt       time.Time
 	// NotableEventID is the most notable event of the send, as on a campaign
 	NotableEventID *uuid.UUID
+	// Language is the language stamp of the send, empty when it has none and
+	// is sent in its template language
+	Language string
 }
 
 // ProgramEventRow is one event on a program campaign
@@ -104,13 +107,14 @@ func (r *Program) inProgramCampaigns(programID *uuid.UUID, indexed bool) clause.
 // the declared column type, so the driver hands over the text instead of
 // trying its time formats one by one, and parseStoredTime reads it.
 func selectSentRow(db *gorm.DB) *gorm.DB {
-	return db.Select("?, ?, ?, ?, ?, ?",
+	return db.Select("?, ?, ?, ?, ?, ?, ?",
 		clause.Column{Name: "id"},
 		clause.Column{Name: "campaign_id"},
 		clause.Column{Name: "recipient_id"},
 		clause.Column{Name: "anonymized_id"},
 		notIndexed(clause.Column{Name: "sent_at"}),
 		clause.Column{Name: "notable_event_id"},
+		clause.Column{Name: "language"},
 	)
 }
 
@@ -378,11 +382,13 @@ func scanSentRows(rows *sql.Rows, fn func(*ProgramSendRow) error) error {
 		row                      ProgramSendRow
 		recipient, anon, notable uuid.NullUUID
 		sentAt                   sql.RawBytes
+		language                 sql.NullString
 	)
 	for rows.Next() {
-		if err := rows.Scan(&row.ID, &row.CampaignID, &recipient, &anon, &sentAt, &notable); err != nil {
+		if err := rows.Scan(&row.ID, &row.CampaignID, &recipient, &anon, &sentAt, &notable, &language); err != nil {
 			return errs.Wrap(err)
 		}
+		row.Language = language.String
 		row.RecipientID = nullUUIDPtr(recipient)
 		row.AnonymizedID = nullUUIDPtr(anon)
 		row.NotableEventID = nullUUIDPtr(notable)

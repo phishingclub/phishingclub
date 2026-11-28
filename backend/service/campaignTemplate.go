@@ -31,6 +31,9 @@ type CampaignTemplate struct {
 	ProgramService *Program
 	// CompanyRepository refuses new data in a company that is being deleted
 	CompanyRepository *repository.Company
+	// TemplateService checks that the emails of the template languages parse
+	// and run, without it they are only parsed
+	TemplateService *Template
 }
 
 // Create creates a new campaign template
@@ -129,6 +132,10 @@ func (c *CampaignTemplate) Create(
 	); err != nil {
 		return nil, err
 	}
+	languages := languagesOf(campaignTemplate)
+	if err := c.validateLanguageEmails(ctx, companyID, languages); err != nil {
+		return nil, err
+	}
 	// create
 	id, err := c.CampaignTemplateRepository.Insert(ctx, campaignTemplate)
 	if err != nil {
@@ -136,6 +143,13 @@ func (c *CampaignTemplate) Create(
 		return nil, errs.Wrap(err)
 	}
 	ae.Details["id"] = id.String()
+	if language := campaignTemplate.TemplateLanguage(); language != "" {
+		ae.Details["language"] = language
+	}
+	if len(languages) > 0 {
+		changes := compareLanguages(nil, languages)
+		ae.Details["languagesAdded"] = changes.added
+	}
 	c.AuditLogAuthorized(ae)
 
 	return id, nil
@@ -165,6 +179,41 @@ func (c *CampaignTemplate) GetByID(
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// a deleted template is looked up in normal use, not an error
 		c.Logger.Debugw("campaign template not found", "id", id.String())
+		return nil, errs.Wrap(err)
+	}
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign template by id", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	// no audit on read
+	return tmpl, nil
+}
+
+// GetByIDForLanguage gets a campaign template with the email and pages of the
+// language code, see repository.CampaignTemplate.GetByIDForLanguage. A
+// template with no usable content in code returns an error that matches
+// repository.ErrTemplateLanguageUnavailable.
+func (c *CampaignTemplate) GetByIDForLanguage(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	code string,
+	options *repository.CampaignTemplateOption,
+) (*model.CampaignTemplate, error) {
+	ae := NewAuditEvent("CampaignTemplate.GetById", session)
+	ae.Details["id"] = id.String()
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return nil, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		c.AuditLogNotAuthorized(ae)
+		return nil, errs.ErrAuthorizationFailed
+	}
+	tmpl, err := c.CampaignTemplateRepository.GetByIDForLanguage(ctx, id, code, options)
+	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, repository.ErrTemplateLanguageUnavailable) {
+		c.Logger.Debugw("campaign template content not found", "id", id.String(), "error", err)
 		return nil, errs.Wrap(err)
 	}
 	if err != nil {
@@ -286,37 +335,9 @@ func (c *CampaignTemplate) removeAPISenderIDBySenderID(
 		return err
 	}
 
-	closedIDs := []string{}
-	closeFailedIDs := []string{}
-	for _, campaign := range campaignsAffected {
-		// a hidden campaign of a program stays open, its sends wait while
-		// the template can not be sent and the program page warns about it
-		if !campaign.IsActive() || campaign.IsProgramManaged() {
-			continue
-		}
-		err := campaign.Close()
-		if err != nil {
-			c.Logger.Errorw("failed to close to campagin", "error", err)
-		}
-		campaignID := campaign.ID.MustGet()
-		err = c.CampaignRepository.UpdateByID(
-			ctx,
-			&campaignID,
-			campaign,
-		)
-		if err != nil {
-			c.Logger.Errorw("failed to update closed campagin", "error", err)
-			closeFailedIDs = append(closeFailedIDs, campaignID.String())
-			continue
-		}
-		closedIDs = append(closedIDs, campaignID.String())
-	}
-	// the campaigns this removal closed, set before the next step so a
-	// failure after this point still names them
-	ae.Details["closedCampaignIds"] = closedIDs
-	if len(closeFailedIDs) > 0 {
-		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
-	}
+	// a hidden campaign of a program stays open, its sends wait while the
+	// template can not be sent and the program page warns about it
+	c.closeCampaignsNow(ctx, ae, campaignsAffected)
 	// remove the domain id from the templates
 	err = c.CampaignTemplateRepository.RemoveAPISenderIDFromAll(ctx, apiSenderID)
 	if err != nil {
@@ -372,37 +393,9 @@ func (c *CampaignTemplate) RemoveDomainByDomainID(
 		return err
 	}
 
-	closedIDs := []string{}
-	closeFailedIDs := []string{}
-	for _, campaign := range campaignsAffected {
-		// a hidden campaign of a program stays open, its sends wait while
-		// the template can not be sent and the program page warns about it
-		if !campaign.IsActive() || campaign.IsProgramManaged() {
-			continue
-		}
-		err := campaign.Close()
-		if err != nil {
-			c.Logger.Errorw("failed to close campaign", "error", err)
-		}
-		campaignID := campaign.ID.MustGet()
-		err = c.CampaignRepository.UpdateByID(
-			ctx,
-			&campaignID,
-			campaign,
-		)
-		if err != nil {
-			c.Logger.Errorw("failed to update closed campaign", "error", err)
-			closeFailedIDs = append(closeFailedIDs, campaignID.String())
-			continue
-		}
-		closedIDs = append(closedIDs, campaignID.String())
-	}
-	// the campaigns this removal closed, set before the next step so a
-	// failure after this point still names them
-	ae.Details["closedCampaignIds"] = closedIDs
-	if len(closeFailedIDs) > 0 {
-		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
-	}
+	// a hidden campaign of a program stays open, its sends wait while the
+	// template can not be sent and the program page warns about it
+	c.closeCampaignsNow(ctx, ae, campaignsAffected)
 	// remove the domain id from the templates
 	err = c.CampaignTemplateRepository.RemoveDomainIDFromAll(ctx, domainID)
 	if err != nil {
@@ -458,37 +451,9 @@ func (c *CampaignTemplate) RemoveSmtpBySmtpID(
 		return err
 	}
 
-	closedIDs := []string{}
-	closeFailedIDs := []string{}
-	for _, campaign := range campaignsAffected {
-		// a hidden campaign of a program stays open, its sends wait while
-		// the template can not be sent and the program page warns about it
-		if !campaign.IsActive() || campaign.IsProgramManaged() {
-			continue
-		}
-		err := campaign.Close()
-		if err != nil {
-			c.Logger.Errorw("failed to close campaign", "error", err)
-		}
-		campaignID := campaign.ID.MustGet()
-		err = c.CampaignRepository.UpdateByID(
-			ctx,
-			&campaignID,
-			campaign,
-		)
-		if err != nil {
-			c.Logger.Errorw("failed to update closed campaign", "error", err)
-			closeFailedIDs = append(closeFailedIDs, campaignID.String())
-			continue
-		}
-		closedIDs = append(closedIDs, campaignID.String())
-	}
-	// the campaigns this removal closed, set before the next step so a
-	// failure after this point still names them
-	ae.Details["closedCampaignIds"] = closedIDs
-	if len(closeFailedIDs) > 0 {
-		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
-	}
+	// a hidden campaign of a program stays open, its sends wait while the
+	// template can not be sent and the program page warns about it
+	c.closeCampaignsNow(ctx, ae, campaignsAffected)
 	// remove the domain id from the templates
 	err = c.CampaignTemplateRepository.RemoveSmtpIDFromAll(ctx, smtpID)
 	if err != nil {
@@ -521,7 +486,8 @@ func (c *CampaignTemplate) RemoveEmailByEmailID(
 		c.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	// find all campaign templates that reference this email
+	// find all campaign templates that reference this email, on the template
+	// or through a language row
 	templatesAffected, err := c.CampaignTemplateRepository.GetByEmailID(
 		ctx,
 		emailID,
@@ -531,47 +497,21 @@ func (c *CampaignTemplate) RemoveEmailByEmailID(
 		c.Logger.Errorw("failed to get affected campaign templates", "error", err)
 		return err
 	}
-	templateIDs := []*uuid.UUID{}
-	for _, t := range templatesAffected {
-		id := t.ID.MustGet()
-		templateIDs = append(templateIDs, &id)
-	}
-	// close any active campaigns that use the affected templates
-	campaignsAffected, err := c.CampaignRepository.GetByTemplateIDs(ctx, templateIDs)
+	languageUses, err := c.CampaignTemplateRepository.GetLanguageUsesByEmailID(ctx, emailID)
 	if err != nil {
-		c.Logger.Errorw("failed to get affected campaigns", "error", err)
+		c.Logger.Errorw("failed to get affected template languages", "error", err)
 		return err
 	}
-	closedIDs := []string{}
-	closeFailedIDs := []string{}
-	for _, campaign := range campaignsAffected {
-		// a hidden campaign of a program stays open, its sends wait while
-		// the template can not be sent and the program page warns about it
-		if !campaign.IsActive() || campaign.IsProgramManaged() {
-			continue
+	direct := []*uuid.UUID{}
+	for _, t := range templatesAffected {
+		if v, err := t.EmailID.Get(); err == nil && v == *emailID {
+			id := t.ID.MustGet()
+			direct = append(direct, &id)
 		}
-		err := campaign.Close()
-		if err != nil {
-			c.Logger.Errorw("failed to close campaign", "error", err)
-		}
-		campaignID := campaign.ID.MustGet()
-		err = c.CampaignRepository.UpdateByID(
-			ctx,
-			&campaignID,
-			campaign,
-		)
-		if err != nil {
-			c.Logger.Errorw("failed to update closed campaign", "error", err)
-			closeFailedIDs = append(closeFailedIDs, campaignID.String())
-			continue
-		}
-		closedIDs = append(closedIDs, campaignID.String())
 	}
-	// the campaigns this removal closed, set before the next step so a
-	// failure after this point still names them
-	ae.Details["closedCampaignIds"] = closedIDs
-	if len(closeFailedIDs) > 0 {
-		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
+	// close the active campaigns that use the affected templates
+	if err := c.closeCampaignsUsingContent(ctx, ae, direct, languageUses); err != nil {
+		return err
 	}
 	// remove the email id from all affected templates
 	err = c.CampaignTemplateRepository.RemoveEmailIDFromAll(ctx, emailID)
@@ -583,8 +523,8 @@ func (c *CampaignTemplate) RemoveEmailByEmailID(
 	return nil
 }
 
-// RemovePageByPageID removes the page ID from a template
-// this makes the template unusable until a domain has been added.
+// RemovePagesByPageID removes the page ID from the templates and language
+// rows that use it and closes the active campaigns that use them.
 func (c *CampaignTemplate) RemovePagesByPageID(
 	ctx context.Context,
 	session *model.Session,
@@ -606,8 +546,9 @@ func (c *CampaignTemplate) RemovePagesByPageID(
 		return errs.ErrAuthorizationFailed
 	}
 
-	// all active campaigns that use this template ID which is becoming unusable due to
-	// the page being removed will be set to close on the next schedule tick.
+	// all active campaigns that use a template which is becoming unusable due
+	// to the page being removed, on the template or through a language row,
+	// are closed
 	templatesAffected, err := c.CampaignTemplateRepository.GetByPageID(
 		ctx,
 		pageID,
@@ -617,36 +558,145 @@ func (c *CampaignTemplate) RemovePagesByPageID(
 		c.Logger.Errorw("failed to get affected campaign templates", "error", err)
 		return err
 	}
-	templateIDs := []*uuid.UUID{}
-	for _, t := range templatesAffected {
-		id := t.ID.MustGet()
-		templateIDs = append(templateIDs, &id)
+	languageUses, err := c.CampaignTemplateRepository.GetLanguageUsesByPageID(ctx, pageID)
+	if err != nil {
+		c.Logger.Errorw("failed to get affected template languages", "error", err)
+		return err
 	}
-	campaignsAffected, err := c.CampaignRepository.GetByTemplateIDs(ctx, templateIDs)
+	direct := []*uuid.UUID{}
+	for _, t := range templatesAffected {
+		for _, pageOf := range []nullable.Nullable[uuid.UUID]{t.BeforeLandingPageID, t.LandingPageID, t.AfterLandingPageID} {
+			if v, err := pageOf.Get(); err == nil && v == *pageID {
+				id := t.ID.MustGet()
+				direct = append(direct, &id)
+				break
+			}
+		}
+	}
+	if err := c.closeCampaignsUsingContent(ctx, ae, direct, languageUses); err != nil {
+		return err
+	}
+	// remove the page id from the templates and their language rows
+	err = c.CampaignTemplateRepository.RemovePageIDFromAll(ctx, pageID)
+	if err != nil {
+		c.Logger.Errorw("failed to remove page ID from all campaign templates", "error", err)
+		return err
+	}
+	c.AuditLogAuthorized(ae)
+	return nil
+}
+
+// closeCampaignsUsingContent closes the active campaigns that use content
+// which is being removed. direct are the templates that hold it themselves,
+// every campaign using one of them is closed. uses are the language rows that
+// hold it, a campaign using such a template is closed when it can reach that
+// language, see FilterCampaignsUsingTemplateLanguage. A hidden campaign of a
+// program stays open, its sends wait while the content can not be sent and
+// the program page warns about it. The audit event gets the closed campaigns
+// and the affected template languages.
+func (c *CampaignTemplate) closeCampaignsUsingContent(
+	ctx context.Context,
+	ae *AuditEvent,
+	direct []*uuid.UUID,
+	uses []repository.TemplateLanguageUse,
+) error {
+	affected := make([]map[string]string, 0, len(uses))
+	for _, use := range uses {
+		affected = append(affected, map[string]string{
+			"templateId": use.TemplateID.String(),
+			"language":   use.Language,
+		})
+	}
+	if len(affected) > 0 {
+		ae.Details["affectedTemplateLanguages"] = affected
+	}
+	toClose := map[uuid.UUID]*model.Campaign{}
+	order := []uuid.UUID{}
+	add := func(campaign *model.Campaign) {
+		if !campaign.IsActive() || campaign.IsProgramManaged() {
+			return
+		}
+		id := campaign.ID.MustGet()
+		if _, ok := toClose[id]; ok {
+			return
+		}
+		toClose[id] = campaign
+		order = append(order, id)
+	}
+	campaigns, err := c.CampaignRepository.GetByTemplateIDs(ctx, direct)
 	if err != nil {
 		c.Logger.Errorw("failed to get affected campaigns", "error", err)
 		return err
 	}
+	for _, campaign := range campaigns {
+		add(campaign)
+	}
+	for _, use := range uses {
+		templateID := use.TemplateID
+		using, err := c.CampaignRepository.GetByTemplateIDs(ctx, []*uuid.UUID{&templateID})
+		if err != nil {
+			c.Logger.Errorw("failed to get affected campaigns", "error", err)
+			return err
+		}
+		byID := map[uuid.UUID]*model.Campaign{}
+		candidates := []uuid.UUID{}
+		for _, campaign := range using {
+			if !campaign.IsActive() || campaign.IsProgramManaged() {
+				continue
+			}
+			id := campaign.ID.MustGet()
+			if _, ok := toClose[id]; ok {
+				continue
+			}
+			byID[id] = campaign
+			candidates = append(candidates, id)
+		}
+		reach, err := c.CampaignRepository.FilterCampaignsUsingTemplateLanguage(ctx, candidates, templateID, use.Language)
+		if err != nil {
+			c.Logger.Errorw("failed to get campaigns using the language", "error", err)
+			return err
+		}
+		for _, id := range reach {
+			if campaign, ok := byID[id]; ok {
+				add(campaign)
+			}
+		}
+	}
+	closing := make([]*model.Campaign, 0, len(order))
+	for _, campaignID := range order {
+		closing = append(closing, toClose[campaignID])
+	}
+	c.closeCampaignsNow(ctx, ae, closing)
+	return nil
+}
 
+// closeCampaignsNow closes the given campaigns now because content they use
+// is removed, also when a campaign has a later close time. Campaigns that are
+// closed already and hidden campaigns of a program are left open. Only the
+// close time is written, so changes made since a campaign was loaded are not
+// undone. The audit event lists the campaigns that were set to close and the
+// ones whose write failed.
+func (c *CampaignTemplate) closeCampaignsNow(
+	ctx context.Context,
+	ae *AuditEvent,
+	campaigns []*model.Campaign,
+) {
 	closedIDs := []string{}
 	closeFailedIDs := []string{}
-	for _, campaign := range campaignsAffected {
-		// a hidden campaign of a program stays open, its sends wait while
-		// the template can not be sent and the program page warns about it
-		if !campaign.IsActive() || campaign.IsProgramManaged() {
+	for _, campaign := range campaigns {
+		if campaign == nil || !campaign.IsActive() || campaign.IsProgramManaged() {
 			continue
 		}
-		err := campaign.Close()
+		if err := campaign.CloseNow(); err != nil {
+			c.Logger.Debugw("campaign not closed", "error", err)
+			continue
+		}
+		closeAt, err := campaign.CloseAt.Get()
 		if err != nil {
-			c.Logger.Errorw("failed to close campagin", "error", err)
+			continue
 		}
 		campaignID := campaign.ID.MustGet()
-		err = c.CampaignRepository.UpdateByID(
-			ctx,
-			&campaignID,
-			campaign,
-		)
-		if err != nil {
+		if err := c.CampaignRepository.SetCloseAtByID(ctx, &campaignID, closeAt); err != nil {
 			c.Logger.Errorw("failed to update closed campaign", "error", err)
 			closeFailedIDs = append(closeFailedIDs, campaignID.String())
 			continue
@@ -659,14 +709,6 @@ func (c *CampaignTemplate) RemovePagesByPageID(
 	if len(closeFailedIDs) > 0 {
 		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
 	}
-	// remove the domain id from the templates
-	err = c.CampaignTemplateRepository.RemovePageIDFromAll(ctx, pageID)
-	if err != nil {
-		c.Logger.Errorw("failed to remove page ID from all campaign templates", "error", err)
-		return err
-	}
-	c.AuditLogAuthorized(ae)
-	return nil
 }
 
 // UpdateByID updates a campaign template by id
@@ -726,6 +768,17 @@ func (c *CampaignTemplate) UpdateByID(
 		storedRedirectURL = v.String()
 	}
 	storedMode, storedAlgorithm, storedLength, storedTraining := lureSettingsOf(incoming)
+	storedLanguage := incoming.TemplateLanguage()
+	storedContent := contentOfTemplate(incoming)
+	storedLanguages, err := c.CampaignTemplateRepository.GetLanguagesByTemplateID(ctx, id, false)
+	if err != nil {
+		c.Logger.Errorw("failed to get campaign template languages", "error", err)
+		return err
+	}
+	// the size of the language list is checked before its refs are read
+	if err := model.ValidateTemplateLanguageCount(languagesOf(campaignTemplate)); err != nil {
+		return err
+	}
 	// the company is never changed by an update, so the stored company decides
 	// which records the request may reference
 	companyID := companyIDPtr(incoming.CompanyID)
@@ -733,9 +786,17 @@ func (c *CampaignTemplate) UpdateByID(
 		ctx,
 		c.CampaignTemplateRepository.DB,
 		companyID,
-		newCompanyRefs(
-			campaignTemplateCompanyRefs(campaignTemplate),
-			campaignTemplateCompanyRefs(incoming),
+		append(
+			newCompanyRefs(
+				campaignTemplateMainCompanyRefs(campaignTemplate),
+				append(campaignTemplateMainCompanyRefs(incoming), templateLanguageCompanyRefs(storedLanguages)...),
+			),
+			// a language row only reuses without a check what a stored language
+			// row holds, not the template's own fields
+			newCompanyRefs(
+				templateLanguageCompanyRefs(languagesOf(campaignTemplate)),
+				templateLanguageCompanyRefs(storedLanguages),
+			)...,
 		),
 	); err != nil {
 		return err
@@ -874,6 +935,11 @@ func (c *CampaignTemplate) UpdateByID(
 	if v, err := campaignTemplate.IsTraining.Get(); err == nil {
 		incoming.IsTraining.Set(v)
 	}
+	if campaignTemplate.Language.IsSpecified() {
+		incoming.Language.Set(model.NormalizeLanguageCode(campaignTemplate.TemplateLanguage()))
+	}
+	// given languages replace the stored rows as a whole
+	incoming.Languages = campaignTemplate.Languages
 	// templates in one pool must keep the same lure and training settings
 	mode, algorithm, length, training := lureSettingsOf(incoming)
 	if mode != storedMode || algorithm != storedAlgorithm || length != storedLength || training != storedTraining {
@@ -934,16 +1000,72 @@ func (c *CampaignTemplate) UpdateByID(
 		c.Logger.Errorw("failed to validate campaign template", "error", err)
 		return err
 	}
-	err = c.CampaignTemplateRepository.UpdateByID(
+	// the languages after the update, the stored rows when none are sent
+	newLanguage := incoming.TemplateLanguage()
+	finalLanguages := storedLanguages
+	if incoming.Languages.IsSpecified() {
+		finalLanguages = languagesOf(incoming)
+		if err := c.validateLanguageEmails(ctx, companyID, languageEmailChanged(storedLanguages, finalLanguages)); err != nil {
+			return err
+		}
+	} else if err := checkStoredLanguages(newLanguage, storedLanguages); err != nil {
+		return err
+	} else if err := checkStoredLanguageStages(model.StagesOf(incoming), storedLanguages); err != nil {
+		return err
+	}
+	// a language people are stamped with must keep its content until they are
+	// sent to
+	gone := goneLanguages(
+		storedLanguage,
+		newLanguage,
+		repository.LanguageCodes(storedLanguages),
+		repository.LanguageCodes(finalLanguages),
+	)
+	// recipients with no language get the template's own content. When that
+	// content moves to another code they are stamped with the code that now
+	// holds what they were getting, in every campaign and program
+	nullStamp := nullStampLanguage(storedLanguage, newLanguage, storedContent, incoming, finalLanguages)
+	if err := c.refuseGoneLanguagesInUse(ctx, id, companyID, gone, nullStamp); err != nil {
+		return err
+	}
+	stamped, err := c.CampaignTemplateRepository.UpdateByIDStampingNull(
 		ctx,
 		id,
 		incoming,
+		nullStamp,
 	)
 	if err != nil {
 		c.Logger.Errorw("failed to update campaign template by id", "error", err)
 		return err
 	}
-	c.ProgramService.ForgetTemplateResults(id)
+	if storedLanguage != newLanguage {
+		ae.Details["previousLanguage"] = storedLanguage
+		ae.Details["language"] = newLanguage
+	}
+	if stamped > 0 {
+		ae.Details["noLanguageStamped"] = stamped
+		ae.Details["noLanguageStampedWith"] = nullStamp
+	}
+	if incoming.Languages.IsSpecified() {
+		changes := compareLanguages(storedLanguages, finalLanguages)
+		if len(changes.added) > 0 {
+			ae.Details["languagesAdded"] = changes.added
+		}
+		if len(changes.removed) > 0 {
+			ae.Details["languagesRemoved"] = changes.removed
+		}
+		if len(changes.changed) > 0 {
+			ae.Details["languagesChanged"] = changes.changed
+		}
+	}
+	// the program results name the template and its languages. The kept
+	// facts hold the language of each send, so they are read again when sends
+	// were stamped or the template language changed
+	if stamped > 0 || storedLanguage != newLanguage {
+		c.ProgramService.ForgetTemplateFacts(id)
+	} else {
+		c.ProgramService.ForgetTemplateResults(id)
+	}
 	c.AuditLogAuthorized(ae)
 
 	return nil
@@ -1109,44 +1231,17 @@ func (c *CampaignTemplate) RemoveProxiesByProxyID(
 		templateIDs = append(templateIDs, &id)
 	}
 
-	closedIDs := []string{}
-	closeFailedIDs := []string{}
 	if len(templateIDs) > 0 {
 		campaignsAffected, err := c.CampaignRepository.GetByTemplateIDs(ctx, templateIDs)
 		if err != nil {
 			c.Logger.Errorw("failed to get affected campaigns by template IDs", "error", err)
 			return err
 		}
-
-		for _, campaign := range campaignsAffected {
-			// a hidden campaign of a program stays open, its sends wait while
-			// the template can not be sent and the program page warns about it
-			if !campaign.IsActive() || campaign.IsProgramManaged() {
-				continue
-			}
-			err := campaign.Close()
-			if err != nil {
-				c.Logger.Errorw("failed to close campaign", "error", err)
-			}
-			campaignID := campaign.ID.MustGet()
-			err = c.CampaignRepository.UpdateByID(
-				ctx,
-				&campaignID,
-				campaign,
-			)
-			if err != nil {
-				c.Logger.Errorw("failed to update closed campaign", "error", err)
-				closeFailedIDs = append(closeFailedIDs, campaignID.String())
-				continue
-			}
-			closedIDs = append(closedIDs, campaignID.String())
-		}
-	}
-	// the campaigns this removal closed, set before the next step so a
-	// failure after this point still names them
-	ae.Details["closedCampaignIds"] = closedIDs
-	if len(closeFailedIDs) > 0 {
-		ae.Details["closeFailedCampaignIds"] = closeFailedIDs
+		// a hidden campaign of a program stays open, its sends wait while
+		// the template can not be sent and the program page warns about it
+		c.closeCampaignsNow(ctx, ae, campaignsAffected)
+	} else {
+		ae.Details["closedCampaignIds"] = []string{}
 	}
 
 	// remove the Proxy id from the templates

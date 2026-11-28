@@ -42,6 +42,9 @@ type programSend struct {
 	TrainingCompletedAt *time.Time
 	// NotableEventID is the most notable event of the send, as on a campaign
 	NotableEventID *uuid.UUID
+	// Language is the language stamp of the send, empty when it has none. An
+	// anonymous program does not keep it, so no language is tied to a person.
+	Language string
 }
 
 // Clicked reports whether the person clicked, a submit counts as a click
@@ -167,6 +170,10 @@ type ProgramResults struct {
 	// CountedTo is set on an anonymous program: the first instant not
 	// counted, the end of the last whole settled month in the period
 	CountedTo *time.Time `json:"countedTo,omitempty"`
+	// HasLanguageGroupData is true when the results grouped by language have
+	// more than one row, also after the program stops picking languages. For
+	// a program with sizes only it counts the rows that grouping gives.
+	HasLanguageGroupData bool `json:"hasLanguageGroupData"`
 }
 
 // programFacts is everything sent by a program with the outcomes
@@ -264,6 +271,9 @@ func (s *Program) loadProgramFacts(
 			// the notable event names the person's own outcome, so an
 			// anonymous program does not keep it
 			NotableEventID: notableOf(anonymous, r.NotableEventID),
+		}
+		if !anonymous {
+			sd.Language = r.Language
 		}
 		facts.sends = append(facts.sends, sd)
 		if r.RecipientID != nil {
@@ -663,10 +673,20 @@ func (s *Program) cachedProgramResults(
 			return nil, err
 		}
 		facts.mu.RLock()
+		keys := make([]string, len(facts.templates))
+		copy(keys, facts.templates)
+		facts.mu.RUnlock()
+		templateLanguages, err := s.factTemplateLanguages(ctx, keys)
+		if err != nil {
+			return nil, err
+		}
+		sizesOnly := program.IsAnonymousOn() || programPersonByPseudonym(program)
+		facts.mu.RLock()
 		in.hasTraining = kinds.training || facts.hasTraining
 		in.hasPhishing = kinds.phishing || facts.hasPhishing
 		version := facts.version
 		results := facts.programResults(in, tiles, program.IsClosed())
+		results.HasLanguageGroupData = facts.languageGroupCount(templateLanguages, sizesOnly, in.now, in.loc) > 1
 		facts.mu.RUnlock()
 		return &programResultsEntry{
 			results:      results,
@@ -751,6 +771,20 @@ func (s *Program) ForgetTemplateResults(templateID *uuid.UUID) {
 	}
 	for _, id := range s.resultsCache.programsWithTemplate(*templateID) {
 		s.resultsCache.invalidateResults(id)
+	}
+}
+
+// ForgetTemplateFacts forgets the kept facts and the cached results of the
+// programs that may show a campaign template. It is used after an update
+// wrote a language on sends that had none, or changed the template language,
+// as the kept facts hold the language of each send as it was read and the
+// recheck does not compare languages.
+func (s *Program) ForgetTemplateFacts(templateID *uuid.UUID) {
+	if s == nil || templateID == nil {
+		return
+	}
+	for _, id := range s.resultsCache.programsWithTemplate(*templateID) {
+		s.resultsCache.invalidate(id)
 	}
 }
 

@@ -152,6 +152,11 @@ func reportSampleData(isTraining bool) *model.ReportData {
 		group("Account Executive", 35, 14, 7, 3, 0, 0, false),
 		group("Other (small groups)", 1, 0, 0, 0, 0, 0, true),
 	}
+	languages := []model.ReportGroupStat{
+		group("English", 64, 18, 8, 5, 0, 0, false),
+		group("German", 41, 10, 4, 2, 0, 0, false),
+		group("Danish", 15, 4, 2, 1, 0, 0, false),
+	}
 	rd := &model.ReportData{
 		CampaignName:             "Q1 Phishing Simulation",
 		CompanyName:              "World Corp",
@@ -184,6 +189,7 @@ func reportSampleData(isTraining bool) *model.ReportData {
 		Groups:                   departments,
 		DepartmentGroups:         departments,
 		PositionGroups:           positions,
+		LanguageGroups:           languages,
 		Recipients: []model.ReportRecipient{
 			{FirstName: "Alice", LastName: "Andersen", Email: "alice@worldcorp.test", Department: "Research and Development", Position: "Head of operations", ClickedLink: true, SubmittedData: true},
 			{FirstName: "Bob", LastName: "Berg", Email: "bob@worldcorp.test", Department: "Sales", Position: "Account Executive", ClickedLink: true},
@@ -215,6 +221,11 @@ func reportSampleData(isTraining bool) *model.ReportData {
 			group("Other (small groups)", 1, 0, 0, 0, 0, 0, true),
 		}
 		rd.DepartmentGroups = rd.Groups
+		rd.LanguageGroups = []model.ReportGroupStat{
+			group("English", 64, 0, 0, 0, 29, 23, false),
+			group("German", 41, 0, 0, 0, 17, 13, false),
+			group("Danish", 15, 0, 0, 0, 6, 5, false),
+		}
 		for i := range rd.Recipients {
 			rd.Recipients[i].TrainingStarted = i < 2
 			rd.Recipients[i].TrainingCompleted = i == 0

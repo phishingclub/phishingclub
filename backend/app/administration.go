@@ -166,6 +166,8 @@ const (
 	ROUTE_V1_RECIPIENT_GROUP_ID         = "/api/v1/recipient/group/:id"
 	ROUTE_V1_RECIPIENT_GROUP_ID_IMPORT  = "/api/v1/recipient/group/:id/import"
 	ROUTE_V1_RECIPIENT_GROUP_RECIPIENTS = "/api/v1/recipient/group/:id/recipients"
+	// the values of a recipient field over groups, for language routes
+	ROUTE_V1_RECIPIENT_GROUP_FIELD_VALUES = "/api/v1/recipient/group/field-values"
 	// logging
 	ROUTE_V1_LOG      = "/api/v1/log"
 	ROUTE_V1_LOG_TEST = "/api/v1/log/test"
@@ -547,6 +549,7 @@ func setupRoutes(
 		DELETE(ROUTE_V1_RECIPIENT_ORPHANED_DELETE, middleware.SessionHandler, controllers.Recipient.DeleteAllOrphaned).
 		// recipient group
 		GET(ROUTE_V1_RECIPIENT_GROUP, middleware.SessionHandler, controllers.RecipientGroup.GetAll).
+		GET(ROUTE_V1_RECIPIENT_GROUP_FIELD_VALUES, middleware.SessionHandler, controllers.RecipientGroup.GetFieldValues).
 		GET(ROUTE_V1_RECIPIENT_GROUP_ID, middleware.SessionHandler, controllers.RecipientGroup.GetByID).
 		GET(ROUTE_V1_RECIPIENT_GROUP_RECIPIENTS, middleware.SessionHandler, controllers.RecipientGroup.GetRecipientsByGroupID).
 		POST(ROUTE_V1_RECIPIENT_GROUP_RECIPIENTS, middleware.SessionHandler, controllers.RecipientGroup.AddRecipients).

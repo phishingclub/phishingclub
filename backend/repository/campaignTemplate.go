@@ -10,6 +10,7 @@ import (
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/vo"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -49,6 +50,9 @@ type CampaignTemplateOption struct {
 	WithAPISender          bool
 	// url and cookie keys
 	WithIdentifier bool
+	// WithLanguages loads the language rows. GetByID also sets the names of
+	// their email and pages, GetAll leaves the names out.
+	WithLanguages bool
 }
 
 // CampaignTemplate is a campaign template repository
@@ -191,12 +195,18 @@ func (r *CampaignTemplate) Insert(
 	row["id"] = id
 	AddTimestamps(row)
 
-	res := r.DB.
-		Model(&database.CampaignTemplate{}).
-		Create(row)
-
-	if res.Error != nil {
-		return nil, res.Error
+	// the template and its language rows are written together
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&database.CampaignTemplate{}).Create(row).Error; err != nil {
+			return err
+		}
+		if languages, err := campaignTemplate.Languages.Get(); err == nil && len(languages) > 0 {
+			return replaceTemplateLanguagesTx(tx, &id, model.StagesOf(campaignTemplate), languages)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return &id, nil
 }
@@ -219,7 +229,18 @@ func (r *CampaignTemplate) GetByID(
 	if res.Error != nil {
 		return nil, res.Error
 	}
-	return ToCampaignTemplate(&tmpl)
+	out, err := ToCampaignTemplate(&tmpl)
+	if err != nil {
+		return nil, err
+	}
+	if options != nil && options.WithLanguages {
+		languages, err := r.GetLanguagesByTemplateID(ctx, id, true)
+		if err != nil {
+			return nil, err
+		}
+		out.Languages = nullable.NewNullableWithValue(languages)
+	}
+	return out, nil
 }
 
 // GetByIDs gets the campaign templates with the given ids in one query. A
@@ -329,7 +350,40 @@ func (r *CampaignTemplate) GetAll(
 		}
 		result.Rows = append(result.Rows, tmpl)
 	}
+	if options.WithLanguages {
+		if err := r.fillListLanguages(ctx, result.Rows); err != nil {
+			return nil, err
+		}
+	}
 	return result, nil
+}
+
+// fillListLanguages sets the language rows, without email and page names, on
+// every template of a list page. It reads the rows of the whole page in one
+// query.
+func (r *CampaignTemplate) fillListLanguages(ctx context.Context, templates []*model.CampaignTemplate) error {
+	ids := make([]uuid.UUID, 0, len(templates))
+	for _, t := range templates {
+		if id, err := t.ID.Get(); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows, err := r.GetLanguageRowsByTemplateIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for _, t := range templates {
+		id, err := t.ID.Get()
+		if err != nil {
+			continue
+		}
+		languages := rows[id]
+		if languages == nil {
+			languages = []*model.CampaignTemplateLanguage{}
+		}
+		t.Languages = nullable.NewNullableWithValue(languages)
+	}
+	return nil
 }
 
 // GetAllByCompanyID gets all campaign templates by company id
@@ -537,8 +591,8 @@ func (r *CampaignTemplate) GetByDomainID(
 	return templates, nil
 }
 
-// GetByPageID gets all campaign templates that uses a page ID
-// in before, landing or after page.
+// GetByPageID gets all campaign templates that use a page ID in before,
+// landing or after page, on the template or on one of its language rows.
 func (r *CampaignTemplate) GetByPageID(
 	ctx context.Context,
 	pageID *uuid.UUID,
@@ -553,35 +607,15 @@ func (r *CampaignTemplate) GetByPageID(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	db = db.Where(
-		fmt.Sprintf(
-			"%s = ?",
-			TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "landing_page_id"),
-		),
-		pageID.String(),
-	).Or(
-		fmt.Sprintf(
-			"%s = ?",
-			TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "before_landing_page_id"),
-		),
-		pageID.String(),
-	).Or(
-		fmt.Sprintf(
-			"%s = ?",
-			TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "after_landing_page_id"),
-		),
-		pageID.String(),
-	)
+	db = db.Where(r.templatesUsingContent(
+		pageID,
+		[]string{"before_landing_page_id", "landing_page_id", "after_landing_page_id"},
+	))
 	if options.UsableOnly {
-		db.Where(
-			fmt.Sprintf("%s = ?",
-				TableColumn(
-					database.CAMPAIGN_TEMPLATE_TABLE,
-					"is_usable",
-				),
-			),
-			true,
-		)
+		db = db.Where(clause.Eq{
+			Column: clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "is_usable"},
+			Value:  true,
+		})
 	}
 	var tmpl []database.CampaignTemplate
 	res := db.Find(&tmpl)
@@ -678,7 +712,8 @@ func (r *CampaignTemplate) RemoveSmtpIDFromAll(
 	return nil
 }
 
-// GetByEmailID gets all campaign templates by email ID
+// GetByEmailID gets all campaign templates that use an email ID, on the
+// template or on one of its language rows
 func (r *CampaignTemplate) GetByEmailID(
 	ctx context.Context,
 	emailID *uuid.UUID,
@@ -693,13 +728,7 @@ func (r *CampaignTemplate) GetByEmailID(
 	if err != nil {
 		return nil, errs.Wrap(err)
 	}
-	db = db.Where(
-		fmt.Sprintf(
-			"%s = ?",
-			TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "email_id"),
-		),
-		emailID.String(),
-	)
+	db = db.Where(r.templatesUsingContent(emailID, []string{"email_id"}))
 	var tmpl []database.CampaignTemplate
 	res := db.Find(&tmpl)
 	if res.Error != nil {
@@ -716,45 +745,57 @@ func (r *CampaignTemplate) GetByEmailID(
 	return templates, nil
 }
 
-// RemoveEmailIDFromAll removes the email ID from all campaign templates that reference it
-// and marks them as not usable
+// RemoveEmailIDFromAll removes the email ID from all campaign templates and
+// language rows that reference it and marks them as not usable, in one
+// transaction
 func (r *CampaignTemplate) RemoveEmailIDFromAll(
 	ctx context.Context,
 	emailID *uuid.UUID,
 ) error {
-	row := map[string]any{}
-	AddUpdatedAt(row)
-	row["email_id"] = nil
-	row["is_usable"] = false
-	res := r.DB.
-		Model(&database.CampaignTemplate{}).
-		Where(
-			fmt.Sprintf(
-				"%s = ?",
-				TableColumn(database.CAMPAIGN_TEMPLATE_TABLE, "email_id"),
-			),
-			emailID.String(),
-		).
-		Updates(row)
-	if res.Error != nil {
-		return res.Error
-	}
-	return nil
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		row := map[string]any{}
+		AddUpdatedAt(row)
+		row["email_id"] = nil
+		row["is_usable"] = false
+		res := tx.
+			Model(&database.CampaignTemplate{}).
+			Where(clause.Eq{
+				Column: clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "email_id"},
+				Value:  emailID.String(),
+			}).
+			Updates(row)
+		if res.Error != nil {
+			return res.Error
+		}
+		return clearLanguageContentTx(tx, emailID, []string{"email_id"})
+	})
 }
 
 // RemovePageIDFromAll removes the page ID from any matching columns
 // landing_page_id, before_landing_page_id and after_landing_page_id. A template
 // is marked as not usable only when it loses its landing page and has no
 // landing proxy, see model.CampaignTemplate.ToDBMap. A before or after page is
-// optional and leaves the usable flag as it is.
+// optional and leaves the usable flag as it is. A language row that holds the
+// page loses it and is marked as not usable when the template still has that
+// stage as a page. The other language rows of a
+// template that lost its own page keep their pages, the stage is only missing
+// its main content. All writes are one transaction.
 func (r *CampaignTemplate) RemovePageIDFromAll(
 	ctx context.Context,
 	pageID *uuid.UUID,
 ) error {
-	return r.removeLandingFromAll(ctx, pageID,
-		[]string{"before_landing_page_id", "after_landing_page_id"},
-		"landing_page_id", "landing_proxy_id",
-	)
+	pageColumns := []string{"before_landing_page_id", "landing_page_id", "after_landing_page_id"}
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := removeLandingFromAllTx(tx, pageID,
+			[]string{"before_landing_page_id", "after_landing_page_id"},
+			"landing_page_id", "landing_proxy_id",
+		); err != nil {
+			return err
+		}
+		// a template that loses its own page keeps the stage on its language
+		// rows, only the rows holding the page lose it
+		return clearLanguageContentTx(tx, pageID, pageColumns)
+	})
 }
 
 // removeLandingFromAll sets the given optional columns and the landing column
@@ -770,27 +811,39 @@ func (r *CampaignTemplate) removeLandingFromAll(
 	otherLanding string,
 ) error {
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return removeLandingFromAllTx(tx, id, optional, landing, otherLanding)
+	})
+}
+
+// removeLandingFromAllTx is removeLandingFromAll inside the caller's
+// transaction
+func removeLandingFromAllTx(
+	tx *gorm.DB,
+	id *uuid.UUID,
+	optional []string,
+	landing string,
+	otherLanding string,
+) error {
+	res := tx.
+		Model(&database.CampaignTemplate{}).
+		Where(clause.Eq{Column: clause.Column{Name: landing}, Value: id.String()}).
+		Where(clause.Eq{Column: clause.Column{Name: otherLanding}, Value: nil}).
+		Updates(map[string]any{"is_usable": false})
+	if res.Error != nil {
+		return res.Error
+	}
+	for _, column := range append(optional, landing) {
+		row := map[string]any{column: nil}
+		AddUpdatedAt(row)
 		res := tx.
 			Model(&database.CampaignTemplate{}).
-			Where(clause.Eq{Column: clause.Column{Name: landing}, Value: id.String()}).
-			Where(clause.Eq{Column: clause.Column{Name: otherLanding}, Value: nil}).
-			Updates(map[string]any{"is_usable": false})
+			Where(clause.Eq{Column: clause.Column{Name: column}, Value: id.String()}).
+			Updates(row)
 		if res.Error != nil {
 			return res.Error
 		}
-		for _, column := range append(optional, landing) {
-			row := map[string]any{column: nil}
-			AddUpdatedAt(row)
-			res := tx.
-				Model(&database.CampaignTemplate{}).
-				Where(clause.Eq{Column: clause.Column{Name: column}, Value: id.String()}).
-				Updates(row)
-			if res.Error != nil {
-				return res.Error
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // UpdateByID updates a campaign template by id
@@ -799,23 +852,148 @@ func (r *CampaignTemplate) UpdateByID(
 	id *uuid.UUID,
 	campaignTemplate *model.CampaignTemplate,
 ) error {
+	_, err := r.UpdateByIDStampingNull(ctx, id, campaignTemplate, "")
+	return err
+}
+
+// UpdateByIDStampingNull updates a campaign template like UpdateByID. When
+// nullStamp is not empty, every recipient on this template that has no
+// language, in any campaign and program, is stamped with it in the same
+// transaction. It returns the number of stamped recipients.
+func (r *CampaignTemplate) UpdateByIDStampingNull(
+	ctx context.Context,
+	id *uuid.UUID,
+	campaignTemplate *model.CampaignTemplate,
+	nullStamp string,
+) (int64, error) {
 	row := campaignTemplate.ToDBMap()
 	AddUpdatedAt(row)
-	res := r.DB.
-		Model(&database.CampaignTemplate{}).
-		Where(
-			fmt.Sprintf(
-				"%s = ?",
-				TableColumnID(database.CAMPAIGN_TEMPLATE_TABLE),
-			),
-			id.String(),
-		).
-		Updates(row)
+	stages := model.StagesOf(campaignTemplate)
+	var stamped int64
+	// the template row and its language rows are written together. Given
+	// languages replace the stored rows, otherwise the stored rows are kept in
+	// the shape of the page flow.
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var stored database.CampaignTemplate
+		if err := tx.
+			Select("before_landing_page_id", "landing_page_id", "after_landing_page_id").
+			Where(clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "id"}, Value: id.String()}).
+			First(&stored).Error; err != nil {
+			return err
+		}
+		if err := tx.
+			Model(&database.CampaignTemplate{}).
+			Where(clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "id"}, Value: id.String()}).
+			Updates(row).Error; err != nil {
+			return err
+		}
+		var err error
+		if languages, getErr := campaignTemplate.Languages.Get(); getErr == nil {
+			err = replaceTemplateLanguagesTx(tx, id, stages, languages)
+		} else if campaignTemplate.Languages.IsNull() {
+			err = deleteTemplateLanguagesTx(tx, id)
+		} else {
+			err = syncTemplateLanguageStagesTx(tx, id, stages, removedStages(&stored, campaignTemplate))
+		}
+		if err != nil || nullStamp == "" {
+			return err
+		}
+		stamped, err = stampTemplateNullLanguagesTx(tx, id, nullStamp)
+		return err
+	})
+	return stamped, err
+}
 
-	if res.Error != nil {
-		return res.Error
+// removedStages returns the stages the update takes away as a page: the
+// stage was a page before and is not one now, or it becomes a proxy. A stage
+// that was empty before and stays empty keeps the pages of the language rows,
+// as its main page was deleted and only the main content is missing.
+func removedStages(stored *database.CampaignTemplate, updated *model.CampaignTemplate) model.TemplateStages {
+	after := model.StagesOf(updated)
+	removed := func(storedPage *uuid.UUID, isPage bool, proxy nullable.Nullable[uuid.UUID]) bool {
+		if isPage {
+			return false
+		}
+		_, err := proxy.Get()
+		return storedPage != nil || err == nil
 	}
-	return nil
+	return model.TemplateStages{
+		BeforeLandingPage: removed(stored.BeforeLandingPageID, after.BeforeLandingPage, updated.BeforeLandingProxyID),
+		LandingPage:       removed(stored.LandingPageID, after.LandingPage, updated.LandingProxyID),
+		AfterLandingPage:  removed(stored.AfterLandingPageID, after.AfterLandingPage, updated.AfterLandingProxyID),
+	}
+}
+
+// nullStampBatch is how many campaign ids one null stamp statement binds,
+// well under the SQLite bind limit
+const nullStampBatch = 500
+
+// stampTemplateNullLanguagesTx stamps code on every recipient that has no
+// language and gets its content from the template id, the recipient's own
+// template or else the campaign template. It returns the number of rows.
+//
+// The rows are reached by campaign id, so each statement seeks the campaign
+// and template index and the update never walks the whole table. A row that
+// holds the template itself can sit in any campaign, also one whose pool no
+// longer has the template (a sent row keeps its template), so every campaign
+// id is visited in pages. A row with no template of its own is only in a
+// campaign whose campaign template is this one.
+func stampTemplateNullLanguagesTx(tx *gorm.DB, id *uuid.UUID, code string) (int64, error) {
+	now := utils.NowRFC3339UTC()
+	var stamped int64
+	idColumn := clause.Column{Table: database.CAMPAIGN_TABLE, Name: "id"}
+	templateColumn := clause.Column{Table: database.CAMPAIGN_TABLE, Name: "campaign_template_id"}
+	page := func(onlyTemplate bool, update func(ids []string) (int64, error)) error {
+		last := ""
+		for {
+			ids := []string{}
+			q := tx.Model(&database.Campaign{}).
+				Where(clause.Gt{Column: idColumn, Value: last}).
+				Order(clause.OrderByColumn{Column: idColumn}).
+				Limit(nullStampBatch)
+			if onlyTemplate {
+				q = q.Where(clause.Eq{Column: templateColumn, Value: id.String()})
+			}
+			if err := q.Pluck("id", &ids).Error; err != nil {
+				return err
+			}
+			if len(ids) == 0 {
+				return nil
+			}
+			n, err := update(ids)
+			if err != nil {
+				return err
+			}
+			stamped += n
+			if len(ids) < nullStampBatch {
+				return nil
+			}
+			last = ids[len(ids)-1]
+		}
+	}
+	// rows that hold the template themselves
+	if err := page(false, func(ids []string) (int64, error) {
+		res := tx.Exec(`UPDATE campaign_recipients
+			SET language = ?, updated_at = ?
+			WHERE campaign_id IN ? AND campaign_template_id = ? AND language IS NULL`,
+			code, now, ids, id.String(),
+		)
+		return res.RowsAffected, res.Error
+	}); err != nil {
+		return 0, err
+	}
+	// rows with no template of their own in campaigns on this template
+	if err := page(true, func(ids []string) (int64, error) {
+		res := tx.Exec(`UPDATE campaign_recipients
+			SET language = ?, updated_at = ?
+			WHERE campaign_id IN ? AND campaign_template_id IS NULL AND language IS NULL`,
+			code, now, ids,
+		)
+		return res.RowsAffected, res.Error
+	}); err != nil {
+		return 0, err
+	}
+	return stamped, nil
 }
 
 // DeleteByID deletes a campaign template by id
@@ -823,13 +1001,15 @@ func (r *CampaignTemplate) DeleteByID(
 	ctx context.Context,
 	id *uuid.UUID,
 ) error {
-	res := r.DB.
-		Where("id = ?", id).
-		Delete(&database.CampaignTemplate{})
-	if res.Error != nil {
-		return res.Error
-	}
-	return nil
+	// the language rows go with the template
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := deleteTemplateLanguagesTx(tx, id); err != nil {
+			return err
+		}
+		return tx.
+			Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: id.String()}).
+			Delete(&database.CampaignTemplate{}).Error
+	})
 }
 
 func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate, error) {
@@ -965,6 +1145,7 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 
 	isUsable := nullable.NewNullableWithValue(row.IsUsable)
 	isTraining := nullable.NewNullableWithValue(row.IsTraining)
+	language := nullable.NewNullableWithValue(row.Language)
 
 	return &model.CampaignTemplate{
 		ID:                          id,
@@ -1001,6 +1182,7 @@ func ToCampaignTemplate(row *database.CampaignTemplate) (*model.CampaignTemplate
 		LureCodeLength:              nullable.NewNullableWithValue(row.LureCodeLength),
 		IsUsable:                    isUsable,
 		IsTraining:                  isTraining,
+		Language:                    language,
 	}, nil
 }
 

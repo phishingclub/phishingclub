@@ -2,6 +2,8 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import CsvColumnsHelp from './CsvColumnsHelp.svelte';
+	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import { LANGUAGES, languageName } from '$lib/utils/languages.js';
 	import { api } from '$lib/api/apiProxy.js';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
@@ -65,8 +67,14 @@
 		department: null,
 		city: null,
 		country: null,
-		misc: null
+		misc: null,
+		language: ''
 	};
+	// the language list for the recipient form, None clears it
+	const languageOptions = [
+		{ value: '', label: 'None' },
+		...LANGUAGES.map((l) => ({ value: l.code, label: l.name }))
+	];
 	let importForm = null;
 	let importModalError = '';
 	let importFormValues = {
@@ -179,6 +187,7 @@
 				city: formValues.city,
 				country: formValues.country,
 				misc: formValues.misc,
+				language: formValues.language ?? '',
 				companyID: contextCompanyID
 			});
 			if (!res.success) {
@@ -187,6 +196,7 @@
 			}
 			addToast('Recipient created', 'Success');
 			form.reset();
+			formValues.language = '';
 			refreshRecipients();
 			isModalVisible = !isModalVisible;
 		} catch (err) {
@@ -210,6 +220,7 @@
 				city: formValues.city,
 				country: formValues.country,
 				misc: formValues.misc,
+				language: formValues.language ?? '',
 				companyID: contextCompanyID
 			});
 			if (!res.success) {
@@ -391,6 +402,7 @@
 	const closeModal = () => {
 		isModalVisible = false;
 		form.reset();
+		formValues.language = '';
 		modalError = '';
 	};
 
@@ -446,7 +458,8 @@
 			department: recipient.data.department,
 			city: recipient.data.city,
 			country: recipient.data.country,
-			misc: recipient.data.misc
+			misc: recipient.data.misc,
+			language: recipient.data.language ?? ''
 		};
 	};
 	// split on the last @ so on phones the domain moves to the second line as one piece
@@ -496,6 +509,7 @@
 			{ column: 'City', size: 'small' },
 			{ column: 'Country', size: 'small' },
 			{ column: 'Misc', size: 'small' },
+			{ column: 'Language', size: 'small' },
 			...(contextCompanyID ? [{ column: 'Scope', size: 'small' }] : [])
 		]}
 		sortable={[
@@ -510,6 +524,7 @@
 			'city',
 			'country',
 			'misc',
+			'language',
 			...(contextCompanyID ? ['scope'] : [])
 		]}
 		hasData={!!recipients.length}
@@ -538,7 +553,9 @@
 						>
 					{/if}
 					{#if recipient.scimSoftDeletedAt}
-						<StatusBadge tone="neutral" title="Disabled through SCIM" class="ml-2">Disabled</StatusBadge>
+						<StatusBadge tone="neutral" title="Disabled through SCIM" class="ml-2"
+							>Disabled</StatusBadge
+						>
 					{/if}
 				</TableCellLink>
 				<TableCellCheck value={recipient.isRepeatOffender} />
@@ -573,6 +590,7 @@
 				<TableCell value={recipient.city} />
 				<TableCell value={recipient.country} />
 				<TableCell value={recipient.misc} />
+				<TableCell value={recipient.language ? languageName(recipient.language) : ''} />
 				{#if contextCompanyID}
 					<TableCellScope companyID={recipient.companyID} />
 				{/if}
@@ -684,6 +702,14 @@
 						toolTipText="Any extra information"
 						optional>Miscellaneous</TextField
 					>
+					<TextFieldSelect
+						id="recipient-language"
+						bind:value={formValues.language}
+						optional
+						placeholder="None"
+						toolTipText="The language the recipient reads. A campaign with Language by Language sends it when every template has it."
+						options={languageOptions}>Language</TextFieldSelect
+					>
 				</FormColumn>
 			</FormColumns>
 			<FormError message={modalError} />
@@ -732,7 +758,8 @@
 								{ column: 'Department', size: 'small' },
 								{ column: 'City', size: 'small' },
 								{ column: 'Country', size: 'small' },
-								{ column: 'Misc', size: 'small' }
+								{ column: 'Misc', size: 'small' },
+								{ column: 'Language', size: 'small' }
 							]}
 							sortable={[
 								'Email',
@@ -745,6 +772,7 @@
 								'City',
 								'Country',
 								'Misc',
+								'Language',
 								'country'
 							]}
 							hasData={!!importFormValues.recipients.length}
@@ -763,6 +791,7 @@
 									<TableCell value={recipient.city} />
 									<TableCell value={recipient.country} />
 									<TableCell value={recipient.misc} />
+									<TableCell value={recipient.language} />
 									<TableCellEmpty />
 									<TableCellAction>
 										<TableDropDownEllipsis>

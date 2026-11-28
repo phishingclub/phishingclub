@@ -78,6 +78,22 @@ type CampaignTemplate struct {
 	IsUsable nullable.Nullable[bool] `json:"isUsable"`
 
 	IsTraining nullable.Nullable[bool] `json:"isTraining"`
+
+	// Language is the code of the language the template's own email and pages
+	// are written in, see data.Languages. Empty means not set.
+	Language nullable.Nullable[string] `json:"language"`
+	// Languages are the other languages of the template. On create and update
+	// the list replaces the stored rows as a whole, left out keeps them. Read
+	// when the template is loaded in full and on the template list.
+	Languages nullable.Nullable[[]*CampaignTemplateLanguage] `json:"languages"`
+}
+
+// TemplateLanguage returns the template language, empty when not set
+func (c *CampaignTemplate) TemplateLanguage() string {
+	if v, err := c.Language.Get(); err == nil {
+		return v
+	}
+	return ""
 }
 
 // Validate checks if the campaign template has a valid state
@@ -131,6 +147,21 @@ func (c *CampaignTemplate) validate(checkRedirectURL bool) error {
 		return errs.NewValidationError(
 			fmt.Errorf("lure code length must be between %d and %d", lure.MinLength, lure.MaxLength),
 		)
+	}
+
+	if c.Language.IsSpecified() && !c.Language.IsNull() {
+		c.Language.Set(NormalizeLanguageCode(c.Language.MustGet()))
+		if v := c.Language.MustGet(); v != "" && !data.IsValidLanguage(v) {
+			return validate.WrapErrorWithField(
+				fmt.Errorf("unknown language %q", v),
+				"language",
+			)
+		}
+	}
+	if languages, err := c.Languages.Get(); err == nil {
+		if err := ValidateTemplateLanguages(c.TemplateLanguage(), StagesOf(c), languages); err != nil {
+			return err
+		}
 	}
 
 	// validate that only one type is set per stage
@@ -346,6 +377,10 @@ func (c *CampaignTemplate) ToDBMap() map[string]any {
 		if v, err := c.IsTraining.Get(); err == nil {
 			m["is_training"] = v
 		}
+	}
+
+	if c.Language.IsSpecified() {
+		m["language"] = c.TemplateLanguage()
 	}
 
 	_, errDomain := c.DomainID.Get()

@@ -1,10 +1,12 @@
 package model
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
+	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/validate"
 	"github.com/phishingclub/phishingclub/vo"
 )
@@ -24,8 +26,11 @@ type Recipient struct {
 	City            nullable.Nullable[vo.OptionalString127] `json:"city"`
 	Country         nullable.Nullable[vo.OptionalString127] `json:"country"`
 	Misc            nullable.Nullable[vo.OptionalString127] `json:"misc"`
-	ScimUserName    nullable.Nullable[vo.OptionalString127] `json:"scimUserName"`
-	CompanyID       nullable.Nullable[uuid.UUID]            `json:"companyID"`
+	// Language is a code of the fixed language list, empty when not known.
+	// Validate turns a tag or an English name into the code.
+	Language     nullable.Nullable[string]               `json:"language"`
+	ScimUserName nullable.Nullable[vo.OptionalString127] `json:"scimUserName"`
+	CompanyID    nullable.Nullable[uuid.UUID]            `json:"companyID"`
 
 	// ScimSoftDeletedAt is set while a SCIM-deprovisioned recipient waits out the
 	// retention grace period before being pruned; nil means active. It is managed
@@ -41,6 +46,28 @@ func (r *Recipient) Validate() error {
 	if err := validate.NullableFieldRequired("email", r.Email); err != nil {
 		return err
 	}
+	return r.normalizeLanguage()
+}
+
+// normalizeLanguage replaces a set language with its code, see
+// data.NormalizeLanguage. A value that names no language is refused.
+func (r *Recipient) normalizeLanguage() error {
+	if !r.Language.IsSpecified() || r.Language.IsNull() {
+		return nil
+	}
+	raw := r.Language.MustGet()
+	code, ok := data.NormalizeLanguage(raw)
+	if !ok {
+		shown := raw
+		if len(shown) > data.MaxLanguageInputLength {
+			shown = shown[:data.MaxLanguageInputLength] + "..."
+		}
+		return validate.WrapErrorWithField(
+			fmt.Errorf("unknown language %q, use a code such as da, a tag such as da-DK or a name such as Danish", shown),
+			"language",
+		)
+	}
+	r.Language.Set(code)
 	return nil
 }
 
@@ -74,6 +101,9 @@ func (r *Recipient) NullifyEmptyOptionals() {
 	if r.Misc.IsSpecified() && !r.Misc.IsNull() && r.Misc.MustGet().String() == "" {
 		r.Misc.SetNull()
 	}
+	if r.Language.IsSpecified() && !r.Language.IsNull() && r.Language.MustGet() == "" {
+		r.Language.SetNull()
+	}
 }
 
 // EmptyStringNulledOptionals sets nulled optional values to a empty string or zero value.
@@ -104,6 +134,9 @@ func (r *Recipient) EmptyStringNulledOptionals() {
 	}
 	if r.Misc.IsSpecified() && r.Misc.IsNull() {
 		r.Misc.Set(*vo.NewOptionalString127Must(""))
+	}
+	if r.Language.IsSpecified() && r.Language.IsNull() {
+		r.Language.Set("")
 	}
 }
 
@@ -182,6 +215,13 @@ func (r *Recipient) ToDBMap() map[string]any {
 		m["misc"] = nil
 		if misc, err := r.Misc.Get(); err == nil {
 			m["misc"] = misc.String()
+		}
+	}
+	if r.Language.IsSpecified() {
+		// no language is stored as null
+		m["language"] = nil
+		if language, err := r.Language.Get(); err == nil && language != "" {
+			m["language"] = language
 		}
 	}
 	if r.ScimUserName.IsSpecified() {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -67,7 +68,9 @@ type CampaignOption struct {
 	WithEvasionPage         bool
 	WithWebhooks            bool
 	WithScripts             bool
-	IncludeTestCampaigns    bool
+	// WithLanguageRoutes loads the language routes, by GetByID only
+	WithLanguageRoutes   bool
+	IncludeTestCampaigns bool
 	// IncludeProgramManaged includes the hidden campaigns a program creates.
 	// Off by default so program campaigns never surface in the campaign UI.
 	IncludeProgramManaged bool
@@ -350,6 +353,11 @@ func (r *Campaign) Insert(
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&database.Campaign{}).Create(row).Error; err != nil {
 			return err
+		}
+		if routes, err := campaign.LanguageRoutes.Get(); err == nil && len(routes) > 0 {
+			if err := replaceCampaignLanguageRoutesTx(tx, &id, routes); err != nil {
+				return err
+			}
 		}
 		if pool := campaign.TemplatePool(); len(pool) > 0 {
 			return setTemplatePoolTx(tx, &id, pool)
@@ -2106,6 +2114,13 @@ func (r *Campaign) GetByID(
 		}
 		campaign.Scripts = nullable.NewNullableWithValue(scripts)
 	}
+	if options.WithLanguageRoutes {
+		routes, err := r.GetLanguageRoutesByCampaignID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		campaign.LanguageRoutes = nullable.NewNullableWithValue(routes)
+	}
 	return campaign, nil
 }
 
@@ -2808,12 +2823,54 @@ func (r *Campaign) UpdateByID(
 	id *uuid.UUID,
 	campaign *model.Campaign,
 ) error {
+	return r.UpdateByIDWith(ctx, id, campaign, nil)
+}
+
+// UpdateByIDWith updates a campaign like UpdateByID. When then is set, it
+// runs in the same transaction as the campaign row and its language routes,
+// so either all of them are written or none.
+func (r *Campaign) UpdateByIDWith(
+	ctx context.Context,
+	id *uuid.UUID,
+	campaign *model.Campaign,
+	then func(tx *gorm.DB) error,
+) error {
 	row := campaign.ToDBMap()
 	AddUpdatedAt(row)
-	res := r.DB.
-		Model(&database.Campaign{}).
-		Where("id = ?", id).
-		Updates(row)
+	var writeErr error
+	if campaign.LanguageRoutes.IsSpecified() || then != nil {
+		// the campaign row and its language routes are written together
+		writeErr = r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.
+				Model(&database.Campaign{}).
+				Where("id = ?", id).
+				Updates(row).Error; err != nil {
+				return err
+			}
+			if campaign.LanguageRoutes.IsSpecified() {
+				routes := map[string]string{}
+				if v, err := campaign.LanguageRoutes.Get(); err == nil {
+					routes = v
+				}
+				if err := replaceCampaignLanguageRoutesTx(tx, id, routes); err != nil {
+					return err
+				}
+			}
+			if then != nil {
+				return then(tx)
+			}
+			return nil
+		})
+	} else {
+		writeErr = r.DB.
+			Model(&database.Campaign{}).
+			Where("id = ?", id).
+			Updates(row).Error
+	}
+	// a failed campaign write leaves the allow and deny lists as they are
+	if writeErr != nil {
+		return writeErr
+	}
 
 	if allowDeny, err := campaign.AllowDenyIDs.Get(); err == nil {
 		denyLen := len(allowDeny)
@@ -2829,9 +2886,6 @@ func (r *Campaign) UpdateByID(
 		}
 	}
 
-	if res.Error != nil {
-		return res.Error
-	}
 	return nil
 }
 
@@ -3007,6 +3061,9 @@ func (r *Campaign) DeleteByID(
 		if err := tx.
 			Where("campaign_id = ?", id.String()).
 			Delete(&database.CampaignTemplatePool{}).Error; err != nil {
+			return err
+		}
+		if err := deleteCampaignLanguageRoutesTx(tx, id); err != nil {
 			return err
 		}
 		// a tracking event saved after the events were deleted would make the
@@ -3407,6 +3464,8 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 	isTraining := nullable.NewNullableWithValue(row.IsTraining)
 	obfuscate := nullable.NewNullableWithValue(row.Obfuscate)
 	templateMixBy := nullable.NewNullableWithValue(row.TemplateMixBy)
+	languageRouteBy := nullable.NewNullableWithValue(row.LanguageRouteBy)
+	languageDefault := nullable.NewNullableWithValue(row.LanguageDefault)
 	// deprecated fields - kept for backward compatibility
 	webhookIncludeData := nullable.NewNullableWithValue(row.WebhookIncludeData)
 	webhookEvents := nullable.NewNullableWithValue(row.WebhookEvents)
@@ -3581,6 +3640,8 @@ func ToCampaign(row *database.Campaign) (*model.Campaign, error) {
 		IsTest:              isTest,
 		Obfuscate:           obfuscate,
 		TemplateMixBy:       templateMixBy,
+		LanguageRouteBy:     languageRouteBy,
+		LanguageDefault:     languageDefault,
 		WebhookIncludeData:  webhookIncludeData,
 		WebhookEvents:       webhookEvents,
 		TemplateID:          templateID,
@@ -3907,6 +3968,13 @@ var groupedStatColumns = map[string]bool{
 // GroupedStatByTemplate groups results by each recipient's template
 const GroupedStatByTemplate = "template"
 
+// GroupedStatByLanguage groups results by each recipient's language
+const GroupedStatByLanguage = "language"
+
+// UnspecifiedLanguageGroup is the group of recipients whose template has no
+// language set
+const UnspecifiedLanguageGroup = "(unspecified)"
+
 // GetGroupedResultStats returns outcome counts grouped by a recipient attribute
 // snapshotted on the campaign recipient, joining events to recipients by the
 // stable pseudonym so it works for an anonymous campaign both while live and after
@@ -3920,6 +3988,9 @@ func (r *Campaign) GetGroupedResultStats(
 ) ([]model.CampaignGroupStat, error) {
 	if groupColumn == GroupedStatByTemplate {
 		return r.getGroupedResultStatsByTemplate(ctx, campaignID)
+	}
+	if groupColumn == GroupedStatByLanguage {
+		return r.getGroupedResultStatsByLanguage(ctx, campaignID)
 	}
 	if !groupedStatColumns[groupColumn] {
 		return nil, fmt.Errorf("invalid group column: %s", groupColumn)
@@ -4106,6 +4177,186 @@ func (r *Campaign) getGroupedResultStatsByTemplate(
 		})
 	}
 	return result, nil
+}
+
+// getGroupedResultStatsByLanguage returns outcome counts grouped by each
+// recipient's language. It counts people the same way as
+// GetGroupedResultStats, grouped by template and stamp, and a row with no
+// stamp is put in its template's language in Go. A person has one row per
+// campaign, so the sums are exact. The group is the language name and the
+// group id its code; a template with no language gives UnspecifiedLanguageGroup.
+func (r *Campaign) getGroupedResultStatsByLanguage(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) ([]model.CampaignGroupStat, error) {
+	beforeID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_BEFORE_PAGE_VISITED]
+	pageID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_PAGE_VISITED]
+	afterID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_AFTER_PAGE_VISITED]
+	submitID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_SUBMITTED_DATA]
+	reportID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_REPORTED]
+	startedID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_STARTED]
+	completedID := cache.EventIDByName[data.EVENT_CAMPAIGN_RECIPIENT_TRAINING_COMPLETED]
+
+	var rows []languageStatRow
+	res := r.DB.WithContext(ctx).Raw(`
+	SELECT
+		p.language AS language,
+		t.language AS template_language,
+		COUNT(DISTINCT p.person) AS total,
+		COUNT(DISTINCT CASE WHEN ev.clicked = 1 THEN p.person END) AS clicked,
+		COUNT(DISTINCT CASE WHEN ev.submitted = 1 THEN p.person END) AS submitted,
+		COUNT(DISTINCT CASE WHEN ev.reported = 1 THEN p.person END) AS reported,
+		COUNT(DISTINCT CASE WHEN ev.training_started = 1 THEN p.person END) AS training_started,
+		COUNT(DISTINCT CASE WHEN ev.training_completed = 1 THEN p.person END) AS training_completed
+	FROM (
+		SELECT
+			COALESCE(cr.anonymized_id, cr.recipient_id) AS person,
+			COALESCE(cr.campaign_template_id, c.campaign_template_id) AS template_id,
+			cr.language AS language
+		FROM campaign_recipients cr
+		JOIN campaigns c ON c.id = cr.campaign_id
+		WHERE cr.campaign_id = ? AND COALESCE(cr.anonymized_id, cr.recipient_id) IS NOT NULL
+	) AS p
+	LEFT JOIN (
+		SELECT
+			COALESCE(anonymized_id, recipient_id) AS person,
+			MAX(CASE WHEN event_id IN (?, ?, ?) THEN 1 ELSE 0 END) AS clicked,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS submitted,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS reported,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS training_started,
+			MAX(CASE WHEN event_id = ? THEN 1 ELSE 0 END) AS training_completed
+		FROM campaign_events
+		WHERE campaign_id = ? AND COALESCE(anonymized_id, recipient_id) IS NOT NULL
+		GROUP BY COALESCE(anonymized_id, recipient_id)
+	) AS ev ON ev.person = p.person
+	LEFT JOIN campaign_templates t ON t.id = p.template_id
+	GROUP BY p.template_id, p.language
+	`,
+		campaignID,
+		beforeID, pageID, afterID,
+		submitID,
+		reportID,
+		startedID,
+		completedID,
+		campaignID,
+	).Scan(&rows)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	return mergeLanguageStatRows(rows), nil
+}
+
+// languageStatRow is one template and stamp of a grouped stats by language
+// query
+type languageStatRow struct {
+	Language          *string
+	TemplateLanguage  *string
+	Total             int
+	Clicked           int
+	Submitted         int
+	Reported          int
+	TrainingStarted   int
+	TrainingCompleted int
+}
+
+// mergeLanguageStatRows puts every row in its language, a row with no stamp
+// in its template language, sums the rows of each language and orders the
+// groups by language name, the group with no language last
+func mergeLanguageStatRows(rows []languageStatRow) []model.CampaignGroupStat {
+	byCode := map[string]*model.CampaignGroupStat{}
+	order := []string{}
+	for _, row := range rows {
+		code := ""
+		if row.Language != nil && *row.Language != "" {
+			code = *row.Language
+		} else if row.TemplateLanguage != nil {
+			code = *row.TemplateLanguage
+		}
+		stat, ok := byCode[code]
+		if !ok {
+			group := UnspecifiedLanguageGroup
+			if code != "" {
+				group = data.LanguageName(code)
+			}
+			stat = &model.CampaignGroupStat{Group: group, GroupID: code}
+			byCode[code] = stat
+			order = append(order, code)
+		}
+		stat.Total += row.Total
+		stat.Clicked += row.Clicked
+		stat.Submitted += row.Submitted
+		stat.Reported += row.Reported
+		stat.TrainingStarted += row.TrainingStarted
+		stat.TrainingCompleted += row.TrainingCompleted
+	}
+	result := make([]model.CampaignGroupStat, 0, len(order))
+	for _, code := range order {
+		result = append(result, *byCode[code])
+	}
+	// by language name, so the order tells nothing of the group sizes, and
+	// the unspecified group last
+	sort.SliceStable(result, func(i, j int) bool {
+		a, b := result[i].GroupID == "", result[j].GroupID == ""
+		if a != b {
+			return b
+		}
+		if result[i].Group != result[j].Group {
+			return result[i].Group < result[j].Group
+		}
+		return result[i].GroupID < result[j].GroupID
+	})
+	return result
+}
+
+// HasLanguageGroupDataByCampaignID reports whether the campaign's recipients
+// are in more than one language, a row with no stamp counting as its template
+// language, or its language routes and default pick more than one language.
+// Routing by the Language field counts as more than one language, as each
+// recipient brings their own.
+func (r *Campaign) HasLanguageGroupDataByCampaignID(
+	ctx context.Context,
+	id *uuid.UUID,
+) (bool, error) {
+	var direct int64
+	res := r.DB.WithContext(ctx).Raw(
+		`SELECT COUNT(*) FROM campaigns c WHERE c.id = ? AND c.language_route_by = 'language'`,
+		id.String(),
+	).Scan(&direct)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if direct > 0 {
+		return true, nil
+	}
+	var routed int64
+	res = r.DB.WithContext(ctx).Raw(`SELECT COUNT(*) FROM (
+		SELECT lr.language AS language FROM campaign_language_routes lr
+		WHERE lr.campaign_id = ?
+		UNION
+		SELECT c.language_default AS language FROM campaigns c
+		WHERE c.id = ? AND c.language_route_by <> '' AND c.language_default <> ''
+	)`, id.String(), id.String()).Scan(&routed)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if routed > 1 {
+		return true, nil
+	}
+	// the read stops once a second language is found. With one language every
+	// row of the campaign is read, which is fine at the recipient cap
+	var used int64
+	res = r.DB.WithContext(ctx).Raw(`SELECT COUNT(*) FROM (
+		SELECT DISTINCT COALESCE(cr.language, t.language, '') AS language
+		FROM campaign_recipients cr
+		JOIN campaigns c ON c.id = cr.campaign_id
+		LEFT JOIN campaign_templates t ON t.id = COALESCE(cr.campaign_template_id, c.campaign_template_id)
+		WHERE cr.campaign_id = ?
+		LIMIT 2
+	)`, id.String()).Scan(&used)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return used > 1, nil
 }
 
 // HasTemplateGroupDataByCampaignID reports whether the campaign's recipients use

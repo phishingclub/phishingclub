@@ -16,7 +16,9 @@ import (
 // SeedReportTemplate inserts the default global report templates if they are
 // missing. There is one global template per kind (phishing, awareness
 // training and program); each is seeded independently and only when absent, so
-// a template already edited through the UI is never overwritten.
+// a template already edited through the UI is never overwritten. A global
+// template that still holds an earlier built in default of its kind gets the
+// current one.
 func SeedReportTemplate(db *gorm.DB) error {
 	if err := seedGlobalReportTemplate(db, false, false, embedded.DefaultReportHTML); err != nil {
 		return err
@@ -27,7 +29,33 @@ func SeedReportTemplate(db *gorm.DB) error {
 	if err := seedGlobalReportTemplate(db, false, true, embedded.DefaultProgramReportHTML); err != nil {
 		return err
 	}
+	if err := upgradeGlobalCampaignReportTemplates(db); err != nil {
+		return err
+	}
 	return upgradeGlobalProgramReportTemplate(db)
+}
+
+// upgradeGlobalCampaignReportTemplates gives a global simulation or training
+// report template that still holds an earlier built in default the current
+// one
+func upgradeGlobalCampaignReportTemplates(db *gorm.DB) error {
+	repo := &repository.ReportTemplate{DB: db}
+	if err := repo.UpgradeGlobalCampaignDefault(
+		context.Background(),
+		false,
+		embedded.PreviousDefaultReportHashes,
+		embedded.ReportContentHash,
+		embedded.DefaultReportHTML,
+	); err != nil {
+		return err
+	}
+	return repo.UpgradeGlobalCampaignDefault(
+		context.Background(),
+		true,
+		embedded.PreviousDefaultTrainingReportHashes,
+		embedded.ReportContentHash,
+		embedded.DefaultTrainingReportHTML,
+	)
 }
 
 // upgradeGlobalProgramReportTemplate gives a global program report template

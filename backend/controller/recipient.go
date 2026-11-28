@@ -34,6 +34,7 @@ var recipientColumnByMap = map[string]string{
 	"city":             repository.TableColumn(database.RECIPIENT_TABLE, "city"),
 	"country":          repository.TableColumn(database.RECIPIENT_TABLE, "country"),
 	"misc":             repository.TableColumn(database.RECIPIENT_TABLE, "misc"),
+	"language":         repository.TableColumn(database.RECIPIENT_TABLE, "language"),
 	"repeat_offender":  "is_repeat_offender", // Special case - don't use TableColumn
 }
 
@@ -121,6 +122,54 @@ func (r *Recipient) GetCampaignEvents(g *gin.Context) {
 	r.Response.OK(g, events)
 }
 
+// recipientExportHeaders gives the header row of a recipient CSV export with
+// one column per group
+func recipientExportHeaders(groupCount int) []string {
+	headers := []string{
+		"Created at",
+		"Updated at",
+		"Email",
+		"Phone",
+		"Extra Identifier",
+		"First name",
+		"Last name",
+		"Position",
+		"Department",
+		"City",
+		"Country",
+		"Misc",
+		"Language",
+	}
+	for i := 1; i <= groupCount; i++ {
+		headers = append(headers, fmt.Sprintf("Group %d", i))
+	}
+	return headers
+}
+
+// recipientExportRow gives the CSV row of a recipient in the same column
+// order as recipientExportHeaders
+func recipientExportRow(recp *model.Recipient, groups []*model.RecipientGroup) []string {
+	row := []string{
+		utils.CSVFromDate(recp.CreatedAt),
+		utils.CSVFromDate(recp.UpdatedAt),
+		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Email)),
+		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Phone)),
+		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.ExtraIdentifier)),
+		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.FirstName)),
+		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.LastName)),
+		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Position)),
+		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Department)),
+		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.City)),
+		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Country)),
+		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Misc)),
+		utils.CSVRemoveFormulaStart(utils.NullableStringValue(recp.Language)),
+	}
+	for _, group := range groups {
+		row = append(row, utils.CSVRemoveFormulaStart(group.Name.MustGet().String()))
+	}
+	return row
+}
+
 // Export outputs a zip with recipient, groups and all events related to the recipient
 func (r *Recipient) Export(g *gin.Context) {
 	session, _, ok := r.handleSession(g)
@@ -151,44 +200,13 @@ func (r *Recipient) Export(g *gin.Context) {
 	}
 	recipientBuffer := &bytes.Buffer{}
 	recipientWriter := csv.NewWriter(recipientBuffer)
-	recpHeaders := []string{
-		"Created at",
-		"Updated at",
-		"Email",
-		"Phone",
-		"Extra Identifier",
-		"Name",
-		"Position",
-		"Department",
-		"City",
-		"Country",
-		"Misc",
-	}
 	groups, _ := recp.Groups.Get()
-	for i := range groups {
-		recpHeaders = append(recpHeaders, fmt.Sprintf("Group %d", i+1))
-	}
+	recpHeaders := recipientExportHeaders(len(groups))
 	err = recipientWriter.Write(recpHeaders)
 	if ok := r.handleErrors(g, err); !ok {
 		return
 	}
-	row := []string{
-		utils.CSVFromDate(recp.CreatedAt),
-		utils.CSVFromDate(recp.UpdatedAt),
-		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Email)),
-		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Phone)),
-		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.ExtraIdentifier)),
-		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.FirstName)),
-		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.LastName)),
-		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Position)),
-		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Department)),
-		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.City)),
-		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Country)),
-		utils.CSVRemoveFormulaStart(utils.NullableToString(recp.Misc)),
-	}
-	for _, group := range groups {
-		row = append(row, utils.CSVRemoveFormulaStart(group.Name.MustGet().String()))
-	}
+	row := recipientExportRow(recp, groups)
 	err = recipientWriter.Write(row)
 	if ok := r.handleErrors(g, err); !ok {
 		return
@@ -272,6 +290,7 @@ func (r *Recipient) Export(g *gin.Context) {
 		"Template",
 		"Kind",
 		"Most notable event",
+		"Language",
 	})
 	if ok := r.handleErrors(g, err); !ok {
 		return
@@ -291,6 +310,7 @@ func (r *Recipient) Export(g *gin.Context) {
 			utils.CSVRemoveFormulaStart(send.TemplateName),
 			kind,
 			utils.CSVRemoveFormulaStart(notable),
+			utils.CSVRemoveFormulaStart(send.EffectiveLanguage()),
 		})
 		if ok := r.handleErrors(g, err); !ok {
 			return

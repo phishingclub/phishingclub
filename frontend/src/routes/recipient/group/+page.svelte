@@ -1,4 +1,5 @@
 <script>
+	import { LANGUAGES } from '$lib/utils/languages.js';
 	import { api } from '$lib/api/apiProxy.js';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import { onDestroy, onMount } from 'svelte';
@@ -45,14 +46,17 @@
 	const appStateService = AppStateService.instance;
 
 	// the recipient fields that can be used as a dynamic filter
-	const dynamicFilterFields = ['position', 'department', 'city', 'country', 'misc'];
+	const dynamicFilterFields = ['position', 'department', 'city', 'country', 'misc', 'language'];
 	const dynamicFilterFieldLabels = {
 		position: 'Position',
 		department: 'Department',
 		city: 'City',
 		country: 'Country',
-		misc: 'Miscellaneous'
+		misc: 'Miscellaneous',
+		language: 'Language'
 	};
+	// the language filter picks from the fixed list, the field holds codes
+	const filterLanguageOptions = LANGUAGES.map((l) => ({ value: l.code, label: l.name }));
 	// example value per filter field, shown as the Filter value placeholder
 	const dynamicFilterValueExamples = {
 		position: 'e.g. Engineer',
@@ -112,8 +116,7 @@
 	const selection = createTableSelection();
 	let isBulkDeleteAlertVisible = false;
 	// a row cannot be selected when its delete action is disabled in shared view
-	const isRowDisabled = (group) =>
-		globalButtonDisabledAttributes(group, contextCompanyID).disabled;
+	const isRowDisabled = (group) => globalButtonDisabledAttributes(group, contextCompanyID).disabled;
 	$: selectablePageIds = groups
 		.filter((g) => !globalButtonDisabledAttributes(g, contextCompanyID).disabled)
 		.map((g) => g.id);
@@ -130,6 +133,19 @@
 		filterField: dynamicFilterFields[0],
 		filterValue: null
 	};
+
+	// a filter value only fits the field it was entered for, so it is cleared
+	// when the field changes
+	let dynamicCreateField = dynamicFormValues.filterField;
+	$: if (dynamicFormValues.filterField !== dynamicCreateField) {
+		dynamicCreateField = dynamicFormValues.filterField;
+		dynamicFormValues.filterValue = null;
+	}
+	let dynamicUpdateField = dynamicUpdateValues.filterField;
+	$: if (dynamicUpdateValues.filterField !== dynamicUpdateField) {
+		dynamicUpdateField = dynamicUpdateValues.filterField;
+		dynamicUpdateValues.filterValue = '';
+	}
 
 	$: {
 		modalText = modalMode === 'create' ? 'New group' : 'Update group';
@@ -403,6 +419,7 @@
 			dynamicUpdateValues.id = id;
 			dynamicUpdateValues.name = group.name;
 			dynamicUpdateValues.filterField = group.filterField ?? dynamicFilterFields[0];
+			dynamicUpdateField = dynamicUpdateValues.filterField;
 			dynamicUpdateValues.filterValue = group.filterValue ?? '';
 			dynamicUpdateError = '';
 			isDynamicUpdateModalVisible = true;
@@ -482,8 +499,7 @@
 								tone={group.deleteFailure ? 'danger' : 'neutral'}
 								title={group.deleteFailure
 									? `The delete is waiting: ${group.deleteFailure}. Remove it and the delete continues on its own.`
-									: 'The group is deleted in the background'}
-								>Deleting</StatusBadge
+									: 'The group is deleted in the background'}>Deleting</StatusBadge
 							></span
 						>
 					{/if}
@@ -574,14 +590,25 @@
 					>
 						Filter field
 					</TextFieldSelect>
-					<TextField
-						required
-						minLength={1}
-						maxLength={127}
-						bind:value={dynamicFormValues.filterValue}
-						toolTipText="Recipients whose field equals this value are included automatically"
-						placeholder={filterValuePlaceholder(dynamicFormValues.filterField)}>Filter value</TextField
-					>
+					{#if dynamicFormValues.filterField === 'language'}
+						<TextFieldSelect
+							id="dynamic-group-filter-language"
+							required
+							bind:value={dynamicFormValues.filterValue}
+							toolTipText="Recipients with this language are included automatically"
+							options={filterLanguageOptions}>Filter value</TextFieldSelect
+						>
+					{:else}
+						<TextField
+							required
+							minLength={1}
+							maxLength={127}
+							bind:value={dynamicFormValues.filterValue}
+							toolTipText="Recipients whose field equals this value are included automatically"
+							placeholder={filterValuePlaceholder(dynamicFormValues.filterField)}
+							>Filter value</TextField
+						>
+					{/if}
 				</FormColumn>
 			</FormColumns>
 			<FormError message={dynamicModalError} />
@@ -614,14 +641,25 @@
 					>
 						Filter field
 					</TextFieldSelect>
-					<TextField
-						required
-						minLength={1}
-						maxLength={127}
-						bind:value={dynamicUpdateValues.filterValue}
-						toolTipText="Recipients whose field equals this value are included automatically"
-						placeholder={filterValuePlaceholder(dynamicUpdateValues.filterField)}>Filter value</TextField
-					>
+					{#if dynamicUpdateValues.filterField === 'language'}
+						<TextFieldSelect
+							id="dynamic-group-filter-language-a"
+							required
+							bind:value={dynamicUpdateValues.filterValue}
+							toolTipText="Recipients with this language are included automatically"
+							options={filterLanguageOptions}>Filter value</TextFieldSelect
+						>
+					{:else}
+						<TextField
+							required
+							minLength={1}
+							maxLength={127}
+							bind:value={dynamicUpdateValues.filterValue}
+							toolTipText="Recipients whose field equals this value are included automatically"
+							placeholder={filterValuePlaceholder(dynamicUpdateValues.filterField)}
+							>Filter value</TextField
+						>
+					{/if}
 				</FormColumn>
 			</FormColumns>
 			<FormError message={dynamicUpdateError} />

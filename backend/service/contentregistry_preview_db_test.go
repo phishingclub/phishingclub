@@ -85,9 +85,9 @@ func campaignRow(t *testing.T, h *ownershipFixture, id uuid.UUID) database.Campa
 // the delete paths treat them. While an open campaign uses the page as its deny
 // page, the page delete is refused: the preview lists the page as blocked and
 // nothing as closed or changed, and remove keeps the page and changes no
-// campaign. Once that campaign is closed, a campaign without a close time is
-// closed, one that already has a close time keeps running, and the closed
-// campaign loses its deny page. Remove must then close exactly the campaigns
+// campaign. Once that campaign is closed, a campaign without a close time and
+// one that has a later close time are both closed now, and the closed campaign
+// loses its deny page. Remove must then close exactly the campaigns
 // the preview listed as closed.
 func TestUninstallPreviewMatchesRemove(t *testing.T) {
 	h := newOwnershipFixture(t)
@@ -118,9 +118,9 @@ func TestUninstallPreviewMatchesRemove(t *testing.T) {
 		len(preview.Blocked[0].UsedBy) != 1 || preview.Blocked[0].UsedBy[0] != "campaign DenyOnly" {
 		t.Fatalf("expected the Login page blocked by campaign DenyOnly, got %+v", preview.Blocked)
 	}
-	if preview.CampaignCount != 0 || preview.KeepRunningCount != 0 || preview.ChangedCount != 0 {
-		t.Fatalf("a page that stays changes no campaign, got closed %+v, keep running %+v, changed %+v",
-			preview.Campaigns, preview.KeepRunning, preview.Changed)
+	if preview.CampaignCount != 0 || preview.ChangedCount != 0 {
+		t.Fatalf("a page that stays changes no campaign, got closed %+v, changed %+v",
+			preview.Campaigns, preview.Changed)
 	}
 	err = h.s.Remove(h.ctx, h.session, ip.ID)
 	if err == nil || !strings.Contains(err.Error(), "stay installed") || !strings.Contains(err.Error(), "DenyOnly") {
@@ -151,12 +151,9 @@ func TestUninstallPreviewMatchesRemove(t *testing.T) {
 	if len(preview.Blocked) != 0 {
 		t.Fatalf("a closed campaign does not hold the page, got %+v", preview.Blocked)
 	}
-	if preview.CampaignCount != 1 || len(preview.Campaigns) != 1 || preview.Campaigns[0].Name != "Open" {
-		t.Fatalf("expected only Open to be closed, got %+v", preview.Campaigns)
-	}
-	if preview.KeepRunningCount != 1 || len(preview.KeepRunning) != 1 ||
-		preview.KeepRunning[0].Name != "Scheduled" || preview.KeepRunning[0].CloseAt == "" {
-		t.Fatalf("expected Scheduled to keep running with its close time, got %+v", preview.KeepRunning)
+	// a campaign with a later close time is closed now too
+	if preview.CampaignCount != 2 || len(preview.Campaigns) != 2 {
+		t.Fatalf("expected Open and Scheduled to be closed, got %+v", preview.Campaigns)
 	}
 	if preview.ChangedCount != 0 {
 		t.Fatalf("a closed campaign is not listed as changed, got %+v", preview.Changed)
@@ -188,8 +185,8 @@ func TestUninstallPreviewMatchesRemove(t *testing.T) {
 	if strings.Join(closed, ",") != strings.Join(previewClosed, ",") {
 		t.Fatalf("remove closed %v but the preview listed %v", closed, previewClosed)
 	}
-	if row := campaignRow(t, h, scheduledID); row.CloseAt == nil || !row.CloseAt.UTC().Equal(future) {
-		t.Fatalf("the close time of Scheduled should be unchanged, got %v", row.CloseAt)
+	if row := campaignRow(t, h, scheduledID); row.CloseAt == nil || !row.CloseAt.Before(future) {
+		t.Fatalf("the later close time of Scheduled should be brought forward, got %v", row.CloseAt)
 	}
 	if row := campaignRow(t, h, denyOnlyID); row.DenyPageID != nil {
 		t.Fatalf("the closed DenyOnly should have lost its deny page")
@@ -476,9 +473,6 @@ func TestUninstallPreviewDeletedTemplateClosesNow(t *testing.T) {
 	}
 	if preview.CampaignCount != 1 || len(preview.Campaigns) != 1 || preview.Campaigns[0].Name != "Later" {
 		t.Fatalf("expected Later to be listed as closed, got %+v", preview.Campaigns)
-	}
-	if preview.KeepRunningCount != 0 {
-		t.Fatalf("expected nothing to keep running, got %+v", preview.KeepRunning)
 	}
 	if err := h.s.Remove(h.ctx, h.session, ipID); err != nil {
 		t.Fatalf("remove: %v", err)

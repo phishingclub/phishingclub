@@ -218,13 +218,41 @@ func (r *ReportTemplate) UpgradeGlobalProgramDefault(
 	hash func(string) string,
 	content string,
 ) error {
+	return r.upgradeGlobalDefault(ctx, true, false, earlier, hash, content)
+}
+
+// UpgradeGlobalCampaignDefault replaces the content of each global campaign
+// report template of the kind, training or simulation, whose content hash is
+// in earlier with content. An edited global template, every company
+// template and the program templates are left as they are.
+func (r *ReportTemplate) UpgradeGlobalCampaignDefault(
+	ctx context.Context,
+	isTraining bool,
+	earlier map[string]bool,
+	hash func(string) string,
+	content string,
+) error {
+	return r.upgradeGlobalDefault(ctx, false, isTraining, earlier, hash, content)
+}
+
+func (r *ReportTemplate) upgradeGlobalDefault(
+	ctx context.Context,
+	isProgram bool,
+	isTraining bool,
+	earlier map[string]bool,
+	hash func(string) string,
+	content string,
+) error {
 	var rows []database.ReportTemplate
-	res := r.DB.
+	db := r.DB.
 		WithContext(ctx).
 		Model(&database.ReportTemplate{}).
 		Where(clause.Eq{Column: clause.Column{Name: "company_id"}, Value: nil}).
-		Where(clause.Eq{Column: clause.Column{Name: "is_program"}, Value: true}).
-		Find(&rows)
+		Where(clause.Eq{Column: clause.Column{Name: "is_program"}, Value: isProgram})
+	if !isProgram {
+		db = db.Where(clause.Eq{Column: clause.Column{Name: "is_training"}, Value: isTraining})
+	}
+	res := db.Find(&rows)
 	if res.Error != nil {
 		return errs.Wrap(res.Error)
 	}

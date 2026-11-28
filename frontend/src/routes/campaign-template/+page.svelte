@@ -50,6 +50,12 @@
 	import TextFieldSelectWithType from '$lib/components/form/TextFieldSelectWithType.svelte';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 	import { resourceContext } from '$lib/store/resourceContext';
+	import { displayMode, isShown } from '$lib/store/displayMode';
+	import Alert from '$lib/components/Alert.svelte';
+	import FieldLabel from '$lib/components/form/FieldLabel.svelte';
+	import Note from '$lib/components/Note.svelte';
+	import { LANGUAGES, languageName } from '$lib/utils/languages.js';
+	import { addButtonClass, rowButtonClass } from '$lib/utils/rowButton.js';
 
 	// services
 	const appStateService = AppStateService.instance;
@@ -75,7 +81,12 @@
 		lureURLMode: 'query',
 		lureCodeAlgo: 'crockford32',
 		lureCodeLength: 12,
-		isTraining: false
+		isTraining: false,
+		language: '',
+		languages: [],
+		multiLanguage: false,
+		beforeLandingKind: 'none',
+		afterLandingKind: 'none'
 	};
 
 	// codes are matched exactly, so the choice is about which glyphs appear and
@@ -171,6 +182,312 @@
 	// a server refusal of the training flag, shown under its checkbox
 	let trainingError = '';
 	$: formValues.isTraining, (trainingError = '');
+	// a server refusal of the languages, shown at the end of the Languages section
+	let languagesError = '';
+
+	// Multiple languages: every language is a row of formValues.languages, the
+	// first row is the main language. On save the main row is the template's
+	// own email, pages and language, the other rows are its language rows.
+	// Without it the editor has no language fields and the template keeps the
+	// language it was loaded with.
+	// the rows taken away by unchecking, given back when it is checked again
+	let removedLanguageRows = [];
+	// the rows taken away with the remove button, given back when the server
+	// refuses to remove them
+	let droppedLanguageRows = [];
+	// true when the template was loaded with language rows
+	let loadedWithLanguages = false;
+	let isRemoveLanguagesAlertVisible = false;
+
+	// language picks: the fixed list as code and name
+	const languageOptions = LANGUAGES.map((l) => ({ value: l.code, label: l.name }));
+	// codes a row can take: not the code of another row
+	$: rowLanguageOptions = (i) =>
+		languageOptions.filter(
+			(o) => !formValues.languages.some((row, j) => j !== i && row.language === o.value)
+		);
+	// what each page flow step is with Multiple languages, the pages are picked
+	// per language in the rows
+	const stepNone = { value: 'none', label: 'None' };
+	const stepPage = { value: 'page', label: 'Page' };
+	const stepProxy = { value: 'proxy', label: 'Proxy' };
+	$: landingKindOptions =
+		isShown('blackbox', $displayMode) || formValues.landingPageType === 'proxy'
+			? [stepPage, stepProxy]
+			: [stepPage];
+	// typed text that is not an option keeps the last pick, so a step is
+	// never dropped by a half typed word
+	/** @param {'beforeLandingKind'|'afterLandingKind'} field @param {string} kind */
+	const setStepKind = (field, kind) => {
+		if (kind !== 'none' && kind !== 'page') return;
+		formValues[field] = kind;
+	};
+	/** @param {string} kind */
+	const setLandingKind = (kind) => {
+		if (kind !== 'page' && kind !== 'proxy') return;
+		if (kind !== formValues.landingPageType) {
+			formValues.landingPageType = kind;
+			// the proxy is picked on the step, a page per language
+			formValues.landingPage = '';
+		}
+	};
+	// the page flow stages a language row has, rows fill the pages and share
+	// the proxy
+	$: languageStages = [
+		...(formValues.beforeLandingKind === 'page'
+			? [{ key: 'beforeLandingPage', label: 'Before Landing', map: beforeLandingPageMap }]
+			: []),
+		formValues.landingPageType === 'proxy'
+			? { key: 'landingPage', label: 'Landing', proxy: true }
+			: { key: 'landingPage', label: 'Landing', map: landingPageMap },
+		...(formValues.afterLandingKind === 'page'
+			? [{ key: 'afterLandingPage', label: 'After Landing', map: afterLandingPageMap }]
+			: [])
+	];
+	// rows are keyed, so making a row the main one moves its fields with it
+	let lastRowKey = 0;
+	const nextRowKey = () => ++lastRowKey;
+	const emptyLanguageRow = () => ({
+		key: nextRowKey(),
+		language: '',
+		email: null,
+		beforeLandingPage: null,
+		landingPage: null,
+		afterLandingPage: null
+	});
+	// the main row made from the template's own email and pages
+	const mainRowFromTemplate = () => ({
+		key: nextRowKey(),
+		language: formValues.language || '',
+		email: formValues.email || null,
+		beforeLandingPage: formValues.beforeLandingPage || null,
+		landingPage: formValues.landingPageType === 'page' ? formValues.landingPage || null : null,
+		afterLandingPage: formValues.afterLandingPage || null
+	});
+	// turns Multiple languages on: the template's email and pages become the
+	// main row, with a second row or the rows taken away earlier
+	const startLanguages = () => {
+		// a step is kept when the main or a language set aside has a page for it
+		formValues.beforeLandingKind =
+			formValues.beforeLandingPage || removedLanguageRows.some((row) => row.beforeLandingPage)
+				? 'page'
+				: 'none';
+		formValues.afterLandingKind =
+			formValues.afterLandingPage || removedLanguageRows.some((row) => row.afterLandingPage)
+				? 'page'
+				: 'none';
+		const main = mainRowFromTemplate();
+		if (!main.language && removedLanguageRows[0]?.language) {
+			main.language = removedLanguageRows[0].language;
+		}
+		const others = removedLanguageRows.slice(1).filter((row) => row.language !== main.language);
+		formValues.languages = [main, ...(others.length ? others : [emptyLanguageRow()])];
+		removedLanguageRows = [];
+		languagesError = '';
+		if (formValues.landingPageType === 'page') {
+			formValues.landingPage = '';
+		}
+		formValues.multiLanguage = true;
+	};
+	// turns Multiple languages off: the main row becomes the template's email
+	// and pages and keeps its language, the other rows are kept aside
+	const stopLanguages = () => {
+		const [main, ...others] = formValues.languages;
+		if (main) {
+			formValues.language = main.language || formValues.language || '';
+			formValues.email = main.email;
+			formValues.beforeLandingPage =
+				formValues.beforeLandingKind === 'page' ? main.beforeLandingPage : null;
+			if (formValues.landingPageType === 'page') {
+				formValues.landingPage = main.landingPage;
+			}
+			formValues.afterLandingPage =
+				formValues.afterLandingKind === 'page' ? main.afterLandingPage : null;
+		}
+		removedLanguageRows = main ? [main, ...others] : [];
+		formValues.languages = [];
+		formValues.multiLanguage = false;
+		languagesError = '';
+	};
+	// a row with nothing picked yet
+	const isBlankRow = (row) =>
+		!row.language &&
+		!row.email &&
+		!row.beforeLandingPage &&
+		!row.landingPage &&
+		!row.afterLandingPage;
+	// the other languages that unchecking takes away
+	$: removedLanguageNames = formValues.languages
+		.slice(1)
+		.filter((row) => row.language)
+		.map((row) => languageName(row.language));
+	// the main language that unchecking keeps
+	$: keptLanguageName = formValues.languages[0]?.language
+		? languageName(formValues.languages[0].language)
+		: '';
+	/** @param {string[]} names */
+	const joinNames = (names) =>
+		names.length > 1
+			? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+			: (names[0] ?? '');
+	const onMultiLanguageChange = async (e) => {
+		const checked = e.target.checked;
+		// the binding writes the new value first, it is set again below
+		await tick();
+		if (checked) {
+			startLanguages();
+			return;
+		}
+		if (loadedWithLanguages || formValues.languages.slice(1).some((row) => !isBlankRow(row))) {
+			formValues.multiLanguage = true;
+			isRemoveLanguagesAlertVisible = true;
+			return;
+		}
+		stopLanguages();
+	};
+	const addLanguage = () => {
+		formValues.languages = [...formValues.languages, emptyLanguageRow()];
+	};
+	/** @param {number} i */
+	const removeLanguage = (i) => {
+		if (i === 0 || formValues.languages.length <= 2) return;
+		const row = formValues.languages[i];
+		if (!isBlankRow(row)) {
+			droppedLanguageRows = [...droppedLanguageRows, row];
+		}
+		formValues.languages = formValues.languages.filter((_, j) => j !== i);
+	};
+	// puts back the removed rows a refusal names, or all of them when it
+	// names none of them. Unchecked rows come back by checking again.
+	/** @param {string} refusal */
+	const restoreRemovedLanguages = (refusal) => {
+		const named = new Set(
+			(refusal.split(' can not be removed')[0] ?? '').split(',').map((name) => name.trim())
+		);
+		const pick = (rows) => {
+			const hit = rows.filter((row) => named.has(languageName(row.language)));
+			return hit.length ? hit : rows;
+		};
+		if (!formValues.multiLanguage && removedLanguageRows.length) {
+			startLanguages();
+		}
+		const present = new Set(formValues.languages.map((row) => row.language));
+		const back = pick(droppedLanguageRows).filter((row) => !present.has(row.language));
+		if (back.length) {
+			formValues.languages = [...formValues.languages, ...back];
+			droppedLanguageRows = droppedLanguageRows.filter((row) => !back.includes(row));
+			if (back.some((row) => row.beforeLandingPage)) formValues.beforeLandingKind = 'page';
+			if (back.some((row) => row.afterLandingPage)) formValues.afterLandingKind = 'page';
+		}
+	};
+	// the row becomes the main language and moves to the top
+	/** @param {number} i */
+	const makeMainLanguage = (i) => {
+		if (i <= 0) return;
+		const row = formValues.languages[i];
+		formValues.languages = [row, ...formValues.languages.filter((_, j) => j !== i)];
+		languagesError = '';
+	};
+	// a stage that is not a page sends no id
+	const stagePageID = (row, key) => {
+		const stage = languageStages.find((st) => st.key === key);
+		if (!stage || stage.proxy) return null;
+		return stage.map.byValueOrNull(row[key]);
+	};
+	const languagesPayload = () =>
+		formValues.languages.slice(1).map((row) => ({
+			language: row.language,
+			emailID: emailMap.byValueOrNull(row.email),
+			beforeLandingPageID: stagePageID(row, 'beforeLandingPage'),
+			landingPageID: stagePageID(row, 'landingPage'),
+			afterLandingPageID: stagePageID(row, 'afterLandingPage')
+		}));
+	// the email, pages and language fields of a create or update. With
+	// Multiple languages they come from the rows. Without it a new template
+	// sends no language, a loaded one keeps its language, and the language
+	// rows are only sent, empty, when the template was loaded with rows.
+	const languageFieldsPayload = () => {
+		if (formValues.multiLanguage) {
+			const main = formValues.languages[0] ?? emptyLanguageRow();
+			return {
+				emailID: emailMap.byValueOrNull(main.email),
+				landingPageID:
+					formValues.landingPageType === 'page'
+						? landingPageMap.byValueOrNull(main.landingPage)
+						: null,
+				landingProxyID:
+					formValues.landingPageType === 'proxy'
+						? landingProxyMap.byValueOrNull(formValues.landingPage)
+						: null,
+				beforeLandingPageID: stagePageID(main, 'beforeLandingPage'),
+				afterLandingPageID: stagePageID(main, 'afterLandingPage'),
+				language: main.language || '',
+				languages: languagesPayload()
+			};
+		}
+		return {
+			emailID: emailMap.byValueOrNull(formValues.email),
+			landingPageID:
+				formValues.landingPageType === 'page'
+					? landingPageMap.byValueOrNull(formValues.landingPage)
+					: null,
+			landingProxyID:
+				formValues.landingPageType === 'proxy'
+					? landingProxyMap.byValueOrNull(formValues.landingPage)
+					: null,
+			beforeLandingPageID: beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage),
+			afterLandingPageID: afterLandingPageMap.byValueOrNull(formValues.afterLandingPage),
+			...(formValues.language ? { language: formValues.language } : {}),
+			...(loadedWithLanguages ? { languages: [] } : {})
+		};
+	};
+	// the stage names for the request fields a language refusal names
+	const stageFieldLabels = {
+		emailID: 'Email',
+		beforeLandingPageID: 'Before Landing',
+		landingPageID: 'Landing',
+		afterLandingPageID: 'After Landing'
+	};
+	const withStageLabels = (text) =>
+		text.replace(
+			/\((emailID|beforeLandingPageID|landingPageID|afterLandingPageID)\)/g,
+			(_, field) => `(${stageFieldLabels[field]})`
+		);
+	// a server refusal of the languages is shown in the Languages section, true
+	// when it was one
+	const showLanguageRefusal = async (error) => {
+		const text = String(error ?? '');
+		const refusal = /^languages?: (.+)$/s.exec(text);
+		if (!refusal) return false;
+		if (/ can not be removed /.test(refusal[1])) {
+			restoreRemovedLanguages(refusal[1]);
+		}
+		languagesError = capitalizeFirst(withStageLabels(refusal[1]));
+		await tick();
+		document
+			.getElementById('template-languages')
+			?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		return true;
+	};
+
+	// the language names of a listed template: its main language, then its
+	// rows. A row that can not be sent yet is marked like in Template Details.
+	// A template without rows has one language and shows none, its stored code
+	// stays as sent recipients may carry it.
+	const listLanguageNames = (template) =>
+		template.languages?.length
+			? [
+					...(template.language ? [languageName(template.language)] : []),
+					...template.languages
+						.filter((l) => l.language)
+						.map((l) => `${languageName(l.language)}${l.isUsable ? '' : ' (incomplete)'}`)
+				]
+			: [];
+	// the title of the list cell marks the main language
+	const listLanguageTitle = (template) =>
+		listLanguageNames(template)
+			.map((name, i) => (i === 0 && template.language ? `${name} (main)` : name))
+			.join(', ');
 	const capitalizeFirst = (text) => (text ? text[0].toUpperCase() + text.slice(1) : text);
 	const tableURLParams = newTableURLParams();
 	let isModalVisible = false;
@@ -359,21 +676,11 @@
 			const res = await api.campaignTemplate.create({
 				name: formValues.name,
 				domainID: domainMap.byValue(formValues.domain),
-				emailID: emailMap.byValueOrNull(formValues.email),
 				smtpConfigurationID: smtpConfigurationMap.byValueOrNull(formValues.smtpConfiguration),
 				apiSenderID: apiSenderMap.byValueOrNull(formValues.apiSender),
-				landingPageID:
-					formValues.landingPageType === 'page'
-						? landingPageMap.byValueOrNull(formValues.landingPage)
-						: null,
-				landingProxyID:
-					formValues.landingPageType === 'proxy'
-						? landingProxyMap.byValueOrNull(formValues.landingPage)
-						: null,
-				beforeLandingPageID: beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage),
 				beforeLandingProxyID: null,
-				afterLandingPageID: afterLandingPageMap.byValueOrNull(formValues.afterLandingPage),
 				afterLandingProxyID: null,
+				...languageFieldsPayload(),
 				afterLandingPageRedirectURL: formValues.afterLandingPageRedirectURL || '',
 				urlIdentifierID: identifierMap.byValueOrNull(formValues.urlIdentifier),
 				stateIdentifierID: identifierMap.byValueOrNull(formValues.stateIdentifier),
@@ -385,6 +692,9 @@
 				companyID: contextCompanyID
 			});
 			if (!res.success) {
+				if (await showLanguageRefusal(res.error)) {
+					return;
+				}
 				modalError = res.error;
 				return;
 			}
@@ -403,21 +713,11 @@
 				id: formValues.id,
 				name: formValues.name,
 				domainID: domainMap.byValueOrNull(formValues.domain),
-				emailID: emailMap.byValueOrNull(formValues.email),
 				smtpConfigurationID: smtpConfigurationMap.byValueOrNull(formValues.smtpConfiguration),
 				apiSenderID: apiSenderMap.byValueOrNull(formValues.apiSender),
-				landingPageID:
-					formValues.landingPageType === 'page'
-						? landingPageMap.byValueOrNull(formValues.landingPage)
-						: null,
-				landingProxyID:
-					formValues.landingPageType === 'proxy'
-						? landingProxyMap.byValueOrNull(formValues.landingPage)
-						: null,
-				beforeLandingPageID: beforeLandingPageMap.byValueOrNull(formValues.beforeLandingPage),
 				beforeLandingProxyID: null,
-				afterLandingPageID: afterLandingPageMap.byValueOrNull(formValues.afterLandingPage),
 				afterLandingProxyID: null,
+				...languageFieldsPayload(),
 				afterLandingPageRedirectURL: formValues.afterLandingPageRedirectURL || '',
 				urlIdentifierID: identifierMap.byValueOrNull(formValues.urlIdentifier),
 				stateIdentifierID: identifierMap.byValueOrNull(formValues.stateIdentifier),
@@ -428,6 +728,9 @@
 				isTraining: formValues.isTraining
 			});
 			if (!res.success) {
+				if (await showLanguageRefusal(res.error)) {
+					return;
+				}
 				// a refused training change names the program, it shows on the checkbox
 				const training = /^isTraining: (.+)$/.exec(String(res.error ?? ''));
 				if (training) {
@@ -498,10 +801,20 @@
 			lureURLMode: 'query',
 			lureCodeAlgo: 'crockford32',
 			lureCodeLength: 12,
-			isTraining: false
+			isTraining: false,
+			language: '',
+			languages: [],
+			multiLanguage: false,
+			beforeLandingKind: 'none',
+			afterLandingKind: 'none'
 		};
 		modalError = '';
 		trainingError = '';
+		languagesError = '';
+		removedLanguageRows = [];
+		droppedLanguageRows = [];
+		loadedWithLanguages = false;
+		isRemoveLanguagesAlertVisible = false;
 		showAdvancedOptions = false;
 		// clear resource context when closing modal
 		resourceContext.clear();
@@ -616,6 +929,35 @@
 		formValues.lureCodeAlgo = template.lureCodeAlgo || 'crockford32';
 		formValues.lureCodeLength = template.lureCodeLength || 12;
 		formValues.isTraining = !!template.isTraining;
+		formValues.language = template.language || '';
+		// a template with language rows opens with Multiple languages, its own
+		// email and pages as the main row
+		const rows = (template.languages ?? []).map((row) => ({
+			key: nextRowKey(),
+			language: row.language,
+			email: emailMap.byKey(row.emailID) ?? null,
+			beforeLandingPage: beforeLandingPageMap.byKey(row.beforeLandingPageID) ?? null,
+			landingPage: landingPageMap.byKey(row.landingPageID) ?? null,
+			afterLandingPage: afterLandingPageMap.byKey(row.afterLandingPageID) ?? null
+		}));
+		loadedWithLanguages = rows.length > 0;
+		removedLanguageRows = [];
+		droppedLanguageRows = [];
+		formValues.languages = [];
+		formValues.multiLanguage = false;
+		if (rows.length) {
+			startLanguages();
+			formValues.languages = [formValues.languages[0], ...rows];
+			// a step is kept when the main or any language has a page for it, so
+			// the pages of the languages are not dropped on the next save. A
+			// missing main page shows as an empty required pick.
+			if (rows.some((row) => row.beforeLandingPage)) {
+				formValues.beforeLandingKind = 'page';
+			}
+			if (rows.some((row) => row.afterLandingPage)) {
+				formValues.afterLandingKind = 'page';
+			}
+		}
 
 		// set advanced options visibility based on template configuration
 		showAdvancedOptions = !!(
@@ -652,6 +994,7 @@
 			{ column: 'Name', size: 'large' },
 			{ column: 'Domain', size: 'medium' },
 			{ column: 'Email', size: 'medium' },
+			{ column: 'Languages', size: 'medium' },
 			{ column: 'Landing Page', title: 'Landing', size: 'medium' },
 			{ column: 'SMTP', size: 'small' },
 			{ column: 'API Sender', size: 'small' },
@@ -726,6 +1069,15 @@
 						>
 							{emailMap.byKey(template.emailID)}
 						</a>
+					{:else}
+						<span class="text-slate-400 dark:text-gray-500">-</span>
+					{/if}
+				</TableCell>
+				<TableCell>
+					{#if listLanguageNames(template).length}
+						<span class="block w-full py-1" title={listLanguageTitle(template)}
+							>{listLanguageNames(template).join(', ')}</span
+						>
 					{:else}
 						<span class="text-slate-400 dark:text-gray-500">-</span>
 					{/if}
@@ -966,14 +1318,21 @@
 								>
 							</div>
 						{/if}
-						<div class="md:max-w-xs">
-							<TextFieldSelect
-								id="email"
-								size="full"
-								bind:value={formValues.email}
-								options={emailMap.values()}>Email</TextFieldSelect
-							>
-						</div>
+						{#if !formValues.multiLanguage}
+							<div class="md:max-w-xs">
+								<TextFieldSelect
+									id="email"
+									size="full"
+									bind:value={formValues.email}
+									options={emailMap.values()}>Email</TextFieldSelect
+								>
+							</div>
+						{:else}
+							<!-- in the place of the Email field, on its label line -->
+							<div class="md:max-w-xs py-2" data-email-per-language>
+								<Note class="py-2">Email is picked per language under Languages.</Note>
+							</div>
+						{/if}
 					</div>
 				</div>
 
@@ -986,63 +1345,248 @@
 					</h3>
 					<div class="grid grid-cols-1 md:grid-cols-5 gap-6">
 						<div class="md:col-span-2 flex flex-col w-full md:max-w-xs">
-							<!-- Before Landing Page -->
-							<TextFieldSelect
-								id="beforeLandingPage"
-								bind:value={formValues.beforeLandingPage}
-								options={beforeLandingPageMap.values()}
-								size="full"
-								optional>Before Landing</TextFieldSelect
-							>
-
-							<ConditionalDisplay show="blackbox">
-								<!-- Landing Page -->
-								<TextFieldSelectWithType
-									id="landingPage"
-									bind:value={formValues.landingPage}
-									bind:type={formValues.landingPageType}
-									pageOptions={landingPageMap.values()}
-									proxyOptions={landingProxyMap.values()}
-									required>Landing</TextFieldSelectWithType
-								>
-							</ConditionalDisplay>
-							<ConditionalDisplay show="whitebox">
+							{#if formValues.multiLanguage}
+								<!-- the steps are picked once, the pages per language below -->
 								<TextFieldSelect
-									id="landingPage"
-									bind:value={formValues.landingPage}
-									options={landingPageMap.values()}
+									id="beforeLandingKind"
 									size="full"
-									required>Landing</TextFieldSelect
+									required
+									toolTipText="Pick the page of each language under Languages."
+									value={formValues.beforeLandingKind}
+									onSelect={(kind) => setStepKind('beforeLandingKind', kind)}
+									options={[stepNone, stepPage]}>Before Landing</TextFieldSelect
 								>
-							</ConditionalDisplay>
+								<TextFieldSelect
+									id="landingKind"
+									size="full"
+									required
+									toolTipText="A proxy is the same in every language."
+									value={formValues.landingPageType}
+									onSelect={setLandingKind}
+									options={landingKindOptions}>Landing</TextFieldSelect
+								>
+								{#if formValues.landingPageType === 'proxy'}
+									<TextFieldSelect
+										id="landingProxy"
+										size="full"
+										required
+										bind:value={formValues.landingPage}
+										options={landingProxyMap.values()}>Landing Proxy</TextFieldSelect
+									>
+								{/if}
+								<TextFieldSelect
+									id="afterLandingKind"
+									size="full"
+									required
+									toolTipText="Pick the page of each language under Languages."
+									value={formValues.afterLandingKind}
+									onSelect={(kind) => setStepKind('afterLandingKind', kind)}
+									options={[stepNone, stepPage]}>After Landing</TextFieldSelect
+								>
+							{:else}
+								<!-- Before Landing Page -->
+								<TextFieldSelect
+									id="beforeLandingPage"
+									bind:value={formValues.beforeLandingPage}
+									options={beforeLandingPageMap.values()}
+									size="full"
+									optional>Before Landing</TextFieldSelect
+								>
 
-							<!-- After Landing Page -->
-							<TextFieldSelect
-								id="afterLandingPage"
-								bind:value={formValues.afterLandingPage}
-								options={afterLandingPageMap.values()}
-								size="full"
-								optional>After Landing</TextFieldSelect
-							>
+								<ConditionalDisplay show="blackbox">
+									<!-- Landing Page -->
+									<TextFieldSelectWithType
+										id="landingPage"
+										bind:value={formValues.landingPage}
+										bind:type={formValues.landingPageType}
+										pageOptions={landingPageMap.values()}
+										proxyOptions={landingProxyMap.values()}
+										required>Landing</TextFieldSelectWithType
+									>
+								</ConditionalDisplay>
+								<ConditionalDisplay show="whitebox">
+									<TextFieldSelect
+										id="landingPage"
+										bind:value={formValues.landingPage}
+										options={landingPageMap.values()}
+										size="full"
+										required>Landing</TextFieldSelect
+									>
+								</ConditionalDisplay>
+
+								<!-- After Landing Page -->
+								<TextFieldSelect
+									id="afterLandingPage"
+									bind:value={formValues.afterLandingPage}
+									options={afterLandingPageMap.values()}
+									size="full"
+									optional>After Landing</TextFieldSelect
+								>
+							{/if}
 						</div>
 
 						<div
 							class="md:col-span-3 md:border-l md:border-gray-200 md:dark:border-gray-700 md:pl-8 flex items-center"
 						>
-							<PageFlow
-								direction="vertical"
-								deliveryType={formValues.templateType === 'External API' ? 'api' : 'email'}
-								deliveryName={formValues.templateType === 'External API'
-									? formValues.apiSender
-									: formValues.email}
-								beforeName={formValues.beforeLandingPage}
-								landingName={formValues.landingPage}
-								landingIsProxy={formValues.landingPageType === 'proxy'}
-								afterName={formValues.afterLandingPage}
-								redirectURL={formValues.afterLandingPageRedirectURL}
-							/>
+							{#if formValues.multiLanguage}
+								<PageFlow
+									direction="vertical"
+									deliveryType={formValues.templateType === 'External API' ? 'api' : 'email'}
+									deliveryName={formValues.templateType === 'External API'
+										? formValues.apiSender
+										: 'Per language'}
+									beforeName={formValues.beforeLandingKind === 'page' ? 'Per language' : ''}
+									landingName={formValues.landingPageType === 'proxy'
+										? formValues.landingPage
+										: 'Per language'}
+									landingIsProxy={formValues.landingPageType === 'proxy'}
+									afterName={formValues.afterLandingKind === 'page' ? 'Per language' : ''}
+									redirectURL={formValues.afterLandingPageRedirectURL}
+								/>
+							{:else}
+								<PageFlow
+									direction="vertical"
+									deliveryType={formValues.templateType === 'External API' ? 'api' : 'email'}
+									deliveryName={formValues.templateType === 'External API'
+										? formValues.apiSender
+										: formValues.email}
+									beforeName={formValues.beforeLandingPage}
+									landingName={formValues.landingPage}
+									landingIsProxy={formValues.landingPageType === 'proxy'}
+									afterName={formValues.afterLandingPage}
+									redirectURL={formValues.afterLandingPageRedirectURL}
+								/>
+							{/if}
 						</div>
 					</div>
+				</div>
+
+				<!-- Languages Section: every language is a row, the first is the main language -->
+				<div class="w-full" id="template-languages">
+					<h3
+						class="text-base font-semibold text-pc-darkblue dark:text-white mb-3 pb-2 border-b border-gray-200 dark:border-gray-700 transition-colors duration-200"
+					>
+						Languages
+					</h3>
+					<CheckboxField
+						id="templateMultiLanguage"
+						inline
+						bind:value={formValues.multiLanguage}
+						on:change={onMultiLanguageChange}
+						toolTipText="Send the email and pages in more than one language. Each campaign decides who gets which language, using a recipient field such as Language or Country."
+					>
+						Multiple languages
+					</CheckboxField>
+					{#if formValues.multiLanguage}
+						<!-- one block per language: the language and its actions on the first
+						line, its email and pages under it with full width selects, so long
+						names stay readable -->
+						<ol class="flex flex-col pt-2">
+							{#each formValues.languages as row, i (row.key)}
+								<li
+									class="flex flex-col gap-1 border-gray-200 dark:border-gray-700"
+									class:pt-4={i > 0}
+									class:mt-4={i > 0}
+									class:border-t={i > 0}
+								>
+									<div class="flex items-center gap-2">
+										<div class="w-40 sm:w-48 flex-shrink-0">
+											<TextFieldSelect
+												id={`template-language-${row.key}`}
+												hideLabel
+												size="full"
+												required
+												placeholder="Language"
+												bind:value={row.language}
+												onSelect={() => (languagesError = '')}
+												options={rowLanguageOptions(i)}
+											/>
+										</div>
+										<div class="flex-1 min-w-0">
+											{#if i === 0}
+												<span
+													id="template-main-language"
+													class="block py-2 text-sm text-slate-500 dark:text-gray-400"
+													title="Recipients scheduled from now on get the main language when a campaign does not use Language by. Recipients already scheduled keep theirs."
+													>Main language</span
+												>
+											{:else}
+												<button
+													type="button"
+													class="pc-focus rounded-sm text-sm font-medium text-cta-blue dark:text-highlight-blue hover:underline"
+													title="Recipients scheduled from now on get the main language when a campaign does not use Language by. Recipients already scheduled keep theirs."
+													aria-label={`Make ${row.language ? languageName(row.language) : `language ${i + 1}`} the main language`}
+													on:click={() => makeMainLanguage(i)}>Make main</button
+												>
+											{/if}
+										</div>
+										<button
+											type="button"
+											class={rowButtonClass}
+											title={i === 0
+												? 'Make another language the main one to remove this one'
+												: formValues.languages.length <= 2
+													? 'A template with Multiple languages has at least two'
+													: 'Remove this language'}
+											aria-label={`Remove ${row.language ? languageName(row.language) : `language ${i + 1}`}`}
+											disabled={i === 0 || formValues.languages.length <= 2}
+											on:click={() => removeLanguage(i)}
+										>
+											<img class="w-4 flex-shrink-0" src="/delete2.svg" alt="" />
+										</button>
+									</div>
+									<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+										<div class="min-w-0">
+											<TextFieldSelect
+												id={`template-language-${row.key}-email`}
+												size="full"
+												required
+												bind:value={row.email}
+												onSelect={() => (languagesError = '')}
+												options={emailMap.values()}>Email</TextFieldSelect
+											>
+										</div>
+										{#each languageStages as stage (stage.key)}
+											<div class="min-w-0">
+												{#if stage.proxy}
+													<FieldLabel>{stage.label}</FieldLabel>
+													<span
+														class="block py-2 text-sm text-slate-500 dark:text-gray-400"
+														title="Proxy stages are the same in every language">Shared proxy</span
+													>
+												{:else}
+													<TextFieldSelect
+														id={`template-language-${row.key}-${stage.key}`}
+														size="full"
+														required
+														bind:value={row[stage.key]}
+														onSelect={() => (languagesError = '')}
+														options={stage.map.values()}>{stage.label}</TextFieldSelect
+													>
+												{/if}
+											</div>
+										{/each}
+									</div>
+								</li>
+							{/each}
+						</ol>
+						<div class="pt-3">
+							<button
+								id="template-add-language"
+								type="button"
+								class={addButtonClass}
+								disabled={formValues.languages.length >= LANGUAGES.length}
+								on:click={addLanguage}
+							>
+								+ Add Language
+							</button>
+						</div>
+					{/if}
+					{#if languagesError}
+						<div class="pt-1 text-red-600 dark:text-red-400 text-sm" role="alert">
+							{languagesError}
+						</div>
+					{/if}
 				</div>
 
 				<FormError message={modalError} />
@@ -1198,6 +1742,30 @@
 		confirm
 		bind:isVisible={isDeleteAlertVisible}
 	></DeleteAlert>
+	<Alert
+		headline="Remove languages"
+		ok="Remove"
+		bind:visible={isRemoveLanguagesAlertVisible}
+		onConfirm={async () => {
+			stopLanguages();
+			return { success: true };
+		}}
+	>
+		<p>
+			{#if removedLanguageNames.length}
+				{joinNames(removedLanguageNames)}
+				{removedLanguageNames.length === 1 ? 'is' : 'are'} removed when you save.
+			{:else}
+				The other languages are removed when you save.
+			{/if}
+			{keptLanguageName
+				? `${keptLanguageName} stays as the template's language.`
+				: "The main language stays as the template's language."}
+		</p>
+		{#if modalMode === 'update'}
+			<p class="mt-2">Saving fails while campaigns or programs use a removed language.</p>
+		{/if}
+	</Alert>
 	<DeleteAlert
 		title="Delete templates"
 		list={[

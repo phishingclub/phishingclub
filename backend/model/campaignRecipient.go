@@ -53,6 +53,28 @@ type CampaignRecipient struct {
 	TemplateID nullable.Nullable[uuid.UUID] `json:"templateID"`
 	// Template is the id and name of TemplateID, set when listing recipients
 	Template *CampaignTemplateRef `json:"template"`
+	// Language is the language this recipient is sent and shown. Null on rows
+	// planned before languages existed, see EffectiveLanguage.
+	Language nullable.Nullable[string] `json:"language"`
+}
+
+// EffectiveLanguage returns the recipient's language, or the language of
+// template when the row has none. Empty means the template content with no
+// language set.
+func (c *CampaignRecipient) EffectiveLanguage(template *CampaignTemplate) string {
+	if v, err := c.Language.Get(); err == nil && v != "" {
+		return v
+	}
+	if template == nil {
+		return ""
+	}
+	return template.TemplateLanguage()
+}
+
+// StampedLanguage returns the language stamped on the row, empty when it has
+// none. The language loader gives the template language for empty.
+func (c *CampaignRecipient) StampedLanguage() string {
+	return c.EffectiveLanguage(nil)
 }
 
 // EffectiveTemplateID returns the recipient's template, or the campaign's first

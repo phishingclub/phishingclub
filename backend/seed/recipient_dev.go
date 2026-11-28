@@ -29,7 +29,9 @@ type DevelopmentRecipient struct {
 	City            string
 	Country         string
 	Misc            string
-	CompanyID       string
+	// Language is a code of the fixed language list, empty for none
+	Language  string
+	CompanyID string
 }
 
 // tcmpRecpMap holds the company name and the recipient emails
@@ -49,12 +51,16 @@ func SeedDevelopmentRecipients(
 			FirstName:  "Alice",
 			LastName:   "",
 			Department: "Economy",
+			Country:    "Germany",
+			Language:   "de",
 		},
 		{
 			Email:      TEST_RECIPIENT_EMAIL_2,
 			FirstName:  "Bob",
 			LastName:   "",
 			Department: "Economy",
+			Country:    "Germany",
+			Language:   "de",
 		},
 		{
 
@@ -62,12 +68,16 @@ func SeedDevelopmentRecipients(
 			FirstName:  "Mallory",
 			LastName:   "",
 			Department: "Marketing",
+			Country:    "Denmark",
+			Language:   "da",
 		},
 		{
 			Email:      TEST_RECIPIENT_EMAIL_4,
 			FirstName:  "Vickey",
 			LastName:   "",
 			Department: "Marketing",
+			Country:    "Denmark",
+			Language:   "da",
 		},
 	}
 	// add random recipients
@@ -352,6 +362,7 @@ func createDevelopmentRecipients(
 			City:            city,
 			Country:         country,
 			Misc:            misc,
+			Language:        nullable.NewNullableWithValue(recipient.Language),
 			CompanyID:       companyID,
 		}
 		emailVO := recipient.Email.MustGet()

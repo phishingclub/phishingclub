@@ -2,11 +2,13 @@ package controller
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 	"github.com/phishingclub/phishingclub/database"
+	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
 	"github.com/phishingclub/phishingclub/repository"
 	"github.com/phishingclub/phishingclub/service"
@@ -351,4 +353,46 @@ func (r *RecipientGroup) DeleteByID(g *gin.Context) {
 		g,
 		&gin.H{},
 	)
+}
+
+// GetFieldValues returns the values of a recipient field over the members of
+// groups, for mapping them to languages. Query: field, groupIDs as a comma
+// separated list and the optional companyID.
+func (r *RecipientGroup) GetFieldValues(g *gin.Context) {
+	session, _, ok := r.handleSession(g)
+	if !ok {
+		return
+	}
+	companyID, ok := strictCompanyIDQuery(g, r.Response)
+	if !ok {
+		return
+	}
+	groupIDs := []*uuid.UUID{}
+	for _, part := range strings.Split(g.Query("groupIDs"), ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if len(groupIDs) >= service.MaxFieldValueGroups {
+			r.Response.BadRequestMessage(g, fmt.Sprintf("at most %d groups can be read at once", service.MaxFieldValueGroups))
+			return
+		}
+		id, err := uuid.Parse(part)
+		if err != nil {
+			r.Response.BadRequestMessage(g, errs.MsgFailedToParseUUID)
+			return
+		}
+		groupIDs = append(groupIDs, &id)
+	}
+	values, err := r.RecipientGroupService.GetFieldValues(
+		g.Request.Context(),
+		session,
+		companyID,
+		g.Query("field"),
+		groupIDs,
+	)
+	if ok := r.handleErrors(g, err); !ok {
+		return
+	}
+	r.Response.OK(g, values)
 }

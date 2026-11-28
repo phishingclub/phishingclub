@@ -396,6 +396,48 @@ func TestProgramTemplateMixBy(t *testing.T) {
 	}
 }
 
+// TestProgramValidateLanguageRouting checks Validate holds the language
+// field to its own allowlist apart from the mix fields, needs a default, and
+// stores the route keys normalized
+func TestProgramValidateLanguageRouting(t *testing.T) {
+	for _, v := range []string{LanguageRouteCountry, LanguageRouteMisc, LanguageRouteDepartment} {
+		p := validProgram()
+		p.LanguageRouteBy = nullable.NewNullableWithValue(v)
+		p.LanguageDefault = nullable.NewNullableWithValue("en")
+		if err := p.Validate(); err != nil {
+			t.Fatalf("%q should be allowed to pick languages: %v", v, err)
+		}
+	}
+	for _, v := range []string{"email", "Country", "country; DROP TABLE programs"} {
+		p := validProgram()
+		p.LanguageRouteBy = nullable.NewNullableWithValue(v)
+		p.LanguageDefault = nullable.NewNullableWithValue("en")
+		if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "languageRouteBy") {
+			t.Fatalf("%q should be refused on languageRouteBy, got %v", v, err)
+		}
+	}
+	p := validProgram()
+	p.LanguageRouteBy = nullable.NewNullableWithValue(LanguageRouteCountry)
+	if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "languageDefault") {
+		t.Fatalf("a default is required, got %v", err)
+	}
+	p.LanguageDefault = nullable.NewNullableWithValue(" EN ")
+	p.LanguageRoutes = nullable.NewNullableWithValue(map[string]string{"  Germany ": "DE"})
+	if err := p.Validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if p.LanguageDefault.MustGet() != "en" || p.LanguageRoutes.MustGet()["germany"] != "de" {
+		t.Fatalf("default and routes must be normalized, got %q %v", p.LanguageDefault.MustGet(), p.LanguageRoutes.MustGet())
+	}
+	m := p.ToDBMap()
+	if m["language_route_by"] != LanguageRouteCountry || m["language_default"] != "en" {
+		t.Fatalf("the routing must be written, got %v", m)
+	}
+	if _, ok := m["language_routes"]; ok {
+		t.Fatal("routes are child rows, not a column")
+	}
+}
+
 // TestProgramValidateNullEntries checks a null entry in a list of a request
 // is a validation error, not a crash
 func TestProgramValidateNullEntries(t *testing.T) {

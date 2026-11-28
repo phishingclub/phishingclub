@@ -129,6 +129,12 @@ func campaignCompanyRefs(c *model.Campaign) []CompanyRef {
 
 // campaignTemplateCompanyRefs lists the references a campaign template request sets
 func campaignTemplateCompanyRefs(t *model.CampaignTemplate) []CompanyRef {
+	return append(campaignTemplateMainCompanyRefs(t), templateLanguageCompanyRefs(languagesOf(t))...)
+}
+
+// campaignTemplateMainCompanyRefs returns the references of a template's own
+// fields, without its language rows
+func campaignTemplateMainCompanyRefs(t *model.CampaignTemplate) []CompanyRef {
 	refs := companyRefs{}
 	refs.add(database.DOMAIN_TABLE, "domainID", t.DomainID)
 	refs.add(database.EMAIL_TABLE, "emailID", t.EmailID)

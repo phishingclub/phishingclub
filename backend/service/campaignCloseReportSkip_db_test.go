@@ -42,6 +42,7 @@ func newCloseReportSkipFixture(t *testing.T) *closeReportSkipFixture {
 		&database.Company{},
 		&database.Option{},
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignEvent{},
 		&database.Event{},
 		&database.Recipient{},

@@ -116,7 +116,7 @@ require (
 	golang.org/x/arch v0.9.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/text v0.41.0
 	golang.org/x/tools v0.49.0 // indirect
 	google.golang.org/protobuf v1.36.7 // indirect
 )

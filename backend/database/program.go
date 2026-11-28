@@ -82,6 +82,10 @@ type Program struct {
 	// order: department, position or city. Empty is off. Sequential order
 	// keeps the value but does not use it.
 	TemplateMixBy string `gorm:"not null;default:''"`
+	// LanguageRouteBy and LanguageDefault pick each person's language, see
+	// Campaign. The values are mapped in program_language_routes.
+	LanguageRouteBy string `gorm:"not null;type:varchar(32);default:''"`
+	LanguageDefault string `gorm:"not null;type:varchar(16);default:''"`
 
 	// StepIntervalMinutes is the time between the start of one recipient's
 	// rounds, one step per round. The default is model.ProgramDefaultIntervalMinutes,

@@ -76,6 +76,20 @@
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
 	import ConditionalDisplay from '$lib/components/ConditionalDisplay.svelte';
 	import ToolTip from '$lib/components/ToolTip.svelte';
+	import LanguageRouteFields from '$lib/components/LanguageRouteFields.svelte';
+	import { languageName } from '$lib/utils/languages.js';
+	import {
+		commonLanguages,
+		hasLanguageRows,
+		LANGUAGE_FIELD,
+		languageRoutingErrors,
+		oneLanguageOnlyText,
+		routedCodes as routedCodesOf,
+		sentLanguages,
+		sentLanguagesText,
+		sharedMainLanguage,
+		valueMap
+	} from '$lib/utils/languageRouting.js';
 
 	let currentStep = 1;
 
@@ -232,6 +246,18 @@
 	let templateRowsByID = {};
 	// names of pool templates that are no longer usable when editing or copying
 	let missingPoolTemplates = [];
+	// the template language and the language rows of each listed template by
+	// id, taken from the template list rows
+	let poolTemplateLanguages = {};
+	$: poolTemplateLanguages = Object.fromEntries(
+		Object.values(templateRowsByID)
+			.map((row) => [row.id, languageInfoOf(row)])
+			.filter(([, info]) => info)
+	);
+	// Language by errors by field: routeBy, default, routes
+	let languageErrors = {};
+	// recipients per language code from the Recipients step, null when not known
+	let languageCounts = null;
 	let recipientGroupsByID = {};
 	let recipientGroupMap = new BiMap({});
 	let recipientGroupRecipients = {}; // stores actual recipients for each group
@@ -403,6 +429,12 @@
 
 	// self managed with a pool, which an anonymous campaign can not have
 	$: selfManagedPool = scheduleType === 'self-managed' && formValues.templates.length > 1;
+	// self managed with Language by picking more than one language, which an
+	// anonymous campaign can not have either
+	$: selfManagedLanguages =
+		scheduleType === 'self-managed' &&
+		(routedCodes.length > 1 || formValues.languageRouteBy === LANGUAGE_FIELD);
+	$: anonymousSelfManaged = formValues.isAnonymous && scheduleType === 'self-managed';
 	// reactive: true when at least one selected recipient group is dynamic
 	$: hasDynamicGroup = formValues.recipientGroups.some((label) => {
 		const id = recipientGroupMap.byValue(label);
@@ -525,6 +557,7 @@
 		City: 'city',
 		Country: 'country',
 		Misc: 'misc',
+		Language: 'language',
 		'Extra ID': 'extraID'
 	});
 
@@ -618,6 +651,8 @@
 	};
 
 	let form = null;
+	// Language by routes and default set aside while the wizard is open
+	let languageKept = {};
 	let formValues = {
 		name: null,
 		sendStartAt: null,
@@ -629,6 +664,9 @@
 		dataAnonymizeAt: null,
 		templates: [],
 		templateMixBy: defaultTemplateMixBy,
+		languageRouteBy: '',
+		languageDefault: '',
+		languageRoutes: valueMap(),
 		sortField: defaultSendField,
 		sortOrder: defaultSendOrder,
 		recipientGroups: [],
@@ -915,6 +953,12 @@
 	};
 
 	const validateRecipients = () => {
+		languageErrors = {};
+		const languageError = languageRoutingError();
+		if (languageError) {
+			languageErrors = languageError;
+			return false;
+		}
 		return checkCurrentStepValidity();
 	};
 
@@ -928,14 +972,14 @@
 			const element = currentStepElements[i];
 			element.setCustomValidity('');
 		}
-		if (!checkTemplatePool([anonymousPoolError])) {
+		if (!checkTemplatePool([anonymousPoolError, anonymousLanguagesError])) {
 			return false;
 		}
 		return checkCurrentStepValidity();
 	};
 
 	const validateMisc = () => {
-		if (!checkTemplatePool([anonymousPoolError])) {
+		if (!checkTemplatePool([anonymousPoolError, anonymousLanguagesError])) {
 			return false;
 		}
 		// validate that deny page is selected if evasion page or filtering is used
@@ -959,6 +1003,7 @@
 		templateMap = BiMap.FromArrayOfObjects(templates);
 		templateRowsByID = Object.fromEntries(templates.map((t) => [t.id, t]));
 		templateDetailsCache = {};
+		languageEmailCache = {};
 	};
 
 	// same limit as the server
@@ -1025,6 +1070,153 @@
 			return 'An anonymous self managed campaign can use only one template.';
 		}
 		return '';
+	};
+
+	/** @returns {string} empty unless an anonymous self managed campaign routes to several languages */
+	const anonymousLanguagesError = () =>
+		formValues.isAnonymous && selfManagedLanguages ? oneLanguageOnlyText : '';
+
+	// the template language and the language rows of a template list row, null
+	// when the row does not carry them
+	const languageInfoOf = (row) =>
+		row && Array.isArray(row.languages)
+			? { name: row.name, language: row.language || '', languages: row.languages }
+			: null;
+	$: poolIDs = formValues.templates.map((name) => templateMap.byValue(name)).filter(Boolean);
+	$: poolInfos = poolIDs.map((id) => poolTemplateLanguages[id]).filter(Boolean);
+	// true when the languages of every pool template are known
+	$: poolInfosKnown = poolInfos.length > 0 && poolInfos.length === poolIDs.length;
+	// the languages every pool template can send, in the order of the fixed list
+	$: poolLanguages = poolInfosKnown ? commonLanguages(poolInfos) : [];
+	// Language by shows once a pool template has more languages, or when it is set
+	$: showLanguageBy = !!formValues.languageRouteBy || poolInfos.some(hasLanguageRows);
+	// what recipients get with Language by None on a pool with languages
+	$: poolMainLanguage = poolInfosKnown ? sharedMainLanguage(poolInfos) : '';
+	// an error goes once its field changes
+	let languageErrorValues = '';
+	$: {
+		const values = JSON.stringify([
+			formValues.languageRouteBy,
+			formValues.languageDefault,
+			formValues.languageRoutes,
+			formValues.templates
+		]);
+		if (values !== languageErrorValues) {
+			languageErrorValues = values;
+			languageErrors = {};
+		}
+	}
+	// the codes Language by can pick: the default and every route
+	$: routedCodes = formValues.languageRouteBy
+		? routedCodesOf(formValues.languageDefault, formValues.languageRoutes)
+		: [];
+
+	/** @returns {Object|null} the Language by error by field, null when it is fine */
+	const languageRoutingError = () => {
+		const errors = languageRoutingErrors({
+			routeBy: formValues.languageRouteBy,
+			defaultLanguage: formValues.languageDefault,
+			routes: formValues.languageRoutes,
+			templates: poolInfos,
+			oneLanguageOnly: anonymousSelfManaged
+		});
+		return Object.keys(errors).length ? errors : null;
+	};
+
+	// the Language by fields of a request. Off sends only the field, which
+	// clears the default and the routes.
+	const languagePayload = () =>
+		formValues.languageRouteBy
+			? {
+					languageRouteBy: formValues.languageRouteBy,
+					languageDefault: formValues.languageDefault,
+					languageRoutes: formValues.languageRoutes
+				}
+			: { languageRouteBy: '' };
+
+	// a server refusal of a Language by field goes to its field on the
+	// Recipients step, true when it was one
+	const showLanguageRefusal = async (error) => {
+		const match = /^(languageRouteBy|languageDefault|languageRoutes): (.+)$/s.exec(
+			String(error ?? '')
+		);
+		if (!match) return false;
+		const field = {
+			languageRouteBy: 'routeBy',
+			languageDefault: 'default',
+			languageRoutes: 'routes'
+		}[match[1]];
+		const text = match[2];
+		languageErrors = { [field]: text.charAt(0).toUpperCase() + text.slice(1) };
+		modalError = '';
+		currentStep = 2;
+		await tick();
+		focusStep();
+		return true;
+	};
+
+	// the emails of the pool template languages, for the delivery details. One
+	// load per email, a few at a time, cleared when the wizard opens.
+	let languageEmailCache = {};
+	const languageEmailQueue = [];
+	let languageEmailsLoading = 0;
+	const languageEmailLimit = 4;
+	const nextLanguageEmails = () => {
+		while (languageEmailsLoading < languageEmailLimit && languageEmailQueue.length) {
+			const load = languageEmailQueue.shift();
+			languageEmailsLoading++;
+			load().finally(() => {
+				languageEmailsLoading--;
+				nextLanguageEmails();
+			});
+		}
+	};
+	const getLanguageEmail = (emailID) => {
+		if (!emailID) return Promise.resolve(null);
+		if (!languageEmailCache[emailID]) {
+			const cache = languageEmailCache;
+			const pending = new Promise((resolve, reject) => {
+				languageEmailQueue.push(() =>
+					api.email
+						.getByID(emailID)
+						.then((res) => {
+							if (!res.success) throw new Error(res.error);
+							resolve(res.data);
+						})
+						.catch((e) => {
+							// a failed load is tried again on the next render
+							if (cache[emailID] === pending) delete cache[emailID];
+							reject(e);
+						})
+				);
+				nextLanguageEmails();
+			});
+			cache[emailID] = pending;
+		}
+		return languageEmailCache[emailID];
+	};
+	// the languages the campaign sends, default first, then by name, with how
+	// many recipients of the picked groups get each when that is known.
+	// Languages no recipient gets are left out.
+	$: reviewLanguages = formValues.languageRouteBy
+		? sentLanguages(
+				formValues.languageDefault,
+				formValues.languageRoutes,
+				lateScheduleEnabled ? null : languageCounts,
+				formValues.languageRouteBy === LANGUAGE_FIELD ? poolLanguages : null
+			)
+		: [];
+	$: reviewLanguageText = sentLanguagesText(reviewLanguages);
+	// the languages of a pool template the campaign sends, the main language
+	// with the template's own email and the others with their email ids
+	const deliveryLanguagesOf = (templateName, _languages, _infos) => {
+		const info = poolTemplateLanguages[templateMap.byValue(templateName)];
+		if (!info) return [];
+		return reviewLanguages.map(({ code }) => ({
+			code,
+			main: code === info.language,
+			emailID: info.languages.find((l) => l.language === code)?.emailID ?? null
+		}));
 	};
 
 	const refreshCampaignDependencyData = async () => {
@@ -1201,6 +1393,7 @@
 				templateID: templateIDs[0],
 				templateIDs: templateIDs,
 				templateMixBy: templateMixBy.byKey(formValues.templateMixBy) || 'department',
+				...languagePayload(),
 				sendStartAt: sendStartAtUTC,
 				sendEndAt: sendEndAtUTC,
 				sortField: sortField.byKey(formValues.sortField),
@@ -1241,6 +1434,7 @@
 			});
 
 			if (!res.success) {
+				if (await showLanguageRefusal(res.error)) return;
 				modalError = res.error;
 				return;
 			}
@@ -1295,6 +1489,7 @@
 				templateID: templateIDs[0],
 				templateIDs: templateIDs,
 				templateMixBy: templateMixBy.byKey(formValues.templateMixBy) || 'department',
+				...languagePayload(),
 				sortField: sortField.byKey(formValues.sortField),
 				sortOrder: sortOrder.byKey(formValues.sortOrder),
 				sendStartAt: sendStartAtUTC,
@@ -1335,6 +1530,7 @@
 			});
 
 			if (!res.success) {
+				if (await showLanguageRefusal(res.error)) return;
 				modalError = res.error;
 				return;
 			}
@@ -1348,7 +1544,7 @@
 	};
 
 	const onSubmit = async () => {
-		if (!checkTemplatePool([templatePoolError, anonymousPoolError])) {
+		if (!checkTemplatePool([templatePoolError, anonymousPoolError, anonymousLanguagesError])) {
 			return;
 		}
 		if (!validateAllSteps()) {
@@ -1468,7 +1664,10 @@
 	};
 
 	const resetFormValues = () => {
+		languageKept = {};
+		languageCounts = null;
 		missingPoolTemplates = [];
+		languageErrors = {};
 		formValues = {
 			name: null,
 			sendStartAt: null,
@@ -1480,6 +1679,9 @@
 			dataAnonymizeAt: null,
 			templates: [],
 			templateMixBy: defaultTemplateMixBy,
+			languageRouteBy: '',
+			languageDefault: '',
+			languageRoutes: valueMap(),
 			sortField: defaultSendField,
 			sortOrder: defaultSendOrder,
 			recipientGroups: [],
@@ -1591,6 +1793,7 @@
 	};
 
 	const assignCampaign = (campaign, copyMode = false) => {
+		languageKept = {};
 		// pool templates that are deleted or no longer usable are not in templateMap.
 		// they are named in step 1 so they are never dropped from the pool unnoticed
 		const poolIDs = campaign.templateIDs?.length ? campaign.templateIDs : [campaign.templateID];
@@ -1611,6 +1814,9 @@
 			sortOrder: sortOrder.byValue(campaign.sortOrder),
 			// empty or missing means department
 			templateMixBy: templateMixBy.byValue(campaign.templateMixBy) || defaultTemplateMixBy,
+			languageRouteBy: campaign.languageRouteBy || '',
+			languageDefault: campaign.languageRouteBy ? campaign.languageDefault || '' : '',
+			languageRoutes: valueMap(campaign.languageRouteBy ? campaign.languageRoutes : null),
 			sendStartAt: copyMode ? null : campaign.sendStartAt,
 			sendEndAt: copyMode ? null : campaign.sendEndAt,
 			scheduledStartAt: copyMode
@@ -2333,6 +2539,34 @@
 									</button>
 								</div>
 							{/if}
+
+							{#if showLanguageBy}
+								<div
+									class="mb-6 w-full max-w-lg"
+									class:mt-6={formValues.recipientGroups.length > 0}
+									id="campaign-language-options"
+								>
+									<LanguageRouteFields
+										idPrefix="campaign"
+										templates={poolInfosKnown ? poolInfos : []}
+										bind:routeBy={formValues.languageRouteBy}
+										bind:defaultLanguage={formValues.languageDefault}
+										bind:routes={formValues.languageRoutes}
+										bind:kept={languageKept}
+										languages={poolLanguages}
+										groupIDs={formValues.recipientGroups
+											.map((name) => recipientGroupMap.byValue(name))
+											.filter(Boolean)}
+										companyID={contextCompanyID}
+										keepNote={modalMode === 'update' && scheduleType === 'self-managed'
+											? 'Recipients not sent to yet get their language from these settings.'
+											: ''}
+										errors={languageErrors}
+										oneLanguageOnly={anonymousSelfManaged}
+										bind:languageCounts
+									/>
+								</div>
+							{/if}
 						</div>
 					</FormColumns>
 				{:else if currentStep === 3}
@@ -2680,6 +2914,12 @@
 												}
 											}}>Late Schedule</CheckboxField
 										>
+										{#if lateScheduleEnabled && formValues.languageRouteBy}
+											<Note
+												>Recipients are added when the campaign is scheduled, their language is
+												decided then.</Note
+											>
+										{/if}
 
 										<TextFieldSelect
 											id="sortField"
@@ -2827,7 +3067,8 @@
 
 							<div class="w-full">
 								<SelectSquare
-									disabled={modalMode === 'update' || (selfManagedPool && !formValues.isAnonymous)}
+									disabled={modalMode === 'update' ||
+										((selfManagedPool || selfManagedLanguages) && !formValues.isAnonymous)}
 									toolTipText="No names, emails, IPs or entered data are stored."
 									label="Anonymous campaign?"
 									options={saveSubbmitedDataOptions}
@@ -2836,6 +3077,11 @@
 								{#if selfManagedPool && (formValues.isAnonymous || modalMode !== 'update')}
 									<p class="mb-4 text-sm text-slate-600 dark:text-gray-300">
 										Anonymous self managed campaigns can use only one template, because you send
+										each email yourself.
+									</p>
+								{:else if selfManagedLanguages && (formValues.isAnonymous || modalMode !== 'update')}
+									<p class="mb-4 text-sm text-slate-600 dark:text-gray-300">
+										Anonymous self managed campaigns can use only one language, because you send
 										each email yourself.
 									</p>
 								{/if}
@@ -3286,6 +3532,39 @@
 														>{formValues.selectedCount} recipients</span
 													>
 												{/if}
+
+												{#if formValues.languageRouteBy}
+													<span class="text-slate-500 dark:text-gray-400 font-medium"
+														>Language by:</span
+													>
+													<span class="text-pc-darkblue dark:text-white"
+														>{formValues.languageRouteBy.charAt(0).toUpperCase() +
+															formValues.languageRouteBy.slice(1)}</span
+													>
+
+													<span class="text-slate-500 dark:text-gray-400 font-medium"
+														>Default language:</span
+													>
+													<span class="text-pc-darkblue dark:text-white"
+														>{formValues.languageDefault
+															? languageName(formValues.languageDefault)
+															: 'Not set'}</span
+													>
+
+													<span class="text-slate-500 dark:text-gray-400 font-medium"
+														>Languages:</span
+													>
+													<span class="text-pc-darkblue dark:text-white">{reviewLanguageText}</span>
+												{:else if poolInfos.some(hasLanguageRows)}
+													<span class="text-slate-500 dark:text-gray-400 font-medium"
+														>Language:</span
+													>
+													<span class="text-pc-darkblue dark:text-white"
+														>{poolMainLanguage
+															? `${languageName(poolMainLanguage)} (main language)`
+															: 'Main language of each template'}</span
+													>
+												{/if}
 											</div>
 
 											{#if lateScheduleEnabled}
@@ -3369,7 +3648,84 @@
 															Loading delivery details...
 														</div>
 													{:then template}
-														{#if template?.apiSender}
+														{#if formValues.languageRouteBy && poolTemplateLanguages[templateMap.byValue(templateName)]?.language && (template?.apiSender || template?.email)}
+															<!-- the sender lines all languages share, then one block per language -->
+															<div
+																class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]"
+															>
+																<span class="text-slate-500 dark:text-gray-400 font-medium"
+																	>Type:</span
+																>
+																<span class="text-pc-darkblue dark:text-white"
+																	>{template.apiSender ? 'API Sender' : 'SMTP'}</span
+																>
+																{#if template.apiSender}
+																	<span class="text-slate-500 dark:text-gray-400 font-medium"
+																		>Name:</span
+																	>
+																	<span class="text-pc-darkblue dark:text-white"
+																		>{template.apiSender.name || 'Not set'}</span
+																	>
+																{/if}
+															</div>
+															<!-- the email of each language the campaign sends -->
+															{#each deliveryLanguagesOf(templateName, reviewLanguages, poolTemplateLanguages) as lang (lang.code)}
+																<div
+																	class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]"
+																>
+																	<span class="text-slate-500 dark:text-gray-400 font-medium"
+																		>Language:</span
+																	>
+																	<span class="text-pc-darkblue dark:text-white"
+																		>{languageName(lang.code)}</span
+																	>
+																	{#await lang.main ? template.email : getLanguageEmail(lang.emailID)}
+																		<span class="text-slate-500 dark:text-gray-400 font-medium"
+																			>Name:</span
+																		>
+																		<span class="text-gray-500 dark:text-gray-400">Loading...</span>
+																	{:then email}
+																		{@const fromParts = splitFromHeader(email?.mailHeaderFrom)}
+																		<span class="text-slate-500 dark:text-gray-400 font-medium"
+																			>{template?.apiSender ? 'Email:' : 'Name:'}</span
+																		>
+																		<span class="text-pc-darkblue dark:text-white"
+																			>{email?.name || 'Not set'}</span
+																		>
+																		{#if !template?.apiSender}
+																			<span class="text-slate-500 dark:text-gray-400 font-medium"
+																				>From:</span
+																			>
+																			<span class="text-pc-darkblue dark:text-white"
+																				>{#if fromParts}<span class="block">{fromParts.name}</span
+																					><span class="block">{fromParts.address}</span
+																					>{:else}{email?.mailHeaderFrom || 'Not set'}{/if}</span
+																			>
+
+																			<span class="text-slate-500 dark:text-gray-400 font-medium"
+																				>Mail from:</span
+																			>
+																			<span class="text-pc-darkblue dark:text-white"
+																				>{email?.mailEnvelopeFrom || 'Not set'}</span
+																			>
+																		{/if}
+																		<span class="text-slate-500 dark:text-gray-400 font-medium"
+																			>Subject:</span
+																		>
+																		<span class="text-pc-darkblue dark:text-white"
+																			>{email?.mailHeaderSubject || 'Not set'}</span
+																		>
+																	{:catch}
+																		<span class="text-slate-500 dark:text-gray-400 font-medium"
+																			>Name:</span
+																		>
+																		<span class="text-red-600 dark:text-red-400"
+																			>Failed to load, go back a step to retry</span
+																		>
+																	{/await}
+																</div>
+															{/each}
+														{:else if template?.apiSender}
 															<div
 																class="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm [&>*]:min-w-0 [&>:nth-child(even)]:[overflow-wrap:anywhere]"
 															>
@@ -3901,7 +4257,9 @@
 												>
 													{recipient.email}
 													{#if recipient.scimSoftDeletedAt}
-														<StatusBadge tone="neutral" title="Disabled through SCIM" class="ml-2">Disabled</StatusBadge>
+														<StatusBadge tone="neutral" title="Disabled through SCIM" class="ml-2"
+															>Disabled</StatusBadge
+														>
 													{/if}
 												</span>
 												{#if recipient.firstName || recipient.lastName}

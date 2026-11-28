@@ -61,6 +61,16 @@ type Campaign struct {
 	// campaign has several templates, one of the TemplateMix values. Empty
 	// means department.
 	TemplateMixBy nullable.Nullable[string] `json:"templateMixBy"`
+	// LanguageRouteBy is the recipient field that picks each recipient's
+	// language, one of LanguageRouteFields. Empty is off.
+	LanguageRouteBy nullable.Nullable[string] `json:"languageRouteBy"`
+	// LanguageDefault is the language of a recipient whose value has no route,
+	// required when LanguageRouteBy is set
+	LanguageDefault nullable.Nullable[string] `json:"languageDefault"`
+	// LanguageRoutes maps a recipient field value to a language code. Keys are
+	// stored normalized, see NormalizeLanguageKey. Left out keeps the stored
+	// routes. Read only when the campaign is loaded with its routes.
+	LanguageRoutes nullable.Nullable[map[string]string] `json:"languageRoutes"`
 	// IsTraining is snapshotted from the template; read-only in campaign requests.
 	IsTraining nullable.Nullable[bool] `json:"isTraining"`
 	// deprecated: use Webhooks array instead for multiple webhooks with per-webhook settings
@@ -181,6 +191,24 @@ func (c *Campaign) ValidateTemplateMixBy() error {
 		return validate.WrapErrorWithField(errors.New("unknown field to mix templates by"), "templateMixBy")
 	}
 	return nil
+}
+
+// ValidateLanguageRouting checks the language fields and normalizes the route
+// keys, see languageRouting.validate
+func (c *Campaign) ValidateLanguageRouting() error {
+	return languageRouting{
+		routeBy:  &c.LanguageRouteBy,
+		fallback: &c.LanguageDefault,
+		routes:   &c.LanguageRoutes,
+	}.validate()
+}
+
+// LanguageRouteField returns the field languages are picked by, empty when off
+func (c *Campaign) LanguageRouteField() string {
+	if v, err := c.LanguageRouteBy.Get(); err == nil {
+		return v
+	}
+	return ""
 }
 
 // TemplateMixField returns the field templates are mixed by, department when
@@ -349,6 +377,12 @@ func (c *Campaign) validate(checkAnonymizeAfterEnd bool) error {
 		return err
 	}
 	if err := c.ValidateTemplateMixBy(); err != nil {
+		return err
+	}
+	if err := c.ValidateLanguageRouting(); err != nil {
+		return err
+	}
+	if err := c.ValidateAnonymousSelfManagedLanguages(); err != nil {
 		return err
 	}
 	if c.TemplateIDs.IsSpecified() {
@@ -724,6 +758,15 @@ func (c *Campaign) ToDBMap() map[string]any {
 			m["template_mix_by"] = v
 		}
 	}
+	if c.LanguageRouteBy.IsSpecified() {
+		m["language_route_by"] = c.LanguageRouteField()
+	}
+	if c.LanguageDefault.IsSpecified() {
+		m["language_default"] = ""
+		if v, err := c.LanguageDefault.Get(); err == nil {
+			m["language_default"] = v
+		}
+	}
 	if c.Obfuscate.IsSpecified() {
 		m["obfuscate"] = false
 		if v, err := c.Obfuscate.Get(); err == nil {
@@ -897,6 +940,51 @@ func (c *Campaign) ValidateAnonymousSelfManagedPool() error {
 		errors.New("an anonymous self managed campaign can use only one template"),
 		"templateIDs",
 	)
+}
+
+// ValidateAnonymousSelfManagedLanguages refuses Language by that can pick more
+// than one language on a campaign that is both anonymous and self managed.
+// The operator delivers each email by hand there, so they would see which
+// language each person got. Routes that are not set on c are not checked.
+func (c *Campaign) ValidateAnonymousSelfManagedLanguages() error {
+	anonymous, err := c.IsAnonymous.Get()
+	if err != nil || !anonymous || !c.IsSelfManaged() {
+		return nil
+	}
+	fallback := ""
+	if v, err := c.LanguageDefault.Get(); err == nil {
+		fallback = v
+	}
+	routes := map[string]string{}
+	if v, err := c.LanguageRoutes.Get(); err == nil {
+		routes = v
+	}
+	return AnonymousSelfManagedLanguagesError(c.LanguageRouteField(), fallback, routes)
+}
+
+// AnonymousSelfManagedLanguagesError returns the refusal for an anonymous self
+// managed campaign whose routing can pick more than one language, else nil
+func AnonymousSelfManagedLanguagesError(routeBy string, fallback string, routes map[string]string) error {
+	// the Language field can give each recipient another language
+	if routeBy == "" || (routeBy != LanguageRouteLanguage && RoutedLanguageCount(fallback, routes) <= 1) {
+		return nil
+	}
+	return validate.WrapErrorWithField(
+		errors.New("an anonymous self managed campaign can use only one language, as each email is delivered by hand"),
+		"languageRouteBy",
+	)
+}
+
+// RoutedLanguageCount returns how many languages a default and routes can pick
+func RoutedLanguageCount(fallback string, routes map[string]string) int {
+	seen := map[string]bool{}
+	if fallback != "" {
+		seen[fallback] = true
+	}
+	for _, code := range routes {
+		seen[code] = true
+	}
+	return len(seen)
 }
 
 // IsSelfManaged returns true if the campaign is self managed

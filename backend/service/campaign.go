@@ -223,6 +223,16 @@ func (c *Campaign) Create(
 		return nil, err
 	}
 	cTemplate := poolTemplates[0]
+	// every language the routing can pick must be sendable by every pool
+	// template, the routes are checked again when the campaign is scheduled.
+	// With the Language field the languages the group members have count.
+	if routeBy, fallback, routes, err := c.languageRoutingOf(ctx, campaign); err != nil {
+		return nil, err
+	} else if reachable, err := c.reachableLanguages(ctx, routeBy, campaign); err != nil {
+		return nil, errs.Wrap(err)
+	} else if _, err := c.checkPoolLanguages(ctx, companyIDPtr(campaign.CompanyID), routeBy, fallback, routes, campaign.TemplatePool(), reachable); err != nil {
+		return nil, err
+	}
 	// the training nature is owned by the template, never the client. Set it from
 	// the template so the campaign row carries it from creation, before any
 	// schedule snapshot, and a crafted request cannot flip it.
@@ -367,6 +377,12 @@ func (c *Campaign) Create(
 	ae.Details["id"] = id.String()
 	ae.Details["templateIds"] = uuidStrings(campaign.TemplatePool())
 	ae.Details["templateMixBy"] = campaign.TemplateMixField()
+	if routeBy := campaign.LanguageRouteField(); routeBy != "" {
+		// the route keys are recipient values, only their count is logged
+		ae.Details["languageRouteBy"] = routeBy
+		ae.Details["languageDefault"] = campaign.LanguageDefault.MustGet()
+		ae.Details["languageRouteCount"] = model.LanguageRouteCount(campaign.LanguageRoutes)
+	}
 	c.AuditLogAuthorized(ae)
 	return id, nil
 }
@@ -531,6 +547,35 @@ func (c *Campaign) recipientTemplateHidden(ctx context.Context, campaign *model.
 		return true, nil
 	}
 	many, err := c.CampaignRepository.HasTemplateGroupDataByCampaignID(ctx, &campaignID)
+	if err != nil {
+		return true, errs.Wrap(err)
+	}
+	return many, nil
+}
+
+// errRecipientContentHidden is returned by per recipient views that would show
+// which template or language a person got on an anonymous campaign with
+// several templates or languages
+var errRecipientContentHidden = errs.NewCustomError(
+	errors.New("not available on an anonymous campaign with several templates or languages"),
+)
+
+// recipientContentHidden reports whether per recipient views must not show
+// which template or which language a recipient got. That is an anonymous
+// campaign that uses more than one template or more than one language. It
+// fails closed when the use can not be read.
+func (c *Campaign) recipientContentHidden(ctx context.Context, campaign *model.Campaign) (bool, error) {
+	if hidden, err := c.recipientTemplateHidden(ctx, campaign); err != nil || hidden {
+		return true, err
+	}
+	if !campaignAnonymous(campaign) {
+		return false, nil
+	}
+	campaignID, err := campaign.ID.Get()
+	if err != nil {
+		return true, nil
+	}
+	many, err := c.CampaignRepository.HasLanguageGroupDataByCampaignID(ctx, &campaignID)
 	if err != nil {
 		return true, errs.Wrap(err)
 	}
@@ -779,6 +824,17 @@ func (c *Campaign) schedule(
 	// this run is allocated under the same rules. A failure is logged and the
 	// campaign schedules on with the settings it holds
 	_ = c.snapshotLureSettings(ctx, session, campaign)
+	// the pool and the language of each new row are settled before any row is
+	// written, so routing that picks a language a pool template can not send is
+	// refused also for a late or repeated schedule
+	pool, err := c.templatePool(ctx, campaign)
+	if err != nil {
+		return errs.Wrap(err)
+	}
+	languages, err := c.campaignLanguagesFor(ctx, campaign, pool)
+	if err != nil {
+		return err
+	}
 
 	// get all recipients and remove duplicates
 	recipients := []*model.Recipient{}
@@ -886,20 +942,6 @@ func (c *Campaign) schedule(
 		if err != nil {
 			return errs.Wrap(err)
 		}
-		pool, err := c.templatePool(ctx, campaign)
-		if err != nil {
-			return errs.Wrap(err)
-		}
-		// c.Logger.Debugw("keeping recpient IDs", recipientIDs)
-		err = c.CampaignRecipientRepository.DeleteRecipientsNotIn(
-			ctx,
-			&campaignID,
-			recipientIDs,
-		)
-		if err != nil {
-			c.Logger.Errorw("failed to delete campaign recipients", "error", err)
-			return errs.Wrap(err)
-		}
 		// find the recipients that are not already in the schedule
 		newRecipients := []*model.Recipient{}
 		for _, recipient := range recipients {
@@ -922,6 +964,21 @@ func (c *Campaign) schedule(
 				continue
 			}
 			newRecipients = append(newRecipients, recipient)
+		}
+		// the emails of the languages the new rows get, before any row is
+		// written or removed
+		if err := c.checkStampEmails(ctx, languages, recipientLanguages(newRecipients)); err != nil {
+			return err
+		}
+		// c.Logger.Debugw("keeping recpient IDs", recipientIDs)
+		err = c.CampaignRecipientRepository.DeleteRecipientsNotIn(
+			ctx,
+			&campaignID,
+			recipientIDs,
+		)
+		if err != nil {
+			c.Logger.Errorw("failed to delete campaign recipients", "error", err)
+			return errs.Wrap(err)
 		}
 		// each new recipient gets the pool template its "Balance per" group has
 		// least of so far, then the one least used in the campaign, so a group
@@ -965,11 +1022,13 @@ func (c *Campaign) schedule(
 		for _, i := range groupByKey(keys, rng) {
 			recipient := newRecipients[i]
 			recpID := nullable.NewNullableWithValue(recipient.ID.MustGet())
+			templateID := pickForGroup(groupCounts[keys[i]], templateCounts, pool, rng)
 			campaignRecipient := &model.CampaignRecipient{
 				RecipientID: recpID,
 				CampaignID:  nullable.NewNullableWithValue(campaignID),
 				SelfManaged: nullable.NewNullableWithValue(true),
-				TemplateID:  nullable.NewNullableWithValue(pickForGroup(groupCounts[keys[i]], templateCounts, pool, rng)),
+				TemplateID:  nullable.NewNullableWithValue(templateID),
+				Language:    languages.languageFor(recipient, templateID),
 			}
 			c.applyAnonymousSnapshot(campaign, campaignRecipient, recipient)
 			if err := allocator.applyTo(campaignRecipient); err != nil {
@@ -1007,11 +1066,21 @@ func (c *Campaign) schedule(
 	if recipientsCount == 0 {
 		return fmt.Errorf("no recipients to schedule")
 	}
+	// the emails of the languages the rows get, before any row is written
+	if err := c.checkStampEmails(ctx, languages, recipientLanguages(recipients)); err != nil {
+		return err
+	}
 	campaignRecipients := make([]*model.CampaignRecipient, recipientsCount)
 	// sort the recipients by the selected sort field and order
 	sortOrder := campaign.SortOrder.MustGet().String()
 	sortField := campaign.SortField.MustGet().String()
-	recipients = sortRecipients(recipients, sortOrder, sortField)
+	recipients, known := sortRecipients(recipients, sortOrder, sortField)
+	if !known {
+		c.Logger.Errorw("unknown recipient sort field, recipients are not sorted",
+			"campaign", campaign.Name.MustGet().String(),
+			"sortField", sortField,
+		)
+	}
 	// schedule the emails
 	if recipientsCount == 0 {
 		return fmt.Errorf("no recipients to schedule for '%s'", campaign.Name.MustGet())
@@ -1029,10 +1098,6 @@ func (c *Campaign) schedule(
 	// schedule order, so ones scheduled one after another rarely share a
 	// template. sends due in the same sender run go out together, and jitter
 	// can swap close neighbours.
-	pool, err := c.templatePool(ctx, campaign)
-	if err != nil {
-		return errs.Wrap(err)
-	}
 	mixBy := campaign.TemplateMixField()
 	keys := make([]string, len(recipients))
 	for i, recipient := range recipients {
@@ -1045,6 +1110,9 @@ func (c *Campaign) schedule(
 	}
 	templateFor := func(recipient *model.Recipient) nullable.Nullable[uuid.UUID] {
 		return nullable.NewNullableWithValue(templateByRecipient[recipient.ID.MustGet()])
+	}
+	languageFor := func(recipient *model.Recipient) nullable.Nullable[string] {
+		return languages.languageFor(recipient, templateByRecipient[recipient.ID.MustGet()])
 	}
 
 	// get jitter values if specified
@@ -1073,6 +1141,7 @@ func (c *Campaign) schedule(
 			SendAt:         nullable.NewNullableWithValue(jitteredStartAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 			TemplateID:     templateFor(recipients[0]),
+			Language:       languageFor(recipients[0]),
 		}
 		c.applyAnonymousSnapshot(campaign, campaignRecipient, recipients[0])
 		if err := allocator.applyTo(campaignRecipient); err != nil {
@@ -1150,6 +1219,7 @@ func (c *Campaign) schedule(
 					SendAt:         nullable.NewNullableWithValue(jitteredTime),
 					NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 					TemplateID:     templateFor(recipient),
+					Language:       languageFor(recipient),
 				}
 				c.applyAnonymousSnapshot(campaign, campaignRecipient, recipient)
 				if err := allocator.applyTo(campaignRecipient); err != nil {
@@ -1199,6 +1269,7 @@ func (c *Campaign) schedule(
 			SendAt:         nullable.NewNullableWithValue(jitteredSentAt),
 			NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
 			TemplateID:     templateFor(recipient),
+			Language:       languageFor(recipient),
 		}
 		c.applyAnonymousSnapshot(campaign, campaignRecipients[i], recipient)
 		if err := allocator.applyTo(campaignRecipients[i]); err != nil {
@@ -1224,172 +1295,86 @@ func (c *Campaign) schedule(
 	return nil
 }
 
-// sortRecipients sorts the recipients by the selected sort field and order
-func sortRecipients(recipients []*model.Recipient, sortOrder, sortField string) []*model.Recipient {
-	switch sortOrder {
-	case "random":
+// recipientSortKey gives the lower cased value a recipient is sorted by and
+// false when the recipient has no value for the field. The field keys are the
+// values vo.NewCampaignSortField allows. name sorts by first name, then last
+// name. The last result is false for a field that is not known.
+func recipientSortKey(r *model.Recipient, sortField string) (string, bool, bool) {
+	str := func(v string, err error) (string, bool, bool) {
+		if err != nil {
+			return "", false, true
+		}
+		return strings.ToLower(v), true, true
+	}
+	switch sortField {
+	case "email":
+		v, err := r.Email.Get()
+		return str(v.String(), err)
+	case "name":
+		first, _ := r.FirstName.Get()
+		last, _ := r.LastName.Get()
+		return strings.ToLower(first.String()) + "\x00" + strings.ToLower(last.String()), true, true
+	case "phone":
+		v, err := r.Phone.Get()
+		return str(v.String(), err)
+	case "position":
+		v, err := r.Position.Get()
+		return str(v.String(), err)
+	case "department":
+		v, err := r.Department.Get()
+		return str(v.String(), err)
+	case "city":
+		v, err := r.City.Get()
+		return str(v.String(), err)
+	case "country":
+		v, err := r.Country.Get()
+		return str(v.String(), err)
+	case "misc":
+		v, err := r.Misc.Get()
+		return str(v.String(), err)
+	case "language":
+		return str(r.Language.Get())
+	case "extraID":
+		v, err := r.ExtraIdentifier.Get()
+		return str(v.String(), err)
+	}
+	return "", false, false
+}
+
+// sortRecipients sorts the recipients by the selected sort field and order.
+// A recipient without a value for the field is not moved against others.
+// It returns false when the sort field is not known, the recipients are then
+// left in their order.
+func sortRecipients(recipients []*model.Recipient, sortOrder, sortField string) ([]*model.Recipient, bool) {
+	if sortOrder == "random" {
 		sort.Slice(recipients, func(i, j int) bool {
 			// return a random bool
 			// #nosec
 			return rand.Float32() < 0.5
 		})
-	case "desc":
-		sort.Slice(recipients, func(a, b int) bool {
-			// TODO implements the rest of the fields
-			switch sortField {
-			case "email":
-				if v, err := recipients[a].Email.Get(); err == nil {
-					if v2, err := recipients[b].Email.Get(); err == nil {
-						return strings.ToLower(v.String()) > strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "first_name":
-				if v, err := recipients[a].FirstName.Get(); err == nil {
-					if v2, err := recipients[b].FirstName.Get(); err == nil {
-						return strings.ToLower(v.String()) > strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "last_name":
-				if v, err := recipients[a].LastName.Get(); err == nil {
-					if v2, err := recipients[b].LastName.Get(); err == nil {
-						return strings.ToLower(v.String()) > strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "phone":
-				if v, err := recipients[a].Phone.Get(); err == nil {
-					if v2, err := recipients[b].Phone.Get(); err == nil {
-						return strings.ToLower(v.String()) > strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "position":
-				if v, err := recipients[a].Position.Get(); err == nil {
-					if v2, err := recipients[b].Position.Get(); err == nil {
-						return strings.ToLower(v.String()) > strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "department":
-				if v, err := recipients[a].Department.Get(); err == nil {
-					if v2, err := recipients[b].Department.Get(); err == nil {
-						return strings.ToLower(v.String()) > strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "city":
-				if v, err := recipients[a].City.Get(); err == nil {
-					if v2, err := recipients[b].City.Get(); err == nil {
-						return strings.ToLower(v.String()) > strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "country":
-				if v, err := recipients[a].Country.Get(); err == nil {
-					if v2, err := recipients[b].Country.Get(); err == nil {
-						return strings.ToLower(v.String()) > strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "misc":
-				if v, err := recipients[a].Misc.Get(); err == nil {
-					if v2, err := recipients[b].Misc.Get(); err == nil {
-						return strings.ToLower(v.String()) > strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "extraID":
-				if v, err := recipients[a].ExtraIdentifier.Get(); err == nil {
-					if v2, err := recipients[b].ExtraIdentifier.Get(); err == nil {
-						return strings.ToLower(v.String()) > strings.ToLower(v2.String())
-					}
-				}
-				return false
-			default:
-				panic("unknown sort field")
-			}
-		})
-	case "asc":
-		sort.Slice(recipients, func(a, b int) bool {
-			switch sortField {
-			case "email":
-				if v, err := recipients[a].Email.Get(); err == nil {
-					if v2, err := recipients[b].Email.Get(); err == nil {
-						return strings.ToLower(v.String()) < strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "firstName":
-				if v, err := recipients[a].FirstName.Get(); err == nil {
-					if v2, err := recipients[b].FirstName.Get(); err == nil {
-						return strings.ToLower(v.String()) < strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "lastName":
-				if v, err := recipients[a].LastName.Get(); err == nil {
-					if v2, err := recipients[b].LastName.Get(); err == nil {
-						return strings.ToLower(v.String()) < strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "phone":
-				if v, err := recipients[a].Phone.Get(); err == nil {
-					if v2, err := recipients[b].Phone.Get(); err == nil {
-						return strings.ToLower(v.String()) < strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "position":
-				if v, err := recipients[a].Position.Get(); err == nil {
-					if v2, err := recipients[b].Position.Get(); err == nil {
-						return strings.ToLower(v.String()) < strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "department":
-				if v, err := recipients[a].Department.Get(); err == nil {
-					if v2, err := recipients[b].Department.Get(); err == nil {
-						return strings.ToLower(v.String()) < strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "city":
-				if v, err := recipients[a].City.Get(); err == nil {
-					if v2, err := recipients[b].City.Get(); err == nil {
-						return strings.ToLower(v.String()) < strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "country":
-				if v, err := recipients[a].Country.Get(); err == nil {
-					if v2, err := recipients[b].Country.Get(); err == nil {
-						return strings.ToLower(v.String()) < strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "misc":
-				if v, err := recipients[a].Misc.Get(); err == nil {
-					if v2, err := recipients[b].Misc.Get(); err == nil {
-						return strings.ToLower(v.String()) < strings.ToLower(v2.String())
-					}
-				}
-				return false
-			case "extraID":
-				if v, err := recipients[a].ExtraIdentifier.Get(); err == nil {
-					if v2, err := recipients[b].ExtraIdentifier.Get(); err == nil {
-						return strings.ToLower(v.String()) < strings.ToLower(v2.String())
-					}
-				}
-				return false
-			default:
-				panic("unknown sort field")
-			}
-		})
+		return recipients, true
 	}
-	return recipients
+	if sortOrder != "asc" && sortOrder != "desc" {
+		return recipients, true
+	}
+	if len(recipients) > 0 {
+		if _, _, known := recipientSortKey(recipients[0], sortField); !known {
+			return recipients, false
+		}
+	}
+	desc := sortOrder == "desc"
+	sort.Slice(recipients, func(a, b int) bool {
+		v, okA, _ := recipientSortKey(recipients[a], sortField)
+		v2, okB, _ := recipientSortKey(recipients[b], sortField)
+		if !okA || !okB {
+			return false
+		}
+		if desc {
+			return v > v2
+		}
+		return v < v2
+	})
+	return recipients, true
 }
 
 // GetByID gets a campaign by its id
@@ -1670,7 +1655,34 @@ func (c *Campaign) GetGroupedResultStats(
 	if groupColumn == repository.GroupedStatByTemplate {
 		return templateGroupStats(stats, isAnon || isAnonymized), nil
 	}
+	// position, department and language: an anonymous or anonymized campaign
+	// merges small groups and shows sizes only
+	if groupColumn == repository.GroupedStatByLanguage {
+		return sortLanguageGroupStats(groupStats(stats, isAnon || isAnonymized)), nil
+	}
 	return groupStats(stats, isAnon || isAnonymized), nil
+}
+
+// sortLanguageGroupStats orders results by language by the language name,
+// then the unspecified group, then the merged small groups, so named,
+// anonymous and anonymized campaigns list them the same way
+func sortLanguageGroupStats(stats []model.CampaignGroupStat) []model.CampaignGroupStat {
+	rank := func(g model.CampaignGroupStat) int {
+		switch g.Group {
+		case OTHER_GROUP_LABEL:
+			return 2
+		case repository.UnspecifiedLanguageGroup:
+			return 1
+		}
+		return 0
+	}
+	sort.SliceStable(stats, func(i, j int) bool {
+		if a, b := rank(stats[i]), rank(stats[j]); a != b {
+			return a < b
+		}
+		return stats[i].Group < stats[j].Group
+	})
+	return stats
 }
 
 // groupStats prepares results per position or department. An anonymous or
@@ -1753,6 +1765,32 @@ func (c *Campaign) HasTemplateGroupData(
 	return c.CampaignRepository.HasTemplateGroupDataByCampaignID(ctx, campaignID)
 }
 
+// HasLanguageGroupData reports whether results can be grouped by language,
+// which is when the campaign's recipients are in more than one language or
+// its routes pick more than one
+func (c *Campaign) HasLanguageGroupData(
+	ctx context.Context,
+	session *model.Session,
+	campaignID *uuid.UUID,
+) (bool, error) {
+	isAuthorized, err := IsAuthorized(session, data.PERMISSION_ALLOW_GLOBAL)
+	if err != nil && !errors.Is(err, errs.ErrAuthorizationFailed) {
+		c.LogAuthError(err)
+		return false, errs.Wrap(err)
+	}
+	if !isAuthorized {
+		ae := NewAuditEvent("Campaign.HasLanguageGroupData", session)
+		ae.Details["campaignId"] = campaignID.String()
+		c.AuditLogNotAuthorized(ae)
+		return false, errs.ErrAuthorizationFailed
+	}
+	// a program's hidden campaigns are read through the program
+	if err := c.rejectProgramCampaign(ctx, campaignID); err != nil {
+		return false, err
+	}
+	return c.CampaignRepository.HasLanguageGroupDataByCampaignID(ctx, campaignID)
+}
+
 // hasNamedGroups reports whether any group has a real attribute value rather than
 // the "(unspecified)" or Other placeholder.
 func hasNamedGroups(stats []model.CampaignGroupStat) bool {
@@ -1823,6 +1861,31 @@ func suppressSmallGroups(stats []model.CampaignGroupStat, hideOutcomes bool) []m
 	return shown
 }
 
+// rowHasRecipient reports whether a campaign recipient row is still linked
+// to its recipient
+func rowHasRecipient(row *model.CampaignRecipient) bool {
+	return row.RecipientID.IsSpecified() && !row.RecipientID.IsNull()
+}
+
+// templateAndLanguageMix reports whether a campaign uses more than one
+// template and whether it uses more than one language
+func (c *Campaign) templateAndLanguageMix(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) (manyTemplates bool, manyLanguages bool, err error) {
+	manyTemplates, err = c.CampaignRepository.HasTemplateGroupDataByCampaignID(ctx, campaignID)
+	if err != nil {
+		c.Logger.Errorw("failed to check campaign template use", "error", err)
+		return false, false, errs.Wrap(err)
+	}
+	manyLanguages, err = c.CampaignRepository.HasLanguageGroupDataByCampaignID(ctx, campaignID)
+	if err != nil {
+		c.Logger.Errorw("failed to check campaign language use", "error", err)
+		return false, false, errs.Wrap(err)
+	}
+	return manyTemplates, manyLanguages, nil
+}
+
 // GetRecipientsByCampaignID gets all recipients for a campaign
 func (c *Campaign) GetRecipientsByCampaignID(
 	ctx context.Context,
@@ -1855,8 +1918,38 @@ func (c *Campaign) GetRecipientsByCampaignID(
 		c.Logger.Errorw("failed to check campaign anonymity before returning recipients", "error", err)
 		isAnon = true
 	}
+	// a campaign anonymized after the fact keeps each row's outcome, so the
+	// language and template of a row would tie that outcome to a group of
+	// people. fail closed: on error, treat as anonymized.
+	isAnonymized := false
+	if !isAnon {
+		isAnonymized, err = c.CampaignRepository.IsAnonymizedByID(ctx, campaignID)
+		if err != nil {
+			c.Logger.Errorw("failed to check campaign anonymization before returning recipients", "error", err)
+			isAnonymized = true
+		}
+	}
+	manyTemplates, manyLanguages := false, false
+	if isAnon || isAnonymized {
+		manyTemplates, manyLanguages, err = c.templateAndLanguageMix(ctx, campaignID)
+		if err != nil {
+			return result, err
+		}
+	}
+	// the send order and send times of a row are the same as before the
+	// campaign was anonymized, so they could be matched to the person (and
+	// rows of one language go out one after the other). on an anonymized
+	// campaign order by the random row id and leave the timing out (below).
+	hideSendOrder := isAnonymized
+	if hideSendOrder {
+		options.OrderByRowID = true
+		options.Search = ""
+	}
 	if isAnon {
 		options.OrderBy = "recipients.first_name"
+		// rows with the same name are ordered by the random row id, not by
+		// the order they were scheduled in
+		options.ThenByRowID = true
 		// search matches every allowed column, including the outcome and timing
 		// columns withheld from the response, so it could filter the named list by
 		// who clicked or when. clear it so only the sort is available, on a neutral
@@ -1886,24 +1979,50 @@ func (c *Campaign) GetRecipientsByCampaignID(
 		for _, row := range result.Rows {
 			row.TemplateID.SetNull()
 			row.Template = nil
+			// nor which language a person got
+			row.Language.SetNull()
 		}
 	} else if err := c.attachRecipientTemplates(ctx, poolCampaign, result.Rows); err != nil {
 		c.Logger.Errorw("failed to get recipient templates", "error", err)
 		return result, errs.Wrap(err)
 	}
-	if isAnon {
-		// with several templates, people left unsent together could be people on
-		// the same template, so the sent indicator is withheld as well
-		manyTemplates, err := c.CampaignRepository.HasTemplateGroupDataByCampaignID(ctx, campaignID)
-		if err != nil {
-			c.Logger.Errorw("failed to check campaign template use", "error", err)
-			return result, errs.Wrap(err)
+	if isAnonymized {
+		// the language of a row is never shown on an anonymized campaign, nor
+		// the template when the campaign has several templates or languages
+		hideTemplate := manyTemplates || manyLanguages
+		for _, row := range result.Rows {
+			row.Language.SetNull()
+			if hideTemplate {
+				row.TemplateID.SetNull()
+				row.Template = nil
+			}
 		}
+	} else if !isAnon {
+		// a removed recipient's row on a named campaign keeps its template,
+		// but not its language
+		for _, row := range result.Rows {
+			if !rowHasRecipient(row) {
+				row.Language.SetNull()
+			}
+		}
+	}
+	if isAnon {
+		// with several templates or languages, people left unsent together
+		// could be people on the same template or language, so the sent
+		// indicator is withheld as well
 		for _, row := range result.Rows {
 			row.NotableEventID.SetNull()
 			row.NotableEventName = ""
 			// replace exact timing with a coarse sent indicator
-			row.Sent = !manyTemplates && row.SentAt.IsSpecified() && !row.SentAt.IsNull()
+			row.Sent = !manyTemplates && !manyLanguages && row.SentAt.IsSpecified() && !row.SentAt.IsNull()
+			row.SendAt.SetNull()
+			row.SentAt.SetNull()
+			row.LastAttemptAt.SetNull()
+			row.CancelledAt.SetNull()
+		}
+	}
+	if hideSendOrder {
+		for _, row := range result.Rows {
 			row.SendAt.SetNull()
 			row.SentAt.SetNull()
 			row.LastAttemptAt.SetNull()
@@ -2722,6 +2841,15 @@ func (c *Campaign) UpdateByID(
 		}
 		current.TemplateMixBy.Set(v)
 	}
+	routingChanged, err := mergeLanguageRouting(ctx, c.CampaignRepository, id, current, incoming, ae)
+	if err != nil {
+		return err
+	}
+	if routingChanged {
+		if err := c.refuseAnonymousRoutingChange(ctx, id, current); err != nil {
+			return err
+		}
+	}
 	// deprecated: webhookIncludeData and webhookEvents on the campaign root are not
 	// written back - they are only read for backward-compat in HandleWebhooks.
 	// per-webhook settings are managed via the webhooks array and campaign_webhooks table.
@@ -2984,37 +3112,58 @@ func (c *Campaign) UpdateByID(
 			"templateIDs",
 		)
 	}
+	// every language the routing can pick must be sendable by every template
+	// of the pool the campaign has after this update. With the Language field
+	// the languages the group members have count.
+	if routeBy, fallback, routes, err := c.languageRoutingOf(ctx, current); err != nil {
+		return errs.Wrap(err)
+	} else if reachable, err := c.reachableLanguages(ctx, routeBy, current); err != nil {
+		return errs.Wrap(err)
+	} else if _, err := c.checkPoolLanguages(ctx, companyID, routeBy, fallback, routes, finalPool, reachable); err != nil {
+		return err
+	} else if campaignAnonymous(current) && current.IsSelfManaged() {
+		// see model.Campaign.ValidateAnonymousSelfManagedLanguages
+		if err := model.AnonymousSelfManagedLanguagesError(routeBy, fallback, routes); err != nil {
+			return err
+		}
+	}
 	// validate and update
 	if err := current.ValidateUpdate(storedDates); err != nil {
 		return errs.Wrap(err)
 	}
+	// closed at is written only by close. The campaign was read open, and
+	// writing that back would open it again if it closed during the update.
+	current.ClosedAt = nullable.Nullable[time.Time]{}
 	// a self managed campaign keeps its recipients. the moves are worked out
 	// before the campaign row points at the new pool, so a recipient without a
-	// template is judged by the template it was given until now. the moves, the
-	// pool and the campaign's first template are then written in one transaction.
+	// template is judged by the template it was given until now. The rows not
+	// sent yet of a self managed campaign get the language the new routing
+	// picks. The campaign row, the pool, the moves and the new stamps are
+	// written in one transaction under one template lock. A scheduled
+	// campaign is rebuilt and stamped below.
+	var plan func() (*poolChange, error)
 	if poolChanged {
-		movedCount, err := c.applyPoolChange(ctx, id, current, incoming, previousTemplateID, newPool)
-		if err != nil {
-			c.Logger.Errorw("failed to update campaign template pool", "error", err)
-			return errs.Wrap(err)
+		plan = func() (*poolChange, error) {
+			return c.planPoolChange(ctx, id, current, incoming, previousTemplateID, newPool, routingChanged)
 		}
-		// the pool is saved now, so it is audited now, even if a later step of
-		// this update fails
+	}
+	restampRouting := routingChanged && current.IsSelfManaged()
+	pool, restamped, err := c.updateWithPoolAndRestamp(ctx, id, current, finalPool, plan, restampRouting)
+	if err != nil {
+		c.Logger.Errorw("failed to update campaign", "error", err)
+		return errs.Wrap(err)
+	}
+	if restampRouting {
+		ae.Details["languageRestamped"] = restamped
+	}
+	if pool != nil {
 		poolAE := NewAuditEvent("Campaign.UpdateTemplatePool", session)
 		poolAE.Details["id"] = id.String()
 		poolAE.Details["previousTemplateIds"] = uuidStrings(storedPool)
 		poolAE.Details["templateIds"] = uuidStrings(newPool)
 		// planned moves; a move skipped because of a send in between is counted
-		poolAE.Details["plannedMoves"] = movedCount
+		poolAE.Details["plannedMoves"] = pool.moved
 		c.AuditLogAuthorized(poolAE)
-	}
-	// closed at is written only by close. The campaign was read open, and
-	// writing that back would open it again if it closed during the update.
-	current.ClosedAt = nullable.Nullable[time.Time]{}
-	err = c.CampaignRepository.UpdateByID(ctx, id, current)
-	if err != nil {
-		c.Logger.Errorw("failed to update campaign by id", "error", err)
-		return errs.Wrap(err)
 	}
 
 	// update webhook configurations
@@ -3703,10 +3852,15 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	campaignRecipients []*model.CampaignRecipient,
 ) error {
 	campaignID := campaign.ID.MustGet()
-	cTemplate, err := c.CampaignTemplateService.GetByID(
+	// the template with the email of its own language. The rows of the other
+	// languages get their email from the language rows, see
+	// languageSendGroups, so the shared sender and connection stay one per
+	// template
+	cTemplate, err := c.CampaignTemplateService.GetByIDForLanguage(
 		ctx,
 		session,
 		&templateID,
+		"",
 		&repository.CampaignTemplateOption{
 			WithDomain:             true,
 			WithSMTPConfiguration:  true,
@@ -3800,120 +3954,34 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 		)
 		return nil
 	}
-	// get email details
-	emailID, err := cTemplate.EmailID.Get()
-	if err != nil {
-		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the template has no email"); held {
-			return holdErr
-		}
-		c.Logger.Warnw("Running campaign does not have a email relation - cancelling campaign",
-			"campaignID", campaignID.String(),
-		)
-		// if the email relation has been removed from the campaign template used in this campagin, close the campaign
-		closeErr := c.closeCampaign(
-			ctx,
-			session,
-			&campaignID,
-			campaign,
-			"Campaign does not have a email relation",
-		)
-		if closeErr != nil {
-			return errs.Wrap(errors.Join(err, closeErr))
-		}
-		return nil
-	}
 	// get campaign's company context for attachment filtering
 	var campaignCompanyID *uuid.UUID
 	if campaign.CompanyID.IsSpecified() && !campaign.CompanyID.IsNull() {
 		companyID := campaign.CompanyID.MustGet()
 		campaignCompanyID = &companyID
 	}
-
-	email, err := c.MailService.GetByID(
-		ctx,
-		session,
-		&emailID,
-		campaignCompanyID,
-	)
-	if err != nil {
-		if campaign.IsProgramManaged() {
-			// a failed read may pass, only an email that is gone holds the sends
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return errs.Wrap(err)
-			}
-			if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the email of the template was deleted"); held {
-				return holdErr
-			}
-		}
-		closeErr := c.closeCampaign(
-			ctx,
-			session,
-			&campaignID,
-			campaign,
-			"failed get email",
-		)
-		return errs.Wrap(errors.Join(err, closeErr))
+	// the rows are split by their stamped language and every language is
+	// checked before any row is tried. A language that can not be sent closes
+	// the campaign, while a program campaign holds only the rows of that
+	// language and sends the others
+	groups, holdErr, done, err := c.languageSendGroups(ctx, session, campaign, cTemplate, campaignRecipients, campaignCompanyID)
+	if done {
+		return err
 	}
-	content, err := email.Content.Get()
-	if err != nil {
-		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the email has no content"); held {
-			return holdErr
-		}
-		// if mail templates fails to parse, close the campaign
-		closeErr := c.closeCampaign(
-			ctx,
-			session,
-			&campaignID,
-			campaign,
-			"failed get email content",
-		)
-		return errs.Wrap(errors.Join(err, closeErr))
+	if len(groups) == 0 {
+		return holdErr
 	}
-	// validate the template is parseable before entering the per recipient loop.
-	// the actual per recipient execution uses TemplateFuncsWithDeviceCode so that
-	// {{MicrosoftDeviceCode}} / {{MicrosoftDeviceCodeURL}} resolve correctly.
-	t := template.New("email")
-	t = t.Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID))
-	_, err = t.Parse(content.String())
-	if err != nil {
-		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the email does not parse"); held {
-			return holdErr
-		}
-		// if mail templates fails to parse, close the campaign
-		closeErr := c.closeCampaign(
-			ctx,
-			session,
-			&campaignID,
-			campaign,
-			"failed to parse the template",
-		)
-		return errs.Wrap(errors.Join(err, closeErr))
-	}
-	// the subject is the same for every recipient, so a subject that does not
-	// parse is handled like a body that does not parse, before any row is tried
-	subjectCheck := template.New("subject")
-	subjectCheck = subjectCheck.Funcs(c.TemplateService.TemplateFuncsWithCompany(ctx, campaignCompanyID))
-	_, err = subjectCheck.Parse(email.MailHeaderSubject.MustGet().String())
-	if err != nil {
-		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the email subject does not parse"); held {
-			return holdErr
-		}
-		closeErr := c.closeCampaign(
-			ctx,
-			session,
-			&campaignID,
-			campaign,
-			"failed to parse the subject",
-		)
-		return errs.Wrap(errors.Join(err, closeErr))
+	groupRows := []*model.CampaignRecipient{}
+	for _, g := range groups {
+		groupRows = append(groupRows, g.rows...)
 	}
 	// check if sending is API or SMTP
 	isSmtpCampaign := cTemplate.SMTPConfigurationID.IsSpecified() && !cTemplate.SMTPConfigurationID.IsNull()
 	isAPISenderCampaign := cTemplate.APISenderID.IsSpecified() && !cTemplate.APISenderID.IsNull()
 	// close the campaign
 	if !isSmtpCampaign && !isAPISenderCampaign {
-		if held, holdErr := c.holdProgramSends(ctx, campaign, campaignRecipients, "the template has no SMTP configuration or API sender"); held {
-			return holdErr
+		if held, err := c.holdProgramSends(ctx, campaign, groupRows, "the template has no SMTP configuration or API sender"); held {
+			return errors.Join(holdErr, err)
 		}
 		c.Logger.Warnw("Running campaign does not have a SMTP or API sender relation - cancelling campaign",
 			"campaignID", campaignID.String(),
@@ -3928,46 +3996,48 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 		)
 	}
 	if isAPISenderCampaign {
-		// send via API
-		for _, campaignRecipient := range campaignRecipients {
-			claimed, err := c.claimForSending(ctx, campaignRecipient)
-			if err != nil {
-				return errs.Wrap(err)
-			}
-			if !claimed {
-				continue
-			}
-			// generate custom campaign URL if first page is MITM
-			customCampaignURL, urlErr := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
-			if urlErr != nil {
-				c.Logger.Errorw("failed to get campaign url for API sender", "error", urlErr)
-				customCampaignURL = ""
-			}
+		// send via API, each row with the email of its language
+		for _, g := range groups {
+			for _, campaignRecipient := range g.rows {
+				claimed, err := c.claimForSending(ctx, campaignRecipient)
+				if err != nil {
+					return errs.Wrap(errors.Join(holdErr, err))
+				}
+				if !claimed {
+					continue
+				}
+				// generate custom campaign URL if first page is MITM
+				customCampaignURL, urlErr := c.landingPageURL(ctx, session, cTemplate, campaignRecipient)
+				if urlErr != nil {
+					c.Logger.Errorw("failed to get campaign url for API sender", "error", urlErr)
+					customCampaignURL = ""
+				}
 
-			// send via API with custom URL (domain and template stay the same for assets)
-			err = c.APISenderService.SendWithCustomURL(
-				ctx,
-				session,
-				cTemplate,
-				campaignRecipient,
-				domain,
-				content.String(),
-				email,
-				customCampaignURL,
-				campaignCompanyID,
-				campaignID,
-			)
-			if err != nil {
-				c.Logger.Errorw("failed to send message via. API", "error", err)
-			}
-			err = c.saveSendingResult(
-				ctx,
-				campaignRecipient,
-				err,
-			)
-			if err != nil {
-				c.Logger.Errorw("failed to save sending result", "error", err)
-				return errs.Wrap(err)
+				// send via API with custom URL (domain and template stay the same for assets)
+				err = c.APISenderService.SendWithCustomURL(
+					ctx,
+					session,
+					cTemplate,
+					campaignRecipient,
+					domain,
+					g.content.String(),
+					g.email,
+					customCampaignURL,
+					campaignCompanyID,
+					campaignID,
+				)
+				if err != nil {
+					c.Logger.Errorw("failed to send message via. API", "error", err)
+				}
+				err = c.saveSendingResult(
+					ctx,
+					campaignRecipient,
+					err,
+				)
+				if err != nil {
+					c.Logger.Errorw("failed to save sending result", "error", err)
+					return errs.Wrap(errors.Join(holdErr, err))
+				}
 			}
 		}
 		err = c.setMostNotableCampaignEvent(
@@ -3977,9 +4047,9 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 		)
 		if err != nil {
 			// err is logged in method call
-			return errs.Wrap(err)
+			return errs.Wrap(errors.Join(holdErr, err))
 		}
-		return nil
+		return holdErr
 	}
 	if !isSmtpCampaign {
 		c.Logger.Error("no sender configuration found")
@@ -4076,12 +4146,9 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 	messageOptions := []mail.MsgOption{
 		mail.WithNoDefaultUserAgent(),
 	}
-	// claim and prepare all messages, a row whose message can not be built
-	// gets a failed send event and is not tried again
-	messages, mailToCampaignRecipient, buildErr := c.claimAndBuildMessages(
-		ctx,
-		campaignRecipients,
-		func(campaignRecipient *model.CampaignRecipient) (*mail.Msg, error) {
+	// buildWith builds the message of a row with the email of its language
+	buildWith := func(email *model.Email, content vo.OptionalString1MB) func(*model.CampaignRecipient) (*mail.Msg, error) {
+		return func(campaignRecipient *model.CampaignRecipient) (*mail.Msg, error) {
 			m := mail.NewMsg(messageOptions...)
 			var err error
 			/* TODO at the moment the mail envelope from is a email, so it can not be empty by definition
@@ -4343,8 +4410,27 @@ func (c *Campaign) sendCampaignMessagesWithTemplate(
 				}
 			}
 			return m, nil
-		},
-	)
+		}
+	}
+	// claim and prepare the messages of every language, a row whose message
+	// can not be built gets a failed send event and is not tried again. All
+	// languages share the SMTP connection below.
+	messages := []*mail.Msg{}
+	mailToCampaignRecipient := map[string]*model.CampaignRecipient{}
+	var buildErr error
+	for _, g := range groups {
+		built, byAddress, err := c.claimAndBuildMessages(ctx, g.rows, buildWith(g.email, g.content))
+		messages = append(messages, built...)
+		for address, campaignRecipient := range byAddress {
+			mailToCampaignRecipient[address] = campaignRecipient
+		}
+		if err != nil {
+			// the languages after this one stay due, like the rows not reached
+			buildErr = err
+			break
+		}
+	}
+	buildErr = errors.Join(holdErr, buildErr)
 	// the messages built before the build stopped are claimed, so they are sent
 	// and their results saved before the error is returned
 	if buildErr != nil {
@@ -4977,6 +5063,12 @@ func (c *Campaign) SchedulePendingCampaigns(
 		if err := c.schedule(ctx, session, campaign); err != nil {
 			c.Logger.Errorw("failed to late-schedule campaign", "campaignID", campaignID, "error", err)
 			failedIDs = append(failedIDs, campaignID.String())
+			// a language whose content can not be sent closes the campaign with
+			// the reason, as the sender does, so it does not wait unseen
+			var contentErr languageContentError
+			if go_errors.As(err, &contentErr) {
+				c.closeUnschedulable(ctx, session, &campaignID, campaign, contentErr)
+			}
 			// continue to next, don't abort the whole run
 			continue
 		}
@@ -5463,6 +5555,25 @@ func (c *Campaign) CloseCampaignByID(
 	return nil
 }
 
+// closeUnschedulable closes a late scheduled campaign that can not be
+// scheduled because a language can not be sent. An anonymous campaign gets a
+// reason without the language and template names.
+func (c *Campaign) closeUnschedulable(
+	ctx context.Context,
+	session *model.Session,
+	id *uuid.UUID,
+	campaign *model.Campaign,
+	cause languageContentError,
+) {
+	reason := "Campaign could not be scheduled: a language of the template can not be sent"
+	if !campaignAnonymous(campaign) {
+		reason = "Campaign could not be scheduled: " + cause.reason
+	}
+	if err := c.closeCampaign(ctx, session, id, campaign, reason); err != nil {
+		c.Logger.Errorw("failed to close campaign that could not be scheduled", "campaignID", id.String(), "error", err)
+	}
+}
+
 // closeCampaign closes a campaign
 func (c *Campaign) closeCampaign(
 	ctx context.Context,
@@ -5817,23 +5928,25 @@ func (c *Campaign) GetCampaignEmailBody(
 		c.Logger.Errorw("failed to get campaign by id", "error", err)
 		return "", errs.Wrap(err)
 	}
-	// the email shows which template the person got
-	if hidden, err := c.recipientTemplateHidden(ctx, campaign); err != nil || hidden {
+	// the email shows which template and language the person got
+	if hidden, err := c.recipientContentHidden(ctx, campaign); err != nil || hidden {
 		if err != nil {
-			c.Logger.Errorw("failed to check campaign template use", "error", err)
+			c.Logger.Errorw("failed to check campaign template and language use", "error", err)
 			return "", errs.Wrap(err)
 		}
-		return "", errRecipientTemplateHidden
+		return "", errRecipientContentHidden
 	}
 	templateID, err := campaignRecipient.EffectiveTemplateID(campaign)
 	if err != nil {
 		c.Logger.Errorw("failed to get template from campaign, has no template", "error", err)
 		return "", errs.Wrap(err)
 	}
-	cTemplate, err := c.CampaignTemplateService.GetByID(
+	// the email of the recipient's stamped language
+	cTemplate, err := c.CampaignTemplateService.GetByIDForLanguage(
 		ctx,
 		session,
 		&templateID,
+		campaignRecipient.StampedLanguage(),
 		&repository.CampaignTemplateOption{
 			WithIdentifier:         true,
 			WithBeforeLandingProxy: true,
@@ -5843,6 +5956,11 @@ func (c *Campaign) GetCampaignEmailBody(
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return "", errs.NewValidationError(
 			errors.New("the recipient's campaign template no longer exists"),
+		)
+	}
+	if errors.Is(err, repository.ErrTemplateLanguageUnavailable) {
+		return "", errs.NewValidationError(
+			errors.New("the recipient's language is no longer usable in the campaign template"),
 		)
 	}
 	if err != nil {
@@ -7270,8 +7388,9 @@ func (c *Campaign) SendEmailByCampaignRecipientID(
 	if err != nil {
 		// the failure is already logged in the campaign event with reason
 		c.Logger.Warnw("failed to send campaign message", "reason", err)
-		// the reason can name the recipient's template, sender or domain
-		if hidden, hiddenErr := c.recipientTemplateHidden(ctx, campaign); hiddenErr != nil || hidden {
+		// the reason can name the recipient's template, language, sender or
+		// domain
+		if hidden, hiddenErr := c.recipientContentHidden(ctx, campaign); hiddenErr != nil || hidden {
 			return errors.New("the message could not be sent")
 		}
 		// don't wrap error, return as-is so controller can handle it as bad request
@@ -7305,10 +7424,12 @@ func (c *Campaign) sendSingleCampaignMessage(
 		return errors.New("campaign has no template")
 	}
 
-	cTemplate, err := c.CampaignTemplateService.GetByID(
+	// the email of the recipient's stamped language
+	cTemplate, err := c.CampaignTemplateService.GetByIDForLanguage(
 		ctx,
 		session,
 		&templateID,
+		campaignRecipient.StampedLanguage(),
 		&repository.CampaignTemplateOption{
 			WithDomain:             true,
 			WithSMTPConfiguration:  true,
@@ -7318,6 +7439,9 @@ func (c *Campaign) sendSingleCampaignMessage(
 			WithLandingProxy:       true,
 		},
 	)
+	if errors.Is(err, repository.ErrTemplateLanguageUnavailable) {
+		return errors.New("the recipient's language is not usable in the campaign template")
+	}
 	if err != nil {
 		c.Logger.Errorw("failed to get campaign template by id", "error", err)
 		return errs.Wrap(err)
@@ -8487,6 +8611,8 @@ func (c *Campaign) buildReportHTMLWithData(
 	}
 
 	rd := buildReportData(name, companyName, campaign, stats, recipients, groups, groupsBy, departmentGroups, positionGroups)
+	rd.LanguageGroups = toReportGroupStats(c.reportLanguageGroups(ctx, campaignID, isAnon || isAnonymized))
+	rd.Anonymous = isAnon || isAnonymized
 
 	// screenshots are a best effort addition: any failure here is logged and
 	// leaves the corresponding field empty, the report still generates with
@@ -8672,6 +8798,9 @@ func runReportCaptures(
 // Screenshots are best effort: a missing template, email or page, or a failed
 // render or capture, only leaves that screenshot empty, and never fails the
 // report.
+//
+// Each template is shown in its template language only. The email and pages
+// of its language rows get no screenshots in v1.
 func (c *Campaign) attachReportScreenshots(
 	ctx context.Context,
 	session *model.Session,
@@ -9459,6 +9588,27 @@ func buildReportData(
 	}
 }
 
+// reportLanguageGroups returns the report's results by language. They are
+// given only when the recipients are in more than one language, so the report
+// of a campaign in one language is as before. An anonymous or anonymized
+// campaign gets merged small groups and sizes only. A failed read leaves them
+// out, the report is still made.
+func (c *Campaign) reportLanguageGroups(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	anonymous bool,
+) []model.CampaignGroupStat {
+	raw, err := c.CampaignRepository.GetGroupedResultStats(ctx, campaignID, repository.GroupedStatByLanguage)
+	if err != nil {
+		c.Logger.Warnw("failed to get language grouped stats for report", "error", err)
+		return nil
+	}
+	if len(raw) < 2 {
+		return nil
+	}
+	return sortLanguageGroupStats(groupStats(raw, anonymous))
+}
+
 // toReportGroupStats converts raw grouped counts to report rows with the
 // percentage of each group that clicked, submitted and reported, already formatted.
 func toReportGroupStats(groups []model.CampaignGroupStat) []model.ReportGroupStat {
@@ -9525,6 +9675,7 @@ func htmlEscapeReportData(rd *model.ReportData) *model.ReportData {
 	cp.Groups = escapeGroups(rd.Groups)
 	cp.DepartmentGroups = escapeGroups(rd.DepartmentGroups)
 	cp.PositionGroups = escapeGroups(rd.PositionGroups)
+	cp.LanguageGroups = escapeGroups(rd.LanguageGroups)
 	cp.TemplateScreenshots = make([]model.ReportTemplateScreenshots, len(rd.TemplateScreenshots))
 	for i, ts := range rd.TemplateScreenshots {
 		ts.Name = template.HTMLEscapeString(ts.Name)
@@ -9543,43 +9694,112 @@ func (c *Campaign) lockCampaignTemplates(campaignID uuid.UUID) func() {
 	return m.Unlock
 }
 
-// applyPoolChange writes a new template pool. For a self managed campaign the
-// recipient moves are planned and written under the campaign's template lock,
-// so no manual send runs in between.
-func (c *Campaign) applyPoolChange(
+// poolChange is a planned write of a new template pool and the recipient
+// moves it gives
+type poolChange struct {
+	pool      []uuid.UUID
+	fillEmpty *uuid.UUID
+	stamps    map[uuid.UUID][]uuid.UUID
+	moves     map[uuid.UUID][]uuid.UUID
+	restamp   bool
+	// the planned number of rows that get a template
+	moved int
+}
+
+// planPoolChange works out the writes of a new template pool. For a self
+// managed campaign it plans the recipient moves, so the caller must hold the
+// campaign's template lock until the plan is written, so no manual send runs
+// in between. routingChanged tells that the same update changes the language
+// routing, so the rows not sent yet are judged by the language the new
+// routing gives them.
+func (c *Campaign) planPoolChange(
 	ctx context.Context,
 	id *uuid.UUID,
 	current *model.Campaign,
 	incoming *model.Campaign,
 	previousTemplateID *uuid.UUID,
 	newPool []uuid.UUID,
-) (int, error) {
-	unlock := c.lockCampaignTemplates(*id)
-	defer unlock()
-	var stamps, moves map[uuid.UUID][]uuid.UUID
+	routingChanged bool,
+) (*poolChange, error) {
+	plan := &poolChange{pool: newPool}
 	// recipients of a scheduled campaign are made again after this, so only a
 	// self managed one has rows to fill and move
-	var fillEmpty *uuid.UUID
 	if incoming.IsSelfManaged() {
-		fillEmpty = previousTemplateID
+		plan.fillEmpty = previousTemplateID
 		// an anonymous self managed campaign holds one template, so everyone
 		// moves with it, as a single template switch always did
 		keepSent := !campaignAnonymous(current)
 		var err error
-		stamps, moves, err = c.planTemplateMoves(ctx, id, previousTemplateID, newPool, current.TemplateMixField(), keepSent)
+		var languages map[uuid.UUID]moverLanguage
+		plan.stamps, plan.moves, languages, err = c.planTemplateMoves(ctx, id, previousTemplateID, newPool, current.TemplateMixField(), keepSent)
 		if err != nil {
-			return 0, err
+			return nil, err
+		}
+		if current.LanguageRouteField() != "" {
+			// a field picks the language, so a moved recipient keeps it and its
+			// new template must have it. A row not sent yet gets the language of
+			// the new routing after this update, so that one is checked
+			if routingChanged {
+				if err := c.routeUnsentMovers(ctx, current, newPool, languages); err != nil {
+					return nil, err
+				}
+			}
+			if err := c.checkMoverLanguages(ctx, newPool, languages, plan.stamps, plan.moves); err != nil {
+				return nil, err
+			}
+		} else {
+			// the stamp only mirrors the template language, a moved recipient
+			// gets the language of its new template
+			plan.restamp = true
 		}
 	}
-	// the planned number; a guarded move skipped for a late send is still counted
-	moved := 0
-	for _, ids := range moves {
-		moved += len(ids)
+	// a guarded move skipped for a late send is still counted
+	for _, ids := range plan.moves {
+		plan.moved += len(ids)
 	}
-	for _, ids := range stamps {
-		moved += len(ids)
+	for _, ids := range plan.stamps {
+		plan.moved += len(ids)
 	}
-	return moved, c.CampaignRepository.ReplaceTemplatePool(ctx, id, newPool, fillEmpty, stamps, moves)
+	return plan, nil
+}
+
+// writeTx writes the planned pool and moves in the given transaction
+func (p *poolChange) writeTx(tx *gorm.DB, id *uuid.UUID) error {
+	return repository.ReplaceTemplatePoolTx(tx, id, p.pool, p.fillEmpty, p.stamps, p.moves, p.restamp)
+}
+
+// routeUnsentMovers sets the language of every mover that the restamp after a
+// routing change rewrites to the language the campaign's routing picks now
+func (c *Campaign) routeUnsentMovers(
+	ctx context.Context,
+	campaign *model.Campaign,
+	newPool []uuid.UUID,
+	movers map[uuid.UUID]moverLanguage,
+) error {
+	routeBy, fallback, routes, err := c.languageRoutingOf(ctx, campaign)
+	if err != nil {
+		return err
+	}
+	languages := &campaignLanguages{routeBy: routeBy, fallback: fallback, routes: routes, memo: map[string]string{}}
+	if routeBy == model.LanguageRouteLanguage {
+		// a recipient's own language is kept only when every new pool
+		// template can send it
+		sets, err := c.CampaignTemplateService.CampaignTemplateRepository.GetLanguageSetsByIDs(ctx, newPool)
+		if err != nil {
+			return err
+		}
+		languages.sets = sets
+	}
+	for id, m := range movers {
+		if !m.assignment.Restampable {
+			continue
+		}
+		if code, err := languages.languageForValue(assignmentRouteValue(m.assignment, routeBy), uuid.Nil).Get(); err == nil {
+			m.stamp = code
+			movers[id] = m
+		}
+	}
+	return nil
 }
 
 // sendUnderTemplateLock reads the recipient again and sends its email while

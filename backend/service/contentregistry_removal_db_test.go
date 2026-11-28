@@ -46,7 +46,9 @@ func newForeignKeyRegFixture(t *testing.T) *regFixture {
 		&database.APISender{},
 		&database.APISenderHeader{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplateLanguage{},
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignTemplatePool{},
 		&database.CampaignRecipient{},
 		&database.Registry{},
@@ -277,6 +279,53 @@ func TestUpdateDroppedEmailUsedByTemplateIsKept(t *testing.T) {
 	}
 	if !h.emailExists("Promo") {
 		t.Fatal("uninstall deleted the untracked email")
+	}
+}
+
+// TestUpdateDroppedEmailUsedByLanguageRowIsKept drops an email that only a
+// language row of the user's own template uses. The update keeps the email
+// and says why, and the language row still points at it.
+func TestUpdateDroppedEmailUsedByLanguageRowIsKept(t *testing.T) {
+	h := newOwnershipFixture(t)
+	ip := h.withUpdateDeps("ns/mail")
+	h.withEmailService()
+	emailID := h.installPromoMail(ip)
+
+	now := time.Now()
+	ctID := uuid.New()
+	urlID := uuid.New()
+	if err := h.db.Create(&database.CampaignTemplate{
+		ID: &ctID, CreatedAt: &now, UpdatedAt: &now, Name: "Operator",
+		URLIdentifierID: &urlID, Language: "en",
+	}).Error; err != nil {
+		t.Fatalf("operator template: %v", err)
+	}
+	rowID := uuid.New()
+	if err := h.db.Create(&database.CampaignTemplateLanguage{
+		ID: &rowID, CreatedAt: &now, UpdatedAt: &now, CampaignTemplateID: &ctID,
+		Language: "de", EmailID: emailID, IsUsable: true,
+	}).Error; err != nil {
+		t.Fatalf("language row: %v", err)
+	}
+
+	v2 := yamlPackage("ns/mail", "1.1.0", "", nil)
+	res, _, err := h.apply(ip, v2, nil)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	want := `email Promo kept (no longer in package, still used by campaign template "Operator")`
+	if !hasSkipped(res, want) {
+		t.Fatalf("missing kept message, got %q", res.Skipped)
+	}
+	if !h.emailExists("Promo") {
+		t.Fatal("an email used by a language row was deleted")
+	}
+	var row database.CampaignTemplateLanguage
+	if err := h.db.Where("id = ?", rowID).First(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.EmailID == nil || *row.EmailID != *emailID || !row.IsUsable {
+		t.Fatal("the language row lost its email")
 	}
 }
 

@@ -49,11 +49,14 @@ func newUnlinkedProxyFixture(t *testing.T) *unlinkedProxyFixture {
 		&database.Page{},
 		&database.Email{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplateLanguage{},
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignRecipient{},
 		&database.CampaignEvent{},
 		&database.Recipient{},
 		&database.Program{},
+		&database.ProgramLanguageRoute{},
 		&database.ProgramEnrollment{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)

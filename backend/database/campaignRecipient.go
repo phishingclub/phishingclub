@@ -62,6 +62,12 @@ type CampaignRecipient struct {
 	// template and checking how many templates a campaign used.
 	CampaignTemplateID *uuid.UUID `gorm:"type:uuid;index:idx_campaign_recipients_campaign_template,priority:2"`
 
+	// Language is the language this recipient is sent and shown, set when the
+	// row is planned and never changed after it is sent. Null on older rows,
+	// which use the template language. Not indexed, the campaign indexes cover
+	// every read.
+	Language *string `gorm:"type:varchar(16)"`
+
 	// NotableEventID is the most notable event for this recipient
 	NotableEvent   *Event     `gorm:"foreignKey:NotableEventID;references:ID"`
 	NotableEventID *uuid.UUID `gorm:"type:uuid;index"`

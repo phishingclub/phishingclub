@@ -1,6 +1,6 @@
 <script>
-	// The recipients of a program with their status, progress, sends and next
-	// template. The rows are paged and sorted by the server through params. The
+	// The recipients of a program with their status, progress, sends, next
+	// template and, with Language by, language. The rows are paged and sorted by the server through params. The
 	// Events and Schedule actions open the events and the plan of that recipient
 	// in this program. Before the program starts the rows are the members of
 	// its groups, not started, with no actions.
@@ -18,6 +18,7 @@
 	import RelativeTime from '$lib/components/RelativeTime.svelte';
 	import { shortRelative } from '$lib/utils/shortRelative.js';
 	import { formatDateTime } from '$lib/utils/programText.js';
+	import { languageName } from '$lib/utils/languages.js';
 
 	export let params;
 	export let programID;
@@ -37,6 +38,9 @@
 	export let startAt = null;
 	// the time the relative times are shown against, in ms
 	export let now = Date.now();
+	// a program with Language by shows the language of each person's next or
+	// last send
+	export let showLanguage = false;
 
 	// Progress and Last template show from xl, as a 1024 screen with the menu
 	// has no room for them. Phones show the recipient only, with the status and next due time in a
@@ -45,6 +49,7 @@
 	$: peopleColumns = [
 		{ column: 'Recipient', size: 'large', compact: true },
 		{ column: 'Status', size: 'medium', compact: true, hideBelow: 'sm' },
+		...(showLanguage ? [{ column: 'Language', size: 'small', compact: true, hideBelow: 'xl' }] : []),
 		{ column: 'Progress', size: loops ? 'medium' : 'small', compact: true, hideBelow: 'xl' },
 		{ column: 'Sent', size: 'small', compact: true, hideBelow: 'md' },
 		{ column: 'Last template', size: 'medium', compact: true, hideBelow: 'xl' },
@@ -106,6 +111,16 @@
 					<EventName eventName={r.notableEventName} />
 				{/if}
 			</TableCell>
+			{#if showLanguage}
+				<TableCell hideBelow="xl">
+					{#if r.language}
+						<span class="block truncate">{languageName(r.language)}</span>
+					{:else}
+						<!-- no language is picked until a template is planned -->
+						<span class={muted}>-</span>
+					{/if}
+				</TableCell>
+			{/if}
 			<TableCell hideBelow="xl">
 				{@const done = Math.min(r.position ?? 0, stepCount)}
 				{#if loops}

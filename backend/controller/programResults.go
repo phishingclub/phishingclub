@@ -38,7 +38,8 @@ func (c *Program) GetResults(g *gin.Context) {
 }
 
 // GetResultGroups returns the results of a program grouped by the current
-// department or position of each recipient, named by the by query value
+// department or position of each recipient or by language, named by the by
+// query value
 func (c *Program) GetResultGroups(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
@@ -53,7 +54,7 @@ func (c *Program) GetResultGroups(g *gin.Context) {
 	}
 	by := g.Query("by")
 	if !service.IsValidProgramGroupBy(by) {
-		c.Response.ValidationFailed(g, "by", errors.New("must be department or position"))
+		c.Response.ValidationFailed(g, "by", errors.New("must be department, position or language"))
 		return
 	}
 	groups, err := c.ProgramService.GetResultGroups(g.Request.Context(), session, id, by)

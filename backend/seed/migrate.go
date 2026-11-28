@@ -44,8 +44,10 @@ func initialInstallAndSeed(
 		&database.SMTPConfiguration{},
 		&database.Email{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplateLanguage{},
 		&database.Campaign{},
 		&database.CampaignTemplatePool{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignRecipientGroup{},
 		&database.CampaignRecipient{},
 		&database.Event{},
@@ -83,6 +85,7 @@ func initialInstallAndSeed(
 		&database.ProgramCampaign{},
 		&database.ProgramAllowDeny{},
 		&database.ProgramWebhook{},
+		&database.ProgramLanguageRoute{},
 	}
 
 	// disable foreign key constraints temporarily for sqlite to allow table recreation

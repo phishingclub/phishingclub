@@ -1351,8 +1351,6 @@
 	}
 	$: removeCampaigns = removePreview?.campaigns || [];
 	$: removeCampaignCount = removePreview?.campaignCount || 0;
-	$: removeKeepRunning = removePreview?.keepRunning || [];
-	$: removeKeepRunningCount = removePreview?.keepRunningCount || 0;
 	$: removeChanged = removePreview?.changed || [];
 	$: removeChangedCount = removePreview?.changedCount || 0;
 	$: removeChangedOpen = removeChanged.some((c) => c.openToEveryone);
@@ -1373,11 +1371,6 @@
 		const lines = [...(a.losses || [])];
 		if (a.unfiltered && !a.openToEveryone) lines.push('No filter left on this asset');
 		return lines;
-	}
-	// a close time from the preview, shown in the browser's local time.
-	function formatCloseAt(v) {
-		const d = new Date(v);
-		return isNaN(d.getTime()) ? v : d.toLocaleString();
 	}
 	$: removeEdited = removePreview?.edited || [];
 	$: removeMembers = removePreview?.members || [];
@@ -2997,12 +2990,12 @@ Escape closes, the arrows page through the screenshots -->
 									</li>
 								{/each}
 							</ul>
-							{#if conflictChoices[key] === 'remove' && (m.campaignCount || m.keepRunningCount || m.changedCount || m.userAssetCount || m.changedAssetCount)}
+							{#if conflictChoices[key] === 'remove' && (m.campaignCount || m.changedCount || m.userAssetCount || m.changedAssetCount)}
 								<div
 									class="mt-3 rounded-md border-2 border-red-200 bg-red-50/60 p-3 dark:border-red-500/30 dark:bg-red-900/10"
 								>
 									<p class="text-sm font-medium text-red-700 dark:text-red-300">
-										{m.campaignCount || m.keepRunningCount || m.changedCount
+										{m.campaignCount || m.changedCount
 											? m.changedAssetCount
 												? 'Uninstalling it affects active campaigns and assets'
 												: 'Uninstalling it affects active campaigns'
@@ -3014,16 +3007,6 @@ Escape closes, the arrows page through the screenshots -->
 										{#each m.campaigns || [] as camp (camp.id)}
 											<li class="break-words">
 												{camp.name} <span class="text-gray-500 dark:text-gray-400">(closed)</span>
-											</li>
-										{/each}
-										{#each m.keepRunning || [] as camp (camp.id)}
-											<li class="break-words">
-												{camp.name}
-												<span class="text-gray-500 dark:text-gray-400"
-													>(keeps running without this content{camp.closeAt
-														? ` until ${formatCloseAt(camp.closeAt)}`
-														: ''})</span
-												>
 											</li>
 										{/each}
 										{#each m.changed || [] as camp (camp.id)}
@@ -3046,7 +3029,7 @@ Escape closes, the arrows page through the screenshots -->
 												>
 											</li>
 										{/each}
-										{#if (m.campaignCount || 0) + (m.keepRunningCount || 0) + (m.changedCount || 0) + (m.changedAssetCount || 0) > (m.campaigns || []).length + (m.keepRunning || []).length + (m.changed || []).length + (m.changedAssets || []).length}
+										{#if (m.campaignCount || 0) + (m.changedCount || 0) + (m.changedAssetCount || 0) > (m.campaigns || []).length + (m.changed || []).length + (m.changedAssets || []).length}
 											<li>and more</li>
 										{/if}
 										{#if m.userAssetCount}
@@ -3493,34 +3476,6 @@ Escape closes, the arrows page through the screenshots -->
 				{#if removeCampaignCount > removeCampaigns.length}
 					<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
 						and {removeCampaignCount - removeCampaigns.length} more
-					</p>
-				{/if}
-			</div>
-		{/if}
-		{#if removeKeepRunningCount}
-			<div
-				class="rounded-md border-2 border-red-200 bg-red-50/60 p-4 dark:border-red-500/30 dark:bg-red-900/10"
-			>
-				<p class="font-medium text-red-700 dark:text-red-300">
-					{removeKeepRunningCount === 1
-						? '1 active campaign uses this content and already has a close time. It keeps running without this content until then and will not work correctly'
-						: `${removeKeepRunningCount} active campaigns use this content and already have a close time. They keep running without this content until then and will not work correctly`}
-				</p>
-				<ul class="ml-4 mt-2 list-disc space-y-1 text-sm text-gray-700 dark:text-gray-300">
-					{#each removeKeepRunning as c (c.id)}
-						<li class="break-words">
-							{c.name}
-							{#if c.closeAt}
-								<span class="text-gray-500 dark:text-gray-400"
-									>(closes {formatCloseAt(c.closeAt)})</span
-								>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-				{#if removeKeepRunningCount > removeKeepRunning.length}
-					<p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-						and {removeKeepRunningCount - removeKeepRunning.length} more
 					</p>
 				{/if}
 			</div>

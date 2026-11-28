@@ -10,6 +10,7 @@
 	import Button from '$lib/components/Button.svelte';
 	import CopyCell from '$lib/components/table/CopyCell.svelte';
 	import CheckboxField from '$lib/components/CheckboxField.svelte';
+	import { languageName } from '$lib/utils/languages.js';
 
 	/** @type {'template'|'campaign'|'program'} */
 	export let kind = 'template';
@@ -112,6 +113,21 @@
 					link: { label: 'Update email', href: `/email?edit=${t.emailID}` }
 				});
 			}
+			// each other language sends its own email, with its own envelope sender
+			for (const l of t.languages ?? []) {
+				const lang = languageName(l.language);
+				if (l.missing?.includes('email')) {
+					notes.push({
+						text: `The ${lang} email of template ${t.name} is missing.`,
+						link: editTemplate
+					});
+				} else if (l.missing?.includes('mailFrom')) {
+					notes.push({
+						text: `The ${lang} email of template ${t.name} has no envelope sender domain.`,
+						link: { label: 'Update email', href: `/email?edit=${l.emailID}` }
+					});
+				}
+			}
 			if (t.missing.includes('sender')) {
 				notes.push({
 					text: `Template ${t.name} has no SMTP configuration or API sender.`,
@@ -213,11 +229,33 @@
 	// an API sender provider usually sets its own bounce domain, so the
 	// envelope sender of the email is shown with a check
 	const breakdownMailFrom = (t) => {
-		if (t.mailFromDomain && t.senderType === 'apiSender') {
-			return `${t.mailFromDomain} (check with the provider)`;
+		const domains = mailFromDomainsOf(t);
+		if (domains.length && t.senderType === 'apiSender') {
+			return `${domains.join(', ')} (check with the provider)`;
 		}
-		return t.mailFromDomain;
+		return domains.join(', ');
 	};
+	// the envelope sender domain of the template email and of each other
+	// language email, each domain once. With languages the domain is followed
+	// by the languages that use it
+	const mailFromDomainsOf = (t) => {
+		const languages = t.languages ?? [];
+		if (!languages.length) return t.mailFromDomain ? [t.mailFromDomain] : [];
+		const byDomain = new Map();
+		const add = (domain, code) => {
+			if (!domain) return;
+			if (!byDomain.has(domain)) byDomain.set(domain, []);
+			if (code) byDomain.get(domain).push(languageName(code));
+		};
+		add(t.mailFromDomain, t.language);
+		for (const l of languages) add(l.mailFromDomain, l.language);
+		return [...byDomain].map(([domain, names]) =>
+			names.length ? `${domain} (${names.join(', ')})` : domain
+		);
+	};
+	// whether any template sends more than one email
+	$: manyEmails =
+		kind !== 'template' || !!data?.templates?.some((t) => (t.languages ?? []).length > 0);
 	const breakdownSender = (t) => {
 		if (t.senderType === 'smtp') return `SMTP: ${t.senderName}`;
 		if (t.senderType === 'apiSender') return `API sender: ${t.senderName}`;
@@ -289,7 +327,7 @@
 			<p class="text-sm">
 				Add these values to the <b>Advanced Delivery</b> policy in Microsoft Defender for Office 365
 				as a third party phishing simulation, so the
-				{kind === 'template' ? 'template email is' : 'emails are'} delivered.
+				{manyEmails ? 'emails are' : 'template email is'} delivered.
 				{#if kind !== 'template'}
 					They cover {plural(data.templates.length, 'template')}.
 				{/if}

@@ -34,18 +34,42 @@ type RecipientProgramSend struct {
 	IsTraining       bool
 	SentAt           *time.Time
 	NotableEventID   *uuid.UUID
+	// Language is the language stamp of the send, nil when it has none
+	Language *string
+	// TemplateLanguage is the language of the template, empty when not set
+	TemplateLanguage *string
+}
+
+// EffectiveLanguage returns the language the send was made in: its stamp, or
+// the template language when it has none. Empty when neither is set.
+func (s *RecipientProgramSend) EffectiveLanguage() string {
+	if s.Language != nil && *s.Language != "" {
+		return *s.Language
+	}
+	if s.TemplateLanguage != nil {
+		return *s.TemplateLanguage
+	}
+	return ""
 }
 
 // programSendJoins joins a program's hidden campaign to its program and its
-// template, starting from the given table and its campaign_id column. Only
-// programs that are not anonymous are joined, an anonymous program has no per
-// person data.
-func programSendJoins(from string) clause.From {
+// template, starting from the given table and its campaign_id column. With
+// rowTemplate the template is the row's own campaign_template_id, else the
+// hidden campaign's. Only programs that are not anonymous are joined, an
+// anonymous program has no per person data.
+func programSendJoins(from string, rowTemplate bool) clause.From {
 	campaignCol := func(name string) clause.Column {
 		return clause.Column{Table: database.CAMPAIGN_TABLE, Name: name}
 	}
 	programCol := func(name string) clause.Column {
 		return clause.Column{Table: database.PROGRAM_TABLE, Name: name}
+	}
+	var templateID any = campaignCol("campaign_template_id")
+	if rowTemplate {
+		templateID = clause.Expr{SQL: "COALESCE(?, ?)", Vars: []any{
+			clause.Column{Table: from, Name: "campaign_template_id"},
+			campaignCol("campaign_template_id"),
+		}}
 	}
 	return clause.From{Joins: []clause.Join{
 		{
@@ -69,8 +93,8 @@ func programSendJoins(from string) clause.From {
 			Type:  clause.LeftJoin,
 			Table: clause.Table{Name: database.CAMPAIGN_TEMPLATE_TABLE},
 			ON: clause.Where{Exprs: []clause.Expression{clause.Eq{
-				Column: campaignCol("campaign_template_id"),
-				Value:  clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "id"},
+				Column: clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "id"},
+				Value:  templateID,
 			}}},
 		},
 	}}
@@ -106,7 +130,7 @@ func (r *Recipient) GetProgramEventsForExport(
 	res := r.DB.WithContext(ctx).
 		Session(&gorm.Session{NewDB: true}).
 		Table(database.CAMPAIGN_EVENT_TABLE).
-		Clauses(programSendJoins(database.CAMPAIGN_EVENT_TABLE), clause.Select{Columns: columns}).
+		Clauses(programSendJoins(database.CAMPAIGN_EVENT_TABLE, false), clause.Select{Columns: columns}).
 		Where(clause.Eq{Column: eventCol("recipient_id"), Value: recipientID}).
 		Order(clause.OrderByColumn{Column: eventCol("created_at")}).
 		Scan(&rows)
@@ -130,12 +154,14 @@ func (r *Recipient) GetProgramSendsForExport(
 		clause.Column{Table: database.CAMPAIGN_TABLE, Name: "is_training"},
 		col("sent_at"),
 		col("notable_event_id"),
+		col("language"),
+		clause.Column{Table: database.CAMPAIGN_TEMPLATE_TABLE, Name: "language", Alias: "template_language"},
 	)
 	rows := []RecipientProgramSend{}
 	res := r.DB.WithContext(ctx).
 		Session(&gorm.Session{NewDB: true}).
 		Table(table).
-		Clauses(programSendJoins(table), clause.Select{Columns: columns}).
+		Clauses(programSendJoins(table, true), clause.Select{Columns: columns}).
 		Where(clause.Eq{Column: col("recipient_id"), Value: recipientID}).
 		Where(clause.Neq{Column: col("sent_at"), Value: nil}).
 		Order(clause.OrderByColumn{Column: col("sent_at")}).

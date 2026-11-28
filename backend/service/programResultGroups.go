@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"time"
 
@@ -32,13 +31,15 @@ const (
 // IsValidProgramGroupBy reports whether by is a field the results can be
 // grouped by
 func IsValidProgramGroupBy(by string) bool {
-	return by == ProgramGroupByDepartment || by == ProgramGroupByPosition
+	return by == ProgramGroupByDepartment || by == ProgramGroupByPosition || by == ProgramGroupByLanguage
 }
 
 // ProgramResultGroups is the results of a named program since the start,
-// grouped by the current department or position of each recipient. The rows
-// count sends, as the template rows do. An anonymous program, or one whose
-// Anonymize All began, has no groups and Anonymous is set.
+// grouped by the current department or position of each recipient, or by the
+// language of each send. The rows count sends, as the template rows do. An
+// anonymous program, or one whose Anonymize All began, has no department or
+// position groups and Anonymous is set. By language it has rows with the
+// sizes only and Anonymous is set, see programLanguageGroups.
 type ProgramResultGroups struct {
 	By        string              `json:"by"`
 	Anonymous bool                `json:"anonymous"`
@@ -48,7 +49,7 @@ type ProgramResultGroups struct {
 }
 
 // GetResultGroups returns the results of a program grouped by the current
-// department or position of each recipient
+// department or position of each recipient, or by language
 func (s *Program) GetResultGroups(
 	ctx context.Context,
 	session *model.Session,
@@ -56,12 +57,15 @@ func (s *Program) GetResultGroups(
 	by string,
 ) (*ProgramResultGroups, error) {
 	if !IsValidProgramGroupBy(by) {
-		return nil, errs.NewValidationError(errors.New("must be department or position"))
+		return nil, errs.NewValidationError(errProgramGroupBy)
 	}
 	ae := NewAuditEvent("Program.GetResultGroups", session)
 	program, err := s.authorizedProgram(ctx, session, id, ae, &repository.ProgramOption{WithSteps: true})
 	if err != nil {
 		return nil, err
+	}
+	if by == ProgramGroupByLanguage {
+		return s.programLanguageGroups(ctx, program, time.Now())
 	}
 	return s.programResultGroups(ctx, program, by, time.Now())
 }

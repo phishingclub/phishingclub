@@ -50,9 +50,12 @@ func newAllowListingFixture(t *testing.T) *allowListingFixture {
 		&database.SMTPHeader{},
 		&database.APISender{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplateLanguage{},
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignTemplatePool{},
 		&database.Program{},
+		&database.ProgramLanguageRoute{},
 		&database.ProgramStep{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -609,5 +612,61 @@ func TestAllowListingOverLimit(t *testing.T) {
 	o = model.NewAllowListingOverLimit(got)
 	if !o.SimulationURLs || o.SimulationDomainURLs {
 		t.Fatalf("31 subdomains: got %+v", o)
+	}
+}
+
+// every language email adds its envelope domain to the mail from list, and
+// each language flags a missing email or envelope sender on its own. The
+// sender and the domains are shared, so they do not grow.
+func TestAllowListingLanguageEnvelopes(t *testing.T) {
+	f := newAllowListingFixture(t)
+	domainID := f.domain("phish.example.test", nil)
+	smtpID := f.smtpConfig("203.0.113.5")
+	enEmail := f.email("bounce@en.example.test")
+	tmpl := f.template(allowListingTemplateOpts{name: "multi", domainID: &domainID, emailID: &enEmail, smtpID: &smtpID})
+	f.db.Model(&database.CampaignTemplate{}).Where("id = ?", tmpl).Update("language", "en")
+	gone := uuid.New()
+	for code, emailID := range map[string]uuid.UUID{
+		"de": f.email("bounce@de.example.test"),
+		// the same envelope domain as English is listed once
+		"da": f.email("other@en.example.test"),
+		"fr": gone,
+		"sv": f.email("no-domain"),
+	} {
+		rowID := uuid.New()
+		templateID := tmpl
+		f.create(&database.CampaignTemplateLanguage{
+			ID: &rowID, CreatedAt: &f.now, UpdatedAt: &f.now, CampaignTemplateID: &templateID,
+			Language: code, EmailID: &emailID, IsUsable: true,
+		})
+	}
+	got, err := f.svc.GetByTemplateID(f.ctx, f.session, &tmpl, nil)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if joined(got.MailFromDomains) != "en.example.test|de.example.test" {
+		t.Fatalf("mail from domains: %v", got.MailFromDomains)
+	}
+	if joined(got.SendingIPs) != "203.0.113.5" || joined(got.SimulationURLs) != "phish.example.test/*" {
+		t.Fatalf("shared values grew: %v %v", got.SendingIPs, got.SimulationURLs)
+	}
+	entry := got.Templates[0]
+	if entry.Language != "en" || len(entry.Languages) != 4 {
+		t.Fatalf("template languages: %q %d", entry.Language, len(entry.Languages))
+	}
+	want := map[string]string{"da": "", "de": "", "fr": model.AllowListingMissingEmail, "sv": model.AllowListingMissingMailFrom}
+	for _, l := range entry.Languages {
+		if joined(l.Missing) != want[l.Language] {
+			t.Fatalf("%s missing: %v, want %q", l.Language, l.Missing, want[l.Language])
+		}
+		if l.Language == "de" && (l.MailFromDomain != "de.example.test" || l.EmailID == nil) {
+			t.Fatalf("German entry: %+v", l)
+		}
+	}
+	// a template without languages has an empty list, not null
+	plain := f.template(allowListingTemplateOpts{name: "plain", domainID: &domainID, emailID: &enEmail, smtpID: &smtpID})
+	got, err = f.svc.GetByTemplateID(f.ctx, f.session, &plain, nil)
+	if err != nil || got.Templates[0].Languages == nil || len(got.Templates[0].Languages) != 0 {
+		t.Fatalf("plain template: %+v %v", got, err)
 	}
 }

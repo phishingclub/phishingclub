@@ -513,7 +513,8 @@ func (c *Campaign) attachRecipientTemplates(
 // template moves; an anonymous self managed campaign uses this, since it may
 // hold only one template. Returns the stamps, which give a recipient a template
 // whether or not it was sent to, and the moves, which only apply while it was
-// not.
+// not, and the language of every recipient that is given a new template, so a
+// move to a template without that language can be refused.
 func (c *Campaign) planTemplateMoves(
 	ctx context.Context,
 	campaignID *uuid.UUID,
@@ -521,13 +522,13 @@ func (c *Campaign) planTemplateMoves(
 	newPool []uuid.UUID,
 	mixBy string,
 	keepSent bool,
-) (stamps map[uuid.UUID][]uuid.UUID, moves map[uuid.UUID][]uuid.UUID, err error) {
+) (stamps map[uuid.UUID][]uuid.UUID, moves map[uuid.UUID][]uuid.UUID, languages map[uuid.UUID]moverLanguage, err error) {
 	if len(newPool) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	rows, err := c.CampaignRecipientRepository.GetTemplateAssignments(ctx, campaignID)
 	if err != nil {
-		return nil, nil, errs.Wrap(err)
+		return nil, nil, nil, errs.Wrap(err)
 	}
 	inPool := make(map[uuid.UUID]bool, len(newPool))
 	for _, id := range newPool {
@@ -543,6 +544,7 @@ func (c *Campaign) planTemplateMoves(
 	}
 	stamps = map[uuid.UUID][]uuid.UUID{}
 	moves = map[uuid.UUID][]uuid.UUID{}
+	languages = map[uuid.UUID]moverLanguage{}
 	movers := []repository.TemplateAssignment{}
 	for _, row := range rows {
 		effective := row.TemplateID
@@ -557,6 +559,11 @@ func (c *Campaign) planTemplateMoves(
 			continue
 		}
 		movers = append(movers, row)
+		stamp := ""
+		if row.Language != nil {
+			stamp = *row.Language
+		}
+		languages[row.ID] = moverLanguage{stamp: stamp, from: effective, assignment: row}
 	}
 	keys := make([]string, len(movers))
 	for i, row := range movers {
@@ -571,7 +578,7 @@ func (c *Campaign) planTemplateMoves(
 			stamps[pick] = append(stamps[pick], movers[i].ID)
 		}
 	}
-	return stamps, moves, nil
+	return stamps, moves, languages, nil
 }
 
 // checkPoolKeepsTraining refuses a new pool whose training setting differs from

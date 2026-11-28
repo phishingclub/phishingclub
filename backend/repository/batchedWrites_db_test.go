@@ -126,7 +126,7 @@ func TestCampaignDeleteAfterLateEvent(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	if err := db.AutoMigrate(&database.Campaign{}, &database.CampaignEvent{}, &database.CampaignRecipient{},
-		&database.CampaignTemplatePool{}, &database.CampaignStats{}, &database.Recipient{}, &database.Event{}); err != nil {
+		&database.CampaignTemplatePool{}, &database.CampaignLanguageRoute{}, &database.CampaignStats{}, &database.Recipient{}, &database.Event{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	ctx := context.Background()

@@ -209,6 +209,7 @@ func NewServices(
 		IdentifierRepository:       repositories.Identifier,
 		ProgramRepository:          repositories.Program,
 		CompanyRepository:          repositories.Company,
+		TemplateService:            templateService,
 	}
 	apiSender := &service.APISender{
 		Common:                  common,

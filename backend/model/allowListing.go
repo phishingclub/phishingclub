@@ -76,6 +76,24 @@ type AllowListingTemplate struct {
 	SendingIPs []string `json:"sendingIPs"`
 	// Missing lists the values the template lacks
 	Missing []string `json:"missing"`
+	// Language is the template language, empty when not set
+	Language string `json:"language"`
+	// Languages are the other languages of the template, each with the
+	// envelope sender of its email. The sender and the domains are shared.
+	Languages []*AllowListingTemplateLanguage `json:"languages"`
+}
+
+// AllowListingTemplateLanguage is the allow listing information of one more
+// language of a template
+type AllowListingTemplateLanguage struct {
+	// Language is the language code
+	Language string `json:"language"`
+	// EmailID is the email of the language, nil when it has none
+	EmailID *uuid.UUID `json:"emailID"`
+	// MailFromDomain is the envelope sender domain of the language email
+	MailFromDomain string `json:"mailFromDomain"`
+	// Missing lists the values the language lacks, email or mailFrom
+	Missing []string `json:"missing"`
 }
 
 // AllowListingOverLimit flags each list that has more entries than Microsoft

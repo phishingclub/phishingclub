@@ -27,10 +27,15 @@ const (
 	TEST_COMPANY_NAME_5 = "Phish Club"
 
 	// test pages
-	TEST_PAGE_NAME_1 = "Login M365"
+	TEST_PAGE_NAME_1    = "Login M365"
+	TEST_PAGE_NAME_1_DE = "Login M365 (German)"
 
 	// test names
-	TEST_EMAIL_NAME_1 = "Validate Account"
+	TEST_EMAIL_NAME_1    = "Validate Account"
+	TEST_EMAIL_NAME_1_DE = "Validate Account (German)"
+
+	// test templates
+	TEST_TEMPLATE_NAME_MULTILINGUAL = "Phishing (multilingual)"
 
 	// test domains
 	TEST_DOMAIN_NAME_1 = "phishing.club.microsoft.test"

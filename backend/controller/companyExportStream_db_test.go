@@ -55,12 +55,15 @@ func newExportFixture(t *testing.T) *exportFixture {
 		&database.RecipientGroup{},
 		&database.RecipientGroupRecipient{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplateLanguage{},
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignTemplatePool{},
 		&database.CampaignRecipient{},
 		&database.Event{},
 		&database.CampaignEvent{},
 		&database.Program{},
+		&database.ProgramLanguageRoute{},
 		&database.ProgramStep{},
 		&database.ProgramCampaign{},
 		&database.ProgramRecipientGroup{},
@@ -301,7 +304,7 @@ func TestCompanyExportContent(t *testing.T) {
 		t.Fatalf("entries %v, want %v", names, wantNames)
 	}
 	recipients := readCSV(t, files["recipients.csv"])
-	wantHeader := "Created at|Updated at|Email|Phone|Extra Identifier|First name|Last name|Position|Department|City|Country|Misc|Group 1|Group 2|Group 3"
+	wantHeader := "Created at|Updated at|Email|Phone|Extra Identifier|First name|Last name|Position|Department|City|Country|Misc|Language|Group 1|Group 2|Group 3"
 	if got := strings.Join(recipients[0], "|"); got != wantHeader {
 		t.Fatalf("recipient header %q", got)
 	}
@@ -309,7 +312,7 @@ func TestCompanyExportContent(t *testing.T) {
 		t.Fatalf("recipient rows %d, want 3 and a header", len(recipients)-1)
 	}
 	alice := strings.Join(recipients[1], "|")
-	wantAlice := "2026-03-01T12:01:00Z|2026-03-01T12:01:00Z|alice@example.com|'-555||'=Alice|'+Smith|'@pos|dept|'-city||'+misc|'=gamma|alpha|beta"
+	wantAlice := "2026-03-01T12:01:00Z|2026-03-01T12:01:00Z|alice@example.com|'-555||'=Alice|'+Smith|'@pos|dept|'-city||'+misc||'=gamma|alpha|beta"
 	if alice != wantAlice {
 		t.Fatalf("alice row\n%q\nwant\n%q", alice, wantAlice)
 	}
@@ -363,7 +366,7 @@ func TestSharedExportContent(t *testing.T) {
 		t.Fatalf("entries %v", names)
 	}
 	recipients := readCSV(t, files["recipients.csv"])
-	if len(recipients) != 2 || recipients[1][5] != "'@Shared" || recipients[1][12] != "shared group" {
+	if len(recipients) != 2 || recipients[1][5] != "'@Shared" || recipients[1][13] != "shared group" {
 		t.Fatalf("shared recipients %v", recipients)
 	}
 	events := readCSV(t, files["campaign_events/Shared campaign.csv"])
@@ -432,16 +435,16 @@ func TestCompanyExportManyRecipients(t *testing.T) {
 	if len(recipients) != count+1 {
 		t.Fatalf("recipient rows %d, want %d", len(recipients)-1, count)
 	}
-	if len(recipients[0]) != 14 {
+	if len(recipients[0]) != 15 {
 		t.Fatalf("header %v, want two group columns", recipients[0])
 	}
-	// a row has twelve fields and one per group
+	// a row has thirteen fields and one per group
 	two := 0
 	for _, row := range recipients[1:] {
 		switch len(row) {
-		case 14:
+		case 15:
 			two++
-		case 13:
+		case 14:
 		default:
 			t.Fatalf("row %v", row)
 		}

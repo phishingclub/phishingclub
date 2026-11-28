@@ -256,6 +256,7 @@ func newReportInboxFixture(t *testing.T) *reportInboxFixture {
 	if err := db.AutoMigrate(
 		&database.Company{},
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignRecipient{},
 		&database.Recipient{},
 		&database.CampaignEvent{},
@@ -267,6 +268,7 @@ func newReportInboxFixture(t *testing.T) *reportInboxFixture {
 		&database.Email{},
 		&database.Domain{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplateLanguage{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

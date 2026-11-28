@@ -14,7 +14,8 @@ import (
 )
 
 // programAttentionReason tells why a program that is not closed needs a look,
-// empty when it is fine. A template that cannot be sent needs attention, and
+// empty when it is fine. A template that cannot be sent needs attention, as
+// does a step template that can not send a language the program picks, and
 // so does a running program whose groups are empty: nobody was ever enrolled
 // or everyone left. A program counts as running once the membership pass
 // marked it started, or once it is past its start by more than
@@ -33,6 +34,9 @@ func programAttentionReason(
 		if !usable[tid] {
 			return "A template cannot be sent. Check its domain, sender and pages."
 		}
+	}
+	if sum.BrokenLanguage {
+		return "A template cannot be sent in a language the program picks. Check the languages of its templates."
 	}
 	running := program.StartedAt != nil
 	if start, err := program.StartAt.Get(); err == nil && !start.After(now.Add(-repository.ProgramStartGrace)) {

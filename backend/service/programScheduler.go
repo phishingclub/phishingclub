@@ -65,44 +65,72 @@ type programSent struct {
 	stepID uuid.UUID
 }
 
-// templateUsable reports whether a template can be sent. The answer is kept in
-// cache, when given, for the rest of the tick. A missing template is unusable,
+// templateUsable reports whether a template can be sent in a language, the
+// empty language being the template's own content. The answer is kept in
+// cache, when given, for the rest of the batch, by template and language, so
+// a person routed to a broken language is never picked onto it while other
+// languages of the template are still sent. A missing template is unusable,
 // and so is one whose email has no content or does not parse, which the
-// sender would hold, see templateEmailSendable.
-func (s *Program) templateUsable(ctx context.Context, templateID uuid.UUID, cache map[uuid.UUID]bool) (bool, error) {
+// sender would hold, see templateEmailSendable. A language must be the
+// template language or a usable language row of set, the language rows of
+// the template read once per tick; with set nil they are read here.
+func (s *Program) templateUsable(
+	ctx context.Context,
+	key programUsableKey,
+	set *repository.TemplateLanguageSet,
+	cache map[programUsableKey]bool,
+) (bool, error) {
 	if cache != nil {
-		if v, ok := cache[templateID]; ok {
+		if v, ok := cache[key]; ok {
 			return v, nil
 		}
 	}
+	templateID := key.templateID
 	usable, err := s.ProgramRepository.GetTemplateUsability(ctx, []uuid.UUID{templateID})
 	if err != nil {
 		return false, errs.Wrap(err)
 	}
 	v := usable[templateID]
+	if v && key.language != "" {
+		if set == nil {
+			sets, err := s.templateRepository().GetLanguageSetsByIDs(ctx, []uuid.UUID{templateID})
+			if err != nil {
+				return false, errs.Wrap(err)
+			}
+			set = sets[templateID]
+		}
+		v = set != nil && set.CanSend(key.language)
+	}
 	if v {
-		if v, err = s.templateEmailSendable(ctx, templateID); err != nil {
+		var companyID *uuid.UUID
+		if key.company != uuid.Nil {
+			companyID = &key.company
+		}
+		if v, err = s.templateEmailSendable(ctx, companyID, templateID, key.language); err != nil {
 			return false, err
 		}
 	}
 	if cache != nil {
-		cache[templateID] = v
+		cache[key] = v
 	}
 	return v, nil
 }
 
-// templateEmailSendable reports whether the email of a template has content
-// that parses, the checks the sender makes before it sends. A template or
-// email that is missing is left to the usable flag, which a removed email
-// clears. Without the email service the check is skipped.
-func (s *Program) templateEmailSendable(ctx context.Context, templateID uuid.UUID) (bool, error) {
+// templateEmailSendable reports whether the email of a template in a
+// language has content and a subject that parse, the checks the sender makes
+// before it sends. The template is read through the language loader, so a
+// language with no usable content is not sendable. A template or email that
+// is missing is left to the usable flag, which a removed email clears.
+// Without the email service the check is skipped. Body and subject are parsed
+// with the template functions of companyID, the ones the sender uses.
+func (s *Program) templateEmailSendable(ctx context.Context, companyID *uuid.UUID, templateID uuid.UUID, language string) (bool, error) {
 	if s.CampaignService == nil || s.CampaignService.MailService == nil ||
 		s.CampaignService.MailService.EmailRepository == nil || s.CampaignTemplateService == nil ||
 		s.CampaignTemplateService.CampaignTemplateRepository == nil {
 		return true, nil
 	}
-	t, err := s.CampaignTemplateService.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{})
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	t, err := s.CampaignTemplateService.CampaignTemplateRepository.GetByIDForLanguage(ctx, &templateID, language, &repository.CampaignTemplateOption{})
+	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, repository.ErrTemplateLanguageUnavailable) {
 		return false, nil
 	}
 	if err != nil {
@@ -123,17 +151,30 @@ func (s *Program) templateEmailSendable(ctx context.Context, templateID uuid.UUI
 	if err != nil {
 		return false, nil
 	}
-	if _, err := template.New("email").Funcs(TemplateFuncs()).Parse(content.String()); err != nil {
+	funcs := TemplateFuncs()
+	if s.CampaignService.TemplateService != nil {
+		funcs = s.CampaignService.TemplateService.TemplateFuncsWithCompany(ctx, companyID)
+	}
+	if _, err := template.New("email").Funcs(funcs).Parse(content.String()); err != nil {
+		return false, nil
+	}
+	// the sender holds a send whose subject is missing or does not parse
+	subject, err := email.MailHeaderSubject.Get()
+	if err != nil {
+		return false, nil
+	}
+	if _, err := template.New("subject").Funcs(funcs).Parse(subject.String()); err != nil {
 		return false, nil
 	}
 	return true, nil
 }
 
 // pickSendableStep picks a step from the candidates whose template can be sent
-// and whose step campaign is open. A step with a broken template is skipped for
-// this pick only, it stays undelivered. blocked reports whether such a step was
-// skipped. mixCounts, when not nil, are the sends of the person's colleagues
-// per step, see programPickStepMixed.
+// in the person's language and whose step campaign is open. A step with a
+// broken template or language is skipped for this pick only, it stays
+// undelivered. blocked reports whether such a step was skipped. mixCounts,
+// when not nil, are the sends of the person's colleagues per step, see
+// programPickStepMixed.
 func (s *Program) pickSendableStep(
 	ctx context.Context,
 	session *model.Session,
@@ -142,13 +183,18 @@ func (s *Program) pickSendableStep(
 	loopCount int,
 	rng *rand.Rand,
 	campaignCache map[string]*model.Campaign,
-	usableCache map[uuid.UUID]bool,
+	usableCache map[programUsableKey]bool,
 	mixCounts map[uuid.UUID]int,
+	language *programPersonLanguage,
 ) (*model.ProgramStep, *model.Campaign, bool, error) {
 	blocked := false
 	for len(candidates) > 0 {
 		pick := programPickStepMixed(program, candidates, rng, mixCounts)
-		usable, err := s.templateUsable(ctx, pick.CampaignTemplateID.MustGet(), usableCache)
+		key, set := language.usableKey(pick.CampaignTemplateID.MustGet())
+		if companyID, err := program.CompanyID.Get(); err == nil {
+			key.company = companyID
+		}
+		usable, err := s.templateUsable(ctx, key, set, usableCache)
 		if err != nil {
 			return nil, nil, blocked, err
 		}
@@ -728,8 +774,11 @@ func (s *Program) cancelRemovedStepSendsOf(ctx context.Context, programID uuid.U
 func (s *Program) advanceDue(ctx context.Context, session *model.Session, now time.Time) error {
 	// the template mixing counts are read once per program and tick
 	mixes := map[uuid.UUID]*programMix{}
+	// the language routes and the language rows of the step templates are
+	// read once per program and tick
+	languages := map[uuid.UUID]*programLanguages{}
 	for advanced := 0; advanced < programAdvanceLimit; {
-		n, err := s.advanceDueBatchWith(ctx, session, now, mixes)
+		n, err := s.advanceDueBatchWith(ctx, session, now, mixes, languages)
 		if err != nil {
 			return err
 		}
@@ -748,16 +797,18 @@ func (s *Program) advanceDueBatch(
 	session *model.Session,
 	now time.Time,
 ) (int, error) {
-	return s.advanceDueBatchWith(ctx, session, now, map[uuid.UUID]*programMix{})
+	return s.advanceDueBatchWith(ctx, session, now, map[uuid.UUID]*programMix{}, map[uuid.UUID]*programLanguages{})
 }
 
-// advanceDueBatchWith is advanceDueBatch with the template mixing state of the
-// earlier batches of the tick, by program, which it reads and updates
+// advanceDueBatchWith is advanceDueBatch with the template mixing state and
+// the language state of the earlier batches of the tick, by program, which it
+// reads and updates
 func (s *Program) advanceDueBatchWith(
 	ctx context.Context,
 	session *model.Session,
 	now time.Time,
 	mixes map[uuid.UUID]*programMix,
+	languages map[uuid.UUID]*programLanguages,
 ) (int, error) {
 	if err := s.lifecycleMu.LockContext(ctx); err != nil {
 		return 0, errs.Wrap(err)
@@ -772,8 +823,8 @@ func (s *Program) advanceDueBatchWith(
 	// campaign is the same row, so it is cached for this batch and not read
 	// again for each due recipient
 	campaignCache := map[string]*model.Campaign{}
-	// whether a template can be sent is read once per batch
-	usableCache := map[uuid.UUID]bool{}
+	// whether a template can be sent in a language is read once per batch
+	usableCache := map[programUsableKey]bool{}
 	// the sends of the batch people are read once per program
 	sendsCache := map[uuid.UUID]*repository.ProgramPeopleSends{}
 	// the template mixing state is updated once per program and batch
@@ -781,7 +832,8 @@ func (s *Program) advanceDueBatchWith(
 	w := &programWrites{recipients: map[uuid.UUID]*model.Recipient{}}
 	// the people whose advance or writes failed
 	failed := map[uuid.UUID]bool{}
-	// the people of an anonymous program are read once per program and batch
+	// the people of an anonymous program, or of one that picks languages by a
+	// field, are read once per program and batch
 	recipientsRead := map[uuid.UUID]bool{}
 	for _, e := range due {
 		programID := e.ProgramID
@@ -825,12 +877,19 @@ func (s *Program) advanceDueBatchWith(
 			mixes[*programID] = mix
 		}
 		mix := mixes[*programID]
-		if program.IsAnonymousOn() && !recipientsRead[*programID] {
+		langs, err := s.tickLanguages(ctx, languages, program)
+		if err != nil {
+			// without the languages no send can be stamped, the person waits
+			// like after a failed advance
+			s.delayFailedEnrollment(ctx, e, now, err)
+			continue
+		}
+		if (program.IsAnonymousOn() || langs.routing()) && !recipientsRead[*programID] {
 			recipientsRead[*programID] = true
 			s.readBatchRecipients(ctx, w, due, *programID)
 		}
 		w.begin(e)
-		if err := s.advanceEnrollmentWith(ctx, session, program, e, now, campaignCache, usableCache, sends, mix, w); err != nil {
+		if err := s.advanceEnrollmentWith(ctx, session, program, e, now, campaignCache, usableCache, sends, mix, w, langs); err != nil {
 			w.drop()
 			failed[*e.ID] = true
 			s.delayFailedEnrollment(ctx, e, now, err)
@@ -882,8 +941,9 @@ func programMixFailed(w *programWrites, failed map[uuid.UUID]bool) map[uuid.UUID
 }
 
 // readBatchRecipients reads the people of one program in the batch in one
-// read, for the department and position an anonymous send keeps. A failure is
-// logged and each send then reads its person.
+// read, for the department and position an anonymous send keeps and the field
+// languages are picked by. A failure is logged and each send then reads its
+// person.
 func (s *Program) readBatchRecipients(
 	ctx context.Context,
 	w *programWrites,
@@ -918,13 +978,15 @@ type programWrites struct {
 }
 
 // programPersonWrites is what an advance stores for one person: a new send or
-// a cancelled send put back in the queue, and the enrollment progress
+// a cancelled send put back in the queue with its new language, and the
+// enrollment progress
 type programPersonWrites struct {
-	e        *database.ProgramEnrollment
-	send     *model.CampaignRecipient
-	reviveID *uuid.UUID
-	reviveAt time.Time
-	fields   map[string]any
+	e              *database.ProgramEnrollment
+	send           *model.CampaignRecipient
+	reviveID       *uuid.UUID
+	reviveAt       time.Time
+	reviveLanguage *string
+	fields         map[string]any
 	// sendStored is set when the send was stored right away and not with the
 	// batch, as a send with a lure code is
 	sendStored bool
@@ -972,7 +1034,7 @@ func storePersonWrites(
 		}
 	}
 	if p.reviveID != nil {
-		if err := programRepo.ReviveCancelledSend(ctx, p.reviveID, p.reviveAt); err != nil {
+		if err := programRepo.ReviveCancelledSend(ctx, p.reviveID, p.reviveAt, p.reviveLanguage); err != nil {
 			return errs.Wrap(err)
 		}
 	}
@@ -1076,16 +1138,17 @@ func (s *Program) advanceEnrollment(
 	e *database.ProgramEnrollment,
 	now time.Time,
 	campaignCache map[string]*model.Campaign,
-	usableCache map[uuid.UUID]bool,
+	usableCache map[programUsableKey]bool,
 ) error {
-	return s.advanceEnrollmentWith(ctx, session, program, e, now, campaignCache, usableCache, nil, nil, nil)
+	return s.advanceEnrollmentWith(ctx, session, program, e, now, campaignCache, usableCache, nil, nil, nil, nil)
 }
 
 // advanceEnrollmentWith is advanceEnrollment with the sends of the person read
 // ahead for the whole batch. With sends nil they are read for this person.
 // With mix the template is mixed among colleagues, nil picks at random.
 // With w the writes are kept in w and stored later for the whole batch, with
-// w nil they are stored right away.
+// w nil they are stored right away. langs is the language state of the
+// program for the tick, nil reads it for this person.
 func (s *Program) advanceEnrollmentWith(
 	ctx context.Context,
 	session *model.Session,
@@ -1093,10 +1156,11 @@ func (s *Program) advanceEnrollmentWith(
 	e *database.ProgramEnrollment,
 	now time.Time,
 	campaignCache map[string]*model.Campaign,
-	usableCache map[uuid.UUID]bool,
+	usableCache map[programUsableKey]bool,
 	sends *repository.ProgramPeopleSends,
 	mix *programMix,
 	w *programWrites,
+	langs *programLanguages,
 ) error {
 	steps := program.Steps
 	if len(steps) == 0 {
@@ -1160,14 +1224,26 @@ func (s *Program) advanceEnrollmentWith(
 			"next_due_at": *end,
 		})
 	}
+	// the person's language is decided before a step is picked, so a step
+	// is only picked when its template can be sent in that language
+	if langs == nil {
+		var err error
+		if langs, err = s.programLanguagesFor(ctx, program); err != nil {
+			return err
+		}
+	}
+	language, err := s.programPersonFor(ctx, langs, e, w)
+	if err != nil {
+		return err
+	}
 	mixCounts := mix.countsFor(e.RecipientID)
-	step, campaign, blocked, err := s.pickSendableStep(ctx, session, program, preferred, loopCount, rng, campaignCache, usableCache, mixCounts)
+	step, campaign, blocked, err := s.pickSendableStep(ctx, session, program, preferred, loopCount, rng, campaignCache, usableCache, mixCounts, language)
 	if err != nil {
 		return err
 	}
 	if step == nil && len(fallback) > 0 {
 		var fallbackBlocked bool
-		step, campaign, fallbackBlocked, err = s.pickSendableStep(ctx, session, program, fallback, loopCount, rng, campaignCache, usableCache, mixCounts)
+		step, campaign, fallbackBlocked, err = s.pickSendableStep(ctx, session, program, fallback, loopCount, rng, campaignCache, usableCache, mixCounts, language)
 		if err != nil {
 			return err
 		}
@@ -1237,20 +1313,24 @@ func (s *Program) advanceEnrollmentWith(
 		return s.planNextRound(ctx, w, program, e, roundStart, now, sentBefore, loopCount,
 			&programSent{at: newest.SendAt, stepID: newest.StepID})
 	}
+	templateID := step.CampaignTemplateID.MustGet()
 	switch {
 	case existing != nil:
 		// a cancelled send, for example of a person who left and came back, is
-		// put back in the queue, as a campaign holds one row per person
+		// put back in the queue, as a campaign holds one row per person. It is
+		// a new planning decision, so it gets the language decided now
+		stamp := language.stampPtr(templateID)
 		if w != nil {
 			w.current.reviveID = &existing.ID
 			w.current.reviveAt = sendAt
-		} else if err := s.ProgramRepository.ReviveCancelledSend(ctx, &existing.ID, sendAt); err != nil {
+			w.current.reviveLanguage = stamp
+		} else if err := s.ProgramRepository.ReviveCancelledSend(ctx, &existing.ID, sendAt, stamp); err != nil {
 			return errs.Wrap(err)
 		} else {
 			programTickStatsFrom(ctx).add(e.ProgramID, 0, 1, 0, 0)
 		}
 	default:
-		if err := s.insertStepSend(ctx, w, campaign, e, recipientID, sendAt); err != nil {
+		if err := s.insertStepSend(ctx, w, campaign, e, recipientID, sendAt, language.stamp(templateID)); err != nil {
 			return err
 		}
 	}
@@ -1265,8 +1345,9 @@ func (s *Program) advanceEnrollmentWith(
 	return s.planNextRound(ctx, w, program, e, roundStart, now, sentCount, loopCount, sent)
 }
 
-// insertStepSend adds a scheduled send of a hidden campaign for a person. The
-// enrollment may be nil only on a campaign that is not anonymous.
+// insertStepSend adds a scheduled send of a hidden campaign for a person,
+// stamped with language. The enrollment may be nil only on a campaign that is
+// not anonymous.
 func (s *Program) insertStepSend(
 	ctx context.Context,
 	w *programWrites,
@@ -1274,6 +1355,7 @@ func (s *Program) insertStepSend(
 	e *database.ProgramEnrollment,
 	recipientID uuid.UUID,
 	sendAt time.Time,
+	language nullable.Nullable[string],
 ) error {
 	campaignID := campaign.ID.MustGet()
 	if campaignAnonymous(campaign) && e == nil {
@@ -1285,6 +1367,7 @@ func (s *Program) insertStepSend(
 		CampaignID:     nullable.NewNullableWithValue(campaignID),
 		SendAt:         nullable.NewNullableWithValue(sendAt),
 		NotableEventID: nullable.NewNullableWithValue(*scheduledEvent),
+		Language:       language,
 	}
 	if campaignAnonymous(campaign) {
 		// the snapshot keeps the department and position for grouped results. A

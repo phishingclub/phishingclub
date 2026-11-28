@@ -176,6 +176,7 @@ const programExportBatch = 1000
 var programSendCSVHeader = []string{
 	"Email", "Name", "Template", "Kind", "Sent at", "Clicked link at",
 	"Data submitted at", "Reported at", "Training started at", "Training completed at",
+	"Language",
 }
 
 // programSendCSV writes one row per sent message of a normal program, oldest
@@ -201,7 +202,23 @@ func (s *Program) programSendCSV(ctx context.Context, program *model.Program, wr
 	}
 	templateNames := make([]string, len(facts.names))
 	copy(templateNames, facts.names)
+	templateKeys := make([]string, len(facts.templates))
+	copy(templateKeys, facts.templates)
+	stamps := make([]string, len(facts.languages))
+	copy(stamps, facts.languages)
 	facts.mu.RUnlock()
+	templateLanguages, err := s.factTemplateLanguages(ctx, templateKeys)
+	if err != nil {
+		return err
+	}
+	// the language of a send is its stamp, or its template language when it
+	// has none
+	languageOf := func(sd *programFactSend) string {
+		if code := stamps[sd.language]; code != "" {
+			return code
+		}
+		return templateLanguages[templateKeys[sd.template]]
+	}
 	// oldest first, sends of the same time in the order they were read
 	order := make([]int32, len(sends))
 	for i := range order {
@@ -257,6 +274,11 @@ func (s *Program) programSendCSV(ctx context.Context, program *model.Program, wr
 				"",
 				at(sd.sentAt),
 				"", "", "", "", "",
+				"",
+			}
+			// once Anonymize All began a send names no language either
+			if !anonymized {
+				row[10] = utils.CSVRemoveFormulaStart(languageOf(sd))
 			}
 			if sd.training {
 				kind = ProgramSendKindTraining

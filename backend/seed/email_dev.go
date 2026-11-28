@@ -40,6 +40,14 @@ func SeedDevelopmentEmails(
 			MailFrom:         "Fresh Fish <ff@phish.internal>",
 			Content:          "Hi {{.FirstName}} Welcome to The Phishing Club! We are excited to have you here. Click <a href='{{.URL}}'>here</a> to get started.",
 		},
+		// German content of the multilingual template
+		{
+			Name:             TEST_EMAIL_NAME_1_DE,
+			Subject:          "Willkommen im Phishing Club",
+			MailEnvelopeFrom: "envelope-sender@phish.internal",
+			MailFrom:         "Frischer Fisch <ff@phish.internal>",
+			Content:          "Hallo {{.FirstName}}, willkommen im Phishing Club! Wir freuen uns, dass Sie da sind. Klicken Sie <a href='{{.URL}}'>hier</a>, um loszulegen.",
+		},
 	}
 	for i := 0; i < 10; i++ {
 		envelopeFrom := faker.Email()

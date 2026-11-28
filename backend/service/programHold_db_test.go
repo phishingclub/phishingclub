@@ -189,14 +189,36 @@ func TestSchedulerSkipsTemplateWithBrokenEmail(t *testing.T) {
 	p.create(&database.Email{ID: &emailID, CreatedAt: &now, UpdatedAt: &now, Name: "broken", Content: "{{ .Broken",
 		MailFrom: "sender@example.com", From: "Sender <sender@example.com>", Subject: "Hello"})
 	p.setTemplate(templateID, map[string]any{"email_id": emailID})
-	usable, err := p.svc.templateUsable(p.ctx, templateID, nil)
+	usable, err := p.svc.templateUsable(p.ctx, programUsableKey{templateID: templateID}, nil, nil)
 	if err != nil || usable {
 		t.Fatalf("a template whose email does not parse must not be usable: %v %v", usable, err)
 	}
 	p.db.Model(&database.Email{}).Where("id = ?", emailID).Update("content", "Hello {{.FirstName}}")
-	usable, err = p.svc.templateUsable(p.ctx, templateID, nil)
+	usable, err = p.svc.templateUsable(p.ctx, programUsableKey{templateID: templateID}, nil, nil)
 	if err != nil || !usable {
 		t.Fatalf("a template whose email parses must be usable: %v %v", usable, err)
+	}
+	// the sender holds a subject that does not parse, so the scheduler skips it
+	p.db.Model(&database.Email{}).Where("id = ?", emailID).Update("subject", "Hello {{.FirstName")
+	usable, err = p.svc.templateUsable(p.ctx, programUsableKey{templateID: templateID}, nil, nil)
+	if err != nil || usable {
+		t.Fatalf("a template whose subject does not parse must not be usable: %v %v", usable, err)
+	}
+	// a language of the template is checked with its own email
+	p.db.Model(&database.Email{}).Where("id = ?", emailID).Update("subject", "Hello")
+	p.setTemplate(templateID, map[string]any{"language": "en"})
+	germanEmail := uuid.New()
+	p.create(&database.Email{ID: &germanEmail, CreatedAt: &now, UpdatedAt: &now, Name: "broken german", Content: "Hallo {{ .Broken",
+		MailFrom: "sender@example.com", From: "Sender <sender@example.com>", Subject: "Hallo"})
+	rowID := uuid.New()
+	p.create(&database.CampaignTemplateLanguage{ID: &rowID, CreatedAt: &now, UpdatedAt: &now,
+		CampaignTemplateID: &templateID, Language: "de", EmailID: &germanEmail, IsUsable: true})
+	german := programUsableKey{templateID: templateID, language: "de"}
+	if usable, err := p.svc.templateUsable(p.ctx, german, nil, nil); err != nil || usable {
+		t.Fatalf("a language whose email does not parse must not be usable: %v %v", usable, err)
+	}
+	if usable, err := p.svc.templateUsable(p.ctx, programUsableKey{templateID: templateID}, nil, nil); err != nil || !usable {
+		t.Fatalf("the template language must stay usable: %v %v", usable, err)
 	}
 }
 

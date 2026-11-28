@@ -22,6 +22,10 @@ import (
 // NextTemplateName is set when the next template is known: a send waits in the
 // queue, or everyone gets the templates in the same order. It is null when the
 // template is picked at send time. NextDueAt is when the next send goes out.
+// Language is the language code of the send waiting in the queue, else of the
+// newest sent one: its stamp, or its template language when it has none. It is
+// set only when the program has Language by, and never for an anonymous
+// program, which gives no rows.
 type ProgramEnrollmentRow struct {
 	RecipientID      string     `json:"recipientID"`
 	Email            string     `json:"email"`
@@ -35,6 +39,7 @@ type ProgramEnrollmentRow struct {
 	LastSentAt       *time.Time `json:"lastSentAt"`
 	NextTemplateName *string    `json:"nextTemplateName"`
 	NextDueAt        *time.Time `json:"nextDueAt"`
+	Language         *string    `json:"language"`
 }
 
 // ProgramRecipientsView is the recipients endpoint response. For an anonymous
@@ -222,6 +227,10 @@ func (s *Program) GetRecipientsView(
 	for _, st := range steps {
 		stepNames[st.ID.MustGet()] = nameOf(st.CampaignTemplateID.MustGet())
 	}
+	languageOf, err := s.peopleLanguages(ctx, program, last, queued)
+	if err != nil {
+		return nil, err
+	}
 	shuffle := program.OrderModeOrDefault() == model.ProgramOrderShuffle
 	for _, e := range enrollments {
 		email, name := recipientDisplayName(e.Recipient)
@@ -276,6 +285,9 @@ func (s *Program) GetRecipientsView(
 			NextTemplateName: nextTemplate,
 			NextDueAt:        nextDue,
 		}
+		if code, ok := languageOf[*e.RecipientID]; ok {
+			row.Language = &code
+		}
 		if sd := last[*e.RecipientID]; sd != nil {
 			n := facts.templateNames[sd.Template]
 			at := sd.SentAt
@@ -289,6 +301,67 @@ func (s *Program) GetRecipientsView(
 	}
 	view.HasNextPage = q.Limit > 0 && int64(q.Offset+len(view.Rows)) < count
 	return view, nil
+}
+
+// peopleLanguages returns the language of each person's queued send, else of
+// their newest sent one, keyed by recipient. A send with no stamp is in its
+// template language, read for those templates only. A person whose language
+// is not known is left out. It is empty for a program without Language by and
+// for an anonymous program.
+func (s *Program) peopleLanguages(
+	ctx context.Context,
+	program *model.Program,
+	last map[uuid.UUID]*programSend,
+	queued map[uuid.UUID]repository.ProgramQueuedSend,
+) (map[uuid.UUID]string, error) {
+	out := map[uuid.UUID]string{}
+	if program.IsAnonymousOn() || program.LanguageRouteField() == "" {
+		return out, nil
+	}
+	type pick struct {
+		code     string
+		template string
+	}
+	picks := make(map[uuid.UUID]pick, len(last)+len(queued))
+	for person, sd := range last {
+		picks[person] = pick{sd.Language, sd.Template}
+	}
+	for person, q := range queued {
+		p := pick{}
+		if q.Language != nil {
+			p.code = *q.Language
+		}
+		if q.TemplateID != nil {
+			p.template = q.TemplateID.String()
+		}
+		picks[person] = p
+	}
+	keys := []string{}
+	seen := map[string]bool{}
+	for _, p := range picks {
+		if p.code == "" && p.template != "" && !seen[p.template] {
+			seen[p.template] = true
+			keys = append(keys, p.template)
+		}
+	}
+	templateLanguages := map[string]string{}
+	if len(keys) > 0 {
+		var err error
+		templateLanguages, err = s.factTemplateLanguages(ctx, keys)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for person, p := range picks {
+		code := p.code
+		if code == "" {
+			code = templateLanguages[p.template]
+		}
+		if code != "" {
+			out[person] = code
+		}
+	}
+	return out, nil
 }
 
 // ProgramAudienceNotStarted is the row status of a person who is in the

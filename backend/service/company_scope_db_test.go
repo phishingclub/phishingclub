@@ -55,7 +55,9 @@ func newCompanyScopeFixture(t *testing.T) *companyScopeFixture {
 		&database.RecipientGroup{},
 		&database.AllowDeny{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplateLanguage{},
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignTemplatePool{},
 		&database.CampaignRecipientGroup{},
 		&database.CampaignAllowDeny{},
@@ -251,6 +253,14 @@ func (f *companyScopeFixture) templateWithRefs(owner *uuid.UUID) *model.Campaign
 		BeforeLandingProxyID: nullable.NewNullableWithValue(f.row(database.PROXY_TABLE, owner)),
 		LandingProxyID:       nullable.NewNullableWithValue(f.row(database.PROXY_TABLE, owner)),
 		AfterLandingProxyID:  nullable.NewNullableWithValue(f.row(database.PROXY_TABLE, owner)),
+		Language:             nullable.NewNullableWithValue("en"),
+		Languages: nullable.NewNullableWithValue([]*model.CampaignTemplateLanguage{{
+			Language:            "de",
+			EmailID:             nullable.NewNullableWithValue(f.row(database.EMAIL_TABLE, owner)),
+			BeforeLandingPageID: nullable.NewNullableWithValue(f.row(database.PAGE_TABLE, owner)),
+			LandingPageID:       nullable.NewNullableWithValue(f.row(database.PAGE_TABLE, owner)),
+			AfterLandingPageID:  nullable.NewNullableWithValue(f.row(database.PAGE_TABLE, owner)),
+		}}),
 	}
 }
 
@@ -270,8 +280,9 @@ func TestCampaignCompanyRefsCollectsEveryReference(t *testing.T) {
 		}
 	}
 	templateRefs := campaignTemplateCompanyRefs(f.templateWithRefs(&f.c2))
-	if len(templateRefs) != 10 {
-		t.Fatalf("template refs: got %d, want 10", len(templateRefs))
+	// 10 on the template and the email and three pages of its language row
+	if len(templateRefs) != 14 {
+		t.Fatalf("template refs: got %d, want 14", len(templateRefs))
 	}
 	for _, ref := range templateRefs {
 		if err := ValidateCompanyRefs(f.ctx, f.db, &f.c1, []CompanyRef{ref}); !isValidationError(err) {

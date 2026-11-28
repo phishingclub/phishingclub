@@ -205,7 +205,7 @@ func TestStepCampaignCanBeReplaced(t *testing.T) {
 }
 
 // TestReviveCancelledSend checks that a cancelled unsent row goes back in the
-// queue and a sent row is never changed
+// queue with the new language stamp and a sent row is never changed
 func TestReviveCancelledSend(t *testing.T) {
 	db := newProgramTestDB(t)
 	ctx := context.Background()
@@ -217,11 +217,13 @@ func TestReviveCancelledSend(t *testing.T) {
 	sent := addCampaignRecipient(t, db, campaignID, ptrUUID(), nil, true)
 	stamp := utils.NowRFC3339UTC()
 	for _, id := range []*uuid.UUID{cancelled, sent} {
-		db.Model(&database.CampaignRecipient{}).Where("id = ?", id).Update("cancelled_at", stamp)
+		db.Model(&database.CampaignRecipient{}).Where("id = ?", id).
+			Updates(map[string]any{"cancelled_at": stamp, "language": "fr"})
 	}
 	sendAt := time.Now().Add(time.Hour)
+	german := "de"
 	for _, id := range []*uuid.UUID{cancelled, sent} {
-		if err := r.ReviveCancelledSend(ctx, id, sendAt); err != nil {
+		if err := r.ReviveCancelledSend(ctx, id, sendAt, &german); err != nil {
 			t.Fatalf("revive: %v", err)
 		}
 	}
@@ -230,10 +232,23 @@ func TestReviveCancelledSend(t *testing.T) {
 	if row.CancelledAt != nil || row.SendAt == nil {
 		t.Fatal("cancelled unsent row was not revived")
 	}
+	if row.Language == nil || *row.Language != "de" {
+		t.Fatalf("a revived row must get the new stamp, got %v", row.Language)
+	}
 	var sentRow database.CampaignRecipient
 	db.Where("id = ?", sent).First(&sentRow)
-	if sentRow.CancelledAt == nil {
+	if sentRow.CancelledAt == nil || sentRow.Language == nil || *sentRow.Language != "fr" {
 		t.Fatal("a sent row must not be changed")
+	}
+	// a revive with no language clears the stamp, the template has none
+	db.Model(&database.CampaignRecipient{}).Where("id = ?", cancelled).Update("cancelled_at", stamp)
+	if err := r.ReviveCancelledSend(ctx, cancelled, sendAt, nil); err != nil {
+		t.Fatalf("revive: %v", err)
+	}
+	row = database.CampaignRecipient{}
+	db.Where("id = ?", cancelled).First(&row)
+	if row.CancelledAt != nil || row.Language != nil {
+		t.Fatalf("a revive with no language must store no stamp, got %v", row.Language)
 	}
 }
 

@@ -57,6 +57,11 @@ type ScimUser struct {
 	EnterpriseUser *ScimEnterpriseUser `json:"urn:ietf:params:scim:schemas:extension:enterprise:2.0:User,omitempty"`
 	// addresses list, work address maps to city/country
 	Addresses []ScimAddress `json:"addresses,omitempty"`
+	// preferredLanguage maps to the recipient language, a tag such as da-DK
+	PreferredLanguage string `json:"preferredLanguage,omitempty"`
+	// locale is read for the language only when preferredLanguage is absent
+	// or names no language of the list, it is not stored on its own
+	Locale string `json:"locale,omitempty"`
 	// active flag, false means the account should be deprovisioned
 	Active bool `json:"active"`
 	// meta sub-object for responses
@@ -449,6 +454,18 @@ func (s *Scim) Schemas(baseURL string) []ScimSchema {
 						{Name: "primary", Type: "boolean", MultiValued: false, Description: "primary address indicator", Required: false, CaseExact: false, Mutability: "readWrite", Returned: "default", Uniqueness: "none"},
 						{Name: "formatted", Type: "string", MultiValued: false, Description: "full mailing address formatted for display", Required: false, CaseExact: false, Mutability: "readWrite", Returned: "default", Uniqueness: "none"},
 					},
+				},
+				{
+					Name: "preferredLanguage", Type: "string", MultiValued: false,
+					Description: "preferred language such as da-DK, stored as the language code when it is in the language list, else left empty",
+					Required:    false, CaseExact: false,
+					Mutability: "readWrite", Returned: "default", Uniqueness: "none",
+				},
+				{
+					Name: "locale", Type: "string", MultiValued: false,
+					Description: "read for the language only when preferredLanguage is absent or not known, not returned",
+					Required:    false, CaseExact: false,
+					Mutability: "writeOnly", Returned: "never", Uniqueness: "none",
 				},
 				{
 					Name: "active", Type: "boolean", MultiValued: false,
@@ -1262,10 +1279,11 @@ func (s *Scim) PatchUser(
 		return nil, errs.Wrap(gorm.ErrRecordNotFound)
 	}
 
+	language := patchLanguage(patch)
 	for _, op := range patch.Operations {
 		switch strings.ToLower(op.Op) {
 		case "replace", "add":
-			deactivated, err := s.applyPatchOperation(ctx, existing, config, recipientID, op)
+			deactivated, err := s.applyPatchOperation(ctx, existing, config, recipientID, op, language)
 			if err != nil {
 				return nil, err
 			}
@@ -1943,6 +1961,8 @@ func (s *Scim) applyScimUserToRecipient(
 		misc = scimUser.CustomExtension.Misc
 	}
 	existing.Misc.Set(*vo.NewOptionalString127Must(truncate(misc, 127)))
+	// language from preferredLanguage, or locale when that is absent or not known
+	existing.Language.Set(scimLanguageFrom(scimUser))
 
 	id := existing.ID.MustGet()
 	if err := s.RecipientRepository.UpdateByID(ctx, &id, existing); err != nil {
@@ -1990,6 +2010,7 @@ func (s *Scim) applyPatchOperation(
 	config *model.CompanyScimConfig,
 	recipientID *uuid.UUID,
 	op ScimPatchOpItem,
+	language string,
 ) (bool, error) {
 	path := strings.ToLower(op.Path)
 
@@ -2016,7 +2037,7 @@ func (s *Scim) applyPatchOperation(
 					return false, err
 				}
 			}
-			if err := s.applyAttributeMap(ctx, existing, config, recipientID, m); err != nil {
+			if err := s.applyAttributeMap(ctx, existing, config, recipientID, m, language); err != nil {
 				return false, err
 			}
 		}
@@ -2073,6 +2094,9 @@ func (s *Scim) applyPatchOperation(
 		existing.ExtraIdentifier.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
 	case "urn:ietf:params:scim:schemas:extension:phishingclub:2.0:user:misc":
 		existing.Misc.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
+	case "preferredlanguage", "locale":
+		// the language is read from the whole request, see patchLanguage
+		existing.Language.Set(language)
 	}
 
 	id := existing.ID.MustGet()
@@ -2090,6 +2114,7 @@ func (s *Scim) applyAttributeMap(
 	config *model.CompanyScimConfig,
 	recipientID *uuid.UUID,
 	m map[string]any,
+	language string,
 ) error {
 	// collect name sub-attributes first so we can merge them correctly
 	givenName := ""
@@ -2122,6 +2147,9 @@ func (s *Scim) applyAttributeMap(
 			existing.Position.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
 		case "urn:ietf:params:scim:schemas:extension:phishingclub:2.0:user:misc":
 			existing.Misc.Set(*vo.NewOptionalString127Must(truncate(strVal, 127)))
+		case "preferredlanguage", "locale":
+			// the language is read from the whole request, see patchLanguage
+			existing.Language.Set(language)
 		}
 	}
 
@@ -2240,6 +2268,11 @@ func recipientToScimUser(r *model.Recipient, baseURL string) ScimUser {
 		custom = &ScimCustomExtension{Misc: v.String()}
 	}
 
+	preferredLanguage := ""
+	if v, err := r.Language.Get(); err == nil {
+		preferredLanguage = v
+	}
+
 	schemas := []string{scimSchemaUser}
 	if enterprise != nil {
 		schemas = append(schemas, scimSchemaEnterpriseUser)
@@ -2249,18 +2282,19 @@ func recipientToScimUser(r *model.Recipient, baseURL string) ScimUser {
 	}
 
 	u := ScimUser{
-		Schemas:         schemas,
-		ID:              id,
-		UserName:        userNameStr,
-		Name:            name,
-		Title:           pos,
-		Emails:          emails,
-		PhoneNumbers:    phones,
-		EnterpriseUser:  enterprise,
-		Addresses:       addresses,
-		Active:          r.ScimSoftDeletedAt == nil,
-		ExternalID:      externalID,
-		CustomExtension: custom,
+		Schemas:           schemas,
+		ID:                id,
+		UserName:          userNameStr,
+		Name:              name,
+		Title:             pos,
+		Emails:            emails,
+		PhoneNumbers:      phones,
+		EnterpriseUser:    enterprise,
+		Addresses:         addresses,
+		Active:            r.ScimSoftDeletedAt == nil,
+		PreferredLanguage: preferredLanguage,
+		ExternalID:        externalID,
+		CustomExtension:   custom,
 	}
 	if baseURL != "" && id != "" {
 		u.Meta = &ScimMeta{
@@ -2333,10 +2367,74 @@ func scimUserToRecipient(scimUser *ScimUser, companyID *uuid.UUID) *model.Recipi
 		r.Misc = nullable.NewNullableWithValue(*vo.NewOptionalString127Must(""))
 	}
 
+	r.Language = nullable.NewNullableWithValue(scimLanguageFrom(scimUser))
+
 	if companyID != nil {
 		r.CompanyID = nullable.NewNullableWithValue(*companyID)
 	}
 	return r
+}
+
+// scimLanguageFrom returns the language code of a SCIM user: from
+// preferredLanguage, or from locale when preferredLanguage is absent or names
+// no language of the list. A value that names no language of the list gives
+// an empty code, so a sync never fails on it.
+func scimLanguageFrom(u *ScimUser) string {
+	if code := scimLanguageCode(u.PreferredLanguage); code != "" {
+		return code
+	}
+	return scimLanguageCode(u.Locale)
+}
+
+// scimLanguageCode returns the code of a SCIM language value, empty when it
+// names no language of the list. A value in the form of an Accept-Language
+// header (da-DK, en;q=0.8) is read by its first entry.
+func scimLanguageCode(v string) string {
+	if i := strings.IndexAny(v, ",;"); i >= 0 {
+		v = v[:i]
+	}
+	code, ok := data.NormalizeLanguage(v)
+	if !ok {
+		return ""
+	}
+	return code
+}
+
+// patchLanguage returns the language code a PatchOp sets through its add and
+// replace operations, by path or inside a value map. preferredLanguage is used
+// when it names a language of the list, else locale of the same request, else
+// the code is empty. The code is only applied when the request names one of
+// the two attributes.
+func patchLanguage(patch *ScimPatchOp) string {
+	preferred, locale := "", ""
+	read := func(key string, v any) {
+		switch strings.ToLower(key) {
+		case "preferredlanguage":
+			preferred = scimLanguageCode(stringFromPatchValue(v))
+		case "locale":
+			locale = scimLanguageCode(stringFromPatchValue(v))
+		}
+	}
+	for _, op := range patch.Operations {
+		switch strings.ToLower(op.Op) {
+		case "replace", "add":
+		default:
+			continue
+		}
+		if op.Path != "" {
+			read(op.Path, op.Value)
+			continue
+		}
+		if m, ok := op.Value.(map[string]any); ok {
+			for k, v := range m {
+				read(k, v)
+			}
+		}
+	}
+	if preferred != "" {
+		return preferred
+	}
+	return locale
 }
 
 // scimUserNameFrom returns the raw userName value to persist as-is.

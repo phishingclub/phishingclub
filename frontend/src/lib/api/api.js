@@ -690,6 +690,12 @@ export class API {
 		 * @param {string} campaign.templateID  uuid, the first entry of templateIDs
 		 * @param {string[]} [campaign.templateIDs] []uuid, ordered template pool
 		 * @param {string} [campaign.templateMixBy] recipient field templates are mixed by
+		 * @param {string} [campaign.languageRouteBy] recipient field that picks each
+		 * recipient's language (language, country, city, department, position, misc), '' is off
+		 * @param {string} [campaign.languageDefault] language code for values with no
+		 * route, required with languageRouteBy
+		 * @param {Object<string,string>} [campaign.languageRoutes] normalized field value
+		 * to language code, at most 500
 		 * @param {string} campaign.name
 		 * @param {boolean} [campaign.saveSubmittedData]
 		 * @param {boolean} [campaign.saveBrowserMetadata]
@@ -722,6 +728,9 @@ export class API {
 			templateID,
 			templateIDs,
 			templateMixBy,
+			languageRouteBy,
+			languageDefault,
+			languageRoutes,
 			name,
 			saveSubmittedData,
 			saveBrowserMetadata,
@@ -754,6 +763,9 @@ export class API {
 				templateID,
 				templateIDs,
 				templateMixBy,
+				languageRouteBy,
+				languageDefault,
+				languageRoutes,
 				name,
 				isAnonymous,
 				isTest,
@@ -803,6 +815,12 @@ export class API {
 		 * @param {string} campaign.templateID uuid, the first entry of templateIDs
 		 * @param {string[]} [campaign.templateIDs] []uuid, ordered template pool
 		 * @param {string} [campaign.templateMixBy] recipient field templates are mixed by
+		 * @param {string} [campaign.languageRouteBy] recipient field that picks each
+		 * recipient's language (language, country, city, department, position, misc), '' is off
+		 * @param {string} [campaign.languageDefault] language code for values with no
+		 * route, required with languageRouteBy
+		 * @param {Object<string,string>} [campaign.languageRoutes] normalized field value
+		 * to language code, at most 500
 		 * @param {string[]} campaign.recipientGroupIDs []uuid
 		 * @param {string[]} campaign.allowDenyIDs []uuid
 		 * @param {string} campaign.denyPageID uuid
@@ -821,6 +839,9 @@ export class API {
 			templateID,
 			templateIDs,
 			templateMixBy,
+			languageRouteBy,
+			languageDefault,
+			languageRoutes,
 			name,
 			saveSubmittedData,
 			saveBrowserMetadata,
@@ -852,6 +873,9 @@ export class API {
 				templateID,
 				templateIDs,
 				templateMixBy,
+				languageRouteBy,
+				languageDefault,
+				languageRoutes,
 				name,
 				isAnonymous,
 				isTest,
@@ -1067,9 +1091,11 @@ export class API {
 		},
 
 		/**
-		 * Get campaign outcome stats grouped by a recipient attribute.
+		 * Get campaign outcome stats grouped by a recipient attribute, the
+		 * template or the language each recipient got. Anonymous and anonymized
+		 * campaigns get sizes only with small groups merged.
 		 * @param {string} campaignID
-		 * @param {'position'|'department'|'template'} by
+		 * @param {'position'|'department'|'template'|'language'} by
 		 * @returns {Promise<ApiResponse>}
 		 */
 		getGroupedResultStats: async (campaignID, by = 'position') => {
@@ -1077,7 +1103,9 @@ export class API {
 		},
 
 		/**
-		 * Whether the campaign has any position/department data to group on.
+		 * Whether the campaign has any data to group on. The data is
+		 * { hasGroupData, hasTemplateGroupData, hasLanguageGroupData }, the last true when the routes pick more than
+		 * one language or the recipients got more than one.
 		 * @param {string} campaignID
 		 * @returns {Promise<ApiResponse>}
 		 */
@@ -1340,9 +1368,27 @@ export class API {
 			const companyQuery = companyID ? `?${this.companyQuery(companyID)}` : '';
 			return await getJSON(this.getPath(`/program/${id}/allow-listing${companyQuery}`));
 		},
+		/**
+		 * Create a program. Language routing takes languageRouteBy (language,
+		 * country, city, department, position, misc or '' for off),
+		 * languageDefault (a language code) and languageRoutes (normalized field
+		 * value to language code, at most 500, empty for language). The three are checked as one request, so they are
+		 * always sent together.
+		 *
+		 * @param {Object} program
+		 * @returns {Promise<ApiResponse>}
+		 */
 		create: async (program) => {
 			return await postJSON(this.getPath('/program'), program);
 		},
+		/**
+		 * Update a program. Send languageRouteBy, languageDefault and
+		 * languageRoutes together, see create.
+		 *
+		 * @param {string} id
+		 * @param {Object} program
+		 * @returns {Promise<ApiResponse>}
+		 */
 		update: async (id, program) => {
 			return await postJSON(this.getPath(`/program/${id}`), program);
 		},
@@ -1441,7 +1487,9 @@ export class API {
 		},
 		/**
 		 * Get the program results, with the result tiles for a time range
-		 * (30d, 90d, 12m or all), or the default of the program when empty
+		 * (30d, 90d, 12m or all), or the default of the program when empty.
+		 * hasLanguageGroupData is true when results grouped by language have more
+		 * than one row, also after Language by is turned off.
 		 *
 		 * @param {string} id
 		 * @param {string} [range]
@@ -1452,11 +1500,14 @@ export class API {
 			return await getJSON(this.getPath(`/program/${id}/results${query}`));
 		},
 		/**
-		 * Get the results of a named program since the start, grouped by the
-		 * current department or position of each recipient
+		 * Get the results of a program since the start, grouped by the current
+		 * department or position of each recipient (named programs), or by the
+		 * language each send got. By language an anonymous program, or one whose
+		 * Anonymize All began, gets sizes only (outcomesHidden) and small rows
+		 * withheld (suppressed).
 		 *
 		 * @param {string} id
-		 * @param {'department'|'position'} by
+		 * @param {'department'|'position'|'language'} by
 		 * @returns {Promise<ApiResponse>}
 		 */
 		resultGroups: async (id, by) => {
@@ -1568,7 +1619,11 @@ export class API {
 	 */
 	campaignTemplate = {
 		/**
-		 * Get a campaign template by its ID.
+		 * Get a campaign template by its ID. The data always holds language (the
+		 * template language code) and languages, the more language rows. Each
+		 * row always has isUsable and the names of its email and pages
+		 * (emailName, beforeLandingPageName, landingPageName,
+		 * afterLandingPageName), with or without full.
 		 *
 		 * @param {string} id
 		 * @param {boolean} full retrieve related data
@@ -1595,7 +1650,9 @@ export class API {
 		},
 
 		/**
-		 * Get all campaign templates using pagination.
+		 * Get all campaign templates using pagination. Each row holds language
+		 * and languages, the language rows with isUsable and without the email
+		 * and page names.
 		 *
 		 * @param {TableURLParams} options
 		 * @param {string|null} companyID
@@ -1632,6 +1689,13 @@ export class API {
 		 * @param {string} template.lureURLMode
 		 * @param {string} template.lureCodeAlgo
 		 * @param {number} template.lureCodeLength
+		 * @param {string} [template.language] language code of the template's own
+		 * email and pages, '' when not set. Required when languages is not empty.
+		 * @param {Array<{language: string, emailID: string, beforeLandingPageID: string|null,
+		 * landingPageID: string|null, afterLandingPageID: string|null}>|null} [template.languages]
+		 * more languages of the template, each with an email and a page for every
+		 * stage the template has as a page. A list replaces the stored rows as a
+		 * whole, null removes them all, left out keeps them.
 		 * @returns {Promise<ApiResponse>}
 		 */
 		create: async ({
@@ -1654,7 +1718,9 @@ export class API {
 			lureURLMode,
 			lureCodeAlgo,
 			lureCodeLength,
-			isTraining
+			isTraining,
+			language,
+			languages
 		}) => {
 			return await postJSON(this.getPath('/campaign/template'), {
 				name: name,
@@ -1676,7 +1742,9 @@ export class API {
 				lureURLMode: lureURLMode,
 				lureCodeAlgo: lureCodeAlgo,
 				lureCodeLength: lureCodeLength,
-				isTraining: isTraining
+				isTraining: isTraining,
+				language: language,
+				languages: languages
 			});
 		},
 
@@ -1704,6 +1772,13 @@ export class API {
 		 * @param {string} template.lureURLMode
 		 * @param {string} template.lureCodeAlgo
 		 * @param {number} template.lureCodeLength
+		 * @param {string} [template.language] language code of the template's own
+		 * email and pages, '' when not set. Required when languages is not empty.
+		 * @param {Array<{language: string, emailID: string, beforeLandingPageID: string|null,
+		 * landingPageID: string|null, afterLandingPageID: string|null}>|null} [template.languages]
+		 * more languages of the template, each with an email and a page for every
+		 * stage the template has as a page. A list replaces the stored rows as a
+		 * whole, null removes them all, left out keeps them.
 		 * @returns {Promise<ApiResponse>}
 		 */
 		update: async ({
@@ -1727,7 +1802,9 @@ export class API {
 			lureURLMode,
 			lureCodeAlgo,
 			lureCodeLength,
-			isTraining
+			isTraining,
+			language,
+			languages
 		}) => {
 			return await postJSON(this.getPath(`/campaign/template/${id}`), {
 				name: name,
@@ -1749,7 +1826,9 @@ export class API {
 				lureURLMode: lureURLMode,
 				lureCodeAlgo: lureCodeAlgo,
 				lureCodeLength: lureCodeLength,
-				isTraining: isTraining
+				isTraining: isTraining,
+				language: language,
+				languages: languages
 			});
 		},
 
@@ -1937,7 +2016,13 @@ export class API {
 			// store the defaults of a company or the global default, a null field is inherited
 			upsert: async (
 				companyID,
-				{ closeAfterDays, anonymizeAfterDays, dataAnonymizeAfterDays, isAnonymous, saveSubmittedData }
+				{
+					closeAfterDays,
+					anonymizeAfterDays,
+					dataAnonymizeAfterDays,
+					isAnonymous,
+					saveSubmittedData
+				}
 			) => {
 				return await postJSON(this.getPath(this.company.campaignDefaults.scopePath(companyID)), {
 					closeAfterDays: closeAfterDays ?? null,
@@ -3269,6 +3354,7 @@ export class API {
 		 * @param {string} recipient.city
 		 * @param {string} recipient.country
 		 * @param {string} recipient.misc
+		 * @param {string} [recipient.language] a code of the language list, '' for none
 		 * @param {string} recipient.companyID
 		 * @returns {Promise<ApiResponse>}
 		 */
@@ -3284,6 +3370,7 @@ export class API {
 			city,
 			country,
 			misc,
+			language,
 			companyID
 		}) => {
 			return await patchJSON(this.getPath(`/recipient/${id}`), {
@@ -3297,6 +3384,7 @@ export class API {
 				city: city,
 				country: country,
 				misc: misc,
+				language: language,
 				companyID: companyID
 			});
 		},
@@ -3315,6 +3403,7 @@ export class API {
 		 * @param {string} recipient.city
 		 * @param {string} recipient.country
 		 * @param {string} recipient.misc
+		 * @param {string} [recipient.language] a code of the language list, '' for none
 		 * @param {string} recipient.companyID
 		 * @returns {Promise<ApiResponse>}
 		 */
@@ -3329,6 +3418,7 @@ export class API {
 			city,
 			country,
 			misc,
+			language,
 			companyID
 		}) => {
 			return await postJSON(this.getPath('/recipient/'), {
@@ -3342,6 +3432,7 @@ export class API {
 				city: city,
 				country: country,
 				misc: misc,
+				language: language,
 				companyID: companyID
 			});
 		},
@@ -3377,7 +3468,7 @@ export class API {
 		 *
 		 * @param {string} name
 		 * @param {string|null} companyID
-		 * @param {string} filterField - recipient attribute to filter on (position, department, city, country, misc)
+		 * @param {string} filterField - recipient attribute to filter on (position, department, city, country, misc, language)
 		 * @param {string} filterValue - value to match against the filter field
 		 * @returns {Promise<ApiResponse>}
 		 */
@@ -3451,6 +3542,35 @@ export class API {
 		getAllByGroupID: async (id, options) => {
 			return await getJSON(
 				this.getPath(`/recipient/group/${id}/recipients?${appendQuery(options)}`)
+			);
+		},
+
+		/**
+		 * Get the values of a recipient field over the members of groups, for
+		 * mapping them to languages. Values are normalized and merged the way
+		 * language routes match them, the most common first, at most 500.
+		 * The data is { field, values: [{ key, values, count }], total,
+		 * truncated, emptyCount, unlistedCount }. truncated is true when some
+		 * values are not listed, total is then more than values.length (it can
+		 * be a little high when there are very many values). emptyCount is how
+		 * many members have no value, unlistedCount how many have a value that
+		 * is not listed, so the listed counts plus emptyCount plus
+		 * unlistedCount are all members.
+		 *
+		 * @param {string} field language, country, city, department, position or misc
+		 * @param {string[]} groupIDs
+		 * @param {string|null} companyID
+		 * @returns {Promise<ApiResponse>}
+		 */
+		getGroupFieldValues: async (field, groupIDs, companyID) => {
+			const query = new URLSearchParams({
+				field: field,
+				groupIDs: (groupIDs || []).join(',')
+			});
+			return await getJSON(
+				this.getPath(
+					`/recipient/group/field-values?${query.toString()}${this.appendCompanyQuery(companyID)}`
+				)
 			);
 		},
 

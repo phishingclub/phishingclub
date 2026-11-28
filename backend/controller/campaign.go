@@ -262,6 +262,7 @@ func (c *Campaign) GetByID(g *gin.Context) {
 			WithEvasionPage:     true,
 			WithWebhooks:        true,
 			WithScripts:         true,
+			WithLanguageRoutes:  true,
 		},
 	)
 	// handle responses
@@ -330,8 +331,8 @@ func (c *Campaign) GetResultStats(g *gin.Context) {
 
 // GetGroupedResultStats returns outcome counts grouped by a recipient attribute.
 // The group is chosen with the `by` query parameter and is restricted to
-// position, department and template; small groups are suppressed by the
-// service so an individual cannot be identified.
+// position, department, template and language; small groups are suppressed by
+// the service so an individual cannot be identified.
 func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
@@ -342,7 +343,8 @@ func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
 		return
 	}
 	groupBy := g.DefaultQuery("by", "position")
-	if groupBy != "position" && groupBy != "department" && groupBy != repository.GroupedStatByTemplate {
+	if groupBy != "position" && groupBy != "department" &&
+		groupBy != repository.GroupedStatByTemplate && groupBy != repository.GroupedStatByLanguage {
 		c.Response.BadRequest(g)
 		return
 	}
@@ -359,8 +361,8 @@ func (c *Campaign) GetGroupedResultStats(g *gin.Context) {
 }
 
 // GetHasGroupData reports whether the campaign has any position or department data
-// to group on, and whether it uses more than one template, so the UI can decide
-// which grouped breakdowns to offer.
+// to group on, and whether it uses more than one template or language, so the UI
+// can decide which grouped breakdowns to offer.
 func (c *Campaign) GetHasGroupData(g *gin.Context) {
 	session, _, ok := c.handleSession(g)
 	if !ok {
@@ -378,7 +380,15 @@ func (c *Campaign) GetHasGroupData(g *gin.Context) {
 	if ok := c.handleErrors(g, err); !ok {
 		return
 	}
-	c.Response.OK(g, gin.H{"hasGroupData": has, "hasTemplateGroupData": hasTemplate})
+	hasLanguage, err := c.CampaignService.HasLanguageGroupData(g.Request.Context(), session, id)
+	if ok := c.handleErrors(g, err); !ok {
+		return
+	}
+	c.Response.OK(g, gin.H{
+		"hasGroupData":         has,
+		"hasTemplateGroupData": hasTemplate,
+		"hasLanguageGroupData": hasLanguage,
+	})
 }
 
 // GetCampaignStats get campaign stats

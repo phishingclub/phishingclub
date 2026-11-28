@@ -71,19 +71,23 @@ type CampaignSortField struct {
 	inner string
 }
 
+// CampaignSortFields are the fields recipients can be sorted by
+var CampaignSortFields = []string{
+	"email",
+	"name",
+	"phone",
+	"position",
+	"department",
+	"city",
+	"country",
+	"misc",
+	"language",
+	"extraID",
+}
+
 // NewCampaignSortField creates a new CampaignSortField
 func NewCampaignSortField(s string) (*CampaignSortField, error) {
-	switch s {
-	case "email":
-	case "name":
-	case "phone":
-	case "position":
-	case "department":
-	case "city":
-	case "country":
-	case "misc":
-	case "extraID":
-	default:
+	if !slices.Contains(CampaignSortFields, s) {
 		return nil, validate.WrapErrorWithField(errors.New("not known or allowed value"), "CampaignSortField")
 	}
 

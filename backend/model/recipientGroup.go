@@ -1,11 +1,13 @@
 package model
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
+	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/validate"
 	"github.com/phishingclub/phishingclub/vo"
 )
@@ -20,6 +22,7 @@ var DynamicGroupAllowedFields = []string{
 	"city",
 	"country",
 	"misc",
+	"language",
 }
 
 // RecipientGroup is an entity for recipient group
@@ -77,6 +80,17 @@ func (rg *RecipientGroup) ValidateDynamic() error {
 	}
 	if err := validate.ErrorIfStringGreaterThan(fv, 255); err != nil {
 		return validate.WrapErrorWithField(err, "filterValue")
+	}
+	// the language field holds codes, so a name or a tag is stored as its code
+	if ff == "language" {
+		code, ok := data.NormalizeLanguage(fv)
+		if !ok || code == "" {
+			return validate.WrapErrorWithField(
+				fmt.Errorf("unknown language %q, use a code such as da or a name such as Danish", fv),
+				"filterValue",
+			)
+		}
+		rg.FilterValue.Set(code)
 	}
 	return nil
 }

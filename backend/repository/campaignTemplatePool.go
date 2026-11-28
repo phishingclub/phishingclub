@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/model"
+	"github.com/phishingclub/phishingclub/utils"
 	"github.com/phishingclub/phishingclub/validate"
 	"gorm.io/gorm"
 )
@@ -18,18 +19,22 @@ func (r *Campaign) SetTemplatePool(
 	campaignID *uuid.UUID,
 	templateIDs []uuid.UUID,
 ) error {
-	return r.ReplaceTemplatePool(ctx, campaignID, templateIDs, nil, nil, nil)
+	return r.ReplaceTemplatePool(ctx, campaignID, templateIDs, nil, nil, nil, false)
 }
 
 // ReplaceTemplatePool replaces a campaign's template pool, points
 // campaign_template_id at the first entry and writes recipient templates, all in
 // one transaction. Every read inside it goes through the transaction, and a
 // template deleted meanwhile fails the write. When fillEmpty is set, every
-// recipient of the campaign without a template is first given it in one
-// statement. stamps then give the listed recipients a template whatever their
+// recipient of the campaign without a language is first stamped with the
+// language of its template, and every recipient without a template is given
+// fillEmpty, each in one statement. stamps then give the listed recipients a template whatever their
 // state. moves give a recipient another template and only apply while that
 // recipient is still not sent to and has no event, so a send that lands between
 // planning and this write keeps its template.
+// With restamp every recipient that got a new template also gets the
+// language of that template, for a campaign where no field picks the
+// language; without it a moved recipient keeps its language.
 func (r *Campaign) ReplaceTemplatePool(
 	ctx context.Context,
 	campaignID *uuid.UUID,
@@ -37,27 +42,53 @@ func (r *Campaign) ReplaceTemplatePool(
 	fillEmpty *uuid.UUID,
 	stamps map[uuid.UUID][]uuid.UUID,
 	moves map[uuid.UUID][]uuid.UUID,
+	restamp bool,
 ) error {
 	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if fillEmpty != nil {
-			row := map[string]any{"campaign_template_id": fillEmpty.String()}
-			AddUpdatedAt(row)
-			if err := tx.
-				Model(&database.CampaignRecipient{}).
-				Where("campaign_id = ?", campaignID.String()).
-				Where("campaign_template_id IS NULL").
-				Updates(row).Error; err != nil {
-				return err
-			}
-		}
-		if err := setTemplateForIDsTx(tx, campaignID, stamps, false); err != nil {
-			return err
-		}
-		if err := setTemplateForIDsTx(tx, campaignID, moves, true); err != nil {
-			return err
-		}
-		return setTemplatePoolTx(tx, campaignID, templateIDs)
+		return ReplaceTemplatePoolTx(tx, campaignID, templateIDs, fillEmpty, stamps, moves, restamp)
 	})
+}
+
+// ReplaceTemplatePoolTx does the writes of ReplaceTemplatePool in a
+// transaction the caller holds, so they can be written together with other
+// campaign writes
+func ReplaceTemplatePoolTx(
+	tx *gorm.DB,
+	campaignID *uuid.UUID,
+	templateIDs []uuid.UUID,
+	fillEmpty *uuid.UUID,
+	stamps map[uuid.UUID][]uuid.UUID,
+	moves map[uuid.UUID][]uuid.UUID,
+	restamp bool,
+) error {
+	if fillEmpty != nil {
+		// a row with no language gets the language of the template it was
+		// given until now, so a move never changes the language it is shown
+		if err := stampNullLanguagesTx(tx, campaignID, fillEmpty); err != nil {
+			return err
+		}
+		row := map[string]any{"campaign_template_id": fillEmpty.String()}
+		AddUpdatedAt(row)
+		if err := tx.
+			Model(&database.CampaignRecipient{}).
+			Where("campaign_id = ?", campaignID.String()).
+			Where("campaign_template_id IS NULL").
+			Updates(row).Error; err != nil {
+			return err
+		}
+	}
+	if err := setTemplateForIDsTx(tx, campaignID, stamps, false); err != nil {
+		return err
+	}
+	if err := setTemplateForIDsTx(tx, campaignID, moves, true); err != nil {
+		return err
+	}
+	if restamp {
+		if err := restampMovedLanguagesTx(tx, campaignID, stamps, moves); err != nil {
+			return err
+		}
+	}
+	return setTemplatePoolTx(tx, campaignID, templateIDs)
 }
 
 // setTemplatePoolTx writes the pool rows and the campaign's first template
@@ -318,4 +349,19 @@ func (r *Campaign) GetUsedTemplateNames(
 		out = append(out, *row.Name)
 	}
 	return out, nil
+}
+
+// stampNullLanguagesTx stamps every recipient of the campaign that has no
+// language with the language of its template, the recipient's own or else
+// fallback. A template with no language set leaves the row as it is.
+func stampNullLanguagesTx(tx *gorm.DB, campaignID *uuid.UUID, fallback *uuid.UUID) error {
+	return tx.Exec(`UPDATE campaign_recipients
+		SET language = (SELECT t.language FROM campaign_templates t
+			WHERE t.id = COALESCE(campaign_recipients.campaign_template_id, ?)),
+			updated_at = ?
+		WHERE campaign_id = ? AND language IS NULL
+		  AND COALESCE((SELECT t.language FROM campaign_templates t
+			WHERE t.id = COALESCE(campaign_recipients.campaign_template_id, ?)), '') <> ''`,
+		fallback.String(), utils.NowRFC3339UTC(), campaignID.String(), fallback.String(),
+	).Error
 }

@@ -177,23 +177,7 @@ func (c *Company) addRecipientsToZip(
 	if ok := c.handleErrors(g, err); !ok {
 		return false
 	}
-	headers := []string{
-		"Created at",
-		"Updated at",
-		"Email",
-		"Phone",
-		"Extra Identifier",
-		"First name",
-		"Last name",
-		"Position",
-		"Department",
-		"City",
-		"Country",
-		"Misc",
-	}
-	for i := 1; i <= maxGroups; i++ {
-		headers = append(headers, fmt.Sprintf("Group %d", i))
-	}
+	headers := recipientExportHeaders(maxGroups)
 	f, err := zipWriter.Create("recipients.csv")
 	if ok := c.handleErrors(g, err); !ok {
 		return false
@@ -205,23 +189,7 @@ func (c *Company) addRecipientsToZip(
 	err = c.RecipientService.EachExportPage(ctx, session, companyID, func(recipients []*model.Recipient) error {
 		for _, recipient := range recipients {
 			groups, _ := recipient.Groups.Get()
-			row := []string{
-				utils.CSVFromDate(recipient.CreatedAt),
-				utils.CSVFromDate(recipient.UpdatedAt),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Email)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Phone)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.ExtraIdentifier)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.FirstName)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.LastName)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Position)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Department)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.City)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Country)),
-				utils.CSVRemoveFormulaStart(utils.NullableToString(recipient.Misc)),
-			}
-			for _, group := range groups {
-				row = append(row, utils.CSVRemoveFormulaStart(group.Name.MustGet().String()))
-			}
+			row := recipientExportRow(recipient, groups)
 			if err := writer.Write(row); err != nil {
 				return err
 			}

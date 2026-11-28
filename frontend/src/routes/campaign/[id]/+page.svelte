@@ -73,6 +73,7 @@
 	import TextField from '$lib/components/TextField.svelte';
 	import FormError from '$lib/components/FormError.svelte';
 	import { resourceContext } from '$lib/store/resourceContext';
+	import { languageName } from '$lib/utils/languages.js';
 	import RemoteBrowserStream from '$lib/components/remote-browser/RemoteBrowserStream.svelte';
 	import LiveSessionBadgeDropdown from '$lib/components/remote-browser/LiveSessionBadgeDropdown.svelte';
 
@@ -96,6 +97,10 @@
 		templates: [],
 		// recipient field the template pool is mixed by, empty means department
 		templateMixBy: '',
+		// recipient field that picks each recipient's language, empty is off
+		languageRouteBy: '',
+		languageDefault: '',
+		languageRoutes: {},
 		isTest: false,
 		hasCustomLureCodes: false,
 		lureURLMode: 'query',
@@ -174,23 +179,49 @@
 	// true when the pool holds more than one template or the recipients used more
 	// than one, so a campaign whose pool shrank still shows its template results
 	let hasTemplateGroupData = false;
+	// true when the routes pick more than one language or the recipients got
+	// more than one
+	let hasLanguageGroupData = false;
 	// a campaign with more than one template shows which template each recipient got
 	$: hasPoolOfMany = (campaign.templates?.length ?? 0) > 1;
 	// name of the campaign template for rows from before template pools, empty
 	// when that template is deleted
 	$: primaryTemplateName =
 		campaign.templates?.find((x) => x.id === campaign.templateID)?.name ?? '';
+	// the languages Language by can give: the default first, then the other
+	// mapped languages by name. Only the settings are shown, not who got
+	// which language.
+	$: routedLanguageNames =
+		campaign.languageRouteBy === 'language'
+			? ["Each recipient's own"]
+			: campaign.languageRouteBy
+				? [
+						...(campaign.languageDefault ? [languageName(campaign.languageDefault)] : []),
+						...[...new Set(Object.values(campaign.languageRoutes ?? {}))]
+							.filter((code) => code && code !== campaign.languageDefault)
+							.map((code) => languageName(code))
+							.sort((a, b) => a.localeCompare(b))
+					]
+				: [];
+	const LANGUAGES_INLINE_LIMIT = 4;
 	// the details card shows this many pool templates, the rest are listed in a modal
 	const POOL_INLINE_LIMIT = 2;
 	let isPoolModalVisible = false;
 	$: hasTemplatePool = hasPoolOfMany || hasTemplateGroupData;
-	// an anonymous campaign never shows which recipient got which template
-	$: showTemplateColumn = hasTemplatePool && !campaign.isAnonymous;
+	// an anonymous or anonymized campaign never shows which recipient got which template
+	$: showTemplateColumn = hasTemplatePool && !campaign.isAnonymous && !campaign.anonymizedAt;
 	// views that would show which template a recipient got are off on an anonymous
 	// campaign with several templates. until the pool check has finished, or when
 	// it failed, an anonymous campaign hides them too
 	$: hidesRecipientTemplate =
 		!!campaign.isAnonymous && (hasTemplatePool || !groupDataChecked || groupDataFailed);
+	// the email a recipient got also tells their language, so it is hidden on an
+	// anonymous campaign with several templates or languages
+	$: hidesRecipientContent =
+		hidesRecipientTemplate || (!!campaign.isAnonymous && hasLanguageGroupData);
+	// a campaign with more than one language shows which language each recipient
+	// got, never on an anonymous or anonymized campaign
+	$: showLanguageColumn = hasLanguageGroupData && !campaign.isAnonymous && !campaign.anonymizedAt;
 	// a dialog opened while the anonymous check was pending loads its template
 	// once the check allows it
 	$: if (!hidesRecipientTemplate && isSendMessageModalVisible) {
@@ -204,18 +235,23 @@
 		: !groupDataChecked
 			? 'Checking the campaign templates'
 			: 'Not available on an anonymous campaign with several templates';
-	// without position or department data the only grouping left is by template
-	$: if (groupDataChecked && !hasGroupData && hasTemplatePool && groupedBy !== 'template') {
-		groupedBy = 'template';
+	$: recipientContentHiddenTitle =
+		groupDataFailed || !groupDataChecked
+			? recipientTemplateHiddenTitle
+			: 'Not available on an anonymous campaign with several templates or languages';
+	// the ways to group the results: position and department when recipients
+	// carry them, template with a pool, language with more than one language
+	$: groupedByOptions = [
+		...(hasGroupData ? ['position', 'department'] : []),
+		...(hasTemplatePool ? ['template'] : []),
+		...(hasLanguageGroupData ? ['language'] : [])
+	];
+	// a grouping that is gone, as template once the pool shrank, falls back to
+	// the first one left
+	$: if (groupDataChecked && groupedByOptions.length && !groupedByOptions.includes(groupedBy)) {
+		groupedBy = groupedByOptions[0];
 		// the section may already be open on the old grouping
 		if (showGroupedStats) {
-			setGroupedStats();
-		}
-	}
-	// with no pool left, grouping by template is gone, so go back to position
-	$: if (groupDataChecked && !hasTemplatePool && groupedBy === 'template') {
-		groupedBy = 'position';
-		if (showGroupedStats && hasGroupData) {
 			setGroupedStats();
 		}
 	}
@@ -228,13 +264,19 @@
 		none: 'Everyone'
 	};
 
-	const groupedByLabels = { position: 'Position', department: 'Department', template: 'Template' };
+	const groupedByLabels = {
+		position: 'Position',
+		department: 'Department',
+		template: 'Template',
+		language: 'Language'
+	};
 	// the results by group section title, also named by the hidden outcome tooltip
-	$: groupedStatsTitle = !hasGroupData
-		? 'Results by template'
-		: hasTemplatePool
-			? 'Results by position, department or template'
-			: 'Results by position or department';
+	$: groupedStatsTitle = (() => {
+		const names = groupedByOptions.map((by) => groupedByLabels[by].toLowerCase());
+		return names.length > 1
+			? `Results by ${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`
+			: `Results by ${names[0] ?? 'template'}`;
+	})();
 
 	// full template objects by id, loaded when a template is opened or needed for a recipient
 	let templateCache = {};
@@ -269,6 +311,33 @@
 	/** @param {Object} recp */
 	const recipientTemplateID = (recp) => recp?.templateID || campaign.templateID;
 
+	// the template language of the templates of rows with no language stamp,
+	// such a row gets the template language
+	let templateLanguages = {};
+	const loadTemplateLanguages = async (rows, show) => {
+		if (!show) return;
+		const ids = [
+			...new Set(
+				rows
+					.filter((r) => !r?.language)
+					.map(recipientTemplateID)
+					.filter((id) => id && !(id in templateLanguages))
+			)
+		];
+		for (const id of ids) {
+			try {
+				const t = await loadTemplate(id);
+				templateLanguages = { ...templateLanguages, [id]: t?.language || '' };
+			} catch {
+				templateLanguages = { ...templateLanguages, [id]: '' };
+			}
+		}
+	};
+	$: loadTemplateLanguages(campaignRecipients, showLanguageColumn);
+	/** @param {string} id */
+	const languageOfTemplate = (id) =>
+		templateLanguages[id] ? languageName(templateLanguages[id]) : '-';
+
 	// the outcomes shown for a group depend on whether it is a training campaign
 	const groupOutcomeMetrics = (r) =>
 		campaign.isTraining
@@ -295,6 +364,7 @@
 			}
 			hasGroupData = !!res.data?.hasGroupData;
 			hasTemplateGroupData = !!res.data?.hasTemplateGroupData;
+			hasLanguageGroupData = !!res.data?.hasLanguageGroupData;
 			groupDataFailed = false;
 		} catch (e) {
 			if (seq !== hasGroupDataSeq) {
@@ -303,6 +373,7 @@
 			console.error('failed to check group data', e);
 			hasGroupData = false;
 			hasTemplateGroupData = false;
+			hasLanguageGroupData = false;
 			groupDataFailed = true;
 		} finally {
 			if (seq === hasGroupDataSeq) {
@@ -738,6 +809,9 @@
 					? [{ id: t.templateID, name: campaign.template?.name }]
 					: [];
 			campaign.templateMixBy = t.templateMixBy ?? '';
+			campaign.languageRouteBy = t.languageRouteBy ?? '';
+			campaign.languageDefault = t.languageDefault ?? '';
+			campaign.languageRoutes = t.languageRouteBy ? { ...(t.languageRoutes ?? {}) } : {};
 			campaign.recipientGroups = t.recipientGroupIDs.map((id) => recipientGroupMap.byKey(id));
 			campaign.notableEventName = t.notableEventName;
 			campaign.scheduleAt = t.scheduleAt ?? null;
@@ -983,7 +1057,7 @@
 		await setGroupedStats();
 	};
 
-	/** @param {'position'|'department'|'template'} by */
+	/** @param {'position'|'department'|'template'|'language'} by */
 	const onChangeGroupedBy = async (by) => {
 		if (by === groupedBy) {
 			return;
@@ -2209,7 +2283,6 @@
 		c.closedAt != null ||
 		(c.sendStartAt != null && new Date(c.sendStartAt) <= new Date(Date.now() + 5 * 60 * 1000));
 
-
 	const timelineRows = (c, selfManaged) => [
 		{ label: 'Created', value: c.createdAt },
 		...(selfManaged
@@ -2229,7 +2302,8 @@
 	});
 	$: resultTiles = (() => {
 		const r = result;
-		const shares = (v, steps) => steps.map(([label, base]) => ({ ...pct(v, base), relativeTo: label }));
+		const shares = (v, steps) =>
+			steps.map(([label, base]) => ({ ...pct(v, base), relativeTo: label }));
 		const ofRecipients = ['of recipients', r.recipients];
 		const ofSent = ['of sent', r.emailsSent];
 		const ofReads = ['of reads', r.trackingPixelLoaded];
@@ -2310,16 +2384,14 @@
 			// red team operators rarely see the target's reports, so a 0 would read
 			// as nobody reported. Red team mode shows the tile only once there is data
 			if (showsSimulation($displayMode) || r.reported > 0) {
-				list.push(
-					{
-						key: 'reported',
-						title: 'Reported',
-						value: r.reported,
-						color: 'text-reported dark:text-slate-300',
-						icon: 'reported',
-						percentages: shares(r.reported, [ofRecipients, ofSent, ofReads, ofVisits])
-					}
-				);
+				list.push({
+					key: 'reported',
+					title: 'Reported',
+					value: r.reported,
+					color: 'text-reported dark:text-slate-300',
+					icon: 'reported',
+					percentages: shares(r.reported, [ofRecipients, ofSent, ofReads, ofVisits])
+				});
 			}
 		}
 		return list;
@@ -2457,7 +2529,7 @@
 
 		<StatTiles tiles={resultTiles} class="mb-8 mt-4" />
 
-		{#if hasGroupData || hasTemplatePool}
+		{#if hasGroupData || hasTemplatePool || hasLanguageGroupData}
 			<div class="mb-6">
 				<!-- Show sits next to the heading and starts at the left edge when it wraps -->
 				<div class="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -2472,25 +2544,27 @@
 
 				{#if showGroupedStats}
 					<!-- the choice shows only when there is more than one way to group -->
-					<div class="mb-4 flex gap-2" class:hidden={!hasGroupData}>
-						<button
-							type="button"
-							class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 {groupedBy ===
-							'position'
-								? 'bg-cta-blue text-white'
-								: 'bg-grayblue-light dark:bg-gray-800/60 text-slate-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700/60'}"
-							aria-pressed={groupedBy === 'position'}
-							on:click={() => onChangeGroupedBy('position')}>Position</button
-						>
-						<button
-							type="button"
-							class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 {groupedBy ===
-							'department'
-								? 'bg-cta-blue text-white'
-								: 'bg-grayblue-light dark:bg-gray-800/60 text-slate-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700/60'}"
-							aria-pressed={groupedBy === 'department'}
-							on:click={() => onChangeGroupedBy('department')}>Department</button
-						>
+					<div class="mb-4 flex gap-2" class:hidden={groupedByOptions.length < 2}>
+						{#if hasGroupData}
+							<button
+								type="button"
+								class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 {groupedBy ===
+								'position'
+									? 'bg-cta-blue text-white'
+									: 'bg-grayblue-light dark:bg-gray-800/60 text-slate-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700/60'}"
+								aria-pressed={groupedBy === 'position'}
+								on:click={() => onChangeGroupedBy('position')}>Position</button
+							>
+							<button
+								type="button"
+								class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 {groupedBy ===
+								'department'
+									? 'bg-cta-blue text-white'
+									: 'bg-grayblue-light dark:bg-gray-800/60 text-slate-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700/60'}"
+								aria-pressed={groupedBy === 'department'}
+								on:click={() => onChangeGroupedBy('department')}>Department</button
+							>
+						{/if}
 						{#if hasTemplatePool}
 							<button
 								type="button"
@@ -2502,15 +2576,28 @@
 								on:click={() => onChangeGroupedBy('template')}>Template</button
 							>
 						{/if}
+						{#if hasLanguageGroupData}
+							<button
+								type="button"
+								class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 {groupedBy ===
+								'language'
+									? 'bg-cta-blue text-white'
+									: 'bg-grayblue-light dark:bg-gray-800/60 text-slate-600 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700/60'}"
+								aria-pressed={groupedBy === 'language'}
+								on:click={() => onChangeGroupedBy('language')}>Language</button
+							>
+						{/if}
 					</div>
 
-					{#if campaign.isAnonymous}
+					{#if campaign.isAnonymous || campaign.anonymizedAt}
 						<div
 							class="mb-4 rounded-md bg-grayblue-light dark:bg-gray-800/60 px-4 py-3 text-sm text-slate-600 dark:text-gray-300"
 						>
-							Per group outcomes are not shown for anonymous campaigns, so no individual can be
-							singled out. Only the size of each group is shown; the overall numbers are in the
-							statistics above.
+							Per group outcomes are not shown for {campaign.isAnonymous
+								? 'anonymous'
+								: 'anonymized'}
+							campaigns, so no individual can be singled out. Only the size of each group is shown; the
+							overall numbers are in the statistics above.
 						</div>
 					{:else if groupedAnyRedacted}
 						<div
@@ -2672,6 +2759,31 @@
 							<span class="text-gray-600 dark:text-gray-400">Balanced per:</span>
 							<span class="text-right"
 								>{templateMixByLabels[campaign.templateMixBy] ?? 'Department'}</span
+							>
+						</div>
+					{/if}
+
+					{#if campaign.languageRouteBy}
+						<div class="flex justify-between">
+							<span class="text-gray-600 dark:text-gray-400">Language by:</span>
+							<span class="text-right"
+								>{campaign.languageRouteBy === 'language'
+									? 'Language'
+									: (templateMixByLabels[campaign.languageRouteBy] ??
+										campaign.languageRouteBy)}</span
+							>
+						</div>
+						<div class="flex justify-between">
+							<span class="text-gray-600 dark:text-gray-400">Default language:</span>
+							<span class="text-right">{languageName(campaign.languageDefault)}</span>
+						</div>
+						<div class="flex justify-between gap-4">
+							<span class="text-gray-600 dark:text-gray-400">Languages:</span>
+							<span class="text-right" title={routedLanguageNames.join(', ')}
+								>{routedLanguageNames
+									.slice(0, LANGUAGES_INLINE_LIMIT)
+									.join(', ')}{#if routedLanguageNames.length > LANGUAGES_INLINE_LIMIT}&nbsp;and {routedLanguageNames.length -
+										LANGUAGES_INLINE_LIMIT} more{/if}</span
 							>
 						</div>
 					{/if}
@@ -3191,6 +3303,13 @@
 		</div>
 		{#if campaign.notableEventName !== 'campaign_pending_schedule'}
 			<SubHeadline>Recipients overview</SubHeadline>
+			{#if campaign.anonymizedAt && !campaign.isAnonymous}
+				<!-- the server leaves out each row's times and orders rows at random -->
+				<Note class="mb-2"
+					>Scheduled, Delivered and Cancelled at are not shown on an anonymized campaign, as the
+					times could tie a row to the person it belonged to. Rows are listed in a random order.</Note
+				>
+			{/if}
 			<Table
 				columns={[
 					...(liveSessions.size > 0 ? [{ column: 'Remote', size: 'small' }] : []),
@@ -3200,21 +3319,17 @@
 					{ column: 'First name', size: 'small' },
 					{ column: 'Last name', size: 'small' },
 					...(showTemplateColumn ? [{ column: 'Template', size: 'medium' }] : []),
+					...(showLanguageColumn ? [{ column: 'Language', size: 'small' }] : []),
 					{ column: 'Send at', title: 'Scheduled', size: 'small' },
 					{ column: 'Sent at', title: 'Delivered', size: 'small' },
 					{ column: 'Cancelled at', size: 'small' },
 					...(showLureCodeColumn ? [{ column: 'Lure URL', size: 'small' }] : [])
 				]}
-				sortable={[
-					'First name',
-					'Last name',
-					'Email',
-					'Status',
-					'Send at',
-					'Sent at',
-					'Cancelled at'
-				]}
+				sortable={campaign.anonymizedAt && !campaign.isAnonymous
+					? []
+					: ['First name', 'Last name', 'Email', 'Status', 'Send at', 'Sent at', 'Cancelled at']}
 				pagination={recipientTableUrlParams}
+				noSearch={!!campaign.anonymizedAt || !!campaign.isAnonymous}
 				plural="recipients"
 				hasData={!!campaignRecipients.length}
 				hasNextPage={campaignRecipientsHasNextPage}
@@ -3263,7 +3378,9 @@
 										<span class="flex min-w-0 items-center gap-2">
 											<span class="min-w-0 truncate">{recp.recipient.email}</span>
 											{#if recp.recipient.scimSoftDeletedAt}
-												<StatusBadge tone="neutral" title="Disabled through SCIM" class="shrink-0">Disabled</StatusBadge>
+												<StatusBadge tone="neutral" title="Disabled through SCIM" class="shrink-0"
+													>Disabled</StatusBadge
+												>
 											{/if}
 										</span>
 										<!-- the Status column is off screen on phones -->
@@ -3329,6 +3446,22 @@
 								<TableCell value={recp?.templateID ? recp.template.name : primaryTemplateName} />
 							{/if}
 						{/if}
+						{#if showLanguageColumn && !recp?.recipient}
+							<!-- the server never gives the language of a removed recipient's row -->
+							<TableCell>
+								<span
+									class="italic text-gray-500 dark:text-gray-400"
+									title="The recipient was removed">Removed</span
+								>
+							</TableCell>
+						{:else if showLanguageColumn}
+							<!-- a row with no stamp gets the template language -->
+							<TableCell
+								value={recp?.language
+									? languageName(recp.language)
+									: languageOfTemplate(recipientTemplateID(recp))}
+							/>
+						{/if}
 						{#if campaign.isAnonymous}
 							<!-- exact per recipient timing is withheld so it cannot be matched against
 							the anonymized event stream; a coarse sent indicator keeps self-managed usable -->
@@ -3340,8 +3473,8 @@
 									class="text-sm {recp?.sent
 										? 'text-slate-600 dark:text-gray-200'
 										: 'text-gray-400 dark:text-gray-500'}"
-									title={hasTemplatePool && !recp?.sent
-										? 'Delivery is hidden on an anonymous campaign with several templates'
+									title={(hasTemplatePool || hasLanguageGroupData) && !recp?.sent
+										? 'Delivery is hidden on an anonymous campaign with several templates or languages'
 										: undefined}>{recp?.sent ? 'Sent' : '-'}</span
 								>
 							</TableCell>
@@ -3436,10 +3569,10 @@
 										disabled={!!campaign.closedAt ||
 											!!campaign.anonymizedAt ||
 											!recp.recipient ||
-											hidesRecipientTemplate ||
+											hidesRecipientContent ||
 											isContextMismatch()}
-										title={hidesRecipientTemplate && !campaign.anonymizedAt
-											? recipientTemplateHiddenTitle
+										title={hidesRecipientContent && !campaign.anonymizedAt
+											? recipientContentHiddenTitle
 											: isContextMismatch()
 												? campaign.companyID
 													? 'Switch to company view to perform this action'
@@ -3475,10 +3608,10 @@
 										disabled={!!campaign.closedAt ||
 											!!campaign.anonymizedAt ||
 											!recp.recipient ||
-											hidesRecipientTemplate ||
+											hidesRecipientContent ||
 											isContextMismatch()}
-										title={hidesRecipientTemplate && !campaign.anonymizedAt
-											? recipientTemplateHiddenTitle
+										title={hidesRecipientContent && !campaign.anonymizedAt
+											? recipientContentHiddenTitle
 											: isContextMismatch()
 												? campaign.companyID
 													? 'Switch to company view to perform this action'
@@ -3650,6 +3783,28 @@
 								API Sender ({modalTemplate?.apiSender?.name ?? ''})
 							{/if}
 						</span>
+
+						{#if modalTemplate?.languages?.length}
+							<span class="text-grayblue-dark font-medium">Languages:</span>
+							<span
+								class="text-pc-darkblue dark:text-white grid grid-cols-[auto_1fr] gap-x-4 gap-y-1"
+							>
+								{#if modalTemplate.language && campaign.languageRouteBy}
+									<span>{languageName(modalTemplate.language)}</span>
+									<span>{modalTemplate.email?.name ?? ''}</span>
+								{:else if modalTemplate.language}
+									<span
+										title="Recipients scheduled from now on get the main language when a campaign does not use Language by. Recipients already scheduled keep theirs."
+										>{languageName(modalTemplate.language)} (main language)</span
+									>
+									<span>{modalTemplate.email?.name ?? ''}</span>
+								{/if}
+								{#each modalTemplate.languages as l}
+									<span>{languageName(l.language)}{l.isUsable ? '' : ' (incomplete)'}</span>
+									<span>{l.emailName ?? ''}</span>
+								{/each}
+							</span>
+						{/if}
 					</div>
 				</div>
 
@@ -3659,7 +3814,11 @@
 						<h3
 							class="text-lg font-semibold text-pc-darkblue dark:text-white mb-4 pb-2 border-b border-gray-200 dark:border-gray-700"
 						>
-							Email
+							{campaign.languageRouteBy &&
+							modalTemplate?.language &&
+							modalTemplate?.languages?.length
+								? `Email (${languageName(modalTemplate.language)})`
+								: 'Email'}
 						</h3>
 						<div class="grid grid-cols-[120px_1fr] gap-y-3">
 							<span class="text-grayblue-dark font-medium">Name:</span>

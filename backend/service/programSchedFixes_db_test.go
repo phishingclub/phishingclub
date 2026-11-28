@@ -180,7 +180,8 @@ func newProgramSenderTest(t *testing.T) *programTest {
 	return p
 }
 
-// sendWith runs the sender for the given sends of a program campaign
+// sendWith runs the sender for the given sends of a program campaign, each
+// with its stamped language
 func (p *programTest) sendWith(campaignID, templateID uuid.UUID, sendIDs ...uuid.UUID) error {
 	p.t.Helper()
 	campaign, err := p.svc.CampaignRepository.GetByID(p.ctx, &campaignID, &repository.CampaignOption{IncludeProgramManaged: true})
@@ -194,6 +195,10 @@ func (p *programTest) sendWith(campaignID, templateID uuid.UUID, sendIDs ...uuid
 			ID:          nullable.NewNullableWithValue(id),
 			CampaignID:  nullable.NewNullableWithValue(campaignID),
 			RecipientID: nullable.NewNullableWithValue(*row.RecipientID),
+		}
+		// the sender splits the rows by their stamped language
+		if row.Language != nil {
+			cr.Language = nullable.NewNullableWithValue(*row.Language)
 		}
 		rows = append(rows, cr)
 	}

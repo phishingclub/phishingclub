@@ -70,8 +70,9 @@ func (c *CampaignTemplate) GetByID(g *gin.Context) {
 	if !ok {
 		return
 	}
-	// check if full data set should be loaded
-	options := &repository.CampaignTemplateOption{}
+	// check if full data set should be loaded. The language rows are always
+	// given, so an edit or a copy of the template carries them.
+	options := &repository.CampaignTemplateOption{WithLanguages: true}
 	_, ok = g.GetQuery("full")
 	if ok {
 		options = &repository.CampaignTemplateOption{
@@ -86,6 +87,7 @@ func (c *CampaignTemplate) GetByID(g *gin.Context) {
 			WithBeforeLandingProxy: true,
 			WithAfterLandingProxy:  true,
 			WithIdentifier:         true,
+			WithLanguages:          true,
 		}
 	}
 	// get
@@ -145,6 +147,7 @@ func (c *CampaignTemplate) GetAll(g *gin.Context) {
 			WithLandingProxy:       true,
 			WithBeforeLandingProxy: true,
 			WithAfterLandingProxy:  true,
+			WithLanguages:          true,
 			UsableOnly:             usableOnly,
 		},
 	)

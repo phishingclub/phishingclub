@@ -45,7 +45,9 @@ func newPoolFixture(t *testing.T) *poolFixture {
 		&database.Domain{},
 		&database.Identifier{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplateLanguage{},
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignTemplatePool{},
 		&database.CampaignRecipient{},
 		&database.Recipient{},
@@ -939,7 +941,7 @@ func TestAnonymousCampaignPool(t *testing.T) {
 			t.Fatal("anonymous pooled campaign shows the sent indicator")
 		}
 		crID := row.ID.MustGet()
-		if _, err := f.svc.GetCampaignEmailBody(f.ctx, f.session, &crID); !errors.Is(err, errRecipientTemplateHidden) {
+		if _, err := f.svc.GetCampaignEmailBody(f.ctx, f.session, &crID); !errors.Is(err, errRecipientContentHidden) {
 			t.Fatalf("email preview: want hidden error, got %v", err)
 		}
 		if _, err := f.svc.GetLandingPageURLByCampaignRecipientID(f.ctx, f.session, &crID); !errors.Is(err, errRecipientTemplateHidden) {

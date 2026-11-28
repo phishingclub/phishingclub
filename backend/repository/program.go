@@ -55,6 +55,8 @@ type ProgramOption struct {
 	*vo.QueryArgs
 	WithSteps           bool
 	WithRecipientGroups bool
+	// WithLanguageRoutes loads the language routes, by GetByID only
+	WithLanguageRoutes bool
 	// Status limits a list to the programs of one of model.ProgramListStatuses,
 	// empty lists every program
 	Status string
@@ -80,6 +82,8 @@ type ProgramChildren struct {
 	RecipientGroupIDs []*uuid.UUID
 	AllowDenyIDs      []*uuid.UUID
 	Webhooks          []*model.CampaignWebhook
+	// LanguageRoutes are the normalized language routes, nil keeps them
+	LanguageRoutes map[string]string
 }
 
 // programsColumn is a column of the programs table
@@ -163,6 +167,11 @@ func writeProgramChildren(tx *gorm.DB, programID *uuid.UUID, children *ProgramCh
 			return err
 		}
 	}
+	if children.LanguageRoutes != nil {
+		if err := replaceProgramLanguageRoutesTx(tx, programID, children.LanguageRoutes); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -202,6 +211,7 @@ func (r *Program) DeleteByID(
 			&database.ProgramCampaign{},
 			&database.ProgramAllowDeny{},
 			&database.ProgramWebhook{},
+			&database.ProgramLanguageRoute{},
 		} {
 			if err := tx.Where(byProgram).Delete(table).Error; err != nil {
 				return errs.Wrap(err)
@@ -251,6 +261,13 @@ func (r *Program) GetByID(
 			ids = append(ids, &gid)
 		}
 		program.RecipientGroupIDs = nullable.NewNullableWithValue(ids)
+	}
+	if options != nil && options.WithLanguageRoutes {
+		routes, err := r.GetLanguageRoutesByProgramID(ctx, id)
+		if err != nil {
+			return nil, errs.Wrap(err)
+		}
+		program.LanguageRoutes = nullable.NewNullableWithValue(routes)
 	}
 	return program, nil
 }
@@ -357,7 +374,8 @@ func (r *Program) whereListStatus(db *gorm.DB, status string, now time.Time) (*g
 var errProgramUnknownStatus = errors.New("unknown program status")
 
 // brokenStep selects the steps of the program row whose template is missing
-// or cannot be sent. It is a subquery on the steps of the program row, read
+// or cannot be sent, or can not send a language the program picks, see
+// stepLanguageBroken. It is a subquery on the steps of the program row, read
 // through the program index of the steps, instead of a list of every program
 // with such a step. A step without a template is not counted, as in
 // programAttentionReason.
@@ -371,7 +389,10 @@ func (r *Program) brokenStep() *gorm.DB {
 		Select("id").
 		Where(clause.Expr{SQL: "? = ?", Vars: []any{clause.Column{Table: database.PROGRAM_STEP_TABLE, Name: "program_id"}, programsColumn("id")}}).
 		Where(clause.Neq{Column: stepTemplate, Value: nil}).
-		Where(clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{usable}})
+		Where(clause.Or(
+			clause.Expr{SQL: "NOT EXISTS (?)", Vars: []any{usable}},
+			r.stepLanguageBroken(),
+		))
 	return steps
 }
 
@@ -921,6 +942,9 @@ type ProgramListSummary struct {
 	StepTemplateIDs []uuid.UUID
 	// Simulations counts the steps
 	Simulations int
+	// BrokenLanguage is set when the program picks a language by a field that
+	// one of its step templates can not send, see stepLanguageBroken
+	BrokenLanguage bool
 }
 
 // sqliteTimeLayouts are the layouts SQLite returns a time in when it comes
@@ -1146,6 +1170,15 @@ func (r *Program) GetListSummaries(
 		}
 		row.Simulations++
 	}
+	broken, err := r.GetProgramsWithBrokenLanguage(ctx, programIDs)
+	if err != nil {
+		return nil, err
+	}
+	for id := range broken {
+		if row, ok := out[id]; ok {
+			row.BrokenLanguage = true
+		}
+	}
 	return out, nil
 }
 
@@ -1346,6 +1379,8 @@ func ToProgram(row *database.Program) (*model.Program, error) {
 		OrderMode:             nullable.NewNullableWithValue(row.OrderMode),
 		LoopMode:              nullable.NewNullableWithValue(row.LoopMode),
 		TemplateMixBy:         nullable.NewNullableWithValue(row.TemplateMixBy),
+		LanguageRouteBy:       nullable.NewNullableWithValue(row.LanguageRouteBy),
+		LanguageDefault:       nullable.NewNullableWithValue(row.LanguageDefault),
 		StepIntervalMinutes:   nullable.NewNullableWithValue(row.StepIntervalMinutes),
 		SpreadMinutes:         nullable.NewNullableWithValue(row.SpreadMinutes),
 		NewMemberDelayMinutes: nullable.NewNullableWithValue(row.NewMemberDelayMinutes),

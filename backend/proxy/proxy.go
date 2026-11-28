@@ -371,10 +371,8 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 		}
 		reqCtx.CampaignID = &campaignID
 
-		// get campaign
-		campaign, err := m.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{
-			WithCampaignTemplate: true,
-		})
+		// get campaign. its template is read below in the recipient's language
+		campaign, err := m.CampaignRepository.GetByID(ctx, &campaignID, &repository.CampaignOption{})
 		if err != nil {
 			return nil, errors.Errorf("failed to get campaign: %w", err)
 		}
@@ -417,13 +415,22 @@ func (m *ProxyHandler) initializeRequestContext(ctx context.Context, req *http.R
 			)
 			return nil, nil
 		}
-		cTemplate, err := m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+		// the email of the language stamped on the recipient, used by the deny
+		// and evasion renders
+		cTemplate, err := m.CampaignTemplateRepository.GetByIDForLanguage(ctx, &templateID, cRecipient.StampedLanguage(), &repository.CampaignTemplateOption{
 			WithDomain:     true,
 			WithIdentifier: true,
 			WithEmail:      true,
 		})
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			m.logger.Debugw("campaign recipient template was deleted",
+				"campaignID", campaignID.String(),
+			)
+			return nil, nil
+		}
+		if errors.Is(err, repository.ErrTemplateLanguageUnavailable) {
+			// served like a deleted template, never in another language
+			m.logger.Debugw("campaign recipient language is not usable",
 				"campaignID", campaignID.String(),
 			)
 			return nil, nil
@@ -5172,7 +5179,7 @@ func (m *ProxyHandler) renderDenyPageTemplate(req *http.Request, reqCtx *Request
 	// use cached template (should already have WithEmail: true from context initialization)
 	cTemplateWithEmail := reqCtx.CampaignTemplate
 	if cTemplateWithEmail == nil {
-		cTemplateWithEmail, err = m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+		cTemplateWithEmail, err = m.CampaignTemplateRepository.GetByIDForLanguage(ctx, &templateID, cRecipient.StampedLanguage(), &repository.CampaignTemplateOption{
 			WithEmail: true,
 		})
 		if err != nil {
@@ -5282,7 +5289,7 @@ func (m *ProxyHandler) renderEvasionPageTemplate(req *http.Request, reqCtx *Requ
 	// use cached template (should already have WithEmail: true from context initialization)
 	cTemplateWithEmail := reqCtx.CampaignTemplate
 	if cTemplateWithEmail == nil {
-		cTemplateWithEmail, err = m.CampaignTemplateRepository.GetByID(ctx, &templateID, &repository.CampaignTemplateOption{
+		cTemplateWithEmail, err = m.CampaignTemplateRepository.GetByIDForLanguage(ctx, &templateID, cRecipient.StampedLanguage(), &repository.CampaignTemplateOption{
 			WithEmail: true,
 		})
 		if err != nil {
@@ -5553,11 +5560,19 @@ func (m *ProxyHandler) checkFilter(req *http.Request, reqCtx *RequestContext) (b
 			if cTemplate == nil {
 				templateID, err := m.recipientOrCampaignTemplateID(reqCtx, campaign)
 				if err == nil {
-					cTemplate, err = m.CampaignTemplateRepository.GetByID(req.Context(), &templateID, &repository.CampaignTemplateOption{
+					language := ""
+					if reqCtx.CampaignRecipient != nil {
+						language = reqCtx.CampaignRecipient.StampedLanguage()
+					}
+					cTemplate, err = m.CampaignTemplateRepository.GetByIDForLanguage(req.Context(), &templateID, language, &repository.CampaignTemplateOption{
 						WithDomain:     true,
 						WithIdentifier: true,
 						WithEmail:      true,
 					})
+					if errors.Is(err, repository.ErrTemplateLanguageUnavailable) {
+						// no deny page in another language, the visit is blocked
+						return true, nil
+					}
 					if err != nil {
 						m.logger.Errorw("failed to load campaign template for deny page", "error", err)
 					}

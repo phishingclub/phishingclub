@@ -274,3 +274,35 @@ func TestReportPreviewTemplateErrors(t *testing.T) {
 		t.Fatalf("got %q %v", out, err)
 	}
 }
+
+// TestDefaultReportLanguageSection checks the default campaign report shows
+// results by language only when there are language groups, with the group
+// names escaped
+func TestDefaultReportLanguageSection(t *testing.T) {
+	for name, html := range map[string]string{"campaign": embedded.DefaultReportHTML, "training": embedded.DefaultTrainingReportHTML} {
+		without := renderReport(t, html, &model.ReportData{})
+		if strings.Contains(without, "Results by language") {
+			t.Fatalf("%s: a report with no language groups must not show the language section", name)
+		}
+		groups := []model.ReportGroupStat{
+			{Group: "German", Total: 12, Clicked: 3, ClickedPercent: "25"},
+			{Group: "<b>x</b>", Total: 9, Clicked: -1, Submitted: -1, Reported: -1, TrainingStarted: -1, TrainingCompleted: -1},
+		}
+		with := renderReport(t, html, &model.ReportData{LanguageGroups: groups})
+		if !strings.Contains(with, "Results by language") || !strings.Contains(with, "<td>German</td>") {
+			t.Fatalf("%s: a report with language groups must show them", name)
+		}
+		if strings.Contains(with, "<b>x</b>") || !strings.Contains(with, "&lt;b&gt;x&lt;/b&gt;") {
+			t.Fatalf("%s: language group names must be escaped", name)
+		}
+		// small groups are merged only on anonymous campaigns, so only they
+		// say so
+		if strings.Contains(with, "folded into Other") {
+			t.Fatalf("%s: a named campaign must not say small language groups are merged", name)
+		}
+		anonymous := renderReport(t, html, &model.ReportData{LanguageGroups: groups, Anonymous: true})
+		if !strings.Contains(anonymous, "language group too small to show on its own is folded into Other") {
+			t.Fatalf("%s: an anonymous campaign must say small language groups are merged", name)
+		}
+	}
+}

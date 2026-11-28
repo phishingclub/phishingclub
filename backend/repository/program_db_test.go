@@ -27,9 +27,11 @@ func newProgramTestDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignRecipient{},
 		&database.CampaignEvent{},
 		&database.Program{},
+		&database.ProgramLanguageRoute{},
 		&database.ProgramStep{},
 		&database.ProgramCampaign{},
 		&database.ProgramRecipientGroup{},
@@ -37,6 +39,7 @@ func newProgramTestDB(t *testing.T) *gorm.DB {
 		&database.ProgramAllowDeny{},
 		&database.ProgramWebhook{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplateLanguage{},
 		&database.Recipient{},
 		&database.Event{},
 	); err != nil {

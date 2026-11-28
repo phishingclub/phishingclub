@@ -36,6 +36,7 @@ var allowdCols = []string{
 	"city",
 	"country",
 	"misc",
+	"language",
 }
 
 // base columns with table prefix
@@ -479,7 +480,8 @@ func (r *Recipient) GetOrphaned(
 					(rg.filter_field = 'department' AND %s.department = rg.filter_value) OR
 					(rg.filter_field = 'city'       AND %s.city       = rg.filter_value) OR
 					(rg.filter_field = 'country'    AND %s.country    = rg.filter_value) OR
-					(rg.filter_field = 'misc'       AND %s.misc       = rg.filter_value)
+					(rg.filter_field = 'misc'       AND %s.misc       = rg.filter_value) OR
+					(rg.filter_field = 'language'   AND recipients.language = rg.filter_value)
 				)
 		)`,
 		database.RECIPIENT_GROUP_RECIPIENT_TABLE,
@@ -1250,6 +1252,10 @@ func ToRecipient(row *database.Recipient) (*model.Recipient, error) {
 	misc := nullable.NewNullableWithValue(
 		*vo.NewOptionalString127Must(row.Misc),
 	)
+	language := nullable.NewNullableWithValue("")
+	if row.Language != nil {
+		language.Set(*row.Language)
+	}
 	scimUserName := nullable.NewNullableWithValue(
 		*vo.NewOptionalString127Must(row.ScimUserName),
 	)
@@ -1283,6 +1289,7 @@ func ToRecipient(row *database.Recipient) (*model.Recipient, error) {
 		City:              city,
 		Country:           country,
 		Misc:              misc,
+		Language:          language,
 		ScimUserName:      scimUserName,
 		ScimSoftDeletedAt: row.ScimSoftDeletedAt,
 		Company:           company,

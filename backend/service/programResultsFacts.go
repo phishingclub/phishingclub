@@ -49,6 +49,9 @@ type programFactSend struct {
 	person   int32
 	template int32
 	training bool
+	// language is the index of the language stamp in languages, 0 for a send
+	// with no stamp, which is in its template language
+	language uint16
 }
 
 func (f *programFactSend) has(slot int) bool {
@@ -148,8 +151,12 @@ type programFactsStore struct {
 	templates []string
 	names     []string
 	persons   map[uuid.UUID]int32
-	sends     []programFactSend
-	index     map[programFactKey]int32
+	// languages is the language stamp of each language index, the first one
+	// empty for no stamp
+	languages  []string
+	languageOf map[string]uint16
+	sends      []programFactSend
+	index      map[programFactKey]int32
 	// hasTraining is set when any training template was sent
 	hasTraining bool
 	// hasPhishing is set when any phishing template was sent
@@ -202,9 +209,27 @@ func newProgramFactsStore(program uuid.UUID, anonymous bool) *programFactsStore 
 		campaignOf: map[uuid.UUID]int32{},
 		templateOf: map[string]int32{},
 		persons:    map[uuid.UUID]int32{},
+		languages:  []string{""},
+		languageOf: map[string]uint16{"": 0},
 		index:      map[programFactKey]int32{},
 		recent:     map[uuid.UUID]int32{},
 	}
+}
+
+// language returns the index of a language stamp, adding it when new. The
+// stamps are codes of the fixed list, a code past the index range counts as
+// no stamp.
+func (st *programFactsStore) language(code string) uint16 {
+	if i, ok := st.languageOf[code]; ok {
+		return i
+	}
+	if len(st.languages) > math.MaxUint16 {
+		return 0
+	}
+	i := uint16(len(st.languages))
+	st.languageOf[code] = i
+	st.languages = append(st.languages, code)
+	return i
 }
 
 // size is how many sends the store holds
@@ -318,6 +343,7 @@ func (st *programFactsStore) addRow(r *repository.ProgramSendRow, recentFrom int
 		person:   st.person(person),
 		template: c.template,
 		training: c.training,
+		language: st.language(r.Language),
 	}
 	if c.training {
 		st.hasTraining = true

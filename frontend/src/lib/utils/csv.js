@@ -65,6 +65,7 @@ export const parseCSVToRecipients = async (file) => {
 						city: row[fieldsMap['city']] ?? null,
 						country: row[fieldsMap['country']] ?? null,
 						misc: row[fieldsMap['misc']] ?? null,
+						language: row[fieldsMap['language']] ?? null,
 						_line: index + 2 // track line number for duplicate detection
 					};
 				});

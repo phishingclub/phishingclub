@@ -222,6 +222,34 @@ func TestSendTemplateGroupsContinuesAfterError(t *testing.T) {
 	}
 }
 
+// TestSplitByLanguage checks the rows of one template are grouped by their
+// stamped language inside the template group, a row with no stamp under the
+// template language, with the template language first
+func TestSplitByLanguage(t *testing.T) {
+	tmpl := &model.CampaignTemplate{Language: nullable.NewNullableWithValue("en")}
+	row := func(language string) *model.CampaignRecipient {
+		cr := &model.CampaignRecipient{}
+		cr.Language.SetNull()
+		if language != "" {
+			cr.Language = nullable.NewNullableWithValue(language)
+		}
+		return cr
+	}
+	rows := []*model.CampaignRecipient{row("de"), row(""), row("fr"), row("en"), row("de")}
+	codes, byCode := splitByLanguage(tmpl, rows)
+	if len(codes) != 3 || codes[0] != "en" || codes[1] != "de" || codes[2] != "fr" {
+		t.Fatalf("order: %v", codes)
+	}
+	if len(byCode["en"]) != 2 || len(byCode["de"]) != 2 || len(byCode["fr"]) != 1 {
+		t.Fatalf("groups: en %d de %d fr %d", len(byCode["en"]), len(byCode["de"]), len(byCode["fr"]))
+	}
+	// a template with no language keeps every row without a stamp together
+	codes, byCode = splitByLanguage(&model.CampaignTemplate{}, []*model.CampaignRecipient{row(""), row("")})
+	if len(codes) != 1 || codes[0] != "" || len(byCode[""]) != 2 {
+		t.Fatalf("no language: %v %d", codes, len(byCode[""]))
+	}
+}
+
 // TestRecipientMixValue checks each mix field reads the matching recipient
 // field and none or an unknown field gives one shared empty key
 func TestRecipientMixValue(t *testing.T) {

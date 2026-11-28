@@ -145,6 +145,12 @@ type ReportData struct {
 	Groups           []ReportGroupStat
 	DepartmentGroups []ReportGroupStat
 	PositionGroups   []ReportGroupStat
+	// LanguageGroups is the breakdown by the language each recipient got,
+	// named by language. Empty when the campaign is in one language.
+	LanguageGroups []ReportGroupStat
+	// Anonymous is true for an anonymous or anonymized campaign. Its results
+	// by group show sizes only and small groups are merged into Other.
+	Anonymous bool
 
 	// Screenshots of the first template's email and pages, rendered with an
 	// example recipient. Each is a data URI to use as an img src, empty when

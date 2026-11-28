@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -177,7 +178,52 @@ func BuildProgramClone(
 		})
 	}
 	out.Webhooks = nullable.NewNullableWithValue(webhooks)
+
+	// the field and the default are kept. The routes are values of the
+	// source company's recipients, so another company does not get them.
+	out.LanguageRouteBy = nullable.NewNullableWithValue(p.LanguageRouteField())
+	out.LanguageDefault = nullable.NewNullableWithValue("")
+	if v, err := p.LanguageDefault.Get(); err == nil {
+		out.LanguageDefault.Set(v)
+	}
+	routes := map[string]string{}
+	if v, err := p.LanguageRoutes.Get(); err == nil && v != nil {
+		routes = v
+	}
+	if sameCompany {
+		copied := make(map[string]string, len(routes))
+		for key, code := range routes {
+			copied[key] = code
+		}
+		out.LanguageRoutes = nullable.NewNullableWithValue(copied)
+	} else {
+		out.LanguageRoutes = nullable.NewNullableWithValue(map[string]string{})
+		if len(routes) > 0 {
+			dropped = append(dropped, ProgramCloneDropped{
+				Kind: "languageRoutes",
+				Name: routeValuesName(len(routes)),
+			})
+		}
+	}
 	return out, dropped
+}
+
+// routeValuesName names a count of route values, like "3 values"
+func routeValuesName(n int) string {
+	if n == 1 {
+		return "1 value"
+	}
+	return strconv.Itoa(n) + " values"
+}
+
+// droppedLanguageRoutes is the number of language routes a clone left out
+func droppedLanguageRoutes(src *model.Program, clone *model.Program) int {
+	source, err := src.LanguageRoutes.Get()
+	if err != nil {
+		return 0
+	}
+	kept, _ := clone.LanguageRoutes.Get()
+	return len(source) - len(kept)
 }
 
 // loadCloneSource reads the source program and the owner of everything it uses.
@@ -185,6 +231,7 @@ func (s *Program) loadCloneSource(ctx context.Context, session *model.Session, i
 	program, err := s.ProgramRepository.GetByID(ctx, id, &repository.ProgramOption{
 		WithSteps:           true,
 		WithRecipientGroups: true,
+		WithLanguageRoutes:  true,
 	})
 	if err != nil {
 		return nil, errs.Wrap(err)
@@ -318,6 +365,20 @@ func (s *Program) Clone(
 	if err := s.validateProgramSettings(ctx, targetCompanyID, nil, clone); err != nil {
 		return nil, err
 	}
+	// a copy in the same company keeps its routes, so every language they
+	// pick must be sendable by every step template, the same as at create. A
+	// copy to another company has no routes and is checked when it starts.
+	if sameCompanyScope(optionalID(src.Program.CompanyID), targetCompanyID) {
+		if routeBy := clone.LanguageRouteField(); routeBy != "" {
+			_, fallback, routes, err := s.programRouting(ctx, clone)
+			if err != nil {
+				return nil, err
+			}
+			if err := s.checkProgramLanguages(ctx, targetCompanyID, routeBy, fallback, routes, clone.Steps, nullableIDs(clone.RecipientGroupIDs)); err != nil {
+				return nil, err
+			}
+		}
+	}
 	// the draft, its steps, groups and settings are stored in one transaction
 	newID, err := s.ProgramRepository.Insert(ctx, clone, programChildren(clone))
 	if err != nil {
@@ -327,6 +388,9 @@ func (s *Program) Clone(
 	ae.Details["sourceCompanyId"] = companyIDString(optionalID(src.Program.CompanyID))
 	ae.Details["targetCompanyId"] = companyIDString(targetCompanyID)
 	ae.Details["dropped"] = len(dropped)
+	if n := droppedLanguageRoutes(src.Program, clone); n > 0 {
+		ae.Details["droppedLanguageRoutes"] = n
+	}
 	s.AuditLogAuthorized(ae)
 	return &ProgramCloneResult{ID: newID, Dropped: dropped}, nil
 }

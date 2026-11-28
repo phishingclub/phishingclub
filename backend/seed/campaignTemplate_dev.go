@@ -17,6 +17,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// devTemplateLanguage is a language row of a seeded template, named by the
+// email and landing page it uses
+type devTemplateLanguage struct {
+	Code            string
+	EmailName       string
+	LandingPageName string
+}
+
 // SeedDevelopmentCampaignTemplates seeds templates
 func SeedDevelopmentCampaignTemplates(
 	apiRepository *repository.APISender,
@@ -42,6 +50,8 @@ func SeedDevelopmentCampaignTemplates(
 		APISenderName               string
 		UrlIdentifierName           string
 		StateIdentifierName         string
+		Language                    string
+		Languages                   []devTemplateLanguage
 	}{
 		{
 			Name:                "Phishing",
@@ -52,6 +62,24 @@ func SeedDevelopmentCampaignTemplates(
 			SMTPConfigName:      TEST_SMTP_CONFIGURATION_NAME_1,
 			UrlIdentifierName:   TEST_URL_IDENTIFIER_NAME,
 			StateIdentifierName: TEST_STATE_IDENTIFIER_NAME,
+		},
+		{
+			Name:                TEST_TEMPLATE_NAME_MULTILINGUAL,
+			DomainName:          TEST_DOMAIN_NAME_1,
+			LandingPageName:     TEST_PAGE_NAME_1,
+			LandingPageTypeName: data.PAGE_TYPE_LANDING,
+			EmailName:           TEST_EMAIL_NAME_1,
+			SMTPConfigName:      TEST_SMTP_CONFIGURATION_NAME_1,
+			UrlIdentifierName:   TEST_URL_IDENTIFIER_NAME,
+			StateIdentifierName: TEST_STATE_IDENTIFIER_NAME,
+			Language:            "en",
+			Languages: []devTemplateLanguage{
+				{
+					Code:            "de",
+					EmailName:       TEST_EMAIL_NAME_1_DE,
+					LandingPageName: TEST_PAGE_NAME_1_DE,
+				},
+			},
 		},
 		{
 			Name:                "Test API - Forgot password",
@@ -245,10 +273,62 @@ func SeedDevelopmentCampaignTemplates(
 			URLIdentifierID:             nullable.NewNullableWithValue(urlIdentifier.ID.MustGet()),
 			StateIdentifierID:           nullable.NewNullableWithValue(stateKeyIdentifier.ID.MustGet()),
 		}
+		if template.Language != "" {
+			createTemplate.Language = nullable.NewNullableWithValue(template.Language)
+		}
+		if len(template.Languages) > 0 {
+			languages := make([]*model.CampaignTemplateLanguage, 0, len(template.Languages))
+			for _, l := range template.Languages {
+				row, err := devTemplateLanguageRow(l, emailRepository, pageRepository)
+				if err != nil {
+					return err
+				}
+				languages = append(languages, row)
+			}
+			createTemplate.Languages = nullable.NewNullableWithValue(languages)
+		}
 		_, err = templateRepository.Insert(context.TODO(), &createTemplate)
 		if err != nil {
 			return errors.Errorf("%w: %s", errs.ErrDBSeedFailure, err)
 		}
 	}
 	return nil
+}
+
+// devTemplateLanguageRow looks up the email and landing page of a seeded
+// language row by name
+func devTemplateLanguageRow(
+	l devTemplateLanguage,
+	emailRepository *repository.Email,
+	pageRepository *repository.Page,
+) (*model.CampaignTemplateLanguage, error) {
+	email, err := emailRepository.GetByNameAndCompanyID(
+		context.Background(),
+		vo.NewString64Must(l.EmailName),
+		nil,
+		&repository.EmailOption{},
+	)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errors.Errorf("%w: %s", errs.ErrDBSeedFailure, err)
+	}
+	if email == nil {
+		return nil, errors.Errorf("%w: %s", errs.ErrDBSeedFailure, "language email not found")
+	}
+	page, err := pageRepository.GetByNameAndCompanyID(
+		context.Background(),
+		vo.NewString64Must(l.LandingPageName),
+		nil,
+		&repository.PageOption{},
+	)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errors.Errorf("%w: %s", errs.ErrDBSeedFailure, err)
+	}
+	if page == nil {
+		return nil, errors.Errorf("%w: %s", errs.ErrDBSeedFailure, "language landing page not found")
+	}
+	return &model.CampaignTemplateLanguage{
+		Language:      l.Code,
+		EmailID:       email.ID,
+		LandingPageID: page.ID,
+	}, nil
 }

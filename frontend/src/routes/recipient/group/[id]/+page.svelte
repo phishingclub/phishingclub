@@ -1,6 +1,8 @@
 <script>
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import CsvColumnsHelp from '../../CsvColumnsHelp.svelte';
+	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
+	import { LANGUAGES, languageName } from '$lib/utils/languages.js';
 	import { onDestroy, onMount } from 'svelte';
 	import Note from '$lib/components/Note.svelte';
 	import DynamicLabel from '$lib/components/DynamicLabel.svelte';
@@ -53,7 +55,8 @@
 		department: 'Department',
 		city: 'City',
 		country: 'Country',
-		misc: 'Miscellaneous'
+		misc: 'Miscellaneous',
+		language: 'Language'
 	};
 
 	// bindings
@@ -93,6 +96,11 @@
 	let isCreateRecipientModalVisible = false;
 	let createRecipientForm = null;
 	let createRecipientError = '';
+	// the language list for the recipient form, None leaves it empty
+	const languageOptions = [
+		{ value: '', label: 'None' },
+		...LANGUAGES.map((l) => ({ value: l.code, label: l.name }))
+	];
 	let createRecipientValues = {
 		email: '',
 		phone: '',
@@ -103,7 +111,8 @@
 		department: '',
 		city: '',
 		country: '',
-		misc: ''
+		misc: '',
+		language: ''
 	};
 
 	// local state
@@ -457,6 +466,7 @@
 				city: createRecipientValues.city,
 				country: createRecipientValues.country,
 				misc: createRecipientValues.misc,
+				language: createRecipientValues.language,
 				companyID: contextCompanyID
 			});
 			if (!res.success) {
@@ -497,7 +507,8 @@
 			department: '',
 			city: '',
 			country: '',
-			misc: ''
+			misc: '',
+			language: ''
 		};
 		createRecipientForm.reset();
 	};
@@ -564,7 +575,9 @@
 			>
 			equals
 			<span class="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-1 rounded"
-				>{groupValues.filterValue}</span
+				>{groupValues.filterField === 'language'
+					? languageName(groupValues.filterValue)
+					: groupValues.filterValue}</span
 			>
 			are included automatically.
 		</p>
@@ -572,19 +585,12 @@
 		<div
 			class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:gap-3 mt-6 mb-10 [&>button]:m-0 [&>button:first-child]:col-span-2"
 		>
-			<BigButton
-				on:click={openCreateRecipientModal}
-				{...groupAttrs}>New recipient</BigButton
+			<BigButton on:click={openCreateRecipientModal} {...groupAttrs}>New recipient</BigButton>
+			<BigButton variant="secondary" on:click={openAddRecipientsModal} {...groupAttrs}
+				>Add recipients</BigButton
 			>
-			<BigButton
-				variant="secondary"
-				on:click={openAddRecipientsModal}
-				{...groupAttrs}>Add recipients</BigButton
-			>
-			<BigButton
-				variant="secondary"
-				on:click={openImportModal}
-				{...groupAttrs}>Import from CSV</BigButton
+			<BigButton variant="secondary" on:click={openImportModal} {...groupAttrs}
+				>Import from CSV</BigButton
 			>
 		</div>
 	{/if}
@@ -600,7 +606,8 @@
 			{ column: 'Extra identifier', title: 'Extra ID', size: 'small' },
 			{ column: 'City', size: 'small' },
 			{ column: 'Country', size: 'small' },
-			{ column: 'Misc', size: 'small' }
+			{ column: 'Misc', size: 'small' },
+			{ column: 'Language', size: 'small' }
 		]}
 		sortable={[
 			'email',
@@ -612,7 +619,8 @@
 			'department',
 			'city',
 			'country',
-			'misc'
+			'misc',
+			'language'
 		]}
 		hasData={!!recipients.length}
 		plural="recipients"
@@ -633,7 +641,9 @@
 						>
 					{/if}
 					{#if recipient.scimSoftDeletedAt}
-						<StatusBadge tone="neutral" title="Disabled through SCIM" class="ml-2">Disabled</StatusBadge>
+						<StatusBadge tone="neutral" title="Disabled through SCIM" class="ml-2"
+							>Disabled</StatusBadge
+						>
 					{/if}
 				</TableCellLink>
 				<TableCell value={recipient.firstName} />
@@ -645,6 +655,7 @@
 				<TableCell value={recipient.city} />
 				<TableCell value={recipient.country} />
 				<TableCell value={recipient.misc} />
+				<TableCell value={recipient.language ? languageName(recipient.language) : ''} />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>
@@ -668,11 +679,7 @@
 		onClose={closeCreateRecipientModal}
 		{isSubmitting}
 	>
-		<FormGrid
-			on:submit={onClickCreateRecipient}
-			bind:bindTo={createRecipientForm}
-			{isSubmitting}
-		>
+		<FormGrid on:submit={onClickCreateRecipient} bind:bindTo={createRecipientForm} {isSubmitting}>
 			<FormColumns>
 				<FormColumn>
 					<TextField
@@ -749,6 +756,14 @@
 						placeholder="e.g. VIP"
 						toolTipText="Any extra information"
 						optional>Miscellaneous</TextField
+					>
+					<TextFieldSelect
+						id="group-recipient-language"
+						bind:value={createRecipientValues.language}
+						optional
+						placeholder="None"
+						toolTipText="The language the recipient reads. A campaign with Language by Language sends it when every template has it."
+						options={languageOptions}>Language</TextFieldSelect
 					>
 				</FormColumn>
 			</FormColumns>
@@ -862,7 +877,8 @@
 								{ column: 'Department', size: 'small' },
 								{ column: 'City', size: 'small' },
 								{ column: 'Country', size: 'small' },
-								{ column: 'Misc', size: 'small' }
+								{ column: 'Misc', size: 'small' },
+								{ column: 'Language', size: 'small' }
 							]}
 							sortable={[
 								'email',
@@ -874,7 +890,8 @@
 								'department',
 								'city',
 								'country',
-								'misc'
+								'misc',
+								'language'
 							]}
 							hasData={!!importFormValues.recipients.length}
 							plural="recipients"
@@ -892,6 +909,7 @@
 									<TableCell value={recipient.city} />
 									<TableCell value={recipient.country} />
 									<TableCell value={recipient.misc} />
+									<TableCell value={recipient.language} />
 									<TableCellEmpty />
 									<TableCellAction>
 										<TableDropDownEllipsis>

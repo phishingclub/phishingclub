@@ -1309,9 +1309,12 @@ func (s *Server) checkAndServePhishingPage(
 		)
 		return false, nil
 	}
-	cTemplate, err := s.repositories.CampaignTemplate.GetByID(
+	// the pages and email of the language stamped on the recipient, never of
+	// a language from the request
+	cTemplate, err := s.repositories.CampaignTemplate.GetByIDForLanguage(
 		c,
 		&templateID,
+		campaignRecipient.StampedLanguage(),
 		&repository.CampaignTemplateOption{
 			WithIdentifier: true,
 		},
@@ -1319,6 +1322,14 @@ func (s *Server) checkAndServePhishingPage(
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		// the recipient's template was deleted, which is the same as no template
 		s.logger.Debugw("campaign template not found",
+			"templateID", templateID.String(),
+		)
+		return false, nil
+	}
+	if errors.Is(err, repository.ErrTemplateLanguageUnavailable) {
+		// the recipient's language is gone, which is the same as no template.
+		// the content of another language is never shown in its place
+		s.logger.Debugw("campaign template has no usable content in the recipient language",
 			"templateID", templateID.String(),
 		)
 		return false, nil
@@ -2447,16 +2458,19 @@ func (s *Server) renderDenyPage(
 	if err != nil {
 		return fmt.Errorf("campaign has no template ID: %s", err)
 	}
-	cTemplate, err := s.repositories.CampaignTemplate.GetByID(
+	// the email of the language stamped on the recipient
+	cTemplate, err := s.repositories.CampaignTemplate.GetByIDForLanguage(
 		ctx,
 		&templateID,
+		campaignRecipient.StampedLanguage(),
 		&repository.CampaignTemplateOption{
 			WithEmail:      true,
 			WithIdentifier: true,
 		},
 	)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		// the recipient's template was deleted, so there is nothing to render
+	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, repository.ErrTemplateLanguageUnavailable) {
+		// the recipient's template or its language was deleted, so there is
+		// nothing to render
 		c.AbortWithStatus(http.StatusNotFound)
 		return nil
 	}

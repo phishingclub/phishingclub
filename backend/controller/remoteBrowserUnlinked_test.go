@@ -39,10 +39,12 @@ func newRBUnlinkedFixture(t *testing.T) *rbUnlinkedFixture {
 	}
 	if err := db.AutoMigrate(
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignRecipient{},
 		&database.CampaignEvent{},
 		&database.Recipient{},
 		&database.Program{},
+		&database.ProgramLanguageRoute{},
 		&database.ProgramEnrollment{},
 		&database.RemoteBrowser{},
 	); err != nil {

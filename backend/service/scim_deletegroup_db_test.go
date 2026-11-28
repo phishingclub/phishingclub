@@ -28,8 +28,10 @@ func TestScimDeleteGroupRemovesItFromPrograms(t *testing.T) {
 		&database.RecipientGroup{},
 		&database.RecipientGroupRecipient{},
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignRecipientGroup{},
 		&database.Program{},
+		&database.ProgramLanguageRoute{},
 		&database.ProgramRecipientGroup{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)

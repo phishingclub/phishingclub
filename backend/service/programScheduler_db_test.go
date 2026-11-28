@@ -36,13 +36,16 @@ func newProgramServiceTest(t *testing.T) *programTest {
 	}
 	if err := db.AutoMigrate(
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignRecipient{},
 		&database.CampaignEvent{},
 		&database.CampaignTemplate{},
+		&database.CampaignTemplateLanguage{},
 		&database.CampaignTemplatePool{},
 		&database.Recipient{},
 		&database.Event{},
 		&database.Program{},
+		&database.ProgramLanguageRoute{},
 		&database.ProgramStep{},
 		&database.ProgramCampaign{},
 		&database.ProgramRecipientGroup{},
@@ -451,7 +454,8 @@ func TestAdvanceEnrollmentRevivesCancelledSend(t *testing.T) {
 	rid := p.recipient("frank@example.com")
 	e := p.enroll(programID, rid, 0)
 	cancelled := p.send(campaignID, rid, false)
-	p.db.Model(&database.CampaignRecipient{}).Where("id = ?", cancelled).Update("cancelled_at", utils.NowRFC3339UTC())
+	p.db.Model(&database.CampaignRecipient{}).Where("id = ?", cancelled).
+		Updates(map[string]any{"cancelled_at": utils.NowRFC3339UTC(), "language": "fr"})
 
 	p.advance(programID, e)
 	rows := p.sendsIn(campaignID)
@@ -460,6 +464,11 @@ func TestAdvanceEnrollmentRevivesCancelledSend(t *testing.T) {
 	}
 	if rows[0].CancelledAt != nil || rows[0].SendAt == nil {
 		t.Fatal("the cancelled send was not put back in the queue")
+	}
+	// put back is a new planning decision: the template has no language, so
+	// the old stamp is not kept
+	if rows[0].Language != nil {
+		t.Fatalf("a revived row gets the language decided now, got %v", *rows[0].Language)
 	}
 	row := p.enrollment(e.ID)
 	if row.Position != 1 || row.Status != model.ProgramEnrollmentActive {

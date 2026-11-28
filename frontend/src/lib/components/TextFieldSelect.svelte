@@ -301,9 +301,10 @@
 	});
 
 	// Generate unique IDs for accessibility
-	const comboboxId = id || `textfield-select-${_id.toString()}`;
-	const listboxId = `${comboboxId}-listbox`;
-	const labelId = `${comboboxId}-label`;
+	// follow the id, a keyed list can move this field to another index
+	$: comboboxId = id || `textfield-select-${_id.toString()}`;
+	$: listboxId = `${comboboxId}-listbox`;
+	$: labelId = `${comboboxId}-label`;
 
 	// Reactive statements for accessibility
 	$: displayValue = getDisplayLabel(value);

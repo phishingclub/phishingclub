@@ -40,6 +40,12 @@ type CampaignRecipientOption struct {
 	// GetUnsendRecipientsForSending. The sender rests a campaign it could not
 	// send for a while, so its rows do not fill every batch.
 	ExcludeCampaignIDs []*uuid.UUID
+	// OrderByRowID makes GetByCampaignID order by the random row id and ignore
+	// the order asked for, so the row order says nothing about send order
+	OrderByRowID bool
+	// ThenByRowID orders rows that tie on the asked order by the random row
+	// id, so ties do not follow the order the rows were written in
+	ThenByRowID bool
 }
 
 // CampaignRecipient is a CampaignRecipient repository
@@ -132,6 +138,10 @@ func (r *CampaignRecipient) Insert(
 	// ToDBMap omits the template, so it is carried here
 	if templateID, err := campaignRecipient.TemplateID.Get(); err == nil {
 		row["campaign_template_id"] = templateID.String()
+	}
+	// the language is stamped once here and never written back by ToDBMap
+	if language, err := campaignRecipient.Language.Get(); err == nil && language != "" {
+		row["language"] = language
 	}
 
 	res := r.DB.
@@ -239,9 +249,20 @@ func (r *CampaignRecipient) GetByCampaignID(
 	options *CampaignRecipientOption,
 ) (*model.Result[model.CampaignRecipient], error) {
 	result := model.NewEmptyResult[model.CampaignRecipient]()
-	db, err := useQuery(r.DB, database.CAMPAIGN_TABLE, options.QueryArgs, allowedCampaignRecipientColumns...)
+	queryArgs := options.QueryArgs
+	if options.OrderByRowID && queryArgs != nil {
+		q := *queryArgs
+		q.OrderBy = ""
+		queryArgs = &q
+	}
+	db, err := useQuery(r.DB, database.CAMPAIGN_TABLE, queryArgs, allowedCampaignRecipientColumns...)
 	if err != nil {
 		return result, errs.Wrap(err)
+	}
+	if options.OrderByRowID || options.ThenByRowID {
+		db = db.Order(clause.OrderByColumn{
+			Column: clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "id"},
+		})
 	}
 	db = r.preload(db, options)
 	var dbCampaignRecipients []database.CampaignRecipient
@@ -519,6 +540,45 @@ func (r *CampaignRecipient) HasRecipientsByCampaignID(
 		Limit(1).
 		Pluck("id", &ids)
 
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return len(ids) > 0, nil
+}
+
+// HasSendActivityByCampaignID reports whether any row of the campaign was
+// sent or claimed by a sender, or any recipient event was saved for it. An
+// event of an anonymous campaign carries only the pseudonym, so both the
+// recipient and the pseudonym columns are checked.
+func (r *CampaignRecipient) HasSendActivityByCampaignID(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+) (bool, error) {
+	ids := []string{}
+	res := r.DB.WithContext(ctx).
+		Model(&database.CampaignRecipient{}).
+		Where(clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "campaign_id"}, Value: campaignID.String()}).
+		Where(clause.Or(
+			clause.Neq{Column: clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "sent_at"}, Value: nil},
+			clause.Neq{Column: clause.Column{Table: database.CAMPAIGN_RECIPIENT_TABLE_NAME, Name: "last_attempt_at"}, Value: nil},
+		)).
+		Limit(1).
+		Pluck("id", &ids)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	if len(ids) > 0 {
+		return true, nil
+	}
+	res = r.DB.WithContext(ctx).
+		Model(&database.CampaignEvent{}).
+		Where(clause.Eq{Column: clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "campaign_id"}, Value: campaignID.String()}).
+		Where(clause.Or(
+			clause.Neq{Column: clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "recipient_id"}, Value: nil},
+			clause.Neq{Column: clause.Column{Table: database.CAMPAIGN_EVENT_TABLE, Name: "anonymized_id"}, Value: nil},
+		)).
+		Limit(1).
+		Pluck("id", &ids)
 	if res.Error != nil {
 		return false, res.Error
 	}
@@ -1383,6 +1443,11 @@ func ToCampaignRecipient(row *database.CampaignRecipient) (*model.CampaignRecipi
 	if row.CampaignTemplateID != nil {
 		templateID = nullable.NewNullableWithValue(*row.CampaignTemplateID)
 	}
+	var language nullable.Nullable[string]
+	language.SetNull()
+	if row.Language != nil {
+		language = nullable.NewNullableWithValue(*row.Language)
+	}
 	return &model.CampaignRecipient{
 		ID:               id,
 		CancelledAt:      cancelledAt,
@@ -1402,6 +1467,7 @@ func ToCampaignRecipient(row *database.CampaignRecipient) (*model.CampaignRecipi
 		LureCode:         lureCode,
 		LureCodeCustom:   nullable.NewNullableWithValue(row.LureCodeCustom),
 		TemplateID:       templateID,
+		Language:         language,
 	}, nil
 }
 
@@ -1457,6 +1523,15 @@ type TemplateAssignment struct {
 	Country    string
 	Misc       string
 	Sent       bool
+	// Restampable is true when the row is not sent, not cancelled, not
+	// claimed by a sender and has no event, the rows RestampUnsentLanguages
+	// rewrites
+	Restampable bool
+	// Language is the stamped language, nil on rows planned before languages
+	Language *string
+	// RecipientLanguage is the Language field of the recipient, empty when
+	// not known
+	RecipientLanguage string
 }
 
 // GetTemplateAssignments returns every recipient of a campaign with its stored
@@ -1475,10 +1550,17 @@ func (r *CampaignRecipient) GetTemplateAssignments(
 			COALESCE(r.city, '') AS city,
 			COALESCE(r.country, '') AS country,
 			COALESCE(r.misc, '') AS misc,
+			COALESCE(r.language, '') AS recipient_language,
+			cr.language AS language,
 			CASE WHEN cr.sent_at IS NOT NULL OR cr.recipient_id IN (
 				SELECT e.recipient_id FROM campaign_events e
 				WHERE e.campaign_id = ? AND e.event_id <> ? AND e.recipient_id IS NOT NULL
-			) THEN 1 ELSE 0 END AS sent`, campaignID.String(), failedSendEventID()).
+			) THEN 1 ELSE 0 END AS sent,
+			CASE WHEN cr.sent_at IS NULL AND cr.cancelled_at IS NULL AND cr.last_attempt_at IS NULL
+				AND (cr.recipient_id IS NULL OR cr.recipient_id NOT IN (
+					SELECT e.recipient_id FROM campaign_events e
+					WHERE e.campaign_id = ? AND e.recipient_id IS NOT NULL
+				)) THEN 1 ELSE 0 END AS restampable`, campaignID.String(), failedSendEventID(), campaignID.String()).
 		Joins("LEFT JOIN recipients r ON r.id = cr.recipient_id").
 		Where("cr.campaign_id = ?", campaignID.String()).
 		Order("cr.id ASC").
@@ -1545,6 +1627,42 @@ func setTemplateForIDsTx(
 	).Error
 }
 
+// restampMovedLanguagesTx gives each listed recipient the language of the
+// template it is keyed under, null when that template has no language. A
+// recipient that does not hold that template, as its move was skipped, is
+// left alone. Used when no field picks the language, so the stamp follows the
+// template.
+func restampMovedLanguagesTx(
+	tx *gorm.DB,
+	campaignID *uuid.UUID,
+	idsByTemplate ...map[uuid.UUID][]uuid.UUID,
+) error {
+	list := []templateMove{}
+	for _, byTemplate := range idsByTemplate {
+		for templateID, ids := range byTemplate {
+			for _, id := range ids {
+				list = append(list, templateMove{ID: id.String(), TemplateID: templateID.String()})
+			}
+		}
+	}
+	if len(list) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	return tx.Exec(`UPDATE campaign_recipients
+		SET language = NULLIF((SELECT t.language FROM campaign_templates t WHERE t.id = j.value->>'t'), ''),
+			updated_at = ?
+		FROM json_each(?) AS j
+		WHERE campaign_recipients.id = j.value->>'i'
+		AND +campaign_recipients.campaign_id = ?
+		AND campaign_recipients.campaign_template_id = j.value->>'t'`,
+		utils.NowRFC3339UTC(), string(payload), campaignID.String(),
+	).Error
+}
+
 // failedSendEventID is the id of the failed send event. A failed send is not a
 // delivery, so it does not keep a recipient on its template.
 func failedSendEventID() string {
@@ -1552,4 +1670,57 @@ func failedSendEventID() string {
 		return id.String()
 	}
 	return ""
+}
+
+// languageStamp is one recipient row and its new language, sent to sqlite as
+// json. An empty language writes null.
+type languageStamp struct {
+	ID       string `json:"i"`
+	Language string `json:"l"`
+}
+
+// RestampUnsentLanguages gives each listed row of the campaign its new
+// language, null for a nil one, in one statement. A row that is sent, is
+// cancelled, is claimed by a sender (last_attempt_at is set) or has any event
+// is left alone, so a row keeps the language it was sent in. It returns how
+// many rows changed.
+func (r *CampaignRecipient) RestampUnsentLanguages(
+	ctx context.Context,
+	campaignID *uuid.UUID,
+	stamps map[uuid.UUID]*string,
+) (int64, error) {
+	if len(stamps) == 0 {
+		return 0, nil
+	}
+	list := make([]languageStamp, 0, len(stamps))
+	for id, code := range stamps {
+		v := ""
+		if code != nil {
+			v = *code
+		}
+		list = append(list, languageStamp{ID: id.String(), Language: v})
+	}
+	payload, err := json.Marshal(list)
+	if err != nil {
+		return 0, err
+	}
+	// the unary plus keeps sqlite on the primary key for each listed id
+	res := r.DB.WithContext(ctx).Exec(`UPDATE campaign_recipients
+		SET language = NULLIF(j.value->>'l', ''), updated_at = ?
+		FROM json_each(?) AS j
+		WHERE campaign_recipients.id = j.value->>'i'
+		AND +campaign_recipients.campaign_id = ?
+		AND +campaign_recipients.sent_at IS NULL
+		AND +campaign_recipients.cancelled_at IS NULL
+		AND +campaign_recipients.last_attempt_at IS NULL
+		AND (campaign_recipients.recipient_id IS NULL OR campaign_recipients.recipient_id NOT IN (
+			SELECT e.recipient_id FROM campaign_events e
+			WHERE e.campaign_id = ? AND e.recipient_id IS NOT NULL
+		))`,
+		utils.NowRFC3339UTC(), string(payload), campaignID.String(), campaignID.String(),
+	)
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	return res.RowsAffected, nil
 }

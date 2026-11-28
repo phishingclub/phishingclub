@@ -252,6 +252,7 @@ func (s *Program) programChangedFields(ctx context.Context, id *uuid.UUID, incom
 	existing, err := s.ProgramRepository.GetByID(ctx, id, &repository.ProgramOption{
 		WithSteps:           true,
 		WithRecipientGroups: true,
+		WithLanguageRoutes:  true,
 	})
 	if err != nil {
 		return nil

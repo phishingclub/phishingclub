@@ -142,6 +142,12 @@ type Program struct {
 	// order, one of ProgramAllowedTemplateMixBy. Empty is off. It is stored
 	// for sequential order too but only used in random order.
 	TemplateMixBy nullable.Nullable[string] `json:"templateMixBy"`
+	// LanguageRouteBy, LanguageDefault and LanguageRoutes pick each person's
+	// language, see Campaign. The three are sent together, the default is
+	// required when LanguageRouteBy is set.
+	LanguageRouteBy nullable.Nullable[string]            `json:"languageRouteBy"`
+	LanguageDefault nullable.Nullable[string]            `json:"languageDefault"`
+	LanguageRoutes  nullable.Nullable[map[string]string] `json:"languageRoutes"`
 
 	StepIntervalMinutes   nullable.Nullable[int]    `json:"stepIntervalMinutes"`
 	SpreadMinutes         nullable.Nullable[int]    `json:"spreadMinutes"`
@@ -279,6 +285,17 @@ type ProgramNames struct {
 
 // Validate checks the program request has a valid state.
 func (p *Program) Validate() error {
+	return p.validate(true)
+}
+
+// ValidateWithoutRouting checks the program request like Validate but leaves
+// out the language fields. An update checks them once they are merged with
+// the stored program, see ValidateLanguageRouting.
+func (p *Program) ValidateWithoutRouting() error {
+	return p.validate(false)
+}
+
+func (p *Program) validate(routing bool) error {
 	if err := validate.NullableFieldRequired("name", p.Name); err != nil {
 		return err
 	}
@@ -294,6 +311,11 @@ func (p *Program) Validate() error {
 	}
 	if v, err := p.TemplateMixBy.Get(); err == nil && !IsValidProgramTemplateMixBy(v) {
 		return validate.WrapErrorWithField(errors.New("unknown field to mix templates by"), "templateMixBy")
+	}
+	if routing {
+		if err := p.ValidateLanguageRouting(); err != nil {
+			return err
+		}
 	}
 	if p.StepIntervalMinutes.IsSpecified() && !p.StepIntervalMinutes.IsNull() {
 		if p.StepIntervalMinutes.MustGet() < ProgramMinIntervalMinutes {
@@ -561,6 +583,15 @@ func (p *Program) ToDBMap() map[string]any {
 			m["template_mix_by"] = v
 		}
 	}
+	if p.LanguageRouteBy.IsSpecified() {
+		m["language_route_by"] = p.LanguageRouteField()
+	}
+	if p.LanguageDefault.IsSpecified() {
+		m["language_default"] = ""
+		if v, err := p.LanguageDefault.Get(); err == nil {
+			m["language_default"] = v
+		}
+	}
 	if p.StepIntervalMinutes.IsSpecified() && !p.StepIntervalMinutes.IsNull() {
 		m["step_interval_minutes"] = p.StepIntervalMinutes.MustGet()
 	}
@@ -627,6 +658,24 @@ func (p *Program) OrderModeOrDefault() string {
 		return p.OrderMode.MustGet()
 	}
 	return ProgramOrderShuffle
+}
+
+// ValidateLanguageRouting checks the language fields and normalizes the route
+// keys, see languageRouting.validate
+func (p *Program) ValidateLanguageRouting() error {
+	return languageRouting{
+		routeBy:  &p.LanguageRouteBy,
+		fallback: &p.LanguageDefault,
+		routes:   &p.LanguageRoutes,
+	}.validate()
+}
+
+// LanguageRouteField returns the field languages are picked by, empty when off
+func (p *Program) LanguageRouteField() string {
+	if v, err := p.LanguageRouteBy.Get(); err == nil {
+		return v
+	}
+	return ""
 }
 
 // TemplateMixInEffect returns the recipient field templates are mixed by, or

@@ -268,6 +268,18 @@ func (s *Program) Create(
 	if err := s.validateProgramSettings(ctx, companyID, nil, program); err != nil {
 		return nil, err
 	}
+	// every language the routing can pick must be sendable by every step
+	// template
+	if routeBy := program.LanguageRouteField(); routeBy != "" {
+		_, fallback, routes, err := s.programRouting(ctx, program)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.checkProgramLanguages(ctx, companyID, routeBy, fallback, routes, program.Steps, nullableIDs(program.RecipientGroupIDs)); err != nil {
+			return nil, err
+		}
+		auditLanguageRouting(ae, routeBy, fallback, routes)
+	}
 	now := time.Now()
 	applyStartRequest(program, nil, now)
 	program.ApplyReportBaseline(nil, now)
@@ -317,6 +329,12 @@ func programChildren(p *model.Program) *repository.ProgramChildren {
 	}
 	if p.Webhooks.IsSpecified() {
 		children.Webhooks = nullableWebhooks(p.Webhooks)
+	}
+	if p.LanguageRoutes.IsSpecified() {
+		children.LanguageRoutes = map[string]string{}
+		if routes, err := p.LanguageRoutes.Get(); err == nil && routes != nil {
+			children.LanguageRoutes = routes
+		}
 	}
 	return children
 }
@@ -370,7 +388,8 @@ func (s *Program) UpdateByID(
 		s.AuditLogNotAuthorized(ae)
 		return errs.ErrAuthorizationFailed
 	}
-	if err := incoming.Validate(); err != nil {
+	// the language fields are checked once merged with the stored program
+	if err := incoming.ValidateWithoutRouting(); err != nil {
 		return errs.Wrap(err)
 	}
 	// the closed check and the write must not race a close or a tick. The lock
@@ -404,6 +423,9 @@ func (s *Program) UpdateByID(
 		}
 		defer unlockCompany()
 		if err := incoming.ValidateUpdate(existing, time.Now()); err != nil {
+			return err
+		}
+		if err := s.mergeProgramRouting(ctx, existing, incoming, ae); err != nil {
 			return err
 		}
 		// a program stays with the company it was created for
@@ -498,6 +520,35 @@ func (s *Program) UpdateByID(
 		}
 		if err := s.validateProgramSettings(ctx, companyID, id, incoming); err != nil {
 			return err
+		}
+		// the routing after the update must pick only languages every step
+		// template after the update can send. A route edit only changes the
+		// sends planned from now on, nothing planned is changed
+		routeBy, fallback, routes, routingSpecified, err := s.programUpdateRouting(ctx, existing, incoming)
+		if err != nil {
+			return err
+		}
+		// with the Language field a group change can bring new languages
+		groupsChange := routeBy == model.LanguageRouteLanguage && incoming.RecipientGroupIDs.IsSpecified()
+		if routeBy != "" && (routingSpecified || editsSteps || groupsChange) {
+			steps := incoming.Steps
+			if !editsSteps {
+				if steps, err = s.ProgramRepository.GetSteps(ctx, id); err != nil {
+					return errs.Wrap(err)
+				}
+			}
+			languageGroups := groupIDs
+			if !incoming.RecipientGroupIDs.IsSpecified() {
+				if languageGroups, err = s.ProgramRepository.GetRecipientGroupIDs(ctx, id); err != nil {
+					return errs.Wrap(err)
+				}
+			}
+			if err := s.checkProgramLanguages(ctx, companyID, routeBy, fallback, routes, steps, languageGroups); err != nil {
+				return err
+			}
+		}
+		if routingSpecified {
+			auditLanguageRouting(ae, routeBy, fallback, routes)
 		}
 		ae.Details["changed"] = s.programChangedFields(ctx, id, incoming)
 		// the mark is stored with the edit, so the membership pass plans the
@@ -1314,6 +1365,7 @@ func (s *Program) GetByID(
 	program, err := s.ProgramRepository.GetByID(ctx, id, &repository.ProgramOption{
 		WithSteps:           true,
 		WithRecipientGroups: true,
+		WithLanguageRoutes:  true,
 	})
 	if err != nil {
 		return nil, errs.Wrap(err)
@@ -1466,7 +1518,7 @@ func (s *Program) healthWarningsWith(
 	if program.IsClosed() {
 		return warnings
 	}
-	warnings = append(warnings, templateWarningsFrom(program, templates)...)
+	warnings = append(warnings, templateWarningsFrom(program, templates, s.programLanguageCheckOrNil(ctx, program))...)
 	if s.audienceIsEmpty(ctx, program) {
 		warnings = append(warnings, "The groups are empty, so nobody is enrolled.")
 	}
@@ -1496,7 +1548,7 @@ func (s *Program) audienceIsEmpty(ctx context.Context, program *model.Program) b
 
 // templateWarnings lists the steps whose template is gone or cannot be sent
 func (s *Program) templateWarnings(ctx context.Context, _ *model.Session, program *model.Program) []string {
-	return templateWarningsFrom(program, s.stepTemplatesOrNil(ctx, program))
+	return templateWarningsFrom(program, s.stepTemplatesOrNil(ctx, program), s.programLanguageCheckOrNil(ctx, program))
 }
 
 // stepTemplatesOrNil reads the step templates, nil when they can not be read
@@ -1510,8 +1562,15 @@ func (s *Program) stepTemplatesOrNil(ctx context.Context, program *model.Program
 }
 
 // templateWarningsFrom lists the steps whose template is gone or cannot be
-// sent. With templates nil they could not be read and nothing is listed.
-func templateWarningsFrom(program *model.Program, templates map[uuid.UUID]repository.ProgramTemplateInfo) []string {
+// sent, and one warning per language the program picks that a step template
+// can not send, see languageWarningsFrom. With templates nil they could not
+// be read and nothing is listed. languages is nil when the program picks no
+// language by a field.
+func templateWarningsFrom(
+	program *model.Program,
+	templates map[uuid.UUID]repository.ProgramTemplateInfo,
+	languages *programLanguageCheck,
+) []string {
 	warnings := []string{}
 	if templates == nil {
 		return warnings
@@ -1530,7 +1589,7 @@ func templateWarningsFrom(program *model.Program, templates map[uuid.UUID]reposi
 			warnings = append(warnings, "Template '"+t.Name+"' is missing a domain, email, page, or an SMTP configuration or API sender, so it is not sent")
 		}
 	}
-	return warnings
+	return append(warnings, languageWarningsFrom(program, templates, languages)...)
 }
 
 // GetAll lists programs for a company.
@@ -1714,6 +1773,21 @@ func (s *Program) Start(ctx context.Context, session *model.Session, id *uuid.UU
 		now := time.Now().UTC()
 		if end := program.EndAtTime(); end != nil && !end.After(now) {
 			return errs.NewValidationError(errors.New("The end has passed. Change or clear the end first."))
+		}
+		// a template may have lost a language since the program was saved, so
+		// every language the routing picks is checked again before it starts
+		if routeBy := program.LanguageRouteField(); routeBy != "" {
+			_, fallback, routes, err := s.programRouting(ctx, program)
+			if err != nil {
+				return err
+			}
+			steps, err := s.ProgramRepository.GetSteps(ctx, id)
+			if err != nil {
+				return errs.Wrap(err)
+			}
+			if err := s.checkProgramLanguages(ctx, optionalID(program.CompanyID), routeBy, fallback, routes, steps, nullableIDs(program.RecipientGroupIDs)); err != nil {
+				return err
+			}
 		}
 		// a start that has passed but that the scheduler has not picked up yet
 		// starts now as well, it keeps its start time

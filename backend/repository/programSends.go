@@ -95,12 +95,19 @@ func (r *Program) GetPersonSend(
 // unique campaign and recipient index allows one row per person per campaign,
 // so a returning person reuses it, and so does a send the sender held as its
 // template could not be sent. A notable event of cancelled
-// goes back to scheduled, as it would outrank the sent event.
+// goes back to scheduled, as it would outrank the sent event. The row gets
+// language as its new stamp, as putting it back is a new planning decision.
+// A nil language stores no stamp.
 func (r *Program) ReviveCancelledSend(
 	ctx context.Context,
 	campaignRecipientID *uuid.UUID,
 	sendAt time.Time,
+	language *string,
 ) error {
+	var stamp any
+	if language != nil && *language != "" {
+		stamp = *language
+	}
 	return errs.Wrap(r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		byID := clause.Eq{Column: clause.Column{Name: "id"}, Value: campaignRecipientID}
 		unsent := clause.And(
@@ -115,6 +122,7 @@ func (r *Program) ReviveCancelledSend(
 				"cancelled_at":    nil,
 				"send_at":         utils.RFC3339UTC(sendAt),
 				"last_attempt_at": nil,
+				"language":        stamp,
 				"updated_at":      utils.NowRFC3339UTC(),
 			})
 		if res.Error != nil {
@@ -1092,6 +1100,8 @@ type ProgramQueuedSend struct {
 	CampaignID  uuid.UUID
 	SendAt      *time.Time
 	TemplateID  *uuid.UUID
+	// Language is the language stamp of the send, nil when it has none
+	Language *string
 }
 
 // GetQueuedSends returns the sends of a program that are not sent or cancelled
@@ -1112,7 +1122,7 @@ func (r *Program) GetQueuedSends(
 	rows := []ProgramQueuedSend{}
 	db := r.DB.WithContext(ctx).
 		Model(&database.CampaignRecipient{}).
-		Select("recipient_id", "campaign_id", "send_at").
+		Select("recipient_id", "campaign_id", "send_at", "language").
 		Where("campaign_id IN (?)", openCampaigns)
 	if recipientIDs == nil {
 		db = db.

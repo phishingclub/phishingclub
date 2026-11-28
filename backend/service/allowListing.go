@@ -210,6 +210,10 @@ func (a *AllowListing) combine(
 		a.Logger.Errorw("failed to get proxy domains for allow listing", "error", err)
 		return nil, errs.Wrap(err)
 	}
+	languages, err := a.readLanguages(ctx, unique)
+	if err != nil {
+		return nil, err
+	}
 
 	mailFrom := newOrderedSet()
 	sendingIPs := newOrderedSet()
@@ -221,7 +225,13 @@ func (a *AllowListing) combine(
 			continue
 		}
 		entry := allowListingTemplate(id, t, proxyDomains)
+		entry.Languages = languages.of(id)
+		entry.Language = t.TemplateLanguage()
 		mailFrom.add(entry.MailFromDomain)
+		// every language email is sent from its own envelope domain
+		for _, l := range entry.Languages {
+			mailFrom.add(l.MailFromDomain)
+		}
 		for _, ip := range entry.SendingIPs {
 			sendingIPs.add(ip)
 		}
@@ -244,6 +254,63 @@ func (a *AllowListing) combine(
 	return result, nil
 }
 
+// allowListingLanguages holds the language rows of the templates and the
+// envelope sender of each language email
+type allowListingLanguages struct {
+	rows     map[uuid.UUID][]*model.CampaignTemplateLanguage
+	mailFrom map[uuid.UUID]string
+}
+
+// readLanguages reads the language rows of the templates in one query and
+// the envelope senders of their emails in one more
+func (a *AllowListing) readLanguages(ctx context.Context, ids []uuid.UUID) (*allowListingLanguages, error) {
+	rows, err := a.CampaignTemplateRepository.GetLanguageRowsByTemplateIDs(ctx, ids)
+	if err != nil {
+		a.Logger.Errorw("failed to get template languages for allow listing", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	emailIDs := []uuid.UUID{}
+	for _, list := range rows {
+		for _, row := range list {
+			if id, err := row.EmailID.Get(); err == nil {
+				emailIDs = append(emailIDs, id)
+			}
+		}
+	}
+	mailFrom, err := a.CampaignTemplateRepository.GetMailFromByEmailIDs(ctx, emailIDs)
+	if err != nil {
+		a.Logger.Errorw("failed to get language emails for allow listing", "error", err)
+		return nil, errs.Wrap(err)
+	}
+	return &allowListingLanguages{rows: rows, mailFrom: mailFrom}, nil
+}
+
+// of returns the allow listing values of every language row of a template,
+// ordered by code
+func (l *allowListingLanguages) of(templateID uuid.UUID) []*model.AllowListingTemplateLanguage {
+	out := []*model.AllowListingTemplateLanguage{}
+	for _, row := range l.rows[templateID] {
+		entry := &model.AllowListingTemplateLanguage{
+			Language: row.Language,
+			Missing:  []string{},
+		}
+		emailID, err := row.EmailID.Get()
+		from, found := l.mailFrom[emailID]
+		if err != nil || !found {
+			entry.Missing = append(entry.Missing, model.AllowListingMissingEmail)
+			out = append(out, entry)
+			continue
+		}
+		entry.EmailID = &emailID
+		entry.MailFromDomain = envelopeDomain(from)
+		if entry.MailFromDomain == "" {
+			entry.Missing = append(entry.Missing, model.AllowListingMissingMailFrom)
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 // allowListingTemplate reads the allow listing values of one template and
 // lists what it is missing
 func allowListingTemplate(
@@ -256,6 +323,7 @@ func allowListingTemplate(
 		ProxyDomains: []string{},
 		SendingIPs:   []string{},
 		Missing:      []string{},
+		Languages:    []*model.AllowListingTemplateLanguage{},
 	}
 	if name, err := t.Name.Get(); err == nil {
 		entry.Name = name.String()

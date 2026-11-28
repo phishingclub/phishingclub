@@ -26,6 +26,15 @@ const developmentHtmlInput = `
 </form>
 `
 
+const developmentHtmlInputGerman = `
+<br><br>
+<form action="{{.URL}}" method="post">
+	<input type="text" name="username" placeholder="Benutzername">
+	<input type="password" name="password" placeholder="Passwort">
+	<input type="submit" value="Anmelden">
+</form>
+`
+
 type DevelopmentPage struct {
 	Name      string
 	Content   string
@@ -43,6 +52,11 @@ func SeedDevelopmentPages(
 		{
 			Name:    TEST_PAGE_NAME_1,
 			Content: "Welcome to the Phishing Club" + developmentHtmlInput,
+		},
+		// German content of the multilingual template
+		{
+			Name:    TEST_PAGE_NAME_1_DE,
+			Content: "Willkommen im Phishing Club" + developmentHtmlInputGerman,
 		},
 	}
 	err := createDevelopmentPages(pages, pageRepository, nil)

@@ -154,6 +154,9 @@ func (r *Recipient) UpdateByID(
 	if v, err := incoming.Misc.Get(); err == nil {
 		current.Misc.Set(v)
 	}
+	if v, err := incoming.Language.Get(); err == nil {
+		current.Language.Set(v)
+	}
 	// validate
 	if err := current.Validate(); err != nil {
 		r.Logger.Debugw("failed to update recipient - recipient is invalid", "error", err)

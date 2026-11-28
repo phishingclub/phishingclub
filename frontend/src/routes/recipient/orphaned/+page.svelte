@@ -1,4 +1,5 @@
 <script>
+	import { languageName } from '$lib/utils/languages.js';
 	import { onMount } from 'svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import Headline from '$lib/components/Headline.svelte';
@@ -131,7 +132,9 @@
 
 	<div class="flex flex-wrap gap-3 mt-6 mb-10 [&>button]:m-0">
 		{#if recipients.length > 0}
-			<BigButton variant="danger-outline" on:click={openDeleteAllAlert}>Delete all orphans</BigButton>
+			<BigButton variant="danger-outline" on:click={openDeleteAllAlert}
+				>Delete all orphans</BigButton
+			>
 		{/if}
 	</div>
 
@@ -149,7 +152,8 @@
 			{ column: 'Extra identifier', title: 'Extra ID', size: 'small' },
 			{ column: 'City', size: 'small' },
 			{ column: 'Country', size: 'small' },
-			{ column: 'Misc', size: 'small' }
+			{ column: 'Misc', size: 'small' },
+			{ column: 'Language', size: 'small' }
 		]}
 		sortable={[
 			'first name',
@@ -162,7 +166,8 @@
 			'department',
 			'city',
 			'country',
-			'misc'
+			'misc',
+			'language'
 		]}
 		hasData={!!recipients.length}
 		plural="recipients"
@@ -187,6 +192,7 @@
 				<TableCell value={recipient.city} />
 				<TableCell value={recipient.country} />
 				<TableCell value={recipient.misc} />
+				<TableCell value={recipient.language ? languageName(recipient.language) : ''} />
 				<TableCellEmpty />
 				<TableCellAction>
 					<TableDropDownEllipsis>

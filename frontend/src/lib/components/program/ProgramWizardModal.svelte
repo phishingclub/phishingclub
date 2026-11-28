@@ -67,6 +67,19 @@
 		windowClockProblem
 	} from '$lib/utils/programSchedule.js';
 	import ProgramEndTimeline from './ProgramEndTimeline.svelte';
+	import { addButtonClass, rowButtonClass } from '$lib/utils/rowButton.js';
+	import LanguageRouteFields from '$lib/components/LanguageRouteFields.svelte';
+	import { languageName } from '$lib/utils/languages.js';
+	import {
+		commonLanguages,
+		hasLanguageRows,
+		LANGUAGE_FIELD,
+		languageRoutingErrors as routingErrors,
+		sentLanguages,
+		sentLanguagesText,
+		sharedMainLanguage,
+		valueMap
+	} from '$lib/utils/languageRouting.js';
 	import {
 		eventDisplayNames,
 		webhookDataLevelOptions,
@@ -97,6 +110,9 @@
 		orderMode: 2,
 		templateMixBy: 2,
 		loopMode: 2,
+		languageRouteBy: 2,
+		languageDefault: 2,
+		languageRoutes: 2,
 		startAt: 3,
 		endAt: 3,
 		endRounds: 3,
@@ -129,7 +145,10 @@
 		webhooks: 'webhooks',
 		denyPageID: 'denyPage',
 		evasionPageID: 'denyPage',
-		saveSubmittedData: 'saveSubmittedData'
+		saveSubmittedData: 'saveSubmittedData',
+		languageRouteBy: 'languageRouteBy',
+		languageDefault: 'languageDefault',
+		languageRoutes: 'languageRoutes'
 	};
 	// fields shown only under "Show advanced options"
 	const advancedFields = ['webhooks', 'denyPage', 'allowDeny', 'saveSubmittedData'];
@@ -149,6 +168,11 @@
 		orderMode: 'program-order',
 		templateMixBy: 'program-mix',
 		loopMode: 'program-loop',
+		languageRouteBy: 'program-language-by',
+		languageDefault: 'program-language-default',
+		languageRoutes: () =>
+			document.querySelector('#program-language-values input') ??
+			document.getElementById('program-language-values'),
 		startAt: () => document.querySelector('#program-start-at input[type="date"]'),
 		endAt: () => document.querySelector('#program-end-at input[type="date"]'),
 		endRounds: 'program-end-rounds',
@@ -311,10 +335,6 @@
 	const noteClass = 'text-sm text-slate-500 dark:text-gray-400 transition-colors duration-200';
 	const linkClass =
 		'pc-focus rounded-sm text-sm font-medium text-cta-blue dark:text-highlight-blue hover:underline';
-	const addButtonClass =
-		'pc-focus inline-flex items-center px-4 py-2 rounded-md border border-cta-blue text-cta-blue bg-white hover:bg-blue-50 dark:bg-gray-800 dark:border-highlight-blue dark:text-blue-200 dark:hover:bg-highlight-blue/20 text-sm font-semibold transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-gray-800';
-	const rowButtonClass =
-		'pc-focus inline-flex items-center justify-center w-8 h-8 flex-shrink-0 rounded-md text-slate-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700/80 transition-colors duration-200 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent';
 	const timeInputClass =
 		'w-full sm:w-auto rounded-md py-2 px-2 text-slate-800 dark:text-gray-300 text-left border bg-grayblue-light dark:bg-gray-900/60 font-normal transition-colors duration-200 focus:outline-none focus:ring-2';
 	const timeInputOkClass =
@@ -366,6 +386,8 @@
 	}));
 
 	let templateMap = new BiMap({});
+	// the loaded template rows by id, they carry the template languages
+	let templateRowsByID = {};
 	let groupMap = new BiMap({});
 	let pageMap = new BiMap({});
 	let allAllowDeny = [];
@@ -405,6 +427,9 @@
 		endRounds: roundsLabel(1),
 		orderMode: orderModes.byValue('shuffle'),
 		templateMixBy: templateMixes.byValue(''),
+		languageRouteBy: '',
+		languageDefault: '',
+		languageRoutes: valueMap(),
 		loopMode: loopModes.byValue('loop'),
 		interval: intervalLabel(DEFAULT_INTERVAL_MINUTES),
 		spread: spreadLabel(MINUTES_PER_WEEK),
@@ -434,6 +459,10 @@
 	});
 
 	let formValues = emptyForm();
+	// Language by routes and default set aside while the wizard is open
+	let languageKept = {};
+	// people per language code from the Templates step, null when not known
+	let languageCounts = null;
 
 	$: isEdit = modalMode === 'update';
 	$: modalText = isEdit ? 'Update program' : 'New program';
@@ -567,7 +596,9 @@
 
 	// builds the option maps from the loaded rows plus extra rows
 	const buildMaps = (extra = {}) => {
-		templateMap = BiMap.FromArrayOfObjects([...loaded.templates, ...(extra.templates || [])]);
+		const templates = [...loaded.templates, ...(extra.templates || [])];
+		templateMap = BiMap.FromArrayOfObjects(templates);
+		templateRowsByID = Object.fromEntries(templates.map((t) => [t.id, t]));
 		groupMap = BiMap.FromArrayOfObjects([...loaded.groups, ...(extra.groups || [])]);
 		pageMap = BiMap.FromArrayOfObjects([...loaded.pages, ...(extra.pages || [])]);
 		allAllowDeny = [...loaded.allowDeny, ...(extra.allowDeny || [])];
@@ -736,7 +767,12 @@
 				if (map.byKey(id)) continue;
 				const row = await lookup(fn, id);
 				const name = freeLabel(`${label(row) || `Unknown ${kind}`} (not found)`, used);
-				list.push({ id, name });
+				// a template keeps its languages, so Language by can still check it
+				list.push(
+					row && Array.isArray(row.languages)
+						? { id, name, language: row.language || '', languages: row.languages }
+						: { id, name }
+				);
 				names.push(`${kind} ${label(row) || id}`);
 			}
 		};
@@ -793,6 +829,8 @@
 		buildMaps();
 		modalMode = 'create';
 		formValues = { ...emptyForm(), companyID: formCompanyID || null };
+		languageKept = {};
+		languageCounts = null;
 		storedMinutes = { interval: null, spread: null, delay: null };
 		originalValues = null;
 		loadedProgram = { startAt: null, timeZone: null };
@@ -833,6 +871,8 @@
 			storedMinutes = { interval, spread, delay };
 			const allowDenyIDs = new Set(p.allowDenyIDs || []);
 			const chosenLists = allAllowDeny.filter((e) => allowDenyIDs.has(e.id));
+			languageKept = {};
+			languageCounts = null;
 			formValues = {
 				id: p.id,
 				companyID: p.companyID || null,
@@ -848,6 +888,9 @@
 				endRounds: roundsLabel(1),
 				orderMode: orderModes.byValue(p.orderMode || 'shuffle'),
 				templateMixBy: templateMixes.byValue(p.templateMixBy || ''),
+				languageRouteBy: p.languageRouteBy || '',
+				languageDefault: p.languageRouteBy ? p.languageDefault || '' : '',
+				languageRoutes: valueMap(p.languageRouteBy ? p.languageRoutes : null),
 				// a stored program without a loop mode stops after the last template,
 				// as the backend reads it. New programs start over by default.
 				loopMode: loopModes.byValue(p.loopMode || 'complete'),
@@ -1155,6 +1198,7 @@
 		if (!loopModes.byKey(formValues.loopMode)) {
 			e.loopMode = 'Pick what happens after the last template';
 		}
+		Object.assign(e, languageRoutingErrors(formValues, stepLanguageInfos));
 		if (preStart && formValues.startMode === 'date') {
 			const at = fromZoneLocal(formValues.startAtLocal, browserTimeZone());
 			// a stored start the user did not change is sent as it is, and the
@@ -1405,6 +1449,54 @@
 		JSON.stringify([v.weekDays, v.startTime, v.endTime]) !==
 			JSON.stringify([originalValues.weekDays, originalValues.startTime, originalValues.endTime]);
 
+	// whether Language by differs from the one the edit wizard loaded
+	const languageChanged = (v) =>
+		!originalValues ||
+		JSON.stringify([v.languageRouteBy, v.languageDefault, v.languageRoutes]) !==
+			JSON.stringify([
+				originalValues.languageRouteBy,
+				originalValues.languageDefault,
+				originalValues.languageRoutes
+			]);
+
+	// the template language and language rows of each step template by id,
+	// taken from the template rows the wizard loaded
+	$: stepTemplateLanguages = Object.fromEntries(
+		Object.values(templateRowsByID)
+			.filter((row) => Array.isArray(row.languages))
+			.map((row) => [
+				row.id,
+				{ name: row.name, language: row.language || '', languages: row.languages }
+			])
+	);
+	$: stepTemplateIDs = formValues.steps
+		.map((st) => (st.template ? templateMap.byValue(st.template) : null))
+		.filter(Boolean);
+	$: stepLanguageInfos = stepTemplateIDs.map((id) => stepTemplateLanguages[id]).filter(Boolean);
+	// true when the languages of every step template are known
+	$: stepInfosKnown =
+		stepLanguageInfos.length > 0 && stepLanguageInfos.length === stepTemplateIDs.length;
+	// the languages every step template can send, in the order of the fixed list
+	$: stepLanguages = stepInfosKnown ? commonLanguages(stepLanguageInfos) : [];
+	// Language by shows once a step template has more languages, or when it is set
+	$: showLanguageBy = !!formValues.languageRouteBy || stepLanguageInfos.some(hasLanguageRows);
+	// what people get with Language by None on templates with languages
+	$: stepMainLanguage = stepInfosKnown ? sharedMainLanguage(stepLanguageInfos) : '';
+	// the Language by errors, the same checks the server runs on save
+	const languageRoutingErrors = (v, infos) => {
+		const e = routingErrors({
+			routeBy: v.languageRouteBy,
+			defaultLanguage: v.languageDefault,
+			routes: v.languageRoutes,
+			templates: infos
+		});
+		return {
+			...(e.routeBy ? { languageRouteBy: e.routeBy } : {}),
+			...(e.default ? { languageDefault: e.default } : {}),
+			...(e.routes ? { languageRoutes: e.routes } : {})
+		};
+	};
+
 	const buildPayload = () => {
 		const steps = formValues.steps
 			.filter((s) => s.template)
@@ -1413,6 +1505,7 @@
 				campaignTemplateID: templateMap.byValue(s.template),
 				position: i
 			}));
+		/** @type {Record<string, any>} */
 		const payload = {
 			name: formValues.name,
 			// an update keeps the company of the program
@@ -1420,6 +1513,15 @@
 			orderMode: orderModes.byKey(formValues.orderMode),
 			// kept for the same order too, the server uses it only in random order
 			templateMixBy: templateMixes.byKey(formValues.templateMixBy),
+			// the three language fields are checked as one, so they go together.
+			// An edit sends them only when they changed
+			...(!isEdit || languageChanged(formValues)
+				? {
+						languageRouteBy: formValues.languageRouteBy,
+						languageDefault: formValues.languageRouteBy ? formValues.languageDefault : '',
+						languageRoutes: formValues.languageRouteBy ? formValues.languageRoutes : {}
+					}
+				: {}),
 			loopMode: loopModes.byKey(formValues.loopMode),
 			stepIntervalMinutes: intervalMinutes,
 			spreadMinutes: spreadMinutes,
@@ -1939,7 +2041,9 @@
 	};
 	// review rows per section; text is what is shown and compared in edit mode.
 	// Rows marked blackbox only show in blackbox mode.
-	const reviewSections = (v) => {
+	// counts are the people per language of the picked groups, null leaves
+	// them out
+	const reviewSections = (v, counts = null) => {
 		const sims = v.steps.filter((s) => s.template).map((s) => s.template);
 		const zone = zoneNote(v.timeZone);
 		const webhooks = v.webhooks.map(
@@ -1977,7 +2081,50 @@
 					...(sims.length >= 2 && orderModes.byKey(v.orderMode) === 'shuffle'
 						? [row('Balance per', v.templateMixBy || 'None')]
 						: []),
-					row('After the last template', v.loopMode)
+					row('After the last template', v.loopMode),
+					...(v.languageRouteBy
+						? [
+								row(
+									'Language by',
+									v.languageRouteBy.charAt(0).toUpperCase() + v.languageRouteBy.slice(1)
+								),
+								row(
+									'Default language',
+									v.languageDefault ? languageName(v.languageDefault) : 'Not set'
+								),
+								row(
+									'Languages',
+									sentLanguagesText(
+										sentLanguages(
+											v.languageDefault,
+											v.languageRoutes,
+											counts,
+											v.languageRouteBy === LANGUAGE_FIELD ? stepLanguages : null
+										)
+									) || 'None',
+									{
+										// an edit marks the row changed by the languages, not the counts
+										compare: sentLanguagesText(
+											sentLanguages(
+												v.languageDefault,
+												v.languageRoutes,
+												null,
+												v.languageRouteBy === LANGUAGE_FIELD ? stepLanguages : null
+											)
+										)
+									}
+								)
+							]
+						: stepLanguageInfos.some(hasLanguageRows)
+							? [
+									row(
+										'Language',
+										stepMainLanguage
+											? `${languageName(stepMainLanguage)} (main language)`
+											: 'Main language of each template'
+									)
+								]
+							: [])
 				]
 			},
 			{
@@ -2035,7 +2182,7 @@
 	// the stored start and zone of the program being edited
 	let loadedProgram = { startAt: null, timeZone: null };
 	// the hours follow the 12h or 24h choice
-	$: sections = ($timeFormat, reviewSections(formValues));
+	$: sections = ($timeFormat, reviewSections(formValues, languageCounts));
 	$: originalRows = (() => {
 		if (!isEdit || !originalValues) return null;
 		const map = {};
@@ -2047,7 +2194,7 @@
 	const rowChange = (title, r, original) => {
 		if (!original) return null;
 		const before = original[`${title}:${r.key || r.label}`];
-		if (before && before.text === r.text) return null;
+		if (before && (before.compare ?? before.text) === (r.compare ?? r.text)) return null;
 		return { old: before && !before.list && before.text.length <= 40 ? before.text : '' };
 	};
 	$: audienceLine =
@@ -2711,6 +2858,33 @@
 								<p id={errorId('loopMode')} class={errorClass}>{errors.loopMode}</p>
 							{/if}
 						</div>
+
+						{#if showLanguageBy}
+							<div id="program-language-options" class="w-full max-w-lg min-w-0">
+								<LanguageRouteFields
+									idPrefix="program"
+									bind:routeBy={formValues.languageRouteBy}
+									bind:defaultLanguage={formValues.languageDefault}
+									bind:routes={formValues.languageRoutes}
+									bind:kept={languageKept}
+									bind:languageCounts
+									languages={stepLanguages}
+									templates={stepInfosKnown ? stepLanguageInfos : []}
+									groupIDs={formValues.recipientGroups
+										.map((name) => groupMap.byValue(name))
+										.filter(Boolean)}
+									companyID={formCompanyID || contextCompanyID || null}
+									keepNote={isEdit && !preStart
+										? 'People already planned keep their language.'
+										: ''}
+									errors={{
+										routeBy: errors.languageRouteBy,
+										default: errors.languageDefault,
+										routes: errors.languageRoutes
+									}}
+								/>
+							</div>
+						{/if}
 					</div>
 				</FormColumns>
 			{:else if currentStep === 3}
@@ -3221,7 +3395,9 @@
 														>
 													{/if}
 													{#if change}
-														<span class="mt-1 block"><StatusBadge tone="warning">Changed</StatusBadge></span>
+														<span class="mt-1 block"
+															><StatusBadge tone="warning">Changed</StatusBadge></span
+														>
 													{/if}
 												</div>
 											{/each}

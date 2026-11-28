@@ -50,6 +50,7 @@ func newAssetFilterFixture(t *testing.T) *assetFilterFixture {
 		&database.AllowDeny{},
 		&database.AssetAllowDeny{},
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignAllowDeny{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
+	"github.com/phishingclub/phishingclub/data"
 	"github.com/phishingclub/phishingclub/database"
 	"github.com/phishingclub/phishingclub/errs"
 	"github.com/phishingclub/phishingclub/model"
@@ -545,9 +547,8 @@ type UninstallPreviewItem struct {
 
 // UninstallPreview is what uninstalling one installed package would affect.
 //
-// Campaigns are the active campaigns the uninstall closes. KeepRunning are
-// active campaigns that already have a close time: deleting their content does
-// not move that time, so they keep running without it until they close.
+// Campaigns are the active campaigns the uninstall closes, also the ones that
+// already have a later close time.
 // Changed are active campaigns that lose a filter, deny page, webhook or script.
 // UserAssetCount counts the assets on domains the uninstall deletes that the
 // package did not install, which are deleted with the domain.
@@ -561,8 +562,6 @@ type UninstallPreviewItem struct {
 type UninstallPreview struct {
 	Campaigns         []UninstallPreviewCampaign `json:"campaigns"`
 	CampaignCount     int                        `json:"campaignCount"`
-	KeepRunning       []UninstallPreviewCampaign `json:"keepRunning"`
-	KeepRunningCount  int                        `json:"keepRunningCount"`
 	Changed           []UninstallPreviewChanged  `json:"changed"`
 	ChangedCount      int                        `json:"changedCount"`
 	UserAssetCount    int                        `json:"userAssetCount"`
@@ -681,7 +680,6 @@ func (s *ContentRegistry) previewRemoval(
 ) (*UninstallPreview, []uuid.UUID, error) {
 	out := &UninstallPreview{
 		Campaigns:     []UninstallPreviewCampaign{},
-		KeepRunning:   []UninstallPreviewCampaign{},
 		Changed:       []UninstallPreviewChanged{},
 		ChangedAssets: []UninstallPreviewAsset{},
 		Edited:        []UninstallPreviewItem{},
@@ -708,6 +706,9 @@ func (s *ContentRegistry) previewRemoval(
 			}
 		}
 	}
+	// language rows that lose content. Only the campaigns and programs that
+	// can reach the language are affected, see closeCampaignsUsingContent
+	var languageUses []repository.TemplateLanguageUse
 	var domainIDs []uuid.UUID
 	// templates the removal deletes itself. their campaigns close now, also when
 	// they already have a later close time.
@@ -842,11 +843,16 @@ func (s *ContentRegistry) previewRemoval(
 					ResourceType: r.ResourceType, Name: name, SourceName: r.SourceName, PackageID: p.PackageID,
 				})
 			}
-			ids, terr := s.templatesClosedByDelete(ctx, r.ResourceType, r.ResourceID)
+			ids, uses, terr := s.templatesAffectedByDelete(ctx, r.ResourceType, r.ResourceID)
 			if terr != nil {
 				return nil, nil, errs.Wrap(terr)
 			}
 			addTemplates(ids)
+			for _, use := range uses {
+				if !skipTemplates[use.TemplateID] {
+					languageUses = append(languageUses, use)
+				}
+			}
 			if r.ResourceType == "campaigntemplate" && r.ResourceID != nil && !skipTemplates[*r.ResourceID] {
 				deletedTemplates = append(deletedTemplates, r.ResourceID)
 			}
@@ -936,6 +942,25 @@ func (s *ContentRegistry) previewRemoval(
 				addProgram(u, fmt.Sprintf("template %q deleted", name), true)
 			}
 		}
+		// a program that picks a language losing content holds only the sends
+		// in that language
+		for _, use := range languageUses {
+			if seenTemplate[use.TemplateID] {
+				continue
+			}
+			templateID := use.TemplateID
+			uses, perr := s.programRepository().GetOpenUsingTemplateLanguages(ctx, &templateID, []string{use.Language})
+			if perr != nil {
+				return nil, nil, errs.Wrap(perr)
+			}
+			name := s.campaignTemplateName(ctx, templateID)
+			for _, u := range uses {
+				addProgram(u, fmt.Sprintf(
+					"template %q loses its %s content, its sends in that language wait",
+					name, data.LanguageName(use.Language),
+				), false)
+			}
+		}
 	}
 	// the blocking programs are listed first, so the cap never hides them all
 	for _, blocking := range []bool{true, false} {
@@ -955,18 +980,6 @@ func (s *ContentRegistry) previewRemoval(
 	campaignRepo := s.campaignRepository()
 	closing := map[uuid.UUID]bool{}
 	now := time.Now()
-	closesNow := map[uuid.UUID]bool{}
-	if len(deletedTemplates) > 0 && campaignRepo != nil {
-		campaigns, err := campaignRepo.GetByTemplateIDs(ctx, deletedTemplates)
-		if err != nil {
-			return nil, nil, errs.Wrap(err)
-		}
-		for _, c := range campaigns {
-			if cid, err := c.ID.Get(); err == nil {
-				closesNow[cid] = true
-			}
-		}
-	}
 	if len(templateIDs) > 0 && campaignRepo != nil {
 		campaigns, err := campaignRepo.GetByTemplateIDs(ctx, templateIDs)
 		if err != nil {
@@ -977,25 +990,55 @@ func (s *ContentRegistry) previewRemoval(
 			if !campaignStillRunning(c, now) {
 				continue
 			}
+			// removing a template or its content closes its campaigns now,
+			// also one that already has a later close time
 			v := previewCampaign(c)
-			// deleting a template closes its campaigns now. a template that only
-			// loses its domain or a page is closed with Campaign.Close, which
-			// leaves a campaign that already has a close time alone.
-			cid, _ := c.ID.Get()
-			if at, err := c.CloseAt.Get(); err == nil && !closesNow[cid] {
-				v.CloseAt = at.UTC().Format(time.RFC3339)
-				out.KeepRunningCount++
-				if len(out.KeepRunning) < uninstallPreviewCampaignCap {
-					out.KeepRunning = append(out.KeepRunning, v)
-				}
-				continue
-			}
 			if cid, err := c.ID.Get(); err == nil {
 				closing[cid] = true
 			}
 			out.CampaignCount++
 			if len(out.Campaigns) < uninstallPreviewCampaignCap {
 				out.Campaigns = append(out.Campaigns, v)
+			}
+		}
+	}
+
+	// a campaign on a template whose language row loses content closes when
+	// it can reach that language, as the removal does
+	if len(languageUses) > 0 && campaignRepo != nil {
+		for _, use := range languageUses {
+			if seenTemplate[use.TemplateID] {
+				continue
+			}
+			templateID := use.TemplateID
+			campaigns, err := campaignRepo.GetByTemplateIDs(ctx, []*uuid.UUID{&templateID})
+			if err != nil {
+				return nil, nil, errs.Wrap(err)
+			}
+			byID := map[uuid.UUID]*model.Campaign{}
+			candidates := []uuid.UUID{}
+			for _, c := range withoutProgramCampaigns(campaigns) {
+				cid, err := c.ID.Get()
+				if err != nil || closing[cid] || !campaignStillRunning(c, now) {
+					continue
+				}
+				byID[cid] = c
+				candidates = append(candidates, cid)
+			}
+			reach, err := campaignRepo.FilterCampaignsUsingTemplateLanguage(ctx, candidates, templateID, use.Language)
+			if err != nil {
+				return nil, nil, errs.Wrap(err)
+			}
+			for _, cid := range reach {
+				c, ok := byID[cid]
+				if !ok || closing[cid] {
+					continue
+				}
+				closing[cid] = true
+				out.CampaignCount++
+				if len(out.Campaigns) < uninstallPreviewCampaignCap {
+					out.Campaigns = append(out.Campaigns, previewCampaign(c))
+				}
 			}
 		}
 	}
@@ -1075,6 +1118,11 @@ func (s *ContentRegistry) previewRemoval(
 	closed := make([]uuid.UUID, 0, len(templateIDs))
 	for _, id := range templateIDs {
 		closed = append(closed, *id)
+	}
+	for _, use := range languageUses {
+		if !seenTemplate[use.TemplateID] && !slices.Contains(closed, use.TemplateID) {
+			closed = append(closed, use.TemplateID)
+		}
 	}
 	return out, closed, nil
 }
@@ -1743,6 +1791,51 @@ func (s *ContentRegistry) templatesClosedByDelete(
 		}
 	}
 	return out, nil
+}
+
+// templatesAffectedByDelete splits the templates a delete strips content
+// from into the templates that hold an email or page themselves, whose
+// campaigns all close, and the language rows that hold it. Other resource
+// types give only templates that hold it themselves.
+func (s *ContentRegistry) templatesAffectedByDelete(
+	ctx context.Context, resourceType string, id *uuid.UUID,
+) ([]uuid.UUID, []repository.TemplateLanguageUse, error) {
+	if (resourceType != "email" && resourceType != "page") || s.CampaignTemplateRepository == nil {
+		ids, err := s.templatesClosedByDelete(ctx, resourceType, id)
+		return ids, nil, err
+	}
+	repo := s.CampaignTemplateRepository
+	var templates []*model.CampaignTemplate
+	var uses []repository.TemplateLanguageUse
+	var err error
+	if resourceType == "email" {
+		templates, err = repo.GetByEmailID(ctx, id, &repository.CampaignTemplateOption{})
+		if err == nil {
+			uses, err = repo.GetLanguageUsesByEmailID(ctx, id)
+		}
+	} else {
+		templates, err = repo.GetByPageID(ctx, id, &repository.CampaignTemplateOption{})
+		if err == nil {
+			uses, err = repo.GetLanguageUsesByPageID(ctx, id)
+		}
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	direct := []uuid.UUID{}
+	for _, t := range templates {
+		columns := []nullable.Nullable[uuid.UUID]{t.EmailID}
+		if resourceType == "page" {
+			columns = []nullable.Nullable[uuid.UUID]{t.BeforeLandingPageID, t.LandingPageID, t.AfterLandingPageID}
+		}
+		for _, column := range columns {
+			if v, err := column.Get(); err == nil && v == *id {
+				direct = append(direct, t.ID.MustGet())
+				break
+			}
+		}
+	}
+	return direct, uses, nil
 }
 
 // resourceEdited reports whether an installed entity differs from what the

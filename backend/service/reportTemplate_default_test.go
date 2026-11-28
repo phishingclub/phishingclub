@@ -28,11 +28,12 @@ func TestIsDefaultReportContent(t *testing.T) {
 }
 
 // the hashes of the current built in defaults. When this test fails, a default
-// report template changed: move its old hash into previousDefaultReportHashes,
-// so installs still on it keep counting as the default, then update it here.
+// report template changed: move its old hash into embedded.PreviousDefaultReportHashes
+// (or embedded.PreviousDefaultTrainingReportHashes),
+// so installs still on it get the new default on start, then update it here.
 const (
-	currentDefaultReportHash         = "c3e3e2e0d61e452d737e004ef049ebe43fca0ee23ad398fc4d10a4735ec2627d"
-	currentDefaultTrainingReportHash = "b417c60a35acceed520a194d897a951bb167a616b43d687a17d092375f3c36bb"
+	currentDefaultReportHash         = "9d195de0a35be248ab154f0ffb8d2fbc34edd27c8b1fcea148eb52f6b25b0bb8"
+	currentDefaultTrainingReportHash = "682bab8f7604781b70e5110d37d29b03750b0752e3febfe7092cfeb47899effd"
 )
 
 func TestDefaultReportHashesAreKept(t *testing.T) {
@@ -41,10 +42,10 @@ func TestDefaultReportHashesAreKept(t *testing.T) {
 		return hex.EncodeToString(sum[:])
 	}
 	if got := hash(embedded.DefaultReportHTML); got != currentDefaultReportHash {
-		t.Errorf("default report changed (now %s): add %s to previousDefaultReportHashes and update currentDefaultReportHash", got, currentDefaultReportHash)
+		t.Errorf("default report changed (now %s): add %s to embedded.PreviousDefaultReportHashes and update currentDefaultReportHash", got, currentDefaultReportHash)
 	}
 	if got := hash(embedded.DefaultTrainingReportHTML); got != currentDefaultTrainingReportHash {
-		t.Errorf("default training report changed (now %s): add %s to previousDefaultReportHashes and update currentDefaultTrainingReportHash", got, currentDefaultTrainingReportHash)
+		t.Errorf("default training report changed (now %s): add %s to embedded.PreviousDefaultTrainingReportHashes and update currentDefaultTrainingReportHash", got, currentDefaultTrainingReportHash)
 	}
 	// an earlier default of one kind is not the default of the other
 	for h := range previousDefaultReportHashes[false] {

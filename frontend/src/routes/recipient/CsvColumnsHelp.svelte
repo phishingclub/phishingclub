@@ -9,7 +9,8 @@
 		'Department',
 		'City',
 		'Country',
-		'Misc'
+		'Misc',
+		'Language'
 	];
 </script>
 
@@ -41,4 +42,8 @@
 			>
 		{/each}
 	</div>
+	<p class="mt-3">
+		Language takes a code such as da, a tag such as da-DK or an English name such as Danish. A row
+		with a language that is not in the list is not imported.
+	</p>
 </div>

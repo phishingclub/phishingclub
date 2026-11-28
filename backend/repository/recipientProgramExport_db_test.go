@@ -64,6 +64,43 @@ func TestProgramExportReads(t *testing.T) {
 	if len(sends) != 1 || sends[0].ProgramName != "Named" || sends[0].TemplateName != "Invoice lure" || sends[0].SentAt == nil {
 		t.Fatalf("sends = %+v", sends)
 	}
+	// a send with no stamp is in the template language, a stamped one in its
+	// stamp
+	if err := db.Model(&database.CampaignTemplate{}).Where("id = ?", templateID).Update("language", "en").Error; err != nil {
+		t.Fatal(err)
+	}
+	sends, err = r.GetProgramSendsForExport(ctx, alice)
+	if err != nil || len(sends) != 1 || sends[0].EffectiveLanguage() != "en" {
+		t.Fatalf("template language of a send = %+v %v", sends, err)
+	}
+	if err := db.Model(&database.CampaignRecipient{}).Where("campaign_id = ?", namedCampaign).Update("language", "de").Error; err != nil {
+		t.Fatal(err)
+	}
+	sends, err = r.GetProgramSendsForExport(ctx, alice)
+	if err != nil || len(sends) != 1 || sends[0].EffectiveLanguage() != "de" {
+		t.Fatalf("stamped language of a send = %+v %v", sends, err)
+	}
+	// a send with no stamp on its own template is in the language of that
+	// template, not of the hidden campaign's template
+	ownTemplate := ptrUUID()
+	if err := db.Create(&database.CampaignTemplate{
+		ID: ownTemplate, CreatedAt: ptrNow(), UpdatedAt: ptrNow(), Name: "Parcel lure", Language: "da",
+		URLIdentifierID: ptrUUID(), StateIdentifierID: ptrUUID(),
+	}).Error; err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+	if err := db.Model(&database.CampaignRecipient{}).Where("campaign_id = ?", namedCampaign).
+		Updates(map[string]any{"language": nil, "campaign_template_id": ownTemplate.String()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	sends, err = r.GetProgramSendsForExport(ctx, alice)
+	if err != nil || len(sends) != 1 || sends[0].EffectiveLanguage() != "da" || sends[0].TemplateName != "Parcel lure" {
+		t.Fatalf("own template of a send = %+v %v", sends, err)
+	}
+	if err := db.Model(&database.CampaignRecipient{}).Where("campaign_id = ?", namedCampaign).
+		Updates(map[string]any{"language": "de", "campaign_template_id": nil}).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	c := &Campaign{DB: db}
 	programs, err := c.GetProgramsForExport(ctx, companyID)

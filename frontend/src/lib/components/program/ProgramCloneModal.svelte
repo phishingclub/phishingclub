@@ -31,7 +31,8 @@
 		denyPage: 'Deny page',
 		evasionPage: 'Evasion page',
 		allowDeny: 'Allow or deny list',
-		webhook: 'Webhook'
+		webhook: 'Webhook',
+		languageRoutes: 'Language by values'
 	};
 	const sharedCompanyLabel = 'Shared (no company)';
 	const noteClass =

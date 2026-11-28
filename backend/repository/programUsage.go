@@ -150,6 +150,8 @@ func (r *Program) RemoveAllowDenyFromProgramFilters(
 type ProgramUse struct {
 	ID   uuid.UUID
 	Name string
+	// CompanyID is the company of the program, nil for a global one
+	CompanyID *uuid.UUID
 }
 
 // getOpenProgramsWhere returns the open programs matching the condition,
@@ -158,7 +160,7 @@ func (r *Program) getOpenProgramsWhere(ctx context.Context, condition clause.Exp
 	var rows []database.Program
 	res := r.DB.WithContext(ctx).
 		Model(&database.Program{}).
-		Select("id", "name").
+		Select("id", "name", "company_id").
 		Where(clause.Eq{Column: clause.Column{Table: database.PROGRAM_TABLE, Name: "closed_at"}, Value: nil}).
 		Where(condition).
 		Order(clause.OrderByColumn{Column: clause.Column{Table: database.PROGRAM_TABLE, Name: "name"}}).
@@ -169,7 +171,7 @@ func (r *Program) getOpenProgramsWhere(ctx context.Context, condition clause.Exp
 	out := make([]ProgramUse, 0, len(rows))
 	for _, row := range rows {
 		if row.ID != nil {
-			out = append(out, ProgramUse{ID: *row.ID, Name: row.Name})
+			out = append(out, ProgramUse{ID: *row.ID, Name: row.Name, CompanyID: row.CompanyID})
 		}
 	}
 	return out, nil

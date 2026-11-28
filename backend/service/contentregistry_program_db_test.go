@@ -18,6 +18,7 @@ func withPrograms(t *testing.T, h *ownershipFixture) {
 	if err := h.db.AutoMigrate(
 		&database.InstalledPackageMember{},
 		&database.Program{},
+		&database.ProgramLanguageRoute{},
 		&database.ProgramStep{},
 		&database.ProgramAllowDeny{},
 		&database.ProgramWebhook{},
@@ -86,11 +87,9 @@ func TestUninstallBlockedByOpenProgramTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}
-	for _, list := range [][]UninstallPreviewCampaign{preview.Campaigns, preview.KeepRunning} {
-		for _, c := range list {
-			if strings.HasPrefix(c.Name, "__program:") {
-				t.Fatalf("a hidden program campaign was listed: %+v", c)
-			}
+	for _, c := range preview.Campaigns {
+		if strings.HasPrefix(c.Name, "__program:") {
+			t.Fatalf("a hidden program campaign was listed: %+v", c)
 		}
 	}
 	if len(preview.Programs) != 1 || preview.Programs[0].Name != "Quarterly" || !preview.Programs[0].Blocks ||

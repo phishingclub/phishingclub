@@ -129,7 +129,7 @@ func TestCampaignTemplateRemoveDomainAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&database.CampaignTemplate{}, &database.Campaign{}, &database.CampaignTemplatePool{}); err != nil {
+	if err := db.AutoMigrate(&database.CampaignTemplate{}, &database.CampaignTemplateLanguage{}, &database.Campaign{}, &database.CampaignTemplatePool{}, &database.CampaignLanguageRoute{}); err != nil {
 		t.Fatal(err)
 	}
 	auditLogger, buf := bufferLogger(zapcore.InfoLevel)
@@ -165,7 +165,7 @@ func TestCampaignTemplateRemoveDomainNamesClosedCampaigns(t *testing.T) {
 	if err := db.Exec("PRAGMA foreign_keys = OFF").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&database.CampaignTemplate{}, &database.Campaign{}, &database.CampaignTemplatePool{}); err != nil {
+	if err := db.AutoMigrate(&database.CampaignTemplate{}, &database.CampaignTemplateLanguage{}, &database.Campaign{}, &database.CampaignTemplatePool{}, &database.CampaignLanguageRoute{}); err != nil {
 		t.Fatal(err)
 	}
 	auditLogger, buf := bufferLogger(zapcore.InfoLevel)

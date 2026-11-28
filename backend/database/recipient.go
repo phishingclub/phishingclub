@@ -22,14 +22,17 @@ type Recipient struct {
 	Phone           *string `gorm:";index"`
 	ExtraIdentifier *string `gorm:";index"`
 
-	FirstName    string `gorm:";"`
-	LastName     string `gorm:";"`
-	Position     string `gorm:";"`
-	Department   string `gorm:";"`
-	City         string `gorm:";"`
-	Country      string `gorm:";"`
-	Misc         string `gorm:";"`
-	ScimUserName string `gorm:";"`
+	FirstName  string `gorm:";"`
+	LastName   string `gorm:";"`
+	Position   string `gorm:";"`
+	Department string `gorm:";"`
+	City       string `gorm:";"`
+	Country    string `gorm:";"`
+	Misc       string `gorm:";"`
+	// Language is a code of the fixed language list (data.Languages), null
+	// when not known
+	Language     *string `gorm:"type:varchar(16)"`
+	ScimUserName string  `gorm:";"`
 
 	// ScimSoftDeletedAt marks a recipient that the IdP has deprovisioned via SCIM
 	// but is kept during the retention grace period before being pruned. Null

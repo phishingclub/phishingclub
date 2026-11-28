@@ -45,6 +45,7 @@
 	import { AppStateService } from '$lib/service/appState';
 	import { resourceContext } from '$lib/store/resourceContext';
 	import { browserTimeZone } from '$lib/utils/dailySlots.js';
+	import { languageName } from '$lib/utils/languages.js';
 	import {
 		ALL_WEEK_DAYS,
 		HIDDEN_RESULTS_NOTE,
@@ -758,8 +759,7 @@
 			}[actionFailure.action] || '';
 	$: resuming = !!program?.resuming;
 	$: enrolling = !!program?.enrolling;
-	$: backgroundBusy =
-		!!stopping || resuming || enrolling || anonymizeAllBusy || anonymizeDataBusy;
+	$: backgroundBusy = !!stopping || resuming || enrolling || anonymizeAllBusy || anonymizeDataBusy;
 	$: isPaused = !isClosed && !notStarted && !stopping && !!program?.pausedAt;
 	// a draft or scheduled program that never sent is deleted instead of closed,
 	// as there are no links to stop and no results to keep
@@ -1030,7 +1030,12 @@
 	// results by group: the template rows come with the results, the
 	// department and position rows of a named program are read when chosen,
 	// as the grouped results of a campaign
-	const groupByLabels = { template: 'Template', department: 'Department', position: 'Position' };
+	const groupByLabels = {
+		template: 'Template',
+		department: 'Department',
+		position: 'Position',
+		language: 'Language'
+	};
 	let groupBy = 'template';
 	let groupRows = [];
 	let groupOmitted = 0;
@@ -1070,10 +1075,18 @@
 		templateParams.perPage = templateParams.perPage;
 		loadGroups();
 	};
-	// an anonymous or anonymized program groups by template only, a group can
-	// be small enough to point at one person
+	// an anonymous or anonymized program does not group by department or
+	// position, a group can be small enough to point at one person
 	$: canGroup = !!program && !isAnonymous && !program.anonymizedAt && !program.anonymizingAt;
-	$: if (!canGroup && groupBy !== 'template') {
+	// by language is also open to an anonymous program, the server gives sizes
+	// only with small rows withheld. It stays while the results hold more than
+	// one language, also after the program stops picking languages.
+	$: groupByOptions = [
+		'template',
+		...(canGroup ? ['department', 'position'] : []),
+		...(program?.languageRouteBy || results?.hasLanguageGroupData ? ['language'] : [])
+	];
+	$: if (!groupByOptions.includes(groupBy)) {
 		groupBy = 'template';
 		groupsSeq++;
 		groupsLoading = false;
@@ -1138,6 +1151,22 @@
 		...(hideBelow ? { hideBelow } : {})
 	}));
 
+	// the languages Language by can give: the default first, then the other
+	// mapped languages by name. Only the settings are shown, not who got
+	// which language.
+	$: routedLanguageNames =
+		program?.languageRouteBy === 'language'
+			? ["Each recipient's own"]
+			: program?.languageRouteBy
+				? [
+						...(program.languageDefault ? [languageName(program.languageDefault)] : []),
+						...[...new Set(Object.values(program.languageRoutes ?? {}))]
+							.filter((code) => code && code !== program.languageDefault)
+							.map((code) => languageName(code))
+							.sort((a, b) => a.localeCompare(b))
+					]
+				: [];
+	const LANGUAGES_INLINE_LIMIT = 4;
 	// program details rows, named like the wizard fields
 	$: windowZone =
 		program?.timeZone && program.timeZone !== browserTimeZone() ? `, ${program.timeZone}` : '';
@@ -1187,6 +1216,25 @@
 							label: 'After the last template',
 							value: program.loopMode === 'complete' ? 'Stop' : 'Start over'
 						},
+						...(program.languageRouteBy
+							? [
+									{
+										label: 'Language by',
+										value:
+											program.languageRouteBy.charAt(0).toUpperCase() +
+											program.languageRouteBy.slice(1)
+									},
+									{ label: 'Default language', value: languageName(program.languageDefault) },
+									{
+										label: 'Languages',
+										value:
+											routedLanguageNames.slice(0, LANGUAGES_INLINE_LIMIT).join(', ') +
+											(routedLanguageNames.length > LANGUAGES_INLINE_LIMIT
+												? ` and ${routedLanguageNames.length - LANGUAGES_INLINE_LIMIT} more`
+												: '')
+									}
+								]
+							: []),
 						{ label: 'Anonymous', value: program.isAnonymous ? 'Yes' : 'No' },
 						{
 							label: 'Data saving',
@@ -1769,10 +1817,10 @@
 							>
 						</div>
 						{#if showTemplateResults}
-							{#if canGroup}
+							{#if groupByOptions.length > 1}
 								<!-- the same choice as the grouped results of a campaign -->
 								<div id="program-group-by" class="mb-4 flex gap-2">
-									{#each ['template', 'department', 'position'] as by (by)}
+									{#each groupByOptions as by (by)}
 										<button
 											type="button"
 											class="px-4 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 {groupBy ===
@@ -2047,7 +2095,10 @@
 													<ActionButton
 														variant="danger-outline"
 														icon="anonymize"
-														disabled={isMismatch || !isClosed || !!stopping || !!program.anonymizeRunning}
+														disabled={isMismatch ||
+															!isClosed ||
+															!!stopping ||
+															!!program.anonymizeRunning}
 														on:click={() => (isAnonymizeModalVisible = true)}
 													>
 														{program.anonymizingAt ? 'Retry Anonymize All' : 'Anonymize All'}
@@ -2087,7 +2138,10 @@
 													<ActionButton
 														variant="danger-outline"
 														icon="anonymize"
-														disabled={isMismatch || !!stopping || !!program.anonymizeRunning || anonymizeAllBusy}
+														disabled={isMismatch ||
+															!!stopping ||
+															!!program.anonymizeRunning ||
+															anonymizeAllBusy}
 														on:click={() => (isAnonymizeDataModalVisible = true)}
 													>
 														Anonymize Data
@@ -2161,6 +2215,7 @@
 							{isClosed}
 							{isPaused}
 							{now}
+							showLanguage={!isAnonymous && !!program.languageRouteBy}
 						/>
 					{/if}
 				</section>

@@ -37,6 +37,7 @@ func newPauseResumeService(t *testing.T) (*Campaign, *gorm.DB) {
 	}
 	if err := db.AutoMigrate(
 		&database.Campaign{},
+		&database.CampaignLanguageRoute{},
 		&database.CampaignRecipient{},
 		&database.Recipient{},
 		&database.CampaignEvent{},

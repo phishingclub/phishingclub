@@ -40,6 +40,10 @@ type CampaignTemplate struct {
 	// built from it emit training events instead of phishing page visit events.
 	IsTraining bool `gorm:"not null;default:false;index"`
 
+	// Language is the code of the language the template's own email and pages
+	// are written in, see data.Languages. Empty means not set.
+	Language string `gorm:"not null;type:varchar(16);default:''"`
+
 	// has-a
 	LandingPageID *uuid.UUID `gorm:"type:uuid;index;"`
 	LandingPage   *Page      `gorm:"references:LandingPage;foreignKey:LandingPageID;references:ID;"`

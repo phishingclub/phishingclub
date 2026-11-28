@@ -153,7 +153,7 @@ func (r *Program) EachRecipientSentRow(
 	}
 	rows, err := r.DB.WithContext(ctx).
 		Model(&database.CampaignRecipient{}).
-		Select("id", "campaign_id", "recipient_id", "anonymized_id", "sent_at", "notable_event_id").
+		Select("id", "campaign_id", "recipient_id", "anonymized_id", "sent_at", "notable_event_id", "language").
 		Where(clause.Eq{Column: clause.Column{Name: "recipient_id"}, Value: recipientID}).
 		Where(clause.Expr{SQL: "? IS NOT NULL", Vars: []any{notIndexed(clause.Column{Name: "sent_at"})}}).
 		Where(clause.Expr{SQL: "? IN (?)", Vars: []any{notIndexed(clause.Column{Name: "campaign_id"}), r.campaignIDsOfPrograms(programIDs)}}).
