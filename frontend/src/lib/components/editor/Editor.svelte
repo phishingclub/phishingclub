@@ -1384,7 +1384,7 @@
 						}
 					}}
 				>
-					<option class="" value="">Templates...</option>
+					<option value="" hidden>Templates...</option>
 					{#each Object.entries(computedTemplates) as [group, items]}
 						<optgroup label={group}>
 							{#each items as item}

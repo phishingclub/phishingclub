@@ -382,9 +382,41 @@ select::placeholder {
 		background-color: transparent;
 		color: inherit;
 	}
+	/* group names in a grouped list read as small muted headings, like the menu
+	   section names, so they do not look like values. The values under them are
+	   indented and keep the normal text style */
+	.pc-select optgroup {
+		padding: 0.375rem 0.25rem 0.25rem;
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: theme('colors.gray.500');
+	}
+	.pc-select optgroup + optgroup {
+		margin-top: 0.25rem;
+		border-top: 1px solid theme('colors.gray.200');
+	}
+	.pc-select optgroup option {
+		padding-left: 0.75rem;
+		font-size: 0.875rem;
+		font-weight: 400;
+		text-transform: none;
+		letter-spacing: normal;
+		color: theme('colors.gray.600');
+	}
 	.dark :is(.pc-select, .pc-per-page, .pc-table-filter)::picker(select) {
 		border-color: rgb(55 65 81 / 0.6);
 		background-color: theme('colors.gray.900');
+	}
+	.dark .pc-select optgroup {
+		color: theme('colors.highlight-blue');
+	}
+	.dark .pc-select optgroup + optgroup {
+		border-top-color: rgb(55 65 81 / 0.6);
+	}
+	.dark .pc-select optgroup option {
+		color: theme('colors.gray.300');
 	}
 	.dark :is(.pc-select, .pc-per-page, .pc-table-filter) option:hover,
 	.dark :is(.pc-select, .pc-per-page, .pc-table-filter) option:focus-visible {
