@@ -1,8 +1,9 @@
 <script>
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import CsvColumnsHelp from '../../CsvColumnsHelp.svelte';
-	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
-	import { LANGUAGES, languageName } from '$lib/utils/languages.js';
+	import RecipientFormModal from '$lib/components/RecipientFormModal.svelte';
+	import TableUpdateButton from '$lib/components/table/TableUpdateButton.svelte';
+	import { languageName } from '$lib/utils/languages.js';
 	import { onDestroy, onMount } from 'svelte';
 	import Note from '$lib/components/Note.svelte';
 	import DynamicLabel from '$lib/components/DynamicLabel.svelte';
@@ -33,7 +34,6 @@
 	import Button from '$lib/components/Button.svelte';
 	import FormColumns from '$lib/components/FormColumns.svelte';
 	import FormColumn from '$lib/components/FormColumn.svelte';
-	import TextField from '$lib/components/TextField.svelte';
 	import Table from '$lib/components/table/Table.svelte';
 	import FormFooter from '$lib/components/FormFooter.svelte';
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
@@ -92,28 +92,8 @@
 	let selectedRecipientsImportPaginatedChunk = [];
 	let isImportModalVisible = false;
 
-	// create recipient
-	let isCreateRecipientModalVisible = false;
-	let createRecipientForm = null;
-	let createRecipientError = '';
-	// the language list for the recipient form, None leaves it empty
-	const languageOptions = [
-		{ value: '', label: 'None' },
-		...LANGUAGES.map((l) => ({ value: l.code, label: l.name }))
-	];
-	let createRecipientValues = {
-		email: '',
-		phone: '',
-		extraIdentifier: '',
-		firstName: '',
-		lastName: '',
-		position: '',
-		department: '',
-		city: '',
-		country: '',
-		misc: '',
-		language: ''
-	};
+	// create and update recipient
+	let recipientModal;
 
 	// local state
 	let isAddRecipientModalVisible = false;
@@ -452,66 +432,40 @@
 		refreshImportsPaginated();
 	};
 
-	const onClickCreateRecipient = async () => {
-		try {
-			isSubmitting = true;
-			const res = await api.recipient.create({
-				email: createRecipientValues.email,
-				phone: createRecipientValues.phone,
-				extraIdentifier: createRecipientValues.extraIdentifier,
-				firstName: createRecipientValues.firstName,
-				lastName: createRecipientValues.lastName,
-				position: createRecipientValues.position,
-				department: createRecipientValues.department,
-				city: createRecipientValues.city,
-				country: createRecipientValues.country,
-				misc: createRecipientValues.misc,
-				language: createRecipientValues.language,
-				companyID: contextCompanyID
-			});
-			if (!res.success) {
-				createRecipientError = res.error;
-				return;
-			}
-			const addRes = await api.recipient.addToGroup($page.params.id, [res.data.id]);
-			if (!addRes.success) {
-				createRecipientError = addRes.error;
-				return;
-			}
-			addToast('Recipient created and added to group', 'Success');
-			refreshRecipients();
-			closeCreateRecipientModal();
-		} catch (err) {
-			addToast('Failed to create recipient', 'Error');
-			console.error('failed to create recipient', err);
-		} finally {
-			isSubmitting = false;
+	// a new recipient goes into this group, a returned string is shown in the form
+	/** @param {string} id */
+	const addCreatedToGroup = async (id) => {
+		const res = await api.recipient.addToGroup($page.params.id, [id]);
+		return res.success ? '' : res.error;
+	};
+
+	const openCreateRecipientModal = () => recipientModal.openCreate();
+
+	/** @param {string} id */
+	const openUpdateRecipientModal = (id) => recipientModal.openUpdate(id);
+
+	/**
+	 * @param {string} mode
+	 * @param {object} values
+	 */
+	const onRecipientSaved = (mode, values) => {
+		refreshRecipients();
+		// a dynamic group holds the recipients whose field equals the group value
+		if (
+			mode === 'update' &&
+			groupValues.isDynamic &&
+			groupValues.filterField &&
+			(values[groupValues.filterField] ?? '') !== (groupValues.filterValue ?? '')
+		) {
+			addToast('The recipient no longer matches this group and has left it', 'Warning');
 		}
 	};
 
-	const openCreateRecipientModal = () => {
-		createRecipientError = '';
-		isCreateRecipientModalVisible = true;
-	};
-
-	const closeCreateRecipientModal = () => {
-		isCreateRecipientModalVisible = false;
-		createRecipientError = '';
-		createRecipientValues = {
-			email: '',
-			phone: '',
-			extraIdentifier: '',
-			firstName: '',
-			lastName: '',
-			position: '',
-			department: '',
-			city: '',
-			country: '',
-			misc: '',
-			language: ''
-		};
-		createRecipientForm.reset();
-	};
+	// the edit action follows the recipient scope, and nothing changes while the group is deleted
+	$: recipientAttrs = (recipient) =>
+		groupValues.deletingAt
+			? { disabled: true, title: 'The group is being deleted' }
+			: globalButtonDisabledAttributes(recipient, contextCompanyID);
 
 	const openAddRecipientsModal = () => {
 		isAddRecipientModalVisible = true;
@@ -660,6 +614,10 @@
 				<TableCellAction>
 					<TableDropDownEllipsis>
 						<TableViewButton on:click={() => goto(`/recipient/${recipient.id}`)} />
+						<TableUpdateButton
+							on:click={() => openUpdateRecipientModal(recipient.id)}
+							{...recipientAttrs(recipient)}
+						/>
 						{#if !groupValues.isDynamic}
 							<TableDeleteButton
 								name="Remove from group"
@@ -673,104 +631,13 @@
 		{/each}
 	</Table>
 
-	<Modal
-		headerText={'New recipient'}
-		visible={isCreateRecipientModalVisible}
-		onClose={closeCreateRecipientModal}
-		{isSubmitting}
-	>
-		<FormGrid on:submit={onClickCreateRecipient} bind:bindTo={createRecipientForm} {isSubmitting}>
-			<FormColumns>
-				<FormColumn>
-					<TextField
-						required
-						minLength={1}
-						maxLength={255}
-						type="email"
-						bind:value={createRecipientValues.email}
-						placeholder="e.g. bob@example.test">Email</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={createRecipientValues.firstName}
-						placeholder="e.g. Bob"
-						optional>First name</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={createRecipientValues.lastName}
-						placeholder="e.g. Jensen"
-						optional>Last name</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={createRecipientValues.position}
-						placeholder="e.g. CEO"
-						optional>Position</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={createRecipientValues.department}
-						placeholder="e.g. Sales"
-						optional>Department</TextField
-					>
-				</FormColumn>
-				<FormColumn>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={createRecipientValues.phone}
-						placeholder="e.g. +45 555 555 5555"
-						optional>Phone</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={createRecipientValues.extraIdentifier}
-						placeholder="e.g. 4982347283947"
-						toolTipText="Optional extra identifier"
-						optional>Extra identifier</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={createRecipientValues.city}
-						placeholder="e.g. Copenhagen"
-						optional>City</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={createRecipientValues.country}
-						placeholder="e.g. Denmark"
-						optional>Country</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={createRecipientValues.misc}
-						placeholder="e.g. VIP"
-						toolTipText="Any extra information"
-						optional>Miscellaneous</TextField
-					>
-					<TextFieldSelect
-						id="group-recipient-language"
-						bind:value={createRecipientValues.language}
-						optional
-						placeholder="None"
-						toolTipText="The language the recipient reads. A campaign with Language by Language sends it when every template has it."
-						options={languageOptions}>Language</TextFieldSelect
-					>
-				</FormColumn>
-			</FormColumns>
-			<FormError message={createRecipientError} />
-			<FormFooter closeModal={closeCreateRecipientModal} {isSubmitting} />
-		</FormGrid>
-	</Modal>
+	<RecipientFormModal
+		bind:this={recipientModal}
+		companyID={contextCompanyID}
+		createdText="Recipient created and added to group"
+		afterCreate={addCreatedToGroup}
+		onSaved={onRecipientSaved}
+	/>
 	<Modal
 		headerText={'Add recipients'}
 		width="xl"

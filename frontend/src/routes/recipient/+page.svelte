@@ -2,14 +2,13 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import { displayMode, showsSimulation } from '$lib/store/displayMode';
 	import CsvColumnsHelp from './CsvColumnsHelp.svelte';
-	import TextFieldSelect from '$lib/components/TextFieldSelect.svelte';
-	import { LANGUAGES, languageName } from '$lib/utils/languages.js';
+	import RecipientFormModal from '$lib/components/RecipientFormModal.svelte';
+	import { languageName } from '$lib/utils/languages.js';
 	import { api } from '$lib/api/apiProxy.js';
 	import { newTableURLParams } from '$lib/service/tableURLParams.js';
 	import { globalButtonDisabledAttributes } from '$lib/utils/form.js';
 	import { onMount } from 'svelte';
 	import Headline from '$lib/components/Headline.svelte';
-	import TextField from '$lib/components/TextField.svelte';
 	import TableRow from '$lib/components/table/TableRow.svelte';
 	import TableCell from '$lib/components/table/TableCell.svelte';
 	import TableCellLink from '$lib/components/table/TableCellLink.svelte';
@@ -35,7 +34,6 @@
 	import HeadTitle from '$lib/components/HeadTitle.svelte';
 	import FileField from '$lib/components/FileField.svelte';
 	import TableCellScope from '$lib/components/table/TableCellScope.svelte';
-	import { getModalText } from '$lib/utils/common';
 	import TableCopyButton from '$lib/components/table/TableCopyButton.svelte';
 	import { showIsLoading, hideIsLoading } from '$lib/store/loading.js';
 	import TableViewButton from '$lib/components/table/TableViewButton.svelte';
@@ -55,26 +53,7 @@
 	const appStateService = AppStateService.instance;
 
 	// data
-	let form = null;
-	let modalError = '';
-	let formValues = {
-		email: null,
-		phone: null,
-		extraIdentifier: null,
-		firstName: null,
-		lastName: null,
-		position: null,
-		department: null,
-		city: null,
-		country: null,
-		misc: null,
-		language: ''
-	};
-	// the language list for the recipient form, None clears it
-	const languageOptions = [
-		{ value: '', label: 'None' },
-		...LANGUAGES.map((l) => ({ value: l.code, label: l.name }))
-	];
+	let recipientModal;
 	let importForm = null;
 	let importModalError = '';
 	let importFormValues = {
@@ -94,10 +73,7 @@
 	let contextCompanyID = null;
 	let recipients = [];
 	let recipientsHasNextPage = true;
-	let isModalVisible = false;
 	let isSubmitting = false;
-	let modalMode = null;
-	let modalText = '';
 
 	let isDeleteAlertVisible = false;
 	let deleteValues = {
@@ -118,10 +94,6 @@
 	$: showMultiSelect = recipients.length > 0;
 
 	let isRecipientsTableLoading = false;
-
-	$: {
-		modalText = getModalText('recipient', modalMode);
-	}
 
 	// hooks
 	onMount(() => {
@@ -156,83 +128,6 @@
 			console.error('failed to load recipients', e);
 		} finally {
 			isRecipientsTableLoading = false;
-		}
-	};
-
-	const onSubmit = async () => {
-		try {
-			isSubmitting = true;
-			if (modalMode === 'create' || modalMode === 'copy') {
-				await create();
-				return;
-			} else {
-				await update();
-				return;
-			}
-		} finally {
-			isSubmitting = false;
-		}
-	};
-
-	const create = async () => {
-		try {
-			const res = await api.recipient.create({
-				email: formValues.email,
-				phone: formValues.phone,
-				extraIdentifier: formValues.extraIdentifier,
-				firstName: formValues.firstName,
-				lastName: formValues.lastName,
-				position: formValues.position,
-				department: formValues.department,
-				city: formValues.city,
-				country: formValues.country,
-				misc: formValues.misc,
-				language: formValues.language ?? '',
-				companyID: contextCompanyID
-			});
-			if (!res.success) {
-				modalError = res.error;
-				return;
-			}
-			addToast('Recipient created', 'Success');
-			form.reset();
-			formValues.language = '';
-			refreshRecipients();
-			isModalVisible = !isModalVisible;
-		} catch (err) {
-			console.error('failed to create recipient', err);
-			addToast('Failed to create recipient', 'Error');
-		}
-	};
-
-	const update = async () => {
-		modalError = '';
-		try {
-			const res = await api.recipient.update({
-				id: formValues.id,
-				email: formValues.email,
-				phone: formValues.phone,
-				extraIdentifier: formValues.extraIdentifier,
-				firstName: formValues.firstName,
-				lastName: formValues.lastName,
-				position: formValues.position,
-				department: formValues.department,
-				city: formValues.city,
-				country: formValues.country,
-				misc: formValues.misc,
-				language: formValues.language ?? '',
-				companyID: contextCompanyID
-			});
-			if (!res.success) {
-				modalError = res.error;
-				return;
-			}
-			addToast('Recipient updated', 'Success');
-			refreshRecipients();
-			isModalVisible = false;
-		} catch (e) {
-			addToast('Failed to update recipient', 'Error');
-			console.error('failed to update recipient:', e);
 		}
 	};
 
@@ -394,74 +289,13 @@
 		return { success: true };
 	};
 
-	const openCreateModal = () => {
-		modalMode = 'create';
-		isModalVisible = true;
-	};
-
-	const closeModal = () => {
-		isModalVisible = false;
-		form.reset();
-		formValues.language = '';
-		modalError = '';
-	};
+	const openCreateModal = () => recipientModal.openCreate();
 
 	/** @param {string} id */
-	const openUpdateModal = async (id) => {
-		modalMode = 'update';
-		try {
-			showIsLoading();
-			const recipient = await api.recipient.getByID(id);
-			if (!recipient.success) {
-				addToast('Failed to get recipient', 'Error');
-				console.error('failed to get recipient', recipient.error);
-				return;
-			}
-			assignRecipient(recipient);
-			isModalVisible = true;
-		} catch (e) {
-			addToast('Failed to get recipient', 'Error');
-			console.error('failed to get recipient', e);
-		} finally {
-			hideIsLoading();
-		}
-		isModalVisible = true;
-	};
+	const openUpdateModal = (id) => recipientModal.openUpdate(id);
 
-	const openCopyModal = async (id) => {
-		modalMode = 'copy';
-		try {
-			const recipient = await api.recipient.getByID(id);
-			if (!recipient.success) {
-				addToast('Failed to get recipient', 'Error');
-				console.error('failed to get recipient', recipient.error);
-				return;
-			}
-			assignRecipient(recipient);
-			isModalVisible = true;
-		} catch (e) {
-			addToast('Failed to get recipient', 'Error');
-			console.error('failed to get recipient', e);
-		}
-		isModalVisible = true;
-	};
-
-	const assignRecipient = (recipient) => {
-		formValues = {
-			id: recipient.data.id,
-			email: recipient.data.email,
-			phone: recipient.data.phone,
-			extraIdentifier: recipient.data.extraIdentifier,
-			firstName: recipient.data.firstName,
-			lastName: recipient.data.lastName,
-			position: recipient.data.position,
-			department: recipient.data.department,
-			city: recipient.data.city,
-			country: recipient.data.country,
-			misc: recipient.data.misc,
-			language: recipient.data.language ?? ''
-		};
-	};
+	/** @param {string} id */
+	const openCopyModal = (id) => recipientModal.openCopy(id);
 	// split on the last @ so on phones the domain moves to the second line as one piece
 	/** @param {string} email */
 	const emailParts = (email) => {
@@ -621,101 +455,11 @@
 			</TableRow>
 		{/each}
 	</Table>
-	<Modal headerText={modalText} bind:visible={isModalVisible} onClose={closeModal} {isSubmitting}>
-		<FormGrid on:submit={onSubmit} bind:bindTo={form} {isSubmitting}>
-			<FormColumns>
-				<FormColumn>
-					<TextField
-						required
-						minLength={1}
-						maxLength={255}
-						type="email"
-						bind:value={formValues.email}
-						placeholder="e.g. bob@example.test"
-						width="medium"
-						readonly={modalMode === 'update'}>Email</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.firstName}
-						placeholder="e.g. Bob"
-						optional>First name</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.lastName}
-						placeholder="e.g. Jensen"
-						optional>Last name</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.position}
-						placeholder="e.g. CEO"
-						optional>Position</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.department}
-						placeholder="e.g. Sales"
-						optional>Department</TextField
-					>
-				</FormColumn>
-				<FormColumn>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.phone}
-						placeholder="e.g. +45 555 555 5555"
-						optional>Phone</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.extraIdentifier}
-						placeholder="e.g. 4982347283947"
-						toolTipText="Optional extra identifier"
-						optional>Extra identifier</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.city}
-						placeholder="e.g. Copenhagen"
-						optional>City</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.country}
-						placeholder="e.g. Denmark"
-						optional>Country</TextField
-					>
-					<TextField
-						minLength={1}
-						maxLength={127}
-						bind:value={formValues.misc}
-						placeholder="e.g. VIP"
-						toolTipText="Any extra information"
-						optional>Miscellaneous</TextField
-					>
-					<TextFieldSelect
-						id="recipient-language"
-						bind:value={formValues.language}
-						optional
-						placeholder="None"
-						toolTipText="The language the recipient reads. A campaign with Language by Language sends it when every template has it."
-						options={languageOptions}>Language</TextFieldSelect
-					>
-				</FormColumn>
-			</FormColumns>
-			<FormError message={modalError} />
-			<FormFooter {closeModal} {isSubmitting} />
-		</FormGrid>
-	</Modal>
+	<RecipientFormModal
+		bind:this={recipientModal}
+		companyID={contextCompanyID}
+		onSaved={refreshRecipients}
+	/>
 	<!-- Import modal -->
 	<Modal
 		headerText={'Import from CSV'}
